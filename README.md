@@ -7,7 +7,7 @@
   <img src="assets/readme/crisprme-logo.png" alt="CRISPRme" width="700"/>
 </p>
 
-# CRISPRme
+# CRISPRme+ (2.2.0)
 
 CRISPRme is a comprehensive tool designed for thorough off-target assessment in 
 CRISPR-Cas systems. It is available as a command-line interface and an offline tool
@@ -20,11 +20,20 @@ genome analyses. CRISPRme automates the entire workflow, from data download to
 executing the search, and delivers detailed reports complete with tables and figures 
 through an interactive web-based interface.
 
+### ✨ What's new in CRISPRme+ (2.2.0)
+
+- **Prebuilt indexes on demand** — pull reference data + precomputed indexes from a HuggingFace CDN (`crisprme.py download`), or `build-index-only` / `publish-index` your own.
+- **One-command web interface in Docker** — no 410 GB local build (see the Quickstart below).
+- **Browser Data-Manager** — add genomes, indexes, VCFs, annotations and PAMs from the web UI, with dependency-aware deletion (Dash 2.x).
+- **PAM-geometry-aware search** — a pamless (`NNN`) index serves any PAM of the same length/orientation, so one index covers many PAM variants.
+- **Bounded complexity** — a `--max-total-edits` cap and a high-variant-density skip keep dense-variant searches tractable.
+- **Diploid `assembly-search`** and **merged VCF panels** (e.g. 1000G+HGDP) for single-scan population analyses.
+
 > ⚠️ **Note**  
 > The original public CRISPRme web service is no longer available.  
 > All functionalities are now accessible via the command-line interface or the 
-locally hosted web interface. Visit https://pinellolab.github.io/crisprme-plus/ for a
-quick guide on deploying locally the web interface.
+locally hosted web interface. See [`docs/DOCKER_QUICKSTART.md`](docs/DOCKER_QUICKSTART.md) for a quick guide on
+deploying the web interface locally.
 
 ## ⚡ Quickstart — web interface in Docker (no conda, no 410 GB)
 
@@ -194,7 +203,7 @@ crisprme.py --version  # Display the installed CRISPRme version
 crisprme.py            # List CRISPRme functionalities
 ```  
 
-- The first command will output the version of CRISPRme (e.g., `2.1.12`).  
+- The first command will output the version of CRISPRme (e.g., `2.2.0`).  
 - The second command should display CRISPRme's functionalities.  
 
 If both commands execute successfully, your installation is complete, and 
@@ -355,20 +364,20 @@ You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run an unreleased line (e.g. **2.2.0**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.0 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run an unreleased line (e.g. **2.2.0**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
 ```bash
-# 1. clone the branch you want to run (2.2.0 development lives on python3.11)
-git clone --branch python3.11 https://github.com/pinellolab/crisprme-plus.git
-cd CRISPRme
+# 1. clone the repository (2.2.0 development lives on the main branch)
+git clone https://github.com/pinellolab/crisprme-plus.git
+cd crisprme-plus
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
 mamba env create -f environment.yml
 mamba activate crisprme-2.2.0
 
-# 3. build CRISPRitz 2.8.0 from source and install both tools into the env
+# 3. build CRISPRitz 2.8.1 from source and install both tools into the env
 bash install_from_source.sh
 
 # 4. verify (both tools are now on your PATH)
@@ -534,7 +543,7 @@ Usage Example for the Complete Search function:
     --genome Genomes/hg38 \  # reference genome directory
     --vcf vcf_config.1000G.HGDP.txt \  # config file declaring usage of 1000G and HGDP variant datasets
     --guide sg1617.txt \  # guide 
-    --pam PAMs/20bp-NGG-spCas9.txt \  # NGG PAM file
+    --pam PAMs/20bp-NGG-SpCas9.txt \  # NGG PAM file
     --annotation Annotations/dhs+encode+gencode.hg38.bed \  # annotation BED
     --gene_annotation Annotations/gencode.protein_coding.bed \  # gene proximity annotation BED
     --samplesID samplesIDs.1000G.HGDP.txt \  # config file declaring usage of 1000G and HGDP samples
@@ -557,7 +566,7 @@ Usage Example for the Complete Search function:
     --genome Genomes/hg38 \  # reference genome directory
     --vcf vcf_config.1000G.HGDP.txt \  # config file declaring usage of 1000G and HGDP variant datasets
     --guide sg1617.txt \  # guide 
-    --pam PAMs/20bp-NGG-spCas9.txt \  # NGG PAM file
+    --pam PAMs/20bp-NGG-SpCas9.txt \  # NGG PAM file
     --annotation Annotations/dhs+encode+gencode.hg38.bed \  # annotation BED
     --gene_annotation Annotations/gencode.protein_coding.bed \  # gene proximity annotation BED
     --samplesID samplesIDs.1000G.HGDP.txt \  # config file declaring usage of 1000G and HGDP samples
@@ -663,6 +672,11 @@ its purpose and usage:
 
 - `--bRNA` (*Required*)
   <br>Maximum allowable RNA bulge size.
+
+- `--max-total-edits` (*Optional*, default `5`)
+  <br>Cap on the combined number of edits (mismatches + DNA/RNA bulges) considered
+  per candidate off-target. Lower values speed up dense-variant searches; raise it to
+  recover targets with many simultaneous edits.
 
 - `--merge` (*Optional - Default: 3*)
   <br>Defines the window size (in base pairs) used to merge closely spaced 
@@ -1097,9 +1111,9 @@ To ensure a smooth conversion process, sample ID files compatible with GNOMAD
 VCFs must be provided. These files are available for download from the CRISPRme 
 GitHub repository:
 
-- [Sample IDs file for GNOMAD v3.1 and v4.0](https://github.com/pinellolab/crisprme-plus/blob/v216/test/data/samplesIDs.gnomad.v40.txt)
+- [Sample IDs file for GNOMAD v3.1 and v4.0](https://github.com/pinellolab/crisprme-plus/blob/main/test/data/samplesIDs/samplesIDs.gnomad.v40.txt)
 
-- [Sample IDs file for GNOMAD v4.1](https://github.com/pinellolab/crisprme-plus/blob/v216/test/data/samplesIDs.gnomad.v41.txt)
+- [Sample IDs file for GNOMAD v4.1](https://github.com/pinellolab/crisprme-plus/blob/main/test/data/samplesIDs/samplesIDs.gnomad.v41.txt)
 
 The conversion process preserves all variant information necessary for CRISPRme
 analyses, including allele frequencies and genotypes (if applicable).
@@ -1111,7 +1125,7 @@ Usage Example for the GNOMAD Converter function:
     --gnomAD_VCFdir gnomad_vcf_dir \  # directory containing GNOMAD VCFs
     --samplesID samplesIDs.gnomad.v41.txt \  # GNOMAD v4.1 samples file
     --keep \  # keep variants with filter different from PASS
-    --thread 4  # number of threads
+    --threads 4  # number of threads
   ```
 
 - **Via Docker**
@@ -1121,7 +1135,7 @@ Usage Example for the GNOMAD Converter function:
     --gnomAD_VCFdir gnomad_vcf_dir \  # directory containing GNOMAD VCFs
     --samplesID samplesIDs.gnomad.v41.txt \  # GNOMAD v4.1 samples file
     --keep \  # keep variants with filter different from PASS
-    --thread 4  # number of threads
+    --threads 4  # number of threads
   ```
 
 ##### Input Arguments
@@ -1554,16 +1568,16 @@ Open a terminal and execute the following command to check the software version:
 
 - **Via Conda/Mamba**
   ```bash
-  crisprme.py --version  # Expected output: v2.1.12
+  crisprme.py --version  # Expected output: v2.2.0
   ```
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
-  crisprme.py --version  # Expected output: v2.1.12
+  crisprme.py --version  # Expected output: v2.2.0
   ```
 
-If the output displays the correct software version (e.g., `v2.1.12`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.2.0`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**
@@ -1573,12 +1587,12 @@ To explore the functionalities and input parameters of CRISPRme, use the
 
 - **Via Conda/Mamba**
   ```bash
-  crisprme.py --help
+  crisprme.py
   ```
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
-    crisprme.py --help
+    crisprme.py
   ```
 
 The help menu provides detailed descriptions of CRISPRme's features and usage 
