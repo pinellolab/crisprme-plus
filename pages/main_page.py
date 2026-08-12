@@ -1625,37 +1625,9 @@ def index_page() -> html.Div:
         for p in get_available_PAM()
         if _def_cas and "-".join(p["value"].split(".")[0].split("-")[2:]) == _def_cas
     ]
-    # page intro
-    introduction_content = html.Div(
-        [
-            html.Div(
-                str(
-                    "CRISPRme is a web application, also available offline or "
-                    "command line, for comprehensive off-target assessment. It "
-                    "integrates human genetic variant datasets with orthogonal "
-                    "genomic annotations to predict and prioritize CRISPR-Cas "
-                    "off-target sites at scale. The method considers both "
-                    "single-nucleotide variants (SNVs) and indels, accounts for "
-                    "bona fide haplotypes, accepts spacer:protospacer mismatches "
-                    "and bulges, and is suitable for population and personal "
-                    "genome analyses."
-                )
-            ),
-            html.Div(
-                [
-                    "Check out our paper in Nature Genetics ",
-                    html.A("here!", target="_blank", href=PAPER_LINK),
-                ]
-            ),
-            html.Div(
-                [
-                    "CRISPRme offline version can be downloaded from ",
-                    html.A("Github", target="_blank", href=GITHUB_LINK),
-                ]
-            ),
-            html.Br(),  # add newline
-        ]
-    )
+    # page intro — descriptive blurb + paper/Github links removed per maintainer
+    # request; the form starts directly at "Select gRNA".
+    introduction_content = html.Div([])
     # warnings
     modal = html.Div(
         [
