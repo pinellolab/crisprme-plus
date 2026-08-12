@@ -1353,10 +1353,15 @@ def index_build_pam(index_dir: str) -> "tuple":
 def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> int:
     """Max bulges an existing TST index supports for this genome+PAM(+VCF).
 
-    Index folders are named ``<motif>_<N>_<genome>[+<vcf>]`` where N = bMax+1, so
-    the usable bulge count is N-1. Returns 0 if no matching index exists (only a
-    0-bulge, index-free search is possible). A variant search also needs the
-    variant index, so callers should take the min with the reference result.
+    Index folders are named ``<motif>_<N>_<genome>`` (reference) or
+    ``<motif>_<N>_<genome>+<enriched-genome>`` (variant), where N = bMax+1, so the
+    usable bulge count is N-1. The enriched-genome name is ``<refgenome>_<dataset[s]>``
+    (e.g. ``NGG_2_hg38+hg38_1000G`` or the combined ``NGG_3_hg38+hg38_1000G_HGDP``) —
+    matching how the search builds ``genome_idx`` (main_page.change_url). A variant
+    dataset is matched as a component of that enriched name (so a single-dataset query
+    also resolves a combined index that contains it). Returns 0 if no matching index
+    exists (only a 0-bulge, index-free search is possible). A variant search also needs
+    the variant index, so callers should take the min with the reference result.
     """
     motif = pam_motif(pam_value)
     if not motif or not genome:
@@ -1365,22 +1370,28 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     lib = os.path.join(current_working_directory, "genome_library")
     if not os.path.isdir(lib):
         return 0
-    tail = f"_{genome}+{vcf}" if vcf else f"_{genome}"
+    prefix = f"{motif}_"
+    base_suffix = f"_{genome}"  # base = "<motif>_<N>_<genome>"
     best = 0
     for d in os.listdir(lib):
         if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
             continue
+        base, _, enriched = d.partition("+")  # enriched="" for a reference index
         if vcf:
-            if not d.endswith(tail):
+            # variant index: the enriched-genome name must contain this dataset
+            # as an underscore-delimited component (e.g. "hg38_1000G" -> {1000G};
+            # "hg38_1000G_HGDP" -> {1000G, HGDP}).
+            if not enriched or vcf not in enriched.split("_"):
                 continue
         else:
-            if "+" in d or not d.endswith(tail):
+            if enriched:  # reference-only: no "+<enriched>"
                 continue
-        head = d[: -len(tail)]  # '<motif>_<N>'
-        parts = head.rsplit("_", 1)
-        if len(parts) != 2 or parts[0] != motif or not parts[1].isdigit():
+        if not (base.startswith(prefix) and base.endswith(base_suffix)):
             continue
-        best = max(best, int(parts[1]))
+        n_str = base[len(prefix) : -len(base_suffix)]  # the "<N>"
+        if not n_str.isdigit():
+            continue
+        best = max(best, int(n_str))
     return max(0, best - 1)
 
 
