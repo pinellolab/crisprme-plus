@@ -171,43 +171,22 @@ By completing these steps, your system will be fully prepared for installing CRI
 #### 1.1.2 Installing CRISPRme
 ---
 
-We strongly recommend using **`Mamba`** to create CRISPRme's `conda` environment 
-due to its superior speed and reliability in dependency management. However, if 
-you prefer `Conda`, you can replace `mamba` with `conda` in all the commands below.
+> **CRISPRme+ (2.2.0) runs on Python 3.11 and installs from source** — the build
+> compiles CRISPRitz 2.8.1 and installs both tools into a conda environment. A native
+> Bioconda `crisprme=2.2.0` package is **in preparation**; until it lands, the Bioconda
+> `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** this
+> 2.2.0 alpha.
 
-**Step 1: Create CRISPRme's Environment**  
+To create the 2.2.0 conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
+(`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
+or use the **[Docker quickstart](docs/DOCKER_QUICKSTART.md)** for the fastest path.
 
-Open a terminal and execute the following command:  
-
-```bash
-mamba create -n crisprme python=3.8 crisprme -y  # Install CRISPRme and its dependencies
-```  
-
-This command sets up a dedicated `conda` environment named `crisprme`, installing 
-CRISPRme along with all required dependencies.
-
-**Step 2: Activate the Environment**  
-
-To activate the newly created CRISPRme environment, type:  
+Verify the installation:
 
 ```bash
-mamba activate crisprme  # Enable the CRISPRme environment
-```  
-
-**Step 3: Test the Installation**  
-
-To verify that CRISPRme is correctly installed, run the following commands in your terminal:  
-
-```bash
-crisprme.py --version  # Display the installed CRISPRme version
-crisprme.py            # List CRISPRme functionalities
-```  
-
-- The first command will output the version of CRISPRme (e.g., `2.2.0`).  
-- The second command should display CRISPRme's functionalities.  
-
-If both commands execute successfully, your installation is complete, and 
-CRISPRme is ready to use.
+crisprme.py --version  # e.g. 2.2.0
+crisprme.py            # list CRISPRme functionalities
+```
 
 #### 1.1.3 Updating CRISPRme
 ---
@@ -227,10 +206,11 @@ desired version number:
 mamba install crisprme=<latest_version>  # Update CRISPRme to the specified version
 ```
 
-For example, to update CRISPRme to version `2.1.11`, execute:
+This updates within the **stable 2.1.x** Bioconda line (latest is `crisprme=2.1.14`):
 ```bash
-mamba install crisprme=2.1.11
+mamba install crisprme=2.1.14
 ```
+For **2.2.0 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.2.0 package yet.
 If you're using `Conda`, replace `mamba` with `conda` in the commands above.
 
 **Step 3: Verify the Update**

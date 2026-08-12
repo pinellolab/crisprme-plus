@@ -22,8 +22,11 @@ mamba config --set channel_priority strict
 ### Create and activate the environment
 
 ```bash
-mamba create -n crisprme python=3.8 crisprme -y
-mamba activate crisprme
+# CRISPRme+ (2.2.0) is a Python 3.11 source build (Bioconda serves stable 2.1.x, py3.8):
+git clone https://github.com/pinellolab/crisprme-plus.git && cd crisprme-plus
+mamba env create -f environment.yml   # env 'crisprme-2.2.0' (Python 3.11)
+mamba activate crisprme-2.2.0
+bash install_from_source.sh
 ```
 
 ### Verify the installation
