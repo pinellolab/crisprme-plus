@@ -37,7 +37,7 @@ available from the CLI.
   Search analyses.
 - A dedicated Job Status page that tracks pipeline progress and links to results
   upon completion.
-- A Results page with an interactive summary table and six specialised report tabs,
+- A Results page with an interactive summary table and up to six report tabs (Summary by Sample and Personal Risk Cards appear only for variant-aware searches; a reference-only search shows four),
   each covering a different analytical perspective on the identified off-targets.
 - Embedded visualisation panels including stem plots, population bar charts, radar
   charts, and sequence motif logos.
@@ -124,7 +124,7 @@ to the address below:
 
 ## Section 3. Interface Overview
 
-The web interface is built around three distinct pages that follow the natural
+The web interface is built around four distinct pages (a Search page, a Results page, a History page, and a Settings / Data Manager) that follow the natural
 sequence of a CRISPRme analysis: job submission on the **Homepage**, progress
 tracking on the **Job Status** page, and interactive data exploration on the
 **Results** page. A persistent navigation bar at the top of every page provides
@@ -141,7 +141,7 @@ The form is designed to be self-guiding: each input field is accompanied by a
 short description of the expected format, and required fields are visually
 distinguished from optional ones. The three steps cover:
 
-- **Step 1 — Spacer, Cas Protein, and PAM selection:** Define what to search for.
+- **Step 1 — Spacer and PAM selection:** Define what to search for.
 - **Step 2 — Genome selection and threshold configuration:** Define where to search
   and how permissively.
 - **Step 3 — Annotations, email notification, and job name:** Enrich results and
@@ -195,7 +195,7 @@ This section walks through the three-step submission form on the Homepage. For f
 parameter definitions — including accepted value ranges and biological rationale —
 refer to *Section 3 of the CRISPRme CLI Setup and Usage Guide*.
 
-### Step 1: Spacer, Cas Protein, and PAM selection
+### Step 1: Spacer and PAM selection
 
 This step defines the CRISPR reagents to search with.
 
@@ -279,7 +279,7 @@ Bulges can be consecutive (e.g., `NN--NN`) or interleaved (e.g., `NN-N-NN`).
 
 **Base editing thresholds (optional)**
 
-When a base editor is selected as the Cas protein, an additional sub-section
+When base editing is enabled (a Yes/No option, independent of the PAM/nuclease), an additional sub-section
 becomes active. Use the **Window start** and **Window stop** dropdowns — both
 constrained to the length of the input guide — to define the region within the
 protospacer where the base editing reaction is expected to occur. Then select the
@@ -574,7 +574,7 @@ the relevant results folder and refer to the
    ls
    # Expected: Annotations/ Dictionaries/ Genomes/ PAMs/ Results/ VCFs/ samplesIDs/
    ```
-3. If the directories are missing, run `crisprme.py setup --path .` to reinitialise
+3. Any `crisprme.py` command recreates missing directories automatically; use `crisprme.py download` to re-fetch data if
    the folder structure.
 4. Restart the server from the correct directory.
 

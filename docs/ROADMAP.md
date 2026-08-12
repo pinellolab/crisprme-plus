@@ -1,3 +1,5 @@
+> ⚠️ Historical/internal planning doc (classic-CRISPRme era) — not part of the CRISPRme+ alpha; may be outdated.
+
 # CRISPRme / CRISPRitz roadmap
 
 This document records the release strategy: a **stable 2.1.12** on the current

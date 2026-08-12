@@ -1,5 +1,9 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
+> ⚠️ **Alpha release.** CRISPRme+ is a preview of the next major version; interfaces, data
+> layouts, and results may change between builds. For production or clinical/critical work,
+> use the frozen stable line **[CRISPRme 2.1.14](https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14)**.
+
 This is the fastest way to get CRISPRme running with its point-and-click **web
 interface**, with **no conda, no compiling, and no 410 GB download**. You copy a
 few commands, open a browser, fill in a short form, and read the results.

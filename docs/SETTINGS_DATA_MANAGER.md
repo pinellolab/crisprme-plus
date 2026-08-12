@@ -40,7 +40,7 @@ Bulge-enabled searches need a genome **index**.
 
 ### Add a VCF dataset
 Variant datasets are large, so they are **fetched server-side** rather than
-uploaded from the browser: from HuggingFace, a URL, an existing folder already on
+uploaded from the browser: from HuggingFace, an existing server folder already on
 the machine (registered in place), or a chunked upload for a local file.
 
 ### Add an annotation

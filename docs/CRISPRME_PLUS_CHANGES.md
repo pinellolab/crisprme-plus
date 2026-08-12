@@ -1,5 +1,7 @@
 # CRISPRme+ — changes emerging from the 2.1.x lineage
 
+> ⚠️ **Alpha.** CRISPRme+ is a preview of the next major version (things may change build-to-build); for critical work use the frozen stable **[CRISPRme 2.1.14](https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14)**.
+
 This document tracks everything that diverges from the last stable **2.1.x** release
 as the **2.2.0 / CRISPRme+** lineage takes shape. It is the single place to see
 "what is new," "what is faster," and — critically — **what breaks backward
@@ -206,18 +208,17 @@ white navbar, favicons, vendored font, README + website typography.
 
 ## 7. 2.1.x end-of-life policy
 
-2.1.x is the **last stable line** and is being retired. Decision:
+2.1.x is the **last stable line**, now retired.
 
-- **One final `2.1.14` patch**, then hard-freeze/archive. It backports **only the
-  non-feature correctness fixes** that could affect users mid-analysis on 2.1.x:
-  1. **stderr-is-fatal** — `[ -s $logerror ]` checks fail any stage whose subprocess
-     merely writes to stderr (hit bit post-analysis in 2.1.13).
-  2. **input-validator hardening**.
+- **`2.1.14` shipped** — the final 2.1.x release: a *deprecation* release (version bump, a
+  README banner redirecting to CRISPRme+, and a security fix removing a hardcoded SMTP
+  credential). [Tagged + released](https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14)
+  on classic CRISPRme, which is now **frozen / maintenance-only**.
 - **No feature backports.** `--max-edits`, the density cap, pamless fallback,
-  Settings/Data Manager, compressed HF, branding, and the CRISPRitz changes are
-  **2.2.0-only** — they depend on the diverging pipeline and are not worth re-basing
-  onto a retiring line.
-- After 2.1.14: all development on 2.2.0 / CRISPRme+; 2.1.x archived on the old repo.
+  Settings/Data Manager, HF download, branding, and the CRISPRitz changes are
+  **2.2.0 / CRISPRme+ only**.
+- All development now happens on **CRISPRme+** (github.com/pinellolab/crisprme-plus);
+  use classic **2.1.14** for critical/production work.
 
 ---
 

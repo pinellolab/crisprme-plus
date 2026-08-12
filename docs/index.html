@@ -22,6 +22,12 @@
 
   <main>
     <section class="notice" aria-labelledby="notice-heading">
+      <p style="background:#fff3cd;border:1px solid #ffe08a;border-radius:6px;padding:0.75rem 1rem;margin:0 0 1rem;">
+        <strong>&#9888; Alpha release.</strong> CRISPRme+ is a preview of the next major version &mdash;
+        interfaces, data layouts, and results may change between builds. For production or
+        clinical/critical work, use the frozen stable line
+        <strong><a href="https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14">CRISPRme 2.1.14</a></strong>.
+      </p>
       <h2 id="notice-heading">Run CRISPRme on your own machine</h2>
       <p>
         CRISPRme is open source and actively maintained, and you can run the
@@ -153,6 +159,9 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
         <summary><strong>Other ways to install</strong> (Conda/Mamba, or build everything from scratch)</summary>
 
         <h3>Install with Conda / Mamba</h3>
+        <p style="color:#b00;margin:0 0 .5rem;"><strong>Note:</strong> Bioconda installs the last
+        <em>stable</em> CRISPRme release (pre-2.2.0), <strong>not</strong> this CRISPRme+ alpha.
+        Use the Docker quickstart above for the alpha.</p>
         <pre><code># Configure Bioconda channels (one-time)
 mamba config --add channels bioconda
 mamba config --add channels conda-forge

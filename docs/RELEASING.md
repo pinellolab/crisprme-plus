@@ -1,3 +1,9 @@
+> ⚠️ **Being updated for CRISPRme+.** Releases are now a **source-built multi-arch Docker
+> image** published on version tags (`.github/workflows/docker-multiarch.yml` + the
+> `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` repo secrets). There is **no `ARG crisprme_version`**
+> (the version lives in `crisprme.py`), and 2.2.0 is **not** on Bioconda. Sections below that
+> still describe the Bioconda-into-Docker model or `ARG crisprme_version` are stale.
+
 # Releasing CRISPRme
 
 This guide explains how a maintainer cuts a new CRISPRme release and keeps the

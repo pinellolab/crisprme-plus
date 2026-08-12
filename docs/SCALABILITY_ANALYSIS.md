@@ -1,3 +1,5 @@
+> ⚠️ Internal analysis. Its conclusions are superseded by the shipped `--max-total-edits` + high-variant-density cap (see CRISPRME_PLUS_CHANGES.md §1.3/§2).
+
 # CRISPRme Post-Analysis Scalability Analysis
 
 Cost map and ranked deep-fix design for the post-analysis blow-up tracked in

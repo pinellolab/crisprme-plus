@@ -27,7 +27,7 @@ and the `release-crisprme` skill.
   and web share one non-human-genome download path.
 - Python 3.11 modernization: pipeline fixes for pandas 2.x / matplotlib 3.x and
   a Dash 1.x → 2.x web-app migration, plus a Python-3.11 Docker image built from
-  source (CRISPRitz 2.8.0) (#131).
+  source (CRISPRitz 2.8.1) (#131).
 - `assembly-search` subcommand: off-target search on a personal diploid genome
   assembly (two haplotypes, no VCF), reconciled to hg38 via liftOver (#113).
 - Reference-index UX: `build-index-only` pre-builds the reusable CRISPRitz

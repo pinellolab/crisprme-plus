@@ -582,9 +582,9 @@ All subsequent commands must be run from inside this working directory. CRISPRme
 
 **Full genome (default):** downloads the complete hg38 assembly from UCSC (~900 MB compressed) and unpacks it as one uncompressed FASTA per chromosome. The archive MD5 is verified before extraction to catch truncated downloads. Existing chromosomes that pass the integrity check are skipped on re-runs.
 
-**Single chromosome (`--chrom chrN`):** downloads only `chrN.fa.gz` from the UCSC per-chromosome endpoint and unpacks it to `Genomes/chrN/chrN.fa`. Use this for testing before committing to the full download.
+**Single chromosome (`--chrom chrN`):** downloads only `chrN.fa.gz` from the UCSC per-chromosome endpoint and unpacks it to `Genomes/hg38_chrN/chrN.fa`. Use this for testing before committing to the full download.
 
-Expected result: `Genomes/hg38/` (full) or `Genomes/chrN/` (single-chrom) containing one `.fa` file per downloaded chromosome.
+Expected result: `Genomes/hg38/` (full) or `Genomes/hg38_chrN/` (single-chrom) containing one `.fa` file per downloaded chromosome.
 
 ### A2c. Download variant VCFs (1000G and HGDP)
 

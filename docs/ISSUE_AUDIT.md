@@ -1,3 +1,5 @@
+> ⚠️ Historical snapshot (classic CRISPRme, pre-freeze). Kept for reference; not current.
+
 # CRISPRme issue audit (pre-2.1.12)
 
 A full review of every open and closed GitHub issue, done to make the 2.1.12

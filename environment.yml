@@ -4,7 +4,7 @@
 #
 #   mamba env create -f environment.yml
 #   mamba activate crisprme-2.2.0
-#   bash install_from_source.sh          # builds crispritz 2.8.0 + installs both
+#   bash install_from_source.sh          # builds crispritz 2.8.1 + installs both
 #
 # The scoring stack pins (scikit-learn/numpy/scipy/pandas) are required: the
 # vendored azimuth/CRISTA models only unpickle on this exact combination.
