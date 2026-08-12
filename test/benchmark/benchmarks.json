@@ -1,6 +1,6 @@
 {
   "_comment": "Registry of validate-test benchmark cases. Each entry defines a nuclease/guide benchmark with a precomputed brute-force ground truth. To add a new example: append an entry, generate its reference with test/benchmark/generate_references.sh, host the TSV, and record its md5. validate.py iterates this registry, downloads+caches each reference (keyed by md5), and reports per-case pass/fail.",
-  "reference_base_url": "https://raw.githubusercontent.com/pinellolab/CRISPRme/main/test/benchmark/",
+  "reference_base_url": "https://raw.githubusercontent.com/pinellolab/crisprme-plus/main/test/benchmark/",
   "thresholds": {
     "mm": 4,
     "bDNA": 1,

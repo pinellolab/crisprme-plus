@@ -268,12 +268,12 @@ and the `release-crisprme` skill.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/CRISPRme/compare/v2.1.13...HEAD
-[2.1.13]: https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.13
-[2.1.12]: https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.12
-[2.1.11]: https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.11
-[2.1.10]: https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.10
-[2.1.9]: https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.9
-[2.1.8]: https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.8
-[2.1.7]: https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.7
-[2.1.6]: https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.6
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.1.13...HEAD
+[2.1.13]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.13
+[2.1.12]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.12
+[2.1.11]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.11
+[2.1.10]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.10
+[2.1.9]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.9
+[2.1.8]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.8
+[2.1.7]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.7
+[2.1.6]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.6

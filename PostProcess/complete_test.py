@@ -79,8 +79,9 @@ VCFHGDPSERVER = "ngs.sanger.ac.uk"
 VCFHGDPURL = "/production/hgdp/hgdp_wgs.20190516/hgdp_wgs.20190516.full.{}.vcf.gz"
 
 # define test data url
-TESTDATAURL = (
-    "https://raw.githubusercontent.com/pinellolab/CRISPRme/refs/heads/main/test/data/"
+TESTDATAURL = os.environ.get(
+    "CRISPRME_TESTDATA_URL",
+    "https://raw.githubusercontent.com/pinellolab/crisprme-plus/refs/heads/main/test/data/",
 )
 
 # define complete-test results folder name

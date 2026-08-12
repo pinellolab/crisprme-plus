@@ -649,4 +649,4 @@ Writes PAM definition files for all supported nucleases to `PAMs/`. Each file is
 
 ---
 
-For full documentation see the [CRISPRme GitHub repository](https://github.com/pinellolab/CRISPRme).
+For full documentation see the [CRISPRme GitHub repository](https://github.com/pinellolab/crisprme-plus).

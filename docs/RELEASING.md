@@ -131,7 +131,7 @@ git commit -m "Release vX.Y.Z"
 git push origin HEAD
 
 gh release create vX.Y.Z \
-  --repo pinellolab/CRISPRme \
+  --repo pinellolab/crisprme-plus \
   --title "CRISPRme vX.Y.Z" \
   --notes-file <changelog-section-for-X.Y.Z>
 ```
@@ -139,7 +139,7 @@ gh release create vX.Y.Z \
 Confirm the tarball is live (HTTP 200) before touching Bioconda:
 
 ```bash
-curl -sIL https://github.com/pinellolab/CRISPRme/archive/refs/tags/vX.Y.Z.tar.gz | head -1
+curl -sIL https://github.com/pinellolab/crisprme-plus/archive/refs/tags/vX.Y.Z.tar.gz | head -1
 ```
 
 ### 5. Update the Bioconda recipe
@@ -149,7 +149,7 @@ Recompute the sha256 from the *published* tarball:
 ```bash
 python scripts/prepare_release.py X.Y.Z        # prints sha256 + the exact meta.yaml diff
 # equivalently:
-curl -sL https://github.com/pinellolab/CRISPRme/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256
+curl -sL https://github.com/pinellolab/crisprme-plus/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256
 ```
 
 There are two ways to get this into `bioconda/bioconda-recipes`:
@@ -200,7 +200,7 @@ docker build -t crisprme:X.Y.Z . && docker run --rm crisprme:X.Y.Z crisprme.py -
 ## Rollback / troubleshooting
 
 - **Bad in-repo bump:** `git checkout crisprme.py Dockerfile CHANGELOG.md`.
-- **Premature/incorrect GitHub release:** `gh release delete vX.Y.Z --repo pinellolab/CRISPRme --cleanup-tag`, then redo.
+- **Premature/incorrect GitHub release:** `gh release delete vX.Y.Z --repo pinellolab/crisprme-plus --cleanup-tag`, then redo.
 - **sha256 mismatch in the Bioconda PR:** GitHub occasionally regenerates archive tarballs; recompute the hash from the live tarball and update `meta.yaml`.
 - **Docker build fails on `crisprme=$crisprme_version`:** the Bioconda package for that version has not published yet — wait and rebuild.
 - **Version lag between files:** always run the step-1 pre-flight; the most common historical drift is the `Dockerfile` ARG trailing `crisprme.py`.

@@ -32,7 +32,7 @@ import re
 import sys
 import urllib.request
 
-REPO = "pinellolab/CRISPRme"
+REPO = "pinellolab/crisprme-plus"
 TARBALL_URL = "https://github.com/{repo}/archive/refs/tags/v{version}.tar.gz"
 
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
@@ -69,7 +69,10 @@ def bump_dockerfile(path: str, version: str) -> bool:
     pat = re.compile(r"^(ARG\s+crisprme_version=)(\d+\.\d+\.\d+)", re.MULTILINE)
     m = pat.search(text)
     if not m:
-        die(f"could not find `ARG crisprme_version=...` in {path}")
+        # the source-built Dockerfile no longer pins crisprme via an ARG
+        # (the version lives only in crisprme.py); nothing to bump here.
+        print("  Dockerfile        no `ARG crisprme_version=` (source build) - skipping")
+        return False
     current = m.group(2)
     if current == version:
         print(f"  Dockerfile        already at {version} (no change)")

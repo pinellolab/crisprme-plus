@@ -23,7 +23,7 @@ through an interactive web-based interface.
 > ⚠️ **Note**  
 > The original public CRISPRme web service is no longer available.  
 > All functionalities are now accessible via the command-line interface or the 
-locally hosted web interface. Visit https://pinellolab.github.io/CRISPRme/ for a
+locally hosted web interface. Visit https://pinellolab.github.io/crisprme-plus/ for a
 quick guide on deploying locally the web interface.
 
 ## ⚡ Quickstart — web interface in Docker (no conda, no 410 GB)
@@ -361,7 +361,7 @@ Use this to run an unreleased line (e.g. **2.2.0**, Python 3.11 + Dash 2.x) befo
 
 ```bash
 # 1. clone the branch you want to run (2.2.0 development lives on python3.11)
-git clone --branch python3.11 https://github.com/pinellolab/CRISPRme.git
+git clone --branch python3.11 https://github.com/pinellolab/crisprme-plus.git
 cd CRISPRme
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
@@ -441,7 +441,7 @@ include the following main subdirectories:
 
 The directory organization required by CRISPRme is illustrated below:
 <p align="center">
-  <img src="https://github.com/pinellolab/CRISPRme/blob/main/assets/readme/crisprme_dirtree.png" alt="crisprme_dirtree.png", width=400/>
+  <img src="https://github.com/pinellolab/crisprme-plus/blob/main/assets/readme/crisprme_dirtree.png" alt="crisprme_dirtree.png", width=400/>
 </p>
 
 ### 2.2 CRISPRme Functions
@@ -1097,9 +1097,9 @@ To ensure a smooth conversion process, sample ID files compatible with GNOMAD
 VCFs must be provided. These files are available for download from the CRISPRme 
 GitHub repository:
 
-- [Sample IDs file for GNOMAD v3.1 and v4.0](https://github.com/pinellolab/CRISPRme/blob/v216/test/data/samplesIDs.gnomad.v40.txt)
+- [Sample IDs file for GNOMAD v3.1 and v4.0](https://github.com/pinellolab/crisprme-plus/blob/v216/test/data/samplesIDs.gnomad.v40.txt)
 
-- [Sample IDs file for GNOMAD v4.1](https://github.com/pinellolab/CRISPRme/blob/v216/test/data/samplesIDs.gnomad.v41.txt)
+- [Sample IDs file for GNOMAD v4.1](https://github.com/pinellolab/crisprme-plus/blob/v216/test/data/samplesIDs.gnomad.v41.txt)
 
 The conversion process preserves all variant information necessary for CRISPRme
 analyses, including allele frequencies and genotypes (if applicable).
@@ -1537,7 +1537,7 @@ testing options tailored to user needs:
   <br>A comprehensive pipeline test, replicating a full-scale CRISPRme analysis.
 
 For persistent issues, refer to the 
-[CRISPRme GitHub Issues Page](https://github.com/pinellolab/CRISPRme/issues) 
+[CRISPRme GitHub Issues Page](https://github.com/pinellolab/crisprme-plus/issues) 
 or contact the maintainers.
 
 ### 3.1 Quick Test

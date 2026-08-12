@@ -35,9 +35,9 @@ BENCHMARKS_JSON = os.path.join(
 )
 # fallback (canonical Cas9 benchmark) if the registry is unavailable
 _FALLBACK_BENCHMARKS = {
-    "reference_base_url": (
-        "https://raw.githubusercontent.com/pinellolab/CRISPRme/refs/heads/main/"
-        "test/benchmark/"
+    "reference_base_url": os.environ.get(
+        "CRISPRME_BENCHMARK_URL",
+        "https://raw.githubusercontent.com/pinellolab/crisprme-plus/refs/heads/main/test/benchmark/",
     ),
     "thresholds": {"mm": 4, "bDNA": 1, "bRNA": 1},
     "benchmarks": [

@@ -536,7 +536,7 @@ This section covers issues specific to the local server environment and browser
 interaction. For problems with the CRISPRme search pipeline itself — such as
 unexpected output or missing results files — consult the `log_error.txt` file in
 the relevant results folder and refer to the
-[CRISPRme GitHub Issues page](https://github.com/pinellolab/CRISPRme/issues).
+[CRISPRme GitHub Issues page](https://github.com/pinellolab/crisprme-plus/issues).
 
 ---
 

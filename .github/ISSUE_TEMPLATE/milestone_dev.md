@@ -19,7 +19,7 @@ _Provide a detailed description of the task. Include the objective, context, and
 
 ### **Milestone**  
 _Linked milestone:_  
-- [ ] **Milestone Name**: [Insert milestone name here, e.g., "Release v2.1.7"](https://github.com/pinellolab/CRISPRme/milestones)  
+- [ ] **Milestone Name**: [Insert milestone name here, e.g., "Release v2.1.7"](https://github.com/pinellolab/crisprme-plus/milestones)  
 
 ---
 

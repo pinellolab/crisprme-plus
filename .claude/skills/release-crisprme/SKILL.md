@@ -19,7 +19,7 @@ Version-sync points (ALL must equal the same `X.Y.Z`):
 - git tag / GitHub release → `vX.Y.Z`
 - Bioconda `recipes/crisprme/meta.yaml` → `{% set version = "X.Y.Z" %}` + fresh `sha256` + `build.number: 0`
 
-Bioconda source URL is `https://github.com/pinellolab/CRISPRme/archive/refs/tags/v{{ version }}.tar.gz`,
+Bioconda source URL is `https://github.com/pinellolab/crisprme-plus/archive/refs/tags/v{{ version }}.tar.gz`,
 so the recipe pulls the **GitHub release tarball** — its sha256 is the hash of that exact tarball.
 
 Run all commands from the CRISPRme repo root. Replace `X.Y.Z` with the real version (no leading `v` except in tags/URLs).
@@ -34,7 +34,7 @@ Confirm where the repo currently stands and that nothing is half-bumped.
 echo "crisprme.py: $(grep -E '^version *= *' crisprme.py)"
 echo "Dockerfile:  $(grep -E '^ARG crisprme_version=' Dockerfile)"
 echo "latest tag:  $(git tag --sort=-v:refname | head -1)"
-echo "latest release: $(gh release list --repo pinellolab/CRISPRme -L1)"
+echo "latest release: $(gh release list --repo pinellolab/crisprme-plus -L1)"
 curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/recipes/crisprme/meta.yaml | grep -E 'set version|sha256|number:'
 ```
 
@@ -64,7 +64,7 @@ Edit `CHANGELOG.md`:
 - Add `## [X.Y.Z] - YYYY-MM-DD` with the curated entries.
 - Leave a fresh empty `## [Unreleased]` at the top.
 - Update the link-reference footer:
-  `[X.Y.Z]: https://github.com/pinellolab/CRISPRme/releases/tag/vX.Y.Z`
+  `[X.Y.Z]: https://github.com/pinellolab/crisprme-plus/releases/tag/vX.Y.Z`
   and repoint `[Unreleased]` to `.../compare/vX.Y.Z...HEAD`.
 
 ## Step 3 — Commit, then create the GitHub release + tag
@@ -80,7 +80,7 @@ git push origin HEAD
 awk '/^## \[X.Y.Z\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > /tmp/crisprme_notes.md
 
 gh release create vX.Y.Z \
-  --repo pinellolab/CRISPRme \
+  --repo pinellolab/crisprme-plus \
   --title "CRISPRme vX.Y.Z" \
   --notes-file /tmp/crisprme_notes.md \
   --target main            # or the branch you released from
@@ -89,10 +89,10 @@ gh release create vX.Y.Z \
 Verify the tarball is now published:
 
 ```bash
-curl -sIL https://github.com/pinellolab/CRISPRme/archive/refs/tags/vX.Y.Z.tar.gz | head -1  # expect 200
+curl -sIL https://github.com/pinellolab/crisprme-plus/archive/refs/tags/vX.Y.Z.tar.gz | head -1  # expect 200
 ```
 
-Rollback: `gh release delete vX.Y.Z --repo pinellolab/CRISPRme --cleanup-tag` (only if the release must be withdrawn before Bioconda picks it up).
+Rollback: `gh release delete vX.Y.Z --repo pinellolab/crisprme-plus --cleanup-tag` (only if the release must be withdrawn before Bioconda picks it up).
 
 ## Step 4 — Update the Bioconda recipe
 
@@ -101,7 +101,7 @@ First compute the sha256 of the now-published tarball (this is the recipe's `sou
 ```bash
 python scripts/prepare_release.py X.Y.Z    # no --no-download; prints sha256 + meta.yaml diff
 # or directly:
-curl -sL https://github.com/pinellolab/CRISPRme/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256
+curl -sL https://github.com/pinellolab/crisprme-plus/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256
 ```
 
 You have two routes. **Prefer autobump; fall back to a manual PR.**
@@ -185,7 +185,7 @@ All four (crisprme.py, Dockerfile ARG, git tag, bioconda version) must read `X.Y
 
 ## Failure / rollback quick reference
 - Wrong in-repo bump: `git checkout crisprme.py Dockerfile CHANGELOG.md`.
-- Wrong/premature GitHub release: `gh release delete vX.Y.Z --repo pinellolab/CRISPRme --cleanup-tag` and redo.
+- Wrong/premature GitHub release: `gh release delete vX.Y.Z --repo pinellolab/crisprme-plus --cleanup-tag` and redo.
 - sha256 mismatch on the Bioconda PR: GitHub can regenerate archive tarballs; recompute the sha256 from the live tarball and update `meta.yaml`, then push.
 - Deps changed but version unchanged: keep `version`, INCREMENT `build.number` (do not reset to 0).
 - Docker build fails on `crisprme=$crisprme_version`: the Bioconda package for that version isn't published yet — wait, then rebuild.

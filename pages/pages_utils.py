@@ -288,7 +288,7 @@ VARIANTS_DATA = ["1000G", "HGDP", "PV"]
 # CRISPRme paper link
 PAPER_LINK = "https://rdcu.be/c1GYQ"
 # CRISPRme github page link
-GITHUB_LINK = "https://github.com/pinellolab/CRISPRme"
+GITHUB_LINK = "https://github.com/pinellolab/crisprme-plus"
 # manual page image directory
 MANUAL_IMGS = "manual_page-images"
 
