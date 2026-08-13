@@ -25,6 +25,30 @@ def _normalize_chrom(chrom: str) -> str:
     """
     return chrom if chrom.startswith("chr") else "chr" + chrom
 
+
+def _dataset_chroms(vcf_dir: str, log_indels_dir: str):
+    """Chromosome list for a variant dataset. Prefer the raw VCFs; fall back to the
+    per-chromosome indel logs bundled with a precomputed index
+    (``Dictionaries/log_indels_<vcf>/log<chrom>.txt``) when the multi-GB source VCFs
+    were not downloaded. See the twin helper in ``pool_search_indels.py``."""
+    if vcf_dir and os.path.isdir(vcf_dir):
+        vcfs = sorted(f for f in os.listdir(vcf_dir) if f.endswith("vcf.gz"))
+        if vcfs:
+            return [_normalize_chrom(_chrom_from_vcf(os.path.join(vcf_dir, f))) for f in vcfs]
+    if log_indels_dir and os.path.isdir(log_indels_dir):
+        chroms = [
+            _normalize_chrom(f[len("log"):-len(".txt")])
+            for f in sorted(os.listdir(log_indels_dir))
+            if f.startswith("log") and f.endswith(".txt")
+        ]
+        if chroms:
+            return chroms
+    raise ValueError(
+        f"No VCFs found in '{vcf_dir}' and no indel logs under '{log_indels_dir}'; "
+        "cannot determine chromosomes for the indel post-analysis."
+    )
+
+
 # post-analysis script name
 POSTANALYSIS = "./post_analisi_indel.sh"
 
@@ -44,8 +68,7 @@ final_res_alt = sys.argv[12]
 ncpus = int(sys.argv[13])
 
 
-def start_analysis(fname: str) -> None:
-    chrom = _normalize_chrom(_chrom_from_vcf(os.path.join(vcf_folder, fname)))
+def start_analysis(chrom: str) -> None:
     code = subprocess.call(
         f"{POSTANALYSIS} {output_folder} {ref_folder} {vcf_folder} {guide_file} "
         f"{mm} {bDNA} {bRNA} {annotation_file} {pam_file} {dict_folder} "
@@ -76,8 +99,9 @@ def memory_capped_workers(requested, n_tasks):
     return max(1, min(requested, cap, n_tasks))
 
 
-# chromosome-wise vcfs list
-chrs = [f for f in os.listdir(vcf_folder) if f.endswith(".vcf.gz")]
+# chromosome list (raw VCFs when present; else the bundled indel logs)
+vcf_name = os.path.basename(vcf_folder.rstrip("/"))
+chrs = _dataset_chroms(vcf_folder, os.path.join(dict_folder, "log_indels_" + vcf_name))
 workers = memory_capped_workers(ncpus, len(chrs))
 # NOTE: write this diagnostic to STDOUT (log_verbose.txt), never STDERR.
 # The caller treats a non-empty stderr log (`[ -s $logerror ]`) as a fatal

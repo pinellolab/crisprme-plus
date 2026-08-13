@@ -135,22 +135,38 @@ while read vcf_f; do
 	done
 
 	# create fake chormosomes fasta for indels
-	if [ "$vcf_name" != "_" ]; then  
+	if [ "$vcf_name" != "_" ]; then
 		unset array_fake_chroms
 		declare -a array_fake_chroms
-		for file_chr in "$vcf_folder"/*.vcf.gz; do
-			file_name=$(basename $file_chr)
-			# file_name=$(basename $file_chr)
-			IFS='.' read -ra ADDR <<<$file_name
-			for i in "${ADDR[@]}"; do
-				if [[ $i == *"chr"* ]]; then
-					chr=$i
-				fi
+		_vcf_glob=("$vcf_folder"/*.vcf.gz)
+		if [ -e "${_vcf_glob[0]}" ]; then
+			# raw VCFs present: derive the fake-chrom list from their filenames
+			for file_chr in "$vcf_folder"/*.vcf.gz; do
+				file_name=$(basename $file_chr)
+				# file_name=$(basename $file_chr)
+				IFS='.' read -ra ADDR <<<$file_name
+				for i in "${ADDR[@]}"; do
+					if [[ $i == *"chr"* ]]; then
+						chr=$i
+					fi
+				done
+				# chr=$(echo -e $file_name | cut -f 2 -d'.')
+				echo -e "fake$chr"
+				array_fake_chroms+=("fake$chr")
 			done
-			# chr=$(echo -e $file_name | cut -f 2 -d'.')
-			echo -e "fake$chr"
-			array_fake_chroms+=("fake$chr")
-		done
+		else
+			# batteries-included install (no raw VCFs): derive the chrom list from the
+			# per-chromosome indel logs bundled with the precomputed index
+			# (Dictionaries/log_indels_<vcf>/log<chrom>.txt). Same set as the VCFs,
+			# since both are produced from those VCFs at index-build time.
+			for _logf in "$current_working_directory/Dictionaries/log_indels_${vcf_name}"/log*.txt; do
+				[ -e "$_logf" ] || continue
+				_c=$(basename "$_logf"); _c=${_c#log}; _c=${_c%.txt}
+				case "$_c" in chr*) : ;; *) _c="chr$_c" ;; esac
+				echo -e "fake$_c"
+				array_fake_chroms+=("fake$_c")
+			done
+		fi
 	fi
 
 	# create output folder in /Results/
@@ -186,7 +202,37 @@ while read vcf_f; do
 	fi
 
 	# START STEP 1 - Genome enrichment
+	# Detect a precomputed variant index shipped WITHOUT the raw VCFs (a batteries-
+	# included install: `download --what index` fetches genome_library/<name> +
+	# <name>_INDELS + the per-sample dictionaries, but not the multi-GB source VCFs).
+	# When a genome_library index <pam>_N_<ref>+<vcf> with N>=bMax is present AND the
+	# dictionaries are present, the enriched genome + dictionaries were produced at
+	# build time and shipped, so on-demand enrichment (which reads the source VCFs) is
+	# both unnecessary and impossible — skip STEP 1 in that case.
+	precomputed_variant=0
 	if [ "$vcf_name" != "_" ]; then
+		for _d in "$current_working_directory/genome_library"/${true_pam}_*_"${ref_name}+${vcf_name}" "$current_working_directory/genome_library"/NNN_*_"${ref_name}+${vcf_name}"; do
+			[ -d "$_d" ] || continue
+			case "$_d" in *_INDELS) continue ;; esac
+			_b=$(basename "$_d"); _n=${_b#*_}; _n=${_n%%_*}
+			case "$_n" in '' | *[!0-9]*) continue ;; esac
+			if [ "$_n" -ge "$bMax" ] \
+				&& [ -d "$current_working_directory/Dictionaries/dictionaries_${vcf_name}" ] \
+				&& [ -d "$current_working_directory/Dictionaries/log_indels_${vcf_name}" ]; then
+				precomputed_variant=1
+				break
+			fi
+		done
+	fi
+	if [ "$vcf_name" != "_" ] && [ "$precomputed_variant" = 1 ]; then
+		echo -e "Using precomputed variant index for ${ref_name}+${vcf_name}; skipping genome enrichment (source VCFs not required)"
+		# same dictionary paths the enrichment branch exports; the downstream SNP/INDEL
+		# post-analysis reads these (they were shipped alongside the precomputed index).
+		dict_folder="$current_working_directory/Dictionaries/dictionaries_${vcf_name}/"
+		indel_dict_folder="$current_working_directory/Dictionaries/log_indels_${vcf_name}/"
+		echo -e 'Add-variants\tStart\t'$(date) >>"$log"
+		echo -e 'Add-variants\tEnd\t'$(date) >>"$log"
+	elif [ "$vcf_name" != "_" ]; then
 		enriched_folder="$current_working_directory/Genomes/${ref_name}+${vcf_name}"
 		_run_tmp=$(mktemp -d "$current_working_directory/Genomes/run_XXXXXX")
 		variants_tmp="$_run_tmp/variants_genome"

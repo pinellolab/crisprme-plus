@@ -24,6 +24,35 @@ def _normalize_chrom(chrom: str) -> str:
     """
     return chrom if chrom.startswith("chr") else "chr" + chrom
 
+
+def _dataset_chroms(vcf_dir: str, log_indels_dir: str):
+    """Chromosome list for a variant dataset.
+
+    Prefer the raw VCFs (chrom = first data record of each ``<chr>.vcf.gz``). When
+    the raw VCFs are absent -- e.g. a batteries-included install that shipped only
+    the precomputed index + dictionaries, not the multi-GB source VCFs -- fall back
+    to the per-chromosome indel logs bundled with the index
+    (``Dictionaries/log_indels_<vcf>/log<chrom>.txt``). Both are produced from the
+    same VCFs at index-build time, so the chromosome set is identical.
+    """
+    if vcf_dir and os.path.isdir(vcf_dir):
+        vcfs = sorted(f for f in os.listdir(vcf_dir) if f.endswith("vcf.gz"))
+        if vcfs:
+            return [_normalize_chrom(_chrom_from_vcf(os.path.join(vcf_dir, f))) for f in vcfs]
+    if log_indels_dir and os.path.isdir(log_indels_dir):
+        chroms = [
+            _normalize_chrom(f[len("log"):-len(".txt")])
+            for f in sorted(os.listdir(log_indels_dir))
+            if f.startswith("log") and f.endswith(".txt")
+        ]
+        if chroms:
+            return chroms
+    raise ValueError(
+        f"No VCFs found in '{vcf_dir}' and no indel logs under '{log_indels_dir}'; "
+        "cannot determine chromosomes for the indel search."
+    )
+
+
 ref_folder = sys.argv[1]
 ref_name = os.path.basename(sys.argv[1])
 vcf_dir = sys.argv[2]
@@ -44,8 +73,7 @@ threads = int(sys.argv[13])
 max_edits = sys.argv[14] if len(sys.argv) > 14 else "-1"
 
 
-def search_indels(f):
-    chrom = _normalize_chrom(_chrom_from_vcf(os.path.join(vcf_dir, f)))
+def search_indels(chrom):
     print("Searching for INDELs in", chrom)
     if bDNA != "0" or bRNA != "0":
         os.system(
@@ -58,10 +86,10 @@ def search_indels(f):
     print("Search ended for INDELs in", chrom)
 
 
-chrs = []
-for f in os.listdir(vcf_dir):
-    if "vcf.gz" == f[-6:]:
-        chrs.append(f)
+chrs = _dataset_chroms(
+    vcf_dir,
+    os.path.join(current_working_directory, "Dictionaries", "log_indels_" + vcf_name),
+)
 
 # cpus = len(os.sched_getaffinity(0))
 # if cpus - 3 < 10:
@@ -78,8 +106,7 @@ with Pool(processes=threads) as pool:
     pool.map(search_indels, chrs)
 
 
-for key in chrs:
-    chrom = _normalize_chrom(_chrom_from_vcf(os.path.join(vcf_dir, key)))
+for chrom in chrs:
     os.system(
         f"tail -n +2 {output_folder}/fake{chrom}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}.targets.txt >> {output_folder}/indels_{ref_name}+{vcf_name}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}.targets.txt"
     )

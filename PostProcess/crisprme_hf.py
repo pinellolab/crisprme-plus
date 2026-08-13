@@ -367,6 +367,26 @@ def download_component(
                     os.rename(dst, backup)  # move any existing index aside (same FS)
                 os.rename(src, dst)  # move the new one into place (atomic, same FS)
                 shutil.rmtree(backup, ignore_errors=True)
+            # a variant index bundles its per-sample dictionaries (see publish_index):
+            # install them into <workdir>/Dictionaries/ so the variant search finds
+            # them without the source VCFs (same atomic swap as the index dirs above).
+            staged_dicts = os.path.join(extract_tmp, "Dictionaries")
+            if os.path.isdir(staged_dicts):
+                dst_dicts_root = os.path.join(workdir, "Dictionaries")
+                os.makedirs(dst_dicts_root, exist_ok=True)
+                for sub in os.listdir(staged_dicts):
+                    src = os.path.join(staged_dicts, sub)
+                    if not os.path.isdir(src):
+                        continue
+                    dst = os.path.join(dst_dicts_root, sub)
+                    backup = os.path.join(dst_dicts_root, f".{sub}.replaced")
+                    if os.path.isdir(backup) and not os.path.exists(dst):
+                        os.rename(backup, dst)
+                    shutil.rmtree(backup, ignore_errors=True)
+                    if os.path.exists(dst):
+                        os.rename(dst, backup)
+                    os.rename(src, dst)
+                    shutil.rmtree(backup, ignore_errors=True)
         finally:
             shutil.rmtree(extract_tmp, ignore_errors=True)
             shutil.rmtree(staging, ignore_errors=True)
@@ -399,15 +419,19 @@ def _make_index_tarball(
     index_name: str,
     indels_dir: str,
     manifest: Dict,
+    dict_dirs: Optional[List[str]] = None,
 ) -> None:
-    """Builds the one-file-per-index ``.tar.gz`` (index + _INDELS + manifest).
+    """Builds the one-file-per-index ``.tar.gz`` (index + _INDELS + dicts + manifest).
 
     Prefers ``pigz`` (parallel gzip) via GNU ``tar`` so a large index compresses
     across all cores instead of one — a 170GB pamless index tars in minutes with
     pigz vs ~a day with single-threaded gzip. Falls back to Python's (single-
     threaded) ``tarfile`` when ``pigz``/``tar`` are unavailable. Both paths write
     an identical archive layout: ``<index_name>/``, optional ``<index_name>_INDELS/``,
-    and ``manifest.json`` at the archive root (see download_component's extractor).
+    each ``dict_dirs`` entry stored under ``Dictionaries/<basename>/`` (the per-sample
+    variant dictionaries a variant search needs at post-analysis time — bundling them
+    lets a downloaded index search WITHOUT the source VCFs), and ``manifest.json`` at
+    the archive root (see download_component's extractor).
     """
     manifest_bytes = json.dumps(manifest, indent=2).encode()
     pigz = shutil.which("pigz")
@@ -425,6 +449,11 @@ def _make_index_tarball(
             inputs = ["-C", parent, index_name]
             if os.path.isdir(indels_dir):
                 inputs += ["-C", parent, os.path.basename(indels_dir)]
+            for dp in (dict_dirs or []):
+                # store as Dictionaries/<basename>/... so the extractor routes it to
+                # <workdir>/Dictionaries/ (not genome_library/)
+                inputs += ["-C", os.path.dirname(os.path.dirname(dp)),
+                           os.path.join("Dictionaries", os.path.basename(dp))]
             inputs += ["-C", tmpd, "manifest.json"]
             subprocess.check_call(
                 [tar, "--use-compress-program", pigz, "-cf", tarball, *inputs]
@@ -452,6 +481,8 @@ def _make_index_tarball(
         tf.add(index_dir, arcname=index_name)  # -> genome_library/<name>/ on unpack
         if os.path.isdir(indels_dir):
             tf.add(indels_dir, arcname=os.path.basename(indels_dir))
+        for dp in (dict_dirs or []):  # -> Dictionaries/<basename>/ on unpack
+            tf.add(dp, arcname=os.path.join("Dictionaries", os.path.basename(dp)))
         info = tarfile.TarInfo(name="manifest.json")
         info.size = len(manifest_bytes)
         tf.addfile(info, io.BytesIO(manifest_bytes))
@@ -511,8 +542,31 @@ def publish_index(
     # the same archive so an index is a single file on HF (indels are part of the
     # index, not a separate artifact). download extracts both dirs into genome_library.
     indels_dir = index_dir + "_INDELS"
+    # A variant index (<ref>+<vcf>) needs its per-sample dictionaries at SEARCH time
+    # (SNP + indel post-analysis). Bundle them so `download --what index` yields a
+    # self-sufficient variant index that searches WITHOUT the multi-GB source VCFs —
+    # submit_job skips genome enrichment when the precomputed index + these dicts are
+    # present. Reference indexes (no '+') have no dictionaries.
+    vcf_name = index_name.partition("+")[2]
+    dict_dirs = []
+    if vcf_name:
+        cwd = os.path.dirname(os.path.dirname(index_dir))  # .../genome_library/<name> -> workdir
+        for d in (f"dictionaries_{vcf_name}", f"log_indels_{vcf_name}"):
+            p = os.path.join(cwd, "Dictionaries", d)
+            if os.path.isdir(p) and os.listdir(p):
+                dict_dirs.append(p)
+        missing = {f"dictionaries_{vcf_name}", f"log_indels_{vcf_name}"} - {
+            os.path.basename(p) for p in dict_dirs
+        }
+        if missing:
+            sys.stderr.write(
+                f"WARNING: variant index '{index_name}' is missing dictionaries "
+                f"{sorted(missing)} under {os.path.join(cwd, 'Dictionaries')}; the "
+                f"published index will NOT be searchable without the source VCFs. "
+                f"Build the index in the same working dir so the dicts are present.\n"
+            )
     tarball = f"{index_dir}.tar.gz"
-    _make_index_tarball(tarball, index_dir, index_name, indels_dir, manifest)
+    _make_index_tarball(tarball, index_dir, index_name, indels_dir, manifest, dict_dirs)
     remote_path = f"indexes/{index_name}.tar.gz"
     api = hf.HfApi()
     api.upload_file(
