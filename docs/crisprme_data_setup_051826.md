@@ -14,7 +14,6 @@ and re-running one search command (Section 3). Information on how to include a n
 
 ```bash
 mamba config --add channels bioconda
-mamba config --add channels defaults
 mamba config --add channels conda-forge
 mamba config --set channel_priority strict
 ```
@@ -77,7 +76,7 @@ By default, each asset is checked with an MD5 digest before downloading. Simply 
 ### Common issues
 
 - **FTP timeout**: re-run the setup command; incomplete files will be retried automatically.
-- **`bgzip` not found**: ensure the `crisprme` environment is active (`mamba activate crisprme`).
+- **`bgzip` not found**: ensure the `crisprme-2.2.0` environment is active (`mamba activate crisprme-2.2.0`).
 - **Disk full**: check available space with `df -h .` before starting; the full bundle needs ~410 GB.
 
 ### 2c. What the setup command produces
@@ -110,7 +109,8 @@ The default repository is `lucapinello/crisprme-data`; override it with `--hf-re
 
 *This is the everyday workflow. Everything from here is fast and lightweight.*
 
-> **Before running any search**, ensure the CRISPRme environment is active: `mamba activate crisprme`
+> **Before running any search**, ensure the CRISPRme environment is active: `mamba activate crisprme-2.2.0`
+> (the 2.2.0 source build creates env `crisprme-2.2.0`; Docker users skip activation).
 
 ### 3a. Choose a PAM file
 

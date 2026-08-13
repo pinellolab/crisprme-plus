@@ -84,8 +84,11 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.3 \
 ```
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
-`VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. For
-variant-aware searches, also run
+`VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
+pre-downloaded `NGG_3_hg38+hg38_1000G_HGDP` index already makes the default web
+search variant-aware — you do **not** need the raw VCFs for that. **Optional
+(advanced):** the raw 1000 Genomes VCFs (~16 GB) are only needed for CLI
+sample-level analyses / personal risk cards:
 `… crisprme.py download --what vcf --dataset 1000G --path /DATA`.
 
 ### 2b. Start the local server
@@ -102,7 +105,8 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
 
 > **Using a Conda/Mamba install instead?** Activate your environment
-> (`mamba activate crisprme`, or `conda` if you use conda), `cd` into your working
+> (`mamba activate crisprme-2.2.0` — the env the 2.2.0 source build creates — or
+> `conda` if you use conda), `cd` into your working
 > directory, and run `crisprme.py web-interface`. Everything else in this guide is
 > identical.
 
@@ -147,7 +151,10 @@ distinguished from optional ones. The three steps cover:
 
 - **Step 1 — Spacer and PAM selection:** Define what to search for.
 - **Step 2 — Genome selection and threshold configuration:** Define where to search
-  and how permissively.
+  and how permissively. By default a single **Maximum edits** slider (total
+  mismatches + bulges, default 3) controls stringency; **Advanced options** exposes
+  the per-type caps (mismatches up to 6, DNA bulges up to 2, RNA bulges up to 2),
+  and a candidate must satisfy each per-type cap **and** the overall budget.
 - **Step 3 — Annotations, email notification, and job name:** Enrich results and
   label the job.
 
@@ -264,8 +271,12 @@ the CLI; it is not configurable from this form.
 
 **Search thresholds**
 
-Define the maximum alignment distances to tolerate when identifying candidate
-off-targets:
+By default the form exposes a single **Maximum edits** slider — the total number
+of differences (mismatches + DNA/RNA bulges) allowed between a guide and an
+off-target (default **3**; raise it for a deeper, slower search). This is all you
+need for a quick search.
+
+Open **Advanced options** to set the per-type caps individually instead:
 
 - **Mismatches** — the maximum number of base mismatches between the spacer and
   the protospacer. The web interface supports up to **6 mismatches**.
@@ -274,7 +285,16 @@ off-targets:
 - **RNA bulges** — the maximum number of RNA bulges (insertions in the RNA strand
   relative to the DNA). The web interface supports up to **2 RNA bulges**.
 
-Bulges can be consecutive (e.g., `NN--NN`) or interleaved (e.g., `NN-N-NN`).
+In Advanced mode a candidate must satisfy **each** per-type cap **and** the overall
+max-total-edits budget. Bulges can be consecutive (e.g., `NN--NN`) or interleaved
+(e.g., `NN-N-NN`).
+
+The web interface uses only precomputed indexes and will **not** build one on the
+fly — if you request a PAM/bulge/genome combination with no installed index it
+blocks and asks you to install one first (see the Docker Quickstart, "Installing
+more indexes"). The variant selector is a dropdown pre-set to the variant-aware
+**1000G+HGDP** index, with a **Reference only** option if you want a reference-genome
+search.
 
 > **Performance note:** Enabling bulge searching substantially increases runtime.
 > For a whole-genome search across both 1000G and HGDP, expect runtimes of several
@@ -347,7 +367,7 @@ interface navigates automatically to the Job Status page.
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
 >   pinellolab/crisprme:v2.2.0-alpha.3 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
-> # (Conda users: mamba activate crisprme && crisprme.py web-interface)
+> # (Conda users: mamba activate crisprme-2.2.0 && crisprme.py web-interface)
 > ```
 
 ---
@@ -561,7 +581,44 @@ the relevant results folder and refer to the
    sudo ss -tlnp | grep 8080
    ```
 5. If another process is already using port `8080`, stop it or restart the CRISPRme
-   server after the port is free.
+   server after the port is free. If Docker reports
+   `Bind for 0.0.0.0:8080 failed: port is already allocated`, another container is
+   holding the port: stop it (`docker ps`, then `docker stop <id>`) or map a
+   different host port with `-p 8081:8080` and open `http://127.0.0.1:8081`.
+
+---
+
+### Search finished but the results table is empty (or shows no variant off-targets)
+
+**Cause:** The search completed but returned no candidates, or none carrying
+variants.
+
+**Steps to resolve:**
+
+1. **Thresholds too strict** — raise **Maximum edits**; if you opened Advanced
+   options, check the DNA and RNA bulges are not both `0`.
+2. **Reference-only selected** — keep the **1000G+HGDP** option (pre-selected by
+   default) to get variant off-targets.
+3. **Variant index not installed** — re-run
+   `crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA`.
+4. **Confirm success** — `Results/<name>/log_error.txt` is empty and
+   `*.integrated_results.tsv` is non-empty.
+
+---
+
+### A search dies with no error / the container exits
+
+**Cause:** Docker ran out of memory (OOM). A default 1000G+HGDP variant search peaks
+at more than 32 GB during post-processing. Signs: the job stops advancing,
+`log_error.txt` is empty, and the terminal returns to the prompt (or exits with
+code 137).
+
+**Steps to resolve:**
+
+1. Raise Docker Desktop memory to **≥32 GB** (64 GB recommended).
+2. Delete the incomplete `Results/<name>/` folder and resubmit.
+3. Or reduce the cost of the search: select **Reference only** or lower
+   **Maximum edits**.
 
 ---
 
@@ -578,8 +635,10 @@ the relevant results folder and refer to the
    ls
    # Expected: Annotations/ Dictionaries/ Genomes/ PAMs/ Results/ VCFs/ samplesIDs/
    ```
-3. Any `crisprme.py` command recreates missing directories automatically; use `crisprme.py download` to re-fetch data if
-   the folder structure.
+3. Any `crisprme.py` command recreates missing directories automatically, but they
+   stay empty until you run the download step. If the dropdowns are still empty,
+   re-run `crisprme.py download --what all --path /DATA` (and the index download)
+   from the working directory, then restart the server.
 4. Restart the server from the correct directory.
 
 ---
@@ -620,7 +679,7 @@ expires or you close the tab:
    a persistent terminal multiplexer before opening the browser:
    ```bash
    tmux new -s crisprme
-   mamba activate crisprme
+   mamba activate crisprme-2.2.0
    cd "$CRISPRME_DIR"
    crisprme.py web-interface
    # Press Ctrl+B, then D to detach. The server keeps running.
