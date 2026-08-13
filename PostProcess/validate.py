@@ -147,13 +147,24 @@ def _load_targets(fname: str, chrom: str, crisprme: bool = False) -> pd.DataFram
         #   0=Bulge type 1=crRNA 2=DNA 3=Chromosome 4=Position 5=Cluster Position
         #   6=Direction 7=Mismatches 8=Bulge Size 9=Total
         # so compute_sites' positional x[3]/x[4]/x[6] are clean integer-label lookups.
-        df = pd.read_csv(fname, sep="\t", header=None)
         chrom_col = 3  # Chromosome
+        try:
+            df = pd.read_csv(fname, sep="\t", header=None)
+        except pd.errors.EmptyDataError:
+            # A guide with zero off-targets within budget yields an empty (headerless)
+            # targets file -- a legitimate result (e.g. a Cas12a guide whose only
+            # on-target is off-chromosome, or a tight max-edits cap). Treat it as the
+            # empty set so the comparison can still match an empty ground truth.
+            return pd.DataFrame(columns=list(range(10)))
         if df.shape[1] < 7 or chrom_col not in df.columns:
             raise ValueError(f"Invalid CRISPRme targets file (too few columns): {fname}.")
     else:
         # Brute-force reference IS headered: CHR RNA DNA Strand Start END ...
-        df = pd.read_csv(fname, sep="\t")
+        try:
+            df = pd.read_csv(fname, sep="\t")
+        except pd.errors.EmptyDataError:
+            return pd.DataFrame(columns=["CHR", "RNA", "DNA", "Strand", "Start",
+                                         "END", "mismatches", "gaps_in_RNA", "gaps_in_DNA"])
         chrom_col = "CHR"
         if chrom_col not in df.columns:
             raise ValueError(f"Invalid targets file: missing column '{chrom_col}'.")
@@ -178,6 +189,8 @@ def _compute_site(chrom: str, pos: int, strand: str) -> str:
 
 
 def compute_sites(targets: pd.DataFrame, crisprme: bool = False) -> List[str]:
+    if targets.empty:
+        return []  # zero off-targets -> empty site set (robust to pandas apply-on-empty)
     if crisprme:
         targets["site"] = targets.apply(lambda x: _compute_site(x[3], x[4], x[6]), axis=1)
     else:
