@@ -40,6 +40,12 @@ deploying the web interface locally.
 New to CRISPRme? Get the point-and-click web interface running in a few commands
 — just install Docker, then:
 
+> **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**,
+> give Docker **16 GB** to start; the default genome-wide 1000G+HGDP variant search is
+> memory-intensive, so use **32 GB (64 GB recommended)** for real runs — peak usage is in
+> results post-processing and can exceed 32 GB. (On Linux/Docker Engine the container uses
+> host memory directly.) See [System Requirements](#0-system-requirements).
+
 ```bash
 mkdir -p ~/crisprme && cd ~/crisprme
 # 1) fast-download the reference data (minutes, via the HuggingFace CDN)
