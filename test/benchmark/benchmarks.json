@@ -1,5 +1,5 @@
 {
-  "_comment": "Registry of validate-test benchmark cases. Each entry defines a nuclease/guide benchmark with a precomputed brute-force ground truth. To add a new example: append an entry, generate its reference with test/benchmark/generate_references.py, host the TSV, and record its md5. validate.py iterates this registry, downloads+caches each reference (keyed by md5), and reports per-case pass/fail. A case may add a per-case \"thresholds\" object overriding the global set; include \"max_total_edits\" to validate the DEFAULT single-'n edits' web mode (per-type caps left wide open, the total cap binding). A case whose reference is not yet generated (md5 \"TODO-after-generation\" and no committed TSV) is SKIPPED, not failed.",
+  "_comment": "Registry of validate-test benchmark cases. Each entry defines a nuclease/guide benchmark with a precomputed brute-force ground truth. To add a new example: append an entry, generate its reference with test/benchmark/generate_references.py, host the TSV, and record its md5. validate.py iterates this registry, downloads+caches each reference (keyed by md5), and reports per-case pass/fail. A case may add a per-case \"thresholds\" object overriding the global set; include \"max_total_edits\" to validate the DEFAULT single-'n edits' web mode (per-type caps left wide open, the total cap binding). A case whose reference is not yet generated (md5 \"TODO-after-generation\" and no committed TSV) is SKIPPED, not failed. A case marked \"heavy\": true builds a bulge-2 (NGG_3/TTTV_3) index over the variant-enriched genome, which exceeds a standard 16GB hosted CI runner (OOM, or too slow under swap); complete_test.py/validate.py skip \"heavy\" cases when CRISPRME_SKIP_HEAVY=1 (set by the hosted CI job), so they run locally / on a larger runner but not on the default PR runner. They are validated locally (4/4) and their references are committed for reproduction.",
   "reference_base_url": "https://raw.githubusercontent.com/pinellolab/crisprme-plus/main/test/benchmark/",
   "thresholds": {
     "mm": 4,
@@ -53,7 +53,8 @@
       "pam_length": 3,
       "pam_concrete": "GG",
       "scope": "chr22",
-      "thresholds": { "mm": 6, "bDNA": 2, "bRNA": 2, "max_total_edits": 3 }
+      "thresholds": { "mm": 6, "bDNA": 2, "bRNA": 2, "max_total_edits": 3 },
+      "heavy": true
     },
     {
       "name": "cas12a_hbg_simple",
@@ -70,7 +71,8 @@
       "pam_length": 4,
       "pam_concrete": "TTTV",
       "scope": "chr22",
-      "thresholds": { "mm": 6, "bDNA": 2, "bRNA": 2, "max_total_edits": 3 }
+      "thresholds": { "mm": 6, "bDNA": 2, "bRNA": 2, "max_total_edits": 3 },
+      "heavy": true
     }
   ]
 }

@@ -32,30 +32,16 @@ on:
 jobs:
   validate-benchmarks:
     runs-on: ubuntu-latest
-    # complete-test now builds the bulge-2 NGG_3/TTTV_3 indexes (for the single-n
-    # benchmarks) on top of the bulge-1 ones, so it needs more disk (many index dirs +
-    # enriched genomes) and time than the default runner allows; the harden step below
-    # frees space + adds swap. Give the slower 2-core runner room to finish.
-    timeout-minutes: 300
+    # The hosted runner runs the LIGHT (bulge-1) benchmarks via CRISPRME_SKIP_HEAVY=1
+    # (passed into the container on the complete-test/validate-test steps). The "heavy"
+    # single-n cases build a bulge-2 index over the variant-enriched genome, which OOMs a
+    # 16GB runner (and is too slow under swap) -- they are validated locally / on a larger
+    # runner. 120 min is plenty for the light suite.
+    timeout-minutes: 120
     env:
       IMG: pinellolab/crisprme
     steps:
       - uses: actions/checkout@v4
-
-      - name: Add swap (the variant bulge-2 index build is memory-heavy)
-        run: |
-          # The runner has ample disk (~87 GB free) but only ~16 GB RAM + 3 GB swap;
-          # building the bulge-2 (NGG_3/TTTV_3) index over the IUPAC variant-enriched
-          # chr22 spikes past that and the runner OOMs ("lost communication"). Add a large
-          # dd-backed swapfile (fallocate swapfiles can fail swapon) ALONGSIDE the existing
-          # swap so the spike lands in swap instead of killing the runner.
-          echo "before:"; free -h; df -h /
-          sudo rm -f /swapfile2 || true
-          sudo dd if=/dev/zero of=/swapfile2 bs=1M count=32768 status=none
-          sudo chmod 600 /swapfile2
-          sudo mkswap /swapfile2
-          sudo swapon /swapfile2
-          echo "after:"; free -h
 
       - name: Pull CRISPRme image
         run: docker pull "$IMG"
@@ -131,7 +117,7 @@ jobs:
         run: |
           mkdir -p work
           n=0
-          until docker run --rm $BRANCH_MOUNT -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          until docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
                   set -e
                   cp /branch/crisprme.py /opt/conda/bin/crisprme.py
                   cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
@@ -148,7 +134,7 @@ jobs:
 
       - name: validate-test (chr22) — assert all benchmarks match the ground truth
         run: |
-          docker run --rm $BRANCH_MOUNT -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/

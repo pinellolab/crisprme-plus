@@ -634,7 +634,17 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
     # output dir (crisprme-test-out_<name>); validate-test looks in each.
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
+    # A "heavy" benchmark builds a bulge-2 (NGG_3/TTTV_3) index over the variant-enriched
+    # genome, which exceeds a standard 16GB hosted CI runner. The hosted CI job sets
+    # CRISPRME_SKIP_HEAVY=1 to skip them there; locally (env unset) all cases run.
+    skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     for bench in registry["benchmarks"]:
+        if skip_heavy and bench.get("heavy"):
+            sys.stderr.write(
+                f"Skipping heavy benchmark '{bench['name']}' (CRISPRME_SKIP_HEAVY=1; "
+                "its bulge-2 variant index build is too large for this runner)\n"
+            )
+            continue
         # Per-case thresholds override the global set, so one registry can hold both
         # the per-type genome-wide cases (mm/bDNA/bRNA applied INDEPENDENTLY, so a
         # target may carry a DNA AND an RNA bulge -> up to bDNA+bRNA bulges) AND cases

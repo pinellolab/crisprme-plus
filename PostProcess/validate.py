@@ -225,9 +225,18 @@ def run_test_validation(chrom: str) -> None:
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     base_url = registry["reference_base_url"]
+    # Mirror complete_test.py: on a hosted CI runner (CRISPRME_SKIP_HEAVY=1) the "heavy"
+    # bulge-2 benchmarks are not run, so don't try to validate them (avoids a misleading
+    # "targets not found" skip). Locally (env unset) all cases validate.
+    skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     validated = failed = skipped = 0
     for bench in registry["benchmarks"]:
         name = bench["name"]
+        if skip_heavy and bench.get("heavy"):
+            sys.stderr.write(f"[{name}] SKIPPED: heavy benchmark not run on this runner "
+                             "(CRISPRME_SKIP_HEAVY=1).\n")
+            skipped += 1
+            continue
         # Per-case thresholds mirror complete_test.py, so the output-report filename
         # (which encodes mm_bDNA_bRNA) is resolved with the SAME budgets this case ran.
         th = dict(global_th)
