@@ -16,9 +16,9 @@ Indexes live under `indexes/` in the CRISPRme dataset repo (default
 
 ```
 indexes/
-  NGG_2_hg38.tar.gz          # SpCas9 (NGG), up-to-1-bulge index of hg38
-  TTTV_2_hg38.tar.gz         # Cas12a (TTTV), up-to-1-bulge index of hg38
-  ...
+  NGG_3_hg38.tar.gz                     # SpCas9 (NGG) reference index of hg38, up-to-2-bulge
+  NGG_3_hg38+hg38_1000G_HGDP.tar.gz     # SpCas9 (NGG) variant-aware index (1000G + HGDP), up-to-2-bulge (web default)
+  NNN_3_hg38+hg38_1000G_HGDP.tar.gz     # pamless (any-PAM) variant-aware index (1000G + HGDP), up-to-2-bulge (advanced)
 ```
 
 Each tarball unpacks to a single `genome_library/<name>/` directory plus a
@@ -30,12 +30,12 @@ timestamp). The folder name is `<PAM>_<bMax+1>_<ref>` — exactly what
 
 ```bash
 # fetch a prebuilt index straight into genome_library/
-crisprme.py download --what index --index-name NGG_2_hg38 --path "$CRISPRME_DIR"
+crisprme.py download --what index --index-name NGG_3_hg38 --path "$CRISPRME_DIR"
 
 # then search, pointing at that library (or just run from $CRISPRME_DIR)
 crisprme.py complete-search \
   --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt \
-  --guide my_guide.txt --mm 4 --bDNA 1 --bRNA 1 \
+  --guide my_guide.txt --mm 4 --bDNA 2 --bRNA 2 \
   --index-path "$CRISPRME_DIR/genome_library" \
   --output my_search
 ```
@@ -51,8 +51,8 @@ name matches:
 ```bash
 crisprme.py build-index-only \
   --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt \
-  --bDNA 1 --bRNA 1 --thread 16 --path "$CRISPRME_DIR"
-# -> genome_library/NGG_2_hg38/
+  --bDNA 2 --bRNA 2 --thread 16 --path "$CRISPRME_DIR"
+# -> genome_library/NGG_3_hg38/
 ```
 
 ## Publish (maintainers)
@@ -62,8 +62,8 @@ Upload the built index to the dataset repo (needs an HF **write** token — via
 
 ```bash
 export HF_TOKEN=hf_...        # your write token, in the shell only
-crisprme.py publish-index --index genome_library/NGG_2_hg38
-# -> uploaded to indexes/NGG_2_hg38.tar.gz (with a manifest.json inside)
+crisprme.py publish-index --index genome_library/NGG_3_hg38
+# -> uploaded to indexes/NGG_3_hg38.tar.gz (with a manifest.json inside)
 ```
 
 ## manifest.json
@@ -72,10 +72,10 @@ Every published index carries a small provenance manifest inside its tarball:
 
 ```json
 {
-  "name": "NGG_2_hg38",
+  "name": "NGG_3_hg38",
   "created_at": "2026-08-05T12:00:00+00:00",
   "pam": "NGG",
-  "index_bmax": "2",
+  "index_bmax": "3",
   "genome": "hg38"
 }
 ```
@@ -87,8 +87,10 @@ ignored — the index directory itself is what `complete-search` consumes.
 
 - An index is only valid for a matching `--genome`/`--pam`/`--bDNA`/`--bRNA`;
   a different PAM or a higher bulge count needs its own index.
-- Variant-enriched (genome + VCF) indexes are dataset-specific and are built
-  locally per run; only the reference index is shared this way.
+- Variant-enriched (genome + VCF) indexes are dataset-specific. The 1000G + HGDP
+  enriched indexes (`NGG_3_hg38+hg38_1000G_HGDP`, `NNN_3_hg38+hg38_1000G_HGDP`)
+  are prebuilt and hosted alongside the reference index; for any other cohort,
+  build and publish the enriched index the same way.
 - If `--index-path` is given but no matching index is found there,
   `complete-search` fails fast with a clear message rather than silently
   rebuilding — so a missing/wrong download is caught immediately.

@@ -94,9 +94,13 @@ docker pull pinellolab/crisprme</code></pre>
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme \
   crisprme.py download --what all --path /DATA
 
-# a ready-made SpCas9 (NGG) index (skips a long index build)
+# a ready-made SpCas9 (NGG) reference index (skips a long index build)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme \
-  crisprme.py download --what index --index-name NGG_2_hg38 --path /DATA</code></pre>
+  crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
+
+# the variant-aware index used by the default web search (1000G + HGDP)
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme \
+  crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA</code></pre>
 
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
@@ -121,9 +125,13 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme \
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what all --path /DATA
 
-# a ready-made SpCas9 (NGG) index (skips a long index build)
+# a ready-made SpCas9 (NGG) reference index (skips a long index build)
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NGG_2_hg38 --path /DATA</code></pre>
+  crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
+
+# the variant-aware index used by the default web search (1000G + HGDP)
+apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
+  crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA</code></pre>
 
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
@@ -151,11 +159,13 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
         machine under <code>~/crisprme/Results/</code>.
       </p>
       <p class="note">
-        <strong>Nothing in the dropdowns?</strong> You skipped step&nbsp;2 &mdash; run the two
+        <strong>Nothing in the dropdowns?</strong> You skipped step&nbsp;2 &mdash; run the
         <code>download</code> commands first.
-        <strong>Need a different nuclease?</strong> Download its index the same way
-        (e.g. <code>--index-name TTTV_2_hg38</code> for Cas12a); anything not yet published
-        is built automatically on first use.
+        <strong>Need a different nuclease or PAM?</strong> Install its index the same way,
+        using a published name from the <code>indexes/</code> folder of the
+        <code>lucapinello/crisprme-data</code> repo. If an index isn't published, the web
+        app will <em>not</em> build it on the fly &mdash; it tells you none is installed;
+        pre-build it once with <code>crisprme.py build-index-only</code>.
       </p>
 
       <p class="cta-row">

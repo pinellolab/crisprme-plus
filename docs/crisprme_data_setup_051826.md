@@ -287,10 +287,10 @@ Publish a locally built index so other machines (or collaborators) can skip the 
 
 ```bash
 # upload — needs an HF write token: export HF_TOKEN=...  (never commit it)
-crisprme.py publish-index --index genome_library/NGG_2_hg38
+crisprme.py publish-index --index genome_library/NGG_3_hg38
 
 # elsewhere: download it straight into genome_library/
-crisprme.py download --what index --index-name NGG_2_hg38 --path "$CRISPRME_DIR"
+crisprme.py download --what index --index-name NGG_3_hg38 --path "$CRISPRME_DIR"
 ```
 
 Then run the search with `--index-path "$CRISPRME_DIR/genome_library"` (or simply from `$CRISPRME_DIR`) and it reuses the downloaded index. The index folder name encodes the PAM, bulge count and genome, so an index is only valid for a matching `--genome`/`--pam`/`--bDNA`/`--bRNA`.
@@ -498,7 +498,7 @@ The 20 leading `N`s define the spacer length; `NGG` is the PAM; `3` is the PAM l
 
 > **Note (bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`) combined with bulges can trigger a crash in older CRISPRitz engines. CRISPRme prints a non-fatal warning in this case; even-length degenerate motifs such as `TTTV` (Cas12a) are unaffected. The underlying issue is fixed in CRISPRitz ≥ 2.7.1 (bundled with current CRISPRme), so it is a caution rather than a blocker — but if you hit an odd-length degenerate PAM with bulges on an older stack, either add one base to make the motif even-length or reduce bulges to 0.
 
-Once the reference index for a new PAM does not yet exist, the first search with it builds one automatically (see Section 3.5); you can also pre-build it with `crisprme.py build-index-only`.
+Once the reference index for a new PAM does not yet exist, the **command-line** search builds one automatically on first use (see Section 3.5); you can also pre-build it with `crisprme.py build-index-only`. (The **web interface** does not build on the fly — it asks you to install a matching index first.)
 
 ### 5b. Run the search
 

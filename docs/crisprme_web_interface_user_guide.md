@@ -74,9 +74,13 @@ mkdir -p ~/crisprme && cd ~/crisprme
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme \
   crisprme.py download --what all --path /DATA
 
-# a ready-made SpCas9 (NGG) index (skips a long index build)
+# a ready-made SpCas9 (NGG) reference index (skips a long index build)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme \
-  crisprme.py download --what index --index-name NGG_2_hg38 --path /DATA
+  crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
+
+# the variant-aware index used by the default web search (1000G + HGDP)
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme \
+  crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA
 ```
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,

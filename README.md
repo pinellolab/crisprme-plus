@@ -107,12 +107,18 @@ before running CRISPRme. To estimate the cost of a large search up front, see
 
 ## 1 Installation
 
+> **Which version do I get?** For **CRISPRme+ (2.2.0, this release)** use **Docker**
+> (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-410-gb) above, or
+> §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
+> 2.2.0 alpha** — use it only if you specifically want the stable release. If in doubt,
+> use Docker.
+
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Conda/Mamba (for Linux users)](#11-install-crisprme-via-condamamba)
-  
-- [Install CRISPRme via Docker (compatible with all operating systems)]()
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.2.0)](#12-install-crisprme-via-docker)
+
+- [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
 Each method ensures a streamlined and efficient installation, enabling you to use 
 CRISPRme with minimal effort. Follow the detailed instructions provided in the 
@@ -120,6 +126,10 @@ respective sections below.
 
 ### 1.1 Install CRISPRme via Conda/Mamba
 ---
+
+> **Note:** Bioconda ships the **stable 2.1.x** line (Python 3.8). For **CRISPRme+
+> (2.2.0)** — the Python 3.11 release with the point-and-click Docker web interface —
+> use [Docker](#12-install-crisprme-via-docker) instead.
 
 This section is organized into three subsections to guide you through the installation 
 and maintenance of CRISPRme:
@@ -1498,9 +1508,10 @@ Bulge-enabled searches build a CRISPRitz index of the reference genome. `complet
 **`build-index-only`** — build the reusable reference index (into `genome_library/<PAM>_<bulges+1>_<genome>`) without running a search. Pass the same `--genome`/`--pam`/`--bDNA`/`--bRNA` you will search with:
 
 ```bash
-crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt \
-  --bDNA 1 --bRNA 1 --thread 16 --path /data/crisprme
+crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt --bDNA 2 --bRNA 2 --thread 16 --path /data/crisprme
 ```
+
+This writes `genome_library/NGG_3_hg38` (the folder number is `max(bDNA,bRNA)+1`, so 2 bulges → `_3_`), which is the same index shipped precomputed on HuggingFace.
 
 **`complete-search --index-path <dir>`** — reuse a prebuilt/staged index library instead of building one under the working directory. A missing matching index is a hard error (rather than a silent rebuild), which is what you want on a read-only shared mount.
 
@@ -1509,13 +1520,14 @@ crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.tx
 ```bash
 crisprme.py download --what all --path /data/crisprme
 crisprme.py download --what vcf --dataset 1000G --path /data/crisprme
-crisprme.py download --what index --index-name NGG_2_hg38 --path /data/crisprme
+crisprme.py download --what index --index-name NGG_3_hg38 --path /data/crisprme
+crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /data/crisprme
 ```
 
 **`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`):
 
 ```bash
-crisprme.py publish-index --index genome_library/NGG_2_hg38
+crisprme.py publish-index --index genome_library/NGG_3_hg38
 ```
 
 See the companion data-setup guide (`docs/crisprme_data_setup_051826.md`, Sections 2d and 3½) for the end-to-end workflow.
