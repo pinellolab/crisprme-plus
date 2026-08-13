@@ -45,11 +45,18 @@ def main():
     ap.add_argument("--chrom", required=True, help="Chromosome name, e.g. chr22")
     ap.add_argument("--only", default=None, help="Generate only this benchmark 'name'")
     ap.add_argument("--out-dir", default=HERE, help="Directory for output TSVs")
+    ap.add_argument("--generator", default=None,
+                    help="Brute-force generator to run (default: the bundled Python "
+                         "generate_brute_force.py). Point at the Rust release binary "
+                         "(rust/target/release/brute_force_gen) for a ~10x speedup; it "
+                         "takes identical flags and produces the same set.")
     args = ap.parse_args()
 
     registry = json.load(open(os.path.join(HERE, "benchmarks.json")))
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
-    generator = os.path.join(HERE, "generate_brute_force.py")
+    generator = args.generator or os.path.join(HERE, "generate_brute_force.py")
+    # a .py generator is run through the interpreter; a compiled binary is run directly
+    launcher = [sys.executable, generator] if generator.endswith(".py") else [generator]
 
     for bench in registry["benchmarks"]:
         if args.only and bench["name"] != args.only:
@@ -66,8 +73,7 @@ def main():
         bdna = min(th["bDNA"], edits_cap) if edits_cap is not None else th["bDNA"]
         brna = min(th["bRNA"], edits_cap) if edits_cap is not None else th["bRNA"]
         out = os.path.join(args.out_dir, f"{bench['name']}.{args.chrom}.tsv")
-        cmd = [
-            sys.executable, generator,
+        cmd = launcher + [
             "--fasta", args.enriched_fasta,
             "--rna", bench["guide_search"],
             "--max-mismatches", str(mm),
