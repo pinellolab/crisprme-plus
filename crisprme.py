@@ -2343,7 +2343,7 @@ def print_help_gnomad_converter():
         "\t--multiallelic, optional flag to merge variants mapped to the "
         "same position, creating multiallelic sites in the output VCFs. By "
         "default, each site remains biallelic\n"
-        "\t--thread, used to set the number of thread used in the conversion "
+        "\t--threads, used to set the number of threads used in the conversion "
         "process [default 8]\n"
     )
     sys.exit(1)
