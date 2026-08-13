@@ -18,11 +18,19 @@ Everything runs inside Docker, so the only thing you install is Docker itself.
 - **Linux:** install **Docker Engine** — https://docs.docker.com/engine/install/
 
 Then, in Docker Desktop → **Settings → Resources**, give Docker at least **16 GB
-of memory** (more is better for whole-genome searches). Check it works:
+of memory** (more is better for whole-genome searches). Check it works, then pull
+the CRISPRme+ image:
 
 ```bash
 docker run --rm hello-world
+
+# Pull the current CRISPRme+ alpha (multi-arch: Apple Silicon + Intel/Linux).
+docker pull pinellolab/crisprme
 ```
+
+> **Already have an older image?** Docker does **not** re-download a tag you already
+> have — run `docker pull pinellolab/crisprme` again to update. Skipping this makes an
+> old image error with `download is not an allowed command`.
 
 ## 2. Make a folder to hold your data and results
 
