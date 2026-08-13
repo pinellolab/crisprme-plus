@@ -12,8 +12,27 @@ alignment instead of CRISPRme's TST index search).
 - `brute-force-cas12-1000G/brute_force_cas12_1000G.tsv` — Cas12a reference
   (HBG1/HBG2 clinical guide, TTTV PAM). **Currently chr22-scoped** (953 off-targets);
   run `validate-test --chrom chr22`. Regenerate genome-wide with the driver below.
+- `brute-force-simple/` — references for the two **default single-"n edits" web
+  mode** cases (`cas9_sg1617_simple`, `cas12a_hbg_simple`): chr22, per-type caps
+  wide open (mm=6/bDNA=2/bRNA=2) with a binding `--max-total-edits 3`, exactly the
+  default search slider. **Pending their one-time generation batch** (md5
+  `TODO-after-generation` in the registry -> these cases SKIP, not fail, until the
+  TSVs land here).
 - `generate_brute_force.py` — the ground-truth generator (see credit below).
 - `generate_references.py` — registry-driven driver (regenerates any benchmark).
+
+## Search modes: per-type vs single-"n edits"
+A benchmark validates one of two modes, driven by its (optional per-case)
+`thresholds` in `benchmarks.json`:
+- **Per-type** (the original cases): independent `mm` / `bDNA` / `bRNA` budgets,
+  so a target may carry a DNA *and* an RNA bulge. No total cap.
+- **Single-"n edits"** (the DEFAULT web slider): leave the per-type caps wide open
+  and add `"max_total_edits": n`. The binding constraint is total
+  mismatches+bulges ≤ `n` (CRISPRme's `--max-total-edits`, each bulge one edit).
+  The generator takes the matching `--max-total-edits n`; `generate_references.py`
+  caps each per-type budget at `n` when it binds (proven set-identical, just
+  faster). Both `generate_brute_force.py` and the Rust port accept `--max-total-edits`
+  and produce the same set.
 
 **Validation status:** on chr22, `generate_brute_force.py` reproduces the committed
 Cas9 reference **exactly** (3495 rows, 0 diff) on the identical enriched genome,

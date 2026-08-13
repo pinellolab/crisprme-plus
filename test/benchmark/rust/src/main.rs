@@ -386,6 +386,7 @@ fn scan<W: Write>(
     writer: &mut W,
     pam: &[u8],
     pam_5prime: bool,
+    max_total_edits: Option<i32>,
 ) {
     let rna_len = rna.len();
     let dna_len = dna.len();
@@ -425,6 +426,15 @@ fn scan<W: Write>(
         }
 
         for al in &aligns {
+            // Single "n edits" mode (CRISPRme --max-total-edits, the default web slider):
+            // cap TOTAL mismatches + DNA + RNA bulges (each bulge counts as one edit).
+            // None disables it -> independent per-type budgets only (byte-for-byte the
+            // original genome-wide references). Mirrors generate_brute_force.py's filter.
+            if let Some(cap) = max_total_edits {
+                if (al.mismatches + al.rna_gaps + al.dna_gaps) as i32 > cap {
+                    continue;
+                }
+            }
             // actual_len = len(r_aln.rstrip('-'))
             let actual_len = {
                 let mut e = al.aln1.len();
@@ -523,6 +533,7 @@ struct Args {
     output: String,
     pam: String,
     pam_5prime: bool,
+    max_total_edits: Option<i32>,
 }
 
 fn parse_args() -> Args {
@@ -535,6 +546,7 @@ fn parse_args() -> Args {
     let mut output: Option<String> = None;
     let mut pam = String::new();
     let mut pam_5prime = false;
+    let mut max_total_edits: Option<i32> = None;
 
     let argv: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -566,6 +578,9 @@ fn parse_args() -> Args {
             "--output" => output = Some(next_val!()),
             "--pam" => pam = next_val!(),
             "--pam-5prime" => pam_5prime = true,
+            "--max-total-edits" => {
+                max_total_edits = Some(next_val!().parse().expect("invalid --max-total-edits"))
+            }
             other => {
                 eprintln!("unknown argument: {}", other);
                 std::process::exit(2);
@@ -584,6 +599,7 @@ fn parse_args() -> Args {
         output: output.expect("--output required"),
         pam,
         pam_5prime,
+        max_total_edits,
     }
 }
 
@@ -617,6 +633,7 @@ fn main() {
         &mut writer,
         &pam,
         args.pam_5prime,
+        args.max_total_edits,
     );
 
     // - strand
@@ -632,6 +649,7 @@ fn main() {
         &mut writer,
         &pam,
         args.pam_5prime,
+        args.max_total_edits,
     );
 
     writer.flush().expect("flush failed");
