@@ -444,7 +444,12 @@ def result_page(job_id: str) -> html.Div:
                     ],
                     page_current=0,
                     page_size=10,
-                    page_action="custom",
+                    # The Result Summary has one row per guide (usually one), each a tall
+                    # multi-line REF/VAR breakdown. Show every row at once -- no pager,
+                    # no vertical scroll -- so the whole summary fits on the page instead
+                    # of a weird pagination bar + scrollbar on a one-row table. Only wide
+                    # tables scroll horizontally (overflowX auto).
+                    page_action="none",
                     # virtualization = True,
                     filter_action="custom",
                     filter_query="",
@@ -453,9 +458,7 @@ def result_page(job_id: str) -> html.Div:
                     sort_by=[],
                     style_table={
                         # 'margin-left': "10%",
-                        "max-height": "260px",
-                        "overflowY": "scroll",
-                        # 'overflowX': 'hidden',
+                        "overflowX": "auto",
                     },
                     style_data={
                         "whiteSpace": "pre",
@@ -3049,10 +3052,10 @@ def update_table_general_profile(
             ascending=[col["direction"] == "asc" for col in sort_by],
             inplace=False,
         )
-    # Calculate sample count
-    data_to_send = dff.iloc[
-        page_current * page_size : (page_current + 1) * page_size
-    ].to_dict("records")
+    # Return every guide row (page_action="none" on this table): the Result Summary
+    # must fit on the page in full, without a pager or vertical scroll. Custom
+    # filter/sort above still apply; there just is no page slice.
+    data_to_send = dff.to_dict("records")
     return data_to_send, [{"row": 0, "column": 0}]
 
 
