@@ -27,7 +27,7 @@ a Claude Code session opened at the repo root:
 
 1. **Prerequisites (one-time / per-release):** `main` is green and up to date,
    `gh` is authenticated, and the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`
-   repository secrets are set (already configured for `pinellolab/crisprme:v2.2.0-alpha.3`, so
+   repository secrets are set (already configured for `pinellolab/crisprme:v2.2.0-alpha.4`, so
    the multi-arch image publishes on the release tag).
 2. **Invoke it:** type `/release-crisprme`, or just ask in plain language, e.g.
    *"release CRISPRme 2.1.13"*. The skill then walks the whole flow:
