@@ -44,8 +44,10 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 mkdir -p ~/crisprme && cd ~/crisprme
 # 1) fast-download the reference data (minutes, via the HuggingFace CDN)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme crisprme.py download --what all --path /DATA
-# 2) grab a prebuilt SpCas9 (NGG) index so no long index build is needed
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme crisprme.py download --what index --index-name NGG_2_hg38 --path /DATA
+# 2) grab the prebuilt SpCas9 (NGG) indexes so no long index build is needed:
+#    the reference index, and the variant-aware hg38 + 1000G + HGDP index (the web default)
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA
 # 3) launch the web interface, then open http://127.0.0.1:8080
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme crisprme.py web-interface
 ```
