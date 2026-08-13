@@ -257,7 +257,12 @@ def homepage_thresholds_() -> html.Li:
                 "between a guide and an off-target (default 3, raise for a deeper, "
                 "slower search). The precomputed indexes support up to 2 bulges of "
                 "each type. Open \"Advanced options\" to set the per-type mismatch / "
-                "DNA-bulge / RNA-bulge caps individually instead. In the command-line "
+                "DNA-bulge / RNA-bulge caps individually instead. Use the single "
+                "\"Maximum edits\" slider for a quick search allowing any mix up to "
+                "that total; choose \"Advanced options\" to control the edit types "
+                "independently (for example, many mismatches but zero bulges) — in "
+                "Advanced mode a candidate must satisfy each per-type cap and the "
+                "overall total budget. In the command-line "
                 "version these thresholds are unrestricted and can be adjusted based "
                 "on available computational resources."
             ),

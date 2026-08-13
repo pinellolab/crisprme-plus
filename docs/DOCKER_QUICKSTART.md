@@ -77,17 +77,19 @@ The web interface picks these up automatically — a search that uses the NGG PA
 with up to 2 bulges will reuse them instead of rebuilding. (Need a different
 nuclease? See **"Installing more indexes"** at the bottom.)
 
-## 5. (Optional) Add 1000 Genomes variants for a variant-aware search
+## 5. (Optional, advanced) Add the raw 1000 Genomes VCFs
 
-CRISPRme's superpower is finding off-targets created by genetic variants. To
-enable that, also download the 1000 Genomes variant set (~16 GB):
+CRISPRme's superpower is finding off-targets created by genetic variants — and the
+`NGG_3_hg38+hg38_1000G_HGDP` index you downloaded in step 2 **already** makes the
+default web search variant-aware. You do **not** need the raw VCFs for that.
+
+Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level
+analyses / personal risk cards:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.3 \
   crisprme.py download --what vcf --dataset 1000G --path /DATA
 ```
-
-You can skip this for a first run and do a plain reference-genome search.
 
 ## 6. Start the web interface
 
@@ -108,8 +110,11 @@ running, and open:
 
 1. Enter a **guide/spacer** sequence (e.g. `CTAACAGTTGCTTTTATCAC`).
 2. Choose the **PAM** (e.g. `20bp-NGG-SpCas9`) and the **genome** (`hg38`).
-3. Set **mismatches** and **bulges** (e.g. 4 / 1 / 1). If you downloaded the
-   variants in step 5, select the **1000G** dataset to make it variant-aware.
+3. Leave the default **Maximum edits** slider (3) for a quick search — it caps the
+   total mismatches + DNA/RNA bulges — or open **Advanced options** to set
+   mismatches / DNA bulges / RNA bulges individually (e.g. 4 / 1 / 1). The default
+   **1000G+HGDP** variant index is pre-selected, so the search is variant-aware out
+   of the box.
 4. Give the job a name and click **Submit**.
 5. Watch the live status page; when it finishes, open the **Results** to explore
    the off-targets, scores and plots.
@@ -138,6 +143,9 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA
+# optional (advanced): the raw 1000G VCFs (~16 GB) — only for CLI sample-level
+# analyses / personal risk cards; the index above already makes the web search
+# variant-aware
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what vcf --dataset 1000G --path /DATA
 
@@ -199,6 +207,20 @@ and deleting data you no longer need. See
   throwaway container.
 - **A search ran out of memory** → raise Docker's memory limit (step 1), or
   start with a smaller search (fewer mismatches/bulges, or one chromosome).
+- **`Bind for 0.0.0.0:8080 failed: port is already allocated`** → another
+  container is already using port 8080. Stop it (`docker ps`, then
+  `docker stop <id>`), or map a different host port with `-p 8081:8080` and open
+  http://127.0.0.1:8081.
+- **Search finished but the results table is empty (or shows no variant
+  off-targets)** →
+  1. Thresholds too strict — raise **Maximum edits**, and if you opened Advanced
+     options check the DNA and RNA bulges are not both `0`.
+  2. Reference-only selected — keep the **1000G+HGDP** option (pre-selected by
+     default) to get variant off-targets.
+  3. Variant index not installed — re-run
+     `crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA`.
+  4. Confirm success: `Results/<name>/log_error.txt` is empty and
+     `*.integrated_results.tsv` is non-empty.
 
 For the full web-interface reference (every form field, all the result tabs),
 see [`crisprme_web_interface_user_guide.md`](crisprme_web_interface_user_guide.md).
