@@ -1357,11 +1357,14 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     ``<motif>_<N>_<genome>+<enriched-genome>`` (variant), where N = bMax+1, so the
     usable bulge count is N-1. The enriched-genome name is ``<refgenome>_<dataset[s]>``
     (e.g. ``NGG_2_hg38+hg38_1000G`` or the combined ``NGG_3_hg38+hg38_1000G_HGDP``) —
-    matching how the search builds ``genome_idx`` (main_page.change_url). A variant
-    dataset is matched as a component of that enriched name (so a single-dataset query
-    also resolves a combined index that contains it). Returns 0 if no matching index
-    exists (only a 0-bulge, index-free search is possible). A variant search also needs
-    the variant index, so callers should take the min with the reference result.
+    matching how the search builds ``genome_idx`` (main_page.change_url). The variant
+    dataset must match the enriched name EXACTLY as ``<genome>_<dataset>`` — the same
+    ``+<ref>_<vcf>`` folder submit_job resolves — so the combined value ``1000G_HGDP``
+    matches its combined index while a single ``1000G`` query does not (the search would
+    not either). Pamless (all-N) indexes of the same length also match (they serve any
+    PAM). Returns 0 if no matching index exists (only a 0-bulge, index-free search is
+    possible). A variant search also needs the variant index, so callers should take the
+    min with the reference result.
     """
     motif = pam_motif(pam_value)
     if not motif or not genome:
@@ -1370,25 +1373,28 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     lib = os.path.join(current_working_directory, "genome_library")
     if not os.path.isdir(lib):
         return 0
-    prefix = f"{motif}_"
+    # Accept the exact PAM motif OR an all-N "pamless" index of the same length: a
+    # pamless index serves any same-length PAM (the requested PAM is enforced by the
+    # post-search PAM filter), exactly mirroring submit_job's "<pam>_* + NNN_*" scan.
+    pamless = "N" * len(motif)
+    prefixes = (f"{motif}_", f"{pamless}_")
     base_suffix = f"_{genome}"  # base = "<motif>_<N>_<genome>"
+    # A variant search needs an index whose enriched-genome name is EXACTLY
+    # "<genome>_<dataset>" -- the same "+<ref>_<vcf>" folder submit_job resolves. So the
+    # combined dropdown value "1000G_HGDP" matches "..._hg38_1000G_HGDP", and a single
+    # "1000G" query does NOT resolve a combined-only index (the search wouldn't either).
+    want_enriched = f"{genome}_{vcf}" if vcf else ""  # "" => reference-only (no "+")
     best = 0
     for d in os.listdir(lib):
         if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
             continue
         base, _, enriched = d.partition("+")  # enriched="" for a reference index
-        if vcf:
-            # variant index: the enriched-genome name must contain this dataset
-            # as an underscore-delimited component (e.g. "hg38_1000G" -> {1000G};
-            # "hg38_1000G_HGDP" -> {1000G, HGDP}).
-            if not enriched or vcf not in enriched.split("_"):
-                continue
-        else:
-            if enriched:  # reference-only: no "+<enriched>"
-                continue
-        if not (base.startswith(prefix) and base.endswith(base_suffix)):
+        if enriched != want_enriched:
             continue
-        n_str = base[len(prefix) : -len(base_suffix)]  # the "<N>"
+        pfx = next((p for p in prefixes if base.startswith(p)), None)
+        if pfx is None or not base.endswith(base_suffix):
+            continue
+        n_str = base[len(pfx) : -len(base_suffix)]  # the "<N>"
         if not n_str.isdigit():
             continue
         best = max(best, int(n_str))
