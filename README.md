@@ -40,12 +40,20 @@ deploying the web interface locally.
 New to CRISPRme? Get the point-and-click web interface running in a few commands
 — just install Docker, then:
 
+> **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**,
+> give Docker **16 GB** to start; the default genome-wide 1000G+HGDP variant search is
+> memory-intensive, so use **32 GB (64 GB recommended)** for real runs — peak usage is in
+> results post-processing and can exceed 32 GB. (On Linux/Docker Engine the container uses
+> host memory directly.) See [System Requirements](#0-system-requirements).
+
 ```bash
 mkdir -p ~/crisprme && cd ~/crisprme
 # 1) fast-download the reference data (minutes, via the HuggingFace CDN)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme crisprme.py download --what all --path /DATA
-# 2) grab a prebuilt SpCas9 (NGG) index so no long index build is needed
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme crisprme.py download --what index --index-name NGG_2_hg38 --path /DATA
+# 2) grab the prebuilt SpCas9 (NGG) indexes so no long index build is needed:
+#    the reference index, and the variant-aware hg38 + 1000G + HGDP index (the web default)
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA
 # 3) launch the web interface, then open http://127.0.0.1:8080
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme crisprme.py web-interface
 ```
@@ -105,12 +113,18 @@ before running CRISPRme. To estimate the cost of a large search up front, see
 
 ## 1 Installation
 
+> **Which version do I get?** For **CRISPRme+ (2.2.0, this release)** use **Docker**
+> (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-410-gb) above, or
+> §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
+> 2.2.0 alpha** — use it only if you specifically want the stable release. If in doubt,
+> use Docker.
+
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Conda/Mamba (for Linux users)](#11-install-crisprme-via-condamamba)
-  
-- [Install CRISPRme via Docker (compatible with all operating systems)]()
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.2.0)](#12-install-crisprme-via-docker)
+
+- [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
 Each method ensures a streamlined and efficient installation, enabling you to use 
 CRISPRme with minimal effort. Follow the detailed instructions provided in the 
@@ -118,6 +132,10 @@ respective sections below.
 
 ### 1.1 Install CRISPRme via Conda/Mamba
 ---
+
+> **Note:** Bioconda ships the **stable 2.1.x** line (Python 3.8). For **CRISPRme+
+> (2.2.0)** — the Python 3.11 release with the point-and-click Docker web interface —
+> use [Docker](#12-install-crisprme-via-docker) instead.
 
 This section is organized into three subsections to guide you through the installation 
 and maintenance of CRISPRme:
@@ -184,8 +202,8 @@ or use the **[Docker quickstart](docs/DOCKER_QUICKSTART.md)** for the fastest pa
 Verify the installation:
 
 ```bash
-crisprme.py --version  # e.g. 2.2.0
-crisprme.py            # list CRISPRme functionalities
+crisprme.py --version
+crisprme.py
 ```
 
 #### 1.1.3 Updating CRISPRme
@@ -203,7 +221,7 @@ Visit the CRISPRme README to identify the latest version of the tool.
 Run the following command in your terminal, replacing <latest_version> with the 
 desired version number:
 ```bash
-mamba install crisprme=<latest_version>  # Update CRISPRme to the specified version
+mamba install crisprme=<latest_version>
 ```
 
 This updates within the **stable 2.1.x** Bioconda line (latest is `crisprme=2.1.14`):
@@ -218,7 +236,7 @@ If you're using `Conda`, replace `mamba` with `conda` in the commands above.
 After the update completes, ensure the installation was successful by checking the 
 version:
 ```bash
-crisprme.py --version  # Confirm the installed version
+crisprme.py --version
 ```
 If the displayed version matches the one you installed, the update was successful.
 
@@ -372,7 +390,7 @@ The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then co
 ```bash
 mkdir crisprme_test && cd crisprme_test
 crisprme.py complete-test --chrom chr22 --thread 4
-crisprme.py validate-test --chrom chr22        # expect: 2 passed, 0 failed
+crisprme.py validate-test --chrom chr22
 ```
 
 Notes:
@@ -520,47 +538,49 @@ Usage Example for the Complete Search function:
 - **Via Conda/Mamba**
   ```bash
   crisprme.py complete-search \
-    --genome Genomes/hg38 \  # reference genome directory
-    --vcf vcf_config.1000G.HGDP.txt \  # config file declaring usage of 1000G and HGDP variant datasets
-    --guide sg1617.txt \  # guide 
-    --pam PAMs/20bp-NGG-SpCas9.txt \  # NGG PAM file
-    --annotation Annotations/dhs+encode+gencode.hg38.bed \  # annotation BED
-    --gene_annotation Annotations/gencode.protein_coding.bed \  # gene proximity annotation BED
-    --samplesID samplesIDs.1000G.HGDP.txt \  # config file declaring usage of 1000G and HGDP samples
-    --be-window 4,8 \  # base editing window start and stop positions within off-targets
-    --be-base A,G \  # nucleotide to test base editing potential (A>G)
-    --mm 4 \  # number of max mismatches (default for CRISPRme examples/tests)
-    --bDNA 1 \  # number of max DNA bulges
-    --bRNA 1 \  # number of max RNA bulges
-    --merge 3 \  # merge off-targets mapped within 3 bp in clusters
-    --sorting-criteria-scoring mm+bulges \  # prioritize within each cluster off-targets with highest score and lowest mm+bulges (CFD and CRISTA reports only)
-    --sorting-criteria mm,bulges \  # prioritize within each cluster off-targets with lowest mm and bulges counts
-    --output sg1617-NGG-1000G-HGDP \  # output directory name
-    --thread 8  # number of threads 
+    --genome Genomes/hg38 \
+    --vcf vcf_config.1000G.HGDP.txt \
+    --guide sg1617.txt \
+    --pam PAMs/20bp-NGG-SpCas9.txt \
+    --annotation Annotations/dhs+encode+gencode.hg38.bed \
+    --gene_annotation Annotations/gencode.protein_coding.bed \
+    --samplesID samplesIDs.1000G.HGDP.txt \
+    --be-window 4,8 \
+    --be-base A,G \
+    --mm 4 \
+    --bDNA 1 \
+    --bRNA 1 \
+    --merge 3 \
+    --sorting-criteria-scoring mm+bulges \
+    --sorting-criteria mm,bulges \
+    --output sg1617-NGG-1000G-HGDP \
+    --thread 8
   ```
+  (Each argument is documented under **Input Arguments** below.)
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
     crisprme.py complete-search \
-    --genome Genomes/hg38 \  # reference genome directory
-    --vcf vcf_config.1000G.HGDP.txt \  # config file declaring usage of 1000G and HGDP variant datasets
-    --guide sg1617.txt \  # guide 
-    --pam PAMs/20bp-NGG-SpCas9.txt \  # NGG PAM file
-    --annotation Annotations/dhs+encode+gencode.hg38.bed \  # annotation BED
-    --gene_annotation Annotations/gencode.protein_coding.bed \  # gene proximity annotation BED
-    --samplesID samplesIDs.1000G.HGDP.txt \  # config file declaring usage of 1000G and HGDP samples
-    --be-window 4,8 \  # base editing window start and stop positions within off-targets
-    --be-base A,G \  # nucleotide to test base editing potential (A>G)
-    --mm 4 \  # number of max mismatches (default for CRISPRme examples/tests)
-    --bDNA 1 \  # number of max DNA bulges
-    --bRNA 1 \  # number of max RNA bulges
-    --merge 3 \  # merge off-targets mapped within 3 bp in clusters
-    --sorting-criteria-scoring mm+bulges \  # prioritize within each cluster off-targets with highest score and lowest mm+bulges (CFD and CRISTA reports only)
-    --sorting-criteria mm,bulges \  # prioritize within each cluster off-targets with lowest mm and bulges counts
-    --output sg1617-NGG-1000G-HGDP \  # output directory name
-    --thread 8  # number of threads 
+    --genome Genomes/hg38 \
+    --vcf vcf_config.1000G.HGDP.txt \
+    --guide sg1617.txt \
+    --pam PAMs/20bp-NGG-SpCas9.txt \
+    --annotation Annotations/dhs+encode+gencode.hg38.bed \
+    --gene_annotation Annotations/gencode.protein_coding.bed \
+    --samplesID samplesIDs.1000G.HGDP.txt \
+    --be-window 4,8 \
+    --be-base A,G \
+    --mm 4 \
+    --bDNA 1 \
+    --bRNA 1 \
+    --merge 3 \
+    --sorting-criteria-scoring mm+bulges \
+    --sorting-criteria mm,bulges \
+    --output sg1617-NGG-1000G-HGDP \
+    --thread 8
   ```
+  (Each argument is documented under **Input Arguments** below.)
 
 ##### Input Arguments
 ---
@@ -826,17 +846,17 @@ to confirm their suitability for the user’s research needs.
 Usage Example for the Complete Test function:
 - **Via Conda/Mamba**
   ```bash
-  crisprme.py complete-test \ 
-    --chrom chr22 \  # test on chromosome 22 data only
-    --vcf_dataset 1000G  # test using 1000G variants
+  crisprme.py complete-test \
+    --chrom chr22 \
+    --vcf_dataset 1000G
   ```
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \ 
-    crisprme.py complete-test \ 
-    --chrom chr22 \  # test on chromosome 22 data only
-    --vcf_dataset 1000G  # test using 1000G variants
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
+    crisprme.py complete-test \
+    --chrom chr22 \
+    --vcf_dataset 1000G
   ```
 
 ##### Input Arguments
@@ -927,14 +947,14 @@ Usage Example for the Off-Target Sites Validation Test function:
 - **Via Conda/Mamba**
   ```bash
   crisprme.py validate-test \
-    --chrom chr22  # optional: restrict validation to a single chromosome
+    --chrom chr22
   ```
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
     crisprme.py validate-test \
-    --chrom chr22  # optional: restrict validation to a single chromosome
+    --chrom chr22
   ```
 
 If no chromosome is specified, validation is performed across all chromosomes
@@ -998,19 +1018,19 @@ enabling flexibility in validation sources. Targets Integration
 Usage Example for the Targets Integration function:
 - **Via Conda/Mamba**
   ```bash
-  crisprme.py targets-integration \ 
-    --targets results.integrated_results.tsv \  # search results
-    --empirical_data empirical_data.bed \  # empirical data BED 
-    --output integrated_targets_dir  # output directory
+  crisprme.py targets-integration \
+    --targets results.integrated_results.tsv \
+    --empirical_data empirical_data.bed \
+    --output integrated_targets_dir
   ```
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
-    crisprme.py targets-integration \ 
-    --targets results.integrated_results.tsv \  # search results
-    --empirical_data empirical_data.bed \  # empirical data BED 
-    --output integrated_targets_dir  # output directory
+    crisprme.py targets-integration \
+    --targets results.integrated_results.tsv \
+    --empirical_data empirical_data.bed \
+    --output integrated_targets_dir
   ```
 
 ##### Input Arguments
@@ -1102,20 +1122,20 @@ Usage Example for the GNOMAD Converter function:
 - **Via Conda/Mamba**
   ```bash
   crisprme.py gnomAD-converter \
-    --gnomAD_VCFdir gnomad_vcf_dir \  # directory containing GNOMAD VCFs
-    --samplesID samplesIDs.gnomad.v41.txt \  # GNOMAD v4.1 samples file
-    --keep \  # keep variants with filter different from PASS
-    --threads 4  # number of threads
+    --gnomAD_VCFdir gnomad_vcf_dir \
+    --samplesID samplesIDs.gnomad.v41.txt \
+    --keep \
+    --threads 4
   ```
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
     crisprme.py gnomAD-converter \
-    --gnomAD_VCFdir gnomad_vcf_dir \  # directory containing GNOMAD VCFs
-    --samplesID samplesIDs.gnomad.v41.txt \  # GNOMAD v4.1 samples file
-    --keep \  # keep variants with filter different from PASS
-    --threads 4  # number of threads
+    --gnomAD_VCFdir gnomad_vcf_dir \
+    --samplesID samplesIDs.gnomad.v41.txt \
+    --keep \
+    --threads 4
   ```
 
 ##### Input Arguments
@@ -1235,18 +1255,18 @@ Usage Example for the Generate Personal Card function:
 - **Via Conda/Mamba**
   ```bash
   crisprme.py generate-personal-card \
-    --result_dir Results/sg1617.4.1.1 \  # results directory from previous search
-    --guide_seq CTAACAGTTGCTTTTATCACNNN \  # guide sequence 
-    --sample_id NA21129  # sample ID
+    --result_dir Results/sg1617.4.1.1 \
+    --guide_seq CTAACAGTTGCTTTTATCACNNN \
+    --sample_id NA21129
   ```
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
     crisprme.py generate-personal-card \
-    --result_dir Results/sg1617.4.1.1 \  # results directory from previous search
-    --guide_seq CTAACAGTTGCTTTTATCACNNN \  # guide sequence 
-    --sample_id NA21129  # sample ID
+    --result_dir Results/sg1617.4.1.1 \
+    --guide_seq CTAACAGTTGCTTTTATCACNNN \
+    --sample_id NA21129
   ```
 
 ##### Input Arguments
@@ -1447,13 +1467,13 @@ Usage example for the Web Interface function:
 
 - **Via Conda/Mamba**
   ```bash
-  crisprme.py web-interface  # Starts the local server and launches the web interface
+  crisprme.py web-interface
   ```
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -p 8080:8080 \
-    pinellolab/crisprme crisprme.py web-interface  # Starts the local server and launches the web interface
+    pinellolab/crisprme crisprme.py web-interface
   ```
 
 > 🌐 **Accessing the interface from another machine (SSH tunnel).** The server
@@ -1496,9 +1516,10 @@ Bulge-enabled searches build a CRISPRitz index of the reference genome. `complet
 **`build-index-only`** — build the reusable reference index (into `genome_library/<PAM>_<bulges+1>_<genome>`) without running a search. Pass the same `--genome`/`--pam`/`--bDNA`/`--bRNA` you will search with:
 
 ```bash
-crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt \
-  --bDNA 1 --bRNA 1 --thread 16 --path /data/crisprme
+crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt --bDNA 2 --bRNA 2 --thread 16 --path /data/crisprme
 ```
+
+This writes `genome_library/NGG_3_hg38` (the folder number is `max(bDNA,bRNA)+1`, so 2 bulges → `_3_`), which is the same index shipped precomputed on HuggingFace.
 
 **`complete-search --index-path <dir>`** — reuse a prebuilt/staged index library instead of building one under the working directory. A missing matching index is a hard error (rather than a silent rebuild), which is what you want on a read-only shared mount.
 
@@ -1507,13 +1528,14 @@ crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.tx
 ```bash
 crisprme.py download --what all --path /data/crisprme
 crisprme.py download --what vcf --dataset 1000G --path /data/crisprme
-crisprme.py download --what index --index-name NGG_2_hg38 --path /data/crisprme
+crisprme.py download --what index --index-name NGG_3_hg38 --path /data/crisprme
+crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /data/crisprme
 ```
 
 **`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`):
 
 ```bash
-crisprme.py publish-index --index genome_library/NGG_2_hg38
+crisprme.py publish-index --index genome_library/NGG_3_hg38
 ```
 
 See the companion data-setup guide (`docs/crisprme_data_setup_051826.md`, Sections 2d and 3½) for the end-to-end workflow.
@@ -1548,13 +1570,13 @@ Open a terminal and execute the following command to check the software version:
 
 - **Via Conda/Mamba**
   ```bash
-  crisprme.py --version  # Expected output: v2.2.0
+  crisprme.py --version
   ```
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
-  crisprme.py --version  # Expected output: v2.2.0
+  crisprme.py --version
   ```
 
 If the output displays the correct software version (e.g., `v2.2.0`), CRISPRme 
@@ -1641,22 +1663,22 @@ execute the following commands:
 
 - **Via Conda/Mamba**
   ```bash
-  crisprme.py complete-test \ 
+  crisprme.py complete-test \
     --chrom chr22 \
-    --vcf_dataset 1000G  # to test on HGDP replace '1000G' with 'HGDP'
+    --vcf_dataset 1000G
   ```
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
-    crisprme.py complete-test \ 
+    crisprme.py complete-test \
     --chrom chr22 \
-    --vcf_dataset 1000G  # to test on HGDP replace '1000G' with 'HGDP'
+    --vcf_dataset 1000G
   ```
 
 After completion, off-target sites generated by this test can be validated using:
 ```bash
-crisprme.py validate-test --chrom chr22  # only available with 1000G data
+crisprme.py validate-test --chrom chr22
 ```
 
 #### 3.2.2 Full Genome Test
@@ -1667,21 +1689,21 @@ variants, execute the following commands:
 
 - **Via Conda/Mamba**
   ```bash
-  crisprme.py complete-test \ 
-    --vcf_dataset 1000G  # to test on HGDP replace '1000G' with 'HGDP'
+  crisprme.py complete-test \
+    --vcf_dataset 1000G
   ```
 
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme \
-    crisprme.py complete-test \ 
-    --vcf_dataset 1000G  # to test on HGDP replace '1000G' with 'HGDP'
+    crisprme.py complete-test \
+    --vcf_dataset 1000G
   ```
 
 Once the full genome test has completed, validation can be performed across all
 chromosomes using:
 ```bash
-crisprme.py validate-test  # only available with 1000G data
+crisprme.py validate-test
 ```
 
 ## 4 Citation

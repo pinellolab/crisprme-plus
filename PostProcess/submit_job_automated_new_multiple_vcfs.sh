@@ -264,43 +264,38 @@ while read vcf_f; do
 	else
 		ref_lib="${current_working_directory}/genome_library"
 	fi
-	# candidate index folders, ordered by priority
-	idx_folder1="${ref_lib}/${true_pam}_${bMax}_${ref_name}"  # index for requested number of bulges
-	idx_folder2="${ref_lib}/${true_pam}_${bMax_}_${ref_name}"  # index for requested number of bulges + 1 (superset for required index)
-	idx_folder3="${ref_lib}/${true_pam}_1_${ref_name}"  # index for number of bulges = 1 (used also for 0 bulges)
-	# pamless (NNN) fallback: a degenerate NNN index contains all candidate sites,
-	# so it works for ANY PAM (the requested PAM is enforced by the post-search PAM
-	# filter, and applied for real in post-analysis). Used when no PAM-specific
-	# index exists, letting one index cover many PAMs.
-	idx_folder_nnn="${ref_lib}/NNN_${bMax}_${ref_name}"
-	idx_folder_nnn_="${ref_lib}/NNN_${bMax_}_${ref_name}"
+	# Reuse ANY installed index whose encoded number N >= the requested bMax (which the
+	# caller passes as max(bDNA,bRNA)+1), preferring the smallest sufficient one; include
+	# pamless NNN indexes (which serve any PAM — the requested PAM is enforced by the
+	# post-search PAM filter). Folder N = the -bMax the index was built with, and it
+	# supports searches up to N-1 bulges of each type, so e.g. an NGG_3 index serves any
+	# search with max(bDNA,bRNA)<=2 — this is why a batteries-included NGG_3 index is
+	# reused for a smaller bulge request instead of triggering a rebuild.
+	idx_folder1="${ref_lib}/${true_pam}_${bMax}_${ref_name}"  # exact-N name, used only for the auto-build path below
+	idx_ref=""
+	_best_n=""
+	for _d in "$ref_lib"/${true_pam}_*_"${ref_name}" "$ref_lib"/NNN_*_"${ref_name}"; do
+		[ -d "$_d" ] || continue
+		case "$_d" in *_INDELS) continue ;; esac
+		_b=$(basename "$_d")
+		_n=${_b#*_}
+		_n=${_n%%_*}
+		case "$_n" in '' | *[!0-9]*) continue ;; esac
+		if [ "$_n" -ge "$bMax" ] && { [ -z "$_best_n" ] || [ "$_n" -lt "$_best_n" ]; }; then
+			_best_n="$_n"
+			idx_ref="$_d"
+		fi
+	done
 
-	# try to use an existing index
-	if [ -d "$idx_folder1" ]; then
-		echo "Reference Index already present"
+	# use the existing (sufficient) index if the scan found one
+	if [ -n "$idx_ref" ]; then
+		echo "Reference index present ($(basename "$idx_ref"))"
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
-		idx_ref="$idx_folder1"
-	elif [ -d "$idx_folder2" ]; then
-		echo "Reference Index already present"
-		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
-		idx_ref="$idx_folder2"
-	elif [ $bMax -le 1 ] && [ -d "$idx_folder3" ]; then
-		echo "Reference Index already present"
-		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
-		idx_ref="$idx_folder3"
-	elif [ -d "$idx_folder_nnn" ]; then
-		echo "Using pamless (NNN) reference index"
-		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
-		idx_ref="$idx_folder_nnn"
-	elif [ -d "$idx_folder_nnn_" ]; then
-		echo "Using pamless (NNN) reference index (superset)"
-		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
-		idx_ref="$idx_folder_nnn_"
 	elif [ "$index_path" != "_" ] && [ -n "$index_path" ]; then
 		# an index location was explicitly provided but no matching index was
 		# found there: fail loudly instead of silently rebuilding elsewhere
 		printf "ERROR: no matching reference index under --index-path '%s'\n" "$ref_lib" >&2
-		printf "       expected one of: %s\n" "$(basename "$idx_folder1"), $(basename "$idx_folder2"), $(basename "$idx_folder3")" >&2
+		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s)\n" "$true_pam" "$ref_name" "$bMax" "$(basename "$idx_folder1")" >&2
 		printf "       build it first with 'crisprme.py build-index-only' (same --genome/--pam/--bDNA/--bRNA), or omit --index-path to build automatically.\n" >&2
 		exit 1
 	else
@@ -329,39 +324,31 @@ while read vcf_f; do
 
 	# START STEP 2.2 Variant genome indexing
 	if [ "$vcf_name" != "_" ]; then  # index alternative genomes (snps only)
-		# candidate index folders, ordered by priority
+		# Reuse ANY installed variant index whose encoded budget N >= requested bMax
+		# (smallest sufficient first), incl. pamless NNN — mirrors the reference scan,
+		# so a batteries-included NGG_3_<ref>+<vcf> index serves a smaller bulge
+		# request without a rebuild.
 		basedir="${current_working_directory}/genome_library"
-		idx_folder1="${basedir}/${true_pam}_${bMax}_${ref_name}+${vcf_name}"
-		idx_folder2="${basedir}/${true_pam}_${bMax_}_${ref_name}+${vcf_name}"
-		idx_folder3="${basedir}/${true_pam}_1_${ref_name}+${vcf_name}"
-		# pamless (NNN) variant-index fallback (see the reference-index note): a
-		# single NNN variant index built on the enriched genome serves any PAM,
-		# with the requested PAM enforced by the post-search PAM filter and
-		# variant-created PAMs preserved (IUPAC-aware) for the creation analysis.
-		idx_folder_nnn="${basedir}/NNN_${bMax}_${ref_name}+${vcf_name}"
-		idx_folder_nnn_="${basedir}/NNN_${bMax_}_${ref_name}+${vcf_name}"
+		idx_folder1="${basedir}/${true_pam}_${bMax}_${ref_name}+${vcf_name}"  # exact-budget name, used only for the auto-build path below
+		idx_var=""
+		_best_n=""
+		for _d in "$basedir"/${true_pam}_*_"${ref_name}+${vcf_name}" "$basedir"/NNN_*_"${ref_name}+${vcf_name}"; do
+			[ -d "$_d" ] || continue
+			case "$_d" in *_INDELS) continue ;; esac
+			_b=$(basename "$_d")
+			_n=${_b#*_}
+			_n=${_n%%_*}
+			case "$_n" in '' | *[!0-9]*) continue ;; esac
+			if [ "$_n" -ge "$bMax" ] && { [ -z "$_best_n" ] || [ "$_n" -lt "$_best_n" ]; }; then
+				_best_n="$_n"
+				idx_var="$_d"
+			fi
+		done
 
-		# try existing indexes in priority order
-		if [ -d "$idx_folder1" ]; then
-			echo "Variant Index already present"
+		# use the existing (sufficient) variant index if the scan found one
+		if [ -n "$idx_var" ]; then
+			echo "Variant index present ($(basename "$idx_var"))"
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
-			idx_var="$idx_folder1"
-		elif [ -d "$idx_folder2" ]; then
-			echo "Variant Index already present"
-			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
-			idx_var="$idx_folder2"
-		elif [ "$bMax" -le 1 ] && [ -d "$idx_folder3" ]; then
-			echo "Variant Index already present"
-			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
-			idx_var="$idx_folder3"
-		elif [ -d "$idx_folder_nnn" ]; then
-			echo "Using pamless (NNN) variant index"
-			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
-			idx_var="$idx_folder_nnn"
-		elif [ -d "$idx_folder_nnn_" ]; then
-			echo "Using pamless (NNN) variant index (superset)"
-			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
-			idx_var="$idx_folder_nnn_"
 		else
 			# no index found, compute it; use mkdir lock to prevent concurrent builds
 			_lock="${idx_folder1}.lock"

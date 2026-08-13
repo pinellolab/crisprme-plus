@@ -62,18 +62,14 @@ def about_div() -> html.Div:
             html.H3("About"),
             html.P(
                 [
-                    "CRISPRme is available as both an online web app (",
-                    html.A(
-                        "http://crisprme.di.univr.it",
-                        href="http://crisprme.di.univr.it",
-                        target="_blank",
-                    ),
                     (
-                        ") and a standalone command-line package. To perform an "
-                        "online search, users need to provide: gRNA spacer(s), "
-                        "Cas protein, PAM sequence, genome build (with or without "
-                        "genetic variants from 1000G, HGDP, and/or personal "
-                        "datasets), and thresholds for mismatches and RNA/DNA bulges."
+                        "CRISPRme+ runs locally: it is both this point-and-click web "
+                        "app (which you are using now, served at http://127.0.0.1:8080) "
+                        "and a standalone command-line package. To run a search, "
+                        "provide: gRNA spacer(s), Cas protein, PAM sequence, genome "
+                        "build (with or without genetic variants from 1000G, HGDP, "
+                        "and/or personal datasets), and the maximum number of edits "
+                        "(mismatches + bulges) to allow."
                     ),
                 ]
             ),
@@ -229,12 +225,14 @@ def homepage_genomes_() -> html.Li:
                 "allowing users to work with various references, including "
                 "transcriptomes, non-human genomes, and cancer genomes. By "
                 "default, the hg38 genome build (including mitochondrial DNA) "
-                "is available, with the option to incorporate variants from "
-                "1000G and/or HGDP. Adding personal variants is only supported "
-                "in the local offline and command-line versions. For RNA-targeting "
-                "strategies, users can either provide a custom transcriptome or "
-                "use a variant-enriched genome, though the latter may miss "
-                "off-targets at splice junctions."
+                "is available. In CRISPRme+ the variant-aware hg38 + 1000G + HGDP "
+                "index is pre-selected, so your first search is already "
+                "variant-aware — pick \"Reference only\" from the variant dropdown "
+                "for a reference-only search. Adding personal variants is only "
+                "supported in the local offline and command-line versions. For "
+                "RNA-targeting strategies, users can either provide a custom "
+                "transcriptome or use a variant-enriched genome, though the latter "
+                "may miss off-targets at splice junctions."
             ),
         ]
     )
@@ -254,12 +252,14 @@ def homepage_thresholds_() -> html.Li:
         [
             html.Strong("Search thresholds: "),
             (
-                "CRISPRme enables users to define tolerance levels for mismatches, "
-                "DNA bulges, and RNA bulges when identifying potential off-targets. "
-                "The web tool supports up to 6 mismatches and up to 2 RNA/DNA bulges, "
-                "which can be consecutive (NN--NN) or interleaved (NN-N-NN). In the "
-                "command-line version, these thresholds are unrestricted and can "
-                "be adjusted based on available computational resources."
+                "By default CRISPRme+ uses a single \"Maximum edits\" slider — the "
+                "total number of differences (mismatches + DNA/RNA bulges) allowed "
+                "between a guide and an off-target (default 3, raise for a deeper, "
+                "slower search). The precomputed indexes support up to 2 bulges of "
+                "each type. Open \"Advanced options\" to set the per-type mismatch / "
+                "DNA-bulge / RNA-bulge caps individually instead. In the command-line "
+                "version these thresholds are unrestricted and can be adjusted based "
+                "on available computational resources."
             ),
         ]
     )

@@ -140,10 +140,34 @@ def download_brute_force_targets(base_url: str, reference: str, expected_md5: st
 def _load_targets(fname: str, chrom: str, crisprme: bool = False) -> pd.DataFrame:
     if not os.path.isfile(fname):
         raise FileNotFoundError(f"Targets file not found: {fname}")
-    df = pd.read_csv(fname, sep="\t")
-    chrom_col = "Chromosome" if crisprme else "CHR"
-    if chrom_col not in df.columns:
-        raise ValueError(f"Invalid targets file: missing column '{chrom_col}'.")
+    if crisprme:
+        # Raw CRISPRitz .targets.txt is HEADERLESS in this pipeline: searchTST writes
+        # a "#Bulge type..." header, but pam_filter.py strips it (a 10-col header row
+        # is treated as data and dropped). Standard CRISPRitz column order (0-indexed):
+        #   0=Bulge type 1=crRNA 2=DNA 3=Chromosome 4=Position 5=Cluster Position
+        #   6=Direction 7=Mismatches 8=Bulge Size 9=Total
+        # so compute_sites' positional x[3]/x[4]/x[6] are clean integer-label lookups.
+        chrom_col = 3  # Chromosome
+        try:
+            df = pd.read_csv(fname, sep="\t", header=None)
+        except pd.errors.EmptyDataError:
+            # A guide with zero off-targets within budget yields an empty (headerless)
+            # targets file -- a legitimate result (e.g. a Cas12a guide whose only
+            # on-target is off-chromosome, or a tight max-edits cap). Treat it as the
+            # empty set so the comparison can still match an empty ground truth.
+            return pd.DataFrame(columns=list(range(10)))
+        if df.shape[1] < 7 or chrom_col not in df.columns:
+            raise ValueError(f"Invalid CRISPRme targets file (too few columns): {fname}.")
+    else:
+        # Brute-force reference IS headered: CHR RNA DNA Strand Start END ...
+        try:
+            df = pd.read_csv(fname, sep="\t")
+        except pd.errors.EmptyDataError:
+            return pd.DataFrame(columns=["CHR", "RNA", "DNA", "Strand", "Start",
+                                         "END", "mismatches", "gaps_in_RNA", "gaps_in_DNA"])
+        chrom_col = "CHR"
+        if chrom_col not in df.columns:
+            raise ValueError(f"Invalid targets file: missing column '{chrom_col}'.")
     df = df[df[chrom_col].isin(CHROMS)]
     if chrom != "all":
         if chrom not in CHROMS:
@@ -165,6 +189,8 @@ def _compute_site(chrom: str, pos: int, strand: str) -> str:
 
 
 def compute_sites(targets: pd.DataFrame, crisprme: bool = False) -> List[str]:
+    if targets.empty:
+        return []  # zero off-targets -> empty site set (robust to pandas apply-on-empty)
     if crisprme:
         targets["site"] = targets.apply(lambda x: _compute_site(x[3], x[4], x[6]), axis=1)
     else:
@@ -197,11 +223,24 @@ def run_test_validation(chrom: str) -> None:
     """Validate every registered benchmark that has complete-test output present."""
     check_variant_dataset()
     registry = load_benchmarks()
-    th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
+    global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     base_url = registry["reference_base_url"]
+    # Mirror complete_test.py: on a hosted CI runner (CRISPRME_SKIP_HEAVY=1) the "heavy"
+    # bulge-2 benchmarks are not run, so don't try to validate them (avoids a misleading
+    # "targets not found" skip). Locally (env unset) all cases validate.
+    skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     validated = failed = skipped = 0
     for bench in registry["benchmarks"]:
         name = bench["name"]
+        if skip_heavy and bench.get("heavy"):
+            sys.stderr.write(f"[{name}] SKIPPED: heavy benchmark not run on this runner "
+                             "(CRISPRME_SKIP_HEAVY=1).\n")
+            skipped += 1
+            continue
+        # Per-case thresholds mirror complete_test.py, so the output-report filename
+        # (which encodes mm_bDNA_bRNA) is resolved with the SAME budgets this case ran.
+        th = dict(global_th)
+        th.update(bench.get("thresholds", {}))
         targets = find_crispritz_targets(
             name, bench["pam_name"], th["mm"], th["bDNA"], th["bRNA"], chrom)
         if targets is None:
@@ -209,8 +248,17 @@ def run_test_validation(chrom: str) -> None:
                              "(this benchmark was not run).\n")
             skipped += 1
             continue
+        # A registered case whose brute-force reference has not been generated yet
+        # (md5 empty or the "TODO-after-generation" sentinel) is SKIPPED, not failed,
+        # so entries can land before their one-time reference batch job runs.
+        ref_rel, md5 = bench.get("reference", ""), bench.get("md5", "")
+        if not ref_rel or md5 in ("", "TODO-after-generation"):
+            sys.stderr.write(f"[{name}] SKIPPED: brute-force reference not generated "
+                             "yet (pending its one-time generation job).\n")
+            skipped += 1
+            continue
         ref_path, alt_path = targets
-        bf_path = download_brute_force_targets(base_url, bench["reference"], bench.get("md5", ""))
+        bf_path = download_brute_force_targets(base_url, ref_rel, md5)
         crisprme_targets, bf_targets = load_targets(ref_path, alt_path, bf_path, chrom)
         if validate(name, crisprme_targets, bf_targets):
             validated += 1

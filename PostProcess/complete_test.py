@@ -353,13 +353,20 @@ def download_samples_ids_data(dataset: str) -> None:
         samplesid_fname = (
             "samplesIDs.1000G.txt" if ds == "1000G" else "samplesIDs.HGDP.txt"
         )
+        # Fetch to the name the config + pipeline expect (write_samplesids_config
+        # references hg38_<ds>.samplesID.txt). BOTH the HuggingFace fast path and
+        # the original-source fallback must land the file at this final name.
+        # Previously only the fallback renamed, so once the file existed on HF the
+        # success path left it as "samplesIDs.<ds>.txt" and the run failed with
+        # "hg38_<ds>.samplesID.txt: No such file or directory".
+        final_path = os.path.join(samplesids_dir, f"hg38_{ds}.samplesID.txt")
         # fast path: HuggingFace, then fall back to the original source
-        dest_path = os.path.join(samplesids_dir, samplesid_fname)
         try:
-            hf_fetch(f"samplesIDs/{samplesid_fname}", dest_path)
-            if MD5SAMPLES.get(samplesid_fname) == compute_md5(dest_path):
+            hf_fetch(f"samplesIDs/{samplesid_fname}", final_path)
+            if MD5SAMPLES.get(samplesid_fname) == compute_md5(final_path):
                 sys.stderr.write(
-                    f"Fetched {samplesid_fname} from HuggingFace ({HF_DATA_REPO})\n"
+                    f"Fetched {samplesid_fname} from HuggingFace ({HF_DATA_REPO}) "
+                    f"-> {os.path.basename(final_path)}\n"
                 )
                 continue
             raise ValueError("MD5 mismatch after HuggingFace fetch")
@@ -373,7 +380,7 @@ def download_samples_ids_data(dataset: str) -> None:
         )
         if MD5SAMPLES[os.path.basename(samplesids)] != compute_md5(samplesids):
             raise ValueError(f"Download for {os.path.basename(samplesids)} failed")
-        rename(samplesids, os.path.join(samplesids_dir, f"hg38_{ds}.samplesID.txt"))
+        rename(samplesids, final_path)
 
 def ensure_annotation_directory(dest: str) -> str:
     """
@@ -626,19 +633,44 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
     # to run into a non-empty output folder, so each benchmark gets its OWN
     # output dir (crisprme-test-out_<name>); validate-test looks in each.
     registry = load_benchmarks()
-    th = registry["thresholds"]
-    bmax = max(th["bDNA"], th["bRNA"])
+    global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
+    # A "heavy" benchmark builds a bulge-2 (NGG_3/TTTV_3) index over the variant-enriched
+    # genome, which exceeds a standard 16GB hosted CI runner. The hosted CI job sets
+    # CRISPRME_SKIP_HEAVY=1 to skip them there; locally (env unset) all cases run.
+    skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     for bench in registry["benchmarks"]:
+        if skip_heavy and bench.get("heavy"):
+            sys.stderr.write(
+                f"Skipping heavy benchmark '{bench['name']}' (CRISPRME_SKIP_HEAVY=1; "
+                "its bulge-2 variant index build is too large for this runner)\n"
+            )
+            continue
+        # Per-case thresholds override the global set, so one registry can hold both
+        # the per-type genome-wide cases (mm/bDNA/bRNA applied INDEPENDENTLY, so a
+        # target may carry a DNA AND an RNA bulge -> up to bDNA+bRNA bulges) AND cases
+        # that pin the DEFAULT single-"n edits" web mode (per-type caps left wide open,
+        # a binding --max-total-edits n).
+        th = dict(global_th)
+        th.update(bench.get("thresholds", {}))
+        # crisprme.py computes bMax = max(bDNA, bRNA) and IGNORES --bmax, but we still
+        # pass it (harmless) for provenance. The binding knob is --max-total-edits:
+        # default it to mm+bDNA+bRNA (non-binding -> per-type mode) unless the case pins
+        # a smaller single-n value. The brute-force ground truth must be generated with
+        # the SAME per-type budgets and the SAME --max-total-edits (see generate_references.py).
+        bmax = th["bDNA"] + th["bRNA"]
+        max_total_edits = th.get("max_total_edits", th["mm"] + th["bDNA"] + th["bRNA"])
         output_dir = f"{COMPLETETESTRESDIR}_{bench['name']}"
         pam = write_pamfile(bench["pam_name"], bench["pam_content"])
         guide = write_guidefile(bench["guide_file"], bench["guide_crisprme"])
         sys.stderr.write(
             f"Running complete-search for benchmark '{bench['name']}' "
-            f"({bench.get('nuclease', '')}) -> {output_dir}\n"
+            f"({bench.get('nuclease', '')}) mm={th['mm']} bDNA={th['bDNA']} "
+            f"bRNA={th['bRNA']} max-total-edits={max_total_edits} -> {output_dir}\n"
         )
         crisprme_cmd = (
             f"crisprme.py complete-search --genome {genome_dir} "
             f"--bmax {bmax} --mm {th['mm']} --bDNA {th['bDNA']} --bRNA {th['bRNA']} "
+            f"--max-total-edits {max_total_edits} "
             f"--merge 3 --pam {pam} --guide {guide} --vcf {vcf} "
             f"--samplesID {samplesids} --annotation {encode} "
             f"--gene_annotation {gencode} --output {output_dir} "

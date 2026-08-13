@@ -1842,7 +1842,8 @@ def print_help_download() -> None:
         "\t--dataset, variant dataset name for --what vcf (e.g. 1000G, HGDP) "
         "[REQUIRED for --what vcf]\n"
         "\t--index-name, precomputed index directory name for --what index "
-        "(e.g. NGG_2_hg38) [REQUIRED for --what index]\n"
+        "(e.g. NGG_3_hg38, or the variant-aware NGG_3_hg38+hg38_1000G_HGDP) "
+        "[REQUIRED for --what index]\n"
         "\t--hf-repo, HuggingFace dataset repo id to fetch from [OPTIONAL]\n"
         "\t--source, for --what genome: hf (HuggingFace, default) | ucsc "
         "(UCSC goldenPath by assembly name, e.g. --ref susScr11) | url "
@@ -2342,7 +2343,7 @@ def print_help_gnomad_converter():
         "\t--multiallelic, optional flag to merge variants mapped to the "
         "same position, creating multiallelic sites in the output VCFs. By "
         "default, each site remains biallelic\n"
-        "\t--thread, used to set the number of thread used in the conversion "
+        "\t--threads, used to set the number of threads used in the conversion "
         "process [default 8]\n"
     )
     sys.exit(1)

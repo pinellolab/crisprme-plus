@@ -21,11 +21,22 @@ on:
       - "test/data/**"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
+  # Weekly run so the benchmark gate also catches DATA-side drift (e.g. a change to
+  # the HuggingFace reference data the complete-test downloads) that the code-path
+  # PR filter above cannot see — this is how the sample-ID fast-path regression went
+  # unnoticed until a manual run.
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 jobs:
   validate-benchmarks:
     runs-on: ubuntu-latest
+    # The hosted runner runs the LIGHT (bulge-1) benchmarks via CRISPRME_SKIP_HEAVY=1
+    # (passed into the container on the complete-test/validate-test steps). The "heavy"
+    # single-n cases build a bulge-2 index over the variant-enriched genome, which OOMs a
+    # 16GB runner (and is too slow under swap) -- they are validated locally / on a larger
+    # runner. 120 min is plenty for the light suite.
     timeout-minutes: 120
     env:
       IMG: pinellolab/crisprme
@@ -106,7 +117,7 @@ jobs:
         run: |
           mkdir -p work
           n=0
-          until docker run --rm $BRANCH_MOUNT -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          until docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
                   set -e
                   cp /branch/crisprme.py /opt/conda/bin/crisprme.py
                   cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
@@ -123,7 +134,7 @@ jobs:
 
       - name: validate-test (chr22) — assert all benchmarks match the ground truth
         run: |
-          docker run --rm $BRANCH_MOUNT -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
