@@ -1512,6 +1512,25 @@ def get_variant_dataset_options(genome: str) -> List:
         if genome_norm and genome_norm in val and core not in seen:
             options.append({"label": core + _pam_note(core), "value": core})
             seen.add(core)
+    # BATTERIES-INCLUDED: a prebuilt variant INDEX ships WITHOUT the raw VCFs folder
+    # (genome_library/<pam>_<N>_<genome>+<genome>_<dataset>, e.g.
+    # NGG_3_hg38+hg38_1000G_HGDP). The loops above only read VCFs/ + built-in markers,
+    # so the shipped combined index was never offered -> the variant dropdown showed
+    # only "Reference only". Also surface datasets that have an installed index, reading
+    # the enriched-genome suffix off the index name.
+    lib = os.path.join(current_working_directory, "genome_library")
+    if genome_norm and os.path.isdir(lib):
+        for d in sorted(os.listdir(lib)):
+            if d.endswith("_INDELS") or not os.path.isdir(os.path.join(lib, d)):
+                continue
+            _, _, enriched = d.partition("+")  # enriched = "<genome>_<dataset[s]>"
+            if not enriched.startswith(f"{genome_norm}_"):
+                continue
+            core = enriched[len(genome_norm) + 1:]  # dataset token(s), e.g. "1000G_HGDP"
+            if core and core not in seen:
+                label = core.replace("_", " + ")  # "1000G_HGDP" -> "1000G + HGDP"
+                options.append({"label": label + _pam_note(core), "value": core})
+                seen.add(core)
     return options
 
 
