@@ -227,12 +227,10 @@ def run_test_validation(chrom: str) -> None:
             skipped += 1
             continue
         # A registered case whose brute-force reference has not been generated yet
-        # (no committed TSV / no md5) is SKIPPED, not failed, so entries can land
-        # before their one-time reference batch job runs.
+        # (md5 empty or the "TODO-after-generation" sentinel) is SKIPPED, not failed,
+        # so entries can land before their one-time reference batch job runs.
         ref_rel, md5 = bench.get("reference", ""), bench.get("md5", "")
-        repo_ref = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
-                                "test", "benchmark", ref_rel)
-        if not ref_rel or not md5 or (not os.path.isfile(repo_ref) and "://" not in base_url):
+        if not ref_rel or md5 in ("", "TODO-after-generation"):
             sys.stderr.write(f"[{name}] SKIPPED: brute-force reference not generated "
                              "yet (pending its one-time generation job).\n")
             skipped += 1
