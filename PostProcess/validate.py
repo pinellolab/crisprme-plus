@@ -140,10 +140,23 @@ def download_brute_force_targets(base_url: str, reference: str, expected_md5: st
 def _load_targets(fname: str, chrom: str, crisprme: bool = False) -> pd.DataFrame:
     if not os.path.isfile(fname):
         raise FileNotFoundError(f"Targets file not found: {fname}")
-    df = pd.read_csv(fname, sep="\t")
-    chrom_col = "Chromosome" if crisprme else "CHR"
-    if chrom_col not in df.columns:
-        raise ValueError(f"Invalid targets file: missing column '{chrom_col}'.")
+    if crisprme:
+        # Raw CRISPRitz .targets.txt is HEADERLESS in this pipeline: searchTST writes
+        # a "#Bulge type..." header, but pam_filter.py strips it (a 10-col header row
+        # is treated as data and dropped). Standard CRISPRitz column order (0-indexed):
+        #   0=Bulge type 1=crRNA 2=DNA 3=Chromosome 4=Position 5=Cluster Position
+        #   6=Direction 7=Mismatches 8=Bulge Size 9=Total
+        # so compute_sites' positional x[3]/x[4]/x[6] are clean integer-label lookups.
+        df = pd.read_csv(fname, sep="\t", header=None)
+        chrom_col = 3  # Chromosome
+        if df.shape[1] < 7 or chrom_col not in df.columns:
+            raise ValueError(f"Invalid CRISPRme targets file (too few columns): {fname}.")
+    else:
+        # Brute-force reference IS headered: CHR RNA DNA Strand Start END ...
+        df = pd.read_csv(fname, sep="\t")
+        chrom_col = "CHR"
+        if chrom_col not in df.columns:
+            raise ValueError(f"Invalid targets file: missing column '{chrom_col}'.")
     df = df[df[chrom_col].isin(CHROMS)]
     if chrom != "all":
         if chrom not in CHROMS:

@@ -21,6 +21,12 @@ on:
       - "test/data/**"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
+  # Weekly run so the benchmark gate also catches DATA-side drift (e.g. a change to
+  # the HuggingFace reference data the complete-test downloads) that the code-path
+  # PR filter above cannot see — this is how the sample-ID fast-path regression went
+  # unnoticed until a manual run.
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 jobs:

@@ -1511,10 +1511,13 @@ def limit_bulges_to_index(genome, pam, variant_choice, cur_dna, cur_rna):
         return AV_BULGES, AV_BULGES, no_update, no_update, ""
     maxb = index_max_bulges(genome, pam, None)  # reference index (always needed)
     # scalar dropdown value -> list of datasets ("ref" -> none)
+    # ANY selected dataset (built-in OR a custom VCF registered via Settings) — not a
+    # hardcoded 1000G/HGDP whitelist, which previously skipped custom datasets and left
+    # their variant-index bulge ceiling unchecked (overstating the bulge dropdown).
     selected = (
         []
         if variant_choice in (None, "", "ref")
-        else [v for v in str(variant_choice).split("+") if v in ("1000G", "HGDP")]
+        else [v for v in str(variant_choice).split("+") if v]
     )
     for v in selected:  # a variant bulge search also needs the variant index
         maxb = min(maxb, index_max_bulges(genome, pam, v))

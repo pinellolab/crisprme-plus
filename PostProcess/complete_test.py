@@ -353,13 +353,20 @@ def download_samples_ids_data(dataset: str) -> None:
         samplesid_fname = (
             "samplesIDs.1000G.txt" if ds == "1000G" else "samplesIDs.HGDP.txt"
         )
+        # Fetch to the name the config + pipeline expect (write_samplesids_config
+        # references hg38_<ds>.samplesID.txt). BOTH the HuggingFace fast path and
+        # the original-source fallback must land the file at this final name.
+        # Previously only the fallback renamed, so once the file existed on HF the
+        # success path left it as "samplesIDs.<ds>.txt" and the run failed with
+        # "hg38_<ds>.samplesID.txt: No such file or directory".
+        final_path = os.path.join(samplesids_dir, f"hg38_{ds}.samplesID.txt")
         # fast path: HuggingFace, then fall back to the original source
-        dest_path = os.path.join(samplesids_dir, samplesid_fname)
         try:
-            hf_fetch(f"samplesIDs/{samplesid_fname}", dest_path)
-            if MD5SAMPLES.get(samplesid_fname) == compute_md5(dest_path):
+            hf_fetch(f"samplesIDs/{samplesid_fname}", final_path)
+            if MD5SAMPLES.get(samplesid_fname) == compute_md5(final_path):
                 sys.stderr.write(
-                    f"Fetched {samplesid_fname} from HuggingFace ({HF_DATA_REPO})\n"
+                    f"Fetched {samplesid_fname} from HuggingFace ({HF_DATA_REPO}) "
+                    f"-> {os.path.basename(final_path)}\n"
                 )
                 continue
             raise ValueError("MD5 mismatch after HuggingFace fetch")
@@ -373,7 +380,7 @@ def download_samples_ids_data(dataset: str) -> None:
         )
         if MD5SAMPLES[os.path.basename(samplesids)] != compute_md5(samplesids):
             raise ValueError(f"Download for {os.path.basename(samplesids)} failed")
-        rename(samplesids, os.path.join(samplesids_dir, f"hg38_{ds}.samplesID.txt"))
+        rename(samplesids, final_path)
 
 def ensure_annotation_directory(dest: str) -> str:
     """
@@ -627,7 +634,15 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
     # output dir (crisprme-test-out_<name>); validate-test looks in each.
     registry = load_benchmarks()
     th = registry["thresholds"]
-    bmax = max(th["bDNA"], th["bRNA"])
+    # Match the brute-force ground truth's thresholds. It is generated with
+    # --max-mismatches mm --max-dna-gaps bDNA --max-rna-gaps bRNA applied
+    # INDEPENDENTLY, so a single target may carry a DNA bulge AND an RNA bulge at
+    # once (up to bDNA+bRNA total bulges, mm+bDNA+bRNA total edits). Use
+    # bmax = bDNA + bRNA (NOT max) and lift the per-alignment total-edits cap to
+    # mm+bDNA+bRNA, otherwise the search cannot reach those 2-bulge / higher-edit
+    # targets and CRISPRme comes back a strict subset of the ground truth.
+    bmax = th["bDNA"] + th["bRNA"]
+    max_total_edits = th["mm"] + th["bDNA"] + th["bRNA"]
     for bench in registry["benchmarks"]:
         output_dir = f"{COMPLETETESTRESDIR}_{bench['name']}"
         pam = write_pamfile(bench["pam_name"], bench["pam_content"])
@@ -639,6 +654,7 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
         crisprme_cmd = (
             f"crisprme.py complete-search --genome {genome_dir} "
             f"--bmax {bmax} --mm {th['mm']} --bDNA {th['bDNA']} --bRNA {th['bRNA']} "
+            f"--max-total-edits {max_total_edits} "
             f"--merge 3 --pam {pam} --guide {guide} --vcf {vcf} "
             f"--samplesID {samplesids} --annotation {encode} "
             f"--gene_annotation {gencode} --output {output_dir} "

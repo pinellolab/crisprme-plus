@@ -243,7 +243,18 @@ def download_component(
             )
         dest = os.path.join(local_dir, ref)
         os.makedirs(dest, exist_ok=True)
-        for fn in sorted(os.listdir(src)):
+        files = sorted(os.listdir(src))
+        # The move + gunzip below has no progress bar and, for a full genome
+        # (~hundreds of per-contig FASTAs, several GB), runs silently for minutes
+        # after "Fetching N files: 100%" — which reads as "stuck". Announce it.
+        n_gz = sum(1 for f in files if f.endswith(".gz"))
+        sys.stderr.write(
+            f"Decompressing + staging {len(files)} file(s)"
+            + (f" ({n_gz} gzip)" if n_gz else "")
+            + f" into {dest} — no progress bar; a full genome can take a few minutes...\n"
+        )
+        sys.stderr.flush()
+        for fn in files:
             moved = shutil.move(os.path.join(src, fn), os.path.join(dest, fn))
             if moved.endswith(".gz"):
                 decompress_gz(moved)
