@@ -32,11 +32,29 @@ on:
 jobs:
   validate-benchmarks:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # complete-test now builds the bulge-2 NGG_3/TTTV_3 indexes (for the single-n
+    # benchmarks) on top of the bulge-1 ones, so it needs more disk (many index dirs +
+    # enriched genomes) and time than the default runner allows; the harden step below
+    # frees space + adds swap. Give the slower 2-core runner room to finish.
+    timeout-minutes: 300
     env:
       IMG: pinellolab/crisprme
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk + add swap (complete-test builds many indexes + enriched genomes)
+        run: |
+          echo "before:"; df -h /; free -h || true
+          # remove preinstalled toolchains we don't use (~20-30 GB) so the index dirs +
+          # variant-enriched genomes don't exhaust the runner disk ("lost communication")
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup \
+            "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          # add swap so a memory spike during a bulge-2 index build cannot OOM the runner
+          sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384
+          sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          echo "after:"; df -h /; free -h || true
 
       - name: Pull CRISPRme image
         run: docker pull "$IMG"
