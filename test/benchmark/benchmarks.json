@@ -1,5 +1,5 @@
 {
-  "_comment": "Registry of validate-test benchmark cases. Each entry defines a nuclease/guide benchmark with a precomputed brute-force ground truth. To add a new example: append an entry, generate its reference with test/benchmark/generate_references.sh, host the TSV, and record its md5. validate.py iterates this registry, downloads+caches each reference (keyed by md5), and reports per-case pass/fail.",
+  "_comment": "Registry of validate-test benchmark cases. Each entry defines a nuclease/guide benchmark with a precomputed brute-force ground truth. To add a new example: append an entry, generate its reference with test/benchmark/generate_references.py, host the TSV, and record its md5. validate.py iterates this registry, downloads+caches each reference (keyed by md5), and reports per-case pass/fail. A case may add a per-case \"thresholds\" object overriding the global set; include \"max_total_edits\" to validate the DEFAULT single-'n edits' web mode (per-type caps left wide open, the total cap binding). A case whose reference is not yet generated (md5 \"TODO-after-generation\" and no committed TSV) is SKIPPED, not failed.",
   "reference_base_url": "https://raw.githubusercontent.com/pinellolab/crisprme-plus/main/test/benchmark/",
   "thresholds": {
     "mm": 4,
@@ -37,6 +37,40 @@
       "pam_length": 4,
       "pam_concrete": "TTTV",
       "scope": "chr22"
+    },
+    {
+      "name": "cas9_sg1617_simple",
+      "nuclease": "SpCas9",
+      "pam_name": "20bp-NGG-SpCas9.txt",
+      "pam_content": "NNNNNNNNNNNNNNNNNNNNNGG 3",
+      "pam_5prime": false,
+      "guide_file": "sg1617_test_guide.txt",
+      "guide_crisprme": "CTAACAGTTGCTTTTATCACNNN",
+      "guide_search": "CTAACAGTTGCTTTTATCACNGG",
+      "reference": "brute-force-simple/cas9_sg1617_simple.chr22.tsv",
+      "md5": "TODO-after-generation",
+      "source": "sg1617 Cas9 guide in the DEFAULT single-'n edits' web mode (per-type caps wide open, --max-total-edits 3)",
+      "pam_length": 3,
+      "pam_concrete": "GG",
+      "scope": "chr22",
+      "thresholds": { "mm": 6, "bDNA": 2, "bRNA": 2, "max_total_edits": 3 }
+    },
+    {
+      "name": "cas12a_hbg_simple",
+      "nuclease": "enAsCas12a",
+      "pam_name": "TTTV-20bp-Cas12a.txt",
+      "pam_content": "TTTVNNNNNNNNNNNNNNNNNNNN -4",
+      "pam_5prime": true,
+      "guide_file": "hbg_cas12a_test_guide.txt",
+      "guide_crisprme": "NNNNCCTTGTCAAGGCTATTGGTC",
+      "guide_search": "TTTVCCTTGTCAAGGCTATTGGTC",
+      "reference": "brute-force-simple/cas12a_hbg_simple.chr22.tsv",
+      "md5": "TODO-after-generation",
+      "source": "HBG1/HBG2 clinical Cas12a guide in the DEFAULT single-'n edits' web mode (per-type caps wide open, --max-total-edits 3)",
+      "pam_length": 4,
+      "pam_concrete": "TTTV",
+      "scope": "chr22",
+      "thresholds": { "mm": 6, "bDNA": 2, "bRNA": 2, "max_total_edits": 3 }
     }
   ]
 }

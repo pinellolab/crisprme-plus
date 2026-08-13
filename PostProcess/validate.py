@@ -210,11 +210,15 @@ def run_test_validation(chrom: str) -> None:
     """Validate every registered benchmark that has complete-test output present."""
     check_variant_dataset()
     registry = load_benchmarks()
-    th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
+    global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     base_url = registry["reference_base_url"]
     validated = failed = skipped = 0
     for bench in registry["benchmarks"]:
         name = bench["name"]
+        # Per-case thresholds mirror complete_test.py, so the output-report filename
+        # (which encodes mm_bDNA_bRNA) is resolved with the SAME budgets this case ran.
+        th = dict(global_th)
+        th.update(bench.get("thresholds", {}))
         targets = find_crispritz_targets(
             name, bench["pam_name"], th["mm"], th["bDNA"], th["bRNA"], chrom)
         if targets is None:
@@ -222,8 +226,19 @@ def run_test_validation(chrom: str) -> None:
                              "(this benchmark was not run).\n")
             skipped += 1
             continue
+        # A registered case whose brute-force reference has not been generated yet
+        # (no committed TSV / no md5) is SKIPPED, not failed, so entries can land
+        # before their one-time reference batch job runs.
+        ref_rel, md5 = bench.get("reference", ""), bench.get("md5", "")
+        repo_ref = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir,
+                                "test", "benchmark", ref_rel)
+        if not ref_rel or not md5 or (not os.path.isfile(repo_ref) and "://" not in base_url):
+            sys.stderr.write(f"[{name}] SKIPPED: brute-force reference not generated "
+                             "yet (pending its one-time generation job).\n")
+            skipped += 1
+            continue
         ref_path, alt_path = targets
-        bf_path = download_brute_force_targets(base_url, bench["reference"], bench.get("md5", ""))
+        bf_path = download_brute_force_targets(base_url, ref_rel, md5)
         crisprme_targets, bf_targets = load_targets(ref_path, alt_path, bf_path, chrom)
         if validate(name, crisprme_targets, bf_targets):
             validated += 1

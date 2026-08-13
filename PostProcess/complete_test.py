@@ -633,23 +633,29 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
     # to run into a non-empty output folder, so each benchmark gets its OWN
     # output dir (crisprme-test-out_<name>); validate-test looks in each.
     registry = load_benchmarks()
-    th = registry["thresholds"]
-    # Match the brute-force ground truth's thresholds. It is generated with
-    # --max-mismatches mm --max-dna-gaps bDNA --max-rna-gaps bRNA applied
-    # INDEPENDENTLY, so a single target may carry a DNA bulge AND an RNA bulge at
-    # once (up to bDNA+bRNA total bulges, mm+bDNA+bRNA total edits). Use
-    # bmax = bDNA + bRNA (NOT max) and lift the per-alignment total-edits cap to
-    # mm+bDNA+bRNA, otherwise the search cannot reach those 2-bulge / higher-edit
-    # targets and CRISPRme comes back a strict subset of the ground truth.
-    bmax = th["bDNA"] + th["bRNA"]
-    max_total_edits = th["mm"] + th["bDNA"] + th["bRNA"]
+    global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     for bench in registry["benchmarks"]:
+        # Per-case thresholds override the global set, so one registry can hold both
+        # the per-type genome-wide cases (mm/bDNA/bRNA applied INDEPENDENTLY, so a
+        # target may carry a DNA AND an RNA bulge -> up to bDNA+bRNA bulges) AND cases
+        # that pin the DEFAULT single-"n edits" web mode (per-type caps left wide open,
+        # a binding --max-total-edits n).
+        th = dict(global_th)
+        th.update(bench.get("thresholds", {}))
+        # crisprme.py computes bMax = max(bDNA, bRNA) and IGNORES --bmax, but we still
+        # pass it (harmless) for provenance. The binding knob is --max-total-edits:
+        # default it to mm+bDNA+bRNA (non-binding -> per-type mode) unless the case pins
+        # a smaller single-n value. The brute-force ground truth must be generated with
+        # the SAME per-type budgets and the SAME --max-total-edits (see generate_references.py).
+        bmax = th["bDNA"] + th["bRNA"]
+        max_total_edits = th.get("max_total_edits", th["mm"] + th["bDNA"] + th["bRNA"])
         output_dir = f"{COMPLETETESTRESDIR}_{bench['name']}"
         pam = write_pamfile(bench["pam_name"], bench["pam_content"])
         guide = write_guidefile(bench["guide_file"], bench["guide_crisprme"])
         sys.stderr.write(
             f"Running complete-search for benchmark '{bench['name']}' "
-            f"({bench.get('nuclease', '')}) -> {output_dir}\n"
+            f"({bench.get('nuclease', '')}) mm={th['mm']} bDNA={th['bDNA']} "
+            f"bRNA={th['bRNA']} max-total-edits={max_total_edits} -> {output_dir}\n"
         )
         crisprme_cmd = (
             f"crisprme.py complete-search --genome {genome_dir} "

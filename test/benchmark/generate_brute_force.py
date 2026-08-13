@@ -153,7 +153,7 @@ def keep_alignment(rna_out, dna_out, pam, pam_5prime):
 
 
 def scan(RNA, DNA, Strand, max_dna_gaps, max_rna_gaps, max_mismatches, chrom,
-         writer, pam="", pam_5prime=False):
+         writer, pam="", pam_5prime=False, max_total_edits=None):
     for starting_pos in range(0, len(DNA) - len(RNA) + max_dna_gaps + 1):
         slice_end = min(starting_pos + len(RNA) + max_rna_gaps, len(DNA))
         DNA_Slice = DNA[starting_pos:slice_end]
@@ -167,6 +167,13 @@ def scan(RNA, DNA, Strand, max_dna_gaps, max_rna_gaps, max_mismatches, chrom,
         if not aligns:
             continue
         for r_aln, d_aln, mm, rg, dg in aligns:
+            # Single "n edits" mode (CRISPRme --max-total-edits, the default web slider):
+            # the per-type caps stay wide open and the TOTAL mismatches+DNA+RNA bulges is
+            # the binding constraint. CRISPRme counts each bulge as one edit, so the total
+            # is mm + rna_gaps + dna_gaps. None disables the cap (independent per-type
+            # budgets only), preserving the existing genome-wide references exactly.
+            if max_total_edits is not None and (mm + rg + dg) > max_total_edits:
+                continue
             actual_len = len(r_aln.rstrip("-"))
             r_out, d_out = r_aln[:actual_len], d_aln[:actual_len]
             if not keep_alignment(r_out, d_out, pam, pam_5prime):
@@ -189,6 +196,11 @@ def main():
     p.add_argument("--max-mismatches", type=int, default=4)
     p.add_argument("--max-dna-gaps", type=int, default=1)
     p.add_argument("--max-rna-gaps", type=int, default=1)
+    p.add_argument("--max-total-edits", type=int, default=None,
+                   help="Cap on TOTAL edits (mismatches + DNA + RNA bulges) per "
+                        "alignment, matching CRISPRme's --max-total-edits / the default "
+                        "single-'n edits' web slider. Omit for independent per-type "
+                        "budgets only (the original genome-wide references).")
     p.add_argument("--chrom", required=True, help="Chromosome name for output (e.g. chr22)")
     p.add_argument("--output", required=True, help="Output TSV path")
     p.add_argument("--pam", default="",
@@ -208,7 +220,8 @@ def main():
         for strand_seq, strand in ((DNA, "+"), (reverse_complement(DNA), "-")):
             scan(args.rna, strand_seq, strand, args.max_dna_gaps, args.max_rna_gaps,
                  args.max_mismatches, args.chrom, writer,
-                 pam=args.pam.upper(), pam_5prime=args.pam_5prime)
+                 pam=args.pam.upper(), pam_5prime=args.pam_5prime,
+                 max_total_edits=args.max_total_edits)
 
 
 if __name__ == "__main__":
