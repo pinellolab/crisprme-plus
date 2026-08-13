@@ -149,11 +149,17 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         Example parameters
     """
 
+    # Pick an installed variant panel dynamically (the richest one) so the example never
+    # selects a dataset that isn't installed -- e.g. when only the combined 1000G+HGDP
+    # panel is present, not a standalone 1000G. Falls back to reference-only.
+    example_variant = _preferred_variant(
+        [o["value"] for o in get_variant_dataset_options("hg38")]
+    )
     return [
         "CTAACAGTTGCTTTTATCAC",  # guide to use
         "20bp-NGG-SpCas9",  # PAM/enzyme to use
         "hg38",  # ref genome to use
-        "1000G",  # variant dataset (single dropdown value)
+        example_variant,  # variant dataset (installed panel, chosen dynamically)
         4,  # MM (int, to match the dropdown option values)
         1,  # DNA bulges
         1,  # RNA bulges
@@ -422,32 +428,22 @@ def change_url(
             if not ref_var:
                 vcf_folder = "_"
                 handle_vcf.write(f"{vcf_folder}\n")
-            if VARIANTS_DATA[0] in ref_var:  # 1000 genomes
-                vcf_folder = "hg38_1000G"
-                sample_list.append("hg38_1000G.samplesID.txt")  # 1KGP samples
-                handle_vcf.write(f"{vcf_folder}\n")
-            if VARIANTS_DATA[1] in ref_var:  # human genome diversity project
-                vcf_folder = "hg38_HGDP"
-                sample_list.append("hg38_HGDP.samplesID.txt")  # HGDP samples
-                handle_vcf.write(f"{vcf_folder}\n")
-            if VARIANTS_DATA[2] in ref_var:  # custom data
-                vcf_folder = vcf_input
-                # custom samples
-                sample_list.append(f"{vcf_input}.samplesID.txt")
-                handle_vcf.write(f"{vcf_folder}\n")
-            # merged/combined or other registered panel (e.g. "1000G_HGDP"): the
-            # dropdown value maps to a single VCF folder "<genome>_<token>" scanned
-            # ONCE (the combined index is built from that one merged VCF). Additive
-            # and existence-guarded, so the 1000G/HGDP/PV paths above are unchanged.
+            # One dropdown value == one dataset == one enriched-genome/VCF folder, whose
+            # name is derived DYNAMICALLY as "<genome>_<dataset>" (no hardcoded 1000G/
+            # HGDP or hg38 literals). This works for any current or future genome/dataset
+            # (e.g. a pig susScr11 + a custom VCF) and for a merged panel whose dropdown
+            # token is itself "1000G_HGDP" -> folder "hg38_1000G_HGDP". The legacy
+            # free-text custom-VCF box (VARIANTS_DATA[2]) still maps to the typed name.
             _gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
             for _tok in ref_var:
-                if _tok in VARIANTS_DATA or not _tok:
+                if not _tok or _tok == "ref":
                     continue
-                _folder = f"{_gpref}_{_tok}"
-                if os.path.isdir(os.path.join(current_working_directory, "VCFs", _folder)):
-                    vcf_folder = _folder
-                    sample_list.append(f"{_folder}.samplesID.txt")
-                    handle_vcf.write(f"{vcf_folder}\n")
+                if _tok == VARIANTS_DATA[2] and vcf_input:  # free-text custom VCF
+                    vcf_folder = vcf_input
+                else:
+                    vcf_folder = f"{_gpref}_{_tok}"  # e.g. hg38_1000G, hg38_1000G_HGDP
+                sample_list.append(f"{vcf_folder}.samplesID.txt")
+                handle_vcf.write(f"{vcf_folder}\n")
     except OSError as e:
         raise e
     try:
@@ -580,11 +576,15 @@ def change_url(
     # bulges
     dna = int(dna)
     rna = int(rna)
-    max_bulges = rna
+    # Index name budget: mirror the validated CLI (crisprme.py complete-search) EXACTLY.
+    # There, bMax = max(bDNA, bRNA) and the TST index is named/built as
+    # "<pam>_<bMax+1>_<genome>" (the +1 is for alignments starting with a gap). So the
+    # folder budget N = max(dna,rna)+1 and the index supports up to N-1 = max(dna,rna)
+    # bulges of each type. Using dna+rna here would mislabel the index and diverge from
+    # the CLI/shell, which resolve by max(dna,rna)+1.
+    max_bulges = max(dna, rna) + 1
     assert isinstance(dna, int)
     assert isinstance(rna, int)
-    if dna > rna:
-        max_bulges = dna
     # base editing
     if be_start is None or not bool(be_start) or radio_be_value == "N":
         be_start = 1
@@ -606,30 +606,23 @@ def change_url(
     # Check if index exists, otherwise set generate_index to true
     genome_idx_list = []
     if genome_type == "ref":
-        genome_idx = f"{pam_char}_{max_bulges}_{genome_selected}"
-        genome_idx_list.append(genome_idx)
+        genome_idx_list.append(f"{pam_char}_{max_bulges}_{genome_selected}")
     else:
-        if VARIANTS_DATA[0] in ref_var:
-            genome_idx = f"{pam_char}_{max_bulges}_{genome_selected}+hg38_1000G"
-            genome_idx_list.append(genome_idx)
-        if VARIANTS_DATA[1] in ref_var:
-            genome_idx = f"{pam_char}_{max_bulges}_{genome_selected}+hg38_HGDP"
-            genome_idx_list.append(genome_idx)
-        if VARIANTS_DATA[2] in ref_var:
-            genome_idx = f"{pam_char}_{max_bulges}_{genome_selected}+{vcf_input}"
-            genome_idx_list.append(genome_idx)
-        # merged/combined or other registered panel: mirror the VCF-folder mapping
-        # above so the index name matches the built index (e.g.
-        # "NNN_3_hg38+hg38_1000G_HGDP"). Additive + existence-guarded.
+        # Variant index name == "<pam>_<budget>_<genome>+<enriched>", where the enriched
+        # genome name is derived DYNAMICALLY as "<genome>_<dataset>" (no hardcoded 1000G/
+        # HGDP or hg38 literals) -- mirroring the VCF-folder mapping above so it matches
+        # the built index (e.g. "NNN_3_hg38+hg38_1000G_HGDP") for any genome/dataset.
+        # Display-only: the shell resolves the actual precomputed index by scanning for a
+        # sufficient bulge budget, so this string need not match the on-disk budget.
         _gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
         for _tok in ref_var:
-            if _tok in VARIANTS_DATA or not _tok:
+            if not _tok or _tok == "ref":
                 continue
-            _folder = f"{_gpref}_{_tok}"
-            if os.path.isdir(os.path.join(current_working_directory, "VCFs", _folder)):
-                genome_idx_list.append(
-                    f"{pam_char}_{max_bulges}_{genome_selected}+{_folder}"
-                )
+            if _tok == VARIANTS_DATA[2] and vcf_input:  # free-text custom VCF
+                _enriched = vcf_input
+            else:
+                _enriched = f"{_gpref}_{_tok}"
+            genome_idx_list.append(f"{pam_char}_{max_bulges}_{genome_selected}+{_enriched}")
     genome_idx = ",".join(genome_idx_list)
     # Create .Params.txt file
     try:
@@ -987,7 +980,7 @@ def change_url(
         max_total_edits = int(max_edits_val) if max_edits_val is not None else 5
     # args 23-25 keep submit_job's defaults (cicd_test, vcf-filter-pass-values,
     # index_path) so that arg 26 (max_total_edits) lands in the right position.
-    cmd = f"{run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max(dna, rna)} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
+    cmd = f"{run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
     return ("/load", f"?job={job_id}")
@@ -1015,6 +1008,7 @@ def change_url(
         State("mms", "value"),
         State("dna", "value"),
         State("rna", "value"),
+        State("variant-dataset", "value"),
         State("modal", "is_open"),
     ],
 )
@@ -1029,6 +1023,7 @@ def check_input(
     mms: int,
     dna: int,
     rna: int,
+    variant_choice: str,
     is_open: bool,
 ) -> Tuple:
     """Check the correctness of input data and fields. If the input data are
@@ -1248,6 +1243,34 @@ def check_input(
                 "21bp, etc)"
             )
         )
+    # WEB-ONLY guard: never build an index on the fly. Block the web submit when no
+    # installed index covers the requested bulge depth. This only withholds the browser
+    # launch (update_style=True -> submit-job returns None below, so change_url never
+    # fires); the CLI complete-search build path in submit_job is deliberately intact.
+    # The bulge depth an index must support is max(dna, rna) -- exactly matching the CLI
+    # (bMax = max(bDNA, bRNA); index folder N = bMax+1) and the shell scan (N >= bMax+1).
+    # index_max_bulges returns N-1, so "index_max_bulges >= max(dna, rna)" is precisely
+    # the shell's index-availability test (incl. NNN-pamless + combined-dataset matching).
+    if genome_selected and pam and dna is not None and rna is not None:
+        need = max(int(dna), int(rna))
+        _ok = index_max_bulges(genome_selected, pam, None) >= need
+        _sel = (
+            []
+            if variant_choice in (None, "", "ref")
+            else [v for v in str(variant_choice).split("+") if v]
+        )
+        for _d in _sel:
+            _ok = _ok and (index_max_bulges(genome_selected, pam, _d) >= need)
+        if not _ok:
+            update_style = True
+            miss_input_list.append(
+                "No installed index supports %d bulge(s) (DNA %s / RNA %s) for this "
+                "genome / PAM / variant selection. The web app never builds an index on "
+                "the fly — reduce the DNA/RNA bulges, or download/build a matching index "
+                "first (Settings → Data manager, or 'crisprme.py download --what index' "
+                "/ 'crisprme.py build-index-only')."
+                % (need, dna, rna)
+            )
     miss_input = html.Div(
         [
             html.P("The following inputs are wrong or missing:"),
@@ -1461,6 +1484,26 @@ def change_placeholder_guide_textbox(guide_type: str) -> List:
     return [place_holder_text]
 
 
+def _preferred_variant(option_values: List[str]) -> str:
+    """Default variant selection, chosen DYNAMICALLY from the installed datasets —
+    NO hardcoded 1000G/HGDP or genome names, so it works for any future genome or
+    dataset (e.g. a pig susScr11 + a custom VCF). Prefer a variant-aware search over
+    reference-only, and among installed panels prefer the 'richest' one: the panel
+    whose dataset tokens are a superset of the most other panels (e.g. a combined
+    1000G+HGDP panel over either alone). Falls back to the first listed variant,
+    then 'ref' when none are installed."""
+    variants = [v for v in option_values if v and v != "ref"]
+    if not variants:
+        return "ref"
+
+    def _covers(v: str) -> int:
+        toks = set(v.split("_"))
+        return sum(1 for o in variants if o != v and set(o.split("_")) <= toks)
+
+    # most-covering (combined) first; ties broken by original listed order
+    return max(variants, key=lambda v: (_covers(v), -variants.index(v)))
+
+
 # change variants options
 @app.callback(
     [Output("variant-dataset", "options"), Output("variant-dataset", "value")],
@@ -1479,9 +1522,9 @@ def change_variant_dataset_options(genome_value: str) -> List:
     if genome_value is not None and not isinstance(genome_value, str):
         raise TypeError(f"Expected {str.__name__}, got {type(genome_value).__name__}")
     options = get_variant_dataset_options(genome_value)
-    valid_values = {o["value"] for o in options}
-    # prefer 1000G if available, else reference only
-    value = "1000G" if "1000G" in valid_values else "ref"
+    # default to a variant-aware search, preferring the richest installed panel —
+    # chosen dynamically (no hardcoded dataset/genome names).
+    value = _preferred_variant([o["value"] for o in options])
     return [options, value]
 
 
@@ -1614,10 +1657,10 @@ def index_page() -> html.Div:
     _def_genome = _default_genome()
     _def_cas = _default_cas()
     _def_pam = _default_pam(_def_cas)
-    _def_variants = (
-        "1000G"
-        if (_def_genome == "hg38" and variant_dataset_present("hg38", "1000G"))
-        else "ref"
+    # Default variant selection, chosen dynamically (mirrors change_variant_dataset_options
+    # so the seed and the genome-change callback agree; no hardcoded dataset names).
+    _def_variants = _preferred_variant(
+        [o["value"] for o in get_variant_dataset_options(_def_genome)]
     )
     _def_annotation = "EN" if _def_genome == "hg38" else "none"
     # seed the PAM dropdown options for the default nuclease so the default PAM
