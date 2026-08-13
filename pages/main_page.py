@@ -66,6 +66,81 @@ import string
 import os
 
 
+def _resolve_vcf_folder(genome_selected: str, tok: str) -> str:
+    """Resolve the on-disk ``VCFs/`` folder (and enriched-genome suffix) for a
+    (genome, dataset-token) pair.
+
+    By convention the folder is ``<genome>_<tok>`` (minus a trailing ``_ref``), and
+    that name is returned whenever it exists on disk -- so behaviour is UNCHANGED when
+    the genome and its VCF folders are named consistently (the shipped hg38 case, and
+    any custom genome named consistently). The fallback makes the web robust to a
+    genome directory whose name differs from the VCF folder's genome prefix -- e.g. a
+    per-chromosome ``hg38_chr22`` whose variants live in ``hg38_1000G`` -- by picking
+    the installed ``VCFs/*_<tok>`` folder whose genome prefix is the longest *token*
+    prefix of the selected genome. Returns the convention name if nothing matches, so
+    the downstream .list_vcfs / .samplesID / genome_idx stay self-consistent."""
+    gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
+    conv = f"{gpref}_{tok}"
+    vcf_dir = os.path.join(current_working_directory, "VCFs")
+    if os.path.isdir(os.path.join(vcf_dir, conv)):
+        return conv
+    best = None  # (folder_name, prefix)
+    if os.path.isdir(vcf_dir):
+        suffix = f"_{tok}"
+        for d in sorted(os.listdir(vcf_dir)):
+            if not os.path.isdir(os.path.join(vcf_dir, d)):
+                continue
+            if d == tok:
+                pfx = ""
+            elif d.endswith(suffix):
+                pfx = d[: -len(suffix)]
+            else:
+                continue
+            # accept only a whole-token genome prefix of the selected genome
+            if pfx == "" or gpref == pfx or gpref.startswith(pfx + "_"):
+                if best is None or len(pfx) > len(best[1]):
+                    best = (d, pfx)
+    return best[0] if best else conv
+
+
+def _ensure_samplesid(genome_selected: str, vcf_folder: str) -> None:
+    """Make sure ``samplesIDs/<vcf_folder>.samplesID.txt`` exists.
+
+    A combined/merged variant dataset (e.g. the batteries-included 1000G+HGDP index,
+    folder ``hg38_1000G_HGDP``) needs a single combined sample-ID list, but the data
+    repo ships only the per-dataset lists (``hg38_1000G``, ``hg38_HGDP``). Without the
+    combined file the search dies at the sample-ID step (submit_job greps a missing
+    file -> non-empty log_error -> exit 1). If it's missing, synthesize it by unioning
+    the component per-dataset lists (dataset suffix split on ``_``). Best effort: if the
+    components aren't all present, leave things unchanged."""
+    sdir = os.path.join(current_working_directory, "samplesIDs")
+    target = os.path.join(sdir, f"{vcf_folder}.samplesID.txt")
+    if os.path.isfile(target):
+        return
+    gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
+    dataset = vcf_folder[len(gpref) + 1:] if vcf_folder.startswith(gpref + "_") else vcf_folder
+    if "_" not in dataset:
+        return  # a single (non-merged) dataset; nothing to synthesize
+    comps = [os.path.join(sdir, f"{gpref}_{c}.samplesID.txt") for c in dataset.split("_")]
+    if not comps or not all(os.path.isfile(c) for c in comps):
+        return  # cannot synthesize from components
+    seen, rows = set(), []
+    for c in comps:
+        with open(c) as handle:
+            for line in handle:
+                if line.startswith("#") or not line.strip():
+                    continue
+                key = line.split("\t", 1)[0]
+                if key not in seen:
+                    seen.add(key)
+                    rows.append(line.rstrip("\n"))
+    try:
+        with open(target, "w") as out:
+            out.write("\n".join(rows) + "\n")
+    except OSError:
+        pass
+
+
 MAX_BULGES = 3  # max allowed bulges
 MAX_MMS = 7  # max allowed mismatches
 # mismatches, bulges and guides values
@@ -434,14 +509,18 @@ def change_url(
             # (e.g. a pig susScr11 + a custom VCF) and for a merged panel whose dropdown
             # token is itself "1000G_HGDP" -> folder "hg38_1000G_HGDP". The legacy
             # free-text custom-VCF box (VARIANTS_DATA[2]) still maps to the typed name.
-            _gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
             for _tok in ref_var:
                 if not _tok or _tok == "ref":
                     continue
                 if _tok == VARIANTS_DATA[2] and vcf_input:  # free-text custom VCF
                     vcf_folder = vcf_input
                 else:
-                    vcf_folder = f"{_gpref}_{_tok}"  # e.g. hg38_1000G, hg38_1000G_HGDP
+                    # resolve the actual on-disk VCFs/ folder (robust to a genome dir
+                    # whose name differs from the VCF folder's genome prefix)
+                    vcf_folder = _resolve_vcf_folder(genome_selected, _tok)
+                # a batteries-included combined index ships without a combined sample-ID
+                # list; synthesize it from the per-dataset lists so the search doesn't die
+                _ensure_samplesid(genome_selected, vcf_folder)
                 sample_list.append(f"{vcf_folder}.samplesID.txt")
                 handle_vcf.write(f"{vcf_folder}\n")
     except OSError as e:
@@ -614,14 +693,15 @@ def change_url(
         # the built index (e.g. "NNN_3_hg38+hg38_1000G_HGDP") for any genome/dataset.
         # Display-only: the shell resolves the actual precomputed index by scanning for a
         # sufficient bulge budget, so this string need not match the on-disk budget.
-        _gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
         for _tok in ref_var:
             if not _tok or _tok == "ref":
                 continue
             if _tok == VARIANTS_DATA[2] and vcf_input:  # free-text custom VCF
                 _enriched = vcf_input
             else:
-                _enriched = f"{_gpref}_{_tok}"
+                # same resolver as the VCF-folder block above, so the index name
+                # matches the enriched genome/index actually on disk
+                _enriched = _resolve_vcf_folder(genome_selected, _tok)
             genome_idx_list.append(f"{pam_char}_{max_bulges}_{genome_selected}+{_enriched}")
     genome_idx = ",".join(genome_idx_list)
     # Create .Params.txt file

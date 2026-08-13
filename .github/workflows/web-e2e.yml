@@ -34,6 +34,16 @@ jobs:
       - name: Build Python-3.11 image (linux/amd64)
         run: docker build -t crisprme:web .
 
+      # Regression guard for the alpha bug where a batteries-included install (index
+      # only, empty VCFs/) offered only "Reference only" in the variant dropdown, and
+      # the combined search lacked its samplesID. Runs inside the built image (needs
+      # the real pages/ + dash/pandas) against a self-built mock install; no server.
+      - name: Variant-dropdown regression (batteries index-only)
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            crisprme:web python -u /t/test_variant_dropdown.py
+
       - name: Start the web interface
         run: |
           docker run -d --name web -p 8090:8080 crisprme:web crisprme.py web-interface
