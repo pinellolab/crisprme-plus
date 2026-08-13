@@ -509,7 +509,6 @@ def change_url(
             # (e.g. a pig susScr11 + a custom VCF) and for a merged panel whose dropdown
             # token is itself "1000G_HGDP" -> folder "hg38_1000G_HGDP". The legacy
             # free-text custom-VCF box (VARIANTS_DATA[2]) still maps to the typed name.
-            _gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
             for _tok in ref_var:
                 if not _tok or _tok == "ref":
                     continue
@@ -694,7 +693,6 @@ def change_url(
         # the built index (e.g. "NNN_3_hg38+hg38_1000G_HGDP") for any genome/dataset.
         # Display-only: the shell resolves the actual precomputed index by scanning for a
         # sufficient bulge budget, so this string need not match the on-disk budget.
-        _gpref = genome_selected[:-4] if genome_selected.endswith("_ref") else genome_selected
         for _tok in ref_var:
             if not _tok or _tok == "ref":
                 continue
