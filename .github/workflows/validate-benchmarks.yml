@@ -42,19 +42,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Free disk + add swap (complete-test builds many indexes + enriched genomes)
+      - name: Add swap (the variant bulge-2 index build is memory-heavy)
         run: |
-          echo "before:"; df -h /; free -h || true
-          # remove preinstalled toolchains we don't use (~20-30 GB) so the index dirs +
-          # variant-enriched genomes don't exhaust the runner disk ("lost communication")
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup \
-            "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
-          sudo docker image prune -af 2>/dev/null || true
-          # add swap so a memory spike during a bulge-2 index build cannot OOM the runner
-          sudo fallocate -l 16G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384
-          sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
-          echo "after:"; df -h /; free -h || true
+          # The runner has ample disk (~87 GB free) but only ~16 GB RAM + 3 GB swap;
+          # building the bulge-2 (NGG_3/TTTV_3) index over the IUPAC variant-enriched
+          # chr22 spikes past that and the runner OOMs ("lost communication"). Add a large
+          # dd-backed swapfile (fallocate swapfiles can fail swapon) ALONGSIDE the existing
+          # swap so the spike lands in swap instead of killing the runner.
+          echo "before:"; free -h; df -h /
+          sudo rm -f /swapfile2 || true
+          sudo dd if=/dev/zero of=/swapfile2 bs=1M count=32768 status=none
+          sudo chmod 600 /swapfile2
+          sudo mkswap /swapfile2
+          sudo swapon /swapfile2
+          echo "after:"; free -h
 
       - name: Pull CRISPRme image
         run: docker pull "$IMG"
