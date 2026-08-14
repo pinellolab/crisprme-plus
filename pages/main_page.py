@@ -1058,6 +1058,11 @@ def change_url(
         max_total_edits = int(mms) + int(dna) + int(rna)
     else:
         max_total_edits = int(max_edits_val) if max_edits_val is not None else 5
+    # Floor the total-edits cap at 1. A cap of 0 hits a crispritz bug (--max-edits 0
+    # returns an empty set on large indexes, dropping even the on-target); the slider
+    # already starts at 1, this also guards the advanced all-zero path. A cap of 1
+    # still includes the 0-edit on-target (Total 0 <= 1), so nothing useful is lost.
+    max_total_edits = max(1, max_total_edits)
     # args 23-25 keep submit_job's defaults (cicd_test, vcf-filter-pass-values,
     # index_path) so that arg 26 (max_total_edits) lands in the right position.
     cmd = f"{run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
@@ -1880,16 +1885,17 @@ def index_page() -> html.Div:
                     ),
                     dcc.Slider(
                         id="max-edits-slider",
-                        min=0,
+                        min=1,
                         max=5,
                         step=1,
                         value=3,
-                        marks={i: str(i) for i in range(6)},
+                        marks={i: str(i) for i in range(1, 6)},
                         tooltip={"placement": "bottom", "always_visible": False},
                     ),
                     html.P(
                         "Total number of differences (mismatches + DNA/RNA bulges) "
-                        "allowed between a guide and an off-target. 3 is recommended (raise for a deeper, slower search).",
+                        "allowed between a guide and an off-target. 3 is recommended (raise for a deeper, slower search). "
+                        "The on-target (0 edits) is always reported at any setting.",
                         style={"font-size": "0.8rem", "color": "#666"},
                     ),
                     html.P(
