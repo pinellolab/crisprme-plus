@@ -744,6 +744,13 @@ def change_url(
             # be tighter than the per-type caps above); recording it lets the report show
             # the real cap rather than only the looser per-type numbers.
             handle_params.write(f"Max_total_edits\t{max_total_edits}\n")
+            # Which threshold control the user used: 'advanced' (explicit per-type
+            # mm/DNA/RNA caps) or 'simple' (the single "Max edits" slider). The result
+            # title uses this to avoid showing per-type caps that contradict a tighter
+            # total cap in simple mode.
+            handle_params.write(
+                f"Threshold_mode\t{'advanced' if advanced_open else 'simple'}\n"
+            )
             handle_params.write(f"Annotation\t{annotation_name}\n")
             # nuclease is derived from the PAM token (<len>bp-<motif>-<enzyme>),
             # since the separate Cas-protein selector was removed
@@ -837,7 +844,7 @@ def change_url(
                                     out, err = date_new.communicate()
                                     log_to_write = "\n".join(log_data[:-1])
                                     date_write = str(
-                                        f"{log_to_write}\nJob\nDone\t"
+                                        f"{log_to_write}\nJob\tDone\t"
                                         f"{out.decode('UTF-8').strip()}"
                                     )
                         except OSError as e:

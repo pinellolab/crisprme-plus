@@ -197,6 +197,17 @@ def result_page(job_id: str) -> html.Div:
                 ),
                 None,
             )
+            # Which threshold control governed the search: 'simple' (the single
+            # "Max edits" slider) or 'advanced' (explicit per-type mm/DNA/RNA caps).
+            # Absent for jobs created before this field -> inferred below.
+            threshold_mode = next(
+                (
+                    s.split("\t")[-1]
+                    for s in all_params.split("\n")
+                    if s.startswith("Threshold_mode")
+                ),
+                None,
+            )
     except OSError as e:
         raise e
     finally:
@@ -321,27 +332,40 @@ def result_page(job_id: str) -> html.Div:
                 color="warning",
             )
         )
-    _summary_parts = [
-        "Result Summary",
-        "-",
-        genome_name,
-        "-",
-        pam_name,
-        "-",
-        "Mismatches",
-        str(mms),
-        "-",
-        "DNA bulges",
-        bulge_dna,
-        "-",
-        "RNA bulges",
-        bulge_rna,
-    ]
-    # Lead the reader with the binding constraint: the total mismatches+bulges cap the
-    # user actually set (the "Max edits" slider). The per-type caps above can be looser
-    # than this total, so without it the title can overstate how broad the search was.
-    if max_total_edits is not None:
-        _summary_parts += ["-", "Max edits (mismatches + bulges)", str(max_total_edits)]
+    # Present the title according to which threshold control governed the search.
+    # SIMPLE mode: show ONLY the single "Max edits" (mismatches + bulges) cap the user
+    # set. The per-type mm/DNA/RNA caps are wide internal defaults (or the ones Load
+    # Example fills in), and showing them next to a tighter total cap is contradictory
+    # (e.g. "Mismatches 4 - DNA bulges 1 - RNA bulges 1 - Max edits 1"). ADVANCED mode:
+    # show the explicit per-type caps the user chose (the total cap equals their sum).
+    try:
+        _mte_int = int(max_total_edits) if max_total_edits is not None else None
+    except (TypeError, ValueError):
+        _mte_int = None
+    try:
+        _per_type_sum = int(mms) + int(bulge_dna) + int(bulge_rna)
+    except (TypeError, ValueError):
+        _per_type_sum = None
+    if threshold_mode == "simple":
+        _is_simple = True
+    elif threshold_mode == "advanced":
+        _is_simple = False
+    else:
+        # Pre-existing job without the field: a total cap tighter than the per-type
+        # sum means the "Max edits" slider governed (simple mode). If the cap wasn't
+        # recorded at all (pre-alpha.15 job), fall back to the per-type title.
+        _is_simple = (
+            _mte_int is not None and _per_type_sum is not None and _mte_int < _per_type_sum
+        )
+    _summary_parts = ["Result Summary", "-", genome_name, "-", pam_name]
+    if _is_simple and _mte_int is not None:
+        _summary_parts += ["-", "Max edits (mismatches + bulges)", str(_mte_int)]
+    else:
+        _summary_parts += [
+            "-", "Mismatches", str(mms),
+            "-", "DNA bulges", bulge_dna,
+            "-", "RNA bulges", bulge_rna,
+        ]
     final_list.append(html.H3(" ".join(_summary_parts)))
     # short description
     if genome_type == "both":

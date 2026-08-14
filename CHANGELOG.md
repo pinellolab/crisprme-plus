@@ -11,6 +11,22 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.16] - 2026-08-14
+
+### Fixed
+- **Result title is now mode-aware and no longer self-contradictory.** In simple mode
+  the title listed the per-type mismatch/DNA/RNA caps *and* the total "Max edits" cap,
+  which contradict when the total cap is tighter (e.g. `Mismatches 4 - DNA bulges 1 -
+  RNA bulges 1 - Max edits 1`). Now a simple-mode search shows only `Max edits
+  (mismatches + bulges) N` (the single control the user set), while an advanced search
+  shows the explicit per-type caps. `change_url` records `Threshold_mode` (simple/
+  advanced) in `.Params.txt`; older jobs are inferred (a total cap tighter than the
+  per-type sum ⇒ simple) and pre-alpha.15 jobs fall back to the per-type title.
+- **Dedup reuse wrote a malformed completion marker.** When a resubmission reused a
+  prior clean result, the marker was written `Job\nDone` (newline) instead of
+  `Job\tDone` (tab), so the dedup check and the status page's completion detection
+  would not recognize the reused job as finished. Fixed to write `Job\tDone`.
+
 ## [2.2.0-alpha.15] - 2026-08-14
 
 ### Fixed
