@@ -670,14 +670,14 @@ variants.
 
 ### A search dies with no error / the container exits
 
-**Cause:** Docker ran out of memory (OOM). A default 1000G+HGDP variant search peaks
-at more than 32 GB during post-processing. Signs: the job stops advancing,
+**Cause:** Docker ran out of memory (OOM). Signs: the job stops advancing,
 `log_error.txt` is empty, and the terminal returns to the prompt (or exits with
-code 137).
+code 137). A genome-wide 1000G+HGDP search is the heaviest case; give it enough RAM.
 
 **Steps to resolve:**
 
-1. Raise Docker Desktop memory to **≥32 GB** (64 GB recommended).
+1. Raise Docker Desktop memory to **≥32 GB** (64 GB recommended for genome-wide
+   population-variant runs).
 2. Delete the incomplete `Results/<name>/` folder and resubmit.
 3. Or reduce the cost of the search: select **Reference only** or lower
    **Maximum edits**.

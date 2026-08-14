@@ -41,10 +41,10 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 — just install Docker, then:
 
 > **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**,
-> give Docker **16 GB** to start; the default genome-wide 1000G+HGDP variant search is
-> memory-intensive, so use **32 GB (64 GB recommended)** for real runs — peak usage is in
-> results post-processing and can exceed 32 GB. (On Linux/Docker Engine the container uses
-> host memory directly.) See [System Requirements](#0-system-requirements).
+> give Docker **16 GB** to start; the genome-wide 1000G+HGDP variant search is
+> heavier, so use **32 GB (64 GB recommended)** for real runs. (On Linux/Docker
+> Engine the container uses host memory directly.) See
+> [System Requirements](#0-system-requirements).
 
 ```bash
 mkdir -p ~/crisprme && cd ~/crisprme
@@ -99,13 +99,10 @@ To ensure optimal performance, CRISPRme requires the following:
 - **Minimum Memory (RAM)**: 32 GB
   <br>Suitable for single-chromosome tests and small, targeted analyses.
 
-- **Whole-genome / population-scale analyses**: 64 GB or more
-  <br>Required for whole-genome searches with large variant datasets. In practice
-  a genome-wide search against the full 1000 Genomes dataset peaks well above
-  32 GB (observed ~64–100 GB during the results post-processing stage), so 64 GB
-  should be treated as the practical floor for whole-genome + population-variant
-  runs, not merely a recommendation. Note that peak memory occurs in
-  post-processing rather than the search itself.
+- **Whole-genome / population-scale analyses**: 32 GB minimum, 64 GB recommended
+  <br>For whole-genome searches with large variant datasets (e.g. genome-wide
+  1000G+HGDP). 32 GB is a workable floor and 64 GB is comfortable for concurrent
+  per-chromosome post-analysis.
 
 For best results, confirm that your system meets or exceeds these specifications 
 before running CRISPRme. To estimate the cost of a large search up front, see

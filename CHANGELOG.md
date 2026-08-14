@@ -11,6 +11,22 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **A resubmitted search no longer resurfaces a previously-FAILED job.** Results are
+  deduplicated by search parameters; the dedup reused any matching prior job, so
+  re-running a search whose earlier attempt had failed (e.g. left behind by a bug
+  since fixed) returned that stale failure — surfaced in the UI as "The selected
+  result encountered some errors, please remove it and try to submit again." Dedup
+  now skips prior results that did not finish cleanly (non-empty `log_error.txt` or
+  no `Job Done`) and runs the search fresh instead.
+
+### Changed
+- Docs: dropped the stale "peak memory is in post-processing and can exceed
+  32 GB / ~64–100 GB" guidance (the alpha.12 streamed SNP-dict load removed that
+  post-analysis spike); the 16 / 32 / 64 GB tiers stay.
+
+## [2.2.0-alpha.13] - 2026-08-14
+
 ### Changed
 - **Post-analysis performance** (follow-up to the streaming dict-load fix):
   - Added the `yajl` C library + `cffi` so `ijson` uses its fast `yajl2_cffi` C

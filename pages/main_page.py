@@ -819,6 +819,21 @@ def change_url(
                                     )
                         except OSError as e:
                             raise e
+                        # Only dedup onto a prior run that FINISHED CLEANLY. A
+                        # failed/incomplete prior result (no "Job\tDone", or a
+                        # non-empty log_error.txt -- e.g. left behind by a bug that
+                        # has since been fixed) must NOT be resurfaced: reusing it
+                        # shows "The selected result encountered some errors, please
+                        # remove it and try to submit again". Skip it so THIS
+                        # submission runs fresh instead of inheriting the old error.
+                        _prev_err = os.path.join(
+                            current_working_directory, RESULTS_DIR, res_dir, "log_error.txt"
+                        )
+                        _prev_failed = (
+                            os.path.exists(_prev_err) and os.path.getsize(_prev_err) > 0
+                        )
+                        if (not adj_date) or _prev_failed:
+                            continue  # unhealthy prior result -> do not dedup onto it
                         if adj_date:
                             try:
                                 with open(
