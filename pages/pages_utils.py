@@ -1545,10 +1545,16 @@ def get_annotation_options(genome: str) -> List:
     """
     genome_norm = (genome or "").replace(" ", "_")
     options = [{"label": "No annotation", "value": "none"}]
-    if genome_norm == "hg38" and os.path.isfile(
-        os.path.join(current_working_directory, ANNOTATIONS_DIR, "dhs+encode+gencode.hg38.bed")
+    _anndir = os.path.join(current_working_directory, ANNOTATIONS_DIR)
+    # the built-in bundle ships (and downloads) as a bgzipped .bed.gz; accept either
+    # form so the option surfaces on a fresh batteries install (sort_annotation
+    # transparently decompresses the .gz at search time). Checking only ".bed" here
+    # was the bug that left every default search with "No annotation".
+    if genome_norm == "hg38" and (
+        os.path.isfile(os.path.join(_anndir, "dhs+encode+gencode.hg38.bed"))
+        or os.path.isfile(os.path.join(_anndir, "dhs+encode+gencode.hg38.bed.gz"))
     ):
-        options.append({"label": "ENCODE cCREs + GENCODE genes (hg38)", "value": "EN"})
+        options.append({"label": "Functional regions: ENCODE cCREs (SCREEN) + DHS + GENCODE (hg38)", "value": "EN"})
     for ann in get_custom_annotations():
         val = ann["value"] if isinstance(ann, dict) else ann
         # match the genome token in the filename; skip the built-in already covered

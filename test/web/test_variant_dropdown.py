@@ -41,12 +41,16 @@ for sub in (
     "genome_library/NGG_3_hg38",
     "genome_library/NGG_3_hg38+hg38_1000G_HGDP",
     "genome_library/NGG_3_hg38+hg38_1000G_HGDP_INDELS",
+    "Annotations",
 ):
     os.makedirs(os.path.join(d, sub), exist_ok=True)
 with open(os.path.join(d, "samplesIDs/hg38_1000G.samplesID.txt"), "w") as fh:
     fh.write("#SAMPLE\tPOP\tSUPERPOP\tSEX\nNA1\tGBR\tEUR\tM\n")
 with open(os.path.join(d, "samplesIDs/hg38_HGDP.samplesID.txt"), "w") as fh:
     fh.write("#SAMPLE\tPOP\tSUPERPOP\tSEX\nHG1\tFrench\tEUR\tM\n")
+# the batteries download ships the annotation bundle bgzipped (.bed.gz)
+with open(os.path.join(d, "Annotations/dhs+encode+gencode.hg38.bed.gz"), "w") as fh:
+    fh.write("")
 
 # 1) discovery: the installed combined index must be offered as a variant option
 from pages import pages_utils  # noqa: E402
@@ -55,6 +59,13 @@ pages_utils.current_working_directory = d
 vals = [o["value"] for o in pages_utils.get_variant_dataset_options("hg38")]
 check("1000G_HGDP" in vals,
       f"variant dropdown surfaces the installed combined index (got {vals})")
+
+# 1b) annotation: the shipped bundle is bgzipped (.bed.gz) -- the option must still
+# surface (checking only ".bed" left every default search with "No annotation"), and
+# the callback defaults the value to it so annotations are ON by default.
+avals = [o["value"] for o in pages_utils.get_annotation_options("hg38")]
+check("EN" in avals,
+      f"annotation option surfaces for the bgzipped bundle -> ON by default (got {avals})")
 
 # 2) resolver + 3) combined-samplesID synthesis (main_page helpers)
 from pages import main_page  # noqa: E402
