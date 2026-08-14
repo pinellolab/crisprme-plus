@@ -423,10 +423,24 @@ while read vcf_f; do
 		fi
 
 		# START STEP 2.3 - indels indexing
-		indels_index_dir="$current_working_directory/genome_library/${true_pam}_${bMax}_${ref_name}+${vcf_name}_INDELS"
+		# The INDELS index is the companion of the RESOLVED variant index (idx_var) and
+		# carries idx_var's OWN <PAM>_<N> prefix -- which may differ from the requested
+		# (true_pam, bMax): a batteries index with N > bMax, or a pamless NNN index,
+		# serves the search via the flexible scan above. Deriving the INDELS name from
+		# idx_var (instead of reconstructing ${true_pam}_${bMax}_..._INDELS) lets a
+		# precomputed/batteries index be found without an (impossible) rebuild.
+		idx_var_base=$(basename "$idx_var")
+		idx_prefix="${idx_var_base%"_${ref_name}+${vcf_name}"}"  # <PAM>_<N>
+		idx_pam="${idx_prefix%_*}"
+		idx_n="${idx_prefix##*_}"
+		indels_index_dir="$current_working_directory/genome_library/${idx_var_base}_INDELS"
 		indels_out="$current_working_directory/Genomes/${ref_name}+${vcf_name}_INDELS"
 
-		if ! [ -d "$indels_index_dir" ]; then
+		if [ -d "$indels_index_dir" ]; then
+			echo "Indels index present ($(basename "$indels_index_dir"))"
+			echo -e 'Indexing Indels\tEnd\t'$(date) >>"$log"
+		elif [ -d "$indels_out" ]; then
+			# source fake-chrom genome present (on-demand enrichment path) -> build it.
 			# use mkdir lock to prevent concurrent builds
 			_lock="${indels_index_dir}.lock"
 			if mkdir "$_lock" 2>/dev/null; then
@@ -434,10 +448,10 @@ while read vcf_f; do
 				"$starting_dir/pool_index_indels.py" \
 					"$indels_out/" \
 					"$pam_file" \
-					"$true_pam" \
+					"$idx_pam" \
 					"$ref_name" \
 					"$vcf_name" \
-					"$bMax" \
+					"$idx_n" \
 					"$ncpus"
 
 				if [ -s "$logerror" ]; then
@@ -454,7 +468,11 @@ while read vcf_f; do
 				while [ -d "$_lock" ]; do sleep 5; done
 			fi
 		else
-			echo "Indels Index already present"
+			# Precomputed/batteries variant index whose INDELS companion is absent AND whose
+			# source fake-chrom genome was not shipped: indels can neither be searched nor
+			# (re)built. Fail clearly instead of crashing inside pool_index_indels.py.
+			printf "ERROR: INDELS index '%s' is missing and cannot be built (source genome '%s' is not installed). The precomputed index looks incomplete — re-download it: crisprme.py download --what index --index-name %s\n" "$(basename "$indels_index_dir")" "$(basename "$indels_out")" "$idx_var_base" >&2
+			exit 1
 		fi
 		# END STEP 2.3 - indels indexing
 	fi
@@ -584,7 +602,7 @@ while read vcf_f; do
 			echo -e "Search INDELs Start"
 			cd $starting_dir
 			# TODO: REMOVE POOL SCRIPT FROM PROCESSING
-			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $bMax $mm $bDNA $bRNA "$output_folder" $true_pam "$current_working_directory/" "$ncpus" "$max_total_edits"
+			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits"
 			awk '($3 !~ "n") {print $0}' "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" >"$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp"
 			mv "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp" "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
 		else

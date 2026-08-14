@@ -11,6 +11,20 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **Variant indel indexing/search now resolves the INDELS companion from the
+  actually-resolved variant index** instead of reconstructing an exact
+  `<true_pam>_<bMax>_..._INDELS` name. A batteries/precomputed index whose N or
+  PAM differs from the request (e.g. the shipped `NGG_3` served against a
+  `bMax=2` search, or a pamless `NNN` index) was not matched, so the pipeline
+  attempted an impossible rebuild and crashed in `pool_index_indels.py`
+  (`FileNotFoundError: .../Genomes/<ref>+<vcf>_INDELS/`). The INDELS index, its
+  search path, and the on-demand builder now all key off the index's own
+  `<PAM>_<N>` prefix (consistent with `build-index-only`/`publish`/`download`),
+  so newly built-and-uploaded indexes work generally. When the companion is
+  genuinely absent and cannot be rebuilt (no source genome), the run now fails
+  with a clear "re-download the index" message instead of a raw traceback.
+
 ### Added
 - **Annotation manager** in Settings → Data Manager: a per-genome
   *Manage annotations (enable / disable)* checklist backed by a persisted

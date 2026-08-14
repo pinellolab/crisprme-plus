@@ -61,6 +61,10 @@ guide_file = sys.argv[4]
 guide_name = os.path.basename(sys.argv[4])
 pam_file = sys.argv[5]
 pam_name = os.path.basename(sys.argv[5])
+# bMax / true_pam here are the RESOLVED variant index's N and PAM (its <PAM>_<N>
+# prefix), so the INDELS index path below matches the installed/precomputed index
+# even when it differs from the requested budget (e.g. a batteries index with N>bMax,
+# or a pamless NNN index). bDNA/bRNA below remain the user's requested bulges.
 bMax = sys.argv[6]
 mm = sys.argv[7]
 bDNA = sys.argv[8]
