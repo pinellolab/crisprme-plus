@@ -11,6 +11,27 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **Annotation manager** in Settings → Data Manager: a per-genome
+  *Manage annotations (enable / disable)* checklist backed by a persisted
+  `.enabled.json` manifest, plus format validation on every uploaded annotation
+  BED (≥4 tab columns, integer `start ≤ end`, whitespace-free label, size cap;
+  malformed files are rejected with a clear message and nothing is written).
+  Enabled tracks are merged on demand into a single cached active annotation and
+  applied automatically to every search.
+
+### Changed
+- Annotations are now applied automatically from the enabled set rather than
+  chosen per search. The annotation dropdown was removed from the search form
+  (Step 3 is now just email + job name); the built-in
+  ENCODE cCREs (SCREEN) + DHS + GENCODE bundle is enabled by default so
+  annotations work out of the box.
+- The **Maximum edits** slider is floored at 1 (the on-target / 0-edit hit is
+  always reported at any setting), avoiding an empty-result edge case on large
+  precomputed indexes.
+- Search-submission form: consistent left indentation for the PAM and
+  variant-dataset dropdowns and the submit/example buttons.
+
 ## [2.2.0] - 2026-08-06
 
 ### Added
