@@ -1795,7 +1795,7 @@ def index_page() -> html.Div:
                     value=_def_pam,
                     clearable=False,
                     id="available-pam",
-                    style={"width": "300px", "margin": "0 auto"},
+                    style={"width": "300px"},
                 )
             ),
         ],
@@ -1835,7 +1835,7 @@ def index_page() -> html.Div:
                     value=_def_variants,
                     clearable=False,
                     id="variant-dataset",
-                    style={"width": "300px", "margin": "0 auto"},
+                    style={"width": "300px"},
                 ),
             ),
         ]
@@ -2077,10 +2077,11 @@ def index_page() -> html.Div:
             html.Button(
                 "Submit",
                 id="check-job",
-                style={"background-color": "#E6E6E6", "width": "260px"},
+                style={"background-color": "#E6E6E6", "width": "300px"},
             ),
             html.Button("", id="submit-job", style={"display": "none"}),
-        ]
+        ],
+        style={"textAlign": "left"},  # left-align to match the inputs/dropdowns
     )
     # load example button
     example_content = html.Div(
@@ -2088,9 +2089,10 @@ def index_page() -> html.Div:
             html.Button(
                 "Load Example",
                 id="load-example-button",
-                style={"background-color": "#E6E6E6", "width": "260px"},
+                style={"background-color": "#E6E6E6", "width": "300px"},
             ),
-        ]
+        ],
+        style={"textAlign": "left"},
     )
     # terms and conditions link
     terms_and_conditions_content = html.Div(
