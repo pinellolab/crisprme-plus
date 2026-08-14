@@ -1727,9 +1727,16 @@ def index_page() -> html.Div:
         for p in get_available_PAM()
         if _def_cas and "-".join(p["value"].split(".")[0].split("-")[2:]) == _def_cas
     ]
-    # page intro — descriptive blurb + paper/Github links removed per maintainer
-    # request; the form starts directly at "Select gRNA".
-    introduction_content = html.Div([])
+    # page intro — the CRISPRme+ wordmark logo above the first step, then the form
+    # starts directly at "Select gRNA".
+    introduction_content = html.Div(
+        html.Img(
+            src="assets/crisprme-logo.svg",
+            style={"height": "80px"},
+            alt="CRISPRme+",
+        ),
+        style={"textAlign": "center", "margin": "4px 0 20px"},
+    )
     # warnings
     modal = html.Div(
         [
@@ -1767,17 +1774,27 @@ def index_page() -> html.Div:
             dcc.Textarea(
                 id="text-guides",
                 placeholder=str("GAGTCCGAGCAGAAGAAGAA\n" "CCATCGGTGGCCGTTTGCCC"),
-                style={"width": "300px", "height": "30px"},
+                style={"width": "300px", "height": "60px", "fontSize": "1rem"},
             ),
             dbc.FormText(
                 str(
                     "Spacer must be provided as a DNA sequence without a PAM. "
-                    "A maximum of 100 spacer sequences can be provided. If "
-                    "using the sequence extraction feature, only the first 100 "
-                    "spacer sequences (starting from the top strand) will be "
-                    "extracted.*"
+                    "Multiple spacers can be entered, one per line. To process "
+                    "many spacers at once we recommend the command-line version "
+                    "of CRISPRme+ (see the offline instructions below)."
                 ),
                 color="secondary",
+                style={"fontSize": "0.95rem"},
+            ),
+            # Load-example lives at the bottom of this box so a new user can populate
+            # the whole form with one click right where they start.
+            html.Div(
+                html.Button(
+                    "Load Example",
+                    id="load-example-button",
+                    style={"background-color": "#E6E6E6", "width": "300px"},
+                ),
+                style={"textAlign": "left", "marginTop": "12px"},
             ),
         ],
         style={"width": "300px"},  # NOTE same as text-area
@@ -1867,7 +1884,7 @@ def index_page() -> html.Div:
                         "Total number of differences (mismatches + DNA/RNA bulges) "
                         "allowed between a guide and an off-target. 3 is recommended (raise for a deeper, slower search). "
                         "The on-target (0 edits) is always reported at any setting.",
-                        style={"font-size": "0.8rem", "color": "#666"},
+                        style={"font-size": "1rem", "color": "#555"},
                     ),
                     html.P(
                         "Note: this limit is applied during the search against the "
@@ -1875,7 +1892,7 @@ def index_page() -> html.Div:
                         "appear with a slightly higher mismatch+bulge count in the "
                         "results (its count is reported against the reference); "
                         "reference off-targets always stay within the limit.",
-                        style={"font-size": "0.75rem", "color": "#888", "font-style": "italic"},
+                        style={"font-size": "0.95rem", "color": "#777", "font-style": "italic"},
                     ),
                 ],
                 style={"max-width": "420px", "margin-bottom": "12px"},
@@ -1886,7 +1903,7 @@ def index_page() -> html.Div:
                 id="advanced-thresholds-toggle",
                 color="link",
                 n_clicks=0,
-                style={"padding": "0", "font-size": "0.9rem"},
+                style={"padding": "0", "font-size": "1rem"},
             ),
             dbc.Collapse(
                 html.Div(
@@ -1894,7 +1911,7 @@ def index_page() -> html.Div:
                         html.P(
                             "Per-type caps. Left at their maxima the slider above "
                             "governs; lower them to further restrict a single type.",
-                            style={"font-size": "0.8rem", "color": "#666"},
+                            style={"font-size": "0.95rem", "color": "#555"},
                         ),
                         html.Div(  # mismatches box
                             [
@@ -1938,8 +1955,8 @@ def index_page() -> html.Div:
                         html.Div(
                             id="bulge-guard-note",
                             style={
-                                "font-size": "0.8rem",
-                                "color": "#666",
+                                "font-size": "0.95rem",
+                                "color": "#555",
                                 "margin-top": "6px",
                             },
                         ),
@@ -2047,6 +2064,20 @@ def index_page() -> html.Div:
                     style={"width": "300px"},
                 )
             ),
+            dbc.FormText(
+                [
+                    "Tick the box and enter your address to get an email when the "
+                    "job finishes. Sending requires a one-time mail-server setup in ",
+                    html.A(
+                        "Settings → Email notifications",
+                        href=os.path.join(URL, "settings"),
+                    ),
+                    " (SMTP host, sender address and an app password). Until that is "
+                    "configured the job still runs — it just won't email you.",
+                ],
+                color="secondary",
+                style={"fontSize": "0.95rem"},
+            ),
         ]
     )
     # job name box
@@ -2083,17 +2114,7 @@ def index_page() -> html.Div:
         ],
         style={"textAlign": "left"},  # left-align to match the inputs/dropdowns
     )
-    # load example button
-    example_content = html.Div(
-        [
-            html.Button(
-                "Load Example",
-                id="load-example-button",
-                style={"background-color": "#E6E6E6", "width": "300px"},
-            ),
-        ],
-        style={"textAlign": "left"},
-    )
+    # (Load Example button moved to the bottom of the "Select gRNA" box above.)
     # terms and conditions link
     terms_and_conditions_content = html.Div(
         [
@@ -2164,8 +2185,6 @@ def index_page() -> html.Div:
                                 job_name_content,
                                 html.Br(),
                                 submit_content,
-                                html.Br(),
-                                example_content,
                                 terms_and_conditions_content,
                             ]
                         ),
@@ -2194,7 +2213,14 @@ def index_page() -> html.Div:
     # intro text and footer line up with the submitting form
     index_page = html.Div(
         final_list,
-        style={"maxWidth": "680px", "margin": "0 auto", "padding": "24px 12px"},
+        style={
+            "maxWidth": "680px",
+            "margin": "0 auto",
+            "padding": "24px 12px",
+            # larger, more legible base font for the whole submission form (headings,
+            # labels, help text and radio/checkbox labels all inherit from here)
+            "fontSize": "1.05rem",
+        },
     )
     return index_page
 
