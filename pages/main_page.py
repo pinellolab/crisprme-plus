@@ -211,6 +211,11 @@ def split_filter_part(filter_part: str) -> Tuple:
         # atomically fixes the race (duplicate of update_base_editing_dropdown's output).
         Output("be-window-start", "options", allow_duplicate=True),
         Output("be-window-stop", "options", allow_duplicate=True),
+        # Set the "Max edits" slider explicitly so the example is driven by the same
+        # total-edits cap the report displays -- rather than leaving the slider at its
+        # default (which could be tighter than the per-type caps below and make the
+        # result title look inconsistent with what the user "chose".)
+        Output("max-edits-slider", "value", allow_duplicate=True),
     ],
     [Input("load-example-button", "n_clicks")],
     prevent_initial_call=True,
@@ -256,6 +261,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         "Y",  # base editor radio button to yes
         be_window_options,  # be-window-start options (set atomically with the value)
         be_window_options,  # be-window-stop options
+        4,  # Max edits (mismatches + bulges): the binding total-edits cap for the example
     ]
 
 
@@ -707,6 +713,18 @@ def change_url(
                 _enriched = _resolve_vcf_folder(genome_selected, _tok)
             genome_idx_list.append(f"{pam_char}_{max_bulges}_{genome_selected}+{_enriched}")
     genome_idx = ",".join(genome_idx_list)
+    # Total-edits cap (submit_job arg 26 + recorded in .Params.txt for the report).
+    # This is the SINGLE source of truth: the same value is written to Params below and
+    # passed to the search below. Simple mode: the "Max edits" slider governs (it is the
+    # constraint the user actually set). Advanced ("old") mode: the per-type mm/bulge caps
+    # govern, so the total cap is their sum (== unbounded, 2.1.x behavior). Floored at 1
+    # (a cap of 0 hits a crispritz --max-edits 0 empty-set bug; 1 still keeps the 0-edit
+    # on-target).
+    if advanced_open:
+        max_total_edits = int(mms) + int(dna) + int(rna)
+    else:
+        max_total_edits = int(max_edits_val) if max_edits_val is not None else 5
+    max_total_edits = max(1, max_total_edits)
     # Create .Params.txt file
     try:
         with open(os.path.join(result_dir, PARAMS_FILE), mode="w") as handle_params:
@@ -721,6 +739,11 @@ def change_url(
             handle_params.write(f"Mismatches\t{mms}\n")
             handle_params.write(f"DNA\t{dna}\n")
             handle_params.write(f"RNA\t{rna}\n")
+            # The actual binding constraint for the search: total mismatches + bulges.
+            # In simple mode this is the "Max edits" slider value the user set (which can
+            # be tighter than the per-type caps above); recording it lets the report show
+            # the real cap rather than only the looser per-type numbers.
+            handle_params.write(f"Max_total_edits\t{max_total_edits}\n")
             handle_params.write(f"Annotation\t{annotation_name}\n")
             # nuclease is derived from the PAM token (<len>bp-<motif>-<enzyme>),
             # since the separate Cas-protein selector was removed
@@ -1069,18 +1092,9 @@ def change_url(
         if not os.path.isfile(gencode):
             code = subprocess.call(f"touch {gencode}", shell=True)
 
-    # total-edits cap (submit_job arg 26). Simple mode: the slider governs. Advanced
-    # ("old") mode: the per-type mm/bulge caps govern, so disable the total cap by
-    # setting it to their sum (== unbounded, 2.1.x behavior).
-    if advanced_open:
-        max_total_edits = int(mms) + int(dna) + int(rna)
-    else:
-        max_total_edits = int(max_edits_val) if max_edits_val is not None else 5
-    # Floor the total-edits cap at 1. A cap of 0 hits a crispritz bug (--max-edits 0
-    # returns an empty set on large indexes, dropping even the on-target); the slider
-    # already starts at 1, this also guards the advanced all-zero path. A cap of 1
-    # still includes the 0-edit on-target (Total 0 <= 1), so nothing useful is lost.
-    max_total_edits = max(1, max_total_edits)
+    # max_total_edits (submit_job arg 26) was computed above as the single source of
+    # truth and written to .Params.txt; reuse it here so Params and the actual search
+    # can never disagree.
     # args 23-25 keep submit_job's defaults (cicd_test, vcf-filter-pass-values,
     # index_path) so that arg 26 (max_total_edits) lands in the right position.
     cmd = f"{run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"

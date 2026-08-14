@@ -186,6 +186,17 @@ def result_page(job_id: str) -> html.Div:
             pam_name = (next(s for s in all_params.split("\n") if "Pam" in s)).split(
                 "\t"
             )[-1]
+            # Optional: the total mismatches+bulges cap that actually bound the search
+            # (the "Max edits" the user set). next(..., None) keeps result pages for jobs
+            # created before this field existed loadable.
+            max_total_edits = next(
+                (
+                    s.split("\t")[-1]
+                    for s in all_params.split("\n")
+                    if s.startswith("Max_total_edits")
+                ),
+                None,
+            )
     except OSError as e:
         raise e
     finally:
@@ -310,28 +321,28 @@ def result_page(job_id: str) -> html.Div:
                 color="warning",
             )
         )
-    final_list.append(
-        html.H3(
-            " ".join(
-                [
-                    "Result Summary",
-                    "-",
-                    genome_name,
-                    "-",
-                    pam_name,
-                    "-",
-                    "Mismatches",
-                    str(mms),
-                    "-",
-                    "DNA bulges",
-                    bulge_dna,
-                    "-",
-                    "RNA bulges",
-                    bulge_rna,
-                ]
-            )
-        )
-    )
+    _summary_parts = [
+        "Result Summary",
+        "-",
+        genome_name,
+        "-",
+        pam_name,
+        "-",
+        "Mismatches",
+        str(mms),
+        "-",
+        "DNA bulges",
+        bulge_dna,
+        "-",
+        "RNA bulges",
+        bulge_rna,
+    ]
+    # Lead the reader with the binding constraint: the total mismatches+bulges cap the
+    # user actually set (the "Max edits" slider). The per-type caps above can be looser
+    # than this total, so without it the title can overstate how broad the search was.
+    if max_total_edits is not None:
+        _summary_parts += ["-", "Max edits (mismatches + bulges)", str(max_total_edits)]
+    final_list.append(html.H3(" ".join(_summary_parts)))
     # short description
     if genome_type == "both":
         add_to_description = html.P(

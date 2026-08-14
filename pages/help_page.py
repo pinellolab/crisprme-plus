@@ -1008,6 +1008,9 @@ def resultspage_personalrisk_() -> html.P:
     return html.P(
         [
             html.P(html.Strong("Personal Risk Card")),
+            "This report is available only for variant-aware searches (i.e. when a "
+            "variant dataset was selected); a reference-only search does not produce "
+            "Personal Risk Cards. ",
             "CRISPRme offers a dedicated page for generating Personal Risk Cards "
             "reports, which summarize potential off-target editing by a specific "
             "gRNA in an individual due to genetic variants. This feature is especially "

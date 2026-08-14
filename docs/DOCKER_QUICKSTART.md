@@ -33,11 +33,11 @@ Check Docker works, then pull the CRISPRme+ image:
 docker run --rm hello-world
 
 # Pull the current CRISPRme+ alpha (multi-arch: Apple Silicon + Intel/Linux).
-docker pull pinellolab/crisprme:v2.2.0-alpha.14
+docker pull pinellolab/crisprme:v2.2.0-alpha.15
 ```
 
 > **Already have an older image?** Docker does **not** re-download a tag you already
-> have — run `docker pull pinellolab/crisprme:v2.2.0-alpha.14` again to update. Skipping this makes an
+> have — run `docker pull pinellolab/crisprme:v2.2.0-alpha.15` again to update. Skipping this makes an
 > old image error with `download is not an allowed command`.
 
 ## 2. Make a folder to hold your data and results
@@ -59,7 +59,7 @@ This pulls the human genome, annotations, PAM files and sample lists from the
 CRISPRme HuggingFace mirror (a fast CDN). It replaces the old multi-hour `setup`:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.14 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.15 \
   crisprme.py download --what all --path /DATA
 ```
 
@@ -69,7 +69,7 @@ Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
 minutes of CPU; instead, download the ready-made SpCas9 (NGG) index:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.14 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.15 \
   crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
 ```
 
@@ -77,7 +77,7 @@ For a variant-aware search (what the default web search uses), also download the
 1000 Genomes + HGDP enriched index:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.14 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.15 \
   crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA
 ```
 
@@ -95,7 +95,7 @@ Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level
 analyses / personal risk cards:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.14 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.15 \
   crisprme.py download --what vcf --dataset 1000G --path /DATA
 ```
 
@@ -103,7 +103,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.14 \
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.2.0-alpha.14 crisprme.py web-interface
+  pinellolab/crisprme:v2.2.0-alpha.15 crisprme.py web-interface
 ```
 
 `-p 8080:8080` connects the app inside the container to your browser. Leave this
@@ -123,9 +123,12 @@ running, and open:
    mismatches / DNA bulges / RNA bulges individually (e.g. 4 / 1 / 1). The default
    **1000G+HGDP** variant index is pre-selected, so the search is variant-aware out
    of the box.
-4. Give the job a name and click **Submit**.
+4. Give the job a name and click **Submit**. (Optionally tick **Notify me by
+   email** to be sent a results link when the job finishes — set your SMTP details
+   once under **Settings → Email notifications**.)
 5. Watch the live status page; when it finishes, open the **Results** to explore
-   the off-targets, scores and plots.
+   the off-targets, scores and plots. Per-sample tabs (Summary by Sample and
+   **Personal Risk Cards**) appear only when the search is variant-aware.
 
 Functional annotations (ENCODE cCREs / SCREEN + DHS + GENCODE) are applied
 automatically — the built-in bundle is enabled by default, so there is nothing to
@@ -146,7 +149,7 @@ is `apptainer`, or `singularity` on older systems — they are interchangeable).
 
 ```bash
 # 1. build the image once (a ~2 GB .sif file; no root needed)
-apptainer pull crisprme.sif docker://pinellolab/crisprme:v2.2.0-alpha.14
+apptainer pull crisprme.sif docker://pinellolab/crisprme:v2.2.0-alpha.15
 
 # 2. download data + a prebuilt index into a working folder
 mkdir -p ~/crisprme && cd ~/crisprme
@@ -188,7 +191,7 @@ An index is specific to a **PAM + bulge count + genome**. Download whichever you
 need by its exact published name — for example the pamless variant index:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.14 crisprme.py download --what index --index-name NNN_3_hg38+hg38_1000G_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.15 crisprme.py download --what index --index-name NNN_3_hg38+hg38_1000G_HGDP --path /DATA
 ```
 
 To see which indexes are published, browse the dataset repository

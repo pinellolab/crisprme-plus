@@ -71,15 +71,15 @@ legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.14 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.15 \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 (NGG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.14 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.15 \
   crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
 
 # the variant-aware index used by the default web search (1000G + HGDP)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.14 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.15 \
   crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA
 ```
 
@@ -99,7 +99,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.2.0-alpha.14 crisprme.py web-interface
+  pinellolab/crisprme:v2.2.0-alpha.15 crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -197,7 +197,7 @@ in Section 5 of this guide:
 | **Summary by Sample** | Per-sample breakdown of variant-specific off-targets and population-level context. |
 | **Query Genomic Regions** | Retrieve all off-targets overlapping a user-specified chromosomal interval. |
 | **Graphical Reports** | Stem plots, population bar charts, radar charts, and sequence motif logos. |
-| **Personal Risk Cards** | Individual-level report of private and personal off-target candidates. |
+| **Personal Risk Cards** | Individual-level report of private and personal off-target candidates (variant-aware searches only). |
 
 ---
 
@@ -373,7 +373,7 @@ interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.2.0-alpha.14 crisprme.py web-interface
+>   pinellolab/crisprme:v2.2.0-alpha.15 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme-2.2.0 && crisprme.py web-interface)
 > ```
