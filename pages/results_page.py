@@ -3865,7 +3865,7 @@ def update_images_tabs(
                                         IMGS_DIR,
                                         str(
                                             f"populations_distribution_{guide}"
-                                            f"_{int(mm) + int(bulge)}total_{filter_criterion}.png"
+                                            f"_{int(mm) + int(bulge)}total_{filter_criterion}_new.png"
                                         ),
                                     ),
                                     mode="rb",
@@ -3883,7 +3883,7 @@ def update_images_tabs(
                         IMGS_DIR,
                         str(
                             f"populations_distribution_{guide}_"
-                            f"{int(mm) + int(bulge)}total_{filter_criterion}.png"
+                            f"{int(mm) + int(bulge)}total_{filter_criterion}_new.png"
                         ),
                     ),
                 ),
@@ -5278,8 +5278,14 @@ def update_content_tab(
                         ),
                         dcc.Dropdown(
                             id="mm-dropdown",
+                            # default to the full budget (mm + bulges): the population
+                            # barplot is cumulative ("up to N"), and the pipeline only
+                            # emits a PNG for a total that has data, so the max total is
+                            # the all-inclusive view and is non-empty whenever the search
+                            # found any off-target (vs the old "0" = on-target-only, which
+                            # showed "No result" for typical sparse guides).
                             options=opt_mm,
-                            value="0",
+                            value=str(total),
                             clearable=False,
                         ),
                     ]

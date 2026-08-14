@@ -11,6 +11,23 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **Graphical Reports population barplot never rendered.** The pipeline writes
+  `populations_distribution_<guide>_<N>total_<score>_new.png`, but the results
+  page read the name without the `_new` suffix, so every mismatch/bulge combo
+  showed "No result found for this combination". Added the missing suffix.
+- **Graphical Reports defaulted to an empty combo.** The "up to N edits" selector
+  defaulted to `0` (on-target only), which is empty for typical sparse guides. It
+  now defaults to the full budget (mm + bulges) — the cumulative barplot the
+  pipeline only emits when it has data — so a plot shows immediately.
+- **"Load Example" left the base-editing window blank.** The `be-window-start/stop`
+  dropdowns start with no options, so the example's window values were dropped
+  before `update_base_editing_dropdown` populated the options. Load Example now
+  emits the window options atomically with the values (and passes ints, matching
+  the option type), so it fills 4/8 correctly.
+
+## [2.2.0-alpha.10] - 2026-08-14
+
 ### Added
 - **Email notifications are now configurable in the app** (Settings → Email
   notifications, local mode): SMTP host/port/SSL, sender, and an app password are
