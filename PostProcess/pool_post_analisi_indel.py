@@ -81,36 +81,105 @@ def start_analysis(chrom: str) -> None:
         )
 
 
-def memory_capped_workers(requested, n_tasks):
-    """Bound concurrent post-analysis workers to a memory budget (see the SNP
-    twin `pool_post_analisi_snp.py` for the rationale). Default 64 GB, overridable
-    via `CRISPRME_MAX_MEM_GB` / `CRISPRME_POSTPROC_WORKER_GB`."""
+def _detect_budget_gb():
+    """Auto-detect the memory budget (GB): CRISPRME_MAX_MEM_GB override, else the
+    SMALLEST of host available/total RAM (/proc/meminfo) and any cgroup limit (so a
+    memory-limited container is respected); 64 GB fallback. See the SNP twin
+    `pool_post_analisi_snp.py` for the rationale (fixes OOM on < 64 GB machines)."""
+    env = os.environ.get("CRISPRME_MAX_MEM_GB")
+    if env:
+        try:
+            v = float(env)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    cands = []
     try:
-        budget_gb = float(os.environ.get("CRISPRME_MAX_MEM_GB", "64"))
-    except ValueError:
-        budget_gb = 64.0
+        info = {}
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                k, _, rest = line.partition(":")
+                info[k.strip()] = rest.strip()
+        for key in ("MemAvailable", "MemTotal"):
+            if key in info:
+                cands.append(int(info[key].split()[0]) / (1024.0 ** 2))
+                break
+    except Exception:
+        pass
+    for p in ("/sys/fs/cgroup/memory.max",
+              "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            with open(p) as fh:
+                raw = fh.read().strip()
+            if raw and raw != "max":
+                b = int(raw)
+                if 0 < b < (1 << 62):
+                    cands.append(b / (1024.0 ** 3))
+        except Exception:
+            pass
+    return min(cands) if cands else 64.0
+
+
+def _estimate_worker_gb(dict_folder):
+    """Estimate per-worker peak RAM (GB) from the largest .json in the dictionary
+    folder (json.load ~2.2x on-disk size + ~1 GB working set); see the SNP twin.
+    Overridable via CRISPRME_POSTPROC_WORKER_GB; floors at 4 GB, 6 GB fallback."""
+    env = os.environ.get("CRISPRME_POSTPROC_WORKER_GB")
+    if env:
+        try:
+            v = float(env)
+            if v > 0:
+                return v
+        except ValueError:
+            pass
+    biggest_bytes = 0
     try:
-        per_worker_gb = float(os.environ.get("CRISPRME_POSTPROC_WORKER_GB", "4"))
-    except ValueError:
-        per_worker_gb = 4.0
-    if per_worker_gb <= 0:
-        per_worker_gb = 4.0
-    cap = max(1, int(budget_gb // per_worker_gb))
-    return max(1, min(requested, cap, n_tasks))
+        for f in os.listdir(dict_folder):
+            if f.endswith(".json"):
+                b = os.path.getsize(os.path.join(dict_folder, f))
+                if b > biggest_bytes:
+                    biggest_bytes = b
+    except Exception:
+        pass
+    if biggest_bytes <= 0:
+        return 6.0
+    return max(4.0, (biggest_bytes / (1024.0 ** 3)) * 2.2 + 1.0)
+
+
+def memory_capped_workers(requested, n_tasks, dict_folder):
+    """Bound concurrent post-analysis workers to the machine's ACTUAL memory (see
+    the SNP twin `pool_post_analisi_snp.py`). Budget auto-detected minus headroom;
+    per-worker estimated from dictionary sizes. Returns
+    (workers, budget_gb, per_worker_gb)."""
+    budget_gb = _detect_budget_gb()
+    usable_gb = max(1.0, budget_gb - max(2.0, budget_gb * 0.15))
+    per_worker_gb = _estimate_worker_gb(dict_folder)
+    cap = max(1, int(usable_gb // per_worker_gb))
+    workers = max(1, min(requested, cap, n_tasks))
+    return workers, budget_gb, per_worker_gb
 
 
 # chromosome list (raw VCFs when present; else the bundled indel logs)
 vcf_name = os.path.basename(vcf_folder.rstrip("/"))
 chrs = _dataset_chroms(vcf_folder, os.path.join(dict_folder, "log_indels_" + vcf_name))
-workers = memory_capped_workers(ncpus, len(chrs))
-# NOTE: write this diagnostic to STDOUT (log_verbose.txt), never STDERR.
+workers, budget_gb, per_worker_gb = memory_capped_workers(ncpus, len(chrs), dict_folder)
+# NOTE: write these diagnostics to STDOUT (log_verbose.txt), never STDERR.
 # The caller treats a non-empty stderr log (`[ -s $logerror ]`) as a fatal
 # post-analysis failure, so informational text on stderr aborts the run.
 sys.stdout.write(
     f"Post-analysis INDELs: {workers} concurrent worker(s) "
-    f"(cores={ncpus}, memory budget "
-    f"{os.environ.get('CRISPRME_MAX_MEM_GB', '64')} GB)\n"
+    f"(cores={ncpus}, detected memory budget {budget_gb:.1f} GB, "
+    f"est. per-worker {per_worker_gb:.1f} GB)\n"
 )
+usable_gb = max(1.0, budget_gb - max(2.0, budget_gb * 0.15))
+if per_worker_gb > usable_gb:
+    sys.stdout.write(
+        f"WARNING: the largest per-chromosome dictionary needs ~{per_worker_gb:.0f} GB "
+        f"of RAM to load, but only ~{usable_gb:.0f} GB is available; this step may be "
+        f"OOM-killed. Use a machine with more RAM (>= ~{per_worker_gb + 4:.0f} GB for this "
+        f"dataset), give the container more memory, or set CRISPRME_MAX_MEM_GB.\n"
+    )
 sys.stdout.flush()
 with Pool(processes=workers) as pool:  # run chrom-wise post-analysis in parallel
     pool.map(start_analysis, chrs)

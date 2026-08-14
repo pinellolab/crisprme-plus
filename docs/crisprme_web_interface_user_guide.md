@@ -221,8 +221,9 @@ input sequence should not include the PAM.
 
 Key constraints:
 - All spacers in a single submission must be the same length.
-- CRISPRme accepts up to **100 spacers** per job.
 - Each spacer must be entered on a separate line.
+- You can enter multiple spacers; for large batches use the command-line version
+  (there is no limit on the number of spacers in the offline/CLI search).
 
 **Genomic sequence(s) (alternative input)**
 
@@ -231,7 +232,7 @@ spacers automatically from a genomic region or a DNA sequence. Two formats are
 supported:
 
 - **BED format** — specify chromosomal coordinates as `chromosome start end`
-  (0-based coordinates). CRISPRme extracts the first 100 possible spacer sequences
+  (0-based coordinates). CRISPRme extracts the possible spacer sequences
   within the region, beginning from the positive strand.
 - **FASTA format** — provide one or more DNA sequences up to 1,000 characters each.
   Each entry must be preceded by a `>header` line.

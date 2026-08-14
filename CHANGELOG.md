@@ -12,6 +12,27 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Fixed
+- **Genome-wide variant post-analysis OOM ("Killed … EmptyDataError").** On a
+  genome-wide 1000G+HGDP search, each per-chromosome worker `json.load()`ed the
+  whole chromosome SNP dictionary — a chr2 dict is ~13 GB on disk and ~26 GB in
+  RAM — so even one worker could exhaust a normal machine (and the concurrency
+  guard defaulted to a fixed 64 GB budget / 4 GB-per-worker, over-subscribing on
+  smaller hosts). `new_simple_analysis.py` now loads **only the dictionary entries
+  the search's off-targets actually query** (streamed with `ijson`), dropping peak
+  RAM from ~26 GB to <0.1 GB on the real chr2 dict (byte-identical results). The
+  worker-cap guards now **detect the machine's real RAM** (host + cgroup limit),
+  **estimate per-worker RAM from the actual dictionary sizes**, and print a clear
+  "needs ~N GB / may be OOM-killed" warning instead of the cryptic cascade. Added
+  `ijson` to the image.
+
+### Changed
+- Docs: corrected the in-app manual and web guide (removed the stale "up to 100
+  spacers / first-100-sequences" copy; annotation is Settings-managed not a Step-3
+  dropdown; email is configured in Settings, not "the server notifies").
+
+## [2.2.0-alpha.11] - 2026-08-14
+
+### Fixed
 - **Graphical Reports population barplot never rendered.** The pipeline writes
   `populations_distribution_<guide>_<N>total_<score>_new.png`, but the results
   page read the name without the `_new` suffix, so every mismatch/bulge combo

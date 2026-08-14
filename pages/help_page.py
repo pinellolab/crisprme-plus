@@ -124,9 +124,10 @@ def homepage_spacer_() -> html.Li:
                 "Cas protein binding in the presence of a protospacer adjacent "
                 "motif (PAM). In CRISPRme, the spacer sequence is represented "
                 "as DNA (rather than RNA) for easy comparison with the aligned "
-                "protospacer sequence. CRISPRme accepts up to 100 gRNA spacers, "
-                "each listed on a separate line and of the same length. The "
-                "input spacer sequence should not include the PAM."
+                "protospacer sequence. Enter one or more spacers, each on a "
+                "separate line and of the same length; for large batches we "
+                "recommend the command-line version. The input spacer sequence "
+                "should not include the PAM."
             ),
         ]
     )
@@ -149,10 +150,10 @@ def homepage_sequences_() -> html.Li:
                 "CRISPRme also supports genomic coordinates in BED format "
                 "(chromosome# start end) or DNA sequences in FASTA format "
                 "(up to 1,000 characters). BED file coordinates are treated "
-                "as 0-based, and in the online version, CRISPRme extracts "
-                "the first 100 possible spacer sequences within these regions, "
-                "starting from the positive strand. For FASTA input, each entry "
-                "must be preceded by a >header."
+                "as 0-based, and CRISPRme extracts the possible spacer "
+                "sequences within these regions, starting from the positive "
+                "strand. For FASTA input, each entry must be preceded by a "
+                ">header."
             ),
         ]
     )
@@ -336,16 +337,18 @@ def homepage_annotation_() -> html.Li:
     """
     return html.Li(
         [
-            html.Strong("Functional annotation (optional): "),
+            html.Strong("Functional annotation (automatic): "),
             (
                 "To evaluate the potential impact of off-target activity, CRISPRme "
-                "provides functional annotations for both coding and non-coding regions. "
-                "These annotations are derived from ENCODE, which includes candidate "
-                "cis-regulatory elements, and GENCODE, which covers protein-coding "
-                "genes, untranslated regions, and introns. In the offline version, "
-                "users can integrate custom genome annotations, such as cell-type-specific "
-                "chromatin marks or experimentally identified off-target sites, "
-                "by uploading BED files."
+                "annotates off-targets with functional elements for both coding and "
+                "non-coding regions. Annotations are no longer chosen on the search "
+                "form: the enabled set is applied automatically to every search. The "
+                "built-in bundle (ENCODE candidate cis-regulatory elements / SCREEN, "
+                "DHS accessible-chromatin regions, and GENCODE gene features) is "
+                "enabled by default. Manage which tracks are applied — and upload your "
+                "own cell-type-specific or experimentally identified BED files (they "
+                "are format-validated on upload) — in Settings → Data Manager → "
+                "Manage annotations (local offline mode)."
             ),
         ]
     )
@@ -364,7 +367,15 @@ def homepage_email_() -> html.Li:
     return html.Li(
         [
             html.Strong("Email notification (optional): "),
-            "If provided, the server notifies the user via email upon job completion.",
+            (
+                "Tick \"Notify me by email\" and enter your address to be emailed a "
+                "link when the job finishes. Sending requires a one-time mail-server "
+                "setup in Settings → Email notifications (SMTP host/port/SSL, sender, "
+                "and an app password — for Gmail generate an app password, not your "
+                "login password; the CRISPRME_SMTP_SENDER / CRISPRME_SMTP_PSW "
+                "environment variables are also honored). Until it is configured the "
+                "job still runs — it simply will not email you."
+            ),
         ]
     )
 
@@ -404,7 +415,7 @@ def homepage_step3() -> html.Li:
     """
     return html.Li(
         [
-            html.Strong("STEP 3 Annotation(s), email notification, and job name"),
+            html.Strong("STEP 3 Email notification and job name (functional annotation is automatic)"),
             html.Ul(
                 [
                     homepage_annotation_(),  # annotation description
