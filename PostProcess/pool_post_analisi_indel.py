@@ -122,9 +122,14 @@ def _detect_budget_gb():
 
 
 def _estimate_worker_gb(dict_folder):
-    """Estimate per-worker peak RAM (GB) from the largest .json in the dictionary
-    folder (json.load ~2.2x on-disk size + ~1 GB working set); see the SNP twin.
-    Overridable via CRISPRME_POSTPROC_WORKER_GB; floors at 4 GB, 6 GB fallback."""
+    """Estimate per-worker peak RAM (GB) for the INDEL post-analysis. Unlike the
+    SNP path, analisi_indels_NNN.py does NOT json.load the (up to ~26 GB)
+    per-chromosome SNP dictionary -- it reads the small per-chromosome indel logs
+    (log_indels_<vcf>) + the fake-chrom targets, so per-worker RAM is modest and
+    independent of the SNP dictionary size. A small fixed estimate keeps workers
+    parallel (the old dict-size heuristic mis-sized this from the big SNP .jsons in
+    Dictionaries/ and needlessly serialized to one worker). Overridable via
+    CRISPRME_POSTPROC_WORKER_GB."""
     env = os.environ.get("CRISPRME_POSTPROC_WORKER_GB")
     if env:
         try:
@@ -133,18 +138,7 @@ def _estimate_worker_gb(dict_folder):
                 return v
         except ValueError:
             pass
-    biggest_bytes = 0
-    try:
-        for f in os.listdir(dict_folder):
-            if f.endswith(".json"):
-                b = os.path.getsize(os.path.join(dict_folder, f))
-                if b > biggest_bytes:
-                    biggest_bytes = b
-    except Exception:
-        pass
-    if biggest_bytes <= 0:
-        return 6.0
-    return max(4.0, (biggest_bytes / (1024.0 ** 3)) * 2.2 + 1.0)
+    return 3.0
 
 
 def memory_capped_workers(requested, n_tasks, dict_folder):

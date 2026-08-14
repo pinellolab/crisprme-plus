@@ -42,7 +42,7 @@ RUN micromamba install -y -n base \
         scikit-learn=1.1.3 numpy=1.24.4 scipy=1.10.1 pandas=2.0.3 \
         "matplotlib-base<3.9" \
         biopython more-itertools statsmodels intervaltree \
-        ijson \
+        ijson yajl \
 
         pysam bcftools bedtools bedops samtools htslib axel gdown zip gsl pigz \
         ucsc-liftover \
