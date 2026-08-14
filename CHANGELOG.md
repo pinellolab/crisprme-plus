@@ -11,6 +11,19 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Changed
+- **Post-analysis performance** (follow-up to the streaming dict-load fix):
+  - Added the `yajl` C library + `cffi` so `ijson` uses its fast `yajl2_cffi` C
+    backend instead of the pure-python fallback (much faster streaming of the SNP
+    dictionary).
+  - The post-analysis worker cap no longer sizes per-worker RAM from the (large) SNP
+    dictionary file: with streaming, per-worker peak is small, so it uses a modest
+    fixed estimate and runs chromosomes in parallel again (the SNP path checks that
+    `ijson` is importable; the INDEL path never loaded the big dict). Previously it
+    over-estimated and serialized to a single worker.
+
+## [2.2.0-alpha.12] - 2026-08-14
+
 ### Fixed
 - **On-demand INDELS index built with a doubled `<PAM>_<N>` prefix** (regression
   from the alpha.10 indels-index-resolution change). crispritz `index-genome`

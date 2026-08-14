@@ -92,6 +92,17 @@ def _estimate_worker_gb(dict_folder):
                 return v
         except ValueError:
             pass
+    # When ijson is available, new_simple_analysis STREAMS only the queried dict
+    # entries, so per-worker peak RAM is ~the chromosome genome string + a small
+    # subset + scoring working set (<~3 GB), independent of the (up to ~26 GB)
+    # dictionary. A modest fixed estimate then lets workers run in parallel again.
+    try:
+        import ijson  # noqa: F401
+        return 3.0
+    except ImportError:
+        pass
+    # No ijson -> new_simple_analysis json.load()s the whole per-chromosome dict
+    # (~2.2x its on-disk size), so size the estimate from the largest dictionary.
     biggest_bytes = 0
     try:
         for f in os.listdir(dict_folder):
