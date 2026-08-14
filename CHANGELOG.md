@@ -13,8 +13,9 @@ and the `release-crisprme` skill.
 
 ### Changed
 - **Post-analysis performance** (follow-up to the streaming dict-load fix):
-  - Added the `yajl` C library so `ijson` uses its fast `yajl2_c` backend instead of
-    the pure-python fallback (~10× faster streaming of the SNP dictionary).
+  - Added the `yajl` C library + `cffi` so `ijson` uses its fast `yajl2_cffi` C
+    backend instead of the pure-python fallback (much faster streaming of the SNP
+    dictionary).
   - The post-analysis worker cap no longer sizes per-worker RAM from the (large) SNP
     dictionary file: with streaming, per-worker peak is small, so it uses a modest
     fixed estimate and runs chromosomes in parallel again (the SNP path checks that
