@@ -12,6 +12,15 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Fixed
+- **On-demand INDELS index built with a doubled `<PAM>_<N>` prefix** (regression
+  from the alpha.10 indels-index-resolution change). crispritz `index-genome`
+  already auto-prepends `<PAM>_<bMax>_` to the output dir, but the builder also
+  added it manually, producing `NGG_2_NGG_2_..._INDELS`; detection/search look for
+  the single-prefix name, so the indel search produced no output and the run failed
+  with "off-targets search failed". Removed the manual prefix (let crispritz add
+  it). This unblocks `validate-benchmarks` (complete-test + validate-test now match
+  the brute-force ground truth: 2/2 light benchmarks). Batteries searches were
+  unaffected (they use a correctly-named pre-built `_INDELS`).
 - **Genome-wide variant post-analysis OOM ("Killed … EmptyDataError").** On a
   genome-wide 1000G+HGDP search, each per-chromosome worker `json.load()`ed the
   whole chromosome SNP dictionary — a chr2 dict is ~13 GB on disk and ~26 GB in
