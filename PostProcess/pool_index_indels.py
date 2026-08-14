@@ -7,6 +7,9 @@ from datetime import datetime
 
 indels_folder = sys.argv[1]
 pam_file = sys.argv[2]
+# true_pam / bMax here are the RESOLVED variant index's PAM and N (its <PAM>_<N>
+# prefix), passed by the caller so the built INDELS index name matches the SNP index
+# and the search path (genome_library/<PAM>_<N>_<ref>+<vcf>_INDELS/<PAM>_<N>_fake<chr>).
 true_pam = sys.argv[3]
 ref_name = sys.argv[4]
 vcf_name = sys.argv[5]
@@ -17,7 +20,7 @@ ncpus = sys.argv[7]
 def index_indels(chrom):
     print("Indexing INDELs in", chrom)
     os.system(
-        f"crispritz.py index-genome {ref_name}+{vcf_name}_INDELS/{true_pam}_{bMax}_fake{chrom} {indels_folder}/fake_{vcf_name}_{chrom} {pam_file} -bMax {bMax} -th 1  >/dev/null"
+        f"crispritz.py index-genome {true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS/{true_pam}_{bMax}_fake{chrom} {indels_folder}/fake_{vcf_name}_{chrom} {pam_file} -bMax {bMax} -th 1  >/dev/null"
     )  # {indels_folder}/fake_{vcf_name}_{chrom}
     print("Indexing ended for INDELs in", chrom)
 
