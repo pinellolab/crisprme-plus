@@ -14,6 +14,8 @@ import subprocess
 import base64
 import sys
 import os
+import json
+import gzip
 
 
 # Define DNA alphabet
@@ -200,6 +202,15 @@ RESULTS_DIR = "Results"
 ASSETS_DIR = "assets"
 # annotations directory
 ANNOTATIONS_DIR = "Annotations"
+# annotation manager: which annotations are enabled per genome (a hidden manifest
+# beside the beds so it travels/deletes with the folder), the built-in bundle's
+# canonical names, the internal merged "active annotation" prefix, and an upload
+# size ceiling for format validation.
+ANNOTATIONS_ENABLED_FILE = ".enabled.json"
+BUILTIN_ANNOTATION_HG38 = "dhs+encode+gencode.hg38.bed.gz"
+BUILTIN_GENCODE_HG38 = "gencode.protein_coding.bed"
+ACTIVE_ANNOTATION_PREFIX = ".active."  # -> Annotations/.active.<genome>.bed[.gz]
+MAX_ANNOTATION_BYTES = 200 * 1024 * 1024  # reject absurd annotation uploads
 # PAMs directory
 PAMS_DIR = "PAMs"
 # VCFs directory
@@ -1638,17 +1649,31 @@ def get_custom_annotations() -> List:
         User's annotation data
     """
 
-    annotation_data = glob(os.path.join(current_working_directory, ANNOTATIONS_DIR, "*.bed"))
-    annotations = [
-        {"label": ann.strip().split("/")[-1], "value": ann.strip().split("/")[-1]}
-        for ann in annotation_data
+    # accept both .bed and bgzipped .bed.gz (the download/upload may deliver either)
+    annotation_data = glob(
+        os.path.join(current_working_directory, ANNOTATIONS_DIR, "*.bed")
+    ) + glob(os.path.join(current_working_directory, ANNOTATIONS_DIR, "*.bed.gz"))
+    seen, annotations = set(), []
+    for ann in annotation_data:
+        name = ann.strip().split("/")[-1]
+        # skip the built-in bundle (offered separately), the gencode companion, the
+        # internal merged "active" annotation, hidden dotfiles, and scratch files.
+        # Match on the FILENAME, not the full path -- a working dir that happens to
+        # contain "tmp"/"encode"/etc. must not hide every user annotation.
         if (
-            "encode" not in ann
-            and "None" not in ann
-            and "dummy" not in ann
-            and "tmp" not in ann
-        )
-    ]
+            "encode" in name
+            or "None" in name
+            or "dummy" in name
+            or "tmp" in name
+            or name.startswith(".")
+            or name.startswith(ACTIVE_ANNOTATION_PREFIX)
+            or name.startswith(BUILTIN_GENCODE_HG38)
+        ):
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        annotations.append({"label": name, "value": name})
     return annotations
 
 
@@ -1784,6 +1809,185 @@ def sort_annotation(annotationfile: str) -> str:
     if decompressed_here and os.path.isfile(plain_path):
         subprocess.call(f"rm {plain_path}", shell=True)
     return result
+
+
+# --- annotation manager ---------------------------------------------------------
+# The search applies the set of ENABLED annotations for a genome (managed in
+# Settings), not a per-search dropdown choice. Multiple enabled beds are merged
+# into one active annotation, since the pipeline takes a single --annotation bed.
+
+
+def _annotations_dir() -> str:
+    return os.path.join(current_working_directory, ANNOTATIONS_DIR)
+
+
+def _enabled_manifest_path() -> str:
+    return os.path.join(_annotations_dir(), ANNOTATIONS_ENABLED_FILE)
+
+
+def _norm_genome(genome: str) -> str:
+    return (genome or "").replace(" ", "_")
+
+
+def _builtin_bundle_present() -> bool:
+    d = _annotations_dir()
+    return os.path.isfile(os.path.join(d, "dhs+encode+gencode.hg38.bed")) or os.path.isfile(
+        os.path.join(d, BUILTIN_ANNOTATION_HG38)
+    )
+
+
+def read_enabled_annotations(genome: str) -> List[str]:
+    """Enabled annotation bed FILENAMES for a genome.
+
+    Backward-compat: with NO manifest, hg38 defaults to the built-in bundle (when
+    it is present on disk), everything else to none -- so a fresh install keeps
+    annotations ON by default, exactly as before the annotation manager. Names no
+    longer present on disk are pruned.
+    """
+    g = _norm_genome(genome)
+    d = _annotations_dir()
+    installed = set(os.listdir(d)) if os.path.isdir(d) else set()
+    path = _enabled_manifest_path()
+    if not os.path.isfile(path):
+        if g == "hg38" and _builtin_bundle_present():
+            return [BUILTIN_ANNOTATION_HG38]
+        return []
+    try:
+        with open(path) as fh:
+            names = list(json.load(fh).get("genomes", {}).get(g, {}).get("enabled", []))
+    except (json.JSONDecodeError, OSError):
+        names = []
+    return [
+        n for n in names
+        if n in installed or (n == BUILTIN_ANNOTATION_HG38 and _builtin_bundle_present())
+    ]
+
+
+def write_enabled_annotations(genome: str, enabled: List[str]) -> None:
+    """Persist the enabled annotation list for a genome (atomic tmp + replace)."""
+    g = _norm_genome(genome)
+    os.makedirs(_annotations_dir(), exist_ok=True)
+    path = _enabled_manifest_path()
+    manifest = {"version": 1, "genomes": {}}
+    if os.path.isfile(path):
+        try:
+            with open(path) as fh:
+                manifest = json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            manifest = {"version": 1, "genomes": {}}
+    manifest.setdefault("genomes", {})[g] = {"enabled": list(dict.fromkeys(enabled))}
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(manifest, fh, indent=2)
+    os.replace(tmp, path)
+
+
+def is_annotation_enabled(genome: str, name: str) -> bool:
+    return name in read_enabled_annotations(genome)
+
+
+def validate_annotation_bed(path: str) -> Optional[str]:
+    """Validate a user-supplied annotation BED; return None if OK else a
+    human-readable error.
+
+    The pipeline (PostProcess/annotation.py) fetches by chrom/start/end and takes
+    the label as the 4th whitespace-split field, so a valid file needs >=4
+    tab-separated columns, integer start<=end, and a non-empty whitespace-free
+    label. Handles .bed and .bed.gz.
+    """
+    if not os.path.isfile(path):
+        return f"File not found: {os.path.basename(path)}"
+    size = os.path.getsize(path)
+    if size == 0:
+        return "Annotation file is empty."
+    if size > MAX_ANNOTATION_BYTES:
+        return (
+            f"Annotation file is too large ({size // (1024 * 1024)} MB > "
+            f"{MAX_ANNOTATION_BYTES // (1024 * 1024)} MB)."
+        )
+    opener = gzip.open if path.endswith(".gz") else open
+    checked = 0
+    try:
+        with opener(path, "rt") as fh:
+            for lineno, line in enumerate(fh, 1):
+                s = line.rstrip("\n")
+                if not s or s.startswith(("#", "track", "browser")):
+                    continue
+                cols = s.split("\t")
+                if len(cols) < 4:
+                    return (
+                        f"Line {lineno}: an annotation needs >=4 tab-separated columns "
+                        f"(chrom, start, end, label); found {len(cols)}."
+                    )
+                try:
+                    start, end = int(cols[1]), int(cols[2])
+                except ValueError:
+                    return f"Line {lineno}: start/end are not integers ({cols[1]!r}, {cols[2]!r})."
+                if start > end:
+                    return f"Line {lineno}: start ({start}) > end ({end})."
+                if not cols[3].strip() or len(cols[3].split()) != 1:
+                    return (
+                        f"Line {lineno}: the label (column 4) must be a single "
+                        f"whitespace-free token; found {cols[3]!r}."
+                    )
+                checked += 1
+                if checked >= 500:
+                    break
+    except (OSError, UnicodeDecodeError, gzip.BadGzipFile) as exc:
+        return f"Could not read the annotation file ({exc}); is it a text BED?"
+    if checked == 0:
+        return "No data lines found (only comments/headers)."
+    return None
+
+
+def build_active_annotation(genome: str) -> Tuple[str, str]:
+    """Assemble the annotation the search applies, from the ENABLED set.
+
+    Returns (annotation_name, gencode_name) as filenames under Annotations/ (or
+    "vuoto.txt" for none). The pipeline takes ONE annotation bed, so multiple
+    enabled beds are concatenated + sorted + bgzipped into a cached
+    Annotations/.active.<genome>.bed.gz, rebuilt only when the enabled set or a
+    member changes. The gencode gene-annotation companion rides with the built-in
+    bundle's enabled state.
+    """
+    g = _norm_genome(genome)
+    d = _annotations_dir()
+    enabled = read_enabled_annotations(g)
+    builtin_on = BUILTIN_ANNOTATION_HG38 in enabled
+    gencode = BUILTIN_GENCODE_HG38 if builtin_on else "vuoto.txt"
+    if not enabled:
+        return ("vuoto.txt", "vuoto.txt")
+    if enabled == [BUILTIN_ANNOTATION_HG38]:
+        return (BUILTIN_ANNOTATION_HG38, gencode)  # fast path: bundle only, no merge
+    members = [os.path.join(d, n) for n in enabled if os.path.isfile(os.path.join(d, n))]
+    if not members:
+        return ("vuoto.txt", "vuoto.txt")
+    active = os.path.join(d, f"{ACTIVE_ANNOTATION_PREFIX}{g}.bed")
+    active_gz = active + ".gz"
+    sig_path = os.path.join(d, f"{ACTIVE_ANNOTATION_PREFIX}{g}.sig")
+    sig = "|".join(sorted(enabled)) + "||" + ";".join(
+        f"{os.path.basename(m)}:{os.path.getsize(m)}:{int(os.path.getmtime(m))}" for m in members
+    )
+    fresh = (
+        os.path.isfile(active_gz)
+        and os.path.isfile(sig_path)
+        and open(sig_path).read() == sig
+    )
+    if not fresh:
+        tmp = active + ".building"
+        with open(tmp, "w") as out:
+            for m in members:
+                opener = gzip.open if m.endswith(".gz") else open
+                with opener(m, "rt") as fh:
+                    for line in fh:
+                        out.write(line)
+        os.replace(tmp, active)
+        sort_annotation(active)  # sort + bgzip -> active_gz
+        if os.path.isfile(active):
+            os.remove(active)  # drop the plain intermediate; keep only the .gz
+        with open(sig_path, "w") as fh:
+            fh.write(sig)
+    return (os.path.basename(active_gz), gencode)
 
 
 def _decompress_file(fname: str, outfname: str) -> str:

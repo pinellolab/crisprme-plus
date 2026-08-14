@@ -44,6 +44,16 @@ jobs:
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_variant_dropdown.py
 
+      # Annotation manager: BED validation, the per-genome enabled-set manifest
+      # (incl. the annotations-on-by-default backward-compat behaviour), and
+      # active-annotation assembly (bundle-only fast path, empty case, multi-bed
+      # merge). Runs inside the image (the merge path needs sort-bed/bgzip).
+      - name: Annotation-manager unit tests
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            crisprme:web python -u /t/test_annotation_manager.py
+
       - name: Start the web interface
         run: |
           docker run -d --name web -p 8090:8080 crisprme:web crisprme.py web-interface

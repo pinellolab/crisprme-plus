@@ -155,8 +155,9 @@ distinguished from optional ones. The three steps cover:
   mismatches + bulges, default 3) controls stringency; **Advanced options** exposes
   the per-type caps (mismatches up to 6, DNA bulges up to 2, RNA bulges up to 2),
   and a candidate must satisfy each per-type cap **and** the overall budget.
-- **Step 3 — Annotations, email notification, and job name:** Enrich results and
-  label the job.
+- **Step 3 — Email notification and job name:** Label the job (functional
+  annotations are applied automatically from the enabled set — see
+  [Managing annotations](#managing-annotations-settings)).
 
 Each step is described in detail in Section 4 of this guide.
 
@@ -313,26 +314,29 @@ CRISPRme will annotate every candidate off-target site with whether the target
 nucleotide falls within the specified window, generating a comprehensive output
 file indicating per-site base editing susceptibility.
 
-### Step 3: Annotations, email notification, and job name
+### Step 3: Email notification and job name
 
-This step attaches optional metadata and functional context to the search.
+This step attaches optional metadata to the search.
 
-**Functional annotation (optional)**
+**Functional annotation (now automatic)**
 
-Select annotation files to overlay on identified off-targets. These annotations
-provide biological context — for example, whether an off-target falls within a
-regulatory element or a protein-coding gene — and are used to populate the
-annotation columns of the results tables.
+Off-targets are automatically overlaid with the currently **enabled** functional
+annotations — no per-search selection is required. Annotations provide biological
+context (for example, whether an off-target falls within a regulatory element or a
+protein-coding gene) and populate the annotation columns of the results tables.
 
-The default installation provides two annotation tracks:
+The default installation ships one enabled bundle that is applied out of the box:
 
-- **ENCODE** — candidate cis-regulatory elements (enhancers, promoters, accessible
-  chromatin regions).
-- **GENCODE** — protein-coding genes, untranslated regions, and introns.
+- **Functional regions (hg38)** — ENCODE candidate cis-regulatory elements
+  (SCREEN cCREs), DHS accessible-chromatin regions, and GENCODE gene features
+  (protein-coding genes, UTRs, introns), plus the GENCODE gene-annotation track.
 
-In the local offline version, custom cell-type-specific annotations or
-experimentally identified off-target sites can be integrated by uploading BED files
-through the interface.
+Which annotations are applied is controlled centrally in **Settings → Manage
+annotations (enable / disable)** rather than on the search form. In the local
+offline version you can upload additional cell-type-specific annotation BED files
+(Settings → Add an annotation), enable/disable them per genome, and they are then
+applied automatically to every subsequent search. See
+[Managing annotations](#managing-annotations-settings) below.
 
 **Email notification (optional)**
 
@@ -369,6 +373,37 @@ interface navigates automatically to the Job Status page.
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme-2.2.0 && crisprme.py web-interface)
 > ```
+
+---
+
+## Managing annotations (Settings)
+
+Functional annotations are no longer chosen on the search form. Instead they are
+managed centrally in **Settings → Data Manager** (local offline mode only; the
+section is disabled on the public `--website` server) and applied automatically to
+every search. This keeps searches reproducible — the same enabled set is used for
+all jobs until you change it.
+
+**Add an annotation (BED).** Under *Add an annotation*, drag-and-drop or select a
+`.bed`/`.bed.gz` file. Each uploaded file is validated before it is accepted: it
+must have at least four tab-separated columns (`chrom`, `start`, `end`, `label`),
+integer coordinates with `start ≤ end`, a whitespace-free label, and be under the
+size cap. Malformed files are rejected with an explanatory message and nothing is
+written. Name files with the genome assembly token (e.g. `myenhancers.hg38.bed`)
+so they are offered for the matching genome.
+
+**Enable / disable annotations.** Under *Manage annotations (enable / disable)*,
+pick a genome to see a checklist of the available tracks — the built-in
+**Functional regions** bundle plus any custom BEDs you have uploaded for that
+genome. Tick the ones you want applied and click **Save enabled annotations**. The
+built-in bundle is enabled by default on a fresh install, so annotations work out
+of the box with no configuration.
+
+When more than one track is enabled, CRISPRme merges them into a single combined
+annotation the first time you search (cached and rebuilt only when the enabled set
+changes). If you disable every track, searches still run — off-targets simply carry
+no functional annotation. The GENCODE gene-annotation track is applied automatically
+alongside the built-in bundle.
 
 ---
 

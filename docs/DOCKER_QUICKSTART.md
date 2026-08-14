@@ -127,6 +127,11 @@ running, and open:
 5. Watch the live status page; when it finishes, open the **Results** to explore
    the off-targets, scores and plots.
 
+Functional annotations (ENCODE cCREs / SCREEN + DHS + GENCODE) are applied
+automatically — the built-in bundle is enabled by default, so there is nothing to
+pick on the search form. To add your own annotation BEDs or turn tracks on/off, use
+**Settings → Data Manager → Manage annotations** (local mode only).
+
 Your results are saved on your computer under `~/crisprme/Results/<job name>/`.
 
 To stop the web server, press **Ctrl+C** in the terminal.

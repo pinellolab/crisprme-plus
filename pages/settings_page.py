@@ -31,6 +31,10 @@ from .pages_utils import (
     get_all_vcf_datasets,
     get_custom_annotations,
     index_build_pam,
+    validate_annotation_bed,
+    read_enabled_annotations,
+    write_enabled_annotations,
+    BUILTIN_ANNOTATION_HG38,
 )
 
 from dash import Input, Output, State, html, dcc, no_update
@@ -80,6 +84,10 @@ def _finalize_upload(
     if target == "annotation":
         if not name.endswith(".bed"):
             raise ValueError("annotation upload must be a .bed file")
+        verr = validate_annotation_bed(part_path)  # reject malformed BEDs
+        if verr:
+            os.remove(part_path)
+            raise ValueError(f"invalid annotation BED: {verr}")
         dest_dir = os.path.join(current_working_directory, "Annotations")
         os.makedirs(dest_dir, exist_ok=True)
         os.replace(part_path, os.path.join(dest_dir, name))
@@ -621,6 +629,30 @@ def _add_card(title: str, blurb: str, body: List) -> dbc.Card:
     )
 
 
+def _annotation_choices(genome: str):
+    """(options, value) for the enable/disable checklist: the built-in bundle (hg38,
+    if installed) plus custom annotations carrying this genome's token; value = the
+    ones currently enabled (per the .enabled.json manifest)."""
+    d = os.path.join(current_working_directory, "Annotations")
+    norm = (genome or "").replace(" ", "_")
+    options = []
+    if norm == "hg38" and (
+        os.path.isfile(os.path.join(d, "dhs+encode+gencode.hg38.bed"))
+        or os.path.isfile(os.path.join(d, BUILTIN_ANNOTATION_HG38))
+    ):
+        options.append({
+            "label": "Functional regions: ENCODE cCREs (SCREEN) + DHS + GENCODE (built-in)",
+            "value": BUILTIN_ANNOTATION_HG38,
+        })
+    for a in get_custom_annotations():
+        name = a["value"]
+        if norm and norm in name:
+            options.append({"label": name, "value": name})
+    valid = {o["value"] for o in options}
+    value = [e for e in read_enabled_annotations(genome) if e in valid]
+    return options, value
+
+
 # ---------------------------------------------------------------------------
 # Page layout
 # ---------------------------------------------------------------------------
@@ -947,6 +979,42 @@ def settings_page() -> List:
         ],
     )
 
+    # ---- Manage annotations (enable / disable) -----------------------------
+    _mg_default = "hg38" if any(g["value"] == "hg38" for g in installed_genomes) else (
+        installed_genomes[0]["value"] if installed_genomes else None
+    )
+    _mg_opts, _mg_val = _annotation_choices(_mg_default) if _mg_default else ([], [])
+    annotation_manage_card = _add_card(
+        "Manage annotations (enable / disable)",
+        "Choose which annotations searches apply for a genome. The built-in ENCODE "
+        "cCREs (SCREEN) + DHS + GENCODE bundle is enabled by default; enable your "
+        "uploaded tracks here. Multiple enabled annotations are merged at search time.",
+        [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Dropdown(
+                            id="ann-manage-genome",
+                            options=installed_genomes,
+                            value=_mg_default,
+                            clearable=False,
+                        ),
+                        width=6,
+                    )
+                ]
+            ),
+            dcc.Checklist(
+                id="ann-enabled-checklist",
+                options=_mg_opts,
+                value=_mg_val,
+                labelStyle={"display": "block"},
+                style={"margin": "0.6rem 0"},
+            ),
+            html.Button("Save enabled annotations", id="ann-enabled-save-btn"),
+            html.Div(id="ann-enabled-feedback", style={"margin-top": "0.4rem"}),
+        ],
+    )
+
     # ---- PAMs --------------------------------------------------------------
     pam_card = _add_card(
         "Define a nuclease / PAM",
@@ -1049,6 +1117,7 @@ def settings_page() -> List:
                                 index_card,
                                 vcf_card,
                                 annotation_card,
+                                annotation_manage_card,
                                 pam_card,
                                 delete_card,
                             ],
@@ -1334,16 +1403,61 @@ def add_annotation(contents, filename):
     try:
         _content_type, content_string = contents.split(",", 1)
         data = base64.b64decode(content_string)
-        os.makedirs(os.path.join(current_working_directory, "Annotations"), exist_ok=True)
-        dest = os.path.join(current_working_directory, "Annotations", filename)
-        with open(dest, "wb") as fout:
+        anndir = os.path.join(current_working_directory, "Annotations")
+        os.makedirs(anndir, exist_ok=True)
+        dest = os.path.join(anndir, filename)
+        tmp = dest + ".uploading"
+        with open(tmp, "wb") as fout:
             fout.write(data)
+        verr = validate_annotation_bed(tmp)  # reject malformed BEDs before accepting
+        if verr:
+            os.remove(tmp)
+            return _fb_refresh(f"Invalid annotation BED: {verr}")
+        os.replace(tmp, dest)
     except Exception as e:
         return _fb_refresh(f"Upload failed: {e}")
     return _fb_refresh(
-        html.Span(f"Added annotation '{filename}'.", style={"color": "green"}),
+        html.Span(
+            f"Added annotation '{filename}'. Enable it under 'Manage annotations' "
+            f"to apply it in searches.",
+            style={"color": "green"},
+        ),
         refresh=True,
     )
+
+
+# --- annotation manager: enable/disable which annotations searches apply ---------
+@app.callback(
+    [Output("ann-enabled-checklist", "options"), Output("ann-enabled-checklist", "value")],
+    [Input("ann-manage-genome", "value")],
+    prevent_initial_call=True,
+)
+def _ann_manage_repopulate(genome):
+    """Refresh the enable/disable checklist for the selected genome."""
+    if genome is None:
+        raise PreventUpdate
+    options, value = _annotation_choices(genome)
+    return options, value
+
+
+@app.callback(
+    Output("ann-enabled-feedback", "children"),
+    [Input("ann-enabled-save-btn", "n_clicks")],
+    [State("ann-manage-genome", "value"), State("ann-enabled-checklist", "value")],
+    prevent_initial_call=True,
+)
+def _ann_manage_save(n, genome, enabled):
+    """Persist which annotations are enabled for a genome (searches apply the set)."""
+    if n is None or ONLINE or genome is None:
+        raise PreventUpdate
+    enabled = enabled or []
+    write_enabled_annotations(genome, enabled)
+    msg = (
+        f"Saved: {len(enabled)} annotation(s) enabled for {genome}."
+        if enabled
+        else f"Saved: no annotations enabled for {genome} (searches will be unannotated)."
+    )
+    return html.Span(msg, style={"color": "green"})
 
 
 @app.callback(
