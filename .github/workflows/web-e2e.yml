@@ -54,6 +54,14 @@ jobs:
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_annotation_manager.py
 
+      # Email-notification config: write/read round-trip (password never echoed,
+      # kept on re-save), validation, 0600 perms, and send_mail resolving .email.json.
+      - name: Email-config unit tests
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            crisprme:web python -u /t/test_email_config.py
+
       - name: Start the web interface
         run: |
           docker run -d --name web -p 8090:8080 crisprme:web crisprme.py web-interface

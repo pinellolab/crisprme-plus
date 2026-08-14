@@ -11,6 +11,21 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **Email notifications are now configurable in the app** (Settings → Email
+  notifications, local mode): SMTP host/port/SSL, sender, and an app password are
+  saved to a local `.email.json` (0600, password never echoed back to the
+  browser). `send_mail.py` reads that config (falling back to the
+  `CRISPRME_SMTP_*` env vars) and is now best-effort — it never writes to stderr
+  or raises, so a mail-server problem can't fail an already-completed search.
+
+### Changed
+- **Search form polish**: the CRISPRme+ logo now sits above the first step; the
+  *Load Example* button moved to the bottom of the *Select gRNA* box; larger,
+  more legible fonts throughout the form; the spacer help text explains that
+  multiple spacers can be entered (and points to the CLI for bulk runs); the
+  *Notify me by email* box explains the one-time Settings setup.
+
 ### Fixed
 - **Variant indel indexing/search now resolves the INDELS companion from the
   actually-resolved variant index** instead of reconstructing an exact

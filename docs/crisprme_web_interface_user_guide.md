@@ -340,9 +340,12 @@ applied automatically to every subsequent search. See
 
 **Email notification (optional)**
 
-If provided, the server sends an email notification to the specified address when
-the job completes. This is useful for long-running whole-genome searches where
-you do not wish to keep the browser open.
+Tick **Notify me by email** and enter your address to be emailed a link when the
+job completes — useful for long-running whole-genome searches where you do not
+wish to keep the browser open. Sending requires a one-time mail-server setup in
+**Settings → Email notifications** (SMTP host, sender address, and an app
+password); see [Email notifications](#email-notifications-settings) below. Until
+that is configured the job still runs — it simply will not email you.
 
 **Job name (optional)**
 
@@ -404,6 +407,29 @@ annotation the first time you search (cached and rebuilt only when the enabled s
 changes). If you disable every track, searches still run — off-targets simply carry
 no functional annotation. The GENCODE gene-annotation track is applied automatically
 alongside the built-in bundle.
+
+---
+
+## Email notifications (Settings)
+
+To have CRISPRme+ email you when a job finishes, configure a mail server once in
+**Settings → Data Manager → Email notifications** (local offline mode only):
+
+- **SMTP host / Port / SSL** — your provider's outgoing mail server. For Gmail use
+  `smtp.gmail.com`, port `465`, SSL on.
+- **Sender address** — the account the notification is sent from.
+- **App password** — for Gmail (and most providers with 2-factor auth) generate an
+  **app password** (Google Account → Security → App passwords) and paste it here —
+  *not* your normal login password.
+
+Click **Save email settings**. The settings are stored locally in your data folder
+(`.email.json`, readable only by you; it holds the app password, so set it only on a
+machine you control). You can also configure the sender/password without the UI via
+the `CRISPRME_SMTP_SENDER` / `CRISPRME_SMTP_PSW` environment variables.
+
+Once configured, tick **Notify me by email** on the search form and enter your
+address. Email is best-effort: if the mail server rejects the message the search
+still completes normally — the failure is logged, not fatal.
 
 ---
 

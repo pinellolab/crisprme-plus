@@ -211,6 +211,11 @@ BUILTIN_ANNOTATION_HG38 = "dhs+encode+gencode.hg38.bed.gz"
 BUILTIN_GENCODE_HG38 = "gencode.protein_coding.bed"
 ACTIVE_ANNOTATION_PREFIX = ".active."  # -> Annotations/.active.<genome>.bed[.gz]
 MAX_ANNOTATION_BYTES = 200 * 1024 * 1024  # reject absurd annotation uploads
+# email notifications: SMTP settings for the completion mailer live in a hidden
+# JSON in the data dir (written by Settings -> Email notifications, local mode),
+# read by pages/send_mail.py. Kept out of the repo/env so an app password is not
+# committed; local-only and plaintext (self-hosted trust model).
+EMAIL_CONFIG_FILE = ".email.json"
 # PAMs directory
 PAMS_DIR = "PAMs"
 # VCFs directory
@@ -1884,6 +1889,81 @@ def write_enabled_annotations(genome: str, enabled: List[str]) -> None:
 
 def is_annotation_enabled(genome: str, name: str) -> bool:
     return name in read_enabled_annotations(genome)
+
+
+# ---- email-notification (SMTP) config -------------------------------------
+def _email_config_path() -> str:
+    return os.path.join(current_working_directory, EMAIL_CONFIG_FILE)
+
+
+def read_email_config() -> Dict[str, str]:
+    """Return the saved SMTP settings (or sensible gmail defaults). The password
+    is never surfaced back to the browser: callers get an empty string and a
+    ``password_set`` flag so the UI can show "configured" without echoing it."""
+    cfg = {
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 465,
+        "use_ssl": True,
+        "sender": "",
+        "password_set": False,
+    }
+    path = _email_config_path()
+    if os.path.isfile(path):
+        try:
+            with open(path) as fh:
+                saved = json.load(fh)
+            if isinstance(saved, dict):
+                cfg["smtp_host"] = str(saved.get("smtp_host", cfg["smtp_host"]))
+                cfg["smtp_port"] = int(saved.get("smtp_port", cfg["smtp_port"]))
+                cfg["use_ssl"] = bool(saved.get("use_ssl", cfg["use_ssl"]))
+                cfg["sender"] = str(saved.get("sender", ""))
+                cfg["password_set"] = bool(saved.get("password"))
+        except (json.JSONDecodeError, OSError, ValueError):
+            pass
+    return cfg
+
+
+def write_email_config(
+    smtp_host: str,
+    smtp_port: int,
+    sender: str,
+    password: Optional[str],
+    use_ssl: bool = True,
+) -> Optional[str]:
+    """Persist SMTP settings atomically. ``password=None`` keeps the previously
+    saved password (so re-saving other fields does not require re-typing it);
+    an empty string clears it. Returns None on success, else an error string."""
+    if not smtp_host or not str(smtp_host).strip():
+        return "SMTP host is required."
+    try:
+        port = int(smtp_port)
+    except (TypeError, ValueError):
+        return "SMTP port must be a number."
+    if sender and "@" not in sender:
+        return "Sender must be a valid email address."
+    path = _email_config_path()
+    existing_pw = ""
+    if os.path.isfile(path):
+        try:
+            with open(path) as fh:
+                existing_pw = json.load(fh).get("password", "") or ""
+        except (json.JSONDecodeError, OSError):
+            existing_pw = ""
+    if password is None:
+        password = existing_pw  # keep what was there
+    cfg = {
+        "smtp_host": str(smtp_host).strip(),
+        "smtp_port": port,
+        "use_ssl": bool(use_ssl),
+        "sender": str(sender).strip(),
+        "password": password,
+    }
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(cfg, fh, indent=2)
+    os.chmod(tmp, 0o600)  # the file holds an app password
+    os.replace(tmp, path)
+    return None
 
 
 def validate_annotation_bed(path: str) -> Optional[str]:

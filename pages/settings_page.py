@@ -34,6 +34,8 @@ from .pages_utils import (
     validate_annotation_bed,
     read_enabled_annotations,
     write_enabled_annotations,
+    read_email_config,
+    write_email_config,
     BUILTIN_ANNOTATION_HG38,
 )
 
@@ -1015,6 +1017,101 @@ def settings_page() -> List:
         ],
     )
 
+    # ---- Email notifications (SMTP) ---------------------------------------
+    _email_cfg = read_email_config()
+    email_card = _add_card(
+        "Email notifications",
+        "Optional: send an email when a job finishes. Enter your mail server (SMTP) "
+        "settings once here; then tick \"Notify me by email\" on the search form. For "
+        "Gmail use host smtp.gmail.com, port 465, and an app password "
+        "(myaccount.google.com → Security → App passwords), not your normal password. "
+        "The password is stored locally in this data folder — set it only on a machine "
+        "you control.",
+        [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.Label("SMTP host"),
+                            dcc.Input(
+                                id="email-smtp-host",
+                                type="text",
+                                value=_email_cfg["smtp_host"],
+                                placeholder="smtp.gmail.com",
+                                style={"width": "100%"},
+                            ),
+                        ],
+                        width=6,
+                    ),
+                    dbc.Col(
+                        [
+                            html.Label("Port"),
+                            dcc.Input(
+                                id="email-smtp-port",
+                                type="number",
+                                value=_email_cfg["smtp_port"],
+                                style={"width": "100%"},
+                            ),
+                        ],
+                        width=3,
+                    ),
+                    dbc.Col(
+                        [
+                            html.Label("SSL"),
+                            dcc.Checklist(
+                                id="email-use-ssl",
+                                options=[{"label": " SSL", "value": "ssl"}],
+                                value=["ssl"] if _email_cfg["use_ssl"] else [],
+                            ),
+                        ],
+                        width=3,
+                    ),
+                ]
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.Label("Sender address"),
+                            dcc.Input(
+                                id="email-sender",
+                                type="email",
+                                value=_email_cfg["sender"],
+                                placeholder="crisprme.notify@gmail.com",
+                                style={"width": "100%"},
+                            ),
+                        ],
+                        width=6,
+                    ),
+                    dbc.Col(
+                        [
+                            html.Label("App password"),
+                            dcc.Input(
+                                id="email-password",
+                                type="password",
+                                value="",
+                                placeholder=(
+                                    "•••••••• (saved)"
+                                    if _email_cfg["password_set"]
+                                    else "app password"
+                                ),
+                                style={"width": "100%"},
+                            ),
+                        ],
+                        width=6,
+                    ),
+                ],
+                style={"margin-top": "0.5rem"},
+            ),
+            html.Button(
+                "Save email settings",
+                id="email-save-btn",
+                style={"margin-top": "0.6rem"},
+            ),
+            html.Div(id="email-save-feedback", style={"margin-top": "0.4rem"}),
+        ],
+    )
+
     # ---- PAMs --------------------------------------------------------------
     pam_card = _add_card(
         "Define a nuclease / PAM",
@@ -1118,6 +1215,7 @@ def settings_page() -> List:
                                 vcf_card,
                                 annotation_card,
                                 annotation_manage_card,
+                                email_card,
                                 pam_card,
                                 delete_card,
                             ],
@@ -1458,6 +1556,40 @@ def _ann_manage_save(n, genome, enabled):
         else f"Saved: no annotations enabled for {genome} (searches will be unannotated)."
     )
     return html.Span(msg, style={"color": "green"})
+
+
+@app.callback(
+    Output("email-save-feedback", "children"),
+    [Input("email-save-btn", "n_clicks")],
+    [
+        State("email-smtp-host", "value"),
+        State("email-smtp-port", "value"),
+        State("email-sender", "value"),
+        State("email-password", "value"),
+        State("email-use-ssl", "value"),
+    ],
+    prevent_initial_call=True,
+)
+def _email_save(n, host, port, sender, password, use_ssl):
+    """Persist SMTP settings for the completion mailer (local mode only)."""
+    if n is None or ONLINE:
+        raise PreventUpdate
+    # an empty password field means "keep the previously saved one" (pass None),
+    # so the user doesn't have to re-enter it when editing other fields.
+    pw = password if (password and str(password).strip()) else None
+    err = write_email_config(
+        smtp_host=host,
+        smtp_port=port,
+        sender=sender,
+        password=pw,
+        use_ssl=bool(use_ssl),
+    )
+    if err:
+        return html.Span(err, style={"color": "red"})
+    return html.Span(
+        "Saved. Tick \"Notify me by email\" on the search form to use it.",
+        style={"color": "green"},
+    )
 
 
 @app.callback(
