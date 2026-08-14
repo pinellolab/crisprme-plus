@@ -1,5 +1,5 @@
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/crisprme/README.html)
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/pinellolab/crisprme:v2.2.0-alpha.6)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/pinellolab/crisprme-plus?include_prereleases)
 ![Conda](https://img.shields.io/conda/dn/bioconda/crisprme)
 ![license](https://img.shields.io/badge/license-AGPL--3.0-lightgrey)
 
@@ -1150,8 +1150,8 @@ Converter function, including detailed explanations and default behaviors:
   <br>Displays the help message with details about the available options and 
   exits the program.
 
-- `--thread` (*Optional - Default: 4*)
-  <br>Specifies the number of threads to use for the computation, allowing for 
+- `--threads` (*Optional - Default: 8*)
+  <br>Specifies the number of threads to use for the conversion, allowing for 
   parallel processing.
 
 - `--debug` (*Optional*)

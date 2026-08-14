@@ -17,9 +17,17 @@ Everything runs inside Docker, so the only thing you install is Docker itself.
 - **Mac / Windows:** install **Docker Desktop** — https://docs.docker.com/get-started/
 - **Linux:** install **Docker Engine** — https://docs.docker.com/engine/install/
 
-Then, in Docker Desktop → **Settings → Resources**, give Docker at least **16 GB
-of memory** (more is better for whole-genome searches). Check it works, then pull
-the CRISPRme+ image:
+Then, in Docker Desktop → **Settings → Resources**, give Docker enough memory:
+**16 GB** is fine for a first run / reference-only searches, but the default
+genome-wide 1000G+HGDP variant search is memory-intensive — give it **at least
+32 GB (64 GB recommended)**.
+
+> **Disk:** the batteries-included setup below needs **≈ 250 GB free**. The download
+> is ~44 GB, but the combined 1000G+HGDP variant index **expands to ~190 GB on disk**
+> — its per-sample variant dictionaries (for population/sample annotation) are
+> ~170 GB uncompressed. A reference-only setup is far smaller (~15 GB).
+
+Check Docker works, then pull the CRISPRme+ image:
 
 ```bash
 docker run --rm hello-world

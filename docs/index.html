@@ -73,9 +73,14 @@
           Install Docker for
           <a href="https://docs.docker.com/desktop/install/mac-install/">macOS</a>,
           <a href="https://docs.docker.com/desktop/install/windows-install/">Windows</a>,
-          or <a href="https://docs.docker.com/engine/install/">Linux</a>, and give it at
-          least <strong>16&nbsp;GB</strong> of memory (Docker Desktop &rarr; Settings
-          &rarr; Resources). Then check it works and pull the CRISPRme+ image:
+          or <a href="https://docs.docker.com/engine/install/">Linux</a>, and give it
+          enough memory (Docker Desktop &rarr; Settings &rarr; Resources):
+          <strong>16&nbsp;GB</strong> for a first / reference-only run, but
+          <strong>32&nbsp;GB (64&nbsp;GB recommended)</strong> for the genome-wide
+          1000G+HGDP variant search. You also need <strong>&asymp;&nbsp;250&nbsp;GB free
+          disk</strong> for the batteries setup (~44&nbsp;GB download that expands to
+          ~190&nbsp;GB on disk — the variant dictionaries are large). Then check it works
+          and pull the CRISPRme+ image:
         </p>
         <pre><code>docker run --rm hello-world
 
