@@ -204,6 +204,13 @@ def split_filter_part(filter_part: str) -> Tuple:
         Output("be-window-stop", "value"),
         Output("be-nts", "value"),
         Output("radio-base_editor", "value"),
+        # also emit the window OPTIONS here so the values below actually stick: the
+        # be-window dropdowns start with no options, and update_base_editing_dropdown
+        # (Input=text-guides) only fills them on the next callback round -- by which
+        # point Dash has already dropped a value that matched no option. Setting both
+        # atomically fixes the race (duplicate of update_base_editing_dropdown's output).
+        Output("be-window-start", "options", allow_duplicate=True),
+        Output("be-window-stop", "options", allow_duplicate=True),
     ],
     [Input("load-example-button", "n_clicks")],
     prevent_initial_call=True,
@@ -230,18 +237,25 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
     example_variant = _preferred_variant(
         [o["value"] for o in get_variant_dataset_options("hg38")]
     )
+    example_guide = "CTAACAGTTGCTTTTATCAC"  # 20 nt
+    # window options span 1..guide_len (ints), matching update_base_editing_dropdown
+    be_window_options = [
+        {"label": i, "value": i} for i in range(1, len(example_guide) + 1)
+    ]
     return [
-        "CTAACAGTTGCTTTTATCAC",  # guide to use
+        example_guide,  # guide to use
         "20bp-NGG-SpCas9",  # PAM/enzyme to use
         "hg38",  # ref genome to use
         example_variant,  # variant dataset (installed panel, chosen dynamically)
         4,  # MM (int, to match the dropdown option values)
         1,  # DNA bulges
         1,  # RNA bulges
-        "4",  # start window in base editor
-        "8",  # stop window in base editor
+        4,  # start window in base editor (int: the be-window options are ints)
+        8,  # stop window in base editor
         "A",  # nt to check in base editor
         "Y",  # base editor radio button to yes
+        be_window_options,  # be-window-start options (set atomically with the value)
+        be_window_options,  # be-window-stop options
     ]
 
 
