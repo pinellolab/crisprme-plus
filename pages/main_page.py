@@ -30,7 +30,7 @@ from .pages_utils import (
     variant_dataset_present,
     has_variant_index,
     get_variant_dataset_options,
-    get_annotation_options,
+    build_active_annotation,
     get_pam_options,
     get_custom_VCF,
     get_available_genomes,
@@ -253,7 +253,6 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         State("url", "href"),
         State("available-genome", "value"),
         State("variant-dataset", "value"),
-        State("annotation-dataset", "value"),
         State("available-pam", "value"),
         State("radio-guide", "value"),
         State("text-guides", "value"),
@@ -276,7 +275,6 @@ def change_url(
     href: str,
     genome_selected: str,
     variant_choice: str,
-    annotation_choice: str,
     pam: str,
     guide_type: str,
     text_guides: List[str],
@@ -332,8 +330,6 @@ def change_url(
         Selected genome
     variant_choice : str
         Selected variant dataset ("ref" / "1000G" / "1000G+HGDP")
-    annotation_choice : str
-        Selected annotation ("none" / "EN" / an installed .bed filename)
     pam : str
         Selected PAM
     guide_type : str
@@ -468,20 +464,13 @@ def change_url(
     if code != 0:
         raise ValueError(f"An error occurred while running {cmd}")
     # ---- Set search parameters
-    # ANNOTATION CHECK
-    # ANNOTATION: the selector is now a single genome-driven dropdown whose value
-    # is "none" (no annotation), "EN" (built-in ENCODE cCREs + GENCODE, hg38), or an
-    # installed annotation .bed filename for the selected genome. Custom annotations
-    # are added via Settings and surface here for their genome (no personal-merge on
-    # the form). gencode is only meaningful for the built-in hg38 bundle.
-    gencode_name = "vuoto.txt"
-    annotation_name = "vuoto.txt"
-    annotation_dir = os.path.join(current_working_directory, ANNOTATIONS_DIR)
-    if annotation_choice == "EN":
-        annotation_name = "dhs+encode+gencode.hg38.bed"
-        gencode_name = "gencode.protein_coding.bed"
-    elif annotation_choice and annotation_choice not in ("none", "None"):
-        annotation_name = annotation_choice
+    # ANNOTATION: there is no per-search annotation selector anymore. The search
+    # applies the annotations ENABLED for this genome (managed in Settings ->
+    # Annotations); build_active_annotation assembles them into a single annotation
+    # bed (the built-in ENCODE cCREs + DHS + GENCODE bundle is enabled by default,
+    # multiple enabled beds are merged, none -> "vuoto.txt"). gencode is the built-in
+    # bundle's gene-annotation companion and rides with its enabled state.
+    annotation_name, gencode_name = build_active_annotation(genome_selected)
     # GENOME TYPE CHECK
     ref_comparison = False
     genome_type = "ref"  # search is 'ref' or 'both'
@@ -1507,25 +1496,8 @@ def disable_job_name(checklist_value: List) -> bool:
 # variant selector is now a single genome-driven dataset dropdown.)
 
 
-@app.callback(
-    [Output("annotation-dataset", "options"), Output("annotation-dataset", "value")],
-    [Input("available-genome", "value")],
-)
-def change_annotation_dataset_options(genome_value: str) -> List:
-    """Repopulate the annotation dropdown for the selected genome.
-
-    Genome-driven, like the variant selector: only annotations that apply to the
-    chosen genome are offered (built-in ENCODE+GENCODE for hg38, installed .bed
-    annotations carrying the genome token), always with "No annotation" first. The
-    value is reset to a still-valid option so a stale selection cannot leak across a
-    genome change."""
-
-    if genome_value is not None and not isinstance(genome_value, str):
-        raise TypeError(f"Expected {str.__name__}, got {type(genome_value).__name__}")
-    options = get_annotation_options(genome_value)
-    valid = {o["value"] for o in options}
-    value = "EN" if "EN" in valid else "none"
-    return [options, value]
+# (The annotation selector was removed from the search form: searches now apply the
+# annotations enabled in Settings -> Annotations, assembled by build_active_annotation.)
 
 
 # select Cas protein from dropdown
@@ -1747,7 +1719,6 @@ def index_page() -> html.Div:
     _def_variants = _preferred_variant(
         [o["value"] for o in get_variant_dataset_options(_def_genome)]
     )
-    _def_annotation = "EN" if _def_genome == "hg38" else "none"
     # seed the PAM dropdown options for the default nuclease so the default PAM
     # value is valid on first render (an empty options list makes Dash drop the
     # preset value before the cas->pam callback can populate it)
@@ -2050,20 +2021,8 @@ def index_page() -> html.Div:
         style={"margin-top": "16px", "border-top": "1px solid #eef2f4", "padding-top": "12px"},
     )
     # annotations dropdown
-    annotation_content = html.Div(
-        [
-            html.H4("Select annotation"),
-            html.Div(
-                dcc.Dropdown(
-                    options=get_annotation_options(_def_genome),
-                    value=_def_annotation,
-                    clearable=False,
-                    id="annotation-dataset",
-                    style={"width": "300px", "margin": "0 auto"},
-                ),
-            ),
-        ]
-    )
+    # (annotation selector removed: searches apply the annotations enabled in
+    # Settings -> Annotations; nothing to pick on the form.)
     # mail box
     mail_content = html.Div(
         [
@@ -2197,7 +2156,6 @@ def index_page() -> html.Div:
                         genome_content,
                         pam_content,
                         html.Div([thresholds_content, base_editing_content]),
-                        annotation_content,
                         html.Div(
                             [
                                 mail_content,
