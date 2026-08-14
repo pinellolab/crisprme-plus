@@ -768,6 +768,74 @@ def calculate_scores(cluster_to_save):
     return [cluster_with_CFD_score, cluster_with_CRISTA_score]
 
 
+def _collect_needed_dict_keys(cluster_path, chrom):
+    """Return the SNP-dictionary keys ('<chrom>,<1-based pos>') this chromosome's
+    targets will query. iupac_decomposition() calls retrieveFromDict() for each
+    genomic position spanned by a target that contains an IUPAC code, so we take the
+    full span of every such target -- a SUPERSET of the exact query set, so no
+    queried position is ever missed. This lets us load only these entries instead of
+    the whole per-chromosome dictionary (a 1000G+HGDP chr2 dict is ~13 GB on disk,
+    ~26 GB via json.load; loading only the queried positions keeps peak RAM small)."""
+    needed = set()
+    try:
+        with open(cluster_path) as fh:
+            fh.readline()  # skip header
+            for line in fh:
+                split = line.rstrip("\n").split("\t")
+                if len(split) <= 4:
+                    continue
+                target = split[2]
+                if not any((c in iupac_nucleotides) for c in target):
+                    continue
+                try:
+                    start = int(split[4])
+                except (ValueError, IndexError):
+                    continue
+                span = len(target.replace("-", ""))
+                for p in range(start, start + span):
+                    needed.add(chrom + "," + str(p + 1))
+    except OSError:
+        pass
+    return needed
+
+
+def _load_dict_targeted(dict_path, needed_keys):
+    """Load ONLY `needed_keys` from the per-chromosome SNP dictionary, streaming the
+    JSON (ijson) so peak RAM is proportional to the queried off-target positions, not
+    the whole file. Also derives the dataset phasing flag from the streamed genotype
+    separators ('|' phased vs '/' unphased), exactly as the previous whole-dict scan
+    did. Returns (mydict, haplotype_check). Falls back to a filtered json.load when
+    ijson is unavailable (correct, but reads the whole file into RAM once)."""
+    result = {}
+    haplo = False
+    decided = False
+    try:
+        import ijson
+        with open(dict_path, "rb") as fh:
+            for key, value in ijson.kvitems(fh, ""):
+                if not decided and isinstance(value, str):
+                    if "|" in value:
+                        haplo, decided = True, True
+                    elif "/" in value:
+                        decided = True
+                if key in needed_keys:
+                    result[key] = value
+        return result, haplo
+    except ImportError:
+        with open(dict_path) as fh:
+            full = json.load(fh)
+        for key, value in full.items():
+            if not decided and isinstance(value, str):
+                if "|" in value:
+                    haplo, decided = True, True
+                elif "/" in value:
+                    decided = True
+            if key in needed_keys:
+                result[key] = value
+        del full
+        return result, haplo
+
+
 # INPUT AND SETTINGS
 # fasta of the reference chromosome
 inFasta = open(sys.argv[1], "r")
@@ -814,20 +882,22 @@ IUPAC_CAP = int(os.environ.get("CRISPRME_IUPAC_CAP", "10"))
 hvdr_bed = open(outputFile + ".high_variant_density_regions.bed", "w")
 hvdr_bed.write("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\n")
 
-# check if dictionaries has haplotypes
+# Load ONLY the SNP-dictionary entries this chromosome's targets actually query,
+# streaming the (up to ~26 GB) per-chromosome dict so peak RAM stays proportional to
+# the off-targets, not the dataset. Previously this json.load()ed the entire
+# chromosome dictionary, which OOM-killed the run on genome-wide 1000G+HGDP searches
+# (and cascaded into the cryptic "Killed ... EmptyDataError" downstream).
 haplotype_check = False
+mydict = {}
 try:
-    inDict = open(sys.argv[2], "r")
-    mydict = json.load(inDict)
-    for entry in mydict:
-        if "|" in mydict[entry]:
-            haplotype_check = True
-            break
-        elif "/" in mydict[entry]:
-            break
-    print("Haplotype processing", haplotype_check)
-except:
-    print("No dict found for", current_chr)
+    _needed_keys = _collect_needed_dict_keys(sys.argv[3], current_chr)
+    mydict, haplotype_check = _load_dict_targeted(sys.argv[2], _needed_keys)
+    print(
+        f"Loaded {len(mydict)} SNP dictionary entr(y/ies) for {current_chr} "
+        f"(only the positions its targets span); haplotype processing {haplotype_check}"
+    )
+except Exception as _dict_err:  # keep going with no SNP annotation, never crash here
+    print("No dict found (or unreadable) for", current_chr, "-", _dict_err)
 
 # check PAM position and relative coordinates on targets
 pam_at_beginning = False
