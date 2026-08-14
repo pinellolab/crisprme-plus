@@ -11,6 +11,28 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.15] - 2026-08-14
+
+### Fixed
+- **The result title now shows the "Max edits" cap that actually bound the search.**
+  In simple mode the "Maximum edits (mismatches + bulges)" slider is the binding
+  constraint, but the Result Summary title only listed the per-type mismatch/DNA/RNA
+  caps — which can be looser than the total cap (and, after "Load Example", are values
+  the user never explicitly chose), so the title overstated how broad the search was.
+  The total-edits cap is now recorded in `.Params.txt` (`Max_total_edits`) and appended
+  to the title as "Max edits (mismatches + bulges) N". Backward-compatible: results for
+  jobs created before this field simply omit the clause.
+
+### Changed
+- **"Load Example" now sets the Max-edits slider (to 4) explicitly** instead of
+  leaving it at the default, so the example is driven by the same total-edits cap the
+  report displays and the per-type caps it fills in (4/1/1) are consistent with it.
+- Docs: added mentions of the optional **email notification** (README, Docker
+  quickstart, landing pages) and clarified that **Personal Risk Cards** appear only
+  for variant-aware searches (landing pages, in-app help, quickstart, user guide).
+
+## [2.2.0-alpha.14] - 2026-08-14
+
 ### Fixed
 - **A resubmitted search no longer resurfaces a previously-FAILED job.** Results are
   deduplicated by search parameters; the dedup reused any matching prior job, so
