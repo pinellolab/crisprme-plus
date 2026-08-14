@@ -49,13 +49,13 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 ```bash
 mkdir -p ~/crisprme && cd ~/crisprme
 # 1) fast-download the reference data (minutes, via the HuggingFace CDN)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.10 crisprme.py download --what all --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.11 crisprme.py download --what all --path /DATA
 # 2) grab the prebuilt SpCas9 (NGG) indexes so no long index build is needed:
 #    the reference index, and the variant-aware hg38 + 1000G + HGDP index (the web default)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.10 crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.10 crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.11 crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.11 crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA
 # 3) launch the web interface, then open http://127.0.0.1:8080
-docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:v2.2.0-alpha.10 crisprme.py web-interface
+docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:v2.2.0-alpha.11 crisprme.py web-interface
 ```
 
 **Full step-by-step (with variants, more indexes, troubleshooting):
@@ -338,7 +338,7 @@ For more examples and ideas, visit:
 After installing Docker, you can download and build the CRISPRme Docker image by 
 running the following command in a terminal:
 ```bash
-docker pull pinellolab/crisprme:v2.2.0-alpha.10
+docker pull pinellolab/crisprme:v2.2.0-alpha.11
 ```
 
 This command retrieves the latest pre-built CRISPRme image from Docker Hub and sets 
@@ -355,7 +355,7 @@ docker images
 Look for an entry similar to the following:
 ```
 REPOSITORY          TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme:v2.2.0-alpha.10 latest    <image_id>     <timestamp>    <size>
+pinellolab/crisprme:v2.2.0-alpha.11 latest    <image_id>     <timestamp>    <size>
 ```
 
 You are now ready to run CRISPRme using Docker.
@@ -560,7 +560,7 @@ Usage Example for the Complete Search function:
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
     crisprme.py complete-search \
     --genome Genomes/hg38 \
     --vcf vcf_config.1000G.HGDP.txt \
@@ -853,7 +853,7 @@ Usage Example for the Complete Test function:
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
     crisprme.py complete-test \
     --chrom chr22 \
     --vcf_dataset 1000G
@@ -952,7 +952,7 @@ Usage Example for the Off-Target Sites Validation Test function:
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
     crisprme.py validate-test \
     --chrom chr22
   ```
@@ -1026,7 +1026,7 @@ Usage Example for the Targets Integration function:
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
     crisprme.py targets-integration \
     --targets results.integrated_results.tsv \
     --empirical_data empirical_data.bed \
@@ -1130,7 +1130,7 @@ Usage Example for the GNOMAD Converter function:
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
     crisprme.py gnomAD-converter \
     --gnomAD_VCFdir gnomad_vcf_dir \
     --samplesID samplesIDs.gnomad.v41.txt \
@@ -1262,7 +1262,7 @@ Usage Example for the Generate Personal Card function:
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
     crisprme.py generate-personal-card \
     --result_dir Results/sg1617.4.1.1 \
     --guide_seq CTAACAGTTGCTTTTATCACNNN \
@@ -1370,7 +1370,7 @@ crisprme.py setup \
 
 - **Via Docker**
 ```bash
-docker run -v ${PWD}:/DATA -w /DATA -it pinellolab/crisprme:v2.2.0-alpha.10 \
+docker run -v ${PWD}:/DATA -w /DATA -it pinellolab/crisprme:v2.2.0-alpha.11 \
   crisprme.py setup \
   --path CRISPRme_database
 ```
@@ -1473,7 +1473,7 @@ Usage example for the Web Interface function:
 - **Via Docker**
   ```bash
   docker run -v ${PWD}:/DATA -w /DATA -p 8080:8080 \
-    pinellolab/crisprme:v2.2.0-alpha.10 crisprme.py web-interface
+    pinellolab/crisprme:v2.2.0-alpha.11 crisprme.py web-interface
   ```
 
 > 🌐 **Accessing the interface from another machine (SSH tunnel).** The server
@@ -1575,7 +1575,7 @@ Open a terminal and execute the following command to check the software version:
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
   crisprme.py --version
   ```
 
@@ -1593,7 +1593,7 @@ To explore the functionalities and input parameters of CRISPRme, use the
   ```
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
     crisprme.py
   ```
 
@@ -1670,7 +1670,7 @@ execute the following commands:
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
     crisprme.py complete-test \
     --chrom chr22 \
     --vcf_dataset 1000G
@@ -1695,7 +1695,7 @@ variants, execute the following commands:
 
 - **Via Docker**
   ```bash
-  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.10 \
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.2.0-alpha.11 \
     crisprme.py complete-test \
     --vcf_dataset 1000G
   ```
