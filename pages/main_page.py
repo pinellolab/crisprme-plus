@@ -261,7 +261,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         "N",  # base editing OFF by default -- the example runs a standard search
         be_window_options,  # be-window-start options (set atomically with the value)
         be_window_options,  # be-window-stop options
-        5,  # Max edits (mismatches + bulges): the binding total-edits cap (== the default)
+        4,  # Max edits (mismatches + bulges): the binding total-edits cap (== the default)
     ]
 
 
@@ -664,6 +664,23 @@ def change_url(
     # bulges
     dna = int(dna)
     rna = int(rna)
+    # Simple mode (Advanced panel closed): the "Max edits" slider is the sole knob, so
+    # derive the per-type bulge caps from it -- bounded by the bulge depth the installed
+    # index(es) actually support -- instead of the hidden per-type dropdown values. This
+    # makes a max-edits=N search look for up to N bulges of each type (capped by the
+    # index) with no per-type input, mirroring the CLI --max-total-edits behavior. If no
+    # bulge-capable index is installed the cap is 0 -> a fast 0-bulge search.
+    if not advanced_open:
+        _mx = int(max_edits_val) if max_edits_val is not None else 4
+        _cap = index_max_bulges(genome_selected, pam, None)  # reference index
+        _sel = (
+            []
+            if variant_choice in (None, "", "ref")
+            else [v for v in str(variant_choice).split("+") if v]
+        )
+        for _v in _sel:  # a variant bulge search also needs the variant index
+            _cap = min(_cap, index_max_bulges(genome_selected, pam, _v))
+        dna = rna = max(0, min(_mx, _cap))
     # Index name budget: mirror the validated CLI (crisprme.py complete-search) EXACTLY.
     # There, bMax = max(bDNA, bRNA) and the TST index is named/built as
     # "<pam>_<bMax+1>_<genome>" (the +1 is for alignments starting with a gap). So the
@@ -1926,13 +1943,13 @@ def index_page() -> html.Div:
                         min=1,
                         max=5,
                         step=1,
-                        value=5,
+                        value=4,
                         marks={i: str(i) for i in range(1, 6)},
                         tooltip={"placement": "bottom", "always_visible": False},
                     ),
                     html.P(
                         "Total number of differences (mismatches + DNA/RNA bulges) "
-                        "allowed between a guide and an off-target. The default is 5 (matching the "
+                        "allowed between a guide and an off-target. The default is 4 (matching the "
                         "command line); lower it for a faster, narrower search. "
                         "The on-target (0 edits) is always reported at any setting.",
                         style={"font-size": "1.45rem", "color": "#555"},

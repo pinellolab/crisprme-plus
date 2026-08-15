@@ -11,6 +11,27 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.23] - 2026-08-15
+
+### Changed
+- **"Max edits" is now a self-sufficient single knob — bulges are derived from it.**
+  Previously a variant off-target that needs a bulge (e.g. the CRISPRme paper's CPS1
+  off-target rs114518452: 2 mismatches + 1 RNA bulge) was only found if bulges were
+  explicitly enabled — the CLI defaulted to bulge-free, so `--max-total-edits` alone
+  found no bulge targets. Now:
+  - **CLI:** when `--bDNA/--bRNA` are omitted, they are derived from `--max-total-edits`,
+    capped by the bulge depth the installed index supports (so `complete-search --vcf …
+    --max-total-edits 4` finds up to 2mm+2bulge patterns with no bulge flags, reusing the
+    installed index — never forcing a heavier build; explicit `--bDNA/--bRNA` still win).
+  - **Web:** in simple mode the per-type bulge caps now track `min(max_edits, index_cap)`
+    instead of a fixed 2/2, so the slider is genuinely the only control needed.
+- **Consistent default cap of 4** across web slider, Load Example, CLI `--max-total-edits`,
+  and the shell fallback (was 5). Four surfaces the CPS1 off-target (needs 3 total edits)
+  with headroom and is the validated performance sweet spot (cap 6 was pathologically slow
+  on genome-wide combined searches).
+- Docs: `--bDNA/--bRNA` are documented as optional (derived from `--max-total-edits`), not
+  "Required"; the variant-aware requirement for variant-created off-targets is noted.
+
 ## [2.2.0-alpha.22] - 2026-08-15
 
 ### Added
