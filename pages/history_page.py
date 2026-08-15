@@ -22,7 +22,7 @@ import os
 import pathlib
 
 SUMMARYTABCOLS = [
-    "Job", "Genome", "Variants", "Mismatches", "DNA bulge", "RNA bulge", "PAM", "Number of Guides", "Start"
+    "Job", "Genome", "Variants", "Mismatches", "DNA bulge", "RNA bulge", "Max edits", "PAM", "Number of Guides", "Start"
 ]
 
 
@@ -236,13 +236,25 @@ def construct_history_summary(results: List[str]) -> pd.DataFrame:
         summary[SUMMARYTABCOLS[3]].append(int(params["Mismatches"]))  # mms
         summary[SUMMARYTABCOLS[4]].append(int(params["DNA"]))  # dna bulges
         summary[SUMMARYTABCOLS[5]].append(int(params["RNA"]))  # rna bulges
-        summary[SUMMARYTABCOLS[6]].append(params["Pam"])  # pam
-        summary[SUMMARYTABCOLS[7]].append(guidesnum)  # number of guides
-        summary[SUMMARYTABCOLS[8]].append(jobinfo)  # job start time
+        # Max edits (total mismatches + bulges cap). Simple-mode searches are governed
+        # by this slider value; advanced-mode searches use the per-type caps and record
+        # their sum here. Older jobs (before this was recorded) show "-".
+        _mte = params.get("Max_total_edits")
+        _mode = params.get("Threshold_mode")
+        if _mte in (None, "", "None"):
+            _maxedits = "-"
+        elif _mode == "advanced":
+            _maxedits = f"{_mte} (advanced)"
+        else:
+            _maxedits = str(_mte)
+        summary[SUMMARYTABCOLS[6]].append(_maxedits)  # max total edits
+        summary[SUMMARYTABCOLS[7]].append(params["Pam"])  # pam
+        summary[SUMMARYTABCOLS[8]].append(guidesnum)  # number of guides
+        summary[SUMMARYTABCOLS[9]].append(jobinfo)  # job start time
         print(jobinfo)
     summary = pd.DataFrame(summary)
-    summary[SUMMARYTABCOLS[8]] = pd.to_datetime(summary[SUMMARYTABCOLS[8]])
-    summary = summary.sort_values([SUMMARYTABCOLS[8]], ascending=False)
+    summary[SUMMARYTABCOLS[9]] = pd.to_datetime(summary[SUMMARYTABCOLS[9]])
+    summary = summary.sort_values([SUMMARYTABCOLS[9]], ascending=False)
     return summary
 
 

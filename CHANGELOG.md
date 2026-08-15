@@ -11,6 +11,14 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.22] - 2026-08-15
+
+### Added
+- **History page now reports the Max edits used.** The results-history table only showed
+  Mismatches / DNA bulge / RNA bulge; it now has a "Max edits" column showing the total
+  mismatches+bulges cap (the simple-mode slider value, or the per-type sum with an
+  "(advanced)" note). Jobs predating this field show "-".
+
 ## [2.2.0-alpha.21] - 2026-08-15
 
 ### Fixed
