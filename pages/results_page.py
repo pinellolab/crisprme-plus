@@ -5307,35 +5307,53 @@ def update_content_tab(
         else:
             super_populations = []
             populations = []
-        try:
-            # try load main image of graphical reports
-            top1000_image = html.Div(
-                html.A(
-                    html.Img(
-                        src="data:image/png;base64,{}".format(
-                            base64.b64encode(
-                                open(
-                                    os.path.join(
-                                        current_working_directory,
-                                        RESULTS_DIR,
-                                        job_id,
-                                        IMGS_DIR,
-                                        f"CRISPRme_{filter_criterion}_top_1000_log_for_main_text_{guide}.png",
-                                    ),
-                                    mode="rb",
-                                ).read()
-                            ).decode()
-                        ),
-                        id="top-1000-score",
-                        width="80%",
-                        height="auto",
+        # embed a top-1000 plot PNG if it exists (returns None if absent, e.g. the
+        # variant-effect plot is only produced for the CFD/CRISTA score criteria)
+        def _embed_top1000(fname, img_id):
+            try:
+                with open(
+                    os.path.join(
+                        current_working_directory, RESULTS_DIR, job_id, IMGS_DIR, fname
                     ),
-                    target="_blank",
-                )
+                    mode="rb",
+                ) as _fh:
+                    _src = "data:image/png;base64,{}".format(
+                        base64.b64encode(_fh.read()).decode()
+                    )
+            except Exception:
+                return None
+            return html.A(
+                html.Img(src=_src, id=img_id, width="80%", height="auto"),
+                target="_blank",
             )
-        except:
-            # let it empty
-            top1000_image = html.Div("")
+
+        _score_img = _embed_top1000(
+            f"CRISPRme_{filter_criterion}_top_1000_log_for_main_text_{guide}.png",
+            "top-1000-score",
+        )
+        _delta_img = _embed_top1000(
+            f"CRISPRme_{filter_criterion}_top_1000_by_variant_effect_{guide}.png",
+            "top-1000-delta",
+        )
+        _t1000_parts = []
+        if _score_img is not None:
+            _t1000_parts += [
+                html.H5("Top 1000 candidate off-targets (ranked by score)"),
+                _score_img,
+            ]
+        if _delta_img is not None:
+            _t1000_parts += [
+                html.Br(),
+                html.H5("Top 1000 by variant effect (largest |ALT-REF| score change)"),
+                html.P(
+                    "Ranked by how much each variant changes the off-target score "
+                    "(largest first), so the impactful variants are not buried among "
+                    "the many that leave the score unchanged.",
+                    style={"font-size": "1.05rem", "color": "#555"},
+                ),
+                _delta_img,
+            ]
+        top1000_image = html.Div(_t1000_parts) if _t1000_parts else html.Div("")
         total_buttons = [
             dbc.Col(
                 html.Div(
