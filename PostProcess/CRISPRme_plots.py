@@ -40,7 +40,7 @@ def reference_count_analysis(row):
     return row
 
 
-def plot_with_MMvBUL(df, out_folder, guide):
+def plot_with_MMvBUL(df, out_folder, guide, tag="top_1000_log_for_main_text"):
     # compute analysis to reference_count_analysis
     df = df.apply(reference_count_analysis, axis=1)
 
@@ -143,7 +143,10 @@ def plot_with_MMvBUL(df, out_folder, guide):
 
     ax.set_xscale("log")
     # plt.title("Top CRISPRme-identified sites for sgRNA 1617")
-    plt.xlabel("Candidate off-target site")
+    plt.xlabel(
+        "Candidate off-target site"
+        + (" (ranked by variant effect |ALT-REF|)" if "variant_effect" in tag else "")
+    )
     plt.ylabel("Mismatches+Bulges")
 
     # Boundaries
@@ -183,13 +186,13 @@ def plot_with_MMvBUL(df, out_folder, guide):
 
     # Save
     plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_fewest_top_1000_log_for_main_text_{guide}.png")
-    plt.savefig(out_folder + f"CRISPRme_fewest_top_1000_log_for_main_text_{guide}.pdf")
+    plt.savefig(out_folder + f"CRISPRme_fewest_{tag}_{guide}.png")
+    plt.savefig(out_folder + f"CRISPRme_fewest_{tag}_{guide}.pdf")
     plt.clf()
     plt.close()
 
 
-def plot_with_CRISTA_score(df, out_folder, guide):
+def plot_with_CRISTA_score(df, out_folder, guide, tag="top_1000_log_for_main_text"):
     # Make index column that numbers the OTs starting from 1
     df.reset_index(inplace=True)
     for index_count, index in enumerate(df.index, start=1):
@@ -286,7 +289,10 @@ def plot_with_CRISTA_score(df, out_folder, guide):
     )
     ax.set_xscale("log")
 
-    plt.xlabel("Candidate off-target site")
+    plt.xlabel(
+        "Candidate off-target site"
+        + (" (ranked by variant effect |ALT-REF|)" if "variant_effect" in tag else "")
+    )
     plt.ylabel("CRISTA score")
 
     # Boundaries
@@ -326,13 +332,13 @@ def plot_with_CRISTA_score(df, out_folder, guide):
 
     # Save
     plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_CRISTA_top_1000_log_for_main_text_{guide}.png")
-    plt.savefig(out_folder + f"CRISPRme_CRISTA_top_1000_log_for_main_text_{guide}.pdf")
+    plt.savefig(out_folder + f"CRISPRme_CRISTA_{tag}_{guide}.png")
+    plt.savefig(out_folder + f"CRISPRme_CRISTA_{tag}_{guide}.pdf")
     plt.clf()
     plt.close()
 
 
-def plot_with_CFD_score(df, out_folder, guide):
+def plot_with_CFD_score(df, out_folder, guide, tag="top_1000_log_for_main_text"):
     # Make index column that numbers the OTs starting from 1
     df.reset_index(inplace=True)
     for index_count, index in enumerate(df.index, start=1):
@@ -433,7 +439,10 @@ def plot_with_CFD_score(df, out_folder, guide):
     )
     ax.set_xscale("log")
 
-    plt.xlabel("Candidate off-target site")
+    plt.xlabel(
+        "Candidate off-target site"
+        + (" (ranked by variant effect |ALT-REF|)" if "variant_effect" in tag else "")
+    )
     plt.ylabel("CFD score")
 
     # Boundaries
@@ -472,8 +481,8 @@ def plot_with_CFD_score(df, out_folder, guide):
 
     # Save
     plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_CFD_top_1000_log_for_main_text_{guide}.png")
-    plt.savefig(out_folder + f"CRISPRme_CFD_top_1000_log_for_main_text_{guide}.pdf")
+    plt.savefig(out_folder + f"CRISPRme_CFD_{tag}_{guide}.png")
+    plt.savefig(out_folder + f"CRISPRme_CFD_{tag}_{guide}.pdf")
     plt.clf()
     plt.close()
 
@@ -484,7 +493,7 @@ out_folder = sys.argv[2]
 # guide = sys.argv[3]
 
 
-def filter_table(df, plot_term):
+def filter_table(df, plot_term, sort_by="score"):
     score_mapping = {
         "cfd": ("Mismatches+bulges_(highest_CFD)", "CFD_score_(highest_CFD)"),
         # NB: sort the CRISTA plot on the CRISTA score, not a non-existent
@@ -494,13 +503,38 @@ def filter_table(df, plot_term):
         "crista": ("Mismatches+bulges_(highest_CRISTA)", "CRISTA_score_(highest_CRISTA)"),
         "mm+b": ("Mismatches+bulges_(fewest_mm+b)", "Mismatches+bulges_(fewest_mm+b)"),
     }
+    # per-plot-term (REF, ALT) score columns, used to rank by the variant-induced change
+    # delta ranking is supported for the score plots only (their REF/ALT score columns
+    # exist in the results); the fewest-mm+b plot derives its REF/ALT columns internally.
+    delta_mapping = {
+        "cfd": ("CFD_score_REF_(highest_CFD)", "CFD_score_ALT_(highest_CFD)"),
+        "crista": (
+            "CRISTA_score_REF_(highest_CRISTA)",
+            "CRISTA_score_ALT_(highest_CRISTA)",
+        ),
+    }
     # Remove targets with mm+bul<=1 since they are probably on-target introduced
     # by variants
     colname, sort_cname = score_mapping[plot_term]
     df = df[df[colname] > 1]
-    # sort values to have highest scored target on top
-    ascending = plot_term == "mm+b"
-    df_sorted = df.sort_values(sort_cname, ascending=ascending)
+    if sort_by == "delta":
+        # Rank by the size of the variant-induced change |ALT - REF|, so the impactful
+        # variants (which the score sort buries among many zero-effect ones) come first.
+        # Reference-only sites have no ALT -> NaN delta -> sorted last.
+        ref_c, alt_c = delta_mapping[plot_term]
+        _delta = (
+            pd.to_numeric(df[alt_c], errors="coerce")
+            - pd.to_numeric(df[ref_c], errors="coerce")
+        ).abs()
+        df_sorted = (
+            df.assign(_variant_delta=_delta)
+            .sort_values("_variant_delta", ascending=False, na_position="last")
+            .drop(columns=["_variant_delta"])
+        )
+    else:
+        # sort values to have highest scored target on top
+        ascending = plot_term == "mm+b"
+        df_sorted = df.sort_values(sort_cname, ascending=ascending)
     return df_sorted.head(1000)  # keep top 1000 targets
 
 
@@ -510,3 +544,15 @@ for guide in df["Spacer+PAM"].unique():
     plot_with_CFD_score(filter_table(df_guide, "cfd"), out_folder, guide)
     plot_with_CRISTA_score(filter_table(df_guide, "crista"), out_folder, guide)
     plot_with_MMvBUL(filter_table(df_guide, "mm+b"), out_folder, guide)
+    # Variant-effect-sorted companions for the SCORE plots (CFD, CRISTA): rank the
+    # top-1000 by |ALT-REF| so the variants that actually change the score (buried among
+    # many zero-effect ones in the score-sorted plot) are foregrounded. The fewest-mm+b
+    # plot is score-only (its REF/ALT mm+b columns are derived inside the plot function,
+    # and a "change in edit count" delta is far less meaningful than a score delta).
+    _tag = "top_1000_by_variant_effect"
+    plot_with_CFD_score(
+        filter_table(df_guide, "cfd", sort_by="delta"), out_folder, guide, tag=_tag
+    )
+    plot_with_CRISTA_score(
+        filter_table(df_guide, "crista", sort_by="delta"), out_folder, guide, tag=_tag
+    )

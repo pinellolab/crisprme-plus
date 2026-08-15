@@ -11,6 +11,16 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.20] - 2026-08-15
+
+### Added
+- **Graphical Reports: a "top 1000 by variant effect" plot.** Alongside the existing
+  score-ranked top-1000 scatter, the CFD and CRISTA reports now also show a companion
+  plot ranked by the size of the variant-induced score change (`|ALT - REF|`), so the
+  variants that actually change the off-target score are foregrounded instead of being
+  buried among the many that leave it unchanged. The score-ranked plot is unchanged; the
+  fewest-mm+b report stays score-only. (`CRISPRme_plots.py`, shown in `results_page.py`.)
+
 ## [2.2.0-alpha.19] - 2026-08-15
 
 ### Fixed
