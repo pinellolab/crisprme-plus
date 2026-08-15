@@ -3874,10 +3874,29 @@ def update_images_tabs(
         raise ValueError(f"Forbidden filtering criterion ({filter_criterion})")
     if not isinstance(search, str):
         raise TypeError(f"Expected {str.__name__}, got {type(search).__name__}")
+    # Dash fires this on tab render before a row is selected; guard before indexing
+    # sel_cel (mirrors update_content_tab / generate_sample_card) so the initial render
+    # is a no-op instead of a crash on sel_cel[0] / all_guides[...].
+    if sel_cel is None or not sel_cel or not all_guides:
+        raise PreventUpdate
     bulge = 0
     job_id = search.split("=")[-1]
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     guide = all_guides[int(sel_cel[0]["row"])]["Guide"]
+    # For a non-SpCas9 nuclease, CFD/CRISTA are not computed, so the barplot + radar
+    # images are only produced for the "fewest mm+bulges" criterion. Remap here (as
+    # update_content_tab does) so this tab reads the files that actually exist instead
+    # of rendering "No result found".
+    try:
+        with open(os.path.join(job_directory, PARAMS_FILE)) as _pf:
+            _params = _pf.read()
+        _nuclease = (
+            next(s for s in _params.split("\n") if "Nuclease" in s)
+        ).split("\t")[-1]
+        if _nuclease != CAS9:
+            filter_criterion = FILTERING_CRITERIA[0]  # fewest mm + bulges
+    except (OSError, StopIteration):
+        pass
     # define plot containers
     # radar_chart_images = list()
     radar_chart_encode_gencode = []
@@ -3966,7 +3985,9 @@ def update_images_tabs(
             "/Results/" + job_id + "/" + radar_img_encode_gencode
         )
     except:
-        radar_href = ""
+        # assign the variable actually used below (href=radar_href_encode_gencode);
+        # the old code set an unused 'radar_href' -> NameError if this ever failed
+        radar_href_encode_gencode = ""
     if img_found:
         radar_chart_encode_gencode.append(
             html.A(
@@ -4118,6 +4139,15 @@ def generate_sample_card(
         targets_private = targets_private.sort_values(
             [criterion_cname], ascending=order
         )
+        # also load the full personal-candidate set (written alongside the private file
+        # on first query) so the card can show ALL candidate sites, not just the private
+        # subset; fall back to the private set if an older cache lacks the personal file
+        if os.path.isfile(targets_personal_fname):
+            targets_personal = pd.read_csv(targets_personal_fname, sep="\t").sort_values(
+                [criterion_cname], ascending=order
+            )
+        else:
+            targets_personal = targets_private
     else:  # first query for this sample
         # sql database to be used for queries
         db_path = os.path.join(job_directory, f".{job_id}.db")
@@ -4222,7 +4252,48 @@ def generate_sample_card(
             "Private": [targets_private.shape[0]],
         }
     ).astype(str)
-    ans = targets_private  # load private targets for sample; targets are displayed
+    ans = targets_private  # private targets = the subset unique to this sample
+    # Build the candidate-sites tables. Show BOTH the full personal-candidate set (all
+    # off-targets the sample carries) and the private subset (unique to the sample).
+    # Previously only the private table was shown, so a sample with personal-but-not-
+    # private candidates (the common case) saw an empty "candidates" table.
+    _risk_sample_cols = [
+        "Variant_samples_(highest_CFD)",
+        "Variant_samples_(fewest_mm+b)",
+        "Variant_samples_(highest_CRISTA)",
+    ]
+
+    def _risk_table(df, tid):
+        return dash_table.DataTable(
+            css=[{"selector": ".row", "rule": "margin: 0"}],
+            id=tid,
+            columns=[{"name": i, "id": i, "hideable": True} for i in df.columns],
+            data=df.to_dict("records"),
+            style_cell_conditional=[
+                {
+                    "if": {"column_id": c},
+                    "textAlign": "left",
+                    "minWidth": "180px",
+                    "width": "180px",
+                    "maxWidth": "180px",
+                    "overflow": "hidden",
+                }
+                for c in _risk_sample_cols
+            ],
+            style_table={
+                "overflowX": "scroll",
+                "overflowY": "scroll",
+                "max-height": "300px",
+            },
+        )
+
+    candidate_tables = [
+        html.H5(f"Personal candidate off-targets ({targets_personal.shape[0]})"),
+        _risk_table(targets_personal, "results-table-risk-personal"),
+        html.Br(),
+        html.H5(f"Private off-targets — unique to this sample ({ans.shape[0]})"),
+        _risk_table(ans, "results-table-risk"),
+    ]
     # put images for personal and private targets in HTML
     try:
         image_personal_top = "data:image/png;base64,{}".format(
@@ -4318,43 +4389,7 @@ def generate_sample_card(
                     },
                 ],
             ),
-            dash_table.DataTable(
-                css=[{"selector": ".row", "rule": "margin: 0"}],
-                id="results-table-risk",
-                columns=[{"name": i, "id": i, "hideable": True} for i in ans.columns],
-                data=ans.to_dict("records"),
-                style_cell_conditional=[
-                    {
-                        "if": {"column_id": "Variant_samples_(highest_CFD)"},
-                        "textAlign": "left",
-                        "minWidth": "180px",
-                        "width": "180px",
-                        "maxWidth": "180px",
-                        "overflow": "hidden",
-                    },
-                    {
-                        "if": {"column_id": "Variant_samples_(fewest_mm+b)"},
-                        "textAlign": "left",
-                        "minWidth": "180px",
-                        "width": "180px",
-                        "maxWidth": "180px",
-                        "overflow": "hidden",
-                    },
-                    {
-                        "if": {"column_id": "Variant_samples_(highest_CRISTA)"},
-                        "textAlign": "left",
-                        "minWidth": "180px",
-                        "width": "180px",
-                        "maxWidth": "180px",
-                        "overflow": "hidden",
-                    },
-                ],
-                style_table={
-                    "overflowX": "scroll",
-                    "overflowY": "scroll",
-                    "max-height": "300px",
-                },
-            ),
+            candidate_tables,
         ]
     except:
         out_1 = [
@@ -5389,11 +5424,16 @@ def update_content_tab(
         radar_chart_encode_gencode = dbc.Col(
             html.Div(id="div-radar-chart-encode_gencode")
         )
-        populations_barplots = dbc.Col(html.Div(id="div-population-barplot"))
-        if genome_type != "ref":
-            graph_summary_both = [populations_barplots, radar_chart_encode_gencode]
-        else:
-            graph_summary_both = [radar_chart_encode_gencode]
+        # Always include the population-barplot container so the callback Output
+        # ("div-population-barplot") always resolves. For reference-only searches
+        # (genome_type == "ref") there is no per-population variant data, so hide it
+        # instead of dropping it from the layout -- dropping it made the whole
+        # update_images_tabs callback fail (the radar chart died too) on ref searches.
+        populations_barplots = dbc.Col(
+            html.Div(id="div-population-barplot"),
+            style=({"display": "none"} if genome_type == "ref" else {}),
+        )
+        graph_summary_both = [populations_barplots, radar_chart_encode_gencode]
         fl.append(html.Div([dbc.Row(graph_summary_both)]))
         fl.append(
             dbc.Row(

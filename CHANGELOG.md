@@ -11,6 +11,30 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.19] - 2026-08-15
+
+### Fixed
+- **Graphical Reports: the top-1000 scatter now shows the variant (ALT) points.** The blue
+  ALT markers were drawn ~10x smaller than the red REF markers at the same x, so they were
+  swallowed and the plot looked "all red." They now have a floored size + a black edge (and
+  stay hidden for reference-only sites), so a variant that changes the CFD/CRISTA score is
+  visible at the tip of its arrow. (`CRISPRme_plots.py`, `CRISPRme_plots_personal.py`.)
+- **Graphical Reports: the CRISTA and fewest-mm+b top-1000 plots are generated again.** The
+  plot generator sorted the CRISTA plot on a non-existent column
+  (`CFD_score_(highest_CRISTA)`) and crashed with a silently-swallowed `KeyError` right after
+  the CFD image, so only the CFD plot appeared. Fixed to `CRISTA_score_(highest_CRISTA)`.
+- **Reference-only searches no longer break the Graphical Reports tab.** The population-barplot
+  callback `Output` targeted a container the layout omitted for reference-only searches, which
+  could fail the whole callback (radar chart included). The container is now always present
+  (hidden for reference-only).
+- **Personal Risk Card now shows the candidate sites.** The detail table was built only from
+  *private* targets (unique to the sample), so it was empty for the common case of a sample
+  with shared-but-not-private candidates. It now shows both a **Personal candidates** table
+  (all off-targets the sample carries) and the **Private** table.
+- `update_images_tabs` now guards an empty table selection (no crash on initial render) and
+  applies the non-SpCas9 -> "fewest" criterion remap the rest of the page uses; fixed a radar
+  chart `except` handler that assigned an unused variable.
+
 ## [2.2.0-alpha.18] - 2026-08-15
 
 ### Fixed
