@@ -1142,11 +1142,15 @@ def _check_sorting_criteria(args: List[str], sorting_criteria: bool) -> str:
         The sorting criteria as a comma-separated string.
 
     Raises:
-        SystemExit: If the --sorting-criteria argument is missing, contains forbidden 
+        SystemExit: If the --sorting-criteria argument is missing, contains forbidden
             or repeated criteria, or exceeds the allowed number of criteria.
     """
     if not sorting_criteria:
-        return "mm+bulges"
+        # Match the web default and this flag's documented default ('mm+bulges,mm'):
+        # the fewest/total tie-break uses mm+bulges then mm, so CLI and web rank tied
+        # targets identically. Previously this returned only 'mm+bulges', disagreeing
+        # with both the web (main_page) and this command's own --help.
+        return "mm+bulges,mm"
     try:
         sorting_criteria_fewest = args[args.index("--sorting-criteria") + 1]
     except IndexError:

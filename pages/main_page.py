@@ -261,7 +261,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         "N",  # base editing OFF by default -- the example runs a standard search
         be_window_options,  # be-window-start options (set atomically with the value)
         be_window_options,  # be-window-stop options
-        4,  # Max edits (mismatches + bulges): the binding total-edits cap for the example
+        5,  # Max edits (mismatches + bulges): the binding total-edits cap (== the default)
     ]
 
 
@@ -1926,13 +1926,14 @@ def index_page() -> html.Div:
                         min=1,
                         max=5,
                         step=1,
-                        value=3,
+                        value=5,
                         marks={i: str(i) for i in range(1, 6)},
                         tooltip={"placement": "bottom", "always_visible": False},
                     ),
                     html.P(
                         "Total number of differences (mismatches + DNA/RNA bulges) "
-                        "allowed between a guide and an off-target. 3 is recommended (raise for a deeper, slower search). "
+                        "allowed between a guide and an off-target. The default is 5 (matching the "
+                        "command line); lower it for a faster, narrower search. "
                         "The on-target (0 edits) is always reported at any setting.",
                         style={"font-size": "1.45rem", "color": "#555"},
                     ),

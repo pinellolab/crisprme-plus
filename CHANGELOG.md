@@ -11,6 +11,27 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.18] - 2026-08-15
+
+### Fixed
+- **INDEL post-analysis: forward-ported the boundary/dense-variant crash guards.** The
+  alpha.17 CRISTA window guard was only in the SNP path (`new_simple_analysis.py`); the
+  parallel INDEL path (`analisi_indels_NNN.py`) still assumed a full 29 nt window, so an
+  out-of-range indel coordinate could crash post-analysis. The `!= 29` null-guard is now
+  mirrored in both INDEL CRISTA blocks.
+- **INDEL CFD scoring no longer KeyErrors on an unexpected PAM.** `analisi_indels_NNN.py`
+  used a raw `pam_scores[pam]` where the SNP path uses the guarded `pam_scores.get(pam,
+  0.0)`; now matched (issue-#94 class).
+- **CLI `--sorting-criteria` default now matches its own `--help` and the web.** It
+  defaulted to `mm+bulges` but documented (and the web uses) `mm+bulges,mm`; the
+  fewest/total tie-break now ranks tied targets identically on both paths.
+
+### Changed
+- **CLI and web now share the same default total-edits cap (5).** The web "Maximum edits"
+  slider defaulted to 3 while the CLI `--max-total-edits` defaults to 5; the web slider
+  (and Load Example) now default to 5 so a default web search and a default CLI search
+  cover the same edit space.
+
 ## [2.2.0-alpha.17] - 2026-08-14
 
 ### Fixed
