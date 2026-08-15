@@ -11,6 +11,20 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.21] - 2026-08-15
+
+### Fixed
+- **Graphical Reports: every variant off-target now shows its blue "Alternative" point.**
+  The top-1000 scatter drew a blue point only when a variant had a known allele frequency;
+  a variant whose MAF was missing (e.g. the frequency is not annotated from the external
+  AF source) was treated like a reference-only site and its blue point was suppressed. On
+  the combined 1000G+HGDP panel that hid ~93% of the variant points, so the plot looked
+  "all red." Now a blue point is drawn for any off-target carried by >= 1 sample, sized by
+  allele frequency when known and a default size when not; only true reference-only sites
+  get no blue point. This reproduces the CRISPRme Nature Genetics figure — e.g. the CPS1
+  off-target rs114518452 (chr2:210530658, CFD 0.021 -> 0.947, a variant-created off-target)
+  appears as the top blue point. Also fixed in the per-sample Personal Risk Card plots.
+
 ## [2.2.0-alpha.20] - 2026-08-15
 
 ### Added
