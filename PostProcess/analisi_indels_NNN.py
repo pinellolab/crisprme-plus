@@ -139,7 +139,10 @@ def calc_cfd(guide_seq, sg, pam, mm_scores, pam_scores, do_scores):
     if "N" in pam:
         score *= 1
     else:
-        score *= pam_scores[pam]
+        # Mirror the SNP path (new_simple_analysis.calc_cfd uses .get): an unexpected
+        # PAM not present in pam_scores must not KeyError-crash INDEL post-analysis
+        # (issue-#94 class). Fall back to 0.0 like the reference implementation.
+        score *= pam_scores.get(pam, 0.0)
     return score
 
 
@@ -621,7 +624,13 @@ def preprocess_CRISTA_score(cluster_targets):
             complete_DNA_seq = reverse_complement_table(complete_DNA_seq)
 
         if (
-            "N" in complete_DNA_seq
+            # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
+            # an out-of-range/off-the-chromosome-end indel coordinate collapses the
+            # window to <29 nt (down to empty), which then crashes get_features
+            # (min() on an empty DNAshape list / [-3] IndexError) and aborts the whole
+            # INDEL post-analysis. Null those targets (CRISTA score -1) like the N case.
+            len(complete_DNA_seq) != 29
+            or "N" in complete_DNA_seq
             or "n" in complete_DNA_seq
             or "N" in DNA_aligned_list[-1]
             or "n" in DNA_aligned_list[-1]
@@ -676,7 +685,13 @@ def preprocess_CRISTA_score(cluster_targets):
             complete_DNA_seq = reverse_complement_table(complete_DNA_seq)
 
         if (
-            "N" in complete_DNA_seq
+            # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
+            # an out-of-range/off-the-chromosome-end indel coordinate collapses the
+            # window to <29 nt (down to empty), which then crashes get_features
+            # (min() on an empty DNAshape list / [-3] IndexError) and aborts the whole
+            # INDEL post-analysis. Null those targets (CRISTA score -1) like the N case.
+            len(complete_DNA_seq) != 29
+            or "N" in complete_DNA_seq
             or "n" in complete_DNA_seq
             or "N" in DNA_aligned_list[-1]
             or "n" in DNA_aligned_list[-1]
