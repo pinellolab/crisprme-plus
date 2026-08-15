@@ -257,8 +257,8 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         1,  # RNA bulges
         4,  # start window in base editor (int: the be-window options are ints)
         8,  # stop window in base editor
-        "A",  # nt to check in base editor
-        "Y",  # base editor radio button to yes
+        "A",  # nt to check in base editor (pre-filled, but base editing stays OFF)
+        "N",  # base editing OFF by default -- the example runs a standard search
         be_window_options,  # be-window-start options (set atomically with the value)
         be_window_options,  # be-window-stop options
         4,  # Max edits (mismatches + bulges): the binding total-edits cap for the example
@@ -1834,7 +1834,7 @@ def index_page() -> html.Div:
                     "of CRISPRme+ (see the offline instructions below)."
                 ),
                 color="secondary",
-                style={"fontSize": "0.95rem"},
+                style={"fontSize": "1.4rem"},
             ),
             # Load-example lives at the bottom of this box so a new user can populate
             # the whole form with one click right where they start.
@@ -1934,7 +1934,7 @@ def index_page() -> html.Div:
                         "Total number of differences (mismatches + DNA/RNA bulges) "
                         "allowed between a guide and an off-target. 3 is recommended (raise for a deeper, slower search). "
                         "The on-target (0 edits) is always reported at any setting.",
-                        style={"font-size": "1rem", "color": "#555"},
+                        style={"font-size": "1.45rem", "color": "#555"},
                     ),
                     html.P(
                         "Note: this limit is applied during the search against the "
@@ -1942,7 +1942,7 @@ def index_page() -> html.Div:
                         "appear with a slightly higher mismatch+bulge count in the "
                         "results (its count is reported against the reference); "
                         "reference off-targets always stay within the limit.",
-                        style={"font-size": "0.95rem", "color": "#777", "font-style": "italic"},
+                        style={"font-size": "1.4rem", "color": "#777", "font-style": "italic"},
                     ),
                 ],
                 style={"max-width": "420px", "margin-bottom": "12px"},
@@ -1961,7 +1961,7 @@ def index_page() -> html.Div:
                         html.P(
                             "Per-type caps. Left at their maxima the slider above "
                             "governs; lower them to further restrict a single type.",
-                            style={"font-size": "0.95rem", "color": "#555"},
+                            style={"font-size": "1.4rem", "color": "#555"},
                         ),
                         html.Div(  # mismatches box
                             [
@@ -2005,7 +2005,7 @@ def index_page() -> html.Div:
                         html.Div(
                             id="bulge-guard-note",
                             style={
-                                "font-size": "0.95rem",
+                                "font-size": "1.4rem",
                                 "color": "#555",
                                 "margin-top": "6px",
                             },
@@ -2126,7 +2126,7 @@ def index_page() -> html.Div:
                     "configured the job still runs — it just won't email you.",
                 ],
                 color="secondary",
-                style={"fontSize": "0.95rem"},
+                style={"fontSize": "1.4rem"},
             ),
         ]
     )

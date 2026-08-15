@@ -241,6 +241,14 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
     countIUPAC = 0
     for pos_c, c in enumerate(replaceTarget):
         if c in iupac_code:
+            if pos_c >= len(refSeq):
+                # refSeq is genomeStr[pos : pos+len(replaceTarget)]; near a chromosome
+                # boundary (or from an out-of-range position on the variant-enriched
+                # combined index) it comes back truncated, shorter than replaceTarget.
+                # An IUPAC position past its end would then hit listReplaceTarget[pos_c]
+                # / refSeq[pos_c] / greedy_seq[pos_c] with an out-of-range index
+                # (IndexError, aborting the whole post-analysis). Skip such positions.
+                continue
             countIUPAC += 1
             snpToReplace, sampleSet, rsID, AF_var, snpInfo = retrieveFromDict(
                 pos_c + int(split[4])
@@ -602,7 +610,13 @@ def preprocess_CRISTA_score(cluster_targets):
         # if 'N' is present in the reference DNA seq, we must use a fake DNA seq to complete the aligned
         # that will be discarded after
         if (
-            "N" in complete_DNA_seq
+            # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
+            # near a chromosome boundary, or on the variant-enriched combined index a
+            # window can be stripped down to empty by the IUPAC removal above, which
+            # then hit `len(full_dna_seq)==0` -> ZeroDivisionError and aborted the whole
+            # post-analysis. Null those targets (CRISTA score -1) like the N case.
+            len(complete_DNA_seq) != 29
+            or "N" in complete_DNA_seq
             or "n" in complete_DNA_seq
             or "N" in DNA_aligned_list[-1]
             or "n" in DNA_aligned_list[-1]
@@ -663,7 +677,13 @@ def preprocess_CRISTA_score(cluster_targets):
         # if 'N' is present in the reference DNA seq, we must use a fake DNA seq to complete the aligned
         # that will be discarded after
         if (
-            "N" in complete_DNA_seq
+            # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
+            # near a chromosome boundary, or on the variant-enriched combined index a
+            # window can be stripped down to empty by the IUPAC removal above, which
+            # then hit `len(full_dna_seq)==0` -> ZeroDivisionError and aborted the whole
+            # post-analysis. Null those targets (CRISTA score -1) like the N case.
+            len(complete_DNA_seq) != 29
+            or "N" in complete_DNA_seq
             or "n" in complete_DNA_seq
             or "N" in DNA_aligned_list[-1]
             or "n" in DNA_aligned_list[-1]

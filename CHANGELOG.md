@@ -11,6 +11,27 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.17] - 2026-08-14
+
+### Fixed
+- **Post-analysis no longer crashes on variant-dense / chromosome-boundary targets.**
+  On the combined 1000G+HGDP index the example search (and any dense-variant search)
+  could abort in post-analysis with a `ZeroDivisionError` (CRISTA scoring divided by the
+  length of a 29 nt window that had been stripped empty of IUPAC codes) or an
+  `IndexError` in `iupac_decomposition` (a reference window truncated at a chromosome
+  boundary was shorter than the target). Both came from assuming a genome slice is always
+  full length. Now an un-scoreable CRISTA window is nulled (score −1, as for windows with
+  `N`) and IUPAC positions past a truncated reference are skipped, with belt-and-suspenders
+  divide-by-zero guards in `CRISTA_score.py`. Verified end-to-end on the batteries
+  1000G+HGDP data: the example completes and its Personal Risk Card renders.
+
+### Changed
+- **Base editing is off by default after "Load Example."** The example now loads a
+  standard (non-base-editing) search; the base-editor toggle stays on "No".
+- **Larger helper text on the submission form.** The small gray guidance texts in the
+  submission cards were ~10.5 px (the page root font is 10 px); enlarged to ~14 px so
+  they are readable. The page's base font is unchanged.
+
 ## [2.2.0-alpha.16] - 2026-08-14
 
 ### Fixed

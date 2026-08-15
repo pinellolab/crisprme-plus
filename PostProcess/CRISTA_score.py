@@ -117,7 +117,7 @@ def agct2numerals(st):
 
 
 def get_avg(l):
-    return sum(l) / float(len(l))
+    return sum(l) / float(len(l)) if l else 0.0
 
 
 def count_mismatches(aligned_seq1, aligned_seq2):
@@ -280,10 +280,14 @@ def get_features(full_dna_seq, aligned_sgRNA, aligned_offtarget, pa_score):
     nG = gapless_dnaseq.count("G")
     nT = gapless_dnaseq.count("T")
 
-    # GC content
+    # GC content (guard against an empty window: callers should never pass one, but a
+    # zero-length full_dna_seq must not abort the whole post-analysis with a
+    # ZeroDivisionError -- degrade to 0.0 GC content instead)
     extended_genomic_GC_content = (
-        full_dna_seq.count("C") + full_dna_seq.count("G")
-    ) / float(len(full_dna_seq))
+        (full_dna_seq.count("C") + full_dna_seq.count("G")) / float(len(full_dna_seq))
+        if len(full_dna_seq) > 0
+        else 0.0
+    )
 
     # five nucleotides downstream to PAM
     # the model feature for additional two nucleotides is disregarded (0) but still exists
