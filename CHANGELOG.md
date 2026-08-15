@@ -11,6 +11,27 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.24] - 2026-08-15
+
+### Changed
+- **Submission page: consolidated to exactly three font sizes (Large / Medium /
+  Small).** The form previously mixed ~7 inline sizes on a 10px root, which left
+  helper notes rendering *larger* than the inputs they described. It now uses one
+  clear hierarchy: Large `2.2rem` for the numbered section headers ("Select
+  gRNA/genome/PAM/thresholds"), Medium `1.5rem` for every interactive control
+  (spacer textarea, dropdowns, Load Example / Submit buttons, the "Maximum edits"
+  label and form body), and Small `1.25rem` for helper text, notes and slider
+  tick marks. Verified via full-page + high-DPI screenshots — no clipping or
+  overflow. Cosmetic only; no change to search behavior.
+- **"Max edits" slider maximum is now derived, not a magic number.** The slider
+  topped out at a hardcoded 5; it now tops out at the app's mismatch ceiling
+  (`MAX_MMS - 1` = 6). Rationale: mismatches are the non-index-limited edit
+  dimension and the dominant search cost, so the total-edits knob should reach as
+  far as the mismatch dropdown does. The installed index caps *bulges* only
+  (`bMax = N - 1`, ≤2 in practice) — that limit is applied separately where
+  simple-mode bulges are derived and must not shrink the mismatch-driven total.
+  Default stays 4.
+
 ## [2.2.0-alpha.23] - 2026-08-15
 
 ### Changed

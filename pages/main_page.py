@@ -1829,7 +1829,7 @@ def index_page() -> html.Div:
     # guides table
     tab_guides_content = html.Div(
         [
-            html.H4("Select gRNA"),
+            html.H4("Select gRNA", style={"fontSize": "2.2rem"}),
             dcc.RadioItems(
                 id="radio-guide",
                 options=[
@@ -1841,7 +1841,7 @@ def index_page() -> html.Div:
             dcc.Textarea(
                 id="text-guides",
                 placeholder=str("GAGTCCGAGCAGAAGAAGAA\n" "CCATCGGTGGCCGTTTGCCC"),
-                style={"width": "300px", "height": "60px", "fontSize": "1rem"},
+                style={"width": "300px", "height": "60px", "fontSize": "1.5rem"},
             ),
             dbc.FormText(
                 str(
@@ -1851,7 +1851,7 @@ def index_page() -> html.Div:
                     "of CRISPRme+ (see the offline instructions below)."
                 ),
                 color="secondary",
-                style={"fontSize": "1.4rem"},
+                style={"fontSize": "1.25rem"},
             ),
             # Load-example lives at the bottom of this box so a new user can populate
             # the whole form with one click right where they start.
@@ -1859,7 +1859,11 @@ def index_page() -> html.Div:
                 html.Button(
                     "Load Example",
                     id="load-example-button",
-                    style={"background-color": "#E6E6E6", "width": "300px"},
+                    style={
+                        "background-color": "#E6E6E6",
+                        "width": "300px",
+                        "fontSize": "1.5rem",
+                    },
                 ),
                 style={"textAlign": "left", "marginTop": "12px"},
             ),
@@ -1872,7 +1876,7 @@ def index_page() -> html.Div:
     # (e.g. "SpCas9 · NGG"), so a single self-describing PAM dropdown suffices.
     pam_content = html.Div(
         [
-            html.H4("Select PAM"),
+            html.H4("Select PAM", style={"fontSize": "2.2rem"}),
             html.Div(
                 dcc.Dropdown(
                     options=get_available_PAM(),
@@ -1902,7 +1906,7 @@ def index_page() -> html.Div:
     # genome dropdown
     genome_content = html.Div(
         [
-            html.H4("Select genome"),
+            html.H4("Select genome", style={"fontSize": "2.2rem"}),
             html.Div(
                 dcc.Dropdown(
                     options=get_available_genomes(),
@@ -1927,7 +1931,7 @@ def index_page() -> html.Div:
     # thresholds boxes
     thresholds_content = html.Div(
         [
-            html.H4("Select thresholds"),
+            html.H4("Select thresholds", style={"fontSize": "2.2rem"}),
             # PRIMARY control: a single "maximum total edits" slider (mismatches +
             # bulges). This is the simple, non-expert knob; the per-type mismatch /
             # bulge limits live under "Advanced" below and stay wide open by default
@@ -1941,10 +1945,20 @@ def index_page() -> html.Div:
                     dcc.Slider(
                         id="max-edits-slider",
                         min=1,
-                        max=5,
+                        # Max = the app's mismatch ceiling (MAX_MMS - 1 = 6), computed rather
+                        # than a magic number. Mismatches are the non-index-limited edit
+                        # dimension and the dominant search cost, so the total-edits knob tops
+                        # out where the mismatch dropdown does. The installed index only caps
+                        # *bulges* (bMax = N-1, <=2 in practice); that limit is applied
+                        # separately where bulges are derived above and must NOT shrink the
+                        # mismatch-driven total here.
+                        max=MAX_MMS - 1,
                         step=1,
                         value=4,
-                        marks={i: str(i) for i in range(1, 6)},
+                        marks={
+                            i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
+                            for i in range(1, MAX_MMS)
+                        },
                         tooltip={"placement": "bottom", "always_visible": False},
                     ),
                     html.P(
@@ -1952,7 +1966,7 @@ def index_page() -> html.Div:
                         "allowed between a guide and an off-target. The default is 4 (matching the "
                         "command line); lower it for a faster, narrower search. "
                         "The on-target (0 edits) is always reported at any setting.",
-                        style={"font-size": "1.45rem", "color": "#555"},
+                        style={"font-size": "1.25rem", "color": "#555"},
                     ),
                     html.P(
                         "Note: this limit is applied during the search against the "
@@ -1960,7 +1974,7 @@ def index_page() -> html.Div:
                         "appear with a slightly higher mismatch+bulge count in the "
                         "results (its count is reported against the reference); "
                         "reference off-targets always stay within the limit.",
-                        style={"font-size": "1.4rem", "color": "#777", "font-style": "italic"},
+                        style={"font-size": "1.25rem", "color": "#777", "font-style": "italic"},
                     ),
                 ],
                 style={"max-width": "420px", "margin-bottom": "12px"},
@@ -1971,7 +1985,7 @@ def index_page() -> html.Div:
                 id="advanced-thresholds-toggle",
                 color="link",
                 n_clicks=0,
-                style={"padding": "0", "font-size": "1rem"},
+                style={"padding": "0", "font-size": "1.25rem"},
             ),
             dbc.Collapse(
                 html.Div(
@@ -1979,7 +1993,7 @@ def index_page() -> html.Div:
                         html.P(
                             "Per-type caps. Left at their maxima the slider above "
                             "governs; lower them to further restrict a single type.",
-                            style={"font-size": "1.4rem", "color": "#555"},
+                            style={"font-size": "1.25rem", "color": "#555"},
                         ),
                         html.Div(  # mismatches box
                             [
@@ -2023,7 +2037,7 @@ def index_page() -> html.Div:
                         html.Div(
                             id="bulge-guard-note",
                             style={
-                                "font-size": "1.4rem",
+                                "font-size": "1.25rem",
                                 "color": "#555",
                                 "margin-top": "6px",
                             },
@@ -2042,7 +2056,7 @@ def index_page() -> html.Div:
             html.Div(
                 [
                     html.Div(
-                        html.H4("Base editing?"),
+                        html.H4("Base editing?", style={"fontSize": "2.2rem"}),
                         style={"display": "inline-block", "margin-right": "20px"},
                     ),
                     html.Div(
@@ -2144,7 +2158,7 @@ def index_page() -> html.Div:
                     "configured the job still runs — it just won't email you.",
                 ],
                 color="secondary",
-                style={"fontSize": "1.4rem"},
+                style={"fontSize": "1.25rem"},
             ),
         ]
     )
@@ -2176,7 +2190,11 @@ def index_page() -> html.Div:
             html.Button(
                 "Submit",
                 id="check-job",
-                style={"background-color": "#E6E6E6", "width": "300px"},
+                style={
+                    "background-color": "#E6E6E6",
+                    "width": "300px",
+                    "fontSize": "1.5rem",
+                },
             ),
             html.Button("", id="submit-job", style={"display": "none"}),
         ],
@@ -2220,7 +2238,7 @@ def index_page() -> html.Div:
                                         "backgroundColor": "#388396",
                                         "color": "white",
                                         "fontWeight": "700",
-                                        "fontSize": "1.1rem",
+                                        "fontSize": "1.5rem",
                                         "display": "flex",
                                         "alignItems": "center",
                                         "justifyContent": "center",
@@ -2287,7 +2305,7 @@ def index_page() -> html.Div:
             "padding": "24px 12px",
             # larger, more legible base font for the whole submission form (headings,
             # labels, help text and radio/checkbox labels all inherit from here)
-            "fontSize": "1.05rem",
+            "fontSize": "1.5rem",
         },
     )
     return index_page
