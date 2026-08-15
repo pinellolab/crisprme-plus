@@ -58,16 +58,19 @@ def plot_with_MMvBUL(df, out_folder, guide, tag="top_1000_log_for_main_text"):
     df["AF"] = df["Variant_MAF_(fewest_mm+b)"].astype(str).str.split(",")
     df["AF"] = df["AF"].apply(lambda x: min(x))
     df["AF"] = pd.to_numeric(df["AF"])
+    _samp = df["Variant_samples_(fewest_mm+b)"].astype(str)
+    df["_has_variant"] = _samp.str.len().gt(1) & ~_samp.isin(["nan", "NA", "n", "."])
 
-    # Adjustments for plotting purposes
-    # Blue ALT-marker size scales with the alt allele frequency, but is floored so a
-    # real variant of any AF stays visible instead of being swallowed by the (much
-    # larger) red REF marker drawn at the same x. AF < 0 is the reference-only sentinel
-    # (filled -1 above) -> NaN, so no blue point is drawn for ref-nominated sites.
+    # Adjustments for plotting purposes.
+    # Draw a blue ALT point for EVERY variant off-target (>=1 carrier), not only those
+    # with a known allele frequency: the MAF may be absent (e.g. the frequency is not
+    # annotated from the external AF source) yet the variant still exists and must be
+    # shown. Size by allele frequency when known; use a fixed default size when it is
+    # missing; give reference-only sites (no carriers) no blue point at all.
     df["plot_AF"] = np.where(
-        df["AF"] < 0,
-        np.nan,
-        np.sqrt((np.clip(df["AF"], 0, None) + 0.001) * 1000) + 6.0,
+        df["AF"] >= 0,
+        np.sqrt(np.clip(df["AF"], 0, None) * 1000 + 0.001 * 1000) + 6.0,
+        np.where(df["_has_variant"], 12.0, np.nan),
     )
 
     # Calculate ref_AF as (1 – alt_AF)
@@ -206,16 +209,19 @@ def plot_with_CRISTA_score(df, out_folder, guide, tag="top_1000_log_for_main_tex
     df["AF"] = df["Variant_MAF_(highest_CRISTA)"].astype(str).str.split(",")
     df["AF"] = df["AF"].apply(lambda x: min(x))
     df["AF"] = pd.to_numeric(df["AF"])
+    _samp = df["Variant_samples_(highest_CRISTA)"].astype(str)
+    df["_has_variant"] = _samp.str.len().gt(1) & ~_samp.isin(["nan", "NA", "n", "."])
 
-    # Adjustments for plotting purposes
-    # Blue ALT-marker size scales with the alt allele frequency, but is floored so a
-    # real variant of any AF stays visible instead of being swallowed by the (much
-    # larger) red REF marker drawn at the same x. AF < 0 is the reference-only sentinel
-    # (filled -1 above) -> NaN, so no blue point is drawn for ref-nominated sites.
+    # Adjustments for plotting purposes.
+    # Draw a blue ALT point for EVERY variant off-target (>=1 carrier), not only those
+    # with a known allele frequency: the MAF may be absent (e.g. the frequency is not
+    # annotated from the external AF source) yet the variant still exists and must be
+    # shown. Size by allele frequency when known; use a fixed default size when it is
+    # missing; give reference-only sites (no carriers) no blue point at all.
     df["plot_AF"] = np.where(
-        df["AF"] < 0,
-        np.nan,
-        np.sqrt((np.clip(df["AF"], 0, None) + 0.001) * 1000) + 6.0,
+        df["AF"] >= 0,
+        np.sqrt(np.clip(df["AF"], 0, None) * 1000 + 0.001 * 1000) + 6.0,
+        np.where(df["_has_variant"], 12.0, np.nan),
     )
 
     # Calculate ref_AF as (1 – alt_AF)
@@ -352,16 +358,21 @@ def plot_with_CFD_score(df, out_folder, guide, tag="top_1000_log_for_main_text")
     df["AF"] = df["Variant_MAF_(highest_CFD)"].astype(str).str.split(",")
     df["AF"] = df["AF"].apply(lambda x: min(x))
     df["AF"] = pd.to_numeric(df["AF"])
+    # a row is a variant off-target (gets a blue point even if its MAF is missing) when
+    # it has at least one carrier sample; reference-only sites have none
+    _samp = df["Variant_samples_(highest_CFD)"].astype(str)
+    df["_has_variant"] = _samp.str.len().gt(1) & ~_samp.isin(["nan", "NA", "n", "."])
 
-    # Adjustments for plotting purposes
-    # Blue ALT-marker size scales with the alt allele frequency, but is floored so a
-    # real variant of any AF stays visible instead of being swallowed by the (much
-    # larger) red REF marker drawn at the same x. AF < 0 is the reference-only sentinel
-    # (filled -1 above) -> NaN, so no blue point is drawn for ref-nominated sites.
+    # Adjustments for plotting purposes.
+    # Draw a blue ALT point for EVERY variant off-target (>=1 carrier), not only those
+    # with a known allele frequency: the MAF may be absent (e.g. the frequency is not
+    # annotated from the external AF source) yet the variant still exists and must be
+    # shown. Size by allele frequency when known; use a fixed default size when it is
+    # missing; give reference-only sites (no carriers) no blue point at all.
     df["plot_AF"] = np.where(
-        df["AF"] < 0,
-        np.nan,
-        np.sqrt((np.clip(df["AF"], 0, None) + 0.001) * 1000) + 6.0,
+        df["AF"] >= 0,
+        np.sqrt(np.clip(df["AF"], 0, None) * 1000 + 0.001 * 1000) + 6.0,
+        np.where(df["_has_variant"], 12.0, np.nan),
     )
 
     # Calculate ref_AF as (1 – alt_AF)
