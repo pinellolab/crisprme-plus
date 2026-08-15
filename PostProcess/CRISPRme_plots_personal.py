@@ -80,10 +80,15 @@ def plot_with_MMvBUL(df, out_folder, guide):
     df["AF"] = pd.to_numeric(df["AF"])
 
     # Adjustments for plotting purposes
-    # so haplotypes that got rounded down to AF = 0 (min AF = 0.01) still appear in the plot
-    df["plot_AF"] = df["AF"] + 0.001
-    df["plot_AF"] *= 1000  # make points larger
-    df["plot_AF"] = np.sqrt(df["plot_AF"])  # so size increase is linear
+    # Blue ALT-marker size scales with the alt allele frequency, but is floored so a
+    # real variant of any AF stays visible instead of being swallowed by the (much
+    # larger) red REF marker drawn at the same x. AF < 0 is the reference-only sentinel
+    # (filled -1 above) -> NaN, so no blue point is drawn for ref-nominated sites.
+    df["plot_AF"] = np.where(
+        df["AF"] < 0,
+        np.nan,
+        np.sqrt((np.clip(df["AF"], 0, None) + 0.001) * 1000) + 6.0,
+    )
 
     # Calculate ref_AF as (1 – alt_AF)
     # Not precisely correct because there can be other non-ref haplotypes, but approximation should be accurate in most cases
@@ -151,6 +156,8 @@ def plot_with_MMvBUL(df, out_folder, guide):
         s="plot_AF",
         c=transparent_blue,
         zorder=2,
+        edgecolors="black",
+        linewidths=0.4,
         ax=ax,
     )
 
@@ -225,10 +232,15 @@ def plot_with_CRISTA_score(df, out_folder, guide):
     df["AF"] = pd.to_numeric(df["AF"])
 
     # Adjustments for plotting purposes
-    # so haplotypes that got rounded down to AF = 0 (min AF = 0.01) still appear in the plot
-    df["plot_AF"] = df["AF"] + 0.001
-    df["plot_AF"] *= 1000  # make points larger
-    df["plot_AF"] = np.sqrt(df["plot_AF"])  # so size increase is linear
+    # Blue ALT-marker size scales with the alt allele frequency, but is floored so a
+    # real variant of any AF stays visible instead of being swallowed by the (much
+    # larger) red REF marker drawn at the same x. AF < 0 is the reference-only sentinel
+    # (filled -1 above) -> NaN, so no blue point is drawn for ref-nominated sites.
+    df["plot_AF"] = np.where(
+        df["AF"] < 0,
+        np.nan,
+        np.sqrt((np.clip(df["AF"], 0, None) + 0.001) * 1000) + 6.0,
+    )
 
     # Calculate ref_AF as (1 – alt_AF)
     # Not precisely correct because there can be other non-ref haplotypes, but approximation should be accurate in most cases
@@ -295,6 +307,8 @@ def plot_with_CRISTA_score(df, out_folder, guide):
         s="plot_AF",
         c=transparent_blue,
         zorder=2,
+        edgecolors="black",
+        linewidths=0.4,
         ax=ax,
     )
     ax.set_xscale("log")
@@ -369,10 +383,15 @@ def plot_with_CFD_score(df, out_folder, guide):
     df["AF"] = pd.to_numeric(df["AF"])
 
     # Adjustments for plotting purposes
-    # so haplotypes that got rounded down to AF = 0 (min AF = 0.01) still appear in the plot
-    df["plot_AF"] = df["AF"] + 0.001
-    df["plot_AF"] *= 1000  # make points larger
-    df["plot_AF"] = np.sqrt(df["plot_AF"])  # so size increase is linear
+    # Blue ALT-marker size scales with the alt allele frequency, but is floored so a
+    # real variant of any AF stays visible instead of being swallowed by the (much
+    # larger) red REF marker drawn at the same x. AF < 0 is the reference-only sentinel
+    # (filled -1 above) -> NaN, so no blue point is drawn for ref-nominated sites.
+    df["plot_AF"] = np.where(
+        df["AF"] < 0,
+        np.nan,
+        np.sqrt((np.clip(df["AF"], 0, None) + 0.001) * 1000) + 6.0,
+    )
 
     # Calculate ref_AF as (1 – alt_AF)
     # Not precisely correct because there can be other non-ref haplotypes, but approximation should be accurate in most cases
@@ -443,6 +462,8 @@ def plot_with_CFD_score(df, out_folder, guide):
         s="plot_AF",
         c=transparent_blue,
         zorder=2,
+        edgecolors="black",
+        linewidths=0.4,
         ax=ax,
     )
     ax.set_xscale("log")
