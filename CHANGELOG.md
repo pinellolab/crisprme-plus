@@ -11,6 +11,15 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.25] - 2026-08-15
+
+### Changed
+- **Contacts page tidied.** Developers are now listed with the Pinello lab first
+  (Luca Pinello), then the Verona/InfOmics group (Manuel Tognon et al.), then the
+  Bauer lab (Linda Lin, Daniel Bauer). Comments are directed to Luca Pinello only
+  (single email), and the page now says bugs should be filed as a GitHub issue.
+  Also fixed a missing space after the comma in the per-lab author lists.
+
 ## [2.2.0-alpha.24] - 2026-08-15
 
 ### Changed
