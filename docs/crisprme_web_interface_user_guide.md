@@ -71,15 +71,15 @@ legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.16 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.17 \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 (NGG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.16 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.17 \
   crisprme.py download --what index --index-name NGG_3_hg38 --path /DATA
 
 # the variant-aware index used by the default web search (1000G + HGDP)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.16 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.17 \
   crisprme.py download --what index --index-name NGG_3_hg38+hg38_1000G_HGDP --path /DATA
 ```
 
@@ -99,7 +99,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.2.0-alpha.16 crisprme.py web-interface
+  pinellolab/crisprme:v2.2.0-alpha.17 crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -373,7 +373,7 @@ interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.2.0-alpha.16 crisprme.py web-interface
+>   pinellolab/crisprme:v2.2.0-alpha.17 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme-2.2.0 && crisprme.py web-interface)
 > ```
