@@ -60,7 +60,7 @@ def format_devs_list(devs_list: List[str]) -> str:
     Returns:
         A string containing the comma-separated list of developer names.
     """
-    return ",".join(devs_list)
+    return ", ".join(devs_list)
 
 def lab_devs(labinfo: str, url: str) -> html.Li:
     """Format lab information and URL for display.
@@ -92,8 +92,8 @@ def devs() -> html.Ul:
     bauerlab = f"{format_devs_list(BAUERLAB_DEVS)}. {BAUERLAB_AFF}"
     return html.Ul(
         [
-            lab_devs(infomics, "https://infomics.github.io/InfOmics/"),
             lab_devs(pinellolab, "http://pinellolab.org/"),
+            lab_devs(infomics, "https://infomics.github.io/InfOmics/"),
             lab_devs(bauerlab, "http://bauerlab.org/"),
         ],
         style={"padding": "15px"},
@@ -108,16 +108,10 @@ def emails() -> html.Ul:
     Returns:
         An html.Ul element containing the formatted list of email addresses.
     """
-    rgmail = "rosalba.giugno@univr.it"
     lpmail = "lpinello@mgh.harvard.edu"
-    dbmail = "bauer@bloodgroup.tch.harvard.edu"
-    mtmail = "manuel.tognon@univr.it"
     return html.Ul(
         [
-            html.Li(["Rosalba Giugno - ", html.A(f"{rgmail}", href=f"mailto:{rgmail}")]),
             html.Li(["Luca Pinello - ", html.A(f"{lpmail}", href=f"mailto:{lpmail}")]),
-            html.Li(["Daniel Bauer - ", html.A(f"{dbmail}", href=f"mailto:{dbmail}")]),
-            html.Li(["Manuel Tognon - ", html.A(f"{mtmail}", href=f"mailto:{mtmail}")]),
         ],
         style={"padding": "15px"},
     )
@@ -138,9 +132,9 @@ def contact_page() -> List:
             html.H3("Contacts"),
             html.P("CRISPRme developers:"),
             devs(),
-            html.P("Please send any comment or bug to:"),
+            html.P("Please send any comments to Luca Pinello only:"),
             emails(),
-            html.P("Alternatively, please open an issue on GitHub: "),
+            html.P("For bugs, please open an issue on GitHub:"),
             html.A(f"{GITHUB_LINK}/issues", href=f"{GITHUB_LINK}/issues", target="_blank")
         ],
         style={"margin-left": "1%"},
