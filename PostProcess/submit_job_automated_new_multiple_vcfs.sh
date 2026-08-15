@@ -81,7 +81,7 @@ index_path="${25:-_}"
 # Optional cap on total edits (mismatches + bulges) per reported alignment
 # (complete-search --max-total-edits). Raw targets exceeding it are dropped
 # right after the search. "-1" (or unset) means no cap.
-max_total_edits="${26:-5}"  # default cap on total edits (mm+bulges); pruned in-search (#107)
+max_total_edits="${26:-4}"  # default cap on total edits (mm+bulges); pruned in-search (#107)
 
 # log files
 log="$output_folder/log.txt"

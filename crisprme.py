@@ -1235,6 +1235,49 @@ def _check_threads(args: List[str], threads: bool) -> int:
         error("Invalid number of threads specified")
     return thread
 
+def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int:
+    """Largest bulge depth an INSTALLED TST index supports for this PAM motif + genome
+    (and, for a variant search, the variant index too).
+
+    Index folders are named ``<motif>_<N>_<genome>`` (reference) or
+    ``<motif>_<N>_<genome>+<enriched>`` (variant); the usable bulge count is N-1 (the +1
+    covers alignments that start with a gap). A pamless all-N index of the same length
+    serves any PAM. Returns 0 when no matching index exists, so the caller leaves the
+    search bulge-free instead of forcing an on-demand index build. Best-effort: any error
+    -> 0. Mirrors pages_utils.index_max_bulges without pulling web dependencies.
+    """
+    try:
+        lib = os.path.join(current_working_directory, "genome_library")
+        if not motif or not genome or not os.path.isdir(lib):
+            return 0
+        pamless = "N" * len(motif)
+        prefixes = (f"{motif}_", f"{pamless}_")
+        suffix = f"_{genome}"
+
+        def _scan(want_plus: bool) -> int:
+            best = 0
+            for d in os.listdir(lib):
+                if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
+                    continue
+                base, plus, _enriched = d.partition("+")
+                if want_plus != bool(plus):
+                    continue
+                pfx = next((p for p in prefixes if base.startswith(p)), None)
+                if pfx is None or not base.endswith(suffix):
+                    continue
+                n_str = base[len(pfx) : -len(suffix)]
+                if n_str.isdigit():
+                    best = max(best, int(n_str))
+            return max(0, best - 1)
+
+        ref_cap = _scan(want_plus=False)
+        if not is_variant:
+            return ref_cap
+        return min(ref_cap, _scan(want_plus=True))  # variant search needs both indexes
+    except Exception:
+        return 0
+
+
 def complete_search() -> None:
     warn_low_memory()  # non-fatal low-memory warning (Docker Desktop, etc.)
     args = input_args[2:]  # retrieve complete-search input arguments
@@ -1257,7 +1300,8 @@ def complete_search() -> None:
     samplefile = _check_samples_ids(args, variant)  # samples ids file
     gene_annotation = _check_gene_annotation(args, "--gene_annotation" in args)  # gene annotation file
     mm = _check_mm(args)  # mismatches
-    bDNA, bRNA = _check_bdna(args, "--bDNA" in args), _check_brna(args, "--bRNA" in args)  # bulges
+    _bdna_given, _brna_given = "--bDNA" in args, "--bRNA" in args
+    bDNA, bRNA = _check_bdna(args, _bdna_given), _check_brna(args, _brna_given)  # bulges
     bMax = max(bDNA, bRNA)  # maximum number of bulges
     merge_t = _check_merge(args, "--merge" in args)  # merge threshold
     sorting_criteria_scoring = _check_sorting_criteria_scoring(args, "--sorting-criteria-scoring" in args)  # sorting criteria score columns
@@ -1297,7 +1341,7 @@ def complete_search() -> None:
     # search (pruned before generation, --max-edits) with a post-search awk drop
     # as a backstop for the -r/brute-force path. Default 5 (a real off-target
     # rarely stacks many mismatches AND several bulges); -1 disables it.
-    max_total_edits = 5
+    max_total_edits = 4
     if "--max-total-edits" in args:
         try:
             max_total_edits = int(args[args.index("--max-total-edits") + 1])
@@ -1366,6 +1410,25 @@ def complete_search() -> None:
             "(e.g. 20bp-NGG-SpCas9.txt)."
         )
     nuclease = pam_name_fields[2]
+    # Treat --max-total-edits as the single "max edits" knob (mirroring the web slider):
+    # when the user did NOT specify per-type bulges, derive bDNA=bRNA from the max-edits
+    # budget, BOUNDED by the bulge depth the installed index actually supports -- so e.g.
+    # `complete-search --vcf ... --max-total-edits 4` searches up to 2 bulges of each type
+    # (finding 2mm+1bulge / 2mm+2bulge patterns) with no bulge flags, while never forcing
+    # a heavier on-demand index build than what is already installed. Explicit
+    # --bDNA/--bRNA always win; if no bulge-capable index is installed the search stays
+    # bulge-free (fast, safe) rather than building one implicitly.
+    if not _bdna_given and not _brna_given and max_total_edits > 0:
+        _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant)
+        _derived = min(max_total_edits, _idx_cap)
+        if _derived > 0:
+            bDNA = bRNA = _derived
+            bMax = max(bDNA, bRNA)
+            print(
+                f"[complete-search] no --bDNA/--bRNA given: deriving up to {_derived} "
+                f"bulge(s) of each type from --max-total-edits {max_total_edits} "
+                f"(installed index supports {_idx_cap})."
+            )
     if bMax != 0:
         search_index = True
     else:
