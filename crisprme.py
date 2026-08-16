@@ -1909,7 +1909,7 @@ def print_help_download() -> None:
         "\t--dataset, variant dataset name for --what vcf (e.g. 1000G, HGDP) "
         "[REQUIRED for --what vcf]\n"
         "\t--index-name, precomputed index directory name for --what index "
-        "(e.g. NGG_3_hg38, or the variant-aware NGG_3_hg38+hg38_1000G_HGDP) "
+        "(e.g. the default NRG_3_hg38, or the variant-aware NRG_3_hg38+hg38_1000G_HGDP) "
         "[REQUIRED for --what index]\n"
         "\t--hf-repo, HuggingFace dataset repo id to fetch from [OPTIONAL]\n"
         "\t--source, for --what genome: hf (HuggingFace, default) | ucsc "

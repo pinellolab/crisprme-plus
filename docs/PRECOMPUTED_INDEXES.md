@@ -16,10 +16,16 @@ Indexes live under `indexes/` in the CRISPRme dataset repo (default
 
 ```
 indexes/
-  NGG_3_hg38.tar.gz                     # SpCas9 (NGG) reference index of hg38, up-to-2-bulge
-  NGG_3_hg38+hg38_1000G_HGDP.tar.gz     # SpCas9 (NGG) variant-aware index (1000G + HGDP), up-to-2-bulge (web default)
+  NRG_3_hg38.tar.gz                     # SpCas9 (NRG = NAG+NGG) reference index of hg38, up-to-2-bulge (DEFAULT)
+  NRG_3_hg38+hg38_1000G_HGDP.tar.gz     # SpCas9 (NRG) variant-aware index (1000G + HGDP), up-to-2-bulge (web default)
+  NGG_3_hg38.tar.gz                     # SpCas9 (canonical NGG only) reference index of hg38, up-to-2-bulge
+  NGG_3_hg38+hg38_1000G_HGDP.tar.gz     # SpCas9 (NGG only) variant-aware index (1000G + HGDP), up-to-2-bulge
   NNN_3_hg38+hg38_1000G_HGDP.tar.gz     # pamless (any-PAM) variant-aware index (1000G + HGDP), up-to-2-bulge (advanced)
 ```
+
+The **NRG** default matches SpCas9's broad recognition (NAG + NGG), so variant-created
+NAG off-targets (e.g. the CPS1 off-target from the CRISPRme paper) are found out of the
+box. Use the `NGG_3_*` indexes if you specifically want canonical-NGG-only results.
 
 Each tarball unpacks to a single `genome_library/<name>/` directory plus a
 `manifest.json` describing its provenance (PAM, bulge level, genome, build
@@ -30,11 +36,11 @@ timestamp). The folder name is `<PAM>_<bMax+1>_<ref>` — exactly what
 
 ```bash
 # fetch a prebuilt index straight into genome_library/
-crisprme.py download --what index --index-name NGG_3_hg38 --path "$CRISPRME_DIR"
+crisprme.py download --what index --index-name NRG_3_hg38 --path "$CRISPRME_DIR"
 
 # then search, pointing at that library (or just run from $CRISPRME_DIR)
 crisprme.py complete-search \
-  --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt \
+  --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
   --guide my_guide.txt --mm 4 --bDNA 2 --bRNA 2 \
   --index-path "$CRISPRME_DIR/genome_library" \
   --output my_search
@@ -50,9 +56,9 @@ name matches:
 
 ```bash
 crisprme.py build-index-only \
-  --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt \
+  --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
   --bDNA 2 --bRNA 2 --thread 16 --path "$CRISPRME_DIR"
-# -> genome_library/NGG_3_hg38/
+# -> genome_library/NRG_3_hg38/
 ```
 
 ## Publish (maintainers)
@@ -62,8 +68,8 @@ Upload the built index to the dataset repo (needs an HF **write** token — via
 
 ```bash
 export HF_TOKEN=hf_...        # your write token, in the shell only
-crisprme.py publish-index --index genome_library/NGG_3_hg38
-# -> uploaded to indexes/NGG_3_hg38.tar.gz (with a manifest.json inside)
+crisprme.py publish-index --index genome_library/NRG_3_hg38
+# -> uploaded to indexes/NRG_3_hg38.tar.gz (with a manifest.json inside)
 ```
 
 ## manifest.json
@@ -72,9 +78,9 @@ Every published index carries a small provenance manifest inside its tarball:
 
 ```json
 {
-  "name": "NGG_3_hg38",
+  "name": "NRG_3_hg38",
   "created_at": "2026-08-05T12:00:00+00:00",
-  "pam": "NGG",
+  "pam": "NRG",
   "index_bmax": "3",
   "genome": "hg38"
 }

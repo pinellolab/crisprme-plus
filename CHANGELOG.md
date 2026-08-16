@@ -11,6 +11,32 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.26] - 2026-08-16
+
+### Changed
+- **Default SpCas9 PAM is now NRG (NAG + NGG), not NGG.** The web form and the
+  "Load Example" default, plus the CLI/download docs, now default to `NRG`
+  (`20bp-NRG-SpCas9`) and the `NRG_3_*` indexes. NRG matches SpCas9's broad
+  recognition, so **variant-created NAG off-targets are found out of the box** —
+  e.g. the CPS1 off-target from the CRISPRme paper (rs114518452: chr2:210530658,
+  2 mismatches + 1 RNA bulge, variant-created `TGG` PAM, CFD 0.947). Verified
+  end-to-end on a from-scratch `NRG_3_hg38+hg38_1000G_HGDP` index. `_default_pam`
+  prefers NRG, falls back to NGG, then the first available PAM. The `NGG_3_*`
+  indexes remain available for canonical-NGG-only searches. New `NRG_3_*` indexes
+  are published on `lucapinello/crisprme-data`.
+
+### Fixed
+- **Off-target search now uses all requested cores.** `submit_job` split
+  `$ncpus` in half and ran reference + variant searches in parallel; the small
+  reference genome finishes first, so the long variant-search tail ran on only
+  half the cores. Now runs the two searches sequentially at full `$ncpus`
+  (reference 44.6 → 25.6 min in testing; `searchTST` 24 → ~45 cores).
+- **Freshly-built / downloaded indexes now search correctly.** `build-index-only`
+  writes `.pam_build`/`.display_label` sidecars inside the index dir, but
+  CRISPRitz's `-index` search requires the dir to contain only `.bin` files
+  ("only .bin files" error). Added a symlink-only `.bin` view so the sidecars no
+  longer break the search, regardless of how the index was built or downloaded.
+
 ## [2.2.0-alpha.25] - 2026-08-15
 
 ### Changed

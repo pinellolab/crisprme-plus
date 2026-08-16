@@ -547,56 +547,84 @@ while read vcf_f; do
 		fi
 	fi
 
-	#ceil npcus to use 1/2 of cpus per search
-	ceiling_result=$((($ncpus) / 2))
+	# Use ALL requested threads per search. The searches run SEQUENTIALLY (reference
+	# then variant), so at any moment only $ncpus threads run (no oversubscription on
+	# an $ncpus-core host) AND the long-pole variant search gets every core. The old
+	# code split $ncpus in half and ran reference + variant in parallel; but the
+	# reference genome is much smaller and finishes far sooner, so for the whole
+	# variant-search tail only ~half the cores were used while the rest sat idle.
+	ceiling_result=$ncpus
 	#if ceiling is 0, set ceiling to 1
 	if [ $ceiling_result -eq 0 ]; then
 		ceiling_result=1
 	fi
 
-	# START STEP 3 - off-targets search
+	# START STEP 3 - off-targets search (sequential, full cores each)
 	cd "$output_folder"
-	pids=()  # reset process ids
-	names=()
-	# TODO: ricerca ref lanciata in parallelo con ricerca alternative
 	echo -e 'Off-targets search\tStart\t'$(date) >>$log
+
+	# A foreground search "fails" if it returned non-zero (handled inline with ||) or
+	# wrote to the error log (stderr). Call right after each search completes.
+	_search_end_or_fail() {  # $1 = human-readable search name
+		if [ -s $logerror ]; then
+			echo "ERROR: off-targets search ${1} failed\n" >&2
+			rm -f $output_folder/*.targets.txt $output_folder/*profile*  # delete partial results
+			exit 1
+		fi
+		echo -e "Off-targets search ${1}\tEnd\t"$(date) >>$log
+	}
+
+	# CRISPRitz's -index search requires the index dir to contain ONLY .bin files, but
+	# crisprme writes .pam_build/.display_label provenance sidecars inside it (and a
+	# downloaded/published index carries them too). Hand the search a symlink-only view
+	# of just the .bin files, kept under the SAME dir basename (crispritz may parse the
+	# "<pam>_<N>_<genome>" name for the bulge budget), so the sidecars can't trip the
+	# "only .bin files" check. Echoes the original dir untouched when it is already clean.
+	_bin_only_view() {  # $1 = index dir -> stdout: a dir safe to pass to crispritz -index
+		local src="${1%/}"
+		if [ -z "$(find "$src" -maxdepth 1 ! -type d ! -name '*.bin' -print -quit 2>/dev/null)" ]; then
+			printf '%s' "$src"
+			return 0
+		fi
+		local view="${output_folder}/.binview/$(basename "$src")"
+		rm -rf "$view"
+		mkdir -p "$view"
+		ln -s "$src"/*.bin "$view"/ 2>/dev/null
+		printf '%s' "$view"
+	}
+
 	if ! [ -f "$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" ]; then
 		echo -e 'Search Reference Start'  # off-targets search on reference genome
-		if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # no bulges 
-			crispritz.py search $idx_ref "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result --max-edits $max_total_edits &
-			pid_search_ref=$!
-			pids+=("$pid_search_ref")  # add reference search pid
-			names+=("Reference")  # add pid identifier
-		else  # consider dna/rna bulges (not combined)
-			crispritz.py search "$current_working_directory/Genomes/${ref_name}/" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result &
-			pid_search_ref=$!
-			pids+=("$pid_search_ref")  # add reference search pid
-			names+=("Reference")  # add pid identifier
+		if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # bulge-enabled: TST index search
+			idx_ref_view="$(_bin_only_view "$idx_ref")"
+			crispritz.py search "$idx_ref_view" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result --max-edits $max_total_edits \
+				|| { echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
+		else  # no bulges: brute-force scan
+			crispritz.py search "$current_working_directory/Genomes/${ref_name}/" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
+				|| { echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
 		fi
 		echo -e 'Search Reference completed'
+		_search_end_or_fail "Reference"
 	else
 		echo -e "Search for reference already done"
 	fi
 
 	if [ "$vcf_name" != "_" ]; then
-		# TODO: search in parallel on ref and alt
 		if ! [ -f "$output_folder/crispritz_targets/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" ]; then
-			echo -e 'Search Variant Start'  # search off-targets on alternative genomes (snps only)
-			if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # no bulge
-				crispritz.py search "$idx_var" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits &
-				pid_search_var=$!
-				pids+=("$pid_search_var")  # add variants search pid
-				names+=("Variant")  # add pid identifier
-			else  # consider bulges
-				crispritz.py search "$current_working_directory/Genomes/${ref_name}+${vcf_name}/" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result &
-				pid_search_var=$!
-				pids+=("$pid_search_var")  # add variants search pid
-				names+=("Variant")  # add pid identifier
+			echo -e 'Search Variant Start'  # search off-targets on the variant-enriched genome (snps)
+			if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # bulge-enabled: TST index search
+				idx_var_view="$(_bin_only_view "$idx_var")"
+				crispritz.py search "$idx_var_view" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits \
+					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
+			else  # no bulges: brute-force scan
+				crispritz.py search "$current_working_directory/Genomes/${ref_name}+${vcf_name}/" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
+					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
 			fi
+			echo -e 'Search Variant completed'
+			_search_end_or_fail "Variant"
 		else
 			echo -e "Search for variant already done"
 		fi
-		echo -e 'Search Variant completed'
 
 		if ! [ -f "$output_folder/crispritz_targets/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" ]; then
 			echo -e "Search INDELs Start"
@@ -611,24 +639,7 @@ while read vcf_f; do
 		echo -e "Search INDELs completed"
 
 	fi
-	
-	# wait for jobs completion
-	for i in "${!pids[@]}"; do
-		pid="${pids[$i]}"
-		name="${names[$i]}"
 
-		if wait "$pid"; then
-			if [ -s $logerror ]; then
-				echo "ERROR: off-targets search ${name} failed\n" >&2
-				rm -f $output_folder/*.targets.txt $output_folder/*profile*  # delete results folder
-				exit 1
-			fi
-			echo -e "Off-targets search $name\tEnd\t"$(date) >>$log  # off-targets search on reference/variant genome
-		else			
-			echo "ERROR: Off-targets search $name failed" >&2
-			exit 1
-		fi
-	done
 	echo -e 'Off-targets search\tEnd\t'$(date) >>$log
 	# move all targets into targets directory
 	if [ -d "${output_folder}/crispritz_targets" ]; then
