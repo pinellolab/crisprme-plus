@@ -11,6 +11,24 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.27] - 2026-08-16
+
+### Fixed
+- **Batteries variant search is now self-sufficient (the index-only download can run
+  a variant search).** The variant post-analysis needs per-sample SNP dictionaries
+  (~152 GB for 1000G+HGDP) that weren't shipped, so a fresh `download --index-name
+  <variant>` install failed at genome enrichment (no source VCFs). The dicts are now
+  shipped **gzipped** (152 GB → ~28 GB; indel logs 18 GB → 3.3 GB) and read **on the
+  fly**, mirroring the existing bgzipped-VCF pattern — no 150 GB on-disk decompress.
+  - `new_simple_analysis.py` / `analisi_indels_NNN.py`: prefer `*.json.gz` / `*.txt.gz`
+    (ijson streams through gzip; json.load + line reads via `gzip.open`), fall back to
+    plain — backward-compatible. Bash wrappers unchanged (Python resolves the extension).
+  - `pool_search_indels.py` / `pool_post_analisi_indel.py` + the `submit_job` batteries
+    chrom glob: strip an optional `.gz` from `log*.txt(.gz)`.
+  - `build-index-only` gzips the per-chromosome dicts it produces (pigz-preferred).
+  - Verified end-to-end by `validate-benchmarks` (build gzips → search reads `.gz`) and
+    a new `test_dict_gzip` unit test (publish bundles + download routes `.gz` dicts).
+
 ## [2.2.0-alpha.26] - 2026-08-16
 
 ### Changed

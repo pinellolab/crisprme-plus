@@ -3,6 +3,7 @@ from math import trunc
 from operator import index
 import sys
 import json
+import gzip
 import os
 import pickle
 import numpy as np
@@ -825,13 +826,23 @@ def _load_dict_targeted(dict_path, needed_keys):
     the whole file. Also derives the dataset phasing flag from the streamed genotype
     separators ('|' phased vs '/' unphased), exactly as the previous whole-dict scan
     did. Returns (mydict, haplotype_check). Falls back to a filtered json.load when
-    ijson is unavailable (correct, but reads the whole file into RAM once)."""
+    ijson is unavailable (correct, but reads the whole file into RAM once).
+
+    Prefers a gzip-compressed dict (``my_dict_<chrom>.json.gz``) when present, so a
+    batteries install keeps the per-sample dicts compressed on disk (~40-50GB instead
+    of ~152GB) and reads them on the fly; falls back to a plain ``.json`` for older /
+    uncompressed installs. ijson and json.load both stream through a gzip file object
+    transparently."""
+    # resolve .gz-vs-plain (prefer the compressed file when it exists)
+    if os.path.exists(dict_path + ".gz"):
+        dict_path = dict_path + ".gz"
+    _is_gz = dict_path.endswith(".gz")
     result = {}
     haplo = False
     decided = False
     try:
         import ijson
-        with open(dict_path, "rb") as fh:
+        with (gzip.open(dict_path, "rb") if _is_gz else open(dict_path, "rb")) as fh:
             for key, value in ijson.kvitems(fh, ""):
                 if not decided and isinstance(value, str):
                     if "|" in value:
@@ -842,7 +853,7 @@ def _load_dict_targeted(dict_path, needed_keys):
                     result[key] = value
         return result, haplo
     except ImportError:
-        with open(dict_path) as fh:
+        with (gzip.open(dict_path, "rt") if _is_gz else open(dict_path)) as fh:
             full = json.load(fh)
         for key, value in full.items():
             if not decided and isinstance(value, str):
