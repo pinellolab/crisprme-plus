@@ -249,7 +249,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
     ]
     return [
         example_guide,  # guide to use
-        "20bp-NGG-SpCas9",  # PAM/enzyme to use
+        "20bp-NRG-SpCas9",  # PAM/enzyme to use
         "hg38",  # ref genome to use
         example_variant,  # variant dataset (installed panel, chosen dynamically)
         4,  # MM (int, to match the dropdown option values)
@@ -425,7 +425,7 @@ def change_url(
     if (genome_selected is None) or (not genome_selected):
         genome_selected = "hg38_ref"  # use hg38 by default
     if (pam is None) or (not pam):
-        pam = "20bp-NGG-SpCas9"  # use Cas9 PAM
+        pam = "20bp-NRG-SpCas9"  # use Cas9 PAM
         guide_seqlen = 20  # set guide length to 20
     else:
         for c in pam.split("-"):
@@ -1252,7 +1252,7 @@ def check_input(
         update_style = True
         miss_input_list.append("Bulge RNA size")
     if pam is None or not bool(pam):
-        pam = "20bp-NGG-SpCas9"
+        pam = "20bp-NRG-SpCas9"
         len_guide_sequence = 20
     else:
         for e in pam.split("-"):
@@ -1741,7 +1741,9 @@ def _default_cas() -> Optional[str]:
 
 
 def _default_pam(cas: Optional[str]) -> Optional[str]:
-    """Default PAM for a nuclease: prefer an NGG PAM, else the first for that Cas."""
+    """Default PAM for a nuclease: prefer an NRG PAM (NAG+NGG, the broad SpCas9
+    default that surfaces variant-created NAG off-targets), else fall back to the
+    canonical NGG, else the first available PAM for that Cas."""
     if not cas:
         return None
     pams = [
@@ -1751,7 +1753,10 @@ def _default_pam(cas: Optional[str]) -> Optional[str]:
     ]
     if not pams:
         return None
-    for p in pams:
+    for p in pams:  # prefer NRG (the new default)
+        if "-NRG-" in p:
+            return p
+    for p in pams:  # else the canonical NGG
         if "-NGG-" in p:
             return p
     return pams[0]
@@ -1775,7 +1780,7 @@ def index_page() -> html.Div:
 
     # begin main page construction
     final_list = []
-    # smart defaults, based on what is actually installed: hg38 + SpCas9/NGG +
+    # smart defaults, based on what is actually installed: hg38 + SpCas9/NRG +
     # 1000G variants + the standard 4/1/1 thresholds, so a non-expert can submit
     # a sensible search without configuring everything from scratch.
     _def_genome = _default_genome()
@@ -1872,7 +1877,7 @@ def index_page() -> html.Div:
     )
     # cas protein dropdown
     # PAM dropdown. The Cas-protein selector was removed as redundant: the PAM value
-    # already encodes the enzyme (e.g. 20bp-NGG-SpCas9) and the label now shows it
+    # already encodes the enzyme (e.g. 20bp-NRG-SpCas9) and the label now shows it
     # (e.g. "SpCas9 · NGG"), so a single self-describing PAM dropdown suffices.
     pam_content = html.Div(
         [

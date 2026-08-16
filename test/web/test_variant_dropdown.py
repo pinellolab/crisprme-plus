@@ -5,7 +5,7 @@ combined variant search must have the inputs it needs.
 Guards the alpha bug where, after the batteries download (index only, no raw VCFs/),
 the variant dropdown showed only "Reference only" -- get_variant_dataset_options read
 only VCFs/ + a built-in marker that did not match the combined enriched index name, so
-the shipped NGG_3_hg38+hg38_1000G_HGDP index was never offered. Also covers the VCF-folder
+the shipped NRG_3_hg38+hg38_1000G_HGDP index was never offered. Also covers the VCF-folder
 resolver and the combined-samplesID synthesis (the combined search dies at the sample-ID
 step without the combined list, which the batteries download does not ship).
 
@@ -38,9 +38,9 @@ for sub in (
     "VCFs",
     "samplesIDs",
     "Genomes/hg38",
-    "genome_library/NGG_3_hg38",
-    "genome_library/NGG_3_hg38+hg38_1000G_HGDP",
-    "genome_library/NGG_3_hg38+hg38_1000G_HGDP_INDELS",
+    "genome_library/NRG_3_hg38",
+    "genome_library/NRG_3_hg38+hg38_1000G_HGDP",
+    "genome_library/NRG_3_hg38+hg38_1000G_HGDP_INDELS",
     "Annotations",
 ):
     os.makedirs(os.path.join(d, sub), exist_ok=True)

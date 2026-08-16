@@ -287,10 +287,10 @@ Publish a locally built index so other machines (or collaborators) can skip the 
 
 ```bash
 # upload — needs an HF write token: export HF_TOKEN=...  (never commit it)
-crisprme.py publish-index --index genome_library/NGG_3_hg38
+crisprme.py publish-index --index genome_library/NRG_3_hg38
 
 # elsewhere: download it straight into genome_library/
-crisprme.py download --what index --index-name NGG_3_hg38 --path "$CRISPRME_DIR"
+crisprme.py download --what index --index-name NRG_3_hg38 --path "$CRISPRME_DIR"
 ```
 
 Then run the search with `--index-path "$CRISPRME_DIR/genome_library"` (or simply from `$CRISPRME_DIR`) and it reuses the downloaded index. The index folder name encodes the PAM, bulge count and genome, so an index is only valid for a matching `--genome`/`--pam`/`--bDNA`/`--bRNA`.
