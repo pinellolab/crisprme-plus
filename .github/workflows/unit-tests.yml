@@ -49,3 +49,7 @@ jobs:
       - name: Variant-index bundle round-trip (dicts travel with the index)
         working-directory: PostProcess
         run: python -m unittest test_index_bundle -v
+
+      - name: Gzipped variant dicts (publish/download route .gz dicts)
+        working-directory: PostProcess
+        run: python -m unittest test_dict_gzip -v

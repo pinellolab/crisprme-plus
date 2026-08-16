@@ -159,10 +159,15 @@ while read vcf_f; do
 			# per-chromosome indel logs bundled with the precomputed index
 			# (Dictionaries/log_indels_<vcf>/log<chrom>.txt). Same set as the VCFs,
 			# since both are produced from those VCFs at index-build time.
-			for _logf in "$current_working_directory/Dictionaries/log_indels_${vcf_name}"/log*.txt; do
+			# accept gzipped logs (log<chrom>.txt.gz) as well as plain; dedup so a
+			# mixed dir never double-counts a chrom
+			_seen_fc=" "
+			for _logf in "$current_working_directory/Dictionaries/log_indels_${vcf_name}"/log*.txt "$current_working_directory/Dictionaries/log_indels_${vcf_name}"/log*.txt.gz; do
 				[ -e "$_logf" ] || continue
-				_c=$(basename "$_logf"); _c=${_c#log}; _c=${_c%.txt}
+				_c=$(basename "$_logf"); _c=${_c#log}; _c=${_c%.gz}; _c=${_c%.txt}
 				case "$_c" in chr*) : ;; *) _c="chr$_c" ;; esac
+				case "$_seen_fc" in *" $_c "*) continue ;; esac
+				_seen_fc="$_seen_fc$_c "
 				echo -e "fake$_c"
 				array_fake_chroms+=("fake$_c")
 			done

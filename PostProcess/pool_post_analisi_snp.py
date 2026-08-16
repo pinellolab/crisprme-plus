@@ -104,17 +104,22 @@ def _estimate_worker_gb(dict_folder):
     # No ijson -> new_simple_analysis json.load()s the whole per-chromosome dict
     # (~2.2x its on-disk size), so size the estimate from the largest dictionary.
     biggest_bytes = 0
+    biggest_is_gz = False
     try:
         for f in os.listdir(dict_folder):
-            if f.endswith(".json"):
+            if f.endswith(".json") or f.endswith(".json.gz"):
                 b = os.path.getsize(os.path.join(dict_folder, f))
                 if b > biggest_bytes:
                     biggest_bytes = b
+                    biggest_is_gz = f.endswith(".gz")
     except Exception:
         pass
     if biggest_bytes <= 0:
         return 6.0
-    return max(4.0, (biggest_bytes / (1024.0 ** 3)) * 2.2 + 1.0)
+    # A gzipped dict is ~3.5x smaller on disk but json.load expands it to the full
+    # uncompressed size in RAM, so scale the on-disk size up before the 2.2x factor.
+    gz_factor = 3.5 if biggest_is_gz else 1.0
+    return max(4.0, (biggest_bytes / (1024.0 ** 3)) * gz_factor * 2.2 + 1.0)
 
 
 def memory_capped_workers(requested, n_tasks, dict_folder):

@@ -44,6 +44,7 @@ import os
 import itertools
 import time
 import json
+import gzip
 import sys
 import warnings
 from CRISTA_score import CRISTA_predict_list
@@ -871,7 +872,11 @@ mmblg_best.write(header + "\tCFD\n")  # Write header
 
 
 INDELS_tree = IntervalTree()
-with open(os.path.realpath(sys.argv[4]) + "/log" + current_chr + ".txt", "r") as log:
+# prefer a gzip-compressed indel log (log<chrom>.txt.gz) when present so batteries
+# installs keep the logs compressed on disk and read them on the fly; fall back to plain
+_logbase = os.path.realpath(sys.argv[4]) + "/log" + current_chr + ".txt"
+_logpath = _logbase + ".gz" if os.path.exists(_logbase + ".gz") else _logbase
+with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, "r")) as log:
     # print('indel processing:', current_chr)
     log.readline()
     for entry in log:

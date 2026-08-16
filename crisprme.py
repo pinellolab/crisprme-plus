@@ -1793,6 +1793,7 @@ def build_index_only() -> None:
     # same folder names a later search looks for.
     import shutil
     import tempfile
+    import gzip
     from glob import glob as _glob
 
     vcfdir = os.path.abspath(args[args.index("--vcf") + 1])
@@ -1842,6 +1843,23 @@ def build_index_only() -> None:
             shutil.move(f, dict_folder)
         for f in _glob(os.path.join(variants_tmp, "SNPs_genome", "log*.txt")):
             shutil.move(f, indel_dict)
+        # Compress the per-chromosome dicts in place (my_dict_*.json -> .json.gz,
+        # log*.txt -> .txt.gz) so the published index ships them ~3.5x smaller
+        # (~40-50GB not ~152GB for 1000G+HGDP) and the variant post-analysis reads
+        # them gzipped on the fly (no 150GB decompress). pigz (parallel) when
+        # available, else Python gzip. Mirrors _make_index_tarball's pigz preference.
+        _pigz = shutil.which("pigz")
+        for _d, _pat in ((dict_folder, "*.json"), (indel_dict, "log*.txt")):
+            _files = _glob(os.path.join(_d, _pat))
+            if not _files:
+                continue
+            if _pigz:
+                subprocess.call([_pigz, "-f", "-p", str(thread), *_files])
+            else:
+                for _f in _files:
+                    with open(_f, "rb") as _src, gzip.open(_f + ".gz", "wb") as _dst:
+                        shutil.copyfileobj(_src, _dst)
+                    os.remove(_f)
         shutil.rmtree(tmp, ignore_errors=True)
     else:
         print(f"Enriched genome already present: {enriched}", flush=True)

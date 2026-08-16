@@ -36,11 +36,15 @@ def _dataset_chroms(vcf_dir: str, log_indels_dir: str):
         if vcfs:
             return [_normalize_chrom(_chrom_from_vcf(os.path.join(vcf_dir, f))) for f in vcfs]
     if log_indels_dir and os.path.isdir(log_indels_dir):
-        chroms = [
-            _normalize_chrom(f[len("log"):-len(".txt")])
-            for f in sorted(os.listdir(log_indels_dir))
-            if f.startswith("log") and f.endswith(".txt")
-        ]
+        chroms = []
+        for f in sorted(os.listdir(log_indels_dir)):
+            if not f.startswith("log"):
+                continue
+            # accept gzipped logs (log<chrom>.txt.gz) as well as plain (log<chrom>.txt)
+            stem = f[:-3] if f.endswith(".gz") else f
+            if not stem.endswith(".txt"):
+                continue
+            chroms.append(_normalize_chrom(stem[len("log"):-len(".txt")]))
         if chroms:
             return chroms
     raise ValueError(
