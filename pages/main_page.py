@@ -2308,7 +2308,29 @@ def index_page() -> html.Div:
             "fontSize": "1.5rem",
         },
     )
-    return index_page
+    # Full-bleed tiled background behind the submission form. Drop a tileable image
+    # at assets/crisprme_bg_tile.png (Dash auto-serves the assets/ folder). The step cards
+    # keep their own white background (see the per-card style above), so they stay
+    # white and float over the tile -- no per-card change needed. Scoped to this
+    # wrapper, so the tile does not bleed into the results/history pages.
+    return html.Div(
+        index_page,
+        style={
+            # Tiled background, shrunk + faded so it reads as a light texture behind
+            # the white step cards. Two background layers: a translucent white veil
+            # (listed first == on top) fades the illustration toward white, and the
+            # tile itself is scaled down via background-size so it repeats smaller.
+            "backgroundColor": "#ffffff",
+            "backgroundImage": (
+                "linear-gradient(rgba(255,255,255,0.78), rgba(255,255,255,0.78)), "
+                'url("/assets/crisprme_bg_tile.png")'
+            ),
+            "backgroundRepeat": "repeat, repeat",
+            "backgroundSize": "auto, 600px",
+            "backgroundAttachment": "fixed, fixed",
+            "minHeight": "100vh",
+        },
+    )
 
 
 @app.callback(
