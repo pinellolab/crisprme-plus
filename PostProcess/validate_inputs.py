@@ -866,6 +866,23 @@ def run_lightweight(
 
     for vcf_dir in vcf_dataset_dirs:
         if not os.path.isdir(vcf_dir):
+            # Batteries-included install: `download --what index` fetches a
+            # precomputed variant index + its per-sample dictionaries but NOT the
+            # multi-GB source VCFs. submit_job detects this same condition (a
+            # precomputed variant index whose dictionaries are present) and skips
+            # genome enrichment, so the missing VCF dir is EXPECTED there, not an
+            # error. Mirror that here: if the dictionaries for this dataset are on
+            # disk, the source VCFs are genuinely not required — pass the check.
+            dataset = os.path.basename(vcf_dir)
+            cwd = current_working_directory or os.path.dirname(os.path.dirname(vcf_dir))
+            dict_dir = os.path.join(cwd, "Dictionaries", f"dictionaries_{dataset}")
+            indel_dir = os.path.join(cwd, "Dictionaries", f"log_indels_{dataset}")
+            if os.path.isdir(dict_dir) and os.path.isdir(indel_dir):
+                report.ok(
+                    f"{dataset}: precomputed variant index + dictionaries present; "
+                    "source VCFs not required (batteries-included install)"
+                )
+                continue
             report.add([Issue(ERROR, f"VCF dataset directory does not exist: {vcf_dir}")])
             continue
         vcf_files = [
