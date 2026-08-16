@@ -21,6 +21,7 @@ import contextlib
 import gzip
 import io
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -797,6 +798,36 @@ class TestRunLightweightEndToEnd(unittest.TestCase):
             report = vi.run_lightweight(genomedir, vcf_dirs, guidefile, pamfile)
             self.assertFalse(report.has_errors())
             self.assertIn("reference-only", report.render())
+
+    def test_missing_vcf_dir_without_dicts_errors(self):
+        # regression guard: a genuinely-missing VCF dataset (no precomputed
+        # dictionaries either) must still fail loudly.
+        with tempfile.TemporaryDirectory() as tmp:
+            genomedir, vcf_dirs, guidefile, pamfile = self._build_clean_fixture(tmp)
+            shutil.rmtree(vcf_dirs[0])  # remove VCFs/datasetA, no dicts present
+            report = vi.run_lightweight(
+                genomedir, vcf_dirs, guidefile, pamfile,
+                current_working_directory=tmp,
+            )
+            self.assertTrue(report.has_errors(), report.render())
+            self.assertIn("VCF dataset directory does not exist", report.render())
+
+    def test_missing_vcf_dir_with_dicts_is_batteries_ok(self):
+        # batteries-included install: `download --what index` ships a precomputed
+        # variant index + its per-sample dictionaries but NOT the source VCFs.
+        # A missing VCFs/<dataset>/ must NOT error when the dictionaries are on disk.
+        with tempfile.TemporaryDirectory() as tmp:
+            genomedir, vcf_dirs, guidefile, pamfile = self._build_clean_fixture(tmp)
+            dataset = os.path.basename(vcf_dirs[0])  # "datasetA"
+            shutil.rmtree(vcf_dirs[0])  # no source VCFs, as for a batteries install
+            os.makedirs(os.path.join(tmp, "Dictionaries", f"dictionaries_{dataset}"))
+            os.makedirs(os.path.join(tmp, "Dictionaries", f"log_indels_{dataset}"))
+            report = vi.run_lightweight(
+                genomedir, vcf_dirs, guidefile, pamfile,
+                current_working_directory=tmp,
+            )
+            self.assertFalse(report.has_errors(), report.render())
+            self.assertIn("batteries-included install", report.render())
 
 
 # ===========================================================================

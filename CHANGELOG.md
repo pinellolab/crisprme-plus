@@ -11,6 +11,22 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.28] - 2026-08-16
+
+### Fixed
+- **Batteries variant search no longer aborts at pre-flight validation.** The
+  lightweight input validator (`validate_inputs.run_lightweight`, always-on before
+  `complete-search`) hard-required `VCFs/<dataset>/` to exist and aborted otherwise —
+  but a batteries-included install (`download --what index`) ships the precomputed
+  variant index + per-sample dictionaries *without* the multi-GB source VCFs. The
+  validator now recognizes that case: when the VCF dataset directory is absent but the
+  dictionaries (`Dictionaries/dictionaries_<dataset>/` + `log_indels_<dataset>/`) are
+  present, it passes the check (source VCFs genuinely not required), mirroring the
+  skip-enrichment logic in `submit_job_automated_new_multiple_vcfs.sh`. A genuinely
+  missing dataset (no dictionaries either) still fails loudly. Completes the alpha.27
+  batteries fix: `download --index-name NRG_3_hg38+hg38_1000G_HGDP` + a variant search
+  now runs end-to-end on a fresh install. Covered by two new `run_lightweight` tests.
+
 ## [2.2.0-alpha.27] - 2026-08-16
 
 ### Fixed
