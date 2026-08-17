@@ -73,3 +73,7 @@ jobs:
       - name: Tier-0 wiring into new_simple_analysis (legacy path unchanged + selection matrix)
         working-directory: PostProcess
         run: python -m unittest test_new_simple_analysis_registry -v
+
+      - name: Tier-1 genotype store (per-sample carrier reconstruction round-trip)
+        working-directory: PostProcess
+        run: python -m unittest test_tier1_genotypes -v
