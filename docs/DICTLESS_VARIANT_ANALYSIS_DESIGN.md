@@ -1,125 +1,245 @@
-# Design: dictless variant post-analysis (replace the 152 GB per-sample dicts)
+# Design: dictless variant post-analysis (v2)
 
-> Status: **design for review** (parallel exploration, not yet implemented). The
-> shipping fix for the batteries gap is the separate "compress dicts + read on the
-> fly" change (branch `feat/compressed-dicts-on-the-fly`, alpha.27). THIS document
-> is the follow-on that makes the dicts tiny + fast rather than merely compressed.
+> Status: **design for review (v2)** — not yet implemented. Supersedes the v1 tiered
+> sketch. v2 incorporates the requirements worked out 2026-08-17: off-target allele
+> frequency is a **SNP-combination (haplotype) property**, reporting must be
+> **global (deduplicated) + per-database + per-subpopulation**, both as **allele**
+> and **carrier (individual)** frequency, and multi-database merges must not blow up
+> disk. Implementation is gated on the golden-output diff in §12.
 
-## Context
-The variant post-analysis reads per-chromosome SNP dictionaries
-(`Dictionaries/dictionaries_<vcf>/my_dict_<chrom>.json`) that map
-`"<chrom>,<pos>" -> $-joined records of "<samples>;<ref,alt>;<rsID>;<AF>"`, where
-`<samples>` is a per-sample `sampleID:genotype` list. For 1000G+HGDP these total
-**~152 GB** — the reason the batteries variant index isn't self-sufficient and why
-post-analysis needs ~3–26 GB RAM/worker.
+---
 
-## The measurement that drives the design
-Measured on a real shipped chr22 dict (1.55 GB uncompressed, 219 MB gzip, 993,880
-variant positions):
+## 1. Problem
+
+Variant post-analysis (`new_simple_analysis.py`) reads per-chromosome SNP dictionaries
+`Dictionaries/dictionaries_<vcf>/my_dict_<chrom>.json` mapping
+`"<chrom>,<pos>" -> $-joined "<samples>;<ref,alt>;<rsID>;<AF>"` where `<samples>` is a
+per-sample `sampleID:genotype` list. For 1000G+HGDP these total **~152 GB** (gzipped
+~31 GB since alpha.27) and need ~3–26 GB RAM/worker. They are the reason the batteries
+variant index is large and post-analysis is slow. The alpha.27 gzip change bought space,
+**not speed** (still a full per-sample parse, now with decompress overhead).
+
+Measured on a real shipped chr22 dict (1.55 GB raw, 219 MB gzip, 993,880 positions):
 
 | Quantity | Value |
 |---|---|
-| Per-position metadata only (pos, ref, alt, rsID, AF), gzip | **4.0 MB = 0.26% of the dict** |
-| Per-sample genotype lists | **99.74% of the dict** |
+| Per-position metadata (pos, ref, alt, rsID, AF), gzip | **4.0 MB = 0.26%** |
+| Per-sample genotype lists | **99.74%** |
 
-The columns that must work out of the box (off-target detection, PAM-creation,
-MAF/rsID) need only the **0.26%** metadata. Per-sample attribution needs the 99.74%
-— exactly what we make **optional/lazy**. Genome-wide the metadata tier is
-**~100–150 MB** vs **152 GB** today.
+## 2. What the user actually needs
 
-## Options considered
-| | (A) tabix-VCF on the fly | (B) tiered: compact registry + optional per-sample | (C) position-indexed BGZF binary |
-|---|---|---|---|
-| Tiny always-shipped MAF/rsID/PAM artifact | no | **yes (~4 MB/chr)** | no (~dict size) |
-| Batteries self-sufficient w/o source VCFs | **breaks** | **kept** | kept |
-| Disk vs today | ≈ source VCF (50–100+ GB) | **~0.15 GB + optional sample tier** | ≈ today |
-| Per-sample attribution | on-the-fly tabix | lazy tier (store or tabix) | always present |
-| Default-run RAM / speed | <100 MB / medium | **<100 MB / fast** | <100 MB / fast |
+For each reported off-target, its **allele frequency** *and* **carrier (individual)
+frequency**, in three coherent views:
 
-**Recommendation: (B) tiered, with (A) as the lazy sample-tier fallback and (C)'s
-seek trick for the sample tier.** (A) alone is a non-starter (breaks batteries); (C)
-doesn't deliver the tiny always-shipped artifact.
+- **Global** — across **all individuals in all loaded databases, deduplicated** (each
+  unique individual counted once).
+- **Per database** — computed within each database's own individuals (1000G, HGDP, …).
+- **Per subpopulation** — within a database, using that database's **native** subpop
+  labels (1000G: AFR/AMR/EAS/EUR/SAS; HGDP: AFRICA/AMERICA/CSA/EAST_ASIA/EUROPE/
+  MIDDLE_EAST/OCEANIA; future gnomAD/UKB: their own).
 
-## Recommended architecture — three artifacts per dataset
-- **Tier 0 — position registry (ALWAYS shipped, ~4 MB/chr):**
-  `Dictionaries/registry_<vcf>/reg_<chrom>.bin` (+ `.idx`) — sorted binary of
-  `(pos, ref, alt, af, rsid)`, loaded fully into RAM per chromosome (~MBs). Powers
-  off-target "is this position variant", PAM-creation (ref+alt), and the rsID/AF/SNP
-  columns. **No per-sample data.** Plus a `manifest.json` with
-  `{sample_count, phased, chroms}` (`phased` replaces the on-the-fly `|`/`/` scan).
-- **Tier 1 — per-sample genotype store (OPTIONAL, lazy, published separately):**
-  `Dictionaries/genotypes_<vcf>/gt_<chrom>.bgz` (+ offset `.gti`), BGZF-blocked,
-  position-sorted; payload is the **existing** `samples;ref,alt;rsID;AF` value string
-  (byte-identical) so `retrieveFromDict`'s parser is unchanged — O(1) seek instead of
-  streaming a 13 GB JSON.
-- **Tier 1-alt — tabix VCF mode (no store shipped):** when the sample tier is absent
-  but source `.vcf.gz`+`.tbi` exist, resolve carriers via `pysam.VariantFile.fetch`
-  (reuse `convert_gnomAD_vcfs.py:150-194`, `annotation.py:47-73`).
+Plus, out of the box: off-target detection, PAM-creation, and the rsID / per-position MAF
+columns. Per-**individual** carrier lists (personal cards) remain available but are the
+"nuanced, on-demand" layer, not the headline.
 
-Runtime selection (new, in `new_simple_analysis.py`):
+## 3. The correctness crux — off-target frequency is a COMBINATION property
+
+An off-target is created/modified when a candidate genomic window matches the guide well
+enough *given the alleles an individual carries there*. Its frequency is therefore the
+frequency of the **specific combination of alleles** (the haplotype) that produces the
+off-target — **not** any single SNP's AF, and **not** a product of per-SNP AFs (the SNPs
+can be in linkage disequilibrium).
+
+Two consequences drive the whole design:
+
+1. **Off-targets are guide-dependent** → unknown at index-build time → we **cannot**
+   precompute per-off-target frequencies into the shipped index. They must be computed at
+   **post-analysis**, for the specific targets a search finds.
+2. The efficiency win is therefore **not** "precompute everything into a tiny table." It
+   is: compute the combination frequency **at query time but SPARSELY** — only at the
+   handful of positions the found off-targets touch (dozens–thousands) — instead of
+   streaming 152 GB across the whole genome.
+
+**Single- vs multi-variant off-targets** (the load-bearing split):
+
+- **Single-variant** off-target (one SNP flips one base — the common case): its frequency
+  **is** that position's allele/carrier frequency. Fully derivable from a per-position
+  table (Tier 0), per database and per subpopulation, exactly.
+- **Multi-variant** off-target (2+ SNPs must co-occur): frequency = co-occurrence of that
+  exact combination among individuals → needs **per-sample genotypes at those positions**.
+  Not derivable from marginal per-position AFs.
+
+**Phasing / cis.** A multi-SNP off-target on a single DNA molecule requires the alts in
+**cis** (same haplotype). Phased panels (1000G) → exact haplotype counting; unphased →
+either assume-cis (upper bound) or report genotype co-occurrence. We carry a per-database
+`phased` flag and state the mode used in the output. (This matches what
+`iupac_decomposition` / the haplotype loop already grapple with today.)
+
+## 4. Architecture — Tier 0 registry + sparse per-database genotype tier
+
+### Tier 0 — position registry (ALWAYS shipped, tiny)
+
+`Dictionaries/registry_<vcf>/reg_<chrom>.bin` (+ `.idx`): position-sorted binary of, per
+variant position:
+
+- `pos, ref, alt, rsID`
+- `AF_global` over the **deduplicated union** of all individuals in the databases bundled
+  in this index (precomputed at build time; see §5/§6 for dedup)
+- `AF[database][subpopulation]` — a **sparse** map (skip zero-carrier groups), database and
+  subpop as small integer codes resolved via the manifest taxonomy
+- optional `AC/AN` alongside each AF so downstream can recompute or combine safely
+
+Loaded fully into RAM per chromosome (MBs). Powers: (a) off-target detection ("is there a
+variant here"), (b) PAM-creation (ref vs alt), (c) the rsID/MAF columns, and (d) **exact
+allele + carrier frequency for single-variant off-targets**, in all three views. No
+per-sample data. A `manifest.json` carries `{databases:[{name, sample_count, phased,
+subpops:[...] }], chroms, total_deduped_individuals}`.
+
+### Genotype tier — per-database, position-indexed, sparse, compact
+
+`Dictionaries/genotypes_<db>/gt_<chrom>.<ext>` (+ position index), **one block per
+database** (NOT a merged matrix). Per variant position, store only what's needed to count
+combinations by group:
+
+- the **alt-carrier set** as sample indices (sparse — most samples are ref), or a 2-bit
+  genotype packing when a locus is dense; whichever is smaller per record
+- for phased data, per-haplotype carrier bits (to count cis combinations)
+- genotypes keyed by a **canonical sample ID** so the same individual across databases can
+  be deduplicated for the global view
+
+Random-access by position (block-compressed + offset index), read **only at the found
+off-target positions**. So the store can be large on disk yet cost <100 MB RAM and a few
+seeks per off-target at query time.
+
+### Runtime selection (in `new_simple_analysis.py`)
+
 ```
-NEED_SAMPLES = personal_cards OR summaries OR Variant_samples requested
-not NEED_SAMPLES        -> Tier 0 only            (default: fast, tiny)
-elif genotypes_<vcf>/   -> Tier 0 + Tier 1 (seek)
-elif VCF+tbi present    -> Tier 0 + Tier 1-alt (tabix)
-else                    -> Tier 0 only + warn "sample attribution unavailable"
+detection, rsID/MAF, single-variant AF (global/per-db/per-subpop)  -> Tier 0 only (always)
+multi-variant off-target frequency + carrier aggregation           -> sparse genotype-tier
+  reads at the off-target's positions, per database, then:
+    per-database   = count carriers within that db's samples
+    per-subpop     = bucket carriers by that db's subpop labels
+    global         = union carriers across dbs, DEDUP by canonical sample ID
+personal per-individual carrier list                               -> same reads, not aggregated
+genotype tier absent but source VCF+tbi present                    -> tabix fetch fallback
+genotype tier absent and no VCF                                    -> single-variant exact;
+    multi-variant flagged "combination frequency needs sample tier"
 ```
 
-## Read-site changes (file:line, contract-preserving)
-- `new_simple_analysis.py:157-199` `retrieveFromDict` — keep the exact 5-tuple
-  `(snp_list, sample_list, rsID_list, AF_list, snp_info_list)`; fill all but
-  `sample_list` from Tier 0; `sample_list` from the active provider (`[]` when not
-  `NEED_SAMPLES` — already a supported branch). `iupac_decomposition` haplotype loop
-  (`:238-288`) is **untouched**.
-- `new_simple_analysis.py:823-867` `_load_dict_targeted` — **replaced** by
-  `_open_registry` (+ a gt-provider factory); `haplotype_check` comes from the
-  manifest, not a genotype scan. Keep the legacy `.json[.gz]` path as a fallback.
-- `:792-820` `_collect_needed_dict_keys` (needed positions) + `:916-931` bootstrap —
-  updated to open the registry + choose the gt provider.
-- Consumers unchanged as long as the 5-tuple + `Samples`/`Variant_samples_*` columns
-  are preserved: `change_headers_bestMerge.py:46-129`, `process_summaries.py:118,153`,
-  `generate_sample_card.py:18,61-71`, `CRISPRme_plots_personal.py`. Tier-0-only runs
-  leave the Samples column empty → summaries/cards degrade gracefully (the intended
-  "optional tier").
+## 5. Frequency semantics (exact)
 
-## Build / publish changes
-- `crisprme.py:1811-1863` (`build_variant_index` STEP 1): after `add-variants`, compile
-  `SNPs_genome/*.json` → `registry_<vcf>/reg_<chrom>.bin` (Tier 0) + optional
-  `genotypes_<vcf>/gt_<chrom>.bgz` (Tier 1, reuse `pysam.BGZFile`); the raw JSON
-  becomes a deleted intermediate.
-- `crisprme_hf.py` `_make_index_tarball`/`publish_index` (`:416-579`): **registry tier
-  goes in the main index tarball** (tiny → batteries stays self-sufficient); the
-  **genotype tier publishes as a separate optional `genotypes_<vcf>.tar.gz`**. Default
-  index download drops from ~40–50 GB of dicts to **~0.15 GB registry**. Extract/route
-  (`:370-385`) always installs `registry_<vcf>/`; opt-in fetch for `genotypes_<vcf>/`.
-  Self-sufficiency check (`crisprme.py:554-567`) requires only the registry.
+For an off-target using variant positions `P = {p1..pk}` with required alleles `a1..ak`:
 
-## Backward compatibility
-5-tuple contract preserved → downstream untouched. `_open_registry` falls back to the
-legacy `my_dict_<chrom>.json[.gz]` when no registry is present, so old installs keep
-working — non-breaking, detection-based (not a flag day).
+- **carrier (individual) frequency** in group `G` = |{ individuals in `G` carrying the
+  combination }| / |G|. "Carrying" = phased: some haplotype has all `ai` in cis; unphased:
+  individual is (het/hom) at every `pi` for `ai` (assume-cis upper bound, flagged).
+- **allele (haplotype) frequency** in group `G` = |{ haplotypes in `G` with all `ai` in
+  cis }| / (2·|G|) — phased only; for unphased we report carrier frequency and mark
+  allele frequency as not-well-defined.
+- `k == 1` (single-variant): both reduce to the position's AC/AN in `G` → **Tier 0**.
+- `k >= 2`: computed from the genotype tier reads at `P`.
 
-## Size / speed vs today
-| | Today | Tiered default (Tier 0) | With sample tier |
+**Group `G` instances:** each database (within-db samples), each subpopulation (within-db,
+native labels), and **global** (deduplicated union of all individuals across databases).
+
+## 6. Multi-database & merging
+
+- **Never merge into one cross-database AF by pooling raw.** Report per database + per
+  subpop with native labels; subpop taxonomies are not reconciled across databases.
+- **Global view = deduplicated union.** Correct **iff** individuals are deduped (each
+  unique person once). Dedup needs a canonical cross-database sample ID. 1000G and HGDP are
+  **disjoint cohorts** (distinct IDs) → union is clean and `AF_global` ≈ today's single
+  `AF` column, made explicit. When adding an **overlapping** resource (gnomAD ⊇ 1000G/HGDP,
+  UKB): dedup by ID; if IDs can't be matched, **exclude** that database from the global
+  number or mark it an **upper bound**. Label the number `AF_global (N=<deduped>)`.
+- **Interpretation caveat (surfaced in output/docs):** pooled cohorts are a *convenience
+  sample*, not a random population draw; `AF_global` is "fraction of sampled individuals,"
+  biased by cohort ancestry composition (same caveat gnomAD's global AF carries).
+- **Provenance.** The `samplesID` files are `#SAMPLE_ID POPULATION_ID SUPERPOPULATION_ID
+  SEX` with **no database column**, and the web's combined `hg38_1000G_HGDP.samplesID.txt`
+  concatenates them (provenance lost). Build-time aggregation reads the **per-database**
+  samplesID files (before concatenation); a `DATABASE` column is added to the combined
+  samplesID for runtime.
+- **Disk composition is linear.** Each database is its own Tier-0 AF contribution +
+  genotype block. Adding a database = add blocks + a taxonomy entry; no cross-product, no
+  re-encode of existing databases.
+
+## 7. Disk & performance
+
+| | Today (per-sample dicts) | v2 default (Tier 0) | v2 with genotype tier |
 |---|---|---|---|
-| Shipped dicts (genome, 1000G+HGDP) | ~40–50 GB | **~0.1–0.15 GB** | +optional ~40–50 GB (separate) |
-| chr22 artifact | 219 MB | **4 MB** | 4 MB + ~219 MB on demand |
-| RAM / worker | 3–26 GB | **<100 MB** | <100 MB |
-| Default-run speed | stream ≤26 GB | **~50–100× faster** | ≈ today when samples needed |
+| Always-shipped artifact (genome, 1000G+HGDP) | ~40–50 GB (gz) | **~0.3–0.6 GB** | same + optional genotype tier |
+| RAM / worker | 3–26 GB | **<100 MB** | <100 MB (sparse seeks) |
+| Single-variant off-target AF (all 3 views) | full parse | **Tier 0, exact** | Tier 0, exact |
+| Multi-variant off-target AF | full parse | flag / VCF-tabix | **sparse seeks at k positions** |
 
-**Net: ~300× smaller always-shipped artifact, ~50–100× faster default post-analysis,
-RAM bottleneck gone.** Per-sample attribution costs the same but only when requested.
+Tier 0 grows vs v1 (~0.15 GB) because it now carries per-(database×subpop) + global AF, but
+stays sub-GB genome-wide. The genotype tier is far smaller than the 152 GB JSON (sparse
+carrier indices / 2-bit packing) and is read only at found positions.
 
-## Phased rollout (recommend build Phase 1 now)
-1. **Tier 0 registry** — compiler + reader + `retrieveFromDict` metadata path, **legacy
-   dict fallback retained** for `NEED_SAMPLES` runs. Ships the ~300× shrink with the
-   smallest correctness surface. **Gate on a golden-output diff** (one guide, old path
-   vs new, assert identical `.bestCFD`/`.bestmmblg`), on a phased (1000G) + unphased set.
-2. **Tabix VCF sample-tier fallback** (Tier 1-alt) — per-sample attribution without
-   shipping the store, when VCFs are present.
-3. **BGZF genotype store** (Tier 1) + separate optional publish/download; make it the
-   default sample provider; retire legacy dict shipping (keep `--legacy-dicts` one release).
-4. Extend the tiering to indel logs (`analisi_indels_NNN.py`).
+## 8. Build / publish / download
 
-**Biggest risk:** phasing/haplotype correctness → mitigate with the golden diff on a
-phased and an unphased dataset.
+- Build (`crisprme.py build_variant_index`, after `add-variants`): compile
+  `SNPs_genome/*.json` → (a) Tier 0 `registry_<vcf>/reg_<chrom>.bin` with per-(db×subpop) +
+  deduped-global AF (aggregated from the per-database `samplesID` labels), and (b) per-db
+  `genotypes_<db>/gt_<chrom>` compact stores. The raw JSON becomes a deleted intermediate.
+- Publish/download (`crisprme_hf.py`): **Tier 0 rides in the main index tarball** (tiny →
+  batteries stays self-sufficient for detection + single-variant AF); **each database's
+  genotype tier publishes as a separate optional `genotypes_<db>.tar.gz`**. Default index
+  download stays small; a user opts into genotype tiers per database as needed.
+- Self-sufficiency check requires only Tier 0.
+
+## 9. Read-site changes (contract-preserving)
+
+- Keep `retrieveFromDict`'s 5-tuple `(snp_list, sample_list, rsID_list, AF_list,
+  snp_info_list)`; fill metadata + single-variant AF from Tier 0; `sample_list` and
+  multi-variant combination counts from the genotype provider (empty when not needed).
+- `_load_dict_targeted` → `_open_registry` + a genotype-provider factory; `haplotype_check`
+  from the manifest `phased` flag, not a scan.
+- Summaries: `process_summaries.py` / `PopulationDistribution` consume the new per-(db×
+  subpop) + global aggregates directly (Tier 0 for single-variant; genotype-tier
+  aggregation for multi-variant) instead of re-deriving from a per-sample Samples column.
+- Legacy `my_dict_<chrom>.json[.gz]` path retained as a detection-based fallback.
+
+## 10. Backward compatibility
+
+5-tuple contract preserved → downstream columns untouched. `_open_registry` falls back to
+the legacy dict when no registry is present, so existing installs keep working (no flag
+day). Output gains explicit `AF_global`/per-db/per-subpop + carrier columns; existing
+columns keep their meaning.
+
+## 11. Rollout
+
+1. **Tier 0 registry** (compiler + reader + single-variant AF path, all three views) with
+   legacy-dict fallback for multi-variant/NEED_SAMPLES. Ships the shrink + single-variant
+   exactness first, smallest correctness surface.
+2. **Sparse genotype tier** (compact per-db store + position index) for multi-variant
+   combination AF + carrier aggregation + dedup-global; make it the default sample provider.
+3. **tabix-VCF fallback** for the genotype tier when source VCFs are present but the store
+   isn't shipped.
+4. Extend to indel logs (`analisi_indels_NNN.py`); retire legacy dict shipping (keep
+   `--legacy-dicts` one release).
+
+## 12. Golden-output diff gate (mandatory before landing each phase)
+
+Assert byte-identical results (old per-sample path vs new) for one guide on:
+
+- a **phased** dataset (1000G) and an **unphased** dataset;
+- targets that include **multi-variant haplotype** off-targets (not just single-SNP);
+- the `PopulationDistribution` summary **and** all three AF views (global/per-db/per-subpop),
+  both allele and carrier frequency;
+- the **CPS1** example (chr2:210,530,658, rs114518452) as a regression anchor.
+
+## 13. Open questions / risks
+
+- **Allele vs carrier frequency for unphased multi-variant** off-targets: confirm the
+  assume-cis upper bound is the desired behavior vs reporting only carrier frequency.
+- **Cross-database ID canonicalization** for dedup when gnomAD/UKB arrive (ID schemes,
+  cryptic relatedness) — may need an explicit sample-map artifact.
+- **Genotype-tier encoding**: sparse carrier indices vs 2-bit matrix vs roaring bitmaps vs
+  reusing the VCF+tbi directly — pick per measured size/seek cost (see §7; open to the
+  optimization review).
+- **Multiallelic / MNV / overlapping-variant** positions: confirm per-alt AC/AF and the
+  combination logic compose correctly.
+- **Biggest risk:** phasing/haplotype correctness → mitigated by the §12 golden diff on a
+  phased and an unphased dataset with real multi-variant targets.
