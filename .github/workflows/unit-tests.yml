@@ -77,3 +77,7 @@ jobs:
       - name: Tier-1 genotype store (per-sample carrier reconstruction round-trip)
         working-directory: PostProcess
         run: python -m unittest test_tier1_genotypes -v
+
+      - name: Tier-1 wiring (genotype tier -> Samples; standalone dictless path)
+        working-directory: PostProcess
+        run: python -m unittest test_tier1_wiring -v

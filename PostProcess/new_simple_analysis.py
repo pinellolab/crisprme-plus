@@ -19,6 +19,16 @@ try:
     import tier0_registry as t0_reg
 except Exception:  # module absent in an old deploy -> legacy path only
     t0_reg = None
+# Tier-1 compact per-sample GENOTYPE tier (CRISPRme+ dictless redesign, Phase 2).
+# GUARDED / lazy exactly like tier0_registry: an old deploy may not ship
+# tier1_genotypes, and most installs have no genotype tier at all -- in either
+# case ``t1_gt`` stays None and ``mygt`` stays None, so the Samples column is
+# reconstructed from the per-sample dict (legacy/augment path) unchanged. Import
+# failure NEVER breaks the legacy or registry paths.
+try:
+    import tier1_genotypes as t1_gt
+except Exception:  # module absent in an old deploy -> no genotype tier
+    t1_gt = None
 # Pure, side-effect-free retrieveFromDict machinery (importable / unit-tested in
 # isolation). This module has no hard dependency on tier0_registry, so its import
 # cannot break the legacy path either.
@@ -172,13 +182,16 @@ def retrieveFromDict(chr_pos):
     """Return the 5-tuple (snp_list, sample_list, rsID_list, AF_list, snp_info_list)
     for a candidate off-target position.
 
-    ADDITIVE Tier-0 wiring: the PURE selection-matrix logic lives in
+    ADDITIVE Tier-0/Tier-1 wiring: the PURE selection-matrix logic lives in
     ``simple_analysis_registry.retrieve_5tuple`` (importable / unit-tested in
     isolation). Here we only supply the module-level registry reader (``myreg``,
-    or None), the raw ``mydict`` entry for this position (or None if absent), and
-    the current chromosome. When ``myreg`` is None this is BYTE-IDENTICAL to the
-    legacy behavior; the dict entry is detected with the SAME bare-subscript
-    try/except as the original so "present" vs "absent" is decided identically."""
+    or None), the genotype-tier reader (``mygt``, or None), the raw ``mydict``
+    entry for this position (or None if absent), and the current chromosome. When
+    ``myreg`` is None this is BYTE-IDENTICAL to the legacy behavior; when a
+    registry is present but the per-sample dict is ABSENT and ``mygt`` is present,
+    the Samples column is reconstructed from the genotype tier (true dictless).
+    The dict entry is detected with the SAME bare-subscript try/except as the
+    original so "present" vs "absent" is decided identically."""
     # ``entry is None`` is the sentinel for "the dict had no entry for this
     # position" (legacy except-branch). A present entry (even a malformed one) is
     # passed through verbatim so the legacy decode -- including its IndexError on a
@@ -188,7 +201,9 @@ def retrieveFromDict(chr_pos):
     except Exception:
         entry = None
     global_gid = t0_reg.GLOBAL_GROUP_ID if t0_reg is not None else "global"
-    return _sar.retrieve_5tuple(myreg, entry, current_chr, chr_pos, global_gid)
+    return _sar.retrieve_5tuple(
+        myreg, entry, current_chr, chr_pos, global_gid, gtreader=mygt
+    )
 
 
 def _aligned_mm(seq_prerevert, realTarget, guide_no_pam, revert):
@@ -887,6 +902,34 @@ def _resolve_registry_paths(dict_path, chrom):
     return None
 
 
+def _resolve_genotype_paths(dict_path, chrom):
+    """Resolve a Tier-1 genotype store (bin, idx) for ``chrom`` from the SNP dict
+    path, or return None if no genotype tier is present.
+
+    MIRRORS ``_resolve_registry_paths`` exactly, only swapping the folder prefix
+    (``dictionaries_`` -> ``genotypes_``) and the per-chromosome file naming
+    (``my_dict_<chrom>.json[.gz]`` -> ``gt_<chrom>.bin`` + ``gt_<chrom>.idx``):
+    the store lives alongside the dicts + registry as
+    ``<...>/Dictionaries/genotypes_<vcf>/gt_<chrom>.bin`` + ``.idx``. Detection is
+    by FILE EXISTENCE only -- absence => None => no genotype tier (Samples come
+    from the dict, unchanged)."""
+    dict_dir = os.path.dirname(dict_path)
+    parent = os.path.dirname(dict_dir)
+    dict_folder_name = os.path.basename(dict_dir)
+    if dict_folder_name.startswith("dictionaries_"):
+        gt_folder_name = "genotypes_" + dict_folder_name[len("dictionaries_"):]
+    else:
+        # non-standard layout: try a sibling "genotypes_<same suffix>"; either way
+        # we only USE it if the files exist.
+        gt_folder_name = "genotypes_" + dict_folder_name
+    gt_dir = os.path.join(parent, gt_folder_name)
+    bin_path = os.path.join(gt_dir, "gt_" + str(chrom) + ".bin")
+    idx_path = os.path.join(gt_dir, "gt_" + str(chrom) + ".idx")
+    if os.path.exists(bin_path) and os.path.exists(idx_path):
+        return bin_path, idx_path
+    return None
+
+
 # INPUT AND SETTINGS
 # fasta of the reference chromosome
 inFasta = open(sys.argv[1], "r")
@@ -968,6 +1011,29 @@ if t0_reg is not None:
     except Exception as _reg_err:  # never break the legacy path on a bad/old registry
         myreg = None
         print("No Tier-0 registry (or unreadable) for", current_chr, "-", _reg_err)
+
+# ADDITIVE Tier-1 genotype-tier detection (dictless redesign, Phase 2). If a
+# genotype store exists for this chromosome (alongside the dict / registry), open a
+# module-level GenotypeReader that retrieveFromDict() consults to reconstruct the
+# Samples column WITHOUT the per-sample dict (true dictless: Tier-0 registry +
+# genotype tier, NO dict). When absent (the common case, and any old deploy without
+# tier1_genotypes) ``mygt`` stays None and the Samples column comes from the dict
+# (legacy/augment path) unchanged. This open is GUARDED exactly like the registry:
+# import failure / missing files / open error -> mygt=None, never break the legacy
+# or registry paths.
+mygt = None
+if t1_gt is not None:
+    try:
+        _gt_paths = _resolve_genotype_paths(sys.argv[2], current_chr)
+        if _gt_paths is not None:
+            mygt = t1_gt.GenotypeReader(_gt_paths[0], _gt_paths[1])
+            print(
+                f"Opened Tier-1 genotype store for {current_chr} "
+                f"({len(mygt)} records) at {_gt_paths[0]}"
+            )
+    except Exception as _gt_err:  # never break legacy/registry on a bad/old store
+        mygt = None
+        print("No Tier-1 genotype store (or unreadable) for", current_chr, "-", _gt_err)
 
 # check PAM position and relative coordinates on targets
 pam_at_beginning = False

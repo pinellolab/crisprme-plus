@@ -100,7 +100,8 @@ def dict_alt_to_samples(entry):
     return alt_to_samples, alt_order
 
 
-def retrieve_5tuple(reader, entry, chrom, chr_pos, global_group_id="global"):
+def retrieve_5tuple(reader, entry, chrom, chr_pos, global_group_id="global",
+                    gtreader=None):
     """Selection-matrix-driven builder of the retrieveFromDict 5-tuple. PURE.
 
     Args:
@@ -110,15 +111,43 @@ def retrieve_5tuple(reader, entry, chrom, chr_pos, global_group_id="global"):
       chrom, chr_pos: chromosome name + 0-based position (dict keys are 1-based,
               i.e. ``chr_pos + 1``).
       global_group_id: the registry's GLOBAL group id (``tier0_registry.GLOBAL_GROUP_ID``).
+      gtreader: a ``tier1_genotypes.GenotypeReader`` for ``chrom`` or None. Present
+              only on a true DICTLESS install (Tier-0 registry + genotype tier, NO
+              per-sample dict); supplies the per-alt "sampleID:genotype" carrier
+              tokens the dict would have supplied. When None (any dict install, any
+              old deploy), the Samples column comes from the dict (or is degraded
+              to [] when neither a dict nor a genotype tier is present) -- so the
+              legacy and registry+dict paths are BYTE-IDENTICAL to before.
 
     Selection matrix (WIRING spec):
-      registry PRESENT + dict PRESENT -> metadata/AF from the registry, carrier
-                                         samples from the dict (per-alt aligned).
-      registry PRESENT + dict ABSENT  -> registry-only: metadata/AF from registry,
-                                         sample_list = [] per alt (degraded Samples;
-                                         the genotype tier is a later phase).
-      registry ABSENT                 -> LEGACY path EXACTLY as today: the dict hit
-                                         decode, or the no-entry fake-SNP fallback.
+      registry PRESENT + dict PRESENT                -> UNCHANGED: legacy dict
+                                                        decode + registry AF
+                                                        override. (gtreader unused:
+                                                        the dict already carries the
+                                                        exact carrier lists + alt
+                                                        order the downstream
+                                                        haplotype decomposition
+                                                        depends on.)
+      registry PRESENT + dict ABSENT + gtreader      -> DICTLESS FULL: iterate the
+                                                        registry's alts; metadata/AF
+                                                        from the registry, and
+                                                        sample_list[i] =
+                                                        gtreader.carrier_tokens(pos1,
+                                                        alt) (or [] if None).
+      registry PRESENT + dict ABSENT + NO gtreader   -> registry-only: metadata/AF
+                                                        from registry, sample_list =
+                                                        [] per alt (degraded
+                                                        Samples), UNCHANGED.
+      registry ABSENT                                -> LEGACY path EXACTLY as
+                                                        today: the dict hit decode,
+                                                        or the no-entry fake-SNP
+                                                        fallback.
+
+    ALT ORDER (dictless case): there is no dict to match, so alts are emitted in
+    ``reader.alts_at(pos1)`` (sorted) order. The downstream haplotype decomposition
+    is alt-order sensitive, so a dictless run MAY differ from a dict run at a few
+    boundary bulge targets even though the carrier SETS match (validated separately
+    in step 2d).
 
     5-tuple contract + element ordering + the no-entry fallback are preserved.
     """
@@ -151,13 +180,24 @@ def retrieve_5tuple(reader, entry, chrom, chr_pos, global_group_id="global"):
                     AF_list[i] = "%.6g" % gcnt.allele_freq()
         return snp_list, sample_list, rsID_list, AF_list, snp_info_list
 
-    # --- registry PRESENT + dict ABSENT: registry-only (Tier-0-only install) ---
-    # Metadata/AF from the registry; sample_list = [] per alt (degraded Samples).
-    # SCOPE NOTE (Phase 1): with an empty carrier list the downstream finalization
-    # guard in new_simple_analysis.py (`if len(samples) > 0`) DROPS the target row
-    # entirely, so a true dictless (no per-sample dict) install emits NO variant
-    # rows yet -- standalone dictless variant output requires the per-sample
-    # GENOTYPE TIER (Phase 2/3). Phase 1 therefore AUGMENTS the dict path.
+    # --- registry PRESENT + dict ABSENT: dictless / registry-only --------------
+    # Metadata/AF from the registry, one 5-tuple element per registry alt (in
+    # ``reader.alts_at`` sorted order -- there is no dict to match; see the alt-order
+    # note in the docstring). For the Samples column:
+    #   * gtreader PRESENT (true dictless: Tier-0 registry + genotype tier, NO
+    #     per-sample dict) -> DICTLESS FULL: sample_list[i] =
+    #     gtreader.carrier_tokens(pos1, alt) (the EXACT legacy "sampleID:genotype"
+    #     token list per alt, ascending sample-index order), or [] when the tier has
+    #     no record for this (pos, alt).
+    #   * gtreader ABSENT (Tier-0-only install) -> registry-only, UNCHANGED:
+    #     sample_list = [] per alt (degraded Samples). With an empty carrier list the
+    #     downstream finalization guard in new_simple_analysis.py (`if len(samples) >
+    #     0`) DROPS the target row, so a Tier-0-only (no dict, no genotype tier)
+    #     install still emits NO variant rows -- standalone dictless variant output
+    #     needs the genotype tier.
+    # Per-alt alignment (snp/sample/rsID/AF/snp_info share the index order) is
+    # preserved, and carrier lists are looked up PER ALT so there is no cross-alt
+    # leak at a multiallelic site.
     alts = reader.alts_at(pos1)
     if not alts:
         return no_entry_5tuple(chrom, chr_pos)
@@ -178,5 +218,9 @@ def retrieve_5tuple(reader, entry, chrom, chr_pos, global_group_id="global"):
         rsID_list.append(rsid)
         AF_list.append("%.6g" % af)
         snp_info_list.append(chrom + "_" + str(pos1) + "_" + ref + "_" + alt)
-        sample_list.append([])
+        if gtreader is not None:
+            tokens = gtreader.carrier_tokens(pos1, alt)
+            sample_list.append(tokens if tokens is not None else [])
+        else:
+            sample_list.append([])
     return snp_list, sample_list, rsID_list, AF_list, snp_info_list
