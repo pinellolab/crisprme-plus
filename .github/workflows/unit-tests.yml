@@ -89,3 +89,7 @@ jobs:
       - name: Population summary companion wiring (additive off-target output)
         working-directory: PostProcess
         run: python -m unittest test_popsummary_wiring -v
+
+      - name: Dictless tier build emission (build emits tiers where search reads them)
+        working-directory: PostProcess
+        run: python -m unittest test_build_emit_tiers -v

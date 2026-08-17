@@ -1646,6 +1646,12 @@ def print_help_build_index() -> None:
         "and indexes the enriched (SNP) and indels genomes, so the first "
         "variant-aware search does not pay the enrichment/indexing cost "
         "[OPTIONAL]\n"
+        "\t--samplesID, a listing file (one samplesID filename per line, under "
+        "samplesIDs/; a combined panel lists both 1000G and HGDP). When given "
+        "with --vcf, the build ALSO emits the additive dictless tiers (Tier-0 "
+        "registry + Tier-1 genotype store) per chromosome alongside the dicts, so "
+        "the built index carries the fast-post-analysis tiers; omit to build dicts "
+        "only [OPTIONAL]\n"
         "\t--path, working directory under which genome_library/ is created "
         "[OPTIONAL, default: current directory]\n"
         "\t--name, human-friendly label for the finished index, written to a "
@@ -1674,6 +1680,79 @@ def _write_display_label(index_dir: str, label: "str | None") -> None:
             fd.write(label.strip() + "\n")
     except OSError as exc:  # non-fatal: the index is built, only the label failed
         sys.stderr.write(f"Warning: could not write index display label: {exc}\n")
+
+
+def _db_name_from_samplesid(samples_filename: str) -> str:
+    """Derive a clean per-database label from a samplesID filename.
+
+    The label is used ONLY as the dataset-provenance name carried in the Tier-0 /
+    Tier-1 per-sample meta (``read_samplesid(path, database)``), so it just needs to
+    be stable and human-readable. samplesID files ship under a few conventions
+    (``hg38_1000G.samplesID.txt``, ``samplesIDs.HGDP.txt``, ``HGDP.samplesID.txt``),
+    so strip the common ``samplesID(s)`` token and the reference-genome prefix and
+    keep the meaningful middle (e.g. "1000G", "HGDP", "gnomad.v41"). Never fails:
+    falls back to the bare basename.
+    """
+    base = os.path.basename(samples_filename).strip()
+    # drop a trailing .txt / .txt.gz
+    for suf in (".txt.gz", ".txt", ".gz"):
+        if base.endswith(suf):
+            base = base[: -len(suf)]
+            break
+    # drop the samplesID token wherever it sits (prefix "samplesIDs.", infix
+    # ".samplesID", suffix ".samplesID")
+    for tok in ("samplesIDs.", "samplesIDs_", "samplesID."):
+        if base.startswith(tok):
+            base = base[len(tok):]
+    for tok in (".samplesID", "_samplesID", ".samplesIDs", "_samplesIDs"):
+        base = base.replace(tok, "")
+    # drop a leading reference-genome token like "hg38_"
+    for ref_tok in ("hg38_", "hg19_", "GRCh38_", "GRCh37_", "T2T_", "mm10_", "mm39_"):
+        if base.startswith(ref_tok):
+            base = base[len(ref_tok):]
+            break
+    base = base.strip("._-")
+    return base or os.path.basename(samples_filename)
+
+
+def _build_db_to_samplesid(samples_listing: str, workdir: str):
+    """Build the ORDERED {db_name: samplesID_path} map for tier emission.
+
+    ``samples_listing`` is the ``--samplesID`` LISTING file (the SAME format
+    complete-search uses: one samplesID FILENAME per line, each resolved under
+    ``<workdir>/samplesIDs/``). For the combined 1000G+HGDP panel this lists BOTH
+    files, so the returned map has BOTH entries (order preserved). Blank lines and
+    ``#`` comment lines are skipped. Returns {} if nothing usable is found (the
+    caller then skips tier emission -- additive, never fatal). Missing listed files
+    are noted to STDOUT and skipped (a partial map still emits usable tiers).
+    """
+    import collections
+
+    db_map = collections.OrderedDict()
+    if not samples_listing or not os.path.isfile(samples_listing):
+        return db_map
+    samples_dir = os.path.join(workdir, "samplesIDs")
+    with open(samples_listing) as fh:
+        for line in fh:
+            name = line.strip()
+            if not name or name.startswith("#"):
+                continue
+            # accept either a bare filename (resolved under samplesIDs/) or an
+            # already-absolute/relative path that exists as given.
+            candidate = name
+            if not os.path.isabs(candidate) or not os.path.isfile(candidate):
+                under_dir = os.path.join(samples_dir, name)
+                if os.path.isfile(under_dir):
+                    candidate = under_dir
+            if not os.path.isfile(candidate):
+                print(
+                    "build-index-only: NOTE samplesID entry %r not found under "
+                    "%s (skipping it for tier emission)" % (name, samples_dir),
+                    flush=True,
+                )
+                continue
+            db_map[_db_name_from_samplesid(name)] = os.path.abspath(candidate)
+    return db_map
 
 
 def _write_pam_build(index_dir: str, pamfile: str) -> None:
@@ -1800,6 +1879,22 @@ def build_index_only() -> None:
     if not os.path.isdir(vcfdir):
         error(f"The VCF dataset directory {vcfdir} does not exist")
     vcf_name = os.path.basename(vcfdir.rstrip("/"))
+    # OPTIONAL --samplesID: a listing file (one samplesID filename per line under
+    # samplesIDs/, the same format complete-search uses; combined panels list both
+    # 1000G and HGDP). When given, the build ALSO emits the ADDITIVE dictless tiers
+    # (Tier-0 registry + Tier-1 genotype store) per chromosome, alongside the dicts,
+    # so a freshly-built variant index carries the fast-post-analysis tiers. Absent
+    # => dicts only (legacy behavior, unchanged).
+    samples_listing = None
+    if "--samplesID" in args:
+        try:
+            samples_listing = os.path.abspath(args[args.index("--samplesID") + 1])
+        except IndexError:
+            error("Missing input for --samplesID. A samples listing file must be "
+                  "specified")
+        if not os.path.isfile(samples_listing):
+            error(f"The file specified for --samplesID does not exist: "
+                  f"{samples_listing}")
     enriched = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}")
     indels_out = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}_INDELS")
     dict_folder = os.path.join(workdir, "Dictionaries", f"dictionaries_{vcf_name}")
@@ -1863,6 +1958,81 @@ def build_index_only() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
     else:
         print(f"Enriched genome already present: {enriched}", flush=True)
+    # STEP 1b (ADDITIVE): emit the dictless tiers (Tier-0 registry + Tier-1 genotype
+    # store) per chromosome, FROM the per-sample dicts just produced -- WITHOUT
+    # touching the dicts. The search side (new_simple_analysis.py) already CONSUMES
+    # these as sibling registry_<vcf>/ + genotypes_<vcf>/ dirs; this is the build
+    # side that PRODUCES them. GATED on a usable --samplesID map; GUARDED so any
+    # failure logs a WARNING to STDOUT (stderr is fatal here) and never aborts the
+    # dict/index build. Path derivation MIRRORS the search resolvers exactly (the
+    # helper swaps the dictionaries_ prefix), so a built install actually uses them.
+    db_to_samplesid = _build_db_to_samplesid(samples_listing, workdir)
+    if not db_to_samplesid:
+        if samples_listing:
+            print(
+                "build-index-only: no usable samplesID entries -> skipping dictless "
+                "tier emission (dicts unaffected; search falls back to the dict "
+                "path).",
+                flush=True,
+            )
+        else:
+            print(
+                "build-index-only: no --samplesID given -> skipping dictless tier "
+                "emission (dicts still built; pass --samplesID to also emit the "
+                "fast-post-analysis tiers).",
+                flush=True,
+            )
+    else:
+        try:
+            import build_dictless_tiers as _bdt
+        except Exception as _bdt_err:  # tier modules absent in this deploy
+            _bdt = None
+            print(
+                "WARNING [build-index-only]: dictless tier modules unavailable "
+                f"({_bdt_err}); building dicts only. Search falls back to the dict "
+                "path.",
+                flush=True,
+            )
+        if _bdt is not None:
+            # Enumerate the chromosomes from the dict files just written (either
+            # my_dict_<chrom>.json or .json.gz, whichever the gzip step left).
+            _dict_files = sorted(
+                _glob(os.path.join(dict_folder, "my_dict_*.json"))
+                + _glob(os.path.join(dict_folder, "my_dict_*.json.gz"))
+            )
+            if not _dict_files:
+                print(
+                    "build-index-only: no my_dict_*.json[.gz] found in "
+                    f"{dict_folder} -> nothing to emit dictless tiers from.",
+                    flush=True,
+                )
+            print(
+                f"Emitting dictless tiers for {len(_dict_files)} chromosome(s) from "
+                f"{os.path.basename(dict_folder)} (databases: "
+                f"{', '.join(db_to_samplesid)})...",
+                flush=True,
+            )
+            _emitted = 0
+            for _dfile in _dict_files:
+                _b = os.path.basename(_dfile)
+                # strip "my_dict_" prefix and the .json / .json.gz suffix -> <chrom>
+                _stem = _b[len("my_dict_"):]
+                for _suf in (".json.gz", ".json"):
+                    if _stem.endswith(_suf):
+                        _stem = _stem[: -len(_suf)]
+                        break
+                _chrom = _stem
+                _res = _bdt.emit_dictless_tiers_guarded(
+                    _dfile, db_to_samplesid, _chrom, dict_folder
+                )
+                if _res is not None:
+                    _emitted += 1
+            print(
+                f"Dictless tier emission complete: {_emitted}/{len(_dict_files)} "
+                "chromosome(s) emitted (registry_<vcf>/ + genotypes_<vcf>/ siblings "
+                "of the dicts).",
+                flush=True,
+            )
     # STEP 2: index the enriched (SNP) genome
     if not os.path.isdir(snp_idx):
         print(f"Building variant index {os.path.basename(snp_idx)}...", flush=True)
