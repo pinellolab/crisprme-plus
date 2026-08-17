@@ -110,7 +110,9 @@ class TestSelectionMatrix(unittest.TestCase):
         self.assertEqual(rsid, ["rs777"])
         # Samples come from the DICT (carrier tokens, per-alt aligned).
         self.assertEqual(samples, [["S1:1|0", "S3:0|1"]])
-        self.assertEqual(info, [CHROM + "_1000_N_A"])
+        # snp_info is the DICT's, verbatim -- real ref "G" (NOT a placeholder):
+        # registry+dict overrides ONLY the AF column.
+        self.assertEqual(info, [CHROM + "_1000_G_A"])
 
     # ---- (b) registry only: AF from registry, samples=[] per alt ---------- #
     def test_registry_only(self):
@@ -129,7 +131,8 @@ class TestSelectionMatrix(unittest.TestCase):
         self.assertEqual(rsid, ["rs42"])
         # Degraded Samples: [] per alt (genotype tier is a later phase).
         self.assertEqual(samples, [[]])
-        self.assertEqual(info, [CHROM + "_2000_N_T"])
+        # registry-only snp_info uses the registry's real ref "C" (reader.ref).
+        self.assertEqual(info, [CHROM + "_2000_C_T"])
 
     # ---- (c) no registry: legacy path unchanged --------------------------- #
     def test_no_registry_legacy_hit(self):
@@ -172,8 +175,10 @@ class TestSelectionMatrix(unittest.TestCase):
             (pos1, "G", "A", "rsA", {"S1": "1|0"}),
             (pos1, "G", "T", "rsT", {"S3": "1|0", "S4": "0|1"}),
         ])
-        # Dict lists the two alts in a DIFFERENT order than the registry's sorted
-        # (A before T) order, to prove we align by alt, not by position in the dict.
+        # Dict lists the alts as T then A. registry+dict PRESERVES the dict's alt
+        # order + carriers + snp_info byte-for-byte (so the order-sensitive
+        # downstream haplotype decomposition is unchanged) and OVERRIDES ONLY the
+        # AF column per alt with the registry's corrected AC/AN.
         entry = _dict_entry(
             ("S3:1|0,S4:0|1", "G", "T", "rsT", ""),
             ("S1:1|0", "G", "A", "rsA", ""),
@@ -181,15 +186,15 @@ class TestSelectionMatrix(unittest.TestCase):
         snp, samples, rsid, af, info = sar.retrieve_5tuple(
             reg, entry, CHROM, chr_pos, GLOBAL_GROUP_ID
         )
-        # Registry emits alts in sorted on-disk order: A, then T.
-        self.assertEqual(snp, ["A", "T"])
-        self.assertEqual(rsid, ["rsA", "rsT"])
-        # AF: A = 1/8 = 0.125 ; T = 2/8 = 0.25.
-        self.assertAlmostEqual(float(af[0]), 0.125)
-        self.assertAlmostEqual(float(af[1]), 0.25)
-        # Samples aligned to the registry alt order (NOT the dict's entry order).
-        self.assertEqual(samples, [["S1:1|0"], ["S3:1|0", "S4:0|1"]])
-        self.assertEqual(info, [CHROM + "_5000_N_A", CHROM + "_5000_N_T"])
+        # Order is the DICT's (T, then A) -- NOT the registry's sorted (A, T).
+        self.assertEqual(snp, ["T", "A"])
+        self.assertEqual(rsid, ["rsT", "rsA"])
+        # AF overridden from the registry, aligned to the dict order: T=2/8, A=1/8.
+        self.assertAlmostEqual(float(af[0]), 0.25)
+        self.assertAlmostEqual(float(af[1]), 0.125)
+        # Samples + snp_info are the dict's, verbatim (real ref "G"), in dict order.
+        self.assertEqual(samples, [["S3:1|0", "S4:0|1"], ["S1:1|0"]])
+        self.assertEqual(info, [CHROM + "_5000_G_T", CHROM + "_5000_G_A"])
 
     def test_multiallelic_registry_only(self):
         pos1 = 6000

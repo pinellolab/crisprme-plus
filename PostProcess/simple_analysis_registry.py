@@ -128,21 +128,39 @@ def retrieve_5tuple(reader, entry, chrom, chr_pos, global_group_id="global"):
             return no_entry_5tuple(chrom, chr_pos)
         return legacy_5tuple_from_entry(entry, chrom, chr_pos)
 
-    # --- registry PRESENT -----------------------------------------------------
     pos1 = chr_pos + 1  # registry is keyed by 1-based genomic position
+
+    # --- registry PRESENT + dict PRESENT: AUGMENT the legacy decode -----------
+    # Keep the dict's alt SET, alt ORDER, carrier samples, rsID and snp_info
+    # BYTE-IDENTICAL to the legacy path (so the downstream haplotype decomposition,
+    # clustering and the Samples column are unchanged), and OVERRIDE ONLY the AF
+    # column with the registry's corrected global allele frequency (AC/AN over the
+    # FULL panel) for each alt the registry knows. This makes registry+dict output
+    # reproduce legacy EXACTLY except the (intentionally) corrected AF -- the legacy
+    # dict AF field is empty for ~95% of variants and mis-polarized for some.
+    # (Ordering the registry's alts independently would perturb the order-sensitive
+    #  decomposition and can add/drop a boundary bulge target, so we do NOT.)
+    if entry is not None:
+        snp_list, sample_list, rsID_list, AF_list, snp_info_list = \
+            legacy_5tuple_from_entry(entry, chrom, chr_pos)
+        for i, alt in enumerate(snp_list):
+            groups = reader.lookup(pos1, alt)
+            if groups:
+                gcnt = groups.get(global_group_id)
+                if gcnt is not None:
+                    AF_list[i] = "%.6g" % gcnt.allele_freq()
+        return snp_list, sample_list, rsID_list, AF_list, snp_info_list
+
+    # --- registry PRESENT + dict ABSENT: registry-only (Tier-0-only install) ---
+    # Metadata/AF from the registry; sample_list = [] per alt (degraded Samples).
+    # SCOPE NOTE (Phase 1): with an empty carrier list the downstream finalization
+    # guard in new_simple_analysis.py (`if len(samples) > 0`) DROPS the target row
+    # entirely, so a true dictless (no per-sample dict) install emits NO variant
+    # rows yet -- standalone dictless variant output requires the per-sample
+    # GENOTYPE TIER (Phase 2/3). Phase 1 therefore AUGMENTS the dict path.
     alts = reader.alts_at(pos1)
     if not alts:
-        # Registry has NO record at this position. Fall back to the legacy dict
-        # behavior so we never lose an off-target the dict knew about.
-        if entry is None:
-            return no_entry_5tuple(chrom, chr_pos)
-        return legacy_5tuple_from_entry(entry, chrom, chr_pos)
-
-    # Dict carriers keyed by alt (empty on a registry-only / Tier-0-only install).
-    # One 5-tuple element per registry alt, in the STABLE registry alt order so
-    # downstream alignment against sample_list holds.
-    alt_to_samples, _ = dict_alt_to_samples(entry)
-
+        return no_entry_5tuple(chrom, chr_pos)
     snp_list = []
     sample_list = []
     AF_list = []
@@ -151,30 +169,14 @@ def retrieve_5tuple(reader, entry, chrom, chr_pos, global_group_id="global"):
     for alt in alts:
         groups = reader.lookup(pos1, alt)
         gcnt = groups.get(global_group_id) if groups else None
-        # AF from the registry is the CORRECTED global allele frequency AC/AN
-        # (re-derived over the FULL panel). This INTENTIONALLY differs from the
-        # legacy dict AF field: that field is empty for ~95% of variants and
-        # mis-polarized for some. See the Tier-0 registry design notes.
         af = gcnt.allele_freq() if gcnt is not None else 0.0
         rsid = reader.rsid(pos1, alt)
         if rsid is None:
             rsid = "."
+        ref = reader.ref(pos1, alt) or "N"
         snp_list.append(alt)
         rsID_list.append(rsid)
-        # %.6g keeps the AF column compact (like the legacy short strings) rather
-        # than a 17-sig-fig float repr; the value is the corrected AC/AN.
         AF_list.append("%.6g" % af)
-        snp_info_list.append(chrom + "_" + str(pos1) + "_" + "N" + "_" + alt)
-        if entry is not None and alt in alt_to_samples:
-            # dict present: reuse its carrier list for this alt (per-'$'-alt aligned)
-            sample_list.append(alt_to_samples[alt])
-        else:
-            # registry-only / dict has no carriers for this alt: degraded Samples.
-            # SCOPE NOTE (Phase 1): with an empty carrier list the downstream
-            # finalization guard in new_simple_analysis.py (`if len(samples) > 0`)
-            # DROPS the target row entirely -- so a true dictless (Tier-0-only, no
-            # per-sample dict) install emits NO variant rows yet. Phase 1 therefore
-            # AUGMENTS the dict path (corrected AF/rsID from the registry); standalone
-            # dictless variant output requires the per-sample GENOTYPE TIER (Phase 2/3).
-            sample_list.append([])
+        snp_info_list.append(chrom + "_" + str(pos1) + "_" + ref + "_" + alt)
+        sample_list.append([])
     return snp_list, sample_list, rsID_list, AF_list, snp_info_list

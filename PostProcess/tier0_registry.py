@@ -1083,6 +1083,14 @@ class RegistryReader(object):
         _, _, _, rsid_off, _, _ = self._record_at(i)
         return self._read_string(rsid_off)
 
+    def ref(self, pos, alt):
+        """Return the reference base for (pos, alt) as a str, or None if absent."""
+        i = self._find_index(pos, alt)
+        if i is None:
+            return None
+        _, _, refb, _, _, _ = self._record_at(i)
+        return refb.decode("ascii")
+
     def record_key_at(self, i):
         """(pos, alt_str) at index i -- for iteration / first/last tests."""
         pos, altb = self._key_at(i)
