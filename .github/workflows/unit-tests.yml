@@ -81,3 +81,7 @@ jobs:
       - name: Tier-1 wiring (genotype tier -> Samples; standalone dictless path)
         working-directory: PostProcess
         run: python -m unittest test_tier1_wiring -v
+
+      - name: Population summary (combination-aware per-db/subpop/global AF)
+        working-directory: PostProcess
+        run: python -m unittest test_population_summary -v
