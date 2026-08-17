@@ -1751,7 +1751,19 @@ def _build_db_to_samplesid(samples_listing: str, workdir: str):
                     flush=True,
                 )
                 continue
-            db_map[_db_name_from_samplesid(name)] = os.path.abspath(candidate)
+            db_name = _db_name_from_samplesid(name)
+            if db_name in db_map:
+                # Two samplesID files reduced to the SAME dataset label. Overwriting
+                # silently would drop the earlier dataset's per-sample provenance
+                # (violating "never conflate datasets") -- make it VISIBLE on stdout.
+                print(
+                    "build-index-only: NOTE two samplesID files map to the same "
+                    "dataset label %r (%r overwrites the earlier entry); per-sample "
+                    "provenance for the earlier dataset would be lost -- give the "
+                    "files distinct names to keep datasets separate." % (db_name, name),
+                    flush=True,
+                )
+            db_map[db_name] = os.path.abspath(candidate)
     return db_map
 
 
@@ -1994,12 +2006,22 @@ def build_index_only() -> None:
                 flush=True,
             )
         if _bdt is not None:
-            # Enumerate the chromosomes from the dict files just written (either
-            # my_dict_<chrom>.json or .json.gz, whichever the gzip step left).
-            _dict_files = sorted(
-                _glob(os.path.join(dict_folder, "my_dict_*.json"))
-                + _glob(os.path.join(dict_folder, "my_dict_*.json.gz"))
-            )
+            # Enumerate the chromosomes from the dict files just written. A chromosome
+            # normally has exactly ONE of my_dict_<chrom>.json / .json.gz (the gzip
+            # step removes the plain form); if a partial/interrupted gzip left BOTH,
+            # dedupe by <chrom> (preferring the plain form) so its tiers emit once.
+            def _chrom_of(_p):
+                _s = os.path.basename(_p)[len("my_dict_"):]
+                for _suf in (".json.gz", ".json"):
+                    if _s.endswith(_suf):
+                        return _s[: -len(_suf)]
+                return _s
+            _by_chrom = {}
+            for _p in _glob(os.path.join(dict_folder, "my_dict_*.json.gz")):
+                _by_chrom[_chrom_of(_p)] = _p
+            for _p in _glob(os.path.join(dict_folder, "my_dict_*.json")):
+                _by_chrom[_chrom_of(_p)] = _p  # plain overwrites gz -> plain preferred
+            _dict_files = [_by_chrom[_c] for _c in sorted(_by_chrom)]
             if not _dict_files:
                 print(
                     "build-index-only: no my_dict_*.json[.gz] found in "
