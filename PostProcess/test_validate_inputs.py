@@ -606,6 +606,121 @@ class TestCheckGuideFile(unittest.TestCase):
 
 
 # ===========================================================================
+# check_guide_pam_consistency
+# ===========================================================================
+
+
+class TestCheckGuidePamConsistency(unittest.TestCase):
+    # Full-length SpCas9 (3' PAM): motif is 20 guide N's + NGG, offset +3.
+    SPCAS9_PAM = "NNNNNNNNNNNNNNNNNNNNNGG 3\n"
+    # Full-length Cas12a (5' PAM): TTTV + 23 guide N's, offset -4.
+    CAS12A_PAM = "TTTVNNNNNNNNNNNNNNNNNNNNNNN -4\n"
+
+    def _write(self, tmp, pam_text, guide_text):
+        pamfile = os.path.join(tmp, "20bp-NGG-SpCas9.txt")
+        guidefile = os.path.join(tmp, "guides.txt")
+        write_text(pamfile, pam_text)
+        write_text(guidefile, guide_text)
+        return guidefile, pamfile
+
+    def test_unpadded_3prime_guide_errors(self):
+        # POSITIVE case: the exact bug — bare 20 nt guide, no trailing NNN.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.SPCAS9_PAM, "CTAACAGTTGCTTTTATCAC\n"
+            )
+            issues = vi.check_guide_pam_consistency(guidefile, pamfile)
+            self.assertEqual(len(issues), 1)
+            self.assertEqual(issues[0].severity, vi.ERROR)
+            self.assertIn("CTAACAGTTGCTTTTATCAC", issues[0].message)
+            self.assertIn("20 nt", issues[0].message)
+            self.assertIn("23 nt", issues[0].message)
+            self.assertIn("append", issues[0].message)
+
+    def test_padded_3prime_guide_no_error(self):
+        # NEGATIVE: correctly padded SpCas9 guide (…NNN) -> length 23.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.SPCAS9_PAM, "CTAACAGTTGCTTTTATCACNNN\n"
+            )
+            self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
+
+    def test_padded_5prime_guide_no_error(self):
+        # NEGATIVE: correctly padded Cas12a guide (NNNN…) -> length 27.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.CAS12A_PAM, "NNNN" + "A" * 23 + "\n"
+            )
+            self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
+
+    def test_unpadded_5prime_guide_errors(self):
+        # POSITIVE: 5' PAM (Cas12a) bare 23 nt guide, missing leading NNNN.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.CAS12A_PAM, "A" * 23 + "\n"
+            )
+            issues = vi.check_guide_pam_consistency(guidefile, pamfile)
+            self.assertEqual(len(issues), 1)
+            self.assertEqual(issues[0].severity, vi.ERROR)
+            self.assertIn("prepend", issues[0].message)
+            self.assertIn("27 nt", issues[0].message)
+
+    def test_lowercase_n_padding_no_error(self):
+        # NEGATIVE: lowercase n padding is still correct length -> no error.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.SPCAS9_PAM, "CTAACAGTTGCTTTTATCACnnn\n"
+            )
+            self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
+
+    def test_literal_pam_correct_length_no_error(self):
+        # NEGATIVE: a fully-specified guide+literal-PAM of the right length is
+        # NOT flagged (scoped to "strictly shorter"); it does not crash radar.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.SPCAS9_PAM, "CTAACAGTTGCTTTTATCACTGG\n"
+            )
+            self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
+
+    def test_short_form_pam_longer_guide_no_error(self):
+        # NEGATIVE: short-form PAM file (motif == bare 'NGG', total_len 3);
+        # a 20 nt guide is LONGER than the motif, not shorter -> not flagged.
+        # This is exactly the run_lightweight end-to-end fixture's shape.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, "NGG 3\n", "ACGTACGTACGTACGTACGT\n"
+            )
+            self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
+
+    def test_empty_lines_ignored(self):
+        # NEGATIVE: blank lines between padded guides are ignored.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.SPCAS9_PAM, "CTAACAGTTGCTTTTATCACNNN\n\n\n"
+            )
+            self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
+
+    def test_malformed_pam_skipped(self):
+        # NEGATIVE: unparseable PAM (no offset) -> geometry None -> no error
+        # here (check_pam_file reports the malformed PAM separately).
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, "NGG\n", "CTAACAGTTGCTTTTATCAC\n"
+            )
+            self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
+
+    def test_multiple_unpadded_guides_each_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.SPCAS9_PAM,
+                "CTAACAGTTGCTTTTATCAC\nGACGCATAAAGATGAGACGC\n",
+            )
+            issues = vi.check_guide_pam_consistency(guidefile, pamfile)
+            self.assertEqual(len(issues), 2)
+            self.assertTrue(all(i.severity == vi.ERROR for i in issues))
+
+
+# ===========================================================================
 # check_gzip_compressed
 # ===========================================================================
 
