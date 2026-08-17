@@ -305,6 +305,213 @@ def aggregate_record(alt_genotypes, sample_meta, ploidy_of, alt_index="1"):
     return result
 
 
+# --------------------------------------------------------------------------- #
+# (A') Panel-aware aggregation (FULL-PANEL AN via hom-ref baseline + delta)
+# --------------------------------------------------------------------------- #
+#
+# The legacy SNP dict lists ONLY alt-carriers per record. To re-derive a correct
+# population allele frequency AF = AC / AN, every panel sample that is NOT listed
+# for a record must be counted as hom-ref: it contributes AC 0, AN == its ploidy,
+# is_called (AN slots all observed as ref), NOT a carrier, NOT hom. So AN is the
+# FULL-PANEL called-allele count, not the alleles among carriers only.
+#
+# Naively this is O(#panel) per record (~60M records x ~4400 samples). Instead we
+# precompute ONCE, per group, the baseline totals assuming EVERY member is
+# hom-ref (PanelIndex). For a record we COPY that baseline and, for each of the
+# (few) carriers, add the DELTA between the carrier's TRUE per-sample counts and
+# the hom-ref assumption the baseline already made for it (ac 0, an ploidy,
+# called 1, carrier 0, hom 0). Cost is O(#carriers) per record.
+#
+# Sparsity: a group is WRITTEN only if it has >= 1 carrier for the record (a group
+# with 0 carriers carries no off-target signal), but the counts we emit for a
+# written group are the FULL-PANEL counts (so AF/carrier_freq denominators are
+# right), not the carriers-only counts.
+
+
+class PanelIndex(object):
+    """Precomputed per-group hom-ref baselines for a fixed panel.
+
+    Built ONCE per compile. For each group -- every (db x subpop) cell, every db,
+    and the GLOBAL group over the DEDUPED union of canonical sample ids -- it
+    stores the baseline Counts assuming ALL members are hom-ref:
+
+        AC = 0
+        AN = sum(ploidy over the group's members)
+        n_carrier_indiv = 0
+        n_hom_indiv = 0
+        n_called_indiv = number of individuals in the group
+
+    It also records, per sample, the (db, subpop) it belongs to and its ploidy, so
+    ``aggregate_record_panel`` can apply carrier deltas without re-deriving group
+    membership. The GLOBAL axis dedups by canonical sample_id: a sample present in
+    two databases is counted once globally (its ploidy taken from the first
+    membership seen; identical across databases for the same individual).
+    """
+
+    __slots__ = ("subpop_baseline", "db_baseline", "global_baseline",
+                 "_sample_group", "_sample_ploidy_global", "n_global")
+
+    def __init__(self, sample_meta, ploidy_of):
+        # Per-group baseline Counts (hom-ref for every member).
+        self.subpop_baseline = {}   # (db, subpop) -> Counts
+        self.db_baseline = {}       # db -> Counts
+        self.global_baseline = Counts()
+
+        # Per-sample resolved (db, subpop, ploidy) for delta application.
+        self._sample_group = {}     # sample_id -> (db, subpop)
+        # Global ploidy per DEDUPED canonical id (counted once globally).
+        self._sample_ploidy_global = {}  # sample_id -> ploidy
+        self.n_global = 0
+
+        for sample_id, (database, subpopulation, sex) in sample_meta.items():
+            ploidy = ploidy_of(sample_id, sex)
+            # ploidy 0 => the sample is ABSENT on this chromosome (e.g. a female on
+            # chrY): exclude it from the panel entirely so it contributes NO phantom
+            # alleles to AN and is not counted as a called individual in any group.
+            if ploidy <= 0:
+                continue
+            self._sample_group[sample_id] = (database, subpopulation)
+
+            key = (database, subpopulation)
+            b = self.subpop_baseline.get(key)
+            if b is None:
+                b = Counts()
+                self.subpop_baseline[key] = b
+            b.AN += ploidy
+            b.n_called_indiv += 1
+
+            d = self.db_baseline.get(database)
+            if d is None:
+                d = Counts()
+                self.db_baseline[database] = d
+            d.AN += ploidy
+            d.n_called_indiv += 1
+
+            # GLOBAL: dedup by canonical sample_id.
+            if sample_id not in self._sample_ploidy_global:
+                self._sample_ploidy_global[sample_id] = ploidy
+                self.global_baseline.AN += ploidy
+                self.global_baseline.n_called_indiv += 1
+                self.n_global += 1
+
+    def sample_group(self, sample_id):
+        """(db, subpop) for a sample, or None if not in the panel."""
+        return self._sample_group.get(sample_id)
+
+    def is_global_member(self, sample_id):
+        return sample_id in self._sample_ploidy_global
+
+
+def _apply_delta(dst, ac, an, is_carrier, is_hom, is_called):
+    """Add the (true - hom-ref-assumed) per-sample delta into a group's Counts.
+
+    The baseline already assumed for this sample: ac 0, an ploidy, called 1,
+    carrier 0, hom 0. ``an`` here is the sample's TRUE called-allele count, which
+    for a listed carrier equals its ploidy MINUS any missing slots. The baseline
+    assumed ``ploidy`` called alleles, but a carrier is by definition a listed
+    sample whose true AN is its observed non-missing slots; the AN delta is
+    (true_an - ploidy). We do NOT have ``ploidy`` here directly, so the caller
+    passes the DELTA-ready values: see ``aggregate_record_panel`` which computes
+    (true - assumed) explicitly.
+    """
+    dst.AC += ac
+    dst.AN += an
+    dst.n_carrier_indiv += is_carrier
+    dst.n_hom_indiv += is_hom
+    dst.n_called_indiv += is_called
+
+
+def aggregate_record_panel(carrier_genotypes, panel_index, sample_meta,
+                           ploidy_of, alt_index="1"):
+    """Aggregate ONE (pos, specific-alt) record with FULL-PANEL AN.
+
+    Args:
+      carrier_genotypes: dict sample_id -> genotype string, listing ONLY the
+        alt-carriers for this record (exactly what the legacy dict stores). Any
+        panel sample NOT listed is treated as hom-ref (via the baseline).
+      panel_index: a ``PanelIndex`` built from the SAME sample_meta/ploidy_of.
+      sample_meta: sample_id -> (database, subpopulation, sex).
+      ploidy_of: callable(sample_id, sex) -> 1 or 2 (same as the PanelIndex).
+      alt_index: genotype token denoting THIS record's alt (default "1").
+
+    Returns:
+      dict[group_id] -> Counts. SPARSE on "has a carrier": a group is emitted only
+      if >= 1 of its members carries the alt for THIS record. BUT the emitted
+      counts are FULL-PANEL (baseline + carrier deltas), so AC/AN/n_called reflect
+      the WHOLE group, giving correct AF = AC / AN denominators.
+
+    Cost: O(#carriers). We copy only the baselines of the (few) touched groups.
+    """
+    # Touched groups (those with >= 1 carrier). We lazily copy each touched
+    # group's baseline the first time a carrier hits it, then apply deltas.
+    subpop_out = {}   # (db, subpop) -> Counts (copy of baseline + deltas)
+    db_out = {}       # db -> Counts
+    global_out = None  # Counts (copy of global baseline) once a global carrier hits
+
+    # Global dedup: apply each canonical id's delta once.
+    global_seen = set()
+
+    for sample_id, gt in carrier_genotypes.items():
+        meta = sample_meta.get(sample_id)
+        if meta is None:
+            continue  # ungroupable / not in panel
+        grp = panel_index.sample_group(sample_id)
+        if grp is None:
+            continue  # in meta but not in the panel baseline (defensive)
+        database, subpopulation = grp
+        _, _, sex = meta
+        ploidy = ploidy_of(sample_id, sex)
+
+        true_ac, true_an, is_carrier, is_hom, is_called = _sample_counts(
+            gt, ploidy, alt_index)
+
+        # Delta vs the hom-ref assumption the baseline already made:
+        #   assumed: ac=0, an=ploidy, called=1, carrier=0, hom=0
+        d_ac = true_ac - 0
+        d_an = true_an - ploidy
+        d_car = (1 if is_carrier else 0) - 0
+        d_hom = (1 if is_hom else 0) - 0
+        d_call = (1 if is_called else 0) - 1
+
+        # (db x subpop) group
+        key = (database, subpopulation)
+        out = subpop_out.get(key)
+        if out is None:
+            base = panel_index.subpop_baseline.get(key)
+            # base must exist: the sample was registered in the PanelIndex.
+            out = Counts(*base.as_tuple())
+            subpop_out[key] = out
+        _apply_delta(out, d_ac, d_an, d_car, d_hom, d_call)
+
+        # db group
+        dout = db_out.get(database)
+        if dout is None:
+            dbase = panel_index.db_baseline.get(database)
+            dout = Counts(*dbase.as_tuple())
+            db_out[database] = dout
+        _apply_delta(dout, d_ac, d_an, d_car, d_hom, d_call)
+
+        # GLOBAL group (dedup by canonical id)
+        if sample_id not in global_seen and panel_index.is_global_member(sample_id):
+            global_seen.add(sample_id)
+            if global_out is None:
+                global_out = Counts(*panel_index.global_baseline.as_tuple())
+            _apply_delta(global_out, d_ac, d_an, d_car, d_hom, d_call)
+
+    result = {}
+    # Only WRITE groups that have >= 1 carrier for this record; but their counts
+    # are already full-panel (baseline + deltas).
+    for key, cnt in subpop_out.items():
+        if cnt.n_carrier_indiv >= 1:
+            result[db_subpop_group_id(key[0], key[1])] = cnt
+    for database, cnt in db_out.items():
+        if cnt.n_carrier_indiv >= 1:
+            result[db_group_id(database)] = cnt
+    if global_out is not None and global_out.n_carrier_indiv >= 1:
+        result[GLOBAL_GROUP_ID] = global_out
+    return result
+
+
 def derive_record_stats(groups):
     """Derive record-level summary stats from a record's per-group Counts.
 
@@ -447,8 +654,13 @@ def _pack_ref(ref):
     return r.encode("ascii")
 
 
-def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx):
+def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx,
+                     alt_index="1"):
     """Compile records into the mmap-friendly binary + json manifest.
+
+    CARRIERS-ONLY aggregation (``aggregate_record``): AN counts only alleles among
+    the samples actually listed for each record. For full-panel AN (correct AF
+    denominators over the WHOLE panel) use ``compile_registry_panel``.
 
     Args:
       records: iterable of (pos:int, ref:str1, alt:str1, rsid:str,
@@ -464,10 +676,50 @@ def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx
 
     Returns the manifest dict (also written to out_idx).
     """
-    # Materialize + sort by (pos, alt).
     recs = list(records)
     recs.sort(key=lambda r: (int(r[0]), r[2]))
 
+    def agg(alt_genotypes, ai):
+        return aggregate_record(alt_genotypes, sample_meta, ploidy_of, ai)
+
+    return _write_registry(recs, agg, sample_meta, taxonomy, out_bin, out_idx,
+                           alt_index=alt_index, aggregation="carriers")
+
+
+def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
+                           out_idx, alt_index="1", panel_index=None):
+    """Compile records with FULL-PANEL AN (``aggregate_record_panel``).
+
+    Identical binary format + manifest to ``compile_registry``, but every emitted
+    group's AC/AN/n_called reflect the WHOLE panel of that group (carriers plus
+    all unlisted samples counted as hom-ref), so AF = AC / AN uses the full-panel
+    denominator. Groups remain SPARSE on "has a carrier".
+
+    Args are the same as ``compile_registry``; ``records`` here carry
+    CARRIER-ONLY genotype dicts (the legacy dict semantics). A ``PanelIndex`` is
+    built once from ``sample_meta``/``ploidy_of`` (or reuse a prebuilt one via
+    ``panel_index``).
+    """
+    recs = list(records)
+    recs.sort(key=lambda r: (int(r[0]), r[2]))
+
+    if panel_index is None:
+        panel_index = PanelIndex(sample_meta, ploidy_of)
+
+    def agg(carrier_genotypes, ai):
+        return aggregate_record_panel(carrier_genotypes, panel_index, sample_meta,
+                                      ploidy_of, ai)
+
+    return _write_registry(recs, agg, sample_meta, taxonomy, out_bin, out_idx,
+                           alt_index=alt_index, aggregation="panel")
+
+
+def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
+                    alt_index="1", aggregation="carriers"):
+    """Shared binary writer. ``aggregate_fn(alt_genotypes, alt_index)`` returns
+    dict[group_id]->Counts for one (pos, alt) record (either the carriers-only
+    ``aggregate_record`` path or the full-panel ``aggregate_record_panel`` path).
+    """
     pool = _StringPool()
     group_blob = bytearray()
     record_rows = []  # (pos, alt_byte, ref_byte, rsid_off, n_groups, groups_off)
@@ -476,7 +728,7 @@ def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx
     seen_group_ids = {}  # group_id -> (kind, database, subpopulation)
 
     for (pos, ref, alt, rsid, alt_genotypes) in recs:
-        groups = aggregate_record(alt_genotypes, sample_meta, ploidy_of)
+        groups = aggregate_fn(alt_genotypes, alt_index)
         # Stable, deterministic group ordering: global last, then db, then
         # (db x subpop) sorted -- but ordering does not affect lookup semantics.
         gids = sorted(groups.keys())
@@ -547,6 +799,8 @@ def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx
         "group_size": GROUP_SIZE,
         "string_pool_off": string_pool_off,
         "alt_field_width": 1,
+        "aggregation": aggregation,  # "carriers" (AN over listed only) or
+                                     # "panel" (AN over the full panel)
         "global_group_id": GLOBAL_GROUP_ID,
         "group_sep": SEP,
         "databases": taxonomy,
@@ -696,15 +950,22 @@ def autosomal_ploidy(sample_id, sex):
     return 2
 
 
-def make_chr_ploidy(haploid_male=True, haploid_female=False):
-    """Factory for a ploidy_of that returns 1 for haploid contexts.
+def make_chr_ploidy(haploid_male=True, haploid_female=False, absent_female=False):
+    """Factory for a ploidy_of returning 2 (diploid), 1 (haploid), or 0 (absent).
 
-    For chrX-nonPAR / chrY, males are haploid (ploidy 1); females diploid on
-    chrX, absent on chrY (the caller simply omits chrY females). Set
-    ``haploid_female=True`` for chrY-only contexts if ever needed.
+    * chrX-nonPAR: ``make_chr_ploidy(haploid_male=True)`` -> males haploid (1),
+      females diploid (2).
+    * chrY: ``make_chr_ploidy(haploid_male=True, absent_female=True)`` -> males
+      haploid (1), females ABSENT (0). Females carry no Y chromosome, so a female
+      samplesID row must contribute NO alleles to the chrY AN denominator;
+      ``PanelIndex`` drops ploidy-0 samples from the panel entirely. (Using haploid
+      females here instead would inflate chrY AN by the female count and bias every
+      chrY AF low.)
     """
     def _ploidy(sample_id, sex):
         s = (sex or "").strip().lower()
+        if s == "female" and absent_female:
+            return 0
         if s == "male" and haploid_male:
             return 1
         if s == "female" and haploid_female:
