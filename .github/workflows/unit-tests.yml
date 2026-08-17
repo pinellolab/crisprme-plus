@@ -93,3 +93,7 @@ jobs:
       - name: Dictless tier build emission (build emits tiers where search reads them)
         working-directory: PostProcess
         run: python -m unittest test_build_emit_tiers -v
+
+      - name: Indel per-chrom subset regression (#172: fakechrom match)
+        working-directory: PostProcess
+        run: python -m unittest test_indel_chrom_subset -v
