@@ -85,3 +85,7 @@ jobs:
       - name: Population summary (combination-aware per-db/subpop/global AF)
         working-directory: PostProcess
         run: python -m unittest test_population_summary -v
+
+      - name: Population summary companion wiring (additive off-target output)
+        working-directory: PostProcess
+        run: python -m unittest test_popsummary_wiring -v

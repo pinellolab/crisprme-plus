@@ -33,6 +33,21 @@ except Exception:  # module absent in an old deploy -> no genotype tier
 # isolation). This module has no hard dependency on tier0_registry, so its import
 # cannot break the legacy path either.
 import simple_analysis_registry as _sar
+# ADDITIVE combination-aware population summary (Phase 3) + its companion-file writer
+# (Phase 3c). GUARDED / lazy exactly like tier0_registry: an old deploy may not ship
+# these -- in that case they stay None and the companion population-summary TSV is
+# simply NOT written. Import failure NEVER breaks the legacy, registry, or genotype
+# paths, and the companion file is ADDITIVE (a separate TSV next to the output stem,
+# gated on ``myreg`` -- it never touches the bestMerge/altMerge/integrated_results
+# columns or the Samples column).
+try:
+    import population_summary as _popsum
+    import population_summary_companion as _popsum_companion
+    import tier0_compile as _t0c
+except Exception:  # any module absent in an old deploy -> no companion summary
+    _popsum = None
+    _popsum_companion = None
+    _t0c = None
 
 
 # For scoring of CFD And Doench
@@ -149,6 +164,57 @@ def calc_cfd(guide_seq, sg, pam, mm_scores, pam_scores, do_scores):
     # KeyError (issue #94). Canonical PAM bases (A/C/G/T) are unaffected.
     score *= pam_scores.get(pam, 0.0)
     return score
+
+
+# ADDITIVE (Phase 3c) companion population-summary collection. We accumulate, per
+# chromosome, one record per VARIANT off-target (identity columns + the creating SNP
+# column) so a companion population-summary TSV can be written at the end WITHOUT
+# perturbing the bestMerge output. Deduped by the bestMerge identity key so
+# per-haplotype / per-score duplicate rows collapse to a single companion row. This
+# collection is only ever CONSUMED when ``myreg`` is present (see the guarded write
+# at the end); otherwise it is harmless dead data and no companion file is written.
+_variant_off_targets = []
+_variant_off_target_keys = set()
+
+# Column indices in a finalized target line (see ``header`` below):
+#   3=Chromosome  4=Position  6=Direction  1=crRNA  2=DNA  17=SNP
+_OT_COL = {
+    "Chromosome": 3,
+    "Position": 4,
+    "Direction": 6,
+    "crRNA": 1,
+    "DNA": 2,
+    "SNP": 17,
+}
+
+
+def _collect_variant_off_target(final_line):
+    """Record a VARIANT off-target's identity + creating-SNP columns for the
+    companion population summary. PURE w.r.t. ``final_line`` (reads, never mutates).
+
+    Guarded: any malformed line (short list, non-string SNP) is silently skipped so
+    this ADDITIVE bookkeeping can never break the finalization loop. Deduped by the
+    bestMerge identity key (Chromosome, Position, Direction, crRNA, DNA, SNP) so the
+    per-haplotype / CFD-vs-CRISTA duplicate rows collapse to one companion row.
+
+    Gated on the Tier-0 registry (and the companion module) being present: on a
+    legacy / dict-only install the companion is never written, so accumulating this
+    per-chromosome set+list would be dead RAM on the hot finalization loop -- which
+    matters given this pipeline's OOM history on genome-wide searches. Returning
+    early here keeps the legacy path ALLOCATION-identical, not just byte-identical.
+    ``myreg`` (module scope) is bound before the target loop that drives this."""
+    if myreg is None or _popsum_companion is None:
+        return
+    try:
+        rec = {name: final_line[idx] for name, idx in _OT_COL.items()}
+    except Exception:
+        return
+    key = (rec["Chromosome"], rec["Position"], rec["Direction"], rec["crRNA"],
+           rec["DNA"], rec["SNP"])
+    if key in _variant_off_target_keys:
+        return
+    _variant_off_target_keys.add(key)
+    _variant_off_targets.append(rec)
 
 
 def revcom(s):
@@ -493,6 +559,15 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             final_line.append(tmp_pos_mms)
                             # append processed target to cluster to save
                             cluster_to_save.append(final_line)
+                            # ADDITIVE (Phase 3c): record this VARIANT off-target's
+                            # identity + creating-variant (SNP) columns for the
+                            # companion population-summary TSV. GATED on ``myreg``
+                            # (built later at module scope) so it is a no-op / empty
+                            # collection on any legacy install; deduped by identity so
+                            # per-haplotype / per-score duplicates collapse to one row.
+                            # This reads ONLY final_line columns and never mutates it,
+                            # so the bestMerge output is byte-identical.
+                            _collect_variant_off_target(final_line)
 
 
 def preprocess_CFD_score(target):
@@ -930,6 +1005,74 @@ def _resolve_genotype_paths(dict_path, chrom):
     return None
 
 
+def _write_population_summary_companion():
+    """ADDITIVE companion population-summary write. FULLY GUARDED + GATED on ``myreg``.
+
+    Writes ``<outputFile>.population_summary.tsv`` -- a SEPARATE file next to the
+    bestMerge / output stem, one row per VARIANT off-target keyed by the SAME identity
+    columns the bestMerge uses (Chromosome, Position, Direction, crRNA, DNA) plus the
+    creating SNP column, so it can be joined back. It NEVER touches the existing
+    bestMerge / altMerge / integrated_results columns or the Samples column.
+
+    Gate: when ``myreg`` is None (legacy / dict-only install, and any old deploy
+    without the population-summary modules) this writes NOTHING (no file created) --
+    BYTE-IDENTICAL legacy behavior. Any error is caught + logged + skipped here, so
+    the companion write can NEVER break the run.
+
+    The single dataset-wide ``phased`` flag is resolved by the companion writer
+    (explicit -> gt manifest -> detect from GT strings -> conservative default), and
+    we feed it the phasing already sniffed from the dict scan (``haplotype_check``) so
+    a dict-backed run agrees with the dict decomposition's cis/trans handling.
+    """
+    if myreg is None:
+        return  # GATE: no registry -> byte-identical legacy behavior (no file)
+    if _popsum is None or _popsum_companion is None or _t0c is None:
+        return  # modules absent (old deploy) -> no companion summary
+    try:
+        # The sample axis + ploidy model for THIS chromosome. Prefer the genotype
+        # tier's axis (needed for exact multi-variant combinations); fall back to the
+        # registry's axis if the reader exposes one, else None (single-variant rows
+        # still resolve straight from the registry).
+        axis = None
+        if mygt is not None and hasattr(mygt, "_axis"):
+            axis = mygt._axis
+        elif hasattr(myreg, "axis"):
+            try:
+                axis = myreg.axis()
+            except Exception:
+                axis = None
+        ploidy_of = _t0c.ploidy_of_for_chrom(current_chr)
+        out_path = outputFile + ".population_summary.tsv"
+
+        def _on_row_error(ot, err):
+            print("population-summary companion: skipped one off-target -", err)
+
+        wrote = _popsum_companion.write_companion(
+            out_path,
+            _variant_off_targets,
+            myreg,
+            mygt,
+            axis,
+            ploidy_of,
+            _popsum,
+            panel_cls=getattr(_popsum, "Panel", None),
+            # dataset-wide phasing already sniffed from the dict scan; the writer
+            # still resolves manifest/detect when this is False-by-default and a gt
+            # tier is present.
+            phased=(True if haplotype_check else None),
+            global_group_id=(t0_reg.GLOBAL_GROUP_ID if t0_reg is not None else "global"),
+            observed_gt_strings=None,
+            on_error=_on_row_error,
+        )
+        if wrote:
+            print(
+                "Wrote population-summary companion (%d variant off-target row[s]) to %s"
+                % (len(_variant_off_targets), out_path)
+            )
+    except Exception as _ps_err:  # ADDITIVE + guarded: never break the run
+        print("population-summary companion skipped for", current_chr, "-", _ps_err)
+
+
 # INPUT AND SETTINGS
 # fasta of the reference chromosome
 inFasta = open(sys.argv[1], "r")
@@ -1158,6 +1301,8 @@ else:
     # cfd dataframe write
     cfd_dataframe = pd.DataFrame.from_dict(cfd_for_graph)
     cfd_dataframe.to_csv(outputFile + ".CFDGraph.txt", sep="\t", index=False)
+    # ADDITIVE + guarded + gated-on-myreg: companion population-summary TSV.
+    _write_population_summary_companion()
     # print complete and exit with no error
     print("ANALYSIS COMPLETE IN", time.time() - global_start)
     exit(0)
@@ -1205,5 +1350,8 @@ os.system(
 
 cfd_dataframe = pd.DataFrame.from_dict(cfd_for_graph)
 cfd_dataframe.to_csv(outputFile + ".CFDGraph.txt", sep="\t", index=False)
+
+# ADDITIVE + guarded + gated-on-myreg: companion population-summary TSV.
+_write_population_summary_companion()
 
 print("ANALYSIS COMPLETE IN", time.time() - global_start)
