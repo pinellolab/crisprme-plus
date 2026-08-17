@@ -1030,6 +1030,35 @@ class RegistryReader(object):
     def __len__(self):
         return self._n
 
+    def alts_at(self, pos):
+        """Return the alt alleles at ``pos`` in on-disk (sorted) order.
+
+        Multiallelic sites are stored as consecutive fixed-width records with the
+        SAME pos and DISTINCT alt (the record array is sorted by (pos, alt_byte),
+        see ``compile_registry``). We bisect to the left bound of the (pos, *)
+        block on the mmap and walk forward while pos matches -- O(log n + #alts),
+        NO full parse. The returned order is the STABLE per-position alt ordering
+        the wiring layer aligns dict carriers against.
+        """
+        pos = int(pos)
+        lo = bisect.bisect_left(self._keys, (pos, b""))
+        alts = []
+        prev = None
+        i = lo
+        while i < self._n:
+            p, altb = self._key_at(i)
+            if p != pos:
+                break
+            a = altb.decode("ascii")
+            # Records are sorted by (pos, alt), so a duplicated (pos, alt) would be
+            # adjacent; collapse it defensively so the wiring never emits two
+            # identical target rows for one alt.
+            if a != prev:
+                alts.append(a)
+                prev = a
+            i += 1
+        return alts
+
     def lookup(self, pos, alt):
         """Return dict[group_id]->Counts for (pos, alt), or None if absent."""
         i = self._find_index(pos, alt)

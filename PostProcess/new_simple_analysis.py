@@ -11,6 +11,19 @@ import pandas as pd
 import time
 from CRISTA_score import CRISTA_predict_list
 
+# Tier-0 compact variant registry (CRISPRme+ dictless redesign). GUARDED /
+# lazy: an old deploy may not ship tier0_registry, and most installs have no
+# registry at all -- in either case ``t0_reg`` stays None and the legacy dict
+# path is used unchanged. Import failure NEVER breaks the legacy path.
+try:
+    import tier0_registry as t0_reg
+except Exception:  # module absent in an old deploy -> legacy path only
+    t0_reg = None
+# Pure, side-effect-free retrieveFromDict machinery (importable / unit-tested in
+# isolation). This module has no hard dependency on tier0_registry, so its import
+# cannot break the legacy path either.
+import simple_analysis_registry as _sar
+
 
 # For scoring of CFD And Doench
 tab = str.maketrans("ACTGRYSWMKHDBVactgryswmkhdbv", "TGACYRSWKMDHVBtgacyrswkmdhvb")
@@ -156,47 +169,26 @@ def get_mm_pam_scores():
 
 
 def retrieveFromDict(chr_pos):
+    """Return the 5-tuple (snp_list, sample_list, rsID_list, AF_list, snp_info_list)
+    for a candidate off-target position.
+
+    ADDITIVE Tier-0 wiring: the PURE selection-matrix logic lives in
+    ``simple_analysis_registry.retrieve_5tuple`` (importable / unit-tested in
+    isolation). Here we only supply the module-level registry reader (``myreg``,
+    or None), the raw ``mydict`` entry for this position (or None if absent), and
+    the current chromosome. When ``myreg`` is None this is BYTE-IDENTICAL to the
+    legacy behavior; the dict entry is detected with the SAME bare-subscript
+    try/except as the original so "present" vs "absent" is decided identically."""
+    # ``entry is None`` is the sentinel for "the dict had no entry for this
+    # position" (legacy except-branch). A present entry (even a malformed one) is
+    # passed through verbatim so the legacy decode -- including its IndexError on a
+    # malformed value -- is unchanged.
     try:
         entry = mydict[current_chr + "," + str(chr_pos + 1)]
-    except:
-        snp_list = []
-        sample_list = []
-        AF_list = []
-        rsID_list = []
-        snp_info_list = []
-        sample_list.append([])  # no samples
-        snp_list.append("C")  # fake snp
-        rsID_list.append(".")  # no rsid
-        AF_list.append("0")  # fake AF
-        snp_info_list.append(
-            current_chr + "_" + str(chr_pos + 1) + "_" + "C" + "_" + "G"
-        )  # fake snp info list
-        return snp_list, sample_list, rsID_list, AF_list, snp_info_list
-    multi_entry = entry.split("$")
-    snp_list = []
-    sample_list = []
-    AF_list = []
-    rsID_list = []
-    snp_info_list = []
-    for entry in multi_entry:
-        split_entry = entry.split(";")
-        samples = split_entry[0].strip().split(",")
-        if samples[0] == "":
-            samples = []
-        sample_list.append(samples)
-        snp_list.append(split_entry[1].strip().split(",")[1])
-        rsID_list.append(split_entry[2].strip())
-        AF_list.append(split_entry[3].strip())
-        snp_info_list.append(
-            current_chr
-            + "_"
-            + str(chr_pos + 1)
-            + "_"
-            + split_entry[1].split(",")[0]
-            + "_"
-            + split_entry[1].split(",")[1]
-        )
-    return snp_list, sample_list, rsID_list, AF_list, snp_info_list
+    except Exception:
+        entry = None
+    global_gid = t0_reg.GLOBAL_GROUP_ID if t0_reg is not None else "global"
+    return _sar.retrieve_5tuple(myreg, entry, current_chr, chr_pos, global_gid)
 
 
 def _aligned_mm(seq_prerevert, realTarget, guide_no_pam, revert):
@@ -867,6 +859,34 @@ def _load_dict_targeted(dict_path, needed_keys):
         return result, haplo
 
 
+def _resolve_registry_paths(dict_path, chrom):
+    """Resolve a Tier-0 registry (bin, idx) for ``chrom`` from the SNP dict path,
+    or return None if no registry is present.
+
+    Layout mirrors the dicts: the search pipeline passes ``dict_path`` as
+    ``<...>/Dictionaries/dictionaries_<vcf>/my_dict_<chrom>.json`` (see
+    post_analisi_snp.sh). The registry lives alongside it as
+    ``<...>/Dictionaries/registry_<vcf>/reg_<chrom>.bin`` + ``.idx``. We derive it
+    by swapping the ``dictionaries_`` folder prefix for ``registry_`` and the
+    ``my_dict_<chrom>.json[.gz]`` file for ``reg_<chrom>.bin``/``.idx``. Detection
+    is by FILE EXISTENCE only -- absence => None => legacy path unchanged."""
+    dict_dir = os.path.dirname(dict_path)
+    parent = os.path.dirname(dict_dir)
+    dict_folder_name = os.path.basename(dict_dir)
+    if dict_folder_name.startswith("dictionaries_"):
+        reg_folder_name = "registry_" + dict_folder_name[len("dictionaries_"):]
+    else:
+        # non-standard layout: try a sibling "registry_<same suffix>" then a
+        # co-located registry dir; either way we only USE it if the files exist.
+        reg_folder_name = "registry_" + dict_folder_name
+    reg_dir = os.path.join(parent, reg_folder_name)
+    bin_path = os.path.join(reg_dir, "reg_" + str(chrom) + ".bin")
+    idx_path = os.path.join(reg_dir, "reg_" + str(chrom) + ".idx")
+    if os.path.exists(bin_path) and os.path.exists(idx_path):
+        return bin_path, idx_path
+    return None
+
+
 # INPUT AND SETTINGS
 # fasta of the reference chromosome
 inFasta = open(sys.argv[1], "r")
@@ -929,6 +949,25 @@ try:
     )
 except Exception as _dict_err:  # keep going with no SNP annotation, never crash here
     print("No dict found (or unreadable) for", current_chr, "-", _dict_err)
+
+# ADDITIVE Tier-0 registry detection (dictless redesign). If a registry exists for
+# this chromosome (alongside the dict), open a module-level RegistryReader that
+# retrieveFromDict() consults for corrected AF / rsID / metadata. When absent (the
+# common case, and any old deploy without tier0_registry) ``myreg`` stays None and
+# retrieveFromDict falls through to the byte-identical legacy dict path.
+myreg = None
+if t0_reg is not None:
+    try:
+        _reg_paths = _resolve_registry_paths(sys.argv[2], current_chr)
+        if _reg_paths is not None:
+            myreg = t0_reg.RegistryReader(_reg_paths[0], _reg_paths[1])
+            print(
+                f"Opened Tier-0 registry for {current_chr} "
+                f"({len(myreg)} records) at {_reg_paths[0]}"
+            )
+    except Exception as _reg_err:  # never break the legacy path on a bad/old registry
+        myreg = None
+        print("No Tier-0 registry (or unreadable) for", current_chr, "-", _reg_err)
 
 # check PAM position and relative coordinates on targets
 pam_at_beginning = False

@@ -69,3 +69,7 @@ jobs:
       - name: Tier-0 compile adapter (dict -> registry, full-panel AN)
         working-directory: PostProcess
         run: python -m unittest test_tier0_compile -v
+
+      - name: Tier-0 wiring into new_simple_analysis (legacy path unchanged + selection matrix)
+        working-directory: PostProcess
+        run: python -m unittest test_new_simple_analysis_registry -v
