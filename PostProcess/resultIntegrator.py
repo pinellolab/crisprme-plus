@@ -372,7 +372,21 @@ for nline, line in enumerate(inCrispritzResults):
         empiricalDict[key] = 50
         valueDict[key] = "NA"
 
-    if "NA" not in annotationLine and check == "TRUE":
+    # No-annotation runs (empty vuoto.txt placeholder) make closest-features emit
+    # "NA" (no closest feature/distance) as the last field, so "NA" in annotationLine
+    # already skips this block. Guard the distance parse anyway: a truncated/empty
+    # $1.found.bed (or a row with an empty trailing field) yields '' here, and
+    # float('') raised ValueError, crashing the whole integration. Treat a
+    # non-numeric distance as "no annotation" and leave the Annotation_* columns at
+    # their default "NA" (same representation as the "NA in annotationLine" case).
+    _annot_dist = annotationLine[len(annotationLine) - 1].strip() if annotationLine else ""
+    _annot_dist_ok = False
+    try:
+        _annot_dist_val = float(_annot_dist)
+        _annot_dist_ok = True
+    except ValueError:
+        _annot_dist_ok = False
+    if "NA" not in annotationLine and check == "TRUE" and _annot_dist_ok:
         for elem in annotationLine:
             if "gene_id" in elem:
                 temp = elem.strip().split(";")
@@ -386,9 +400,9 @@ for nline, line in enumerate(inCrispritzResults):
                             "="
                         )[1]
         saveDict["Annotation_closest_gene_distance_(kb)"] = str(
-            float(annotationLine[len(annotationLine) - 1]) / 1000
+            _annot_dist_val / 1000
         )
-        if float(annotationLine[len(annotationLine) - 1]) != 0:
+        if _annot_dist_val != 0:
             saveDict["Annotation_GENCODE"] = "intergenic"
 
     variantList = ["NA"]

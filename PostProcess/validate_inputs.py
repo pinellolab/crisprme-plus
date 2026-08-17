@@ -640,6 +640,124 @@ def check_guide_file(guidefile: str) -> List[Issue]:
     return []
 
 
+def _parse_pam_geometry(pamfile: str) -> Optional[Tuple[int, int, bool]]:
+    """Parses a PAM file into (total_len, pam_len, pam_begin).
+
+    Mirrors exactly how `crisprme.py`'s `complete_search()` (~lines 1355-1378)
+    reads the PAM file: the first whitespace-token is the FULL search motif
+    (guide region rendered as N's + the PAM), and the second token is the
+    signed PAM length -- positive for a 3' PAM (SpCas9-style, e.g.
+    `NNNNNNNNNNNNNNNNNNNNNGG 3`) and negative for a 5' PAM (Cas12a-style, e.g.
+    `TTTVNNNNNNNNNNNNNNNNNNNNNNN -4`). So:
+
+      total_len  = len(motif)             # full protospacer+PAM length
+      pam_len    = abs(offset)            # positions the PAM occupies
+      pam_begin  = offset < 0             # True => PAM at the 5' (start) end
+
+    A padded guide the pipeline accepts therefore has length == total_len with
+    the `pam_len` PAM positions all 'N' (appended for 3' PAMs, prepended for 5'
+    PAMs) -- exactly what the web (`pages/main_page.py` ~635-660) and the CLI
+    `--sequence` path (`crisprme.py` ~1532-1536) both produce.
+
+    Returns:
+        `(total_len, pam_len, pam_begin)`, or `None` if the PAM file is
+        malformed (missing/non-integer offset, empty motif) -- in which case
+        the geometry can't be trusted and the guide-vs-PAM check is skipped
+        (`check_pam_file` already reports the malformed PAM separately).
+    """
+    try:
+        with open(pamfile, "r") as fin:
+            first_line = fin.readline()
+    except OSError:
+        return None
+    tokens = first_line.split()
+    if len(tokens) < 2:
+        return None
+    motif, offset = tokens[0], tokens[1]
+    try:
+        offset_val = int(offset)
+    except ValueError:
+        return None
+    total_len = len(motif)
+    pam_len = abs(offset_val)
+    if total_len == 0 or pam_len == 0 or pam_len > total_len:
+        return None
+    return total_len, pam_len, offset_val < 0
+
+
+def check_guide_pam_consistency(guidefile: str, pamfile: str) -> List[Issue]:
+    """Checks that each guide is N-padded to match the PAM search motif.
+
+    The radar-chart post-analysis (`radar_chart_dict_generator.py:138`,
+    `fillDict`) indexes `guide[count]` while `count` walks the aligned target
+    (`alignedSequence`), whose length is the full protospacer+PAM
+    (`total_len`). A guide supplied WITHOUT its PAM N-padding (e.g. the bare
+    20 nt `CTAACAGTTGCTTTTATCAC` instead of the canonical
+    `CTAACAGTTGCTTTTATCACNNN`) is shorter than the aligned target, so
+    `guide[count]` raises `IndexError: string index out of range` -- but only
+    after the entire multi-hour search + enrichment has completed.
+
+    The WEB never hits this: `pages/main_page.py` auto-pads every guide with
+    `N * pam_len` (prepended for 5' PAMs, appended for 3' PAMs) before writing
+    `guides.txt`, and the CLI `--sequence` path pads identically
+    (`crisprme.py` ~1532-1536). Only the CLI `--guide <file>` path is exposed:
+    `crisprme.py:1548` copies the user's guide file to `guides.txt` verbatim,
+    with no padding -- so an unpadded guide there is user error that should be
+    caught here, up front, with an exact fix, instead of crashing deep in the
+    run.
+
+    Severity rationale: an ERROR is raised ONLY for guides strictly SHORTER
+    than the PAM motif's total length. That is precisely (and only) the case
+    that triggers the `IndexError` above -- a guide of the correct length (with
+    or without literal-PAM bases in the PAM positions) does not, and a guide
+    LONGER than the motif is left to `check_guide_file`'s length-consistency
+    check. This keeps the check from false-positiving on: correctly-padded 3'
+    guides (`...NNN`), correctly-padded 5' guides (`NNNN...`), the `--sequence`
+    extracted+padded guides, guides with a lowercase `n` or a literal PAM in
+    the PAM positions, short-form PAM files (motif == bare PAM, e.g. `NGG 3`)
+    whose guides are legitimately longer than the motif, and empty/malformed
+    PAM files (skipped entirely).
+
+    Args:
+        guidefile: Path to the guide RNA file (the copied-verbatim
+            `guides.txt` in `--guide` mode).
+        pamfile: Path to the PAM file, used to derive the expected padded
+            guide length and PAM orientation.
+
+    Returns:
+        A list of issues; empty if every guide is at least as long as the PAM
+        motif (or if the PAM geometry can't be parsed).
+    """
+    geometry = _parse_pam_geometry(pamfile)
+    if geometry is None:
+        return []  # malformed PAM already reported by check_pam_file
+    total_len, pam_len, pam_begin = geometry
+    fname = os.path.basename(guidefile)
+    try:
+        with open(guidefile, "r") as fin:
+            guides = [line.strip() for line in fin if line.strip()]
+    except OSError:
+        return []  # already reported by check_guide_file
+    where = "prepend" if pam_begin else "append"
+    fixed_hint = (("N" * pam_len) + "...") if pam_begin else ("..." + ("N" * pam_len))
+    issues: List[Issue] = []
+    for guide in guides:
+        if len(guide) < total_len:
+            issues.append(
+                Issue(
+                    ERROR,
+                    f"{fname}: guide '{guide}' is {len(guide)} nt but the PAM "
+                    f"'{os.path.basename(pamfile)}' expects a padded length of "
+                    f"{total_len} nt (protospacer + {pam_len} nt PAM). It looks "
+                    "like the PAM's N-padding is missing — the run will crash "
+                    "in the radar-chart post-analysis (IndexError). Fix: "
+                    f"{where} {pam_len} 'N'(s) to each guide (i.e. "
+                    f"'{fixed_hint}').",
+                )
+            )
+    return issues
+
+
 def check_gzip_compressed(fname_path: str, label: str) -> List[Issue]:
     """Checks that a file is gzip-compressed.
 
@@ -921,6 +1039,10 @@ def run_lightweight(
     report.add(check_pam_file(pamfile), ok_message=f"PAM file: {os.path.basename(pamfile)}")
     report.add(
         check_guide_file(guidefile), ok_message=f"Guide file: {os.path.basename(guidefile)}"
+    )
+    report.add(
+        check_guide_pam_consistency(guidefile, pamfile),
+        ok_message=f"Guide file: guides padded to match PAM {os.path.basename(pamfile)}",
     )
     # --annotation is not checked here: _sort_annotation (crisprme.py) treats
     # a file not ending in .gz as already-plain-text, no decompression

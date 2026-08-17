@@ -14,6 +14,13 @@
 
 #EXTRACT DIRECTORY FROM REF FILE
 dir=$(dirname $1)
+# Annotation temp/sorted BEDs MUST be written into the run's (writable) output
+# directory, NOT next to the annotation file. When no --annotation/--gene_annotation
+# is given, $2 is the shipped empty placeholder inside the install dir
+# (PostProcess/vuoto.txt), which is READ-ONLY on an apptainer SIF; writing
+# $2.tmp.bed there fails ("Read-only file system"). $dir is the output folder
+# (dirname of $1, e.g. the *.bestMerge.txt in output_folder), always writable.
+annot_tmp="$dir/$(basename $2)"
 
 #EXAMPLE CALL bash post_process.sh sg1617.best.only_indels.txt gencode.protein_coding.bed sg1617.empiricalresults.tsv guide.txt hg38 sg1617.test
 
@@ -33,21 +40,21 @@ awk '{print $5"\t"$7"\t"$7+length($3)"\t"NR}' $1 >$1.bed
 sort-bed $1.bed >$1.bed.sort
 mv $1.bed.sort $1.bed
 if [ $(basename $2) != "vuoto.txt" ]; then
-    gunzip -k -c $2 > $2.tmp.bed  # decompress gene annotation
+    gunzip -k -c $2 > $annot_tmp.tmp.bed  # decompress gene annotation
 else
-    cp $2 $2.tmp.bed
+    cp $2 $annot_tmp.tmp.bed
 fi
-sort-bed $2.tmp.bed > $2.tmp.sorted.bed  # sort bed features 
-rm $2.tmp.bed
+sort-bed $annot_tmp.tmp.bed > $annot_tmp.tmp.sorted.bed  # sort bed features
+rm $annot_tmp.tmp.bed
 echo 'Finding genecode annotation in range with targets'
-closest-features --closest --delim "\t" --dist $1.bed $2.tmp.sorted.bed > $1.found.bed
+closest-features --closest --delim "\t" --dist $1.bed $annot_tmp.tmp.sorted.bed > $1.found.bed
 echo 'Sorting final annotation results using original NR to correspond with original results file'
 # LC_ALL=C sort -T $dir -k4,4rg $1.found.bed -o $1.found.bed
 LC_ALL=C sort -T $dir -k4,4n $1.found.bed -o $1.found.bed
 echo 'Starting integration with empirical data (this may take a while)'
 "$starting_dir"./resultIntegrator.py $1 $3 $1.found.bed $4 $6/ true $5 $7 $9 ${10} ${11}
 echo 'Removing unnecessary files'
-rm -f $1.bed $1.found.bed $1.redirectFile.out $1.temp.bed $2.tmp.sorted.bed
+rm -f $1.bed $1.found.bed $1.redirectFile.out $1.temp.bed $annot_tmp.tmp.sorted.bed
 # sed -i 1i"#Bulge_type\tcrRNA\tDNA\tReference\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\t#Seq_in_cluster\tCFD\tCFD_ref\tHighest_CFD_Risk_Score\tHighest_CFD_Absolute_Risk_Score\tMMBLG_#Bulge_type\tMMBLG_crRNA\tMMBLG_DNA\tMMBLG_Reference\tMMBLG_Chromosome\tMMBLG_Position\tMMBLG_Cluster_Position\tMMBLG_Direction\tMMBLG_Mismatches\tMMBLG_Bulge_Size\tMMBLG_Total\tMMBLG_PAM_gen\tMMBLG_Var_uniq\tMMBLG_Samples\tMMBLG_Annotation_Type\tMMBLG_Real_Guide\tMMBLG_rsID\tMMBLG_AF\tMMBLG_SNP\tMMBLG_#Seq_in_cluster\tMMBLG_CFD\tMMBLG_CFD_ref\tMMBLG_CFD_Risk_Score\tMMBLG_CFD_Absolute_Risk_Score" "$1"
 #insert back header in bestmerge file
 # sed -i 1i"#Bulge_type\tcrRNA\tDNA\tReference\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\t#Seq_in_cluster\tCFD\tCFD_ref\tHighest_CFD_Risk_Score\tHighest_CFD_Absolute_Risk_Score\tMMBLG_#Bulge_type\tMMBLG_crRNA\tMMBLG_DNA\tMMBLG_Reference\tMMBLG_Chromosome\tMMBLG_Position\tMMBLG_Cluster_Position\tMMBLG_Direction\tMMBLG_Mismatches\tMMBLG_Bulge_Size\tMMBLG_Total\tMMBLG_PAM_gen\tMMBLG_Var_uniq\tMMBLG_Samples\tMMBLG_Annotation_Type\tMMBLG_Real_Guide\tMMBLG_rsID\tMMBLG_AF\tMMBLG_SNP\tMMBLG_#Seq_in_cluster\tMMBLG_CFD\tMMBLG_CFD_ref\tMMBLG_CFD_Risk_Score\tMMBLG_CFD_Absolute_Risk_Score\tCRISTA_#Bulge_type\tCRISTA_crRNA\tCRISTA_DNA\tCRISTA_Reference\tCRISTA_Chromosome\tCRISTA_Position\tCRISTA_Cluster_Position\tCRISTA_Direction\tCRISTA_Mismatches\tCRISTA_Bulge_Size\tCRISTA_Total\tCRISTA_PAM_gen\tCRISTA_Var_uniq\tCRISTA_Samples\tCRISTA_Annotation_Type\tCRISTA_Real_Guide\tCRISTA_rsID\tCRISTA_AF\tCRISTA_SNP\tCRISTA_#Seq_in_cluster\tCRISTA_CFD\tCRISTA_CFD_ref\tCRISTA_CFD_Risk_Score\tCRISTA_CFD_Absolute_Risk_Score" "$1"

@@ -11,6 +11,30 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.29] - 2026-08-16
+
+### Fixed
+- **Variant search without `--annotation` no longer crashes on a read-only install
+  (apptainer SIF).** `post_process.sh` wrote the annotation intermediate BEDs
+  (`<annot>.tmp.bed` / `.tmp.sorted.bed`) next to the annotation file; with no
+  `--annotation`/`--gene_annotation` that file is the shipped empty placeholder
+  `PostProcess/vuoto.txt` inside the (read-only) install dir, so the writes failed
+  and the run died at "Integrating results". Temps now go to the run's writable
+  output dir. As defense-in-depth, `resultIntegrator.py` guards the closest-gene
+  distance parse so a missing/empty annotation field is treated as "no annotation"
+  (columns stay `NA`) instead of raising `ValueError: could not convert string to
+  float: ''`. The Docker/web path (real annotation, writable FS) is byte-identical.
+
+### Added
+- **Pre-flight check for unpadded guides.** A CLI `--guide` file whose guides lack
+  the PAM's N-padding (e.g. the bare 20 nt `CTAACAGTTGCTTTTATCAC` instead of
+  `CTAACAGTTGCTTTTATCACNNN`) previously ran the full multi-hour search then crashed
+  deep in `radar_chart_dict_generator.py` (`IndexError`). The lightweight validator
+  now catches this up front with an exact fix message (append/prepend N's), handling
+  both 3' (SpCas9) and 5' (Cas12a) PAM orientations. The web is unaffected (it
+  auto-pads guides). Covered by 10 new `check_guide_pam_consistency` tests; the whole
+  `test_validate_inputs` suite is now run in the unit-tests CI (previously it wasn't).
+
 ## [2.2.0-alpha.28] - 2026-08-16
 
 ### Fixed
