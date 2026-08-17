@@ -558,56 +558,97 @@ def derive_record_stats(groups):
 
 
 # --------------------------------------------------------------------------- #
-# (B) Binary format + compiler + mmap reader
+# (B) Binary format + compiler + mmap reader  --  COMPACT ENCODING (v2)
 # --------------------------------------------------------------------------- #
+#
+# v2 shrinks the on-disk footprint of v1 WITHOUT changing the reader/compiler
+# Python API. Two independent wins:
+#
+#   (i)  RECORD: 28 B -> 16 B.
+#          v1 stored pos as int64 (human coords all < 2^32) and n_groups as u32
+#          (a record touches at most #groups, always small) and groups_off as
+#          u64 (the group blob is far smaller than 2^32 bytes for a chromosome).
+#          v2 uses pos u32 + n_groups u16 + groups_off u32, and drops the 2 pad
+#          bytes. rsID still lives in the deduped string pool (rsIDs are mostly
+#          unique; "." dedups).
+#
+#   (ii) GROUP entry: 24 B -> (1 + 5*count_width) B  => 11 B at u16, 21 B at u32.
+#          v1 stored a u32 string-pool offset for the group_id (4 B/entry) plus
+#          five u32 counts (20 B). v2 replaces the group_id offset with a 1-byte
+#          GROUP CODE (u8; auto-widened to u16 if a file ever has > 255 groups)
+#          that indexes a group-code table stored ONCE in the manifest, and packs
+#          the five counts in the SMALLEST safe width. The width is decided at
+#          COMPILE time from the observed max count and recorded as "count_width"
+#          in the header + manifest: u16 while every count < 2^16 (panel scale:
+#          AC/AN <= 2*#indiv ~ 8858, n_* <= #indiv ~ 4429, all << 65536), else
+#          u32. This NEVER silently overflows: a count that would exceed the
+#          chosen width triggers a widen (or, at the u32 ceiling, a clear error).
 #
 # File layout (all little-endian):
 #
 #   <out_bin>  primary binary
 #     [1] MAGIC  b"T0RG"  (4 bytes)
-#     [2] VERSION u32 (=1)
-#     [3] n_records u32
-#     [4] alt_field_width u8  (== 1 for SNPs; alt strings padded/truncated)
-#                             (kept generic so callers see the constant)
-#     [5] pad (3 bytes, zero) -> 16-byte header
-#     [6] RECORD ARRAY : n_records * RECORD_STRUCT, sorted by (pos, alt_bytes).
-#           each record (fixed width, MMAP-FRIENDLY, no Python parsing needed to
-#           binary-search):
-#             q   pos            (int64)
+#     [2] VERSION u16 (=2)
+#     [3] count_width u8   (2 => u16 counts, 4 => u32 counts)
+#     [4] code_width  u8   (1 => u8 group codes, 2 => u16 group codes)
+#     [5] n_records u32
+#     [6] alt_field_width u8  (== 1 for SNPs)
+#     [7] pad (3 bytes, zero) -> 16-byte header
+#     [8] RECORD ARRAY : n_records * RECORD_STRUCT, sorted by (pos, alt_byte).
+#           each record (fixed width, MMAP-FRIENDLY):
+#             I   pos            (u32; human coords < 2^32)
 #             c   alt            (1 byte, ascii)
 #             c   ref            (1 byte, ascii)
-#             xx  pad (2 bytes)
-#             I   rsid_off       (u32, byte offset into STRING POOL; the pool
-#                                 stores a u16 length prefix then utf-8 bytes)
-#             I   n_groups       (u32, number of group entries for this record)
-#             Q   groups_off     (u64, byte offset into GROUP BLOB)
-#         => struct format "<qccxxIIQ" = 8+1+1+2+4+4+8 = 28 bytes.
-#     [7] GROUP BLOB : concatenated group entries. Each entry:
-#             I   gid_off        (u32 offset into STRING POOL for the group_id)
-#             I   AC
-#             I   AN
-#             I   n_carrier_indiv
-#             I   n_hom_indiv
-#             I   n_called_indiv
-#         => struct format "<IIIIII" = 24 bytes. A record's n_groups entries are
-#            stored contiguously starting at groups_off.
-#     [8] STRING POOL : deduplicated strings. Each string = u16 length + utf-8.
+#             H   n_groups       (u16, number of group entries; <= #groups)
+#             I   groups_off     (u32, byte offset into GROUP BLOB)
+#             I   rsid_off       (u32, byte offset into STRING POOL)
+#         => struct format "<IccHII" = 4+1+1+2+4+4 = 16 bytes.
+#     [9] GROUP BLOB : concatenated group entries. Each entry:
+#             <code>   group code (u8 or u16 per code_width) into the manifest's
+#                      "group_codes" table (code -> group_id string)
+#             <count>x5  AC, AN, n_carrier, n_hom, n_called (u16 or u32 per
+#                      count_width)
+#         => size = code_width + 5*count_width (11 B at u8+u16). A record's
+#            n_groups entries are stored contiguously starting at groups_off.
+#     [10] STRING POOL : deduplicated rsID strings. Each = u16 length + utf-8.
 #
-#   <out_idx>  json sidecar / manifest, capturing section offsets + the taxonomy
-#     so the reader can mmap sections without re-deriving them.
+#   <out_idx>  json manifest: section offsets + the taxonomy + the ordered
+#     "group_codes" list (index == on-disk code) so the reader maps code->gid.
 #
 # The record array is a fixed-width sorted array => bisect on an mmap gives the
-# record without materializing the array. The idx also stores the record-array
-# byte offset + record stride so the reader can seek directly.
+# record without materializing the array.
 
 MAGIC = b"T0RG"
-VERSION = 1
-_HEADER_STRUCT = struct.Struct("<4sIIBxxx")   # magic, version, n_records, altw, pad
-_RECORD_STRUCT = struct.Struct("<qccxxIIQ")   # pos, alt, ref, pad, rsid_off, n_groups, groups_off
-_GROUP_STRUCT = struct.Struct("<IIIIII")      # gid_off, AC, AN, ncar, nhom, ncall
-HEADER_SIZE = _HEADER_STRUCT.size             # 16
-RECORD_SIZE = _RECORD_STRUCT.size             # 28
-GROUP_SIZE = _GROUP_STRUCT.size               # 24
+VERSION = 2
+# Reader accepts only VERSION; older v1 files are rejected with a clear message.
+_HEADER_STRUCT = struct.Struct("<4sHBBIBxxx")  # magic, version, cnt_w, code_w, n_rec, altw, pad
+_RECORD_STRUCT = struct.Struct("<IccHII")      # pos, alt, ref, n_groups, groups_off, rsid_off
+HEADER_SIZE = _HEADER_STRUCT.size              # 16
+RECORD_SIZE = _RECORD_STRUCT.size              # 16
+
+# Group-entry width is decided per file (count_width / code_width). The static
+# GROUP_SIZE below is the DEFAULT (u8 code + u16 counts = 11 B) exported for
+# callers/manifests that want the common-case stride; the reader always uses the
+# per-file group_size from the manifest.
+_MAX_POS = 0xFFFFFFFF          # u32 position ceiling (all human coords fit)
+_U16_MAX = 0xFFFF
+_U32_MAX = 0xFFFFFFFF
+
+
+def _group_struct(count_width, code_width):
+    """Return a struct.Struct for a group entry at the given widths.
+
+    code_width in {1,2} (u8/u16 group code); count_width in {2,4} (u16/u32
+    counts). Layout: <code><AC><AN><ncar><nhom><ncall>.
+    """
+    code_fmt = {1: "B", 2: "H"}[code_width]
+    cnt_fmt = {2: "H", 4: "I"}[count_width]
+    return struct.Struct("<" + code_fmt + cnt_fmt * 5)
+
+
+# Default (common-case) group struct + size: u8 code + u16 counts = 11 bytes.
+_GROUP_STRUCT = _group_struct(2, 1)
+GROUP_SIZE = _GROUP_STRUCT.size               # 11 (default; per-file may differ)
 
 
 class _StringPool(object):
@@ -714,71 +755,124 @@ def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
                            alt_index=alt_index, aggregation="panel")
 
 
+def _choose_count_width(max_count):
+    """Pick the smallest safe count field width (2=u16, 4=u32) for a max count.
+
+    GUARD: we NEVER silently overflow. u16 while max < 2^16, u32 while
+    max < 2^32; beyond that (a panel with a single count >= ~4.3e9, far past any
+    real cohort) we raise rather than truncate.
+    """
+    if max_count <= _U16_MAX:
+        return 2
+    if max_count <= _U32_MAX:
+        return 4
+    raise ValueError(
+        "tier0_registry: a group count %d exceeds the u32 ceiling (%d); the "
+        "panel is implausibly large -- refusing to overflow" % (max_count, _U32_MAX)
+    )
+
+
 def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
                     alt_index="1", aggregation="carriers"):
     """Shared binary writer. ``aggregate_fn(alt_genotypes, alt_index)`` returns
     dict[group_id]->Counts for one (pos, alt) record (either the carriers-only
     ``aggregate_record`` path or the full-panel ``aggregate_record_panel`` path).
-    """
-    pool = _StringPool()
-    group_blob = bytearray()
-    record_rows = []  # (pos, alt_byte, ref_byte, rsid_off, n_groups, groups_off)
 
-    # Track which group_ids actually appear (for the manifest taxonomy).
-    seen_group_ids = {}  # group_id -> (kind, database, subpopulation)
+    v2 compact encoding: group_ids are interned into a per-file group-code table
+    (u8/u16 code, not a 4-byte string-pool offset) stored ONCE in the manifest;
+    the five counts are packed at the smallest safe width (u16 unless a count
+    exceeds 2^16, then u32). pos/n_groups/groups_off shrink to u32/u16/u32.
+    """
+    pool = _StringPool()  # rsIDs only now (group_ids use the code table)
+
+    # First pass: aggregate every record, intern group codes, track the max
+    # count (to size count_width) and cache the per-record group lists so we do
+    # NOT re-aggregate. Records are already sorted by (pos, alt) by the caller.
+    group_code = {}       # group_id -> integer code (assigned in first-seen order)
+    code_order = []       # code index -> group_id (the manifest table)
+    seen_group_ids = {}   # group_id -> (kind, database, subpopulation)
+    per_record = []       # (pos, alt, ref, rsid, [(code, AC,AN,ncar,nhom,ncall), ...])
+    max_count = 0
+
+    def _intern_group(gid):
+        code = group_code.get(gid)
+        if code is None:
+            code = len(code_order)
+            group_code[gid] = code
+            code_order.append(gid)
+            if gid == GLOBAL_GROUP_ID:
+                seen_group_ids[gid] = ("global", None, None)
+            elif SEP in gid:
+                db, sp = gid.split(SEP, 1)
+                seen_group_ids[gid] = ("db_subpop", db, sp)
+            else:
+                seen_group_ids[gid] = ("db", gid, None)
+        return code
 
     for (pos, ref, alt, rsid, alt_genotypes) in recs:
         groups = aggregate_fn(alt_genotypes, alt_index)
-        # Stable, deterministic group ordering: global last, then db, then
-        # (db x subpop) sorted -- but ordering does not affect lookup semantics.
-        gids = sorted(groups.keys())
-        groups_off = len(group_blob)
-        for gid in gids:
+        # Stable, deterministic group ordering (sorted); ordering does not affect
+        # lookup semantics but keeps builds reproducible.
+        entries = []
+        for gid in sorted(groups.keys()):
             cnt = groups[gid]
-            gid_off = pool.intern(gid)
-            group_blob += _GROUP_STRUCT.pack(
-                gid_off, cnt.AC, cnt.AN,
-                cnt.n_carrier_indiv, cnt.n_hom_indiv, cnt.n_called_indiv,
-            )
-            if gid not in seen_group_ids:
-                if gid == GLOBAL_GROUP_ID:
-                    seen_group_ids[gid] = ("global", None, None)
-                elif SEP in gid:
-                    db, sp = gid.split(SEP, 1)
-                    seen_group_ids[gid] = ("db_subpop", db, sp)
-                else:
-                    seen_group_ids[gid] = ("db", gid, None)
-        rsid_off = pool.intern(rsid if rsid else ".")
-        record_rows.append(
-            (int(pos), _pack_alt(alt), _pack_ref(ref), rsid_off, len(gids), groups_off)
-        )
+            code = _intern_group(gid)
+            tup = (code, cnt.AC, cnt.AN,
+                   cnt.n_carrier_indiv, cnt.n_hom_indiv, cnt.n_called_indiv)
+            entries.append(tup)
+            c = max(cnt.AC, cnt.AN, cnt.n_carrier_indiv,
+                    cnt.n_hom_indiv, cnt.n_called_indiv)
+            if c > max_count:
+                max_count = c
+        per_record.append((int(pos), _pack_alt(alt), _pack_ref(ref),
+                           rsid if rsid else ".", entries))
 
-    n_records = len(record_rows)
+    n_records = len(per_record)
+
+    # Decide field widths from the observed data (no silent overflow).
+    count_width = _choose_count_width(max_count)
+    n_groups_total = len(code_order)
+    code_width = 1 if n_groups_total <= 0xFF else 2
+    grp_struct = _group_struct(count_width, code_width)
+    group_size = grp_struct.size
+
+    # Second pass: lay out the group blob (now that widths are fixed) and the
+    # per-record rows with their group-blob offsets. Guard pos <= u32.
+    group_blob = bytearray()
+    record_rows = []  # (pos, altb, refb, rsid_off, n_groups, groups_off)
+    for (pos, altb, refb, rsid, entries) in per_record:
+        if pos < 0 or pos > _MAX_POS:
+            raise ValueError(
+                "tier0_registry: position %d does not fit in u32 (0..%d)"
+                % (pos, _MAX_POS))
+        if len(entries) > _U16_MAX:
+            raise ValueError(
+                "tier0_registry: record at pos %d has %d groups (> u16 max %d)"
+                % (pos, len(entries), _U16_MAX))
+        groups_off = len(group_blob)
+        for tup in entries:
+            group_blob += grp_struct.pack(*tup)
+        rsid_off = pool.intern(rsid)
+        record_rows.append((pos, altb, refb, rsid_off, len(entries), groups_off))
 
     # Compute section offsets.
     record_array_off = HEADER_SIZE
     group_blob_off = record_array_off + n_records * RECORD_SIZE
     string_pool_off = group_blob_off + len(group_blob)
 
-    # The stored groups_off / rsid_off are RELATIVE to their section start; make
-    # them absolute file offsets so the reader can seek with a single addend.
+    # groups_off / rsid_off are stored as ABSOLUTE file offsets so the reader
+    # seeks with a single addend.
     with open(out_bin, "wb") as fh:
-        fh.write(_HEADER_STRUCT.pack(MAGIC, VERSION, n_records, 1))
+        fh.write(_HEADER_STRUCT.pack(MAGIC, VERSION, count_width, code_width,
+                                     n_records, 1))
         for (pos, altb, refb, rsid_off, n_groups, groups_off) in record_rows:
             fh.write(_RECORD_STRUCT.pack(
                 pos, altb, refb,
-                string_pool_off + rsid_off,
                 n_groups,
                 group_blob_off + groups_off,
+                string_pool_off + rsid_off,
             ))
-        # rewrite gid_off references in the blob to absolute pool offsets
-        # (they were interned as pool-relative). Do it in a copy.
-        blob = bytearray(group_blob)
-        for i in range(0, len(blob), GROUP_SIZE):
-            gid_off, AC, AN, ncar, nhom, ncall = _GROUP_STRUCT.unpack_from(blob, i)
-            _GROUP_STRUCT.pack_into(blob, i, string_pool_off + gid_off,
-                                    AC, AN, ncar, nhom, ncall)
-        fh.write(bytes(blob))
+        fh.write(bytes(group_blob))
         fh.write(pool.getbuffer())
 
     # ---- manifest / taxonomy ---- #
@@ -796,7 +890,10 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
         "record_array_off": record_array_off,
         "record_size": RECORD_SIZE,
         "group_blob_off": group_blob_off,
-        "group_size": GROUP_SIZE,
+        "group_size": group_size,
+        "count_width": count_width,
+        "code_width": code_width,
+        "group_codes": code_order,   # index == on-disk group code
         "string_pool_off": string_pool_off,
         "alt_field_width": 1,
         "aggregation": aggregation,  # "carriers" (AN over listed only) or
@@ -841,14 +938,53 @@ class RegistryReader(object):
         self._n = self.manifest["n_records"]
         self._rec_off = self.manifest["record_array_off"]
         self._rec_size = self.manifest["record_size"]
+        # v2 per-file group-entry geometry + the code->group_id table. These are
+        # scalars / a small (n_groups-sized, NOT n_records-sized) list, so they
+        # do not violate the "no per-record materialization" contract.
+        self._count_width = self.manifest["count_width"]
+        self._code_width = self.manifest["code_width"]
+        self._group_size = self.manifest["group_size"]
+        self._grp_struct = _group_struct(self._count_width, self._code_width)
+        # Defense-in-depth: the per-record group STRIDE (group_size) is used to
+        # walk the blob, while entries are unpacked with _grp_struct (derived from
+        # the widths). On any untampered file they agree by construction; assert it
+        # so a hand-edited/mismatched manifest can't cause silent stride drift.
+        if self._group_size != self._grp_struct.size:
+            raise ValueError(
+                "manifest group_size %d != struct size %d (count_width=%d, "
+                "code_width=%d) -- corrupt/inconsistent registry"
+                % (self._group_size, self._grp_struct.size,
+                   self._count_width, self._code_width))
+        # NB: the code->group_id table lives in self.manifest["group_codes"] (a
+        # small n_groups-sized list, NOT per-record). We read it THROUGH the
+        # manifest rather than caching it as a bare list attribute so the reader
+        # holds no Python sequence attribute other than the manifest itself (the
+        # "no per-record materialization" structural contract).
         self._fh = open(bin_path, "rb")
         self._mm = mmap.mmap(self._fh.fileno(), 0, access=mmap.ACCESS_READ)
-        # sanity-check header
-        magic, version, n_records, altw = _HEADER_STRUCT.unpack_from(self._mm, 0)
-        if magic != MAGIC:
-            raise ValueError("bad magic in %s: %r" % (bin_path, magic))
-        if n_records != self._n:
-            raise ValueError("n_records mismatch between bin and idx")
+        # sanity-check header (also rejects an unknown / old-version file clearly).
+        # On any failure, close the just-opened mmap + handle before re-raising so
+        # a rejected file does not leak a descriptor (ResourceWarning).
+        try:
+            magic, version, cnt_w, code_w, n_records, altw = \
+                _HEADER_STRUCT.unpack_from(self._mm, 0)
+            if magic != MAGIC:
+                raise ValueError("bad magic in %s: %r" % (bin_path, magic))
+            if version != VERSION:
+                raise ValueError(
+                    "tier0_registry: unsupported format version %d in %s "
+                    "(this reader supports v%d only; rebuild the registry)"
+                    % (version, bin_path, VERSION))
+            if n_records != self._n:
+                raise ValueError("n_records mismatch between bin and idx")
+            if cnt_w != self._count_width or code_w != self._code_width:
+                raise ValueError("header/manifest width mismatch in %s" % bin_path)
+        except Exception:
+            try:
+                self._mm.close()
+            finally:
+                self._fh.close()
+            raise
 
         # bisect helper: a virtual sorted sequence of record keys, computed on
         # demand from the mmap so we never build a Python list of all records.
@@ -869,13 +1005,13 @@ class RegistryReader(object):
 
     def _key_at(self, i):
         base = self._record_base(i)
-        pos = struct.unpack_from("<q", self._mm, base)[0]
-        altb = self._mm[base + 8:base + 9]  # single byte after the int64 pos
+        pos = struct.unpack_from("<I", self._mm, base)[0]  # u32 pos (v2)
+        altb = self._mm[base + 4:base + 5]  # single byte after the u32 pos
         return (pos, altb)
 
     def _record_at(self, i):
         base = self._record_base(i)
-        (pos, altb, refb, rsid_off, n_groups, groups_off) = \
+        (pos, altb, refb, n_groups, groups_off, rsid_off) = \
             _RECORD_STRUCT.unpack_from(self._mm, base)
         return pos, altb, refb, rsid_off, n_groups, groups_off
 
@@ -901,10 +1037,12 @@ class RegistryReader(object):
             return None
         _, _, _, _, n_groups, groups_off = self._record_at(i)
         groups = {}
+        gs = self._group_size
+        code_table = self.manifest["group_codes"]  # small; via manifest by design
         for k in range(n_groups):
-            base = groups_off + k * self.manifest["group_size"]
-            gid_off, AC, AN, ncar, nhom, ncall = _GROUP_STRUCT.unpack_from(self._mm, base)
-            gid = self._read_string(gid_off)
+            base = groups_off + k * gs
+            code, AC, AN, ncar, nhom, ncall = self._grp_struct.unpack_from(self._mm, base)
+            gid = code_table[code]
             groups[gid] = Counts(AC, AN, ncar, nhom, ncall)
         return groups
 

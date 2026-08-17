@@ -487,5 +487,87 @@ class TestMaxSubpopAndObserved(unittest.TestCase):
         self.assertIsNone(der["max_subpop_af_label"])
 
 
+class TestCompactEncoding(unittest.TestCase):
+    """Guard the v2 compaction so it cannot silently regress to the fat v1."""
+
+    def _compile(self):
+        meta = {
+            "S1": ("1000G", "EUR", "female"),
+            "S2": ("1000G", "AFR", "female"),
+            "H1": ("HGDP", "EAS", "female"),
+        }
+        records = [
+            (100, "A", "G", "rs100", {"S1": "0|1", "S2": "1|1", "H1": "0|1"}),
+            (250, "C", "T", "rs250", {"S2": "1|0"}),
+        ]
+        d = tempfile.mkdtemp()
+        binp = os.path.join(d, "reg.bin")
+        idxp = os.path.join(d, "reg.idx.json")
+        manifest = compile_registry(records, meta, None, autosomal_ploidy, binp, idxp)
+        return binp, idxp, manifest
+
+    def test_group_entry_is_compact(self):
+        # The compact group entry must be <= 12 bytes (target 11 = u8 code +
+        # 5x u16 counts). If it grows back toward the old 24-byte struct, fail.
+        self.assertLessEqual(t0.GROUP_SIZE, 12,
+                             "default group entry regressed: %d B" % t0.GROUP_SIZE)
+        _, _, manifest = self._compile()
+        self.assertLessEqual(manifest["group_size"], 12,
+                             "per-file group entry regressed: %d B"
+                             % manifest["group_size"])
+        # At this panel scale the counts fit u16 and there are < 256 groups.
+        self.assertEqual(manifest["count_width"], 2)
+        self.assertEqual(manifest["code_width"], 1)
+        self.assertEqual(manifest["group_size"], 11)
+
+    def test_record_is_16_bytes(self):
+        # v2 record: u32 pos + alt + ref + u16 n_groups + u32 groups_off +
+        # u32 rsid_off = 16 bytes (was 28 in v1).
+        self.assertEqual(t0.RECORD_SIZE, 16)
+        _, _, manifest = self._compile()
+        self.assertEqual(manifest["record_size"], 16)
+
+    def test_version_bumped_and_manifest_has_code_table(self):
+        self.assertEqual(t0.VERSION, 2)
+        _, _, manifest = self._compile()
+        self.assertEqual(manifest["version"], 2)
+        # code table present, index == on-disk code, covers every emitted group.
+        self.assertIn("group_codes", manifest)
+        self.assertEqual(set(manifest["group_codes"]), set(manifest["groups"].keys()))
+
+    def test_reader_rejects_wrong_version(self):
+        # Corrupt the on-disk version to an unknown value; the reader must reject
+        # it clearly rather than silently misparse.
+        binp, idxp, _ = self._compile()
+        with open(binp, "r+b") as fh:
+            data = bytearray(fh.read())
+            # header: <4sHBBIBxxx> -> version u16 at byte offset 4
+            data[4:6] = (999).to_bytes(2, "little")
+            fh.seek(0)
+            fh.write(bytes(data))
+        with self.assertRaises(ValueError):
+            RegistryReader(binp, idxp)
+
+    def test_count_width_widens_when_needed(self):
+        # A synthetic panel whose group counts exceed u16 must widen count_width
+        # to u32 (never truncate). We force this via a big single-subpop panel.
+        meta = {"X%d" % i: ("1000G", "EUR", "female") for i in range(70000)}
+        # every sample a hom carrier -> AC per group = 2*70000 = 140000 > 65535.
+        gts = {sid: "1|1" for sid in meta}
+        records = [(100, "A", "G", "rsBig", gts)]
+        d = tempfile.mkdtemp()
+        binp = os.path.join(d, "reg.bin")
+        idxp = os.path.join(d, "reg.idx.json")
+        manifest = compile_registry(records, meta, None, autosomal_ploidy, binp, idxp)
+        self.assertEqual(manifest["count_width"], 4)  # widened, not overflowed
+        reader = RegistryReader(binp, idxp)
+        try:
+            g = reader.lookup(100, "G")[GLOBAL_GROUP_ID]
+            self.assertEqual(g.AC, 140000)   # exact, no truncation
+            self.assertEqual(g.AN, 140000)
+        finally:
+            reader.close()
+
+
 if __name__ == "__main__":
     unittest.main()
