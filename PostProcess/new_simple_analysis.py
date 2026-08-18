@@ -49,6 +49,19 @@ except Exception:  # any module absent in an old deploy -> no companion summary
     _popsum_companion = None
     _t0c = None
 
+# Module-level dictless state, DEFAULTED here in the import prologue so
+# retrieveFromDict() / _collect_variant_off_target() / _write_population_summary_
+# companion() always resolve these globals (they are read, not assigned, inside
+# those functions). The real detection block further down (guarded on sys.argv,
+# after inFasta is opened) RE-BINDS them to a live RegistryReader / GenotypeReader
+# when a Tier-0 registry / Tier-1 genotype store is on disk; absent that, they stay
+# None and every dictless hook is a byte-identical no-op on the legacy path. This
+# prologue default also lets the pure-function unit tests (which AST-load only the
+# code before ``inFasta = open(...)``) drive retrieveFromDict without the runtime
+# module body -- e.g. test_phased_haplotype's iupac_decomposition round-trip.
+myreg = None
+mygt = None
+
 
 # For scoring of CFD And Doench
 tab = str.maketrans("ACTGRYSWMKHDBVactgryswmkhdbv", "TGACYRSWKMDHVBtgacyrswkmdhvb")
@@ -455,16 +468,56 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                                     resultSet,
                                     listInfo2,
                                 ]
-                                # remove the new generated sample set from all lower levels
-                                # (this should be done only with phased VCF since unphased cannot be verified)
-                                if haplotype_check:
-                                    totalDict[count][size][key][1] = (
-                                        totalDict[count][size][key][1]
-                                        - totalDict[count][size + 1][combinedKey][1]
-                                    )
-                                    totalDict[count][0][newkey][1] = (
-                                        totalDict[count][0][newkey][1]
-                                        - totalDict[count][size + 1][combinedKey][1]
+                                # NOTE (paired with the deferred peel below): the
+                                # phased dedup subtraction USED to run HERE, emptying
+                                # the parent combo and the level-0 seed as soon as a
+                                # combo was formed. But deeper levels grow ONLY by
+                                # crossing against the level-0 seeds (line above:
+                                # `for newkey in totalDict[count][0]`); emptying those
+                                # seeds mid-loop starved levels >= 2 (a sample carrying
+                                # k>=4 cis alts got "used up" into disjoint 2-SNP pairs
+                                # and its maximal k-combo could never form -> the true
+                                # 0-mismatch haplotype was dropped). We keep the growth
+                                # loop mutation-free so the FULL lattice forms, then do
+                                # the dedup once, after the loop, in the deferred peel.
+                                # DO NOT re-add any in-loop subtraction here or the
+                                # under-report bug returns.
+
+            # Deferred phased dedup ("peel"): now that the full combination lattice is
+            # built (level-0 seeds were never emptied), attribute each sample to the
+            # single MAXIMAL cis combo containing all of its co-occurring alt alleles,
+            # and remove it from every shorter (ancestor) combo/seed. This reproduces
+            # the exact maximal-combo-only attribution the old in-loop subtraction
+            # intended, without starving the growth. Phased only: unphased cannot prove
+            # cis, so it keeps every sample on every sub-combo (the conservative
+            # superset) -- Phase B is skipped there, leaving that path byte-identical.
+            # Capped (greedy) path has a single level-0 entry per haplotype (nothing to
+            # peel), so it is skipped too.
+            if haplotype_check and not capped:
+                # position+allele set of every combo key: keys alternate
+                # (pos, elem, pos, elem, ...), so pairs (k[0],k[1]),(k[2],k[3]),...
+                # An ancestor is a combo whose (pos,elem) set is a STRICT subset -- the
+                # (pos,elem) form (not pos-only) guarantees we peel a lower combo only
+                # when its alleles match the higher one at the shared positions, so a
+                # multiallelic / divergent-allele sibling that merely shares positions
+                # is never wrongly peeled.
+                posset = {}
+                for lvl in totalDict[count]:
+                    for k in totalDict[count][lvl]:
+                        posset[(lvl, k)] = frozenset(zip(k[0::2], k[1::2]))
+                levels_desc = sorted(totalDict[count].keys(), reverse=True)
+                for hi in levels_desc:
+                    for hk, hv in totalDict[count][hi].items():
+                        if not hv[1]:  # no samples on this combo -> nothing to peel with
+                            continue
+                        hpos = posset[(hi, hk)]
+                        for lo in totalDict[count]:
+                            if lo >= hi:
+                                continue
+                            for lk in totalDict[count][lo]:
+                                if posset[(lo, lk)] < hpos:  # strict allelic-prefix ancestor
+                                    totalDict[count][lo][lk][1] = (
+                                        totalDict[count][lo][lk][1] - hv[1]
                                     )
 
             refSeq_with_bulges = list(refSeq)
