@@ -65,3 +65,7 @@ jobs:
       - name: Indel per-chrom subset matches fakechrom (issue #172 silent-drop)
         working-directory: PostProcess
         run: python -m unittest test_indel_chrom_subset -v
+
+      - name: Phased multi-SNP haplotype not under-reported (deferred-peel fix)
+        working-directory: PostProcess
+        run: python -m unittest test_phased_haplotype -v
