@@ -50,13 +50,6 @@ def _load_crisprme():
     truncate the source at that dispatch block and exec only the part above it. That
     gives us the real, as-shipped ``_emit_combined_samplesid`` / ``_build_db_to_samplesid``
     functions without launching the CLI or its side effects (check_crisprme_dirtree)."""
-    if "Bio" not in sys.modules:
-        bio = types.ModuleType("Bio")
-        bio_seq = types.ModuleType("Bio.Seq")
-        bio_seq.Seq = object  # crisprme.py only needs the name importable
-        bio.Seq = bio_seq
-        sys.modules["Bio"] = bio
-        sys.modules["Bio.Seq"] = bio_seq
     here = os.path.dirname(os.path.abspath(__file__))
     crisprme_py = os.path.join(os.path.dirname(here), "crisprme.py")
     # crisprme.py inserts its own PostProcess dir on sys.path; make sure this one
@@ -70,7 +63,45 @@ def _load_crisprme():
     mod = types.ModuleType("crisprme_under_test")
     mod.__file__ = crisprme_py
     code = compile(defs_only, crisprme_py, "exec")
-    exec(code, mod.__dict__)
+    # crisprme.py does `from Bio.Seq import Seq` -- a SUBMODULE import that a MagicMock
+    # parent can't satisfy ("'Bio' is not a package"), so register Bio + Bio.Seq in
+    # sys.modules explicitly (Seq only needs to be an importable name). The functions
+    # under test don't use Bio.
+    if "Bio.Seq" not in sys.modules:
+        _bio = types.ModuleType("Bio")
+        _bio_seq = types.ModuleType("Bio.Seq")
+        _bio_seq.Seq = object
+        _bio.Seq = _bio_seq
+        sys.modules.setdefault("Bio", _bio)
+        sys.modules["Bio.Seq"] = _bio_seq
+    # The network-free unit-test env also lacks the scientific/analysis stack that
+    # crisprme.py imports transitively (pandas via assembly_reconcile, which even uses
+    # pd.DataFrame in def-time annotations) -- but the functions under test don't use
+    # it. Auto-stub ANY other genuinely-absent module with a MagicMock (handles
+    # attribute access like pd.DataFrame) via a LAST-RESORT meta-path finder installed
+    # only for the exec. Installed modules (e.g. numpy on CI) resolve + are used for real.
+    import importlib.abc
+    import importlib.util
+    from unittest.mock import MagicMock
+
+    class _AutoStub(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+        def find_spec(self, name, path=None, target=None):
+            # Reached only when every real finder returned None (module absent),
+            # since this finder is appended LAST to sys.meta_path.
+            return importlib.util.spec_from_loader(name, self)
+
+        def create_module(self, spec):
+            return MagicMock(name=spec.name)
+
+        def exec_module(self, module):
+            pass
+
+    _stub = _AutoStub()
+    sys.meta_path.append(_stub)
+    try:
+        exec(code, mod.__dict__)
+    finally:
+        sys.meta_path.remove(_stub)
     return mod
 
 
