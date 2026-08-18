@@ -136,14 +136,29 @@ def list_available_downloads(
         prefix = _COMPONENT_PREFIXES[component]
         if component == "index":
             items = []
+            gt_present = set()  # vcf names that have a genotypes_<vcf>.tar.gz companion
             for entry in api.list_repo_tree(
                 repo, repo_type="dataset", path_in_repo=prefix
             ):
                 size = getattr(entry, "size", None)
                 path = getattr(entry, "path", "")
-                if size is not None and path.endswith(".tar.gz"):
-                    name = os.path.basename(path)[: -len(".tar.gz")]
-                    items.append({"name": name, "size": size})
+                if size is None or not path.endswith(".tar.gz"):
+                    continue
+                name = os.path.basename(path)[: -len(".tar.gz")]
+                # The separate Tier-1 genotype companions live under the SAME
+                # indexes/ prefix but are NOT selectable indexes themselves — they
+                # ride along with their index on download. Record which vcfs have
+                # one (so the index rows can advertise it) and skip them as rows.
+                if name.startswith("genotypes_"):
+                    gt_present.add(name[len("genotypes_"):])
+                    continue
+                items.append({"name": name, "size": size})
+            # ADDITIVE metadata: mark whether each variant index has a genotype
+            # companion available (has_genotypes). Consumers that only read
+            # name/size are unaffected (extra keys are ignored).
+            for it in items:
+                vcf = it["name"].partition("+")[2]
+                it["has_genotypes"] = bool(vcf) and vcf in gt_present
             return sorted(items, key=lambda d: d["name"])
         # genome / vcf: folders under prefix/, sum their files' sizes
         sizes: Dict[str, int] = {}
@@ -196,6 +211,64 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
     return local_dir
 
 
+def _fetch_genotypes_companion(
+    repo: str,
+    workdir: str,
+    vcf_name: str,
+    remote_prefix: str,
+    token: Optional[str] = None,
+) -> bool:
+    """Fetch + extract the SEPARATE Tier-1 ``genotypes_<vcf>.tar.gz`` companion
+    into ``<workdir>/Dictionaries/`` so ``genotypes_<vcf>/`` lands as a sibling of
+    ``dictionaries_``/``registry_`` (the exact path the search resolver reads).
+
+    Returns ``True`` when the store was installed, ``False`` when the repo has no
+    such companion (a registry-only / detection-only publish). Absence is NOT an
+    error: the search falls back gracefully (degraded Samples). Uses the same
+    atomic-swap staging as the main index install; all diagnostics go to STDOUT
+    (stderr is fatal downstream)."""
+    remote_name = f"genotypes_{vcf_name}.tar.gz"
+    patterns = [f"{remote_prefix}/{remote_name}"]
+    staging = os.path.join(workdir, ".hf_stage_genotypes")
+    shutil.rmtree(staging, ignore_errors=True)
+    _hf_snapshot(repo, patterns, staging, token)
+    gt_tarball = os.path.join(staging, remote_prefix, remote_name)
+    if not os.path.isfile(gt_tarball):
+        shutil.rmtree(staging, ignore_errors=True)
+        return False
+    dst_dicts_root = os.path.join(workdir, "Dictionaries")
+    os.makedirs(dst_dicts_root, exist_ok=True)
+    extract_tmp = os.path.join(dst_dicts_root, f".extract_genotypes_{vcf_name}")
+    shutil.rmtree(extract_tmp, ignore_errors=True)
+    os.makedirs(extract_tmp)
+    try:
+        with tarfile.open(gt_tarball) as tf:
+            tf.extractall(extract_tmp)
+        staged = os.path.join(extract_tmp, "Dictionaries")
+        # tolerate an archive rooted at genotypes_<vcf>/ directly (no Dictionaries/
+        # prefix) as well as the canonical Dictionaries/genotypes_<vcf>/ layout.
+        src_root = staged if os.path.isdir(staged) else extract_tmp
+        installed_any = False
+        for sub in os.listdir(src_root):
+            src = os.path.join(src_root, sub)
+            if not os.path.isdir(src):
+                continue
+            dst = os.path.join(dst_dicts_root, sub)
+            backup = os.path.join(dst_dicts_root, f".{sub}.replaced")
+            if os.path.isdir(backup) and not os.path.exists(dst):
+                os.rename(backup, dst)
+            shutil.rmtree(backup, ignore_errors=True)
+            if os.path.exists(dst):
+                os.rename(dst, backup)
+            os.rename(src, dst)
+            shutil.rmtree(backup, ignore_errors=True)
+            installed_any = True
+        return installed_any
+    finally:
+        shutil.rmtree(extract_tmp, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
+
+
 def download_component(
     component: str,
     workdir: str,
@@ -204,6 +277,7 @@ def download_component(
     dataset: Optional[str] = None,
     index_name: Optional[str] = None,
     token: Optional[str] = None,
+    genotypes: bool = True,
 ) -> str:
     """Download one CRISPRme reference component from HF into the canonical
     local layout under ``workdir``.
@@ -390,6 +464,46 @@ def download_component(
         finally:
             shutil.rmtree(extract_tmp, ignore_errors=True)
             shutil.rmtree(staging, ignore_errors=True)
+        # ADDITIVE Tier-1: after the main tarball (which may now carry
+        # registry_<vcf>/), ALSO fetch + extract the separate genotypes_<vcf>.tar.gz
+        # into <workdir>/Dictionaries/ so genotypes_<vcf>/ lands as a sibling of
+        # dictionaries_/registry_ — the exact path _resolve_genotype_paths reads.
+        # Default ON; --no-genotypes (genotypes=False) skips it (detection-only,
+        # degraded Samples). A missing companion (registry-only publish) is NOT an
+        # error: warn to STDOUT and continue — search falls back gracefully. A
+        # dictless index (no dictionaries_<vcf>/ in the main tarball) is also FINE:
+        # the registry + genotype tiers cover it.
+        vcf_name = index_name.partition("+")[2]
+        if vcf_name:
+            if not genotypes:
+                sys.stdout.write(
+                    f"Skipping Tier-1 genotype store for '{index_name}' "
+                    f"(--no-genotypes): off-target detection works, but per-sample "
+                    f"Samples will be degraded until genotypes_{vcf_name}/ is present.\n"
+                )
+            else:
+                try:
+                    got = _fetch_genotypes_companion(
+                        repo, workdir, vcf_name, remote_prefix, token
+                    )
+                except Exception as exc:  # network/extract error -> non-fatal
+                    got = False
+                    sys.stdout.write(
+                        f"NOTE: could not fetch Tier-1 genotype store "
+                        f"'genotypes_{vcf_name}.tar.gz' ({exc}); continuing without "
+                        f"it — off-target detection works, Samples degraded.\n"
+                    )
+                if got:
+                    sys.stdout.write(
+                        f"Installed Tier-1 genotype store genotypes_{vcf_name}/ "
+                        f"into {os.path.join(workdir, 'Dictionaries')}\n"
+                    )
+                else:
+                    sys.stdout.write(
+                        f"NOTE: index '{index_name}' has no genotypes_{vcf_name}.tar.gz "
+                        f"companion in {repo} (registry-only/detection publish); "
+                        f"off-target detection works, per-sample Samples degraded.\n"
+                    )
         return os.path.join(local_dir, index_name)
 
     # flat components: annotations, pams, samples
@@ -488,11 +602,51 @@ def _make_index_tarball(
         tf.addfile(info, io.BytesIO(manifest_bytes))
 
 
+def _make_genotypes_tarball(tarball: str, genotypes_dir: str) -> None:
+    """Build the SEPARATE Tier-1 genotype-store archive ``genotypes_<vcf>.tar.gz``.
+
+    Layout mirrors ``_make_index_tarball``'s dict routing: the single member is
+    ``Dictionaries/<basename>/...`` so the download extractor drops it straight
+    into ``<workdir>/Dictionaries/`` alongside ``dictionaries_``/``registry_`` —
+    the exact sibling path ``_resolve_genotype_paths`` reads. Prefers pigz/tar,
+    falls back to single-threaded Python tarfile (identical archive layout). This
+    is the big (~22GB genome) optional artifact, uploaded separately from the main
+    index tarball so a detection-only install can skip it (``--no-genotypes``)."""
+    arcname = os.path.join("Dictionaries", os.path.basename(genotypes_dir))
+    parent_of_dictionaries = os.path.dirname(os.path.dirname(genotypes_dir))
+    pigz = shutil.which("pigz")
+    tar = shutil.which("tar")
+    if pigz and tar:
+        try:
+            subprocess.check_call(
+                [tar, "--use-compress-program", pigz, "-cf", tarball,
+                 "-C", parent_of_dictionaries, arcname]
+            )
+            return
+        except (subprocess.CalledProcessError, OSError) as exc:
+            # diagnostics to STDOUT (stderr is fatal to the post-analysis pipeline)
+            sys.stdout.write(
+                f"Note: parallel (pigz) compression of genotype store failed "
+                f"({exc}); falling back to single-threaded gzip.\n"
+            )
+            if os.path.exists(tarball):
+                os.remove(tarball)
+    else:
+        sys.stdout.write(
+            "Note: pigz/tar not found — compressing the genotype store with "
+            "single-threaded gzip (slow; ~22GB genome). Install pigz for parallel "
+            "compression.\n"
+        )
+    with tarfile.open(tarball, "w:gz") as tf:
+        tf.add(genotypes_dir, arcname=arcname)
+
+
 def publish_index(
     index_dir: str,
     repo: Optional[str] = None,
     token: Optional[str] = None,
     display_name: Optional[str] = None,
+    dictless: bool = False,
 ) -> str:
     """Tar a locally built genome_library index and upload it to HF.
 
@@ -500,9 +654,25 @@ def publish_index(
         index_dir: path to the ``genome_library/<index_name>`` directory.
         repo: HF repo id (defaults via :func:`resolve_repo`).
         token: HF write token (defaults via :func:`resolve_token`).
+        display_name: optional human-friendly label for the index.
+        dictless: when ``True``, EXCLUDE the per-sample SNP dictionaries
+            (``dictionaries_<vcf>/``) from the main tarball — the additive
+            registry (Tier-0) + genotype (Tier-1) tiers replace them — while
+            KEEPING ``log_indels_<vcf>/`` (indel post-analysis still needs the
+            indel logs; the tiers are SNP-only). When ``False`` (default),
+            publishing is BYTE-FOR-BYTE unchanged from the classic path: the
+            SNP dicts are bundled exactly as before; the registry tier, if
+            present, is simply ADDED.
+
+    In BOTH modes, the small Tier-0 ``registry_<vcf>/`` dir is added to the main
+    tarball when it exists (it powers out-of-the-box off-target detection +
+    corrected AF/rsID), and — when a ``genotypes_<vcf>/`` dir exists — a SEPARATE
+    ``genotypes_<vcf>.tar.gz`` companion is produced and uploaded to the same repo
+    under the same ``indexes/`` prefix (the big optional Tier-1 artifact).
 
     Returns:
-        The remote path (``indexes/<index_name>.tar.gz``) the index was uploaded to.
+        The remote path (``indexes/<index_name>.tar.gz``) the main index was
+        uploaded to.
     """
     index_dir = os.path.abspath(index_dir.rstrip("/"))
     if not os.path.isdir(index_dir):
@@ -549,22 +719,48 @@ def publish_index(
     # present. Reference indexes (no '+') have no dictionaries.
     vcf_name = index_name.partition("+")[2]
     dict_dirs = []
+    genotypes_dir = None
     if vcf_name:
         cwd = os.path.dirname(os.path.dirname(index_dir))  # .../genome_library/<name> -> workdir
-        for d in (f"dictionaries_{vcf_name}", f"log_indels_{vcf_name}"):
-            p = os.path.join(cwd, "Dictionaries", d)
+        dicts_root = os.path.join(cwd, "Dictionaries")
+        snp_name = f"dictionaries_{vcf_name}"
+        indel_name = f"log_indels_{vcf_name}"
+        registry_name = f"registry_{vcf_name}"
+        genotypes_name = f"genotypes_{vcf_name}"
+        # DEFAULT (classic) main-tarball members: SNP dicts + indel logs, exactly
+        # as before. DICTLESS: drop the (152GB) per-sample SNP dicts but KEEP the
+        # indel logs (the tiers are SNP-only). Missing-dir handling is unchanged:
+        # a dir is bundled only when present + non-empty.
+        wanted = [indel_name] if dictless else [snp_name, indel_name]
+        for d in wanted:
+            p = os.path.join(dicts_root, d)
             if os.path.isdir(p) and os.listdir(p):
                 dict_dirs.append(p)
-        missing = {f"dictionaries_{vcf_name}", f"log_indels_{vcf_name}"} - {
-            os.path.basename(p) for p in dict_dirs
-        }
+        missing = set(wanted) - {os.path.basename(p) for p in dict_dirs}
         if missing:
             sys.stderr.write(
                 f"WARNING: variant index '{index_name}' is missing dictionaries "
-                f"{sorted(missing)} under {os.path.join(cwd, 'Dictionaries')}; the "
+                f"{sorted(missing)} under {dicts_root}; the "
                 f"published index will NOT be searchable without the source VCFs. "
                 f"Build the index in the same working dir so the dicts are present.\n"
             )
+        # ADDITIVE Tier-0: always include the small registry_<vcf>/ in the MAIN
+        # tarball when it exists (out-of-the-box off-target detection + AF/rsID).
+        # Absent => behave exactly as today (no error). It is routed under
+        # Dictionaries/ by _make_index_tarball just like the other dict dirs.
+        reg_p = os.path.join(dicts_root, registry_name)
+        if os.path.isdir(reg_p) and os.listdir(reg_p):
+            dict_dirs.append(reg_p)
+            manifest["has_registry"] = True
+        # ADDITIVE Tier-1: the big genotype store travels as a SEPARATE tarball
+        # (see below), never inside the main archive.
+        gt_p = os.path.join(dicts_root, genotypes_name)
+        if os.path.isdir(gt_p) and os.listdir(gt_p):
+            genotypes_dir = gt_p
+    # record the publish shape so a consumer (list_available_downloads / download)
+    # can tell a dictless index + a genotype companion apart without unpacking.
+    manifest["dictless"] = bool(dictless and vcf_name)
+    manifest["has_genotypes"] = genotypes_dir is not None
     tarball = f"{index_dir}.tar.gz"
     _make_index_tarball(tarball, index_dir, index_name, indels_dir, manifest, dict_dirs)
     remote_path = f"indexes/{index_name}.tar.gz"
@@ -577,4 +773,23 @@ def publish_index(
         token=token,
     )
     os.remove(tarball)
+    # SEPARATE upload of the big Tier-1 genotype store (only when it exists), to
+    # the SAME repo + indexes/ prefix as the main tarball, named after the vcf so
+    # download can find it deterministically from the index name.
+    if genotypes_dir is not None:
+        gt_tarball = os.path.join(os.path.dirname(index_dir),
+                                  f"genotypes_{vcf_name}.tar.gz")
+        _make_genotypes_tarball(gt_tarball, genotypes_dir)
+        gt_remote = f"indexes/genotypes_{vcf_name}.tar.gz"
+        api.upload_file(
+            path_or_fileobj=gt_tarball,
+            path_in_repo=gt_remote,
+            repo_id=repo,
+            repo_type="dataset",
+            token=token,
+        )
+        os.remove(gt_tarball)
+        sys.stdout.write(
+            f"Published Tier-1 genotype store to {repo}:{gt_remote}\n"
+        )
     return remote_path

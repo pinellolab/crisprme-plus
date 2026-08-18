@@ -2126,6 +2126,10 @@ def print_help_download() -> None:
         "(UCSC goldenPath by assembly name, e.g. --ref susScr11) | url "
         "(explicit --url link) [OPTIONAL]\n"
         "\t--url, explicit genome download URL when --source url [OPTIONAL]\n"
+        "\t--no-genotypes, for --what index: skip fetching the separate Tier-1 "
+        "genotype store (genotypes_<vcf>.tar.gz). Off-target detection still "
+        "works via the bundled Tier-0 registry, but per-sample Samples are "
+        "degraded until the store is present [OPTIONAL, default: fetch it]\n"
         "\t--path, working directory the CRISPRme dir-tree lives under "
         "[OPTIONAL, default: current directory]\n"
     )
@@ -2152,6 +2156,9 @@ def download_data() -> None:
     # or 'url' (explicit download link). Only meaningful for --what genome.
     source = args[args.index("--source") + 1] if "--source" in args else "hf"
     url = args[args.index("--url") + 1] if "--url" in args else None
+    # ADDITIVE: for --what index, --no-genotypes skips the big Tier-1 genotype
+    # store (detection-only; degraded Samples). Default = fetch it.
+    genotypes = "--no-genotypes" not in args
     workdir = os.getcwd()
     if "--path" in args:
         workdir = os.path.abspath(args[args.index("--path") + 1])
@@ -2179,6 +2186,7 @@ def download_data() -> None:
                     ref=ref,
                     dataset=dataset,
                     index_name=index_name,
+                    genotypes=genotypes,
                 )
         except (ValueError, ImportError, RuntimeError) as e:
             error(str(e))
@@ -2203,6 +2211,13 @@ def print_help_publish_index() -> None:
         "\t--token, HuggingFace write token [OPTIONAL if HF_TOKEN is set]\n"
         "\t--name, optional human-friendly display name for the index (else a "
         "clear convention label is derived from the folder name) [OPTIONAL]\n"
+        "\t--dictless, EXCLUDE the per-sample SNP dictionaries "
+        "(dictionaries_<vcf>/) from the main tarball — the additive Tier-0 "
+        "registry + Tier-1 genotype tiers replace them — while keeping the indel "
+        "logs. Without this flag the classic dicts are bundled exactly as before "
+        "[OPTIONAL, default: off]. In BOTH modes the small registry_<vcf>/ is "
+        "added when present, and a separate genotypes_<vcf>.tar.gz companion is "
+        "uploaded when a genotype store exists.\n"
     )
     sys.exit(1)
 
@@ -2217,8 +2232,13 @@ def publish_index_cmd() -> None:
     token = args[args.index("--token") + 1] if "--token" in args else None
     # optional human-friendly display name (else the UI parses a convention label)
     name = args[args.index("--name") + 1] if "--name" in args else None
+    # ADDITIVE: --dictless drops the 152GB per-sample SNP dicts from the main
+    # tarball (tiers replace them); default off => byte-for-byte-unchanged publish.
+    dictless = "--dictless" in args
     try:
-        remote_path = publish_index(index_dir, repo=repo, token=token, display_name=name)
+        remote_path = publish_index(
+            index_dir, repo=repo, token=token, display_name=name, dictless=dictless
+        )
     except (ValueError, ImportError) as e:
         error(str(e))
     print(f"Published index to {resolve_repo(repo)}:{remote_path}", flush=True)
