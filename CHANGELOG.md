@@ -11,6 +11,21 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-08-18
+
+### Fixed
+- **Dict-less `download --what index` is now self-sufficient.** A standalone
+  `download --what index` for a merged variant index (e.g.
+  `NRG_3_hg38-dictless+hg38_1000G_HGDP`) now fetches the per-dataset `samplesID`
+  lists it needs before synthesizing the combined `<vcf>.samplesID.txt`, so it no
+  longer requires a prior `download --what all`/`--what samples`. No-op when those
+  files are already present (the `--what all` → `--what index` path is unchanged).
+- **Restored the `unit-tests` CI gate.** A colon in a workflow step name
+  (`(#172: fakechrom match)`) made GitHub Actions reject `unit-tests.yml` at startup
+  (a 0 s "workflow file issue"), so the unit-tests job had silently not run since the
+  v2.3.0 merge (the tests themselves pass locally). Quoting the name fixes the parse;
+  the full 22-step unit suite runs in CI again.
+
 ## [2.3.0] - 2026-08-18
 
 The dict-less variant-analysis engine: replaces the ~152 GB per-sample SNP
@@ -756,7 +771,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.3.1...HEAD
+[2.3.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.1
 [2.3.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.0
 [2.2.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.2.0
 [2.2.0-alpha.30]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.2.0-alpha.30
