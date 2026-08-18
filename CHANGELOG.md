@@ -38,7 +38,11 @@ dict-based install still works unchanged.
   `genotypes_<vcf>.tar.gz`; `download` fetches the genotype tier by default
   (`--no-genotypes` to skip). Published `NRG_3_hg38-dictless+hg38_1000G_HGDP` on
   `lucapinello/crisprme-data` (the dict-based `NRG_3`/`NGG_3` indexes remain the
-  default).
+  default). Fetch it with `download --what all` first, then `download --what index`,
+  so the per-dataset `samplesID` lists are on disk when the combined
+  `<vcf>.samplesID.txt` is auto-synthesized (a standalone `--what index` without a
+  prior `samples` fetch leaves the combined file absent — hardening tracked as a
+  follow-up).
 
 ### Fixed
 - **Corrected allele frequencies.** The AF column — empty/mis-polarized for ~95 % of
