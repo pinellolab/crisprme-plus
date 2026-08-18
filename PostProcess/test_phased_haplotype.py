@@ -54,6 +54,8 @@ Run with:
 import ast
 import io
 import os
+import sys
+import types
 import unittest
 
 PP = os.path.dirname(os.path.abspath(__file__))
@@ -75,6 +77,21 @@ def _load_pure_functions(global_overrides):
             break  # first side-effecting statement of the module body -> stop
         keep.append(node)
     module = ast.Module(body=keep, type_ignores=[])
+    # The kept prologue imports numpy / pandas / CRISTA_score at module top, but
+    # iupac_decomposition uses NONE of them at runtime. The light unit-tests CI env
+    # has no numpy/pandas/scientific stack (the other PostProcess tests are
+    # stdlib-only by design), so exec would die on `import numpy`. Inject harmless
+    # stubs ONLY when the real package is unavailable — a full local env keeps using
+    # the real ones. (This is exactly why the suite passed locally but failed in CI.)
+    for _name, _attrs in (("numpy", ()), ("pandas", ()),
+                          ("CRISTA_score", ("CRISTA_predict_list",))):
+        try:
+            __import__(_name)
+        except Exception:
+            _stub = types.ModuleType(_name)
+            for _a in _attrs:
+                setattr(_stub, _a, lambda *a, **k: None)
+            sys.modules[_name] = _stub
     namespace = {}
     exec(compile(module, SRC_PATH, "exec"), namespace)
     namespace.update(global_overrides)
