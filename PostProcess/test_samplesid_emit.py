@@ -74,34 +74,24 @@ def _load_crisprme():
         _bio.Seq = _bio_seq
         sys.modules.setdefault("Bio", _bio)
         sys.modules["Bio.Seq"] = _bio_seq
-    # The network-free unit-test env also lacks the scientific/analysis stack that
-    # crisprme.py imports transitively (pandas via assembly_reconcile, which even uses
-    # pd.DataFrame in def-time annotations) -- but the functions under test don't use
-    # it. Auto-stub ANY other genuinely-absent module with a MagicMock (handles
-    # attribute access like pd.DataFrame) via a LAST-RESORT meta-path finder installed
-    # only for the exec. Installed modules (e.g. numpy on CI) resolve + are used for real.
-    import importlib.abc
-    import importlib.util
+    # The network-free unit-test env also lacks pandas (imported by assembly_reconcile,
+    # which even uses pd.DataFrame in def-time annotations) and possibly other pure-
+    # scientific modules. Stub ONLY those, TARGETED -- never a catch-all: a catch-all
+    # would also stub optional-import-fallback targets (e.g. requests' `try: import
+    # simplejson`), handing them a MagicMock instead of the expected absence and breaking
+    # them (MagicMock.JSONDecodeError as an exception base -> metaclass conflict). Use a
+    # MagicMock so attribute access (pd.DataFrame) works. requests/numpy are installed on
+    # CI; a module that is actually present is imported for real (we stub only absents).
     from unittest.mock import MagicMock
-
-    class _AutoStub(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-        def find_spec(self, name, path=None, target=None):
-            # Reached only when every real finder returned None (module absent),
-            # since this finder is appended LAST to sys.meta_path.
-            return importlib.util.spec_from_loader(name, self)
-
-        def create_module(self, spec):
-            return MagicMock(name=spec.name)
-
-        def exec_module(self, module):
-            pass
-
-    _stub = _AutoStub()
-    sys.meta_path.append(_stub)
-    try:
-        exec(code, mod.__dict__)
-    finally:
-        sys.meta_path.remove(_stub)
+    for _m in ("pandas", "scipy", "sklearn", "matplotlib", "seaborn",
+               "statsmodels", "intervaltree", "CRISTA_score"):
+        if _m in sys.modules:
+            continue
+        try:
+            __import__(_m)
+        except Exception:
+            sys.modules[_m] = MagicMock()
+    exec(code, mod.__dict__)
     return mod
 
 
