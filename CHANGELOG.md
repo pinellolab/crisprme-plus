@@ -11,6 +11,27 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-08-18
+
+### Fixed
+- **Self-built dict-less indexes are now self-complete for samplesIDs.**
+  `build-index-only` (with `--samplesID`) writes the per-dataset and the combined
+  `<vcf>.samplesID.txt` into the install (reusing the one union implementation), and
+  `publish-index` bundles them into the index tarball — so a fresh `download
+  --index-name <X>` + search works with no separate `--what samples`/`--what all`
+  dependency (the download-side synthesis added in 2.3.1 becomes a pure fallback).
+  No-op for single-dataset, reference, and dict-based indexes.
+
+### Documentation
+- **Rewrote the index-build docs for the dict-less flow.** `docs/PRECOMPUTED_INDEXES.md`
+  now covers `build-index-only --vcf --samplesID` (**required** to emit the Tier-0
+  registry + Tier-1 genotype tiers — without it you get a dicts-only index),
+  `publish-index --dictless`, the separate `genotypes_<vcf>.tar.gz`, `download
+  --no-genotypes`, the `-dictless` canonical install-name behavior, and the updated
+  `manifest.json` fields (with a caveat that name-parsed fields are reference-index
+  only). Added the variant-index build path to README §2.2.9, `crisprme_data_setup`
+  §3.5, and `SETTINGS_DATA_MANAGER.md`; fixed an NGG→NRG example nit.
+
 ## [2.3.1] - 2026-08-18
 
 ### Fixed
@@ -771,7 +792,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.3.1...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.3.2...HEAD
+[2.3.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.2
 [2.3.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.1
 [2.3.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.0
 [2.2.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.2.0
