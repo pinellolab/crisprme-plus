@@ -61,3 +61,7 @@ jobs:
       - name: post_process.sh writes temps to output dir, not install dir
         working-directory: PostProcess
         run: python -m unittest test_post_process_tempdir -v
+
+      - name: Indel per-chrom subset matches fakechrom (issue #172 silent-drop)
+        working-directory: PostProcess
+        run: python -m unittest test_indel_chrom_subset -v
