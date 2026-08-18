@@ -11,6 +11,32 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-18
+
+First stable release of the CRISPRme+ 2.2.0 line (Python 3.11 / Dash 2.x). It
+consolidates the `2.2.0-alpha.27`–`alpha.30` pre-releases (see those sections
+below for the full history); the entries here are the changes since `alpha.30`.
+
+### Fixed
+- **Phased multi-SNP haplotype off-targets are no longer under-reported.** In the
+  phased post-analysis path — the default for phased datasets such as 1000G/HGDP —
+  `iupac_decomposition` failed to assemble the full-haplotype off-target when one
+  sample carried **≥4 co-occurring variants in a single protospacer window**: the
+  true worst target (fully substituted, lowest-mismatch/highest-CFD) was silently
+  under-reported or dropped. The in-loop level-0 subtraction (a dedup device that
+  starved the deeper combination layers) is replaced with a **deferred peel** that
+  runs after the full lattice is built, so the maximal *cis* combination forms while
+  per-haplotype attribution stays deduplicated. Validated byte-identical for every
+  previously-correct case (unphased, phased ≤3-variant, single-SNP, >cap greedy)
+  plus a real-data genome-wide no-regression diff. (#41; a long-standing defect
+  inherited from classic CRISPRme, tracked there at pinellolab/CRISPRme#175.)
+
+### Changed
+- `environment.yml` now includes `ijson`, so from-source installs get the streaming
+  low-RAM SNP-dict reader that the Docker image already had (without it, SNP
+  post-analysis falls back to a whole-file `json.load`; results are identical, but
+  RAM use and the OOM-guard estimate are higher).
+
 ## [2.2.0-alpha.30] - 2026-08-17
 
 ### Fixed
@@ -684,7 +710,8 @@ and the `release-crisprme` skill.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.2.0-alpha.30...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.2.0
 [2.2.0-alpha.30]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.2.0-alpha.30
 [2.1.13]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.13
 [2.1.12]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.12

@@ -25,6 +25,7 @@ dependencies:
   - more-itertools
   - statsmodels
   - intervaltree
+  - ijson                      # streaming low-RAM SNP-dict reader in new_simple_analysis.py (else falls back to whole-file json.load); matches the Docker image
   - pysam
   - bcftools
   - bedtools
