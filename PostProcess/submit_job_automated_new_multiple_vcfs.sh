@@ -211,9 +211,13 @@ while read vcf_f; do
 	# included install: `download --what index` fetches genome_library/<name> +
 	# <name>_INDELS + the per-sample dictionaries, but not the multi-GB source VCFs).
 	# When a genome_library index <pam>_N_<ref>+<vcf> with N>=bMax is present AND the
-	# dictionaries are present, the enriched genome + dictionaries were produced at
-	# build time and shipped, so on-demand enrichment (which reads the source VCFs) is
-	# both unnecessary and impossible — skip STEP 1 in that case.
+	# per-sample dictionaries OR the compact dictless Tier-0 registry are present, the
+	# enriched genome + variant data were produced at build time and shipped, so
+	# on-demand enrichment (which reads the source VCFs) is both unnecessary and
+	# impossible — skip STEP 1 in that case. A dictless install ships registry_<vcf>/
+	# (+ genotypes_<vcf>/) INSTEAD of the 152 GB dictionaries_<vcf>/; the SNP/INDEL
+	# post-analysis derives the registry/genotype sibling paths from the dict_folder
+	# stem, so dict_folder may point at a dictionaries_<vcf>/ that does not exist.
 	precomputed_variant=0
 	if [ "$vcf_name" != "_" ]; then
 		for _d in "$current_working_directory/genome_library"/${true_pam}_*_"${ref_name}+${vcf_name}" "$current_working_directory/genome_library"/NNN_*_"${ref_name}+${vcf_name}"; do
@@ -222,7 +226,8 @@ while read vcf_f; do
 			_b=$(basename "$_d"); _n=${_b#*_}; _n=${_n%%_*}
 			case "$_n" in '' | *[!0-9]*) continue ;; esac
 			if [ "$_n" -ge "$bMax" ] \
-				&& [ -d "$current_working_directory/Dictionaries/dictionaries_${vcf_name}" ] \
+				&& { [ -d "$current_working_directory/Dictionaries/dictionaries_${vcf_name}" ] \
+					|| [ -d "$current_working_directory/Dictionaries/registry_${vcf_name}" ]; } \
 				&& [ -d "$current_working_directory/Dictionaries/log_indels_${vcf_name}" ]; then
 				precomputed_variant=1
 				break

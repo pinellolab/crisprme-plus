@@ -944,6 +944,24 @@ class TestRunLightweightEndToEnd(unittest.TestCase):
             self.assertFalse(report.has_errors(), report.render())
             self.assertIn("batteries-included install", report.render())
 
+    def test_missing_vcf_dir_with_registry_is_dictless_ok(self):
+        # DICTLESS batteries install: ships registry_<dataset>/ (+ genotypes_) INSTEAD
+        # of the 152 GB dictionaries_<dataset>/. A missing VCFs/<dataset>/ must NOT
+        # error when the dictless Tier-0 registry is on disk (source VCFs not required).
+        with tempfile.TemporaryDirectory() as tmp:
+            genomedir, vcf_dirs, guidefile, pamfile = self._build_clean_fixture(tmp)
+            dataset = os.path.basename(vcf_dirs[0])  # "datasetA"
+            shutil.rmtree(vcf_dirs[0])  # no source VCFs, as for a batteries install
+            # NO dictionaries_<dataset>/ — only the dictless registry + indel logs
+            os.makedirs(os.path.join(tmp, "Dictionaries", f"registry_{dataset}"))
+            os.makedirs(os.path.join(tmp, "Dictionaries", f"log_indels_{dataset}"))
+            report = vi.run_lightweight(
+                genomedir, vcf_dirs, guidefile, pamfile,
+                current_working_directory=tmp,
+            )
+            self.assertFalse(report.has_errors(), report.render())
+            self.assertIn("dictless registry", report.render())
+
 
 # ===========================================================================
 # _normalize_chrom

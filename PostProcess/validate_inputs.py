@@ -989,15 +989,19 @@ def run_lightweight(
             # multi-GB source VCFs. submit_job detects this same condition (a
             # precomputed variant index whose dictionaries are present) and skips
             # genome enrichment, so the missing VCF dir is EXPECTED there, not an
-            # error. Mirror that here: if the dictionaries for this dataset are on
-            # disk, the source VCFs are genuinely not required — pass the check.
+            # error. Mirror that here: if the per-sample dictionaries OR the compact
+            # dictless Tier-0 registry for this dataset are on disk, the source VCFs
+            # are genuinely not required — pass the check. (A dictless install ships
+            # registry_<dataset>/ instead of the 152 GB dictionaries_<dataset>/.)
             dataset = os.path.basename(vcf_dir)
             cwd = current_working_directory or os.path.dirname(os.path.dirname(vcf_dir))
             dict_dir = os.path.join(cwd, "Dictionaries", f"dictionaries_{dataset}")
+            reg_dir = os.path.join(cwd, "Dictionaries", f"registry_{dataset}")
             indel_dir = os.path.join(cwd, "Dictionaries", f"log_indels_{dataset}")
-            if os.path.isdir(dict_dir) and os.path.isdir(indel_dir):
+            if (os.path.isdir(dict_dir) or os.path.isdir(reg_dir)) and os.path.isdir(indel_dir):
+                kind = "dictionaries" if os.path.isdir(dict_dir) else "dictless registry"
                 report.ok(
-                    f"{dataset}: precomputed variant index + dictionaries present; "
+                    f"{dataset}: precomputed variant index + {kind} present; "
                     "source VCFs not required (batteries-included install)"
                 )
                 continue
