@@ -11,6 +11,25 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.2.0-alpha.30] - 2026-08-17
+
+### Fixed
+- **Indel off-targets were silently dropped since v2.1.9.** `post_analisi_indel.sh`
+  subset the per-chromosome indel targets with `grep -F -w $chrom`, but the indel
+  search runs on a per-chromosome *fake* genome (`pool_search_indels.py` searches and
+  names its targets `fake<chrom>`), so every indel target row's Chromosome column is
+  `fake<chrom>` (e.g. `fakechr22`) — which `grep -F -w chr22` can never match (`-w`'s
+  left word boundary fails because `chr22` is preceded by the word character `e`). The
+  per-chromosome subsets came back empty, the indel post-analysis processed nothing,
+  and **all indel off-targets were dropped with a clean exit**. Both grep lines now
+  match on `"$fakechrom"` (`-w` still prevents `fakechr2` matching `fakechr22`); the
+  `NF >= 10` malformed-line guard that the same refactor had dropped is restored; and
+  an empty subset now prints a WARNING to stdout (stderr is fatal in this pipeline) so
+  the failure can never be silent again. A hermetic regression test
+  (`test_indel_chrom_subset.py`) is added and wired into CI. SNP post-analysis is
+  unaffected (SNP targets use real chromosome names). Thanks to @munchr-gene1 for the
+  report and diagnosis (#172).
+
 ## [2.2.0-alpha.29] - 2026-08-16
 
 ### Fixed
@@ -665,7 +684,8 @@ and the `release-crisprme` skill.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.1.13...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.2.0-alpha.30...HEAD
+[2.2.0-alpha.30]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.2.0-alpha.30
 [2.1.13]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.13
 [2.1.12]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.12
 [2.1.11]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.11
