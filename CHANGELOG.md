@@ -11,6 +11,36 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.3.3] - 2026-08-18
+
+### Fixed
+- **Bulge dropdowns could not be raised above 0 on a downloaded dict-less index.**
+  The search form caps the selectable bulges at `min(index_max_bulges(reference),
+  index_max_bulges(variant))`. A dict-less variant tarball ships the variant index
+  but not the reference index, so the reference term was read as `0` and forced the
+  cap — and therefore the bulge dropdowns — to `0`. The reference term is now
+  **buildable-aware** (`reference_bulge_capacity`): the reference index is built
+  on demand from the downloaded `Genomes/<ref>`, so its capacity is taken from the
+  resolved index's `<PAM>_<N>` prefix instead of an absent folder. The default
+  SpCas9 install now correctly offers up to 2 DNA / 2 RNA bulges.
+- **Default search parameters restored to MM 6 / bDNA 2 / bRNA 2 with max-total-edits 4.**
+  These are the intended out-of-the-box SpCas9 defaults (mismatches 6, both bulges 2,
+  capped at 4 total edits); a prior change had drifted them.
+- **A 0-bulge variant search failed on a dict-less / batteries install.** With
+  `bDNA=0, bRNA=0` the indel branch ran a non-indexed CRISPRitz search of the
+  **raw** fake-indel genome (`Genomes/<ref>+<vcf>_INDELS/`), which a dict-less
+  install does not ship (build-time only) — producing missing `fakechr*.targets.txt`
+  files and a `tail/head/rm/sed` cascade in `post_analisi_indel.sh`. The 0-bulge
+  indel search now routes through the **indexed** indel genome
+  (`genome_library/<idx>_INDELS/`, which the tarball does ship), matching the
+  ≥1-bulge path. No behavior change for dict-based installs.
+- **Population-distribution post-analysis crashed on out-of-range totals**
+  (`max() arg is an empty sequence`). `populations_distribution.py` /
+  `process_summaries.py` now guard the empty case (`max(..., default=0)`, an empty
+  "no targets" figure) and the driver loop bound is computed from `mm + bDNA + bRNA`
+  (the true edit budget) instead of the index `N`, so no row index falls outside the
+  populated range.
+
 ## [2.3.2] - 2026-08-18
 
 ### Fixed
@@ -792,7 +822,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.3.2...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.3.3...HEAD
+[2.3.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.3
 [2.3.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.2
 [2.3.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.1
 [2.3.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.0
