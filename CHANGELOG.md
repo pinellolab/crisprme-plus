@@ -11,6 +11,48 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-08-18
+
+The dict-less variant-analysis engine: replaces the ~152 GB per-sample SNP
+dictionaries with compact, memory-mapped tiers, adds population-level off-target
+summaries, and corrects the allele-frequency column. Backward-compatible — a
+dict-based install still works unchanged.
+
+### Added
+- **Compact dict-less variant post-analysis.** A tiny, always-shipped **Tier-0
+  registry** (per-(pos,alt) AC/AN + per-(db×subpop)/global allele counts + rsID,
+  mmap+bisect) powers off-target detection and corrected allele frequencies out of
+  the box; an optional **Tier-1 genotype store** reconstructs the exact per-sample
+  Samples column. Together they replace the 152 GB per-sample dicts with ~7 GB
+  (registry) + ~22 GB (genotype tier), random-access — SNP post-analysis no longer
+  streams 152 GB of per-sample JSON. `build-index-only` emits the tiers; the search
+  auto-detects and uses them (falling back to dicts when present).
+- **Combination-aware population-summary output** — a `<output>.population_summary.tsv`
+  companion per variant off-target with per-database, per-superpopulation and global
+  allele/carrier frequencies, max-subpopulation AF (+label), homozygote counts and
+  absolute Ns, with **dataset provenance preserved** (never conflates 1000G vs HGDP).
+  Phased datasets use exact cis co-occurrence; unphased report an assume-cis upper
+  bound + a labeled lower bound.
+- **Dict-less HuggingFace distribution.** `publish-index --dictless` ships the
+  registry in the main index tarball + the genotype tier as a separate optional
+  `genotypes_<vcf>.tar.gz`; `download` fetches the genotype tier by default
+  (`--no-genotypes` to skip). Published `NRG_3_hg38-dictless+hg38_1000G_HGDP` on
+  `lucapinello/crisprme-data` (the dict-based `NRG_3`/`NGG_3` indexes remain the
+  default).
+
+### Fixed
+- **Corrected allele frequencies.** The AF column — empty/mis-polarized for ~95 % of
+  variants in the dict format (a documented 2.2.0 limitation) — is re-derived from
+  AC/AN over the full panel.
+- **Out-of-the-box dict-less install.** The skip-enrichment gates
+  (`submit_job_automated_new_multiple_vcfs.sh`, `validate_inputs.py`) now accept a
+  `registry_<vcf>/` tier in place of `dictionaries_<vcf>/`; `download` installs a
+  `-dictless`-named index under its search-resolvable canonical name and synthesizes
+  the combined `<vcf>.samplesID.txt` from the per-db files. Verified end-to-end: a
+  fresh dict-less download finds the CPS1 off-target (chr2:210530658, CFD 0.947,
+  rs114518452) with Samples reconstructed from the genotype tier and a populated
+  population summary.
+
 ## [2.2.0] - 2026-08-18
 
 First stable release of the CRISPRme+ 2.2.0 line (Python 3.11 / Dash 2.x). It
@@ -710,7 +752,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.0
 [2.2.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.2.0
 [2.2.0-alpha.30]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.2.0-alpha.30
 [2.1.13]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.1.13
