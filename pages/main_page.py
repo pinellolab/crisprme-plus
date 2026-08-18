@@ -27,6 +27,8 @@ from .pages_utils import (
     get_available_PAM,
     get_available_CAS,
     index_max_bulges,
+    reference_bulge_capacity,
+    MAX_BULGES,
     variant_dataset_present,
     has_variant_index,
     get_variant_dataset_options,
@@ -141,7 +143,9 @@ def _ensure_samplesid(genome_selected: str, vcf_folder: str) -> None:
         pass
 
 
-MAX_BULGES = 3  # max allowed bulges
+# MAX_BULGES (the app-wide bulge ceiling; usable bulges = MAX_BULGES - 1) is single-
+# sourced in pages_utils so the dropdown ceiling here and reference_bulge_capacity's
+# buildable-cap agree. Imported above.
 MAX_MMS = 7  # max allowed mismatches
 # mismatches, bulges and guides values
 AV_MISMATCHES = [{"label": i, "value": i} for i in range(MAX_MMS)]
@@ -672,12 +676,16 @@ def change_url(
     # bulge-capable index is installed the cap is 0 -> a fast 0-bulge search.
     if not advanced_open:
         _mx = int(max_edits_val) if max_edits_val is not None else 4
-        _cap = index_max_bulges(genome_selected, pam, None)  # reference index
+        # REFERENCE term is buildable-aware (raw genome shipped -> reference index
+        # buildable on demand), so a dict-less install can still derive up to 2 bulges
+        # from the slider instead of being forced to 0. See reference_bulge_capacity.
+        _cap = reference_bulge_capacity(genome_selected, pam)
         _sel = (
             []
             if variant_choice in (None, "", "ref")
             else [v for v in str(variant_choice).split("+") if v]
         )
+        # VARIANT term stays strictly installed-index-based (never buildable dict-less).
         for _v in _sel:  # a variant bulge search also needs the variant index
             _cap = min(_cap, index_max_bulges(genome_selected, pam, _v))
         dna = rna = max(0, min(_mx, _cap))
@@ -1384,32 +1392,41 @@ def check_input(
                 "21bp, etc)"
             )
         )
-    # WEB-ONLY guard: never build an index on the fly. Block the web submit when no
-    # installed index covers the requested bulge depth. This only withholds the browser
-    # launch (update_style=True -> submit-job returns None below, so change_url never
-    # fires); the CLI complete-search build path in submit_job is deliberately intact.
-    # The bulge depth an index must support is max(dna, rna) -- exactly matching the CLI
-    # (bMax = max(bDNA, bRNA); index folder N = bMax+1) and the shell scan (N >= bMax+1).
-    # index_max_bulges returns N-1, so "index_max_bulges >= max(dna, rna)" is precisely
-    # the shell's index-availability test (incl. NNN-pamless + combined-dataset matching).
+    # WEB-ONLY guard: never build a VARIANT/INDEL index on the fly (its source VCFs are
+    # not shipped dict-less, so it can't be rebuilt) -- but the REFERENCE index MAY be
+    # built from the shipped raw genome (the only index buildable without the source VCFs;
+    # the search shell already builds it under an mkdir lock). Block the web submit only
+    # when the requested bulge depth is UNreachable: unbuildable for the reference term
+    # AND uninstalled for every selected variant term.
+    #
+    # This only withholds the browser launch (update_style=True -> submit-job returns None
+    # below, so change_url never fires); the CLI complete-search build path in submit_job
+    # is deliberately intact. The bulge depth an index must support is max(dna, rna) --
+    # exactly matching the CLI (bMax = max(bDNA, bRNA); index folder N = bMax+1) and the
+    # shell scan (N >= bMax+1). reference_bulge_capacity / index_max_bulges return N-1, so
+    # ">= max(dna, rna)" is precisely the shell's reachability test (incl. NNN-pamless +
+    # combined-dataset matching, and the buildable-reference relaxation).
     if genome_selected and pam and dna is not None and rna is not None:
         need = max(int(dna), int(rna))
-        _ok = index_max_bulges(genome_selected, pam, None) >= need
+        # REFERENCE term: buildable-aware (raw genome shipped -> reference index buildable).
+        _ok = reference_bulge_capacity(genome_selected, pam) >= need
         _sel = (
             []
             if variant_choice in (None, "", "ref")
             else [v for v in str(variant_choice).split("+") if v]
         )
+        # VARIANT term stays strictly installed-index-based (never buildable dict-less).
         for _d in _sel:
             _ok = _ok and (index_max_bulges(genome_selected, pam, _d) >= need)
         if not _ok:
             update_style = True
             miss_input_list.append(
-                "No installed index supports %d bulge(s) (DNA %s / RNA %s) for this "
-                "genome / PAM / variant selection. The web app never builds an index on "
-                "the fly — reduce the DNA/RNA bulges, or download/build a matching index "
-                "first (Settings → Data manager, or 'crisprme.py download --what index' "
-                "/ 'crisprme.py build-index-only')."
+                "No index can supply %d bulge(s) (DNA %s / RNA %s) for this "
+                "genome / PAM / variant selection. The reference index is built on the "
+                "fly from the installed raw genome, but a VARIANT index cannot be built "
+                "here (its source VCFs are not installed) — reduce the DNA/RNA bulges, or "
+                "download/build a matching variant index first (Settings → Data manager, "
+                "or 'crisprme.py download --what index' / 'crisprme.py build-index-only')."
                 % (need, dna, rna)
             )
     miss_input = html.Div(
@@ -1652,11 +1669,21 @@ def change_variant_dataset_options(genome_value: str) -> List:
     return [options, value]
 
 
-# Limit the DNA/RNA bulge options to what a built index supports (hard cap).
-# Bulge searches need a per-PAM TST index; 0-bulge searches run index-free, so 0
-# is always available. A variant search also needs the variant index for each
-# selected dataset, so the cap is the min across the reference and variant
-# indexes. Mismatches are never index-limited, so they are left untouched.
+# Limit the DNA/RNA bulge options to the bulge depth a search can REACH here.
+# Bulge searches need a per-PAM TST index; 0-bulge searches run index-free, so 0 is
+# always available. The cap is the min of the REFERENCE term and the VARIANT term, but
+# the two terms are ASYMMETRIC:
+#   * REFERENCE: reference_bulge_capacity -- an already-built reference index OR, when the
+#     raw genome Genomes/<genome>/ is shipped, the app ceiling (the reference index is
+#     buildable on demand from the raw genome, exactly as the search shell does under an
+#     mkdir lock). This is the fix for the dict-less bug: a variant HF tarball ships NO
+#     reference index, so the old index_max_bulges(...,None) returned 0 and forced the
+#     dropdown (and the DNA/RNA=2 defaults) to 0 even though the raw genome IS shipped and
+#     a bmax=2 reference index is buildable.
+#   * VARIANT: index_max_bulges(...,dataset) -- STRICTLY the installed variant index; a
+#     variant/indel index can NOT be built dict-less (its source VCFs are not shipped), so
+#     this term must never be relaxed to a buildable ceiling.
+# Mismatches are never index-limited, so they are left untouched.
 @app.callback(
     [
         Output("dna", "options"),
@@ -1676,7 +1703,12 @@ def change_variant_dataset_options(genome_value: str) -> List:
 def limit_bulges_to_index(genome, pam, variant_choice, cur_dna, cur_rna):
     if not genome or not pam:
         return AV_BULGES, AV_BULGES, no_update, no_update, ""
-    maxb = index_max_bulges(genome, pam, None)  # reference index (always needed)
+    # REFERENCE term: buildable-aware (raw genome shipped -> reference index buildable).
+    maxb = reference_bulge_capacity(genome, pam)
+    # Is the reference depth relying on an on-demand build (raw genome present but no
+    # reference index yet)? Then the first bulge search will build it once (and cache it).
+    ref_installed = index_max_bulges(genome, pam, None)
+    ref_needs_build = maxb > ref_installed
     # scalar dropdown value -> list of datasets ("ref" -> none)
     # ANY selected dataset (built-in OR a custom VCF registered via Settings) — not a
     # hardcoded 1000G/HGDP whitelist, which previously skipped custom datasets and left
@@ -1686,20 +1718,29 @@ def limit_bulges_to_index(genome, pam, variant_choice, cur_dna, cur_rna):
         if variant_choice in (None, "", "ref")
         else [v for v in str(variant_choice).split("+") if v]
     )
+    # VARIANT term: strictly the SHIPPED variant index (never buildable dict-less).
     for v in selected:  # a variant bulge search also needs the variant index
         maxb = min(maxb, index_max_bulges(genome, pam, v))
     opts = [{"label": i, "value": i} for i in range(0, maxb + 1)]
-    dna_v = cur_dna if (isinstance(cur_dna, int) and cur_dna <= maxb) else 0
-    rna_v = cur_rna if (isinstance(cur_rna, int) and cur_rna <= maxb) else 0
+    # Only shrink a value that genuinely EXCEEDS the reachable cap. With the reference
+    # term now buildable-aware, the shipped DNA/RNA=2 defaults survive on a dict-less
+    # install (cap = min(ref_buildable=2, var=2) = 2) instead of being clobbered to 0.
+    dna_v = cur_dna if (isinstance(cur_dna, int) and cur_dna <= maxb) else maxb
+    rna_v = cur_rna if (isinstance(cur_rna, int) and cur_rna <= maxb) else maxb
     if maxb == 0:
         note = (
             "No bulge index for this genome/PAM"
             + (" + selected variant set" if selected else "")
-            + " yet — only a fast 0-bulge search is available. Build an index in "
-            "Settings to enable bulges."
+            + " yet, and no raw genome to build one — only a fast 0-bulge search is "
+            "available. Build/download an index in Settings to enable bulges."
         )
     else:
-        note = f"Up to {maxb} DNA/RNA bulge(s) available (limited by the built index)."
+        note = f"Up to {maxb} DNA/RNA bulge(s) available."
+        if ref_needs_build:
+            note += (
+                " The first bulge search will build the reference index once "
+                "(~20–35 min) from the installed raw genome, then reuse it."
+            )
     return opts, opts, dna_v, rna_v, note
 
 

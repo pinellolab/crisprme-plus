@@ -82,14 +82,52 @@ max_edits = sys.argv[14] if len(sys.argv) > 14 else "-1"
 
 
 def search_indels(chrom):
+    """Run the per-chromosome indel off-target search for one fake-indel chromosome.
+
+    The indel search ALWAYS routes through the SHIPPED indexed indel genome
+    (``genome_library/<PAM>_<N>_<ref>+<vcf>_INDELS/<PAM>_<N>_fake<chrom>/``) via
+    ``crispritz.py search -index`` -- including the 0-bulge case. ``crispritz -index``
+    fully supports ``-bDNA 0 -bRNA 0`` (verified: exit 0, empty stderr, well-formed
+    targets), so the same indexed command serves any bulge depth. This is the correct,
+    non-hack fix for issue: on a batteries / dict-less install ONLY the indexed
+    ``_INDELS`` genome is shipped -- the raw ``Genomes/<ref>+<vcf>_INDELS/`` fake genome
+    is absent -- so the old 0-bulge branch searched a missing directory, produced no
+    ``fake<chrom>...targets.txt``, and post_analisi_indel.sh then choked on
+    tail/head/rm/sed of the missing file.
+
+    The raw-genome brute-force command is kept ONLY as a fallback for a non-batteries
+    install that has the raw fake-indel genome but no indexed one (the indexed genome is
+    preferred whenever present, which it always is on batteries/dict-less installs; the
+    calling shell guarantees the indexed ``_INDELS`` dir exists or errors out before this
+    script runs).
+    """
     print("Searching for INDELs in", chrom)
-    if bDNA != "0" or bRNA != "0":
+    indexed_fakechrom = os.path.join(
+        current_working_directory,
+        "genome_library",
+        f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS",
+        f"{true_pam}_{bMax}_fake{chrom}",
+    )
+    raw_fakechrom = os.path.join(
+        current_working_directory,
+        "Genomes",
+        f"{ref_name}+{vcf_name}_INDELS",
+        f"fake_{vcf_name}_{chrom}",
+    )
+    out_name = f"fake{chrom}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}"
+    if os.path.isdir(indexed_fakechrom) or not os.path.isdir(raw_fakechrom):
+        # Preferred / batteries path: indexed search (valid for 0 bulges too).
         os.system(
-            f"crispritz.py search {current_working_directory}/genome_library/{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS/{true_pam}_{bMax}_fake{chrom}/ {pam_file} {guide_file} fake{chrom}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA} -index -mm {mm} -bDNA {bDNA} -bRNA {bRNA} -t -th 1 --max-edits {max_edits} >/dev/null"
+            f"crispritz.py search {indexed_fakechrom}/ {pam_file} {guide_file} "
+            f"{out_name} -index -mm {mm} -bDNA {bDNA} -bRNA {bRNA} -t -th 1 "
+            f"--max-edits {max_edits} >/dev/null"
         )
     else:
+        # Fallback: only a raw fake-indel genome is installed (no indexed one). This
+        # path cannot serve bulges, so it is used strictly for a 0-bulge search.
         os.system(
-            f"crispritz.py search {current_working_directory}/Genomes/{ref_name}+{vcf_name}_INDELS/fake_{vcf_name}_{chrom}/ {pam_file} {guide_file} fake{chrom}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA} -mm {mm} -t -th 1 >/dev/null"
+            f"crispritz.py search {raw_fakechrom}/ {pam_file} {guide_file} "
+            f"{out_name} -mm {mm} -t -th 1 >/dev/null"
         )
     print("Search ended for INDELs in", chrom)
 

@@ -1236,26 +1236,47 @@ def _check_threads(args: List[str], threads: bool) -> int:
         error("Invalid number of threads specified")
     return thread
 
+# App-wide bulge ceiling (usable bulges = MAX_BULGES - 1), matching pages_utils.MAX_BULGES.
+# A reference index up to this depth is buildable on demand from the shipped raw genome.
+MAX_BULGES = 3
+
+
 def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int:
-    """Largest bulge depth an INSTALLED TST index supports for this PAM motif + genome
-    (and, for a variant search, the variant index too).
+    """Bulge depth a search can REACH for this PAM motif + genome (mirrors the web's
+    pages_utils.reference_bulge_capacity/index_max_bulges cap without web dependencies).
 
     Index folders are named ``<motif>_<N>_<genome>`` (reference) or
     ``<motif>_<N>_<genome>+<enriched>`` (variant); the usable bulge count is N-1 (the +1
     covers alignments that start with a gap). A pamless all-N index of the same length
-    serves any PAM. Returns 0 when no matching index exists, so the caller leaves the
-    search bulge-free instead of forcing an on-demand index build. Best-effort: any error
-    -> 0. Mirrors pages_utils.index_max_bulges without pulling web dependencies.
+    serves any PAM.
+
+    The REFERENCE and VARIANT terms are ASYMMETRIC:
+      * REFERENCE: the larger of the installed reference index depth and -- when the raw
+        genome ``Genomes/<genome>/`` is present (has FASTA chromosome files) -- the app
+        ceiling ``MAX_BULGES - 1``, because a reference index up to that depth is buildable
+        on demand from the shipped raw genome (the search shell already builds it under an
+        mkdir lock). This is the fix for the dict-less bug where a variant tarball ships no
+        reference index, so a fresh-install variant complete-search silently derived 0
+        bulges even though the raw genome IS shipped and a bmax=2 reference is buildable.
+      * VARIANT: STRICTLY the installed variant index (index_max_bulges(...,dataset)); a
+        variant/indel index can NOT be built dict-less (its source VCFs are not shipped),
+        so this term is never relaxed to a buildable ceiling.
+
+    Returns 0 when no index can supply bulges and no raw genome is present, so the caller
+    leaves the search bulge-free rather than forcing an impossible build. Best-effort: any
+    error -> 0.
     """
     try:
         lib = os.path.join(current_working_directory, "genome_library")
-        if not motif or not genome or not os.path.isdir(lib):
+        if not motif or not genome:
             return 0
         pamless = "N" * len(motif)
         prefixes = (f"{motif}_", f"{pamless}_")
         suffix = f"_{genome}"
 
         def _scan(want_plus: bool) -> int:
+            if not os.path.isdir(lib):
+                return 0
             best = 0
             for d in os.listdir(lib):
                 if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
@@ -1271,10 +1292,22 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int
                     best = max(best, int(n_str))
             return max(0, best - 1)
 
-        ref_cap = _scan(want_plus=False)
+        # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling.
+        ref_installed = _scan(want_plus=False)
+        raw = os.path.join(current_working_directory, "Genomes", genome)
+        ref_buildable = 0
+        try:
+            if os.path.isdir(raw) and any(
+                f.endswith((".fa", ".fasta")) for f in os.listdir(raw)
+            ):
+                ref_buildable = MAX_BULGES - 1
+        except OSError:
+            ref_buildable = 0
+        ref_cap = max(ref_installed, ref_buildable)
         if not is_variant:
             return ref_cap
-        return min(ref_cap, _scan(want_plus=True))  # variant search needs both indexes
+        # VARIANT search also needs the (SHIPPED, non-buildable) variant index.
+        return min(ref_cap, _scan(want_plus=True))
     except Exception:
         return 0
 
@@ -1413,12 +1446,14 @@ def complete_search() -> None:
     nuclease = pam_name_fields[2]
     # Treat --max-total-edits as the single "max edits" knob (mirroring the web slider):
     # when the user did NOT specify per-type bulges, derive bDNA=bRNA from the max-edits
-    # budget, BOUNDED by the bulge depth the installed index actually supports -- so e.g.
+    # budget, BOUNDED by the bulge depth a search can REACH here -- so e.g.
     # `complete-search --vcf ... --max-total-edits 4` searches up to 2 bulges of each type
-    # (finding 2mm+1bulge / 2mm+2bulge patterns) with no bulge flags, while never forcing
-    # a heavier on-demand index build than what is already installed. Explicit
-    # --bDNA/--bRNA always win; if no bulge-capable index is installed the search stays
-    # bulge-free (fast, safe) rather than building one implicitly.
+    # (finding 2mm+1bulge / 2mm+2bulge patterns) with no bulge flags. The reference term of
+    # the cap is buildable-aware (the reference index is built on demand from the shipped
+    # raw genome, as the search shell does), so a fresh/dict-less install no longer silently
+    # derives 0 bulges; the variant term stays strictly installed-index-based (a variant
+    # index can't be built dict-less). Explicit --bDNA/--bRNA always win; if no index can
+    # supply bulges and no raw genome exists the search stays bulge-free (fast, safe).
     if not _bdna_given and not _brna_given and max_total_edits > 0:
         _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant)
         _derived = min(max_total_edits, _idx_cap)
@@ -1428,7 +1463,7 @@ def complete_search() -> None:
             print(
                 f"[complete-search] no --bDNA/--bRNA given: deriving up to {_derived} "
                 f"bulge(s) of each type from --max-total-edits {max_total_edits} "
-                f"(installed index supports {_idx_cap})."
+                f"(reachable index bulge depth {_idx_cap})."
             )
     if bMax != 0:
         search_index = True

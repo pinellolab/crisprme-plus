@@ -222,6 +222,11 @@ PAMS_DIR = "PAMs"
 VCFS_DIR = "VCFs"
 # genomes directory
 GENOMES_DIR = "Genomes"
+# App-wide bulge ceiling: the largest index N the search form / build path targets
+# (index folder "<pam>_<N>_<genome>", usable bulges = N-1). Single-sourced here so the
+# reference-bulge-capacity helper (which pages_utils owns) and main_page's dropdown
+# ceiling (MAX_BULGES) agree; usable bulges top out at MAX_BULGES - 1.
+MAX_BULGES = 3
 # Post-process directory
 POSTPROCESS_DIR = "PostProcess"
 # Run parameters file
@@ -1415,6 +1420,49 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
             continue
         best = max(best, int(n_str))
     return max(0, best - 1)
+
+
+def reference_bulge_capacity(genome: str, pam_value: str) -> int:
+    """Bulge depth a REFERENCE bulge search CAN reach for this genome+PAM.
+
+    A variant/enriched bulge search first runs a REFERENCE bulge search against a
+    reference TST index at the requested depth (submit_job_automated_new_multiple_vcfs.sh
+    "Search Reference" step). That reference index is NOT shipped in a variant HF tarball
+    (publish_index bundles one index + its ``_INDELS`` companion only) -- but it is cheaply
+    BUILDABLE on demand from the shipped raw genome ``Genomes/<genome>/``, which the search
+    shell already does under an mkdir lock. So the correct reference "cap" is not "what is
+    already indexed" but "what depth a reference bulge search can REACH here":
+
+      * If a reference index already exists, its usable depth (``index_max_bulges`` with
+        no VCF) -- possibly deeper than the app ceiling if someone built a big one.
+      * Else, if the raw reference genome ``Genomes/<genome>/`` is present (has ``.fa``/
+        ``.fasta`` chromosome files), the app bulge ceiling ``MAX_BULGES - 1`` -- because a
+        reference index up to that depth can be built locally from it.
+      * Else 0 -- no reference index and no raw genome to build one -> only an index-free
+        0-bulge reference search is possible.
+
+    This is asymmetric to the VARIANT term of the bulge cap on purpose: a variant/indel
+    index can NOT be built dict-less (its source VCFs are not shipped), so callers must
+    keep the variant term strictly installed-index-based (``index_max_bulges`` with a VCF)
+    and only relax the REFERENCE term via this helper. Returns 0 on any error / missing
+    genome so callers degrade to a safe 0-bulge search.
+    """
+    if not genome or not pam_value or not pam_motif(pam_value):
+        return 0
+    installed = index_max_bulges(genome, pam_value, None)  # already-built reference index
+    genome_dir = genome.replace(" ", "_")
+    raw = os.path.join(current_working_directory, GENOMES_DIR, genome_dir)
+    buildable = 0
+    try:
+        if os.path.isdir(raw) and any(
+            f.endswith((".fa", ".fasta")) for f in os.listdir(raw)
+        ):
+            # raw reference genome present -> a reference index up to the app ceiling can
+            # be built locally on demand (the search shell does this under an mkdir lock).
+            buildable = MAX_BULGES - 1
+    except OSError:
+        buildable = 0
+    return max(installed, buildable)
 
 
 def has_variant_index(genome: str, dataset: str) -> bool:

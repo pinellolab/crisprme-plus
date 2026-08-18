@@ -115,6 +115,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_chrom_subset -v
 
+      - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
+        working-directory: PostProcess
+        run: python -m unittest test_bulge_cap -v
+
       - name: Phased multi-SNP haplotype not under-reported (deferred-peel fix)
         working-directory: PostProcess
         run: python -m unittest test_phased_haplotype -v
