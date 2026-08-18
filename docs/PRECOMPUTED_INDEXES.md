@@ -186,7 +186,7 @@ A dict-less variant index adds the tier/companion/self-completeness fields:
   "created_at": "2026-08-05T12:00:00+00:00",
   "pam": "NRG",
   "index_bmax": "3",
-  "genome": "hg38-dictless",
+  "genome": "HGDP",
   "display_label": "SpCas9 NRG — hg38 (1000G + HGDP)",
   "has_registry": true,
   "dictless": true,
@@ -194,6 +194,13 @@ A dict-less variant index adds the tier/companion/self-completeness fields:
   "has_samplesids": true
 }
 ```
+
+> **Note:** `pam` / `index_bmax` / `genome` are parsed from the index *name* and are
+> only meaningful for a **reference** index. For a **variant/merged** index the name
+> is `<pam>_<N>_<ref>+<vcf>`, so this name-splitting makes `genome` the last VCF token
+> (here `HGDP`), not the reference assembly — a harmless artifact. The authoritative
+> dict-less descriptors are the boolean flags: `dictless`, `has_registry`,
+> `has_genotypes`, `has_samplesids`.
 
 - `has_registry` — the main tarball carries the Tier-0 `registry_<vcf>/`.
 - `dictless` — the per-sample SNP dicts were excluded (tiers replace them).

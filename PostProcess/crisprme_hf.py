@@ -1045,11 +1045,12 @@ def publish_index(
         try:
             # ref token for the strict <ref>_<db>.samplesID.txt convention: parsed
             # from the index-dir name's REF segment, CANONICALIZED to drop a
-            # publish-only marker (e.g. '-dictless'). manifest["genome"] is parsed
-            # BEFORE stripping (index_name.rsplit('_',2)), so it may be e.g.
-            # 'hg38-dictless'; canonicalize the whole name then re-parse so the
-            # bundled per-db files are named 'hg38_<db>.samplesID.txt' and download
-            # (which passes --ref hg38) resolves them.
+            # publish-only marker (e.g. '-dictless'). NOTE: manifest["genome"] is a
+            # name-split artifact (index_name.rsplit('_',2)) that is only meaningful
+            # for a REFERENCE index; for a merged variant index it is the last VCF
+            # token (e.g. 'HGDP'), NOT the ref -- so we do NOT use it here. Canonicalize
+            # the whole name then re-parse the ref, so the bundled per-db files are
+            # named 'hg38_<db>.samplesID.txt' and download (--ref hg38) resolves them.
             _canon = canonical_index_name(index_name)
             _canon_base = _canon.partition("+")[0]  # <pam>_<N>_<ref>
             _cparts = _canon_base.rsplit("_", 2)
