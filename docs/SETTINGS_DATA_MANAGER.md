@@ -35,8 +35,11 @@ Bulge-enabled searches need a genome **index**.
 - **Build locally** from an installed genome + PAM + bulge counts.
 - **Pre-build a variant-aware index**: pick a VCF dataset in the build panel and
   CRISPRme enriches the genome with the variants and indexes it ahead of time, so
-  your first variant-aware search is fast instead of slow. (CLI equivalent:
-  `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt --bDNA 1 --bRNA 1 --vcf VCFs/1000G`.)
+  your first variant-aware search is fast instead of slow. Adding `--samplesID`
+  also emits the dict-less Tier-0 registry + Tier-1 genotype tiers (and, for a
+  merged panel, the combined samplesID list), making the index self-complete for
+  fast post-analysis. (CLI equivalent:
+  `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_1000G_HGDP --samplesID samplesIDs.config.txt`.)
 
 ### Add a VCF dataset
 Variant datasets are large, so they are **fetched server-side** rather than

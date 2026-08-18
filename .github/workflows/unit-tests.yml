@@ -63,6 +63,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_dictless_download -v
 
+      - name: "samplesID self-completeness (build emits combined + publish bundles + download installs)"
+        working-directory: PostProcess
+        run: python -m unittest test_samplesid_emit -v
+
       - name: Gzipped variant dicts (publish/download route .gz dicts)
         working-directory: PostProcess
         run: python -m unittest test_dict_gzip -v

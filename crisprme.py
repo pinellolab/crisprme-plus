@@ -59,6 +59,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
     download_component,
     publish_index,
     resolve_repo,
+    synthesize_combined_samplesid,
     DEFAULT_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
@@ -1767,6 +1768,78 @@ def _build_db_to_samplesid(samples_listing: str, workdir: str):
     return db_map
 
 
+def _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid):
+    """Emit the combined ``samplesIDs/<vcf_name>.samplesID.txt`` for a MERGED
+    variant index into the install, reusing the ONE union implementation
+    (:func:`crisprme_hf.synthesize_combined_samplesid`).
+
+    This is the build-side complement of the download-side synthesizer: a user
+    who BUILDS + PUBLISHES their own merged index must ship the combined
+    samplesID so ``download --what index`` + search is self-complete (the
+    search's ``--samplesID`` listing expects that single combined file, and the
+    download-side generation only unions per-db files that are already on HF).
+
+    ``db_to_samplesid`` is the ORDERED ``{db_label: samplesID_path}`` map already
+    computed by :func:`_build_db_to_samplesid` (reused, never recomputed). The map
+    KEYS are clean db labels (``1000G``, ``HGDP``) but the map VALUES may point at
+    arbitrarily-named source files (e.g. ``samplesIDs.HGDP.txt``); the shared
+    synthesizer keys off the STRICT ``<ref>_<db>.samplesID.txt`` convention, so we
+    first copy each per-db source into ``samplesIDs/`` under that CANONICAL name
+    (only when absent — never clobber a shipped file), then call the synthesizer.
+
+    NO-OP (returns ``None``) when the map has < 2 usable datasets (single dataset
+    => no combined file is needed; the per-db list IS the search's samplesID) — the
+    exact guard the synthesizer no-ops on. Fully guarded: any error is reported to
+    STDOUT (stderr is fatal in the post-analysis context) and swallowed so a build
+    never aborts over this additive convenience file. Returns the written combined
+    path, or ``None`` (no-op / already present / a component missing).
+    """
+    try:
+        # Gate: only a MERGED panel (>= 2 datasets) needs a combined file. A single
+        # entry (or two files collapsing to one label) => single dataset => NO-OP.
+        if not db_to_samplesid or len(db_to_samplesid) < 2:
+            return None
+        import shutil as _shutil
+
+        sdir = os.path.join(workdir, "samplesIDs")
+        os.makedirs(sdir, exist_ok=True)
+        # Normalize the per-db source files to the strict canonical names the
+        # shared synthesizer resolves by (<ref>_<db>.samplesID.txt). Copy in only
+        # when the canonical target is absent, so a shipped file is never touched.
+        for db_label, src in db_to_samplesid.items():
+            canonical = os.path.join(sdir, f"{genome_ref}_{db_label}.samplesID.txt")
+            if not os.path.isfile(canonical) and os.path.isfile(src):
+                _shutil.copy2(src, canonical)
+        # Single implementation of the union (header-less, dedup by SAMPLE_ID,
+        # stable dataset order) — mirrors pages/main_page._ensure_samplesid.
+        written = synthesize_combined_samplesid(workdir, vcf_name, ref=genome_ref)
+        if written:
+            print(
+                f"build-index-only: wrote combined samplesID "
+                f"{os.path.basename(written)} into {sdir} (union of "
+                f"{', '.join(db_to_samplesid)}); a published index is now "
+                f"self-complete for search.",
+                flush=True,
+            )
+        else:
+            print(
+                f"build-index-only: combined samplesID for {vcf_name} not "
+                f"synthesized (already present, single dataset, or a per-db "
+                f"component missing) -> no-op.",
+                flush=True,
+            )
+        return written
+    except Exception as _sid_err:  # additive convenience -> never abort a build
+        print(
+            f"WARNING [build-index-only]: could not emit combined samplesID for "
+            f"{vcf_name} ({_sid_err}); the index/dicts are still built. Provide "
+            f"samplesIDs/{vcf_name}.samplesID.txt manually if a merged search "
+            f"needs it.",
+            flush=True,
+        )
+        return None
+
+
 def _write_pam_build(index_dir: str, pamfile: str) -> None:
     """Records the PAM an index was built with, into ``<index_dir>/.pam_build``.
 
@@ -2092,6 +2165,13 @@ def build_index_only() -> None:
         print(f"Indels index already present: {indels_idx}", flush=True)
     _write_pam_build(snp_idx, pamfile)
     _write_display_label(snp_idx, display_name)
+    # ADDITIVE: emit the combined samplesIDs/<vcf_name>.samplesID.txt for a MERGED
+    # panel so a user who BUILDS + PUBLISHES their own merged index is self-complete
+    # (the search's --samplesID listing wants that single combined file). Reuses the
+    # already-computed db_to_samplesid map and the ONE union implementation; a strict
+    # NO-OP for a single-dataset panel / when --samplesID was absent (empty map).
+    # Fully guarded (STDOUT-only; never aborts) — the index/dicts are already built.
+    _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid)
     print(
         f"Variant index ready: {os.path.basename(snp_idx)} (+ _INDELS). A later "
         f"variant-aware search on {genome_ref} with {vcf_name} reuses it.",

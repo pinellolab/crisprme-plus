@@ -640,6 +640,29 @@ def download_component(
                         os.rename(dst, backup)
                     os.rename(src, dst)
                     shutil.rmtree(backup, ignore_errors=True)
+            # ADDITIVE: a self-complete variant index (published after the samplesID
+            # emit fix) bundles its samplesID lists under samplesIDs/ (see
+            # publish_index / _make_index_tarball). Install them into
+            # <workdir>/samplesIDs/ so `download --what index` searches WITHOUT a
+            # separate `--what samples`. INSTALL-ONLY-IF-ABSENT: never clobber a
+            # user's / `--what all`-fetched samplesID (a stale bundled file must not
+            # shadow a freshly fetched per-db list). This lands BEFORE the
+            # _ensure_perdb_samplesids + synthesize_combined_samplesid calls below,
+            # which then strictly no-op. Tiny text files -> a plain guarded copy is
+            # enough (no atomic swap needed). Absent for a legacy/reference index ->
+            # no-op, download-side 2.3.1 fallback still covers a merged index.
+            staged_sids = os.path.join(extract_tmp, "samplesIDs")
+            if os.path.isdir(staged_sids):
+                dst_sids_root = os.path.join(workdir, "samplesIDs")
+                os.makedirs(dst_sids_root, exist_ok=True)
+                for fn in sorted(os.listdir(staged_sids)):
+                    src = os.path.join(staged_sids, fn)
+                    if not os.path.isfile(src):
+                        continue
+                    dst = os.path.join(dst_sids_root, fn)
+                    if os.path.isfile(dst):
+                        continue  # never overwrite a shipped/fresher samplesID
+                    shutil.move(src, dst)
         finally:
             shutil.rmtree(extract_tmp, ignore_errors=True)
             shutil.rmtree(staging, ignore_errors=True)
@@ -750,8 +773,10 @@ def _make_index_tarball(
     indels_dir: str,
     manifest: Dict,
     dict_dirs: Optional[List[str]] = None,
+    samplesid_files: Optional[List[str]] = None,
 ) -> None:
-    """Builds the one-file-per-index ``.tar.gz`` (index + _INDELS + dicts + manifest).
+    """Builds the one-file-per-index ``.tar.gz`` (index + _INDELS + dicts +
+    samplesID lists + manifest).
 
     Prefers ``pigz`` (parallel gzip) via GNU ``tar`` so a large index compresses
     across all cores instead of one — a 170GB pamless index tars in minutes with
@@ -760,62 +785,84 @@ def _make_index_tarball(
     an identical archive layout: ``<index_name>/``, optional ``<index_name>_INDELS/``,
     each ``dict_dirs`` entry stored under ``Dictionaries/<basename>/`` (the per-sample
     variant dictionaries a variant search needs at post-analysis time — bundling them
-    lets a downloaded index search WITHOUT the source VCFs), and ``manifest.json`` at
-    the archive root (see download_component's extractor).
+    lets a downloaded index search WITHOUT the source VCFs), each ``samplesid_files``
+    entry stored under ``samplesIDs/<basename>`` (the combined + per-db samplesID
+    lists a MERGED variant search's ``--samplesID`` needs — bundling them makes
+    ``download --what index`` self-complete, no separate ``--what samples``), and
+    ``manifest.json`` at the archive root (see download_component's extractor).
+
+    Both the samplesID files (small text) and manifest.json are staged into a
+    single temp dir so the two code paths share ONE staging mechanism.
     """
     manifest_bytes = json.dumps(manifest, indent=2).encode()
     pigz = shutil.which("pigz")
     tar = shutil.which("tar")
-    if pigz and tar:
-        # stage manifest.json in a temp dir so tar can add it at the archive root
-        # with the same "manifest.json" name the extractor expects. All three -C
-        # paths are absolute, so the multi -C chaining is order-independent.
-        tmpd = tempfile.mkdtemp(prefix="hfpub_")
-        try:
-            with open(os.path.join(tmpd, "manifest.json"), "wb") as mf:
-                mf.write(manifest_bytes)
-            parent = os.path.dirname(index_dir)
-            # -C <dir> <name> stores <name> under its basename == the desired arcname
-            inputs = ["-C", parent, index_name]
-            if os.path.isdir(indels_dir):
-                inputs += ["-C", parent, os.path.basename(indels_dir)]
-            for dp in (dict_dirs or []):
-                # store as Dictionaries/<basename>/... so the extractor routes it to
-                # <workdir>/Dictionaries/ (not genome_library/)
-                inputs += ["-C", os.path.dirname(os.path.dirname(dp)),
-                           os.path.join("Dictionaries", os.path.basename(dp))]
-            inputs += ["-C", tmpd, "manifest.json"]
-            subprocess.check_call(
-                [tar, "--use-compress-program", pigz, "-cf", tarball, *inputs]
-            )
-            return
-        except (subprocess.CalledProcessError, OSError) as exc:
-            # this tar may not support --use-compress-program (busybox / very old),
-            # or pigz died mid-stream -> drop any partial tarball and fall through
-            # to the single-threaded Python path so publish still succeeds.
+    # stage the small text artifacts (manifest.json + samplesID lists) in a temp
+    # dir so BOTH paths add them by the same arcnames the extractor expects:
+    #   <tmpd>/manifest.json          -> manifest.json (archive root)
+    #   <tmpd>/samplesIDs/<basename>  -> samplesIDs/<basename>
+    tmpd = tempfile.mkdtemp(prefix="hfpub_")
+    try:
+        with open(os.path.join(tmpd, "manifest.json"), "wb") as mf:
+            mf.write(manifest_bytes)
+        staged_sids = []  # arcnames (relative to tmpd) actually staged
+        for sf in (samplesid_files or []):
+            if not (os.path.isfile(sf) and os.path.getsize(sf) > 0):
+                continue  # skip absent/empty (legacy build) -> fewer bundled files
+            sdir = os.path.join(tmpd, "samplesIDs")
+            os.makedirs(sdir, exist_ok=True)
+            arc = os.path.join("samplesIDs", os.path.basename(sf))
+            shutil.copy2(sf, os.path.join(tmpd, arc))
+            staged_sids.append(arc)
+        if pigz and tar:
+            try:
+                parent = os.path.dirname(index_dir)
+                # -C <dir> <name> stores <name> under its basename == the arcname
+                inputs = ["-C", parent, index_name]
+                if os.path.isdir(indels_dir):
+                    inputs += ["-C", parent, os.path.basename(indels_dir)]
+                for dp in (dict_dirs or []):
+                    # store as Dictionaries/<basename>/... so the extractor routes it
+                    # to <workdir>/Dictionaries/ (not genome_library/)
+                    inputs += ["-C", os.path.dirname(os.path.dirname(dp)),
+                               os.path.join("Dictionaries", os.path.basename(dp))]
+                # samplesID lists + manifest.json both come from the staging tmpd
+                for arc in staged_sids:
+                    inputs += ["-C", tmpd, arc]
+                inputs += ["-C", tmpd, "manifest.json"]
+                subprocess.check_call(
+                    [tar, "--use-compress-program", pigz, "-cf", tarball, *inputs]
+                )
+                return
+            except (subprocess.CalledProcessError, OSError) as exc:
+                # this tar may not support --use-compress-program (busybox / very
+                # old), or pigz died mid-stream -> drop any partial tarball and fall
+                # through to the single-threaded Python path so publish succeeds.
+                sys.stderr.write(
+                    f"Note: parallel (pigz) compression failed ({exc}); falling back "
+                    f"to single-threaded gzip.\n"
+                )
+                if os.path.exists(tarball):
+                    os.remove(tarball)
+        else:
             sys.stderr.write(
-                f"Note: parallel (pigz) compression failed ({exc}); falling back "
-                f"to single-threaded gzip.\n"
+                "Note: pigz/tar not found — compressing with single-threaded gzip "
+                "(slow for large indexes). Install pigz for parallel compression.\n"
             )
-            if os.path.exists(tarball):
-                os.remove(tarball)
-        finally:
-            shutil.rmtree(tmpd, ignore_errors=True)
-    else:
-        sys.stderr.write(
-            "Note: pigz/tar not found — compressing with single-threaded gzip "
-            "(slow for large indexes). Install pigz for parallel compression.\n"
-        )
-    # fallback: single-threaded Python tarfile (identical layout)
-    with tarfile.open(tarball, "w:gz") as tf:
-        tf.add(index_dir, arcname=index_name)  # -> genome_library/<name>/ on unpack
-        if os.path.isdir(indels_dir):
-            tf.add(indels_dir, arcname=os.path.basename(indels_dir))
-        for dp in (dict_dirs or []):  # -> Dictionaries/<basename>/ on unpack
-            tf.add(dp, arcname=os.path.join("Dictionaries", os.path.basename(dp)))
-        info = tarfile.TarInfo(name="manifest.json")
-        info.size = len(manifest_bytes)
-        tf.addfile(info, io.BytesIO(manifest_bytes))
+        # fallback: single-threaded Python tarfile (identical layout)
+        with tarfile.open(tarball, "w:gz") as tf:
+            tf.add(index_dir, arcname=index_name)  # -> genome_library/<name>/ on unpack
+            if os.path.isdir(indels_dir):
+                tf.add(indels_dir, arcname=os.path.basename(indels_dir))
+            for dp in (dict_dirs or []):  # -> Dictionaries/<basename>/ on unpack
+                tf.add(dp, arcname=os.path.join("Dictionaries", os.path.basename(dp)))
+            for arc in staged_sids:  # -> samplesIDs/<basename> on unpack
+                tf.add(os.path.join(tmpd, arc), arcname=arc)
+            info = tarfile.TarInfo(name="manifest.json")
+            info.size = len(manifest_bytes)
+            tf.addfile(info, io.BytesIO(manifest_bytes))
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
 
 
 def _make_genotypes_tarball(tarball: str, genotypes_dir: str) -> None:
@@ -982,12 +1029,56 @@ def publish_index(
         gt_p = os.path.join(dicts_root, genotypes_name)
         if os.path.isdir(gt_p) and os.listdir(gt_p):
             genotypes_dir = gt_p
+    # ADDITIVE samplesID self-completeness: bundle the samplesID lists this variant
+    # index's datasets need — the combined <vcf_name>.samplesID.txt (emitted at
+    # build time by crisprme.py._emit_combined_samplesid) plus the per-db
+    # <ref>_<db>.samplesID.txt lists — INTO the main tarball, routed to
+    # <workdir>/samplesIDs/ on download. This makes `download --what index` yield a
+    # searchable install with NO separate `--what samples`/`--what all`; download's
+    # 2.3.1 _ensure_perdb_samplesids + synthesize_combined_samplesid then no-op
+    # (belt-and-suspenders). Each file is guarded by exists+non-empty; a legacy
+    # index built before the emit fix simply bundles fewer files (or none) and the
+    # download-side fallback still covers it. Reference-only indexes (no vcf_name)
+    # skip this block entirely -> byte-for-byte-unchanged tarball.
+    samplesid_files: List[str] = []
+    if vcf_name:
+        try:
+            # ref token for the strict <ref>_<db>.samplesID.txt convention: parsed
+            # from the index-dir name's REF segment, CANONICALIZED to drop a
+            # publish-only marker (e.g. '-dictless'). manifest["genome"] is parsed
+            # BEFORE stripping (index_name.rsplit('_',2)), so it may be e.g.
+            # 'hg38-dictless'; canonicalize the whole name then re-parse so the
+            # bundled per-db files are named 'hg38_<db>.samplesID.txt' and download
+            # (which passes --ref hg38) resolves them.
+            _canon = canonical_index_name(index_name)
+            _canon_base = _canon.partition("+")[0]  # <pam>_<N>_<ref>
+            _cparts = _canon_base.rsplit("_", 2)
+            ref_token = _cparts[2] if len(_cparts) == 3 else manifest.get("genome", "hg38")
+            sdir = os.path.join(cwd, "samplesIDs")
+            candidates = [os.path.join(sdir, f"{vcf_name}.samplesID.txt")]  # combined
+            for db in _derive_perdb_datasets(vcf_name, ref_token):  # [] => single ds
+                candidates.append(os.path.join(sdir, f"{ref_token}_{db}.samplesID.txt"))
+            for c in candidates:
+                if os.path.isfile(c) and os.path.getsize(c) > 0:
+                    samplesid_files.append(c)
+        except Exception as exc:  # additive convenience -> never fail a publish
+            sys.stdout.write(
+                f"NOTE: could not collect samplesID lists for '{index_name}' "
+                f"({exc}); publishing without bundled samplesIDs (download-side "
+                f"synthesis still covers a merged index if the per-db lists are on "
+                f"HF).\n"
+            )
+            samplesid_files = []
     # record the publish shape so a consumer (list_available_downloads / download)
     # can tell a dictless index + a genotype companion apart without unpacking.
     manifest["dictless"] = bool(dictless and vcf_name)
     manifest["has_genotypes"] = genotypes_dir is not None
+    manifest["has_samplesids"] = bool(samplesid_files)
     tarball = f"{index_dir}.tar.gz"
-    _make_index_tarball(tarball, index_dir, index_name, indels_dir, manifest, dict_dirs)
+    _make_index_tarball(
+        tarball, index_dir, index_name, indels_dir, manifest, dict_dirs,
+        samplesid_files=samplesid_files,
+    )
     remote_path = f"indexes/{index_name}.tar.gz"
     api = hf.HfApi()
     api.upload_file(

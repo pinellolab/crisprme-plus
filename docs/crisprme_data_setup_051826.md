@@ -271,6 +271,19 @@ crisprme.py build-index-only \
 
 Pass the **same** `--genome`, `--pam`, `--bDNA`, `--bRNA` you will use in `complete-search`, so the folder name matches and the search reuses it. (Zero-bulge searches need no index and this command will say so.)
 
+Add `--vcf <folder> --samplesID <listing>` to also pre-build the **variant-aware** index (genome enrichment + SNP/indel indexes). With `--samplesID` the build additionally emits the dict-less Tier-0 registry + Tier-1 genotype tiers and, for a merged panel, the combined `samplesIDs/<vcf>.samplesID.txt` list — so the built index is self-complete for the fast post-analysis path (see `docs/PRECOMPUTED_INDEXES.md`). Without `--samplesID` you get a dicts-only index (no tiers).
+
+```bash
+crisprme.py build-index-only \
+  --genome Genomes/hg38 \
+  --pam PAMs/20bp-NRG-SpCas9.txt \
+  --bDNA 2 --bRNA 2 \
+  --vcf VCFs/hg38_1000G_HGDP \
+  --samplesID samplesIDs.config.txt \
+  --thread 16 \
+  --path "$CRISPRME_DIR"
+```
+
 ### Point a search at a prebuilt (or shared) index
 
 `--index-path` tells `complete-search` to look for the reference index in a specific library instead of building one under the working directory. If a matching index isn't there, the run **fails fast with a clear message** (rather than silently rebuilding) — which is what you want on a read-only shared mount:
