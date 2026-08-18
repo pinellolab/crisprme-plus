@@ -310,8 +310,9 @@ def _compute_plot_yrange(
     """
     if not lower_barplot_values:  # validate inputs
         return _create_default_range()
-    # find maximum value across all lower bounds
-    max_lower_value = max(lower_barplot_values.values())
+    # find maximum value across all lower bounds (default=0 -> defense in depth:
+    # never max() an empty sequence, even if a caller passes {} past the guard above)
+    max_lower_value = max(lower_barplot_values.values(), default=0)
     total_max = max_value + max_lower_value  # update total maximum
     if total_max <= 0:  # calculate appropriate Y-range
         return _create_default_range()
@@ -504,6 +505,32 @@ def draw_barplot(
     Returns:
         None. The function saves the generated barplot as a PNG file.
     """
+    # No population rows for this total (e.g. the requested total is beyond the
+    # groups the PopulationDistribution file actually holds -- mmbul_num can be
+    # driven past mm + search_bulges by an out-of-range caller). There is nothing
+    # to plot: emit an empty "no targets" figure and return, never crashing on a
+    # max()/index of an empty structure downstream. Defense in depth alongside the
+    # tightened shell loop bound (which normally keeps mmbul_num in range).
+    if not barplot_values:
+        plt.figure()
+        plt.title(
+            f"Targets with up to {mmbul_num} mismatches and/or bulges by "
+            "superpopulation",
+            size=TITLESIZE,
+        )
+        plt.annotate(
+            f"No targets found with {mmbul_num} mismatches + bulges",
+            (0.5, 0.5),
+            xycoords="axes fraction",
+            size=FONTSIZE,
+            ha="center",
+            va="center",
+        )
+        plt.savefig(
+            f"populations_distribution_{guide}_{mmbul_num}total_{score}_new.png",
+            format="png",
+        )
+        return
     ax = plt.figure()  # initialize plot
     # compute plot x-range and y-range
     x_range = np.arange(0, len(labels), 1)
@@ -513,8 +540,11 @@ def draw_barplot(
     lower_counts, bar_counts = retrieve_barplot_counts(
         barplot_values, lower_barplot_values, number_bars
     )  # retrieve bar counts
+    # max(..., default=0): defense in depth -- lower_counts is empty when there
+    # are no population rows, and max([]) would otherwise raise ValueError.
+    has_lower_targets = max(lower_counts, default=0) > 0
     bar_low = []  # bars storing the counts of targets lower than threshold
-    if max(lower_counts) > 0:  # lower targets found
+    if has_lower_targets:  # lower targets found
         bar_low = [
             plt.bar(
                 x_range,
@@ -540,7 +570,7 @@ def draw_barplot(
         )
         previous_bar = [x + previous_bar[j] for j, x in enumerate(bar_counts[i])]
     legend_labs, handles_colors = compute_legend_labels_n_colors(
-        barplot_values, bar_low, bars, mmbul_num, max(lower_counts) > 0, number_bars
+        barplot_values, bar_low, bars, mmbul_num, has_lower_targets, number_bars
     )  # compute legened labels and color handles, and create legend
     plt.legend(handles_colors, legend_labs, fontsize=FONTSIZE, handlelength=5, handler_map={tuple: HandlerTuple(ndivide=None)}, title="MM mismatches, B bulges", title_fontsize=FONTSIZE)  # type: ignore
     plt.title(

@@ -1061,8 +1061,18 @@ if ! [ -d "$output_folder/imgs" ]; then  # create images folder
 fi
 if [ "$vcf_name" != "_" ]; then  # variants available -> create population distribution plots
 	cd "$output_folder/imgs"
+	# Population-distribution totals loop bound: iterate 0 .. mm + SEARCH bulge
+	# budget, NOT mm + bMax (the RESOLVED INDEX depth N). process_summaries.py
+	# sizes each PopulationDistribution row's groups from bulge = bDNA + bRNA
+	# (the actual search bulge budget), so the meaningful totals only reach
+	# mm + bDNA + bRNA. When the reused index N > bDNA + bRNA (always for a
+	# 0-bulge search on an N>=1 index, and for the MM6/DNA2/RNA2 default on the
+	# NRG_3 index), mm + bMax overshot the file's groups; populations_distribution.py
+	# then read an out-of-range total, got no rows, and crashed on max([]) -- which
+	# crisprme treats as fatal ([ -s $logerror ]) and drops integrated_results.tsv.
+	pop_dist_total_max=$(expr $mm + $bDNA + $bRNA)
 	while IFS= read -r line || [ -n "$line" ]; do
-		for total in $(seq 0 $(expr $mm + $bMax)); do
+		for total in $(seq 0 $pop_dist_total_max); do
 			python $starting_dir/populations_distribution.py "${output_folder}/.$(basename ${output_folder}).PopulationDistribution_CFD.txt" $total $line "CFD"
 			python $starting_dir/populations_distribution.py "${output_folder}/.$(basename ${output_folder}).PopulationDistribution_CRISTA.txt" $total $line "CRISTA"
 			python $starting_dir/populations_distribution.py "${output_folder}/.$(basename ${output_folder}).PopulationDistribution_fewest.txt" $total $line "fewest"

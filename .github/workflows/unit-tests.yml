@@ -119,6 +119,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_bulge_cap -v
 
+      - name: "Population-distribution out-of-range total never crashes (v2.3.3)"
+        working-directory: PostProcess
+        run: python -m unittest test_populations_distribution -v
+
       - name: Phased multi-SNP haplotype not under-reported (deferred-peel fix)
         working-directory: PostProcess
         run: python -m unittest test_phased_haplotype -v
