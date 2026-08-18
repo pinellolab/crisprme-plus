@@ -65,19 +65,47 @@ def _build_index_tarball(src_root, index_name, sink_dir, dicts=True):
     return tarball
 
 
-def _serve_snapshot(sink_dir):
-    """Return a _hf_snapshot stub that copies any requested indexes/* file out of
-    sink_dir into the caller's local_dir/indexes/."""
+def _serve_snapshot(sink_dir, samples_dir=None, fetch_log=None):
+    """Return a _hf_snapshot stub that serves the tarball(s) from sink_dir AND —
+    when ``samples_dir`` is given — the per-db samplesID files it holds.
+
+    Each allow_pattern is a repo-relative path like ``indexes/<name>.tar.gz`` or
+    ``samplesIDs/<ref>_<db>.samplesID.txt``. The stub reproduces the repo tree under
+    ``local_dir`` (as huggingface_hub.snapshot_download does): it routes an
+    ``indexes/*`` pattern to ``sink_dir`` and a ``samplesIDs/*`` pattern to
+    ``samples_dir``, copying the file to ``local_dir/<prefix>/<basename>`` only when
+    the source exists (an unpublished file simply isn't copied — mirroring HF's
+    "pattern matched nothing"). Appended to ``fetch_log`` (if given) so a test can
+    assert exactly which patterns were requested (and that NONE were on the no-op
+    path).
+    """
     def fake_snapshot(repo, allow_patterns, local_dir, token=None):
-        dest = os.path.join(local_dir, "indexes")
-        os.makedirs(dest, exist_ok=True)
+        if fetch_log is not None:
+            fetch_log.extend(allow_patterns)
         for pat in allow_patterns:
+            prefix = pat.split("/", 1)[0]
             base = os.path.basename(pat)
-            srcf = os.path.join(sink_dir, base)
+            if prefix == "samplesIDs" and samples_dir is not None:
+                srcf = os.path.join(samples_dir, base)
+            else:
+                srcf = os.path.join(sink_dir, base)
             if os.path.isfile(srcf):
+                dest = os.path.join(local_dir, prefix)
+                os.makedirs(dest, exist_ok=True)
                 shutil.copy(srcf, os.path.join(dest, base))
         return local_dir
     return fake_snapshot
+
+
+def _make_remote_samplesids(dbs=("1000G", "HGDP")):
+    """Materialize a fake HF ``samplesIDs/`` component in a temp dir: one per-db
+    file per requested dataset. Returns the dir path."""
+    remote = tempfile.mkdtemp(prefix="dl_samples_")
+    bodies = {"1000G": _S_1000G, "HGDP": _S_HGDP}
+    for db in dbs:
+        _mkfile(os.path.join(remote, f"hg38_{db}.samplesID.txt"),
+                bodies.get(db, "#SAMPLE_ID\nX\n"))
+    return remote
 
 
 # per-db samplesID fixtures (header + a couple of data rows each)
@@ -284,6 +312,215 @@ class TestDictlessDownloadEndToEnd(unittest.TestCase):
             self.assertEqual(fh.read(), "PRESHIPPED\tX\tY\tZ\n")
         # no stray '-dictless' dir anywhere in genome_library
         self.assertFalse(any("-dictless" in n for n in os.listdir(gl)))
+
+
+# --- GAP 2b: _derive_perdb_datasets (pure, shared derivation) ----------------
+
+class TestDerivePerdbDatasets(unittest.TestCase):
+    """The ensure-step and the synthesizer MUST agree byte-for-byte on which
+    per-db files matter; both now derive from this single helper."""
+
+    def test_merged_two_datasets(self):
+        self.assertEqual(
+            hf._derive_perdb_datasets("hg38_1000G_HGDP", "hg38"),
+            ["1000G", "HGDP"],
+        )
+
+    def test_merged_three_datasets(self):
+        self.assertEqual(
+            hf._derive_perdb_datasets("hg38_1000G_HGDP_gnomAD", "hg38"),
+            ["1000G", "HGDP", "gnomAD"],
+        )
+
+    def test_single_dataset_is_empty(self):
+        # "hg38_1000G" -> strip ref -> "1000G" (no '_') -> [] (nothing to ensure)
+        self.assertEqual(hf._derive_perdb_datasets("hg38_1000G", "hg38"), [])
+
+    def test_no_ref_prefix(self):
+        # a vcf_name that does not start with "<ref>_" is used verbatim
+        self.assertEqual(
+            hf._derive_perdb_datasets("1000G_HGDP", "hg38"), ["1000G", "HGDP"])
+
+
+# --- GAP 2b: _ensure_perdb_samplesids (offline, stubbed snapshot) ------------
+
+class TestEnsurePerdbSamplesids(unittest.TestCase):
+    def setUp(self):
+        self.workdir = tempfile.mkdtemp(prefix="ens_")
+        self.samples_remote = _make_remote_samplesids()
+        self._orig_snapshot = hf._hf_snapshot
+        self.fetch_log = []
+        hf._hf_snapshot = _serve_snapshot(
+            self.workdir, samples_dir=self.samples_remote, fetch_log=self.fetch_log)
+
+    def tearDown(self):
+        hf._hf_snapshot = self._orig_snapshot
+        for d in (self.workdir, self.samples_remote):
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_fetches_both_missing_per_db(self):
+        hf._ensure_perdb_samplesids(
+            "local/test", self.workdir, "hg38_1000G_HGDP", "hg38", token="x")
+        sdir = os.path.join(self.workdir, "samplesIDs")
+        self.assertTrue(os.path.isfile(os.path.join(sdir, "hg38_1000G.samplesID.txt")))
+        self.assertTrue(os.path.isfile(os.path.join(sdir, "hg38_HGDP.samplesID.txt")))
+        # exactly the two exact-path patterns were requested (no whole-folder glob)
+        self.assertEqual(
+            sorted(self.fetch_log),
+            ["samplesIDs/hg38_1000G.samplesID.txt",
+             "samplesIDs/hg38_HGDP.samplesID.txt"],
+        )
+        # no staging dir left behind
+        self.assertFalse(os.path.isdir(os.path.join(self.workdir, ".hf_stage_samplesids")))
+
+    def test_noop_when_all_present(self):
+        _write_per_db_samplesids(self.workdir)  # both already on disk
+        hf._ensure_perdb_samplesids(
+            "local/test", self.workdir, "hg38_1000G_HGDP", "hg38", token="x")
+        # NO fetch happened at all (no _hf_snapshot call)
+        self.assertEqual(self.fetch_log, [])
+
+    def test_fetches_only_the_missing_one(self):
+        sdir = os.path.join(self.workdir, "samplesIDs")
+        _mkfile(os.path.join(sdir, "hg38_1000G.samplesID.txt"), _S_1000G)  # present
+        hf._ensure_perdb_samplesids(
+            "local/test", self.workdir, "hg38_1000G_HGDP", "hg38", token="x")
+        # only the absent HGDP file was fetched; the present 1000G was not clobbered
+        self.assertEqual(self.fetch_log, ["samplesIDs/hg38_HGDP.samplesID.txt"])
+        self.assertTrue(os.path.isfile(os.path.join(sdir, "hg38_HGDP.samplesID.txt")))
+
+    def test_single_dataset_is_noop(self):
+        hf._ensure_perdb_samplesids(
+            "local/test", self.workdir, "hg38_1000G", "hg38", token="x")
+        self.assertEqual(self.fetch_log, [])  # single dataset -> no fetch
+
+    def test_combined_already_present_short_circuits(self):
+        sdir = os.path.join(self.workdir, "samplesIDs")
+        _mkfile(os.path.join(sdir, "hg38_1000G_HGDP.samplesID.txt"), "PRE\n")
+        hf._ensure_perdb_samplesids(
+            "local/test", self.workdir, "hg38_1000G_HGDP", "hg38", token="x")
+        self.assertEqual(self.fetch_log, [])  # combined present -> nothing to ensure
+
+
+# --- GAP 2b end-to-end: standalone `--what index` (offline, stubbed) ---------
+
+class TestStandaloneIndexSamplesidFetch(unittest.TestCase):
+    """A standalone `download --what index` (no prior samples fetch) must still
+    end up with the combined samplesID the search needs."""
+
+    def setUp(self):
+        self.src = tempfile.mkdtemp(prefix="dl2_src_")
+        self.sink = tempfile.mkdtemp(prefix="dl2_sink_")
+        self.workdir = tempfile.mkdtemp(prefix="dl2_dst_")
+        self.samples_remote = _make_remote_samplesids()
+        self._orig_snapshot = hf._hf_snapshot
+        self.fetch_log = []
+
+    def tearDown(self):
+        hf._hf_snapshot = self._orig_snapshot
+        for d in (self.src, self.sink, self.workdir, self.samples_remote):
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_a_standalone_index_fetches_per_db_then_synthesizes(self):
+        """(a) STANDALONE `--what index` variant install with NO per-db samplesIDs
+        present -> the per-db fetch is triggered (stubbed) and the combined file is
+        synthesized."""
+        published = "NRG_3_hg38-dictless+hg38_1000G_HGDP"
+        _build_index_tarball(self.src, published, self.sink, dicts=False)
+        hf._hf_snapshot = _serve_snapshot(
+            self.sink, samples_dir=self.samples_remote, fetch_log=self.fetch_log)
+        # NOTE: no _write_per_db_samplesids(self.workdir) — the standalone case
+
+        hf.download_component(
+            "index", self.workdir, repo="local/test",
+            index_name=published, token="x", genotypes=False)
+
+        sdir = os.path.join(self.workdir, "samplesIDs")
+        # the two per-db files were fetched into place...
+        self.assertTrue(os.path.isfile(os.path.join(sdir, "hg38_1000G.samplesID.txt")))
+        self.assertTrue(os.path.isfile(os.path.join(sdir, "hg38_HGDP.samplesID.txt")))
+        # ...and the exact-path per-db patterns were among the snapshot requests
+        self.assertIn("samplesIDs/hg38_1000G.samplesID.txt", self.fetch_log)
+        self.assertIn("samplesIDs/hg38_HGDP.samplesID.txt", self.fetch_log)
+        # combined samplesID synthesized from them, named for the canonical vcf seg
+        combined = os.path.join(sdir, "hg38_1000G_HGDP.samplesID.txt")
+        self.assertTrue(os.path.isfile(combined),
+                        "combined samplesID not synthesized on standalone install")
+        with open(combined) as fh:
+            body = fh.read()
+        self.assertEqual(
+            body,
+            "HG00096\tGBR\tEUR\tmale\n"
+            "HG00097\tGBR\tEUR\tfemale\n"
+            "HGDP00001\tBrahui\tCENTRAL_SOUTH_ASIA\tmale\n"
+            "HGDP00003\tBrahui\tCENTRAL_SOUTH_ASIA\tmale\n",
+        )
+
+    def test_b_what_all_path_no_extra_fetch_still_synthesizes(self):
+        """(b) NO-REGRESSION for `--what all`: the per-db files are already present
+        (the 'samples' component ran first) -> NO extra samplesID fetch, and the
+        combined is synthesized exactly as before."""
+        published = "NRG_3_hg38-dictless+hg38_1000G_HGDP"
+        _build_index_tarball(self.src, published, self.sink, dicts=False)
+        _write_per_db_samplesids(self.workdir)  # the --what all preamble
+        hf._hf_snapshot = _serve_snapshot(
+            self.sink, samples_dir=self.samples_remote, fetch_log=self.fetch_log)
+
+        hf.download_component(
+            "index", self.workdir, repo="local/test",
+            index_name=published, token="x", genotypes=False)
+
+        sdir = os.path.join(self.workdir, "samplesIDs")
+        # NO per-db samplesID fetch happened (only the index tarball was requested)
+        self.assertNotIn("samplesIDs/hg38_1000G.samplesID.txt", self.fetch_log)
+        self.assertNotIn("samplesIDs/hg38_HGDP.samplesID.txt", self.fetch_log)
+        self.assertFalse(any(p.startswith("samplesIDs/") for p in self.fetch_log),
+                         "no samplesID fetch may occur on the --what all path")
+        # combined synthesized as before
+        combined = os.path.join(sdir, "hg38_1000G_HGDP.samplesID.txt")
+        self.assertTrue(os.path.isfile(combined))
+        with open(combined) as fh:
+            self.assertEqual(
+                fh.read(),
+                "HG00096\tGBR\tEUR\tmale\n"
+                "HG00097\tGBR\tEUR\tfemale\n"
+                "HGDP00001\tBrahui\tCENTRAL_SOUTH_ASIA\tmale\n"
+                "HGDP00003\tBrahui\tCENTRAL_SOUTH_ASIA\tmale\n",
+            )
+        # no staging dir left behind
+        self.assertFalse(os.path.isdir(
+            os.path.join(self.workdir, ".hf_stage_samplesids")))
+
+    def test_c_per_db_absent_from_repo_warns_and_no_crash(self):
+        """(c) a per-db file ABSENT from the repo -> warned to STDOUT, no crash, and
+        NO half-union combined file written (synthesizer no-ops gracefully)."""
+        published = "NRG_3_hg38-dictless+hg38_1000G_HGDP"
+        _build_index_tarball(self.src, published, self.sink, dicts=False)
+        # remote has ONLY 1000G published; HGDP is absent
+        partial_remote = _make_remote_samplesids(dbs=("1000G",))
+        self.addCleanup(shutil.rmtree, partial_remote, True)
+        hf._hf_snapshot = _serve_snapshot(
+            self.sink, samples_dir=partial_remote, fetch_log=self.fetch_log)
+
+        # must not raise
+        dest = hf.download_component(
+            "index", self.workdir, repo="local/test",
+            index_name=published, token="x", genotypes=False)
+
+        gl = os.path.join(self.workdir, "genome_library")
+        canonical = "NRG_3_hg38+hg38_1000G_HGDP"
+        self.assertEqual(dest, os.path.join(gl, canonical))  # index still installed
+        sdir = os.path.join(self.workdir, "samplesIDs")
+        # the available per-db (1000G) was fetched; the missing one (HGDP) was not
+        self.assertTrue(os.path.isfile(os.path.join(sdir, "hg38_1000G.samplesID.txt")))
+        self.assertFalse(os.path.isfile(os.path.join(sdir, "hg38_HGDP.samplesID.txt")))
+        # NO combined file (a missing component => graceful no-op, never a half-union)
+        self.assertFalse(os.path.isfile(
+            os.path.join(sdir, "hg38_1000G_HGDP.samplesID.txt")),
+            "must not write a half-union combined samplesID")
+        # no staging dir left behind on the warn path
+        self.assertFalse(os.path.isdir(
+            os.path.join(self.workdir, ".hf_stage_samplesids")))
 
 
 if __name__ == "__main__":

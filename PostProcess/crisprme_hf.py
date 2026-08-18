@@ -113,11 +113,13 @@ def synthesize_combined_samplesid(workdir, vcf_name, ref="hg38"):
     target = os.path.join(sdir, f"{vcf_name}.samplesID.txt")
     if os.path.isfile(target):
         return None  # already present -> NO-OP (never touch a shipped file)
-    # derive dataset tokens: strip the leading "<ref>_" if present, split on "_"
-    dataset = vcf_name[len(ref) + 1:] if vcf_name.startswith(ref + "_") else vcf_name
-    if "_" not in dataset:
+    # derive dataset tokens via the SHARED helper so the ensure-step
+    # (_ensure_perdb_samplesids) and this synthesizer never disagree on which
+    # per-db files matter. Empty -> single (non-merged) dataset -> nothing to do.
+    dbs = _derive_perdb_datasets(vcf_name, ref)
+    if not dbs:
         return None  # single (non-merged) dataset -> nothing to synthesize
-    comps = [os.path.join(sdir, f"{ref}_{c}.samplesID.txt") for c in dataset.split("_")]
+    comps = [os.path.join(sdir, f"{ref}_{c}.samplesID.txt") for c in dbs]
     if not comps or not all(os.path.isfile(c) for c in comps):
         return None  # cannot synthesize (don't write a half-union)
     seen, rows = set(), []
@@ -332,6 +334,97 @@ def _fetch_genotypes_companion(
     finally:
         shutil.rmtree(extract_tmp, ignore_errors=True)
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def _derive_perdb_datasets(vcf_name: str, ref: str = "hg38") -> List[str]:
+    """Derive the per-db dataset tokens of a MERGED variant index, EXACTLY the way
+    :func:`synthesize_combined_samplesid` does (lines 116-120), so the ensure-step
+    and the synthesizer never diverge on which per-db files matter.
+
+    ``vcf_name`` is the segment after the first ``+`` of an index name (e.g.
+    ``hg38_1000G_HGDP``). Strip a leading ``<ref>_`` then split on ``_``. Returns
+    ``[]`` for a SINGLE (non-merged) dataset (no ``_`` after the ref-strip), which
+    is the exact guard the synthesizer no-ops on — a single dataset needs no
+    combined file, and its per-db list IS the samplesID the search uses.
+    """
+    dataset = vcf_name[len(ref) + 1:] if vcf_name.startswith(ref + "_") else vcf_name
+    if "_" not in dataset:
+        return []  # single (non-merged) dataset -> nothing to ensure/synthesize
+    return dataset.split("_")
+
+
+def _ensure_perdb_samplesids(
+    repo: str,
+    workdir: str,
+    vcf_name: str,
+    ref: str = "hg38",
+    token: Optional[str] = None,
+) -> None:
+    """Ensure the per-db samplesID files for a MERGED variant index are present in
+    ``<workdir>/samplesIDs/`` before :func:`synthesize_combined_samplesid` runs,
+    fetching any that are missing from HF's ``samplesIDs/`` component (GAP 2b).
+
+    Rationale: ``synthesize_combined_samplesid`` unions the per-db lists
+    (``<ref>_<db>.samplesID.txt``) into the combined
+    ``<ref>_<db1>_<db2>...samplesID.txt`` the search's ``--samplesID`` expects, but
+    ONLY when those per-db files are already on disk. They arrive via
+    ``download --what all`` / ``--what samples`` (the 'samples' component), NOT via
+    ``download --what index``. A standalone ``--what index`` therefore had no per-db
+    files and the synthesis silently no-op'd. This fetches the genuinely-missing
+    ones — reusing the exact HF snapshot mechanism (_hf_snapshot + exact-path
+    allow_patterns) the 'samples' component / genotypes companion already use — so
+    the standalone path works too.
+
+    Strict NO-OP when every per-db file is already present (the ``--what all`` path:
+    zero extra network calls, no staging dir, no STDOUT noise) and for a single
+    (non-merged) dataset. Fully guarded: any network/HF error is reported to STDOUT
+    and swallowed (stderr is fatal to CRISPRme post-analysis) — degrading to today's
+    silent no-op but with a diagnostic; the caller never crashes over an optional
+    convenience file.
+    """
+    try:
+        dbs = _derive_perdb_datasets(vcf_name, ref)
+        if not dbs:
+            return  # single-dataset index -> nothing to ensure (matches synthesizer)
+        sdir = os.path.join(workdir, "samplesIDs")
+        # Cheap short-circuit: if the combined target already exists, the synthesizer
+        # will no-op at its first guard anyway -> nothing to ensure.
+        if os.path.isfile(os.path.join(sdir, f"{vcf_name}.samplesID.txt")):
+            return
+        remote_prefix = _COMPONENT_PREFIXES["samples"]
+        missing = [
+            db for db in dbs
+            if not os.path.isfile(os.path.join(sdir, f"{ref}_{db}.samplesID.txt"))
+        ]
+        if not missing:
+            return  # all per-db files already present (the --what all path) -> NO-OP
+        patterns = [f"{remote_prefix}/{ref}_{db}.samplesID.txt" for db in missing]
+        staging = os.path.join(workdir, ".hf_stage_samplesids")
+        shutil.rmtree(staging, ignore_errors=True)
+        try:
+            _hf_snapshot(repo, patterns, staging, token)
+            os.makedirs(sdir, exist_ok=True)
+            for db in missing:
+                fname = f"{ref}_{db}.samplesID.txt"
+                staged = os.path.join(staging, remote_prefix, fname)
+                if os.path.isfile(staged):
+                    # plain move, no decompress — same as the flat 'samples' path.
+                    shutil.move(staged, os.path.join(sdir, fname))
+                else:
+                    # not published in the repo: warn + continue. The synthesizer
+                    # then no-ops gracefully at its own missing-component guard.
+                    sys.stdout.write(
+                        f"NOTE: could not fetch per-dataset samplesID "
+                        f"'{remote_prefix}/{fname}' from {repo}; combined samplesID "
+                        f"may not be synthesized.\n"
+                    )
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+    except Exception as exc:  # network/HF/dep error -> non-fatal, STDOUT only
+        sys.stdout.write(
+            f"NOTE: could not ensure per-dataset samplesID files for '{vcf_name}' "
+            f"({exc}); combined samplesID may not be synthesized.\n"
+        )
 
 
 def download_component(
@@ -598,6 +691,20 @@ def download_component(
         # vcf_name is unaffected by GAP 3's canonicalization (marker is only in the
         # base segment), so the file is named for the canonical installed index.
         if vcf_name:
+            # GAP 2b: a standalone `download --what index` never runs the 'samples'
+            # component, so the per-db samplesID lists the synthesizer unions may be
+            # absent (whereas `--what all` fetches them first). Ensure the per-db
+            # files for THIS index's datasets are present — fetching any missing from
+            # HF's samplesIDs/ component — BEFORE synthesizing. Internally guarded;
+            # STDOUT-only; strict NO-OP when they are already present (`--what all`).
+            try:
+                _ensure_perdb_samplesids(repo, workdir, vcf_name, ref, token)
+            except Exception as exc:  # belt-and-suspenders (helper is guarded too)
+                sys.stdout.write(
+                    f"NOTE: could not ensure per-dataset samplesID files for "
+                    f"'{vcf_name}' ({exc}); combined samplesID may not be "
+                    f"synthesized.\n"
+                )
             try:
                 _sid = synthesize_combined_samplesid(workdir, vcf_name, ref=ref)
             except OSError as exc:
