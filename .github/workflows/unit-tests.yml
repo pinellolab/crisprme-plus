@@ -55,6 +55,14 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_index_bundle -v
 
+      - name: Dictless publish/download tiers (registry + genotype companion)
+        working-directory: PostProcess
+        run: python -m unittest test_dictless_publish -v
+
+      - name: Dictless download OOTB fixes (canonical install name + combined samplesID)
+        working-directory: PostProcess
+        run: python -m unittest test_dictless_download -v
+
       - name: Gzipped variant dicts (publish/download route .gz dicts)
         working-directory: PostProcess
         run: python -m unittest test_dict_gzip -v

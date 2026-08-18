@@ -71,6 +71,71 @@ _COMPONENT_LOCALDIR = {
 }
 
 
+# Publish-only markers a build may embed in the REF segment of an index dir name
+# (<pam>_<N>_<ref>[+<vcf>]). They are NOT part of the search convention
+# (ref segment == genome-folder basename), so download must strip them from the
+# INSTALL dir name or the search cannot resolve the index (GAP 3).
+_DICTLESS_MARKERS = ("-dictless",)
+
+
+def canonical_index_name(index_name: str) -> str:
+    """Strip a publish-only marker (e.g. ``-dictless``) from the REF segment of
+    ``<pam>_<N>_<ref>[+<vcf>]`` so the installed dir matches the search convention
+    (ref segment == genome-folder basename). NO-OP when already canonical.
+
+    Only the ``base`` (``<pam>_<N>_<ref>``) segment before the FIRST ``+`` is
+    mutated; the ``<vcf>`` segment after ``+`` is preserved verbatim (it equals
+    ``vcf_name`` and names the shared ``genotypes_<vcf>`` companion, so it must
+    never change). A reference-only name (no ``+``) or an already-canonical name
+    passes through unchanged.
+    """
+    base, plus, vcf = index_name.partition("+")  # vcf untouched
+    for mark in _DICTLESS_MARKERS:
+        base = base.replace(mark, "")
+    return base + plus + vcf
+
+
+def synthesize_combined_samplesid(workdir, vcf_name, ref="hg38"):
+    """Generate ``samplesIDs/<vcf_name>.samplesID.txt`` for a merged dataset when
+    it is missing but the per-db component files are present (GAP 2).
+
+    A merged variant index (e.g. ``hg38_1000G_HGDP``) searches ONE vcf folder and
+    the search expects a single combined ``samplesIDs/<vcf_name>.samplesID.txt``,
+    but the published artifact ships only the per-db lists
+    (``hg38_1000G.samplesID.txt`` + ``hg38_HGDP.samplesID.txt``). This unions the
+    per-db DATA rows (header-less, dedup by SAMPLE_ID, stable dataset order),
+    mirroring ``pages/main_page._ensure_samplesid`` byte-for-byte so CLI == web.
+
+    Returns the written path, or ``None`` (NO-OP) when the combined file already
+    exists, the dataset is single (non-merged), or a component is missing.
+    """
+    sdir = os.path.join(workdir, "samplesIDs")
+    target = os.path.join(sdir, f"{vcf_name}.samplesID.txt")
+    if os.path.isfile(target):
+        return None  # already present -> NO-OP (never touch a shipped file)
+    # derive dataset tokens: strip the leading "<ref>_" if present, split on "_"
+    dataset = vcf_name[len(ref) + 1:] if vcf_name.startswith(ref + "_") else vcf_name
+    if "_" not in dataset:
+        return None  # single (non-merged) dataset -> nothing to synthesize
+    comps = [os.path.join(sdir, f"{ref}_{c}.samplesID.txt") for c in dataset.split("_")]
+    if not comps or not all(os.path.isfile(c) for c in comps):
+        return None  # cannot synthesize (don't write a half-union)
+    seen, rows = set(), []
+    for c in comps:  # stable dataset order (e.g. 1000G then HGDP)
+        with open(c) as fh:
+            for line in fh:
+                if line.startswith("#") or not line.strip():
+                    continue
+                key = line.split("\t", 1)[0]
+                if key not in seen:
+                    seen.add(key)
+                    rows.append(line.rstrip("\n"))
+    os.makedirs(sdir, exist_ok=True)
+    with open(target, "w") as out:
+        out.write("\n".join(rows) + "\n")
+    return target
+
+
 def resolve_repo(cli_repo: Optional[str] = None) -> str:
     """Resolve the HuggingFace repo id: CLI value > env var > built-in default."""
     if cli_repo:
@@ -372,6 +437,14 @@ def download_component(
                 f"build-index-only' — the repo may not have it uploaded yet."
             )
         os.makedirs(local_dir, exist_ok=True)
+        # GAP 3: the remote tarball filename AND the archive's internal top-level
+        # dir are the ORIGINAL index_name (that is how it was published), so the
+        # fetch (above) + the extract-validation below keep using index_name. But
+        # the INSTALL dir name must be search-resolvable: strip a publish-only
+        # marker (e.g. "-dictless") from the ref segment so the search convention
+        # (<pam>_<N>_<ref>+<vcf>, ref == genome-folder basename) resolves it. This
+        # is a NO-OP for a canonical name (install_name == index_name).
+        install_name = canonical_index_name(index_name)
         # Extract into a HIDDEN staging dir on the SAME filesystem as
         # genome_library, validate, then atomically rename into place. This keeps
         # the install atomic: a partial/failed extract never leaves a discoverable
@@ -423,13 +496,26 @@ def download_component(
                         lf.write(label)
                 except OSError:
                     pass
-            # atomically swap the index and its _INDELS companion into place
+            # GAP 3 diagnostic: announce a rename (STDOUT only; stderr is fatal
+            # downstream). Never fires for a canonical name (NO-OP).
+            if install_name != index_name:
+                sys.stdout.write(
+                    f"Installing index '{index_name}' under search-resolvable "
+                    f"name '{install_name}' (stripped publish marker from ref "
+                    f"segment)\n"
+                )
+            # atomically swap the index and its _INDELS companion into place. The
+            # SOURCE dir in extract_tmp is the ORIGINAL name (that is what the
+            # tarball contains); the DESTINATION is the canonical name so the
+            # search can resolve it. For a canonical name these are identical, so
+            # the paths (and the backup name) are byte-for-byte today's behavior.
             for sub in (index_name, index_name + "_INDELS"):
                 src = os.path.join(extract_tmp, sub)
                 if not os.path.isdir(src):
                     continue  # reference-only indexes have no _INDELS companion
-                dst = os.path.join(local_dir, sub)
-                backup = os.path.join(local_dir, f".{sub}.replaced")  # hidden -> unlisted
+                dst_name = canonical_index_name(sub)
+                dst = os.path.join(local_dir, dst_name)
+                backup = os.path.join(local_dir, f".{dst_name}.replaced")  # hidden -> unlisted
                 # roll forward an interrupted prior swap: if a backup exists but the
                 # live dir is gone, a previous run died between the two renames below
                 # -> restore it before we would otherwise delete it (avoids losing
@@ -504,7 +590,30 @@ def download_component(
                         f"companion in {repo} (registry-only/detection publish); "
                         f"off-target detection works, per-sample Samples degraded.\n"
                     )
-        return os.path.join(local_dir, index_name)
+        # GAP 2: a merged variant index searches ONE vcf folder and the search
+        # expects a single combined samplesIDs/<vcf_name>.samplesID.txt, but the
+        # published artifact ships only the per-db lists. Synthesize the combined
+        # file from those when it is missing (NO-OP when already present / single
+        # dataset / a component is absent). Non-fatal, STDOUT-only (stderr fatal).
+        # vcf_name is unaffected by GAP 3's canonicalization (marker is only in the
+        # base segment), so the file is named for the canonical installed index.
+        if vcf_name:
+            try:
+                _sid = synthesize_combined_samplesid(workdir, vcf_name, ref=ref)
+            except OSError as exc:
+                _sid = None
+                sys.stdout.write(
+                    f"NOTE: could not synthesize combined samplesID for "
+                    f"'{vcf_name}' ({exc}); provide "
+                    f"samplesIDs/{vcf_name}.samplesID.txt manually if needed.\n"
+                )
+            if _sid:
+                sys.stdout.write(
+                    f"Generated combined samplesID {os.path.basename(_sid)} "
+                    f"from per-dataset lists in "
+                    f"{os.path.join(workdir, 'samplesIDs')}\n"
+                )
+        return os.path.join(local_dir, install_name)
 
     # flat components: annotations, pams, samples
     patterns = [f"{remote_prefix}/*"]
@@ -669,6 +778,15 @@ def publish_index(
     corrected AF/rsID), and — when a ``genotypes_<vcf>/`` dir exists — a SEPARATE
     ``genotypes_<vcf>.tar.gz`` companion is produced and uploaded to the same repo
     under the same ``indexes/`` prefix (the big optional Tier-1 artifact).
+
+    SECONDARY (future builds): the download side now synthesizes the combined
+    ``samplesIDs/<vcf_name>.samplesID.txt`` for a MERGED index when it is missing
+    (see :func:`synthesize_combined_samplesid`), so the already-published artifact
+    works with zero manual steps. The cleaner long-term fix is to EMIT that
+    combined file at build time (build-index-only already has the ordered
+    ``{db: samplesID_path}`` map for the panel) and upload it under ``samplesIDs/``
+    (component ``samples``); the download-side generation then becomes a pure
+    fallback. This publish path is unchanged; the note is intentional.
 
     Returns:
         The remote path (``indexes/<index_name>.tar.gz``) the main index was
