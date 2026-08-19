@@ -290,6 +290,7 @@ saveDict = {
     "Annotation_closest_gene_distance_(kb)": "NA",
     "Annotation_ENCODE": "NA",
     "Annotation_DHS": "NA",
+    "Annotation_COSMIC": "NA",
     "Annotation_personal": "NA",
     "Susceptible_to_ABE": "NA",
     "Susceptible_to_CBE": "NA",
@@ -998,6 +999,7 @@ for nline, line in enumerate(inCrispritzResults):
     encode_annotations = set()
     gencode_annotations = set()
     DHS_annotations = set()
+    cosmic_annotations = set()
 
     for elem in annotationList:
         if "_personal" in elem:
@@ -1006,11 +1008,18 @@ for nline, line in enumerate(inCrispritzResults):
             gencode_annotations.add(elem.replace("_gencode", ""))
         elif "_DHS" in elem:
             DHS_annotations.add(elem.replace("_DHS", ""))
+        elif "_COSMIC" in elem:
+            # Cancer Gene Census tier/role (e.g. Tier1_TSG, Tier1_oncogene_fusion);
+            # must be bucketed BEFORE the ENCODE catch-all or it pollutes ENCODE.
+            cosmic_annotations.add(elem.replace("_COSMIC", ""))
         else:
             encode_annotations.add(elem)
 
     if len(DHS_annotations):
         saveDict["Annotation_DHS"] = ",".join(DHS_annotations)
+
+    if len(cosmic_annotations):
+        saveDict["Annotation_COSMIC"] = ",".join(cosmic_annotations)
 
     if len(personal_annotations):
         saveDict["Annotation_personal"] = ",".join(personal_annotations)

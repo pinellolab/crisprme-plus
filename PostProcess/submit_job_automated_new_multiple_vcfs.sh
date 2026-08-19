@@ -1189,6 +1189,23 @@ else
 fi
 echo -e "JOB END"
 
+# STEP 8b - shareable self-contained report (additive; every complete-search).
+# Runs AFTER the integrated_results rename/zip above so the glob finds the
+# finalized <guide>+..._integrated_results.tsv (not the pre-rename bestMerge
+# name). It is a supplementary artifact like imgs/, so a failure must NOT delete
+# a completed run (issue #143 posture): on nonzero we warn to stderr and
+# continue -- never `exit 1`. It is intentionally NOT gated on
+# gene_proximity!="_" (unlike CRISPRme_plots above) so dict-less runs still get
+# a report; it degrades gracefully when annotation columns are empty.
+echo -e 'Building shareable report\tStart\t'$(date) >>$log
+if python "$starting_dir/generate_report.py" --result-dir "${output_folder}" >>"${output_folder}/report.log" 2>&1; then
+	echo -e 'Building shareable report\tEnd\t'$(date) >>$log
+else
+	printf "WARNING: shareable report generation failed — results are PRESERVED (issue #143). See %s/report.log\n" "${output_folder}" >&2
+	echo -e 'Building shareable report\tFAILED (non-fatal)\t'$(date) >>$log
+fi
+# END STEP 8b
+
 if [ "$email" != "_" ]; then
 	python $starting_dir/../pages/send_mail.py $output_folder
 fi

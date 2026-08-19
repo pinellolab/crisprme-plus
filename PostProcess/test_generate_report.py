@@ -1,0 +1,618 @@
+#!/usr/bin/env python3
+"""Unit test for the shareable-report generator (PostProcess/generate_report.py).
+
+Builds a tiny integrated_results fixture (dict-based schema with CRISTA + PAM
+creation + annotation columns GENCODE/gene/distance/ENCODE/DHS, header names only
+for the columns the report reads) and asserts that build_report produces a ZIP
+that flat-decompresses to report.html + the RAW integrated_results.tsv.gz + the
+CURATED top1000.tsv + panel_top100.tsv + the per-tier curated TSVs, and that the
+HTML is a self-contained IND-briefing-book digest (report v2.4):
+
+  * SECTION 1: the header summary card (guide, PAM, aggregated specificity score)
+    AND the global Off-targets-by-MM-and-B matrix are present; the matrix
+    REFERENCE + VARIANT totals reconcile to the canonical partition off-target
+    total (REFERENCE + VARIANT + on-target == grand total),
+  * the canonical partition invariant holds:
+    variant-created + reference + on-target == total EXACTLY,
+  * SECTION 2: exactly FOUR ref/alt scatter panels are embedded as inline base64
+    PNGs when CRISTA is computed (by CFD, by CFD delta, by CRISTA, by CRISTA
+    delta); 2 panels when CRISTA is absent,
+  * CURATED COLUMNS (report v2.4): ONE curated column set is shared by BOTH the
+    in-report top-1000 table AND every download file (top1000.tsv,
+    panel_top100.tsv, per-tier tsvs). The table shows the annotation columns
+    (Gene, Gene_distance_kb, GENCODE, ENCODE, DHS); the downloads use the SAME
+    curated columns (header spot-checked on panel_top100.tsv),
+  * SECTION 4: the HYBRID panel -- hard-include mm+b <= PANEL_FLOOR_MMB (2) OR
+    CFD >= PANEL_FLOOR_CFD (0.5), fill to PANEL_CAP (100) by worst-case severity
+    (no variant quota); the module-level floors are present, and the in-report
+    methods note is present,
+  * PER-TIER DOWNLOADS: the non-empty CFD/mm+b/variant-created subsets are bundled
+    as curated TSVs and linked,
+  * MAF FOOTNOTE: the v2.4 blank-MAF explanation is present,
+  * SECTION 5/6: top1000.tsv + panel_top100.tsv are bundled in the zip,
+  * SECTION 7: the fixed research-only disclaimer is in the footer,
+  * there is no external dependency (<script>/<link>/http(s)), so it opens with
+    file:// offline,
+  * the download links are RELATIVE (resolve after unzip on any machine).
+
+Dependency note: generate_report imports matplotlib + pandas at module top, and
+the network-free CI env installs only requests + numpy. The whole test therefore
+self-skips (never fails) when matplotlib/pandas are unavailable; it runs fully in
+the real pipeline env (and locally), which is where the artifact is produced.
+"""
+
+import base64
+import glob
+import gzip
+import os
+import re
+import sys
+import tempfile
+import unittest
+import zipfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+try:  # the report's real deps (present in the pipeline env, absent in light CI)
+    import matplotlib  # noqa: F401
+    import pandas  # noqa: F401
+
+    import generate_report as gr
+
+    _HAVE_DEPS = True
+    _SKIP_REASON = ""
+except Exception as exc:  # noqa: BLE001 - any import failure => skip, not fail
+    _HAVE_DEPS = False
+    _SKIP_REASON = f"matplotlib/pandas not available: {exc}"
+
+
+# A minimal fixture that exercises the columns the report reads by NAME. Two
+# reference off-targets and three variant-created ones (one multi-SNP haplotype
+# with comma-joined rsID/MAF/samples), plus one on-target (mm+b == 0) that must
+# be excluded from the top-N by the mm+b > 1 filter. The schema includes the
+# highest_CFD projection (with CFD REF/ALT + PAM creation) and the highest_CRISTA
+# projection (non-empty), so the report emits the CRISTA scatter + CRISTA column.
+_HEADER = [
+    "Spacer+PAM",
+    "Chromosome",
+    "Start_coordinate_(highest_CFD)",
+    "Strand_(highest_CFD)",
+    "Aligned_protospacer+PAM_REF_(highest_CFD)",
+    "Aligned_protospacer+PAM_ALT_(highest_CFD)",
+    "PAM_(highest_CFD)",
+    "Mismatches_(highest_CFD)",
+    "Bulges_(highest_CFD)",
+    "Mismatches+bulges_(highest_CFD)",
+    "REF/ALT_origin_(highest_CFD)",
+    "PAM_creation_(highest_CFD)",
+    "CFD_score_(highest_CFD)",
+    "CFD_score_REF_(highest_CFD)",
+    "CFD_score_ALT_(highest_CFD)",
+    "Variant_info_genome_(highest_CFD)",
+    "Variant_MAF_(highest_CFD)",
+    "Variant_rsID_(highest_CFD)",
+    "Variant_samples_(highest_CFD)",
+    "CRISTA_score_(highest_CRISTA)",
+    "CRISTA_score_REF_(highest_CRISTA)",
+    "CRISTA_score_ALT_(highest_CRISTA)",
+    "Variant_MAF_(highest_CRISTA)",
+    "Variant_rsID_(highest_CRISTA)",
+    "Variant_samples_(highest_CRISTA)",
+    "Not_found_in_REF",
+    "Annotation_GENCODE",
+    "Annotation_closest_gene_name",
+    "Annotation_closest_gene_distance_(kb)",
+    "Annotation_ENCODE",
+    "Annotation_DHS",
+]
+
+_GUIDE = "CTCTCAGCTGGTACACGGCANNN"
+
+# columns: guide, chrom, pos, strand, aln_ref, aln_alt, pam, mm, bul, mmb,
+#          origin, pam_creation, cfd, cfd_ref, cfd_alt, var_genome, maf, rsid,
+#          samples, crista, crista_ref, crista_alt, crista_maf, crista_rsid,
+#          crista_samples, not_in_ref, GENCODE, gene, dist, ENCODE, DHS
+_ROWS = [
+    # on-target (mm+b == 0) -> excluded from top-N; counted as 1 on-target
+    [_GUIDE, "chr2", "100", "+", "CTCTCAGCTGGTACACGGCATGG", "NA", "TGG",
+     "0", "0", "0", "ref", "NA", "1.0", "1.0", "1.0", "NA", "NA", "NA", "NA",
+     "1.0", "1.0", "1.0", "NA", "NA", "NA", "NA",
+     "protein_coding", "GENE0", "0.0", "CTCF", "DHS_1"],
+    # reference off-targets
+    [_GUIDE, "chr3", "200", "-", "cTCTCAGCTGGTACACGGCAAGG", "NA", "AGG",
+     "2", "0", "2", "ref", "NA", "0.85", "0.85", "0.85", "NA", "NA", "NA", "NA",
+     "0.80", "0.80", "0.80", "NA", "NA", "NA", "NA",
+     "intron", "GENE1", "1.2", "enhancer", "DHS_2"],
+    [_GUIDE, "chr4", "300", "+", "ctCTCAGCTGGTACACGGCAcGG", "NA", "CGG",
+     "3", "0", "3", "ref", "NA", "0.40", "0.40", "0.40", "NA", "NA", "NA", "NA",
+     "0.35", "0.35", "0.35", "NA", "NA", "NA", "NA",
+     "NA", "GENE2", "5.0", "NA", "NA"],
+    # variant-created off-targets (1000G + HGDP carriers)
+    [_GUIDE, "chr5", "400", "+", "CTCTCAGCTGGTACACGGCAtGG",
+     "CTCTCAGCTGGTACACGGCAAGG", "AGG",
+     "2", "0", "2", "alt", "NA", "0.90", "0.20", "0.90", "chr5_400_T_A",
+     "0.01", "rs111", "HG00096,HGDP00001",
+     "0.88", "0.18", "0.88", "0.01", "rs111", "HG00096,HGDP00001",
+     "y", "exon", "GENE3", "0.5", "promoter", "DHS_3"],
+    [_GUIDE, "chr6", "500", "-", "CTCTCAGCTGGTACACGGCAtGG",
+     "CTCTCAGCTGGTACACGGCAcGG", "CGG",
+     "3", "1", "4", "alt", "pam_created", "0.55", "0.30", "0.55", "chr6_500_T_C",
+     "0.02", "rs222", "NA18525",
+     "0.50", "0.25", "0.50", "0.02", "rs222", "NA18525",
+     "y", "intergenic", "GENE4", "2.0", "CTCF", "DHS_4"],
+    # multi-SNP haplotype: comma-joined rsID/MAF/samples (min-AF + first-rsID),
+    # and a BLANK MAF -> em-dash + footnote path
+    [_GUIDE, "chr7", "600", "+", "CTCTCAGCTGGTACACGGCAtGG",
+     "CTCTCAGCTGGTACACGGCAgGG", "GGG",
+     "3", "0", "3", "alt", "NA", "0.30", "0.10", "0.30", "chr7_600_T_G,chr7_601_A_C",
+     "NA,0.005,0.003", "NA,rs333,rs444", "HG00097,HGDP00003",
+     "0.28", "0.08", "0.28", "NA,0.005,0.003", "NA,rs333,rs444",
+     "HG00097,HGDP00003", "y", "lincRNA", "GENE5", "10.0", "enhancer", "DHS_5"],
+]
+
+
+@unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
+class TestGenerateReport(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gr_test_")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
+        # write the fixture under a canonical finalized filename so filename
+        # fallback decodes guide/pam/genome/datasets/mm/bmax
+        self.tsv = os.path.join(
+            self.tmp,
+            f"{_GUIDE}+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv",
+        )
+        with open(self.tsv, "w") as handle:
+            handle.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                handle.write("\t".join(row) + "\n")
+        # a samplesID dir so the superpop plot resolves EUR/CSA
+        self.sid_dir = os.path.join(self.tmp, "samplesIDs")
+        os.makedirs(self.sid_dir)
+        with open(os.path.join(self.sid_dir, "samplesIDs.1000G.txt"), "w") as h:
+            h.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+            h.write("HG00096\tGBR\tEUR\tmale\n")
+            h.write("HG00097\tGBR\tEUR\tfemale\n")
+            h.write("NA18525\tCHB\tEAS\tfemale\n")
+        with open(os.path.join(self.sid_dir, "samplesIDs.HGDP.txt"), "w") as h:
+            h.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+            h.write("HGDP00001\tBrahui\tCSA\tmale\n")
+            h.write("HGDP00003\tBrahui\tCSA\tmale\n")
+
+    def _build_and_extract(self, **kwargs):
+        out_zip = gr.build_report(
+            integrated_tsv=self.tsv,
+            out_zip=os.path.join(self.tmp, "fixture_report.zip"),
+            samplesid_dir=self.sid_dir,
+            **kwargs,
+        )
+        self.assertTrue(os.path.isfile(out_zip))
+        extract = os.path.join(self.tmp, "extracted")
+        with zipfile.ZipFile(out_zip) as zf:
+            names = zf.namelist()
+            zf.extractall(extract)
+        return out_zip, names, extract
+
+    @staticmethod
+    def _read(path):
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_zip_has_exactly_the_flat_bundle(self):
+        _, names, _ = self._build_and_extract()
+        # report v2.4 bundles the RAW gz + the curated top1000/panel + every
+        # NON-EMPTY per-tier curated TSV. For this fixture (5 off-targets):
+        #   CFD>= 0.5/0.2/0.1/0.05 -> 3/5/5/5 (all non-empty)
+        #   mm+b<= 1/2/3/4         -> 0/2/4/5 (mmb_le_1 is EMPTY -> not bundled)
+        #   variant_created        -> 3
+        self.assertEqual(
+            sorted(names),
+            sorted([
+                "report.html",
+                "integrated_results.tsv.gz",
+                "top1000.tsv",
+                "panel_top100.tsv",
+                "cfd_ge_0.50.tsv",
+                "cfd_ge_0.20.tsv",
+                "cfd_ge_0.10.tsv",
+                "cfd_ge_0.05.tsv",
+                "mmb_le_2.tsv",
+                "mmb_le_3.tsv",
+                "mmb_le_4.tsv",
+                "variant_created.tsv",
+            ]),
+        )
+        # the empty tier (mm+b <= 1) is NOT bundled
+        self.assertNotIn("mmb_le_1.tsv", names)
+        # flat (no directory components)
+        for name in names:
+            self.assertNotIn("/", name)
+
+    def test_pertier_downloads_are_curated_and_linked(self):
+        _, names, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        expected_curated = gr.curated_headers(has_crista=True)
+        # every bundled per-tier / panel / top1000 TSV uses the SAME curated header
+        for fname in (
+            "top1000.tsv", "panel_top100.tsv",
+            "cfd_ge_0.50.tsv", "cfd_ge_0.20.tsv", "cfd_ge_0.10.tsv",
+            "cfd_ge_0.05.tsv", "mmb_le_2.tsv", "mmb_le_3.tsv", "mmb_le_4.tsv",
+            "variant_created.tsv",
+        ):
+            path = os.path.join(extract, fname)
+            self.assertTrue(os.path.isfile(path), fname)
+            with open(path) as handle:
+                header = handle.readline().rstrip("\n").split("\t")
+            self.assertEqual(header, expected_curated, fname)
+            # each bundled tier file is linked from the HTML with a RELATIVE href
+            self.assertIn(f'href="{fname}"', html)
+        # curated header carries the annotation columns
+        for ann in ("Gene", "Gene_distance_kb", "GENCODE", "ENCODE", "DHS",
+                    "COSMIC_cancer_gene"):
+            self.assertIn(ann, expected_curated)
+
+    def test_curated_column_list_is_the_shared_set(self):
+        # the ONE curated set, with CRISTA when computed
+        self.assertEqual(
+            gr.curated_headers(has_crista=True),
+            [
+                "rank", "Chromosome", "Position", "Strand",
+                "Aligned_protospacer+PAM", "Mismatches", "Bulges",
+                "Mismatches+bulges", "CFD", "CRISTA", "REF/ALT_origin",
+                "PAM_creation", "Variant", "MAF", "Gene", "Gene_distance_kb",
+                "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
+            ],
+        )
+        # CRISTA is dropped when not computed (else identical)
+        no_crista = gr.curated_headers(has_crista=False)
+        self.assertNotIn("CRISTA", no_crista)
+        self.assertEqual(
+            [c for c in gr.curated_headers(has_crista=True) if c != "CRISTA"],
+            no_crista,
+        )
+
+    def test_bundled_tsv_gz_round_trips(self):
+        _, _, extract = self._build_and_extract()
+        gz = os.path.join(extract, "integrated_results.tsv.gz")
+        self.assertTrue(os.path.isfile(gz))
+        with gzip.open(gz, "rt") as handle:
+            content = handle.read()
+        self.assertIn("Spacer+PAM", content.splitlines()[0])
+        self.assertEqual(len(content.strip().splitlines()), len(_ROWS) + 1)
+
+    def test_top1000_tsv_bundled_with_table_rows(self):
+        _, _, extract = self._build_and_extract()
+        top = os.path.join(extract, "top1000.tsv")
+        self.assertTrue(os.path.isfile(top))
+        with open(top) as handle:
+            lines = handle.read().strip().splitlines()
+        # header is now the CURATED set (rank first), NOT the raw Spacer+PAM dump
+        header = lines[0].split("\t")
+        self.assertEqual(header, gr.curated_headers(has_crista=True))
+        self.assertEqual(header[0], "rank")
+        self.assertNotIn("Spacer+PAM", lines[0])
+        # header + the 5 off-targets (on-target mm+b==0 filtered out)
+        self.assertEqual(len(lines), 5 + 1)
+        # rank column is 1..5 in order
+        ranks = [ln.split("\t")[0] for ln in lines[1:]]
+        self.assertEqual(ranks, ["1", "2", "3", "4", "5"])
+
+    def test_consistency_partition_sums_to_total(self):
+        # variant-created + reference + on-target == total EXACTLY
+        import pandas as pd
+
+        df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        variant, reference, ontarget = gr.partition_masks(df, cols)
+        n_v = int(variant.sum())
+        n_r = int(reference.sum())
+        n_o = int(ontarget.sum())
+        self.assertEqual(n_v + n_r + n_o, len(df))
+        # the fixture: 3 variant-created, 1 on-target, 2 reference
+        self.assertEqual(n_v, 3)
+        self.assertEqual(n_o, 1)
+        self.assertEqual(n_r, 2)
+        # masks are mutually exclusive
+        self.assertEqual(int((variant & reference).sum()), 0)
+        self.assertEqual(int((variant & ontarget).sum()), 0)
+        self.assertEqual(int((reference & ontarget).sum()), 0)
+
+    def test_section1_summary_card_and_global_matrix(self):
+        _, _, extract = self._build_and_extract(
+            params_override={
+                "Nuclease": "SpCas9", "Pam": "NRG", "Genome_selected": "hg38",
+                "Mismatches": "6", "DNA": "2", "RNA": "2", "Max_bulges": "2",
+                "Max_total_edits": "4",
+            }
+        )
+        html = self._read(os.path.join(extract, "report.html"))
+        # header card
+        self.assertIn("gRNA (spacer+PAM)", html)
+        self.assertIn(_GUIDE, html)
+        self.assertIn("Aggregated Specificity Score (0-100)", html)
+        self.assertRegex(html, r"Nuclease</td><td>SpCas9<")
+        # global MM/B matrix present, grouped REFERENCE vs VARIANT
+        self.assertIn("Off-targets by Mismatch (MM) and Bulge (B)", html)
+        self.assertIn('class="matrix"', html)
+        self.assertIn(">REFERENCE", html)
+        self.assertIn(">VARIANT", html)
+        # per-mismatch columns up to the run's mm (6MM), on-target excluded
+        self.assertIn(">6MM<", html)
+
+    def test_section1_matrix_reconciles_to_grand_total(self):
+        """Matrix REFERENCE+VARIANT totals == off-target partition total, and
+        REFERENCE + VARIANT + on-target == grand total (every off-target lands
+        in a cell). Bulge rows span 0..(bDNA+bRNA)=0..4, mm cols 0..6."""
+        import pandas as pd
+
+        df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        meta = gr.build_summary_meta(
+            None, self.tsv, df, cols,
+            params_override={
+                "Nuclease": "SpCas9", "Pam": "NRG", "Genome_selected": "hg38",
+                "Mismatches": "6", "DNA": "2", "RNA": "2", "Max_bulges": "2",
+                "Max_total_edits": "4",
+            },
+        )
+        matrix = gr.build_mmb_matrix(df, cols, meta)
+
+        # bulge rows span 0..(bDNA+bRNA) == 0..4 (NOT Max_bulges=2)
+        for label, mrows in matrix["groups"]:
+            self.assertEqual([r[0] for r in mrows], [0, 1, 2, 3, 4])
+        # mm columns span 0..6
+        self.assertEqual(matrix["mm_cols"], [0, 1, 2, 3, 4, 5, 6])
+
+        # matrix REFERENCE + VARIANT totals == canonical off-target totals
+        variant, reference, ontarget = gr.partition_masks(df, cols)
+        by_label = {lbl: sum(r[1] for r in rows) for lbl, rows in matrix["groups"]}
+        self.assertEqual(by_label["REFERENCE"], int(reference.sum()))
+        self.assertEqual(by_label["VARIANT"], int(variant.sum()))
+
+        # every off-target lands in a cell: sum of ALL per-mm cells == off-target
+        # count; and REFERENCE + VARIANT + on-target == grand total
+        cell_sum = 0
+        for _lbl, rows in matrix["groups"]:
+            for _b, _tot, per_mm in rows:
+                cell_sum += sum(per_mm)
+        n_offtarget = int((~ontarget).sum())
+        self.assertEqual(cell_sum, n_offtarget)
+        self.assertEqual(
+            by_label["REFERENCE"] + by_label["VARIANT"] + int(ontarget.sum()),
+            len(df),
+        )
+
+    def test_section2_four_scatter_panels_when_crista_present(self):
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        imgs = re.findall(r'src="data:image/png;base64,([A-Za-z0-9+/=]+)"', html)
+        # 4 scatter panels + 1 population plot => 5 inline PNGs; each decodable
+        self.assertEqual(len(imgs), 5)
+        for encoded in imgs:
+            raw = base64.b64decode(encoded)
+            self.assertEqual(raw[:8], b"\x89PNG\r\n\x1a\n")
+        # exactly the FOUR panel titles are present because CRISTA is computed
+        self.assertIn("By CFD score", html)
+        self.assertIn("By variant effect (CFD ALT - REF delta)", html)
+        self.assertIn("By CRISTA score", html)
+        self.assertIn("By variant effect (CRISTA)", html)
+
+        # and the count is driven by crista_computed(): count scatter <h3> panels
+        import pandas as pd
+
+        df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        self.assertTrue(gr.crista_computed(df, cols))
+        panels = gr.plot_scatter_panels(df, cols, n=1000, include_crista=True)
+        self.assertEqual(len(panels), 4)
+
+    def test_section2_two_scatter_panels_when_crista_absent(self):
+        # blank out every CRISTA score -> crista_computed() False -> 2 panels
+        import pandas as pd
+
+        df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        df[cols["crista"]] = ""
+        self.assertFalse(gr.crista_computed(df, cols))
+        panels = gr.plot_scatter_panels(df, cols, n=1000, include_crista=False)
+        self.assertEqual(len(panels), 2)
+        titles = [p[0] for p in panels]
+        self.assertEqual(
+            titles,
+            ["By CFD score", "By variant effect (CFD ALT - REF delta)"],
+        )
+
+    def test_section4_hybrid_panel_floors_note_and_maf_footnote(self):
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        self.assertIn("Recommended validation panel", html)
+        # hybrid panel wording + cap (100) present
+        self.assertIn("hybrid", html.lower())
+        self.assertIn("worst-case", html.lower())
+        self.assertIn("top 100", html)
+        # C) EXPLICIT IN-REPORT METHODS NOTE with the REAL constants:
+        #    hard-include (mm+b <= 2 OR CFD >= 0.5), fill to 100 by worst-case
+        self.assertIn("<strong>Methods.</strong>", html)
+        self.assertIn("hard-include", html.lower())
+        self.assertIn("mismatches+bulges &le; 2 OR CFD &ge; 0.5", html)
+        self.assertIn("fill", html.lower())
+        self.assertIn("worst by ANY single", html)
+        self.assertIn("NO category quota", html)
+        # the FULL threshold table is kept (CFD>= {0.5,0.2,0.1,0.05},
+        # mm+b<= {1,2,3,4})
+        for t in ("0.5", "0.2", "0.1", "0.05"):
+            self.assertIn(f"CFD &ge; {t}", html)
+        for t in ("1", "2", "3", "4"):
+            self.assertIn(f"mismatches + bulges &le; {t}", html)
+        # of the selected panel, 3 are variant-created (the fixture has exactly 3)
+        self.assertRegex(html, r"<strong>3</strong>[^<]*are\s+variant-created")
+        # E) MAF FOOTNOTE (the v2.4 blank-MAF explanation)
+        self.assertIn(
+            "MAF blank (&mdash;) = reference off-target (no variant), "
+            "an indel-derived variant", html,
+        )
+        self.assertIn("frequency registry is SNP-only", html)
+        self.assertIn("AC/AN over the genotyped panel", html)
+
+    def test_section4_hybrid_floors_are_module_level(self):
+        # HYBRID panel floors + cap + metrics are module-level constants
+        self.assertEqual(gr.PANEL_CAP, 100)
+        self.assertEqual(gr.PANEL_FLOOR_MMB, 2)
+        self.assertEqual(gr.PANEL_FLOOR_CFD, 0.5)
+        self.assertEqual(
+            gr.PANEL_WORSTCASE_METRICS,
+            (("cfd", "desc"), ("crista", "desc"), ("mmb", "asc")),
+        )
+
+    def test_section4_hybrid_selection_and_cap(self):
+        """Hard-include (mm+b<=2 OR CFD>=0.5), fill by worst-case severity, cap."""
+        import pandas as pd
+
+        header = list(_HEADER)
+
+        def _row(chrom, mm, b, cfd, crista, notref):
+            r = ["G", chrom, "1", "+", "AAA", "AAA", "GGG", str(mm), str(b),
+                 str(mm + b), notref and "alt" or "ref", "NA",
+                 f"{cfd}", f"{cfd}", f"{cfd}", "NA", "NA", "NA", "NA",
+                 f"{crista}", f"{crista}", f"{crista}", "NA", "NA", "NA",
+                 "y" if notref else "NA", "NA", "GENE", "1.0", "NA", "NA"]
+            return r
+
+        rows = [
+            _row("chrON", 0, 0, 1.0, 1.0, False),    # on-target -> excluded
+            _row("chrCFD", 3, 2, 0.99, 0.10, True),  # HARD (CFD>=0.5)
+            _row("chrMMB", 2, 0, 0.10, 0.10, False), # HARD (mm+b<=2)
+            _row("chrCRI", 4, 3, 0.10, 0.99, True),  # not hard; worst by CRISTA
+            _row("chrLOW", 6, 4, 0.05, 0.05, False), # low by every metric
+        ]
+        tsv = os.path.join(self.tmp, "wc.tsv")
+        with open(tsv, "w") as h:
+            h.write("\t".join(header) + "\n")
+            for r in rows:
+                h.write("\t".join(r) + "\n")
+        df = pd.read_csv(tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+
+        panel = gr.select_worstcase_panel(df, cols, cap=gr.PANEL_CAP)
+        chroms = list(panel[cols["chrom"]])
+        # on-target excluded
+        self.assertNotIn("chrON", chroms)
+        # hard-includes always present; CRISTA-only site enters via the fill ranks
+        self.assertIn("chrCFD", chroms)
+        self.assertIn("chrMMB", chroms)
+        self.assertIn("chrCRI", chroms)
+        # hard-includes come FIRST (before the fill), all-low site last
+        self.assertEqual({"chrCFD", "chrMMB"}, set(chroms[:2]))
+        self.assertEqual(chroms[-1], "chrLOW")
+
+        # HARD-INCLUDES EXCEED THE CAP -> they are ALL kept (panel > cap allowed).
+        # Build many mm+b<=2 hard-include sites, cap at 3.
+        hard = [_row("chrON", 0, 0, 1.0, 1.0, False)]
+        for i in range(10):
+            hard.append(_row(f"h{i}", 1, 1, 0.10, 0.10, False))  # mm+b=2 -> hard
+        tsvh = os.path.join(self.tmp, "wc_hard.tsv")
+        with open(tsvh, "w") as h:
+            h.write("\t".join(header) + "\n")
+            for r in hard:
+                h.write("\t".join(r) + "\n")
+        dfh = pd.read_csv(tsvh, sep="\t", dtype=str, na_filter=False)
+        colsh = gr._resolve(dfh.columns, list(gr._COLS.keys()))
+        panelh = gr.select_worstcase_panel(dfh, colsh, cap=3)
+        # 10 hard-includes > cap(3) -> all 10 kept, on-target still excluded
+        self.assertEqual(len(panelh), 10)
+        self.assertNotIn("chrON", set(panelh[colsh["chrom"]]))
+
+        # cap is honored when hard-includes are few: many mid sites -> exactly cap
+        big = [_row("chrON", 0, 0, 1.0, 1.0, False)]
+        for i in range(500):
+            # mm+b=4 (>floor) and CFD=0.20 (<floor) -> NOT hard-included
+            big.append(_row(f"c{i}", 3, 1, 0.20, 0.20, i % 2 == 0))
+        tsv2 = os.path.join(self.tmp, "wc_big.tsv")
+        with open(tsv2, "w") as h:
+            h.write("\t".join(header) + "\n")
+            for r in big:
+                h.write("\t".join(r) + "\n")
+        df2 = pd.read_csv(tsv2, sep="\t", dtype=str, na_filter=False)
+        cols2 = gr._resolve(df2.columns, list(gr._COLS.keys()))
+        panel2 = gr.select_worstcase_panel(df2, cols2, cap=gr.PANEL_CAP)
+        self.assertEqual(len(panel2), gr.PANEL_CAP)
+        self.assertNotIn("chrON", set(panel2[cols2["chrom"]]))
+        # on-target never in the panel
+        self.assertNotIn("chrON", set(panel2[cols2["chrom"]]))
+
+    def test_section6_table_shows_curated_columns_incl_annotations(self):
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        self.assertIn('class="ottable"', html)
+        # the table now renders the CURATED headers (shared with downloads),
+        # including PAM_creation + CRISTA (computed) AND the ANNOTATION columns
+        for hdr in gr.curated_headers(has_crista=True):
+            self.assertIn(f"<th>{hdr}</th>", html)
+        for ann in ("Gene", "Gene_distance_kb", "GENCODE", "ENCODE", "DHS"):
+            self.assertIn(f"<th>{ann}</th>", html)
+        self.assertIn("<th>PAM_creation</th>", html)
+        self.assertIn("<th>CRISTA</th>", html)
+        # the annotation VALUES from the fixture render in the table body
+        tbody = html.split('class="ottable"')[-1].split("<tbody>")[-1].split("</tbody>")[0]
+        for val in ("promoter", "enhancer", "DHS_3", "DHS_5", "exon", "lincRNA"):
+            self.assertIn(val, tbody)
+        # rows sorted by CFD desc, on-target excluded => 5 rows
+        n_rows = tbody.count("<tr>")
+        self.assertEqual(n_rows, 5)
+        cfds = re.findall(r"<td>(0\.\d{4})</td>", tbody)
+        self.assertEqual(cfds, sorted(cfds, reverse=True))
+        # the pam_created value from the fixture appears
+        self.assertIn("pam_created", html)
+
+    def test_table_and_downloads_share_curated_columns(self):
+        """The in-report table AND every download expose the SAME curated set."""
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        curated = gr.curated_headers(has_crista=True)
+        # table header order == curated order
+        thead = html.split('class="ottable"')[-1].split("<thead>")[-1].split("</thead>")[0]
+        table_headers = re.findall(r"<th>([^<]+)</th>", thead)
+        self.assertEqual(table_headers, curated)
+        # top1000.tsv + panel_top100.tsv headers == curated order (spot check)
+        for fname in ("top1000.tsv", "panel_top100.tsv"):
+            with open(os.path.join(extract, fname)) as handle:
+                header = handle.readline().rstrip("\n").split("\t")
+            self.assertEqual(header, curated, fname)
+
+    def test_section7_footer_disclaimer_and_provenance(self):
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        # exact disclaimer text (research-purposes-only wording)
+        self.assertIn(
+            "This report is provided for research purposes only.", html
+        )
+        self.assertIn(
+            "are NOT a substitute for experimental validation", html
+        )
+        # provenance stamp: report generator version + source TSV basename
+        self.assertIn("report generator v", html)
+        self.assertIn(os.path.basename(self.tsv), html)
+
+    def test_self_contained_offline_and_relative_links(self):
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        # NO external dependencies -> opens offline with file://
+        self.assertNotIn("<script", html.lower())
+        self.assertNotIn("<link", html.lower())
+        self.assertNotIn("http://", html)
+        self.assertNotIn("https://", html)
+        # RELATIVE download links to both bundled siblings
+        self.assertIn('href="integrated_results.tsv.gz"', html)
+        self.assertIn('href="top1000.tsv"', html)
+
+    def test_multi_snp_haplotype_min_maf_and_first_rsid(self):
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        # the multi-SNP row (rs333,rs444 / NA,0.005,0.003) must show rs333 and
+        # the MIN maf 0.003 -> "3.00e-03"
+        self.assertIn("rs333", html)
+        self.assertIn("3.00e-03", html)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
