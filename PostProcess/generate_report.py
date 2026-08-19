@@ -181,9 +181,25 @@ CURATED_COLUMNS = (
     ("GENCODE", "gencode"),
     ("ENCODE", "encode"),
     ("DHS", "dhs"),
+    ("COSMIC_cancer_gene", "cosmic"),  # Cancer Gene Census tier/role; "-" when none
 )
 # value used when a curated column's source is missing / blank
 CURATED_MISSING = "-"
+
+# When True (set via build_report(drop_maf=True) / the --no-maf CLI flag), the MAF
+# column is omitted ENTIRELY -- from the curated header, the in-report table, and
+# every download file. Use this when a run's allele frequencies are not yet
+# finalized (e.g. the Tier-0 AF denominator rebuild is still pending) and showing
+# a MAF column would be misleading. Nothing else changes; the raw 85-column dump
+# still carries whatever MAF the source TSV had.
+_DROP_MAF = False
+
+
+def _active_columns():
+    """``CURATED_COLUMNS`` minus MAF when ``_DROP_MAF`` is set."""
+    if _DROP_MAF:
+        return tuple(c for c in CURATED_COLUMNS if c[1] != "maf")
+    return CURATED_COLUMNS
 
 # --------------------------------------------------------------------------- #
 # Column-name resolution helpers
@@ -221,6 +237,7 @@ _COLS = {
     "gencode": ["Annotation_GENCODE"],
     "encode": ["Annotation_ENCODE"],
     "dhs": ["Annotation_DHS"],
+    "cosmic": ["Annotation_COSMIC"],
     # CRISTA projection (present only when CRISTA was computed this run)
     "crista": [f"CRISTA_score_{_CRISTA_PROJ}", "CRISTA_score"],
     "crista_ref": [f"CRISTA_score_REF_{_CRISTA_PROJ}"],
@@ -370,6 +387,8 @@ def _curated_cell(kind, row, cols):
         v = _get("encode")
     elif kind == "dhs":
         v = _get("dhs")
+    elif kind == "cosmic":
+        v = _get("cosmic")
     else:
         v = None
 
@@ -379,8 +398,9 @@ def _curated_cell(kind, row, cols):
 
 
 def curated_headers(has_crista):
-    """The curated display headers, dropping CRISTA when not computed."""
-    return [h for h, kind in CURATED_COLUMNS if kind != "crista" or has_crista]
+    """The curated display headers, dropping CRISTA when not computed (and MAF
+    when ``_DROP_MAF`` is set)."""
+    return [h for h, kind in _active_columns() if kind != "crista" or has_crista]
 
 
 def build_curated_frame(sub_df, cols, has_crista, start_rank=1):
@@ -393,7 +413,7 @@ def build_curated_frame(sub_df, cols, has_crista, start_rank=1):
     columns, in the same order, resolved by name (missing -> "-").
     """
     headers = curated_headers(has_crista)
-    kinds = [kind for _h, kind in CURATED_COLUMNS if kind != "crista" or has_crista]
+    kinds = [kind for _h, kind in _active_columns() if kind != "crista" or has_crista]
     data = {h: [] for h in headers}
     for offset, (_idx, row) in enumerate(sub_df.iterrows()):
         for h, kind in zip(headers, kinds):
@@ -1836,6 +1856,7 @@ def build_report(
     samplesid_dir=None,
     params_override=None,
     top_n=1000,
+    drop_maf=False,
 ):
     """Build ``<jobid>_report.zip`` (report.html + integrated_results.tsv.gz +
     top1000.tsv).
@@ -1866,6 +1887,8 @@ def build_report(
     str
         Absolute path to the written ZIP.
     """
+    global _DROP_MAF
+    _DROP_MAF = bool(drop_maf)
     if integrated_tsv is None:
         if not result_dir:
             raise ValueError("Provide result_dir or integrated_tsv")
@@ -2109,6 +2132,13 @@ def _build_arg_parser():
         dest="output",
         help="Output ZIP path (default: <result-dir>/<jobid>_report.zip).",
     )
+    parser.add_argument(
+        "--no-maf",
+        dest="no_maf",
+        action="store_true",
+        help="Omit the MAF column entirely (table + every download) -- use when "
+        "allele frequencies are not yet finalized so a MAF column would mislead.",
+    )
     return parser
 
 
@@ -2122,6 +2152,7 @@ def main(argv=None):
         integrated_tsv=args.integrated_results,
         out_zip=args.output,
         samplesid_dir=args.samplesid_dir,
+        drop_maf=args.no_maf,
     )
     sys.stdout.write(f"Report written: {out}\n")
     return 0

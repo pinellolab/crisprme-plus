@@ -247,7 +247,8 @@ class TestGenerateReport(unittest.TestCase):
             # each bundled tier file is linked from the HTML with a RELATIVE href
             self.assertIn(f'href="{fname}"', html)
         # curated header carries the annotation columns
-        for ann in ("Gene", "Gene_distance_kb", "GENCODE", "ENCODE", "DHS"):
+        for ann in ("Gene", "Gene_distance_kb", "GENCODE", "ENCODE", "DHS",
+                    "COSMIC_cancer_gene"):
             self.assertIn(ann, expected_curated)
 
     def test_curated_column_list_is_the_shared_set(self):
@@ -259,7 +260,7 @@ class TestGenerateReport(unittest.TestCase):
                 "Aligned_protospacer+PAM", "Mismatches", "Bulges",
                 "Mismatches+bulges", "CFD", "CRISTA", "REF/ALT_origin",
                 "PAM_creation", "Variant", "MAF", "Gene", "Gene_distance_kb",
-                "GENCODE", "ENCODE", "DHS",
+                "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
             ],
         )
         # CRISTA is dropped when not computed (else identical)
