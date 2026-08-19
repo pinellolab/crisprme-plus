@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Self-contained, shareable CRISPRme off-target report (v2.1 -- IND briefing book).
+"""Self-contained, shareable CRISPRme off-target report (v2.2 -- IND briefing book).
 
 Given a CRISPRme result folder (or a bare ``*integrated_results.tsv``), this
 module produces a single, easily-transferable ZIP::
@@ -13,6 +13,14 @@ module produces a single, easily-transferable ZIP::
                                    #   its own RELATIVE download link
       panel_top100.tsv            # the recommended worst-case top-100 validation
                                    #   panel (section 4), bundled + RELATIVE link
+      <per-tier>.tsv[.gz]         # (v2.2) one ready-to-use TSV per validation
+                                   #   tier -- CFD>=t, mm+b<=t, variant-created --
+                                   #   each the matching off-target subset (same
+                                   #   columns as top1000.tsv, CFD desc), bundled
+                                   #   + RELATIVE link in the section-4 table and
+                                   #   the section-5 downloads. Tiers > ~2 MB are
+                                   #   gzipped (label reflects .tsv vs .tsv.gz);
+                                   #   0-row tiers are skipped (no file, no link).
 
 The report is a portable *digest* of the full interactive CRISPRme website
 result (personal risk cards, etc. stay in the website). It is meant for a
@@ -22,6 +30,13 @@ guide, SpCas9 NRG).
 
 Report structure (top -> bottom)
 --------------------------------
+4. RECOMMENDED VALIDATION PANEL (v2.2): the full threshold table now carries a
+   Download column -- EACH tier (worst-case top-100, CFD>= {0.5,0.2,0.1,0.05},
+   mm+b<= {1,2,3,4}, variant-created) is exported as its own ready-to-use TSV
+   (same columns as top1000.tsv, off-targets only w/ mm+b<=1 excluded, CFD desc),
+   bundled in the zip and linked RELATIVELY here + in section 5; 0-row tiers are
+   skipped and files > ~2 MB are gzipped.
+
 1. HEADER + GLOBAL SUMMARY: mirrors the web result-page top table. Left card:
    gRNA (spacer+PAM), nuclease, Aggregated Specificity Score (0-100, from
    ``.<jobid>.acfd_CFD.txt`` if present, else "CFD score not available"). Right:
@@ -91,7 +106,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 # report-generator version -- bumped here, stamped in the footer provenance line.
-REPORT_GENERATOR_VERSION = "2.1"
+REPORT_GENERATOR_VERSION = "2.2"
 
 # --------------------------------------------------------------------------- #
 # Recommended-validation-panel thresholds (module-level constants, section 4)
@@ -117,6 +132,63 @@ PANEL_WORSTCASE_METRICS = (
 )
 # bundled worst-case-panel filename (extra download alongside top1000.tsv)
 PANEL_TOP100_NAME = "panel_top100.tsv"
+
+# --------------------------------------------------------------------------- #
+# Per-tier "everything ready to go" downloads (v2.2, section 4 + 5)
+# --------------------------------------------------------------------------- #
+# EACH tier is exported as its own ready-to-use TSV bundled in the zip: the
+# matching subset of OFF-TARGETS (on-/near-on-target mm+b<=1 excluded, exactly
+# like the top-1000 table / scatter panels), sorted by CFD desc, with the SAME
+# column set as top1000.tsv (all original columns). A tier with 0 rows is
+# skipped (no file, no link). Files larger than ~TIER_GZIP_MAX_BYTES are gzipped
+# to keep the zip lean; the link label reflects .tsv vs .tsv.gz.
+#
+# This list is the single source of truth -- add/remove/reorder tiers here and
+# both the section-4 table column and the section-5 downloads follow. Each entry
+# is a dict:
+#   key       : stable identifier (used for ordering / debugging)
+#   filename  : base bundled filename (before optional .gz)
+#   label     : human label shown in the Download column / section 5
+#   kind      : "cfd_ge" | "mmb_le" | "variant_created" -- how to subset
+#   threshold : numeric threshold for cfd_ge / mmb_le (ignored for others)
+# The worst-case top-100 panel is handled separately (select_worstcase_panel)
+# but is ALSO surfaced in the same tier table via TIER_PANEL_TOP100_LABEL.
+TIER_GZIP_MAX_BYTES = 2 * 1024 * 1024  # gzip any tier TSV larger than ~2 MB
+
+TIER_SPECS = [
+    {"key": "cfd_ge_0.50", "filename": "cfd_ge_0.50.tsv",
+     "label": "CFD ≥ 0.50", "kind": "cfd_ge", "threshold": 0.50},
+    {"key": "cfd_ge_0.20", "filename": "cfd_ge_0.20.tsv",
+     "label": "CFD ≥ 0.20", "kind": "cfd_ge", "threshold": 0.20},
+    {"key": "cfd_ge_0.10", "filename": "cfd_ge_0.10.tsv",
+     "label": "CFD ≥ 0.10", "kind": "cfd_ge", "threshold": 0.10},
+    {"key": "cfd_ge_0.05", "filename": "cfd_ge_0.05.tsv",
+     "label": "CFD ≥ 0.05", "kind": "cfd_ge", "threshold": 0.05},
+    {"key": "mmb_le_1", "filename": "mmb_le_1.tsv",
+     "label": "mismatches+bulges ≤ 1", "kind": "mmb_le", "threshold": 1},
+    {"key": "mmb_le_2", "filename": "mmb_le_2.tsv",
+     "label": "mismatches+bulges ≤ 2", "kind": "mmb_le", "threshold": 2},
+    {"key": "mmb_le_3", "filename": "mmb_le_3.tsv",
+     "label": "mismatches+bulges ≤ 3", "kind": "mmb_le", "threshold": 3},
+    {"key": "mmb_le_4", "filename": "mmb_le_4.tsv",
+     "label": "mismatches+bulges ≤ 4", "kind": "mmb_le", "threshold": 4},
+    {"key": "variant_created", "filename": "variant_created.tsv",
+     "label": "Variant-created (Not_found_in_REF)", "kind": "variant_created",
+     "threshold": None},
+]
+
+# label under which the already-produced worst-case top-100 panel is shown IN
+# the tier table (its file/link is the panel_top100.tsv handled elsewhere).
+TIER_PANEL_TOP100_LABEL = f"Worst-case top {PANEL_WORSTCASE_CAP} (any single metric)"
+
+# concise MAF footnote (v2.2) -- explains a blank / em-dash Variant_MAF. Shown
+# under the top-1000 table and under the summary.
+MAF_FOOTNOTE = (
+    "Variant_MAF blank / —: reference off-target (no variant), an "
+    "indel-derived variant (the allele-frequency registry is SNP-only), or a "
+    "SNP variant not present in the frequency panel. For SNP variant "
+    "off-targets the frequency is AC/AN over the genotyped panel."
+)
 
 # --------------------------------------------------------------------------- #
 # Column-name resolution helpers
@@ -624,6 +696,7 @@ def render_summary_and_matrix(meta, spec_score, matrix):
     bulge count. Total column = row sum across mismatches.</p>
   </div>
 </div>
+<p class="caption maf-footnote">{html.escape(MAF_FOOTNOTE)}</p>
 """
 
 
@@ -1148,18 +1221,40 @@ def build_validation_panel(df, cols):
     }
 
 
-def render_validation_panel(vp, panel_tsv_name=None):
+def _tier_dl_cell(tier_links, key):
+    """A single Download-column <td> for tier ``key`` (relative link, or em-dash
+    when the tier was skipped -- 0 rows -- or downloads are unavailable).
+
+    ``tier_links`` maps tier key -> bundled filename (``.tsv`` / ``.tsv.gz``); the
+    link label reflects the extension so the reviewer knows what they'll get.
+    """
+    name = (tier_links or {}).get(key)
+    if not name:
+        return '<td class="dl">&mdash;</td>'
+    ext = "TSV, gzip" if name.endswith(".gz") else "TSV"
+    return (
+        f'<td class="dl"><a class="tierdl" href="{_esc(name)}" download>'
+        f"{ext}</a></td>"
+    )
+
+
+def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
     """Section 4 HTML: full threshold tables + worst-case suggested panel + note.
 
     ``panel_tsv_name`` (when given) adds a relative download link to the bundled
-    worst-case panel TSV.
+    worst-case panel TSV. ``tier_links`` (v2.2) maps each tier key
+    (``cfd_ge_<t>`` / ``mmb_le_<t>`` / ``variant_created`` / ``panel_top100``) to
+    its bundled filename; a new Download column links each non-empty tier
+    RELATIVELY, and 0-row tiers (absent from the map) render an em-dash.
     """
     cfd_rows = "".join(
-        f"<tr><td>CFD &ge; {t}</td><td class='num'>{c:,}</td></tr>"
+        f"<tr><td>CFD &ge; {t}</td><td class='num'>{c:,}</td>"
+        f"{_tier_dl_cell(tier_links, f'cfd_ge_{t:.2f}')}</tr>"
         for t, c in vp["cfd_counts"]
     )
     mmb_rows = "".join(
-        f"<tr><td>mismatches + bulges &le; {t}</td><td class='num'>{c:,}</td></tr>"
+        f"<tr><td>mismatches + bulges &le; {t}</td><td class='num'>{c:,}</td>"
+        f"{_tier_dl_cell(tier_links, f'mmb_le_{t}')}</tr>"
         for t, c in vp["mmb_counts"]
     )
     metric_names = ["CFD (desc)"]
@@ -1190,27 +1285,39 @@ def render_validation_panel(vp, panel_tsv_name=None):
             f"Recommended worst-case panel (TSV, up to {PANEL_WORSTCASE_CAP} sites)"
             f"</a></p>"
         )
+
+    # v2.2: each tier row carries a relative Download link (or em-dash when the
+    # tier is empty/skipped). The worst-case panel + variant-created rows in the
+    # summary table get their own Download cell too.
+    dl_note = (
+        "Each tier below is bundled in this zip as a ready-to-use TSV (same "
+        "columns as the top-1000 table, off-targets only with mm+b&le;1 "
+        "excluded, sorted by CFD desc); large tiers are gzipped. Empty tiers "
+        "are omitted (&mdash;). The links resolve after unzipping."
+    )
     return f"""
+<p class="caption">{dl_note}</p>
 <div class="panel-grid">
   <div>
-    <table class="thr-table"><thead><tr><th>CFD threshold</th><th>Candidates</th></tr></thead>
+    <table class="thr-table"><thead><tr><th>CFD threshold</th><th>Candidates</th><th>Download</th></tr></thead>
     <tbody>{cfd_rows}</tbody></table>
   </div>
   <div>
-    <table class="thr-table"><thead><tr><th>Edit-distance threshold</th><th>Candidates</th></tr></thead>
+    <table class="thr-table"><thead><tr><th>Edit-distance threshold</th><th>Candidates</th><th>Download</th></tr></thead>
     <tbody>{mmb_rows}</tbody></table>
   </div>
 </div>
-<table class="thr-table" style="max-width:680px">
+<table class="thr-table" style="max-width:820px">
+  <thead><tr><th>Tier</th><th>Candidates</th><th>Download</th></tr></thead>
   <tbody>
-    <tr><td>Off-targets (on-target mm+b=0 excluded)</td><td class="num">{vp['n_offtarget']:,}</td></tr>
-    <tr><td>Variant-created off-targets (Not_found_in_REF)</td><td class="num">{vp['n_variant']:,}</td></tr>
-    <tr><td>&hellip; of those with CFD &ge; {PANEL_VARIANT_CFD_MIN}</td><td class="num">{vp['n_variant_cfd']:,}</td></tr>
+    <tr><td>Off-targets (on-target mm+b=0 excluded)</td><td class="num">{vp['n_offtarget']:,}</td><td class="dl">&mdash;</td></tr>
+    <tr><td>Variant-created off-targets (Not_found_in_REF)</td><td class="num">{vp['n_variant']:,}</td>{_tier_dl_cell(tier_links, 'variant_created')}</tr>
+    <tr><td>&hellip; of those with CFD &ge; {PANEL_VARIANT_CFD_MIN}</td><td class="num">{vp['n_variant_cfd']:,}</td><td class="dl">&mdash;</td></tr>
     <tr class="panel-hi"><td><strong>Suggested panel &mdash; worst-case top {PANEL_WORSTCASE_CAP} sites</strong><br>
       <span class="caption">the most-concerning off-targets by ANY single metric
       ({metric_list}); of these, <strong>{vp['panel_variant']:,}</strong> are
       variant-created.</span></td>
-      <td class="num"><strong>{vp['panel_size']:,}</strong></td></tr>
+      <td class="num"><strong>{vp['panel_size']:,}</strong></td>{_tier_dl_cell(tier_links, 'panel_top100')}</tr>
   </tbody>
 </table>
 {download_html}
@@ -1235,6 +1342,71 @@ def select_top(df, cols, n=1000):
             _cfd=pd.to_numeric(work[cols["cfd"]], errors="coerce").fillna(-1.0)
         ).sort_values("_cfd", ascending=False).drop(columns=["_cfd"])
     return work.head(n)
+
+
+def _offtarget_cfd_sorted(df, cols):
+    """OFF-TARGET base frame for the per-tier exports (v2.2).
+
+    Exactly the base the top-1000 table and scatter panels use: drop on-/near-on
+    target rows (mm+b <= 1) and sort by CFD desc, keeping ALL original columns
+    (so each tier is column-identical to top1000.tsv). Returned once and re-subset
+    per tier so every tier is a consistent, ready-to-use slice.
+    """
+    work = df.copy()
+    if "mmb" in cols:
+        work = work[_to_int_series(work[cols["mmb"]]) > 1]
+    if "cfd" in cols:
+        work = work.assign(
+            _cfd=pd.to_numeric(work[cols["cfd"]], errors="coerce").fillna(-1.0)
+        ).sort_values("_cfd", ascending=False).drop(columns=["_cfd"])
+    return work
+
+
+def _tier_subset(base, cols, spec):
+    """Subset the CFD-sorted off-target base frame for one TIER_SPECS entry."""
+    kind = spec["kind"]
+    if kind == "cfd_ge":
+        if "cfd" not in cols:
+            return base.iloc[0:0]
+        cfd = _to_float_series(base[cols["cfd"]]).fillna(-1.0)
+        return base[cfd >= spec["threshold"]]
+    if kind == "mmb_le":
+        if "mmb" not in cols:
+            return base.iloc[0:0]
+        mmb = _to_int_series(base[cols["mmb"]])
+        return base[mmb <= spec["threshold"]]
+    if kind == "variant_created":
+        if "not_in_ref" in cols and cols["not_in_ref"] in base.columns:
+            var = base[cols["not_in_ref"]].astype(str).str.strip().str.lower().eq("y")
+        elif "origin" in cols and cols["origin"] in base.columns:
+            var = base[cols["origin"]].astype(str).str.strip().str.lower().eq("alt")
+        else:
+            return base.iloc[0:0]
+        return base[var]
+    return base.iloc[0:0]
+
+
+def build_tier_frames(df, cols):
+    """Build every non-empty per-tier off-target frame (v2.2).
+
+    Returns a list of (spec, frame) in TIER_SPECS order, EXCLUDING any tier with
+    0 rows (those get no file and no link). Each frame is CFD-sorted, off-targets
+    only (mm+b <= 1 excluded), with the full top1000-identical column set.
+    """
+    base = _offtarget_cfd_sorted(df, cols)
+    out = []
+    for spec in TIER_SPECS:
+        try:
+            sub = _tier_subset(base, cols, spec)
+        except Exception as exc:  # noqa: BLE001 - a bad tier never aborts the run
+            sys.stderr.write(
+                f"generate-report: tier {spec['key']} unavailable: {exc}\n"
+            )
+            continue
+        if len(sub) == 0:
+            continue  # 0-row tier -> skip (no file, no link)
+        out.append((spec, sub))
+    return out
 
 
 def _esc(value):
@@ -1262,7 +1434,6 @@ def build_table_html(top_df, cols, has_crista):
     ]
     head_html = "".join(f"<th>{h}</th>" for h in headers)
 
-    maf_missing_seen = False
     body_rows = []
     for rank, (_, row) in enumerate(top_df.iterrows(), start=1):
         aligned = ""
@@ -1280,7 +1451,6 @@ def build_table_html(top_df, cols, has_crista):
             maf_txt = f"{maf:.2e}"
         else:
             maf_txt = "&mdash;"
-            maf_missing_seen = True
 
         gene = row.get(cols["gene_name"]) if "gene_name" in cols else None
         gene_txt = "" if _is_na(gene) else _esc(gene)
@@ -1321,13 +1491,11 @@ def build_table_html(top_df, cols, has_crista):
         ]
         body_rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
 
-    footnote = ""
-    if maf_missing_seen:
-        footnote = (
-            '<p class="caption">MAF shown as &mdash; when no allele frequency is '
-            "annotated for the variant (the variant still exists in the callset; "
-            "only its population frequency is unavailable from the AF source).</p>"
-        )
+    # v2.2: always show the concise MAF footnote (explains a blank / em-dash
+    # Variant_MAF), regardless of whether an em-dash happened to appear in the
+    # top-N slice -- the summary references it too. The em-dash rendering above
+    # is unchanged (rsID->genomic-key fallback intact).
+    footnote = f'<p class="caption maf-footnote">{html.escape(MAF_FOOTNOTE)}</p>'
 
     table = (
         '<div class="ottable-wrap"><table class="ottable">'
@@ -1341,6 +1509,27 @@ def build_table_html(top_df, cols, has_crista):
 def write_top1000_tsv(top_df, path):
     """Write the exact top-N rows (all original columns) to a TSV."""
     top_df.to_csv(path, sep="\t", index=False)
+
+
+def write_tier_tsv(frame, staging, base_filename, gzip_max=TIER_GZIP_MAX_BYTES):
+    """Write one tier frame as a plain .tsv, gzipping it in-place when it exceeds
+    ``gzip_max`` (v2.2). Returns the FINAL bundled basename (``.tsv`` or
+    ``.tsv.gz``) so the caller can bundle the file and link it RELATIVELY.
+
+    Excel-ready plain TSV by default; gzipped only when large so the zip stays
+    lean. The gzip decision is by ACTUAL written size (not a row-count estimate),
+    so it holds across schemas / column counts.
+    """
+    plain_path = os.path.join(staging, base_filename)
+    frame.to_csv(plain_path, sep="\t", index=False)
+    if os.path.getsize(plain_path) > gzip_max:
+        gz_name = base_filename + ".gz"
+        gz_path = os.path.join(staging, gz_name)
+        with open(plain_path, "rb") as src, gzip.open(gz_path, "wb") as dst:
+            shutil.copyfileobj(src, dst, length=1024 * 1024)
+        os.remove(plain_path)
+        return gz_name, gz_path
+    return base_filename, plain_path
 
 
 # --------------------------------------------------------------------------- #
@@ -1385,6 +1574,14 @@ table.thr-table { border-collapse: collapse; margin: 0.4em 0; }
 table.thr-table th, table.thr-table td { border: 1px solid #e2e8f0; padding: 5px 12px; }
 table.thr-table th { background: #f7fafc; text-align: left; }
 table.thr-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.thr-table td.dl { text-align: center; }
+a.tierdl { color: #2b6cb0; text-decoration: none; font-weight: 600;
+           white-space: nowrap; }
+a.tierdl:hover { text-decoration: underline; }
+.maf-footnote { max-width: 900px; }
+.dl-list { columns: 2; -webkit-columns: 2; max-width: 900px; font-size: 0.9em;
+           margin: 0.2em 0 0.6em; padding-left: 1.1em; }
+.dl-list li { break-inside: avoid; margin: 0.15em 0; }
 tr.panel-hi td { background: #ebf8ff; }
 .ottable-wrap { max-height: 560px; overflow: auto; border: 1px solid #ccc;
                 border-radius: 4px; }
@@ -1415,7 +1612,7 @@ DISCLAIMER = (
 def render_html(
     job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
     table_html, tsv_gz_name, top1000_name, footer_html,
-    panel_top100_name=None,
+    panel_top100_name=None, tier_downloads=None,
 ):
     scatter_html = []
     for title, caption, uri in scatter_panels:
@@ -1436,6 +1633,25 @@ def render_html(
         panel_caption = (
             f" The recommended worst-case top-100 panel is also bundled as "
             f"<code>{_esc(panel_top100_name)}</code>."
+        )
+
+    # v2.2: per-tier "ready to go" download list (section 5). Each entry is
+    # (label, bundled_filename); the link is RELATIVE and its label reflects
+    # .tsv vs .tsv.gz. Empty when no tiers were produced.
+    tier_dl_html = ""
+    if tier_downloads:
+        items = []
+        for label, name in tier_downloads:
+            ext = "TSV, gzip" if str(name).endswith(".gz") else "TSV"
+            items.append(
+                f'<li><a href="{_esc(name)}" download>{_esc(label)}</a> '
+                f"({ext}) &mdash; <code>{_esc(name)}</code></li>"
+            )
+        tier_dl_html = (
+            "<p class=\"caption\" style=\"margin-bottom:0.2em\">Per-tier subsets "
+            "(off-targets only, mm+b&le;1 excluded, sorted by CFD desc, same "
+            "columns as the top-1000 TSV):</p>"
+            f'<ul class="dl-list">{"".join(items)}</ul>'
         )
 
     return f"""<!DOCTYPE html>
@@ -1478,6 +1694,7 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 <p class="caption">All files are bundled alongside this HTML in the same ZIP;
 the links resolve after unzipping on any machine. The top-1000 TSV contains
 exactly the rows shown in the table below.{panel_caption}</p>
+{tier_dl_html}
 
 <h2>6. Top 1000 off-targets (by CFD)</h2>
 {table_html}
@@ -1680,39 +1897,97 @@ def build_report(
         sys.stderr.write(f"generate-report: population plot unavailable: {exc}\n")
         pop_uri = _placeholder_uri("Population plot unavailable")
 
-    # ---- SECTION 4: validation panel (worst-case top-100) -------------------
-    panel_top100_df = None
-    panel_top100_name = PANEL_TOP100_NAME
-    try:
-        vp = build_validation_panel(df, cols)
-        panel_top100_df = vp.get("panel_df")
-        validation_html = render_validation_panel(vp, panel_tsv_name=panel_top100_name)
-    except Exception as exc:  # noqa: BLE001
-        sys.stderr.write(f"generate-report: validation panel unavailable: {exc}\n")
-        validation_html = "<p>Validation panel unavailable.</p>"
-        panel_top100_name = None
-
-    # ---- SECTION 6: top-1000 table -----------------------------------------
-    try:
-        table_html = build_table_html(top_df, cols, has_crista)
-    except Exception as exc:  # noqa: BLE001
-        sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
-        table_html = "<p>Top-1000 table unavailable.</p>"
-
-    # ---- SECTION 7: footer --------------------------------------------------
-    footer_html = build_footer(meta, version, os.path.basename(integrated_tsv))
-
-    tsv_gz_name = "integrated_results.tsv.gz"
-    top1000_name = "top1000.tsv"
-    html_doc = render_html(
-        job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
-        table_html, tsv_gz_name, top1000_name, footer_html,
-        panel_top100_name=(panel_top100_name if panel_top100_df is not None else None),
-    )
-
-    # ---- stage the files and zip -j (flat) ---------------------------------
+    # ---- stage dir up-front: tier files are written here FIRST so their final
+    # names (plain .tsv vs gzipped .tsv.gz, by actual size) can be linked in the
+    # section-4 table + section-5 downloads (v2.2). ----------------------------
     staging = tempfile.mkdtemp(prefix="crisprme_report_")
     try:
+        # ---- per-tier "ready to go" TSVs (v2.2) ----------------------------
+        # Build every non-empty tier frame, write each (gzip when large), and
+        # collect (a) tier_links: key -> bundled filename for the section-4
+        # table, (b) tier_downloads: [(label, filename)] for section 5, and
+        # (c) tier_paths: staged files to bundle. 0-row tiers are skipped.
+        tier_links = {}
+        tier_downloads = []
+        tier_paths = []
+        try:
+            tier_frames = build_tier_frames(df, cols)
+        except Exception as exc:  # noqa: BLE001 - a tier failure never aborts
+            sys.stderr.write(f"generate-report: tier export unavailable: {exc}\n")
+            tier_frames = []
+        for spec, frame in tier_frames:
+            try:
+                name, path = write_tier_tsv(frame, staging, spec["filename"])
+            except Exception as exc:  # noqa: BLE001 - skip a bad tier, keep going
+                sys.stderr.write(
+                    f"generate-report: tier {spec['key']} write failed: {exc}\n"
+                )
+                continue
+            tier_links[spec["key"]] = name
+            tier_downloads.append((spec["label"], name))
+            tier_paths.append(path)
+
+        # ---- SECTION 4: validation panel (worst-case top-100) --------------
+        panel_top100_df = None
+        panel_top100_name = PANEL_TOP100_NAME
+        try:
+            vp = build_validation_panel(df, cols)
+            panel_top100_df = vp.get("panel_df")
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"generate-report: validation panel unavailable: {exc}\n")
+            vp = None
+            panel_top100_name = None
+
+        # the recommended worst-case top-100 panel, bundled as an extra file, and
+        # surfaced in the tier table under the panel_top100 key.
+        panel_path = None
+        if panel_top100_df is not None:
+            panel_path = os.path.join(staging, PANEL_TOP100_NAME)
+            try:
+                panel_top100_df.to_csv(panel_path, sep="\t", index=False)
+                tier_links["panel_top100"] = PANEL_TOP100_NAME
+                tier_downloads.insert(
+                    0,
+                    (TIER_PANEL_TOP100_LABEL, PANEL_TOP100_NAME),
+                )
+            except Exception as exc:  # noqa: BLE001 - never abort on the panel TSV
+                sys.stderr.write(f"generate-report: {PANEL_TOP100_NAME} unavailable: {exc}\n")
+                with open(panel_path, "w") as handle:
+                    handle.write("\t".join(df.columns) + "\n")
+
+        if vp is not None:
+            try:
+                validation_html = render_validation_panel(
+                    vp, panel_tsv_name=panel_top100_name, tier_links=tier_links
+                )
+            except Exception as exc:  # noqa: BLE001
+                sys.stderr.write(
+                    f"generate-report: validation panel render failed: {exc}\n"
+                )
+                validation_html = "<p>Validation panel unavailable.</p>"
+        else:
+            validation_html = "<p>Validation panel unavailable.</p>"
+
+        # ---- SECTION 6: top-1000 table -------------------------------------
+        try:
+            table_html = build_table_html(top_df, cols, has_crista)
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
+            table_html = "<p>Top-1000 table unavailable.</p>"
+
+        # ---- SECTION 7: footer ---------------------------------------------
+        footer_html = build_footer(meta, version, os.path.basename(integrated_tsv))
+
+        tsv_gz_name = "integrated_results.tsv.gz"
+        top1000_name = "top1000.tsv"
+        html_doc = render_html(
+            job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
+            table_html, tsv_gz_name, top1000_name, footer_html,
+            panel_top100_name=(panel_top100_name if panel_top100_df is not None else None),
+            tier_downloads=tier_downloads,
+        )
+
+        # ---- stage the remaining files and zip -j (flat) -------------------
         html_path = os.path.join(staging, "report.html")
         with open(html_path, "w", encoding="utf-8") as handle:
             handle.write(html_doc)
@@ -1725,17 +2000,6 @@ def build_report(
             with open(top1000_path, "w") as handle:
                 handle.write("\t".join(df.columns) + "\n")
 
-        # the recommended worst-case top-100 panel, bundled as an extra file
-        panel_path = None
-        if panel_top100_df is not None:
-            panel_path = os.path.join(staging, PANEL_TOP100_NAME)
-            try:
-                panel_top100_df.to_csv(panel_path, sep="\t", index=False)
-            except Exception as exc:  # noqa: BLE001 - never abort on the panel TSV
-                sys.stderr.write(f"generate-report: {PANEL_TOP100_NAME} unavailable: {exc}\n")
-                with open(panel_path, "w") as handle:
-                    handle.write("\t".join(df.columns) + "\n")
-
         gz_path = os.path.join(staging, tsv_gz_name)
         if integrated_tsv.endswith(".gz"):
             shutil.copyfile(integrated_tsv, gz_path)
@@ -1746,6 +2010,7 @@ def build_report(
         bundle = [html_path, gz_path, top1000_path]
         if panel_path is not None:
             bundle.append(panel_path)
+        bundle.extend(tier_paths)
 
         if os.path.exists(out_zip):
             os.remove(out_zip)

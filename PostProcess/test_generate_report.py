@@ -5,8 +5,8 @@ Builds a tiny integrated_results fixture (dict-based schema with CRISTA + PAM
 creation columns, header names only for the columns the report reads) and
 asserts that build_report produces a ZIP that flat-decompresses to exactly the
 bundled files -- report.html + integrated_results.tsv.gz + top1000.tsv +
-panel_top100.tsv -- and that the HTML is a self-contained IND-briefing-book
-digest (report v2.1):
+panel_top100.tsv + the per-tier "ready to go" TSVs (v2.2) -- and that the HTML
+is a self-contained IND-briefing-book digest (report v2.2):
 
   * SECTION 1: the header summary card (guide, PAM, aggregated specificity score)
     AND the global Off-targets-by-MM-and-B matrix are present; the matrix
@@ -19,9 +19,15 @@ digest (report v2.1):
     delta); 2 panels when CRISTA is absent,
   * SECTION 4: the suggested panel is the worst-case top-100 (a site worst by any
     single metric -- CFD, CRISTA, or mm+b -- is included; capped at 100),
+  * SECTION 4/5 (v2.2): EACH validation tier (CFD>= {0.5,0.2,0.1,0.05},
+    mm+b<= {1,2,3,4}, variant-created, + the worst-case top-100) is exported as
+    its own ready-to-use TSV bundled in the zip, linked RELATIVELY in the
+    section-4 Download column AND section-5; 0-row tiers (mm+b<=1 here) are
+    skipped (no file, no link); each tier is column-identical to top1000.tsv,
   * SECTION 5/6: the top-N off-target table is rendered inline (rows sorted by
     CFD) with a PAM-creation column, and top1000.tsv + panel_top100.tsv are
-    bundled in the zip,
+    bundled in the zip; the concise MAF footnote (blank/em-dash explanation) is
+    present under the summary and the top-1000 table,
   * SECTION 7: the fixed research-only disclaimer is in the footer,
   * there is no external dependency (<script>/<link>/http(s)), so it opens with
     file:// offline,
@@ -186,16 +192,30 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_zip_has_exactly_the_flat_bundle(self):
         _, names, _ = self._build_and_extract()
-        # report v2.1 bundles the worst-case panel too (panel_top100.tsv)
+        # report v2.2 bundles the worst-case panel (panel_top100.tsv) AND one
+        # ready-to-go TSV per NON-EMPTY validation tier. The fixture's 5
+        # off-targets yield: cfd_ge_{0.50,0.20,0.10,0.05}, mmb_le_{2,3,4} (NOT
+        # mmb_le_1 -- 0 rows -> skipped), variant_created. All fixture tiers are
+        # tiny -> plain .tsv (no .gz).
         self.assertEqual(
             sorted(names),
             [
+                "cfd_ge_0.05.tsv",
+                "cfd_ge_0.10.tsv",
+                "cfd_ge_0.20.tsv",
+                "cfd_ge_0.50.tsv",
                 "integrated_results.tsv.gz",
+                "mmb_le_2.tsv",
+                "mmb_le_3.tsv",
+                "mmb_le_4.tsv",
                 "panel_top100.tsv",
                 "report.html",
                 "top1000.tsv",
+                "variant_created.tsv",
             ],
         )
+        # the 0-row tier (mm+b<=1 after the mm+b>1 base filter) is NOT bundled
+        self.assertNotIn("mmb_le_1.tsv", names)
         # flat (no directory components)
         for name in names:
             self.assertNotIn("/", name)
@@ -430,6 +450,146 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(len(panel2), gr.PANEL_WORSTCASE_CAP)
         # on-target never in the panel
         self.assertNotIn("chrON", set(panel2[cols2["chrom"]]))
+
+    def test_section45_per_tier_files_bundled_and_linked_relative(self):
+        """v2.2: each NON-EMPTY tier is bundled as its own ready-to-use TSV,
+        column-identical to top1000.tsv, and linked RELATIVELY in the section-4
+        Download column AND section-5; the 0-row tier is skipped (no file/link).
+        """
+        _, names, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+
+        # the expected non-empty tier files for the fixture (mmb_le_1 skipped)
+        expected = [
+            "cfd_ge_0.50.tsv", "cfd_ge_0.20.tsv", "cfd_ge_0.10.tsv",
+            "cfd_ge_0.05.tsv", "mmb_le_2.tsv", "mmb_le_3.tsv", "mmb_le_4.tsv",
+            "variant_created.tsv",
+        ]
+        for name in expected:
+            with self.subTest(tier=name):
+                # bundled in the zip
+                self.assertIn(name, names)
+                self.assertTrue(os.path.isfile(os.path.join(extract, name)))
+                # linked RELATIVELY (bare filename href, no scheme / no leading /)
+                self.assertIn(f'href="{name}"', html)
+                self.assertNotIn(f'href="/{name}"', html)
+                self.assertNotIn(f"http://{name}", html)
+
+        # the worst-case top-100 panel is ALSO surfaced in the tier table
+        self.assertIn('href="panel_top100.tsv"', html)
+
+        # 0-row tier (mm+b<=1) is skipped: no file, no link anywhere
+        self.assertNotIn("mmb_le_1.tsv", names)
+        self.assertNotIn("mmb_le_1", html)
+
+        # a new Download column exists in the section-4 threshold tables
+        self.assertIn("<th>Download</th>", html)
+
+        # tier files are column-identical to top1000.tsv, sorted by CFD desc,
+        # off-targets only (mm+b<=1 excluded)
+        top_hdr = self._read(os.path.join(extract, "top1000.tsv")).splitlines()[0]
+        for name in expected:
+            with self.subTest(columns_of=name):
+                lines = self._read(os.path.join(extract, name)).splitlines()
+                self.assertEqual(lines[0], top_hdr)  # same column set/order
+                # every data row has mm+b > 1 (on-/near-on-target excluded)
+                import pandas as pd
+
+                sub = pd.read_csv(
+                    os.path.join(extract, name), sep="\t", dtype=str, na_filter=False
+                )
+                mmb = pd.to_numeric(
+                    sub["Mismatches+bulges_(highest_CFD)"], errors="coerce"
+                )
+                self.assertTrue((mmb > 1).all())
+                cfd = pd.to_numeric(
+                    sub["CFD_score_(highest_CFD)"], errors="coerce"
+                ).fillna(-1.0).tolist()
+                self.assertEqual(cfd, sorted(cfd, reverse=True))  # CFD desc
+
+        # exact per-tier row counts for the fixture (5 off-targets)
+        counts = {
+            "cfd_ge_0.50.tsv": 3, "cfd_ge_0.20.tsv": 5, "cfd_ge_0.10.tsv": 5,
+            "cfd_ge_0.05.tsv": 5, "mmb_le_2.tsv": 2, "mmb_le_3.tsv": 4,
+            "mmb_le_4.tsv": 5, "variant_created.tsv": 3, "panel_top100.tsv": 5,
+        }
+        for name, n in counts.items():
+            with self.subTest(rowcount_of=name):
+                lines = self._read(os.path.join(extract, name)).strip().splitlines()
+                self.assertEqual(len(lines), n + 1)  # + header
+
+    def test_tier_specs_are_module_level_and_editable(self):
+        """The tier list is a module-level structure (easy to edit)."""
+        self.assertTrue(hasattr(gr, "TIER_SPECS"))
+        keys = [s["key"] for s in gr.TIER_SPECS]
+        self.assertEqual(
+            keys,
+            [
+                "cfd_ge_0.50", "cfd_ge_0.20", "cfd_ge_0.10", "cfd_ge_0.05",
+                "mmb_le_1", "mmb_le_2", "mmb_le_3", "mmb_le_4",
+                "variant_created",
+            ],
+        )
+        # gzip threshold is a module-level constant (~2 MB)
+        self.assertEqual(gr.TIER_GZIP_MAX_BYTES, 2 * 1024 * 1024)
+
+    def test_large_tier_is_gzipped_and_labeled(self):
+        """A tier whose plain TSV exceeds the ~2 MB threshold is gzipped, the
+        bundled name gains .gz, and the link label reflects it (.tsv vs .tsv.gz).
+        """
+        import pandas as pd
+
+        df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        frame = gr._offtarget_cfd_sorted(df, cols)
+
+        staging = tempfile.mkdtemp(prefix="gr_tier_")
+        self.addCleanup(
+            lambda: __import__("shutil").rmtree(staging, ignore_errors=True)
+        )
+        # tiny threshold -> even the small fixture tier gzips
+        name, path = gr.write_tier_tsv(
+            frame, staging, "cfd_ge_0.05.tsv", gzip_max=10
+        )
+        self.assertEqual(name, "cfd_ge_0.05.tsv.gz")
+        self.assertTrue(os.path.isfile(path))
+        self.assertFalse(os.path.isfile(os.path.join(staging, "cfd_ge_0.05.tsv")))
+        # round-trips + same columns
+        with gzip.open(path, "rt") as h:
+            content = h.read()
+        self.assertIn("Spacer+PAM", content.splitlines()[0])
+
+        # a large threshold keeps it plain
+        name2, path2 = gr.write_tier_tsv(
+            frame, staging, "cfd_ge_0.20.tsv", gzip_max=10 ** 9
+        )
+        self.assertEqual(name2, "cfd_ge_0.20.tsv")
+        self.assertTrue(path2.endswith(".tsv"))
+
+    def test_maf_footnote_present_under_summary_and_table(self):
+        """v2.2: the concise Variant_MAF footnote (blank/em-dash explanation) is
+        present, with the SNP-only-registry + AC/AN wording, and the existing
+        em-dash rendering + rsID->genomic-key fallback are intact.
+        """
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        # the footnote text is a module-level constant, easy to audit/edit
+        self.assertTrue(hasattr(gr, "MAF_FOOTNOTE"))
+        for phrase in (
+            "reference off-target (no variant)",
+            "the allele-frequency registry is SNP-only",
+            "a SNP variant not present in the frequency panel",
+            "AC/AN over the genotyped panel",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, gr.MAF_FOOTNOTE)
+                self.assertIn(phrase, html)
+        # rendered twice (under the summary AND under the top-1000 table)
+        self.assertGreaterEqual(html.count("maf-footnote"), 2)
+        # the em-dash blank-MAF rendering is still there (fixture has a blank MAF)
+        self.assertIn("&mdash;", html)
+        # rsID->genomic-key fallback intact: the multi-SNP row shows its rsID
+        self.assertIn("rs333", html)
 
     def test_section6_table_has_pam_creation_and_crista(self):
         _, _, extract = self._build_and_extract()
