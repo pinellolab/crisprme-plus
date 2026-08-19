@@ -441,12 +441,22 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     dict-less LOCUS coverage matches the stable reports.
 
     The row is a PURE reference alignment (no alt substituted). It carries the SAME
-    column writes (2/7/9/10) and PAM check as ``_finalize_observed_entry``, but with:
-      * ``final_line[12]`` (Samples) = "NA"  -> ``resultIntegrator`` classifies it
-        origin=ref (target[13]=="NA"); ``remove_contiguous_samples`` /
-        ``merge_contiguous_targets`` classify it origin=ref via the Reference column;
-      * ``final_line[15/16/17]`` (rsID / AF / SNP) = "NA"  -> a reference off-target
-        has no creating variant;
+    column writes (2/7/9/10) and PAM check as ``_finalize_observed_entry``, but its
+    Samples / rsID / AF / SNP markers are the LEGACY literal "n" (NOT "NA"), making the
+    row byte-identical to the legacy non-IUPAC else-branch reference row that provably
+    flows through the whole pipeline:
+      * ``final_line[12]`` (Samples) = "n"  -> ``remove_contiguous_samples`` /
+        ``merge_contiguous_targets`` classify it origin=ref via SNP(col18)=="n";
+        ``remove_n_and_dots`` then rewrites the literal "n" into the literal string
+        "NA", so ``resultIntegrator`` sees Samples == "NA" (origin=ref via
+        target[13]=="NA") and SNP == "NA" (its target[18]!="NA" guard skips the
+        variant parse). Writing "NA" here would break BOTH: pandas reads a written
+        "NA" as NaN and re-serializes it as "" (empty) -> resultIntegrator enters the
+        variant parse and `"".split("_")[2]` raises IndexError, and Samples ""!="NA"
+        misclassifies the row origin=alt.
+      * ``final_line[15/16/17]`` (rsID / AF / SNP) = "n"  -> a reference off-target
+        has no creating variant; SNP[17] (col18 post-adjust) is the LOAD-BEARING
+        marker the merge scripts and resultIntegrator key off.
       * the appended tail ``[ "n", 55, tmp_pos_mms ]`` -- the "n" Reference column and
         the ``55`` sentinel mark this DNA as REFERENCE (its CFD IS the ref CFD, no
         separate ref recompute), identical to the legacy non-IUPAC else-branch row.
@@ -495,10 +505,20 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     final_line[7] = str(mm_new_t - int(final_line[8]))
     final_line[9] = str(mm_new_t)
     # a pure reference row never creates the PAM (no alt substituted): leave [10] as-is.
-    final_line[12] = "NA"   # no carriers -> origin=ref (Samples == "NA")
-    final_line[15] = "NA"   # rsID  (reference: no creating variant)
-    final_line[16] = "NA"   # AF
-    final_line[17] = "NA"   # SNP / snp_info
+    # The reference markers MUST be the legacy literal "n" (NOT "NA"): every downstream
+    # consumer keys origin=ref off the LITERAL "n" in these columns. merge scripts bin a
+    # row origin=ref only when SNP(col18 post-adjust) == "n"; remove_n_and_dots then
+    # rewrites that literal "n" into the literal string "NA" (via chunk.replace({"n":
+    # "NA"})), which resultIntegrator reads as a REAL string -> its `target[18]!="NA"`
+    # and `target[13]=="NA"` guards both hold, so no variant-parse and origin=ref.
+    # Writing "NA" here instead broke both: pandas reads the written "NA" as NaN and
+    # re-serializes it as "" (empty), so resultIntegrator entered the variant parse and
+    # `"".split("_")[2]` raised IndexError; and Samples "NA"->"" made target[13]!="NA"
+    # so the reference row was misclassified origin=alt.
+    final_line[12] = "n"   # Samples  -> origin=ref (literal "n" round-trips to "NA")
+    final_line[15] = "n"   # rsID  (reference: no creating variant)
+    final_line[16] = "n"   # AF
+    final_line[17] = "n"   # SNP / snp_info  (LOAD-BEARING: col18 post-adjust)
     # Reference-row tail: "n" Reference column + sentinel 55 (DNA is REF, CFD is the ref
     # CFD, no separate ref recompute) + tmp_pos count. This is byte-identical to the
     # legacy non-IUPAC else-branch reference row, so every downstream consumer bins it

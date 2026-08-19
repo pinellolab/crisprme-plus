@@ -107,14 +107,18 @@ def _run(n_snps, **kw):
 
 
 def _n_snps_in_row(row):
-    return row[17].count(",") + 1 if row[17] not in ("", "NA") else 0
+    return row[17].count(",") + 1 if row[17] not in ("", "NA", "n") else 0
 
 
 def _is_reference_row(row):
     """A candidate's REFERENCE off-target row (LOCUS-COVERAGE FIX): pure reference
-    alignment, no carriers (Samples == 'NA'), and the legacy 'n' / sentinel-55 tail
-    (Reference col == 'n', target[-2] == 55) that bins it origin=ref downstream."""
-    return row[12] == "NA" and row[-3] == "n" and row[-2] == 55
+    alignment, no carriers (Samples == legacy literal 'n'), and the legacy 'n' /
+    sentinel-55 tail (Reference col == 'n', target[-2] == 55) that bins it origin=ref
+    downstream. The row is byte-identical to the legacy non-IUPAC else-branch reference
+    row: its Samples/rsID/AF/SNP markers are the literal 'n' (NOT 'NA'); remove_n_and_
+    dots rewrites those to the literal 'NA' string that resultIntegrator's target[13]/
+    target[18] guards depend on."""
+    return row[12] == "n" and row[-3] == "n" and row[-2] == 55
 
 
 def _variant_rows(rows):
@@ -188,8 +192,12 @@ class ScoringSentinelsIntact(unittest.TestCase):
         self.assertEqual(row[-3], "n", "Reference column must be 'n' for a ref row")
         self.assertEqual(row[-2], 55, "ref sentinel 55 (DNA is REF) must be at [-2]")
         self.assertIsInstance(row[-1], int, "tmp_pos_mms (int) must be the last token")
-        self.assertEqual(row[12], "NA", "reference row must have no carriers (Samples NA)")
-        self.assertEqual(row[17], "NA", "reference row must have NA SNP/snp_info")
+        self.assertEqual(row[12], "n",
+                         "reference row Samples must be the legacy literal 'n' "
+                         "(round-trips to 'NA' via remove_n_and_dots -> origin=ref)")
+        self.assertEqual(row[17], "n",
+                         "reference row SNP/snp_info must be the legacy literal 'n' "
+                         "(the load-bearing col18 marker downstream)")
 
     def test_no_extra_column_on_final_line(self):
         # BOTH the variant AND the reference row must have exactly the legacy 18 split
@@ -335,8 +343,8 @@ class ReferenceOffTargetCoverage(unittest.TestCase):
         # Sentinel tail intact + reference sentinels.
         self.assertEqual(row[-3], "n")
         self.assertEqual(row[-2], 55)
-        self.assertEqual(row[12], "NA")     # no carriers
-        self.assertEqual(row[17], "NA")     # snp_info sentinel != a real rsID
+        self.assertEqual(row[12], "n")      # no carriers (legacy 'n' marker)
+        self.assertEqual(row[17], "n")      # snp_info sentinel (legacy 'n' marker)
         # exactly the legacy 18 + 3 tail columns (no spliced-in phase column).
         self.assertEqual(len(row), 18 + 3)
 
