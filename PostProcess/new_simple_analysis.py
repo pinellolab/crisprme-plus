@@ -424,6 +424,91 @@ def _finalize_observed_entry(split, realTarget, refSeq_prerevert,
     _collect_variant_off_target(final_line)
 
 
+def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
+                              refSeq_with_bulges, guide_no_pam, revert,
+                              cluster_to_save):
+    """Materialize the REFERENCE off-target of an IUPAC candidate (dict-less path).
+
+    LOCUS-COVERAGE FIX. Legacy ``iupac_decomposition`` ALWAYS represents a candidate's
+    reference off-target: every alt row it emits embeds ``refSeq_with_bulges`` + the
+    sentinel ``33``, and ``resultIntegrator`` resolves that embedded reference into the
+    cluster's origin=ref alignment/score. The observed-haplotype path only emits real
+    variant haplotypes (``enumerate_observed_haplotypes`` never yields the empty set),
+    so a candidate with NO productive / in-budget observed haplotype lost its entire
+    locus -- both its reference AND its alt off-targets. This helper restores the
+    reference off-target for EVERY candidate, exactly as the SEPARATE reference-genome
+    CRISPRitz search would (a pure ``n`` / sentinel-``55`` reference row), so the
+    dict-less LOCUS coverage matches the stable reports.
+
+    The row is a PURE reference alignment (no alt substituted). It carries the SAME
+    column writes (2/7/9/10) and PAM check as ``_finalize_observed_entry``, but with:
+      * ``final_line[12]`` (Samples) = "NA"  -> ``resultIntegrator`` classifies it
+        origin=ref (target[13]=="NA"); ``remove_contiguous_samples`` /
+        ``merge_contiguous_targets`` classify it origin=ref via the Reference column;
+      * ``final_line[15/16/17]`` (rsID / AF / SNP) = "NA"  -> a reference off-target
+        has no creating variant;
+      * the appended tail ``[ "n", 55, tmp_pos_mms ]`` -- the "n" Reference column and
+        the ``55`` sentinel mark this DNA as REFERENCE (its CFD IS the ref CFD, no
+        separate ref recompute), identical to the legacy non-IUPAC else-branch row.
+
+    It applies the SAME ``mm_new_t - int(split[8]) > allowed_mms`` budget gate and
+    ``pam_ok`` gate as the finalizer, so it keeps the SAME reference rows the legacy
+    finalizer would keep (its level-0 seed rows share the reference allele at every
+    non-variant column). It does NOT feed ``_record_phase_confirmation`` or
+    ``_collect_variant_off_target`` -- the reference is not a variant off-target, so it
+    must never populate the phase-confirmation or population-summary companions.
+    """
+    final_line = split.copy()
+
+    if revert:
+        seq_joined = reverse_complement_table("".join(refSeq_prerevert))
+    else:
+        seq_joined = "".join(refSeq_prerevert)
+    target_to_list = list(seq_joined)
+    for pos, char in enumerate(realTarget):
+        if char == "-":
+            target_to_list.insert(pos, "-")
+
+    mm_new_t = 0
+    tmp_pos_mms = 0
+    for position_t, char_t in enumerate(target_to_list[pos_beg:pos_end]):
+        if char_t.upper() != guide_no_pam[position_t]:
+            mm_new_t += 1
+            tmp_pos_mms = position_t
+            if guide_no_pam[position_t] != "-":
+                target_to_list[pos_beg + position_t] = char_t.lower()
+
+    pam_ok = True
+    for pam_chr_pos, pam_chr in enumerate(target_to_list[pam_begin:pam_end]):
+        if pam_chr.upper() not in iupac_code_set[pam[pam_chr_pos]]:
+            pam_ok = False
+
+    # SAME budget + PAM gates as the finalizer (mirrors legacy :828/:830). An over-budget
+    # or PAM-failing reference is dropped EXACTLY as the legacy seed rows would be, so we
+    # keep the SAME reference rows stable keeps -- no more, no less.
+    if mm_new_t - int(split[8]) > allowed_mms:
+        return
+    if not pam_ok:
+        return
+
+    final_line[2] = "".join(target_to_list)
+    final_line[7] = str(mm_new_t - int(final_line[8]))
+    final_line[9] = str(mm_new_t)
+    # a pure reference row never creates the PAM (no alt substituted): leave [10] as-is.
+    final_line[12] = "NA"   # no carriers -> origin=ref (Samples == "NA")
+    final_line[15] = "NA"   # rsID  (reference: no creating variant)
+    final_line[16] = "NA"   # AF
+    final_line[17] = "NA"   # SNP / snp_info
+    # Reference-row tail: "n" Reference column + sentinel 55 (DNA is REF, CFD is the ref
+    # CFD, no separate ref recompute) + tmp_pos count. This is byte-identical to the
+    # legacy non-IUPAC else-branch reference row, so every downstream consumer bins it
+    # origin=ref.
+    final_line.append("n")
+    final_line.append(55)
+    final_line.append(tmp_pos_mms)
+    cluster_to_save.append(final_line)
+
+
 def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     """DICT-LESS observed-haplotype branch of iupac_decomposition.
 
@@ -497,17 +582,42 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
         return
 
     # 2) Enumerate the distinct observed haplotypes (bounded by ~ploidy*n_carriers).
+    #    NOTE: this may be EMPTY (a candidate whose registry variants are absent /
+    #    unproductive in every individual). We must NOT early-return on an empty
+    #    ``haplotypes`` -- the candidate's REFERENCE off-target is emitted below
+    #    REGARDLESS, so its locus is never dropped (LOCUS-COVERAGE FIX; matches the
+    #    legacy embedded-refSeq/sentinel-33 representation, which is present on every
+    #    IUPAC candidate). The ``enumerate_observed_haplotypes`` contract never yields
+    #    the empty/reference haplotype, so the reference row is our responsibility here.
     haplotypes = _obshap.enumerate_observed_haplotypes(
         positions, refSeq, parse_haplotypes, ploidy_of, current_chr
     )
-    if not haplotypes:
-        return
+
+    # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block).
+    refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
+    refSeq_with_bulges = list(refSeq_final)
+    for pos, char in enumerate(realTarget):
+        if char == "-":
+            refSeq_with_bulges.insert(pos, "-")
+    refSeq_with_bulges = "".join(refSeq_with_bulges)
+
+    # 3a) Emit the candidate's REFERENCE off-target ONCE (LOCUS-COVERAGE FIX). This is
+    #     emitted whether or not any observed variant haplotype survived, mirroring the
+    #     legacy path (which always represents the reference via its alt rows' embedded
+    #     refSeq). It is a pure reference alignment (no alt), origin=ref, in-budget/PAM
+    #     gated exactly like the finalizer -- so the observed path's LOCUS coverage
+    #     matches stable while still collapsing phantom multi-variant combinations.
+    _finalize_reference_entry(
+        split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
+        revert, cluster_to_save,
+    )
 
     # SAFETY VALVE (visibility, not truncation): a dense/hypervariable window (many
     # ambiguity columns) still emits every REAL observed haplotype -- sensitivity-first,
     # never miss a putative region -- but we LOG it to the shared high-variant-density
     # BED (as the legacy cap does) so an MHC-scale window is surfaced. Unlike the legacy
-    # 2^k cap this is O(#distinct observed sets), so no truncation is needed.
+    # 2^k cap this is O(#distinct observed sets), so no truncation is needed. It unions
+    # hap.carriers, so it is a natural no-op when ``haplotypes`` is empty.
     if IUPAC_CAP >= 0 and len(positions) > IUPAC_CAP:
         _samples = set()
         for _h in haplotypes:
@@ -523,15 +633,8 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
         except Exception:
             pass  # BED logging is best-effort; never break the run
 
-    # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block), then
-    #    finalize each observed haplotype through the shared finalizer.
-    refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
-    refSeq_with_bulges = list(refSeq_final)
-    for pos, char in enumerate(realTarget):
-        if char == "-":
-            refSeq_with_bulges.insert(pos, "-")
-    refSeq_with_bulges = "".join(refSeq_with_bulges)
-
+    # 3b) Finalize each observed VARIANT haplotype through the shared finalizer (may be
+    #     an empty loop when no productive observed haplotype exists).
     for hap in haplotypes:
         _finalize_observed_entry(
             split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
