@@ -126,3 +126,15 @@ jobs:
       - name: Phased multi-SNP haplotype not under-reported (deferred-peel fix)
         working-directory: PostProcess
         run: python -m unittest test_phased_haplotype -v
+
+      - name: "Observed-haplotype enumerator (per-individual, confirmed/putative)"
+        working-directory: PostProcess
+        run: python -m unittest test_observed_haplotypes -v
+
+      - name: "Observed-haplotype integration (real iupac_decomposition, sentinel tail intact)"
+        working-directory: PostProcess
+        run: python -m unittest test_observed_haplotype_integration -v
+
+      - name: "AF panel denominator uses VCF-filtered genotyped samples"
+        working-directory: PostProcess
+        run: python -m unittest test_af_denominator_panel -v
