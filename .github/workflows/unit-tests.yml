@@ -36,9 +36,12 @@ jobs:
         # requests: utils.py imports it at module load. numpy: test_phased_haplotype
         # exercises the real iupac_decomposition, which uses np.array (the only
         # scientific-stack dep on that hot path; pandas/CRISTA_score are stubbed in
-        # the test since that path uses neither). Still no huggingface_hub, so the
+        # the test since that path uses neither). pandas + matplotlib: the
+        # shareable-report generator (generate_report.py) uses both for real, and
+        # test_generate_report self-skips without them — install them so the report
+        # test actually exercises here. Still no huggingface_hub, so the
         # fallback-contract test keeps exercising the absent-hf_hub path offline.
-        run: python -m pip install --upgrade pip requests numpy
+        run: python -m pip install --upgrade pip requests numpy pandas matplotlib
 
       - name: Byte-compile the pipeline (syntax check)
         run: python -m py_compile crisprme.py PostProcess/*.py
@@ -126,3 +129,7 @@ jobs:
       - name: Phased multi-SNP haplotype not under-reported (deferred-peel fix)
         working-directory: PostProcess
         run: python -m unittest test_phased_haplotype -v
+
+      - name: "Shareable report (self-contained ZIP: report.html + tsv.gz, base64 plots, top-N table)"
+        working-directory: PostProcess
+        run: python -m unittest test_generate_report -v

@@ -2964,6 +2964,82 @@ def crisprme_version():
     sys.stdout.write(f"v{__version__}\n")
 
 
+def print_help_generate_report() -> None:
+    """Prints detailed help for the generate-report functionality."""
+    sys.stderr.write(
+        "The generate-report functionality builds a SELF-CONTAINED, easily "
+        "shareable report for a completed CRISPRme run. It produces a single "
+        "ZIP (<jobid>_report.zip) that flat-decompresses to exactly two files: "
+        "report.html (offline, no external dependencies -- plots embedded as "
+        "base64 PNG, the top-1000 off-target table inline, CSS inline) and "
+        "integrated_results.tsv.gz (the full results the HTML links to with a "
+        "relative href). It is a portable digest of the full interactive "
+        "website result, aimed at sharing off-target predictions (e.g. to "
+        "design a targeted-NGS / rhAMP-Seq confirmation panel).\n"
+    )
+    sys.stderr.write(
+        "Options:\n"
+        "\t--result-dir, a CRISPRme result folder (Results/<jobid>). The "
+        "integrated_results TSV, .Params.txt, .version.txt and the default "
+        "output location are resolved from here [REQUIRED unless "
+        "--integrated-results is given]\n"
+        "\t--integrated-results, an explicit integrated_results TSV (.tsv or "
+        ".tsv.gz) to report on [OPTIONAL]\n"
+        "\t--samplesID-dir, directory of samplesID files used for the "
+        "superpopulation breakdown plot; auto-detected near the install when "
+        "omitted [OPTIONAL]\n"
+        "\t--output, output ZIP path [default: "
+        "<result-dir>/<jobid>_report.zip]\n"
+    )
+    sys.exit(1)
+
+
+def generate_report() -> None:
+    """Standalone entry point for the shareable-report generator.
+
+    Delegates to PostProcess/generate_report.build_report so the same command
+    (re)generates the shareable ZIP for both CLI and website runs (their
+    Results/<jobid> folders are identical).
+    """
+    args = input_args[2:]
+    if "--help" in args:
+        print_help_generate_report()
+
+    def _opt(*names):
+        for name in names:
+            if name in args:
+                idx = args.index(name)
+                if idx + 1 < len(args):
+                    return args[idx + 1]
+                sys.stderr.write(f"ERROR! Missing value for {name}\n")
+                print_help_generate_report()
+        return None
+
+    result_dir = _opt("--result-dir")
+    integrated_results = _opt("--integrated-results")
+    samplesid_dir = _opt("--samplesID-dir")
+    output = _opt("--output", "--out")
+
+    if not result_dir and not integrated_results:
+        sys.stderr.write(
+            "ERROR! generate-report requires --result-dir or "
+            "--integrated-results\n\n"
+        )
+        print_help_generate_report()
+
+    # import lazily so the rest of the CLI never pays the matplotlib import cost
+    sys.path.insert(0, os.path.join(script_path, "PostProcess"))
+    import generate_report as _report_module
+
+    out = _report_module.build_report(
+        result_dir=result_dir,
+        integrated_tsv=integrated_results,
+        out_zip=output,
+        samplesid_dir=samplesid_dir,
+    )
+    sys.stdout.write(f"Report written: {out}\n")
+
+
 def print_help_complete_test():
     """
     Prints the help information for executing comprehensive testing of the
@@ -3237,6 +3313,10 @@ def crisprme_help() -> None:
         "crisprme.py generate-personal-card\n"
         "\tGenerates a personal card for specific samples by extracting all "
         "private targets\n\n"
+        "crisprme.py generate-report\n"
+        "\tBuilds a self-contained, shareable report (<jobid>_report.zip: "
+        "offline report.html + integrated_results.tsv.gz) for a completed "
+        "run\n\n"
         "crisprme.py setup\n"
         "\tInitializes the legacy database by downloading all reference "
         "genomes, variant datasets, PAM definition files, and associated "
@@ -3274,6 +3354,8 @@ elif sys.argv[1] == "gnomAD-converter":  # run gnomad converter
     gnomAD_converter()
 elif sys.argv[1] == "generate-personal-card":  # run create personal card
     personal_card()
+elif sys.argv[1] == "generate-report":  # build shareable self-contained report
+    generate_report()
 elif sys.argv[1] == "setup":  # run legacy database setup
     setup_database()
 elif sys.argv[1] == "web-interface":  # run web interface
