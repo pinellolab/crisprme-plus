@@ -48,6 +48,25 @@ except Exception:  # any module absent in an old deploy -> no companion summary
     _popsum = None
     _popsum_companion = None
     _t0c = None
+# ADDITIVE observed-haplotype enumerator (dict-less multi-variant path). GUARDED /
+# lazy exactly like the tiers above: an old deploy may not ship it, and it is ONLY
+# consulted on the ``mygt is not None`` dict-less branch. When absent, ``_obshap``
+# stays None and iupac_decomposition takes the BYTE-IDENTICAL legacy dict path (dict
+# decode + haplotype_check peel + greedy cap) unchanged. Its companion phase-
+# confirmation TSV is ADDITIVE (a separate file next to the output stem) so it never
+# touches the bestMerge/Samples columns or the downstream positional parsers.
+try:
+    import observed_haplotypes as _obshap
+    import phase_confirmation_companion as _phase_companion
+except Exception:  # module absent in an old deploy -> legacy dict path only
+    _obshap = None
+    _phase_companion = None
+# Accumulator for the ADDITIVE phase-confirmation companion TSV (one row per emitted
+# dict-less variant off-target: identity columns + CONFIRMED/PUTATIVE). Populated ONLY
+# on the ``mygt is not None`` branch; dead/empty on every legacy install so the
+# legacy path stays allocation-identical, not just byte-identical.
+_phase_confirmation_rows = []
+_phase_confirmation_keys = set()
 
 # Module-level dictless state, DEFAULTED here in the import prologue so
 # retrieveFromDict() / _collect_variant_off_target() / _write_population_summary_
@@ -308,7 +327,230 @@ def _aligned_mm(seq_prerevert, realTarget, guide_no_pam, revert):
     return mm
 
 
+def _record_phase_confirmation(final_line, phase_state):
+    """Record one dict-less variant off-target's identity + CONFIRMED/PUTATIVE flag
+    for the ADDITIVE phase-confirmation companion TSV. PURE w.r.t. ``final_line``
+    (reads, never mutates). Deduped by the SAME bestMerge identity key the population-
+    summary companion uses, so per-haplotype / CFD-vs-CRISTA duplicates collapse to one
+    row. GATED on the dict-less branch (mygt present); a no-op collection otherwise."""
+    try:
+        rec = {name: final_line[idx] for name, idx in _OT_COL.items()}
+    except Exception:
+        return
+    key = (rec["Chromosome"], rec["Position"], rec["Direction"], rec["crRNA"],
+           rec["DNA"], rec["SNP"])
+    if key in _phase_confirmation_keys:
+        return
+    _phase_confirmation_keys.add(key)
+    rec["Phase_Confirmation"] = phase_state
+    _phase_confirmation_rows.append(rec)
+
+
+def _finalize_observed_entry(split, realTarget, refSeq_prerevert,
+                             refSeq_with_bulges, guide_no_pam, revert, seq_prerevert,
+                             carriers, info, phase_state, cluster_to_save):
+    """Materialize ONE observed haplotype into the finalized row + companion flag.
+
+    Drives the EXACT same column writes (2/7/9/10/12/15/16/17), PAM check, PAM-
+    creation, mm-threshold discard, Reference/33/tmp_pos appends and cluster append
+    as the legacy finalization block (new_simple_analysis.py's totalDict path), so the
+    scored output is byte-for-byte compatible with a dict-based variant row (same
+    negative-index sentinels for CFD/CRISTA). The CONFIRMED/PUTATIVE flag is carried
+    OUT OF BAND to the companion TSV -- it is NEVER appended to ``final_line`` (that
+    would shift the target[-3]/target[-4] scoring sentinels).
+    """
+    if not carriers:
+        return
+    final_line = split.copy()
+
+    # apply strand + re-insert bulge gaps, mirroring the legacy per-key block
+    if revert:
+        seq_joined = reverse_complement_table("".join(seq_prerevert))
+    else:
+        seq_joined = "".join(seq_prerevert)
+    target_to_list = list(seq_joined)
+    for pos, char in enumerate(realTarget):
+        if char == "-":
+            target_to_list.insert(pos, "-")
+
+    mm_new_t = 0
+    tmp_pos_mms = 0
+    for position_t, char_t in enumerate(target_to_list[pos_beg:pos_end]):
+        if char_t.upper() != guide_no_pam[position_t]:
+            mm_new_t += 1
+            tmp_pos_mms = position_t
+            if guide_no_pam[position_t] != "-":
+                target_to_list[pos_beg + position_t] = char_t.lower()
+
+    pam_ok = True
+    for pam_chr_pos, pam_chr in enumerate(target_to_list[pam_begin:pam_end]):
+        if pam_chr.upper() not in iupac_code_set[pam[pam_chr_pos]]:
+            pam_ok = False
+
+    target_pam_ref = refSeq_with_bulges[pam_begin:pam_end]
+    found_creation = False
+    for pos_pam, pam_char in enumerate(target_pam_ref):
+        if not iupac_code_set[pam[pos_pam]] & iupac_code_set[pam_char]:
+            found_creation = True
+
+    if mm_new_t - int(split[8]) > allowed_mms:
+        return
+    if not pam_ok:
+        return
+
+    final_line[2] = "".join(target_to_list)
+    final_line[7] = str(mm_new_t - int(final_line[8]))
+    final_line[9] = str(mm_new_t)
+    if found_creation:
+        final_line[10] = "".join(target_to_list[pam_begin:pam_end])
+    final_line[12] = ",".join(carriers)
+    tmp_matrix = np.array(info)
+    if tmp_matrix.shape[0] > 1:
+        final_line[15] = ",".join(tmp_matrix[:, 0])
+        final_line[16] = ",".join(tmp_matrix[:, 1])
+        final_line[17] = ",".join(tmp_matrix[:, 2])
+    else:
+        final_line[15] = str(tmp_matrix[0][0])
+        final_line[16] = str(tmp_matrix[0][1])
+        final_line[17] = str(tmp_matrix[0][2])
+    final_line.append(refSeq_with_bulges)
+    final_line.append(33)
+    final_line.append(tmp_pos_mms)
+    cluster_to_save.append(final_line)
+    # ADDITIVE: companion phase-confirmation flag (out of band; never mutates
+    # final_line so the bestMerge column count + scoring sentinels are unchanged) and
+    # the ADDITIVE population-summary companion, both gated / deduped by identity.
+    _record_phase_confirmation(final_line, phase_state)
+    _collect_variant_off_target(final_line)
+
+
+def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
+    """DICT-LESS observed-haplotype branch of iupac_decomposition.
+
+    GATED by the caller on ``mygt is not None`` (a true dict-less install with a
+    Tier-1 genotype store). Reads the window's genotypes ONCE, enumerates the DISTINCT
+    haplotypes real individuals carry (via ``observed_haplotypes``), and feeds each
+    into the shared finalization. Replaces the legacy per-SNP seed split, the 2^k
+    growth lattice, the deferred phased peel AND the greedy IUPAC cap -- none of which
+    run on this path. Cross-individual chimeras are excluded by construction; the
+    IUPAC_CAP / high_variant_density BED are UNNECESSARY here (output is bounded by
+    the number of distinct observed sets, not 2^k) and stay live only on the legacy
+    path.
+    """
+    realTarget = split[2]
+    replaceTarget = split[2].replace("-", "")
+    refSeq = genomeStr[int(split[4]): int(split[4]) + len(replaceTarget)].upper()
+    revert = False
+    if split[6] == "-":
+        revert = True
+        replaceTarget = reverse_complement_table(replaceTarget)
+
+    parse_haplotypes = _popsum.parse_haplotypes
+    ploidy_of = _t0c.ploidy_of_for_chrom(current_chr)
+
+    # 1) Collect the k ambiguity/variant columns, EXACTLY as the legacy loop gathers
+    #    them (same boundary guard, same retrieveFromDict 5-tuple), but WITHOUT the
+    #    per-SNP seed split. Each column carries per-alt carrier GT maps (from the
+    #    genotype tier via retrieveFromDict's dict-less 5-tuple), the resolved per-alt
+    #    alt-index (multiallelic-safe), and per-alt [rsID, AF, snp_info].
+    positions = []
+    for pos_c, c in enumerate(replaceTarget):
+        if c not in iupac_code:
+            continue
+        if pos_c >= len(refSeq):
+            # boundary guard: an IUPAC position past the (truncated) refSeq end would
+            # index out of range -- skip it, exactly like the legacy path.
+            continue
+        snpToReplace, sampleSet, rsID, AF_var, snpInfo = retrieveFromDict(
+            pos_c + int(split[4])
+        )
+        alts, carrier_gts, alt_index, info, ps = [], [], [], [], None
+        for i, elem in enumerate(snpToReplace):
+            # tokens are "sampleID:gt"; split each on its FIRST ':' (never on '|').
+            gt_map = {}
+            for tok in sampleSet[i]:
+                if ":" in tok:
+                    sid, gt = tok.split(":", 1)
+                else:
+                    sid, gt = tok, ""
+                gt_map[sid.strip()] = gt.strip()
+            alts.append(elem)
+            carrier_gts.append(gt_map)
+            # Resolve THIS (pos, alt) record's alt-index token (multiallelic-safe)
+            # from its own carrier genotypes. Ploidy 2 is a safe upper bound for the
+            # token scan (parse_haplotypes just returns more slots; the classification
+            # only cares which non-ref token the record's carriers share).
+            alt_index.append(
+                _obshap._alt_index_for_record(gt_map.values(), parse_haplotypes, 2)
+            )
+            info.append([rsID[i], AF_var[i], snpInfo[i]])
+        positions.append({
+            "pos_c": pos_c,
+            "alts": alts,
+            "carrier_gts": carrier_gts,
+            "alt_index": alt_index,
+            "info": info,
+            "ps": ps,  # PS not stored on-disk yet -> single-block assumption
+        })
+
+    if not positions:
+        return
+
+    # 2) Enumerate the distinct observed haplotypes (bounded by ~ploidy*n_carriers).
+    haplotypes = _obshap.enumerate_observed_haplotypes(
+        positions, refSeq, parse_haplotypes, ploidy_of, current_chr
+    )
+    if not haplotypes:
+        return
+
+    # SAFETY VALVE (visibility, not truncation): a dense/hypervariable window (many
+    # ambiguity columns) still emits every REAL observed haplotype -- sensitivity-first,
+    # never miss a putative region -- but we LOG it to the shared high-variant-density
+    # BED (as the legacy cap does) so an MHC-scale window is surfaced. Unlike the legacy
+    # 2^k cap this is O(#distinct observed sets), so no truncation is needed.
+    if IUPAC_CAP >= 0 and len(positions) > IUPAC_CAP:
+        _samples = set()
+        for _h in haplotypes:
+            _samples |= _h.carriers
+        _start = int(split[4])
+        try:
+            hvdr_bed.write(
+                "%s\t%d\t%d\t%s\t%d\t%s\n"
+                % (split[3], _start, _start + len(replaceTarget),
+                   split[1].replace("-", ""), len(positions),
+                   ",".join(sorted(_samples)) if _samples else ".")
+            )
+        except Exception:
+            pass  # BED logging is best-effort; never break the run
+
+    # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block), then
+    #    finalize each observed haplotype through the shared finalizer.
+    refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
+    refSeq_with_bulges = list(refSeq_final)
+    for pos, char in enumerate(realTarget):
+        if char == "-":
+            refSeq_with_bulges.insert(pos, "-")
+    refSeq_with_bulges = "".join(refSeq_with_bulges)
+
+    for hap in haplotypes:
+        _finalize_observed_entry(
+            split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
+            revert, hap.seq, sorted(hap.carriers), hap.info, hap.phase_state,
+            cluster_to_save,
+        )
+
+
 def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
+    # DICT-LESS observed-haplotype path: GATED on a Tier-1 genotype store being
+    # present (mygt) AND the enumerator + its parsing helpers being importable. When
+    # ANY is absent (every dict-based install, and any old deploy) fall through to the
+    # BYTE-IDENTICAL legacy path below (per-SNP seed split + 2^k lattice + deferred
+    # peel + greedy cap). This is the ONLY behavioral fork; nothing below changes.
+    if mygt is not None and _obshap is not None and _popsum is not None \
+            and _t0c is not None:
+        _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save)
+        return
+
     realTarget = split[2]
     replaceTarget = split[2].replace("-", "")
     refSeq = genomeStr[int(split[4]) : int(split[4]) + len(replaceTarget)].upper()
@@ -1126,6 +1368,33 @@ def _write_population_summary_companion():
         print("population-summary companion skipped for", current_chr, "-", _ps_err)
 
 
+def _write_phase_confirmation_companion():
+    """ADDITIVE phase-confirmation companion write. FULLY GUARDED + GATED on the
+    dict-less branch (``mygt``).
+
+    Writes ``<outputFile>.phase_confirmation.tsv`` -- a SEPARATE joinable file next to
+    the output stem, one row per dict-less variant off-target: identity columns + the
+    CONFIRMED/PUTATIVE flag. It NEVER touches the bestMerge / Samples columns (the flag
+    is out of band) so the byte-identical legacy path is unaffected.
+
+    Gate: when ``mygt`` is None (legacy / dict-only install, or an old deploy without
+    the enumerator) NOTHING is written -- byte-identical legacy behavior. Any error is
+    caught + logged + skipped so this can NEVER break the run."""
+    if mygt is None or _phase_companion is None:
+        return  # GATE: no genotype tier -> no dict-less enumeration -> no companion
+    if not _phase_confirmation_rows:
+        return  # nothing enumerated (no variant off-targets on this chromosome)
+    try:
+        out_path = outputFile + ".phase_confirmation.tsv"
+        n = _phase_companion.write_companion(out_path, _phase_confirmation_rows)
+        print(
+            "Wrote phase-confirmation companion (%d variant off-target row[s]) to %s"
+            % (n, out_path)
+        )
+    except Exception as _pc_err:  # ADDITIVE + guarded: never break the run
+        print("phase-confirmation companion skipped for", current_chr, "-", _pc_err)
+
+
 # INPUT AND SETTINGS
 # fasta of the reference chromosome
 inFasta = open(sys.argv[1], "r")
@@ -1356,6 +1625,8 @@ else:
     cfd_dataframe.to_csv(outputFile + ".CFDGraph.txt", sep="\t", index=False)
     # ADDITIVE + guarded + gated-on-myreg: companion population-summary TSV.
     _write_population_summary_companion()
+    # ADDITIVE + guarded + gated-on-mygt: dict-less phase-confirmation companion TSV.
+    _write_phase_confirmation_companion()
     # print complete and exit with no error
     print("ANALYSIS COMPLETE IN", time.time() - global_start)
     exit(0)
@@ -1406,5 +1677,7 @@ cfd_dataframe.to_csv(outputFile + ".CFDGraph.txt", sep="\t", index=False)
 
 # ADDITIVE + guarded + gated-on-myreg: companion population-summary TSV.
 _write_population_summary_companion()
+# ADDITIVE + guarded + gated-on-mygt: dict-less phase-confirmation companion TSV.
+_write_phase_confirmation_companion()
 
 print("ANALYSIS COMPLETE IN", time.time() - global_start)
