@@ -2086,6 +2086,11 @@ def build_index_only() -> None:
     # failure logs a WARNING to STDOUT (stderr is fatal here) and never aborts the
     # dict/index build. Path derivation MIRRORS the search resolvers exactly (the
     # helper swaps the dictionaries_ prefix), so a built install actually uses them.
+    # NOTE (AF denominator, #117/#121): the panel denominator (AN) is built by
+    # tier0_compile.build_sample_meta over EXACTLY the per-db samplesID files listed
+    # here, so those files MUST be VCF-FILTERED to the genotyped samples (the merge
+    # script build_combined_panel.sh writes filtered per-db lists + a listing) or the
+    # panel would over-count phantom hom-ref individuals and inflate AN.
     db_to_samplesid = _build_db_to_samplesid(samples_listing, workdir)
     if not db_to_samplesid:
         if samples_listing:
