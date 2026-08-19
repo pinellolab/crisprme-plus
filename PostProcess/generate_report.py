@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Self-contained, shareable CRISPRme off-target report (v2 -- IND briefing book).
+"""Self-contained, shareable CRISPRme off-target report (v2.1 -- IND briefing book).
 
 Given a CRISPRme result folder (or a bare ``*integrated_results.tsv``), this
 module produces a single, easily-transferable ZIP::
@@ -11,6 +11,8 @@ module produces a single, easily-transferable ZIP::
                                    #   with a RELATIVE href (resolves post-unzip)
       top1000.tsv                 # the top-1000-by-CFD rows shown in the table,
                                    #   its own RELATIVE download link
+      panel_top100.tsv            # the recommended worst-case top-100 validation
+                                   #   panel (section 4), bundled + RELATIVE link
 
 The report is a portable *digest* of the full interactive CRISPRme website
 result (personal risk cards, etc. stay in the website). It is meant for a
@@ -25,15 +27,19 @@ Report structure (top -> bottom)
    ``.<jobid>.acfd_CFD.txt`` if present, else "CFD score not available"). Right:
    the "Off-targets by Mismatch (MM) and Bulge (B)" matrix, grouped REFERENCE vs
    VARIANT, then by bulge count, columns Total + 0MM..<mm>MM.
-2. KEY GRAPHICAL REPORT: the CRISPRme-paper CFD scatter (site index log-x vs
+2. KEY GRAPHICAL REPORT: the CRISPRme-paper ref/alt scatter (site index log-x vs
    score, red REF / blue ALT points sized by allele frequency, ref->alt arrows,
-   top site rsID-annotated), in up to three panels: by CFD, by DELTA=ALT-REF, and
-   by CRISTA (only when CRISTA was computed).
+   top site rsID-annotated), in up to FOUR panels: by CFD, by variant effect
+   (CFD ALT-REF delta), by CRISTA, and by variant effect (CRISTA ALT-REF delta).
+   The two CRISTA panels appear only when CRISTA was computed -> 4 panels with
+   CRISTA, 2 without.
 3. SIMPLIFIED reference-vs-population plot (v1 single view).
-4. RECOMMENDED VALIDATION PANEL: candidate counts at CFD / edit-distance
-   thresholds, a suggested tiered panel (union of top-100-by-CFD + all mm+b<=2 +
-   all variant-created with CFD>=0.05), and an IND rationale.
-5. DOWNLOADS: full integrated_results.tsv.gz + top1000.tsv (both bundled).
+4. RECOMMENDED VALIDATION PANEL: the full threshold table (candidate counts at
+   CFD>= {0.5,0.2,0.1,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS a
+   suggested tier = the up-to-100 most-concerning off-targets by ANY single
+   metric (worst-case severity across CFD desc, CRISTA desc, mm+b asc), with a
+   note + how many are variant-created; the panel is exported as panel_top100.tsv.
+5. DOWNLOADS: full integrated_results.tsv.gz + top1000.tsv + panel_top100.tsv.
 6. SCROLLABLE TOP-1000 TABLE (by CFD desc, mm+b<=1 excluded), with a PAM-creation
    column and CRISTA when computed.
 7. FOOTER: CRISPRme version + provenance stamp + fixed research-only disclaimer.
@@ -85,17 +91,32 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 # report-generator version -- bumped here, stamped in the footer provenance line.
-REPORT_GENERATOR_VERSION = "2.0"
+REPORT_GENERATOR_VERSION = "2.1"
 
 # --------------------------------------------------------------------------- #
 # Recommended-validation-panel thresholds (module-level constants, section 4)
 # --------------------------------------------------------------------------- #
 CFD_THRESHOLDS = (0.5, 0.2, 0.1, 0.05)
 MMB_THRESHOLDS = (1, 2, 3, 4)
-# tiered-panel construction knobs
-PANEL_TOP_N_BY_CFD = 100
-PANEL_MMB_MAX = 2
+# threshold-table variant-created CFD floor (kept for the full threshold table)
 PANEL_VARIANT_CFD_MIN = 0.05
+
+# Worst-case suggested-panel construction (section 4). The suggested tier is the
+# UP-TO-100 most-concerning off-targets by ANY single metric: each site is ranked
+# by CFD (desc), CRISTA (desc, when computed) and mm+bulges (asc, fewer = closer =
+# worse); a site's SEVERITY is the BEST (minimum) of its available ranks, so a
+# site that is worst by any one metric is prioritized. The panel is the top
+# PANEL_WORSTCASE_CAP by severity (ties: CFD desc, CRISTA desc, mm+b asc).
+PANEL_WORSTCASE_CAP = 100
+# metrics contributing to the worst-case severity (logical key, direction).
+# direction "desc" => higher is worse; "asc" => lower is worse (closer sequence).
+PANEL_WORSTCASE_METRICS = (
+    ("cfd", "desc"),
+    ("crista", "desc"),
+    ("mmb", "asc"),
+)
+# bundled worst-case-panel filename (extra download alongside top1000.tsv)
+PANEL_TOP100_NAME = "panel_top100.tsv"
 
 # --------------------------------------------------------------------------- #
 # Column-name resolution helpers
@@ -470,7 +491,16 @@ def build_mmb_matrix(df, cols, meta):
     Mirrors the web result-page top matrix: columns Total, 0MM..<mm>MM; rows
     grouped REFERENCE then VARIANT, within each a row per bulge count 0..maxbulges.
     Uses the canonical partition (variant := Not_found_in_REF=="y"; on-target
-    rows mm+b==0 are excluded from the off-target matrix). Returns a dict with
+    rows mm+b==0 are excluded from the off-target matrix).
+
+    Extent is chosen so EVERY off-target lands in a cell:
+      * bulge rows span 0..(bDNA + bRNA)  -- NOT Max_bulges, which under-counts
+        when both a DNA and an RNA bulge co-occur (bDNA=2, bRNA=2 -> rows 0..4);
+      * mm columns span 0..Mismatches (0..6).
+    If the OBSERVED max ever exceeds the configured span (defensive), the extent
+    grows to cover it so no off-target is silently dropped -- guaranteeing the
+    matrix REFERENCE + VARIANT totals equal the canonical partition off-target
+    totals (REFERENCE + VARIANT + on-target == grand total). Returns a dict with
     ``mm_cols`` (0..mm) and ``groups`` = list of (label, [ (bulge, total, [per-mm
     counts]) ... ]).
     """
@@ -481,14 +511,30 @@ def build_mmb_matrix(df, cols, meta):
     if mm_series is None or b_series is None:
         return None
 
-    # column extent: prefer the run's configured mm; else observed max
+    obs_max_mm = int(mm_series[mm_series >= 0].max()) if (mm_series >= 0).any() else 0
+    obs_max_b = int(b_series[b_series >= 0].max()) if (b_series >= 0).any() else 0
+
+    # column extent: run's configured Mismatches, grown to cover observed
     max_mm = meta.get("mm_int")
-    if max_mm is None:
-        max_mm = int(mm_series[mm_series >= 0].max()) if (mm_series >= 0).any() else 0
-    # row extent: prefer configured max bulges; else observed max
-    max_b = meta.get("bmax_int")
-    if max_b is None:
-        max_b = int(b_series[b_series >= 0].max()) if (b_series >= 0).any() else 0
+    max_mm = obs_max_mm if max_mm is None else max(max_mm, obs_max_mm)
+
+    # row extent: bDNA + bRNA (total simultaneous bulges), grown to cover observed.
+    # Fall back to Max_bulges, then observed, when DNA/RNA counts are unavailable.
+    def _int_or_none(x):
+        try:
+            return int(str(x).strip())
+        except (TypeError, ValueError):
+            return None
+
+    bdna = _int_or_none(meta.get("bdna"))
+    brna = _int_or_none(meta.get("brna"))
+    if bdna is not None and brna is not None:
+        max_b = bdna + brna
+    elif meta.get("bmax_int") is not None:
+        max_b = meta["bmax_int"]
+    else:
+        max_b = obs_max_b
+    max_b = max(max_b, obs_max_b)
 
     mm_cols = list(range(0, max_mm + 1))
 
@@ -645,9 +691,18 @@ def _placeholder_uri(message):
         )
 
 
-def _cfd_style_scatter(sub, cols, score_key, ref_key, alt_key, xlabel, title):
+def _cfd_style_scatter(
+    sub, score_key, ref_key, alt_key, xlabel, title,
+    score_name="CFD", maf_col=None, samp_col=None, rsid_col=None,
+):
     """The CRISPRme-paper CFD/CRISTA scatter, adapted from
     CRISPRme_plots.py:plot_with_CFD_score (~L347).
+
+    Generalized over the score family: ``score_key`` / ``ref_key`` / ``alt_key``
+    are the resolved combined/REF/ALT score-column names (CFD or CRISTA), and
+    ``maf_col`` / ``samp_col`` / ``rsid_col`` are the resolved allele-frequency /
+    samples / rsID column names for that same projection. ``score_name`` is the
+    y-axis / annotation label ("CFD" or "CRISTA").
 
     ``sub`` is an ALREADY-ORDERED (top-first) top-N frame. Red REF points and
     blue ALT points, both sized by allele frequency; gray arrows connect the
@@ -661,9 +716,6 @@ def _cfd_style_scatter(sub, cols, score_key, ref_key, alt_key, xlabel, title):
     work["_index"] = np.arange(1, n + 1)
 
     # min-AF across a multi-SNP haplotype; -1 => AF unknown (CRISPRme_plots.py:54-60)
-    maf_col = cols.get("_maf_for_" + score_key)
-    if maf_col is None or maf_col not in work.columns:
-        maf_col = cols.get("maf") if score_key == "cfd" else cols.get("crista_maf")
     if maf_col and maf_col in work.columns:
         af = work[maf_col].astype(str).str.split(",").apply(
             lambda toks: min(
@@ -674,9 +726,6 @@ def _cfd_style_scatter(sub, cols, score_key, ref_key, alt_key, xlabel, title):
         af = pd.Series([-1.0] * n)
     work["AF"] = pd.to_numeric(af, errors="coerce").fillna(-1.0)
 
-    samp_col = (
-        cols.get("samples") if score_key == "cfd" else cols.get("crista_samples")
-    )
     if samp_col and samp_col in work.columns:
         _samp = work[samp_col].astype(str)
         has_var = _samp.str.len().gt(1) & ~_samp.str.lower().isin(
@@ -719,7 +768,7 @@ def _cfd_style_scatter(sub, cols, score_key, ref_key, alt_key, xlabel, title):
     )
     ax.set_xscale("log")
     ax.set_xlabel(xlabel)
-    ax.set_ylabel(score_label(score_key) + " score")
+    ax.set_ylabel(f"{score_name} score")
     ax.set_title(title)
     ax.set_xlim(0.9, max(1000, n))
     ax.set_ylim(0, 1)
@@ -742,7 +791,6 @@ def _cfd_style_scatter(sub, cols, score_key, ref_key, alt_key, xlabel, title):
             continue
 
     # annotate top-ranked off-target with its rsID
-    rsid_col = cols.get("rsid") if score_key == "cfd" else cols.get("crista_rsid")
     if rsid_col and rsid_col in work.columns:
         top_rsid = _first_non_na(work.iloc[0][rsid_col])
         top_y = y_alt.iloc[0] if pd.notna(y_alt.iloc[0]) else y_ref.iloc[0]
@@ -785,19 +833,16 @@ def _num_ok(tok):
         return False
 
 
-def score_label(score_key):
-    return "CRISTA" if score_key == "crista" else "CFD"
-
-
 def plot_scatter_panels(df, cols, n=1000, include_crista=False):
     """Produce the key graphical-report scatter panels (section 2).
 
     Returns a list of (title, caption, data_uri). Panels:
       (a) top-N by CFD score
-      (b) top-N by DELTA = ALT CFD - REF CFD (largest variant increase first)
-      (c) top-N by CRISTA score  -- only when include_crista is True
-    Every panel is guarded; a failing panel yields a placeholder URI (never
-    aborts).
+      (b) top-N by CFD DELTA = ALT CFD - REF CFD (largest variant increase first)
+      (c) top-N by CRISTA score               -- only when include_crista is True
+      (d) top-N by CRISTA DELTA = ALT - REF    -- only when include_crista is True
+    So: CRISTA computed -> 4 panels; CRISTA absent -> 2 panels. Every panel is
+    guarded; a failing panel yields a placeholder URI (never aborts).
     """
     panels = []
 
@@ -805,38 +850,32 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
     base = df
     if "mmb" in cols:
         base = base[_to_int_series(base[cols["mmb"]]) > 1]
+    n_shown = min(n, len(base))
 
-    # (a) by CFD score
-    def _cfd_sorted():
-        cfd = _to_float_series(base[cols["cfd"]]).fillna(-1.0)
-        return base.assign(_s=cfd).sort_values("_s", ascending=False).head(n)
+    def _score_sorted(score_col):
+        s = _to_float_series(base[score_col]).fillna(-1.0)
+        return base.assign(_s=s).sort_values("_s", ascending=False).head(n)
 
-    # (b) by DELTA = ALT - REF (descending)
-    def _delta_sorted():
-        alt = _to_float_series(base[cols["cfd_alt"]])
-        ref = _to_float_series(base[cols["cfd_ref"]])
-        delta = (alt - ref)
+    def _delta_sorted(alt_col, ref_col):
+        delta = _to_float_series(base[alt_col]) - _to_float_series(base[ref_col])
         return (
             base.assign(_delta=delta)
             .sort_values("_delta", ascending=False, na_position="last")
             .head(n)
         )
 
-    # (c) by CRISTA
-    def _crista_sorted():
-        cr = _to_float_series(base[cols["crista"]]).fillna(-1.0)
-        return base.assign(_s=cr).sort_values("_s", ascending=False).head(n)
-
-    ref_key = cols.get("cfd_ref", "")
-    alt_key = cols.get("cfd_alt", "")
-    score_key = cols.get("cfd", "")
-
-    # (a)
+    # (a) by CFD score
+    cfd_score = cols.get("cfd", "")
+    cfd_ref = cols.get("cfd_ref", "")
+    cfd_alt = cols.get("cfd_alt", "")
     try:
         uri = _cfd_style_scatter(
-            _cfd_sorted(), cols, score_key, ref_key, alt_key,
+            _score_sorted(cfd_score), cfd_score, cfd_ref, cfd_alt,
             xlabel="Candidate off-target site (ranked by CFD)",
-            title=f"Top {min(n, len(base))} candidates by CFD score",
+            title=f"Top {n_shown} candidates by CFD score",
+            score_name="CFD",
+            maf_col=cols.get("maf"), samp_col=cols.get("samples"),
+            rsid_col=cols.get("rsid"),
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: CFD scatter unavailable: {exc}\n")
@@ -850,35 +889,45 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
         uri,
     ))
 
-    # (b) only when the REF/ALT CFD columns exist
+    # (b) by CFD DELTA -- only when the REF/ALT CFD columns exist
     if "cfd_ref" in cols and "cfd_alt" in cols:
         try:
             uri = _cfd_style_scatter(
-                _delta_sorted(), cols, score_key, ref_key, alt_key,
+                _delta_sorted(cfd_alt, cfd_ref), cfd_score, cfd_ref, cfd_alt,
                 xlabel="Candidate off-target site (ranked by variant effect ALT-REF)",
-                title=f"Top {min(n, len(base))} by variant-induced CFD increase (ALT-REF)",
+                title=f"Top {n_shown} by variant-induced CFD increase (ALT-REF)",
+                score_name="CFD",
+                maf_col=cols.get("maf"), samp_col=cols.get("samples"),
+                rsid_col=cols.get("rsid"),
             )
         except Exception as exc:  # noqa: BLE001
-            sys.stderr.write(f"generate-report: delta scatter unavailable: {exc}\n")
-            uri = _placeholder_uri("Delta scatter unavailable")
+            sys.stderr.write(f"generate-report: CFD delta scatter unavailable: {exc}\n")
+            uri = _placeholder_uri("CFD delta scatter unavailable")
         panels.append((
-            "By variant effect (ALT - REF CFD)",
+            "By variant effect (CFD ALT - REF delta)",
             "Same axes, re-ranked by the variant-induced CFD change (ALT-REF, "
             "descending): the variants that most raise the CFD score come first, "
             "foregrounding the risk-relevant variant-created sites.",
             uri,
         ))
 
-    # (c) CRISTA, only when computed
+    # (c) + (d) CRISTA, only when computed
     if include_crista:
         cr_score = cols.get("crista", "")
         cr_ref = cols.get("crista_ref", "")
         cr_alt = cols.get("crista_alt", "")
+        cr_maf = cols.get("crista_maf")
+        cr_samp = cols.get("crista_samples")
+        cr_rsid = cols.get("crista_rsid")
+
+        # (c) by CRISTA score
         try:
             uri = _cfd_style_scatter(
-                _crista_sorted(), cols, cr_score, cr_ref, cr_alt,
+                _score_sorted(cr_score), cr_score, cr_ref, cr_alt,
                 xlabel="Candidate off-target site (ranked by CRISTA)",
-                title=f"Top {min(n, len(base))} candidates by CRISTA score",
+                title=f"Top {n_shown} candidates by CRISTA score",
+                score_name="CRISTA",
+                maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
             )
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: CRISTA scatter unavailable: {exc}\n")
@@ -889,6 +938,31 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
             "because CRISTA scores were computed for this run.",
             uri,
         ))
+
+        # (d) by CRISTA DELTA -- only when the REF/ALT CRISTA columns exist
+        if "crista_ref" in cols and "crista_alt" in cols:
+            try:
+                uri = _cfd_style_scatter(
+                    _delta_sorted(cr_alt, cr_ref), cr_score, cr_ref, cr_alt,
+                    xlabel="Candidate off-target site (ranked by variant effect ALT-REF)",
+                    title=f"Top {n_shown} by variant-induced CRISTA increase (ALT-REF)",
+                    score_name="CRISTA",
+                    maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
+                )
+            except Exception as exc:  # noqa: BLE001
+                sys.stderr.write(
+                    f"generate-report: CRISTA delta scatter unavailable: {exc}\n"
+                )
+                uri = _placeholder_uri("CRISTA delta scatter unavailable")
+            panels.append((
+                "By variant effect (CRISTA)",
+                "Same CRISPRme-paper ref/alt scatter with CRISTA on the y-axis, "
+                "re-ranked by the variant-induced CRISTA change (ALT-REF, "
+                "descending): the population variants that most raise the "
+                "independent CRISTA cleavage score come first. Included because "
+                "CRISTA scores were computed for this run.",
+                uri,
+            ))
 
     return panels
 
@@ -963,12 +1037,77 @@ def plot_population(df, cols, sample_superpop):
 # --------------------------------------------------------------------------- #
 # SECTION 4: recommended validation panel
 # --------------------------------------------------------------------------- #
+def select_worstcase_panel(df, cols, cap=PANEL_WORSTCASE_CAP):
+    """Return the OFF-TARGET rows for the worst-case suggested panel (section 4).
+
+    The panel is the UP-TO-``cap`` most-concerning off-targets by ANY single
+    metric. Over the off-target set (on-target mm+b==0 excluded), each site is
+    ranked independently by every available metric in ``PANEL_WORSTCASE_METRICS``:
+    CFD (desc), CRISTA (desc; only when computed) and mm+bulges (asc, fewer =
+    closer sequence = worse). Rank 1 is the worst by that metric. A site's
+    SEVERITY is the BEST (minimum) rank it achieves across its available metrics,
+    so a site that is worst by ANY single metric floats to the top. We then take
+    the ``cap`` lowest-severity sites; ties are broken by CFD desc, then CRISTA
+    desc, then mm+b asc.
+
+    Returns the selected sub-frame (original columns, in severity order).
+    """
+    _variant, _reference, ontarget = partition_masks(df, cols)
+    offt = df[~ontarget].copy()
+    if len(offt) == 0:
+        return offt
+
+    cfd = (
+        _to_float_series(offt[cols["cfd"]]).fillna(-1.0)
+        if "cfd" in cols else pd.Series(-1.0, index=offt.index)
+    )
+    crista = (
+        _to_float_series(offt[cols["crista"]])
+        if "crista" in cols else pd.Series(np.nan, index=offt.index)
+    )
+    mmb = (
+        _to_int_series(offt[cols["mmb"]])
+        if "mmb" in cols else pd.Series(10 ** 6, index=offt.index)
+    )
+    has_crista = crista.notna().any()
+
+    # per-metric ranks (rank 1 == worst). ascending flag flips per direction:
+    #   desc metric -> higher is worse -> rank ascending=False
+    #   asc  metric -> lower  is worse -> rank ascending=True
+    series_by_key = {"cfd": cfd, "crista": crista, "mmb": mmb}
+    rank_frames = []
+    for key, direction in PANEL_WORSTCASE_METRICS:
+        if key == "crista" and not has_crista:
+            continue  # CRISTA absent -> this metric does not contribute
+        s = series_by_key.get(key)
+        if s is None:
+            continue
+        ascending = direction == "asc"
+        rank_frames.append(s.rank(method="min", ascending=ascending))
+
+    if not rank_frames:
+        return offt.head(cap)
+
+    # severity = BEST (minimum) available rank across the contributing metrics
+    severity = pd.concat(rank_frames, axis=1).min(axis=1)
+
+    ordered = offt.assign(
+        _severity=severity, _cfd=cfd, _crista=crista.fillna(-1.0), _mmb=mmb
+    ).sort_values(
+        ["_severity", "_cfd", "_crista", "_mmb"],
+        ascending=[True, False, False, True],
+    )
+    return ordered.head(cap).drop(columns=["_severity", "_cfd", "_crista", "_mmb"])
+
+
 def build_validation_panel(df, cols):
-    """Compute candidate counts at CFD / edit-distance thresholds and a suggested
-    tiered panel. Returns a dict for rendering.
+    """Compute candidate counts at CFD / edit-distance thresholds and the
+    worst-case suggested panel. Returns a dict for rendering.
 
     Counting is over the OFF-TARGET set (on-target row mm+b==0 excluded), so
-    thresholds report actionable candidates for a confirmation panel.
+    thresholds report actionable candidates for a confirmation panel. The FULL
+    threshold table is kept (CFD>= {0.5,0.2,0.1,0.05}, mm+b<= {1,2,3,4}, and
+    variant-created counts); the suggested tier is the worst-case top-100.
     """
     variant, _reference, ontarget = partition_masks(df, cols)
     offt = df[~ontarget]  # off-targets only
@@ -983,34 +1122,38 @@ def build_validation_panel(df, cols):
     n_variant = int(var_off.sum())
     n_variant_cfd = int((var_off & (cfd >= PANEL_VARIANT_CFD_MIN)).sum())
 
-    # suggested tiered panel = union of index sets over the OFF-TARGET frame
-    idx = offt.index
-    top_by_cfd = set(
-        offt.assign(_s=cfd.fillna(-1.0))
-        .sort_values("_s", ascending=False)
-        .head(PANEL_TOP_N_BY_CFD)
-        .index
-    )
-    all_mmb = set(idx[(mmb <= PANEL_MMB_MAX).values])
-    all_var_cfd = set(idx[(var_off & (cfd >= PANEL_VARIANT_CFD_MIN)).values])
-    panel = top_by_cfd | all_mmb | all_var_cfd
+    has_crista = crista_computed(df, cols)
+
+    # worst-case suggested panel (up to PANEL_WORSTCASE_CAP sites)
+    panel_df = select_worstcase_panel(df, cols, cap=PANEL_WORSTCASE_CAP)
+    panel_size = len(panel_df)
+    # how many of the selected panel are variant-created
+    if "not_in_ref" in cols and cols["not_in_ref"] in panel_df.columns:
+        panel_variant = int(
+            panel_df[cols["not_in_ref"]].astype(str).str.strip().str.lower().eq("y").sum()
+        )
+    else:
+        panel_variant = 0
 
     return {
         "cfd_counts": cfd_counts,
         "mmb_counts": mmb_counts,
         "n_variant": n_variant,
         "n_variant_cfd": n_variant_cfd,
-        "panel_size": len(panel),
-        "tier_sizes": {
-            "top_cfd": len(top_by_cfd),
-            "mmb": len(all_mmb),
-            "variant_cfd": len(all_var_cfd),
-        },
+        "n_offtarget": int((~ontarget).sum()),
+        "has_crista": has_crista,
+        "panel_size": panel_size,
+        "panel_variant": panel_variant,
+        "panel_df": panel_df,
     }
 
 
-def render_validation_panel(vp):
-    """Section 4 HTML: threshold tables + suggested panel + IND rationale."""
+def render_validation_panel(vp, panel_tsv_name=None):
+    """Section 4 HTML: full threshold tables + worst-case suggested panel + note.
+
+    ``panel_tsv_name`` (when given) adds a relative download link to the bundled
+    worst-case panel TSV.
+    """
     cfd_rows = "".join(
         f"<tr><td>CFD &ge; {t}</td><td class='num'>{c:,}</td></tr>"
         for t, c in vp["cfd_counts"]
@@ -1019,21 +1162,34 @@ def render_validation_panel(vp):
         f"<tr><td>mismatches + bulges &le; {t}</td><td class='num'>{c:,}</td></tr>"
         for t, c in vp["mmb_counts"]
     )
-    ts = vp["tier_sizes"]
-    rationale = (
-        "IND rationale: no single metric captures off-target risk, so the "
-        "suggested confirmation panel combines a CFD-score cutoff with an "
-        "edit-distance (mismatch + bulge) cutoff. It is the union of the top "
-        f"{PANEL_TOP_N_BY_CFD} candidates by CFD, every site within "
-        f"{PANEL_MMB_MAX} mismatches + bulges of the protospacer, and every "
-        f"variant-created site with CFD &ge; {PANEL_VARIANT_CFD_MIN}. This "
-        "captures both the highest-scoring predicted cleavage sites and the "
-        "near-cognate sequences that scoring models can under-weight, while "
-        "specifically retaining the population-variant-created sites that a "
-        "reference-only analysis would miss. The full integrated results table "
-        "is provided below (and as a bundled download) so the panel can be "
-        "freely re-subset for a given assay budget."
+    metric_names = ["CFD (desc)"]
+    if vp.get("has_crista"):
+        metric_names.append("CRISTA (desc)")
+    metric_names.append("mismatches+bulges (asc)")
+    metric_list = ", ".join(metric_names)
+
+    note = (
+        f"Worst-case selection: no single metric captures off-target risk, so the "
+        f"suggested confirmation panel is the up-to-{PANEL_WORSTCASE_CAP} most-"
+        f"concerning off-targets by ANY single metric. Each site is ranked "
+        f"independently by {metric_list}; a site&rsquo;s severity is the best "
+        f"(worst-case) of those ranks, and the top {PANEL_WORSTCASE_CAP} by "
+        f"severity are taken (ties broken by CFD desc, then CRISTA desc, then "
+        f"mm+b asc). A site is therefore included if it is high-CFD OR high-CRISTA "
+        f"OR low-edit-distance &mdash; capturing the highest-scoring predicted "
+        f"cleavage sites, the near-cognate sequences that scoring models can "
+        f"under-weight, and (via the ranks) the population-variant-created sites a "
+        f"reference-only analysis would miss. The full threshold table above and "
+        f"the complete integrated results (bundled download) let the panel be "
+        f"re-subset for any assay budget."
     )
+    download_html = ""
+    if panel_tsv_name:
+        download_html = (
+            f'<p><a class="download" href="{_esc(panel_tsv_name)}" download>'
+            f"Recommended worst-case panel (TSV, up to {PANEL_WORSTCASE_CAP} sites)"
+            f"</a></p>"
+        )
     return f"""
 <div class="panel-grid">
   <div>
@@ -1045,18 +1201,20 @@ def render_validation_panel(vp):
     <tbody>{mmb_rows}</tbody></table>
   </div>
 </div>
-<table class="thr-table" style="max-width:640px">
+<table class="thr-table" style="max-width:680px">
   <tbody>
+    <tr><td>Off-targets (on-target mm+b=0 excluded)</td><td class="num">{vp['n_offtarget']:,}</td></tr>
     <tr><td>Variant-created off-targets (Not_found_in_REF)</td><td class="num">{vp['n_variant']:,}</td></tr>
     <tr><td>&hellip; of those with CFD &ge; {PANEL_VARIANT_CFD_MIN}</td><td class="num">{vp['n_variant_cfd']:,}</td></tr>
-    <tr class="panel-hi"><td><strong>Suggested tiered panel &mdash; total sites</strong><br>
-      <span class="caption">union of top-{PANEL_TOP_N_BY_CFD}-by-CFD ({ts['top_cfd']:,})
-      &cup; all mm+b&le;{PANEL_MMB_MAX} ({ts['mmb']:,})
-      &cup; variant-created CFD&ge;{PANEL_VARIANT_CFD_MIN} ({ts['variant_cfd']:,})</span></td>
+    <tr class="panel-hi"><td><strong>Suggested panel &mdash; worst-case top {PANEL_WORSTCASE_CAP} sites</strong><br>
+      <span class="caption">the most-concerning off-targets by ANY single metric
+      ({metric_list}); of these, <strong>{vp['panel_variant']:,}</strong> are
+      variant-created.</span></td>
       <td class="num"><strong>{vp['panel_size']:,}</strong></td></tr>
   </tbody>
 </table>
-<p class="caption">{rationale}</p>
+{download_html}
+<p class="caption">{note}</p>
 """
 
 
@@ -1257,6 +1415,7 @@ DISCLAIMER = (
 def render_html(
     job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
     table_html, tsv_gz_name, top1000_name, footer_html,
+    panel_top100_name=None,
 ):
     scatter_html = []
     for title, caption, uri in scatter_panels:
@@ -1266,6 +1425,18 @@ def render_html(
             f'<p class="caption">{caption}</p>'
         )
     scatter_block = "\n".join(scatter_html)
+
+    panel_download = ""
+    panel_caption = ""
+    if panel_top100_name:
+        panel_download = (
+            f'\n  <a class="download" href="{_esc(panel_top100_name)}" download>'
+            f"Recommended worst-case panel (TSV)</a>"
+        )
+        panel_caption = (
+            f" The recommended worst-case top-100 panel is also bundled as "
+            f"<code>{_esc(panel_top100_name)}</code>."
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
@@ -1302,11 +1473,11 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 <h2>5. Downloads</h2>
 <p>
   <a class="download" href="{_esc(tsv_gz_name)}" download>Complete integrated results (TSV, gzip)</a>
-  <a class="download" href="{_esc(top1000_name)}" download>Top-1000 off-targets (TSV)</a>
+  <a class="download" href="{_esc(top1000_name)}" download>Top-1000 off-targets (TSV)</a>{panel_download}
 </p>
-<p class="caption">Both files are bundled alongside this HTML in the same ZIP;
+<p class="caption">All files are bundled alongside this HTML in the same ZIP;
 the links resolve after unzipping on any machine. The top-1000 TSV contains
-exactly the rows shown in the table below.</p>
+exactly the rows shown in the table below.{panel_caption}</p>
 
 <h2>6. Top 1000 off-targets (by CFD)</h2>
 {table_html}
@@ -1509,13 +1680,17 @@ def build_report(
         sys.stderr.write(f"generate-report: population plot unavailable: {exc}\n")
         pop_uri = _placeholder_uri("Population plot unavailable")
 
-    # ---- SECTION 4: validation panel ---------------------------------------
+    # ---- SECTION 4: validation panel (worst-case top-100) -------------------
+    panel_top100_df = None
+    panel_top100_name = PANEL_TOP100_NAME
     try:
         vp = build_validation_panel(df, cols)
-        validation_html = render_validation_panel(vp)
+        panel_top100_df = vp.get("panel_df")
+        validation_html = render_validation_panel(vp, panel_tsv_name=panel_top100_name)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: validation panel unavailable: {exc}\n")
         validation_html = "<p>Validation panel unavailable.</p>"
+        panel_top100_name = None
 
     # ---- SECTION 6: top-1000 table -----------------------------------------
     try:
@@ -1532,9 +1707,10 @@ def build_report(
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
         table_html, tsv_gz_name, top1000_name, footer_html,
+        panel_top100_name=(panel_top100_name if panel_top100_df is not None else None),
     )
 
-    # ---- stage the 3 files and zip -j (flat) -------------------------------
+    # ---- stage the files and zip -j (flat) ---------------------------------
     staging = tempfile.mkdtemp(prefix="crisprme_report_")
     try:
         html_path = os.path.join(staging, "report.html")
@@ -1549,6 +1725,17 @@ def build_report(
             with open(top1000_path, "w") as handle:
                 handle.write("\t".join(df.columns) + "\n")
 
+        # the recommended worst-case top-100 panel, bundled as an extra file
+        panel_path = None
+        if panel_top100_df is not None:
+            panel_path = os.path.join(staging, PANEL_TOP100_NAME)
+            try:
+                panel_top100_df.to_csv(panel_path, sep="\t", index=False)
+            except Exception as exc:  # noqa: BLE001 - never abort on the panel TSV
+                sys.stderr.write(f"generate-report: {PANEL_TOP100_NAME} unavailable: {exc}\n")
+                with open(panel_path, "w") as handle:
+                    handle.write("\t".join(df.columns) + "\n")
+
         gz_path = os.path.join(staging, tsv_gz_name)
         if integrated_tsv.endswith(".gz"):
             shutil.copyfile(integrated_tsv, gz_path)
@@ -1556,24 +1743,27 @@ def build_report(
             with open(integrated_tsv, "rb") as src, gzip.open(gz_path, "wb") as dst:
                 shutil.copyfileobj(src, dst, length=1024 * 1024)
 
+        bundle = [html_path, gz_path, top1000_path]
+        if panel_path is not None:
+            bundle.append(panel_path)
+
         if os.path.exists(out_zip):
             os.remove(out_zip)
         os.makedirs(os.path.dirname(out_zip), exist_ok=True)
         # `zip -j` matches submit_job_automated_new_multiple_vcfs.sh:1187 and
-        # flat-decompresses to exactly the 3 files. Fall back to Python zipfile
-        # if the `zip` binary is unavailable.
+        # flat-decompresses to exactly the bundled files. Fall back to Python
+        # zipfile if the `zip` binary is unavailable.
         try:
             subprocess.run(
-                ["zip", "-j", "-q", out_zip, html_path, gz_path, top1000_path],
+                ["zip", "-j", "-q", out_zip, *bundle],
                 check=True,
             )
         except (FileNotFoundError, subprocess.CalledProcessError):
             import zipfile
 
             with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.write(html_path, "report.html")
-                zf.write(gz_path, tsv_gz_name)
-                zf.write(top1000_path, top1000_name)
+                for p in bundle:
+                    zf.write(p, os.path.basename(p))
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 

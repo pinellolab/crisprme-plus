@@ -3,18 +3,25 @@
 
 Builds a tiny integrated_results fixture (dict-based schema with CRISTA + PAM
 creation columns, header names only for the columns the report reads) and
-asserts that build_report produces a ZIP that flat-decompresses to exactly three
-files -- report.html + integrated_results.tsv.gz + top1000.tsv -- and that the
-HTML is a self-contained IND-briefing-book digest (report v2):
+asserts that build_report produces a ZIP that flat-decompresses to exactly the
+bundled files -- report.html + integrated_results.tsv.gz + top1000.tsv +
+panel_top100.tsv -- and that the HTML is a self-contained IND-briefing-book
+digest (report v2.1):
 
   * SECTION 1: the header summary card (guide, PAM, aggregated specificity score)
-    AND the global Off-targets-by-MM-and-B matrix are present,
+    AND the global Off-targets-by-MM-and-B matrix are present; the matrix
+    REFERENCE + VARIANT totals reconcile to the canonical partition off-target
+    total (REFERENCE + VARIANT + on-target == grand total),
   * the canonical partition invariant holds:
     variant-created + reference + on-target == total EXACTLY,
-  * SECTION 2: >= 2 CFD scatter panels are embedded as inline base64 PNGs
-    (by CFD + by delta), plus a CRISTA panel because CRISTA is non-empty,
-  * SECTION 5: the top-N off-target table is rendered inline (rows sorted by CFD)
-    with a PAM-creation column, and top1000.tsv is bundled in the zip,
+  * SECTION 2: exactly FOUR ref/alt scatter panels are embedded as inline base64
+    PNGs when CRISTA is computed (by CFD, by CFD delta, by CRISTA, by CRISTA
+    delta); 2 panels when CRISTA is absent,
+  * SECTION 4: the suggested panel is the worst-case top-100 (a site worst by any
+    single metric -- CFD, CRISTA, or mm+b -- is included; capped at 100),
+  * SECTION 5/6: the top-N off-target table is rendered inline (rows sorted by
+    CFD) with a PAM-creation column, and top1000.tsv + panel_top100.tsv are
+    bundled in the zip,
   * SECTION 7: the fixed research-only disclaimer is in the footer,
   * there is no external dependency (<script>/<link>/http(s)), so it opens with
     file:// offline,
@@ -177,11 +184,17 @@ class TestGenerateReport(unittest.TestCase):
         with open(path, encoding="utf-8") as handle:
             return handle.read()
 
-    def test_zip_has_exactly_three_flat_files(self):
+    def test_zip_has_exactly_the_flat_bundle(self):
         _, names, _ = self._build_and_extract()
+        # report v2.1 bundles the worst-case panel too (panel_top100.tsv)
         self.assertEqual(
             sorted(names),
-            ["integrated_results.tsv.gz", "report.html", "top1000.tsv"],
+            [
+                "integrated_results.tsv.gz",
+                "panel_top100.tsv",
+                "report.html",
+                "top1000.tsv",
+            ],
         )
         # flat (no directory components)
         for name in names:
@@ -248,30 +261,175 @@ class TestGenerateReport(unittest.TestCase):
         # per-mismatch columns up to the run's mm (6MM), on-target excluded
         self.assertIn(">6MM<", html)
 
-    def test_section2_scatter_panels_and_crista(self):
+    def test_section1_matrix_reconciles_to_grand_total(self):
+        """Matrix REFERENCE+VARIANT totals == off-target partition total, and
+        REFERENCE + VARIANT + on-target == grand total (every off-target lands
+        in a cell). Bulge rows span 0..(bDNA+bRNA)=0..4, mm cols 0..6."""
+        import pandas as pd
+
+        df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        meta = gr.build_summary_meta(
+            None, self.tsv, df, cols,
+            params_override={
+                "Nuclease": "SpCas9", "Pam": "NRG", "Genome_selected": "hg38",
+                "Mismatches": "6", "DNA": "2", "RNA": "2", "Max_bulges": "2",
+                "Max_total_edits": "4",
+            },
+        )
+        matrix = gr.build_mmb_matrix(df, cols, meta)
+
+        # bulge rows span 0..(bDNA+bRNA) == 0..4 (NOT Max_bulges=2)
+        for label, mrows in matrix["groups"]:
+            self.assertEqual([r[0] for r in mrows], [0, 1, 2, 3, 4])
+        # mm columns span 0..6
+        self.assertEqual(matrix["mm_cols"], [0, 1, 2, 3, 4, 5, 6])
+
+        # matrix REFERENCE + VARIANT totals == canonical off-target totals
+        variant, reference, ontarget = gr.partition_masks(df, cols)
+        by_label = {lbl: sum(r[1] for r in rows) for lbl, rows in matrix["groups"]}
+        self.assertEqual(by_label["REFERENCE"], int(reference.sum()))
+        self.assertEqual(by_label["VARIANT"], int(variant.sum()))
+
+        # every off-target lands in a cell: sum of ALL per-mm cells == off-target
+        # count; and REFERENCE + VARIANT + on-target == grand total
+        cell_sum = 0
+        for _lbl, rows in matrix["groups"]:
+            for _b, _tot, per_mm in rows:
+                cell_sum += sum(per_mm)
+        n_offtarget = int((~ontarget).sum())
+        self.assertEqual(cell_sum, n_offtarget)
+        self.assertEqual(
+            by_label["REFERENCE"] + by_label["VARIANT"] + int(ontarget.sum()),
+            len(df),
+        )
+
+    def test_section2_four_scatter_panels_when_crista_present(self):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
         imgs = re.findall(r'src="data:image/png;base64,([A-Za-z0-9+/=]+)"', html)
-        # >= 2 CFD scatter panels + population plot + CRISTA panel => >= 3 images;
-        # each must be a decodable PNG
-        self.assertGreaterEqual(len(imgs), 2)
+        # 4 scatter panels + 1 population plot => 5 inline PNGs; each decodable
+        self.assertEqual(len(imgs), 5)
         for encoded in imgs:
             raw = base64.b64decode(encoded)
             self.assertEqual(raw[:8], b"\x89PNG\r\n\x1a\n")
-        # both required scatter sort orders are present
+        # exactly the FOUR panel titles are present because CRISTA is computed
         self.assertIn("By CFD score", html)
-        self.assertIn("By variant effect (ALT - REF CFD)", html)
-        # CRISTA panel included because CRISTA is non-empty in the fixture
+        self.assertIn("By variant effect (CFD ALT - REF delta)", html)
         self.assertIn("By CRISTA score", html)
+        self.assertIn("By variant effect (CRISTA)", html)
 
-    def test_section4_validation_panel(self):
+        # and the count is driven by crista_computed(): count scatter <h3> panels
+        import pandas as pd
+
+        df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        self.assertTrue(gr.crista_computed(df, cols))
+        panels = gr.plot_scatter_panels(df, cols, n=1000, include_crista=True)
+        self.assertEqual(len(panels), 4)
+
+    def test_section2_two_scatter_panels_when_crista_absent(self):
+        # blank out every CRISTA score -> crista_computed() False -> 2 panels
+        import pandas as pd
+
+        df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        df[cols["crista"]] = ""
+        self.assertFalse(gr.crista_computed(df, cols))
+        panels = gr.plot_scatter_panels(df, cols, n=1000, include_crista=False)
+        self.assertEqual(len(panels), 2)
+        titles = [p[0] for p in panels]
+        self.assertEqual(
+            titles,
+            ["By CFD score", "By variant effect (CFD ALT - REF delta)"],
+        )
+
+    def test_section4_validation_panel_worstcase(self):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
         self.assertIn("Recommended validation panel", html)
-        self.assertIn("Suggested tiered panel", html)
-        # threshold labels
-        self.assertIn("CFD &ge; 0.5", html)
-        self.assertIn("mismatches + bulges &le; 2", html)
+        # worst-case wording + cap (100) present
+        self.assertIn("worst-case", html.lower())
+        self.assertIn("worst-case top 100", html)
+        # the FULL threshold table is kept (CFD>= {0.5,0.2,0.1,0.05},
+        # mm+b<= {1,2,3,4})
+        for t in ("0.5", "0.2", "0.1", "0.05"):
+            self.assertIn(f"CFD &ge; {t}", html)
+        for t in ("1", "2", "3", "4"):
+            self.assertIn(f"mismatches + bulges &le; {t}", html)
+        # of the selected panel, 3 are variant-created (the fixture has exactly 3)
+        self.assertRegex(html, r"<strong>3</strong>[^<]*are\s+variant-created")
+
+    def test_section4_worstcase_selection_and_cap(self):
+        """A site worst by ANY single metric is included; cap honored."""
+        import pandas as pd
+
+        # constants are module-level
+        self.assertEqual(gr.PANEL_WORSTCASE_CAP, 100)
+        self.assertEqual(
+            gr.PANEL_WORSTCASE_METRICS,
+            (("cfd", "desc"), ("crista", "desc"), ("mmb", "asc")),
+        )
+
+        header = list(_HEADER)
+        # Build a synthetic frame where each metric's single "worst" site is
+        # NOT the leader on the other metrics -> only a worst-case (min-rank)
+        # selection surfaces all three; a plain top-by-CFD would miss two.
+        # Columns needed by select_worstcase_panel: mm, bulges, mmb, cfd, crista,
+        # not_in_ref. We keep the on-target(mm+b==0) out of the panel.
+        def _row(chrom, mm, b, cfd, crista, notref):
+            r = ["G", chrom, "1", "+", "AAA", "AAA", "GGG", str(mm), str(b),
+                 str(mm + b), notref and "alt" or "ref", "NA",
+                 f"{cfd}", f"{cfd}", f"{cfd}", "NA", "NA", "NA", "NA",
+                 f"{crista}", f"{crista}", f"{crista}", "NA", "NA", "NA",
+                 "y" if notref else "NA", "GENE", "1.0"]
+            return r
+
+        rows = [
+            _row("chrON", 0, 0, 1.0, 1.0, False),   # on-target -> excluded
+            _row("chrCFD", 3, 2, 0.99, 0.10, True),  # worst by CFD only
+            _row("chrCRI", 4, 3, 0.10, 0.99, True),  # worst by CRISTA only
+            _row("chrMMB", 2, 0, 0.10, 0.10, False),  # worst (closest) by mm+b
+            _row("chrLOW", 6, 4, 0.05, 0.05, False),  # low by every metric
+        ]
+        tsv = os.path.join(self.tmp, "wc.tsv")
+        with open(tsv, "w") as h:
+            h.write("\t".join(header) + "\n")
+            for r in rows:
+                h.write("\t".join(r) + "\n")
+        df = pd.read_csv(tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+
+        panel = gr.select_worstcase_panel(df, cols, cap=gr.PANEL_WORSTCASE_CAP)
+        chroms = set(panel[cols["chrom"]])
+        # on-target excluded
+        self.assertNotIn("chrON", chroms)
+        # each single-metric-worst site is surfaced by the worst-case rule
+        self.assertIn("chrCFD", chroms)
+        self.assertIn("chrCRI", chroms)
+        self.assertIn("chrMMB", chroms)
+
+        # top-3 by severity are exactly the three single-metric leaders (in some
+        # order); the all-low site ranks last
+        top3 = list(panel[cols["chrom"]].head(3))
+        self.assertEqual({"chrCFD", "chrCRI", "chrMMB"}, set(top3))
+        self.assertEqual(list(panel[cols["chrom"]])[-1], "chrLOW")
+
+        # cap is honored: many low sites -> panel never exceeds the cap
+        big = [_row("chrON", 0, 0, 1.0, 1.0, False)]
+        for i in range(500):
+            big.append(_row(f"c{i}", 5, 3, 0.20, 0.20, i % 2 == 0))
+        tsv2 = os.path.join(self.tmp, "wc_big.tsv")
+        with open(tsv2, "w") as h:
+            h.write("\t".join(header) + "\n")
+            for r in big:
+                h.write("\t".join(r) + "\n")
+        df2 = pd.read_csv(tsv2, sep="\t", dtype=str, na_filter=False)
+        cols2 = gr._resolve(df2.columns, list(gr._COLS.keys()))
+        panel2 = gr.select_worstcase_panel(df2, cols2, cap=gr.PANEL_WORSTCASE_CAP)
+        self.assertEqual(len(panel2), gr.PANEL_WORSTCASE_CAP)
+        # on-target never in the panel
+        self.assertNotIn("chrON", set(panel2[cols2["chrom"]]))
 
     def test_section6_table_has_pam_creation_and_crista(self):
         _, _, extract = self._build_and_extract()
