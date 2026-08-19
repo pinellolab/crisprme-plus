@@ -1204,6 +1204,18 @@ else
 	printf "WARNING: shareable report generation failed — results are PRESERVED (issue #143). See %s/report.log\n" "${output_folder}" >&2
 	echo -e 'Building shareable report\tFAILED (non-fatal)\t'$(date) >>$log
 fi
+# Point the user (CLI runs) at the shareable report. Goes to stdout, so a
+# command-line complete-search prints it at the end; in the web flow this stdout
+# is captured to the job log (harmless).
+_report_zip=$(ls "${output_folder}"/*_report.zip 2>/dev/null | head -1)
+if [ -n "${_report_zip}" ]; then
+	printf '\n=====================================================================\n'
+	printf '  Shareable off-target assessment report:\n    %s\n' "${_report_zip}"
+	printf '  Unzip it and open report.html in a web browser to view the results\n'
+	printf '  (summary, graphical report, recommended validation panel, top-1000\n'
+	printf '  table with annotations, and per-tier downloads).\n'
+	printf '=====================================================================\n\n'
+fi
 # END STEP 8b
 
 if [ "$email" != "_" ]; then
