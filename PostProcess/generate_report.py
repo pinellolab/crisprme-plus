@@ -1605,8 +1605,25 @@ def write_top1000_tsv(top_df, cols, has_crista, path):
 _CSS = """
 :root { color-scheme: light; }
 body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-       max-width: 1180px; margin: 24px auto; padding: 0 20px; color: #1a202c;
-       line-height: 1.45; }
+       margin: 0; padding: 26px 14px; color: #1a202c; line-height: 1.45;
+       background-color: #eef2f7; }
+.page { max-width: 1180px; margin: 0 auto; background: #ffffff; padding: 26px 34px 34px;
+        border-radius: 10px; box-shadow: 0 2px 16px rgba(20,40,80,0.14); }
+.report-header { display: flex; align-items: center; gap: 18px;
+                 border-bottom: 2px solid #edf2f7; padding-bottom: 14px;
+                 margin-bottom: 1.2em; }
+.report-header img.logo { height: 58px; width: auto; }
+.report-header .titles { flex: 1 1 auto; }
+.report-header h1 { margin: 0 0 0.05em; }
+.legend { display: flex; flex-direction: column; gap: 10px; margin: 0.5em 0 1em; }
+.legend-item { display: flex; gap: 16px; align-items: baseline; border: 1px solid #e6edf5;
+               border-radius: 6px; padding: 10px 14px; background: #fbfcfe; }
+.legend-term { flex: 0 0 215px; font-weight: 600; color: #2c5282; }
+.legend-def { flex: 1 1 auto; color: #2d3748; font-size: 0.92em; }
+.legend-def ul { margin: 0.4em 0 0; padding-left: 1.2em; }
+.legend-def li { margin: 0.15em 0; }
+.legend code { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em;
+               background: #edf2f7; padding: 0 3px; border-radius: 3px; }
 h1 { font-size: 1.6em; margin-bottom: 0.1em; }
 h2 { font-size: 1.25em; margin-top: 1.8em; border-bottom: 1px solid #e2e8f0;
      padding-bottom: 0.2em; }
@@ -1674,6 +1691,88 @@ DISCLAIMER = (
 )
 
 
+def _asset_data_uri(name):
+    """Return a base64 data URI for a bundled asset (logo/background), or "".
+
+    Resolves ``assets/<name>`` relative to the repo (this file lives in
+    PostProcess/, assets/ is its sibling). Missing asset -> "" so the report
+    degrades gracefully (no logo / plain background) instead of failing.
+    """
+    import base64
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "assets", name),
+                 os.path.join(here, "assets", name)):
+        cand = os.path.abspath(cand)
+        if os.path.isfile(cand):
+            ext = name.rsplit(".", 1)[-1].lower()
+            mime = {"svg": "image/svg+xml", "jpg": "image/jpeg",
+                    "jpeg": "image/jpeg"}.get(ext, "image/" + ext)
+            with open(cand, "rb") as fh:
+                b64 = base64.b64encode(fh.read()).decode("ascii")
+            return "data:%s;base64,%s" % (mime, b64)
+    return ""
+
+
+# Annotation legend (Section 7): plain-language meaning of every annotation
+# column value, so a reviewer never has to guess what "dELS" or "Tier1_TSG" is.
+_ANNOTATION_LEGEND = [
+    ("GENCODE", "Gene-model context of the site: <code>exon</code>, "
+     "<code>CDS</code> (protein-coding sequence), <code>UTR</code>, "
+     "<code>transcript</code>, <code>start_codon</code>/"
+     "<code>stop_codon</code>, or <code>intergenic</code> when outside genes."),
+    ("DHS", "DNase I Hypersensitive Site &mdash; a region of open, accessible "
+     "chromatin (often regulatory), labeled by the tissue / organ system in "
+     "which it is active (e.g. <code>Lymphoid</code>, <code>Neural</code>, "
+     "<code>Tissue_invariant</code>)."),
+    ("ENCODE (SCREEN v4 cCREs)", "Candidate <i>cis</i>-regulatory elements from "
+     "the ENCODE SCREEN v4 registry. Classes:<ul>"
+     "<li><b>PLS</b> &mdash; promoter-like signature (at a transcription start "
+     "site).</li>"
+     "<li><b>pELS</b> &mdash; proximal enhancer-like signature (near a TSS, "
+     "&le;2 kb).</li>"
+     "<li><b>dELS</b> &mdash; distal enhancer-like signature (far from a TSS).</li>"
+     "<li><b>CA-CTCF</b> &mdash; chromatin-accessible + CTCF binding (often "
+     "insulator/architectural).</li>"
+     "<li><b>CA-H3K4me3</b> &mdash; chromatin-accessible + H3K4me3, away from a "
+     "TSS.</li>"
+     "<li><b>CA-TF</b> &mdash; chromatin-accessible + transcription-factor "
+     "binding.</li>"
+     "<li><b>CA</b> &mdash; chromatin-accessible only.</li>"
+     "<li><b>TF</b> &mdash; transcription-factor binding only (no high "
+     "accessibility).</li></ul>"),
+    ("COSMIC (Cancer Gene Census)", "The off-target lies in a gene catalogued in "
+     "the COSMIC Cancer Gene Census &mdash; a curated list of genes causally "
+     "implicated in cancer. Labels combine a confidence <b>tier</b> and the "
+     "gene's documented <b>role(s)</b>:<ul>"
+     "<li><b>Tier 1</b> &mdash; extensive, curated evidence of a direct, causal "
+     "role in cancer.</li>"
+     "<li><b>Tier 2</b> &mdash; strong but less-extensively-curated evidence.</li>"
+     "<li><b>oncogene</b> &mdash; drives cancer when activated/over-active.</li>"
+     "<li><b>TSG</b> &mdash; tumor-suppressor gene (drives cancer when "
+     "lost/inactivated).</li>"
+     "<li><b>fusion</b> &mdash; recurrently involved in cancer gene fusions.</li>"
+     "</ul>A blank cell (&ndash;) means the site is not in a Cancer Gene Census "
+     "gene. This flag is context for prioritization, not evidence of risk on its "
+     "own."),
+]
+
+
+def build_annotation_legend_html():
+    """Render the annotation legend (Section 7) as a definition list."""
+    items = "".join(
+        '<div class="legend-item"><div class="legend-term">%s</div>'
+        '<div class="legend-def">%s</div></div>' % (term, definition)
+        for term, definition in _ANNOTATION_LEGEND
+    )
+    return (
+        '<p class="caption">What the annotation columns in the table above (and '
+        "in the downloads) mean. Annotations describe the genomic context of "
+        "each off-target site; they help prioritize which sites to examine "
+        "first.</p>"
+        '<div class="legend">' + items + "</div>"
+    )
+
+
 def render_html(
     job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
     table_html, tsv_gz_name, top1000_name, footer_html,
@@ -1719,17 +1818,35 @@ def render_html(
             "panel can be expanded to any tier for review."
         )
 
+    logo_uri = _asset_data_uri("crisprme-logo.png")
+    # a right-sized seamless tile for the report (~320 KB); fall back to the full
+    # web-UI tile (~3.5 MB) only if the report-sized one isn't bundled.
+    bg_uri = (_asset_data_uri("crisprme_bg_report.png")
+              or _asset_data_uri("crisprme_bg_tile.png"))
+    logo_html = (f'<img class="logo" src="{logo_uri}" alt="CRISPRme logo">'
+                 if logo_uri else "")
+    bg_style = (f"<style>body {{ background-image: url('{bg_uri}');"
+                f" background-repeat: repeat; }}</style>" if bg_uri else "")
+    legend_html = build_annotation_legend_html()
+
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_esc(job_id)} CRISPRme off-target report</title>
+<title>{_esc(job_id)} CRISPRme off-target assessment report</title>
 <style>{_CSS}</style>
+{bg_style}
 </head><body>
+<div class="page">
 
-<h1>CRISPRme off-target prediction report</h1>
-<p class="subtitle">IND briefing-book digest &mdash; targeted-NGS (rhAMP-Seq)
-confirmation panel design</p>
+<div class="report-header">
+{logo_html}
+<div class="titles">
+<h1>Off-target assessment report</h1>
+<p class="subtitle">CRISPRme &mdash; genome-wide off-target prediction accounting
+for human genetic variation</p>
+</div>
+</div>
 
 <h2>1. Summary</h2>
 {summary_matrix_html}
@@ -1765,8 +1882,12 @@ below; the complete integrated results (all columns) stays as the raw
 <h2>6. Top 1000 off-targets (by CFD)</h2>
 {table_html}
 
+<h2>7. Annotation legend</h2>
+{legend_html}
+
 {footer_html}
 
+</div>
 </body></html>
 """
 

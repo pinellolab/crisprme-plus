@@ -385,7 +385,9 @@ class TestGenerateReport(unittest.TestCase):
     def test_section2_four_scatter_panels_when_crista_present(self):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
-        imgs = re.findall(r'src="data:image/png;base64,([A-Za-z0-9+/=]+)"', html)
+        # strip the branding logo <img> so we count only PLOT images
+        plot_html = re.sub(r'<img class="logo"[^>]*>', "", html)
+        imgs = re.findall(r'src="data:image/png;base64,([A-Za-z0-9+/=]+)"', plot_html)
         # 4 scatter panels + 1 population plot => 5 inline PNGs; each decodable
         self.assertEqual(len(imgs), 5)
         for encoded in imgs:
