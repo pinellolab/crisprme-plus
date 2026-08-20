@@ -11,6 +11,46 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-20
+
+### Added
+- **Dict-less variant index is the default distribution.** The shipped SpCas9
+  (NRG) variant index (`NRG_3_hg38-dictless+hg38_1000G_HGDP`, 1000G + HGDP)
+  replaces the 152 GB per-sample SNP dictionaries with the compact Tier-0
+  allele registry + Tier-1 genotype store — a ~16 GB download that searches out
+  of the box with correct allele frequencies, rsIDs, per-individual Samples, and
+  population summaries. See `METHODS.md`.
+- **Shareable off-target report** (`generate-report`, auto-run at the end of
+  `complete-search`): a single self-contained, branded `report.html` with an
+  annotation / COSMIC legend plus a top-N table for validation. The web results
+  page now shows a one-click **Download Report (.zip)** button in place of the
+  three raw result-file links, and the CLI prints an "open the report" hint.
+- **COSMIC cancer-gene annotation on by default.** The built-in functional-region
+  bundle is now `dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz` (ENCODE SCREEN v4
+  cCREs + COSMIC Cancer Gene Census tiers); results carry an `Annotation_COSMIC`
+  column. Legacy bundles remain supported via automatic fallback.
+- **Observed-haplotype enumerator** (dict-less multi-variant path): multi-variant
+  off-targets are enumerated only for haplotypes actually carried by sampled
+  individuals (CONFIRMED = phased, PUTATIVE = unphased / mixed), removing phantom
+  combinations. Gated on the Tier-1 genotype store.
+- `download --what all` on hg38 also fetches the default reference index
+  (`NRG_3_hg38`) so a reference-genome scan works with no on-demand index build.
+- Manuscript-level `METHODS.md` (dict-less model, VCF homogenization / merging,
+  AF estimation, phased / unphased / mixed haplotype scanning, variant-density
+  control, annotations, report) and README "what's new" pointers.
+
+### Fixed
+- **Combined allele-frequency denominator in the shipped dict-less index.** The
+  registry's global panel size was built from an over-listed sample list
+  (AN = 8858) rather than the VCF-resident panel (1000G 2548 + HGDP 929 = 3477 →
+  AN = 6954), deflating combined MAF by ~27 %. The published registry now reports
+  the correct combined AF (AC / 6954); allele counts were already correct. A
+  singleton reads 1 / 6954 = 1.44e-4.
+- **Annotation sorting is read-only-install + concurrent-job safe.**
+  `_sort_annotation` / `_process_personal_annotation` build the sorted / merged
+  annotation in a per-invocation temp dir instead of decompressing and
+  overwriting files in the shared install `Annotations/` directory.
+
 ## [2.3.3] - 2026-08-18
 
 ### Fixed
