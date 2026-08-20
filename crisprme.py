@@ -3007,11 +3007,12 @@ def print_help_generate_report() -> None:
     sys.stderr.write(
         "The generate-report functionality builds a SELF-CONTAINED, easily "
         "shareable report for a completed CRISPRme run. It produces a single "
-        "ZIP (<jobid>_report.zip) that flat-decompresses to exactly two files: "
-        "report.html (offline, no external dependencies -- plots embedded as "
-        "base64 PNG, the top-1000 off-target table inline, CSS inline) and "
-        "integrated_results.tsv.gz (the full results the HTML links to with a "
-        "relative href). It is a portable digest of the full interactive "
+        "ZIP (<jobid>_report.zip) bundling report.html (offline, no external "
+        "dependencies -- plots embedded as base64 PNG, the top-1000 off-target "
+        "table inline, CSS inline), integrated_results.tsv.gz (the full results "
+        "the HTML links to with a relative href), the top-1000 and top-100 "
+        "validation-panel tables, and the non-empty per-tier curated TSVs. It is "
+        "a portable digest of the full interactive "
         "website result, aimed at sharing off-target predictions (e.g. to "
         "design a targeted-NGS / rhAMP-Seq confirmation panel).\n"
     )
