@@ -25,7 +25,7 @@ nomination.
 | Contig naming | **bare, no `chr` prefix** (`22`, `X`, …) |
 | Source | International Genome Sample Resource (IGSR) @ EBI |
 | Access | Open / unrestricted |
-| Integrity | Per-file MD5 checksums (see [retrieval](#how-the-data-are-retrieved)) |
+| Integrity | Per-file MD5 checksums (see [Reproducibility notes](#reproducibility-notes)) |
 
 ---
 
@@ -58,15 +58,16 @@ super-populations:
 * **EUR** — European
 * **SAS** — South Asian
 
-The sample → population → super-population mapping is **not** part of these VCFs;
-CRISPRme reads it from a separate `samplesID` metadata file (obtained
-independently of this retrieval script — see [Related files](#related-files)).
+The sample → population → super-population mapping is described under
+[Sample and population metadata](#sample-and-population-metadata) below.
 
-### Variant types and phasing
+### Variant types
 
 * **Biallelic SNVs** and **short INDELs** only (one ALT allele per record).
-* Genotypes are **phased** (`GT` uses the `|` separator), suitable for
-  haplotype-aware analyses.
+* Produced with **multiple variant callers** whose call sets were integrated
+  before final genotyping (per the release README).
+* Genotypes are **phased** (`GT` uses the `|` separator, integrated with
+  SHAPEIT2), suitable for haplotype-aware analyses.
 
 ### Reference genome and coordinates
 
@@ -86,6 +87,42 @@ Each record carries allele counts and frequencies in the `INFO` column,
 including the global `AC`, `AN`, `AF` and per-super-population frequencies
 (`AFR_AF`, `AMR_AF`, `EAS_AF`, `EUR_AF`, `SAS_AF`). For example, the first
 record of chr22 is `22:10516173 A>G` with `AF=0.02`.
+
+### Record counts
+
+Per-chromosome variant counts (from the release's tabix indexes, via
+`bcftools index`):
+
+| Chrom | Records | Chrom | Records | Chrom | Records |
+|---|---|---|---|---|---|
+| chr1 | 6,191,833 | chr9 | 3,384,360 | chr17 | 2,209,149 |
+| chr2 | 6,790,551 | chr10 | 3,874,259 | chr18 | 2,189,529 |
+| chr3 | 5,641,493 | chr11 | 3,881,791 | chr19 | 1,738,824 |
+| chr4 | 5,477,810 | chr12 | 3,745,465 | chr20 | 1,817,492 |
+| chr5 | 5,115,036 | chr13 | 2,760,845 | chr21 | 1,045,269 |
+| chr6 | 4,863,337 | chr14 | 2,548,903 | chr22 | 1,059,079 |
+| chr7 | 4,511,408 | chr15 | 2,301,453 | chrX | 106,963 |
+| chr8 | 4,425,449 | chr16 | 2,548,920 | | |
+
+In this biallelic release chrX carries far fewer records than the autosomes
+(106,963); interpret chrX-based statistics with that in mind.
+
+### Sample and population metadata
+
+The sample → population → super-population mapping is **not** stored in the VCFs;
+two upstream sources are relevant, depending on the need:
+
+* **To run CRISPRme**, use CRISPRme's own sample-ID list,
+  `test/data/samplesIDs/samplesIDs.1000G.txt` in the CRISPRme repository
+  (installed as `hg38_1000G.samplesID.txt` and pulled automatically by the
+  tool's setup). This is the file the CRISPRme pipeline actually consumes to
+  match VCF samples. It is served from the `main` branch of the pinellolab
+  repository — a moving target, not a pinned commit/tag, matching what
+  CRISPRme's own setup does.
+* **For the underlying population definitions** (the 26 populations and five
+  super-populations, with their sample assignments) refer to the standard
+  1000 Genomes / IGSR sample metadata, available through the IGSR data portal
+  ([internationalgenome.org](https://www.internationalgenome.org/data-portal/)).
 
 ---
 
