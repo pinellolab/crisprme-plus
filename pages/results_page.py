@@ -394,56 +394,28 @@ def result_page(job_id: str) -> html.Div:
             dbc.Row(
                 dbc.Col(
                     [
+                        # Single prominent "Download Report" action (replaces the
+                        # former three raw-file links). The self-contained report
+                        # ZIP bundles the integrated results, all tiers, and the
+                        # complete raw table, so it supersedes them. A polling
+                        # interval reveals the link once the report has been
+                        # generated at the end of the job.
                         html.Div(
                             [
                                 html.P(
-                                    "Generating download link, Please wait...",
-                                    id="download-link-general-table",
+                                    "Preparing the off-target report for download…",
+                                    id="download-link-report",
                                 ),
-                                dcc.Interval(
-                                    interval=1 * 1000, id="interval-general-table"
-                                ),
+                                dcc.Interval(interval=2 * 1000, id="interval-report"),
                                 html.Div(
                                     os.path.join(
                                         current_working_directory,
                                         RESULTS_DIR,
                                         job_id,
-                                        ".".join([job_id, "general_table.txt"]),
+                                        job_id + "_report.zip",
                                     ),
                                     style={"display": "none"},
-                                    id="div-info-general-table",
-                                ),
-                            ]
-                        ),
-                        html.Div(
-                            [
-                                html.P(
-                                    "Generating download link, Please wait...",
-                                    id="download-link-integrated-results",
-                                ),
-                                dcc.Interval(
-                                    interval=1 * 1000, id="interval-integrated-results"
-                                ),
-                                html.Div(
-                                    integrated_file_name_zip,
-                                    style={"display": "none"},
-                                    id="div-info-integrated-results",
-                                ),
-                            ]
-                        ),
-                        html.Div(
-                            [
-                                html.P(
-                                    "Generating download link, Please wait...",
-                                    id="download-link-alt_merge-results",
-                                ),
-                                dcc.Interval(
-                                    interval=1 * 3000, id="interval-alt_merge-results"
-                                ),
-                                html.Div(
-                                    alt_merge_file_name_zip,
-                                    style={"display": "none"},
-                                    id="div-info-alt_merge-results",
+                                    id="div-info-report",
                                 ),
                             ]
                         ),
@@ -752,36 +724,23 @@ def download_link_sample(
     return "Generating download link, Please wait...", False
 
 
-# download summary result table
+# download the self-contained off-target report (replaces the former three
+# raw-file links: general table, integrated results, alt-alignments). The report
+# ZIP already bundles the integrated results, per-tier subsets, and the complete
+# raw table, so a single button supersedes all three. The report is generated at
+# the end of the job; the polling interval reveals the button once it exists.
 @app.callback(
     [
-        Output("download-link-general-table", "children"),
-        Output("interval-general-table", "disabled"),
+        Output("download-link-report", "children"),
+        Output("interval-report", "disabled"),
     ],
-    [Input("interval-general-table", "n_intervals")],
-    [State("div-info-general-table", "children"), State("url", "search")],
+    [Input("interval-report", "n_intervals")],
+    [State("div-info-report", "children"), State("url", "search")],
 )
-def download_general_table(
+def download_report(
     n: int, file_to_load: str, search: str
-) -> Tuple[str, bool]:  # file to load =
-    """Create the link to download CRISPRme result summary table.
-
-    ...
-
-    Parameters
-    ----------
-    n : int
-    file_to_load : str
-        File to download
-    search : str
-        Target search name
-
-    Returns
-    -------
-    str
-    bool
-    """
-
+) -> Tuple[str, bool]:
+    """Reveal the 'Download Report' button once <job>_report.zip exists."""
     if not isinstance(file_to_load, str):
         raise TypeError(f"Expected {str.__name__}, got {type(file_to_load).__name__}")
     if not isinstance(search, str):
@@ -790,121 +749,27 @@ def download_general_table(
         raise PreventUpdate
     job_id = search.split("=")[-1]
     file_to_load = file_to_load.split("/")[-1]
-    # print(file_to_load)
-    if os.path.exists(os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)):
+    if os.path.exists(
+        os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)
+    ):
         return (
             html.A(
-                "Download General Table",
+                "⬇  Download Report (.zip)",
                 href=os.path.join(URL, RESULTS_DIR, job_id, file_to_load),
                 target="_blank",
+                style={
+                    "display": "inline-block",
+                    "background": "#2b6cb0",
+                    "color": "#fff",
+                    "padding": "10px 20px",
+                    "borderRadius": "6px",
+                    "textDecoration": "none",
+                    "fontWeight": "600",
+                },
             ),
             True,
         )
-    return "Generating download link, Please wait...", False
-
-
-# download integrated results
-@app.callback(
-    [
-        Output("download-link-integrated-results", "children"),
-        Output("interval-integrated-results", "disabled"),
-    ],
-    [Input("interval-integrated-results", "n_intervals")],
-    [State("div-info-integrated-results", "children"), State("url", "search")],
-)
-def download_general_table(
-    n: int, file_to_load: str, search: str
-) -> Tuple[str, bool]:  # file to load =
-    """Create the link to download CRISPRme integrated result table.
-
-    ...
-
-    Parameters
-    ----------
-    n : int
-    file_to_load : str
-        File to download
-    search : str
-        Target search name
-
-    Returns
-    -------
-    str
-    bool
-    """
-
-    if not isinstance(file_to_load, str):
-        raise TypeError(f"Expected {str.__name__}, got {type(file_to_load).__name__}")
-    if not isinstance(search, str):
-        raise TypeError(f"Expected {str.__name__}, got {type(search).__name__}")
-    if n is None:
-        raise PreventUpdate
-    job_id = search.split("=")[-1]
-    file_to_load = file_to_load.split("/")[-1]
-    # print(file_to_load)
-    if os.path.exists(os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)):
-        return (
-            html.A(
-                "Download Integrated Results",
-                href=os.path.join(URL, RESULTS_DIR, job_id, file_to_load),
-                target="_blank",
-            ),
-            True,
-        )
-    return "Generating download link, Please wait...", False
-
-
-# download alt_merge results
-
-
-@app.callback(
-    [
-        Output("download-link-alt_merge-results", "children"),
-        Output("interval-alt_merge-results", "disabled"),
-    ],
-    [Input("interval-alt_merge-results", "n_intervals")],
-    [State("div-info-alt_merge-results", "children"), State("url", "search")],
-)
-def download_general_table(
-    n: int, file_to_load: str, search: str
-) -> Tuple[str, bool]:  # file to load =
-    """Create the link to download CRISPRme alt_merge result table.
-
-    ...
-
-    Parameters
-    ----------
-    n : int
-    file_to_load : str
-        File to download
-    search : str
-        Target search name
-
-    Returns
-    -------
-    str
-    bool
-    """
-
-    if not isinstance(file_to_load, str):
-        raise TypeError(f"Expected {str.__name__}, got {type(file_to_load).__name__}")
-    if not isinstance(search, str):
-        raise TypeError(f"Expected {str.__name__}, got {type(search).__name__}")
-    if n is None:
-        raise PreventUpdate
-    job_id = search.split("=")[-1]
-    file_to_load = file_to_load.split("/")[-1]
-    # print(file_to_load)
-    if os.path.exists(os.path.join(current_working_directory, RESULTS_DIR, job_id, file_to_load)):
-        return (
-            html.A(
-                "Download All Results Including Alternative Alignments",
-                href=os.path.join(URL, RESULTS_DIR, job_id, file_to_load),
-                target="_blank",
-            ),
-            True,
-        )
-    return "Generating download link, Please wait...", False
+    return "Preparing the off-target report for download…", False
 
 
 # Generate download link sumbysample
