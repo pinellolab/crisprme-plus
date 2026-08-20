@@ -767,25 +767,27 @@ def _sort_annotation(annotationfile: str) -> str:
         SystemExit: If decompression, sorting, compression, or renaming fails.
     """
     # sort-bed needs an uncompressed BED. Accept either a plain .bed or a
-    # bgzipped .bed.gz (setup/complete-test download the latter) and always
-    # write the canonical bgzipped output back to <name>.gz.
+    # bgzipped .bed.gz (setup/complete-test download the latter). Read-only-safe:
+    # decompress/sort/compress through a per-invocation temp dir and return the
+    # temp .gz, so the (possibly shared or read-only) install annotation dir is
+    # never written to and concurrent jobs cannot race on it (#97).
+    import tempfile
+
+    tmpdir = tempfile.mkdtemp(prefix="crisprme_annot_")
     if annotationfile.endswith(".gz"):
-        gz_path, plain_path = annotationfile, annotationfile[:-3]
+        plain_path = os.path.join(tmpdir, "annotation.bed")
+        _decompress_file(annotationfile, plain_path)  # gz -> temp plain
+    elif os.path.isfile(annotationfile):
+        plain_path = annotationfile  # plain input; sort-bed only reads it
+    elif os.path.isfile(f"{annotationfile}.gz"):
+        plain_path = os.path.join(tmpdir, "annotation.bed")
+        _decompress_file(f"{annotationfile}.gz", plain_path)
     else:
-        gz_path, plain_path = f"{annotationfile}.gz", annotationfile
-    decompressed_here = False
-    if not os.path.isfile(plain_path):
-        if os.path.isfile(gz_path):
-            _decompress_file(gz_path, plain_path)  # gunzip -k -c gz > plain
-            decompressed_here = True
-        else:
-            error(f"Annotation file not found: {annotationfile}")
-    annotationfile_sorted = _sort_bed(plain_path, f"{plain_path}.tmp.sorted.bed")
-    annotationfile_sorted_bgzip = _compress_file(annotationfile_sorted)
-    result = _mv_file(annotationfile_sorted_bgzip, gz_path)
-    if decompressed_here:
-        _rm_files([plain_path])  # remove only the temp copy we created
-    return result
+        error(f"Annotation file not found: {annotationfile}")
+    annotationfile_sorted = _sort_bed(
+        plain_path, os.path.join(tmpdir, "annotation.sorted.bed")
+    )
+    return _compress_file(annotationfile_sorted)  # temp annotation.sorted.bed.gz
 
 
 def _check_annotation(args: List[str], annotation: bool) -> str:
@@ -865,27 +867,29 @@ def _process_personal_annotation(personal_annotationfile: str, annotationfile: s
         SystemExit: If decompression, tagging, concatenation, sorting, or 
             compression fails.
     """
-    pannotation_tag = f"{personal_annotationfile}.tmp.tag.bed"
-    pannotation_tag = _tag_personal_annotation(personal_annotationfile, pannotation_tag)
-    concat_annotationfile = os.path.join(
-        os.path.abspath(os.path.dirname(personal_annotationfile)),
-        "annotation+personal.bed"
+    # Read-only-safe: build the merged personal+reference annotation entirely in a
+    # per-invocation temp dir, never next to the (possibly read-only) inputs (#97).
+    import tempfile
+
+    tmpdir = tempfile.mkdtemp(prefix="crisprme_pannot_")
+    pannotation_tag = _tag_personal_annotation(
+        personal_annotationfile, os.path.join(tmpdir, "personal.tag.bed")
     )
+    concat_annotationfile = os.path.join(tmpdir, "annotation+personal.bed")
     if annotationfile == os.path.join(script_path, "vuoto.txt"):
         concat_annotationfile = _mv_file(pannotation_tag, concat_annotationfile)
     else:  # concatenate personal and annotation file
         concat_annotationfile = _cat_files(
             annotationfile, pannotation_tag, concat_annotationfile
         )
-        _rm_files([pannotation_tag])
-    # sort concatenated annotation files
-    concat_annotationfile_sorted = f"{concat_annotationfile}.sorted.bed"
-    concat_annotationfile_sorted = _sort_bed(concat_annotationfile, concat_annotationfile_sorted)
-    concat_annotationfile_bgzip = _compress_file(concat_annotationfile_sorted)
-    concat_annotationfile = _mv_file(concat_annotationfile_bgzip, f"{concat_annotationfile}.gz")
-    _rm_files([concat_annotationfile_bgzip])
-    assert os.path.isfile(concat_annotationfile)
-    return concat_annotationfile
+    # sort the concatenated annotation, then bgzip to annotation+personal.bed.gz
+    concat_sorted = _sort_bed(
+        concat_annotationfile, os.path.join(tmpdir, "annotation+personal.sorted.bed")
+    )
+    concat_annotationfile = _mv_file(concat_sorted, concat_annotationfile)
+    result = _compress_file(concat_annotationfile)  # temp annotation+personal.bed.gz
+    assert os.path.isfile(result)
+    return result
     
 
 def _check_personal_annotation(args: List[str], annotationfile: str, personal_annotation: bool) -> str:
@@ -2234,7 +2238,9 @@ def print_help_download() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--what, component to fetch: genome | annotations | pams | samples | "
-        "vcf | index | all (all = genome+annotations+pams+samples) [REQUIRED]\n"
+        "vcf | index | all (all = genome+annotations+pams+samples, plus the "
+        "default hg38 reference index so a reference scan works out of the box) "
+        "[REQUIRED]\n"
         "\t--ref, reference genome name for --what genome/index [default: hg38]\n"
         "\t--dataset, variant dataset name for --what vcf (e.g. 1000G, HGDP) "
         "[REQUIRED for --what vcf]\n"
@@ -2254,6 +2260,11 @@ def print_help_download() -> None:
         "[OPTIONAL, default: current directory]\n"
     )
     sys.exit(1)
+
+
+# Default REFERENCE index published on HF for hg38 (the default NRG PAM, bMax 3);
+# fetched by ``download --what all`` so a simple reference scan works out of the box.
+DEFAULT_REFERENCE_INDEX_HG38 = "NRG_3_hg38"
 
 
 def download_data() -> None:
@@ -2284,8 +2295,10 @@ def download_data() -> None:
         workdir = os.path.abspath(args[args.index("--path") + 1])
         if not os.path.isdir(workdir):
             error(f"The working directory {workdir} does not exist")
-    # "all" fetches the always-needed reference bundle (variant VCFs and indexes
-    # are dataset/index specific, so they are requested explicitly)
+    # "all" fetches the always-needed reference bundle (variant VCFs are dataset
+    # specific, so they are requested explicitly). On hg38 it ALSO fetches the
+    # default-PAM REFERENCE index (below) so a simple reference-genome scan works
+    # out of the box.
     if what == "all":
         components = ["genome", "annotations", "pams", "samples"]
     else:
@@ -2311,6 +2324,26 @@ def download_data() -> None:
         except (ValueError, ImportError, RuntimeError) as e:
             error(str(e))
         print(f"Downloaded {comp} -> {dest}", flush=True)
+
+    # For --what all on hg38, also fetch the default-PAM REFERENCE index so a
+    # simple reference-genome scan works immediately. Without it, the first
+    # reference search must build the index on demand from the raw genome
+    # (correct, but slow). Non-fatal: on any hiccup the genome is still present
+    # and the index is built on demand at search time.
+    if what == "all" and ref == "hg38":
+        ref_index = index_name or DEFAULT_REFERENCE_INDEX_HG38
+        try:
+            dest = download_component(
+                "index", workdir, repo=repo, ref=ref,
+                index_name=ref_index, genotypes=False,
+            )
+            print(f"Downloaded reference index {ref_index} -> {dest}", flush=True)
+        except (ValueError, ImportError, RuntimeError) as e:
+            sys.stderr.write(
+                f"WARNING: could not fetch the default reference index "
+                f"{ref_index} ({e}). The reference genome is present; a reference "
+                f"index will be built on demand at the first search.\n"
+            )
 
 
 def print_help_publish_index() -> None:
