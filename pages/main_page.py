@@ -1991,19 +1991,21 @@ def index_page() -> html.Div:
                     dcc.Slider(
                         id="max-edits-slider",
                         min=1,
-                        # Max = the app's mismatch ceiling (MAX_MMS - 1 = 6), computed rather
-                        # than a magic number. Mismatches are the non-index-limited edit
-                        # dimension and the dominant search cost, so the total-edits knob tops
-                        # out where the mismatch dropdown does. The installed index only caps
-                        # *bulges* (bMax = N-1, <=2 in practice); that limit is applied
-                        # separately where bulges are derived above and must NOT shrink the
-                        # mismatch-driven total here.
-                        max=MAX_MMS - 1,
+                        # Max = mismatch ceiling (MAX_MMS - 1 = 6) + bulge ceiling
+                        # (MAX_BULGES - 1 = 2) = 8 -- the largest total-edit budget the app
+                        # supports (e.g. 6 mismatches + 2 bulges), computed rather than a magic
+                        # number. In simple mode the per-type caps are DERIVED from this value:
+                        # mismatches come from the hidden Advanced dropdown default (6) and
+                        # bulges are capped by the installed index's depth (<=2), so a
+                        # max-edits=8 search resolves to 6 mismatches + up to 2 bulges. The
+                        # default value stays 4 (matching the CLI); the Advanced per-type caps
+                        # stay 6 / 2 / 2.
+                        max=(MAX_MMS - 1) + (MAX_BULGES - 1),
                         step=1,
                         value=4,
                         marks={
                             i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
-                            for i in range(1, MAX_MMS)
+                            for i in range(1, (MAX_MMS - 1) + (MAX_BULGES - 1) + 1)
                         },
                         tooltip={"placement": "bottom", "always_visible": False},
                     ),
@@ -2420,6 +2422,42 @@ def toggle_advanced_thresholds(n_clicks: int, is_open: bool) -> Tuple:
     label = "Advanced options ▴" if new_open else "Advanced options ▾"
     # slider disabled (grayed out) exactly when the advanced panel is open
     return new_open, new_open, label
+
+
+@app.callback(
+    [
+        Output("max-edits-slider", "max"),
+        Output("max-edits-slider", "marks"),
+        Output("max-edits-slider", "value", allow_duplicate=True),
+    ],
+    [Input("mms", "value"), Input("dna", "value"), Input("rna", "value")],
+    [State("max-edits-slider", "value")],
+    prevent_initial_call=True,
+)
+def sync_max_edits_bound(mms, dna, rna, cur_val) -> Tuple:
+    """Compute the "Max edits" slider ceiling on the fly from the Advanced per-type
+    caps. The most total edits a single off-target can carry is
+    ``mismatches + max(DNA bulges, RNA bulges)`` -- a target is aligned with DNA OR
+    RNA bulges, so the larger of the two governs (not their sum). With the defaults
+    6 / 2 / 2 this is 6 + 2 = 8. The marks and the current value are kept within the
+    new ceiling. Fires whenever an Advanced dropdown changes, so returning to simple
+    mode reflects the user's per-type choices. The layout seeds the static max
+    (MAX_MMS-1 + MAX_BULGES-1 = 8) for the default caps before this first fires."""
+    def _as_int(v, default):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+    mm = _as_int(mms, MAX_MMS - 1)
+    bd = _as_int(dna, 0)
+    br = _as_int(rna, 0)
+    new_max = max(1, mm + max(bd, br))
+    marks = {
+        i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
+        for i in range(1, new_max + 1)
+    }
+    val = min(_as_int(cur_val, 4), new_max)
+    return new_max, marks, val
 
 
 @app.callback(
