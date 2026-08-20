@@ -207,7 +207,12 @@ ANNOTATIONS_DIR = "Annotations"
 # canonical names, the internal merged "active annotation" prefix, and an upload
 # size ceiling for format validation.
 ANNOTATIONS_ENABLED_FILE = ".enabled.json"
-BUILTIN_ANNOTATION_HG38 = "dhs+encode+gencode.hg38.bed.gz"
+# The default functional-region bundle: SCREEN v4 cCREs + DHS + GENCODE + COSMIC
+# Cancer Gene Census. BUILTIN_ANNOTATION_HG38_LEGACY is the pre-COSMIC bundle,
+# kept as a fallback so an install that only has the older bundle on disk still
+# gets a default (no regression on upgrade-without-redownload).
+BUILTIN_ANNOTATION_HG38 = "dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz"
+BUILTIN_ANNOTATION_HG38_LEGACY = "dhs+encode+gencode.hg38.bed.gz"
 BUILTIN_GENCODE_HG38 = "gencode.protein_coding.bed"
 ACTIVE_ANNOTATION_PREFIX = ".active."  # -> Annotations/.active.<genome>.bed[.gz]
 MAX_ANNOTATION_BYTES = 200 * 1024 * 1024  # reject absurd annotation uploads
@@ -1614,11 +1619,8 @@ def get_annotation_options(genome: str) -> List:
     # form so the option surfaces on a fresh batteries install (sort_annotation
     # transparently decompresses the .gz at search time). Checking only ".bed" here
     # was the bug that left every default search with "No annotation".
-    if genome_norm == "hg38" and (
-        os.path.isfile(os.path.join(_anndir, "dhs+encode+gencode.hg38.bed"))
-        or os.path.isfile(os.path.join(_anndir, "dhs+encode+gencode.hg38.bed.gz"))
-    ):
-        options.append({"label": "Functional regions: ENCODE cCREs (SCREEN) + DHS + GENCODE (hg38)", "value": "EN"})
+    if genome_norm == "hg38" and resolve_builtin_annotation() is not None:
+        options.append({"label": "Functional regions: ENCODE cCREs (SCREEN v4) + DHS + GENCODE + COSMIC (hg38)", "value": "EN"})
     for ann in get_custom_annotations():
         val = ann["value"] if isinstance(ann, dict) else ann
         # match the genome token in the filename; skip the built-in already covered
@@ -1882,19 +1884,38 @@ def _norm_genome(genome: str) -> str:
     return (genome or "").replace(" ", "_")
 
 
-def _builtin_bundle_present() -> bool:
+def resolve_builtin_annotation():
+    """Return the functional-region default bundle actually present on disk.
+
+    Prefers the SCREEN-v4 + COSMIC bundle; falls back to the legacy bundle. Each
+    ships bgzipped but sort_annotation accepts a plain .bed too, so both forms are
+    accepted. Returns the bundle FILENAME (as enabled/stored) or None.
+    """
     d = _annotations_dir()
-    return os.path.isfile(os.path.join(d, "dhs+encode+gencode.hg38.bed")) or os.path.isfile(
-        os.path.join(d, BUILTIN_ANNOTATION_HG38)
-    )
+    for name in (BUILTIN_ANNOTATION_HG38, BUILTIN_ANNOTATION_HG38_LEGACY):
+        base = name[:-3] if name.endswith(".gz") else name  # plain .bed form
+        if os.path.isfile(os.path.join(d, name)) or os.path.isfile(
+            os.path.join(d, base)
+        ):
+            return name
+    return None
+
+
+def _is_builtin_annotation(name) -> bool:
+    """True if ``name`` is either the current or the legacy built-in bundle."""
+    return name in (BUILTIN_ANNOTATION_HG38, BUILTIN_ANNOTATION_HG38_LEGACY)
+
+
+def _builtin_bundle_present() -> bool:
+    return resolve_builtin_annotation() is not None
 
 
 def read_enabled_annotations(genome: str) -> List[str]:
     """Enabled annotation bed FILENAMES for a genome.
 
-    Backward-compat: with NO manifest, hg38 defaults to the built-in bundle (when
-    it is present on disk), everything else to none -- so a fresh install keeps
-    annotations ON by default, exactly as before the annotation manager. Names no
+    Backward-compat: with NO manifest, hg38 defaults to the built-in bundle (the
+    SCREEN-v4 + COSMIC bundle when present, else the legacy bundle), everything
+    else to none -- so a fresh install keeps annotations ON by default. Names no
     longer present on disk are pruned.
     """
     g = _norm_genome(genome)
@@ -1902,8 +1923,9 @@ def read_enabled_annotations(genome: str) -> List[str]:
     installed = set(os.listdir(d)) if os.path.isdir(d) else set()
     path = _enabled_manifest_path()
     if not os.path.isfile(path):
-        if g == "hg38" and _builtin_bundle_present():
-            return [BUILTIN_ANNOTATION_HG38]
+        if g == "hg38":
+            b = resolve_builtin_annotation()
+            return [b] if b else []
         return []
     try:
         with open(path) as fh:
@@ -1912,7 +1934,7 @@ def read_enabled_annotations(genome: str) -> List[str]:
         names = []
     return [
         n for n in names
-        if n in installed or (n == BUILTIN_ANNOTATION_HG38 and _builtin_bundle_present())
+        if n in installed or (_is_builtin_annotation(n) and _builtin_bundle_present())
     ]
 
 
@@ -2081,12 +2103,12 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
     g = _norm_genome(genome)
     d = _annotations_dir()
     enabled = read_enabled_annotations(g)
-    builtin_on = BUILTIN_ANNOTATION_HG38 in enabled
+    builtin_on = any(_is_builtin_annotation(n) for n in enabled)
     gencode = BUILTIN_GENCODE_HG38 if builtin_on else "vuoto.txt"
     if not enabled:
         return ("vuoto.txt", "vuoto.txt")
-    if enabled == [BUILTIN_ANNOTATION_HG38]:
-        return (BUILTIN_ANNOTATION_HG38, gencode)  # fast path: bundle only, no merge
+    if len(enabled) == 1 and _is_builtin_annotation(enabled[0]):
+        return (enabled[0], gencode)  # fast path: single built-in bundle, no merge
     members = [os.path.join(d, n) for n in enabled if os.path.isfile(os.path.join(d, n))]
     if not members:
         return ("vuoto.txt", "vuoto.txt")

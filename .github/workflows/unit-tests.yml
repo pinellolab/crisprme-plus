@@ -36,9 +36,13 @@ jobs:
         # requests: utils.py imports it at module load. numpy: test_phased_haplotype
         # exercises the real iupac_decomposition, which uses np.array (the only
         # scientific-stack dep on that hot path; pandas/CRISTA_score are stubbed in
-        # the test since that path uses neither). Still no huggingface_hub, so the
-        # fallback-contract test keeps exercising the absent-hf_hub path offline.
-        run: python -m pip install --upgrade pip requests numpy
+        # the test since that path uses neither). pandas: test_reference_row_downstream
+        # runs the REAL remove_n_and_dots.py (pandas) to reproduce the NaN round-trip
+        # that crashed resultIntegrator. pandas + matplotlib: the shareable-report
+        # generator (generate_report.py) uses both, and test_generate_report self-skips
+        # without them. Still no huggingface_hub, so the fallback-contract test keeps
+        # exercising the absent-hf_hub path offline.
+        run: python -m pip install --upgrade pip requests numpy pandas matplotlib
 
       - name: Byte-compile the pipeline (syntax check)
         run: python -m py_compile crisprme.py PostProcess/*.py
@@ -126,3 +130,23 @@ jobs:
       - name: Phased multi-SNP haplotype not under-reported (deferred-peel fix)
         working-directory: PostProcess
         run: python -m unittest test_phased_haplotype -v
+
+      - name: "Observed-haplotype enumerator (per-individual, confirmed/putative)"
+        working-directory: PostProcess
+        run: python -m unittest test_observed_haplotypes -v
+
+      - name: "Observed-haplotype integration (real iupac_decomposition, sentinel tail intact)"
+        working-directory: PostProcess
+        run: python -m unittest test_observed_haplotype_integration -v
+
+      - name: "AF panel denominator uses VCF-filtered genotyped samples"
+        working-directory: PostProcess
+        run: python -m unittest test_af_denominator_panel -v
+
+      - name: "Reference off-target row flows downstream (no resultIntegrator IndexError)"
+        working-directory: PostProcess
+        run: python -m unittest test_reference_row_downstream -v
+
+      - name: "Shareable report (self-contained ZIP: report.html + tsv.gz, base64 plots, top-N table)"
+        working-directory: PostProcess
+        run: python -m unittest test_generate_report -v

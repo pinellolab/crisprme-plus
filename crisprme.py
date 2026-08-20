@@ -11,7 +11,7 @@ import os
 import re
 
 
-version = "2.3.3"  #  CRISPRme version; TODO: update when required
+version = "2.4.0"  #  CRISPRme version; TODO: update when required
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -767,25 +767,27 @@ def _sort_annotation(annotationfile: str) -> str:
         SystemExit: If decompression, sorting, compression, or renaming fails.
     """
     # sort-bed needs an uncompressed BED. Accept either a plain .bed or a
-    # bgzipped .bed.gz (setup/complete-test download the latter) and always
-    # write the canonical bgzipped output back to <name>.gz.
+    # bgzipped .bed.gz (setup/complete-test download the latter). Read-only-safe:
+    # decompress/sort/compress through a per-invocation temp dir and return the
+    # temp .gz, so the (possibly shared or read-only) install annotation dir is
+    # never written to and concurrent jobs cannot race on it (#97).
+    import tempfile
+
+    tmpdir = tempfile.mkdtemp(prefix="crisprme_annot_")
     if annotationfile.endswith(".gz"):
-        gz_path, plain_path = annotationfile, annotationfile[:-3]
+        plain_path = os.path.join(tmpdir, "annotation.bed")
+        _decompress_file(annotationfile, plain_path)  # gz -> temp plain
+    elif os.path.isfile(annotationfile):
+        plain_path = annotationfile  # plain input; sort-bed only reads it
+    elif os.path.isfile(f"{annotationfile}.gz"):
+        plain_path = os.path.join(tmpdir, "annotation.bed")
+        _decompress_file(f"{annotationfile}.gz", plain_path)
     else:
-        gz_path, plain_path = f"{annotationfile}.gz", annotationfile
-    decompressed_here = False
-    if not os.path.isfile(plain_path):
-        if os.path.isfile(gz_path):
-            _decompress_file(gz_path, plain_path)  # gunzip -k -c gz > plain
-            decompressed_here = True
-        else:
-            error(f"Annotation file not found: {annotationfile}")
-    annotationfile_sorted = _sort_bed(plain_path, f"{plain_path}.tmp.sorted.bed")
-    annotationfile_sorted_bgzip = _compress_file(annotationfile_sorted)
-    result = _mv_file(annotationfile_sorted_bgzip, gz_path)
-    if decompressed_here:
-        _rm_files([plain_path])  # remove only the temp copy we created
-    return result
+        error(f"Annotation file not found: {annotationfile}")
+    annotationfile_sorted = _sort_bed(
+        plain_path, os.path.join(tmpdir, "annotation.sorted.bed")
+    )
+    return _compress_file(annotationfile_sorted)  # temp annotation.sorted.bed.gz
 
 
 def _check_annotation(args: List[str], annotation: bool) -> str:
@@ -865,27 +867,29 @@ def _process_personal_annotation(personal_annotationfile: str, annotationfile: s
         SystemExit: If decompression, tagging, concatenation, sorting, or 
             compression fails.
     """
-    pannotation_tag = f"{personal_annotationfile}.tmp.tag.bed"
-    pannotation_tag = _tag_personal_annotation(personal_annotationfile, pannotation_tag)
-    concat_annotationfile = os.path.join(
-        os.path.abspath(os.path.dirname(personal_annotationfile)),
-        "annotation+personal.bed"
+    # Read-only-safe: build the merged personal+reference annotation entirely in a
+    # per-invocation temp dir, never next to the (possibly read-only) inputs (#97).
+    import tempfile
+
+    tmpdir = tempfile.mkdtemp(prefix="crisprme_pannot_")
+    pannotation_tag = _tag_personal_annotation(
+        personal_annotationfile, os.path.join(tmpdir, "personal.tag.bed")
     )
+    concat_annotationfile = os.path.join(tmpdir, "annotation+personal.bed")
     if annotationfile == os.path.join(script_path, "vuoto.txt"):
         concat_annotationfile = _mv_file(pannotation_tag, concat_annotationfile)
     else:  # concatenate personal and annotation file
         concat_annotationfile = _cat_files(
             annotationfile, pannotation_tag, concat_annotationfile
         )
-        _rm_files([pannotation_tag])
-    # sort concatenated annotation files
-    concat_annotationfile_sorted = f"{concat_annotationfile}.sorted.bed"
-    concat_annotationfile_sorted = _sort_bed(concat_annotationfile, concat_annotationfile_sorted)
-    concat_annotationfile_bgzip = _compress_file(concat_annotationfile_sorted)
-    concat_annotationfile = _mv_file(concat_annotationfile_bgzip, f"{concat_annotationfile}.gz")
-    _rm_files([concat_annotationfile_bgzip])
-    assert os.path.isfile(concat_annotationfile)
-    return concat_annotationfile
+    # sort the concatenated annotation, then bgzip to annotation+personal.bed.gz
+    concat_sorted = _sort_bed(
+        concat_annotationfile, os.path.join(tmpdir, "annotation+personal.sorted.bed")
+    )
+    concat_annotationfile = _mv_file(concat_sorted, concat_annotationfile)
+    result = _compress_file(concat_annotationfile)  # temp annotation+personal.bed.gz
+    assert os.path.isfile(result)
+    return result
     
 
 def _check_personal_annotation(args: List[str], annotationfile: str, personal_annotation: bool) -> str:
@@ -2086,6 +2090,11 @@ def build_index_only() -> None:
     # failure logs a WARNING to STDOUT (stderr is fatal here) and never aborts the
     # dict/index build. Path derivation MIRRORS the search resolvers exactly (the
     # helper swaps the dictionaries_ prefix), so a built install actually uses them.
+    # NOTE (AF denominator, #117/#121): the panel denominator (AN) is built by
+    # tier0_compile.build_sample_meta over EXACTLY the per-db samplesID files listed
+    # here, so those files MUST be VCF-FILTERED to the genotyped samples (the merge
+    # script build_combined_panel.sh writes filtered per-db lists + a listing) or the
+    # panel would over-count phantom hom-ref individuals and inflate AN.
     db_to_samplesid = _build_db_to_samplesid(samples_listing, workdir)
     if not db_to_samplesid:
         if samples_listing:
@@ -2229,7 +2238,9 @@ def print_help_download() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--what, component to fetch: genome | annotations | pams | samples | "
-        "vcf | index | all (all = genome+annotations+pams+samples) [REQUIRED]\n"
+        "vcf | index | all (all = genome+annotations+pams+samples, plus the "
+        "default hg38 reference index so a reference scan works out of the box) "
+        "[REQUIRED]\n"
         "\t--ref, reference genome name for --what genome/index [default: hg38]\n"
         "\t--dataset, variant dataset name for --what vcf (e.g. 1000G, HGDP) "
         "[REQUIRED for --what vcf]\n"
@@ -2249,6 +2260,11 @@ def print_help_download() -> None:
         "[OPTIONAL, default: current directory]\n"
     )
     sys.exit(1)
+
+
+# Default REFERENCE index published on HF for hg38 (the default NRG PAM, bMax 3);
+# fetched by ``download --what all`` so a simple reference scan works out of the box.
+DEFAULT_REFERENCE_INDEX_HG38 = "NRG_3_hg38"
 
 
 def download_data() -> None:
@@ -2279,8 +2295,10 @@ def download_data() -> None:
         workdir = os.path.abspath(args[args.index("--path") + 1])
         if not os.path.isdir(workdir):
             error(f"The working directory {workdir} does not exist")
-    # "all" fetches the always-needed reference bundle (variant VCFs and indexes
-    # are dataset/index specific, so they are requested explicitly)
+    # "all" fetches the always-needed reference bundle (variant VCFs are dataset
+    # specific, so they are requested explicitly). On hg38 it ALSO fetches the
+    # default-PAM REFERENCE index (below) so a simple reference-genome scan works
+    # out of the box.
     if what == "all":
         components = ["genome", "annotations", "pams", "samples"]
     else:
@@ -2306,6 +2324,26 @@ def download_data() -> None:
         except (ValueError, ImportError, RuntimeError) as e:
             error(str(e))
         print(f"Downloaded {comp} -> {dest}", flush=True)
+
+    # For --what all on hg38, also fetch the default-PAM REFERENCE index so a
+    # simple reference-genome scan works immediately. Without it, the first
+    # reference search must build the index on demand from the raw genome
+    # (correct, but slow). Non-fatal: on any hiccup the genome is still present
+    # and the index is built on demand at search time.
+    if what == "all" and ref == "hg38":
+        ref_index = index_name or DEFAULT_REFERENCE_INDEX_HG38
+        try:
+            dest = download_component(
+                "index", workdir, repo=repo, ref=ref,
+                index_name=ref_index, genotypes=False,
+            )
+            print(f"Downloaded reference index {ref_index} -> {dest}", flush=True)
+        except (ValueError, ImportError, RuntimeError) as e:
+            sys.stderr.write(
+                f"WARNING: could not fetch the default reference index "
+                f"{ref_index} ({e}). The reference genome is present; a reference "
+                f"index will be built on demand at the first search.\n"
+            )
 
 
 def print_help_publish_index() -> None:
@@ -2964,6 +3002,82 @@ def crisprme_version():
     sys.stdout.write(f"v{__version__}\n")
 
 
+def print_help_generate_report() -> None:
+    """Prints detailed help for the generate-report functionality."""
+    sys.stderr.write(
+        "The generate-report functionality builds a SELF-CONTAINED, easily "
+        "shareable report for a completed CRISPRme run. It produces a single "
+        "ZIP (<jobid>_report.zip) that flat-decompresses to exactly two files: "
+        "report.html (offline, no external dependencies -- plots embedded as "
+        "base64 PNG, the top-1000 off-target table inline, CSS inline) and "
+        "integrated_results.tsv.gz (the full results the HTML links to with a "
+        "relative href). It is a portable digest of the full interactive "
+        "website result, aimed at sharing off-target predictions (e.g. to "
+        "design a targeted-NGS / rhAMP-Seq confirmation panel).\n"
+    )
+    sys.stderr.write(
+        "Options:\n"
+        "\t--result-dir, a CRISPRme result folder (Results/<jobid>). The "
+        "integrated_results TSV, .Params.txt, .version.txt and the default "
+        "output location are resolved from here [REQUIRED unless "
+        "--integrated-results is given]\n"
+        "\t--integrated-results, an explicit integrated_results TSV (.tsv or "
+        ".tsv.gz) to report on [OPTIONAL]\n"
+        "\t--samplesID-dir, directory of samplesID files used for the "
+        "superpopulation breakdown plot; auto-detected near the install when "
+        "omitted [OPTIONAL]\n"
+        "\t--output, output ZIP path [default: "
+        "<result-dir>/<jobid>_report.zip]\n"
+    )
+    sys.exit(1)
+
+
+def generate_report() -> None:
+    """Standalone entry point for the shareable-report generator.
+
+    Delegates to PostProcess/generate_report.build_report so the same command
+    (re)generates the shareable ZIP for both CLI and website runs (their
+    Results/<jobid> folders are identical).
+    """
+    args = input_args[2:]
+    if "--help" in args:
+        print_help_generate_report()
+
+    def _opt(*names):
+        for name in names:
+            if name in args:
+                idx = args.index(name)
+                if idx + 1 < len(args):
+                    return args[idx + 1]
+                sys.stderr.write(f"ERROR! Missing value for {name}\n")
+                print_help_generate_report()
+        return None
+
+    result_dir = _opt("--result-dir")
+    integrated_results = _opt("--integrated-results")
+    samplesid_dir = _opt("--samplesID-dir")
+    output = _opt("--output", "--out")
+
+    if not result_dir and not integrated_results:
+        sys.stderr.write(
+            "ERROR! generate-report requires --result-dir or "
+            "--integrated-results\n\n"
+        )
+        print_help_generate_report()
+
+    # import lazily so the rest of the CLI never pays the matplotlib import cost
+    sys.path.insert(0, os.path.join(script_path, "PostProcess"))
+    import generate_report as _report_module
+
+    out = _report_module.build_report(
+        result_dir=result_dir,
+        integrated_tsv=integrated_results,
+        out_zip=output,
+        samplesid_dir=samplesid_dir,
+    )
+    sys.stdout.write(f"Report written: {out}\n")
+
+
 def print_help_complete_test():
     """
     Prints the help information for executing comprehensive testing of the
@@ -3237,6 +3351,10 @@ def crisprme_help() -> None:
         "crisprme.py generate-personal-card\n"
         "\tGenerates a personal card for specific samples by extracting all "
         "private targets\n\n"
+        "crisprme.py generate-report\n"
+        "\tBuilds a self-contained, shareable report (<jobid>_report.zip: "
+        "offline report.html + integrated_results.tsv.gz) for a completed "
+        "run\n\n"
         "crisprme.py setup\n"
         "\tInitializes the legacy database by downloading all reference "
         "genomes, variant datasets, PAM definition files, and associated "
@@ -3274,6 +3392,8 @@ elif sys.argv[1] == "gnomAD-converter":  # run gnomad converter
     gnomAD_converter()
 elif sys.argv[1] == "generate-personal-card":  # run create personal card
     personal_card()
+elif sys.argv[1] == "generate-report":  # build shareable self-contained report
+    generate_report()
 elif sys.argv[1] == "setup":  # run legacy database setup
     setup_database()
 elif sys.argv[1] == "web-interface":  # run web interface

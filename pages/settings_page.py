@@ -37,6 +37,7 @@ from .pages_utils import (
     read_email_config,
     write_email_config,
     BUILTIN_ANNOTATION_HG38,
+    resolve_builtin_annotation,
 )
 
 from dash import Input, Output, State, html, dcc, no_update
@@ -638,13 +639,11 @@ def _annotation_choices(genome: str):
     d = os.path.join(current_working_directory, "Annotations")
     norm = (genome or "").replace(" ", "_")
     options = []
-    if norm == "hg38" and (
-        os.path.isfile(os.path.join(d, "dhs+encode+gencode.hg38.bed"))
-        or os.path.isfile(os.path.join(d, BUILTIN_ANNOTATION_HG38))
-    ):
+    _builtin = resolve_builtin_annotation() if norm == "hg38" else None
+    if _builtin is not None:
         options.append({
-            "label": "Functional regions: ENCODE cCREs (SCREEN) + DHS + GENCODE (built-in)",
-            "value": BUILTIN_ANNOTATION_HG38,
+            "label": "Functional regions: ENCODE cCREs (SCREEN v4) + DHS + GENCODE + COSMIC (built-in)",
+            "value": _builtin,
         })
     for a in get_custom_annotations():
         name = a["value"]

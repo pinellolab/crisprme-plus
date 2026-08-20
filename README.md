@@ -7,7 +7,7 @@
   <img src="assets/readme/crisprme-logo.png" alt="CRISPRme" width="700"/>
 </p>
 
-# CRISPRme+ (2.2.0)
+# CRISPRme+ (2.4.0)
 
 CRISPRme is a comprehensive tool designed for thorough off-target assessment in 
 CRISPR-Cas systems. It is available as a command-line interface and an offline tool
@@ -20,8 +20,12 @@ genome analyses. CRISPRme automates the entire workflow, from data download to
 executing the search, and delivers detailed reports complete with tables and figures 
 through an interactive web-based interface.
 
-### ✨ What's new in CRISPRme+ (2.2.0)
+### ✨ What's new in CRISPRme+
 
+- **Dictionary-less variant search** — a compact Tier-0 registry + Tier-1 genotype store replace the ~152 GB per-sample SNP dictionaries, so variant-aware search (with allele frequencies + rsIDs) ships with the index and runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
+- **Observed-haplotype enumeration** — multi-variant off-targets are enumerated only as haplotypes that occur in a real individual (confirmed for phased data, putative for unphased / mixed), removing phantom off-targets and restoring dropped real haplotypes. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
+- **COSMIC cancer-gene annotation** — off-targets are flagged when they fall in a Cancer Gene Census gene (tier + oncogene/TSG/fusion), alongside updated ENCODE SCREEN v4, GENCODE and DHS annotations. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
+- **Shareable off-target assessment report** — every run auto-generates a self-contained, branded HTML report (summary, graphical report, recommended validation panel, annotated top-1000, per-tier downloads, annotation legend), downloadable from the results page. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
 - **Prebuilt indexes on demand** — pull reference data + precomputed indexes from a HuggingFace CDN (`crisprme.py download`), or `build-index-only` / `publish-index` your own.
 - **One-command web interface in Docker** — no 410 GB local build (see the Quickstart below).
 - **Browser Data-Manager** — add genomes, indexes, VCFs, annotations and PAMs from the web UI, with dependency-aware deletion (Dash 2.x).

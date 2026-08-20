@@ -1,0 +1,2283 @@
+#!/usr/bin/env python
+"""Self-contained, shareable CRISPRme off-target report (v2.4 -- IND briefing book).
+
+Given a CRISPRme result folder (or a bare ``*integrated_results.tsv``), this
+module produces a single, easily-transferable ZIP::
+
+    <jobid>_report.zip
+      report.html                 # self-contained: base64 PNG plots, inline
+                                   #   top-1000 table, inline CSS, opens offline
+      integrated_results.tsv.gz   # the full RAW results (all 85 columns), the
+                                   #   HTML links to it with a RELATIVE href
+      top1000.tsv                 # the top-1000-by-CFD rows shown in the table,
+                                   #   CURATED columns, its own RELATIVE link
+      panel_top100.tsv            # the hybrid worst-case top-100 validation
+                                   #   panel (section 4), CURATED columns
+      cfd_ge_0.50.tsv ...         # per-tier subsets (CFD>=0.5/0.2/0.1/0.05,
+      mmb_le_1.tsv ...            #   mm+b<=1/2/3/4, variant_created), each in
+      variant_created.tsv         #   CURATED columns, only when non-empty
+
+Curated columns (report v2.4)
+-----------------------------
+ONE curated, readable, Excel-ready column set (``CURATED_COLUMNS``) is shared by
+BOTH the in-report top-1000 table AND every exported download file (top1000.tsv,
+panel_top100.tsv, and every per-tier TSV). It carries the ranking columns PLUS
+the annotation columns (gene, distance, GENCODE, ENCODE, DHS). Columns are
+resolved BY NAME from the highest_CFD projection; a missing source degrades to
+``-``. The complete raw 85-column dump stays as integrated_results.tsv.gz.
+
+The report is a portable *digest* of the full interactive CRISPRme website
+result (personal risk cards, etc. stay in the website). It is meant for a
+collaborator preparing an IND briefing book -- e.g. designing a targeted-NGS
+rhAMP-Seq confirmation panel from the predicted off-targets (Saha lab, TRAC
+guide, SpCas9 NRG).
+
+Report structure (top -> bottom)
+--------------------------------
+1. HEADER + GLOBAL SUMMARY: mirrors the web result-page top table. Left card:
+   gRNA (spacer+PAM), nuclease, Aggregated Specificity Score (0-100, from
+   ``.<jobid>.acfd_CFD.txt`` if present, else "CFD score not available"). Right:
+   the "Off-targets by Mismatch (MM) and Bulge (B)" matrix, grouped REFERENCE vs
+   VARIANT, then by bulge count, columns Total + 0MM..<mm>MM.
+2. KEY GRAPHICAL REPORT: the CRISPRme-paper ref/alt scatter (site index log-x vs
+   score, red REF / blue ALT points sized by allele frequency, ref->alt arrows,
+   top site rsID-annotated), in up to FOUR panels: by CFD, by variant effect
+   (CFD ALT-REF delta), by CRISTA, and by variant effect (CRISTA ALT-REF delta).
+   The two CRISTA panels appear only when CRISTA was computed -> 4 panels with
+   CRISTA, 2 without.
+3. SIMPLIFIED reference-vs-population plot (v1 single view).
+4. RECOMMENDED VALIDATION PANEL: the full threshold table (candidate counts at
+   CFD>= {0.5,0.2,0.1,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS the
+   HYBRID worst-case top-100 panel: HARD-INCLUDE every site with mm+b<=2 OR
+   CFD>=0.5, then FILL to 100 by worst-case severity across CFD desc / CRISTA
+   desc (if computed) / mm+b asc (no variant quota). An explicit in-report
+   methods note (plain-language, real constants) sits under the panel. The panel
+   and each non-empty threshold tier are exported (curated columns) and linked.
+5. DOWNLOADS: full RAW integrated_results.tsv.gz + curated top1000.tsv +
+   panel_top100.tsv + every non-empty per-tier curated TSV.
+6. SCROLLABLE TOP-1000 TABLE (by CFD desc, mm+b<=1 excluded) in the CURATED
+   columns, including the annotation columns (gene, distance, GENCODE, ENCODE,
+   DHS) and CRISTA when computed.
+7. FOOTER: CRISPRme version + provenance stamp + fixed research-only disclaimer.
+
+Design goals / robustness posture
+---------------------------------
+* Pure stdlib + matplotlib + pandas + numpy (the pipeline conda env). No Dash,
+  no Jinja, no network. The HTML has no <script> and no external <link>, so it
+  opens with ``file://`` on any machine.
+* Columns are selected BY NAME from the header (never fixed indices), because
+  the dict-less 85-col schema and the dict-based schema differ in column set /
+  order. Missing columns (CRISTA, per-dataset, annotation on dict-less) are
+  optional -- the report degrades, it never crashes.
+* ONE canonical partition everywhere: variant-created := Not_found_in_REF=="y";
+  reference := the rest; on-target := mm+b==0 (reported separately).
+  variant + reference + on-target == total, exactly.
+* Every plot/table is wrapped in try/except; a failure inlines a small
+  placeholder rather than failing the report (issue-#143 "preserve results").
+
+Runnable both as ``python -m PostProcess.generate_report --result-dir ...`` and
+via ``crisprme.py generate-report --result-dir ...``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import glob
+import gzip
+import html
+import io
+import math
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from datetime import datetime
+
+import matplotlib
+
+# never touch an X server (pipeline convention, CRISPRme_plots.py:21)
+matplotlib.use("Agg")
+
+import matplotlib.lines as mlines  # noqa: E402
+import matplotlib.patches as mpatches  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+
+# report-generator version -- bumped here, stamped in the footer provenance line.
+REPORT_GENERATOR_VERSION = "2.4"
+
+# --------------------------------------------------------------------------- #
+# Recommended-validation-panel thresholds (module-level constants, section 4)
+# --------------------------------------------------------------------------- #
+CFD_THRESHOLDS = (0.5, 0.2, 0.1, 0.05)
+MMB_THRESHOLDS = (1, 2, 3, 4)
+# threshold-table variant-created CFD floor (kept for the full threshold table)
+PANEL_VARIANT_CFD_MIN = 0.05
+
+# --------------------------------------------------------------------------- #
+# HYBRID worst-case top-100 panel (section 4).
+# --------------------------------------------------------------------------- #
+# Over the OFF-TARGET set (on-target mm+b==0 excluded), the panel is built in two
+# stages:
+#   1. HARD-INCLUDE every site that is close by sequence OR high-scoring, i.e.
+#      mm+bulges <= PANEL_FLOOR_MMB  OR  CFD >= PANEL_FLOOR_CFD. These are always
+#      in the panel even if they exceed the cap (a low-edit-distance or high-CFD
+#      site is never dropped from the confirmation panel).
+#   2. FILL the remaining slots up to PANEL_CAP by worst-case severity: each site
+#      is ranked independently by CFD (desc), CRISTA (desc; only when computed),
+#      and mm+bulges (asc, fewer = closer = worse); a site's SEVERITY is the BEST
+#      (minimum) rank across its available metrics, so a site that is worst by ANY
+#      single metric floats up. Ties: CFD desc -> CRISTA desc -> mm+b asc.
+# There is NO variant-created quota: variant-created sites enter through the same
+# floors/ranks as reference sites.
+PANEL_CAP = 100
+PANEL_FLOOR_MMB = 2  # hard-include every off-target with mm+bulges <= this
+PANEL_FLOOR_CFD = 0.5  # hard-include every off-target with CFD >= this
+# metrics contributing to the worst-case severity (logical key, direction).
+# direction "desc" => higher is worse; "asc" => lower is worse (closer sequence).
+PANEL_WORSTCASE_METRICS = (
+    ("cfd", "desc"),
+    ("crista", "desc"),
+    ("mmb", "asc"),
+)
+# bundled worst-case-panel filename (extra download alongside top1000.tsv)
+PANEL_TOP100_NAME = "panel_top100.tsv"
+
+# per-tier download files (section 4/5) are plain .tsv unless the curated TSV
+# would exceed this size, in which case they are gzipped (.tsv.gz).
+TIER_GZIP_BYTES = 2 * 1024 * 1024  # ~2 MB
+
+# --------------------------------------------------------------------------- #
+# ONE curated column set, shared by the in-report top-1000 table AND every
+# exported download file (top1000.tsv, panel_top100.tsv, per-tier tsvs).
+# --------------------------------------------------------------------------- #
+# Each entry is (display_header, kind) where kind selects the value builder in
+# ``curated_row`` / ``build_curated_frame``. Columns are resolved BY NAME from
+# the integrated_results header (highest_CFD projection); a column whose source
+# is missing degrades to "-" rather than being dropped, so every download and the
+# table always carry the same, readable, Excel-ready schema. "rank" and "crista"
+# are handled specially (rank is 1-based row order; CRISTA appears only when
+# crista_computed()). The full 85-column raw dump stays as integrated_results.tsv.gz.
+CURATED_COLUMNS = (
+    ("rank", "rank"),
+    ("Chromosome", "chrom"),
+    ("Position", "pos"),
+    ("Strand", "strand"),
+    ("Aligned_protospacer+PAM", "aligned"),  # ALT with REF fallback
+    ("Mismatches", "mm"),
+    ("Bulges", "bulges"),
+    ("Mismatches+bulges", "mmb"),
+    ("CFD", "cfd"),
+    ("CRISTA", "crista"),  # emitted only when crista_computed()
+    ("REF/ALT_origin", "origin"),
+    ("PAM_creation", "pam_creation"),
+    ("Variant", "variant"),  # rsID | genomic key when rsID absent
+    ("MAF", "maf"),  # em-dash when blank
+    ("Gene", "gene_name"),
+    ("Gene_distance_kb", "gene_dist"),
+    ("GENCODE", "gencode"),
+    ("ENCODE", "encode"),
+    ("DHS", "dhs"),
+    ("COSMIC_cancer_gene", "cosmic"),  # Cancer Gene Census tier/role; "-" when none
+)
+# value used when a curated column's source is missing / blank
+CURATED_MISSING = "-"
+
+# When True (set via build_report(drop_maf=True) / the --no-maf CLI flag), the MAF
+# column is omitted ENTIRELY -- from the curated header, the in-report table, and
+# every download file. Use this when a run's allele frequencies are not yet
+# finalized (e.g. the Tier-0 AF denominator rebuild is still pending) and showing
+# a MAF column would be misleading. Nothing else changes; the raw 85-column dump
+# still carries whatever MAF the source TSV had.
+_DROP_MAF = False
+
+
+def _active_columns():
+    """``CURATED_COLUMNS`` minus MAF when ``_DROP_MAF`` is set."""
+    if _DROP_MAF:
+        return tuple(c for c in CURATED_COLUMNS if c[1] != "maf")
+    return CURATED_COLUMNS
+
+# --------------------------------------------------------------------------- #
+# Column-name resolution helpers
+# --------------------------------------------------------------------------- #
+# The "highest_CFD" projection is the one the report uses (CFD is the primary
+# ranking the IND reviewer cares about). We resolve every column by its base
+# name against whichever suffixes a given schema uses.
+_PROJ = "(highest_CFD)"
+_CRISTA_PROJ = "(highest_CRISTA)"
+
+# base-name -> preferred header suffix list (first match wins)
+_COLS = {
+    "guide": ["Spacer+PAM"],
+    "chrom": ["Chromosome"],
+    "pos": [f"Start_coordinate_{_PROJ}", "Start_coordinate"],
+    "strand": [f"Strand_{_PROJ}", "Strand"],
+    "aln_ref": [f"Aligned_protospacer+PAM_REF_{_PROJ}", "Aligned_protospacer+PAM_REF"],
+    "aln_alt": [f"Aligned_protospacer+PAM_ALT_{_PROJ}", "Aligned_protospacer+PAM_ALT"],
+    "pam": [f"PAM_{_PROJ}", "PAM"],
+    "mm": [f"Mismatches_{_PROJ}", "Mismatches"],
+    "bulges": [f"Bulges_{_PROJ}", "Bulges"],
+    "mmb": [f"Mismatches+bulges_{_PROJ}", "Mismatches+bulges"],
+    "origin": [f"REF/ALT_origin_{_PROJ}", "REF/ALT_origin"],
+    "pam_creation": [f"PAM_creation_{_PROJ}", "PAM_creation"],
+    "cfd": [f"CFD_score_{_PROJ}", "CFD_score"],
+    "cfd_ref": [f"CFD_score_REF_{_PROJ}"],
+    "cfd_alt": [f"CFD_score_ALT_{_PROJ}"],
+    "var_genome": [f"Variant_info_genome_{_PROJ}", "Variant_info_genome"],
+    "maf": [f"Variant_MAF_{_PROJ}", "Variant_MAF"],
+    "rsid": [f"Variant_rsID_{_PROJ}", "Variant_rsID"],
+    "samples": [f"Variant_samples_{_PROJ}", "Variant_samples"],
+    "not_in_ref": ["Not_found_in_REF"],
+    "gene_name": ["Annotation_closest_gene_name"],
+    "gene_dist": ["Annotation_closest_gene_distance_(kb)"],
+    "gencode": ["Annotation_GENCODE"],
+    "encode": ["Annotation_ENCODE"],
+    "dhs": ["Annotation_DHS"],
+    "cosmic": ["Annotation_COSMIC"],
+    # CRISTA projection (present only when CRISTA was computed this run)
+    "crista": [f"CRISTA_score_{_CRISTA_PROJ}", "CRISTA_score"],
+    "crista_ref": [f"CRISTA_score_REF_{_CRISTA_PROJ}"],
+    "crista_alt": [f"CRISTA_score_ALT_{_CRISTA_PROJ}"],
+    "crista_mmb": [f"Mismatches+bulges_{_CRISTA_PROJ}"],
+    "crista_maf": [f"Variant_MAF_{_CRISTA_PROJ}"],
+    "crista_samples": [f"Variant_samples_{_CRISTA_PROJ}"],
+    "crista_rsid": [f"Variant_rsID_{_CRISTA_PROJ}"],
+}
+
+_NA_TOKENS = {"", "na", "n", ".", "nan", "none", "-1"}
+
+
+def _resolve(header, keys):
+    """Map logical column keys -> actual header names present in the TSV."""
+    present = set(header)
+    resolved = {}
+    for key in keys:
+        for candidate in _COLS[key]:
+            if candidate in present:
+                resolved[key] = candidate
+                break
+    return resolved
+
+
+def _is_na(value) -> bool:
+    if value is None:
+        return True
+    try:
+        if isinstance(value, float) and np.isnan(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().lower() in _NA_TOKENS
+
+
+def _min_maf(raw):
+    """Min AF across a comma-joined multi-SNP haplotype (CRISPRme_plots.py:58-60)."""
+    if _is_na(raw):
+        return None
+    vals = []
+    for tok in str(raw).split(","):
+        tok = tok.strip()
+        if _is_na(tok):
+            continue
+        try:
+            vals.append(float(tok))
+        except ValueError:
+            continue
+    return min(vals) if vals else None
+
+
+def _first_non_na(raw):
+    """First non-NA token from a comma-joined field (e.g. rsID list)."""
+    if _is_na(raw):
+        return None
+    for tok in str(raw).split(","):
+        tok = tok.strip()
+        if not _is_na(tok):
+            return tok
+    return None
+
+
+def _to_int_series(series):
+    return pd.to_numeric(series, errors="coerce").fillna(-1).astype(int)
+
+
+def _to_float_series(series):
+    return pd.to_numeric(series, errors="coerce")
+
+
+def crista_computed(df, cols):
+    """True when the CRISTA_score projection column exists AND has >=1 real value.
+
+    The stable schema always ships the CRISTA columns; a dict-less / CRISTA-off
+    run either omits them or leaves them blank. We include the CRISTA scatter
+    only when a real (numeric, non-NA) CRISTA score is present in this run.
+    """
+    if "crista" not in cols or cols["crista"] not in df.columns:
+        return False
+    vals = _to_float_series(df[cols["crista"]])
+    return bool(vals.notna().any())
+
+
+# --------------------------------------------------------------------------- #
+# Curated column projection (ONE set shared by the table + every download file)
+# --------------------------------------------------------------------------- #
+def _curated_cell(kind, row, cols):
+    """Compute the display value for one curated column of one row.
+
+    Values are resolved BY NAME (via ``cols``) from the highest_CFD projection;
+    anything missing / blank degrades to ``CURATED_MISSING`` ("-"). ``rank`` and
+    ``crista`` are handled by the caller (rank is positional; CRISTA is dropped
+    entirely when not computed). Returns a plain string, Excel-ready.
+    """
+    def _get(key):
+        return row.get(cols[key]) if key in cols else None
+
+    if kind == "chrom":
+        v = _get("chrom")
+    elif kind == "pos":
+        v = _get("pos")
+    elif kind == "strand":
+        v = _get("strand")
+    elif kind == "aligned":
+        # ALT with REF fallback
+        v = row.get(cols["aln_alt"]) if "aln_alt" in cols else None
+        if _is_na(v):
+            v = row.get(cols["aln_ref"]) if "aln_ref" in cols else None
+    elif kind == "mm":
+        v = _get("mm")
+    elif kind == "bulges":
+        v = _get("bulges")
+    elif kind == "mmb":
+        v = _get("mmb")
+    elif kind == "cfd":
+        raw = _get("cfd")
+        num = pd.to_numeric(raw, errors="coerce") if raw is not None else None
+        return f"{num:.4f}" if (num is not None and pd.notna(num)) else CURATED_MISSING
+    elif kind == "crista":
+        raw = _get("crista")
+        num = pd.to_numeric(raw, errors="coerce") if raw is not None else None
+        return f"{num:.4f}" if (num is not None and pd.notna(num)) else CURATED_MISSING
+    elif kind == "origin":
+        v = _get("origin")
+        if not _is_na(v):
+            return str(v).upper()
+        return CURATED_MISSING
+    elif kind == "pam_creation":
+        v = _get("pam_creation")
+    elif kind == "variant":
+        # rsID | genomic key when rsID absent
+        v = _first_non_na(_get("rsid")) if "rsid" in cols else None
+        if v is None and "var_genome" in cols:
+            v = _first_non_na(_get("var_genome"))
+    elif kind == "maf":
+        maf = _min_maf(_get("maf")) if "maf" in cols else None
+        # em-dash when blank (MAF footnote explains the blanks)
+        return f"{maf:.2e}" if isinstance(maf, float) else CURATED_MISSING
+    elif kind == "gene_name":
+        v = _get("gene_name")
+    elif kind == "gene_dist":
+        v = _get("gene_dist")
+    elif kind == "gencode":
+        v = _get("gencode")
+    elif kind == "encode":
+        v = _get("encode")
+    elif kind == "dhs":
+        v = _get("dhs")
+    elif kind == "cosmic":
+        v = _get("cosmic")
+    else:
+        v = None
+
+    if _is_na(v):
+        return CURATED_MISSING
+    return str(v)
+
+
+def curated_headers(has_crista):
+    """The curated display headers, dropping CRISTA when not computed (and MAF
+    when ``_DROP_MAF`` is set)."""
+    return [h for h, kind in _active_columns() if kind != "crista" or has_crista]
+
+
+def build_curated_frame(sub_df, cols, has_crista, start_rank=1):
+    """Project a sub-frame onto the ONE curated column set (rows in input order).
+
+    The result is a plain string DataFrame with the curated display headers as
+    columns (``rank`` first, CRISTA only when computed), used BOTH to write the
+    exported TSVs (top1000/panel/per-tier) and, via ``build_table_html``, the
+    in-report table -- so the table and every download share exactly the same
+    columns, in the same order, resolved by name (missing -> "-").
+    """
+    headers = curated_headers(has_crista)
+    kinds = [kind for _h, kind in _active_columns() if kind != "crista" or has_crista]
+    data = {h: [] for h in headers}
+    for offset, (_idx, row) in enumerate(sub_df.iterrows()):
+        for h, kind in zip(headers, kinds):
+            if kind == "rank":
+                data[h].append(str(start_rank + offset))
+            else:
+                data[h].append(_curated_cell(kind, row, cols))
+    return pd.DataFrame(data, columns=headers)
+
+
+def write_curated_tsv(sub_df, cols, has_crista, path, start_rank=1):
+    """Write a sub-frame as a curated-column TSV (shared by every download)."""
+    build_curated_frame(sub_df, cols, has_crista, start_rank=start_rank).to_csv(
+        path, sep="\t", index=False
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Canonical partition (variant / reference / on-target) -- single source
+# --------------------------------------------------------------------------- #
+def partition_masks(df, cols):
+    """Return (variant_mask, reference_mask, ontarget_mask) over df.
+
+    variant-created := Not_found_in_REF == "y" (fallback: origin == alt)
+    on-target       := mm+b == 0
+    reference       := everything else
+
+    By construction the three masks are disjoint and cover every row, so
+    variant.sum() + reference.sum() + ontarget.sum() == len(df) EXACTLY.
+    """
+    n = len(df)
+    if "mmb" in cols:
+        ontarget = _to_int_series(df[cols["mmb"]]) == 0
+    else:
+        ontarget = pd.Series([False] * n, index=df.index)
+
+    if "not_in_ref" in cols:
+        variant_raw = (
+            df[cols["not_in_ref"]].astype(str).str.strip().str.lower().eq("y")
+        )
+    elif "origin" in cols:
+        variant_raw = df[cols["origin"]].astype(str).str.strip().str.lower().eq("alt")
+    else:
+        variant_raw = pd.Series([False] * n, index=df.index)
+
+    # on-target takes precedence, so the three are mutually exclusive
+    variant = variant_raw & (~ontarget)
+    reference = (~variant) & (~ontarget)
+    return variant, reference, ontarget
+
+
+# --------------------------------------------------------------------------- #
+# Aggregated Specificity Score (.<jobid>.acfd_CFD.txt)
+# --------------------------------------------------------------------------- #
+def read_specificity_score(result_dir, job_id, guides):
+    """Read the aggregated CFD specificity score (0-100) from the acfd sidecar.
+
+    File format (process_summaries.py:211-215): ``<guide>\\t<score>\\tNA\\tNA``
+    where <score> = 100/(100+sum_cfds) in [0,1). The web converts it to 0-100 via
+    x*100 (results_page.py:2881-2888) and shows "CFD score not available" when
+    x>=1 (i.e. no scoreable off-targets). Returns a display string.
+    """
+    if not result_dir:
+        return "CFD score not available"
+    acfd_file = os.path.join(result_dir, f".{job_id}.acfd_CFD.txt")
+    if not os.path.isfile(acfd_file):
+        return "CFD score not available"
+    try:
+        with open(acfd_file) as handle:
+            lines = [ln for ln in handle.read().strip().split("\n") if ln.strip()]
+    except OSError:
+        return "CFD score not available"
+    # map guide -> score; if a single guide, take the only/first row
+    by_guide = {}
+    for ln in lines:
+        parts = ln.split("\t")
+        if len(parts) >= 2:
+            try:
+                by_guide[parts[0].strip()] = float(parts[1])
+            except ValueError:
+                continue
+    if not by_guide:
+        return "CFD score not available"
+
+    def _fmt(x):
+        if 0 <= x < 1:
+            return f"{x * 100:.3f}"
+        return "CFD score not available"
+
+    if len(by_guide) == 1:
+        return _fmt(next(iter(by_guide.values())))
+    # multi-guide: label per guide (in the order they appear in the table)
+    ordered = guides if guides else list(by_guide.keys())
+    parts = []
+    for g in ordered:
+        if g in by_guide:
+            parts.append(f"{g}: {_fmt(by_guide[g])}")
+    return "; ".join(parts) if parts else "CFD score not available"
+
+
+# --------------------------------------------------------------------------- #
+# Summary metadata: .Params.txt / .version.txt / filename fallback
+# --------------------------------------------------------------------------- #
+def _read_kv_sidecar(path):
+    """Read a tab-separated ``key\\tvalue`` sidecar (Params.txt/.version.txt)."""
+    out = {}
+    if not path or not os.path.isfile(path):
+        return out
+    try:
+        with open(path) as handle:
+            for line in handle:
+                line = line.rstrip("\n")
+                if "\t" not in line:
+                    continue
+                key, _, val = line.partition("\t")
+                out[key.strip()] = val.strip()
+    except OSError:
+        pass
+    return out
+
+
+def _parse_results_filename(tsv_path):
+    """Fallback summary from ``<guide>+<pam>_<ref>+<vcf>_<mm>+<bmax>_integrated_results.tsv``.
+
+    e.g. CTCTCAGCTGGTACACGGCANNN+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv
+      -> guide=CTCTCAGCTGGTACACGGCANNN, pam=NRG, genome=hg38,
+         datasets=1000G+HGDP, mm=6, bMax=3
+    """
+    info = {}
+    base = os.path.basename(tsv_path)
+    for suffix in (
+        "_integrated_results.tsv.gz",
+        "_integrated_results.tsv",
+        ".bestMerge.txt.integrated_results.tsv",
+    ):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    # <guide>+<pam>_<ref>+<vcf>_<mm>+<bmax>
+    try:
+        guide_pam, rest = base.split("_", 1)
+        if "+" in guide_pam:
+            info["guide"], info["pam"] = guide_pam.split("+", 1)
+        else:
+            info["guide"] = guide_pam
+        # rest = <ref>+<vcf>_<mm>+<bmax>  (vcf may itself contain '_')
+        if "_" in rest:
+            genome_vcf, mm_b = rest.rsplit("_", 1)
+        else:
+            genome_vcf, mm_b = rest, ""
+        if "+" in genome_vcf:
+            info["genome"], vcf = genome_vcf.split("+", 1)
+            # vcf like "hg38_1000G_HGDP" -> datasets after the ref token
+            vcf_tokens = vcf.split("_")
+            if vcf_tokens and vcf_tokens[0] == info["genome"]:
+                vcf_tokens = vcf_tokens[1:]
+            info["datasets"] = "+".join(t for t in vcf_tokens if t) or vcf
+        else:
+            info["genome"] = genome_vcf
+        if "+" in mm_b:
+            info["mm"], info["bmax"] = mm_b.split("+", 1)
+    except ValueError:
+        pass
+    return info
+
+
+def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
+    """Collect summary metadata used by the header card and matrix.
+
+    Returns a dict with resolved guide list, nuclease, pam, genome, datasets, mm,
+    bdna, brna, bmax, max_edits, date, version, and the canonical partition
+    counts (n_total, n_variant, n_reference, n_ontarget, n_offtarget).
+    """
+    params = {}
+    version = None
+    date = None
+    if result_dir:
+        params = _read_kv_sidecar(os.path.join(result_dir, ".Params.txt"))
+        if not params:
+            params = _read_kv_sidecar(os.path.join(result_dir, "Params.txt"))
+        ver = _read_kv_sidecar(os.path.join(result_dir, ".version.txt"))
+        version = ver.get("crisprme_version")
+        for probe in (".Params.txt", "Params.txt", os.path.basename(tsv_path)):
+            candidate = os.path.join(result_dir, probe)
+            if os.path.isfile(candidate):
+                date = datetime.fromtimestamp(
+                    os.path.getmtime(candidate)
+                ).strftime("%Y-%m-%d")
+                break
+    if params_override:
+        params = {**params, **params_override}
+
+    fn = _parse_results_filename(tsv_path)
+
+    guides = []
+    if "guide" in cols and cols["guide"] in df.columns:
+        guides = [g for g in df[cols["guide"]].dropna().unique().tolist()]
+    if not guides and fn.get("guide"):
+        guides = [fn["guide"]]
+
+    pam = params.get("Pam") or fn.get("pam") or "n/a"
+    nuclease = params.get("Nuclease") or "n/a"
+    genome = (
+        params.get("Genome_selected")
+        or params.get("Genome_ref")
+        or fn.get("genome")
+        or "n/a"
+    )
+    datasets = fn.get("datasets")
+    if not datasets:
+        idx = params.get("Genome_idx", "")
+        ref_comp = params.get("Ref_comp", "")
+        if "True" in str(ref_comp):
+            datasets = "reference + variants"
+        elif idx and idx != "None":
+            datasets = idx
+        else:
+            datasets = "reference only"
+
+    def _int_or_none(x):
+        try:
+            return int(str(x).strip())
+        except (TypeError, ValueError):
+            return None
+
+    mm = params.get("Mismatches") or fn.get("mm") or "n/a"
+    mm_int = _int_or_none(mm)
+    bdna = params.get("DNA")
+    brna = params.get("RNA")
+    bmax = params.get("Max_bulges") or fn.get("bmax") or "n/a"
+    bmax_int = _int_or_none(bmax)
+    max_edits = params.get("Max_total_edits") or "n/a"
+
+    variant, reference, ontarget = partition_masks(df, cols)
+    n_total = len(df)
+    n_variant = int(variant.sum())
+    n_reference = int(reference.sum())
+    n_ontarget = int(ontarget.sum())
+    n_offtarget = n_total - n_ontarget
+
+    return {
+        "guides": guides,
+        "guide_display": ", ".join(guides) if guides else "n/a",
+        "nuclease": nuclease,
+        "pam": pam,
+        "genome": genome,
+        "datasets": datasets,
+        "mm": str(mm),
+        "mm_int": mm_int,
+        "bdna": bdna,
+        "brna": brna,
+        "bmax": str(bmax),
+        "bmax_int": bmax_int,
+        "max_edits": str(max_edits),
+        "date": date or "n/a",
+        "version": version,
+        "n_total": n_total,
+        "n_variant": n_variant,
+        "n_reference": n_reference,
+        "n_ontarget": n_ontarget,
+        "n_offtarget": n_offtarget,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# SECTION 1: global off-target-by-MM-and-B matrix (REFERENCE vs VARIANT)
+# --------------------------------------------------------------------------- #
+def build_mmb_matrix(df, cols, meta):
+    """Off-targets binned by origin(REFERENCE/VARIANT) x bulge x mismatch.
+
+    Mirrors the web result-page top matrix: columns Total, 0MM..<mm>MM; rows
+    grouped REFERENCE then VARIANT, within each a row per bulge count 0..maxbulges.
+    Uses the canonical partition (variant := Not_found_in_REF=="y"; on-target
+    rows mm+b==0 are excluded from the off-target matrix).
+
+    Extent is chosen so EVERY off-target lands in a cell:
+      * bulge rows span 0..(bDNA + bRNA)  -- NOT Max_bulges, which under-counts
+        when both a DNA and an RNA bulge co-occur (bDNA=2, bRNA=2 -> rows 0..4);
+      * mm columns span 0..Mismatches (0..6).
+    If the OBSERVED max ever exceeds the configured span (defensive), the extent
+    grows to cover it so no off-target is silently dropped -- guaranteeing the
+    matrix REFERENCE + VARIANT totals equal the canonical partition off-target
+    totals (REFERENCE + VARIANT + on-target == grand total). Returns a dict with
+    ``mm_cols`` (0..mm) and ``groups`` = list of (label, [ (bulge, total, [per-mm
+    counts]) ... ]).
+    """
+    variant, reference, _ontarget = partition_masks(df, cols)
+
+    mm_series = _to_int_series(df[cols["mm"]]) if "mm" in cols else None
+    b_series = _to_int_series(df[cols["bulges"]]) if "bulges" in cols else None
+    if mm_series is None or b_series is None:
+        return None
+
+    obs_max_mm = int(mm_series[mm_series >= 0].max()) if (mm_series >= 0).any() else 0
+    obs_max_b = int(b_series[b_series >= 0].max()) if (b_series >= 0).any() else 0
+
+    # column extent: run's configured Mismatches, grown to cover observed
+    max_mm = meta.get("mm_int")
+    max_mm = obs_max_mm if max_mm is None else max(max_mm, obs_max_mm)
+
+    # row extent: bDNA + bRNA (total simultaneous bulges), grown to cover observed.
+    # Fall back to Max_bulges, then observed, when DNA/RNA counts are unavailable.
+    def _int_or_none(x):
+        try:
+            return int(str(x).strip())
+        except (TypeError, ValueError):
+            return None
+
+    bdna = _int_or_none(meta.get("bdna"))
+    brna = _int_or_none(meta.get("brna"))
+    if bdna is not None and brna is not None:
+        max_b = bdna + brna
+    elif meta.get("bmax_int") is not None:
+        max_b = meta["bmax_int"]
+    else:
+        max_b = obs_max_b
+    max_b = max(max_b, obs_max_b)
+
+    mm_cols = list(range(0, max_mm + 1))
+
+    def _rows_for(mask):
+        rows = []
+        for b in range(0, max_b + 1):
+            b_mask = mask & (b_series == b)
+            per_mm = [int((b_mask & (mm_series == m)).sum()) for m in mm_cols]
+            total = int(b_mask.sum())
+            rows.append((b, total, per_mm))
+        return rows
+
+    groups = [
+        ("REFERENCE", _rows_for(reference)),
+        ("VARIANT", _rows_for(variant)),
+    ]
+    return {"mm_cols": mm_cols, "groups": groups}
+
+
+def render_summary_and_matrix(meta, spec_score, matrix):
+    """Section 1 HTML: header card (left) + MM/B matrix (right)."""
+    bdna = meta["bdna"]
+    brna = meta["brna"]
+    bulge_disp = (
+        f"{bdna if bdna is not None else 'n/a'} / "
+        f"{brna if brna is not None else 'n/a'}"
+        + (f" (max {meta['bmax']})" if meta["bmax"] != "n/a" else "")
+    )
+
+    left_rows = [
+        ("gRNA (spacer+PAM)", meta["guide_display"]),
+        ("Nuclease", meta["nuclease"]),
+        ("PAM", meta["pam"]),
+        ("Genome", meta["genome"]),
+        ("Variant dataset(s)", meta["datasets"]),
+        ("Mismatches", meta["mm"]),
+        ("Bulges (DNA / RNA)", bulge_disp),
+        ("Max total edits", meta["max_edits"]),
+        ("Aggregated Specificity Score (0-100)", spec_score),
+    ]
+    left_html = "".join(
+        f'<tr><td class="k">{_esc(k)}</td><td>{_esc(v)}</td></tr>'
+        for k, v in left_rows
+    )
+
+    # right: the MM/B matrix
+    if matrix is None:
+        matrix_html = "<p>Off-target matrix unavailable (missing MM/bulge columns).</p>"
+    else:
+        mm_cols = matrix["mm_cols"]
+        head_cells = ['<th class="grp">Origin</th>', "<th>Bulges (B)</th>", "<th>Total</th>"]
+        head_cells += [f"<th>{m}MM</th>" for m in mm_cols]
+        head_html = "".join(head_cells)
+
+        body = []
+        for label, rows in matrix["groups"]:
+            grp_total = sum(r[1] for r in rows)
+            first = True
+            for b, total, per_mm in rows:
+                cells = []
+                if first:
+                    cells.append(
+                        f'<td class="grp" rowspan="{len(rows)}">{_esc(label)}'
+                        f'<br><span class="grp-total">({grp_total:,})</span></td>'
+                    )
+                    first = False
+                cells.append(f"<td>{b}B</td>")
+                cells.append(f"<td class='tot'>{total:,}</td>")
+                cells += [f"<td>{c:,}</td>" for c in per_mm]
+                body.append("<tr>" + "".join(cells) + "</tr>")
+        matrix_html = (
+            '<div class="matrix-wrap"><table class="matrix">'
+            f"<thead><tr>{head_html}</tr></thead>"
+            f"<tbody>{''.join(body)}</tbody></table></div>"
+        )
+
+    return f"""
+<div class="summary-grid">
+  <div class="summary-card">
+    <table class="summary-table"><tbody>{left_html}</tbody></table>
+  </div>
+  <div class="matrix-card">
+    <div class="matrix-title">Off-targets by Mismatch (MM) and Bulge (B)</div>
+    {matrix_html}
+    <p class="caption">Off-target counts (on-target row mm+b=0 excluded), grouped
+    by REFERENCE vs VARIANT origin (variant-created := Not_found_in_REF), then by
+    bulge count. Total column = row sum across mismatches.</p>
+  </div>
+</div>
+"""
+
+
+# --------------------------------------------------------------------------- #
+# samplesID -> superpopulation mapping (for the simplified population plot)
+# --------------------------------------------------------------------------- #
+def load_sample_superpop(samplesid_dir, datasets_hint=""):
+    """sample_id -> SUPERPOPULATION_ID, loaded from any samplesID files present.
+
+    Mirrors process_summaries.py:38-63 (header
+    ``#SAMPLE_ID\\tPOPULATION_ID\\tSUPERPOPULATION_ID\\tSEX``). Returns an empty
+    dict when no samplesID files are resolvable; the caller then falls back to
+    per-dataset (1000G vs HGDP) provenance.
+    """
+    mapping = {}
+    if not samplesid_dir or not os.path.isdir(samplesid_dir):
+        return mapping
+    for path in sorted(glob.glob(os.path.join(samplesid_dir, "samplesID*.txt"))):
+        try:
+            with open(path) as handle:
+                handle.readline()  # header
+                for line in handle:
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) >= 3 and parts[0]:
+                        mapping[parts[0]] = parts[2]
+        except OSError:
+            continue
+    return mapping
+
+
+def _dataset_of(sample_id):
+    """Infer dataset provenance from an ID prefix (preserve-provenance rule)."""
+    sid = sample_id.strip()
+    if sid.startswith("HGDP"):
+        return "HGDP"
+    if sid.startswith("HG") or sid.startswith("NA"):
+        return "1000G"
+    return "other"
+
+
+# --------------------------------------------------------------------------- #
+# Plots (matplotlib -> in-memory PNG -> base64 data URI)
+# --------------------------------------------------------------------------- #
+def _fig_to_data_uri(fig, dpi=120):
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    encoded = base64.b64encode(buf.getvalue()).decode()
+    return f"data:image/png;base64,{encoded}"
+
+
+def _placeholder_uri(message):
+    """A tiny figure that says a plot could not be drawn (never fails the run)."""
+    try:
+        fig, ax = plt.subplots(figsize=(6, 1.6))
+        ax.axis("off")
+        ax.text(0.5, 0.5, message, ha="center", va="center", fontsize=11, wrap=True)
+        return _fig_to_data_uri(fig, dpi=90)
+    except Exception:  # pragma: no cover - graphics totally unavailable
+        # 1x1 transparent PNG
+        return (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+            "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )
+
+
+def _cfd_style_scatter(
+    sub, score_key, ref_key, alt_key, xlabel, title,
+    score_name="CFD", maf_col=None, samp_col=None, rsid_col=None,
+):
+    """The CRISPRme-paper CFD/CRISTA scatter, adapted from
+    CRISPRme_plots.py:plot_with_CFD_score (~L347).
+
+    Generalized over the score family: ``score_key`` / ``ref_key`` / ``alt_key``
+    are the resolved combined/REF/ALT score-column names (CFD or CRISTA), and
+    ``maf_col`` / ``samp_col`` / ``rsid_col`` are the resolved allele-frequency /
+    samples / rsID column names for that same projection. ``score_name`` is the
+    y-axis / annotation label ("CFD" or "CRISTA").
+
+    ``sub`` is an ALREADY-ORDERED (top-first) top-N frame. Red REF points and
+    blue ALT points, both sized by allele frequency; gray arrows connect the
+    ref->alt pair for the same site; the top-ranked off-target is annotated with
+    its rsID. Returns a base64 data URI.
+    """
+    work = sub.reset_index(drop=True).copy()
+    n = len(work)
+    if n == 0:
+        raise ValueError("no rows to plot")
+    work["_index"] = np.arange(1, n + 1)
+
+    # min-AF across a multi-SNP haplotype; -1 => AF unknown (CRISPRme_plots.py:54-60)
+    if maf_col and maf_col in work.columns:
+        af = work[maf_col].astype(str).str.split(",").apply(
+            lambda toks: min(
+                [float(t) for t in toks if _num_ok(t)] or [-1.0]
+            )
+        )
+    else:
+        af = pd.Series([-1.0] * n)
+    work["AF"] = pd.to_numeric(af, errors="coerce").fillna(-1.0)
+
+    if samp_col and samp_col in work.columns:
+        _samp = work[samp_col].astype(str)
+        has_var = _samp.str.len().gt(1) & ~_samp.str.lower().isin(
+            ["nan", "na", "n", "."]
+        )
+    else:
+        has_var = pd.Series([False] * n)
+    work["_has_variant"] = has_var.values
+
+    # point sizes (CRISPRme_plots.py:70-80)
+    work["plot_AF"] = np.where(
+        work["AF"] >= 0,
+        np.sqrt(np.clip(work["AF"], 0, None) * 1000 + 0.001 * 1000) + 6.0,
+        np.where(work["_has_variant"], 12.0, np.nan),
+    )
+    work["ref_AF"] = np.sqrt(np.clip(1 - work["AF"], 0, None) * 1000)
+
+    y_ref = _to_float_series(work[ref_key]) if ref_key in work.columns else None
+    y_alt = _to_float_series(work[alt_key]) if alt_key in work.columns else None
+    # fall back to the combined score column if REF/ALT variants are missing
+    y_combined = _to_float_series(work[score_key]) if score_key in work.columns else None
+    if y_ref is None:
+        y_ref = y_combined
+    if y_alt is None:
+        y_alt = y_combined
+
+    transparent_red = "#e5323280"
+    transparent_blue = "#2b6cb080"
+
+    plt.rcParams.update({"font.size": 8})
+    fig, ax = plt.subplots(figsize=(8.0, 3.2))
+
+    ax.scatter(
+        work["_index"], y_ref, s=work["ref_AF"], c=transparent_red, zorder=1,
+        label="_ref",
+    )
+    ax.scatter(
+        work["_index"], y_alt, s=work["plot_AF"], c=transparent_blue, zorder=2,
+        edgecolors="black", linewidths=0.4, label="_alt",
+    )
+    ax.set_xscale("log")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(f"{score_name} score")
+    ax.set_title(title)
+    ax.set_xlim(0.9, max(1000, n))
+    ax.set_ylim(0, 1)
+
+    # ref -> alt arrows (CRISPRme_plots.py:160-177)
+    for x, yr, ya in zip(work["_index"], y_ref, y_alt):
+        if pd.isna(yr) or pd.isna(ya):
+            continue
+        z = ya - yr
+        if abs(z) < 1e-9:
+            continue
+        try:
+            ax.arrow(
+                x, yr + 0.02, 0, z - 0.04,
+                color="gray",
+                head_width=(x * (10 ** 0.005 - 10 ** (-0.005))),
+                head_length=0.02, length_includes_head=True, zorder=0, alpha=0.5,
+            )
+        except (ValueError, FloatingPointError):
+            continue
+
+    # annotate top-ranked off-target with its rsID
+    if rsid_col and rsid_col in work.columns:
+        top_rsid = _first_non_na(work.iloc[0][rsid_col])
+        top_y = y_alt.iloc[0] if pd.notna(y_alt.iloc[0]) else y_ref.iloc[0]
+        if top_rsid and pd.notna(top_y):
+            ax.annotate(
+                f"top site: {top_rsid}",
+                xy=(1, top_y),
+                xytext=(2.2, min(0.96, top_y + 0.12)),
+                fontsize=8,
+                arrowprops=dict(arrowstyle="->", color="#333", lw=0.7),
+            )
+
+    # allele-frequency size legend (CRISPRme_plots.py:88-114)
+    handles = [
+        mlines.Line2D([], [], marker="o", linestyle="None", color="black",
+                      markersize=math.sqrt(math.sqrt((v + 0.001) * 1000)), label=lab)
+        for v, lab in ((1.0, "1"), (0.1, "0.1"), (0.01, "0.01"))
+    ]
+    leg1 = ax.legend(handles=handles, title="Allele frequency", ncol=3, loc="upper center", fontsize=7)
+    ax.add_artist(leg1)
+    ax.legend(
+        handles=[
+            mpatches.Patch(color=transparent_red, label="Reference"),
+            mpatches.Patch(color=transparent_blue, label="Alternative (variant)"),
+        ],
+        loc="upper right", fontsize=7,
+    )
+    fig.tight_layout()
+    return _fig_to_data_uri(fig)
+
+
+def _num_ok(tok):
+    tok = str(tok).strip()
+    if tok.lower() in _NA_TOKENS:
+        return False
+    try:
+        float(tok)
+        return True
+    except ValueError:
+        return False
+
+
+def plot_scatter_panels(df, cols, n=1000, include_crista=False):
+    """Produce the key graphical-report scatter panels (section 2).
+
+    Returns a list of (title, caption, data_uri). Panels:
+      (a) top-N by CFD score
+      (b) top-N by CFD DELTA = ALT CFD - REF CFD (largest variant increase first)
+      (c) top-N by CRISTA score               -- only when include_crista is True
+      (d) top-N by CRISTA DELTA = ALT - REF    -- only when include_crista is True
+    So: CRISTA computed -> 4 panels; CRISTA absent -> 2 panels. Every panel is
+    guarded; a failing panel yields a placeholder URI (never aborts).
+    """
+    panels = []
+
+    # candidate frame: drop on-/near-on-target rows (mm+b<=1), same as the table
+    base = df
+    if "mmb" in cols:
+        base = base[_to_int_series(base[cols["mmb"]]) > 1]
+    n_shown = min(n, len(base))
+
+    def _score_sorted(score_col):
+        s = _to_float_series(base[score_col]).fillna(-1.0)
+        return base.assign(_s=s).sort_values("_s", ascending=False).head(n)
+
+    def _delta_sorted(alt_col, ref_col):
+        delta = _to_float_series(base[alt_col]) - _to_float_series(base[ref_col])
+        return (
+            base.assign(_delta=delta)
+            .sort_values("_delta", ascending=False, na_position="last")
+            .head(n)
+        )
+
+    # (a) by CFD score
+    cfd_score = cols.get("cfd", "")
+    cfd_ref = cols.get("cfd_ref", "")
+    cfd_alt = cols.get("cfd_alt", "")
+    try:
+        uri = _cfd_style_scatter(
+            _score_sorted(cfd_score), cfd_score, cfd_ref, cfd_alt,
+            xlabel="Candidate off-target site (ranked by CFD)",
+            title=f"Top {n_shown} candidates by CFD score",
+            score_name="CFD",
+            maf_col=cols.get("maf"), samp_col=cols.get("samples"),
+            rsid_col=cols.get("rsid"),
+        )
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"generate-report: CFD scatter unavailable: {exc}\n")
+        uri = _placeholder_uri("CFD scatter unavailable")
+    panels.append((
+        "By CFD score",
+        "Candidate off-targets ranked by CFD (log x). Red = reference, blue = "
+        "variant-created (sized by allele frequency); gray arrows connect the "
+        "reference->variant pair for the same site; the top site is labeled with "
+        "its rsID.",
+        uri,
+    ))
+
+    # (b) by CFD DELTA -- only when the REF/ALT CFD columns exist
+    if "cfd_ref" in cols and "cfd_alt" in cols:
+        try:
+            uri = _cfd_style_scatter(
+                _delta_sorted(cfd_alt, cfd_ref), cfd_score, cfd_ref, cfd_alt,
+                xlabel="Candidate off-target site (ranked by variant effect ALT-REF)",
+                title=f"Top {n_shown} by variant-induced CFD increase (ALT-REF)",
+                score_name="CFD",
+                maf_col=cols.get("maf"), samp_col=cols.get("samples"),
+                rsid_col=cols.get("rsid"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"generate-report: CFD delta scatter unavailable: {exc}\n")
+            uri = _placeholder_uri("CFD delta scatter unavailable")
+        panels.append((
+            "By variant effect (CFD ALT - REF delta)",
+            "Same axes, re-ranked by the variant-induced CFD change (ALT-REF, "
+            "descending): the variants that most raise the CFD score come first, "
+            "foregrounding the risk-relevant variant-created sites.",
+            uri,
+        ))
+
+    # (c) + (d) CRISTA, only when computed
+    if include_crista:
+        cr_score = cols.get("crista", "")
+        cr_ref = cols.get("crista_ref", "")
+        cr_alt = cols.get("crista_alt", "")
+        cr_maf = cols.get("crista_maf")
+        cr_samp = cols.get("crista_samples")
+        cr_rsid = cols.get("crista_rsid")
+
+        # (c) by CRISTA score
+        try:
+            uri = _cfd_style_scatter(
+                _score_sorted(cr_score), cr_score, cr_ref, cr_alt,
+                xlabel="Candidate off-target site (ranked by CRISTA)",
+                title=f"Top {n_shown} candidates by CRISTA score",
+                score_name="CRISTA",
+                maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
+            )
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"generate-report: CRISTA scatter unavailable: {exc}\n")
+            uri = _placeholder_uri("CRISTA scatter unavailable")
+        panels.append((
+            "By CRISTA score",
+            "Independent CRISTA scoring model, ranked by CRISTA score. Included "
+            "because CRISTA scores were computed for this run.",
+            uri,
+        ))
+
+        # (d) by CRISTA DELTA -- only when the REF/ALT CRISTA columns exist
+        if "crista_ref" in cols and "crista_alt" in cols:
+            try:
+                uri = _cfd_style_scatter(
+                    _delta_sorted(cr_alt, cr_ref), cr_score, cr_ref, cr_alt,
+                    xlabel="Candidate off-target site (ranked by variant effect ALT-REF)",
+                    title=f"Top {n_shown} by variant-induced CRISTA increase (ALT-REF)",
+                    score_name="CRISTA",
+                    maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
+                )
+            except Exception as exc:  # noqa: BLE001
+                sys.stderr.write(
+                    f"generate-report: CRISTA delta scatter unavailable: {exc}\n"
+                )
+                uri = _placeholder_uri("CRISTA delta scatter unavailable")
+            panels.append((
+                "By variant effect (CRISTA)",
+                "Same CRISPRme-paper ref/alt scatter with CRISTA on the y-axis, "
+                "re-ranked by the variant-induced CRISTA change (ALT-REF, "
+                "descending): the population variants that most raise the "
+                "independent CRISTA cleavage score come first. Included because "
+                "CRISTA scores were computed for this run.",
+                uri,
+            ))
+
+    return panels
+
+
+def plot_population(df, cols, sample_superpop):
+    """SECTION 3: SIMPLIFIED population view at the run's SELECTED parameters.
+
+    Two panels over the FULL result set (no per-total-mm faceting):
+      left  : reference vs variant-created off-target counts
+      right : among variant-created, one bar per superpopulation (or per
+              dataset when superpop mapping is unavailable).
+    """
+    variant, _reference, _ontarget = partition_masks(df, cols)
+    variant_mask = variant
+    n_variant = int(variant_mask.sum())
+    n_reference = len(df) - n_variant  # (reference + on-target) as the non-variant bar
+
+    group_counts = {}
+    use_superpop = bool(sample_superpop)
+    samples_col = cols.get("samples")
+    if samples_col and samples_col in df.columns:
+        for raw in df.loc[variant_mask, samples_col].astype(str):
+            if _is_na(raw):
+                continue
+            seen = set()
+            for sid in raw.split(","):
+                sid = sid.strip()
+                if _is_na(sid):
+                    continue
+                if use_superpop:
+                    grp = sample_superpop.get(sid)
+                    if grp is None:
+                        grp = _dataset_of(sid)
+                else:
+                    grp = _dataset_of(sid)
+                seen.add(grp)
+            for grp in seen:
+                group_counts[grp] = group_counts.get(grp, 0) + 1
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 3.8))
+
+    ax1.bar(
+        ["reference", "variant-created"],
+        [n_reference, n_variant],
+        color=["#a0aec0", "#dd6b20"],
+    )
+    ax1.set_ylabel("number of off-targets")
+    ax1.set_title("Reference vs variant-created")
+    for i, val in enumerate([n_reference, n_variant]):
+        ax1.text(i, val, f"{val:,}", ha="center", va="bottom", fontsize=9)
+
+    if group_counts:
+        labels = sorted(group_counts, key=lambda k: (-group_counts[k], k))
+        values = [group_counts[k] for k in labels]
+        ax2.bar(labels, values, color="#2b6cb0")
+        ax2.set_ylabel("variant-created off-targets")
+        title = "By superpopulation" if use_superpop else "By dataset (provenance)"
+        ax2.set_title(title)
+        if len(labels) > 4:
+            ax2.tick_params(axis="x", rotation=45)
+    else:
+        ax2.axis("off")
+        ax2.text(
+            0.5, 0.5,
+            "No per-population breakdown\n(no sample IDs / mapping available)",
+            ha="center", va="center", fontsize=10,
+        )
+    fig.tight_layout()
+    return _fig_to_data_uri(fig)
+
+
+# --------------------------------------------------------------------------- #
+# SECTION 4: recommended validation panel
+# --------------------------------------------------------------------------- #
+def select_worstcase_panel(df, cols, cap=PANEL_CAP):
+    """Return the OFF-TARGET rows for the HYBRID worst-case top-100 panel (sec 4).
+
+    Two stages over the off-target set (on-target mm+b==0 excluded):
+
+    1. HARD-INCLUDE every site that is close by sequence OR high-scoring:
+       ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR ``CFD >= PANEL_FLOOR_CFD (0.5)``.
+       These are always kept; if the hard-includes already exceed ``cap`` we keep
+       them all (a low-edit-distance / high-CFD site is never dropped).
+    2. FILL the remaining slots up to ``cap`` by worst-case severity. Each site
+       is ranked independently by every available metric in
+       ``PANEL_WORSTCASE_METRICS``: CFD (desc), CRISTA (desc; only when computed)
+       and mm+bulges (asc, fewer = closer sequence = worse); rank 1 == worst. A
+       site's SEVERITY is the BEST (minimum) rank across its available metrics,
+       so a site that is worst by ANY single metric floats up. Fill sites are
+       taken by ascending severity; ties are broken by CFD desc -> CRISTA desc ->
+       mm+b asc.
+
+    There is NO variant-created quota: variant-created sites qualify through the
+    same floors/ranks as reference sites. Returns the selected sub-frame (original
+    columns): hard-includes first (severity-ordered), then the fill (also
+    severity-ordered).
+    """
+    _variant, _reference, ontarget = partition_masks(df, cols)
+    offt = df[~ontarget].copy()
+    if len(offt) == 0:
+        return offt
+
+    cfd = (
+        _to_float_series(offt[cols["cfd"]]).fillna(-1.0)
+        if "cfd" in cols else pd.Series(-1.0, index=offt.index)
+    )
+    crista = (
+        _to_float_series(offt[cols["crista"]])
+        if "crista" in cols else pd.Series(np.nan, index=offt.index)
+    )
+    mmb = (
+        _to_int_series(offt[cols["mmb"]])
+        if "mmb" in cols else pd.Series(10 ** 6, index=offt.index)
+    )
+    has_crista = crista.notna().any()
+
+    # per-metric ranks (rank 1 == worst). ascending flag flips per direction:
+    #   desc metric -> higher is worse -> rank ascending=False
+    #   asc  metric -> lower  is worse -> rank ascending=True
+    series_by_key = {"cfd": cfd, "crista": crista, "mmb": mmb}
+    rank_frames = []
+    for key, direction in PANEL_WORSTCASE_METRICS:
+        if key == "crista" and not has_crista:
+            continue  # CRISTA absent -> this metric does not contribute
+        s = series_by_key.get(key)
+        if s is None:
+            continue
+        ascending = direction == "asc"
+        rank_frames.append(s.rank(method="min", ascending=ascending))
+
+    if rank_frames:
+        # severity = BEST (minimum) available rank across the contributing metrics
+        severity = pd.concat(rank_frames, axis=1).min(axis=1)
+    else:
+        severity = pd.Series(1.0, index=offt.index)
+
+    # STAGE 1: hard-includes (mm+b <= floor OR CFD >= floor)
+    hard_mask = (mmb <= PANEL_FLOOR_MMB) | (cfd >= PANEL_FLOOR_CFD)
+
+    ordered = offt.assign(
+        _severity=severity, _cfd=cfd, _crista=crista.fillna(-1.0), _mmb=mmb,
+        _hard=hard_mask,
+    ).sort_values(
+        # hard-includes first, then by worst-case severity; ties CFD/CRISTA/mm+b
+        ["_hard", "_severity", "_cfd", "_crista", "_mmb"],
+        ascending=[False, True, False, False, True],
+    )
+
+    n_hard = int(hard_mask.sum())
+    # if the hard-includes already exceed the cap keep them ALL; otherwise fill
+    keep = max(cap, n_hard)
+    drop = ["_severity", "_cfd", "_crista", "_mmb", "_hard"]
+    return ordered.head(keep).drop(columns=drop)
+
+
+def build_validation_panel(df, cols):
+    """Compute candidate counts at CFD / edit-distance thresholds and the
+    worst-case suggested panel. Returns a dict for rendering.
+
+    Counting is over the OFF-TARGET set (on-target row mm+b==0 excluded), so
+    thresholds report actionable candidates for a confirmation panel. The FULL
+    threshold table is kept (CFD>= {0.5,0.2,0.1,0.05}, mm+b<= {1,2,3,4}, and
+    variant-created counts); the suggested tier is the worst-case top-100.
+    """
+    variant, _reference, ontarget = partition_masks(df, cols)
+    offt = df[~ontarget]  # off-targets only
+
+    cfd = _to_float_series(offt[cols["cfd"]]) if "cfd" in cols else pd.Series([], dtype=float)
+    mmb = _to_int_series(offt[cols["mmb"]]) if "mmb" in cols else pd.Series([], dtype=int)
+    var_off = variant[~ontarget]
+
+    cfd_counts = [(t, int((cfd >= t).sum())) for t in CFD_THRESHOLDS]
+    mmb_counts = [(t, int((mmb <= t).sum())) for t in MMB_THRESHOLDS]
+
+    n_variant = int(var_off.sum())
+    n_variant_cfd = int((var_off & (cfd >= PANEL_VARIANT_CFD_MIN)).sum())
+
+    has_crista = crista_computed(df, cols)
+
+    # hybrid worst-case top-100 panel
+    panel_df = select_worstcase_panel(df, cols, cap=PANEL_CAP)
+    panel_size = len(panel_df)
+    # how many of the selected panel are variant-created
+    if "not_in_ref" in cols and cols["not_in_ref"] in panel_df.columns:
+        panel_variant = int(
+            panel_df[cols["not_in_ref"]].astype(str).str.strip().str.lower().eq("y").sum()
+        )
+    else:
+        panel_variant = 0
+
+    # per-tier off-target subsets (for the bundled curated downloads + links).
+    # Each entry: (logical tier key, display label, sub-frame). Only non-empty
+    # tiers are bundled/linked (decided by the caller).
+    tiers = build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb)
+
+    return {
+        "cfd_counts": cfd_counts,
+        "mmb_counts": mmb_counts,
+        "n_variant": n_variant,
+        "n_variant_cfd": n_variant_cfd,
+        "n_offtarget": int((~ontarget).sum()),
+        "has_crista": has_crista,
+        "panel_size": panel_size,
+        "panel_variant": panel_variant,
+        "panel_df": panel_df,
+        "tiers": tiers,
+    }
+
+
+def _tier_filename(key):
+    """Canonical bundled filename for a per-tier subset (curated TSV)."""
+    if key == "panel":
+        return PANEL_TOP100_NAME
+    if key.startswith("cfd_"):
+        return f"cfd_ge_{key.split('_', 1)[1]}.tsv"
+    if key.startswith("mmb_"):
+        return f"mmb_le_{key.split('_', 1)[1]}.tsv"
+    return f"{key}.tsv"
+
+
+def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb):
+    """Off-target subsets for each threshold tier (section-4 downloads).
+
+    Returns a list of dicts ``{key, label, filename, df}`` for the CFD>= and
+    mm+b<= tiers and the variant-created tier, over the OFF-TARGET set (on-target
+    mm+b==0 excluded). ``cfd`` / ``mmb`` are the OFF-TARGET-aligned series already
+    computed by the caller. Empty tiers are still returned; the caller skips
+    bundling/linking empties. Sub-frames carry the ORIGINAL columns so the
+    curated projection is applied uniformly at write time.
+    """
+    tiers = []
+    var_off = variant[~ontarget]
+    for t in CFD_THRESHOLDS:
+        sub = offt[(cfd >= t).values]
+        tiers.append({
+            "key": f"cfd_{t:.2f}",
+            "label": f"CFD &ge; {t}",
+            "filename": _tier_filename(f"cfd_{t:.2f}"),
+            "df": sub,
+        })
+    for t in MMB_THRESHOLDS:
+        sub = offt[(mmb <= t).values]
+        tiers.append({
+            "key": f"mmb_{t}",
+            "label": f"mismatches + bulges &le; {t}",
+            "filename": _tier_filename(f"mmb_{t}"),
+            "df": sub,
+        })
+    tiers.append({
+        "key": "variant_created",
+        "label": "variant-created off-targets",
+        "filename": "variant_created.tsv",
+        "df": offt[var_off.values],
+    })
+    return tiers
+
+
+def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
+    """Section 4 HTML: full threshold table + hybrid panel + methods note + the
+    per-tier download table.
+
+    ``panel_tsv_name`` (when given) is the bundled hybrid-panel filename.
+    ``tier_links`` maps a tier key ("panel", "cfd_0.50", ..., "mmb_1", ...,
+    "variant_created") to its bundled filename, so a Download column / link
+    appears only for the tiers that were actually bundled (non-empty ones).
+    """
+    tier_links = tier_links or {}
+
+    def _tier_count_link(key, count):
+        fname = tier_links.get(key)
+        if not fname:
+            return f"{count:,}"
+        return (
+            f"{count:,} &nbsp;<a class=\"tier-dl\" href=\"{_esc(fname)}\" "
+            f"download>{_esc(fname)}</a>"
+        )
+
+    cfd_rows = "".join(
+        f"<tr><td>CFD &ge; {t}</td><td class='num'>"
+        f"{_tier_count_link(f'cfd_{t:.2f}', c)}</td></tr>"
+        for t, c in vp["cfd_counts"]
+    )
+    mmb_rows = "".join(
+        f"<tr><td>mismatches + bulges &le; {t}</td><td class='num'>"
+        f"{_tier_count_link(f'mmb_{t}', c)}</td></tr>"
+        for t, c in vp["mmb_counts"]
+    )
+    metric_names = ["CFD (desc)"]
+    if vp.get("has_crista"):
+        metric_names.append("CRISTA (desc)")
+    metric_names.append("mismatches+bulges (asc)")
+    metric_list = ", ".join(metric_names)
+
+    # C) EXPLICIT IN-REPORT METHODS NOTE (plain-language, using the real
+    #    constants). Two hard-include floors, then fill by worst-case severity.
+    metric_or = (
+        "CFD, CRISTA, or mm+b" if vp.get("has_crista") else "CFD or mm+b"
+    )
+    note = (
+        f"How the panel was chosen (hybrid, up to {PANEL_CAP} sites). "
+        f"First, every off-target that is CLOSE by sequence OR HIGH-scoring is "
+        f"hard-included &mdash; specifically every site with mismatches+bulges "
+        f"&le; {PANEL_FLOOR_MMB} OR CFD &ge; {PANEL_FLOOR_CFD}. These are always "
+        f"kept (if the hard-included sites already exceed {PANEL_CAP}, they are "
+        f"all kept). The remaining slots up to {PANEL_CAP} are then filled by "
+        f"worst-case severity: each site is ranked independently by "
+        f"{metric_list}, and a site is prioritized if it is worst by ANY single "
+        f"one of those metrics ({metric_or}) &mdash; so the highest-scoring "
+        f"predicted cleavage sites AND the near-cognate low-edit-distance "
+        f"sequences that scoring models can under-weight both surface. There is "
+        f"NO category quota: variant-created sites qualify through the same "
+        f"floors and ranks as reference sites. The full threshold table above, "
+        f"the per-threshold subset files, and the complete raw integrated results "
+        f"(bundled downloads) let the panel be reviewed or expanded for any assay "
+        f"budget."
+    )
+    panel_dl = ""
+    if panel_tsv_name:
+        panel_dl = (
+            f'<p><a class="download" href="{_esc(panel_tsv_name)}" download>'
+            f"Recommended hybrid worst-case panel (TSV, up to {PANEL_CAP} sites)"
+            f"</a></p>"
+        )
+    return f"""
+<div class="panel-grid">
+  <div>
+    <table class="thr-table"><thead><tr><th>CFD threshold</th><th>Candidates (download)</th></tr></thead>
+    <tbody>{cfd_rows}</tbody></table>
+  </div>
+  <div>
+    <table class="thr-table"><thead><tr><th>Edit-distance threshold</th><th>Candidates (download)</th></tr></thead>
+    <tbody>{mmb_rows}</tbody></table>
+  </div>
+</div>
+<table class="thr-table" style="max-width:720px">
+  <tbody>
+    <tr><td>Off-targets (on-target mm+b=0 excluded)</td><td class="num">{vp['n_offtarget']:,}</td></tr>
+    <tr><td>Variant-created off-targets (Not_found_in_REF)</td><td class="num">{_tier_count_link('variant_created', vp['n_variant'])}</td></tr>
+    <tr><td>&hellip; of those with CFD &ge; {PANEL_VARIANT_CFD_MIN}</td><td class="num">{vp['n_variant_cfd']:,}</td></tr>
+    <tr class="panel-hi"><td><strong>Recommended panel &mdash; hybrid worst-case top {PANEL_CAP}</strong><br>
+      <span class="caption">hard-include (mm+b &le; {PANEL_FLOOR_MMB} OR CFD &ge;
+      {PANEL_FLOOR_CFD}), then fill to {PANEL_CAP} by worst-case severity across
+      {metric_list}; of the selected sites, <strong>{vp['panel_variant']:,}</strong>
+      are variant-created.</span></td>
+      <td class="num"><strong>{_tier_count_link('panel', vp['panel_size'])}</strong></td></tr>
+  </tbody>
+</table>
+{panel_dl}
+<p class="caption"><strong>Methods.</strong> {note}</p>
+"""
+
+
+# --------------------------------------------------------------------------- #
+# Top-1000 selection + HTML table + top1000.tsv
+# --------------------------------------------------------------------------- #
+def select_top(df, cols, n=1000):
+    """Top-N off-targets by CFD desc, dropping on-/near-on-target rows.
+
+    Filter mm+b > 1 to drop the on-target and near-on-target rows, matching
+    CRISPRme_plots.py:527-530 filter_table.
+    """
+    work = df.copy()
+    if "mmb" in cols:
+        work = work[_to_int_series(work[cols["mmb"]]) > 1]
+    if "cfd" in cols:
+        work = work.assign(
+            _cfd=pd.to_numeric(work[cols["cfd"]], errors="coerce").fillna(-1.0)
+        ).sort_values("_cfd", ascending=False).drop(columns=["_cfd"])
+    return work.head(n)
+
+
+def _esc(value):
+    if _is_na(value):
+        return ""
+    return html.escape(str(value))
+
+
+# MAF footnote (report v2.4): explains every blank / em-dash MAF cell in the
+# table and the curated download files.
+MAF_FOOTNOTE = (
+    "MAF blank (&mdash;) = reference off-target (no variant), an indel-derived "
+    "variant (the frequency registry is SNP-only), or a SNP not in the frequency "
+    "panel; for SNP variant off-targets the frequency is AC/AN over the genotyped "
+    "panel."
+)
+
+
+def build_table_html(top_df, cols, has_crista):
+    """Scrollable inline top-N table, sorted by CFD desc; no JS (opens offline).
+
+    Renders EXACTLY the ONE curated column set (``CURATED_COLUMNS``) that every
+    download file uses -- so the table and top1000.tsv / panel_top100.tsv / the
+    per-tier TSVs all show the same columns, including the annotation columns
+    (Gene, Gene_distance_kb, GENCODE, ENCODE, DHS) and CRISTA when computed. Cells
+    come from ``build_curated_frame`` (values resolved by name; missing -> "-").
+    The aligned protospacer+PAM cell is wrapped in <code>; the MAF em-dash keeps
+    its footnote. Extra columns don't break the scroll box / sticky header.
+    """
+    curated = build_curated_frame(top_df, cols, has_crista, start_rank=1)
+    headers = list(curated.columns)
+    head_html = "".join(f"<th>{_esc(h)}</th>" for h in headers)
+
+    aligned_hdr = "Aligned_protospacer+PAM"
+    maf_hdr = "MAF"
+    maf_missing_seen = False
+    body_rows = []
+    for _idx, row in curated.iterrows():
+        cells = []
+        for h in headers:
+            val = row[h]
+            if h == aligned_hdr:
+                cells.append(f"<code>{_esc(val)}</code>")
+            elif h == maf_hdr:
+                if val == CURATED_MISSING:
+                    maf_missing_seen = True
+                    cells.append("&mdash;")
+                else:
+                    cells.append(_esc(val))
+            else:
+                cells.append(_esc(val))
+        body_rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+
+    footnote = ""
+    if maf_missing_seen:
+        footnote = f'<p class="caption">{MAF_FOOTNOTE}</p>'
+
+    table = (
+        '<div class="ottable-wrap"><table class="ottable">'
+        f"<thead><tr>{head_html}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        "</table></div>"
+    )
+    return table + footnote
+
+
+def write_top1000_tsv(top_df, cols, has_crista, path):
+    """Write the top-N rows as a CURATED-column TSV (shared curated schema)."""
+    write_curated_tsv(top_df, cols, has_crista, path, start_rank=1)
+
+
+# --------------------------------------------------------------------------- #
+# HTML assembly
+# --------------------------------------------------------------------------- #
+_CSS = """
+:root { color-scheme: light; }
+body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+       margin: 0; padding: 26px 14px; color: #1a202c; line-height: 1.45;
+       background-color: #eef2f7; }
+.page { max-width: 1180px; margin: 0 auto; background: #ffffff; padding: 26px 34px 34px;
+        border-radius: 10px; box-shadow: 0 2px 16px rgba(20,40,80,0.14); }
+.report-header { display: flex; align-items: center; gap: 18px;
+                 border-bottom: 2px solid #edf2f7; padding-bottom: 14px;
+                 margin-bottom: 1.2em; }
+.report-header img.logo { height: 58px; width: auto; }
+.report-header .titles { flex: 1 1 auto; }
+.report-header h1 { margin: 0 0 0.05em; }
+.legend { display: flex; flex-direction: column; gap: 10px; margin: 0.5em 0 1em; }
+.legend-item { display: flex; gap: 16px; align-items: baseline; border: 1px solid #e6edf5;
+               border-radius: 6px; padding: 10px 14px; background: #fbfcfe; }
+.legend-term { flex: 0 0 215px; font-weight: 600; color: #2c5282; }
+.legend-def { flex: 1 1 auto; color: #2d3748; font-size: 0.92em; }
+.legend-def ul { margin: 0.4em 0 0; padding-left: 1.2em; }
+.legend-def li { margin: 0.15em 0; }
+.legend code { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em;
+               background: #edf2f7; padding: 0 3px; border-radius: 3px; }
+h1 { font-size: 1.6em; margin-bottom: 0.1em; }
+h2 { font-size: 1.25em; margin-top: 1.8em; border-bottom: 1px solid #e2e8f0;
+     padding-bottom: 0.2em; }
+.subtitle { color: #4a5568; margin-top: 0; }
+.caption { color: #718096; font-size: 0.86em; margin: 0.3em 0 1.2em; }
+.summary-grid { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.summary-card { flex: 0 0 auto; }
+.matrix-card { flex: 1 1 460px; min-width: 420px; }
+.matrix-title { font-weight: 600; margin-bottom: 0.4em; }
+table.summary-table { border-collapse: collapse; margin: 0.2em 0; width: 100%;
+                      max-width: 520px; }
+table.summary-table td { border: 1px solid #e2e8f0; padding: 6px 10px;
+                         vertical-align: top; }
+table.summary-table td.k { background: #f7fafc; font-weight: 600; width: 250px; }
+.matrix-wrap { overflow-x: auto; }
+table.matrix { border-collapse: collapse; font-size: 0.82em; }
+table.matrix th, table.matrix td { border: 1px solid #e2e8f0; padding: 4px 9px;
+                                   text-align: right; }
+table.matrix th { background: #f7fafc; }
+table.matrix td.grp { background: #edf2f7; font-weight: 600; text-align: center;
+                      vertical-align: middle; }
+table.matrix td.tot { font-weight: 600; background: #f7fafc; }
+.grp-total { color: #718096; font-weight: 400; font-size: 0.9em; }
+.plot { margin: 0.6em 0 0.6em; }
+.plot img { max-width: 100%; height: auto; border: 1px solid #edf2f7; border-radius: 4px; }
+a.download { display: inline-block; background: #2b6cb0; color: #fff;
+             padding: 8px 16px; border-radius: 4px; text-decoration: none;
+             margin: 4px 8px 4px 0; }
+a.download:hover { background: #2c5282; }
+.tier-downloads a.download { background: #4a5568; font-size: 0.86em;
+                             padding: 6px 12px; }
+.tier-downloads a.download:hover { background: #2d3748; }
+.panel-grid { display: flex; flex-wrap: wrap; gap: 24px; }
+table.thr-table { border-collapse: collapse; margin: 0.4em 0; }
+table.thr-table th, table.thr-table td { border: 1px solid #e2e8f0; padding: 5px 12px; }
+table.thr-table th { background: #f7fafc; text-align: left; }
+table.thr-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+a.tier-dl { color: #2b6cb0; text-decoration: none; font-size: 0.9em;
+            font-variant-numeric: normal; }
+a.tier-dl:hover { text-decoration: underline; }
+tr.panel-hi td { background: #ebf8ff; }
+.ottable-wrap { max-height: 560px; overflow: auto; border: 1px solid #ccc;
+                border-radius: 4px; }
+table.ottable { border-collapse: collapse; width: 100%; font-size: 0.8em; }
+table.ottable th, table.ottable td { padding: 4px 8px; text-align: left;
+                                     white-space: nowrap; }
+table.ottable thead th { position: sticky; top: 0; background: #fff;
+                         border-bottom: 2px solid #cbd5e0; z-index: 1; }
+table.ottable tbody tr:nth-child(even) { background: #f6f6f6; }
+table.ottable code { font-family: SFMono-Regular, Menlo, Consolas, monospace;
+                     font-size: 0.95em; }
+footer { margin-top: 2.5em; color: #4a5568; font-size: 0.82em;
+         border-top: 1px solid #e2e8f0; padding-top: 0.9em; }
+footer .disclaimer { color: #742a2a; background: #fff5f5; border: 1px solid #fed7d7;
+                     border-radius: 4px; padding: 10px 14px; margin-top: 0.8em; }
+""".strip()
+
+DISCLAIMER = (
+    "This report is provided for research purposes only. CRISPRme off-target "
+    "predictions are computational, may contain false positives and false "
+    "negatives, and are NOT a substitute for experimental validation. The "
+    "authors, contributors, and their institutions make no warranties, express "
+    "or implied, and accept no liability for any decision, result, clinical or "
+    "regulatory application, or other use arising from this report."
+)
+
+
+def _asset_data_uri(name):
+    """Return a base64 data URI for a bundled asset (logo/background), or "".
+
+    Resolves ``assets/<name>`` relative to the repo (this file lives in
+    PostProcess/, assets/ is its sibling). Missing asset -> "" so the report
+    degrades gracefully (no logo / plain background) instead of failing.
+    """
+    import base64
+    here = os.path.dirname(os.path.abspath(__file__))
+    for cand in (os.path.join(here, "..", "assets", name),
+                 os.path.join(here, "assets", name)):
+        cand = os.path.abspath(cand)
+        if os.path.isfile(cand):
+            ext = name.rsplit(".", 1)[-1].lower()
+            mime = {"svg": "image/svg+xml", "jpg": "image/jpeg",
+                    "jpeg": "image/jpeg"}.get(ext, "image/" + ext)
+            with open(cand, "rb") as fh:
+                b64 = base64.b64encode(fh.read()).decode("ascii")
+            return "data:%s;base64,%s" % (mime, b64)
+    return ""
+
+
+# Annotation legend (Section 7): plain-language meaning of every annotation
+# column value, so a reviewer never has to guess what "dELS" or "Tier1_TSG" is.
+_ANNOTATION_LEGEND = [
+    ("GENCODE", "Gene-model context of the site: <code>exon</code>, "
+     "<code>CDS</code> (protein-coding sequence), <code>UTR</code>, "
+     "<code>transcript</code>, <code>start_codon</code>/"
+     "<code>stop_codon</code>, or <code>intergenic</code> when outside genes."),
+    ("DHS", "DNase I Hypersensitive Site &mdash; a region of open, accessible "
+     "chromatin (often regulatory), labeled by the tissue / organ system in "
+     "which it is active (e.g. <code>Lymphoid</code>, <code>Neural</code>, "
+     "<code>Tissue_invariant</code>)."),
+    ("ENCODE (SCREEN v4 cCREs)", "Candidate <i>cis</i>-regulatory elements from "
+     "the ENCODE SCREEN v4 registry. Classes:<ul>"
+     "<li><b>PLS</b> &mdash; promoter-like signature (at a transcription start "
+     "site).</li>"
+     "<li><b>pELS</b> &mdash; proximal enhancer-like signature (near a TSS, "
+     "&le;2 kb).</li>"
+     "<li><b>dELS</b> &mdash; distal enhancer-like signature (far from a TSS).</li>"
+     "<li><b>CA-CTCF</b> &mdash; chromatin-accessible + CTCF binding (often "
+     "insulator/architectural).</li>"
+     "<li><b>CA-H3K4me3</b> &mdash; chromatin-accessible + H3K4me3, away from a "
+     "TSS.</li>"
+     "<li><b>CA-TF</b> &mdash; chromatin-accessible + transcription-factor "
+     "binding.</li>"
+     "<li><b>CA</b> &mdash; chromatin-accessible only.</li>"
+     "<li><b>TF</b> &mdash; transcription-factor binding only (no high "
+     "accessibility).</li></ul>"),
+    ("COSMIC (Cancer Gene Census)", "The off-target lies in a gene catalogued in "
+     "the COSMIC Cancer Gene Census &mdash; a curated list of genes causally "
+     "implicated in cancer. Labels combine a confidence <b>tier</b> and the "
+     "gene's documented <b>role(s)</b>:<ul>"
+     "<li><b>Tier 1</b> &mdash; extensive, curated evidence of a direct, causal "
+     "role in cancer.</li>"
+     "<li><b>Tier 2</b> &mdash; strong but less-extensively-curated evidence.</li>"
+     "<li><b>oncogene</b> &mdash; drives cancer when activated/over-active.</li>"
+     "<li><b>TSG</b> &mdash; tumor-suppressor gene (drives cancer when "
+     "lost/inactivated).</li>"
+     "<li><b>fusion</b> &mdash; recurrently involved in cancer gene fusions.</li>"
+     "</ul>A blank cell (&ndash;) means the site is not in a Cancer Gene Census "
+     "gene. This flag is context for prioritization, not evidence of risk on its "
+     "own."),
+]
+
+
+def build_annotation_legend_html():
+    """Render the annotation legend (Section 7) as a definition list."""
+    items = "".join(
+        '<div class="legend-item"><div class="legend-term">%s</div>'
+        '<div class="legend-def">%s</div></div>' % (term, definition)
+        for term, definition in _ANNOTATION_LEGEND
+    )
+    return (
+        '<p class="caption">What the annotation columns in the table above (and '
+        "in the downloads) mean. Annotations describe the genomic context of "
+        "each off-target site; they help prioritize which sites to examine "
+        "first.</p>"
+        '<div class="legend">' + items + "</div>"
+    )
+
+
+def render_html(
+    job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
+    table_html, tsv_gz_name, top1000_name, footer_html,
+    panel_top100_name=None, tier_downloads=None,
+):
+    scatter_html = []
+    for title, caption, uri in scatter_panels:
+        scatter_html.append(
+            f'<h3 style="margin:0.8em 0 0.2em">{_esc(title)}</h3>'
+            f'<div class="plot"><img alt="{_esc(title)}" src="{uri}"></div>'
+            f'<p class="caption">{caption}</p>'
+        )
+    scatter_block = "\n".join(scatter_html)
+
+    panel_download = ""
+    panel_caption = ""
+    if panel_top100_name:
+        panel_download = (
+            f'\n  <a class="download" href="{_esc(panel_top100_name)}" download>'
+            f"Recommended hybrid panel (TSV)</a>"
+        )
+        panel_caption = (
+            f" The recommended hybrid worst-case top-100 panel is also bundled as "
+            f"<code>{_esc(panel_top100_name)}</code>."
+        )
+
+    # per-tier curated downloads (Section 5). ``tier_downloads`` is a list of
+    # (label, filename) for every non-empty threshold tier that was bundled.
+    tier_download_html = ""
+    tier_caption = ""
+    if tier_downloads:
+        links = "".join(
+            f'\n  <a class="download" href="{_esc(fname)}" download>'
+            f"{_esc(label)}</a>"
+            for label, fname in tier_downloads
+        )
+        tier_download_html = (
+            f'\n<p class="tier-downloads">{links}\n</p>'
+        )
+        tier_caption = (
+            " Per-threshold subsets (CFD and mismatch+bulge tiers, plus the "
+            "variant-created subset) are bundled as curated-column TSVs so the "
+            "panel can be expanded to any tier for review."
+        )
+
+    logo_uri = _asset_data_uri("crisprme-logo.png")
+    # a right-sized seamless tile for the report (~320 KB); fall back to the full
+    # web-UI tile (~3.5 MB) only if the report-sized one isn't bundled.
+    bg_uri = (_asset_data_uri("crisprme_bg_report.png")
+              or _asset_data_uri("crisprme_bg_tile.png"))
+    logo_html = (f'<img class="logo" src="{logo_uri}" alt="CRISPRme logo">'
+                 if logo_uri else "")
+    bg_style = (f"<style>body {{ background-image: url('{bg_uri}');"
+                f" background-repeat: repeat; }}</style>" if bg_uri else "")
+    legend_html = build_annotation_legend_html()
+
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_esc(job_id)} CRISPRme off-target assessment report</title>
+<style>{_CSS}</style>
+{bg_style}
+</head><body>
+<div class="page">
+
+<div class="report-header">
+{logo_html}
+<div class="titles">
+<h1>Off-target assessment report</h1>
+<p class="subtitle">CRISPRme &mdash; genome-wide off-target prediction accounting
+for human genetic variation</p>
+</div>
+</div>
+
+<h2>1. Summary</h2>
+{summary_matrix_html}
+
+<h2>2. Key graphical report</h2>
+<p class="caption">Reference vs variant off-target scores across the top-ranked
+candidates (CRISPRme-paper style). The same scatter is shown under multiple
+rankings so the highest-scoring sites and the highest-variant-effect sites are
+both foregrounded.</p>
+{scatter_block}
+
+<h2>3. Reference vs population origin</h2>
+<div class="plot"><img alt="Reference vs population origin" src="{pop_uri}"></div>
+<p class="caption">Left: reference vs variant-created off-target counts at the
+run's selected parameters. Right: variant-created sites broken down by
+superpopulation (or dataset provenance when superpopulation mapping is
+unavailable). A site is counted once per group with at least one carrier.</p>
+
+<h2>4. Recommended validation panel</h2>
+{validation_html}
+
+<h2>5. Downloads</h2>
+<p>
+  <a class="download" href="{_esc(tsv_gz_name)}" download>Complete raw integrated results (all columns, TSV gzip)</a>
+  <a class="download" href="{_esc(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}
+</p>{tier_download_html}
+<p class="caption">All files are bundled alongside this HTML in the same ZIP;
+the links resolve after unzipping on any machine. The top-1000 TSV, the panel,
+and the per-tier subsets share the SAME curated, readable columns as the table
+below; the complete integrated results (all columns) stays as the raw
+<code>{_esc(tsv_gz_name)}</code>.{panel_caption}{tier_caption}</p>
+
+<h2>6. Top 1000 off-targets (by CFD)</h2>
+{table_html}
+
+<h2>7. Annotation legend</h2>
+{legend_html}
+
+{footer_html}
+
+</div>
+</body></html>
+"""
+
+
+def build_footer(meta, version, tsv_basename):
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    crisprme_version = version or meta.get("version") or "n/a"
+    return f"""<footer>
+<p>CRISPRme version: {_esc(crisprme_version)}
+&nbsp;&middot;&nbsp; report generator v{_esc(REPORT_GENERATOR_VERSION)}
+&nbsp;&middot;&nbsp; generated {_esc(stamp)}
+&nbsp;&middot;&nbsp; source: {_esc(tsv_basename)}</p>
+<p class="disclaimer">{_esc(DISCLAIMER)}</p>
+</footer>"""
+
+
+# --------------------------------------------------------------------------- #
+# TSV resolution
+# --------------------------------------------------------------------------- #
+def resolve_integrated_tsv(result_dir):
+    """Find the finalized integrated_results TSV in a result folder.
+
+    Matches results_page.py:2298-2300 (glob ``*integrated_results.tsv``). Prefers
+    the renamed ``<guide>+..._integrated_results.tsv`` over the intermediate
+    ``.bestMerge.txt.integrated_results.tsv``.
+    """
+    candidates = sorted(
+        glob.glob(os.path.join(result_dir, "*integrated_results.tsv"))
+    )
+    candidates += sorted(
+        glob.glob(os.path.join(result_dir, "*integrated_results.tsv.gz"))
+    )
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: ("bestMerge" in os.path.basename(p), p))
+    return candidates[0]
+
+
+def _job_id_from(result_dir, tsv_path):
+    if result_dir:
+        jid = os.path.basename(os.path.normpath(result_dir))
+        if jid:
+            return jid
+    base = os.path.basename(tsv_path)
+    for suffix in ("_integrated_results.tsv.gz", "_integrated_results.tsv"):
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return os.path.splitext(base)[0]
+
+
+def _default_samplesid_dir(result_dir):
+    """Best-effort samplesID directory near the install (never required)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = []
+    if result_dir:
+        candidates.append(os.path.join(result_dir, "samplesIDs"))
+        candidates.append(os.path.join(result_dir, "..", "..", "samplesIDs"))
+    candidates.append(os.path.join(here, "..", "samplesIDs"))
+    candidates.append(os.path.join(here, "..", "test", "data", "samplesIDs"))
+    candidates.append(os.path.join(os.getcwd(), "samplesIDs"))
+    for cand in candidates:
+        if cand and os.path.isdir(cand):
+            return cand
+    return None
+
+
+def _package_version():
+    """Best-effort CRISPRme package version (footer fallback)."""
+    try:
+        from importlib.metadata import PackageNotFoundError, version as _v
+
+        try:
+            return _v("CRISPRme")
+        except PackageNotFoundError:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# --------------------------------------------------------------------------- #
+# Public entry point
+# --------------------------------------------------------------------------- #
+def build_report(
+    result_dir=None,
+    integrated_tsv=None,
+    out_zip=None,
+    samplesid_dir=None,
+    params_override=None,
+    top_n=1000,
+    drop_maf=False,
+):
+    """Build ``<jobid>_report.zip`` (report.html + integrated_results.tsv.gz +
+    top1000.tsv).
+
+    Parameters
+    ----------
+    result_dir : str, optional
+        A CRISPRme result folder. The TSV, .Params.txt, .version.txt, the acfd
+        specificity sidecar and the output ZIP location are all resolved from
+        here when given.
+    integrated_tsv : str, optional
+        An explicit integrated_results TSV (``.tsv`` or ``.tsv.gz``). Required
+        when ``result_dir`` has no discoverable TSV.
+    out_zip : str, optional
+        Output ZIP path. Defaults to ``<result_dir or cwd>/<jobid>_report.zip``.
+    samplesid_dir : str, optional
+        Directory of samplesID files for the superpopulation plot. Auto-detected
+        near the install when omitted; the plot degrades to per-dataset bars if
+        unresolved.
+    params_override : dict, optional
+        Override / supply summary fields when no .Params.txt exists (e.g. the
+        synthesized summary for a bare sample TSV).
+    top_n : int
+        Table / top-N TSV size (default 1000).
+
+    Returns
+    -------
+    str
+        Absolute path to the written ZIP.
+    """
+    global _DROP_MAF
+    _DROP_MAF = bool(drop_maf)
+    if integrated_tsv is None:
+        if not result_dir:
+            raise ValueError("Provide result_dir or integrated_tsv")
+        integrated_tsv = resolve_integrated_tsv(result_dir)
+        if integrated_tsv is None:
+            raise FileNotFoundError(
+                f"No *integrated_results.tsv found in {result_dir}"
+            )
+    integrated_tsv = os.path.abspath(integrated_tsv)
+    if not os.path.isfile(integrated_tsv):
+        raise FileNotFoundError(integrated_tsv)
+
+    job_id = _job_id_from(result_dir, integrated_tsv)
+
+    if out_zip is None:
+        base_dir = result_dir if result_dir else os.path.dirname(integrated_tsv)
+        out_zip = os.path.join(os.path.abspath(base_dir), f"{job_id}_report.zip")
+    out_zip = os.path.abspath(out_zip)
+
+    if samplesid_dir is None:
+        samplesid_dir = _default_samplesid_dir(result_dir)
+
+    # ---- load data (all columns as str; resolve by name) -------------------
+    compression = "gzip" if integrated_tsv.endswith(".gz") else None
+    df = pd.read_csv(
+        integrated_tsv,
+        sep="\t",
+        dtype=str,
+        compression=compression,
+        na_filter=False,
+        low_memory=False,
+    )
+    cols = _resolve(df.columns, list(_COLS.keys()))
+
+    meta = build_summary_meta(
+        result_dir, integrated_tsv, df, cols, params_override=params_override
+    )
+    version = meta.get("version") or _package_version()
+    has_crista = crista_computed(df, cols)
+
+    spec_score = read_specificity_score(result_dir, job_id, meta["guides"])
+
+    fn = _parse_results_filename(integrated_tsv)
+    sample_superpop = load_sample_superpop(samplesid_dir, fn.get("datasets", ""))
+
+    top_df = select_top(df, cols, n=top_n)
+
+    # ---- SECTION 1: summary + matrix ---------------------------------------
+    try:
+        matrix = build_mmb_matrix(df, cols, meta)
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"generate-report: matrix unavailable: {exc}\n")
+        matrix = None
+    try:
+        summary_matrix_html = render_summary_and_matrix(meta, spec_score, matrix)
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"generate-report: summary section unavailable: {exc}\n")
+        summary_matrix_html = "<p>Summary unavailable.</p>"
+
+    # ---- SECTION 2: scatter panels -----------------------------------------
+    try:
+        scatter_panels = plot_scatter_panels(
+            df, cols, n=top_n, include_crista=has_crista
+        )
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"generate-report: scatter panels unavailable: {exc}\n")
+        scatter_panels = [
+            ("Graphical report", "Plot unavailable.", _placeholder_uri("Plot unavailable"))
+        ]
+
+    # ---- SECTION 3: population plot -----------------------------------------
+    try:
+        pop_uri = plot_population(df, cols, sample_superpop)
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"generate-report: population plot unavailable: {exc}\n")
+        pop_uri = _placeholder_uri("Population plot unavailable")
+
+    # ---- SECTION 4: validation panel (hybrid worst-case top-100) ------------
+    # Compute the panel + the per-tier subsets FIRST, then write each non-empty
+    # tier as a CURATED-column TSV (gzip when > ~2 MB) so the section-4 table can
+    # link the exact bundled filenames. We stage the files into ``staging`` and
+    # record: panel_top100_name, tier_links (key->filename for the sec-4 links),
+    # tier_downloads (label,filename for section 5), and staged_tier_paths.
+    staging = tempfile.mkdtemp(prefix="crisprme_report_")
+    tsv_gz_name = "integrated_results.tsv.gz"
+    top1000_name = "top1000.tsv"
+    panel_top100_name = None
+    tier_links = {}
+    tier_downloads = []
+    staged_tier_paths = []
+
+    def _stage_curated(sub_df, base_name):
+        """Write ``sub_df`` as a curated TSV under ``staging``; gzip if > ~2 MB.
+
+        Returns the bundled filename (basename), or None on failure. Writes a
+        plain .tsv first, then re-packs to .tsv.gz when it exceeds TIER_GZIP_BYTES
+        (plain .tsv otherwise, per spec)."""
+        plain = os.path.join(staging, base_name)
+        try:
+            write_curated_tsv(sub_df, cols, has_crista, plain, start_rank=1)
+        except Exception as exc:  # noqa: BLE001 - never abort on a bundled TSV
+            sys.stderr.write(f"generate-report: {base_name} unavailable: {exc}\n")
+            return None
+        if os.path.getsize(plain) > TIER_GZIP_BYTES:
+            gz_name = base_name + ".gz"
+            gz = os.path.join(staging, gz_name)
+            with open(plain, "rb") as src, gzip.open(gz, "wb") as dst:
+                shutil.copyfileobj(src, dst, length=1024 * 1024)
+            os.remove(plain)
+            staged_tier_paths.append(gz)
+            return gz_name
+        staged_tier_paths.append(plain)
+        return base_name
+
+    try:
+        vp = build_validation_panel(df, cols)
+        panel_top100_df = vp.get("panel_df")
+
+        # panel_top100.tsv (curated) -- always a hard bundle when non-empty.
+        # Linked in section 4 (tier_links) and section 5 (panel_download in
+        # render_html), so it is NOT added to tier_downloads (avoid duplicate).
+        if panel_top100_df is not None and len(panel_top100_df) > 0:
+            fname = _stage_curated(panel_top100_df, PANEL_TOP100_NAME)
+            if fname:
+                panel_top100_name = fname
+                tier_links["panel"] = fname
+
+        # per-threshold tiers -- only the non-empty ones
+        for tier in vp.get("tiers", []):
+            sub = tier["df"]
+            if sub is None or len(sub) == 0:
+                continue
+            fname = _stage_curated(sub, tier["filename"])
+            if not fname:
+                continue
+            tier_links[tier["key"]] = fname
+            label = f"{tier['label'].replace('&ge;', '>=').replace('&le;', '<=')} ({len(sub):,})"
+            tier_downloads.append((label, fname))
+
+        validation_html = render_validation_panel(
+            vp, panel_tsv_name=panel_top100_name, tier_links=tier_links
+        )
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"generate-report: validation panel unavailable: {exc}\n")
+        validation_html = "<p>Validation panel unavailable.</p>"
+
+    # ---- SECTION 6: top-1000 table (curated columns incl. annotations) ------
+    try:
+        table_html = build_table_html(top_df, cols, has_crista)
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
+        table_html = "<p>Top-1000 table unavailable.</p>"
+
+    # ---- SECTION 7: footer --------------------------------------------------
+    footer_html = build_footer(meta, version, os.path.basename(integrated_tsv))
+
+    html_doc = render_html(
+        job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
+        table_html, tsv_gz_name, top1000_name, footer_html,
+        panel_top100_name=panel_top100_name,
+        tier_downloads=tier_downloads,
+    )
+
+    # ---- stage the remaining files and zip -j (flat) -----------------------
+    try:
+        html_path = os.path.join(staging, "report.html")
+        with open(html_path, "w", encoding="utf-8") as handle:
+            handle.write(html_doc)
+
+        # top1000.tsv -- curated columns (same schema as the table + downloads)
+        top1000_path = os.path.join(staging, top1000_name)
+        try:
+            write_top1000_tsv(top_df, cols, has_crista, top1000_path)
+        except Exception as exc:  # noqa: BLE001 - never abort on the bundled TSV
+            sys.stderr.write(f"generate-report: top1000.tsv unavailable: {exc}\n")
+            with open(top1000_path, "w") as handle:
+                handle.write("\t".join(curated_headers(has_crista)) + "\n")
+
+        # the complete RAW results (all 85 columns) stay as the gzip
+        gz_path = os.path.join(staging, tsv_gz_name)
+        if integrated_tsv.endswith(".gz"):
+            shutil.copyfile(integrated_tsv, gz_path)
+        else:
+            with open(integrated_tsv, "rb") as src, gzip.open(gz_path, "wb") as dst:
+                shutil.copyfileobj(src, dst, length=1024 * 1024)
+
+        bundle = [html_path, gz_path, top1000_path]
+        bundle += staged_tier_paths
+
+        if os.path.exists(out_zip):
+            os.remove(out_zip)
+        os.makedirs(os.path.dirname(out_zip), exist_ok=True)
+        # `zip -j` matches submit_job_automated_new_multiple_vcfs.sh:1187 and
+        # flat-decompresses to exactly the bundled files. Fall back to Python
+        # zipfile if the `zip` binary is unavailable.
+        try:
+            subprocess.run(
+                ["zip", "-j", "-q", out_zip, *bundle],
+                check=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            import zipfile
+
+            with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+                for p in bundle:
+                    zf.write(p, os.path.basename(p))
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    return out_zip
+
+
+# --------------------------------------------------------------------------- #
+# CLI
+# --------------------------------------------------------------------------- #
+def _build_arg_parser():
+    parser = argparse.ArgumentParser(
+        prog="generate-report",
+        description="Build a self-contained, shareable CRISPRme off-target report ZIP.",
+    )
+    parser.add_argument(
+        "--result-dir",
+        help="CRISPRme result folder (Results/<jobid>). The TSV, .Params.txt, "
+        ".version.txt and default output location are resolved from here.",
+    )
+    parser.add_argument(
+        "--integrated-results",
+        dest="integrated_results",
+        help="Explicit integrated_results TSV (.tsv or .tsv.gz). Required if "
+        "--result-dir has no discoverable TSV.",
+    )
+    parser.add_argument(
+        "--samplesID-dir",
+        dest="samplesid_dir",
+        help="Directory of samplesID files for the superpopulation plot "
+        "(auto-detected when omitted).",
+    )
+    parser.add_argument(
+        "--output",
+        "--out",
+        dest="output",
+        help="Output ZIP path (default: <result-dir>/<jobid>_report.zip).",
+    )
+    parser.add_argument(
+        "--no-maf",
+        dest="no_maf",
+        action="store_true",
+        help="Omit the MAF column entirely (table + every download) -- use when "
+        "allele frequencies are not yet finalized so a MAF column would mislead.",
+    )
+    return parser
+
+
+def main(argv=None):
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+    if not args.result_dir and not args.integrated_results:
+        parser.error("provide --result-dir or --integrated-results")
+    out = build_report(
+        result_dir=args.result_dir,
+        integrated_tsv=args.integrated_results,
+        out_zip=args.output,
+        samplesid_dir=args.samplesid_dir,
+        drop_maf=args.no_maf,
+    )
+    sys.stdout.write(f"Report written: {out}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
