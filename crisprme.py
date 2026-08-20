@@ -11,7 +11,7 @@ import os
 import re
 
 
-version = "2.4.0-alpha.1"  #  CRISPRme version; TODO: update when required
+version = "2.4.0-alpha.2"  #  CRISPRme version; TODO: update when required
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
