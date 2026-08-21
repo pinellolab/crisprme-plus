@@ -176,12 +176,22 @@ input genotypes:
   haplotype: that individual carries exactly those variants together on one
   chromosome.
 - **Unphased data** (alleles separated by `/`). The cis/trans configuration is
-  unknown. CRISPRme+ reports the individual's diploid variant-set as a
-  **putative** haplotype: it is flagged as unconfirmed (the variants may or may
-  not be in cis) but is **not dropped**. This is the sensitivity-first choice —
-  we never omit a combination that a real individual could plausibly carry — at
-  the cost of some putative sites that phasing (or experimental validation) may
-  later rule out.
+  unknown, so **every** cis/trans arrangement of the individual's carried variants
+  is possible. CRISPRme+ therefore reports **every non-empty subset** of that
+  individual's variant-set as a **putative** haplotype (each flagged as
+  unconfirmed, none dropped). Enumerating the subsets — not only the maximal union
+  — is essential because a variant can *break* an off-target as well as create one:
+  e.g. a variant that disrupts the PAM must be droppable, so that a sub-combination
+  which keeps the reference allele at that position (and is a genuine off-target
+  under one possible phasing) is not hidden by the all-variants union. The subsets
+  are the individual's **own** variants only (never cross-individual chimeras); the
+  scoring/PAM/mismatch-budget gates prune subsets that are not in-budget PAM-valid
+  targets, and identical subsets carried by different individuals are deduplicated.
+  This is the sensitivity-first choice — we never omit a haplotype a real
+  individual could plausibly carry — bounded by `CRISPRME_IUPAC_CAP`: an individual
+  carrying more variants than the cap in a single window falls back to the union
+  (the combinatorial blow-up is confined to that individual, and the dense window
+  is surfaced in the high-variant-density BED).
 - **Mixed data** (e.g. a merge of phased and unphased sources, or block-phased
   VCFs from WhatsHap/GATK/HapCUT2). Genotypes are handled conservatively:
   same-individual variant-sets are enumerated; combinations that would require
