@@ -93,16 +93,25 @@ and the `release-crisprme` skill.
   alignments may exist, and gives the FULL IUPAC protospacer (every variant column
   as its ref+alt ambiguity code, also added to the `.bed`) so a user can see all
   alleles in the window and dig into the other possible alignments.
-- **Deterministic off-target representative (dict == dict-less).** When two
-  alignments of a cluster tied exactly on CFD and mismatches+bulges, the reported
-  "highest-CFD representative" fell to enumeration order, so the dict and dict-less
-  paths (which enumerate a locus's alleles in different orders) could show a
-  different representative coordinate for ~0.3 % of clusters (identical cluster,
-  carriers and CFD; max CFD 0.246). The greedy dense-region representative and the
-  cluster representative selector now break exact ties by an intrinsic key (smaller
-  alt allele; aligned-DNA + genomic position), so the representative is
-  order-independent and dict and dict-less converge — a no-op on every
-  already-unique cluster.
+- **Deterministic off-target representative.** When two alignments of a cluster
+  tied exactly on CFD and mismatches+bulges, the reported "highest-CFD
+  representative" fell to enumeration order, so the dict and dict-less paths (which
+  enumerate a locus's alleles in different orders) could show a different
+  representative *coordinate* for a small fraction of clusters (identical cluster,
+  carriers and CFD). The greedy dense-region representative and the cluster
+  representative selector now break exact ties by an intrinsic key (smaller alt
+  allele; aligned-DNA + genomic position), so the representative is
+  order-independent — a no-op on every already-unique cluster.
+- **Dict-less correctly omits dict phantom off-targets (verified).** A genome-wide
+  dict-vs-dict-less comparison leaves a handful of variant off-targets that the
+  legacy dict path reports and the dict-less path does not. These are NOT missed
+  regions: they are the dict's cross-variant *chimeras* — an off-target attributed
+  to carriers who, in their actual (phased) haplotype, also carry an additional
+  variant in the window that breaks the alignment, so no real individual carries the
+  off-target. The dict-less observed enumerator (which reconstructs each individual's
+  real haplotype and every sub-combination) correctly emits every off-target a real
+  haplotype creates and drops these phantoms — it is *more* accurate than the dict
+  here, not less (see §3/§4 of `METHODS.md`, and #118/#120).
 - Report polish: combined-panel MAF is spelled out in the legend, the Section-3
   population bar no longer counts the on-target, duplicate reference rows are
   collapsed, and the section-numbering docstring matches the emitted sections.
