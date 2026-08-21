@@ -33,6 +33,7 @@ import bisect
 import json
 import mmap
 import struct
+import zlib
 
 # --------------------------------------------------------------------------- #
 # Group id conventions (also mirrored in the JSON manifest taxonomy).
@@ -619,12 +620,42 @@ def derive_record_stats(groups):
 # record without materializing the array.
 
 MAGIC = b"T0RG"
-VERSION = 2
-# Reader accepts only VERSION; older v1 files are rejected with a clear message.
+VERSION = 2               # raw (mmap fixed-width) on-disk format
+VERSION_COMPRESSED = 3    # block-compressed on-disk format (see below)
+_SUPPORTED_VERSIONS = (VERSION, VERSION_COMPRESSED)
+# Reader accepts VERSION and VERSION_COMPRESSED; older v1 files are rejected with
+# a clear message.
 _HEADER_STRUCT = struct.Struct("<4sHBBIBxxx")  # magic, version, cnt_w, code_w, n_rec, altw, pad
 _RECORD_STRUCT = struct.Struct("<IccHII")      # pos, alt, ref, n_groups, groups_off, rsid_off
 HEADER_SIZE = _HEADER_STRUCT.size              # 16
 RECORD_SIZE = _RECORD_STRUCT.size              # 16
+
+# --------------------------------------------------------------------------- #
+# (B') v3 block-compressed layout  (BACKWARD COMPATIBLE with v2)
+# --------------------------------------------------------------------------- #
+#
+# v3 keeps EVERYTHING about v2 -- the same 16 B records, the same group-blob
+# geometry, the same string pool, the same manifest fields (group_codes, widths,
+# taxonomy) -- and only changes the *framing*: each of the three big sections
+# (record array, group blob, string pool) is partitioned into fixed-size blocks
+# that are individually zlib-compressed and written back to back. The manifest
+# gains a block index per section so the reader can, for any position / offset,
+# find the ONE covering block, decompress it, and read block-relative bytes that
+# are BYTE-IDENTICAL to the v2 uncompressed bytes. Because the writer only
+# re-chunks + compresses verbatim v2 bytes (record groups_off / rsid_off stay as
+# ABSOLUTE offsets into the *virtual uncompressed* group blob / pool), a v3
+# reader reproduces the exact v2 semantics.
+#
+#   v3 header (still 16 B, MAGIC/count_width/code_width/n_records/alt_field_width
+#   unchanged) reuses the 3 pad bytes to carry: codec (u8: 0=raw, 1=zlib) and
+#   block_records (u16). A version-3 file with codec==0 is legal and the reader
+#   treats it exactly like v2 (raw fast path).
+_HEADER_STRUCT_V3 = struct.Struct("<4sHBBIBBH")  # magic,ver,cnt_w,code_w,n_rec,altw,codec,block_records
+CODEC_RAW = 0
+CODEC_ZLIB = 1
+DEFAULT_BLOCK_RECORDS = 4096
+DEFAULT_BLOCK_BYTES = DEFAULT_BLOCK_RECORDS * RECORD_SIZE  # group/pool byte-chunk size
+_LRU_BLOCKS = 8  # decompressed-block cache size (per reader)
 
 # Group-entry width is decided per file (count_width / code_width). The static
 # GROUP_SIZE below is the DEFAULT (u8 code + u16 counts = 11 B) exported for
@@ -696,7 +727,7 @@ def _pack_ref(ref):
 
 
 def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx,
-                     alt_index="1"):
+                     alt_index="1", compress=False, block_records=DEFAULT_BLOCK_RECORDS):
     """Compile records into the mmap-friendly binary + json manifest.
 
     CARRIERS-ONLY aggregation (``aggregate_record``): AN counts only alleles among
@@ -724,11 +755,13 @@ def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx
         return aggregate_record(alt_genotypes, sample_meta, ploidy_of, ai)
 
     return _write_registry(recs, agg, sample_meta, taxonomy, out_bin, out_idx,
-                           alt_index=alt_index, aggregation="carriers")
+                           alt_index=alt_index, aggregation="carriers",
+                           compress=compress, block_records=block_records)
 
 
 def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
-                           out_idx, alt_index="1", panel_index=None):
+                           out_idx, alt_index="1", panel_index=None,
+                           compress=False, block_records=DEFAULT_BLOCK_RECORDS):
     """Compile records with FULL-PANEL AN (``aggregate_record_panel``).
 
     Identical binary format + manifest to ``compile_registry``, but every emitted
@@ -752,7 +785,8 @@ def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
                                       ploidy_of, ai)
 
     return _write_registry(recs, agg, sample_meta, taxonomy, out_bin, out_idx,
-                           alt_index=alt_index, aggregation="panel")
+                           alt_index=alt_index, aggregation="panel",
+                           compress=compress, block_records=block_records)
 
 
 def _choose_count_width(max_count):
@@ -773,7 +807,8 @@ def _choose_count_width(max_count):
 
 
 def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
-                    alt_index="1", aggregation="carriers"):
+                    alt_index="1", aggregation="carriers",
+                    compress=False, block_records=DEFAULT_BLOCK_RECORDS):
     """Shared binary writer. ``aggregate_fn(alt_genotypes, alt_index)`` returns
     dict[group_id]->Counts for one (pos, alt) record (either the carriers-only
     ``aggregate_record`` path or the full-panel ``aggregate_record_panel`` path).
@@ -782,6 +817,12 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
     (u8/u16 code, not a 4-byte string-pool offset) stored ONCE in the manifest;
     the five counts are packed at the smallest safe width (u16 unless a count
     exceeds 2^16, then u32). pos/n_groups/groups_off shrink to u32/u16/u32.
+
+    ``compress=True`` writes the v3 block-compressed framing (identical logical
+    content, zlib per block); ``compress=False`` writes the raw v2 file (default,
+    byte-identical to before). The v3 record ``groups_off``/``rsid_off`` stay as
+    ABSOLUTE offsets into the *virtual uncompressed* group blob / string pool, so
+    the two framings share the exact same section bytes.
     """
     pool = _StringPool()  # rsIDs only now (group_ids use the code table)
 
@@ -855,25 +896,25 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
         rsid_off = pool.intern(rsid)
         record_rows.append((pos, altb, refb, rsid_off, len(entries), groups_off))
 
-    # Compute section offsets.
+    # Compute the RAW (v2) section offsets. groups_off / rsid_off are ABSOLUTE
+    # file offsets in v2 -- and, in v3, ABSOLUTE offsets into the *virtual
+    # uncompressed* group blob / pool -- so both framings share these addends.
     record_array_off = HEADER_SIZE
     group_blob_off = record_array_off + n_records * RECORD_SIZE
     string_pool_off = group_blob_off + len(group_blob)
 
-    # groups_off / rsid_off are stored as ABSOLUTE file offsets so the reader
-    # seeks with a single addend.
-    with open(out_bin, "wb") as fh:
-        fh.write(_HEADER_STRUCT.pack(MAGIC, VERSION, count_width, code_width,
-                                     n_records, 1))
-        for (pos, altb, refb, rsid_off, n_groups, groups_off) in record_rows:
-            fh.write(_RECORD_STRUCT.pack(
-                pos, altb, refb,
-                n_groups,
-                group_blob_off + groups_off,
-                string_pool_off + rsid_off,
-            ))
-        fh.write(bytes(group_blob))
-        fh.write(pool.getbuffer())
+    # Materialize the three section byte-buffers ONCE (identical bytes for both
+    # framings). Records carry ABSOLUTE offsets into the group blob / pool.
+    record_array = bytearray()
+    for (pos, altb, refb, rsid_off, n_groups, groups_off) in record_rows:
+        record_array += _RECORD_STRUCT.pack(
+            pos, altb, refb,
+            n_groups,
+            group_blob_off + groups_off,
+            string_pool_off + rsid_off,
+        )
+    group_blob_bytes = bytes(group_blob)
+    string_pool_bytes = pool.getbuffer()
 
     # ---- manifest / taxonomy ---- #
     if taxonomy is None:
@@ -885,7 +926,6 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
 
     manifest = {
         "magic": MAGIC.decode("ascii"),
-        "version": VERSION,
         "n_records": n_records,
         "record_array_off": record_array_off,
         "record_size": RECORD_SIZE,
@@ -903,10 +943,291 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
         "databases": taxonomy,
         "groups": group_taxonomy,
     }
+
+    if compress:
+        _emit_v3(out_bin, manifest, record_array, group_blob_bytes,
+                 string_pool_bytes, n_records, count_width, code_width,
+                 block_records)
+    else:
+        # RAW v2: header + sections back to back (byte-identical to before).
+        manifest["version"] = VERSION
+        with open(out_bin, "wb") as fh:
+            fh.write(_HEADER_STRUCT.pack(MAGIC, VERSION, count_width, code_width,
+                                         n_records, 1))
+            fh.write(bytes(record_array))
+            fh.write(group_blob_bytes)
+            fh.write(string_pool_bytes)
+
     with open(out_idx, "w") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True)
 
     return manifest
+
+
+# --------------------------------------------------------------------------- #
+# v3 block-compressed section framing (writer helpers)
+# --------------------------------------------------------------------------- #
+def _blockify_bytes(data, chunk_bytes):
+    """Split ``data`` into [uncomp_off, uncomp_len) chunks of ``chunk_bytes``.
+
+    Yields (uncomp_off, uncomp_len, chunk_bytes_slice). A trailing short chunk is
+    fine; an empty ``data`` yields a single empty block so the reader always has a
+    covering block for offset 0.
+    """
+    n = len(data)
+    if n == 0:
+        yield (0, 0, b"")
+        return
+    off = 0
+    while off < n:
+        end = min(off + chunk_bytes, n)
+        yield (off, end - off, bytes(data[off:end]))
+        off = end
+
+
+def _emit_v3(out_bin, manifest, record_array, group_blob_bytes, string_pool_bytes,
+             n_records, count_width, code_width, block_records):
+    """Write the v3 block-compressed .bin and populate v3 manifest fields.
+
+    The record array is partitioned into ``block_records``-record chunks; the
+    group blob and string pool into ``block_records * RECORD_SIZE``-byte chunks.
+    Each chunk is zlib-compressed and written sequentially after the header. The
+    manifest gains ``record_blocks`` / ``group_blocks`` / ``pool_blocks`` so the
+    reader can bisect to the covering block, decompress it, and read block-relative
+    bytes that are byte-identical to the uncompressed v2 section.
+
+    ``record_array`` / ``group_blob_bytes`` / ``string_pool_bytes`` are the RAW v2
+    section bytes (records already carry ABSOLUTE offsets into the group blob /
+    pool); this helper only re-chunks + compresses them verbatim, so it serves both
+    the fresh-build path and ``transcode_registry`` identically.
+    """
+    codec = CODEC_ZLIB
+    br = int(block_records)
+    if br <= 0:
+        raise ValueError("block_records must be >= 1, got %d" % br)
+    chunk_bytes = br * RECORD_SIZE
+
+    parts = []          # list of compressed byte chunks, written in order
+    comp_cursor = [HEADER_SIZE]  # running compressed-file offset (after header)
+
+    def _add(uncomp_off, uncomp_len, raw_chunk):
+        comp = zlib.compress(raw_chunk)
+        comp_off = comp_cursor[0]
+        parts.append(comp)
+        comp_cursor[0] += len(comp)
+        return (comp_off, len(comp), uncomp_off, uncomp_len)
+
+    # ---- record blocks: index on (first_pos, first_alt_int) for bisect ---- #
+    # first_pos/first_alt are read STRAIGHT off the record bytes so this path is
+    # identical for fresh-build and transcode (no unpacked rows needed).
+    record_blocks = []
+    n_blocks = (n_records + br - 1) // br if n_records else 1
+    for b in range(n_blocks):
+        lo = b * br
+        hi = min(lo + br, n_records)
+        uncomp_off = lo * RECORD_SIZE
+        if lo < n_records:
+            first_pos = struct.unpack_from("<I", record_array, uncomp_off)[0]
+            first_alt = record_array[uncomp_off + 4]  # single alt byte (int)
+        else:
+            # empty registry: one empty block; sentinels never matched (n==0).
+            first_pos = 0
+            first_alt = 0
+        raw_chunk = bytes(record_array[uncomp_off:hi * RECORD_SIZE])
+        comp_off, comp_len, u_off, u_len = _add(uncomp_off, len(raw_chunk), raw_chunk)
+        record_blocks.append([first_pos, first_alt, comp_off, comp_len,
+                              u_off, u_len])
+
+    # ---- group blocks: index on uncomp_off ---- #
+    group_blocks = []
+    for (uncomp_off, uncomp_len, raw_chunk) in _blockify_bytes(group_blob_bytes,
+                                                               chunk_bytes):
+        comp_off, comp_len, u_off, u_len = _add(uncomp_off, uncomp_len, raw_chunk)
+        group_blocks.append([u_off, comp_off, comp_len, u_len])
+
+    # ---- pool blocks: index on uncomp_off ---- #
+    pool_blocks = []
+    for (uncomp_off, uncomp_len, raw_chunk) in _blockify_bytes(string_pool_bytes,
+                                                               chunk_bytes):
+        comp_off, comp_len, u_off, u_len = _add(uncomp_off, uncomp_len, raw_chunk)
+        pool_blocks.append([u_off, comp_off, comp_len, u_len])
+
+    with open(out_bin, "wb") as fh:
+        fh.write(_HEADER_STRUCT_V3.pack(MAGIC, VERSION_COMPRESSED, count_width,
+                                        code_width, n_records, 1, codec, br))
+        for chunk in parts:
+            fh.write(chunk)
+
+    manifest["version"] = VERSION_COMPRESSED
+    manifest["format"] = VERSION_COMPRESSED
+    manifest["codec"] = codec
+    manifest["block_records"] = br
+    manifest["record_blocks"] = record_blocks
+    manifest["group_blocks"] = group_blocks
+    manifest["pool_blocks"] = pool_blocks
+
+
+def transcode_registry(old_bin, old_idx, new_bin, new_idx,
+                       codec=CODEC_ZLIB, block_records=DEFAULT_BLOCK_RECORDS):
+    """Re-frame an EXISTING v2 registry into a v3 block-compressed one.
+
+    This is the PRIMARY path to compress the shipped registries with NO VCF
+    reparse. It reads the three raw section byte-ranges (record array, group blob,
+    string pool) STRAIGHT off the old file (no unpacking of individual records)
+    and re-chunks + zlib-compresses them verbatim. Because the record rows keep
+    their ABSOLUTE ``groups_off``/``rsid_off`` offsets (which the reader resolves
+    block-relative), the produced v3 reader is byte-for-byte semantically identical
+    to the source v2 reader.
+
+    ``codec=CODEC_RAW`` (0) is accepted for symmetry: it writes a v3-framed file
+    whose blocks are stored uncompressed. The default is zlib.
+
+    Args:
+      old_bin, old_idx: paths to the source v2 .bin and .idx (manifest).
+      new_bin, new_idx: paths to write the v3 .bin and .idx.
+      codec: CODEC_ZLIB (default) or CODEC_RAW.
+      block_records: record-block size (bytes-block = block_records * RECORD_SIZE).
+
+    Returns the new (v3) manifest dict (also written to ``new_idx``).
+    """
+    if codec not in (CODEC_RAW, CODEC_ZLIB):
+        raise ValueError("transcode_registry: unknown codec %r" % (codec,))
+    with open(old_idx, "r") as fh:
+        old_manifest = json.load(fh)
+    old_version = old_manifest.get("version")
+    if old_version not in _SUPPORTED_VERSIONS:
+        raise ValueError(
+            "transcode_registry: source manifest version %r unsupported "
+            "(expected one of %r)" % (old_version, _SUPPORTED_VERSIONS))
+    if old_version == VERSION_COMPRESSED:
+        raise ValueError(
+            "transcode_registry: source %s is already v3 (block-compressed); "
+            "transcode operates on a raw v2 source" % old_idx)
+
+    n_records = old_manifest["n_records"]
+    rec_off = old_manifest["record_array_off"]
+    rec_size = old_manifest["record_size"]
+    grp_off = old_manifest["group_blob_off"]
+    pool_off = old_manifest["string_pool_off"]
+    count_width = old_manifest["count_width"]
+    code_width = old_manifest["code_width"]
+
+    fh = open(old_bin, "rb")
+    try:
+        mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
+    except Exception:
+        fh.close()
+        raise
+    try:
+        # sanity: header must be a raw v2 file we can byte-copy verbatim.
+        magic, version, cnt_w, code_w, n_rec, _altw = \
+            _HEADER_STRUCT.unpack_from(mm, 0)
+        if magic != MAGIC:
+            raise ValueError("transcode_registry: bad magic in %s" % old_bin)
+        if version != VERSION:
+            raise ValueError(
+                "transcode_registry: %s is not a raw v2 file (version %d)"
+                % (old_bin, version))
+        if n_rec != n_records or cnt_w != count_width or code_w != code_width:
+            raise ValueError(
+                "transcode_registry: header/manifest mismatch in %s" % old_bin)
+        # Raw section byte-ranges, copied verbatim (no per-record unpacking).
+        record_array = mm[rec_off:rec_off + n_records * rec_size]
+        group_blob_bytes = mm[grp_off:pool_off]
+        string_pool_bytes = mm[pool_off:len(mm)]
+    finally:
+        mm.close()
+        fh.close()
+
+    # Build the new v3 manifest from the old one (drop stale v2-only framing keys;
+    # keep group_codes / widths / taxonomy / groups / aggregation unchanged).
+    manifest = dict(old_manifest)
+    manifest["magic"] = MAGIC.decode("ascii")
+    manifest["record_array_off"] = rec_off
+    manifest["group_blob_off"] = grp_off
+    manifest["string_pool_off"] = pool_off
+    manifest["record_size"] = rec_size
+
+    if codec == CODEC_RAW:
+        _emit_v3_raw(new_bin, manifest, record_array, group_blob_bytes,
+                     string_pool_bytes, n_records, count_width, code_width,
+                     block_records)
+    else:
+        _emit_v3(new_bin, manifest, record_array, group_blob_bytes,
+                 string_pool_bytes, n_records, count_width, code_width,
+                 block_records)
+
+    with open(new_idx, "w") as out:
+        json.dump(manifest, out, indent=2, sort_keys=True)
+    return manifest
+
+
+def _emit_v3_raw(out_bin, manifest, record_array, group_blob_bytes,
+                 string_pool_bytes, n_records, count_width, code_width,
+                 block_records):
+    """v3 framing with codec=0 (blocks stored UNCOMPRESSED).
+
+    Same block index shape as ``_emit_v3`` but each block is written raw; the
+    reader's codec==0 fast path skips decompression. Used by ``transcode_registry``
+    when ``codec=CODEC_RAW`` is requested (mainly for testing the reader's raw v3
+    path).
+    """
+    br = int(block_records)
+    if br <= 0:
+        raise ValueError("block_records must be >= 1, got %d" % br)
+    chunk_bytes = br * RECORD_SIZE
+
+    parts = []
+    comp_cursor = [HEADER_SIZE]
+
+    def _add(uncomp_off, uncomp_len, raw_chunk):
+        comp_off = comp_cursor[0]
+        parts.append(raw_chunk)
+        comp_cursor[0] += len(raw_chunk)
+        return (comp_off, len(raw_chunk), uncomp_off, uncomp_len)
+
+    record_blocks = []
+    n_blocks = (n_records + br - 1) // br if n_records else 1
+    for b in range(n_blocks):
+        lo = b * br
+        hi = min(lo + br, n_records)
+        uncomp_off = lo * RECORD_SIZE
+        if lo < n_records:
+            first_pos = struct.unpack_from("<I", record_array, uncomp_off)[0]
+            first_alt = record_array[uncomp_off + 4]
+        else:
+            first_pos = 0
+            first_alt = 0
+        raw_chunk = bytes(record_array[uncomp_off:hi * RECORD_SIZE])
+        comp_off, comp_len, u_off, u_len = _add(uncomp_off, len(raw_chunk), raw_chunk)
+        record_blocks.append([first_pos, first_alt, comp_off, comp_len,
+                              u_off, u_len])
+
+    group_blocks = []
+    for (uncomp_off, uncomp_len, raw_chunk) in _blockify_bytes(group_blob_bytes,
+                                                               chunk_bytes):
+        comp_off, comp_len, u_off, u_len = _add(uncomp_off, uncomp_len, raw_chunk)
+        group_blocks.append([u_off, comp_off, comp_len, u_len])
+
+    pool_blocks = []
+    for (uncomp_off, uncomp_len, raw_chunk) in _blockify_bytes(string_pool_bytes,
+                                                               chunk_bytes):
+        comp_off, comp_len, u_off, u_len = _add(uncomp_off, uncomp_len, raw_chunk)
+        pool_blocks.append([u_off, comp_off, comp_len, u_len])
+
+    with open(out_bin, "wb") as fh:
+        fh.write(_HEADER_STRUCT_V3.pack(MAGIC, VERSION_COMPRESSED, count_width,
+                                        code_width, n_records, 1, CODEC_RAW, br))
+        for chunk in parts:
+            fh.write(chunk)
+
+    manifest["version"] = VERSION_COMPRESSED
+    manifest["format"] = VERSION_COMPRESSED
+    manifest["codec"] = CODEC_RAW
+    manifest["block_records"] = br
+    manifest["record_blocks"] = record_blocks
+    manifest["group_blocks"] = group_blocks
+    manifest["pool_blocks"] = pool_blocks
 
 
 def _derive_taxonomy(sample_meta):
@@ -960,21 +1281,61 @@ class RegistryReader(object):
         # manifest rather than caching it as a bare list attribute so the reader
         # holds no Python sequence attribute other than the manifest itself (the
         # "no per-record materialization" structural contract).
+        # v3 detection: peek the version from the manifest (falls back to raw v2
+        # when the manifest predates versioned framing). The bin header is the
+        # authority and is cross-checked below.
+        self._compressed = False
+        self._codec = CODEC_RAW
+        self._block_records = None
+        # v3 block indexes + LRU cache are created ONLY in the v3 branch so the v2
+        # reader holds no bare Python sequence/dict attribute (the "no per-record
+        # materialization" structural contract; also asserted by the tests).
+        self._record_blocks = None
+        self._group_blocks = None
+        self._pool_blocks = None
+        self._block_cache = None     # {(section, block_idx): decompressed bytes}
+        self._block_order = None     # LRU key order
+
         self._fh = open(bin_path, "rb")
         self._mm = mmap.mmap(self._fh.fileno(), 0, access=mmap.ACCESS_READ)
         # sanity-check header (also rejects an unknown / old-version file clearly).
         # On any failure, close the just-opened mmap + handle before re-raising so
         # a rejected file does not leak a descriptor (ResourceWarning).
         try:
-            magic, version, cnt_w, code_w, n_records, altw = \
-                _HEADER_STRUCT.unpack_from(self._mm, 0)
+            # The version lives at byte offset 4 (u16) in BOTH the v2 and v3 header
+            # layouts, so we can read it before deciding which struct to unpack.
+            magic = self._mm[0:4]
+            version = struct.unpack_from("<H", self._mm, 4)[0]
             if magic != MAGIC:
-                raise ValueError("bad magic in %s: %r" % (bin_path, magic))
-            if version != VERSION:
+                raise ValueError("bad magic in %s: %r" % (bin_path, bytes(magic)))
+            if version not in _SUPPORTED_VERSIONS:
                 raise ValueError(
                     "tier0_registry: unsupported format version %d in %s "
-                    "(this reader supports v%d only; rebuild the registry)"
-                    % (version, bin_path, VERSION))
+                    "(this reader supports v%s; rebuild the registry)"
+                    % (version, bin_path, "/".join(map(str, _SUPPORTED_VERSIONS))))
+            if version == VERSION_COMPRESSED:
+                (_m, _v, cnt_w, code_w, n_records, altw, codec, block_records) = \
+                    _HEADER_STRUCT_V3.unpack_from(self._mm, 0)
+                self._codec = codec
+                self._block_records = block_records
+                # codec 0 => v3 framing but raw blocks (still needs block index to
+                # locate the covering block); codec 1 => zlib.
+                self._compressed = True
+                self._block_cache = {}
+                self._block_order = []
+                self._record_blocks = self.manifest["record_blocks"]
+                self._group_blocks = self.manifest["group_blocks"]
+                self._pool_blocks = self.manifest["pool_blocks"]
+                # group/pool block-offset arrays for O(log n_blocks) bisect on a
+                # record's ABSOLUTE groups_off / rsid_off. Record blocks are fixed
+                # size (block_records), so a record's covering block is found by
+                # integer division (i // block_records) -- no bisect needed there,
+                # while the OUTER (pos, alt) bisect runs over _key_at unchanged.
+                self._group_block_off = [gb[0] for gb in self._group_blocks]
+                self._pool_block_off = [pb[0] for pb in self._pool_blocks]
+            else:
+                (_m, _v, cnt_w, code_w, n_records, altw) = \
+                    _HEADER_STRUCT.unpack_from(self._mm, 0)
             if n_records != self._n:
                 raise ValueError("n_records mismatch between bin and idx")
             if cnt_w != self._count_width or code_w != self._code_width:
@@ -999,25 +1360,131 @@ class RegistryReader(object):
 
         self._keys = _KeyView()
 
+    # ---- v3 block cache (tiny LRU of decompressed section blocks) ---- #
+    def _cache_get(self, key):
+        buf = self._block_cache.get(key)
+        if buf is not None:
+            # touch: move to MRU end.
+            try:
+                self._block_order.remove(key)
+            except ValueError:
+                pass
+            self._block_order.append(key)
+        return buf
+
+    def _cache_put(self, key, buf):
+        self._block_cache[key] = buf
+        self._block_order.append(key)
+        while len(self._block_order) > _LRU_BLOCKS:
+            old = self._block_order.pop(0)
+            # a key may appear once (put) then be re-touched (remove+append), so
+            # only evict if it is truly no longer the live entry.
+            if old not in self._block_order:
+                self._block_cache.pop(old, None)
+
+    def _decompress_block(self, section, block_idx, comp_off, comp_len):
+        key = (section, block_idx)
+        buf = self._cache_get(key)
+        if buf is not None:
+            return buf
+        raw = self._mm[comp_off:comp_off + comp_len]
+        buf = raw if self._codec == CODEC_RAW else zlib.decompress(raw)
+        self._cache_put(key, buf)
+        return buf
+
     # ---- low-level record access (no full parse) ---- #
     def _record_base(self, i):
         return self._rec_off + i * self._rec_size
 
+    def _record_block_bytes(self, i):
+        """(block_buffer, offset_within_block) for record index ``i`` (v3 only)."""
+        # bisect record blocks by (first_pos, first_alt) is not needed for an
+        # index-based lookup: each block holds a fixed ``block_records`` count, so
+        # the covering block is i // block_records.
+        b = i // self._block_records
+        rb = self._record_blocks[b]
+        _, _, comp_off, comp_len, uncomp_off, _ = rb
+        buf = self._decompress_block("rec", b, comp_off, comp_len)
+        within = i * self._rec_size - uncomp_off
+        return buf, within
+
     def _key_at(self, i):
+        if self._compressed:
+            buf, within = self._record_block_bytes(i)
+            pos = struct.unpack_from("<I", buf, within)[0]
+            altb = buf[within + 4:within + 5]
+            return (pos, altb)
         base = self._record_base(i)
         pos = struct.unpack_from("<I", self._mm, base)[0]  # u32 pos (v2)
         altb = self._mm[base + 4:base + 5]  # single byte after the u32 pos
         return (pos, altb)
 
     def _record_at(self, i):
+        if self._compressed:
+            buf, within = self._record_block_bytes(i)
+            (pos, altb, refb, n_groups, groups_off, rsid_off) = \
+                _RECORD_STRUCT.unpack_from(buf, within)
+            return pos, altb, refb, rsid_off, n_groups, groups_off
         base = self._record_base(i)
         (pos, altb, refb, n_groups, groups_off, rsid_off) = \
             _RECORD_STRUCT.unpack_from(self._mm, base)
         return pos, altb, refb, rsid_off, n_groups, groups_off
 
+    def _section_bytes(self, blocks, block_off_index, section, base_off,
+                       abs_off, length):
+        """Return ``length`` uncompressed bytes at ABSOLUTE section offset.
+
+        Handles a range that STRADDLES a block boundary (the section is chunked by
+        fixed byte ranges, not aligned to record/entry/string boundaries) by
+        stitching consecutive block slices. ``base_off`` is the section's absolute
+        base (group_blob_off / string_pool_off) so ``abs_off - base_off`` is the
+        offset into the virtual uncompressed section.
+        """
+        rel = abs_off - base_off
+        b = bisect.bisect_right(block_off_index, rel) - 1
+        parts = []
+        need = length
+        cur = rel
+        while need > 0:
+            blk = blocks[b]
+            blk_uncomp_off, comp_off, comp_len, uncomp_len = blk
+            buf = self._decompress_block(section, b, comp_off, comp_len)
+            within = cur - blk_uncomp_off
+            take = min(need, uncomp_len - within)
+            parts.append(buf[within:within + take])
+            need -= take
+            cur += take
+            b += 1
+        if len(parts) == 1:
+            return parts[0]
+        return b"".join(parts)
+
+    def _group_bytes(self, abs_off, length):
+        """Return ``length`` bytes at ABSOLUTE group-blob offset ``abs_off``.
+
+        v2: straight off mmap. v3: locate the covering group block(s) (the record's
+        groups_off is absolute into the virtual uncompressed group blob, i.e.
+        group_blob_off + relative), decompress, and slice/stitch block-relative.
+        """
+        if not self._compressed:
+            return self._mm[abs_off:abs_off + length]
+        return self._section_bytes(self._group_blocks, self._group_block_off,
+                                   "grp", self.manifest["group_blob_off"],
+                                   abs_off, length)
+
     def _read_string(self, off):
-        (n,) = struct.unpack_from("<H", self._mm, off)
-        return self._mm[off + 2:off + 2 + n].decode("utf-8")
+        """Read a u16-length-prefixed utf-8 string at ABSOLUTE pool offset ``off``."""
+        if not self._compressed:
+            (n,) = struct.unpack_from("<H", self._mm, off)
+            return self._mm[off + 2:off + 2 + n].decode("utf-8")
+        base = self.manifest["string_pool_off"]
+        # length prefix first (may itself straddle a boundary), then the payload.
+        prefix = self._section_bytes(self._pool_blocks, self._pool_block_off,
+                                     "pool", base, off, 2)
+        (n,) = struct.unpack_from("<H", prefix, 0)
+        payload = self._section_bytes(self._pool_blocks, self._pool_block_off,
+                                      "pool", base, off + 2, n)
+        return payload.decode("utf-8")
 
     def _find_index(self, pos, alt):
         key = (int(pos), alt.encode("ascii"))
@@ -1068,9 +1535,23 @@ class RegistryReader(object):
         groups = {}
         gs = self._group_size
         code_table = self.manifest["group_codes"]  # small; via manifest by design
+        if not self._compressed:
+            # v2 fast path: unpack straight off mmap at absolute offsets.
+            for k in range(n_groups):
+                base = groups_off + k * gs
+                code, AC, AN, ncar, nhom, ncall = \
+                    self._grp_struct.unpack_from(self._mm, base)
+                gid = code_table[code]
+                groups[gid] = Counts(AC, AN, ncar, nhom, ncall)
+            return groups
+        # v3: the record's n_groups entries are contiguous in the group blob;
+        # fetch them (possibly spanning a block; _group_bytes handles the covering
+        # block) then unpack block-locally.
+        blob = self._group_bytes(groups_off, n_groups * gs)
         for k in range(n_groups):
-            base = groups_off + k * gs
-            code, AC, AN, ncar, nhom, ncall = self._grp_struct.unpack_from(self._mm, base)
+            base = k * gs
+            code, AC, AN, ncar, nhom, ncall = \
+                self._grp_struct.unpack_from(blob, base)
             gid = code_table[code]
             groups[gid] = Counts(AC, AN, ncar, nhom, ncall)
         return groups
