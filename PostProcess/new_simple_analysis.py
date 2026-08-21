@@ -651,11 +651,16 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
             _samples |= _h.carriers
         _start = int(split[4])
         try:
+            # 7th field = the FULL IUPAC protospacer (every variant column as its
+            # ref+alt ambiguity code) so a user can see all alleles in the window and
+            # dig into the other possible alignments (resultIntegrator surfaces this
+            # + a "dense region" flag as an integrated_results column).
             hvdr_bed.write(
-                "%s\t%d\t%d\t%s\t%d\t%s\n"
+                "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
                 % (split[3], _start, _start + len(replaceTarget),
                    split[1].replace("-", ""), len(positions),
-                   ",".join(sorted(_samples)) if _samples else ".")
+                   ",".join(sorted(_samples)) if _samples else ".",
+                   replaceTarget)
             )
         except Exception:
             pass  # BED logging is best-effort; never break the run
@@ -801,7 +806,7 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                     _samples |= _v[1]
             _start = int(split[4])
             hvdr_bed.write(
-                "%s\t%d\t%d\t%s\t%d\t%s\n"
+                "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
                 % (
                     split[3],
                     _start,
@@ -809,6 +814,7 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                     split[1].replace("-", ""),
                     countIUPAC,
                     ",".join(sorted(_samples)) if _samples else ".",
+                    replaceTarget,  # full IUPAC protospacer (dig-in aid)
                 )
             )
             # Build the greedy representative per haplotype and REPLACE the per-SNP
@@ -1619,7 +1625,9 @@ crista_best.write(header + "\tCFD\n")  # Write header
 # so a real off-target risk is still surfaced without the combinatorial blow-up.
 IUPAC_CAP = int(os.environ.get("CRISPRME_IUPAC_CAP", "10"))
 hvdr_bed = open(outputFile + ".high_variant_density_regions.bed", "w")
-hvdr_bed.write("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\n")
+hvdr_bed.write(
+    "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\n"
+)
 
 # Load ONLY the SNP-dictionary entries this chromosome's targets actually query,
 # streaming the (up to ~26 GB) per-chromosome dict so peak RAM stays proportional to

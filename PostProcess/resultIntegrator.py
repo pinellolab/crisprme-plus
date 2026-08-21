@@ -296,6 +296,7 @@ saveDict = {
     "Susceptible_to_CBE": "NA",
     "Susceptible_to_GBE": "NA",
     "Susceptible_to_TBE": "NA",
+    "High_variant_density_region": "NA",
 }
 
 start_time = time.time()
@@ -316,6 +317,52 @@ for count, line in enumerate(inEmpiricalResults):
     saveDict[str(empList[5])] = "NA"
     # newkey = str(empList[5])+'_mm+bul'
     # saveDict[newkey] = 'NA'
+
+# High-variant-density regions (#144): load every
+# <out>.high_variant_density_regions.bed the search produced, so each off-target row
+# can be flagged when it lands in a dense window. In such a window the greedy
+# worst-case alignment is what gets reported and ADDITIONAL haplotype alignments may
+# exist -- the bed carries the region span, variant count, carriers and the FULL IUPAC
+# protospacer, surfaced verbatim so an interested user can dig into the other alignments.
+hvdr_by_chrom = {}
+try:
+    _hvdr_folder = os.path.dirname(outFile_name) or "."
+    for _bed in glob.glob(
+        os.path.join(_hvdr_folder, "*high_variant_density_regions.bed")
+    ):
+        for _ln in open(_bed):
+            if _ln.startswith("#") or not _ln.strip():
+                continue
+            _f = _ln.rstrip("\n").split("\t")
+            if len(_f) < 5:
+                continue
+            _chrom, _s, _e = _f[0], int(_f[1]), int(_f[2])
+            _nvar = _f[4]
+            _iupac = _f[6] if len(_f) > 6 else ""
+            hvdr_by_chrom.setdefault(_chrom, IntervalTree())[_s - 1 : _e + 1] = (
+                _nvar,
+                _iupac,
+            )
+except Exception as _hvdr_err:  # never break integration on a bad/missing bed
+    print("high-variant-density BED join skipped:", _hvdr_err)
+
+
+def _hvdr_note(chrom, pos):
+    tree = hvdr_by_chrom.get(chrom)
+    if not tree:
+        return "NA"
+    hits = tree[pos]
+    if not hits:
+        return "NA"
+    nvar, iupac = sorted(hits)[0].data
+    note = (
+        "high_variant_density (%s variants): a greedy worst-case alignment is "
+        "reported here; additional haplotype alignments may exist" % nvar
+    )
+    if iupac:
+        note += "; full_IUPAC=%s" % iupac
+    return note
+
 
 # writing header in file
 save = ""
@@ -1095,6 +1142,15 @@ for nline, line in enumerate(inCrispritzResults):
         # check count T
         if value[3]:
             saveDict["Susceptible_to_TBE"] = "y"
+
+    # #144: flag this off-target if it lands in a high-variant-density window
+    # (chrom=target[4], highest-CFD start=target[5]); "NA" otherwise.
+    try:
+        saveDict["High_variant_density_region"] = _hvdr_note(
+            str(target[4]), int(target[5])
+        )
+    except (ValueError, IndexError):
+        saveDict["High_variant_density_region"] = "NA"
 
     save = "\t".join(list(saveDict.values()))
     save += "\n"
