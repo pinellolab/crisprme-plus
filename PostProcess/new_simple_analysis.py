@@ -575,8 +575,19 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
         snpToReplace, sampleSet, rsID, AF_var, snpInfo = retrieveFromDict(
             pos_c + int(split[4])
         )
+        # #139: the dict-less registry returns EVERY alt at this genomic position
+        # (``alts_at``), but the target's own IUPAC column ``c`` encodes exactly the
+        # ref+alt CRISPRitz used for THIS off-target. At a bulge boundary a
+        # position-keyed alt that the target column does NOT permit would steer the
+        # enumerator to the wrong allele and drop the real variant-bulge off-target.
+        # Keep only alts representable by the column's IUPAC code (a no-op wherever the
+        # code already permits the alt, i.e. every non-bulge column). Never invents a
+        # carrier -- only removes a target-inconsistent alt.
+        _allowed = iupac_code_set.get(c)
         alts, carrier_gts, alt_index, info, ps = [], [], [], [], None
         for i, elem in enumerate(snpToReplace):
+            if _allowed is not None and elem not in _allowed:
+                continue
             # tokens are "sampleID:gt"; split each on its FIRST ':' (never on '|').
             gt_map = {}
             for tok in sampleSet[i]:
