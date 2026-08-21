@@ -90,7 +90,7 @@ DL_WAITRETRY="${DL_WAITRETRY:-10}"
 
 # Default set: autosomes only (chrX excluded — see "Known issues" in the header)
 ALL_CHROMS="chr1 chr2 chr3 chr4 chr5 chr6 chr7 chr8 chr9 chr10 chr11 chr12 \
-chr13 chr14 chr15 chr16 chr17 chr18 chr19 chr20 chr21 chr22"
+chr13 chr14 chr15 chr16 chr17 chr18 chr19 chr20 chr21 chr22 chrX"
 
 # ------------------------------------------------------------------------------
 # Per-chromosome filename (autosomes and chrX use different phasers, hence names)
