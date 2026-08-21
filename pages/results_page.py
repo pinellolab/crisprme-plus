@@ -390,38 +390,57 @@ def result_page(job_id: str) -> html.Div:
     final_list.append(add_to_description)
     # define upper page box
     final_list.append(
+        # Single PROMINENT, CENTERED "Download Report" action (replaces the former
+        # three raw-file links). The self-contained report ZIP bundles the integrated
+        # results, all tiers, the complete raw table, and the high-variant-density
+        # regions BED, so it supersedes them. A polling interval reveals the button
+        # once the report has been generated at the end of the job. Boxed + centered
+        # so a user cannot miss it.
         html.Div(
             dbc.Row(
                 dbc.Col(
-                    [
-                        # Single prominent "Download Report" action (replaces the
-                        # former three raw-file links). The self-contained report
-                        # ZIP bundles the integrated results, all tiers, and the
-                        # complete raw table, so it supersedes them. A polling
-                        # interval reveals the link once the report has been
-                        # generated at the end of the job.
-                        html.Div(
-                            [
-                                html.P(
-                                    "Preparing the off-target report for download…",
-                                    id="download-link-report",
+                    html.Div(
+                        [
+                            html.H4(
+                                "📄 Off-target report",
+                                style={
+                                    "margin": "0 0 8px 0",
+                                    "fontWeight": "700",
+                                    "color": "#1a365d",
+                                },
+                            ),
+                            html.P(
+                                "Preparing the off-target report for download…",
+                                id="download-link-report",
+                                style={"margin": "0", "fontSize": "1.05rem"},
+                            ),
+                            dcc.Interval(interval=2 * 1000, id="interval-report"),
+                            html.Div(
+                                os.path.join(
+                                    current_working_directory,
+                                    RESULTS_DIR,
+                                    job_id,
+                                    job_id + "_report.zip",
                                 ),
-                                dcc.Interval(interval=2 * 1000, id="interval-report"),
-                                html.Div(
-                                    os.path.join(
-                                        current_working_directory,
-                                        RESULTS_DIR,
-                                        job_id,
-                                        job_id + "_report.zip",
-                                    ),
-                                    style={"display": "none"},
-                                    id="div-info-report",
-                                ),
-                            ]
-                        ),
-                    ]
-                )
-            )
+                                style={"display": "none"},
+                                id="div-info-report",
+                            ),
+                        ],
+                        style={"textAlign": "center"},
+                    ),
+                    width={"size": 10, "offset": 1},
+                ),
+                justify="center",
+            ),
+            style={
+                "textAlign": "center",
+                "margin": "16px auto 24px auto",
+                "padding": "22px",
+                "background": "#eef6ff",
+                "border": "2px solid #2b6cb0",
+                "borderRadius": "12px",
+                "boxShadow": "0 2px 10px rgba(43,108,176,0.18)",
+            },
         )
     )
     # results table (middle of page layout)
@@ -759,12 +778,15 @@ def download_report(
                 target="_blank",
                 style={
                     "display": "inline-block",
-                    "background": "#2b6cb0",
+                    "background": "#2f855a",
                     "color": "#fff",
-                    "padding": "10px 20px",
-                    "borderRadius": "6px",
+                    "padding": "16px 44px",
+                    "borderRadius": "8px",
                     "textDecoration": "none",
-                    "fontWeight": "600",
+                    "fontWeight": "700",
+                    "fontSize": "1.4rem",
+                    "boxShadow": "0 3px 10px rgba(0,0,0,0.25)",
+                    "marginTop": "4px",
                 },
             ),
             True,
