@@ -93,6 +93,16 @@ and the `release-crisprme` skill.
   alignments may exist, and gives the FULL IUPAC protospacer (every variant column
   as its ref+alt ambiguity code, also added to the `.bed`) so a user can see all
   alleles in the window and dig into the other possible alignments.
+- **Deterministic off-target representative (dict == dict-less).** When two
+  alignments of a cluster tied exactly on CFD and mismatches+bulges, the reported
+  "highest-CFD representative" fell to enumeration order, so the dict and dict-less
+  paths (which enumerate a locus's alleles in different orders) could show a
+  different representative coordinate for ~0.3 % of clusters (identical cluster,
+  carriers and CFD; max CFD 0.246). The greedy dense-region representative and the
+  cluster representative selector now break exact ties by an intrinsic key (smaller
+  alt allele; aligned-DNA + genomic position), so the representative is
+  order-independent and dict and dict-less converge — a no-op on every
+  already-unique cluster.
 - Report polish: combined-panel MAF is spelled out in the legend, the Section-3
   population bar no longer counts the on-target, duplicate reference rows are
   collapsed, and the section-numbering docstring matches the emitted sections.
