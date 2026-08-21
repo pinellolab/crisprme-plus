@@ -4,6 +4,29 @@ import sys
 import time
 
 
+def _rep_tiebreak(x):
+    """Deterministic, intrinsic final tie-break for the per-cluster representative
+    (issue #139).
+
+    Appended as the LAST element of every sort key in ``get_best_targets``. It is only
+    ever consulted when two rows tie EXACTLY on the pre-existing key elements (CFD,
+    mm/bulges, and the cluster-position ``int(x[pos])`` which is constant within a
+    cluster). In that exact-tie case the pre-fix winner fell to Python's stable-sort
+    INPUT order -- i.e. the alt/enumeration order -- which differs between the dict
+    (VCF order) and dict-less (sorted) paths, so they picked DIFFERENT representative
+    alignments for the same cluster/carriers/CFD.
+
+    This key is intrinsic to the row's own fields (aligned target DNA at col 2 -- unique
+    per alignment within a cluster -- plus the true genomic Position at col ``pos - 1``
+    as a secondary safety discriminator), never input order. Because it is consulted
+    only when all earlier key elements are exactly equal, it CANNOT reorder any cluster
+    whose best row is already unique: output stays byte-identical for those (~99.7%);
+    for the exactly-tied clusters it makes both paths converge on the same
+    (lexicographically-smallest aligned-DNA) representative.
+    """
+    return (str(x[2]), str(x[pos - 1]))
+
+
 def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     # avoid crush when cluster is empty in the first call
     if not cluster:
@@ -83,17 +106,20 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             if sort_criteria == "mm+bulges":
                 final_list_best_ref = sorted(
                     final_list_best_ref,
-                    key=lambda x: (-float(x[cfd]), int(x[total]), int(x[pos])),
+                    key=lambda x: (-float(x[cfd]), int(x[total]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "bulges":
                 final_list_best_ref = sorted(
                     final_list_best_ref,
-                    key=lambda x: (-float(x[cfd]), int(x[total - 1]), int(x[pos])),
+                    key=lambda x: (-float(x[cfd]), int(x[total - 1]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm":
                 final_list_best_ref = sorted(
                     final_list_best_ref,
-                    key=lambda x: (-float(x[cfd]), int(x[total - 2]), int(x[pos])),
+                    key=lambda x: (-float(x[cfd]), int(x[total - 2]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm+bulges,bulges":
                 final_list_best_ref = sorted(
@@ -103,6 +129,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm+bulges,mm":
@@ -113,6 +140,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm+bulges":
@@ -123,6 +151,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm":
@@ -133,6 +162,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,mm+bulges":
@@ -143,6 +173,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,bulges":
@@ -153,6 +184,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm+bulges,bulges,mm":
@@ -164,6 +196,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm+bulges,mm,bulges":
@@ -175,6 +208,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm+bulges,mm":
@@ -186,6 +220,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm,mm+bulges":
@@ -197,6 +232,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,mm+bulges,bulges":
@@ -208,6 +244,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,bulges,mm+bulges":
@@ -219,6 +256,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
 
@@ -226,17 +264,20 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             if sort_criteria == "mm+bulges":
                 final_list_best_var = sorted(
                     final_list_best_var,
-                    key=lambda x: (-float(x[cfd]), int(x[total]), int(x[pos])),
+                    key=lambda x: (-float(x[cfd]), int(x[total]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "bulges":
                 final_list_best_var = sorted(
                     final_list_best_var,
-                    key=lambda x: (-float(x[cfd]), int(x[total - 1]), int(x[pos])),
+                    key=lambda x: (-float(x[cfd]), int(x[total - 1]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm":
                 final_list_best_var = sorted(
                     final_list_best_var,
-                    key=lambda x: (-float(x[cfd]), int(x[total - 2]), int(x[pos])),
+                    key=lambda x: (-float(x[cfd]), int(x[total - 2]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm+bulges,bulges":
                 final_list_best_var = sorted(
@@ -246,6 +287,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm+bulges,mm":
@@ -256,6 +298,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm+bulges":
@@ -266,6 +309,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm":
@@ -276,6 +320,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,mm+bulges":
@@ -286,6 +331,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,bulges":
@@ -296,6 +342,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm+bulges,bulges,mm":
@@ -307,6 +354,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm+bulges,mm,bulges":
@@ -318,6 +366,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm+bulges,mm":
@@ -329,6 +378,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm,mm+bulges":
@@ -340,6 +390,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,mm+bulges,bulges":
@@ -351,6 +402,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,bulges,mm+bulges":
@@ -362,6 +414,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
 
@@ -405,45 +458,54 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
         if validity_check_ref:
             if sort_criteria == "mm+bulges":
                 final_list_best_ref = sorted(
-                    final_list_best_ref, key=lambda x: (int(x[total]), int(x[pos]))
+                    final_list_best_ref, key=lambda x: (int(x[total]), int(x[pos]),
+                        *_rep_tiebreak(x))
                 )
             elif sort_criteria == "bulges":
                 final_list_best_ref = sorted(
-                    final_list_best_ref, key=lambda x: (int(x[total - 1]), int(x[pos]))
+                    final_list_best_ref, key=lambda x: (int(x[total - 1]), int(x[pos]),
+                        *_rep_tiebreak(x))
                 )
             elif sort_criteria == "mm":
                 final_list_best_ref = sorted(
-                    final_list_best_ref, key=lambda x: (int(x[total - 2]), int(x[pos]))
+                    final_list_best_ref, key=lambda x: (int(x[total - 2]), int(x[pos]),
+                        *_rep_tiebreak(x))
                 )
             elif sort_criteria == "mm+bulges,bulges":
                 final_list_best_ref = sorted(
                     final_list_best_ref,
-                    key=lambda x: (int(x[total]), int(x[total - 1]), int(x[pos])),
+                    key=lambda x: (int(x[total]), int(x[total - 1]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm+bulges,mm":
                 final_list_best_ref = sorted(
                     final_list_best_ref,
-                    key=lambda x: (int(x[total]), int(x[total - 2]), int(x[pos])),
+                    key=lambda x: (int(x[total]), int(x[total - 2]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "bulges,mm+bulges":
                 final_list_best_ref = sorted(
                     final_list_best_ref,
-                    key=lambda x: (int(x[total - 1]), int(x[total]), int(x[pos])),
+                    key=lambda x: (int(x[total - 1]), int(x[total]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "bulges,mm":
                 final_list_best_ref = sorted(
                     final_list_best_ref,
-                    key=lambda x: (int(x[total - 1]), int(x[total - 2]), int(x[pos])),
+                    key=lambda x: (int(x[total - 1]), int(x[total - 2]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm,mm+bulges":
                 final_list_best_ref = sorted(
                     final_list_best_ref,
-                    key=lambda x: (int(x[total - 2]), int(x[total]), int(x[pos])),
+                    key=lambda x: (int(x[total - 2]), int(x[total]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm,bulges":
                 final_list_best_ref = sorted(
                     final_list_best_ref,
-                    key=lambda x: (int(x[total - 2]), int(x[total - 1]), int(x[pos])),
+                    key=lambda x: (int(x[total - 2]), int(x[total - 1]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm+bulges,bulges,mm":
                 final_list_best_ref = sorted(
@@ -453,6 +515,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm+bulges,mm,bulges":
@@ -463,6 +526,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm+bulges,mm":
@@ -473,6 +537,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm,mm+bulges":
@@ -483,6 +548,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,mm+bulges,bulges":
@@ -493,6 +559,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,bulges,mm+bulges":
@@ -503,51 +570,61 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
 
         if validity_check_var:
             if sort_criteria == "mm+bulges":
                 final_list_best_var = sorted(
-                    final_list_best_var, key=lambda x: (int(x[total]), int(x[pos]))
+                    final_list_best_var, key=lambda x: (int(x[total]), int(x[pos]),
+                        *_rep_tiebreak(x))
                 )
             elif sort_criteria == "bulges":
                 final_list_best_var = sorted(
-                    final_list_best_var, key=lambda x: (int(x[total - 1]), int(x[pos]))
+                    final_list_best_var, key=lambda x: (int(x[total - 1]), int(x[pos]),
+                        *_rep_tiebreak(x))
                 )
             elif sort_criteria == "mm":
                 final_list_best_var = sorted(
-                    final_list_best_var, key=lambda x: (int(x[total - 2]), int(x[pos]))
+                    final_list_best_var, key=lambda x: (int(x[total - 2]), int(x[pos]),
+                        *_rep_tiebreak(x))
                 )
             elif sort_criteria == "mm+bulges,bulges":
                 final_list_best_var = sorted(
                     final_list_best_var,
-                    key=lambda x: (int(x[total]), int(x[total - 1]), int(x[pos])),
+                    key=lambda x: (int(x[total]), int(x[total - 1]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm+bulges,mm":
                 final_list_best_var = sorted(
                     final_list_best_var,
-                    key=lambda x: (int(x[total]), int(x[total - 2]), int(x[pos])),
+                    key=lambda x: (int(x[total]), int(x[total - 2]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "bulges,mm+bulges":
                 final_list_best_var = sorted(
                     final_list_best_var,
-                    key=lambda x: (int(x[total - 1]), int(x[total]), int(x[pos])),
+                    key=lambda x: (int(x[total - 1]), int(x[total]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "bulges,mm":
                 final_list_best_var = sorted(
                     final_list_best_var,
-                    key=lambda x: (int(x[total - 1]), int(x[total - 2]), int(x[pos])),
+                    key=lambda x: (int(x[total - 1]), int(x[total - 2]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm,mm+bulges":
                 final_list_best_var = sorted(
                     final_list_best_var,
-                    key=lambda x: (int(x[total - 2]), int(x[total]), int(x[pos])),
+                    key=lambda x: (int(x[total - 2]), int(x[total]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm,bulges":
                 final_list_best_var = sorted(
                     final_list_best_var,
-                    key=lambda x: (int(x[total - 2]), int(x[total - 1]), int(x[pos])),
+                    key=lambda x: (int(x[total - 2]), int(x[total - 1]), int(x[pos]),
+                        *_rep_tiebreak(x)),
                 )
             elif sort_criteria == "mm+bulges,bulges,mm":
                 final_list_best_var = sorted(
@@ -557,6 +634,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm+bulges,mm,bulges":
@@ -567,6 +645,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm+bulges,mm":
@@ -577,6 +656,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 2]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "bulges,mm,mm+bulges":
@@ -587,6 +667,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 2]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,mm+bulges,bulges":
@@ -597,6 +678,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total]),
                         int(x[total - 1]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
             elif sort_criteria == "mm,bulges,mm+bulges":
@@ -607,6 +689,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         int(x[total - 1]),
                         int(x[total]),
                         int(x[pos]),
+                        *_rep_tiebreak(x),
                     ),
                 )
 

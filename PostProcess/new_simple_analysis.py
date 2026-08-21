@@ -690,7 +690,13 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                 _m = _aligned_mm(_trial, realTarget, guide_no_pam, revert)
                 # strict improvement, or a tie preferring an alt (keeps PAM-creating
                 # variants where the mismatch count is unaffected)
-                if _m < _best_mm or (_m == _best_mm and _best_i is None):
+                if _m < _best_mm or (
+                    _m == _best_mm
+                    and (_best_i is None or _elem < _col["alts"][_best_i])
+                ):
+                    # deterministic tie-break: on an mm-neutral tie prefer the
+                    # lexicographically-smaller alt, so the dict-less greedy rep
+                    # matches the legacy one regardless of alt-enumeration order (#139)
                     _best_mm, _best_i = _m, _i
             if _best_i is not None:
                 greedy_seq[_pc] = _col["alts"][_best_i]
@@ -836,8 +842,13 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         trial[pos_c] = elem
                         m = _aligned_mm(trial, realTarget, guide_no_pam, revert)
                         # strict improvement, or tie preferring an alt (keeps PAM-
-                        # creating / present variants where mismatch is unaffected)
-                        if m < best_mm or (m == best_mm and best_v is None):
+                        # creating / present variants where mismatch is unaffected).
+                        # Among alts, a mm-neutral tie prefers the lexicographically-
+                        # smaller alt (deterministic), so this legacy greedy rep matches
+                        # the dict-less one regardless of alt order (#139).
+                        if m < best_mm or (
+                            m == best_mm and (best_v is None or elem < best_elem)
+                        ):
                             best_mm, best_elem, best_v = m, elem, v
                     if best_v is not None:
                         greedy_seq[pos_c] = best_elem
