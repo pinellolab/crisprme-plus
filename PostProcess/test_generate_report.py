@@ -261,6 +261,7 @@ class TestGenerateReport(unittest.TestCase):
                 "Mismatches+bulges", "CFD", "CRISTA", "REF/ALT_origin",
                 "PAM_creation", "Variant", "MAF", "Gene", "Gene_distance_kb",
                 "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
+                "High_complexity_region",
             ],
         )
         # CRISTA is dropped when not computed (else identical)
@@ -270,6 +271,73 @@ class TestGenerateReport(unittest.TestCase):
             [c for c in gr.curated_headers(has_crista=True) if c != "CRISTA"],
             no_crista,
         )
+
+    def test_high_complexity_region_flag_projection(self):
+        # the curated cell compacts the integrated_results note to "Yes (N var)"
+        note = (
+            "high_variant_density (12 variants): a greedy worst-case alignment is "
+            "reported here; additional haplotype alignments may exist; full_IUPAC=ACGT"
+        )
+        cell = gr._curated_cell(
+            "complex_region",
+            {"High_variant_density_region": note},
+            {"complex_region": "High_variant_density_region"},
+        )
+        self.assertEqual(cell, "Yes (12 var)")
+        # "NA" -> the missing sentinel
+        self.assertEqual(
+            gr._curated_cell(
+                "complex_region",
+                {"High_variant_density_region": "NA"},
+                {"complex_region": "High_variant_density_region"},
+            ),
+            gr.CURATED_MISSING,
+        )
+
+    def test_highly_complex_regions_bundled_and_surfaced(self):
+        # a run with a high_variant_density_regions.bed in the result dir:
+        # the report bundles the merged bed, links it, and shows the callout.
+        rd = os.path.join(self.tmp, "hvdr_run")
+        os.makedirs(rd)
+        tsv = os.path.join(
+            rd, f"{_GUIDE}+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv"
+        )
+        header = list(_HEADER) + ["High_variant_density_region"]
+        note = (
+            "high_variant_density (12 variants): a greedy worst-case alignment is "
+            "reported here; additional haplotype alignments may exist; full_IUPAC=ACGTNNNN"
+        )
+        with open(tsv, "w") as h:
+            h.write("\t".join(header) + "\n")
+            for i, row in enumerate(_ROWS):
+                h.write("\t".join(list(row) + [note if i == 0 else "NA"]) + "\n")
+        with open(os.path.join(rd, "job.high_variant_density_regions.bed"), "w") as h:
+            h.write(
+                "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\n"
+            )
+            h.write("chr1\t1000\t1023\tGUIDE\t12\tHG00096,HG00097\tACGTNNNNACGTACGTACGTNGG\n")
+        out_zip = gr.build_report(
+            result_dir=rd,
+            samplesid_dir=self.sid_dir,
+            out_zip=os.path.join(self.tmp, "hvdr_report.zip"),
+        )
+        extract = os.path.join(self.tmp, "hvdr_extract")
+        with zipfile.ZipFile(out_zip) as zf:
+            names = zf.namelist()
+            zf.extractall(extract)
+        self.assertIn("high_variant_density_regions.bed", names)
+        # the bundled bed keeps the IUPAC field
+        bed = self._read(os.path.join(extract, "high_variant_density_regions.bed"))
+        self.assertIn("iupac_protospacer", bed)
+        self.assertIn("ACGTNNNNACGTACGTACGTNGG", bed)
+        html = self._read(os.path.join(extract, "report.html"))
+        self.assertIn("Highly complex (high-variant-density) regions", html)
+        self.assertIn('href="high_variant_density_regions.bed"', html)
+        # curated column is part of the shared set (header of top1000)
+        top_header = self._read(
+            os.path.join(extract, "top1000.tsv")
+        ).splitlines()[0].split("\t")
+        self.assertIn("High_complexity_region", top_header)
 
     def test_bundled_tsv_gz_round_trips(self):
         _, _, extract = self._build_and_extract()

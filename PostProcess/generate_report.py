@@ -185,6 +185,7 @@ CURATED_COLUMNS = (
     ("ENCODE", "encode"),
     ("DHS", "dhs"),
     ("COSMIC_cancer_gene", "cosmic"),  # Cancer Gene Census tier/role; "-" when none
+    ("High_complexity_region", "complex_region"),  # dense window: greedy shown, more exist
 )
 # value used when a curated column's source is missing / blank
 CURATED_MISSING = "-"
@@ -241,6 +242,7 @@ _COLS = {
     "encode": ["Annotation_ENCODE"],
     "dhs": ["Annotation_DHS"],
     "cosmic": ["Annotation_COSMIC"],
+    "complex_region": ["High_variant_density_region"],
     # CRISTA projection (present only when CRISTA was computed this run)
     "crista": [f"CRISTA_score_{_CRISTA_PROJ}", "CRISTA_score"],
     "crista_ref": [f"CRISTA_score_REF_{_CRISTA_PROJ}"],
@@ -392,6 +394,20 @@ def _curated_cell(kind, row, cols):
         v = _get("dhs")
     elif kind == "cosmic":
         v = _get("cosmic")
+    elif kind == "complex_region":
+        # high-variant-density flag: compact "Yes (N var)" for the table; the full
+        # note + IUPAC live in integrated_results.tsv and the bundled regions BED.
+        v = _get("complex_region")
+        if _is_na(v):
+            return CURATED_MISSING
+        s = str(v)
+        if "(" in s and " variants" in s:
+            try:
+                n = s.split("(", 1)[1].split(" variants")[0].strip()
+                return f"Yes ({n} var)"
+            except Exception:
+                pass
+        return "Yes"
     else:
         v = None
 
@@ -1819,6 +1835,7 @@ def render_html(
     job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
     table_html, tsv_gz_name, top1000_name, footer_html,
     panel_top100_name=None, tier_downloads=None,
+    hvdr_bundle_name=None, hvdr_n_regions=0,
 ):
     scatter_html = []
     for title, caption, uri in scatter_panels:
@@ -1839,6 +1856,28 @@ def render_html(
         panel_caption = (
             f" The recommended hybrid worst-case top-100 panel is also bundled as "
             f"<code>{_esc(panel_top100_name)}</code>."
+        )
+
+    # highly-complex (high-variant-density) regions: download link + a prominent
+    # callout so a report reader is fully aware these windows exist and where to look.
+    hvdr_download = ""
+    hvdr_callout = ""
+    if hvdr_bundle_name:
+        hvdr_download = (
+            f'\n  <a class="download" href="{_esc(hvdr_bundle_name)}" download>'
+            f"Highly complex regions ({hvdr_n_regions:,}) &mdash; BED</a>"
+        )
+        hvdr_callout = (
+            f'<p class="caption" style="border-left:4px solid #d97706;'
+            f'padding-left:0.7em;background:#fffbeb">'
+            f"<strong>Highly complex (high-variant-density) regions:</strong> "
+            f"{hvdr_n_regions:,} window(s) carry so many overlapping variants that a single "
+            f"greedy worst-case alignment is reported for each (flagged in the "
+            f"<code>High_complexity_region</code> column of the table and the raw results) "
+            f"&mdash; ADDITIONAL haplotype alignments may exist there. The full list (region "
+            f"span, variant count, carriers, and the full IUPAC protospacer) is bundled as "
+            f"<code>{_esc(hvdr_bundle_name)}</code> so these regions can be reviewed in "
+            f"full, alongside the integrated results.</p>"
         )
 
     # per-tier curated downloads (Section 5). ``tier_downloads`` is a list of
@@ -1913,8 +1952,9 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 <h2>5. Downloads</h2>
 <p>
   <a class="download" href="{_esc(tsv_gz_name)}" download>Complete raw integrated results (all columns, TSV gzip)</a>
-  <a class="download" href="{_esc(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}
+  <a class="download" href="{_esc(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}
 </p>{tier_download_html}
+{hvdr_callout}
 <p class="caption">All files are bundled alongside this HTML in the same ZIP;
 the links resolve after unzipping on any machine. The top-1000 TSV, the panel,
 and the per-tier subsets share the SAME curated, readable columns as the table
@@ -2211,6 +2251,39 @@ def build_report(
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
         table_html = "<p>Top-1000 table unavailable.</p>"
 
+    # ---- high-variant-density ("highly complex") regions BED (#144) ----------
+    # Merge the per-chromosome beds the search wrote into ONE bundled file (single
+    # header) so report readers can see + dig into every dense window where a greedy
+    # worst-case alignment is reported and additional alignments may exist. Computed
+    # BEFORE render_html so the downloads section can link it + show the count.
+    hvdr_bundle_name = None
+    hvdr_n_regions = 0
+    try:
+        _hvdr_src_dir = result_dir if result_dir else os.path.dirname(integrated_tsv)
+        _hvdr_files = sorted(
+            glob.glob(os.path.join(_hvdr_src_dir, "*high_variant_density_regions.bed"))
+        )
+        if _hvdr_files:
+            _hvdr_path = os.path.join(staging, "high_variant_density_regions.bed")
+            with open(_hvdr_path, "w") as _out:
+                _out.write(
+                    "#chrom\tstart\tend\tguide\tn_variants\t"
+                    "samples_with_alt\tiupac_protospacer\n"
+                )
+                for _bf in _hvdr_files:
+                    for _ln in open(_bf):
+                        if _ln.startswith("#") or not _ln.strip():
+                            continue
+                        _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
+                        hvdr_n_regions += 1
+            if hvdr_n_regions:
+                hvdr_bundle_name = "high_variant_density_regions.bed"
+            else:
+                os.remove(_hvdr_path)
+    except Exception as exc:  # noqa: BLE001 - never abort on the sidecar bundle
+        sys.stderr.write(f"generate-report: HVDR bed bundle unavailable: {exc}\n")
+        hvdr_bundle_name = None
+
     # ---- FOOTER (unnumbered; section 7 is the annotation legend, built in
     #      render_html via build_annotation_legend_html) -----------------------
     footer_html = build_footer(meta, version, os.path.basename(integrated_tsv))
@@ -2220,6 +2293,8 @@ def build_report(
         table_html, tsv_gz_name, top1000_name, footer_html,
         panel_top100_name=panel_top100_name,
         tier_downloads=tier_downloads,
+        hvdr_bundle_name=hvdr_bundle_name,
+        hvdr_n_regions=hvdr_n_regions,
     )
 
     # ---- stage the remaining files and zip -j (flat) -----------------------
@@ -2247,6 +2322,8 @@ def build_report(
 
         bundle = [html_path, gz_path, top1000_path]
         bundle += staged_tier_paths
+        if hvdr_bundle_name:
+            bundle.append(os.path.join(staging, hvdr_bundle_name))
 
         if os.path.exists(out_zip):
             os.remove(out_zip)
