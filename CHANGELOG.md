@@ -50,6 +50,17 @@ and the `release-crisprme` skill.
   `_sort_annotation` / `_process_personal_annotation` build the sorted / merged
   annotation in a per-invocation temp dir instead of decompressing and
   overwriting files in the shared install `Annotations/` directory.
+- **Dict-less unphased multi-variant off-targets: enumerate sub-combinations.**
+  The observed-haplotype enumerator reported only the maximal-*union* variant set
+  for an unphased individual, which hides a valid off-target when a variant
+  *breaks* the target (e.g. one that disrupts the PAM) — the sub-combination that
+  keeps the reference allele at that column (a real off-target under one possible
+  phasing) was dropped. Unphased (and cross-phase-set) individuals now enumerate
+  every non-empty subset of their own carried variants (never cross-individual
+  chimeras); the mismatch/PAM gates prune out-of-budget subsets and the enumerator
+  dedups shared subsets, bounded by `CRISPRME_IUPAC_CAP`. Recovers the missed
+  off-targets with correct MAF + samples, with zero change to previously-reported
+  rows or to the phased (confirmed-cis) path.
 
 ## [2.3.3] - 2026-08-18
 
