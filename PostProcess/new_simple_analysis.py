@@ -659,6 +659,45 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
             )
         except Exception:
             pass  # BED logging is best-effort; never break the run
+        # SURFACE THE WORST CASE -- never leave a dense region with only a .bed entry
+        # and no off-target ROW. The observed haplotypes above are per-individual
+        # unions, which in a capped window may all land ABOVE threshold; the region
+        # would then appear only in the high-variant-density BED, invisible to a reader
+        # of the results table. Emit ONE greedy min-mismatch representative: at each
+        # variant column pick the allele that most lowers the mismatch count (additive
+        # per column, so this is the exact argmin over all 2^k combinations -- the SAME
+        # best-case off-target the legacy dict cap reports at line ~775). This
+        # guarantees every dense region ALWAYS surfaces >=1 off-target row, at parity
+        # with the dict path. Tagged PUTATIVE (a synthetic worst-case combination, not a
+        # confirmed per-individual haplotype); its carriers are the union of the chosen
+        # alts' carriers (matching the legacy greedy's sample set). The shared finalizer
+        # applies the identical mismatch/PAM budget gate, so this is reported only when
+        # the dict path would report it too.
+        greedy_seq = list(refSeq)  # pre-revert reference, like the enumerator's seqs
+        greedy_samples, greedy_info = set(), []
+        for _col in positions:
+            _pc = _col["pos_c"]
+            _best_mm = _aligned_mm(greedy_seq, realTarget, guide_no_pam, revert)
+            _best_i = None
+            for _i, _elem in enumerate(_col["alts"]):
+                _trial = list(greedy_seq)
+                _trial[_pc] = _elem
+                _m = _aligned_mm(_trial, realTarget, guide_no_pam, revert)
+                # strict improvement, or a tie preferring an alt (keeps PAM-creating
+                # variants where the mismatch count is unaffected)
+                if _m < _best_mm or (_m == _best_mm and _best_i is None):
+                    _best_mm, _best_i = _m, _i
+            if _best_i is not None:
+                greedy_seq[_pc] = _col["alts"][_best_i]
+                greedy_samples |= set(_col["carrier_gts"][_best_i].keys())
+                greedy_info.append(_col["info"][_best_i])
+        if greedy_info:  # at least one alt improved/held the alignment vs reference
+            _finalize_observed_entry(
+                split, realTarget, refSeq_final, refSeq_with_bulges,
+                guide_no_pam, revert, "".join(greedy_seq),
+                sorted(greedy_samples), greedy_info, _obshap.PUTATIVE,
+                cluster_to_save,
+            )
 
     # 3b) Finalize each observed VARIANT haplotype through the shared finalizer (may be
     #     an empty loop when no productive observed haplotype exists).
