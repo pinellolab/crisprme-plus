@@ -376,7 +376,8 @@ def download_samples_ids_data(dataset: str) -> None:
                 "falling back to original source\n"
             )
         samplesids = download(
-            samplesids_dir, http_url=f"{TESTDATAURL}/samplesIDs/{samplesid_fname}"
+            samplesids_dir,
+            http_url=f"{TESTDATAURL.rstrip('/')}/samplesIDs/{samplesid_fname}",
         )
         if MD5SAMPLES[os.path.basename(samplesids)] != compute_md5(samplesids):
             raise ValueError(f"Download for {os.path.basename(samplesids)} failed")

@@ -517,6 +517,31 @@ def download_component(
     if component == "index":
         if not index_name:
             raise ValueError("--index-name is required to download an 'index' component")
+        # Dict-less is the default in 2.4.0. If the caller asked for a VARIANT
+        # index by its bare (legacy dict-based) name but a corrected `-dictless`
+        # companion exists on the repo, prefer it: the `-dictless` marker is
+        # stripped at install time (canonical_index_name), so both names install
+        # to the SAME search-resolvable folder, and the dict-less tarball is the
+        # smaller, combined-AF one that 2.4.0 ships. Best-effort — any lookup
+        # failure falls through to the requested name (legacy behaviour), so this
+        # never makes a previously-working download fail.
+        if "+" in index_name and "-dictless" not in index_name:
+            dictless_name = index_name.replace("+", "-dictless+", 1)
+            try:
+                if _require_hf().HfApi().file_exists(
+                    repo,
+                    f"{remote_prefix}/{dictless_name}.tar.gz",
+                    repo_type="dataset",
+                    token=token,
+                ):
+                    sys.stderr.write(
+                        f"Preferring dict-less variant index '{dictless_name}' "
+                        f"(smaller, corrected combined-AF) over legacy "
+                        f"'{index_name}'; both install to the same folder.\n"
+                    )
+                    index_name = dictless_name
+            except Exception:
+                pass  # existence check failed — use the requested name as-is
         patterns = [f"{remote_prefix}/{index_name}.tar.gz"]
         staging = os.path.join(workdir, ".hf_stage_index")
         _hf_snapshot(repo, patterns, staging, token)

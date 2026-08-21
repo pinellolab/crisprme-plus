@@ -3,11 +3,11 @@
 >    `.github/workflows/docker-multiarch.yml` (needs the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`
 >    repo secrets). It builds **CRISPRitz 2.8.1 + CRISPRme from source**; the version lives in
 >    `crisprme.py` (there is **no** `ARG crisprme_version`).
-> 2. **Conda / Bioconda** *(in progress)* — a native `crisprme=2.2.0` package on **Python 3.11**.
+> 2. **Conda / Bioconda** *(in progress)* — a native `crisprme=2.4.0` package on **Python 3.11**.
 >    **Prerequisite:** publish **CRISPRitz 2.8.1 to Bioconda for py3.11 first** (it is currently
 >    source-built because it is not yet on Bioconda for 3.11), then update the `crisprme` recipe
->    to 2.2.0 / py3.11 (dropping the py3.8 pin). Until then, `mamba install crisprme` serves the
->    stable **2.1.x** line, and 2.2.0 is installed via the source build or Docker.
+>    to 2.4.0 / py3.11 (dropping the py3.8 pin). Until then, `mamba install crisprme` serves the
+>    stable **2.1.x** line, and 2.4.0 is installed via the source build or Docker.
 >
 > Sections below that describe the old Bioconda-into-Docker model or `ARG crisprme_version` are
 > stale and are being rewritten for this model.
@@ -27,7 +27,7 @@ a Claude Code session opened at the repo root:
 
 1. **Prerequisites (one-time / per-release):** `main` is green and up to date,
    `gh` is authenticated, and the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`
-   repository secrets are set (already configured for `pinellolab/crisprme:v2.2.0-alpha.29`, so
+   repository secrets are set (already configured for `pinellolab/crisprme:v2.4.0`, so
    the multi-arch image publishes on the release tag).
 2. **Invoke it:** type `/release-crisprme`, or just ask in plain language, e.g.
    *"release CRISPRme 2.1.13"*. The skill then walks the whole flow:

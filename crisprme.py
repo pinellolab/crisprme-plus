@@ -334,7 +334,7 @@ def print_help_complete_search() -> None:
         "reported alignment, pruned INSIDE the TST search so excess alignments "
         "are never generated (much faster + smaller intermediates). E.g. with "
         "--mm 6 --bDNA 2 --bRNA 2 --max-total-edits 6, a 4mm+1+1 alignment is "
-        "kept but a 6mm+2+2 (=10) one is skipped. Default 5; set it >= "
+        "kept but a 6mm+2+2 (=10) one is skipped. Default 4; set it >= "
         "mm+bDNA+bRNA to effectively disable. NOTE: the cap is on the alignment "
         "against the searched (possibly variant-enriched) genome; a variant that "
         "matches the guide lowers the searched edit count, so a VARIANT off-target's "
@@ -750,8 +750,24 @@ def _rm_files(fnames: List[str]) -> None:
                 error("Failed removing file")
 
 
+def _writable_tmp_base() -> "Optional[str]":
+    """Pick a roomy, writable base dir for annotation intermediates so a small or
+    full ``/tmp`` (common in HPC/containers) does not break annotation prep (#138).
+
+    Prefers an explicit ``$CRISPRME_TMPDIR``, then the current working directory
+    (the job/output dir, which lives on the roomy data disk where the search
+    already writes its results), and finally ``None`` -- letting ``tempfile`` use
+    its default (``$TMPDIR`` or ``/tmp``). Never returns a read-only dir, so the
+    #97 read-only-install guarantee is preserved.
+    """
+    for cand in (os.environ.get("CRISPRME_TMPDIR"), os.getcwd()):
+        if cand and os.path.isdir(cand) and os.access(cand, os.W_OK):
+            return cand
+    return None
+
+
 def _sort_annotation(annotationfile: str) -> str:
-    """Sorts, compresses, and replaces a BED annotation file for downstream 
+    """Sorts, compresses, and replaces a BED annotation file for downstream
     analysis.
 
     Sorts the input annotation file, compresses it with bgzip, 
@@ -773,7 +789,7 @@ def _sort_annotation(annotationfile: str) -> str:
     # never written to and concurrent jobs cannot race on it (#97).
     import tempfile
 
-    tmpdir = tempfile.mkdtemp(prefix="crisprme_annot_")
+    tmpdir = tempfile.mkdtemp(prefix="crisprme_annot_", dir=_writable_tmp_base())
     if annotationfile.endswith(".gz"):
         plain_path = os.path.join(tmpdir, "annotation.bed")
         _decompress_file(annotationfile, plain_path)  # gz -> temp plain
@@ -871,7 +887,7 @@ def _process_personal_annotation(personal_annotationfile: str, annotationfile: s
     # per-invocation temp dir, never next to the (possibly read-only) inputs (#97).
     import tempfile
 
-    tmpdir = tempfile.mkdtemp(prefix="crisprme_pannot_")
+    tmpdir = tempfile.mkdtemp(prefix="crisprme_pannot_", dir=_writable_tmp_base())
     pannotation_tag = _tag_personal_annotation(
         personal_annotationfile, os.path.join(tmpdir, "personal.tag.bed")
     )
@@ -1377,7 +1393,7 @@ def complete_search() -> None:
     # combined-edit alignments (e.g. 6mm+2+2 bulges = 10) from bloating the
     # intermediate files, scoring and post-analysis. Enforced INSIDE the TST
     # search (pruned before generation, --max-edits) with a post-search awk drop
-    # as a backstop for the -r/brute-force path. Default 5 (a real off-target
+    # as a backstop for the -r/brute-force path. Default 4 (a real off-target
     # rarely stacks many mismatches AND several bulges); -1 disables it.
     max_total_edits = 4
     if "--max-total-edits" in args:

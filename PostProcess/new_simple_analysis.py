@@ -80,6 +80,12 @@ _phase_confirmation_keys = set()
 # module body -- e.g. test_phased_haplotype's iupac_decomposition round-trip.
 myreg = None
 mygt = None
+# Registry-only install (Tier-0 registry present, NO per-sample dict, NO genotype
+# tier -- e.g. a `--no-genotypes` download). Computed once after tier detection;
+# when True the variant finalizer emits degraded off-target rows (empty Samples ->
+# "NA") instead of dropping the site (#136). Default False keeps every other mode
+# (legacy, registry+dict, dictless-with-genotypes) byte-identical.
+registry_only_mode = False
 
 
 # For scoring of CFD And Doench
@@ -901,7 +907,10 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
 
             for level in totalDict[count]:
                 for key in totalDict[count][level]:
-                    if len(totalDict[count][level][key][1]) > 0:
+                    # Normally a variant row needs >=1 carrier; on a registry-only
+                    # install (#136) there is no carrier source, so emit the site
+                    # anyway with a degraded ("NA") Samples column (set below).
+                    if len(totalDict[count][level][key][1]) > 0 or registry_only_mode:
                         if revert:
                             totalDict[count][level][key][0] = reverse_complement_table(
                                 "".join(totalDict[count][level][key][0])
@@ -960,7 +969,15 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                                 final_line[10] = "".join(
                                     target_to_list[pam_begin:pam_end]
                                 )
-                            final_line[12] = ",".join(totalDict[count][level][key][1])
+                            # degraded Samples sentinel on a registry-only install
+                            # (empty carrier set) -- "NA" round-trips through the
+                            # downstream integrator like the reference-row case,
+                            # avoiding the ""->NaN->IndexError hazard (#136).
+                            final_line[12] = (
+                                ",".join(totalDict[count][level][key][1])
+                                if totalDict[count][level][key][1]
+                                else "NA"
+                            )
                             tmp_matrix = np.array(totalDict[count][level][key][2])
                             if tmp_matrix.shape[0] > 1:
                                 final_line[15] = ",".join(tmp_matrix[:, 0])
@@ -1572,9 +1589,13 @@ hvdr_bed.write("#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\n")
 # (and cascaded into the cryptic "Killed ... EmptyDataError" downstream).
 haplotype_check = False
 mydict = {}
+dict_tier_present = False  # True once a per-sample dict FILE loads (mode 1); stays
+#                            False on a dict-less install (modes 2/3) -- the reliable
+#                            "dict absent" signal for the registry-only guard (#136).
 try:
     _needed_keys = _collect_needed_dict_keys(sys.argv[3], current_chr)
     mydict, haplotype_check = _load_dict_targeted(sys.argv[2], _needed_keys)
+    dict_tier_present = True
     print(
         f"Loaded {len(mydict)} SNP dictionary entr(y/ies) for {current_chr} "
         f"(only the positions its targets span); haplotype processing {haplotype_check}"
@@ -1623,6 +1644,21 @@ if t1_gt is not None:
     except Exception as _gt_err:  # never break legacy/registry on a bad/old store
         mygt = None
         print("No Tier-1 genotype store (or unreadable) for", current_chr, "-", _gt_err)
+
+# Registry-only install (#136): Tier-0 registry present, but NEITHER a per-sample
+# dict NOR a genotype tier (e.g. `download --no-genotypes`). Here every variant
+# carrier list is empty, so the variant finalizer's `len(samples) > 0` guard would
+# DROP the off-target site entirely. Detect the mode once so that finalizer can
+# instead emit a DEGRADED row (Samples = "NA") -- the site + creating-variant
+# rsID/AF are still surfaced, just without per-sample resolution. This is False on
+# every other install (legacy: myreg None; registry+dict: dict_tier_present;
+# dictless-with-genotypes: mygt set), so those paths stay byte-identical.
+registry_only_mode = (myreg is not None) and (mygt is None) and (not dict_tier_present)
+if registry_only_mode:
+    print(
+        f"Registry-only install for {current_chr}: emitting variant off-targets "
+        f"with degraded (NA) Samples -- no genotype tier to resolve carriers."
+    )
 
 # check PAM position and relative coordinates on targets
 pam_at_beginning = False

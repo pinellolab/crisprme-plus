@@ -21,7 +21,7 @@ mamba config --set channel_priority strict
 ### Create and activate the environment
 
 ```bash
-# CRISPRme+ (2.2.0) is a Python 3.11 source build (Bioconda serves stable 2.1.x, py3.8):
+# CRISPRme+ (2.4.0) is a Python 3.11 source build (Bioconda serves stable 2.1.x, py3.8):
 git clone https://github.com/pinellolab/crisprme-plus.git && cd crisprme-plus
 mamba env create -f environment.yml   # env 'crisprme-2.2.0' (Python 3.11)
 mamba activate crisprme-2.2.0
@@ -110,7 +110,7 @@ The default repository is `lucapinello/crisprme-data`; override it with `--hf-re
 *This is the everyday workflow. Everything from here is fast and lightweight.*
 
 > **Before running any search**, ensure the CRISPRme environment is active: `mamba activate crisprme-2.2.0`
-> (the 2.2.0 source build creates env `crisprme-2.2.0`; Docker users skip activation).
+> (the 2.4.0 source build creates env `crisprme-2.2.0`; Docker users skip activation).
 
 ### 3a. Choose a PAM file
 

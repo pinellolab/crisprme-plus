@@ -61,6 +61,31 @@ and the `release-crisprme` skill.
   dedups shared subsets, bounded by `CRISPRME_IUPAC_CAP`. Recovers the missed
   off-targets with correct MAF + samples, with zero change to previously-reported
   rows or to the phased (confirmed-cis) path.
+- **Registry-only (`--no-genotypes`) installs no longer drop variant off-target
+  sites.** With a Tier-0 registry but no per-sample dict and no genotype tier, the
+  variant finalizer's "≥1 carrier" guard silently discarded every variant-created
+  off-target. Such sites are now emitted as degraded rows (Samples = `NA`) that
+  still carry the creating-variant's registry rsID / AF, so the risk is surfaced
+  without per-sample resolution. Gated on the registry-only mode, so legacy,
+  registry+dict, and dict-less-with-genotypes installs are byte-identical.
+- **`complete-test` sample-ID download.** The github fallback URL was built with a
+  double slash (`…/data//samplesIDs/…`, a redirect the downloader could stumble
+  on); it now normalizes to a single slash.
+- **`download` prefers the corrected dict-less variant index.** Requesting a
+  variant index by its bare (legacy dict-based) name now transparently resolves to
+  the `-dictless` companion when one exists on the repo — both install to the same
+  folder, so old links / muscle-memory get the smaller, combined-AF index.
+- **Annotation sorting survives a small or full `/tmp`.** `_sort_annotation` /
+  `_process_personal_annotation` now stage intermediates on a roomy writable disk
+  (`$CRISPRME_TMPDIR`, else the working/output dir) instead of the default `/tmp`,
+  which is tiny on many HPC/container setups.
+- Report polish: combined-panel MAF is spelled out in the legend, the Section-3
+  population bar no longer counts the on-target, duplicate reference rows are
+  collapsed, and the section-numbering docstring matches the emitted sections.
+- Doc/CLI accuracy: the Docker quick-start + web-interface guide use the v2.4.0
+  image and the `-dictless` index name; `--max-total-edits` help states its real
+  default (4); the web "Load Example" picks the installed default PAM; and a note
+  documents pointing `HF_HOME` at a large disk on small-home systems.
 
 ## [2.3.3] - 2026-08-18
 

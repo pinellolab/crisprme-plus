@@ -78,7 +78,7 @@ For a variant-aware search (what the default web search uses), also download the
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G_HGDP --path /DATA
+  crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA
 ```
 
 The web interface picks these up automatically — a search that uses the default NRG PAM
@@ -88,7 +88,7 @@ The web interface picks these up automatically — a search that uses the defaul
 ## 5. (Optional, advanced) Add the raw 1000 Genomes VCFs
 
 CRISPRme's superpower is finding off-targets created by genetic variants — and the
-`NRG_3_hg38+hg38_1000G_HGDP` index you downloaded in step 2 **already** makes the
+`NRG_3_hg38-dictless+hg38_1000G_HGDP` index you downloaded in step 2 **already** makes the
 default web search variant-aware. You do **not** need the raw VCFs for that.
 
 Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level
@@ -158,7 +158,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G_HGDP --path /DATA
+  crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA
 # optional (advanced): the raw 1000G VCFs (~16 GB) — only for CLI sample-level
 # analyses / personal risk cards; the index above already makes the web search
 # variant-aware
@@ -191,7 +191,7 @@ An index is specific to a **PAM + bulge count + genome**. Download whichever you
 need by its exact published name — for example the pamless variant index:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 crisprme.py download --what index --index-name NNN_3_hg38+hg38_1000G_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 crisprme.py download --what index --index-name NNN_3_hg38-dictless+hg38_1000G_HGDP --path /DATA
 ```
 
 To see which indexes are published, browse the dataset repository
@@ -223,6 +223,12 @@ and deleting data you no longer need. See
   throwaway container.
 - **A search ran out of memory** → raise Docker's memory limit (step 1), or
   start with a smaller search (fewer mismatches/bulges, or one chromosome).
+- **`download` fails with `Not enough free disk space` (or a small/HPC home
+  directory)** → the download first caches files under `~/.cache/huggingface`.
+  On systems with a small home (many HPC clusters), point that cache at a roomy
+  disk by adding `--env HF_HOME=/DATA/hf_cache` to your `docker`/`apptainer`
+  command (or `export HF_HOME=/big/disk/hf_cache` for a source install). `/DATA`
+  is already bind-mounted, so the cache lands next to your data.
 - **`Bind for 0.0.0.0:8080 failed: port is already allocated`** → another
   container is already using port 8080. Stop it (`docker ps`, then
   `docker stop <id>`), or map a different host port with `-p 8081:8080` and open
@@ -234,7 +240,7 @@ and deleting data you no longer need. See
   2. Reference-only selected — keep the **1000G+HGDP** option (pre-selected by
      default) to get variant off-targets.
   3. Variant index not installed — re-run
-     `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G_HGDP --path /DATA`.
+     `crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA`.
   4. Confirm success: `Results/<name>/log_error.txt` is empty and
      `*.integrated_results.tsv` is non-empty.
 

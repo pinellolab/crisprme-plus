@@ -71,21 +71,21 @@ legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.29 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 (NGG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.29 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
 # the variant-aware index used by the default web search (1000G + HGDP)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.29 \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+  crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA
 ```
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRG_3_hg38+hg38_1000G_HGDP` index already makes the default web
+pre-downloaded `NRG_3_hg38-dictless+hg38_1000G_HGDP` index already makes the default web
 search variant-aware — you do **not** need the raw VCFs for that. **Optional
 (advanced):** the raw 1000 Genomes VCFs (~16 GB) are only needed for CLI
 sample-level analyses / personal risk cards:
@@ -99,13 +99,13 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.2.0-alpha.29 crisprme.py web-interface
+  pinellolab/crisprme:v2.4.0 crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
 
 > **Using a Conda/Mamba install instead?** Activate your environment
-> (`mamba activate crisprme-2.2.0` — the env the 2.2.0 source build creates — or
+> (`mamba activate crisprme-2.2.0` — the env the 2.4.0 source build creates — or
 > `conda` if you use conda), `cd` into your working
 > directory, and run `crisprme.py web-interface`. Everything else in this guide is
 > identical.
@@ -373,7 +373,7 @@ interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.2.0-alpha.29 crisprme.py web-interface
+>   pinellolab/crisprme:v2.4.0 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme-2.2.0 && crisprme.py web-interface)
 > ```
@@ -662,7 +662,7 @@ variants.
 2. **Reference-only selected** — keep the **1000G+HGDP** option (pre-selected by
    default) to get variant off-targets.
 3. **Variant index not installed** — re-run
-   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G_HGDP --path /DATA`.
+   `crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA`.
 4. **Confirm success** — `Results/<name>/log_error.txt` is empty and
    `*.integrated_results.tsv` is non-empty.
 

@@ -89,6 +89,8 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 <br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.6 [Generate Personal Card](#226-generate-personal-card)
 <br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.7 [Setup Legacy Database](#227-setup-legacy-database)
 <br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.8 [Local Web Interface](#228-local-web-interface)
+<br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.9 [Generate Report](#229-generate-report)
+<br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.10 [Reference-Index and Data-Distribution Commands](#2210-reference-index-and-data-distribution-commands)
 <br>3 [Test](#3-test)
 <br>&nbsp;&nbsp;3.1 [Quick Test](#31-quick-test)
 <br>&nbsp;&nbsp;3.2 [Detailed Test](#32-detailed-test)
@@ -116,16 +118,16 @@ before running CRISPRme. To estimate the cost of a large search up front, see
 
 ## 1 Installation
 
-> **Which version do I get?** For **CRISPRme+ (2.2.0, this release)** use **Docker**
+> **Which version do I get?** For **CRISPRme+ (2.4.0, this release)** use **Docker**
 > (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-410-gb) above, or
 > §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
-> 2.2.0 alpha** — use it only if you specifically want the stable release. If in doubt,
+> 2.4.0 line** — use it only if you specifically want the stable release. If in doubt,
 > use Docker.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.2.0)](#12-install-crisprme-via-docker)
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.4.0)](#12-install-crisprme-via-docker)
 
 - [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
@@ -137,7 +139,7 @@ respective sections below.
 ---
 
 > **Note:** Bioconda ships the **stable 2.1.x** line (Python 3.8). For **CRISPRme+
-> (2.2.0)** — the Python 3.11 release with the point-and-click Docker web interface —
+> (2.4.0)** — the Python 3.11 release with the point-and-click Docker web interface —
 > use [Docker](#12-install-crisprme-via-docker) instead.
 
 This section is organized into three subsections to guide you through the installation 
@@ -192,13 +194,13 @@ By completing these steps, your system will be fully prepared for installing CRI
 #### 1.1.2 Installing CRISPRme
 ---
 
-> **CRISPRme+ (2.2.0) runs on Python 3.11 and installs from source** — the build
+> **CRISPRme+ (2.4.0) runs on Python 3.11 and installs from source** — the build
 > compiles CRISPRitz 2.8.1 and installs both tools into a conda environment. A native
-> Bioconda `crisprme=2.2.0` package is **in preparation**; until it lands, the Bioconda
+> Bioconda `crisprme=2.4.0` package is **in preparation**; until it lands, the Bioconda
 > `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** this
-> 2.2.0 alpha.
+> 2.4.0 line.
 
-To create the 2.2.0 conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
+To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
 (`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
 or use the **[Docker quickstart](docs/DOCKER_QUICKSTART.md)** for the fastest path.
 
@@ -231,7 +233,7 @@ This updates within the **stable 2.1.x** Bioconda line (latest is `crisprme=2.1.
 ```bash
 mamba install crisprme=2.1.14
 ```
-For **2.2.0 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.2.0 package yet.
+For **2.4.0 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.4.0 package yet.
 If you're using `Conda`, replace `mamba` with `conda` in the commands above.
 
 **Step 3: Verify the Update**
@@ -365,12 +367,12 @@ You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run an unreleased line (e.g. **2.2.0**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run an unreleased line (e.g. **2.4.0**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
 ```bash
-# 1. clone the repository (2.2.0 development lives on the main branch)
+# 1. clone the repository (2.4.0 development lives on the main branch)
 git clone https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
@@ -466,6 +468,14 @@ outputs. The following is a summary of CRISPRme's key features:
   search across both reference and variant datasets (if specified), conducts 
   Cutting Frequency Determination (CFD) and CRISTA analyses (if applicable), and 
   identifies candidate targets.
+
+- [**Generate Report**](#229-generate-report) (`generate-report`)
+  <br>Builds a self-contained, easily shareable off-target assessment report for a
+  completed run — a single ZIP bundling an offline `report.html` (embedded plots,
+  the top-1000 off-target table, a recommended validation panel), the full
+  `integrated_results.tsv.gz`, and the per-tier curated TSVs. It runs
+  automatically at the end of every `complete-search`, and can be re-run
+  standalone on any `Results/<jobid>` folder.
 
 - [**Complete Test**](#222-complete-test) (`complete-test`)
   <br>Tests CRISPRme pipeline on a small input dataset or the full genome, 
@@ -602,7 +612,7 @@ its purpose and usage:
   analysis will be saved. This directory will be created within the `Results` 
   directory.
 
-- `--thread` (*Optional - Default: 4*)
+- `--thread` (*Optional - Default: 8*)
   <br>Defines the number of CPU threads to use for parallel computation. 
   Increasing the number of threads can speed up analysis on systems with 
   multiple cores.
@@ -1027,8 +1037,13 @@ This module supports integration with user-provided datasets in `BED` format,
 enabling flexibility in validation sources. Targets Integration 
 
 Usage Example for the Targets Integration function:
+
+> **Note:** the `--output` folder must already exist — `targets-integration`
+> errors out if it does not. Create it first with `mkdir -p`.
+
 - **Via Conda/Mamba**
   ```bash
+  mkdir -p integrated_targets_dir
   crisprme.py targets-integration \
     --targets results.integrated_results.tsv \
     --empirical_data empirical_data.bed \
@@ -1037,6 +1052,7 @@ Usage Example for the Targets Integration function:
 
 - **Via Docker**
   ```bash
+  mkdir -p integrated_targets_dir
   docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.4.0 \
     crisprme.py targets-integration \
     --targets results.integrated_results.tsv \
@@ -1055,9 +1071,6 @@ Integration function, including detailed explanations and default behaviors:
 - `--help`
   <br>Displays the help message with details about the available options and 
   exits the program.
-
-- `--debug` (*Optional*)
-  <br>Runs the tool in debug mode. 
 
 **Input Data Parameters**
 
@@ -1520,7 +1533,57 @@ displayed dynamically within the web interface itself, offering an interactive
 experience for viewing CRISPRme data and outputs (see [Section 2.2.1](#221-complete-search)
 for details).
 
-#### 2.2.9 Reference-Index and Data-Distribution Commands
+#### 2.2.9 Generate Report
+---
+
+The **Generate Report** function (`generate-report`) builds a self-contained,
+easily shareable off-target assessment report for a completed CRISPRme run. It
+produces a single ZIP (`<jobid>_report.zip`) bundling an offline `report.html`
+(no external dependencies — plots embedded as base64 PNGs, the top-1000
+off-target table inline, CSS inline), the full `integrated_results.tsv.gz`, the
+top-1000 and top-100 validation-panel tables, and the non-empty per-tier curated
+TSVs. It is a portable digest of the full interactive website result, aimed at
+sharing off-target predictions (for example, to design a targeted-NGS /
+rhAMP-Seq confirmation panel).
+
+This report is generated **automatically at the end of every `complete-search`**
+run, so most users never call it directly. Run it standalone only to
+(re)generate the ZIP for an existing result folder.
+
+Usage Example for the Generate Report function:
+- **Via Conda/Mamba**
+  ```bash
+  crisprme.py generate-report \
+    --result-dir Results/my-job
+  ```
+
+- **Via Docker**
+  ```bash
+  docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.4.0 \
+    crisprme.py generate-report \
+    --result-dir Results/my-job
+  ```
+
+##### Input Arguments
+---
+
+- `--result-dir` (*Required unless `--integrated-results` is given*)
+  <br>A CRISPRme result folder (`Results/<jobid>`). The integrated-results TSV,
+  `.Params.txt`, `.version.txt` and the default output location are resolved from
+  here.
+
+- `--integrated-results` (*Optional*)
+  <br>An explicit `integrated_results` TSV (`.tsv` or `.tsv.gz`) to report on,
+  instead of resolving it from `--result-dir`.
+
+- `--samplesID-dir` (*Optional*)
+  <br>Directory of samplesID files used for the superpopulation breakdown plot;
+  auto-detected near the install when omitted.
+
+- `--output` (*Optional*)
+  <br>Output ZIP path. Defaults to `<result-dir>/<jobid>_report.zip`.
+
+#### 2.2.10 Reference-Index and Data-Distribution Commands
 
 Bulge-enabled searches build a CRISPRitz index of the reference genome. `complete-search` does this automatically on the first run and reuses it afterward, but three commands let you control it explicitly — useful for batch jobs, shared clusters, and skipping the build via prebuilt indexes.
 
@@ -1597,7 +1660,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.2.0`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.4.0`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**

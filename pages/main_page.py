@@ -246,6 +246,10 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
     example_variant = _preferred_variant(
         [o["value"] for o in get_variant_dataset_options("hg38")]
     )
+    # Pick the installed default PAM dynamically (prefer NRG SpCas9) so the
+    # example never selects a PAM that isn't installed -- e.g. an NGG-only
+    # install. Falls back to the canonical NRG SpCas9 name.
+    example_pam = _default_pam(_default_cas()) or "20bp-NRG-SpCas9"
     example_guide = "CTAACAGTTGCTTTTATCAC"  # 20 nt
     # window options span 1..guide_len (ints), matching update_base_editing_dropdown
     be_window_options = [

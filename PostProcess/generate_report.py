@@ -58,7 +58,10 @@ Report structure (top -> bottom)
 6. SCROLLABLE TOP-1000 TABLE (by CFD desc, mm+b<=1 excluded) in the CURATED
    columns, including the annotation columns (gene, distance, GENCODE, ENCODE,
    DHS) and CRISTA when computed.
-7. FOOTER: CRISPRme version + provenance stamp + fixed research-only disclaimer.
+7. ANNOTATION LEGEND: plain-language meaning of every annotation column value
+   (GENCODE / DHS / ENCODE SCREEN v4 cCREs / COSMIC Cancer Gene Census).
+FOOTER (unnumbered): CRISPRme version + provenance stamp + fixed research-only
+   disclaimer.
 
 Design goals / robustness posture
 ---------------------------------
@@ -463,6 +466,40 @@ def partition_masks(df, cols):
     variant = variant_raw & (~ontarget)
     reference = (~variant) & (~ontarget)
     return variant, reference, ontarget
+
+
+def dedupe_reference_rows(df, cols):
+    """Drop duplicate REFERENCE rows, keeping one per (chrom,pos,strand,target).
+
+    The locus-completeness rule (METHODS.md sec 4) emits the reference off-target
+    for every candidate window, so the same reference site can appear more than
+    once (once per co-located variant haplotype / per score projection). The
+    reference off-target is variant-independent, so those repeats are the SAME
+    site and would over-count it in the matrix / plots / table / panel.
+
+    Only REFERENCE rows are de-duplicated, keyed on their site identity
+    (chromosome + position + strand + aligned REF protospacer, using whichever of
+    those columns are resolvable). VARIANT rows are left untouched -- distinct
+    haplotypes at one locus are genuinely different variant off-targets -- and so
+    are on-target rows. Distinct reference loci (different chrom/pos/strand/target)
+    are preserved. The raw integrated_results dump bundled in the ZIP is a direct
+    copy of the source file and is NOT affected. No-op when no identity column is
+    resolvable or there are no duplicates. Returns a (possibly) shorter DataFrame.
+    """
+    _variant, reference, _ontarget = partition_masks(df, cols)
+    if not bool(reference.any()):
+        return df
+    key_keys = [k for k in ("chrom", "pos", "strand", "aln_ref") if k in cols]
+    if not key_keys:
+        return df  # cannot form a site identity -> leave rows as-is
+    key = pd.Series([""] * len(df), index=df.index)
+    for k in key_keys:
+        key = key.str.cat(df[cols[k]].astype(str), sep="\x1f")
+    # duplicate reference rows: reference AND a repeated identity key, keeping first
+    dup_ref = reference & key.duplicated(keep="first")
+    if not bool(dup_ref.any()):
+        return df
+    return df[~dup_ref]
 
 
 # --------------------------------------------------------------------------- #
@@ -1171,10 +1208,13 @@ def plot_population(df, cols, sample_superpop):
       right : among variant-created, one bar per superpopulation (or per
               dataset when superpop mapping is unavailable).
     """
-    variant, _reference, _ontarget = partition_masks(df, cols)
+    variant, reference, _ontarget = partition_masks(df, cols)
     variant_mask = variant
     n_variant = int(variant_mask.sum())
-    n_reference = len(df) - n_variant  # (reference + on-target) as the non-variant bar
+    # OFF-TARGETS only: exclude the on-target (mm+b==0) from the reference bar --
+    # the chart counts off-targets, and the on-target is not one (canonical
+    # partition: reference + variant + on-target == total).
+    n_reference = int(reference.sum())
 
     group_counts = {}
     use_superpop = bool(sample_superpop)
@@ -1539,10 +1579,12 @@ def _esc(value):
 # MAF footnote (report v2.4): explains every blank / em-dash MAF cell in the
 # table and the curated download files.
 MAF_FOOTNOTE = (
+    "MAF = combined-panel minor/alternate allele frequency (1000G + HGDP). "
     "MAF blank (&mdash;) = reference off-target (no variant), an indel-derived "
     "variant (the frequency registry is SNP-only), or a SNP not in the frequency "
     "panel; for SNP variant off-targets the frequency is AC/AN over the genotyped "
-    "panel."
+    "panel &mdash; here the merged 1000G + HGDP union panel (the combined global "
+    "AF), not a single ancestry."
 )
 
 
@@ -2044,6 +2086,12 @@ def build_report(
     )
     cols = _resolve(df.columns, list(_COLS.keys()))
 
+    # De-duplicate REFERENCE off-target rows (locus-completeness can emit the same
+    # variant-independent reference site once per co-located haplotype). Applied to
+    # the report's working frame only; the raw integrated_results.tsv.gz bundled in
+    # the ZIP is copied from the source file and stays complete.
+    df = dedupe_reference_rows(df, cols)
+
     meta = build_summary_meta(
         result_dir, integrated_tsv, df, cols, params_override=params_override
     )
@@ -2163,7 +2211,8 @@ def build_report(
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
         table_html = "<p>Top-1000 table unavailable.</p>"
 
-    # ---- SECTION 7: footer --------------------------------------------------
+    # ---- FOOTER (unnumbered; section 7 is the annotation legend, built in
+    #      render_html via build_annotation_legend_html) -----------------------
     footer_html = build_footer(meta, version, os.path.basename(integrated_tsv))
 
     html_doc = render_html(
