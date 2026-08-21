@@ -610,7 +610,8 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     #    IUPAC candidate). The ``enumerate_observed_haplotypes`` contract never yields
     #    the empty/reference haplotype, so the reference row is our responsibility here.
     haplotypes = _obshap.enumerate_observed_haplotypes(
-        positions, refSeq, parse_haplotypes, ploidy_of, current_chr
+        positions, refSeq, parse_haplotypes, ploidy_of, current_chr,
+        max_putative=IUPAC_CAP,
     )
 
     # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block).

@@ -149,16 +149,22 @@ class ObservedBranchSelected(unittest.TestCase):
         self.assertFalse(any(_n_snps_in_row(r) == 4 for r in rows),
                          "trans alts wrongly combined into a full cis haplotype")
 
-    def test_unphased_single_putative_union(self):
-        # UNPHASED N=4: ONE PUTATIVE union VARIANT haplotype (all 4), sample present
-        # once -- PLUS the candidate's single REFERENCE off-target row (LOCUS-COVERAGE
-        # FIX). We assert on the VARIANT rows only for the union semantics.
+    def test_unphased_enumerates_subcombinations(self):
+        # UNPHASED N=4: the phasing is unknown, so EVERY non-empty subset of the sample's
+        # 4 variants is a candidate cis haplotype = 2^4 - 1 = 15 PUTATIVE variant rows
+        # (the finalize mm/PAM gates prune any out-of-budget / PAM-invalid subset; here
+        # all pass), sample present in each -- PLUS the candidate's single REFERENCE
+        # off-target row (LOCUS-COVERAGE FIX). This is the fix for the union-only miss:
+        # a valid sub-combination off-target (needing a reference allele at a het column,
+        # e.g. PAM creation) is no longer hidden by the maximal union.
         rows, ns = _run(4, phased=False)
         var = _variant_rows(rows)
-        self.assertEqual(len(var), 1,
-                         "unphased must emit ONE union variant row, got %d" % len(var))
-        self.assertEqual(_n_snps_in_row(var[0]), 4)
-        self.assertEqual(var[0][12], "S")
+        self.assertEqual(len(var), 15,
+                         "unphased must emit all 2^4-1 subset rows, got %d" % len(var))
+        # the maximal union (all 4) is among them, and every row carries sample S.
+        self.assertTrue(any(_n_snps_in_row(r) == 4 for r in var))
+        for r in var:
+            self.assertEqual(r[12], "S")
         # exactly ONE reference off-target row for the candidate.
         self.assertEqual(len(_reference_rows(rows)), 1)
 

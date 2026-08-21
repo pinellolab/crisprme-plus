@@ -53,9 +53,10 @@ def _col(pos_c, alts, carrier_gts, alt_index=None, info=None, ps=None):
 REF = "AAAAA"  # 5-nt reference window; ambiguity columns applied per test
 
 
-def _enumerate(positions):
+def _enumerate(positions, max_putative=-1):
     return oh.enumerate_observed_haplotypes(
-        positions, REF, parse_haplotypes, _ploidy_diploid, "chrT"
+        positions, REF, parse_haplotypes, _ploidy_diploid, "chrT",
+        max_putative=max_putative,
     )
 
 
@@ -102,19 +103,27 @@ class PhasedTrans(unittest.TestCase):
 
 
 class Unphased(unittest.TestCase):
-    def test_unphased_single_putative_union(self):
-        # 0/1 at two positions -> ONE PUTATIVE haplotype = the union, sample present
-        # exactly once; NO split onto two seeds.
+    def test_unphased_enumerates_subcombinations(self):
+        # 0/1 at two positions, UNPHASED -> the cis/trans phasing is unknown, so emit
+        # EVERY non-empty subset as a candidate cis haplotype (a variant that would BREAK
+        # a target -- e.g. disrupt the PAM -- must be droppable, so the maximal union
+        # cannot be the only set). All PUTATIVE, sample present in each.
         positions = [
             _col(0, ["G"], [{"S": "0/1"}]),
             _col(1, ["G"], [{"S": "0/1"}]),
         ]
-        haps = _enumerate(positions)
-        self.assertEqual(len(haps), 1)
-        h = haps[0]
-        self.assertEqual(h.variant_set, frozenset({(0, "G"), (1, "G")}))
-        self.assertEqual(h.phase_state, oh.PUTATIVE)
-        self.assertEqual(h.carriers, {"S"})
+        haps = _by_set(_enumerate(positions))
+        self.assertEqual(
+            set(haps),
+            {
+                frozenset({(0, "G")}),
+                frozenset({(1, "G")}),
+                frozenset({(0, "G"), (1, "G")}),
+            },
+        )
+        for h in haps.values():
+            self.assertEqual(h.phase_state, oh.PUTATIVE)
+            self.assertEqual(h.carriers, {"S"})
 
 
 class MixedPanel(unittest.TestCase):
@@ -125,32 +134,52 @@ class MixedPanel(unittest.TestCase):
             _col(1, ["G"], [{"A": "1|0", "B": "0/1", "C": "0|1"}]),
         ]
         haps = _by_set(_enumerate(positions))
-        # A cis set {(0,G),(1,G)} CONFIRMED; B union {(0,G),(1,G)} PUTATIVE -> the two
-        # coincide, so the shared set is downgraded to PUTATIVE with carriers {A,B}.
+        # A cis set {(0,G),(1,G)} CONFIRMED; B (unphased) now contributes EVERY subset
+        # {0},{1},{0,1} as PUTATIVE. The full set coincides with A's cis -> downgraded to
+        # PUTATIVE, carriers {A,B}.
         cis = haps[frozenset({(0, "G"), (1, "G")})]
         self.assertEqual(cis.carriers, {"A", "B"})
-        self.assertEqual(cis.phase_state, oh.PUTATIVE)  # downgraded by B
-        # C contributes two CONFIRMED singletons.
+        self.assertEqual(cis.phase_state, oh.PUTATIVE)  # downgraded by B's union subset
+        # C contributes CONFIRMED singletons {0} and {1}; B contributes the SAME sets as
+        # PUTATIVE -> shared -> downgraded to PUTATIVE with carriers {B,C}.
         s0 = haps[frozenset({(0, "G")})]
         s1 = haps[frozenset({(1, "G")})]
-        self.assertEqual(s0.carriers, {"C"})
-        self.assertEqual(s0.phase_state, oh.CONFIRMED)
-        self.assertEqual(s1.carriers, {"C"})
-        self.assertEqual(s1.phase_state, oh.CONFIRMED)
+        self.assertEqual(s0.carriers, {"B", "C"})
+        self.assertEqual(s0.phase_state, oh.PUTATIVE)
+        self.assertEqual(s1.carriers, {"B", "C"})
+        self.assertEqual(s1.phase_state, oh.PUTATIVE)
 
 
 class PhaseSetBlock(unittest.TestCase):
-    def test_different_ps_ids_is_putative(self):
-        # Two phased calls in DIFFERENT phase sets -> cannot prove cis -> PUTATIVE
-        # union.
+    def test_different_ps_ids_enumerates_subcombinations(self):
+        # Two phased calls in DIFFERENT phase sets -> cannot prove cis -> treated as
+        # unphased -> enumerate every non-empty subset, all PUTATIVE.
         positions = [
             _col(0, ["G"], [{"S": "1|0"}], ps=[{"S": 100}]),
             _col(1, ["G"], [{"S": "1|0"}], ps=[{"S": 200}]),
         ]
-        haps = _enumerate(positions)
+        haps = _by_set(_enumerate(positions))
+        self.assertEqual(
+            set(haps),
+            {
+                frozenset({(0, "G")}),
+                frozenset({(1, "G")}),
+                frozenset({(0, "G"), (1, "G")}),
+            },
+        )
+        for h in haps.values():
+            self.assertEqual(h.phase_state, oh.PUTATIVE)
+
+    def test_unphased_dense_window_falls_back_to_union(self):
+        # GUARD: a sample carrying more than max_putative variants in the window falls
+        # back to the union only (the 2^k blow-up is confined to that sample).
+        positions = [_col(i, ["G"], [{"S": "0/1"}]) for i in range(4)]
+        haps = _enumerate(positions, max_putative=2)  # 4 > 2 -> union only
         self.assertEqual(len(haps), 1)
-        self.assertEqual(haps[0].variant_set, frozenset({(0, "G"), (1, "G")}))
-        self.assertEqual(haps[0].phase_state, oh.PUTATIVE)
+        self.assertEqual(
+            haps[0].variant_set,
+            frozenset({(0, "G"), (1, "G"), (2, "G"), (3, "G")}),
+        )
 
     def test_same_ps_id_is_confirmed(self):
         positions = [

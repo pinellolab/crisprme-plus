@@ -59,6 +59,8 @@ cannot break the legacy path (the dict-less branch is simply not taken).
 
 from __future__ import annotations
 
+import itertools
+
 CONFIRMED = "CONFIRMED"
 PUTATIVE = "PUTATIVE"
 
@@ -134,7 +136,8 @@ def _gt_is_phased(gt):
     return "|" in gt
 
 
-def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom):
+def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom,
+                             max_putative=-1):
     """Build each real individual's per-phase-set cis variant-set(s) for the window.
 
     Args:
@@ -218,18 +221,37 @@ def _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of, chrom):
             # A phased sample with no slot actually carrying an alt (all ref/missing)
             # contributes nothing -- it is not a carrier of any set.
         else:
-            # PUTATIVE: the union of every (pos_c, alt) the sample carries on ANY slot.
-            vset = set()
-            for e in entries:
-                if any(tok == e["alt_index"] for tok in e["toks"]):
-                    vset.add((e["pos_c"], e["alt"]))
-            if vset:
-                out[sid] = [(frozenset(vset), PUTATIVE)]
+            # PUTATIVE: the sample is unphased (or its phased columns span >1 phase set),
+            # so the cis/trans phasing of its carried variants is UNKNOWN. Emit EVERY
+            # non-empty SUBSET of the variants it carries as a candidate cis haplotype --
+            # any subset could be the sample's true haplotype, and a variant that BREAKS a
+            # target (e.g. one that disrupts the PAM) MUST be droppable, so the maximal
+            # union alone is NOT sufficient (it hides a valid sub-combination off-target
+            # that needs a reference allele at a het column). The downstream finalize
+            # mm/PAM gates prune out-of-budget / PAM-invalid subsets, and
+            # enumerate_observed_haplotypes dedups subsets shared across samples. These are
+            # the sample's OWN variants only -- never cross-individual chimeras.
+            # GUARD: a sample carrying more than ``max_putative`` variants in the window
+            # falls back to the union (the 2^k blow-up is confined to that one sample; a
+            # dense window is already surfaced to the high-variant-density BED upstream).
+            carried = sorted(set(
+                (e["pos_c"], e["alt"]) for e in entries
+                if any(tok == e["alt_index"] for tok in e["toks"])
+            ))
+            if carried:
+                if max_putative >= 0 and len(carried) > max_putative:
+                    out[sid] = [(frozenset(carried), PUTATIVE)]
+                else:
+                    out[sid] = [
+                        (frozenset(combo), PUTATIVE)
+                        for r in range(1, len(carried) + 1)
+                        for combo in itertools.combinations(carried, r)
+                    ]
     return out
 
 
 def enumerate_observed_haplotypes(positions, refSeq, parse_haplotypes, ploidy_of,
-                                  chrom):
+                                  chrom, max_putative=-1):
     """Enumerate the DISTINCT observed haplotypes for one candidate window.
 
     Args:
@@ -254,7 +276,7 @@ def enumerate_observed_haplotypes(positions, refSeq, parse_haplotypes, ploidy_of
             info_of[(pos_c, alt)] = col["info"][i]
 
     per_sample = _per_sample_variant_sets(positions, parse_haplotypes, ploidy_of,
-                                          chrom)
+                                          chrom, max_putative=max_putative)
 
     # Dedup: variant_set -> {carriers:set, confirmed_all:bool}. A set is CONFIRMED only
     # if EVERY contributing (sample, path) was CONFIRMED cis.
