@@ -79,6 +79,20 @@ and the `release-crisprme` skill.
   `_process_personal_annotation` now stage intermediates on a roomy writable disk
   (`$CRISPRME_TMPDIR`, else the working/output dir) instead of the default `/tmp`,
   which is tiny on many HPC/container setups.
+- **Dict-less never misses a high-variant-density region.** In a capped dense
+  window the observed path emitted only the real observed haplotypes (per-individual
+  unions) and logged the region to `*.high_variant_density_regions.bed`; when those
+  unions all exceeded the mismatch budget the region surfaced ONLY in the BED with no
+  off-target ROW in the results (the dict path always reports a greedy representative
+  there). The observed path now also emits the same greedy min-mismatch representative
+  (argmin over the window's alleles) per capped region, so every dense region always
+  surfaces ≥1 off-target row at parity with the dict path (verified genome-wide).
+- **Dense-region transparency.** A new `High_variant_density_region` column in
+  `integrated_results.tsv` flags each off-target that falls in a dense window,
+  noting that a greedy worst-case alignment is reported and additional haplotype
+  alignments may exist, and gives the FULL IUPAC protospacer (every variant column
+  as its ref+alt ambiguity code, also added to the `.bed`) so a user can see all
+  alleles in the window and dig into the other possible alignments.
 - Report polish: combined-panel MAF is spelled out in the legend, the Section-3
   population bar no longer counts the on-target, duplicate reference rows are
   collapsed, and the section-numbering docstring matches the emitted sections.

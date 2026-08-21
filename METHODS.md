@@ -235,14 +235,25 @@ complementary controls:
   user-requested budget, so a reported off-target never silently exceeds the
   stated edit distance.
 - **High-variant-density cap.** Windows exceeding a configurable variant-count
-  threshold fall back to a bounded procedure instead of full enumeration, so a
-  single pathological window cannot dominate runtime or memory.
-- **Density reporting.** Every window that triggers the cap is written to a
-  `high_variant_density_regions.bed` sidecar, so nothing is silently truncated —
-  the affected regions are auditable.
+  threshold (`CRISPRME_IUPAC_CAP`) fall back to a bounded procedure instead of full
+  2ᵏ enumeration, so a single pathological window cannot dominate runtime or memory.
+  Crucially, the bounded procedure still emits a **greedy minimum-mismatch
+  representative** for the window — at each variant column it takes the allele that
+  most lowers the mismatch count, which (mismatches being additive per column) is the
+  exact argmin over all 2ᵏ combinations, i.e. the window's worst-case off-target.
+  So a capped window **always surfaces at least one off-target row**; the cap trades
+  exhaustive per-haplotype enumeration for a single conservative representative, never
+  the whole region.
+- **Density reporting + transparency.** Every window that triggers the cap is written
+  to a `high_variant_density_regions.bed` sidecar (region span, variant count,
+  carriers, and the full IUPAC protospacer), and each affected off-target carries a
+  `High_variant_density_region` column in `integrated_results.tsv` noting that a
+  greedy worst-case alignment is reported and additional haplotype alignments may
+  exist, with the full IUPAC sequence so a user can dig into them. Nothing is silently
+  truncated — the bound, the representative, and the alternatives are all auditable.
 
 Together these keep genome-wide variant search tractable while making any bound
-that was applied explicit and reviewable.
+that was applied explicit and reviewable, and guaranteeing no region is dropped.
 
 ---
 
