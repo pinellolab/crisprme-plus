@@ -1831,9 +1831,48 @@ Epub 2022 Dec 15. PMID: 36522432; PMCID: PMC10272994.
 
 ## 6 License
 
-CRISPRme is licensed under the **AGPL-3.0** license, which permits its use for 
-**academic research purposes only**.
+CRISPRme is licensed under the **AGPL-3.0** license, which permits its use **free
+of charge for academic and non-profit research and teaching**. Under the AGPL, any
+derivative work that is distributed or offered over a network (SaaS) must itself be
+released under the AGPL-3.0 with complete corresponding source code.
 
-For any commercial or for-profit use, a separate license must be obtained. For 
-further information regarding licensing for commercial purposes, please contact 
-**Luca Pinello** at lpinello@mgh.harvard.edu.
+### Commercial licensing
+
+> **Draft summary — for guidance only.** The description below states the *intended*
+> commercial-licensing model; the binding terms are those of the separate commercial
+> license agreement. Licensing is administered with **Mass General Brigham
+> Innovation** (which manages the underlying intellectual property). This text is not
+> legal advice and is subject to their review.
+
+**Any commercial or for-profit use requires a separate commercial license.** The
+requirement is triggered by the commercial use of **CRISPRme itself or of any
+result, report, or other output it produces** — for example in a clinical trial,
+diagnostic, product, or drug-development program — **regardless of who ran the
+software.** In particular, having an academic or non-profit party run CRISPRme on
+your behalf does **not** confer commercial rights: the free academic license grants
+no commercial rights to the outputs.
+
+The model is meant to be fair and to keep CRISPRme widely usable:
+
+- **Academic / non-profit users** use CRISPRme freely under the AGPL for their own
+  non-commercial research and teaching — no license, no fee, no time limit.
+- **A commercial license covers running CRISPRme and the commercial use of what it
+  produces.** Results generated under a valid commercial license may be used and
+  transferred with the associated program — a downstream party (e.g. after an
+  acquisition or out-licensing) does **not** pay again merely to *use* a result that
+  was generated under a commercial license. A license *is* needed to **run** CRISPRme
+  to produce new results, or to make commercial use of a result that was **not**
+  generated under a commercial license.
+- **Service providers / CROs** that run CRISPRme to produce results for third
+  parties require a commercial (service-provider) license.
+
+**No warranty.** CRISPRme and its outputs are provided **"AS IS", without warranty
+of any kind**; predictions are computational, may contain false positives and false
+negatives, and are **not a substitute for experimental validation**. Outputs may
+**change** as the software, its methods, or the underlying data are updated or
+improved. To the maximum extent permitted by law, the authors, contributors, and
+their institutions accept **no liability** for any use of, or reliance on, CRISPRme
+or its outputs. (The same disclaimer appears in every generated report.)
+
+For a commercial license or any licensing question, please contact **Luca Pinello**
+at lpinello@mgh.harvard.edu.

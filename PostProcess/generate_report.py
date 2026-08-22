@@ -1795,12 +1795,22 @@ footer .disclaimer { color: #742a2a; background: #fff5f5; border: 1px solid #fed
 """.strip()
 
 DISCLAIMER = (
-    "This report is provided for research purposes only. CRISPRme off-target "
-    "predictions are computational, may contain false positives and false "
-    "negatives, and are NOT a substitute for experimental validation. The "
-    "authors, contributors, and their institutions make no warranties, express "
-    "or implied, and accept no liability for any decision, result, clinical or "
-    "regulatory application, or other use arising from this report."
+    "This report is provided for research purposes only and on an \"AS IS\" basis, "
+    "without warranty of any kind, express or implied, including without limitation "
+    "any warranty of merchantability, fitness for a particular purpose, accuracy, "
+    "completeness, or non-infringement. CRISPRme off-target predictions are "
+    "computational and may contain false positives and false negatives; they are "
+    "NOT a substitute for experimental validation and must not be the sole basis "
+    "for any clinical, diagnostic, therapeutic, or regulatory decision. Results "
+    "depend on the software version, algorithms, reference genome, PAM, search "
+    "parameters, and variant datasets used, and MAY CHANGE as CRISPRme, its methods, "
+    "or the underlying data are updated or improved — a report reflects only the "
+    "inputs and version stated above and is not a fixed or guaranteed output. To the "
+    "maximum extent permitted by law, the authors, contributors, and their "
+    "institutions make no warranties and accept no liability for any loss, injury, "
+    "damage, cost, or claim, or for any decision, result, or clinical, diagnostic, "
+    "therapeutic, regulatory, commercial, or other use of or reliance on this report "
+    "or the software."
 )
 
 
@@ -2094,6 +2104,8 @@ development program, and regardless of who ran the software &mdash; requires a
 commercial license.</strong> To obtain a license, please contact
 <a href="mailto:lpinello@mgh.harvard.edu">Luca Pinello (lpinello@mgh.harvard.edu)</a>.</p>
 <p class="disclaimer">{_esc(DISCLAIMER)}</p>
+<p class="feedback">Feedback or a bug to report? Please open an issue at
+<a href="https://github.com/pinellolab/crisprme-plus/issues">github.com/pinellolab/crisprme-plus/issues</a>.</p>
 </footer>"""
 
 

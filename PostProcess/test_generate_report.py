@@ -701,12 +701,16 @@ class TestGenerateReport(unittest.TestCase):
     def test_section7_footer_disclaimer_and_provenance(self):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
-        # exact disclaimer text (research-purposes-only wording)
+        # disclaimer: research-only, AS IS, outputs-may-change, no liability
+        self.assertIn("research purposes only", html)
+        self.assertIn("AS IS", html)
+        self.assertIn("are NOT a substitute for experimental validation", html)
+        self.assertIn("MAY CHANGE as CRISPRme", html)
+        self.assertIn("accept no liability", html)
+        # feedback / issue tracker at the very end
+        self.assertIn("open an issue", html)
         self.assertIn(
-            "This report is provided for research purposes only.", html
-        )
-        self.assertIn(
-            "are NOT a substitute for experimental validation", html
+            'href="https://github.com/pinellolab/crisprme-plus/issues"', html
         )
         # provenance stamp: report generator version + source TSV basename
         self.assertIn("report generator v", html)
@@ -715,11 +719,19 @@ class TestGenerateReport(unittest.TestCase):
     def test_self_contained_offline_and_relative_links(self):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
-        # NO external dependencies -> opens offline with file://
+        # Fully self-contained: renders offline with NO external RESOURCE loading
+        # (no phone-home). Outbound <a href> links (the license contact mailto, the
+        # issue tracker) are allowed -- they load nothing until the reader clicks.
         self.assertNotIn("<script", html.lower())
         self.assertNotIn("<link", html.lower())
-        self.assertNotIn("http://", html)
-        self.assertNotIn("https://", html)
+        self.assertNotIn('src="http', html)  # no external images / iframes
+        self.assertNotIn("url(http", html)    # no external CSS resources
+        # every http(s) URL must sit inside an <a href="..."> (a plain link), never
+        # a resource reference
+        i = html.find("http")
+        while i != -1:
+            self.assertEqual(html[i - 6 : i], 'href="', f"non-link URL: {html[i-10:i+40]!r}")
+            i = html.find("http", i + 1)
         # RELATIVE download links to both bundled siblings
         self.assertIn('href="integrated_results.tsv.gz"', html)
         self.assertIn('href="top1000.tsv"', html)
