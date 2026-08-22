@@ -1642,6 +1642,25 @@ def select_top(df, cols, n=1000):
     return work.head(n)
 
 
+def select_top_crista(df, cols, n=1000):
+    """Top-N off-targets by CRISTA desc (mm+b > 1), when CRISTA is computed.
+
+    Mirrors :func:`select_top` (same on-/near-on-target filter, same curated
+    columns) but ranks by the CRISTA score instead of CFD. Returns an EMPTY frame
+    when CRISTA is absent, so the caller renders the CRISTA table only when it
+    exists.
+    """
+    if "crista" not in cols:
+        return df.iloc[0:0]
+    work = df.copy()
+    if "mmb" in cols:
+        work = work[_to_int_series(work[cols["mmb"]]) > 1]
+    work = work.assign(
+        _cr=pd.to_numeric(work[cols["crista"]], errors="coerce").fillna(-1.0)
+    ).sort_values("_cr", ascending=False).drop(columns=["_cr"])
+    return work.head(n)
+
+
 def _esc(value):
     if _is_na(value):
         return ""
@@ -1950,6 +1969,7 @@ def render_html(
     table_html, tsv_gz_name, top1000_name, footer_html,
     panel_top100_name=None, tier_downloads=None,
     hvdr_bundle_name=None, hvdr_n_regions=0, perfect_banner="",
+    table_crista_html="",
 ):
     scatter_html = []
     for title, caption, uri in scatter_panels:
@@ -2026,6 +2046,12 @@ def render_html(
                 f" background-repeat: repeat; background-size: 640px 640px; }}</style>"
                 if bg_uri else "")
     legend_html = build_annotation_legend_html()
+    crista_block = ""
+    if table_crista_html:
+        crista_block = (
+            '<h3 style="margin:1.4em 0 0.3em 0">Ranked by CRISTA score</h3>\n'
+            + table_crista_html
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
@@ -2079,8 +2105,10 @@ and the per-tier subsets share the SAME curated, readable columns as the table
 below; the complete integrated results (all columns) stays as the raw
 <code>{_esc(tsv_gz_name)}</code>.{panel_caption}{tier_caption}</p>
 
-<h2>6. Top 1000 off-targets (by CFD)</h2>
+<h2>6. Top 1000 putative off-targets</h2>
+<h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>
 {table_html}
+{crista_block}
 
 <h2>7. Annotation legend</h2>
 {legend_html}
@@ -2379,6 +2407,21 @@ def build_report(
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
         table_html = "<p>Top-1000 table unavailable.</p>"
+    # Second top-1000 table ranked by CRISTA (only when CRISTA was computed), with
+    # a bundled curated TSV alongside top1000.tsv.
+    table_crista_html = ""
+    top_crista_df = None
+    if has_crista:
+        try:
+            top_crista_df = select_top_crista(df, cols, n=top_n)
+            if len(top_crista_df):
+                table_crista_html = build_table_html(top_crista_df, cols, has_crista)
+                tier_downloads.append(
+                    ("Top-1000 by CRISTA (curated TSV)", "top1000_crista.tsv")
+                )
+        except Exception as exc:  # noqa: BLE001
+            sys.stderr.write(f"generate-report: CRISTA table unavailable: {exc}\n")
+            table_crista_html, top_crista_df = "", None
 
     # ---- high-variant-density ("highly complex") regions BED (#144) ----------
     # Merge the per-chromosome beds the search wrote into ONE bundled file (single
@@ -2425,6 +2468,7 @@ def build_report(
         hvdr_bundle_name=hvdr_bundle_name,
         hvdr_n_regions=hvdr_n_regions,
         perfect_banner=perfect_banner,
+        table_crista_html=table_crista_html,
     )
 
     # ---- stage the remaining files and zip -j (flat) -----------------------
@@ -2442,6 +2486,16 @@ def build_report(
             with open(top1000_path, "w") as handle:
                 handle.write("\t".join(curated_headers(has_crista)) + "\n")
 
+        # top1000_crista.tsv -- the CRISTA-ranked companion (same curated schema)
+        if top_crista_df is not None and len(top_crista_df):
+            try:
+                write_top1000_tsv(
+                    top_crista_df, cols, has_crista,
+                    os.path.join(staging, "top1000_crista.tsv"),
+                )
+            except Exception as exc:  # noqa: BLE001 - never abort on the bundled TSV
+                sys.stderr.write(f"generate-report: top1000_crista.tsv unavailable: {exc}\n")
+
         # the complete RAW results (all 85 columns) stay as the gzip
         gz_path = os.path.join(staging, tsv_gz_name)
         if integrated_tsv.endswith(".gz"):
@@ -2451,6 +2505,9 @@ def build_report(
                 shutil.copyfileobj(src, dst, length=1024 * 1024)
 
         bundle = [html_path, gz_path, top1000_path]
+        _crista_path = os.path.join(staging, "top1000_crista.tsv")
+        if os.path.isfile(_crista_path):
+            bundle.append(_crista_path)
         bundle += staged_tier_paths
         if hvdr_bundle_name:
             bundle.append(os.path.join(staging, hvdr_bundle_name))
