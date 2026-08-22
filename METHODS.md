@@ -331,6 +331,14 @@ and the annotation legend of Section 6. Allele frequencies can be omitted
 (`--no-maf`) for runs where they are not yet finalized, so the site set and
 scores can be shared without misleading frequency values.
 
+A guide with **more than one perfect genomic match** (0 mismatch, 0 bulge) has no
+a-priori on-target — each is an equally-efficient candidate cut site, and a
+perfect-match *off*-target is the highest-risk class. Every 0-mismatch site is
+therefore forced to the top of the validation panel (never truncated), flagged in
+a `Perfect_match` column, and called out in a prominent warning banner (red when
+there are several, listing the sites; amber "presumed on-target" when there is
+exactly one) — in both the report and the interactive web results page.
+
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the

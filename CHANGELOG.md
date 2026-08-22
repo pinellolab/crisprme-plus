@@ -44,6 +44,16 @@ and the `release-crisprme` skill.
 - Manuscript-level `METHODS.md` (dict-less model, VCF homogenization / merging,
   AF estimation, phased / unphased / mixed haplotype scanning, variant-density
   control, annotations, report) and README "what's new" pointers.
+- **Perfect-match (0-mismatch) multiplicity flagging.** A guide with more than one
+  perfect genomic match (0 mismatch, 0 bulge) has no a-priori on-target -- each is
+  an equally-efficient candidate cut site. The report **and** the web results page
+  now force EVERY 0-mm site to the top of the validation panel (never truncated),
+  add a `Perfect_match` column to the curated tables, and show a prominent red
+  "no unambiguous on-target" banner listing the sites (an amber "presumed
+  on-target" note when there is exactly one). Previously all 0-mm sites were
+  bucketed as "the on-target" and excluded from the off-target set and the panel
+  with no warning -- so a perfect-match off-target, the highest-risk class, was the
+  one thing the report never surfaced.
 
 ### Fixed
 - **Web job launch crashed on special characters in the job name.** A job name
