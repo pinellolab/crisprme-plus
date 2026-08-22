@@ -64,8 +64,24 @@ import collections
 import subprocess
 import filecmp
 import random
+import re
 import string
 import os
+
+
+def _sanitize_job_name(job_name: str) -> str:
+    """Make a user-supplied job name safe to use as a results directory component.
+
+    The job name becomes a path segment (``Results/<name>_<id>``) and is
+    interpolated into the shell search pipeline, so it must be restricted to a
+    filesystem/shell-safe charset. Runs of any other character (spaces, ``/``,
+    ``(``, ``)``, ``>``, ``&``, ``;`` ...) collapse to a single underscore, and
+    leading/trailing separators are trimmed. A name that is entirely unsafe
+    reduces to ``""`` (the caller then keeps the random-only job id). Example:
+    ``"SBDS(T>C)" -> "SBDS_T_C"`` -- without this, ``/bin/sh`` fails on the
+    ``(`` when the results directory is created.
+    """
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", job_name).strip("._-")
 
 
 def _resolve_vcf_folder(genome_selected: str, tok: str) -> str:
@@ -479,18 +495,24 @@ def change_url(
                 break
     if job_name and job_name != "None":
         assert isinstance(job_name, str)
-        job_id = f"{job_name}_{job_id}"
+        # Sanitize the user-supplied job name before it becomes a directory
+        # component / shell argument (e.g. "SBDS(T>C)" would break /bin/sh).
+        safe_job_name = _sanitize_job_name(job_name)
+        if safe_job_name:
+            job_id = f"{safe_job_name}_{job_id}"
     result_dir = os.path.join(current_working_directory, RESULTS_DIR, job_id)
-    # create results directory
-    cmd = f"mkdir {result_dir}"
-    code = subprocess.call(cmd, shell=True)
-    if code != 0:
-        raise ValueError(f"An error occurred while running {cmd}")
+    # create results directory (no shell: the path is safe, but avoid the shell
+    # entirely so a directory name can never be parsed as a command)
+    try:
+        os.makedirs(result_dir)
+    except OSError as error:
+        raise ValueError(f"An error occurred while creating {result_dir}: {error}")
     # NOTE test command for queue
-    cmd = f"touch {os.path.join(current_working_directory, RESULTS_DIR, job_id, QUEUE_FILE)}"
-    code = subprocess.call(cmd, shell=True)
-    if code != 0:
-        raise ValueError(f"An error occurred while running {cmd}")
+    queue_file = os.path.join(current_working_directory, RESULTS_DIR, job_id, QUEUE_FILE)
+    try:
+        open(queue_file, "a").close()
+    except OSError as error:
+        raise ValueError(f"An error occurred while creating {queue_file}: {error}")
     # ---- Set search parameters
     # ANNOTATION: there is no per-search annotation selector anymore. The search
     # applies the annotations ENABLED for this genome (managed in Settings ->
