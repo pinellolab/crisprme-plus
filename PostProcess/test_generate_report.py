@@ -258,7 +258,8 @@ class TestGenerateReport(unittest.TestCase):
             [
                 "rank", "Chromosome", "Position", "Strand",
                 "Aligned_protospacer+PAM", "Mismatches", "Bulges",
-                "Mismatches+bulges", "CFD", "CRISTA", "REF/ALT_origin",
+                "Mismatches+bulges", "Perfect_match", "CFD", "CRISTA",
+                "REF/ALT_origin",
                 "PAM_creation", "Variant", "MAF", "Gene", "Gene_distance_kb",
                 "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
                 "High_complexity_region",
@@ -549,7 +550,7 @@ class TestGenerateReport(unittest.TestCase):
             return r
 
         rows = [
-            _row("chrON", 0, 0, 1.0, 1.0, False),    # on-target -> excluded
+            _row("chrON", 0, 0, 1.0, 1.0, False),    # perfect match -> forced to top
             _row("chrCFD", 3, 2, 0.99, 0.10, True),  # HARD (CFD>=0.5)
             _row("chrMMB", 2, 0, 0.10, 0.10, False), # HARD (mm+b<=2)
             _row("chrCRI", 4, 3, 0.10, 0.99, True),  # not hard; worst by CRISTA
@@ -565,14 +566,14 @@ class TestGenerateReport(unittest.TestCase):
 
         panel = gr.select_worstcase_panel(df, cols, cap=gr.PANEL_CAP)
         chroms = list(panel[cols["chrom"]])
-        # on-target excluded
-        self.assertNotIn("chrON", chroms)
+        # perfect match (mm+b==0) is FORCED to the top of the panel (candidate cut site)
+        self.assertEqual(chroms[0], "chrON")
         # hard-includes always present; CRISTA-only site enters via the fill ranks
         self.assertIn("chrCFD", chroms)
         self.assertIn("chrMMB", chroms)
         self.assertIn("chrCRI", chroms)
-        # hard-includes come FIRST (before the fill), all-low site last
-        self.assertEqual({"chrCFD", "chrMMB"}, set(chroms[:2]))
+        # after the perfect match, hard-includes come first (before the fill); all-low last
+        self.assertEqual({"chrCFD", "chrMMB"}, set(chroms[1:3]))
         self.assertEqual(chroms[-1], "chrLOW")
 
         # HARD-INCLUDES EXCEED THE CAP -> they are ALL kept (panel > cap allowed).
@@ -588,9 +589,9 @@ class TestGenerateReport(unittest.TestCase):
         dfh = pd.read_csv(tsvh, sep="\t", dtype=str, na_filter=False)
         colsh = gr._resolve(dfh.columns, list(gr._COLS.keys()))
         panelh = gr.select_worstcase_panel(dfh, colsh, cap=3)
-        # 10 hard-includes > cap(3) -> all 10 kept, on-target still excluded
-        self.assertEqual(len(panelh), 10)
-        self.assertNotIn("chrON", set(panelh[colsh["chrom"]]))
+        # 10 hard-includes > cap(3) -> all 10 kept; perfect match prepended -> 11, at top
+        self.assertEqual(len(panelh), 11)
+        self.assertEqual(list(panelh[colsh["chrom"]])[0], "chrON")
 
         # cap is honored when hard-includes are few: many mid sites -> exactly cap
         big = [_row("chrON", 0, 0, 1.0, 1.0, False)]
@@ -605,10 +606,49 @@ class TestGenerateReport(unittest.TestCase):
         df2 = pd.read_csv(tsv2, sep="\t", dtype=str, na_filter=False)
         cols2 = gr._resolve(df2.columns, list(gr._COLS.keys()))
         panel2 = gr.select_worstcase_panel(df2, cols2, cap=gr.PANEL_CAP)
-        self.assertEqual(len(panel2), gr.PANEL_CAP)
-        self.assertNotIn("chrON", set(panel2[cols2["chrom"]]))
-        # on-target never in the panel
-        self.assertNotIn("chrON", set(panel2[cols2["chrom"]]))
+        # PANEL_CAP off-targets + the prepended perfect match, which is at the top
+        self.assertEqual(len(panel2), gr.PANEL_CAP + 1)
+        self.assertEqual(list(panel2[cols2["chrom"]])[0], "chrON")
+
+    def test_perfect_match_flag_and_banner(self):
+        """0-mm/0-bulge sites are flagged and drive the warning banner."""
+        mmb_col = {"mmb": "Mismatches+bulges_(highest_CFD)"}
+        # curated cell: "Yes" for a perfect match, blank otherwise
+        self.assertEqual(
+            gr._curated_cell(
+                "perfect_match", {"Mismatches+bulges_(highest_CFD)": "0"}, mmb_col
+            ),
+            "Yes",
+        )
+        self.assertEqual(
+            gr._curated_cell(
+                "perfect_match", {"Mismatches+bulges_(highest_CFD)": "2"}, mmb_col
+            ),
+            gr.CURATED_MISSING,
+        )
+        # >= 2 perfect matches -> red "no unambiguous on-target" banner, sites listed
+        vp2 = {
+            "n_perfect": 2,
+            "perfect_sites": [
+                {"chrom": "chr7", "pos": "66994206", "strand": "-"},
+                {"chrom": "chr7", "pos": "72830803", "strand": "+"},
+            ],
+        }
+        b2 = gr.render_perfect_match_banner(vp2)
+        self.assertIn("Multiple perfect matches", b2)
+        self.assertIn("chr7:66994206", b2)
+        self.assertIn("chr7:72830803", b2)
+        self.assertIn("#dc2626", b2)  # red border
+        # exactly 1 -> amber presumed-on-target note, not the red warning
+        b1 = gr.render_perfect_match_banner(
+            {"n_perfect": 1, "perfect_sites": [{"chrom": "chr5", "pos": "1", "strand": "+"}]}
+        )
+        self.assertIn("presumed", b1.lower())
+        self.assertNotIn("Multiple perfect matches", b1)
+        # 0 -> no banner
+        self.assertEqual(
+            gr.render_perfect_match_banner({"n_perfect": 0, "perfect_sites": []}), ""
+        )
 
     def test_section6_table_shows_curated_columns_incl_annotations(self):
         _, _, extract = self._build_and_extract()

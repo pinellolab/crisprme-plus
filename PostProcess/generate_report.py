@@ -173,6 +173,7 @@ CURATED_COLUMNS = (
     ("Mismatches", "mm"),
     ("Bulges", "bulges"),
     ("Mismatches+bulges", "mmb"),
+    ("Perfect_match", "perfect_match"),  # "Yes" when mm+b==0: a perfect genomic match
     ("CFD", "cfd"),
     ("CRISTA", "crista"),  # emitted only when crista_computed()
     ("REF/ALT_origin", "origin"),
@@ -408,6 +409,12 @@ def _curated_cell(kind, row, cols):
             except Exception:
                 pass
         return "Yes"
+    elif kind == "perfect_match":
+        # "Yes" for a perfect genomic match (0 mismatches + 0 bulges): a candidate
+        # cut site with no a-priori on/off-target distinction. Blank otherwise.
+        raw = _get("mmb")
+        num = pd.to_numeric(raw, errors="coerce") if raw is not None else None
+        return "Yes" if (num is not None and pd.notna(num) and int(num) == 0) else CURATED_MISSING
     else:
         v = None
 
@@ -1290,9 +1297,11 @@ def plot_population(df, cols, sample_superpop):
 # SECTION 4: recommended validation panel
 # --------------------------------------------------------------------------- #
 def select_worstcase_panel(df, cols, cap=PANEL_CAP):
-    """Return the OFF-TARGET rows for the HYBRID worst-case top-100 panel (sec 4).
+    """Return the rows for the HYBRID worst-case top-100 validation panel (sec 4).
 
-    Two stages over the off-target set (on-target mm+b==0 excluded):
+    Every PERFECT match (mm+b==0) is placed at the TOP of the panel first -- a
+    candidate cut site with no a-priori on/off-target distinction, never dropped.
+    The OFF-TARGET rows are then selected in two stages (over the off-target set):
 
     1. HARD-INCLUDE every site that is close by sequence OR high-scoring:
        ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR ``CFD >= PANEL_FLOOR_CFD (0.5)``.
@@ -1313,9 +1322,14 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     severity-ordered).
     """
     _variant, _reference, ontarget = partition_masks(df, cols)
+    # Perfect matches (0 mismatch + 0 bulge) are candidate cut sites with no
+    # a-priori on/off-target distinction -- ALWAYS include every one, at the TOP of
+    # the panel, never subject to the cap (a perfect-match off-target cuts as
+    # efficiently as the intended site and must be validated).
+    perfect = df[ontarget].copy()
     offt = df[~ontarget].copy()
     if len(offt) == 0:
-        return offt
+        return perfect
 
     cfd = (
         _to_float_series(offt[cols["cfd"]]).fillna(-1.0)
@@ -1367,7 +1381,11 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     # if the hard-includes already exceed the cap keep them ALL; otherwise fill
     keep = max(cap, n_hard)
     drop = ["_severity", "_cfd", "_crista", "_mmb", "_hard"]
-    return ordered.head(keep).drop(columns=drop)
+    off_panel = ordered.head(keep).drop(columns=drop)
+    # prepend the perfect matches (disjoint from off_panel by construction)
+    if len(perfect):
+        return pd.concat([perfect, off_panel])
+    return off_panel
 
 
 def build_validation_panel(df, cols):
@@ -1381,6 +1399,19 @@ def build_validation_panel(df, cols):
     """
     variant, _reference, ontarget = partition_masks(df, cols)
     offt = df[~ontarget]  # off-targets only
+
+    # Perfect matches (0 mm + 0 bulge): distinct candidate cut sites. With >1 there
+    # is no a-priori on-target, so these drive the red warning banner + panel.
+    perfect_sites = []
+    if bool(ontarget.any()):
+        seen = set()
+        for _, r in df[ontarget].iterrows():
+            c = str(r[cols["chrom"]]) if "chrom" in cols else "?"
+            p = str(r[cols["pos"]]) if "pos" in cols else "?"
+            s = str(r[cols["strand"]]) if "strand" in cols else ""
+            if (c, p, s) not in seen:
+                seen.add((c, p, s))
+                perfect_sites.append({"chrom": c, "pos": p, "strand": s})
 
     cfd = _to_float_series(offt[cols["cfd"]]) if "cfd" in cols else pd.Series([], dtype=float)
     mmb = _to_int_series(offt[cols["mmb"]]) if "mmb" in cols else pd.Series([], dtype=int)
@@ -1421,6 +1452,8 @@ def build_validation_panel(df, cols):
         "panel_variant": panel_variant,
         "panel_df": panel_df,
         "tiers": tiers,
+        "n_perfect": len(perfect_sites),
+        "perfect_sites": perfect_sites,
     }
 
 
@@ -1831,11 +1864,59 @@ def build_annotation_legend_html():
     )
 
 
+def render_perfect_match_banner(vp):
+    """Prominent banner for perfect (0 mismatch + 0 bulge) matches.
+
+    A guide with several perfect genomic matches has no a-priori on-target -- each
+    is an equally-efficient candidate cut site, and a perfect-match OFF-target is
+    the highest-risk class. ``>= 2`` renders a red "no unambiguous on-target"
+    warning; exactly ``1`` renders an amber "presumed on-target" note; ``0`` an
+    empty string. The sites are listed so the reader sees exactly where they are.
+    """
+    n = int(vp.get("n_perfect", 0) or 0)
+    sites = vp.get("perfect_sites", []) or []
+    if n <= 0:
+        return ""
+
+    def _fmt(s):
+        strand = f" ({_esc(str(s.get('strand', '')))})" if s.get("strand") else ""
+        return f"{_esc(str(s.get('chrom', '?')))}:{_esc(str(s.get('pos', '?')))}{strand}"
+
+    site_list = ", ".join(_fmt(s) for s in sites[:20])
+    if len(sites) > 20:
+        site_list += ", &hellip;"
+
+    if n >= 2:
+        return (
+            '<div style="border:2px solid #dc2626;background:#fef2f2;'
+            'padding:0.9em 1.1em;margin:1em 0;border-radius:6px">'
+            '<p style="margin:0 0 0.4em;color:#991b1b;font-size:1.05em">'
+            "<strong>&#9888; Multiple perfect matches &mdash; no unambiguous "
+            "on-target.</strong></p>"
+            f'<p style="margin:0">This guide matches <strong>{n}</strong> genomic '
+            "sites with <strong>0 mismatches and 0 bulges</strong>. The intended "
+            "on-target cannot be determined from sequence alone &mdash; "
+            "<strong>every one is a candidate cut site</strong> (a perfect-match "
+            "off-target cuts as efficiently as the on-target). All are placed at "
+            "the top of the validation panel (Section&nbsp;4) and flagged "
+            "<code>Perfect_match&nbsp;=&nbsp;Yes</code> in the tables. "
+            f"Sites: {site_list}.</p></div>"
+        )
+    return (
+        '<div style="border-left:4px solid #d97706;background:#fffbeb;'
+        'padding:0.6em 0.9em;margin:1em 0">'
+        "<p style=\"margin:0\"><strong>Perfect match:</strong> one genomic site "
+        f"matches with 0 mismatches / 0 bulges ({site_list}) &mdash; the presumed "
+        "on-target, included in the validation panel and flagged "
+        "<code>Perfect_match&nbsp;=&nbsp;Yes</code>.</p></div>"
+    )
+
+
 def render_html(
     job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
     table_html, tsv_gz_name, top1000_name, footer_html,
     panel_top100_name=None, tier_downloads=None,
-    hvdr_bundle_name=None, hvdr_n_regions=0,
+    hvdr_bundle_name=None, hvdr_n_regions=0, perfect_banner="",
 ):
     scatter_html = []
     for title, caption, uri in scatter_panels:
@@ -1928,7 +2009,7 @@ def render_html(
 for human genetic variation</p>
 </div>
 </div>
-
+{perfect_banner}
 <h2>1. Summary</h2>
 {summary_matrix_html}
 
@@ -2212,8 +2293,10 @@ def build_report(
         staged_tier_paths.append(plain)
         return base_name
 
+    perfect_banner = ""
     try:
         vp = build_validation_panel(df, cols)
+        perfect_banner = render_perfect_match_banner(vp)
         panel_top100_df = vp.get("panel_df")
 
         # panel_top100.tsv (curated) -- always a hard bundle when non-empty.
@@ -2295,6 +2378,7 @@ def build_report(
         tier_downloads=tier_downloads,
         hvdr_bundle_name=hvdr_bundle_name,
         hvdr_n_regions=hvdr_n_regions,
+        perfect_banner=perfect_banner,
     )
 
     # ---- stage the remaining files and zip -j (flat) -----------------------
