@@ -93,6 +93,50 @@ import os
 #
 
 
+def _perfect_match_sites(integrated_tsv):
+    """Distinct perfect-match (0 mismatch + 0 bulge) sites in an integrated TSV.
+
+    A guide with >1 perfect genomic match has no a-priori on-target -- each is an
+    equally-efficient candidate cut site (a perfect-match off-target is the
+    highest-risk class). Reads ONLY the locus + mm+b columns so it is fast even on
+    a genome-wide result. Fully guarded: returns [] on any error (never blocks the
+    results page). Each entry is a (chrom, pos, strand) tuple.
+    """
+    try:
+        import pandas as pd
+
+        header = pd.read_csv(integrated_tsv, sep="\t", nrows=0).columns.tolist()
+
+        def _col(*cands):
+            for c in cands:
+                if c in header:
+                    return c
+            return None
+
+        mmb = _col("Mismatches+bulges_(highest_CFD)", "Mismatches+bulges")
+        chrom = _col("Chromosome")
+        pos = _col("Start_coordinate_(highest_CFD)", "Start_coordinate")
+        strand = _col("Strand_(highest_CFD)", "Strand")
+        if not mmb:
+            return []
+        usecols = [c for c in (mmb, chrom, pos, strand) if c]
+        df = pd.read_csv(integrated_tsv, sep="\t", usecols=usecols, dtype=str)
+        mask = pd.to_numeric(df[mmb], errors="coerce") == 0
+        seen, out = set(), []
+        for _, r in df[mask].iterrows():
+            key = (
+                str(r.get(chrom, "?")),
+                str(r.get(pos, "?")),
+                str(r.get(strand, "")),
+            )
+            if key not in seen:
+                seen.add(key)
+                out.append(key)
+        return out
+    except Exception:
+        return []
+
+
 def result_page(job_id: str) -> html.Div:
     """Print the results page layout (guides table + images).
     The guides table contains the research profile found during
@@ -330,6 +374,32 @@ def result_page(job_id: str) -> html.Div:
                     " to view them",
                 ],
                 color="warning",
+            )
+        )
+    # Multiple perfect matches (0 mm + 0 bulge) => no a-priori on-target. A
+    # perfect-match OFF-target cuts as efficiently as the intended site, so warn
+    # loudly and point to the report (where all are forced into the panel + flagged).
+    _perfect_sites = _perfect_match_sites(integrated_file_name)
+    if len(_perfect_sites) >= 2:
+        _site_txt = ", ".join(f"{c}:{p}" for c, p, _s in _perfect_sites[:10])
+        if len(_perfect_sites) > 10:
+            _site_txt += ", …"
+        final_list.append(
+            dbc.Alert(
+                [
+                    html.Strong(
+                        f"⚠ Multiple perfect matches — no unambiguous "
+                        f"on-target. "
+                    ),
+                    f"This guide matches {len(_perfect_sites)} genomic sites with "
+                    f"0 mismatches and 0 bulges ({_site_txt}). Each is a candidate "
+                    f"cut site — a perfect-match off-target cuts as efficiently "
+                    f"as the intended one. All are placed at the top of the "
+                    f"validation panel and flagged ",
+                    html.Code("Perfect_match = Yes"),
+                    " in the downloadable report.",
+                ],
+                color="danger",
             )
         )
     # Present the title according to which threshold control governed the search.
