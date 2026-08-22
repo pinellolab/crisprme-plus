@@ -320,7 +320,8 @@ class TestGenerateReport(unittest.TestCase):
             h.write(
                 "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\n"
             )
-            h.write("chr1\t1000\t1023\tGUIDE\t12\tHG00096,HG00097\tACGTNNNNACGTACGTACGTNGG\n")
+            # overlaps the chr3:200 top-N off-target so it survives the top-N scoping
+            h.write("chr3\t190\t213\tGUIDE\t12\tHG00096,HG00097\tACGTNNNNACGTACGTACGTNGG\n")
         out_zip = gr.build_report(
             result_dir=rd,
             samplesid_dir=self.sid_dir,

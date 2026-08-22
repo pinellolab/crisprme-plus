@@ -2082,19 +2082,20 @@ def render_html(
     if hvdr_bundle_name:
         hvdr_download = (
             f'\n  <a class="download" href="{_esc(hvdr_bundle_name)}" download>'
-            f"Highly complex regions ({hvdr_n_regions:,}) &mdash; BED</a>"
+            f"Highly complex regions near top sites ({hvdr_n_regions:,}) &mdash; BED</a>"
         )
         hvdr_callout = (
             f'<p class="caption" style="border-left:4px solid #d97706;'
             f'padding-left:0.7em;background:#fffbeb">'
             f"<strong>Highly complex (high-variant-density) regions:</strong> "
-            f"{hvdr_n_regions:,} window(s) carry so many overlapping variants that a single "
-            f"greedy worst-case alignment is reported for each (flagged in the "
-            f"<code>High_complexity_region</code> column of the table and the raw results) "
-            f"&mdash; ADDITIONAL haplotype alignments may exist there. The full list (region "
-            f"span, variant count, carriers, and the full IUPAC protospacer) is bundled as "
-            f"<code>{_esc(hvdr_bundle_name)}</code> so these regions can be reviewed in "
-            f"full, alongside the integrated results.</p>"
+            f"{hvdr_n_regions:,} window(s) overlapping the top-ranked reported off-targets "
+            f"carry so many overlapping variants that a single greedy worst-case alignment "
+            f"is reported for each (flagged in the <code>High_complexity_region</code> "
+            f"column of the table) &mdash; ADDITIONAL haplotype alignments may exist there. "
+            f"Those regions (span, variant count, carriers, full IUPAC protospacer) are "
+            f"bundled as <code>{_esc(hvdr_bundle_name)}</code>. The <strong>complete "
+            f"genome-wide</strong> flag is in the <code>High_variant_density_region</code> "
+            f"column of the integrated results (every site).</p>"
         )
 
     # per-tier curated downloads (Section 5). ``tier_downloads`` is a list of
@@ -2522,10 +2523,39 @@ def build_report(
     hvdr_bundle_name = None
     hvdr_n_regions = 0
     try:
+        import bisect
+
         _hvdr_src_dir = result_dir if result_dir else os.path.dirname(integrated_tsv)
         _hvdr_files = sorted(
             glob.glob(os.path.join(_hvdr_src_dir, "*high_variant_density_regions.bed"))
         )
+        # Scope the report's HVDR list to the TOP-N reported off-targets. Genome-wide,
+        # a permissive search flags tens of thousands of dense windows, most of them
+        # low-relevance -- so keep only regions overlapping a top-N site here; the FULL
+        # per-site flag stays in the High_variant_density_region column of the
+        # integrated results. Fall back to the full list if positions can't be read.
+        _top_pos = {}
+        try:
+            if "chrom" in cols and "pos" in cols and len(top_df):
+                _cs = top_df[cols["chrom"]].astype(str).tolist()
+                _ps = pd.to_numeric(top_df[cols["pos"]], errors="coerce").tolist()
+                for _c, _p in zip(_cs, _ps):
+                    if pd.notna(_p):
+                        _top_pos.setdefault(_c, []).append(int(_p))
+                for _c in _top_pos:
+                    _top_pos[_c].sort()
+        except Exception:  # noqa: BLE001
+            _top_pos = {}
+        _filter_hvdr = bool(_top_pos)
+        _TOL = 25  # guide+PAM slack for matching a site to its dense window
+
+        def _hits_top(chrom, start, end):
+            arr = _top_pos.get(chrom)
+            if not arr:
+                return False
+            i = bisect.bisect_left(arr, start - _TOL)
+            return i < len(arr) and arr[i] <= end + _TOL
+
         if _hvdr_files:
             _hvdr_path = os.path.join(staging, "high_variant_density_regions.bed")
             with open(_hvdr_path, "w") as _out:
@@ -2537,6 +2567,13 @@ def build_report(
                     for _ln in open(_bf):
                         if _ln.startswith("#") or not _ln.strip():
                             continue
+                        if _filter_hvdr:
+                            _p = _ln.split("\t")
+                            try:
+                                if not _hits_top(_p[0], int(_p[1]), int(_p[2])):
+                                    continue
+                            except (IndexError, ValueError):
+                                continue
                         _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
                         hvdr_n_regions += 1
             if hvdr_n_regions:
