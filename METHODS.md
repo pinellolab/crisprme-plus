@@ -61,6 +61,31 @@ Population summaries (per-database, per-super-population, and global frequency
 distributions) are **first-class** and computed at build time, so they are
 available without touching Tier-1; per-individual queries remain lazy.
 
+### Compact on-disk encoding of the Tier-0 registry
+Physically, the registry is three contiguous sections: a fixed-width **record
+array** (16 bytes per record — position, reference base, alternate base, the
+record's group count, and offsets into the two following sections), a **group
+blob** (the per-group AC / AN / carrier / homozygote / called-allele counts), and
+a deduplicated **string pool** (rsIDs). The group blob dominates the file
+(~75–80 %), and within it the allele-number and called-allele columns are
+near-constant across the millions of records on a chromosome — the genotyped
+panel is essentially the same size everywhere — so the raw layout is highly
+redundant.
+
+CRISPRme+ therefore stores the registry in a **block-compressed** format: each of
+the three sections is partitioned into fixed-size blocks (4,096 records) that are
+individually `zlib`-compressed, with a small sparse index of block offsets carried
+in the JSON manifest. A lookup bisects that sparse index to the one covering
+block, decompresses it (kept in a tiny LRU so clustered/adjacent lookups stay
+warm), and reads it exactly as before — so the public reader API and the
+`O(log n)` random access by genomic position are unchanged, while the
+near-constant count columns compress away. On the shipped 1000 Genomes + HGDP
+registry this is ≈3.5× on disk (≈7.5 GB → ≈2.1 GB after extraction). The reader is
+fully backward-compatible (it still reads an uncompressed registry byte-for-byte),
+and an existing registry is re-encoded **losslessly** by a verbatim block
+re-chunking (`transcode_registry`) with no VCF re-parse — the records, counts,
+rsIDs and lookups are identical, only the container changes.
+
 ### Out-of-the-box variant search
 Because Tier-0/Tier-1 are small, they are shipped **with the pre-built index**
 (compressed, read on the fly). A user who downloads a variant index can
