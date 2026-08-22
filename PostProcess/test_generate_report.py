@@ -104,6 +104,7 @@ _HEADER = [
     "Annotation_closest_gene_distance_(kb)",
     "Annotation_ENCODE",
     "Annotation_DHS",
+    "Annotation_COSMIC",
 ]
 
 _GUIDE = "CTCTCAGCTGGTACACGGCANNN"
@@ -111,35 +112,35 @@ _GUIDE = "CTCTCAGCTGGTACACGGCANNN"
 # columns: guide, chrom, pos, strand, aln_ref, aln_alt, pam, mm, bul, mmb,
 #          origin, pam_creation, cfd, cfd_ref, cfd_alt, var_genome, maf, rsid,
 #          samples, crista, crista_ref, crista_alt, crista_maf, crista_rsid,
-#          crista_samples, not_in_ref, GENCODE, gene, dist, ENCODE, DHS
+#          crista_samples, not_in_ref, GENCODE, gene, dist, ENCODE, DHS, COSMIC
 _ROWS = [
     # on-target (mm+b == 0) -> excluded from top-N; counted as 1 on-target
     [_GUIDE, "chr2", "100", "+", "CTCTCAGCTGGTACACGGCATGG", "NA", "TGG",
      "0", "0", "0", "ref", "NA", "1.0", "1.0", "1.0", "NA", "NA", "NA", "NA",
      "1.0", "1.0", "1.0", "NA", "NA", "NA", "NA",
-     "protein_coding", "GENE0", "0.0", "CTCF", "DHS_1"],
+     "protein_coding", "GENE0", "0.0", "CTCF", "DHS_1", "-"],
     # reference off-targets
     [_GUIDE, "chr3", "200", "-", "cTCTCAGCTGGTACACGGCAAGG", "NA", "AGG",
      "2", "0", "2", "ref", "NA", "0.85", "0.85", "0.85", "NA", "NA", "NA", "NA",
      "0.80", "0.80", "0.80", "NA", "NA", "NA", "NA",
-     "intron", "GENE1", "1.2", "enhancer", "DHS_2"],
+     "intron", "GENE1", "1.2", "enhancer", "DHS_2", "TSG"],
     [_GUIDE, "chr4", "300", "+", "ctCTCAGCTGGTACACGGCAcGG", "NA", "CGG",
      "3", "0", "3", "ref", "NA", "0.40", "0.40", "0.40", "NA", "NA", "NA", "NA",
      "0.35", "0.35", "0.35", "NA", "NA", "NA", "NA",
-     "NA", "GENE2", "5.0", "NA", "NA"],
+     "NA", "GENE2", "5.0", "NA", "NA", "-"],
     # variant-created off-targets (1000G + HGDP carriers)
     [_GUIDE, "chr5", "400", "+", "CTCTCAGCTGGTACACGGCAtGG",
      "CTCTCAGCTGGTACACGGCAAGG", "AGG",
      "2", "0", "2", "alt", "NA", "0.90", "0.20", "0.90", "chr5_400_T_A",
      "0.01", "rs111", "HG00096,HGDP00001",
      "0.88", "0.18", "0.88", "0.01", "rs111", "HG00096,HGDP00001",
-     "y", "exon", "GENE3", "0.5", "promoter", "DHS_3"],
+     "y", "exon", "GENE3", "0.5", "promoter", "DHS_3", "oncogene"],
     [_GUIDE, "chr6", "500", "-", "CTCTCAGCTGGTACACGGCAtGG",
      "CTCTCAGCTGGTACACGGCAcGG", "CGG",
      "3", "1", "4", "alt", "pam_created", "0.55", "0.30", "0.55", "chr6_500_T_C",
      "0.02", "rs222", "NA18525",
      "0.50", "0.25", "0.50", "0.02", "rs222", "NA18525",
-     "y", "intergenic", "GENE4", "2.0", "CTCF", "DHS_4"],
+     "y", "intergenic", "GENE4", "2.0", "CTCF", "DHS_4", "-"],
     # multi-SNP haplotype: comma-joined rsID/MAF/samples (min-AF + first-rsID),
     # and a BLANK MAF -> em-dash + footnote path
     [_GUIDE, "chr7", "600", "+", "CTCTCAGCTGGTACACGGCAtGG",
@@ -147,13 +148,18 @@ _ROWS = [
      "3", "0", "3", "alt", "NA", "0.30", "0.10", "0.30", "chr7_600_T_G,chr7_601_A_C",
      "NA,0.005,0.003", "NA,rs333,rs444", "HG00097,HGDP00003",
      "0.28", "0.08", "0.28", "NA,0.005,0.003", "NA,rs333,rs444",
-     "HG00097,HGDP00003", "y", "lincRNA", "GENE5", "10.0", "enhancer", "DHS_5"],
+     "HG00097,HGDP00003", "y", "lincRNA", "GENE5", "10.0", "enhancer", "DHS_5", "-"],
 ]
 
 
 @unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
 class TestGenerateReport(unittest.TestCase):
     def setUp(self):
+        # reset build_report's module-level run state so a prior test's run
+        # (e.g. a drop_maf=True or partial-annotation build) cannot leak into a
+        # standalone curated_headers()/_active_columns() call in this test
+        gr._DROP_MAF = False
+        gr._PRESENT_ANN_KINDS = None
         self.tmp = tempfile.mkdtemp(prefix="gr_test_")
         self.addCleanup(lambda: __import__("shutil").rmtree(self.tmp, ignore_errors=True))
         # write the fixture under a canonical finalized filename so filename
@@ -372,6 +378,47 @@ class TestGenerateReport(unittest.TestCase):
                 h.write("SAMPLE_X\tp\ts\tm\n")
             self.assertEqual(gr.load_sample_dataset(d)["SAMPLE_X"], "gnomAD")
         self.assertEqual(gr.load_sample_dataset("/nonexistent"), {})
+
+    def test_load_sample_superpop_reads_finalized_install_names(self):
+        """Superpop must load from the REAL install layout hg38_<db>.samplesID.txt
+        (not just the classic samplesIDs.<db>.txt), else the plot silently blanks."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "hg38_1000G.samplesID.txt"), "w") as h:
+                h.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+                h.write("HG00096\tGBR\tEUR\tmale\n")
+            with open(os.path.join(d, "hg38_HGDP.samplesID.txt"), "w") as h:
+                h.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+                h.write("HGDP00001\tBrahui\tCSA\tmale\n")
+            # a config sidecar must be ignored, not parsed as samples
+            with open(os.path.join(d, "samplesIDs.config.txt"), "w") as h:
+                h.write("hg38\t1000G\tvcf\n")
+            m = gr.load_sample_superpop(d)
+            self.assertEqual(m.get("HG00096"), "EUR")
+            self.assertEqual(m.get("HGDP00001"), "CSA")
+            # classic download name also still works
+            with open(os.path.join(d, "samplesIDs.EXTRA.txt"), "w") as h:
+                h.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+                h.write("NA20000\tTSI\tEUR\tmale\n")
+            self.assertEqual(gr.load_sample_superpop(d).get("NA20000"), "EUR")
+
+    def test_genome_normalization_and_dataset_poison(self):
+        """'_ref' suffix is stripped from the genome; a reference-only vcf token
+        does not leak 'ref' as a dataset."""
+        self.assertEqual(gr._normalize_genome("hg38_ref"), "hg38")
+        self.assertEqual(gr._normalize_genome("mm10_reference"), "mm10")
+        self.assertEqual(gr._normalize_genome("hg38"), "hg38")
+        # reference-only web filename: <guide>+<pam>_hg38+hg38_ref_6+3
+        fn = gr._parse_results_filename(
+            "GUIDENNN+NGG_hg38+hg38_ref_6+3_integrated_results.tsv"
+        )
+        self.assertEqual(fn.get("genome"), "hg38")
+        self.assertNotIn("datasets", fn)  # 'ref' must NOT become a dataset
+        # a real variant run still decodes datasets
+        fn2 = gr._parse_results_filename(
+            "GUIDENNN+NGG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv"
+        )
+        self.assertEqual(fn2.get("datasets"), "1000G+HGDP")
 
     def test_bundled_tsv_gz_round_trips(self):
         _, _, extract = self._build_and_extract()
@@ -692,6 +739,59 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(
             gr.render_perfect_match_banner({"n_perfect": 0, "perfect_sites": []}), ""
         )
+        # MULTI-GUIDE: two guides, ONE perfect match each -> NOT ambiguous (amber),
+        # even though n_perfect == 2. The red banner is per-guide (max 1 here).
+        bmg = gr.render_perfect_match_banner({
+            "n_perfect": 2, "max_perfect_per_guide": 1, "n_guides_with_perfect": 2,
+            "perfect_sites": [
+                {"guide": "GUIDE_A", "chrom": "chr5", "pos": "1", "strand": "+"},
+                {"guide": "GUIDE_B", "chrom": "chr9", "pos": "2", "strand": "-"},
+            ],
+        })
+        self.assertNotIn("Multiple perfect matches", bmg)
+        self.assertIn("one per guide", bmg)
+        self.assertIn("GUIDE_A", bmg)  # guide labelled when several contribute
+        # ONE guide with 2 perfect matches -> red ambiguity even in a 2-guide vp
+        bamb = gr.render_perfect_match_banner({
+            "n_perfect": 2, "max_perfect_per_guide": 2, "n_guides_with_perfect": 1,
+            "perfect_sites": [
+                {"guide": "GUIDE_A", "chrom": "chr5", "pos": "1", "strand": "+"},
+                {"guide": "GUIDE_A", "chrom": "chr9", "pos": "2", "strand": "-"},
+            ],
+        })
+        self.assertIn("Multiple perfect matches", bamb)
+        self.assertIn("#dc2626", bamb)
+
+    def test_annotation_columns_and_legend_drop_when_absent(self):
+        """A run WITHOUT a given annotation must NOT show its all-'-' column NOR a
+        legend entry documenting a screen that never ran; a no-annotation run omits
+        Section 7 entirely."""
+        import tempfile
+        # legend gates on the resolved column keys present in `cols`
+        self.assertEqual(gr.build_annotation_legend_html({}), "")  # nothing present
+        only_cosmic = gr.build_annotation_legend_html({"cosmic": "Annotation_COSMIC"})
+        self.assertIn("COSMIC", only_cosmic)
+        self.assertNotIn("DNase", only_cosmic)  # DHS entry absent
+        # a run whose TSV carries NO annotation columns -> no COSMIC/ENCODE column,
+        # and no "7. Annotation legend" section
+        header = _HEADER[:26]  # drop GENCODE/gene/dist/ENCODE/DHS/COSMIC
+        with tempfile.TemporaryDirectory() as d:
+            tsv = os.path.join(
+                d, f"{_GUIDE}+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv"
+            )
+            with open(tsv, "w") as h:
+                h.write("\t".join(header) + "\n")
+                for row in _ROWS:
+                    h.write("\t".join(row[:26]) + "\n")
+            out = gr.build_report(
+                integrated_tsv=tsv, out_zip=os.path.join(d, "r.zip")
+            )
+            with zipfile.ZipFile(out) as zf:
+                html = zf.read("report.html").decode()
+                top = zf.read("top1000.tsv").decode().splitlines()[0].split("\t")
+        self.assertNotIn("7. Annotation legend", html)
+        self.assertNotIn("COSMIC_cancer_gene", top)
+        self.assertNotIn("GENCODE", top)
 
     def test_section6_table_shows_curated_columns_incl_annotations(self):
         _, _, extract = self._build_and_extract()

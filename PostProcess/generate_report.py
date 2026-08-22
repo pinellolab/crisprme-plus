@@ -200,12 +200,29 @@ CURATED_MISSING = "-"
 # still carries whatever MAF the source TSV had.
 _DROP_MAF = False
 
+# Annotation curated kinds that are dropped when their source column is absent from
+# the run's TSV, so a run without a given annotation (legacy no-COSMIC bundle, a
+# dict-less no-annotation run, a non-human genome) does not show an all-"-" column
+# that falsely implies the screen was performed. None => keep all (backward-compat);
+# build_report sets it to {kind : kind present in cols} for the run.
+_ANNOTATION_KINDS = frozenset(
+    {"gencode", "encode", "dhs", "cosmic", "gene_name", "gene_dist"}
+)
+_PRESENT_ANN_KINDS = None
+
 
 def _active_columns():
-    """``CURATED_COLUMNS`` minus MAF when ``_DROP_MAF`` is set."""
+    """``CURATED_COLUMNS`` minus MAF (when ``_DROP_MAF``) and minus any annotation
+    column whose source is absent from the run (when ``_PRESENT_ANN_KINDS`` is set)."""
+    cols = CURATED_COLUMNS
     if _DROP_MAF:
-        return tuple(c for c in CURATED_COLUMNS if c[1] != "maf")
-    return CURATED_COLUMNS
+        cols = tuple(c for c in cols if c[1] != "maf")
+    if _PRESENT_ANN_KINDS is not None:
+        cols = tuple(
+            c for c in cols
+            if c[1] not in _ANNOTATION_KINDS or c[1] in _PRESENT_ANN_KINDS
+        )
+    return cols
 
 # --------------------------------------------------------------------------- #
 # Column-name resolution helpers
@@ -316,17 +333,45 @@ def _to_float_series(series):
     return pd.to_numeric(series, errors="coerce")
 
 
-def crista_computed(df, cols):
-    """True when the CRISTA_score projection column exists AND has >=1 real value.
+def _scored(num):
+    """CFD/CRISTA are defined on [0,1]. Anything else -- the ``do_scores=False``
+    sentinel ``-1.000`` that the pipeline writes for non-SpCas9 / non-3nt-PAM /
+    5'-PAM nucleases (Cas12a etc.), plus NaN/None -- is 'not scored' -> None."""
+    if num is None:
+        return None
+    try:
+        if pd.isna(num):
+            return None
+        f = float(num)
+    except (TypeError, ValueError):
+        return None
+    return f if 0.0 <= f <= 1.0 else None
 
-    The stable schema always ships the CRISTA columns; a dict-less / CRISTA-off
-    run either omits them or leaves them blank. We include the CRISTA scatter
-    only when a real (numeric, non-NA) CRISTA score is present in this run.
+
+def _in_range(series):
+    """A float Series masked to [0,1]; out-of-range / unparseable -> NaN, so the
+    -1.000 not-scored sentinel never counts, sorts, or thresholds as a real score."""
+    s = _to_float_series(series)
+    return s.where((s >= 0.0) & (s <= 1.0))
+
+
+def cfd_computed(df, cols):
+    """True when the CFD column exists AND has >=1 in-range [0,1] value (i.e. real
+    scores, not the all-(-1) sentinel emitted for out-of-CFD-regime nucleases)."""
+    if "cfd" not in cols or cols["cfd"] not in df.columns:
+        return False
+    return bool(_in_range(df[cols["cfd"]]).notna().any())
+
+
+def crista_computed(df, cols):
+    """True when the CRISTA_score projection column exists AND has >=1 in-range
+    [0,1] value. The stable schema always ships the CRISTA columns; a dict-less /
+    CRISTA-off / non-SpCas9 run either omits them or fills them with the -1
+    sentinel. We include the CRISTA path only when a real score is present.
     """
     if "crista" not in cols or cols["crista"] not in df.columns:
         return False
-    vals = _to_float_series(df[cols["crista"]])
-    return bool(vals.notna().any())
+    return bool(_in_range(df[cols["crista"]]).notna().any())
 
 
 # --------------------------------------------------------------------------- #
@@ -361,13 +406,11 @@ def _curated_cell(kind, row, cols):
     elif kind == "mmb":
         v = _get("mmb")
     elif kind == "cfd":
-        raw = _get("cfd")
-        num = pd.to_numeric(raw, errors="coerce") if raw is not None else None
-        return f"{num:.4f}" if (num is not None and pd.notna(num)) else CURATED_MISSING
+        num = _scored(pd.to_numeric(_get("cfd"), errors="coerce")) if "cfd" in cols else None
+        return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "crista":
-        raw = _get("crista")
-        num = pd.to_numeric(raw, errors="coerce") if raw is not None else None
-        return f"{num:.4f}" if (num is not None and pd.notna(num)) else CURATED_MISSING
+        num = _scored(pd.to_numeric(_get("crista"), errors="coerce")) if "crista" in cols else None
+        return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "origin":
         v = _get("origin")
         if not _is_na(v):
@@ -596,6 +639,18 @@ def _read_kv_sidecar(path):
     return out
 
 
+def _normalize_genome(genome):
+    """Display form of a genome token: strip a trailing ``_ref``/``_reference``
+    marker some web/CLI configs append to the reference-genome directory name
+    (e.g. ``hg38_ref`` -> ``hg38``), so the report header shows the assembly, not
+    an internal folder suffix. Genome-agnostic (works for mm10, custom, ...)."""
+    g = str(genome or "").strip()
+    for suf in ("_reference", "_ref"):
+        if g.lower().endswith(suf) and len(g) > len(suf):
+            return g[: -len(suf)]
+    return g
+
+
 def _parse_results_filename(tsv_path):
     """Fallback summary from ``<guide>+<pam>_<ref>+<vcf>_<mm>+<bmax>_integrated_results.tsv``.
 
@@ -627,13 +682,21 @@ def _parse_results_filename(tsv_path):
             genome_vcf, mm_b = rest, ""
         if "+" in genome_vcf:
             info["genome"], vcf = genome_vcf.split("+", 1)
+            info["genome"] = _normalize_genome(info["genome"])
             # vcf like "hg38_1000G_HGDP" -> datasets after the ref token
             vcf_tokens = vcf.split("_")
             if vcf_tokens and vcf_tokens[0] == info["genome"]:
                 vcf_tokens = vcf_tokens[1:]
-            info["datasets"] = "+".join(t for t in vcf_tokens if t) or vcf
+            # drop a bare "ref"/"reference" marker (reference-only web/CLI runs
+            # name the vcf token "<genome>_ref" -> it must NOT become a dataset)
+            vcf_tokens = [
+                t for t in vcf_tokens if t and t.lower() not in ("ref", "reference")
+            ]
+            if vcf_tokens:
+                info["datasets"] = "+".join(vcf_tokens)
+            # else: leave datasets unset -> build_summary_meta -> "reference only"
         else:
-            info["genome"] = genome_vcf
+            info["genome"] = _normalize_genome(genome_vcf)
         if "+" in mm_b:
             info["mm"], info["bmax"] = mm_b.split("+", 1)
     except ValueError:
@@ -677,12 +740,12 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
 
     pam = params.get("Pam") or fn.get("pam") or "n/a"
     nuclease = params.get("Nuclease") or "n/a"
-    genome = (
+    genome = _normalize_genome(
         params.get("Genome_selected")
         or params.get("Genome_ref")
         or fn.get("genome")
-        or "n/a"
-    )
+        or ""
+    ) or "n/a"
     datasets = fn.get("datasets")
     if not datasets:
         idx = params.get("Genome_idx", "")
@@ -851,8 +914,10 @@ def render_inputs_criteria(meta, variant_created_name=None):
          "and intergenic. CRISPRme applies no allele-frequency threshold; any "
          "pre-filtering of the input database is the sponsor's."),
         ("Allele-frequency basis",
-         f"Combined-panel minor/alternate allele frequency (AC/AN) over the merged "
-         f"{_esc(ds)} genotyped panel. Per-dataset and per-superpopulation "
+         f"Combined-panel minor/alternate allele frequency over the merged "
+         f"{_esc(ds)} panel: for genotyped databases this is AC/AN across the "
+         f"panel; a frequency-only database contributes its reported population "
+         f"allele frequency directly. Per-dataset and per-superpopulation "
          f"frequencies are available in the interactive website."),
         ("Off-target search criteria",
          f"Sites where a variant increases homology to the guide by reducing "
@@ -963,6 +1028,53 @@ def render_summary_and_matrix(meta, spec_score, matrix):
 # --------------------------------------------------------------------------- #
 # samplesID -> superpopulation mapping (for the simplified population plot)
 # --------------------------------------------------------------------------- #
+def _iter_samplesid_files(samplesid_dir):
+    """All samplesID files under EITHER naming convention, deduped and sorted:
+
+      * the finalized install layout ``<genome>_<db...>.samplesID.txt`` (e.g.
+        ``hg38_1000G.samplesID.txt``, ``hg38_1000G_HGDP.samplesID.txt``) -- this
+        is what a real install actually carries (setup_legacy_database.py renames
+        the download to this form); AND
+      * the classic/download name ``samplesID*.txt`` (e.g. ``samplesIDs.1000G.txt``).
+
+    Config sidecars (``*.config.*``) are skipped. The old superpop loader only
+    matched the second form, so on a real ``hg38_*.samplesID.txt`` install the
+    superpopulation plot silently went blank -- this locator fixes that.
+    """
+    if not samplesid_dir or not os.path.isdir(samplesid_dir):
+        return []
+    seen, out = set(), []
+    for pat in ("*.samplesID.txt", "samplesID*.txt"):
+        for path in glob.glob(os.path.join(samplesid_dir, pat)):
+            if ".config." in os.path.basename(path):
+                continue
+            if path not in seen:
+                seen.add(path)
+                out.append(path)
+    return sorted(out)
+
+
+def _samplesid_dataset_label(basename):
+    """``(label, n_tokens)`` for a samplesID filename, or ``None`` if not a per-db
+    sample list. ``n_tokens`` is the dataset-token count -- LOWER = more specific
+    (a native per-db file), so the caller keeps the most-specific label per sample.
+    Handles both ``<genome>_<db...>.samplesID.txt`` and classic ``samplesIDs.<db>.txt``.
+    """
+    if basename.endswith(".samplesID.txt"):
+        base = basename[: -len(".samplesID.txt")]
+        parts = base.split("_")
+        if len(parts) < 2:
+            return None  # need <genome>_<db...>
+        return "_".join(parts[1:]), len(parts) - 1  # drop the genome token
+    if basename.startswith("samplesID") and basename.endswith(".txt"):
+        # classic samplesIDs.<db>.txt -> a single native db
+        segs = basename[: -len(".txt")].split(".")
+        if len(segs) < 2 or not segs[1]:
+            return None
+        return ".".join(segs[1:]), 1
+    return None
+
+
 def load_sample_superpop(samplesid_dir, datasets_hint=""):
     """sample_id -> SUPERPOPULATION_ID, loaded from any samplesID files present.
 
@@ -972,15 +1084,14 @@ def load_sample_superpop(samplesid_dir, datasets_hint=""):
     per-dataset (1000G vs HGDP) provenance.
     """
     mapping = {}
-    if not samplesid_dir or not os.path.isdir(samplesid_dir):
-        return mapping
-    for path in sorted(glob.glob(os.path.join(samplesid_dir, "samplesID*.txt"))):
+    for path in _iter_samplesid_files(samplesid_dir):
         try:
             with open(path) as handle:
-                handle.readline()  # header
                 for line in handle:
+                    if line.startswith("#"):
+                        continue  # header (either #-prefixed or a blank first line)
                     parts = line.rstrip("\n").split("\t")
-                    if len(parts) >= 3 and parts[0]:
+                    if len(parts) >= 3 and parts[0] and parts[0].upper() != "SAMPLE_ID":
                         mapping[parts[0]] = parts[2]
         except OSError:
             continue
@@ -997,16 +1108,12 @@ def load_sample_dataset(samplesid_dir):
     The genome token (first ``_`` segment) is stripped to form the label. Returns
     ``{}`` when no samplesID files are resolvable (caller falls back to a heuristic).
     """
-    if not samplesid_dir or not os.path.isdir(samplesid_dir):
-        return {}
     best = {}  # sample_id -> (n_tokens, label)
-    for path in sorted(glob.glob(os.path.join(samplesid_dir, "*.samplesID.txt"))):
-        base = os.path.basename(path)[: -len(".samplesID.txt")]
-        parts = base.split("_")
-        if len(parts) < 2:
-            continue  # need <genome>_<db...>
-        label = "_".join(parts[1:])  # drop the genome token
-        n_tokens = len(parts) - 1
+    for path in _iter_samplesid_files(samplesid_dir):
+        parsed = _samplesid_dataset_label(os.path.basename(path))
+        if parsed is None:
+            continue
+        label, n_tokens = parsed
         try:
             with open(path) as handle:
                 for line in handle:
@@ -1112,6 +1219,10 @@ def _cfd_style_scatter(
         np.sqrt(np.clip(work["AF"], 0, None) * 1000 + 0.001 * 1000) + 6.0,
         np.where(work["_has_variant"], 12.0, np.nan),
     )
+    # marker sizes must be finite: a reference off-target (no AF, no variant) gets
+    # NaN above, which would crash fig.savefig (reference-only runs). NaN -> a small
+    # visible marker.
+    work["plot_AF"] = np.nan_to_num(np.asarray(work["plot_AF"], dtype=float), nan=6.0)
     work["ref_AF"] = np.sqrt(np.clip(1 - work["AF"], 0, None) * 1000)
 
     y_ref = _to_float_series(work[ref_key]) if ref_key in work.columns else None
@@ -1122,6 +1233,12 @@ def _cfd_style_scatter(
         y_ref = y_combined
     if y_alt is None:
         y_alt = y_combined
+    # nothing scoreable in [0,1] (e.g. the -1 sentinel for a non-CFD-regime nuclease)
+    # -> raise so the caller renders a labeled placeholder, not an empty off-axis plot.
+    _yr = y_ref if y_ref is not None else pd.Series([], dtype=float)
+    _ya = y_alt if y_alt is not None else pd.Series([], dtype=float)
+    if not (_in_range(_yr).notna().any() or _in_range(_ya).notna().any()):
+        raise ValueError(f"no valid {score_name} score to plot")
 
     transparent_red = "#e5323280"
     transparent_blue = "#2b6cb080"
@@ -1367,11 +1484,14 @@ def plot_population(df, cols, sample_superpop, sample_dataset=None):
                 sid = sid.strip()
                 if _is_na(sid):
                     continue
-                _prov = _ds.get(sid) or _dataset_of(sid)  # provenance from the files
                 if use_superpop:
-                    grp = sample_superpop.get(sid) or _prov
+                    # keep the superpopulation axis pure: a sample with no
+                    # superpop mapping goes to "unknown", NOT a dataset name (which
+                    # would read as if a dataset were a superpopulation). With the
+                    # samplesID-glob fix this fallback is rarely hit.
+                    grp = sample_superpop.get(sid) or "unknown"
                 else:
-                    grp = _prov
+                    grp = _ds.get(sid) or _dataset_of(sid)  # native provenance
                 seen.add(grp)
             for grp in seen:
                 group_counts[grp] = group_counts.get(grp, 0) + 1
@@ -1458,7 +1578,10 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
         _to_int_series(offt[cols["mmb"]])
         if "mmb" in cols else pd.Series(10 ** 6, index=offt.index)
     )
-    has_crista = crista.notna().any()
+    # unparseable mmb -> -1 (from _to_int_series); clamp to a large sentinel so it is
+    # neither hard-included (mmb <= floor) nor ranked most-severe (mmb asc rank=1)
+    mmb = mmb.where(mmb >= 0, 10 ** 6)
+    has_crista = ((crista >= 0) & (crista <= 1)).any()
 
     # per-metric ranks (rank 1 == worst). ascending flag flips per direction:
     #   desc metric -> higher is worse -> rank ascending=False
@@ -1518,29 +1641,41 @@ def build_validation_panel(df, cols):
     # Perfect matches (0 mm + 0 bulge): distinct candidate cut sites. With >1 there
     # is no a-priori on-target, so these drive the red warning banner + panel.
     perfect_sites = []
+    perfect_by_guide = {}
     if bool(ontarget.any()):
         seen = set()
+        gcol = cols.get("guide")
         for _, r in df[ontarget].iterrows():
             c = str(r[cols["chrom"]]) if "chrom" in cols else "?"
             p = str(r[cols["pos"]]) if "pos" in cols else "?"
             s = str(r[cols["strand"]]) if "strand" in cols else ""
-            if (c, p, s) not in seen:
-                seen.add((c, p, s))
-                perfect_sites.append({"chrom": c, "pos": p, "strand": s})
+            g = str(r[gcol]) if gcol and gcol in df.columns else ""
+            # dedup per (guide, locus): in a MULTI-guide run each guide has its own
+            # on-target -- ambiguity is per-guide, not across guides.
+            if (g, c, p, s) not in seen:
+                seen.add((g, c, p, s))
+                perfect_sites.append(
+                    {"guide": g, "chrom": c, "pos": p, "strand": s}
+                )
+                perfect_by_guide[g] = perfect_by_guide.get(g, 0) + 1
 
-    cfd = _to_float_series(offt[cols["cfd"]]) if "cfd" in cols else pd.Series([], dtype=float)
-    mmb = _to_int_series(offt[cols["mmb"]]) if "mmb" in cols else pd.Series([], dtype=int)
+    # INDEX-ALIGNED sentinel fallbacks (mirror select_worstcase_panel): a length-0
+    # Series here would make (cfd>=t)/(mmb<=t) length-0 and raise "wrong length"
+    # (ValueError) that silently wipes the entire Section-4 validation panel for a
+    # CRISTA-only / mm+b-only / CFD-skipped run. Full-length sentinels -> empty tiers.
+    cfd = _to_float_series(offt[cols["cfd"]]) if "cfd" in cols else pd.Series(-1.0, index=offt.index)
+    mmb = _to_int_series(offt[cols["mmb"]]) if "mmb" in cols else pd.Series(10 ** 6, index=offt.index)
     crista = (
         _to_float_series(offt[cols["crista"]]) if "crista" in cols
-        else pd.Series([], dtype=float)
+        else pd.Series(np.nan, index=offt.index)
     )
     var_off = variant[~ontarget]
 
     cfd_counts = [(t, int((cfd >= t).sum())) for t in CFD_THRESHOLDS]
-    mmb_counts = [(t, int((mmb <= t).sum())) for t in MMB_THRESHOLDS]
+    mmb_counts = [(t, int(((mmb >= 0) & (mmb <= t)).sum())) for t in MMB_THRESHOLDS]
     crista_counts = (
         [(t, int((crista >= t).sum())) for t in CRISTA_THRESHOLDS]
-        if "crista" in cols and crista.notna().any() else []
+        if "crista" in cols and ((crista >= 0) & (crista <= 1)).any() else []
     )
 
     n_variant = int(var_off.sum())
@@ -1578,6 +1713,13 @@ def build_validation_panel(df, cols):
         "tiers": tiers,
         "n_perfect": len(perfect_sites),
         "perfect_sites": perfect_sites,
+        # per-guide multiplicity: the red "no unambiguous on-target" banner fires
+        # only when a SINGLE guide has >= 2 perfect matches (a multi-guide run with
+        # one perfect match each is normal, not ambiguous).
+        "max_perfect_per_guide": (
+            max(perfect_by_guide.values()) if perfect_by_guide else 0
+        ),
+        "n_guides_with_perfect": len(perfect_by_guide),
     }
 
 
@@ -1614,7 +1756,7 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crista=None):
             "filename": _tier_filename(f"cfd_{t:.2f}"),
             "df": sub,
         })
-    if crista is not None and "crista" in cols and crista.notna().any():
+    if crista is not None and "crista" in cols and ((crista >= 0) & (crista <= 1)).any():
         for t in CRISTA_THRESHOLDS:
             sub = offt[(crista >= t).values]
             tiers.append({
@@ -1624,7 +1766,9 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crista=None):
                 "df": sub,
             })
     for t in MMB_THRESHOLDS:
-        sub = offt[(mmb <= t).values]
+        # mask invalid mmb (_to_int_series maps unparseable -> -1; -1 <= t would
+        # falsely pull a garbage site into EVERY low-edit tier + the panel)
+        sub = offt[((mmb >= 0) & (mmb <= t)).values]
         tiers.append({
             "key": f"mmb_{t}",
             "label": f"mismatches + bulges &le; {t}",
@@ -1989,16 +2133,20 @@ def _asset_data_uri(name):
 # Annotation legend (Section 7): plain-language meaning of every annotation
 # column value, so a reviewer never has to guess what "dELS" or "Tier1_TSG" is.
 _ANNOTATION_LEGEND = [
-    ("GENCODE", "Gene-model context of the site: <code>exon</code>, "
-     "<code>CDS</code> (protein-coding sequence), <code>UTR</code>, "
-     "<code>transcript</code>, <code>start_codon</code>/"
-     "<code>stop_codon</code>, or <code>intergenic</code> when outside genes."),
-    ("DHS", "DNase I Hypersensitive Site &mdash; a region of open, accessible "
+    ("gencode", "GENCODE", "Gene-model context of the site as labeled by the "
+     "supplied GENCODE annotation: commonly <code>exon</code>, <code>CDS</code> "
+     "(protein-coding sequence), <code>UTR</code>, <code>transcript</code>, "
+     "<code>start_codon</code>/<code>stop_codon</code>, or <code>intergenic</code> "
+     "(outside annotated genes); other feature terms (e.g. <code>protein_coding</code>, "
+     "<code>intron</code>, <code>lincRNA</code>) may appear depending on the bundle."),
+    ("dhs", "DHS", "DNase I Hypersensitive Site &mdash; a region of open, accessible "
      "chromatin (often regulatory), labeled by the tissue / organ system in "
      "which it is active (e.g. <code>Lymphoid</code>, <code>Neural</code>, "
      "<code>Tissue_invariant</code>)."),
-    ("ENCODE (SCREEN v4 cCREs)", "Candidate <i>cis</i>-regulatory elements from "
-     "the ENCODE SCREEN v4 registry. Classes:<ul>"
+    ("encode", "ENCODE / functional region", "Functional-region annotation "
+     "(the built-in bundle uses ENCODE SCREEN v4 candidate <i>cis</i>-regulatory "
+     "elements; a custom functional-region BED is reported in this column too). "
+     "SCREEN v4 cCRE classes:<ul>"
      "<li><b>PLS</b> &mdash; promoter-like signature (at a transcription start "
      "site).</li>"
      "<li><b>pELS</b> &mdash; proximal enhancer-like signature (near a TSS, "
@@ -2013,7 +2161,7 @@ _ANNOTATION_LEGEND = [
      "<li><b>CA</b> &mdash; chromatin-accessible only.</li>"
      "<li><b>TF</b> &mdash; transcription-factor binding only (no high "
      "accessibility).</li></ul>"),
-    ("COSMIC (Cancer Gene Census)", "The off-target lies in a gene catalogued in "
+    ("cosmic", "COSMIC (Cancer Gene Census)", "The off-target lies in a gene catalogued in "
      "the COSMIC Cancer Gene Census &mdash; a curated list of genes causally "
      "implicated in cancer. Labels combine a confidence <b>tier</b> and the "
      "gene's documented <b>role(s)</b>:<ul>"
@@ -2030,12 +2178,30 @@ _ANNOTATION_LEGEND = [
 ]
 
 
-def build_annotation_legend_html():
-    """Render the annotation legend (Section 7) as a definition list."""
+def build_annotation_legend_html(cols=None, df=None):
+    """Render the annotation legend (Section 7). Only include an entry when its
+    backing annotation column is actually present in this run (and, when ``df`` is
+    given, carries at least one real value), so a run WITHOUT a given annotation is
+    never falsely documented (e.g. a legacy/no-COSMIC or non-human/custom-genome
+    run must not print a COSMIC Cancer Gene Census glossary). Returns "" when no
+    entry qualifies, so the caller omits the whole section. ``cols=None`` keeps the
+    legacy full legend (backward-compatible)."""
+    def _active(key):
+        if cols is None:
+            return True
+        if key not in cols:
+            return False
+        if df is not None and cols[key] in df.columns:
+            return bool(df[cols[key]].map(lambda v: not _is_na(v)).any())
+        return True
+
+    entries = [(t, d) for (k, t, d) in _ANNOTATION_LEGEND if _active(k)]
+    if not entries:
+        return ""
     items = "".join(
         '<div class="legend-item"><div class="legend-term">%s</div>'
         '<div class="legend-def">%s</div></div>' % (term, definition)
-        for term, definition in _ANNOTATION_LEGEND
+        for term, definition in entries
     )
     return (
         '<p class="caption">What the annotation columns in the table above (and '
@@ -2051,31 +2217,44 @@ def render_perfect_match_banner(vp):
 
     A guide with several perfect genomic matches has no a-priori on-target -- each
     is an equally-efficient candidate cut site, and a perfect-match OFF-target is
-    the highest-risk class. ``>= 2`` renders a red "no unambiguous on-target"
-    warning; exactly ``1`` renders an amber "presumed on-target" note; ``0`` an
-    empty string. The sites are listed so the reader sees exactly where they are.
+    the highest-risk class. The red "no unambiguous on-target" warning fires only
+    when a SINGLE guide has ``>= 2`` perfect matches (``max_perfect_per_guide``);
+    a multi-guide run with exactly one perfect match per guide is NORMAL and gets
+    the amber "presumed on-target(s)" note. ``0`` perfect matches -> empty string.
     """
     n = int(vp.get("n_perfect", 0) or 0)
     sites = vp.get("perfect_sites", []) or []
+    # per-guide multiplicity drives ambiguity; default to n for legacy vp dicts
+    max_pg = int(vp.get("max_perfect_per_guide", n) or 0)
+    n_guides = int(vp.get("n_guides_with_perfect", 1) or 1)
     if n <= 0:
         return ""
 
+    multi_guide = n_guides > 1
+
     def _fmt(s):
         strand = f" ({_esc(str(s.get('strand', '')))})" if s.get("strand") else ""
-        return f"{_esc(str(s.get('chrom', '?')))}:{_esc(str(s.get('pos', '?')))}{strand}"
+        loc = f"{_esc(str(s.get('chrom', '?')))}:{_esc(str(s.get('pos', '?')))}{strand}"
+        # label the guide when several guides contribute perfect matches
+        if multi_guide and s.get("guide"):
+            return f"{_esc(str(s.get('guide')))} &rarr; {loc}"
+        return loc
 
     site_list = ", ".join(_fmt(s) for s in sites[:20])
     if len(sites) > 20:
         site_list += ", &hellip;"
 
-    if n >= 2:
+    if max_pg >= 2:
+        lead = (
+            "One or more guides match" if multi_guide else "This guide matches"
+        )
         return (
             '<div style="border:2px solid #dc2626;background:#fef2f2;'
             'padding:0.9em 1.1em;margin:1em 0;border-radius:6px">'
             '<p style="margin:0 0 0.4em;color:#991b1b;font-size:1.05em">'
             "<strong>&#9888; Multiple perfect matches &mdash; no unambiguous "
             "on-target.</strong></p>"
-            f'<p style="margin:0">This guide matches <strong>{n}</strong> genomic '
+            f'<p style="margin:0">{lead} <strong>multiple</strong> genomic '
             "sites with <strong>0 mismatches and 0 bulges</strong>. The intended "
             "on-target cannot be determined from sequence alone &mdash; "
             "<strong>every one is a candidate cut site</strong> (a perfect-match "
@@ -2084,12 +2263,22 @@ def render_perfect_match_banner(vp):
             "<code>Perfect_match&nbsp;=&nbsp;Yes</code> in the tables. "
             f"Sites: {site_list}.</p></div>"
         )
+    # each guide has exactly one perfect match (one guide, or one-per-guide)
+    if n == 1:
+        lead_txt = (
+            "one genomic site matches with 0 mismatches / 0 bulges "
+            f"({site_list}) &mdash; the presumed on-target"
+        )
+    else:
+        lead_txt = (
+            f"{n} genomic sites match with 0 mismatches / 0 bulges, one per guide "
+            f"({site_list}) &mdash; the presumed on-target of each guide"
+        )
     return (
         '<div style="border-left:4px solid #d97706;background:#fffbeb;'
         'padding:0.6em 0.9em;margin:1em 0">'
-        "<p style=\"margin:0\"><strong>Perfect match:</strong> one genomic site "
-        f"matches with 0 mismatches / 0 bulges ({site_list}) &mdash; the presumed "
-        "on-target, included in the validation panel and flagged "
+        f"<p style=\"margin:0\"><strong>Perfect match:</strong> {lead_txt}, "
+        "included in the validation panel and flagged "
         "<code>Perfect_match&nbsp;=&nbsp;Yes</code>.</p></div>"
     )
 
@@ -2099,7 +2288,7 @@ def render_html(
     table_html, tsv_gz_name, top1000_name, footer_html,
     panel_top100_name=None, tier_downloads=None,
     hvdr_bundle_name=None, hvdr_n_regions=0, perfect_banner="",
-    table_crista_html="", inputs_criteria_html="",
+    table_crista_html="", inputs_criteria_html="", legend_html=None,
 ):
     scatter_html = []
     for title, caption, uri in scatter_panels:
@@ -2176,7 +2365,12 @@ def render_html(
     bg_style = (f"<style>body {{ background-image: url('{bg_uri}');"
                 f" background-repeat: repeat; background-size: 640px 640px; }}</style>"
                 if bg_uri else "")
-    legend_html = build_annotation_legend_html()
+    if legend_html is None:
+        legend_html = build_annotation_legend_html()
+    # omit the whole "7. Annotation legend" section when no annotation is present
+    legend_section = (
+        f"\n<h2>7. Annotation legend</h2>\n{legend_html}" if legend_html else ""
+    )
     crista_block = ""
     if table_crista_html:
         crista_block = (
@@ -2250,8 +2444,7 @@ locally with <code>crisprme.py web-interface</code>.</p>
 {table_html}
 {crista_block}
 
-<h2>7. Annotation legend</h2>
-{legend_html}
+{legend_section}
 
 {footer_html}
 
@@ -2420,6 +2613,10 @@ def build_report(
         low_memory=False,
     )
     cols = _resolve(df.columns, list(_COLS.keys()))
+    # drop annotation curated columns whose source is absent from THIS run (no
+    # all-"-" COSMIC/ENCODE/... column implying a screen that was never performed)
+    global _PRESENT_ANN_KINDS
+    _PRESENT_ANN_KINDS = {k for k in _ANNOTATION_KINDS if k in cols}
 
     # De-duplicate REFERENCE off-target rows (locus-completeness can emit the same
     # variant-independent reference site once per co-located haplotype). Applied to
@@ -2652,6 +2849,7 @@ def build_report(
         perfect_banner=perfect_banner,
         table_crista_html=table_crista_html,
         inputs_criteria_html=inputs_criteria_html,
+        legend_html=build_annotation_legend_html(cols, df),
     )
 
     # ---- stage the remaining files and zip -j (flat) -----------------------
