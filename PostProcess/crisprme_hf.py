@@ -95,6 +95,42 @@ def canonical_index_name(index_name: str) -> str:
     return base + plus + vcf
 
 
+def _ensure_search_lists(workdir, vcf_name):
+    """Make a downloaded variant index searchable from the CLI out of the box.
+
+    The web form builds the per-search VCF / samplesID lists automatically; a CLI
+    ``crisprme.py complete-search`` instead reads them from the ``--vcf`` /
+    ``--samplesID`` list files. A fresh ``download --what index`` installs the
+    index, registry and combined samplesID but NOT those small list files, so a
+    CLI search previously required the user to hand-write them (and to know the
+    internal dataset name). Create/extend them here: append this dataset to
+    ``list_vcf.txt`` and its combined samplesID to ``list_samplesID.txt`` at the
+    install root. Idempotent (each dataset added once), so installing several
+    indexes accumulates them. Guarded, STDOUT-only, never fatal -- an optional
+    convenience file, exactly like the combined samplesID.
+    """
+    try:
+        entries = [("list_vcf.txt", vcf_name)]
+        sid_name = f"{vcf_name}.samplesID.txt"
+        if os.path.isfile(os.path.join(workdir, "samplesIDs", sid_name)):
+            entries.append(("list_samplesID.txt", sid_name))
+        for fname, value in entries:
+            path = os.path.join(workdir, fname)
+            lines = []
+            if os.path.isfile(path):
+                with open(path) as handle:
+                    lines = [ln.strip() for ln in handle if ln.strip()]
+            if value not in lines:
+                lines.append(value)
+                with open(path, "w") as handle:
+                    handle.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        sys.stdout.write(
+            f"NOTE: could not write CLI search lists for '{vcf_name}' ({exc}); "
+            f"create list_vcf.txt / list_samplesID.txt manually for CLI searches.\n"
+        )
+
+
 def synthesize_combined_samplesid(workdir, vcf_name, ref="hg38"):
     """Generate ``samplesIDs/<vcf_name>.samplesID.txt`` for a merged dataset when
     it is missing but the per-db component files are present (GAP 2).
@@ -768,6 +804,10 @@ def download_component(
                     f"from per-dataset lists in "
                     f"{os.path.join(workdir, 'samplesIDs')}\n"
                 )
+            # Make the index searchable from the CLI out of the box: name this
+            # dataset + its samples in the --vcf / --samplesID list files the web
+            # builds per-search but a CLI complete-search reads from disk.
+            _ensure_search_lists(workdir, vcf_name)
         return os.path.join(local_dir, install_name)
 
     # flat components: annotations, pams, samples
