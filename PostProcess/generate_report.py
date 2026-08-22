@@ -115,8 +115,8 @@ REPORT_GENERATOR_VERSION = "2.4"
 # --------------------------------------------------------------------------- #
 # Recommended-validation-panel thresholds (module-level constants, section 4)
 # --------------------------------------------------------------------------- #
-CFD_THRESHOLDS = (0.5, 0.2, 0.1, 0.05)
-CRISTA_THRESHOLDS = (0.5, 0.2, 0.1, 0.05)  # same as CFD (both 0-1); used when CRISTA computed
+CFD_THRESHOLDS = (0.5, 0.2, 0.05)
+CRISTA_THRESHOLDS = (0.5, 0.2, 0.05)  # same as CFD (both 0-1); used when CRISTA computed
 MMB_THRESHOLDS = (1, 2, 3, 4)
 # threshold-table variant-created CFD floor (kept for the full threshold table)
 PANEL_VARIANT_CFD_MIN = 0.05

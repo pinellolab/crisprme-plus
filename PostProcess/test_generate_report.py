@@ -202,9 +202,10 @@ class TestGenerateReport(unittest.TestCase):
         _, names, _ = self._build_and_extract()
         # report v2.4 bundles the RAW gz + the curated top1000/panel + every
         # NON-EMPTY per-tier curated TSV. For this fixture (5 off-targets):
-        #   CFD>= 0.5/0.2/0.1/0.05 -> 3/5/5/5 (all non-empty)
-        #   mm+b<= 1/2/3/4         -> 0/2/4/5 (mmb_le_1 is EMPTY -> not bundled)
-        #   variant_created        -> 3
+        #   CFD>= 0.5/0.2/0.05  -> all non-empty (0.1 tier removed)
+        #   CRISTA>= 0.5/0.2/0.05 -> all non-empty (fixture has CRISTA)
+        #   mm+b<= 1/2/3/4      -> 0/2/4/5 (mmb_le_1 is EMPTY -> not bundled)
+        #   variant_created     -> 3
         self.assertEqual(
             sorted(names),
             sorted([
@@ -215,11 +216,9 @@ class TestGenerateReport(unittest.TestCase):
                 "panel_top100.tsv",
                 "cfd_ge_0.50.tsv",
                 "cfd_ge_0.20.tsv",
-                "cfd_ge_0.10.tsv",
                 "cfd_ge_0.05.tsv",
                 "crista_ge_0.50.tsv",  # CRISTA tiers, symmetric with CFD (fixture has CRISTA)
                 "crista_ge_0.20.tsv",
-                "crista_ge_0.10.tsv",
                 "crista_ge_0.05.tsv",
                 "mmb_le_2.tsv",
                 "mmb_le_3.tsv",
@@ -240,7 +239,7 @@ class TestGenerateReport(unittest.TestCase):
         # every bundled per-tier / panel / top1000 TSV uses the SAME curated header
         for fname in (
             "top1000.tsv", "panel_top100.tsv",
-            "cfd_ge_0.50.tsv", "cfd_ge_0.20.tsv", "cfd_ge_0.10.tsv",
+            "cfd_ge_0.50.tsv", "cfd_ge_0.20.tsv",
             "cfd_ge_0.05.tsv", "mmb_le_2.tsv", "mmb_le_3.tsv", "mmb_le_4.tsv",
             "variant_created.tsv",
         ):
@@ -523,10 +522,11 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("fill", html.lower())
         self.assertIn("worst by ANY single", html)
         self.assertIn("NO category quota", html)
-        # the FULL threshold table is kept (CFD>= {0.5,0.2,0.1,0.05},
+        # the FULL threshold table is kept (CFD>= {0.5,0.2,0.05},
         # mm+b<= {1,2,3,4})
-        for t in ("0.5", "0.2", "0.1", "0.05"):
+        for t in ("0.5", "0.2", "0.05"):
             self.assertIn(f"CFD &ge; {t}", html)
+        self.assertNotIn("CFD &ge; 0.1", html)  # 0.1 tier removed
         for t in ("1", "2", "3", "4"):
             self.assertIn(f"mismatches + bulges &le; {t}", html)
         # of the selected panel, 3 are variant-created (the fixture has exactly 3)
