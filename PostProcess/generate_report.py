@@ -2014,14 +2014,17 @@ def render_html(
         )
 
     logo_uri = _asset_data_uri("crisprme-logo.png")
-    # a right-sized seamless tile for the report (~320 KB); fall back to the full
-    # web-UI tile (~3.5 MB) only if the report-sized one isn't bundled.
-    bg_uri = (_asset_data_uri("crisprme_bg_report.png")
+    # High-resolution seamless tile (1254px, ~0.85 MB JPEG) shown at 640px via
+    # background-size, so the pattern keeps its density but stays crisp on
+    # high-DPI/retina screens (the old 640px PNG was upscaled ~2x and looked soft).
+    # Fall back to the full web-UI PNG tile if the report JPEG isn't bundled.
+    bg_uri = (_asset_data_uri("crisprme_bg_report.jpg")
               or _asset_data_uri("crisprme_bg_tile.png"))
     logo_html = (f'<img class="logo" src="{logo_uri}" alt="CRISPRme+ logo">'
                  if logo_uri else "")
     bg_style = (f"<style>body {{ background-image: url('{bg_uri}');"
-                f" background-repeat: repeat; }}</style>" if bg_uri else "")
+                f" background-repeat: repeat; background-size: 640px 640px; }}</style>"
+                if bg_uri else "")
     legend_html = build_annotation_legend_html()
 
     return f"""<!DOCTYPE html>
