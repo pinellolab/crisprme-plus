@@ -821,6 +821,52 @@ def build_mmb_matrix(df, cols, meta):
     return {"mm_cols": mm_cols, "groups": groups}
 
 
+def render_inputs_criteria(meta):
+    """'Analysis inputs & criteria' box (FDA off-target guidance VII.F.i / F.ii).
+
+    States, in one place, the variant database(s), the variant inclusion policy
+    (all common + rare, genic + intergenic, no CRISPRme-applied AF threshold), the
+    allele-frequency basis, and the off-target search criteria (variant homology
+    gain via fewer mismatches / lowered gaps + variant-created PAM detection). The
+    scientific justification for the choices remains the sponsor's.
+    """
+    ds = meta.get("datasets", "n/a")
+    mm = meta.get("mm", "n/a")
+    bdna, brna = meta.get("bdna"), meta.get("brna")
+    bulges = f"{bdna if bdna is not None else 'n/a'} / {brna if brna is not None else 'n/a'}"
+    max_edits = meta.get("max_edits", "n/a")
+    rows = [
+        ("Variant database(s)", _esc(ds)),
+        ("Variants included",
+         "All variants present in the database(s) &mdash; common and rare, genic "
+         "and intergenic. CRISPRme applies no allele-frequency threshold; any "
+         "pre-filtering of the input database is the sponsor's."),
+        ("Allele-frequency basis",
+         f"Combined-panel minor/alternate allele frequency (AC/AN) over the merged "
+         f"{_esc(ds)} genotyped panel. Per-dataset and per-superpopulation "
+         f"frequencies are available in the interactive website."),
+        ("Off-target search criteria",
+         f"Sites where a variant increases homology to the guide by reducing "
+         f"mismatches (up to {_esc(mm)}) and/or lowering gaps (DNA/RNA bulges up to "
+         f"{_esc(bulges)}; max total edits {_esc(max_edits)}). Variant-created PAM "
+         f"sequences are detected and flagged (<code>PAM_creation</code>)."),
+        ("Variant-contributed sites",
+         "Flagged by REF/ALT origin and <code>PAM_creation</code>; the full list is "
+         "bundled as <code>variant_created.tsv</code>."),
+    ]
+    body = "".join(f'<tr><td class="k">{k}</td><td>{v}</td></tr>' for k, v in rows)
+    return (
+        '<div class="inputs-card" style="margin-top:1em;padding:14px 18px;'
+        'background:#f7fafc;border:1px solid #cbd5e0;border-radius:10px">'
+        '<div class="matrix-title">Analysis inputs &amp; criteria</div>'
+        f'<table class="summary-table"><tbody>{body}</tbody></table>'
+        '<p class="caption">Provided to support an off-target analysis accounting '
+        "for human genetic variation. The scientific justification for the database "
+        "choice, any allele-frequency threshold, and any population stratification "
+        "is the sponsor&rsquo;s to provide.</p></div>"
+    )
+
+
 def render_summary_and_matrix(meta, spec_score, matrix):
     """Section 1 HTML: header card (left) + MM/B matrix (right)."""
     bdna = meta["bdna"]
@@ -902,6 +948,7 @@ def render_summary_and_matrix(meta, spec_score, matrix):
     match is reported here and forced to the top of the validation panel below.</p>
   </div>
 </div>
+{render_inputs_criteria(meta)}
 """
 
 
@@ -1520,7 +1567,7 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb):
         })
     tiers.append({
         "key": "variant_created",
-        "label": "variant-created off-targets",
+        "label": "variant-contributed off-target sites (variant-created)",
         "filename": "variant_created.tsv",
         "df": offt[var_off.values],
     })
@@ -2104,6 +2151,14 @@ the links resolve after unzipping on any machine. The top-1000 TSV, the panel,
 and the per-tier subsets share the SAME curated, readable columns as the table
 below; the complete integrated results (all columns) stays as the raw
 <code>{_esc(tsv_gz_name)}</code>.{panel_caption}{tier_caption}</p>
+
+<p class="caption" style="border-left:4px solid #2b6cb0;padding-left:0.7em;background:#eef6ff">
+<strong>Need more detail?</strong> The interactive CRISPRme+ web interface goes beyond
+this static report: it can generate a <strong>personalized off-target report for any
+individual included in the variant panel</strong> (using that person's specific
+genotypes), let you explore per-sample and per-population results interactively, and
+run analyses against a <strong>custom personal genome assembly</strong>. Launch it
+locally with <code>crisprme.py web-interface</code>.</p>
 
 <h2>6. Top 1000 putative off-targets</h2>
 <h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>

@@ -211,6 +211,7 @@ class TestGenerateReport(unittest.TestCase):
                 "report.html",
                 "integrated_results.tsv.gz",
                 "top1000.tsv",
+                "top1000_crista.tsv",  # CRISTA-ranked companion (fixture has CRISTA)
                 "panel_top100.tsv",
                 "cfd_ge_0.50.tsv",
                 "cfd_ge_0.20.tsv",
