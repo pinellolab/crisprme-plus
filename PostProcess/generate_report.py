@@ -987,8 +987,46 @@ def load_sample_superpop(samplesid_dir, datasets_hint=""):
     return mapping
 
 
+def load_sample_dataset(samplesid_dir):
+    """sample_id -> native dataset label, READ FROM the per-db samplesID files.
+
+    A merged panel ships a combined ``<genome>_<db1>_<db2>...samplesID.txt`` plus
+    per-db ``<genome>_<db>.samplesID.txt`` files. Each sample is assigned the label
+    from the MOST SPECIFIC file it appears in (fewest dataset tokens) -- i.e. its
+    native per-db provenance. Fully dynamic for ANY database(s); nothing hardcoded.
+    The genome token (first ``_`` segment) is stripped to form the label. Returns
+    ``{}`` when no samplesID files are resolvable (caller falls back to a heuristic).
+    """
+    if not samplesid_dir or not os.path.isdir(samplesid_dir):
+        return {}
+    best = {}  # sample_id -> (n_tokens, label)
+    for path in sorted(glob.glob(os.path.join(samplesid_dir, "*.samplesID.txt"))):
+        base = os.path.basename(path)[: -len(".samplesID.txt")]
+        parts = base.split("_")
+        if len(parts) < 2:
+            continue  # need <genome>_<db...>
+        label = "_".join(parts[1:])  # drop the genome token
+        n_tokens = len(parts) - 1
+        try:
+            with open(path) as handle:
+                for line in handle:
+                    line = line.rstrip("\n")
+                    if not line or line.startswith("#"):
+                        continue
+                    sid = line.split("\t", 1)[0].strip()
+                    if not sid or sid.upper() == "SAMPLE_ID":
+                        continue
+                    prev = best.get(sid)
+                    if prev is None or n_tokens < prev[0]:
+                        best[sid] = (n_tokens, label)
+        except OSError:
+            continue
+    return {sid: lbl for sid, (_n, lbl) in best.items()}
+
+
 def _dataset_of(sample_id):
-    """Infer dataset provenance from an ID prefix (preserve-provenance rule)."""
+    """Last-resort dataset-provenance heuristic when the per-db samplesID files are
+    unavailable (see :func:`load_sample_dataset`, which is preferred)."""
     sid = sample_id.strip()
     if sid.startswith("HGDP"):
         return "HGDP"
@@ -1300,7 +1338,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
     return panels
 
 
-def plot_population(df, cols, sample_superpop):
+def plot_population(df, cols, sample_superpop, sample_dataset=None):
     """SECTION 3: SIMPLIFIED population view at the run's SELECTED parameters.
 
     Two panels over the FULL result set (no per-total-mm faceting):
@@ -1318,6 +1356,7 @@ def plot_population(df, cols, sample_superpop):
 
     group_counts = {}
     use_superpop = bool(sample_superpop)
+    _ds = sample_dataset or {}  # native per-db provenance (dynamic; see load_sample_dataset)
     samples_col = cols.get("samples")
     if samples_col and samples_col in df.columns:
         for raw in df.loc[variant_mask, samples_col].astype(str):
@@ -1328,12 +1367,11 @@ def plot_population(df, cols, sample_superpop):
                 sid = sid.strip()
                 if _is_na(sid):
                     continue
+                _prov = _ds.get(sid) or _dataset_of(sid)  # provenance from the files
                 if use_superpop:
-                    grp = sample_superpop.get(sid)
-                    if grp is None:
-                        grp = _dataset_of(sid)
+                    grp = sample_superpop.get(sid) or _prov
                 else:
-                    grp = _dataset_of(sid)
+                    grp = _prov
                 seen.add(grp)
             for grp in seen:
                 group_counts[grp] = group_counts.get(grp, 0) + 1
@@ -2399,6 +2437,7 @@ def build_report(
 
     fn = _parse_results_filename(integrated_tsv)
     sample_superpop = load_sample_superpop(samplesid_dir, fn.get("datasets", ""))
+    sample_dataset = load_sample_dataset(samplesid_dir)  # native per-db provenance (dynamic)
 
     top_df = select_top(df, cols, n=top_n)
 
@@ -2427,7 +2466,7 @@ def build_report(
 
     # ---- SECTION 3: population plot -----------------------------------------
     try:
-        pop_uri = plot_population(df, cols, sample_superpop)
+        pop_uri = plot_population(df, cols, sample_superpop, sample_dataset)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: population plot unavailable: {exc}\n")
         pop_uri = _placeholder_uri("Population plot unavailable")

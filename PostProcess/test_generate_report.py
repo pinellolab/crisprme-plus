@@ -345,6 +345,34 @@ class TestGenerateReport(unittest.TestCase):
         ).splitlines()[0].split("\t")
         self.assertIn("High_complexity_region", top_header)
 
+    def test_load_sample_dataset_native_provenance(self):
+        """sample -> native per-db label, read from the files (no hardcoding)."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "hg38_1000G.samplesID.txt"), "w") as h:
+                h.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+                h.write("HG00096\tGBR\tEUR\tmale\n")
+                h.write("NA19017\tLWK\tAFR\tfemale\n")
+            with open(os.path.join(d, "hg38_HGDP.samplesID.txt"), "w") as h:
+                h.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+                h.write("HGDP00001\tBrahui\tCSA\tmale\n")
+            # the combined superset must NOT override the per-db label
+            with open(os.path.join(d, "hg38_1000G_HGDP.samplesID.txt"), "w") as h:
+                h.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+                for s in ("HG00096", "NA19017", "HGDP00001"):
+                    h.write(f"{s}\tX\tY\tZ\n")
+            m = gr.load_sample_dataset(d)
+            self.assertEqual(m["HG00096"], "1000G")
+            self.assertEqual(m["NA19017"], "1000G")
+            self.assertEqual(m["HGDP00001"], "HGDP")
+        # a completely different database is labeled dynamically (never hardcoded)
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "hg38_gnomAD.samplesID.txt"), "w") as h:
+                h.write("#SAMPLE_ID\tPOP\tSUPERPOP\tSEX\n")
+                h.write("SAMPLE_X\tp\ts\tm\n")
+            self.assertEqual(gr.load_sample_dataset(d)["SAMPLE_X"], "gnomAD")
+        self.assertEqual(gr.load_sample_dataset("/nonexistent"), {})
+
     def test_bundled_tsv_gz_round_trips(self):
         _, _, extract = self._build_and_extract()
         gz = os.path.join(extract, "integrated_results.tsv.gz")
