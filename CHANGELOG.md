@@ -35,11 +35,23 @@ and the `release-crisprme` skill.
   combinations. Gated on the Tier-1 genotype store.
 - `download --what all` on hg38 also fetches the default reference index
   (`NRG_3_hg38`) so a reference-genome scan works with no on-demand index build.
+- **Turn-key CLI search after a download.** `download --what index` now writes the
+  `list_vcf.txt` / `list_samplesID.txt` list files (the ones the web form builds
+  per-search) at the install root, so `complete-search --vcf list_vcf.txt
+  --samplesID list_samplesID.txt` works out of the box — no hand-written config.
+  A "Run a search from the command line" section is added to the Docker
+  quickstart, README and the landing site, with the `generate-report` step.
 - Manuscript-level `METHODS.md` (dict-less model, VCF homogenization / merging,
   AF estimation, phased / unphased / mixed haplotype scanning, variant-density
   control, annotations, report) and README "what's new" pointers.
 
 ### Fixed
+- **Web job launch crashed on special characters in the job name.** A job name
+  with shell / path metacharacters (e.g. `SBDS(T>C)`) was interpolated raw into a
+  `mkdir` run through `/bin/sh`, aborting the launch (`Syntax error: "("
+  unexpected`, HTTP 500 in `change_url`). The name is now sanitized to a
+  filesystem/shell-safe charset, and the results directory + queue file are
+  created without a shell (`os.makedirs` / `open`).
 - **Combined allele-frequency denominator in the shipped dict-less index.** The
   registry's global panel size was built from an over-listed sample list
   (AN = 8858) rather than the VCF-resident panel (1000G 2548 + HGDP 929 = 3477 →

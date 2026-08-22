@@ -131,6 +131,10 @@ crisprme.py download --what index \
 - The **Tier-1 genotype store** is fetched automatically. Add `--no-genotypes`
   to skip the big companion: off-target **detection still works** via the Tier-0
   registry, but per-sample `Samples` are degraded until the store is present.
+- The **CLI search-list files** `list_vcf.txt` (the dataset, `hg38_1000G_HGDP`)
+  and `list_samplesID.txt` (its combined samplesID) are written at the install
+  root, so a CLI search works out of the box — the same lists the web form builds
+  per-search. Installing several variant indexes appends each dataset once.
 
 Then search, pointing at that library (or just run from `$CRISPRME_DIR`):
 
@@ -138,7 +142,7 @@ Then search, pointing at that library (or just run from `$CRISPRME_DIR`):
 crisprme.py complete-search \
   --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
   --guide my_guide.txt --mm 4 --bDNA 2 --bRNA 2 \
-  --vcf VCFs/hg38_1000G_HGDP --samplesID samplesIDs.config.txt \
+  --vcf list_vcf.txt --samplesID list_samplesID.txt \
   --index-path "$CRISPRME_DIR/genome_library" \
   --output my_search
 ```

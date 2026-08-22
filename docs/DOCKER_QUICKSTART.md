@@ -141,6 +141,49 @@ To stop the web server, press **Ctrl+C** in the terminal.
 
 ---
 
+## 8. Run a search from the command line (no browser)
+
+The same batteries install runs a search directly from the command line — handy
+for scripting or a headless server, with results identical to the web interface.
+Put your 20 nt spacer(s) in a file (one per line; CRISPRme auto-pads them to the
+PAM), then run `complete-search`. The `download --what index` step already wrote
+the `list_vcf.txt` / `list_samplesID.txt` the search reads, so from `~/crisprme`:
+
+```bash
+printf '%s\n' CTAACAGTTGCTTTTATCAC > my_guide.txt
+
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+  crisprme.py complete-search \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --guide my_guide.txt \
+    --vcf list_vcf.txt --samplesID list_samplesID.txt \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+    --gene_annotation Annotations/gencode.protein_coding.bed.gz \
+    --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
+```
+
+- `--mm` is mismatches; `--bDNA` / `--bRNA` are DNA / RNA bulges. For a wider
+  search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 5` (the same as
+  **Maximum edits = 5** in the web form; `--max-total-edits` caps the total
+  mismatches + bulges).
+- Because the index bundles 1000&nbsp;Genomes + HGDP variants, the search is
+  variant-aware with combined allele frequencies and COSMIC annotation.
+- Results land in `~/crisprme/Results/my_search/`.
+
+Build the same shareable one-file report the web **Download report** button
+produces (a self-contained `report.html` inside a ZIP):
+
+```bash
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+  crisprme.py generate-report --result-dir Results/my_search
+# -> Results/my_search/<jobid>_report.zip
+```
+
+On Singularity/Apptainer the commands are identical, wrapped as
+`apptainer exec --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif crisprme.py ...`.
+
+---
+
 ## Running on HPC with Singularity / Apptainer
 
 On a cluster you usually cannot run Docker, but Singularity/Apptainer runs the

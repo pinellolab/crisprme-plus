@@ -547,6 +547,27 @@ Key highlights of the Complete Search functionality include:
   <br>Produces user-friendly output files, including text-based tables and 
   visualization-ready graphical summaries.
 
+**Quickstart (batteries install).** After the Docker
+[quickstart](docs/DOCKER_QUICKSTART.md) download, a variant-aware search is a
+single command — `download --what index` already wrote the `list_vcf.txt` /
+`list_samplesID.txt` the search reads, and the guide is auto-padded to the PAM:
+
+```bash
+printf '%s\n' ACTGAAATCTGTAAGCAGGC > my_guide.txt
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+  crisprme.py complete-search \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --guide my_guide.txt --vcf list_vcf.txt --samplesID list_samplesID.txt \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+    --gene_annotation Annotations/gencode.protein_coding.bed.gz \
+    --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
+# shareable report: crisprme.py generate-report --result-dir Results/my_search
+```
+
+The example below shows **every** argument (a classic setup with a custom VCF
+config file and base-editing options); see the
+[CLI guide](docs/crisprme_data_setup_051826.md) for each one.
+
 Usage Example for the Complete Search function:
 - **Via Conda/Mamba**
   ```bash
