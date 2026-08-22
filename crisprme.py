@@ -1534,6 +1534,9 @@ def complete_search() -> None:
         p.write("Mismatches\t" + str(mm) + "\n")
         p.write("DNA\t" + str(bDNA) + "\n")
         p.write("RNA\t" + str(bRNA) + "\n")
+        # the binding total-edits cap the search actually used (the "Max edits" the
+        # user set): the report + web read this; without it they showed "n/a".
+        p.write("Max_total_edits\t" + str(max_total_edits) + "\n")
         p.write("Annotation\t" + str(annotation_name) + "\n")
         p.write("Nuclease\t" + str(nuclease) + "\n")
         # p.write('Gecko\t' + str(gecko_comp) + '\n')
