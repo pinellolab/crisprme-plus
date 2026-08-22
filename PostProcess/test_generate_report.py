@@ -409,9 +409,10 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn(">6MM<", html)
 
     def test_section1_matrix_reconciles_to_grand_total(self):
-        """Matrix REFERENCE+VARIANT totals == off-target partition total, and
-        REFERENCE + VARIANT + on-target == grand total (every off-target lands
-        in a cell). Bulge rows span 0..(bDNA+bRNA)=0..4, mm cols 0..6."""
+        """Matrix INCLUDES perfect matches (mm+b==0): REFERENCE + VARIANT totals
+        == grand total (every site lands in a cell), the origin split covers all
+        rows, and the perfect match(es) sit in the 0 MM / 0 B cell. Bulge rows
+        span 0..(bDNA+bRNA)=0..4, mm cols 0..6."""
         import pandas as pd
 
         df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
@@ -432,24 +433,32 @@ class TestGenerateReport(unittest.TestCase):
         # mm columns span 0..6
         self.assertEqual(matrix["mm_cols"], [0, 1, 2, 3, 4, 5, 6])
 
-        # matrix REFERENCE + VARIANT totals == canonical off-target totals
+        # matrix now INCLUDES perfect matches (mm+b==0): origin split over ALL rows
         variant, reference, ontarget = gr.partition_masks(df, cols)
+        if "not_in_ref" in cols:
+            variant_all = df[cols["not_in_ref"]].astype(str).str.strip().str.lower().eq("y")
+        else:
+            variant_all = df[cols["origin"]].astype(str).str.strip().str.lower().eq("alt")
+        reference_all = ~variant_all
         by_label = {lbl: sum(r[1] for r in rows) for lbl, rows in matrix["groups"]}
-        self.assertEqual(by_label["REFERENCE"], int(reference.sum()))
-        self.assertEqual(by_label["VARIANT"], int(variant.sum()))
+        self.assertEqual(by_label["REFERENCE"], int(reference_all.sum()))
+        self.assertEqual(by_label["VARIANT"], int(variant_all.sum()))
 
-        # every off-target lands in a cell: sum of ALL per-mm cells == off-target
-        # count; and REFERENCE + VARIANT + on-target == grand total
-        cell_sum = 0
-        for _lbl, rows in matrix["groups"]:
-            for _b, _tot, per_mm in rows:
-                cell_sum += sum(per_mm)
-        n_offtarget = int((~ontarget).sum())
-        self.assertEqual(cell_sum, n_offtarget)
-        self.assertEqual(
-            by_label["REFERENCE"] + by_label["VARIANT"] + int(ontarget.sum()),
-            len(df),
+        # every row (incl perfect matches) lands in a cell; REF+VAR == grand total
+        cell_sum = sum(
+            sum(per_mm) for _lbl, rows in matrix["groups"] for _b, _tot, per_mm in rows
         )
+        self.assertEqual(cell_sum, len(df))
+        self.assertEqual(by_label["REFERENCE"] + by_label["VARIANT"], len(df))
+
+        # the perfect match(es) appear in the 0 MM / 0 B cell
+        pm_cell = sum(
+            per_mm[0]
+            for _lbl, rows in matrix["groups"]
+            for b, _tot, per_mm in rows
+            if b == 0
+        )
+        self.assertEqual(pm_cell, int(ontarget.sum()))
 
     def test_section2_four_scatter_panels_when_crista_present(self):
         _, _, extract = self._build_and_extract()

@@ -746,8 +746,10 @@ def build_mmb_matrix(df, cols, meta):
 
     Mirrors the web result-page top matrix: columns Total, 0MM..<mm>MM; rows
     grouped REFERENCE then VARIANT, within each a row per bulge count 0..maxbulges.
-    Uses the canonical partition (variant := Not_found_in_REF=="y"; on-target
-    rows mm+b==0 are excluded from the off-target matrix).
+    Split by origin only (variant := Not_found_in_REF=="y"); PERFECT matches
+    (mm+b==0) are INCLUDED as putative off-targets in the 0MM/0B cell, because a
+    guide's intended on-target cannot be told from a perfect-match off-target a
+    priori. So REFERENCE + VARIANT matrix totals == the grand total of all sites.
 
     Extent is chosen so EVERY off-target lands in a cell:
       * bulge rows span 0..(bDNA + bRNA)  -- NOT Max_bulges, which under-counts
@@ -760,7 +762,16 @@ def build_mmb_matrix(df, cols, meta):
     ``mm_cols`` (0..mm) and ``groups`` = list of (label, [ (bulge, total, [per-mm
     counts]) ... ]).
     """
-    variant, reference, _ontarget = partition_masks(df, cols)
+    # Origin split ONLY (perfect matches mm+b==0 are kept, not excluded), so the
+    # 0MM/0B cell reports the guide's perfect genomic match(es) as putative
+    # off-targets alongside everything else.
+    if "not_in_ref" in cols:
+        variant = df[cols["not_in_ref"]].astype(str).str.strip().str.lower().eq("y")
+    elif "origin" in cols:
+        variant = df[cols["origin"]].astype(str).str.strip().str.lower().eq("alt")
+    else:
+        variant = pd.Series([False] * len(df), index=df.index)
+    reference = ~variant
 
     mm_series = _to_int_series(df[cols["mm"]]) if "mm" in cols else None
     b_series = _to_int_series(df[cols["bulges"]]) if "bulges" in cols else None
@@ -859,7 +870,14 @@ def render_summary_and_matrix(meta, spec_score, matrix):
                     first = False
                 cells.append(f"<td>{b}B</td>")
                 cells.append(f"<td class='tot'>{total:,}</td>")
-                cells += [f"<td>{c:,}</td>" for c in per_mm]
+                for mi, c in enumerate(per_mm):
+                    # highlight the 0 MM / 0 B cell -- the perfect match(es)
+                    if b == 0 and mm_cols[mi] == 0 and c > 0:
+                        cells.append(
+                            f"<td style='font-weight:700;background:#fef2f2'>{c:,}</td>"
+                        )
+                    else:
+                        cells.append(f"<td>{c:,}</td>")
                 body.append("<tr>" + "".join(cells) + "</tr>")
         matrix_html = (
             '<div class="matrix-wrap"><table class="matrix">'
@@ -873,11 +891,15 @@ def render_summary_and_matrix(meta, spec_score, matrix):
     <table class="summary-table"><tbody>{left_html}</tbody></table>
   </div>
   <div class="matrix-card">
-    <div class="matrix-title">Off-targets by Mismatch (MM) and Bulge (B)</div>
+    <div class="matrix-title">On-target(s) and Putative Off-targets by Mismatch (MM) and Bulge (B)</div>
     {matrix_html}
-    <p class="caption">Off-target counts (on-target row mm+b=0 excluded), grouped
-    by REFERENCE vs VARIANT origin (variant-created := Not_found_in_REF), then by
-    bulge count. Total column = row sum across mismatches.</p>
+    <p class="caption">The highlighted <strong>0&nbsp;MM / 0&nbsp;B</strong> cell holds
+    the guide's <strong>perfect genomic match(es)</strong> &mdash; the candidate
+    on-target(s); every other cell is a <strong>putative off-target</strong>. Split by
+    REFERENCE vs VARIANT origin (variant-created := Not_found_in_REF), then by bulge
+    count; Total = row sum across mismatches. The intended on-target cannot be
+    distinguished from a perfect-match off-target by sequence alone, so every perfect
+    match is reported here and forced to the top of the validation panel below.</p>
   </div>
 </div>
 """
@@ -2009,9 +2031,10 @@ def render_html(
 for human genetic variation</p>
 </div>
 </div>
-{perfect_banner}
+
 <h2>1. Summary</h2>
 {summary_matrix_html}
+{perfect_banner}
 
 <h2>2. Key graphical report</h2>
 <p class="caption">Reference vs variant off-target scores across the top-ranked
@@ -2063,6 +2086,13 @@ def build_footer(meta, version, tsv_basename):
 &nbsp;&middot;&nbsp; report generator v{_esc(REPORT_GENERATOR_VERSION)}
 &nbsp;&middot;&nbsp; generated {_esc(stamp)}
 &nbsp;&middot;&nbsp; source: {_esc(tsv_basename)}</p>
+<p class="license"><strong>License.</strong> CRISPRme is <strong>free for academic
+and non-profit research use</strong> (AGPL-3.0), for the user's own non-commercial
+research and teaching. <strong>Any commercial or for-profit use &mdash; of CRISPRme
+or of any result or report it produces, including in a clinical trial, product, or
+development program, and regardless of who ran the software &mdash; requires a
+commercial license.</strong> To obtain a license, please contact
+<a href="mailto:lpinello@mgh.harvard.edu">Luca Pinello (lpinello@mgh.harvard.edu)</a>.</p>
 <p class="disclaimer">{_esc(DISCLAIMER)}</p>
 </footer>"""
 

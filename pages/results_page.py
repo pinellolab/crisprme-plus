@@ -482,7 +482,11 @@ def result_page(job_id: str) -> html.Div:
                             html.P(
                                 "Preparing the off-target report for download…",
                                 id="download-link-report",
-                                style={"margin": "0", "fontSize": "1.05rem"},
+                                style={
+                                    "margin": "0",
+                                    "fontSize": "1.05rem",
+                                    "textAlign": "center",
+                                },
                             ),
                             dcc.Interval(interval=2 * 1000, id="interval-report"),
                             html.Div(
@@ -498,7 +502,7 @@ def result_page(job_id: str) -> html.Div:
                         ],
                         style={"textAlign": "center"},
                     ),
-                    width={"size": 10, "offset": 1},
+                    width={"size": 10},
                 ),
                 justify="center",
             ),
