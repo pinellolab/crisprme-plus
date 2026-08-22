@@ -822,15 +822,23 @@ def build_mmb_matrix(df, cols, meta):
     return {"mm_cols": mm_cols, "groups": groups}
 
 
-def render_inputs_criteria(meta):
+def render_inputs_criteria(meta, variant_created_name=None):
     """'Analysis inputs & criteria' box (FDA off-target guidance VII.F.i / F.ii).
 
     States, in one place, the variant database(s), the variant inclusion policy
     (all common + rare, genic + intergenic, no CRISPRme-applied AF threshold), the
     allele-frequency basis, and the off-target search criteria (variant homology
     gain via fewer mismatches / lowered gaps + variant-created PAM detection). The
-    scientific justification for the choices remains the sponsor's.
+    scientific justification for the choices remains the sponsor's. Everything is
+    read from the run's meta (no hardcoded database names). ``variant_created_name``
+    is the ACTUAL bundled filename (``.tsv`` or ``.tsv.gz``) so the link never
+    breaks; when absent the name is shown as plain text.
     """
+    vc_html = (
+        f'<a href="{_esc(variant_created_name)}" download>'
+        f"<code>{_esc(variant_created_name)}</code></a>"
+        if variant_created_name else "<code>variant_created.tsv</code>"
+    )
     ds = meta.get("datasets", "n/a")
     mm = meta.get("mm", "n/a")
     bdna, brna = meta.get("bdna"), meta.get("brna")
@@ -853,8 +861,7 @@ def render_inputs_criteria(meta):
          f"sequences are detected and flagged (<code>PAM_creation</code>)."),
         ("Variant-contributed sites",
          "Flagged by REF/ALT origin and <code>PAM_creation</code>; the full list is "
-         'bundled as <a href="variant_created.tsv" download>'
-         "<code>variant_created.tsv</code></a>."),
+         f"bundled as {vc_html}."),
     ]
     body = "".join(f'<tr><td class="k">{k}</td><td>{v}</td></tr>' for k, v in rows)
     return (
@@ -950,7 +957,6 @@ def render_summary_and_matrix(meta, spec_score, matrix):
     match is reported here and forced to the top of the validation panel below.</p>
   </div>
 </div>
-{render_inputs_criteria(meta)}
 """
 
 
@@ -1750,19 +1756,22 @@ def _esc(value):
     return html.escape(str(value))
 
 
-# MAF footnote (report v2.4): explains every blank / em-dash MAF cell in the
-# table and the curated download files.
-MAF_FOOTNOTE = (
-    "MAF = combined-panel minor/alternate allele frequency (1000G + HGDP). "
-    "MAF blank (&mdash;) = reference off-target (no variant), an indel-derived "
-    "variant (the frequency registry is SNP-only), or a SNP not in the frequency "
-    "panel; for SNP variant off-targets the frequency is AC/AN over the genotyped "
-    "panel &mdash; here the merged 1000G + HGDP union panel (the combined global "
-    "AF), not a single ancestry."
-)
+# MAF footnote (report v2.4): explains every blank / em-dash MAF cell in the table
+# and the curated download files. The panel name is READ FROM THE RUN (meta
+# datasets), never hardcoded, so it stays correct for any variant database(s).
+def maf_footnote(datasets=None):
+    ds = datasets or "the variant panel"
+    return (
+        "MAF = combined-panel minor/alternate allele frequency. "
+        "MAF blank (&mdash;) = reference off-target (no variant), an indel-derived "
+        "variant (the frequency registry is SNP-only), or a SNP not in the frequency "
+        "panel; for SNP variant off-targets the frequency is AC/AN over the genotyped "
+        f"panel &mdash; here the merged {ds} union panel (the combined global "
+        "AF), not a single ancestry."
+    )
 
 
-def build_table_html(top_df, cols, has_crista):
+def build_table_html(top_df, cols, has_crista, datasets=""):
     """Scrollable inline top-N table, sorted by CFD desc; no JS (opens offline).
 
     Renders EXACTLY the ONE curated column set (``CURATED_COLUMNS``) that every
@@ -1799,7 +1808,7 @@ def build_table_html(top_df, cols, has_crista):
 
     footnote = ""
     if maf_missing_seen:
-        footnote = f'<p class="caption">{MAF_FOOTNOTE}</p>'
+        footnote = f'<p class="caption">{maf_footnote(datasets)}</p>'
 
     table = (
         '<div class="ottable-wrap"><table class="ottable">'
@@ -2052,7 +2061,7 @@ def render_html(
     table_html, tsv_gz_name, top1000_name, footer_html,
     panel_top100_name=None, tier_downloads=None,
     hvdr_bundle_name=None, hvdr_n_regions=0, perfect_banner="",
-    table_crista_html="",
+    table_crista_html="", inputs_criteria_html="",
 ):
     scatter_html = []
     for title, caption, uri in scatter_panels:
@@ -2158,6 +2167,7 @@ for human genetic variation</p>
 
 <h2>1. Summary</h2>
 {summary_matrix_html}
+{inputs_criteria_html}
 {perfect_banner}
 
 <h2>2. Key graphical report</h2>
@@ -2495,7 +2505,7 @@ def build_report(
 
     # ---- SECTION 6: top-1000 table (curated columns incl. annotations) ------
     try:
-        table_html = build_table_html(top_df, cols, has_crista)
+        table_html = build_table_html(top_df, cols, has_crista, datasets=meta.get("datasets", ""))
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
         table_html = "<p>Top-1000 table unavailable.</p>"
@@ -2507,7 +2517,9 @@ def build_report(
         try:
             top_crista_df = select_top_crista(df, cols, n=top_n)
             if len(top_crista_df):
-                table_crista_html = build_table_html(top_crista_df, cols, has_crista)
+                table_crista_html = build_table_html(
+                    top_crista_df, cols, has_crista, datasets=meta.get("datasets", "")
+                )
                 tier_downloads.append(
                     ("Top-1000 by CRISTA (curated TSV)", "top1000_crista.tsv")
                 )
@@ -2588,6 +2600,9 @@ def build_report(
     #      render_html via build_annotation_legend_html) -----------------------
     footer_html = build_footer(meta, version, os.path.basename(integrated_tsv))
 
+    # inputs/criteria box built HERE (after tiers staged) so the variant_created
+    # link uses the ACTUAL bundled filename (.tsv or .tsv.gz), never a broken guess.
+    inputs_criteria_html = render_inputs_criteria(meta, tier_links.get("variant_created"))
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
         table_html, tsv_gz_name, top1000_name, footer_html,
@@ -2597,6 +2612,7 @@ def build_report(
         hvdr_n_regions=hvdr_n_regions,
         perfect_banner=perfect_banner,
         table_crista_html=table_crista_html,
+        inputs_criteria_html=inputs_criteria_html,
     )
 
     # ---- stage the remaining files and zip -j (flat) -----------------------
