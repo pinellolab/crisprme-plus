@@ -1234,7 +1234,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
                 uri = _placeholder_uri("CRISTA delta scatter unavailable")
             panels.append((
                 "By variant effect (CRISTA)",
-                "Same CRISPRme-paper ref/alt scatter with CRISTA on the y-axis, "
+                "Same paper-style ref/alt scatter with CRISTA on the y-axis, "
                 "re-ranked by the variant-induced CRISTA change (ALT-REF, "
                 "descending): the population variants that most raise the "
                 "independent CRISTA cleavage score come first. Included because "
@@ -1569,7 +1569,8 @@ def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
         "CFD, CRISTA, or mm+b" if vp.get("has_crista") else "CFD or mm+b"
     )
     note = (
-        f"How the panel was chosen (hybrid, up to {PANEL_CAP} sites). "
+        f"How the panel was chosen (hybrid, ~{PANEL_CAP} sites &mdash; may be more "
+        f"when many sites are hard-included). "
         f"First, every off-target that is CLOSE by sequence OR HIGH-scoring is "
         f"hard-included &mdash; specifically every site with mismatches+bulges "
         f"&le; {PANEL_FLOOR_MMB} OR CFD &ge; {PANEL_FLOOR_CFD}. These are always "
@@ -1590,7 +1591,7 @@ def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
     if panel_tsv_name:
         panel_dl = (
             f'<p><a class="download" href="{_esc(panel_tsv_name)}" download>'
-            f"Recommended hybrid worst-case panel (TSV, up to {PANEL_CAP} sites)"
+            f"Recommended hybrid worst-case panel (TSV, ~{PANEL_CAP} sites)"
             f"</a></p>"
         )
     return f"""
@@ -1798,12 +1799,12 @@ DISCLAIMER = (
     "This report is provided for research purposes only and on an \"AS IS\" basis, "
     "without warranty of any kind, express or implied, including without limitation "
     "any warranty of merchantability, fitness for a particular purpose, accuracy, "
-    "completeness, or non-infringement. CRISPRme off-target predictions are "
+    "completeness, or non-infringement. CRISPRme+ off-target predictions are "
     "computational and may contain false positives and false negatives; they are "
     "NOT a substitute for experimental validation and must not be the sole basis "
     "for any clinical, diagnostic, therapeutic, or regulatory decision. Results "
     "depend on the software version, algorithms, reference genome, PAM, search "
-    "parameters, and variant datasets used, and MAY CHANGE as CRISPRme, its methods, "
+    "parameters, and variant datasets used, and MAY CHANGE as CRISPRme+, its methods, "
     "or the underlying data are updated or improved — a report reflects only the "
     "inputs and version stated above and is not a fixed or guaranteed output. To the "
     "maximum extent permitted by law, the authors, contributors, and their "
@@ -2017,7 +2018,7 @@ def render_html(
     # web-UI tile (~3.5 MB) only if the report-sized one isn't bundled.
     bg_uri = (_asset_data_uri("crisprme_bg_report.png")
               or _asset_data_uri("crisprme_bg_tile.png"))
-    logo_html = (f'<img class="logo" src="{logo_uri}" alt="CRISPRme logo">'
+    logo_html = (f'<img class="logo" src="{logo_uri}" alt="CRISPRme+ logo">'
                  if logo_uri else "")
     bg_style = (f"<style>body {{ background-image: url('{bg_uri}');"
                 f" background-repeat: repeat; }}</style>" if bg_uri else "")
@@ -2027,7 +2028,7 @@ def render_html(
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{_esc(job_id)} CRISPRme off-target assessment report</title>
+<title>{_esc(job_id)} CRISPRme+ off-target assessment report</title>
 <style>{_CSS}</style>
 {bg_style}
 </head><body>
@@ -2037,7 +2038,7 @@ def render_html(
 {logo_html}
 <div class="titles">
 <h1>Off-target assessment report</h1>
-<p class="subtitle">CRISPRme &mdash; genome-wide off-target prediction accounting
+<p class="subtitle">CRISPRme+ &mdash; genome-wide off-target prediction accounting
 for human genetic variation</p>
 </div>
 </div>
@@ -2048,7 +2049,7 @@ for human genetic variation</p>
 
 <h2>2. Key graphical report</h2>
 <p class="caption">Reference vs variant off-target scores across the top-ranked
-candidates (CRISPRme-paper style). The same scatter is shown under multiple
+candidates (paper-style scatter). The same scatter is shown under multiple
 rankings so the highest-scoring sites and the highest-variant-effect sites are
 both foregrounded.</p>
 {scatter_block}
@@ -2092,13 +2093,9 @@ def build_footer(meta, version, tsv_basename):
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     crisprme_version = version or meta.get("version") or "n/a"
     return f"""<footer>
-<p>CRISPRme version: {_esc(crisprme_version)}
-&nbsp;&middot;&nbsp; report generator v{_esc(REPORT_GENERATOR_VERSION)}
-&nbsp;&middot;&nbsp; generated {_esc(stamp)}
-&nbsp;&middot;&nbsp; source: {_esc(tsv_basename)}</p>
-<p class="license"><strong>License.</strong> CRISPRme is <strong>free for academic
+<p class="license"><strong>License.</strong> CRISPRme+ is <strong>free for academic
 and non-profit research use</strong> (AGPL-3.0), for the user's own non-commercial
-research and teaching. <strong>Any commercial or for-profit use &mdash; of CRISPRme
+research and teaching. <strong>Any commercial or for-profit use &mdash; of CRISPRme+
 or of any result or report it produces, including in a clinical trial, product, or
 development program, and regardless of who ran the software &mdash; requires a
 commercial license.</strong> To obtain a license, please contact
@@ -2106,6 +2103,10 @@ commercial license.</strong> To obtain a license, please contact
 <p class="disclaimer">{_esc(DISCLAIMER)}</p>
 <p class="feedback">Feedback or a bug to report? Please open an issue at
 <a href="https://github.com/pinellolab/crisprme-plus/issues">github.com/pinellolab/crisprme-plus/issues</a>.</p>
+<p>CRISPRme+ version: {_esc(crisprme_version)}
+&nbsp;&middot;&nbsp; report generator v{_esc(REPORT_GENERATOR_VERSION)}
+&nbsp;&middot;&nbsp; generated {_esc(stamp)}
+&nbsp;&middot;&nbsp; source: {_esc(tsv_basename)}</p>
 </footer>"""
 
 
