@@ -217,6 +217,10 @@ class TestGenerateReport(unittest.TestCase):
                 "cfd_ge_0.20.tsv",
                 "cfd_ge_0.10.tsv",
                 "cfd_ge_0.05.tsv",
+                "crista_ge_0.50.tsv",  # CRISTA tiers, symmetric with CFD (fixture has CRISTA)
+                "crista_ge_0.20.tsv",
+                "crista_ge_0.10.tsv",
+                "crista_ge_0.05.tsv",
                 "mmb_le_2.tsv",
                 "mmb_le_3.tsv",
                 "mmb_le_4.tsv",

@@ -116,6 +116,7 @@ REPORT_GENERATOR_VERSION = "2.4"
 # Recommended-validation-panel thresholds (module-level constants, section 4)
 # --------------------------------------------------------------------------- #
 CFD_THRESHOLDS = (0.5, 0.2, 0.1, 0.05)
+CRISTA_THRESHOLDS = (0.5, 0.2, 0.1, 0.05)  # same as CFD (both 0-1); used when CRISTA computed
 MMB_THRESHOLDS = (1, 2, 3, 4)
 # threshold-table variant-created CFD floor (kept for the full threshold table)
 PANEL_VARIANT_CFD_MIN = 0.05
@@ -852,7 +853,8 @@ def render_inputs_criteria(meta):
          f"sequences are detected and flagged (<code>PAM_creation</code>)."),
         ("Variant-contributed sites",
          "Flagged by REF/ALT origin and <code>PAM_creation</code>; the full list is "
-         "bundled as <code>variant_created.tsv</code>."),
+         'bundled as <a href="variant_created.tsv" download>'
+         "<code>variant_created.tsv</code></a>."),
     ]
     body = "".join(f'<tr><td class="k">{k}</td><td>{v}</td></tr>' for k, v in rows)
     return (
@@ -1484,10 +1486,18 @@ def build_validation_panel(df, cols):
 
     cfd = _to_float_series(offt[cols["cfd"]]) if "cfd" in cols else pd.Series([], dtype=float)
     mmb = _to_int_series(offt[cols["mmb"]]) if "mmb" in cols else pd.Series([], dtype=int)
+    crista = (
+        _to_float_series(offt[cols["crista"]]) if "crista" in cols
+        else pd.Series([], dtype=float)
+    )
     var_off = variant[~ontarget]
 
     cfd_counts = [(t, int((cfd >= t).sum())) for t in CFD_THRESHOLDS]
     mmb_counts = [(t, int((mmb <= t).sum())) for t in MMB_THRESHOLDS]
+    crista_counts = (
+        [(t, int((crista >= t).sum())) for t in CRISTA_THRESHOLDS]
+        if "crista" in cols and crista.notna().any() else []
+    )
 
     n_variant = int(var_off.sum())
     n_variant_cfd = int((var_off & (cfd >= PANEL_VARIANT_CFD_MIN)).sum())
@@ -1508,10 +1518,11 @@ def build_validation_panel(df, cols):
     # per-tier off-target subsets (for the bundled curated downloads + links).
     # Each entry: (logical tier key, display label, sub-frame). Only non-empty
     # tiers are bundled/linked (decided by the caller).
-    tiers = build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb)
+    tiers = build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crista)
 
     return {
         "cfd_counts": cfd_counts,
+        "crista_counts": crista_counts,
         "mmb_counts": mmb_counts,
         "n_variant": n_variant,
         "n_variant_cfd": n_variant_cfd,
@@ -1532,12 +1543,14 @@ def _tier_filename(key):
         return PANEL_TOP100_NAME
     if key.startswith("cfd_"):
         return f"cfd_ge_{key.split('_', 1)[1]}.tsv"
+    if key.startswith("crista_"):
+        return f"crista_ge_{key.split('_', 1)[1]}.tsv"
     if key.startswith("mmb_"):
         return f"mmb_le_{key.split('_', 1)[1]}.tsv"
     return f"{key}.tsv"
 
 
-def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb):
+def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crista=None):
     """Off-target subsets for each threshold tier (section-4 downloads).
 
     Returns a list of dicts ``{key, label, filename, df}`` for the CFD>= and
@@ -1557,6 +1570,15 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb):
             "filename": _tier_filename(f"cfd_{t:.2f}"),
             "df": sub,
         })
+    if crista is not None and "crista" in cols and crista.notna().any():
+        for t in CRISTA_THRESHOLDS:
+            sub = offt[(crista >= t).values]
+            tiers.append({
+                "key": f"crista_{t:.2f}",
+                "label": f"CRISTA &ge; {t}",
+                "filename": _tier_filename(f"crista_{t:.2f}"),
+                "df": sub,
+            })
     for t in MMB_THRESHOLDS:
         sub = offt[(mmb <= t).values]
         tiers.append({
@@ -1604,6 +1626,19 @@ def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
         f"{_tier_count_link(f'mmb_{t}', c)}</td></tr>"
         for t, c in vp["mmb_counts"]
     )
+    # CRISTA thresholds, symmetric with CFD (only when CRISTA was computed)
+    crista_table_block = ""
+    if vp.get("crista_counts"):
+        crista_rows = "".join(
+            f"<tr><td>CRISTA &ge; {t}</td><td class='num'>"
+            f"{_tier_count_link(f'crista_{t:.2f}', c)}</td></tr>"
+            for t, c in vp["crista_counts"]
+        )
+        crista_table_block = (
+            '<div><table class="thr-table"><thead><tr>'
+            "<th>CRISTA threshold</th><th>Candidates (download)</th></tr></thead>"
+            f"<tbody>{crista_rows}</tbody></table></div>"
+        )
     metric_names = ["CFD (desc)"]
     if vp.get("has_crista"):
         metric_names.append("CRISTA (desc)")
@@ -1647,6 +1682,7 @@ def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
     <table class="thr-table"><thead><tr><th>CFD threshold</th><th>Candidates (download)</th></tr></thead>
     <tbody>{cfd_rows}</tbody></table>
   </div>
+  {crista_table_block}
   <div>
     <table class="thr-table"><thead><tr><th>Edit-distance threshold</th><th>Candidates (download)</th></tr></thead>
     <tbody>{mmb_rows}</tbody></table>
