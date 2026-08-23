@@ -12,6 +12,32 @@ import os
 
 TBI = "tbi"
 
+# A valid bgzipped file ends with this 28-byte empty-BGZF-block "EOF marker";
+# its absence is htslib's definition of a truncated file.
+_BGZF_EOF = bytes.fromhex("1f8b08040000000000ff0600424302001b0003000000000000000000")
+
+
+def _bgzf_eof_ok(path: str) -> bool:
+    """True if ``path`` ends with the BGZF EOF marker (i.e. not truncated)."""
+    try:
+        if os.path.getsize(path) < len(_BGZF_EOF):
+            return False
+        with open(path, "rb") as fh:
+            fh.seek(-len(_BGZF_EOF), os.SEEK_END)
+            return fh.read(len(_BGZF_EOF)) == _BGZF_EOF
+    except OSError:
+        return False
+
+
+def _reindex(annotation_fname: str) -> None:
+    """(Re)build the tabix index for a bgzipped BED, dropping any stale/corrupt one."""
+    try:
+        os.remove(annotation_fname + ".tbi")
+    except OSError:
+        pass
+    pysam.tabix_index(annotation_fname, force=True, preset="bed")
+
+
 def parse_commandline(args: List[str]) -> Tuple[str, str, str]:
     """Parses and validates command line arguments for the annotation script.
 
@@ -60,21 +86,46 @@ def load_annotation_bed(annotation_fname: str) -> TabixFile:
     Raises:
         SamtoolsError: If the annotation BED file cannot be loaded or indexed.
     """
-    # check that tabix index is available and up-to-date; use a lock file so
-    # that parallel annotation processes don't write the .tbi simultaneously
+    # Guard against a truncated/corrupt annotation download BEFORE htslib does,
+    # so the failure is an actionable message instead of the cryptic
+    # "EOF marker is absent ... could not open index" traceback. A bgzipped BED
+    # (.gz) must end with the BGZF EOF marker; its absence means it is truncated.
+    if annotation_fname.endswith(".gz") and not _bgzf_eof_ok(annotation_fname):
+        raise SamtoolsError(
+            f"Annotation file '{annotation_fname}' is truncated or corrupt "
+            "(incomplete download). Re-download it and retry:\n"
+            "  crisprme.py download --what annotations --path <DATA_DIR>\n"
+            "The download now verifies integrity and re-fetches only bad files. "
+            "(Or delete this file and its .tbi, then re-run the download.)"
+        )
+    # check that tabix index is available and up-to-date; use a lock file so that
+    # parallel annotation processes don't write the .tbi simultaneously. A
+    # missing / empty / stale .tbi is rebuilt -- a shipped index whose mtime
+    # predates its .bed.gz, or a half-written one, would otherwise fail the load.
     tbi_path = annotation_fname + ".tbi"
     lock_path = annotation_fname + ".tbi.lock"
     with open(lock_path, "w") as lock_fh:
         fcntl.flock(lock_fh, fcntl.LOCK_EX)
         if (not os.path.isfile(tbi_path)
+                or os.path.getsize(tbi_path) == 0
                 or os.path.getmtime(tbi_path) < os.path.getmtime(annotation_fname)):
-            pysam.tabix_index(annotation_fname, force=True, preset="bed")
+            _reindex(annotation_fname)
     try:  # return tabix indexes for each annotation bed
         return pysam.TabixFile(annotation_fname)
-    except (SamtoolsError, Exception) as e:
-        raise SamtoolsError(
-            "An error occurred while loading Annotation BED files"
-        ) from e
+    except Exception:
+        # self-heal once: a corrupt .tbi that slipped past the checks above
+        # (e.g. same mtime as the bed) -- rebuild it and retry before giving up.
+        with open(lock_path, "w") as lock_fh:
+            fcntl.flock(lock_fh, fcntl.LOCK_EX)
+            _reindex(annotation_fname)
+        try:
+            return pysam.TabixFile(annotation_fname)
+        except Exception as e:
+            raise SamtoolsError(
+                f"Could not load annotation file '{annotation_fname}' even after "
+                "rebuilding its index -- the file may be corrupt. Re-download it: "
+                "crisprme.py download --what annotations --path <DATA_DIR>"
+            ) from e
 
 
 def compute_target_coords(fields: List[str]) -> Tuple[str, int, int]:

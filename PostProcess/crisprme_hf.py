@@ -298,10 +298,137 @@ def decompress_gz(path: str, remove_source: bool = True) -> str:
     return out
 
 
+# --- download integrity -----------------------------------------------------
+# A truncated/interrupted download (partial file, flaky mount, disk full, a proxy
+# that returns a short body) used to install silently and only blow up later at
+# search time with a cryptic htslib error ("EOF marker is absent … could not open
+# index"). We verify every downloaded file and re-fetch the bad ones before they
+# are moved into place.
+
+# A valid bgzipped file (*.bed.gz, *.vcf.gz, *.tbi, …) ends with this 28-byte
+# empty-BGZF-block "EOF marker"; its absence is htslib's definition of truncated.
+_BGZF_EOF = bytes.fromhex("1f8b08040000000000ff0600424302001b0003000000000000000000")
+# A regular gzip stream (FASTA .fa.gz, index .tar.gz) ends with an 8-byte trailer
+# (CRC32 + ISIZE); it has magic 1f 8b at the start. These are cheap structural
+# sanity checks; a full-stream scan (interior corruption) is opt-in (see below).
+_GZIP_MAGIC = b"\x1f\x8b"
+
+
+class DownloadIntegrityError(RuntimeError):
+    """A downloaded file failed integrity checks and could not be repaired."""
+
+
+def _has_bgzf_eof(path: str) -> bool:
+    try:
+        if os.path.getsize(path) < len(_BGZF_EOF):
+            return False
+        with open(path, "rb") as fh:
+            fh.seek(-len(_BGZF_EOF), os.SEEK_END)
+            return fh.read(len(_BGZF_EOF)) == _BGZF_EOF
+    except OSError:
+        return False
+
+
+def _gzip_stream_ok(path: str) -> bool:
+    """Full decompress-scan — catches interior corruption, but reads the whole
+    (possibly multi-GB) file, so it is opt-in via CRISPRME_VERIFY_DEEP=1."""
+    try:
+        with gzip.open(path, "rb") as fh:
+            while fh.read(1 << 20):
+                pass
+        return True
+    except Exception:  # noqa: BLE001 — any read/decompress error == corrupt
+        return False
+
+
+def _tar_stream_ok(path: str) -> bool:
+    try:
+        with tarfile.open(path) as tf:
+            tf.getmembers()
+        return True
+    except Exception:  # noqa: BLE001 — any error opening the archive == corrupt
+        return False
+
+
+def verify_download_file(path: str, expected_size: Optional[int] = None,
+                         deep: Optional[bool] = None) -> Optional[str]:
+    """Return None if ``path`` looks intact, else a short human reason.
+
+    Cheap by default: the file exists, is non-empty, matches HF's advertised
+    size (the reliable truncation catch), and passes a per-type structural check
+    (BGZF EOF marker for *.bed.gz/*.vcf.gz/*.tbi; gzip magic for other *.gz). Set
+    ``CRISPRME_VERIFY_DEEP=1`` (or deep=True) to also scan the full gzip/tar
+    stream for interior corruption.
+    """
+    if deep is None:
+        deep = os.environ.get("CRISPRME_VERIFY_DEEP") == "1"
+    if not os.path.isfile(path):
+        return "missing"
+    size = os.path.getsize(path)
+    if size == 0:
+        return "empty (0 bytes)"
+    if expected_size is not None and size != expected_size:
+        return f"size {size:,} B != expected {expected_size:,} B (truncated/partial)"
+    low = path.lower()
+    if low.endswith((".bed.gz", ".vcf.gz", ".tbi", ".csi", ".bgz")):
+        if not _has_bgzf_eof(path):
+            return "BGZF EOF marker absent (truncated)"
+        if deep and not _gzip_stream_ok(path):
+            return "gzip stream corrupt"
+    elif low.endswith((".tar.gz", ".tgz")):
+        with open(path, "rb") as fh:
+            if fh.read(2) != _GZIP_MAGIC:
+                return "not a gzip stream (corrupt/partial)"
+        if deep and not _tar_stream_ok(path):
+            return "tar archive corrupt"
+    elif low.endswith(".gz"):
+        with open(path, "rb") as fh:
+            if fh.read(2) != _GZIP_MAGIC:
+                return "not a gzip stream (corrupt/partial)"
+        if deep and not _gzip_stream_ok(path):
+            return "gzip stream corrupt"
+    return None
+
+
+def _remote_sizes(hf, repo: str, rel_paths: List[str],
+                  token: Optional[str]) -> Dict[str, int]:
+    """Best-effort {remote_path: size} from HF metadata (the ground truth for a
+    truncation check). Any failure (old hub, offline) -> {} = structural-only."""
+    sizes: Dict[str, int] = {}
+    try:
+        for i in range(0, len(rel_paths), 256):  # chunk large trees
+            chunk = rel_paths[i:i + 256]
+            for info in hf.get_paths_info(
+                repo, chunk, repo_type="dataset", token=token
+            ):
+                size = getattr(info, "size", None)
+                if size is not None:
+                    sizes[info.path] = size
+    except Exception:  # noqa: BLE001 — verification degrades gracefully
+        return {}
+    return sizes
+
+
+def _staged_files(local_dir: str) -> List[str]:
+    """Relative paths of downloaded files under ``local_dir`` (skip hub cache)."""
+    out: List[str] = []
+    for root, dirs, files in os.walk(local_dir):
+        dirs[:] = [d for d in dirs if d != ".cache"]  # hf_hub metadata dir
+        for fn in files:
+            rel = os.path.relpath(os.path.join(root, fn), local_dir)
+            if not rel.startswith(".cache" + os.sep):
+                out.append(rel)
+    return out
+
+
 def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
-                 token: Optional[str] = None) -> str:
+                 token: Optional[str] = None, retries: int = 2) -> str:
     """Download the files matching ``allow_patterns`` from ``repo`` into
-    ``local_dir`` (flat, following the repo tree). Returns ``local_dir``."""
+    ``local_dir`` (flat, following the repo tree), VERIFY each one against HF's
+    advertised size + a structural check, and re-fetch any truncated/corrupt file
+    (up to ``retries`` extra passes) before returning. Raises
+    ``DownloadIntegrityError`` if a file can't be made whole. Returns
+    ``local_dir``. Set CRISPRME_SKIP_VERIFY=1 to bypass (not recommended)."""
     hf = _require_hf()
     os.makedirs(local_dir, exist_ok=True)
     hf.snapshot_download(
@@ -311,6 +438,48 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
         local_dir=local_dir,
         token=token,
     )
+    if os.environ.get("CRISPRME_SKIP_VERIFY") == "1":
+        return local_dir
+
+    rels = _staged_files(local_dir)
+    sizes = _remote_sizes(hf, repo, rels, token)
+    for attempt in range(retries + 1):
+        bad = {}
+        for rel in _staged_files(local_dir):
+            reason = verify_download_file(
+                os.path.join(local_dir, rel), sizes.get(rel)
+            )
+            if reason:
+                bad[rel] = reason
+        if not bad:
+            return local_dir
+        if attempt == retries:
+            detail = "\n".join(f"  - {r}: {why}" for r, why in sorted(bad.items()))
+            raise DownloadIntegrityError(
+                f"{len(bad)} file(s) from '{repo}' are still corrupt after "
+                f"{retries + 1} download attempt(s):\n{detail}\n"
+                "This is usually a flaky network/mount or low disk space. Free up "
+                "space, check the connection, and re-run the same download command "
+                "(it resumes and re-fetches only the bad files)."
+            )
+        sys.stderr.write(
+            f"Integrity check: re-downloading {len(bad)} truncated/corrupt "
+            f"file(s) (attempt {attempt + 2}/{retries + 1})...\n"
+        )
+        sys.stderr.flush()
+        for rel in bad:  # drop the bad copy so the re-fetch cannot be skipped
+            try:
+                os.remove(os.path.join(local_dir, rel))
+            except OSError:
+                pass
+        hf.snapshot_download(
+            repo_id=repo,
+            repo_type="dataset",
+            allow_patterns=list(bad),  # exact remote paths of the bad files
+            local_dir=local_dir,
+            token=token,
+            force_download=True,
+        )
     return local_dir
 
 

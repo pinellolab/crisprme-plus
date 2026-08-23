@@ -372,6 +372,51 @@ def remove_result(n: int, dir_name: str) -> html.P:
     return None
 
 
+# Show / hide the full job log (errors + verbose tail) so users can copy-paste
+# the complete error text into a bug report instead of only seeing the generic
+# "encountered some errors" banner.
+@app.callback(
+    [Output("full-log-container", "hidden"), Output("full-log-text", "value")],
+    [Input("button-show-log", "n_clicks")],
+    [State("url", "search"), State("full-log-container", "hidden")],
+)
+def show_full_log(n: int, dir_name: str, currently_hidden: bool) -> Tuple[bool, str]:
+    """Toggle the log panel; when opening, load log_error.txt + a tail of
+    log_verbose.txt from the job directory into a read-only, copyable text box."""
+    if not n:
+        raise PreventUpdate
+    if not currently_hidden:  # it's open -> collapse it
+        return True, ""
+    job_dir = os.path.join(
+        current_working_directory, RESULTS_DIR, dir_name.split("=")[-1]
+    )
+    sections: List[str] = []
+    # (display label, filename, tail_lines or None for full)
+    for label, fname, tail in (
+        ("log_error.txt", "log_error.txt", None),
+        ("log_verbose.txt (tail)", "log_verbose.txt", 400),
+    ):
+        path = os.path.join(job_dir, fname)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError as exc:
+            sections.append(f"===== {label} =====\n(could not read: {exc})")
+            continue
+        if tail and len(lines) > tail:
+            lines = [f"... (showing last {tail} lines) ...\n"] + lines[-tail:]
+        body = "".join(lines).rstrip() or "(empty)"
+        sections.append(f"===== {label} =====\n{body}")
+    text = (
+        "\n\n".join(sections)
+        if sections
+        else "No log files found for this job yet."
+    )
+    return False, text
+
+
 # Load Page
 def load_page_no_job() -> List:
     """Empty-state shown when /load is opened without a valid job id.
@@ -576,10 +621,36 @@ def load_page(job_link: str = "link") -> List:
                                     id="button-remove-result",
                                     n_clicks=0,
                                     hidden=True,
-                                )
+                                ),
+                                html.Button(
+                                    "Show full log",
+                                    id="button-show-log",
+                                    n_clicks=0,
+                                    style={"margin-left": "8px"},
+                                ),
                             ]
                         ),
                         html.Div(id="result-deleted"),
+                        # collapsible, copy-pasteable job log (errors + verbose
+                        # tail) so users can grab the full error text for a report
+                        html.Div(
+                            dcc.Textarea(
+                                id="full-log-text",
+                                value="",
+                                readOnly=True,
+                                style={
+                                    "width": "100%",
+                                    "height": "320px",
+                                    "fontFamily": "monospace",
+                                    "fontSize": "12px",
+                                    "whiteSpace": "pre",
+                                    "overflow": "auto",
+                                },
+                            ),
+                            id="full-log-container",
+                            hidden=True,
+                            style={"marginTop": "8px"},
+                        ),
                     ]
                 ),
             ],

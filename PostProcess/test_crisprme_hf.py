@@ -165,5 +165,74 @@ class TestIndexTarRoundTrip(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(out, "NGG_2_hg38", "chr1.bin")))
 
 
+class TestDownloadIntegrity(unittest.TestCase):
+    """Post-download verification: truncation/corruption must be caught (the
+    class of bug where a partial download installed silently and only failed
+    later at search time with a cryptic htslib error)."""
+
+    def _tmp(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(d, ignore_errors=True))
+        return d
+
+    def test_valid_bgzf_passes(self):
+        d = self._tmp()
+        p = os.path.join(d, "x.bed.gz")
+        with open(p, "wb") as fh:
+            fh.write(b"X" * 200 + hf._BGZF_EOF)  # ends with the BGZF EOF marker
+        self.assertIsNone(hf.verify_download_file(p))
+
+    def test_truncated_bgzf_detected(self):
+        d = self._tmp()
+        p = os.path.join(d, "x.bed.gz")
+        with open(p, "wb") as fh:
+            fh.write(b"X" * 200)  # no BGZF EOF marker -> truncated
+        reason = hf.verify_download_file(p)
+        self.assertIsNotNone(reason)
+        self.assertIn("EOF", reason)
+
+    def test_empty_file_detected(self):
+        d = self._tmp()
+        p = os.path.join(d, "x.bed.gz")
+        open(p, "wb").close()
+        self.assertIn("empty", hf.verify_download_file(p) or "")
+
+    def test_size_mismatch_detected(self):
+        d = self._tmp()
+        p = os.path.join(d, "y.fa.gz")
+        with gzip.open(p, "wb") as fh:
+            fh.write(b">c\nACGT\n")
+        actual = os.path.getsize(p)
+        self.assertIsNone(hf.verify_download_file(p, expected_size=actual))
+        self.assertIn("truncated", hf.verify_download_file(p, expected_size=actual + 999) or "")
+
+    def test_bad_gzip_magic_detected(self):
+        d = self._tmp()
+        p = os.path.join(d, "z.gz")
+        with open(p, "wb") as fh:
+            fh.write(b"not a gzip stream")
+        self.assertIn("gzip", hf.verify_download_file(p) or "")
+
+    def test_valid_targz_passes(self):
+        d = self._tmp()
+        p = os.path.join(d, "a.tar.gz")
+        with tarfile.open(p, "w:gz"):
+            pass
+        self.assertIsNone(hf.verify_download_file(p))
+
+    def test_deep_scan_catches_interior_corruption(self):
+        d = self._tmp()
+        p = os.path.join(d, "c.gz")
+        with gzip.open(p, "wb") as fh:
+            fh.write(b"A" * 4096)
+        self.assertIsNone(hf.verify_download_file(p, deep=True))  # intact
+        raw = bytearray(open(p, "rb").read())
+        raw[len(raw) // 2] ^= 0xFF  # flip an interior byte
+        with open(p, "wb") as fh:
+            fh.write(raw)
+        self.assertIsNotNone(hf.verify_download_file(p, deep=True))
+
+
 if __name__ == "__main__":
     unittest.main()
