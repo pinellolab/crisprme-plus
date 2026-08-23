@@ -59,9 +59,12 @@ curl -fsSL https://pinellolab.github.io/CRISPRme/install.sh | bash
 ```powershell
 irm https://pinellolab.github.io/CRISPRme/install.ps1 | iex
 ```
-Then open **CRISPRme** → click **Download reference data** (once) → **Open CRISPRme**;
-your browser opens the web interface. (Genome-wide *variant* search needs 64 GB RAM;
-reference-only fits 16 GB.) Details: [`install/`](install/).
+Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) — a
+small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
+first time it downloads the reference + variant data automatically (~85 GB, once), then
+opens the web interface at http://localhost:8080; every Start after that is instant.
+(Genome-wide *variant* search needs 64 GB RAM; reference-only fits 16 GB.) Details:
+[`install/`](install/).
 
 ---
 
