@@ -13,7 +13,7 @@ module produces a single, easily-transferable ZIP::
                                    #   CURATED columns, its own RELATIVE link
       panel_top100.tsv            # the hybrid worst-case top-100 validation
                                    #   panel (section 4), CURATED columns
-      cfd_ge_0.50.tsv ...         # per-tier subsets (CFD>=0.5/0.2/0.1/0.05,
+      cfd_ge_0.50.tsv ...         # per-tier subsets (CFD>=0.5/0.2/0.05,
       mmb_le_1.tsv ...            #   mm+b<=1/2/3/4, variant_created), each in
       variant_created.tsv         #   CURATED columns, only when non-empty
 
@@ -47,7 +47,7 @@ Report structure (top -> bottom)
    CRISTA, 2 without.
 3. SIMPLIFIED reference-vs-population plot (v1 single view).
 4. RECOMMENDED VALIDATION PANEL: the full threshold table (candidate counts at
-   CFD>= {0.5,0.2,0.1,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS the
+   CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS the
    HYBRID worst-case top-100 panel: HARD-INCLUDE every site with mm+b<=2 OR
    CFD>=0.5, then FILL to 100 by worst-case severity across CFD desc / CRISTA
    desc (if computed) / mm+b asc (no variant quota). An explicit in-report
@@ -902,9 +902,10 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     the panel size + database SNP-variant count to the inclusion row when known
     (registry sample counts preferred -- they match the AC/AN denominator).
     """
+    # bare <code>name</code>; _linkify_bundled_filenames makes every inline mention
+    # of a bundled file (this one included) clickable in one uniform pass.
     vc_html = (
-        f'<a href="{_dl_href(variant_created_name)}" download>'
-        f"<code>{_esc(variant_created_name)}</code></a>"
+        f"<code>{_esc(variant_created_name)}</code>"
         if variant_created_name else "<code>variant_created.tsv</code>"
     )
     ds = meta.get("datasets", "n/a")
@@ -928,7 +929,10 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
          f"Sites where a variant increases homology to the guide by reducing "
          f"mismatches (up to {_esc(mm)}) and/or lowering gaps (DNA/RNA bulges up to "
          f"{_esc(bulges)}; max total edits {_esc(max_edits)}). Variant-created PAM "
-         f"sequences are detected and flagged (<code>PAM_creation</code>)."),
+         f"sequences are detected and flagged (<code>PAM_creation</code>). The "
+         f"edit cap bounds the search against the variant-enriched (IUPAC-expanded) "
+         f"genome; individual reported alignments &mdash; especially "
+         f"variant-expanded ones &mdash; may show more total edits."),
         ("Variant-contributed sites",
          "Flagged by REF/ALT origin and <code>PAM_creation</code>; the full list is "
          f"bundled as {vc_html}."),
@@ -950,11 +954,28 @@ def render_summary_and_matrix(meta, spec_score, matrix):
     """Section 1 HTML: header card (left) + MM/B matrix (right)."""
     bdna = meta["bdna"]
     brna = meta["brna"]
-    bulge_disp = (
-        f"{bdna if bdna is not None else 'n/a'} / "
-        f"{brna if brna is not None else 'n/a'}"
-        + (f" (max {meta['bmax']})" if meta["bmax"] != "n/a" else "")
-    )
+
+    def _int_or_none(x):
+        try:
+            return int(str(x).strip())
+        except (TypeError, ValueError):
+            return None
+
+    _bd, _br = _int_or_none(bdna), _int_or_none(brna)
+    if _bd is not None and _br is not None:
+        # bDNA / bRNA are PER-TYPE caps; a single alignment may carry both, so the
+        # total bulge count reaches bDNA+bRNA (the matrix spans 0..bDNA+bRNA). The
+        # old "(max {Max_bulges})" = max(bDNA,bRNA) read as a total cap and
+        # contradicted the populated 3B/4B rows.
+        bulge_disp = (
+            f"{_bd} / {_br} (up to {_bd + _br} total; a DNA and an RNA bulge "
+            "may co-occur in one alignment)"
+        )
+    else:
+        bulge_disp = (
+            f"{bdna if bdna is not None else 'n/a'} / "
+            f"{brna if brna is not None else 'n/a'}"
+        )
 
     left_rows = [
         ("gRNA (spacer+PAM)", meta["guide_display"]),
@@ -965,7 +986,7 @@ def render_summary_and_matrix(meta, spec_score, matrix):
         ("Mismatches", meta["mm"]),
         ("Bulges (DNA / RNA)", bulge_disp),
         ("Max total edits", meta["max_edits"]),
-        ("Aggregated Specificity Score (0-100)", spec_score),
+        ("Aggregated Specificity Score (0-100; higher = more specific)", spec_score),
     ]
     left_html = "".join(
         f'<tr><td class="k">{_esc(k)}</td><td>{_esc(v)}</td></tr>'
@@ -1774,7 +1795,7 @@ def build_validation_panel(df, cols):
 
     Counting is over the OFF-TARGET set (on-target row mm+b==0 excluded), so
     thresholds report actionable candidates for a confirmation panel. The FULL
-    threshold table is kept (CFD>= {0.5,0.2,0.1,0.05}, mm+b<= {1,2,3,4}, and
+    threshold table is kept (CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, and
     variant-created counts); the suggested tier is the worst-case top-100.
     """
     variant, _reference, ontarget = partition_masks(df, cols)
@@ -1940,7 +1961,9 @@ def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
     def _tier_count_link(key, count):
         fname = tier_links.get(key)
         if not fname:
-            return f"{count:,}"
+            # no bundled file: an empty tier (0) reads as a blank/missing value if
+            # shown as a bare "0" -- label it as a genuine count of zero sites
+            return "0 <span class='caption'>(none)</span>" if count == 0 else f"{count:,}"
         return (
             f"{count:,} &nbsp;<a class=\"tier-dl\" href=\"{_dl_href(fname)}\" "
             f"download>{_esc(fname)}</a>"
@@ -1999,13 +2022,32 @@ def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
         f"(bundled downloads) let the panel be reviewed or expanded for any assay "
         f"budget."
     )
+    _panel_n = vp.get("panel_size", 0)
+    _panel_dl_n = f"~{PANEL_CAP} sites" + (
+        f", {_panel_n:,} here" if _panel_n > PANEL_CAP else ""
+    )
     panel_dl = ""
     if panel_tsv_name:
         panel_dl = (
             f'<p><a class="download" href="{_dl_href(panel_tsv_name)}" download>'
-            f"Recommended hybrid worst-case panel (TSV, ~{PANEL_CAP} sites)"
+            f"Recommended hybrid worst-case panel (TSV, {_panel_dl_n})"
             f"</a></p>"
         )
+    # off-target-count bridge: show the total-sites minus perfect-match subtraction
+    # so summing the Section-1 matrix (which includes perfect matches) reconciles.
+    _np = int(vp.get("n_perfect", 0) or 0)
+    _off_label = "Off-targets (on-target mm+b=0 excluded)"
+    if _np > 0:
+        _total_sites = vp["n_offtarget"] + _np
+        _off_label = (
+            f"Off-targets ({_total_sites:,} total sites &minus; {_np:,} perfect "
+            f"match{'es' if _np != 1 else ''} = {vp['n_offtarget']:,})"
+        )
+    # panel can EXCEED PANEL_CAP because all hard-included sites are always kept
+    _panel_hdr = f"Recommended panel &mdash; hybrid worst-case (~{PANEL_CAP} sites"
+    if vp.get("panel_size", 0) > PANEL_CAP:
+        _panel_hdr += f"; {vp['panel_size']:,} here &mdash; all hard-included sites kept"
+    _panel_hdr += ")"
     return f"""
 <div class="panel-grid">
   <div>
@@ -2020,12 +2062,12 @@ def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
 </div>
 <table class="thr-table" style="max-width:720px">
   <tbody>
-    <tr><td>Off-targets (on-target mm+b=0 excluded)</td><td class="num">{vp['n_offtarget']:,}</td></tr>
+    <tr><td>{_off_label}</td><td class="num">{vp['n_offtarget']:,}</td></tr>
     <tr><td>Variant-created off-targets (Not_found_in_REF)</td><td class="num">{_tier_count_link('variant_created', vp['n_variant'])}</td></tr>
     <tr><td>&hellip; of those with CFD &ge; {PANEL_VARIANT_CFD_MIN}</td><td class="num">{vp['n_variant_cfd']:,}</td></tr>
-    <tr class="panel-hi"><td><strong>Recommended panel &mdash; hybrid worst-case top {PANEL_CAP}</strong><br>
+    <tr class="panel-hi"><td><strong>{_panel_hdr}</strong><br>
       <span class="caption">hard-include (mm+b &le; {PANEL_FLOOR_MMB} OR CFD &ge;
-      {PANEL_FLOOR_CFD}), then fill to {PANEL_CAP} by worst-case severity across
+      {PANEL_FLOOR_CFD}), then fill up to {PANEL_CAP} by worst-case severity across
       {metric_list}; of the selected sites, <strong>{vp['panel_variant']:,}</strong>
       are variant-created.</span></td>
       <td class="num"><strong>{_tier_count_link('panel', vp['panel_size'])}</strong></td></tr>
@@ -2090,6 +2132,25 @@ def _dl_href(name):
     """href to a bundled download (which lives under ``data/``). The visible link
     TEXT stays the bare filename; only the href is prefixed."""
     return f"{DATA_SUBDIR}/{_esc(name)}"
+
+
+def _linkify_bundled_filenames(html, names):
+    """Make EVERY inline ``<code>FILE</code>`` mention of a bundled file clickable
+    (a download link into ``data/``), so any reference to a download in the report
+    prose -- not just the dedicated download buttons -- is itself a link. ``names``
+    is the set of files actually bundled, so a mention is only linked when the file
+    exists. No inline ``<code>`` filename is pre-linked (see ``vc_html``), so a plain
+    substring replace is safe and idempotent; a filename that is a substring of
+    another never collides because the whole ``<code>...</code>`` token must match."""
+    for name in names:
+        if not name or name == "report.html":
+            continue
+        token = f"<code>{_esc(name)}</code>"
+        if token in html:
+            html = html.replace(
+                token, f'<a href="{_dl_href(name)}" download>{token}</a>'
+            )
+    return html
 
 
 # MAF footnote (report v2.4): explains every blank / em-dash MAF cell in the table
@@ -2291,6 +2352,14 @@ def _asset_data_uri(name):
 # Annotation legend (Section 7): plain-language meaning of every annotation
 # column value, so a reviewer never has to guess what "dELS" or "Tier1_TSG" is.
 _ANNOTATION_LEGEND = [
+    ("gene_name", "Gene", "Symbol of the nearest gene to the off-target site (from "
+     "the supplied gene annotation); use with <code>Gene_distance_kb</code> to see "
+     "whether a site falls in or near a gene of interest."),
+    ("gene_dist", "Gene_distance_kb", "Signed distance in kilobases to the nearest "
+     "gene: <code>0.0</code> means the site lies WITHIN a gene (the GENCODE column "
+     "is then a genic feature, not <code>intergenic</code>); a non-zero value&rsquo;s "
+     "magnitude is the distance to the nearest gene boundary and its sign indicates "
+     "the side (upstream vs downstream of the gene)."),
     ("gencode", "GENCODE", "Gene-model context of the site as labeled by the "
      "supplied GENCODE annotation: commonly <code>exon</code>, <code>CDS</code> "
      "(protein-coding sequence), <code>UTR</code>, <code>transcript</code>, "
@@ -3018,6 +3087,17 @@ def build_report(
         inputs_criteria_html=inputs_criteria_html,
         legend_html=build_annotation_legend_html(cols, df),
     )
+
+    # make every inline <code>FILE</code> reference to a bundled download clickable
+    _linkable = {tsv_gz_name, top1000_name}
+    if panel_top100_name:
+        _linkable.add(panel_top100_name)
+    if hvdr_bundle_name:
+        _linkable.add(hvdr_bundle_name)
+    if top_crista_df is not None and len(top_crista_df):
+        _linkable.add("top1000_crista.tsv")
+    _linkable.update(v for v in tier_links.values() if v)
+    html_doc = _linkify_bundled_filenames(html_doc, _linkable)
 
     # ---- stage the remaining files and zip -j (flat) -----------------------
     try:

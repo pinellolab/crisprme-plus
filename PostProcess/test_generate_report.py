@@ -487,7 +487,7 @@ class TestGenerateReport(unittest.TestCase):
         # header card
         self.assertIn("gRNA (spacer+PAM)", html)
         self.assertIn(_GUIDE, html)
-        self.assertIn("Aggregated Specificity Score (0-100)", html)
+        self.assertIn("Aggregated Specificity Score (0-100; higher = more specific)", html)
         self.assertRegex(html, r"Nuclease</td><td>SpCas9<")
         # global MM/B matrix present, grouped REFERENCE vs VARIANT
         self.assertIn("Off-targets by Mismatch (MM) and Bulge (B)", html)
@@ -595,10 +595,11 @@ class TestGenerateReport(unittest.TestCase):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
         self.assertIn("Recommended validation panel", html)
-        # hybrid panel wording + cap (100) present
+        # hybrid panel wording + cap (~100) present (title no longer says a flat
+        # "top 100" since the panel can exceed the cap when many are hard-included)
         self.assertIn("hybrid", html.lower())
         self.assertIn("worst-case", html.lower())
-        self.assertIn("top 100", html)
+        self.assertIn("~100 sites", html)
         # C) EXPLICIT IN-REPORT METHODS NOTE with the REAL constants:
         #    hard-include (mm+b <= 2 OR CFD >= 0.5), fill to 100 by worst-case
         self.assertIn("<strong>Methods.</strong>", html)
@@ -961,6 +962,51 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIsNone(
                 gr._registry_variant_count(os.path.join(d, "no", "such"), meta)
             )
+
+    def test_review_fixes_bulge_bridge_emptytier_legend(self):
+        """Careful-review fixes: bulge label shows total (not misleading '(max 2)');
+        off-target line bridges to the matrix via the perfect-match subtraction;
+        empty tiers read as '0 (none)'; Gene/Gene_distance_kb are in the legend."""
+        # bulge label: per-type + total (direct render, needs int bdna/brna)
+        meta = {"guide_display": "G", "nuclease": "SpCas9", "pam": "NRG",
+                "genome": "hg38", "datasets": "1000G", "mm": "5",
+                "bdna": 2, "brna": 2, "bmax": "2", "max_edits": "5"}
+        hs = gr.render_summary_and_matrix(meta, "6.1", None)
+        self.assertIn("up to 4 total", hs)
+        self.assertNotIn("(max 2)", hs)
+        # in the rendered report (fixture: 1 perfect match, empty mm+b<=1 tier)
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        # off-target subtraction bridge (6 total - 1 perfect = 5)
+        self.assertIn("total sites &minus; 1 perfect match", html)
+        # empty edit-distance tier reads as a count, not a blank
+        self.assertIn("0 <span class='caption'>(none)</span>", html)
+        # Gene + Gene_distance_kb documented in the annotation legend
+        self.assertIn("Signed distance in kilobases", html)
+        self.assertIn("<div class=\"legend-term\">Gene</div>", html)
+        # max-total-edits caveat present (cap bounds the search, not per-site edits)
+        self.assertIn("individual reported alignments", html)
+
+    def test_inline_filename_mentions_are_clickable(self):
+        """Any inline <code>FILE</code> reference to a bundled download (in prose,
+        not just the download buttons) is itself a clickable link into data/."""
+        h = "raw <code>integrated_results.tsv.gz</code>; also <code>other.tsv</code>."
+        out = gr._linkify_bundled_filenames(h, {"integrated_results.tsv.gz"})
+        self.assertIn(
+            '<a href="data/integrated_results.tsv.gz" download>'
+            "<code>integrated_results.tsv.gz</code></a>", out
+        )
+        self.assertIn("<code>other.tsv</code>", out)         # not bundled -> plain
+        self.assertNotIn("<code>other.tsv</code></a>", out)  # not linked
+        # in a real report, the prose mentions are links (single, not double-wrapped)
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        for name in ("integrated_results.tsv.gz", "panel_top100.tsv",
+                     "variant_created.tsv"):
+            self.assertIn(
+                f'<a href="data/{name}" download><code>{name}</code></a>', html
+            )
+            self.assertNotIn(f"<code>{name}</code></a></a>", html)  # no double link
 
     def test_self_contained_offline_and_relative_links(self):
         _, _, extract = self._build_and_extract()
