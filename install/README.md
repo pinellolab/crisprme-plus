@@ -17,8 +17,10 @@ irm https://pinellolab.github.io/CRISPRme/install.ps1 | iex
 ```
 
 Then open **CRISPRme** from Applications (macOS) or the Desktop / Start Menu
-(Windows), click **Download reference data** once, then **Open CRISPRme** — your
-browser opens the web interface at http://localhost:8080.
+(Windows) — a small window with **three buttons: Start / Update / Stop**. Click
+**Start**: the first time it downloads the reference + variant data automatically
+(once), then opens the web interface at http://localhost:8080; every Start after
+that is instant. (Manage additional data from the web app's own Settings.)
 
 **Requirements:** Docker Desktop (the installer guides you if it is missing) and,
 for the genome-wide *variant* search, 64 GB of RAM (reference-only fits 16 GB).
