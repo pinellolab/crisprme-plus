@@ -875,16 +875,21 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("<strong>3,477</strong> individuals", note)   # 2548 + 929
         self.assertIn("1000G n=2,548", note)
         self.assertIn("106,664,924", note)
-        self.assertIn("SNP variants", note)
+        self.assertIn("SNPs", note)
+        # indels must be stated as ALSO searched, never "excluded"
+        self.assertIn("indel", note.lower())
+        self.assertNotIn("excluded", note.lower())
         # no registry -> fall back to samplesID counts, no variant count clause
         note2 = gr.panel_and_variants_note({"1000G": 3, "HGDP": 2})
         self.assertIn("<strong>5</strong> individuals", note2)
-        self.assertNotIn("SNP variants", note2)
+        self.assertNotIn("SNPs", note2)
         # rendered report (fixture has no registry -> samplesID fallback)
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
         self.assertNotIn("applies no allele-frequency threshold", html)
         self.assertIn("no variants are excluded by allele frequency", html)
+        # inclusion statement explicitly covers indels (they ARE searched)
+        self.assertIn("SNPs and insertions/deletions", html)
         self.assertIn("<strong>5</strong> individuals", html)  # 3 + 2 (samplesID)
         # the impossible 1e-05 "finest resolution" line is GONE
         self.assertNotIn("Finest allele-frequency resolution", html)

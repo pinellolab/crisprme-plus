@@ -916,7 +916,8 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         ("Variant database(s)", _esc(ds)),
         ("Variants included",
          "All variants present in the database(s) &mdash; common and rare, genic "
-         "and intergenic; no variants are excluded by allele frequency."
+         "and intergenic, SNPs and insertions/deletions (indels); no variants are "
+         "excluded by allele frequency."
          + panel_and_variants_note(dataset_counts, variant_count)),
         ("Allele-frequency basis",
          f"Combined-panel minor/alternate allele frequency over the merged "
@@ -1251,14 +1252,17 @@ def panel_and_variants_note(dataset_counts, variant_count=None):
         return ""
     parts = ", ".join(f"{lbl} n={n:,}" for lbl, n in sorted(counts.items()))
     per_ds = f" ({parts})" if len(counts) > 1 else ""
-    lead = f" Panel: <strong>{total:,}</strong> individuals{per_ds}"
+    lead = f" Panel: <strong>{total:,}</strong> individuals{per_ds}."
     if variant_count and variant_count.get("n_records"):
+        # n_records is the registry's SNP count (indels live in a separate index);
+        # be explicit that indels are ALSO searched, so the SNP figure is not read
+        # as "the only variants" nor as "indels dropped".
         lead += (
-            f" contributing <strong>{variant_count['n_records']:,}</strong> SNP "
-            "variants (single-base substitutions with &ge;1 carrier; indels and "
-            "no-carrier records excluded from the search-usable set)"
+            f" The database contributes <strong>{variant_count['n_records']:,}"
+            "</strong> SNPs to the allele-frequency registry; insertions/deletions "
+            "from the same panel are also searched (indel pipeline)."
         )
-    return lead + "."
+    return lead
 
 
 # --------------------------------------------------------------------------- #
