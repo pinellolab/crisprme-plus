@@ -117,7 +117,11 @@ REPORT_GENERATOR_VERSION = "2.4"
 # Recommended-validation-panel thresholds (module-level constants, section 4)
 # --------------------------------------------------------------------------- #
 CFD_THRESHOLDS = (0.5, 0.2, 0.05)
-CRISTA_THRESHOLDS = (0.5, 0.2, 0.05)  # same as CFD (both 0-1); used when CRISTA computed
+# CRISTA is on a DIFFERENT scale than CFD -- reusing CFD's cut points made CRISTA>=0.05
+# select ~98% of off-targets (a meaningless "shortlist"). These CRISTA-appropriate,
+# higher cut points keep the tiers graduated + model-relative. CRISTA remains the
+# score to lean on for bulge/gapped sites (where CFD is out of its training domain).
+CRISTA_THRESHOLDS = (0.6, 0.4, 0.2)
 MMB_THRESHOLDS = (1, 2, 3, 4)
 # threshold-table variant-created CFD floor (kept for the full threshold table)
 PANEL_VARIANT_CFD_MIN = 0.05
@@ -779,6 +783,15 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     n_ontarget = int(ontarget.sum())
     n_offtarget = n_total - n_ontarget
 
+    # observed max mismatches+bulges -- variant-expanded / IUPAC-collapsed alignments
+    # can exceed the search's Max_total_edits cap, so surface the real observed max.
+    obs_max_mmb = None
+    if "mmb" in cols and cols["mmb"] in df.columns:
+        _mm = _to_int_series(df[cols["mmb"]])
+        _mm = _mm[_mm >= 0]
+        if len(_mm):
+            obs_max_mmb = int(_mm.max())
+
     return {
         "guides": guides,
         "guide_display": ", ".join(guides) if guides else "n/a",
@@ -800,6 +813,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "n_reference": n_reference,
         "n_ontarget": n_ontarget,
         "n_offtarget": n_offtarget,
+        "obs_max_mmb": obs_max_mmb,
     }
 
 
@@ -977,6 +991,22 @@ def render_summary_and_matrix(meta, spec_score, matrix):
             f"{brna if brna is not None else 'n/a'}"
         )
 
+    # Max total edits is a SEARCH cap on the IUPAC-collapsed genome; variant-expanded
+    # alignments can exceed it -- surface the observed max right next to the value.
+    _me = meta["max_edits"]
+    _obs = meta.get("obs_max_mmb")
+    _me_display, _me_footnote = _me, ""
+    try:
+        if _obs is not None and int(_obs) > int(_me):
+            _me_display = f"{_me} (search cap)"
+            _me_footnote = (
+                "Max total edits is the search cap on the variant-collapsed (IUPAC) "
+                "genome; individual variant-expanded alignments may exceed it — "
+                f"the largest reported here has {_obs} mismatches+bulges."
+            )
+    except (TypeError, ValueError):
+        pass
+
     left_rows = [
         ("gRNA (spacer+PAM)", meta["guide_display"]),
         ("Nuclease", meta["nuclease"]),
@@ -985,7 +1015,7 @@ def render_summary_and_matrix(meta, spec_score, matrix):
         ("Variant dataset(s)", meta["datasets"]),
         ("Mismatches", meta["mm"]),
         ("Bulges (DNA / RNA)", bulge_disp),
-        ("Max total edits", meta["max_edits"]),
+        ("Max total edits", _me_display),
         ("Aggregated Specificity Score (0-100; higher = more specific)", spec_score),
     ]
     left_html = "".join(
@@ -1035,6 +1065,7 @@ def render_summary_and_matrix(meta, spec_score, matrix):
 <div class="summary-grid">
   <div class="summary-card">
     <table class="summary-table"><tbody>{left_html}</tbody></table>
+    {f'<p class="caption" style="margin-top:0.5em">{_esc(_me_footnote)}</p>' if _me_footnote else ''}
   </div>
   <div class="matrix-card">
     <div class="matrix-title">On-target(s) and Putative Off-targets by Mismatch (MM) and Bulge (B)</div>
@@ -1813,12 +1844,19 @@ def build_validation_panel(df, cols):
             p = str(r[cols["pos"]]) if "pos" in cols else "?"
             s = str(r[cols["strand"]]) if "strand" in cols else ""
             g = str(r[gcol]) if gcol and gcol in df.columns else ""
+            # origin (ref vs variant-created) + MAF distinguish a UNIVERSAL reference
+            # perfect match from a RARE variant-created one in the banner.
+            o = (str(r[cols["origin"]]).strip().lower()
+                 if "origin" in cols and cols["origin"] in df.columns else "")
+            m = (_min_maf(r[cols["maf"]])
+                 if "maf" in cols and cols["maf"] in df.columns else None)
             # dedup per (guide, locus): in a MULTI-guide run each guide has its own
             # on-target -- ambiguity is per-guide, not across guides.
             if (g, c, p, s) not in seen:
                 seen.add((g, c, p, s))
                 perfect_sites.append(
-                    {"guide": g, "chrom": c, "pos": p, "strand": s}
+                    {"guide": g, "chrom": c, "pos": p, "strand": s,
+                     "origin": o, "maf": m}
                 )
                 perfect_by_guide[g] = perfect_by_guide.get(g, 0) + 1
 
@@ -2405,6 +2443,75 @@ _ANNOTATION_LEGEND = [
 ]
 
 
+# Scores & columns legend (Section 7, always shown): what every score/column in the
+# tables means, with a primary citation AND a plain-language rule of thumb -- so a
+# bench scientist can judge HOW risky a site is and a reviewer can trace provenance.
+_SCORE_LEGEND = [
+    ("CFD",
+     "<b>Cutting Frequency Determination</b> score (Doench <i>et al.</i>, "
+     "<i>Nat. Biotechnol.</i> 2016) &mdash; a 0&ndash;1 estimate of how efficiently "
+     "SpCas9 cuts a mismatched site relative to a perfect match (1 = as efficient as "
+     "the on-target). Higher = more likely to be cut. <b>Rule of thumb:</b> treat "
+     "CFD&nbsp;&ge;&nbsp;0.2 as worth validating (the recommended panel already "
+     "hard-includes CFD&nbsp;&ge;&nbsp;0.5). <b>Caveat:</b> CFD was trained on "
+     "single-base mismatches; CFD values for sites containing DNA/RNA bulges "
+     "(insertions/deletions) are an extrapolation beyond the model&rsquo;s training "
+     "domain &mdash; weigh CRISTA there."),
+    ("CRISTA",
+     "CRISTA score (Abadi <i>et al.</i>, <i>PLoS Comput. Biol.</i> 2017) &mdash; an "
+     "<b>independent</b> machine-learning 0&ndash;1 estimate of cleavage propensity "
+     "that also models bulges/indels. Higher = more likely to be cut. Reported "
+     "alongside CFD because the two models can disagree; <b>a site scored high by "
+     "EITHER model warrants validation</b>. CRISTA&rsquo;s scale is not directly "
+     "comparable to CFD&rsquo;s &mdash; the same number means different things in "
+     "each, so its threshold tiers are model-relative."),
+    ("Mismatches",
+     "Number of base substitutions between the guide and the genomic site (fewer = "
+     "closer sequence match = generally higher off-target risk)."),
+    ("Bulges",
+     "DNA/RNA bulges (gaps) in the alignment &mdash; a bulge lets the guide pair with "
+     "a genomic site of slightly different length (a small insertion/deletion)."),
+    ("Mismatches+bulges",
+     "Total edit distance (mismatches + bulges). The smallest values are the "
+     "near-cognate sites that scoring models can under-weight, so the panel includes "
+     "them regardless of score."),
+    ("Perfect_match",
+     "<b>Yes</b> when the site matches with <b>0 mismatches AND 0 bulges</b> &mdash; "
+     "an exact genomic match, i.e. a candidate cut site indistinguishable from an "
+     "intended on-target by sequence alone."),
+    ("REF/ALT_origin",
+     "Whether the site exists in the <b>reference</b> genome (<code>ref</code>) or is "
+     "created/altered by a population <b>variant</b> (<code>alt</code>). Variant "
+     "(alt) sites only exist in carriers of that variant."),
+    ("PAM_creation",
+     "Flagged when a variant creates a new PAM absent from the reference, enabling an "
+     "off-target that reference-only tools miss."),
+    ("MAF",
+     "Minor-allele frequency of the contributing variant over the genotyped panel "
+     "(blank for reference sites). A value of <b>1&times;10<sup>&minus;5</sup></b> is "
+     "a display floor meaning &ldquo;present, frequency effectively&nbsp;0&rdquo;, "
+     "not a measured frequency."),
+    ("Aligned protospacer+PAM notation",
+     "In the aligned-sequence column: <b>UPPERCASE</b> = a base matching the guide, "
+     "<b>lowercase</b> = a mismatch, and a dash <code>-</code> = a bulge/gap."),
+]
+
+
+def build_score_legend_html():
+    """Render the scores-&-columns legend (Section 7, always present)."""
+    items = "".join(
+        '<div class="legend-item"><div class="legend-term">%s</div>'
+        '<div class="legend-def">%s</div></div>' % (term, definition)
+        for term, definition in _SCORE_LEGEND
+    )
+    return (
+        '<p class="caption">What the score and key columns in the tables above (and '
+        "in the downloads) mean, so a site can be judged not just by <i>where</i> it "
+        "is but <i>how</i> likely it is to be cut.</p>"
+        '<div class="legend">' + items + "</div>"
+    )
+
+
 def build_annotation_legend_html(cols=None, df=None):
     """Render the annotation legend (Section 7). Only include an entry when its
     backing annotation column is actually present in this run (and, when ``df`` is
@@ -2439,6 +2546,44 @@ def build_annotation_legend_html(cols=None, df=None):
     )
 
 
+def render_next_steps_box(vp):
+    """Plain-language 'What to do next' box -- turns the recommended panel into an
+    actionable bench-validation workflow for a wet-lab reader."""
+    panel_n = vp.get("panel_size", 0)
+    n_perfect = int(vp.get("n_perfect", 0) or 0)
+    max_pg = int(vp.get("max_perfect_per_guide", n_perfect) or 0)
+    steps = []
+    if max_pg >= 2:
+        steps.append(
+            "<b>Resolve the on-target first.</b> This guide has more than one perfect "
+            "(0-mismatch / 0-bulge) match, so the intended on-target cannot be chosen "
+            "from sequence alone &mdash; confirm it experimentally, or redesign the "
+            "guide, before interpreting the rest."
+        )
+    steps.append(
+        f"<b>Validate the recommended panel.</b> Design amplicon / rhAMP-Seq assays "
+        f"for the ~{panel_n} sites in <code>panel_top100.tsv</code> "
+        "(Section&nbsp;4) &mdash; the worst-case shortlist across all metrics."
+    )
+    steps.append(
+        "<b>Prioritize within the panel</b> sites that are (i) high CFD or CRISTA, "
+        "(ii) low edit-distance (few mismatches/bulges), and (iii) inside a gene "
+        "&mdash; especially a COSMIC cancer gene."
+    )
+    steps.append(
+        "<b>Read variant-created sites in context.</b> A site flagged "
+        "<code>alt</code> only exists in carriers of that variant; its relevance "
+        "depends on the allele frequency in your target population."
+    )
+    items = "".join(f'<li style="margin:0.35em 0">{s}</li>' for s in steps)
+    return (
+        '<div style="border:1px solid #9ae6b4;background:#f0fff4;border-radius:10px;'
+        'padding:14px 18px;margin:1.2em 0">'
+        '<div class="matrix-title">What to do next</div>'
+        f'<ol style="margin:0.4em 0 0;padding-left:1.3em">{items}</ol></div>'
+    )
+
+
 def render_perfect_match_banner(vp):
     """Prominent banner for perfect (0 mismatch + 0 bulge) matches.
 
@@ -2459,13 +2604,26 @@ def render_perfect_match_banner(vp):
 
     multi_guide = n_guides > 1
 
+    def _origin_tag(s):
+        # distinguish a UNIVERSAL reference match from a RARE variant-created one, so
+        # a rare-allele perfect match is not presented as co-equal to the on-target.
+        o = str(s.get("origin", "")).lower()
+        m = s.get("maf")
+        if o == "alt":
+            if m is not None and m > 0:
+                return f" <em>[variant-created, MAF&nbsp;{m:.2g} &mdash; only in carriers]</em>"
+            return " <em>[variant-created &mdash; only in carriers]</em>"
+        if o == "ref":
+            return " <em>[reference &mdash; present in all genomes]</em>"
+        return ""
+
     def _fmt(s):
         strand = f" ({_esc(str(s.get('strand', '')))})" if s.get("strand") else ""
         loc = f"{_esc(str(s.get('chrom', '?')))}:{_esc(str(s.get('pos', '?')))}{strand}"
         # label the guide when several guides contribute perfect matches
         if multi_guide and s.get("guide"):
-            return f"{_esc(str(s.get('guide')))} &rarr; {loc}"
-        return loc
+            loc = f"{_esc(str(s.get('guide')))} &rarr; {loc}"
+        return loc + _origin_tag(s)
 
     site_list = ", ".join(_fmt(s) for s in sites[:20])
     if len(sites) > 20:
@@ -2516,6 +2674,7 @@ def render_html(
     panel_top100_name=None, tier_downloads=None,
     hvdr_bundle_name=None, hvdr_n_regions=0, perfect_banner="",
     table_crista_html="", inputs_criteria_html="", legend_html=None,
+    next_steps_html="",
 ):
     scatter_html = []
     for title, caption, uri in scatter_panels:
@@ -2593,10 +2752,11 @@ def render_html(
                 f" background-repeat: repeat; background-size: 640px 640px; }}</style>"
                 if bg_uri else "")
     if legend_html is None:
-        legend_html = build_annotation_legend_html()
-    # omit the whole "7. Annotation legend" section when no annotation is present
+        legend_html = build_score_legend_html()
+    # Section 7 always present (the scores/columns legend is always relevant)
     legend_section = (
-        f"\n<h2>7. Annotation legend</h2>\n{legend_html}" if legend_html else ""
+        f"\n<h2>7. Legend &mdash; scores, columns &amp; annotations</h2>\n{legend_html}"
+        if legend_html else ""
     )
     crista_block = ""
     if table_crista_html:
@@ -2645,6 +2805,7 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 
 <h2>4. Recommended validation panel</h2>
 {validation_html}
+{next_steps_html}
 
 <h2>5. Downloads</h2>
 <p>
@@ -3070,10 +3231,11 @@ def build_report(
     _ds_counts = {}
     for _lbl in sample_dataset.values():
         _ds_counts[_lbl] = _ds_counts.get(_lbl, 0) + 1
+    _reg_vc = _registry_variant_count(result_dir, meta)
     inputs_criteria_html = render_inputs_criteria(
         meta, tier_links.get("variant_created"),
         dataset_counts=_ds_counts,
-        variant_count=_registry_variant_count(result_dir, meta),
+        variant_count=_reg_vc,
     )
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
@@ -3083,9 +3245,17 @@ def build_report(
         hvdr_bundle_name=hvdr_bundle_name,
         hvdr_n_regions=hvdr_n_regions,
         perfect_banner=perfect_banner,
+        next_steps_html=render_next_steps_box(vp),
         table_crista_html=table_crista_html,
         inputs_criteria_html=inputs_criteria_html,
-        legend_html=build_annotation_legend_html(cols, df),
+        legend_html=(
+            '<h3 style="margin:0.6em 0 0.3em">Scores &amp; columns</h3>'
+            + build_score_legend_html()
+            + (
+                '<h3 style="margin:1.2em 0 0.3em">Annotations</h3>' + _ann_legend
+                if (_ann_legend := build_annotation_legend_html(cols, df)) else ""
+            )
+        ),
     )
 
     # make every inline <code>FILE</code> reference to a bundled download clickable
@@ -3139,6 +3309,58 @@ def build_report(
         bundle += staged_tier_paths
         if hvdr_bundle_name:
             bundle.append(os.path.join(staging, hvdr_bundle_name))
+
+        # machine-readable run manifest (IND traceability) + the raw .Params.txt, so
+        # the ZIP is self-sufficient for re-execution. Never break the report on it.
+        try:
+            _manifest = {
+                "crisprme_version": meta.get("version") or "2.4.0",
+                "report_generator": "v2.4",
+                "generated_date": meta.get("date"),
+                "guides": meta.get("guides"),
+                "nuclease": meta.get("nuclease"),
+                "pam": meta.get("pam"),
+                "genome": meta.get("genome"),
+                "variant_datasets": meta.get("datasets"),
+                "search": {
+                    "mismatches": meta.get("mm"),
+                    "bulges_dna": meta.get("bdna"),
+                    "bulges_rna": meta.get("brna"),
+                    "max_total_edits": meta.get("max_edits"),
+                    "observed_max_mismatches_plus_bulges": meta.get("obs_max_mmb"),
+                },
+                "counts": {
+                    "total_sites": meta.get("n_total"),
+                    "off_targets": meta.get("n_offtarget"),
+                    "on_target_perfect_matches": (
+                        vp.get("n_perfect") if isinstance(vp, dict) else None),
+                    "variant_created_off_targets": (
+                        vp.get("n_variant") if isinstance(vp, dict) else None),
+                    "recommended_panel_size": (
+                        vp.get("panel_size") if isinstance(vp, dict) else None),
+                },
+                "database": _reg_vc,  # {n_records SNPs, n_indels, databases} or None
+                "source_integrated_results": os.path.basename(integrated_tsv),
+                "crispritz_note": (
+                    "search-engine (CRISPRitz) version is recorded in the build; the "
+                    "pinellolab/crisprme:v2.4.0 image builds CRISPRitz v2.8.2. See "
+                    "Params.txt for the exact run parameters."
+                ),
+            }
+            _man_path = os.path.join(staging, "run_manifest.json")
+            with open(_man_path, "w") as _mf:
+                json.dump(_manifest, _mf, indent=2, sort_keys=True)
+            bundle.append(_man_path)
+            if result_dir:
+                for _pn in (".Params.txt", "Params.txt"):
+                    _pp = os.path.join(result_dir, _pn)
+                    if os.path.isfile(_pp):
+                        _dst = os.path.join(staging, "Params.txt")
+                        shutil.copyfile(_pp, _dst)
+                        bundle.append(_dst)
+                        break
+        except Exception as exc:  # noqa: BLE001 - manifest is optional
+            sys.stderr.write(f"generate-report: run_manifest unavailable: {exc}\n")
 
         if os.path.exists(out_zip):
             os.remove(out_zip)

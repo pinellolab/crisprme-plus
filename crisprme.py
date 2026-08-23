@@ -1604,7 +1604,8 @@ def complete_search() -> None:
     # exit(0)
     void_mail = "_"
     if sequence_use == False:
-        os.system(f"cp {guidefile} {outputfolder}/guides.txt")
+        # shutil (no shell) so a guide/output path containing spaces does not break
+        shutil.copyfile(guidefile, os.path.join(outputfolder, "guides.txt"))
 
     # pre-flight input validation (lightweight tier, always on): catches
     # misconfigurations that would otherwise only surface deep into the run

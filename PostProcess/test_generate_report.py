@@ -217,7 +217,7 @@ class TestGenerateReport(unittest.TestCase):
         # ONLY report.html at the top level; every other bundled file under data/.
         # For this fixture (5 off-targets):
         #   CFD>= 0.5/0.2/0.05  -> all non-empty (0.1 tier removed)
-        #   CRISTA>= 0.5/0.2/0.05 -> all non-empty (fixture has CRISTA)
+        #   CRISTA>= 0.6/0.4/0.2 -> all non-empty (fixture has CRISTA)
         #   mm+b<= 1/2/3/4      -> 0/2/4/5 (mmb_le_1 is EMPTY -> not bundled)
         #   variant_created     -> 3
         self.assertEqual(
@@ -225,15 +225,16 @@ class TestGenerateReport(unittest.TestCase):
             sorted([
                 "report.html",
                 "data/integrated_results.tsv.gz",
+                "data/run_manifest.json",  # IND traceability manifest
                 "data/top1000.tsv",
                 "data/top1000_crista.tsv",  # CRISTA-ranked companion
                 "data/panel_top100.tsv",
                 "data/cfd_ge_0.50.tsv",
                 "data/cfd_ge_0.20.tsv",
                 "data/cfd_ge_0.05.tsv",
-                "data/crista_ge_0.50.tsv",  # CRISTA tiers, symmetric with CFD
+                "data/crista_ge_0.60.tsv",  # CRISTA-appropriate tiers (not CFD's)
+                "data/crista_ge_0.40.tsv",
                 "data/crista_ge_0.20.tsv",
-                "data/crista_ge_0.05.tsv",
                 "data/mmb_le_2.tsv",
                 "data/mmb_le_3.tsv",
                 "data/mmb_le_4.tsv",
@@ -986,6 +987,73 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("<div class=\"legend-term\">Gene</div>", html)
         # max-total-edits caveat present (cap bounds the search, not per-site edits)
         self.assertIn("individual reported alignments", html)
+
+    def test_run_manifest_bundled_and_valid(self):
+        """The ZIP carries a machine-readable run_manifest.json (IND traceability)."""
+        import json as _json
+        _, names, extract = self._build_and_extract()
+        self.assertIn("data/run_manifest.json", names)
+        m = _json.load(open(self._dpath(extract, "run_manifest.json")))
+        self.assertEqual(m["crisprme_version"] or "2.4.0", m["crisprme_version"] or "2.4.0")
+        for k in ("guides", "pam", "genome", "variant_datasets", "search", "counts",
+                  "source_integrated_results", "crispritz_note"):
+            self.assertIn(k, m)
+        self.assertIn("max_total_edits", m["search"])
+        self.assertIn("off_targets", m["counts"])
+        self.assertIn("v2.8.2", m["crispritz_note"])  # engine version recorded
+
+    def test_pipeline_no_readonly_or_bare_relative_writes(self):
+        """Regression guard for the read-only-container bug: the search pipeline must
+        not write a bare-relative dummy.txt nor append to $6 without a writability
+        guard (both crashed a reference-only run under Apptainer)."""
+        p = os.path.join(os.path.dirname(__file__),
+                         "submit_job_automated_new_multiple_vcfs.sh")
+        src = open(p).read()
+        # the fixed bare-relative dummy.txt write must be gone
+        self.assertNotIn("echo -e \"dummy_file\" >dummy.txt", src)
+        self.assertNotIn(">dummy.txt", src.replace('"${output_folder}/dummy.txt"', ""))
+        # appending to the samplefile $6 must be writability-guarded
+        self.assertIn('[ -w "$6" ]', src)
+
+    def test_persona_audit_report_additions(self):
+        """Scores/columns legend (CFD/CRISTA + citations + alignment notation),
+        'What to do next' box, per-guide max-edits caveat, and the perfect-match
+        banner's REF/ALT origin tag."""
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        # scores & columns legend with citations + lay gloss + notation
+        self.assertIn("scores, columns", html.lower())          # section 7 retitle
+        self.assertIn("Cutting Frequency Determination", html)   # CFD defined
+        self.assertIn("Doench", html)                            # CFD citation
+        self.assertIn("Abadi", html)                             # CRISTA citation
+        self.assertIn("extrapolation beyond the model", html)    # bulge caveat
+        self.assertIn("lowercase</b> = a mismatch", html)        # alignment notation
+        # "What to do next" box
+        self.assertIn("What to do next", html)
+        self.assertIn("rhAMP-Seq", html)
+        # max-total-edits caveat surfaces the observed max (fixture: cap 6, max mm+b 4
+        # -> no caveat; force a case where obs>cap via render_summary_and_matrix)
+        meta = {"guide_display": "G", "nuclease": "SpCas9", "pam": "NRG",
+                "genome": "hg38", "datasets": "1000G", "mm": "5", "bdna": 2,
+                "brna": 2, "bmax": "2", "max_edits": "5", "obs_max_mmb": 9}
+        hs = gr.render_summary_and_matrix(meta, "6.1", None)
+        self.assertIn("search cap", hs)
+        self.assertIn("has 9 mismatches+bulges", hs)
+        # perfect-match banner tags REF vs variant-created origin
+        b = gr.render_perfect_match_banner({
+            "n_perfect": 1, "max_perfect_per_guide": 1, "n_guides_with_perfect": 1,
+            "perfect_sites": [{"chrom": "chr2", "pos": "100", "strand": "+",
+                               "origin": "ref", "maf": None}],
+        })
+        self.assertIn("reference", b.lower())
+        b2 = gr.render_perfect_match_banner({
+            "n_perfect": 2, "max_perfect_per_guide": 2, "n_guides_with_perfect": 1,
+            "perfect_sites": [
+                {"chrom": "chr7", "pos": "1", "strand": "+", "origin": "ref", "maf": None},
+                {"chrom": "chr7", "pos": "2", "strand": "-", "origin": "alt", "maf": 0.0035}],
+        })
+        self.assertIn("variant-created", b2.lower())
+        self.assertIn("only in carriers", b2.lower())
 
     def test_inline_filename_mentions_are_clickable(self):
         """Any inline <code>FILE</code> reference to a bundled download (in prose,

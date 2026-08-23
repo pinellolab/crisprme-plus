@@ -351,6 +351,53 @@ panel; a variant present in the panel but whose source allele frequency is exact
 1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
 read as "present, frequency effectively 0", not a measured frequency.
 
+## 8. Off-target scoring, assumptions and limitations
+
+**Scoring models.** Candidate off-targets are scored with two independent,
+previously published models, used **unchanged** from their original definitions:
+**CFD** (Cutting Frequency Determination; Doench *et al.*, *Nat. Biotechnol.*
+2016) and **CRISTA** (Abadi *et al.*, *PLoS Comput. Biol.* 2017). Both return a
+value in [0, 1]; higher means more likely to be cut. They are reported
+side-by-side because they can disagree, and the recommended validation panel is
+deliberately model-agnostic (a site worst by *any* metric is included), so no
+single model gates the shortlist. CRISPRme+ does not re-train or modify either
+model; it applies them to the aligned protospacer+PAM of each candidate.
+
+**Domain-of-validity caveat (important).** CFD was trained on **single-nucleotide
+mismatches** and was not designed to score DNA/RNA bulges (insertions/deletions).
+CRISPRme+ nonetheless reports a CFD value for bulge-containing alignments, which
+is an **extrapolation beyond the model's training domain**; for gapped/bulge
+sites, CRISTA (which models indels) is the more appropriate score, and both
+should be read as relative risk indicators rather than calibrated probabilities.
+The CFD/CRISTA threshold tiers in the report are **model-relative** (CRISTA's
+cut points differ from CFD's because the two scores are on different scales).
+
+**Assumptions.** (i) Results are relative to the chosen **reference assembly** and
+its coordinates. (ii) The variant panel is only as representative as the input
+databases — **1000G + HGDP is broad but not exhaustive**, and a variant absent
+from the panel cannot generate a variant-created off-target. (iii) Allele
+frequencies are **AC/AN over the genotyped panel** (see §3); a frequency-only
+database contributes its reported population AF directly, so a single combined
+number can mix a genotyped denominator with imported summary statistics. (iv)
+Phasing is resolved per haplotype from the genotypes (confirmed vs putative,
+§4); unphased or cross-phase-set haplotypes are reported as **putative**.
+
+**Limitations.** CRISPRme+ does **not** model somatic/mosaic variants, copy-number
+or large structural variants, epigenetic state beyond the supplied annotations, or
+chromatin accessibility as a cutting determinant. The `Max_total_edits` value is a
+**search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded
+alignments may exceed it (the report surfaces the observed maximum). A reported MAF
+of `1e-05` is a **display floor** for a source-AF of 0, not a measured frequency
+(§3, §7). These are computational predictions and are **not a substitute for
+experimental off-target validation** (e.g. GUIDE-seq / CIRCLE-seq / targeted
+amplicon or rhAMP-Seq sequencing of the recommended panel).
+
+**Validation.** CRISPRme+ ships a brute-force `validate-test` harness that checks
+the fast index-based search against an exhaustive ground-truth enumeration
+(Cas9/Cas12a benchmarks); maintainers should surface its concordance figures and
+any retrospective comparison to experimental off-target assays when using the tool
+for regulatory-grade reporting.
+
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the

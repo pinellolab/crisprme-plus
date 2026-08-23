@@ -1,4 +1,4 @@
-# CRISPRme 2.2.0 — Python 3.11 image, built FROM SOURCE.
+# CRISPRme+ 2.4.0 — Python 3.11 image, built FROM SOURCE.
 #
 # crispritz 2.8.2 is compiled from source (it is not yet on Bioconda for
 # Python 3.11) and crisprme is installed from this build context. The dependency
