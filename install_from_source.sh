@@ -5,17 +5,17 @@
 # bin/ + opt/ layout the Bioconda/Docker builds use (crisprme.py resolves
 # PostProcess as <dir-of-crisprme.py>[:-3] + opt/crisprme/PostProcess/).
 #
-# Prerequisites: the crisprme-2.2.0 conda env created from environment.yml and
+# Prerequisites: the crisprme-2.4.0 conda env created from environment.yml and
 # ACTIVATED (so a C++ compiler with OpenMP, git and the Python deps are present):
 #
 #   mamba env create -f environment.yml
-#   mamba activate crisprme-2.2.0
+#   mamba activate crisprme-2.4.0
 #   bash install_from_source.sh
 #
 # Override the CRISPRitz tag with CRISPRITZ_REF (default v2.8.1).
 set -euo pipefail
 
-: "${CONDA_PREFIX:?Activate the conda env first: 'mamba activate crisprme-2.2.0'}"
+: "${CONDA_PREFIX:?Activate the conda env first: 'mamba activate crisprme-2.4.0'}"
 CRISPRITZ_REF="${CRISPRITZ_REF:-v2.8.1}"
 CXX="${CXX:-g++}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this crisprme checkout

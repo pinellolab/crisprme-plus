@@ -23,8 +23,8 @@ mamba config --set channel_priority strict
 ```bash
 # CRISPRme+ (2.4.0) is a Python 3.11 source build (Bioconda serves stable 2.1.x, py3.8):
 git clone https://github.com/pinellolab/crisprme-plus.git && cd crisprme-plus
-mamba env create -f environment.yml   # env 'crisprme-2.2.0' (Python 3.11)
-mamba activate crisprme-2.2.0
+mamba env create -f environment.yml   # env 'crisprme-2.4.0' (Python 3.11)
+mamba activate crisprme-2.4.0
 bash install_from_source.sh
 ```
 
@@ -76,7 +76,7 @@ By default, each asset is checked with an MD5 digest before downloading. Simply 
 ### Common issues
 
 - **FTP timeout**: re-run the setup command; incomplete files will be retried automatically.
-- **`bgzip` not found**: ensure the `crisprme-2.2.0` environment is active (`mamba activate crisprme-2.2.0`).
+- **`bgzip` not found**: ensure the `crisprme-2.4.0` environment is active (`mamba activate crisprme-2.4.0`).
 - **Disk full**: check available space with `df -h .` before starting; the full bundle needs ~410 GB.
 
 ### 2c. What the setup command produces
@@ -109,8 +109,8 @@ The default repository is `lucapinello/crisprme-data`; override it with `--hf-re
 
 *This is the everyday workflow. Everything from here is fast and lightweight.*
 
-> **Before running any search**, ensure the CRISPRme environment is active: `mamba activate crisprme-2.2.0`
-> (the 2.4.0 source build creates env `crisprme-2.2.0`; Docker users skip activation).
+> **Before running any search**, ensure the CRISPRme environment is active: `mamba activate crisprme-2.4.0`
+> (the 2.4.0 source build creates env `crisprme-2.4.0`; Docker users skip activation).
 
 ### 3a. Choose a PAM file
 

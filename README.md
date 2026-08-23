@@ -30,7 +30,7 @@ through an interactive web-based interface.
 - **Shareable off-target assessment report** — every run auto-generates a self-contained, branded HTML report (summary, graphical report, recommended validation panel, annotated top-1000, per-tier downloads, annotation legend), downloadable from the results page. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
 - **Prebuilt indexes on demand** — pull reference data + precomputed indexes from a HuggingFace CDN (`crisprme.py download`).
 - **Build & publish your own dict-less indexes** — `build-index-only` produces a *self-complete* variant-aware index in one command (the CRISPRitz index + its `_INDELS` companion, the Tier-0 allele-frequency **registry**, the Tier-1 **genotype store**, the indel logs, the combined **samplesID** lists, and a build-time **variant-count manifest**), and `publish-index --dictless` uploads it (plus the genotype companion) to the HuggingFace CDN — so new precomputed dict-less indexes (new PAMs, genomes, or merged/phased panels) can be built and shared with no code change. Merged multi-dataset panels (`bcftools merge`) are supported with **per-dataset provenance** and **per-haplotype phasing** (phased datasets give confirmed haplotypes, unphased give putative, mixed panels handle each dataset on its own). ([protocol](docs/PRECOMPUTED_INDEXES.md))
-- **One-command web interface in Docker** — no 410 GB local build (see the Quickstart below).
+- **One-command web interface in Docker** — no conda, no giant local build (see the Quickstart below).
 - **Browser Data-Manager** — add genomes, indexes, VCFs, annotations and PAMs from the web UI, with dependency-aware deletion (Dash 2.x).
 - **Email notifications** — optionally get a results link emailed to you when a job finishes (SMTP configured once under **Settings → Email notifications**).
 - **PAM-geometry-aware search** — a pamless (`NNN`) index serves any PAM of the same length/orientation, so one index covers many PAM variants.
@@ -43,20 +43,21 @@ through an interactive web-based interface.
 locally hosted web interface. See [`docs/DOCKER_QUICKSTART.md`](docs/DOCKER_QUICKSTART.md) for a quick guide on
 deploying the web interface locally.
 
-## ⚡ Quickstart — web interface in Docker (no conda, no 410 GB)
+## ⚡ Quickstart — web interface in Docker (no conda, no giant build)
 
 New to CRISPRme? Get the point-and-click web interface running in a few commands
 — just install Docker, then:
 
-> **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**,
-> give Docker **16 GB** to start; the genome-wide 1000G+HGDP variant search is
-> heavier, so use **32 GB (64 GB recommended)** for real runs. (On Linux/Docker
-> Engine the container uses host memory directly.) See
-> [System Requirements](#0-system-requirements).
+> **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**:
+> **16 GB** is enough for reference-only / single-chromosome runs, but the
+> genome-wide 1000G+HGDP variant search shown here peaks around **68–75 GB**, so
+> give Docker **64 GB+** for it (32 GB will OOM). (On Linux/Docker Engine the
+> container uses host memory directly.) See [System Requirements](#0-system-requirements).
 
 ```bash
 mkdir -p ~/crisprme && cd ~/crisprme
-# 1) fast-download the reference data (minutes, via the HuggingFace CDN)
+# 1) fast-download the reference data + reference index (minutes, HuggingFace CDN)
+#    (this does NOT include the variant index — that is step 2)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 crisprme.py download --what all --path /DATA
 # 2) grab the prebuilt SpCas9 (NRG = NAG+NGG) indexes so no long index build is needed:
 #    the reference index, and the compact dict-less variant-aware hg38 + 1000G + HGDP
@@ -130,24 +131,23 @@ so the search above works out of the box on a fresh install.
 
 ## 0 System Requirements
 
-To ensure optimal performance, CRISPRme requires the following:
+Memory scales with the search — pick your tier (measured figures):
 
-- **Minimum Memory (RAM)**: 32 GB
-  <br>Suitable for single-chromosome tests and small, targeted analyses.
+| Search | RAM | Disk |
+|---|---|---|
+| **Reference-only / single-chromosome** (toy or reference-genome runs) | **8–16 GB** | ~22 GB (reference-only install) |
+| **Whole-genome, variant-aware** (e.g. 1000G+HGDP; the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~85 GB (full dict-less install) |
 
-- **Whole-genome / population-scale analyses**: 32 GB minimum, 64 GB recommended
-  <br>For whole-genome searches with large variant datasets (e.g. genome-wide
-  1000G+HGDP). 32 GB is a workable floor and 64 GB is comfortable for concurrent
-  per-chromosome post-analysis.
-
-For best results, confirm that your system meets or exceeds these specifications 
-before running CRISPRme. To estimate the cost of a large search up front, see
-`docs/SCALABILITY_ANALYSIS.md`.
+The variant-aware genome-wide search is the memory-heavy one: the CRISPRitz search
+process alone peaks around **68–75 GB** loading and traversing the variant index, so
+**16 GB or 32 GB will OOM a real genome-wide variant search** — allocate 64 GB+.
+Reference-only runs are light (a few GB). To estimate the cost of a large search up
+front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
 > **Which version do I get?** For **CRISPRme+ (2.4.0, this release)** use **Docker**
-> (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-410-gb) above, or
+> (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above, or
 > §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
 > 2.4.0 line** — use it only if you specifically want the stable release. If in doubt,
 > use Docker.
@@ -318,8 +318,9 @@ pull or run the image, so no special flags are required.
 CRISPRme's searches are memory intensive. By default Docker Desktop caps the
 memory available to containers, which can cause searches to fail with
 out-of-memory errors. Before running large analyses, raise the limit in
-**Docker Desktop → Settings → Resources → Memory** to **at least 32 GB** (64 GB
-or more is recommended for large analyses). CRISPRme prints a non-fatal
+**Docker Desktop → Settings → Resources → Memory** — **16 GB** is fine for
+reference-only runs, but a genome-wide **variant** search needs **64 GB+** (it peaks
+at ~68–75 GB). CRISPRme prints a non-fatal
 `WARNING:` at the start of a `complete-search` / `complete-test` run when it
 detects less than 32 GB of total memory, reminding you to increase this
 allocation. (You can override the threshold with `CRISPRME_MIN_GB` or skip the
@@ -388,7 +389,7 @@ docker images
 Look for an entry similar to the following:
 ```
 REPOSITORY          TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme:v2.4.0 latest    <image_id>     <timestamp>    <size>
+pinellolab/crisprme   v2.4.0    <image_id>     <timestamp>    ~818MB
 ```
 
 You are now ready to run CRISPRme using Docker.
@@ -406,7 +407,7 @@ cd crisprme-plus
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
 mamba env create -f environment.yml
-mamba activate crisprme-2.2.0
+mamba activate crisprme-2.4.0
 
 # 3. build CRISPRitz 2.8.1 from source and install both tools into the env
 bash install_from_source.sh
@@ -548,33 +549,6 @@ and variant datasets to deliver comprehensive results. This feature integrates
 all critical stages of the CRISPRme pipeline, encompassing off-target 
 identification, functional annotation, and detailed reporting.
 
-Key highlights of the Complete Search functionality include:
-
-- **Variant- and Haplotype-Awareness** 
-  <br>Accurately incorporates genetic variation, including population- and 
-  sample-specific variants, and haplotypes data, to identify off-targets that 
-  reflect real-world genomic diversity.
-
-- **Comprehensive Off-Target Discovery**
-  <br>Searches both the reference genome and user-specified variant datasets 
-  for potential off-targets, including those encompassing mismatches and bulges.
-
-- **Functional Annotation** 
-  <br>Annotates off-targets with relevant genomic features, such as 
-  coding/non-coding regions, regulatory elements, and gene proximity.
-
-- **Detailed Reporting**
-  <br>Generates population-specific and sample-specific off-target summaries, 
-  highlighting variations that may impact specificity or introduce novel PAM 
-  sites. Provides CFD (Cutting Frequency Determination) and CRISTA scores, and 
-  mismatches and bulges counts to rank off-targets based on their potential 
-  impact. Includes graphical representations of findings to facilitate result 
-  interpretation.
-
-- **Output Formats** 
-  <br>Produces user-friendly output files, including text-based tables and 
-  visualization-ready graphical summaries.
-
 **Quickstart (batteries install).** After the Docker
 [quickstart](docs/DOCKER_QUICKSTART.md) download, a variant-aware search is a
 single command — `download --what index` already wrote the `list_vcf.txt` /
@@ -603,7 +577,7 @@ Usage Example for the Complete Search function:
     --genome Genomes/hg38 \
     --vcf vcf_config.1000G.HGDP.txt \
     --guide sg1617.txt \
-    --pam PAMs/20bp-NGG-SpCas9.txt \
+    --pam PAMs/20bp-NRG-SpCas9.txt \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed \
     --samplesID samplesIDs.1000G.HGDP.txt \
@@ -627,7 +601,7 @@ Usage Example for the Complete Search function:
     --genome Genomes/hg38 \
     --vcf vcf_config.1000G.HGDP.txt \
     --guide sg1617.txt \
-    --pam PAMs/20bp-NGG-SpCas9.txt \
+    --pam PAMs/20bp-NRG-SpCas9.txt \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed \
     --samplesID samplesIDs.1000G.HGDP.txt \

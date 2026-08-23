@@ -96,7 +96,11 @@ if [ $2 == "_" ]; then
 	vcf_list=$output_folder/tmp_list_vcf.txt
 fi
 echo >>$vcf_list
-if [ $6 != "_" ]; then
+# $6 is the samplefile; for a reference-only run it is a shared placeholder that
+# may live in a READ-ONLY install/image (e.g. Apptainer without --writable-tmpfs).
+# Only append the trailing newline when it is actually writable, so a read-only
+# reference-only run does not die with "Read-only file system".
+if [ $6 != "_" ] && [ -w "$6" ]; then
 	echo >>$6
 fi
 
@@ -1097,11 +1101,15 @@ if [ "$vcf_name" != "_" ]; then
 		exit 1
 	fi
 else
-	echo -e "dummy_file" >dummy.txt
-	./radar_chart_dict_generator.py $guide_file $final_res.bestCFD.txt dummy.txt $annotation_file "$output_folder" $ncpus $mm $bMax "CFD"
-	./radar_chart_dict_generator.py $guide_file $final_res.bestCRISTA.txt dummy.txt $annotation_file "$output_folder" $ncpus $mm $bMax "CRISTA"
-	./radar_chart_dict_generator.py $guide_file $final_res.bestmmblg.txt dummy.txt $annotation_file "$output_folder" $ncpus $mm $bMax "fewest"
-	rm dummy.txt
+	# write the placeholder into the WRITABLE output folder, not a relative path in
+	# the (possibly read-only) install/image cwd -- the reference-only radar-chart
+	# branch otherwise dies with "dummy.txt: Read-only file system" under Apptainer.
+	_dummy="${output_folder}/dummy.txt"
+	echo -e "dummy_file" >"$_dummy"
+	./radar_chart_dict_generator.py $guide_file $final_res.bestCFD.txt "$_dummy" $annotation_file "$output_folder" $ncpus $mm $bMax "CFD"
+	./radar_chart_dict_generator.py $guide_file $final_res.bestCRISTA.txt "$_dummy" $annotation_file "$output_folder" $ncpus $mm $bMax "CRISTA"
+	./radar_chart_dict_generator.py $guide_file $final_res.bestmmblg.txt "$_dummy" $annotation_file "$output_folder" $ncpus $mm $bMax "fewest"
+	rm -f "$_dummy"
 	if [ -s $logerror ]; then
 		printf  "ERROR: summary processing failed (reference genome pipeline)\n" >&2
 		rm -r "${output_folder}/imgs"
