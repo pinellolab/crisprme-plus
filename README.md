@@ -45,6 +45,28 @@ deploying the web interface locally.
 
 ## ⚡ Quickstart — web interface in Docker (no conda, no giant build)
 
+### Easiest: one-line install → a clickable app (no terminal after this)
+
+Not comfortable with the command line? Run **one** command once, and it installs a
+clickable **CRISPRme** app (into Applications / Start Menu) that manages everything
+— you never touch the terminal again. Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+
+**macOS / Linux** (Terminal):
+```bash
+curl -fsSL https://pinellolab.github.io/CRISPRme/install.sh | bash
+```
+**Windows** (PowerShell):
+```powershell
+irm https://pinellolab.github.io/CRISPRme/install.ps1 | iex
+```
+Then open **CRISPRme** → click **Download reference data** (once) → **Open CRISPRme**;
+your browser opens the web interface. (Genome-wide *variant* search needs 64 GB RAM;
+reference-only fits 16 GB.) Details: [`install/`](install/).
+
+---
+
+### Or run the Docker commands yourself
+
 New to CRISPRme? Get the point-and-click web interface running in a few commands
 — just install Docker, then:
 
