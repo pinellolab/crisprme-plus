@@ -2211,17 +2211,43 @@ def build_index_only() -> None:
                         _n_records += int(_m.get("n_records", 0) or 0)
                         if not _dbs and _m.get("databases"):
                             _dbs = _m["databases"]
+                    # exact indel count = data lines (minus 1-line header) across the
+                    # log_indels log*.txt[.gz] files (one line per indel allele). The
+                    # SNP registry does NOT hold indels, so this is the only place the
+                    # indel total is captured for the report.
+                    _n_indels = None
+                    try:
+                        import gzip as _gzip
+                        _logs = (sorted(_glob(os.path.join(indel_dict, "log*.txt.gz")))
+                                 or sorted(_glob(os.path.join(indel_dict, "log*.txt"))))
+                        if _logs:
+                            _ni = 0
+                            for _lg in _logs:
+                                _op = (_gzip.open(_lg, "rb") if _lg.endswith(".gz")
+                                       else open(_lg, "rb"))
+                                _c = 0
+                                with _op as _lfh:
+                                    while True:
+                                        _b = _lfh.read(1 << 20)
+                                        if not _b:
+                                            break
+                                        _c += _b.count(b"\n")
+                                _ni += max(0, _c - 1)  # minus header line
+                            _n_indels = _ni
+                    except Exception:  # noqa: BLE001 - indel count is optional
+                        _n_indels = None
                     if _n_records > 0:
+                        _payload = {"n_records": _n_records, "databases": _dbs}
+                        if _n_indels is not None:
+                            _payload["n_indels"] = _n_indels
                         with open(
                             os.path.join(_reg_dir, "variant_count.json"), "w"
                         ) as _out:
-                            _json.dump(
-                                {"n_records": _n_records, "databases": _dbs},
-                                _out, indent=2, sort_keys=True,
-                            )
+                            _json.dump(_payload, _out, indent=2, sort_keys=True)
                         print(
-                            f"Wrote registry variant-count manifest: "
-                            f"{_n_records:,} SNP variant records.",
+                            f"Wrote variant-count manifest: {_n_records:,} SNPs"
+                            + (f" + {_n_indels:,} indels." if _n_indels is not None
+                               else " (indel count unavailable)."),
                             flush=True,
                         )
                 except Exception as _vc_err:  # noqa: BLE001 - manifest is optional

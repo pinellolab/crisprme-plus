@@ -870,15 +870,25 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(gr.panel_and_variants_note(None), "")
         # registry sample_count OVERRIDES the samplesID-derived count (the latter
         # can over-list vs the AC/AN denominator); SNP count is surfaced
-        vc = {"n_records": 106_664_924, "databases": {"1000G": 2548, "HGDP": 929}}
+        # with an indel count (build manifest): both counts shown, "all searched"
+        vc = {"n_records": 106_664_924, "n_indels": 14_255_298,
+              "databases": {"1000G": 2548, "HGDP": 929}}
         note = gr.panel_and_variants_note({"1000G": 3, "HGDP": 2}, vc)
         self.assertIn("<strong>3,477</strong> individuals", note)   # 2548 + 929
         self.assertIn("1000G n=2,548", note)
         self.assertIn("106,664,924", note)
-        self.assertIn("SNPs", note)
-        # indels must be stated as ALSO searched, never "excluded"
-        self.assertIn("indel", note.lower())
+        self.assertIn("14,255,298", note)
+        self.assertIn("indels, all searched", note)
         self.assertNotIn("excluded", note.lower())
+        self.assertNotIn("indel pipeline", note.lower())
+        # no indel count (legacy install / idx fallback): SNPs shown, indels stated
+        # as also searched, still no "(indel pipeline)" nor "excluded"
+        vc2 = {"n_records": 106_664_924, "n_indels": None,
+               "databases": {"1000G": 2548, "HGDP": 929}}
+        note_sc = gr.panel_and_variants_note({}, vc2)
+        self.assertIn("106,664,924</strong> SNPs", note_sc)
+        self.assertIn("also searched", note_sc)
+        self.assertNotIn("indel pipeline", note_sc.lower())
         # no registry -> fall back to samplesID counts, no variant count clause
         note2 = gr.panel_and_variants_note({"1000G": 3, "HGDP": 2})
         self.assertIn("<strong>5</strong> individuals", note2)
@@ -887,7 +897,7 @@ class TestGenerateReport(unittest.TestCase):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
         self.assertNotIn("applies no allele-frequency threshold", html)
-        self.assertIn("no variants are excluded by allele frequency", html)
+        self.assertNotIn("no variants are excluded by allele frequency", html)
         # inclusion statement explicitly covers indels (they ARE searched)
         self.assertIn("SNPs and insertions/deletions", html)
         self.assertIn("<strong>5</strong> individuals", html)  # 3 + 2 (samplesID)
@@ -915,12 +925,15 @@ class TestGenerateReport(unittest.TestCase):
             vc = gr._registry_variant_count(rdir, meta)
             self.assertEqual(vc["n_records"], 150)  # summed across chroms
             self.assertEqual(vc["databases"], {"1000G": 2548, "HGDP": 929})
-            # a build-time sidecar takes precedence over re-summing the idx files
+            self.assertIsNone(vc["n_indels"])  # idx headers carry no indel count
+            # a build-time sidecar takes precedence + supplies the indel count
             with open(os.path.join(reg, "variant_count.json"), "w") as h:
-                _json.dump({"n_records": 106664924, "databases": dbs}, h)
-            self.assertEqual(
-                gr._registry_variant_count(rdir, meta)["n_records"], 106664924
-            )
+                _json.dump(
+                    {"n_records": 106664924, "n_indels": 14255298, "databases": dbs}, h
+                )
+            vc2 = gr._registry_variant_count(rdir, meta)
+            self.assertEqual(vc2["n_records"], 106664924)
+            self.assertEqual(vc2["n_indels"], 14255298)
             # no registry resolvable -> None (report simply omits the count)
             self.assertIsNone(gr._registry_variant_count(None, meta))
             self.assertIsNone(

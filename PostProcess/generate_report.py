@@ -916,8 +916,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         ("Variant database(s)", _esc(ds)),
         ("Variants included",
          "All variants present in the database(s) &mdash; common and rare, genic "
-         "and intergenic, SNPs and insertions/deletions (indels); no variants are "
-         "excluded by allele frequency."
+         "and intergenic, SNPs and insertions/deletions (indels)."
          + panel_and_variants_note(dataset_counts, variant_count)),
         ("Allele-frequency basis",
          f"Combined-panel minor/alternate allele frequency over the merged "
@@ -1217,7 +1216,15 @@ def _registry_variant_count(result_dir, meta):
                 m = json.load(fh)
             n = int(m.get("n_records", 0) or 0)
             if n > 0:
-                return {"n_records": n, "databases": _dbs(m)}
+                _ni = m.get("n_indels")
+                return {
+                    "n_records": n,
+                    "n_indels": int(_ni) if _ni else None,
+                    "databases": _dbs(m),
+                }
+        # fallback: sum n_records across the per-chrom reg_*.idx headers. The idx
+        # files carry no indel count, so n_indels is only available from the
+        # build-time sidecar above.
         total, dbs = 0, {}
         for p in sorted(glob.glob(os.path.join(chosen, "reg_*.idx"))):
             try:
@@ -1228,7 +1235,8 @@ def _registry_variant_count(result_dir, meta):
             total += int(m.get("n_records", 0) or 0)
             if not dbs:
                 dbs = _dbs(m)
-        return {"n_records": total, "databases": dbs} if total > 0 else None
+        return ({"n_records": total, "n_indels": None, "databases": dbs}
+                if total > 0 else None)
     except Exception:  # noqa: BLE001 - a count is optional; never break the report
         return None
 
@@ -1253,15 +1261,22 @@ def panel_and_variants_note(dataset_counts, variant_count=None):
     parts = ", ".join(f"{lbl} n={n:,}" for lbl, n in sorted(counts.items()))
     per_ds = f" ({parts})" if len(counts) > 1 else ""
     lead = f" Panel: <strong>{total:,}</strong> individuals{per_ds}."
-    if variant_count and variant_count.get("n_records"):
-        # n_records is the registry's SNP count (indels live in a separate index);
-        # be explicit that indels are ALSO searched, so the SNP figure is not read
-        # as "the only variants" nor as "indels dropped".
-        lead += (
-            f" The database contributes <strong>{variant_count['n_records']:,}"
-            "</strong> SNPs to the allele-frequency registry; insertions/deletions "
-            "from the same panel are also searched (indel pipeline)."
-        )
+    n_snp = variant_count.get("n_records") if variant_count else None
+    n_indel = variant_count.get("n_indels") if variant_count else None
+    if n_snp:
+        # SNPs come from the registry; indels from the separate indel index. Show
+        # BOTH counts as searched when the indel count is known (build-time
+        # manifest); otherwise state indels are also searched without a number.
+        if n_indel:
+            lead += (
+                f" The database contributes <strong>{n_snp:,}</strong> SNPs and "
+                f"<strong>{n_indel:,}</strong> indels, all searched."
+            )
+        else:
+            lead += (
+                f" The database contributes <strong>{n_snp:,}</strong> SNPs; "
+                "insertions/deletions from the same panel are also searched."
+            )
     return lead
 
 
