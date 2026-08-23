@@ -1,13 +1,24 @@
 # CRISPRme+ — changes emerging from the 2.1.x lineage
 
+> 📌 **Historical design log (2.2.0 lineage).** This document captures how CRISPRme+
+> first diverged from 2.1.x. It is **not** the current release state: CRISPRme+ has
+> since shipped as **v2.4.0**, with the **dict-less variant index as the default**
+> (compact allele-frequency registry + optional per-genotype store, no per-sample
+> dictionaries), the **shareable off-target report**, **perfect-match multiplicity
+> flagging**, **COSMIC** annotation, and the **v3 compacted registry**. For the
+> current shipped state see **[CHANGELOG.md](../CHANGELOG.md)** (the `[2.4.0]`
+> section) and **[METHODS.md](../METHODS.md)**; several items below marked "🚧 pending"
+> or "Version stays 2.2.0" are now **done and shipped in v2.4.0**.
+
 > ⚠️ **Alpha.** CRISPRme+ is a preview of the next major version (things may change build-to-build); for critical work use the frozen stable **[CRISPRme 2.1.14](https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14)**.
 
 This document tracks everything that diverges from the last stable **2.1.x** release
 as the **2.2.0 / CRISPRme+** lineage takes shape. It is the single place to see
 "what is new," "what is faster," and — critically — **what breaks backward
-compatibility**. Version stays `2.2.0` and the package/CLI stays `crisprme` (so
-bioconda/Docker users are not disrupted); the "+" denotes the diverging,
-optimization-focused lineage that **may break retro-compatibility** where noted.
+compatibility**. (Version has since advanced to `2.4.0`; the package/CLI stays
+`crisprme` so bioconda/Docker users are not disrupted.) The "+" denotes the
+diverging, optimization-focused lineage that **may break retro-compatibility**
+where noted.
 
 Status legend: ✅ done & validated · 🔬 validated in isolation, integration pending ·
 🚧 in progress · ⏸ pinned (waiting on an external dependency).

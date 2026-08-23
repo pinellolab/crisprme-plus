@@ -22,10 +22,13 @@ Then, in Docker Desktop → **Settings → Resources**, give Docker enough memor
 genome-wide 1000G+HGDP variant search is memory-intensive — give it **at least
 32 GB (64 GB recommended)**.
 
-> **Disk:** the batteries-included setup below needs **≈ 250 GB free**. The download
-> is ~44 GB, but the combined 1000G+HGDP variant index **expands to ~190 GB on disk**
-> — its per-sample variant dictionaries (for population/sample annotation) are
-> ~170 GB uncompressed. A reference-only setup is far smaller (~15 GB).
+> **Disk:** give Docker **≈ 100 GB free** for the batteries-included (variant-aware)
+> setup — it uses **~85 GB** on disk. v2.4.0 ships a **dict-less** variant index
+> (no per-sample dictionaries — that is the point of this release): the reference +
+> variant genome indexes are ~40 GB, the compact allele-frequency registry ~2 GB,
+> and the per-genotype store (used for optional per-sample annotation) ~26 GB. The
+> combined 1000G+HGDP variant index itself is a ~16 GB download. A reference-only
+> setup is far smaller (~25 GB).
 
 Check Docker works, then pull the CRISPRme+ image:
 
@@ -117,8 +120,9 @@ running, and open:
 ## 7. Run a search in the browser
 
 1. Enter a **guide/spacer** sequence (e.g. `CTAACAGTTGCTTTTATCAC`).
-2. Choose the **PAM** (e.g. `20bp-NGG-SpCas9`) and the **genome** (`hg38`).
-3. Leave the default **Maximum edits** slider (3) for a quick search — it caps the
+2. Choose the **PAM** — the default **`20bp-NRG-SpCas9`** (NGG + NAG) matches the
+   shipped index and the **Load Example** button — and the **genome** (`hg38`).
+3. Leave the default **Maximum edits** slider (4) for a quick search — it caps the
    total mismatches + DNA/RNA bulges — or open **Advanced options** to set
    mismatches / DNA bulges / RNA bulges individually (e.g. 4 / 1 / 1). The default
    **1000G+HGDP** variant index is pre-selected, so the search is variant-aware out
@@ -231,10 +235,10 @@ the Docker instructions above.
 ## Installing more indexes (as you need them)
 
 An index is specific to a **PAM + bulge count + genome**. Download whichever you
-need by its exact published name — for example the pamless variant index:
+need by its **exact published name** — for example the pamless variant index:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 crisprme.py download --what index --index-name NNN_3_hg38-dictless+hg38_1000G_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 crisprme.py download --what index --index-name NNN_3_hg38+hg38_1000G_HGDP --path /DATA
 ```
 
 To see which indexes are published, browse the dataset repository

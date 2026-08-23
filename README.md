@@ -9,6 +9,8 @@
 
 # CRISPRme+ (2.4.0)
 
+### 📦 Repository, releases & issues → **https://github.com/pinellolab/crisprme-plus**
+
 CRISPRme is a comprehensive tool designed for thorough off-target assessment in 
 CRISPR-Cas systems. It is available as a command-line interface and an offline tool
 with a locally deployable web interface. CRISPRme integrates human genetic variant 
@@ -26,7 +28,8 @@ through an interactive web-based interface.
 - **Observed-haplotype enumeration** — multi-variant off-targets are enumerated only as haplotypes that occur in a real individual (confirmed for phased data, putative for unphased / mixed), removing phantom off-targets and restoring dropped real haplotypes. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
 - **COSMIC cancer-gene annotation** — off-targets are flagged when they fall in a Cancer Gene Census gene (tier + oncogene/TSG/fusion), alongside updated ENCODE SCREEN v4, GENCODE and DHS annotations. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
 - **Shareable off-target assessment report** — every run auto-generates a self-contained, branded HTML report (summary, graphical report, recommended validation panel, annotated top-1000, per-tier downloads, annotation legend), downloadable from the results page. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
-- **Prebuilt indexes on demand** — pull reference data + precomputed indexes from a HuggingFace CDN (`crisprme.py download`), or `build-index-only` / `publish-index` your own.
+- **Prebuilt indexes on demand** — pull reference data + precomputed indexes from a HuggingFace CDN (`crisprme.py download`).
+- **Build & publish your own dict-less indexes** — `build-index-only` produces a *self-complete* variant-aware index in one command (the CRISPRitz index + its `_INDELS` companion, the Tier-0 allele-frequency **registry**, the Tier-1 **genotype store**, the indel logs, the combined **samplesID** lists, and a build-time **variant-count manifest**), and `publish-index --dictless` uploads it (plus the genotype companion) to the HuggingFace CDN — so new precomputed dict-less indexes (new PAMs, genomes, or merged/phased panels) can be built and shared with no code change. Merged multi-dataset panels (`bcftools merge`) are supported with **per-dataset provenance** and **per-haplotype phasing** (phased datasets give confirmed haplotypes, unphased give putative, mixed panels handle each dataset on its own). ([protocol](docs/PRECOMPUTED_INDEXES.md))
 - **One-command web interface in Docker** — no 410 GB local build (see the Quickstart below).
 - **Browser Data-Manager** — add genomes, indexes, VCFs, annotations and PAMs from the web UI, with dependency-aware deletion (Dash 2.x).
 - **Email notifications** — optionally get a results link emailed to you when a job finishes (SMTP configured once under **Settings → Email notifications**).
@@ -66,6 +69,31 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 
 **Full step-by-step (with variants, more indexes, troubleshooting):
 [`docs/DOCKER_QUICKSTART.md`](docs/DOCKER_QUICKSTART.md).**
+
+### …or run the same search from the command line
+
+Prefer the CLI? After the download steps above (1 & 2), run the variant-aware
+example search and generate the shareable report — no web UI needed:
+
+```bash
+# a genome-wide SpCas9 (NRG) search over hg38 + 1000G + HGDP, up to 6 mismatches
+# + 2 DNA / 2 RNA bulges, with combined allele frequencies, rsIDs and annotations
+echo "CTAACAGTTGCTTTTATCACNNN" > guide.txt
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 crisprme.py complete-search \
+  --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --guide guide.txt \
+  --vcf list_vcf.txt --samplesID list_samplesID.txt \
+  --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+  --gene_annotation Annotations/gencode.protein_coding.bed.gz \
+  --mm 6 --bDNA 2 --bRNA 2 --output my_search --thread 8
+
+# build the self-contained, shareable HTML report (report.html + a data/ folder)
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 crisprme.py generate-report \
+  --result-dir Results/my_search
+# -> open Results/my_search/<jobid>_report.zip, then report.html
+```
+
+`download --what all/index` writes `list_vcf.txt` and `list_samplesID.txt` for you,
+so the search above works out of the box on a fresh install.
 
 ## Table Of Contents
 
@@ -576,7 +604,7 @@ Usage Example for the Complete Search function:
     --vcf vcf_config.1000G.HGDP.txt \
     --guide sg1617.txt \
     --pam PAMs/20bp-NGG-SpCas9.txt \
-    --annotation Annotations/dhs+encode+gencode.hg38.bed \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed \
     --samplesID samplesIDs.1000G.HGDP.txt \
     --be-window 4,8 \
@@ -600,7 +628,7 @@ Usage Example for the Complete Search function:
     --vcf vcf_config.1000G.HGDP.txt \
     --guide sg1617.txt \
     --pam PAMs/20bp-NGG-SpCas9.txt \
-    --annotation Annotations/dhs+encode+gencode.hg38.bed \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed \
     --samplesID samplesIDs.1000G.HGDP.txt \
     --be-window 4,8 \
@@ -1559,13 +1587,15 @@ for details).
 
 The **Generate Report** function (`generate-report`) builds a self-contained,
 easily shareable off-target assessment report for a completed CRISPRme run. It
-produces a single ZIP (`<jobid>_report.zip`) bundling an offline `report.html`
-(no external dependencies — plots embedded as base64 PNGs, the top-1000
-off-target table inline, CSS inline), the full `integrated_results.tsv.gz`, the
-top-1000 and top-100 validation-panel tables, and the non-empty per-tier curated
-TSVs. It is a portable digest of the full interactive website result, aimed at
-sharing off-target predictions (for example, to design a targeted-NGS /
-rhAMP-Seq confirmation panel).
+produces a single ZIP (`<jobid>_report.zip`) in which **`report.html` is the only
+top-level file — open it** — while every bundled data file (the full
+`integrated_results.tsv.gz`, the top-1000 / top-100 validation-panel tables, the
+non-empty per-tier curated TSVs, and the high-variant-density BED) sits under a
+**`data/`** subfolder. `report.html` is fully offline (plots embedded as base64
+PNGs, the top-1000 table + CSS inline, no external dependencies), and every
+filename it mentions links to its bundled file under `data/`. It is a portable
+digest of the full interactive website result, aimed at sharing off-target
+predictions (for example, to design a targeted-NGS / rhAMP-Seq confirmation panel).
 
 This report is generated **automatically at the end of every `complete-search`**
 run, so most users never call it directly. Run it standalone only to
@@ -1584,6 +1614,28 @@ Usage Example for the Generate Report function:
     crisprme.py generate-report \
     --result-dir Results/my-job
   ```
+
+##### How to read the report
+---
+
+Unzip and open **`report.html`** (the only file at the top level; everything else
+is under `data/`). Reading top to bottom:
+
+- **1. Summary** — run parameters and an off-target-by-mismatch/bulge matrix. The
+  **Analysis inputs & criteria** box's *Variants included* line states the
+  genotyped panel size (e.g. **3,477 individuals** for 1000G+HGDP) and the number
+  of **SNPs** and **indels** searched.
+- **⚠ Red banner ("no unambiguous on-target")** — appears when a guide has **more
+  than one perfect (0-mismatch / 0-bulge) match**: there is then no *a-priori*
+  on-target, so every perfect-match site is listed, flagged `Perfect_match = Yes`,
+  and forced to the top of the validation panel. (One perfect match = a normal
+  amber "presumed on-target" note instead.)
+- **4. Recommended validation panel** — CFD / CRISTA / edit-distance threshold
+  tables plus a **hybrid worst-case ~100-site panel** (`data/panel_top100.tsv`) to
+  seed a targeted-NGS / rhAMP-Seq confirmation assay.
+- **MAF column** — a value of **`1e-05` is a display floor** meaning "present but
+  frequency effectively 0" (used so a zero-frequency allele still renders on the
+  log-scale plots), **not** a measured frequency.
 
 ##### Input Arguments
 ---

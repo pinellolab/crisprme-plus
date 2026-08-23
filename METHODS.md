@@ -339,6 +339,18 @@ a `Perfect_match` column, and called out in a prominent warning banner (red when
 there are several, listing the sites; amber "presumed on-target" when there is
 exactly one) — in both the report and the interactive web results page.
 
+The report ZIP places `report.html` at the top level with all data files under a
+`data/` subfolder, and its *Variants included* line states the genotyped panel
+size and the number of SNPs and indels searched. These database counts are read
+from a build-time `Dictionaries/registry_<vcf>/variant_count.json` sidecar
+(`n_records` SNPs + `n_indels`) written when the dict-less index is built, so the
+report needs no VCF access at report time (for the shipped combined 1000G+HGDP
+panel: 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyped
+panel; a variant present in the panel but whose source allele frequency is exactly
+0 (e.g. a secondary allele of a multiallelic site) is shown at a **display floor of
+1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
+read as "present, frequency effectively 0", not a measured frequency.
+
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the

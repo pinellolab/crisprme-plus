@@ -3485,6 +3485,8 @@ elif sys.argv[1] == "web-interface":  # run web interface
     web_interface()
 elif sys.argv[1] == "--version":  # print version
     crisprme_version()
+elif sys.argv[1] in ("--help", "-h", "help"):  # explicit help request (no error)
+    crisprme_help()
 else:
     sys.stderr.write(f"ERROR! {sys.argv[1]} is not an allowed command!\n\n")
     crisprme_help()  # print help if invalid command is given

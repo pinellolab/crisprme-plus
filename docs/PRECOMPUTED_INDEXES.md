@@ -73,11 +73,20 @@ crisprme.py build-index-only \
   --bDNA 2 --bRNA 2 --thread 16 \
   --vcf VCFs/hg38_1000G_HGDP --samplesID samplesIDs.config.txt \
   --path "$CRISPRME_DIR"
-# -> genome_library/NRG_3_hg38+hg38_1000G_HGDP/  (+ _INDELS)
-#    Dictionaries/registry_hg38_1000G_HGDP/      (Tier-0)
-#    Dictionaries/genotypes_hg38_1000G_HGDP/     (Tier-1)
-#    samplesIDs/hg38_1000G_HGDP.samplesID.txt    (combined, emitted by the build)
+# -> genome_library/NRG_3_hg38+hg38_1000G_HGDP/          (+ _INDELS companion)
+#    Dictionaries/registry_hg38_1000G_HGDP/              (Tier-0 allele-freq registry)
+#    Dictionaries/registry_hg38_1000G_HGDP/variant_count.json  (SNP + indel counts, for the report)
+#    Dictionaries/genotypes_hg38_1000G_HGDP/             (Tier-1 per-sample genotype store)
+#    Dictionaries/log_indels_hg38_1000G_HGDP/            (indel logs, for indel post-analysis)
+#    samplesIDs/hg38_1000G_HGDP.samplesID.txt            (combined, emitted by the build)
 ```
+
+**One command, all supporting files.** `build-index-only` writes *everything* a
+variant-aware search + report needs — the index and its `_INDELS` companion, the
+Tier-0 registry, the Tier-1 genotype store, the indel logs, the combined samplesID
+list, and the `variant_count.json` manifest (`n_records` SNPs + `n_indels`, which
+feeds the report's *Variants included* line). Nothing else has to be assembled by
+hand, so `publish-index` (below) ships a self-complete index.
 
 `--samplesID` is a listing file (one samplesID filename per line, resolved under
 `samplesIDs/`); a combined panel lists **both** the 1000G and HGDP files, e.g.:
@@ -94,12 +103,51 @@ hg38_HGDP.samplesID.txt
 > `--samplesID` to emit the tiers **and** (for a merged panel) write the combined
 > samplesID list into the install, so the published index is self-complete.
 
+### Merged multi-dataset panels & phasing (maintainers)
+
+To build an index over **several datasets at once** (e.g. 1000G + HGDP, or adding
+a new cohort later), first merge the per-dataset VCFs into one combined panel, then
+point `build-index-only --vcf` at the merged VCF folder and list every per-db
+samplesID file in `--samplesID`.
+
+```bash
+# 1) normalize each source VCF to per-alt records (left-align + split multiallelics)
+for db in 1000G HGDP NewCohort; do
+  bcftools norm -m -any -f hg38.fa "$db.vcf.gz" -Oz -o "$db.norm.vcf.gz" && bcftools index -t "$db.norm.vcf.gz"
+done
+# 2) merge into one combined panel (consistent reference build + contig naming across datasets)
+bcftools merge 1000G.norm.vcf.gz HGDP.norm.vcf.gz NewCohort.norm.vcf.gz -Oz -o VCFs/hg38_1000G_HGDP_NewCohort/merged.vcf.gz
+# 3) build the dict-less index (emits registry + genotypes + variant_count.json + combined samplesID)
+crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+  --bDNA 2 --bRNA 2 --vcf VCFs/hg38_1000G_HGDP_NewCohort --samplesID samplesIDs.config.txt --path "$CRISPRME_DIR"
+```
+
+Two things the build handles for you, which matter as new merged panels are added:
+
+- **Per-dataset provenance is preserved.** Allele frequencies are recomputed on the
+  merged multiallelic records (requires the multiallelic-AF fix in CRISPRitz PR #36)
+  and reported **per native dataset label** *and* as a combined global frequency over
+  the union panel — 1000G / HGDP / gnomAD are never conflated. The panel size (AN)
+  is the **genotyped** sample set, not the roster (`samplesID` can over-list samples;
+  see METHODS §1). The `databases` block in each `registry_<vcf>/reg_*.idx` carries
+  the per-dataset `sample_count`.
+- **Phasing is resolved per haplotype from the genotypes themselves.** A multi-variant
+  off-target is enumerated as an **observed haplotype**; it is reported *confirmed*
+  only when its carriers reached it via **phased** (`|`), same-phase-set genotypes,
+  and *putative* when the genotypes are **unphased** (`/`) or span different phase
+  sets. So a **mixed** merged panel (some datasets phased, some not) is handled
+  correctly with no special flags — phased datasets yield confirmed haplotypes,
+  unphased yield putative, each on its own. The dataset-wide population-summary
+  phasing flag defaults conservatively to *unphased* (reports bounds, never a false
+  confirmation) and can be set explicitly at build time if a dataset's phasing is
+  known but not detectable from its GT separators.
+
 ### Publish (maintainers)
 
 ```bash
 export HF_TOKEN=hf_...        # your write token, in the shell only
 crisprme.py publish-index --index genome_library/NRG_3_hg38+hg38_1000G_HGDP --dictless
-# -> indexes/NRG_3_hg38+hg38_1000G_HGDP.tar.gz     (main: index + _INDELS + registry + indel logs + samplesIDs + manifest)
+# -> indexes/NRG_3_hg38+hg38_1000G_HGDP.tar.gz     (main: index + _INDELS + registry (+ variant_count.json) + indel logs + samplesIDs + manifest)
 # -> indexes/genotypes_hg38_1000G_HGDP.tar.gz      (separate Tier-1 companion)
 ```
 
