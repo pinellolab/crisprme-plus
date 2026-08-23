@@ -48,6 +48,11 @@ deploying the web interface locally.
 New to CRISPRme? Get the point-and-click web interface running in a few commands
 — just install Docker, then:
 
+> **Prefer no terminal at all?** Install Docker Desktop, then use the
+> **double-click launcher** in [`launcher/`](launcher/) — `1 - Download data`,
+> then `2 - Start CRISPRme`, and your browser opens the web interface. See
+> [`launcher/README.txt`](launcher/README.txt).
+
 > **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**:
 > **16 GB** is enough for reference-only / single-chromosome runs, but the
 > genome-wide 1000G+HGDP variant search shown here peaks around **68–75 GB**, so

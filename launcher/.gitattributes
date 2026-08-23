@@ -1,0 +1,4 @@
+# Windows batch files need CRLF; Mac .command (bash) must stay LF or the shebang breaks.
+*.bat       text eol=crlf
+*.command   text eol=lf
+*.command   -text

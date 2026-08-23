@@ -1,0 +1,19 @@
+# CRISPRme+ web interface — one-file config for the double-click launchers.
+#
+# Data lives in ./crisprme-data (created by the "Download data" launcher) and
+# PERSISTS between runs. The web interface is served at http://localhost:8080.
+#
+# Memory: set Docker Desktop -> Settings -> Resources -> Memory to 16 GB for
+# reference-only searches, or 64 GB for the genome-wide variant-aware search.
+services:
+  crisprme:
+    image: pinellolab/crisprme:v2.4.0
+    working_dir: /DATA
+    volumes:
+      - ./crisprme-data:/DATA
+    ports:
+      - "8080:8080"
+    command: crisprme.py web-interface
+    stdin_open: true
+    tty: true
+    restart: "no"
