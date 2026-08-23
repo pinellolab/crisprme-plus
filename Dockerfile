@@ -1,3 +1,7 @@
+# check=skip=SecretsUsedInArgOrEnv
+# ^ false positive: HF_HUB_DISABLE_IMPLICIT_TOKEN is a boolean flag (=1), not a
+#   secret — buildkit's lint only pattern-matches the substring "TOKEN" in the
+#   name. Skipping it keeps the build output clean.
 # CRISPRme+ 2.4.0 — Python 3.11 image, built FROM SOURCE.
 #
 # crispritz 2.8.2 is compiled from source (it is not yet on Bioconda for
