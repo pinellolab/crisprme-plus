@@ -885,20 +885,22 @@ def build_mmb_matrix(df, cols, meta):
     return {"mm_cols": mm_cols, "groups": groups}
 
 
-def render_inputs_criteria(meta, variant_created_name=None):
+def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
+                           min_maf=None):
     """'Analysis inputs & criteria' box (FDA off-target guidance VII.F.i / F.ii).
 
     States, in one place, the variant database(s), the variant inclusion policy
     (all common + rare, genic + intergenic, no CRISPRme-applied AF threshold), the
     allele-frequency basis, and the off-target search criteria (variant homology
-    gain via fewer mismatches / lowered gaps + variant-created PAM detection). The
-    scientific justification for the choices remains the sponsor's. Everything is
-    read from the run's meta (no hardcoded database names). ``variant_created_name``
-    is the ACTUAL bundled filename (``.tsv`` or ``.tsv.gz``) so the link never
-    breaks; when absent the name is shown as plain text.
+    gain via fewer mismatches / lowered gaps + variant-created PAM detection).
+    Everything is read from the run's meta (no hardcoded database names).
+    ``variant_created_name`` is the ACTUAL bundled filename (``.tsv`` or ``.tsv.gz``)
+    so the link never breaks; when absent the name is shown as plain text.
+    ``dataset_counts`` (``{dataset: n_individuals}``, cheap from the samplesID files)
+    adds the panel size + minimum resolvable MAF to the inclusion row when known.
     """
     vc_html = (
-        f'<a href="{_esc(variant_created_name)}" download>'
+        f'<a href="{_dl_href(variant_created_name)}" download>'
         f"<code>{_esc(variant_created_name)}</code></a>"
         if variant_created_name else "<code>variant_created.tsv</code>"
     )
@@ -911,8 +913,8 @@ def render_inputs_criteria(meta, variant_created_name=None):
         ("Variant database(s)", _esc(ds)),
         ("Variants included",
          "All variants present in the database(s) &mdash; common and rare, genic "
-         "and intergenic. CRISPRme applies no allele-frequency threshold; any "
-         "pre-filtering of the input database is the sponsor's."),
+         "and intergenic. CRISPRme applies no allele-frequency threshold."
+         + panel_stats_note(dataset_counts, min_maf)),
         ("Allele-frequency basis",
          f"Combined-panel minor/alternate allele frequency over the merged "
          f"{_esc(ds)} panel: for genotyped databases this is AC/AN across the "
@@ -1140,6 +1142,59 @@ def _dataset_of(sample_id):
     if sid.startswith("HG") or sid.startswith("NA"):
         return "1000G"
     return "other"
+
+
+def dataset_individual_counts(samplesid_dir):
+    """``{dataset_label: n_individuals}`` from the samplesID files -- CHEAP (just
+    counts sample IDs; no VCF/genotype parsing). Each sample is counted under its
+    MOST-SPECIFIC native dataset (see :func:`load_sample_dataset`), so 1000G and
+    HGDP individuals are separated and the combined-panel superset does not double
+    count. Returns ``{}`` when no samplesID files are resolvable."""
+    ds = load_sample_dataset(samplesid_dir)  # sid -> native dataset label
+    counts = {}
+    for label in ds.values():
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def min_positive_maf(df, cols):
+    """Smallest POSITIVE minor-allele frequency present in the run's MAF column
+    (comma-joined multi-SNP cells handled by :func:`_min_maf`). DATA-DRIVEN, so it
+    reflects the TRUE allele-frequency resolution of the panel regardless of any
+    samplesID over-listing (a raw sample count can exceed the genotyped denominator,
+    which would make a 1/2N estimate wrong). Returns ``None`` when no positive MAF
+    is present. Cheap: one pass over the already-loaded column."""
+    if "maf" not in cols or cols["maf"] not in df.columns:
+        return None
+    best = None
+    for raw in df[cols["maf"]]:
+        v = _min_maf(raw)
+        if v is not None and v > 0:
+            best = v if best is None else min(best, v)
+    return best
+
+
+def panel_stats_note(dataset_counts, min_maf=None):
+    """One-line panel note for the 'Variants included' row: the number of
+    individuals per dataset + combined (panel size, from the samplesID files), and
+    the finest allele-frequency resolution actually represented (``min_maf``, the
+    rarest contributing variant -- data-driven, NOT derived from the sample count,
+    so samplesID over-listing cannot inflate it). Returns "" when nothing is known."""
+    bits = []
+    if dataset_counts:
+        total = sum(dataset_counts.values())
+        if total > 0:
+            parts = ", ".join(
+                f"{lbl} n={n:,}" for lbl, n in sorted(dataset_counts.items())
+            )
+            per_ds = f" ({parts})" if len(dataset_counts) > 1 else ""
+            bits.append(f"Panel: <strong>{total:,}</strong> individuals{per_ds}.")
+    if min_maf is not None and min_maf > 0:
+        bits.append(
+            f"Finest allele-frequency resolution among the analysed variants: "
+            f"<strong>{min_maf:.2e}</strong> (the rarest contributing variant)."
+        )
+    return (" " + " ".join(bits)) if bits else ""
 
 
 # --------------------------------------------------------------------------- #
@@ -1444,7 +1499,8 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
                 uri = _placeholder_uri("CRISTA delta scatter unavailable")
             panels.append((
                 "By variant effect (CRISTA)",
-                "Same paper-style ref/alt scatter with CRISTA on the y-axis, "
+                "The same ref/alt scatter as for the CFD score above, now with "
+                "CRISTA on the y-axis, "
                 "re-ranked by the variant-induced CRISTA change (ALT-REF, "
                 "descending): the population variants that most raise the "
                 "independent CRISTA cleavage score come first. Included because "
@@ -1800,7 +1856,7 @@ def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
         if not fname:
             return f"{count:,}"
         return (
-            f"{count:,} &nbsp;<a class=\"tier-dl\" href=\"{_esc(fname)}\" "
+            f"{count:,} &nbsp;<a class=\"tier-dl\" href=\"{_dl_href(fname)}\" "
             f"download>{_esc(fname)}</a>"
         )
 
@@ -1860,7 +1916,7 @@ def render_validation_panel(vp, panel_tsv_name=None, tier_links=None):
     panel_dl = ""
     if panel_tsv_name:
         panel_dl = (
-            f'<p><a class="download" href="{_esc(panel_tsv_name)}" download>'
+            f'<p><a class="download" href="{_dl_href(panel_tsv_name)}" download>'
             f"Recommended hybrid worst-case panel (TSV, ~{PANEL_CAP} sites)"
             f"</a></p>"
         )
@@ -1936,6 +1992,18 @@ def _esc(value):
     if _is_na(value):
         return ""
     return html.escape(str(value))
+
+
+# All bundled downloads live under this subfolder in the report ZIP, so the top
+# level contains ONLY report.html -- it is then self-evident that the reader opens
+# report.html. The in-HTML links point here; the zip stores files under it.
+DATA_SUBDIR = "data"
+
+
+def _dl_href(name):
+    """href to a bundled download (which lives under ``data/``). The visible link
+    TEXT stays the bare filename; only the href is prefixed."""
+    return f"{DATA_SUBDIR}/{_esc(name)}"
 
 
 # MAF footnote (report v2.4): explains every blank / em-dash MAF cell in the table
@@ -2303,7 +2371,7 @@ def render_html(
     panel_caption = ""
     if panel_top100_name:
         panel_download = (
-            f'\n  <a class="download" href="{_esc(panel_top100_name)}" download>'
+            f'\n  <a class="download" href="{_dl_href(panel_top100_name)}" download>'
             f"Recommended hybrid panel (TSV)</a>"
         )
         panel_caption = (
@@ -2317,7 +2385,7 @@ def render_html(
     hvdr_callout = ""
     if hvdr_bundle_name:
         hvdr_download = (
-            f'\n  <a class="download" href="{_esc(hvdr_bundle_name)}" download>'
+            f'\n  <a class="download" href="{_dl_href(hvdr_bundle_name)}" download>'
             f"Highly complex regions near top sites ({hvdr_n_regions:,}) &mdash; BED</a>"
         )
         hvdr_callout = (
@@ -2340,7 +2408,7 @@ def render_html(
     tier_caption = ""
     if tier_downloads:
         links = "".join(
-            f'\n  <a class="download" href="{_esc(fname)}" download>'
+            f'\n  <a class="download" href="{_dl_href(fname)}" download>'
             f"{_esc(label)}</a>"
             for label, fname in tier_downloads
         )
@@ -2404,7 +2472,7 @@ for human genetic variation</p>
 
 <h2>2. Key graphical report</h2>
 <p class="caption">Reference vs variant off-target scores across the top-ranked
-candidates (paper-style scatter). The same scatter is shown under multiple
+candidates. The same scatter is shown under multiple
 rankings so the highest-scoring sites and the highest-variant-effect sites are
 both foregrounded.</p>
 {scatter_block}
@@ -2421,8 +2489,8 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 
 <h2>5. Downloads</h2>
 <p>
-  <a class="download" href="{_esc(tsv_gz_name)}" download>Complete raw integrated results (all columns, TSV gzip)</a>
-  <a class="download" href="{_esc(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}
+  <a class="download" href="{_dl_href(tsv_gz_name)}" download>Complete raw integrated results (all columns, TSV gzip)</a>
+  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}
 </p>{tier_download_html}
 {hvdr_callout}
 <p class="caption">All files are bundled alongside this HTML in the same ZIP;
@@ -2838,7 +2906,15 @@ def build_report(
 
     # inputs/criteria box built HERE (after tiers staged) so the variant_created
     # link uses the ACTUAL bundled filename (.tsv or .tsv.gz), never a broken guess.
-    inputs_criteria_html = render_inputs_criteria(meta, tier_links.get("variant_created"))
+    # per-dataset panel sizes for the 'Variants included' row (reuse the already
+    # loaded native-provenance map; cheap -- just tallies sample IDs)
+    _ds_counts = {}
+    for _lbl in sample_dataset.values():
+        _ds_counts[_lbl] = _ds_counts.get(_lbl, 0) + 1
+    inputs_criteria_html = render_inputs_criteria(
+        meta, tier_links.get("variant_created"),
+        dataset_counts=_ds_counts, min_maf=min_positive_maf(df, cols),
+    )
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
         table_html, tsv_gz_name, top1000_name, footer_html,
@@ -2896,20 +2972,19 @@ def build_report(
         if os.path.exists(out_zip):
             os.remove(out_zip)
         os.makedirs(os.path.dirname(out_zip), exist_ok=True)
-        # `zip -j` matches submit_job_automated_new_multiple_vcfs.sh:1187 and
-        # flat-decompresses to exactly the bundled files. Fall back to Python
-        # zipfile if the `zip` binary is unavailable.
-        try:
-            subprocess.run(
-                ["zip", "-j", "-q", out_zip, *bundle],
-                check=True,
-            )
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            import zipfile
+        # Layout: report.html at the TOP level, every other bundled file under
+        # data/ -- so unzipping shows a single obvious report.html plus a data/
+        # folder. The in-HTML links point at data/<name> (see _dl_href), so the
+        # report stays fully self-contained and openable in place.
+        import zipfile
 
-            with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
-                for p in bundle:
-                    zf.write(p, os.path.basename(p))
+        def _arcname(path):
+            base = os.path.basename(path)
+            return base if base == "report.html" else f"{DATA_SUBDIR}/{base}"
+
+        with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+            for p in bundle:
+                zf.write(p, _arcname(p))
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 

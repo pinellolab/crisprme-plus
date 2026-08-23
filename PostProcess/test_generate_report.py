@@ -204,10 +204,18 @@ class TestGenerateReport(unittest.TestCase):
         with open(path, encoding="utf-8") as handle:
             return handle.read()
 
-    def test_zip_has_exactly_the_flat_bundle(self):
+    @staticmethod
+    def _dpath(extract, name):
+        """Path to a bundled file: report.html at the TOP level, everything else
+        under the data/ subfolder (report v2.4 layout)."""
+        if name == "report.html":
+            return os.path.join(extract, name)
+        return os.path.join(extract, "data", name)
+
+    def test_zip_layout_report_at_root_rest_under_data(self):
         _, names, _ = self._build_and_extract()
-        # report v2.4 bundles the RAW gz + the curated top1000/panel + every
-        # NON-EMPTY per-tier curated TSV. For this fixture (5 off-targets):
+        # ONLY report.html at the top level; every other bundled file under data/.
+        # For this fixture (5 off-targets):
         #   CFD>= 0.5/0.2/0.05  -> all non-empty (0.1 tier removed)
         #   CRISTA>= 0.5/0.2/0.05 -> all non-empty (fixture has CRISTA)
         #   mm+b<= 1/2/3/4      -> 0/2/4/5 (mmb_le_1 is EMPTY -> not bundled)
@@ -216,27 +224,27 @@ class TestGenerateReport(unittest.TestCase):
             sorted(names),
             sorted([
                 "report.html",
-                "integrated_results.tsv.gz",
-                "top1000.tsv",
-                "top1000_crista.tsv",  # CRISTA-ranked companion (fixture has CRISTA)
-                "panel_top100.tsv",
-                "cfd_ge_0.50.tsv",
-                "cfd_ge_0.20.tsv",
-                "cfd_ge_0.05.tsv",
-                "crista_ge_0.50.tsv",  # CRISTA tiers, symmetric with CFD (fixture has CRISTA)
-                "crista_ge_0.20.tsv",
-                "crista_ge_0.05.tsv",
-                "mmb_le_2.tsv",
-                "mmb_le_3.tsv",
-                "mmb_le_4.tsv",
-                "variant_created.tsv",
+                "data/integrated_results.tsv.gz",
+                "data/top1000.tsv",
+                "data/top1000_crista.tsv",  # CRISTA-ranked companion
+                "data/panel_top100.tsv",
+                "data/cfd_ge_0.50.tsv",
+                "data/cfd_ge_0.20.tsv",
+                "data/cfd_ge_0.05.tsv",
+                "data/crista_ge_0.50.tsv",  # CRISTA tiers, symmetric with CFD
+                "data/crista_ge_0.20.tsv",
+                "data/crista_ge_0.05.tsv",
+                "data/mmb_le_2.tsv",
+                "data/mmb_le_3.tsv",
+                "data/mmb_le_4.tsv",
+                "data/variant_created.tsv",
             ]),
         )
+        # report.html is the ONLY top-level entry (self-obvious what to open)
+        top_level = [n for n in names if "/" not in n]
+        self.assertEqual(top_level, ["report.html"])
         # the empty tier (mm+b <= 1) is NOT bundled
-        self.assertNotIn("mmb_le_1.tsv", names)
-        # flat (no directory components)
-        for name in names:
-            self.assertNotIn("/", name)
+        self.assertNotIn("data/mmb_le_1.tsv", names)
 
     def test_pertier_downloads_are_curated_and_linked(self):
         _, names, extract = self._build_and_extract()
@@ -249,13 +257,14 @@ class TestGenerateReport(unittest.TestCase):
             "cfd_ge_0.05.tsv", "mmb_le_2.tsv", "mmb_le_3.tsv", "mmb_le_4.tsv",
             "variant_created.tsv",
         ):
-            path = os.path.join(extract, fname)
+            path = self._dpath(extract, fname)
             self.assertTrue(os.path.isfile(path), fname)
             with open(path) as handle:
                 header = handle.readline().rstrip("\n").split("\t")
             self.assertEqual(header, expected_curated, fname)
-            # each bundled tier file is linked from the HTML with a RELATIVE href
-            self.assertIn(f'href="{fname}"', html)
+            # each bundled tier file is linked from the HTML with a RELATIVE
+            # href into the data/ subfolder
+            self.assertIn(f'href="data/{fname}"', html)
         # curated header carries the annotation columns
         for ann in ("Gene", "Gene_distance_kb", "GENCODE", "ENCODE", "DHS",
                     "COSMIC_cancer_gene"):
@@ -337,17 +346,17 @@ class TestGenerateReport(unittest.TestCase):
         with zipfile.ZipFile(out_zip) as zf:
             names = zf.namelist()
             zf.extractall(extract)
-        self.assertIn("high_variant_density_regions.bed", names)
+        self.assertIn("data/high_variant_density_regions.bed", names)
         # the bundled bed keeps the IUPAC field
-        bed = self._read(os.path.join(extract, "high_variant_density_regions.bed"))
+        bed = self._read(self._dpath(extract, "high_variant_density_regions.bed"))
         self.assertIn("iupac_protospacer", bed)
         self.assertIn("ACGTNNNNACGTACGTACGTNGG", bed)
         html = self._read(os.path.join(extract, "report.html"))
         self.assertIn("Highly complex (high-variant-density) regions", html)
-        self.assertIn('href="high_variant_density_regions.bed"', html)
+        self.assertIn('href="data/high_variant_density_regions.bed"', html)
         # curated column is part of the shared set (header of top1000)
         top_header = self._read(
-            os.path.join(extract, "top1000.tsv")
+            self._dpath(extract, "top1000.tsv")
         ).splitlines()[0].split("\t")
         self.assertIn("High_complexity_region", top_header)
 
@@ -422,7 +431,7 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_bundled_tsv_gz_round_trips(self):
         _, _, extract = self._build_and_extract()
-        gz = os.path.join(extract, "integrated_results.tsv.gz")
+        gz = self._dpath(extract, "integrated_results.tsv.gz")
         self.assertTrue(os.path.isfile(gz))
         with gzip.open(gz, "rt") as handle:
             content = handle.read()
@@ -431,7 +440,7 @@ class TestGenerateReport(unittest.TestCase):
 
     def test_top1000_tsv_bundled_with_table_rows(self):
         _, _, extract = self._build_and_extract()
-        top = os.path.join(extract, "top1000.tsv")
+        top = self._dpath(extract, "top1000.tsv")
         self.assertTrue(os.path.isfile(top))
         with open(top) as handle:
             lines = handle.read().strip().splitlines()
@@ -788,7 +797,7 @@ class TestGenerateReport(unittest.TestCase):
             )
             with zipfile.ZipFile(out) as zf:
                 html = zf.read("report.html").decode()
-                top = zf.read("top1000.tsv").decode().splitlines()[0].split("\t")
+                top = zf.read("data/top1000.tsv").decode().splitlines()[0].split("\t")
         self.assertNotIn("7. Annotation legend", html)
         self.assertNotIn("COSMIC_cancer_gene", top)
         self.assertNotIn("GENCODE", top)
@@ -828,7 +837,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(table_headers, curated)
         # top1000.tsv + panel_top100.tsv headers == curated order (spot check)
         for fname in ("top1000.tsv", "panel_top100.tsv"):
-            with open(os.path.join(extract, fname)) as handle:
+            with open(self._dpath(extract, fname)) as handle:
                 header = handle.readline().rstrip("\n").split("\t")
             self.assertEqual(header, curated, fname)
 
@@ -850,6 +859,35 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("report generator v", html)
         self.assertIn(os.path.basename(self.tsv), html)
 
+    def test_variants_included_panel_stats_and_no_sponsor_clause(self):
+        """'Variants included' drops the sponsor pre-filtering clause and gains the
+        cheap panel size + minimum resolvable MAF (from the samplesID files)."""
+        # cheap counter, per-dataset (fixture: 1000G n=3, HGDP n=2)
+        self.assertEqual(
+            gr.dataset_individual_counts(self.sid_dir), {"1000G": 3, "HGDP": 2}
+        )
+        # note empty without counts/maf
+        self.assertEqual(gr.panel_stats_note({}), "")
+        self.assertEqual(gr.panel_stats_note(None), "")
+        # min-MAF is DATA-DRIVEN (rarest MAF in the run), immune to samplesID
+        # over-listing -- never a 1/2N estimate from the sample count
+        _note = gr.panel_stats_note({"1000G": 3, "HGDP": 2}, min_maf=1.44e-4)
+        self.assertIn("1000G n=3", _note)
+        self.assertIn("1.44e-04", _note)
+        _, _, extract = self._build_and_extract()
+        html = self._read(os.path.join(extract, "report.html"))
+        self.assertNotIn("pre-filtering of the input database is the sponsor", html)
+        self.assertIn("<strong>5</strong> individuals", html)  # 3 + 2
+        self.assertIn("1000G n=3", html)
+        self.assertIn("HGDP n=2", html)
+        # fixture's rarest positive MAF is 0.003 (from the multi-SNP chr7 row);
+        # NOT a 1/2N sample-count estimate (which would wrongly be 1/10)
+        self.assertIn("3.00e-03", html)
+        self.assertNotIn("1/10", html)
+        # captions no longer use the "paper-style" jargon; CRISTA panel references CFD
+        self.assertNotIn("paper-style", html)
+        self.assertIn("the same ref/alt scatter as for the cfd score", html.lower())
+
     def test_self_contained_offline_and_relative_links(self):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
@@ -866,9 +904,10 @@ class TestGenerateReport(unittest.TestCase):
         while i != -1:
             self.assertEqual(html[i - 6 : i], 'href="', f"non-link URL: {html[i-10:i+40]!r}")
             i = html.find("http", i + 1)
-        # RELATIVE download links to both bundled siblings
-        self.assertIn('href="integrated_results.tsv.gz"', html)
-        self.assertIn('href="top1000.tsv"', html)
+        # RELATIVE download links into the data/ subfolder (report.html is the
+        # only top-level file, so it is self-evident what to open)
+        self.assertIn('href="data/integrated_results.tsv.gz"', html)
+        self.assertIn('href="data/top1000.tsv"', html)
 
     def test_multi_snp_haplotype_min_maf_and_first_rsid(self):
         _, _, extract = self._build_and_extract()
