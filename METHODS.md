@@ -392,11 +392,31 @@ of `1e-05` is a **display floor** for a source-AF of 0, not a measured frequency
 experimental off-target validation** (e.g. GUIDE-seq / CIRCLE-seq / targeted
 amplicon or rhAMP-Seq sequencing of the recommended panel).
 
-**Validation.** CRISPRme+ ships a brute-force `validate-test` harness that checks
-the fast index-based search against an exhaustive ground-truth enumeration
-(Cas9/Cas12a benchmarks); maintainers should surface its concordance figures and
-any retrospective comparison to experimental off-target assays when using the tool
-for regulatory-grade reporting.
+**Validation (search-engine correctness).** The fast index-based search has been
+verified against an **independent brute-force ground truth** — an exhaustive
+dynamic-programming alignment implemented by a *different* method (and a
+dependency-free Rust re-implementation as a second independent check), driven from
+a benchmark registry (`test/benchmark/benchmarks.json`) via `crisprme.py
+validate-test`. This is a one-time correctness check, not a per-search step:
+
+- **SpCas9 (sg1617, NGG, mm 4 / DNA-bulge 1 / RNA-bulge 1)** on the hg38 + 1000G
+  variant-enriched genome — CRISPRme reproduces the brute-force reference
+  **exactly (3,495 off-targets, 0 differences)**.
+- **enAsCas12a (HBG1/HBG2 clinical guide, TTTV 5′ PAM)** on chr22 — **953
+  off-targets**, matched against the brute-force reference.
+- The registered benchmarks pass end-to-end (`complete-test` → `validate-test`),
+  including the default single-`--max-total-edits` web-mode cases (4/4 locally);
+  `validate-test` exits non-zero on any mismatch, and the round-trip runs in CI.
+- Separately, the high-variant-density greedy decomposition (§5) was validated as
+  provably exact against brute-force argmin on **4,000/4,000 random cases** (both
+  strands, with/without bulges), with PAM-creating-variant cases reproducing full
+  enumeration (variant attribution identical).
+
+This establishes that the engine **does not miss** off-targets relative to
+exhaustive search. It does **not** validate the *scoring* models' predictive
+accuracy against experimental cleavage — a regulatory-grade package should add a
+retrospective comparison of CFD/CRISTA ranking to experimental off-target assays
+(e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 
 ---
 

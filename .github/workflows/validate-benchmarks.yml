@@ -113,6 +113,38 @@ jobs:
             echo "zero-hit regression PASS"
           '
 
+      - name: read-only-container smoke (reference-only search, code dir read-only)
+        run: |
+          # Regression guard for the read-only-filesystem class: the pipeline used to
+          # write into the install/code dir (a placeholder vuoto.txt and a bare-relative
+          # dummy.txt), so a reference-only search DIED under Apptainer (read-only image)
+          # without --writable-tmpfs. CI normally runs the code on the WRITABLE Docker
+          # image layer, so it never caught it. Here we chmod the code dir READ-ONLY
+          # (mimicking Apptainer) and run a reference-only search that PRODUCES HITS (so
+          # the graphical/summary reference branch — where the bug lived — actually runs).
+          # A regression fails with "Read-only file system" / "Genome enrichment failed".
+          mkdir -p rowork
+          docker run --rm $BRANCH_MOUNT -v "${PWD}/rowork:/DATA" -w /DATA "$IMG" bash -c '
+            set -e
+            cp /branch/crisprme.py /opt/conda/bin/crisprme.py
+            cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
+            mkdir -p Genomes/synth PAMs
+            # genome = guide + NGG PAM repeated -> guaranteed hits (exercises post-analysis)
+            python -c "open(\"Genomes/synth/chrS.fa\",\"w\").write(\">chrS\n\"+(\"ACGTACGTACGTACGTACGTAGG\"*200)+\"\n\")"
+            printf "NNNNNNNNNNNNNNNNNNNNNGG 3\n" > PAMs/20bp-NGG-SpCas9.txt
+            printf "ACGTACGTACGTACGTACGTNNN\n" > guide.txt
+            # make the install/code dir READ-ONLY (the class the bug lived in)
+            chmod -R a-w /opt/conda/opt/crisprme
+            crisprme.py complete-search --genome Genomes/synth --pam PAMs/20bp-NGG-SpCas9.txt \
+              --guide guide.txt --mm 1 --bDNA 0 --bRNA 0 --output ro
+            if [ -s Results/ro/log_error.txt ]; then
+              echo "FAIL: log_error non-empty (read-only regression?)"; cat Results/ro/log_error.txt; exit 1
+            fi
+            ls Results/ro/*integrated_results.tsv >/dev/null 2>&1 \
+              || { echo "FAIL: no integrated_results (read-only regression)"; exit 1; }
+            echo "read-only-container smoke PASS"
+          '
+
       - name: complete-test (chr22, 1000G) for all registered benchmarks
         run: |
           mkdir -p work
