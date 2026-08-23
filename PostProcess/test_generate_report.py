@@ -893,6 +893,28 @@ class TestGenerateReport(unittest.TestCase):
         note2 = gr.panel_and_variants_note({"1000G": 3, "HGDP": 2})
         self.assertIn("<strong>5</strong> individuals", note2)
         self.assertNotIn("SNPs", note2)
+
+    def test_panel_note_is_database_agnostic(self):
+        """The panel/variant-count note works for ANY database(s) + edge counts --
+        nothing is tuned to 1000G/HGDP."""
+        # arbitrary future databases, three of them, with an indel count
+        vc = {"n_records": 500, "n_indels": 42,
+              "databases": {"gnomAD": 76156, "TOPMed": 132345, "MyCohort": 88}}
+        note = gr.panel_and_variants_note({}, vc)
+        self.assertIn("<strong>208,589</strong> individuals", note)  # 76156+132345+88
+        self.assertIn("MyCohort n=88", note)
+        self.assertIn("TOPMed n=132,345", note)
+        self.assertIn("500</strong> SNPs and <strong>42</strong> indels", note)
+        # a SNP-only database: n_indels == 0 is KNOWN (not "unknown") -> "0 indels"
+        note0 = gr.panel_and_variants_note({}, {"n_records": 9, "n_indels": 0,
+                                               "databases": {"SnpOnlyDB": 10}})
+        self.assertIn("9</strong> SNPs and <strong>0</strong> indels, all searched",
+                      note0)
+        # unknown indel count (n_indels None) -> "also searched", no invented number
+        noteU = gr.panel_and_variants_note({}, {"n_records": 9, "n_indels": None,
+                                               "databases": {"SomeDB": 10}})
+        self.assertIn("also searched", noteU)
+        self.assertNotIn("indels, all searched", noteU)
         # rendered report (fixture has no registry -> samplesID fallback)
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))

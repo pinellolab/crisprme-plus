@@ -1265,9 +1265,12 @@ def panel_and_variants_note(dataset_counts, variant_count=None):
     n_indel = variant_count.get("n_indels") if variant_count else None
     if n_snp:
         # SNPs come from the registry; indels from the separate indel index. Show
-        # BOTH counts as searched when the indel count is known (build-time
-        # manifest); otherwise state indels are also searched without a number.
-        if n_indel:
+        # BOTH counts as searched when the indel count is KNOWN (build-time
+        # manifest) -- including a genuine 0 for a SNP-only database; when the
+        # indel count is UNKNOWN (n_indel is None: legacy install / idx fallback)
+        # state indels are also searched without inventing a number. Fully
+        # database-agnostic -- nothing here assumes a particular panel.
+        if n_indel is not None:
             lead += (
                 f" The database contributes <strong>{n_snp:,}</strong> SNPs and "
                 f"<strong>{n_indel:,}</strong> indels, all searched."
