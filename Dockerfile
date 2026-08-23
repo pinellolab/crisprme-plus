@@ -43,7 +43,6 @@ RUN micromamba install -y -n base \
         "matplotlib-base<3.9" \
         biopython more-itertools statsmodels intervaltree \
         ijson yajl cffi \
-
         pysam bcftools bedtools bedops samtools htslib axel gdown zip gsl pigz \
         ucsc-liftover \
         huggingface_hub \

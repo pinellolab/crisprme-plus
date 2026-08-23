@@ -2913,16 +2913,43 @@ def _default_samplesid_dir(result_dir):
 
 
 def _package_version():
-    """Best-effort CRISPRme package version (footer fallback)."""
+    """Best-effort CRISPRme version for the footer.
+
+    Order: (1) installed package metadata (pip/conda), then (2) the canonical
+    ``version = "X"`` assignment in the sibling ``crisprme.py`` -- the source /
+    Docker install case, where CRISPRme is laid down by ``COPY .`` and has NO
+    package metadata, so importlib.metadata fails and the footer used to read
+    "n/a". Returns None only if neither is available.
+    """
     try:
         from importlib.metadata import PackageNotFoundError, version as _v
 
         try:
             return _v("CRISPRme")
         except PackageNotFoundError:
-            return None
+            pass
     except Exception:  # noqa: BLE001
-        return None
+        pass
+    # source / Docker install: parse the canonical version out of crisprme.py.
+    # PostProcess/ sits under the source root (../crisprme.py) and, in the
+    # Bioconda/Docker bin layout, crisprme.py is also copied alongside -- try both.
+    try:
+        import re
+
+        here = os.path.dirname(os.path.abspath(__file__))
+        for cand in (
+            os.path.join(here, os.pardir, "crisprme.py"),
+            os.path.join(here, "crisprme.py"),
+        ):
+            if os.path.isfile(cand):
+                with open(cand, "r", errors="replace") as fh:
+                    for line in fh:
+                        m = re.match(r'version\s*=\s*["\']([^"\']+)["\']', line)
+                        if m:
+                            return m.group(1)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
 
 
 # --------------------------------------------------------------------------- #

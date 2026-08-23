@@ -860,6 +860,19 @@ class TestGenerateReport(unittest.TestCase):
         # provenance stamp: report generator version + source TSV basename
         self.assertIn("report generator v", html)
         self.assertIn(os.path.basename(self.tsv), html)
+        # the CRISPRme+ version must RESOLVE (not "n/a"): source/Docker installs
+        # have no package metadata, so it is read from crisprme.py's canonical
+        # `version`. Regression guard for the footer showing "version: n/a".
+        self.assertNotIn("CRISPRme+ version: n/a", html)
+        self.assertRegex(html, r"CRISPRme\+ version: \d+\.\d+")
+
+    def test_package_version_resolves_without_metadata(self):
+        """_package_version falls back to crisprme.py's canonical version when the
+        package isn't pip/conda-installed (the source/Docker `COPY .` case), so the
+        footer never reads 'n/a'."""
+        v = gr._package_version()
+        self.assertIsNotNone(v)
+        self.assertRegex(v, r"^\d+\.\d+")
 
     def test_variants_included_panel_and_variant_count(self):
         """'Variants included': no AF-threshold claim, no impossible 1e-05 min-MAF
