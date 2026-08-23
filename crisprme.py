@@ -2191,6 +2191,45 @@ def build_index_only() -> None:
                 "of the dicts).",
                 flush=True,
             )
+            # Persist a tiny variant-count manifest so reports can state the
+            # database size (SNP variants + genotyped panel sizes) with ZERO VCF
+            # access -- summed from the per-chrom registry .idx headers just
+            # written. Purely additive; a failure here never affects the build.
+            if _emitted:
+                try:
+                    import json as _json
+                    _reg_dir = os.path.join(
+                        os.path.dirname(dict_folder), f"registry_{vcf_name}"
+                    )
+                    _n_records, _dbs = 0, {}
+                    for _ix in sorted(_glob(os.path.join(_reg_dir, "reg_*.idx"))):
+                        try:
+                            with open(_ix) as _fh:
+                                _m = _json.load(_fh)
+                        except (OSError, ValueError):
+                            continue
+                        _n_records += int(_m.get("n_records", 0) or 0)
+                        if not _dbs and _m.get("databases"):
+                            _dbs = _m["databases"]
+                    if _n_records > 0:
+                        with open(
+                            os.path.join(_reg_dir, "variant_count.json"), "w"
+                        ) as _out:
+                            _json.dump(
+                                {"n_records": _n_records, "databases": _dbs},
+                                _out, indent=2, sort_keys=True,
+                            )
+                        print(
+                            f"Wrote registry variant-count manifest: "
+                            f"{_n_records:,} SNP variant records.",
+                            flush=True,
+                        )
+                except Exception as _vc_err:  # noqa: BLE001 - manifest is optional
+                    print(
+                        f"WARNING [build-index-only]: variant-count manifest not "
+                        f"written ({_vc_err}); reports fall back to the .idx headers.",
+                        flush=True,
+                    )
     # STEP 2: index the enriched (SNP) genome
     if not os.path.isdir(snp_idx):
         print(f"Building variant index {os.path.basename(snp_idx)}...", flush=True)

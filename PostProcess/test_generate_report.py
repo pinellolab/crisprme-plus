@@ -859,34 +859,68 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("report generator v", html)
         self.assertIn(os.path.basename(self.tsv), html)
 
-    def test_variants_included_panel_stats_and_no_sponsor_clause(self):
-        """'Variants included' drops the sponsor pre-filtering clause and gains the
-        cheap panel size + minimum resolvable MAF (from the samplesID files)."""
-        # cheap counter, per-dataset (fixture: 1000G n=3, HGDP n=2)
+    def test_variants_included_panel_and_variant_count(self):
+        """'Variants included': no AF-threshold claim, no impossible 1e-05 min-MAF
+        line; panel size (registry sample_count preferred) + SNP variant count."""
+        # cheap per-dataset individual counter (fixture: 1000G n=3, HGDP n=2)
         self.assertEqual(
             gr.dataset_individual_counts(self.sid_dir), {"1000G": 3, "HGDP": 2}
         )
-        # note empty without counts/maf
-        self.assertEqual(gr.panel_stats_note({}), "")
-        self.assertEqual(gr.panel_stats_note(None), "")
-        # min-MAF is DATA-DRIVEN (rarest MAF in the run), immune to samplesID
-        # over-listing -- never a 1/2N estimate from the sample count
-        _note = gr.panel_stats_note({"1000G": 3, "HGDP": 2}, min_maf=1.44e-4)
-        self.assertIn("1000G n=3", _note)
-        self.assertIn("1.44e-04", _note)
+        self.assertEqual(gr.panel_and_variants_note({}), "")
+        self.assertEqual(gr.panel_and_variants_note(None), "")
+        # registry sample_count OVERRIDES the samplesID-derived count (the latter
+        # can over-list vs the AC/AN denominator); SNP count is surfaced
+        vc = {"n_records": 106_664_924, "databases": {"1000G": 2548, "HGDP": 929}}
+        note = gr.panel_and_variants_note({"1000G": 3, "HGDP": 2}, vc)
+        self.assertIn("<strong>3,477</strong> individuals", note)   # 2548 + 929
+        self.assertIn("1000G n=2,548", note)
+        self.assertIn("106,664,924", note)
+        self.assertIn("SNP variants", note)
+        # no registry -> fall back to samplesID counts, no variant count clause
+        note2 = gr.panel_and_variants_note({"1000G": 3, "HGDP": 2})
+        self.assertIn("<strong>5</strong> individuals", note2)
+        self.assertNotIn("SNP variants", note2)
+        # rendered report (fixture has no registry -> samplesID fallback)
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
-        self.assertNotIn("pre-filtering of the input database is the sponsor", html)
-        self.assertIn("<strong>5</strong> individuals", html)  # 3 + 2
-        self.assertIn("1000G n=3", html)
-        self.assertIn("HGDP n=2", html)
-        # fixture's rarest positive MAF is 0.003 (from the multi-SNP chr7 row);
-        # NOT a 1/2N sample-count estimate (which would wrongly be 1/10)
-        self.assertIn("3.00e-03", html)
-        self.assertNotIn("1/10", html)
+        self.assertNotIn("applies no allele-frequency threshold", html)
+        self.assertIn("no variants are excluded by allele frequency", html)
+        self.assertIn("<strong>5</strong> individuals", html)  # 3 + 2 (samplesID)
+        # the impossible 1e-05 "finest resolution" line is GONE
+        self.assertNotIn("Finest allele-frequency resolution", html)
+        # the MAF footnote now explains the 1e-05 DISPLAY floor
+        self.assertIn("display floor of 1&times;10<sup>&minus;5</sup>", html)
         # captions no longer use the "paper-style" jargon; CRISTA panel references CFD
         self.assertNotIn("paper-style", html)
         self.assertIn("the same ref/alt scatter as for the cfd score", html.lower())
+
+    def test_registry_variant_count_idx_and_sidecar(self):
+        """Cheap variant count + genotyped sample counts from the Tier-0 registry
+        (sums reg_*.idx n_records; sidecar takes precedence; never scans VCFs)."""
+        import tempfile, json as _json
+        with tempfile.TemporaryDirectory() as d:
+            rdir = os.path.join(d, "Results", "job1"); os.makedirs(rdir)
+            reg = os.path.join(d, "Dictionaries", "registry_hg38_1000G_HGDP")
+            os.makedirs(reg)
+            dbs = {"1000G": {"sample_count": 2548}, "HGDP": {"sample_count": 929}}
+            for i, n in enumerate((100, 50)):
+                with open(os.path.join(reg, f"reg_chr{i+1}.idx"), "w") as h:
+                    _json.dump({"n_records": n, "databases": dbs}, h)
+            meta = {"datasets": "1000G+HGDP"}
+            vc = gr._registry_variant_count(rdir, meta)
+            self.assertEqual(vc["n_records"], 150)  # summed across chroms
+            self.assertEqual(vc["databases"], {"1000G": 2548, "HGDP": 929})
+            # a build-time sidecar takes precedence over re-summing the idx files
+            with open(os.path.join(reg, "variant_count.json"), "w") as h:
+                _json.dump({"n_records": 106664924, "databases": dbs}, h)
+            self.assertEqual(
+                gr._registry_variant_count(rdir, meta)["n_records"], 106664924
+            )
+            # no registry resolvable -> None (report simply omits the count)
+            self.assertIsNone(gr._registry_variant_count(None, meta))
+            self.assertIsNone(
+                gr._registry_variant_count(os.path.join(d, "no", "such"), meta)
+            )
 
     def test_self_contained_offline_and_relative_links(self):
         _, _, extract = self._build_and_extract()

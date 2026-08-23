@@ -90,6 +90,7 @@ import glob
 import gzip
 import html
 import io
+import json
 import math
 import os
 import shutil
@@ -886,7 +887,7 @@ def build_mmb_matrix(df, cols, meta):
 
 
 def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
-                           min_maf=None):
+                           variant_count=None):
     """'Analysis inputs & criteria' box (FDA off-target guidance VII.F.i / F.ii).
 
     States, in one place, the variant database(s), the variant inclusion policy
@@ -896,8 +897,10 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     Everything is read from the run's meta (no hardcoded database names).
     ``variant_created_name`` is the ACTUAL bundled filename (``.tsv`` or ``.tsv.gz``)
     so the link never breaks; when absent the name is shown as plain text.
-    ``dataset_counts`` (``{dataset: n_individuals}``, cheap from the samplesID files)
-    adds the panel size + minimum resolvable MAF to the inclusion row when known.
+    ``dataset_counts`` (``{dataset: n_individuals}`` from the samplesID files) and
+    ``variant_count`` (``{'n_records', 'databases'}`` from the Tier-0 registry) add
+    the panel size + database SNP-variant count to the inclusion row when known
+    (registry sample counts preferred -- they match the AC/AN denominator).
     """
     vc_html = (
         f'<a href="{_dl_href(variant_created_name)}" download>'
@@ -913,8 +916,8 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         ("Variant database(s)", _esc(ds)),
         ("Variants included",
          "All variants present in the database(s) &mdash; common and rare, genic "
-         "and intergenic. CRISPRme applies no allele-frequency threshold."
-         + panel_stats_note(dataset_counts, min_maf)),
+         "and intergenic; no variants are excluded by allele frequency."
+         + panel_and_variants_note(dataset_counts, variant_count)),
         ("Allele-frequency basis",
          f"Combined-panel minor/alternate allele frequency over the merged "
          f"{_esc(ds)} panel: for genotyped databases this is AC/AN across the "
@@ -1157,44 +1160,105 @@ def dataset_individual_counts(samplesid_dir):
     return counts
 
 
-def min_positive_maf(df, cols):
-    """Smallest POSITIVE minor-allele frequency present in the run's MAF column
-    (comma-joined multi-SNP cells handled by :func:`_min_maf`). DATA-DRIVEN, so it
-    reflects the TRUE allele-frequency resolution of the panel regardless of any
-    samplesID over-listing (a raw sample count can exceed the genotyped denominator,
-    which would make a 1/2N estimate wrong). Returns ``None`` when no positive MAF
-    is present. Cheap: one pass over the already-loaded column."""
-    if "maf" not in cols or cols["maf"] not in df.columns:
+def _registry_variant_count(result_dir, meta):
+    """Cheap database variant-count + CORRECTED genotyped panel sizes from the
+    Tier-0 registry manifests -- index-only (no VCF access, no bcftools, no full
+    scan). Returns ``{'n_records': int, 'databases': {label: sample_count}}`` or
+    ``None``. Prefers a build-time ``variant_count.json`` sidecar; else sums the
+    ``n_records`` key across the per-chrom ``reg_*.idx`` JSON headers (each a small
+    manifest). Never raises, never scans VCFs.
+
+    The registry ``sample_count`` is the GENOTYPED panel behind AC/AN (e.g. 3,477
+    for 1000G+HGDP), which is authoritative over the samplesID-derived count (that
+    can over-list individuals relative to the AC/AN denominator). ``n_records`` is
+    the search-usable SNP-variant count (indels / no-carrier records excluded)."""
+    try:
+        if not result_dir:
+            return None
+        dict_dir = None
+        for cand in (
+            os.path.join(result_dir, "..", "..", "Dictionaries"),
+            os.path.join(result_dir, "..", "Dictionaries"),
+            os.path.join(os.getcwd(), "Dictionaries"),
+        ):
+            if os.path.isdir(cand):
+                dict_dir = cand
+                break
+        if dict_dir is None:
+            return None
+        reg_dirs = [d for d in sorted(glob.glob(os.path.join(dict_dir, "registry_*")))
+                    if os.path.isdir(d)]
+        if not reg_dirs:
+            return None
+        # pick the registry whose name carries the run's dataset tokens
+        tokens = [t for t in str(meta.get("datasets", "")).replace("+", "_").split("_") if t]
+        chosen = None
+        for d in reg_dirs:
+            name = os.path.basename(d).lower()
+            if tokens and all(t.lower() in name for t in tokens):
+                chosen = d
+                break
+        if chosen is None:
+            chosen = reg_dirs[0] if len(reg_dirs) == 1 else None
+        if chosen is None:
+            return None
+
+        def _dbs(manifest):
+            return {
+                k: v.get("sample_count")
+                for k, v in (manifest.get("databases") or {}).items()
+                if isinstance(v, dict) and v.get("sample_count")
+            }
+
+        sidecar = os.path.join(chosen, "variant_count.json")
+        if os.path.isfile(sidecar):
+            with open(sidecar) as fh:
+                m = json.load(fh)
+            n = int(m.get("n_records", 0) or 0)
+            if n > 0:
+                return {"n_records": n, "databases": _dbs(m)}
+        total, dbs = 0, {}
+        for p in sorted(glob.glob(os.path.join(chosen, "reg_*.idx"))):
+            try:
+                with open(p) as fh:
+                    m = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            total += int(m.get("n_records", 0) or 0)
+            if not dbs:
+                dbs = _dbs(m)
+        return {"n_records": total, "databases": dbs} if total > 0 else None
+    except Exception:  # noqa: BLE001 - a count is optional; never break the report
         return None
-    best = None
-    for raw in df[cols["maf"]]:
-        v = _min_maf(raw)
-        if v is not None and v > 0:
-            best = v if best is None else min(best, v)
-    return best
 
 
-def panel_stats_note(dataset_counts, min_maf=None):
-    """One-line panel note for the 'Variants included' row: the number of
-    individuals per dataset + combined (panel size, from the samplesID files), and
-    the finest allele-frequency resolution actually represented (``min_maf``, the
-    rarest contributing variant -- data-driven, NOT derived from the sample count,
-    so samplesID over-listing cannot inflate it). Returns "" when nothing is known."""
-    bits = []
-    if dataset_counts:
-        total = sum(dataset_counts.values())
-        if total > 0:
-            parts = ", ".join(
-                f"{lbl} n={n:,}" for lbl, n in sorted(dataset_counts.items())
-            )
-            per_ds = f" ({parts})" if len(dataset_counts) > 1 else ""
-            bits.append(f"Panel: <strong>{total:,}</strong> individuals{per_ds}.")
-    if min_maf is not None and min_maf > 0:
-        bits.append(
-            f"Finest allele-frequency resolution among the analysed variants: "
-            f"<strong>{min_maf:.2e}</strong> (the rarest contributing variant)."
+def panel_and_variants_note(dataset_counts, variant_count=None):
+    """Panel size + database variant count for the 'Variants included' row.
+
+    Prefers the registry's GENOTYPED ``sample_count`` (``variant_count['databases']``)
+    over the samplesID-derived ``dataset_counts`` -- the latter can over-list
+    individuals relative to the AC/AN denominator. Appends the search-usable SNP
+    variant count when known. Returns "" when nothing is available."""
+    counts = None
+    if variant_count and variant_count.get("databases"):
+        counts = {k: v for k, v in variant_count["databases"].items() if v}
+    if not counts:
+        counts = dataset_counts or {}
+    if not counts:
+        return ""
+    total = sum(counts.values())
+    if total <= 0:
+        return ""
+    parts = ", ".join(f"{lbl} n={n:,}" for lbl, n in sorted(counts.items()))
+    per_ds = f" ({parts})" if len(counts) > 1 else ""
+    lead = f" Panel: <strong>{total:,}</strong> individuals{per_ds}"
+    if variant_count and variant_count.get("n_records"):
+        lead += (
+            f" contributing <strong>{variant_count['n_records']:,}</strong> SNP "
+            "variants (single-base substitutions with &ge;1 carrier; indels and "
+            "no-carrier records excluded from the search-usable set)"
         )
-    return (" " + " ".join(bits)) if bits else ""
+    return lead + "."
 
 
 # --------------------------------------------------------------------------- #
@@ -2017,7 +2081,11 @@ def maf_footnote(datasets=None):
         "variant (the frequency registry is SNP-only), or a SNP not in the frequency "
         "panel; for SNP variant off-targets the frequency is AC/AN over the genotyped "
         f"panel &mdash; here the merged {ds} union panel (the combined global "
-        "AF), not a single ancestry."
+        "AF), not a single ancestry. A variant present in the panel but whose "
+        "source allele frequency is 0 (e.g. a secondary allele of a multiallelic "
+        "site) is shown at a display floor of 1&times;10<sup>&minus;5</sup> so it "
+        "renders on log-scale plots &mdash; read it as &ldquo;present, frequency "
+        "effectively 0&rdquo;, not as a measured frequency of 10<sup>&minus;5</sup>."
     )
 
 
@@ -2913,7 +2981,8 @@ def build_report(
         _ds_counts[_lbl] = _ds_counts.get(_lbl, 0) + 1
     inputs_criteria_html = render_inputs_criteria(
         meta, tier_links.get("variant_created"),
-        dataset_counts=_ds_counts, min_maf=min_positive_maf(df, cols),
+        dataset_counts=_ds_counts,
+        variant_count=_registry_variant_count(result_dir, meta),
     )
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
