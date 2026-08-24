@@ -2346,7 +2346,7 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .report-header { display: flex; align-items: center; gap: 18px;
                  border-bottom: 2px solid #edf2f7; padding-bottom: 14px;
                  margin-bottom: 1.2em; }
-.report-header img.logo { height: 58px; width: auto; }
+.report-header img.logo { height: 92px; width: auto; }
 .report-header .titles { flex: 1 1 auto; }
 .report-header h1 { margin: 0 0 0.05em; }
 .legend { display: flex; flex-direction: column; gap: 10px; margin: 0.5em 0 1em; }

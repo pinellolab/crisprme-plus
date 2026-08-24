@@ -65,6 +65,7 @@ import subprocess
 import filecmp
 import random
 import re
+import shutil
 import string
 import os
 
@@ -1137,16 +1138,30 @@ def change_url(
     assert isinstance(dna, int)
     assert isinstance(rna, int)
 
-    # if annotation requested, compress and index bed 
+    # Prepare the annotation + gencode beds the pipeline needs (sorted + bgzipped) in
+    # the JOB dir, on a COPY of the shared install file -- never sort/compress/replace
+    # the shared Annotations/ file in place (#97). An in-place rewrite races between
+    # concurrent jobs on the same shared bundle (corrupting it mid-search) and fails
+    # outright on a read-only install; the shared bundle + gencode are read-only INPUTS
+    # (already sorted at build/enable time). Empty ("vuoto.txt") placeholders also go
+    # to the job dir so a read-only install never has to touch Annotations/.
     if annotation_name != "vuoto.txt":
-        annotation = sort_annotation(annotation)
+        _ann_src = annotation if os.path.isfile(annotation) else f"{annotation}.gz"
+        _ann_job = os.path.join(result_dir, os.path.basename(_ann_src))
+        shutil.copyfile(_ann_src, _ann_job)
+        annotation = sort_annotation(_ann_job)
     else:
+        annotation = os.path.join(result_dir, annotation_name)
         if not os.path.isfile(annotation):
             code = subprocess.call(f"touch {annotation}", shell=True)
 
     if gencode_name != "vuoto.txt":
-        gencode = compress_file(gencode)
+        _gc_src = gencode if os.path.isfile(gencode) else f"{gencode}.gz"
+        _gc_job = os.path.join(result_dir, os.path.basename(_gc_src))
+        shutil.copyfile(_gc_src, _gc_job)
+        gencode = _gc_job if _gc_job.endswith(".gz") else compress_file(_gc_job)
     else:
+        gencode = os.path.join(result_dir, gencode_name)
         if not os.path.isfile(gencode):
             code = subprocess.call(f"touch {gencode}", shell=True)
 
