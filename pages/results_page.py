@@ -451,27 +451,10 @@ def result_page(job_id: str) -> html.Div:
             "-", "RNA bulges", bulge_rna,
         ]
     final_list.append(html.H3(" ".join(_summary_parts)))
-    # short description
-    if genome_type == "both":
-        add_to_description = html.P(
-            [
-                str(
-                    "General summary for input guides. For each guide, is "
-                    "reported the count of targets in reference and variant "
-                    "genome grouped by mismatches count and bulge size."
-                ),
-            ]
-        )
-    else:
-        add_to_description = html.P(
-            str(
-                "General summary for input guides. For each guide, is reported the "
-                "count of targets in reference and variant genome grouped by "
-                "mismatches count and bulge size."
-            )
-        )
-    # add description line to page layout
-    final_list.append(add_to_description)
+    # The detailed explanation of this matrix is rendered as a caption BELOW the table
+    # (see `matrix_explanation` after the DataTable), so it reads right next to the cells
+    # it describes and stays consistent, word-for-word in message, with the downloadable
+    # report's matrix caption.
     # define upper page box
     final_list.append(
         # Single PROMINENT, CENTERED "Download Report" action (replaces the former
@@ -621,6 +604,71 @@ def result_page(job_id: str) -> html.Div:
                 id="div-general-profile-table",
                 style={"margin-left": "5%", "margin-right": "5%"},
             )
+        )
+    )
+    # Explanation BELOW the table, consistent in message with the downloadable report's
+    # matrix caption: what a cell is, the origin split, the perfect-match cell, and that
+    # every site is counted once (one row carrying both alleles as columns).
+    _cap_style = {
+        "margin": "0 5% 0 5%",
+        "fontSize": "1.02rem",
+        "color": "#334155",
+        "lineHeight": "1.5",
+    }
+    _budget_note = []
+    if _mte_int is not None:
+        _budget_note = [
+            " Some entries combine mismatches and bulges beyond the ",
+            html.Strong(f"Max edits total ({_mte_int})"),
+            ": the search caps mismatches and bulges independently, so an alignment's "
+            "total can exceed that budget while the same site stays within scope on its "
+            "other (reference or variant) allele — the same distinct sites, not extra "
+            "off-target risk.",
+        ]
+    final_list.append(
+        html.Div(
+            [
+                html.P(
+                    [
+                        "Each entry counts ",
+                        html.Strong("distinct putative off-target sites"),
+                        ", grouped by mismatch count and bulge size and split by origin: ",
+                        html.Strong("REFERENCE"),
+                        " — the target exists in the reference genome (even if a variant "
+                        "also alters it) — vs ",
+                        html.Strong("VARIANT"),
+                        " — the target exists only because a variant creates it (",
+                        html.Code("Not_found_in_REF"),
+                        ").",
+                    ],
+                    style=_cap_style,
+                ),
+                html.P(
+                    [
+                        "The ",
+                        html.Strong("0 MM / 0 B"),
+                        " entry holds the guide's ",
+                        html.Strong("perfect genomic match(es)"),
+                        " — the candidate on-target(s). The intended on-target cannot be "
+                        "told from a perfect-match off-target by sequence alone, so every "
+                        "perfect match is reported and forced to the top of the validation "
+                        "panel in the downloadable report.",
+                    ],
+                    style={**_cap_style, "marginTop": "0.5em"},
+                ),
+                html.P(
+                    [
+                        "Every site is counted ",
+                        html.Strong("once"),
+                        ": a site is a single row that carries both its reference-genome "
+                        "alignment and its variant-carrier alignment as side-by-side "
+                        "columns, so it is never double-counted across cells.",
+                        *_budget_note,
+                    ],
+                    style={**_cap_style, "marginTop": "0.5em"},
+                ),
+            ],
+            style={"marginTop": "10px", "marginBottom": "6px"},
         )
     )
     final_list.append(html.Br())  # add space between HTML lines

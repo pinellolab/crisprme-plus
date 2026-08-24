@@ -1008,26 +1008,37 @@ def render_summary_and_matrix(meta, spec_score, matrix):
             f"{brna if brna is not None else 'n/a'}"
         )
 
-    # The matrix places each site by its FEWEST-mismatch+bulge alignment (the
-    # score-neutral view). Since every off-target was found because some alignment is
-    # within budget, almost all land in budget here; a few still exceed it because
-    # their minimal alignment against the SHOWN allele does, while the OTHER allele is
-    # within budget -- the same distinct sites (not duplicates, not extra risk),
-    # greyed. Surface the observed max next to the value and explain it.
+    # Each SITE is one row carrying both its reference and variant-carrier alignments
+    # as columns; the matrix places it ONCE, by its FEWEST-mismatch+bulge alignment
+    # (score-neutral). A few land beyond the max-total-edits budget: the reported
+    # carrier allele exceeds it while the same row's reference allele stays in scope
+    # (the raw search caps mismatches and bulges independently, so an alignment's total
+    # can exceed the budget) -- distinct sites, not duplicates, not extra risk; greyed.
+    # The full explanation is rendered as a caption BELOW the matrix (_greyed_note).
     _me = meta["max_edits"]
     _obs = meta.get("obs_max_mmb")
-    _me_display, _me_footnote = _me, ""
+    _me_display, _greyed_note = _me, ""
     try:
         if _obs is not None and int(_obs) > int(_me):
             _me_display = f"{_me} (search cap)"
-            _me_footnote = (
-                f"Max total edits ({_me}) is the search budget. This matrix places each "
-                "site by its FEWEST-mismatch+bulge alignment — the score-neutral view (it "
-                "does not prefer CFD over CRISTA) — so almost every site is within budget. "
-                f"A few reach up to {_obs}: their minimal alignment against the shown allele "
-                "exceeds the budget while the OTHER allele is within it. These are the same "
-                "distinct sites (not duplicates, not extra off-target risk), kept for full "
-                "coverage; those cells are greyed."
+            _cap_bits = []
+            if _bd is not None and _br is not None:
+                _cap_bits.append(
+                    f"up to {meta['mm']} mismatches and {_bd + _br} bulges "
+                    f"({_bd} DNA + {_br} RNA)"
+                )
+            _cap_phrase = (
+                f" The raw search caps mismatches and bulges independently &mdash; "
+                f"{_cap_bits[0]} &mdash; so an alignment&rsquo;s total can exceed the budget."
+                if _cap_bits else ""
+            )
+            _greyed_note = (
+                f" A few sites reach up to {int(_obs)} total edits &mdash; the "
+                f"<strong>greyed</strong> cells beyond the max-total-edits budget of "
+                f"{_me}. There the reported (variant-carrier) allele exceeds the budget "
+                f"while the <em>same row&rsquo;s</em> reference allele stays within scope."
+                f"{_cap_phrase} These are the same distinct sites, kept for full locus "
+                "coverage &mdash; not duplicates and not additional off-target risk."
             )
     except (TypeError, ValueError):
         pass
@@ -1103,18 +1114,24 @@ def render_summary_and_matrix(meta, spec_score, matrix):
 <div class="summary-grid">
   <div class="summary-card">
     <table class="summary-table"><tbody>{left_html}</tbody></table>
-    {f'<p class="caption" style="margin-top:0.5em">{_esc(_me_footnote)}</p>' if _me_footnote else ''}
   </div>
   <div class="matrix-card">
     <div class="matrix-title">On-target(s) and Putative Off-targets by Mismatch (MM) and Bulge (B)</div>
     {matrix_html}
-    <p class="caption">The highlighted <strong>0&nbsp;MM / 0&nbsp;B</strong> cell holds
-    the guide's <strong>perfect genomic match(es)</strong> &mdash; the candidate
-    on-target(s); every other cell is a <strong>putative off-target</strong>. Split by
-    REFERENCE vs VARIANT origin (variant-created := Not_found_in_REF), then by bulge
-    count; Total = row sum across mismatches. The intended on-target cannot be
-    distinguished from a perfect-match off-target by sequence alone, so every perfect
-    match is reported here and forced to the top of the validation panel below.</p>
+    <p class="caption">Each cell counts <strong>distinct putative off-target sites</strong>.
+    The highlighted <strong>0&nbsp;MM / 0&nbsp;B</strong> cell holds the guide&rsquo;s
+    <strong>perfect genomic match(es)</strong> &mdash; the candidate on-target(s), forced
+    to the top of the validation panel below (the intended on-target cannot be told from a
+    perfect-match off-target by sequence alone). Rows are split by origin &mdash;
+    <strong>REFERENCE</strong> (the target exists in the reference genome, even if a
+    variant also alters it) vs <strong>VARIANT</strong> (the target exists only because a
+    variant creates it; <code>Not_found_in_REF</code>) &mdash; then by bulge count;
+    Total&nbsp;= row sum across mismatches.</p>
+    <p class="caption">Every site is <strong>one row</strong> that carries <em>both</em> its
+    reference-genome alignment and its variant-carrier alignment as side-by-side columns,
+    and is placed here <strong>once</strong> &mdash; by its <strong>fewest-mismatch+bulge</strong>
+    alignment, the score-neutral view (it does not prefer CFD over CRISTA). A site is never
+    double-counted across cells.{_greyed_note}</p>
   </div>
 </div>
 """
