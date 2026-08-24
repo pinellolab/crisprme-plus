@@ -173,9 +173,13 @@ def emit_dictless_tiers(dict_path, db_to_samplesid, chrom, dictionaries_dir=None
     os.makedirs(os.path.dirname(reg_bin), exist_ok=True)
     os.makedirs(os.path.dirname(gt_bin), exist_ok=True)
 
+    # Ship the v3 block-compressed registry (Issue #99): ~3.6x smaller on-disk,
+    # logically identical, and the reader is backward-compatible (reads v2 + v3).
+    # The build now emits v3 directly instead of requiring a manual post-build
+    # transcode_registry pass.
     reg_stats = t0c.compile_from_dict(
         resolved_dict, db_to_samplesid, chrom, reg_bin, reg_idx,
-        subpop_field=subpop_field,
+        subpop_field=subpop_field, compress=True,
     )
     gt_stats = t1g.compile_genotypes_from_dict(
         resolved_dict, db_to_samplesid, chrom, gt_bin, gt_idx,

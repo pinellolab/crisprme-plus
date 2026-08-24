@@ -231,7 +231,8 @@ def _emit_key(key, value, prefix):
 # Top-level compile
 # --------------------------------------------------------------------------- #
 def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
-                      *, alt_index="1", subpop_field="superpopulation"):
+                      *, alt_index="1", subpop_field="superpopulation",
+                      compress=False):
     """Compile a legacy SNP dict into a panel-aware Tier-0 registry.
 
     Args:
@@ -289,7 +290,7 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
 
     manifest = t0.compile_registry_panel(
         record_stream(), sample_meta, None, ploidy_of, out_bin, out_idx,
-        alt_index=alt_index, panel_index=panel_index,
+        alt_index=alt_index, panel_index=panel_index, compress=compress,
     )
 
     stats["n_positions"] = len(seen_positions)
