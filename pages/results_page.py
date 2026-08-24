@@ -227,6 +227,20 @@ def result_page(job_id: str) -> html.Div:
             max_bulges = (
                 next(s for s in all_params.split("\n") if "Max_bulges" in s)
             ).split("\t")[-1]
+            # DNA and RNA bulges are INDEPENDENT per-type caps and a single alignment
+            # can carry BOTH, so the total bulge span (and the mm+bulge column extent)
+            # is their SUM -- not Max_bulges (the older single/max value). Fall back to
+            # Max_bulges for jobs created before the DNA/RNA fields existed.
+            def _param_val(key):
+                return next(
+                    (s.split("\t")[-1] for s in all_params.split("\n")
+                     if s.startswith(key + "\t")),
+                    None,
+                )
+            try:
+                total_bulges = int(_param_val("DNA")) + int(_param_val("RNA"))
+            except (TypeError, ValueError):
+                total_bulges = int(max_bulges)
             pam_name = (next(s for s in all_params.split("\n") if "Pam" in s)).split(
                 "\t"
             )[-1]
@@ -299,9 +313,9 @@ def result_page(job_id: str) -> html.Div:
         finally:
             handle_error_g.close()
     col_targetfor = "("
-    for i in range(1, (mms + int(max_bulges))):
+    for i in range(1, (mms + total_bulges)):
         col_targetfor = "".join([col_targetfor, str(i), "-"])
-    col_targetfor = "".join([col_targetfor, str(mms + int(max_bulges))])
+    col_targetfor = "".join([col_targetfor, str(mms + total_bulges)])
     col_targetfor = " ".join([col_targetfor, "Mismatches + Bulges)"])
     # Column of headers. Remove the entries accordingly when checking genome type
     columns_profile_table = [
@@ -2571,6 +2585,16 @@ def load_distribution_populations(
                 next(s for s in all_params.split("\n") if "Max_bulges" in s)
             ).split("\t")[-1]
             max_bulges = int(max_bulges)
+            # total bulge span = DNA + RNA (independent per-type caps, both may
+            # co-occur in one alignment); fall back to Max_bulges for old jobs.
+            try:
+                total_bulges = int(
+                    next(s.split("\t")[-1] for s in all_params.split("\n") if s.startswith("DNA\t"))
+                ) + int(
+                    next(s.split("\t")[-1] for s in all_params.split("\n") if s.startswith("RNA\t"))
+                )
+            except (StopIteration, ValueError):
+                total_bulges = max_bulges
     except OSError as e:
         raise e
     # begin page construction
@@ -2587,10 +2611,10 @@ def load_distribution_populations(
         )
     ]
     # compute plots
-    for i in range(math.ceil((mms + max_bulges + 1) / BARPLOT_LEN)):
+    for i in range(math.ceil((mms + total_bulges + 1) / BARPLOT_LEN)):
         all_images = []
         for mm in range(i * BARPLOT_LEN, (i + 1) * BARPLOT_LEN):
-            if mm < (mms + max_bulges + 1):
+            if mm < (mms + total_bulges + 1):
                 try:
                     all_images.append(
                         dbc.Col(
