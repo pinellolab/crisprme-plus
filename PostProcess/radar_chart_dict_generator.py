@@ -115,17 +115,22 @@ def fillDict(guide, guideDict, motifDict):
             # each target in the proper level and in all the following levels
             guideDict[over]["General"] += 1
             if split[14] != "NA":
-                annotationsList = split[14].strip().split(",")
-                # to avoid duplicate categories
-                annotationsList = set(annotationsList)
-                for annotation in annotationsList:
+                # count EVERY annotation category the target overlaps, not just
+                # GENCODE/CTCF. The old code only handled "_gencode" and legacy
+                # "CTCF-bound" tokens, so ENCODE cCRE (dELS/pELS/PLS/CA-*), DHS and
+                # COSMIC overlaps -- which carry no suffix -- were silently dropped,
+                # leaving those radar axes permanently at 0 even when thousands of
+                # off-targets hit them. Tokens match the dict's keys (built from the
+                # annotation file), and GENCODE carries a "_gencode" suffix to strip.
+                for annotation in set(split[14].strip().split(",")):
                     if "_personal" in annotation:
                         continue
-                    if "CTCF-bound" in annotation:
+                    if "CTCF-bound" in annotation:  # legacy ENCODE-v3 CTCF token
                         guideDict[over]["CTCF-only"] += 1
-                        guideDict[over][annotation.split(";")[0]] += 1
-                    elif "_gencode" in annotation:
-                        guideDict[over][annotation.replace("_gencode", "")] += 1
+                        annotation = annotation.split(";")[0]
+                    name = annotation.replace("_gencode", "")
+                    if name in guideDict[over]:
+                        guideDict[over][name] += 1
             if "RNA,DNA" in split[0]:
                 continue
             # find motif in X and RNA/DNA targets

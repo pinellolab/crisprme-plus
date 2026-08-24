@@ -99,38 +99,43 @@ def generatePlot(guide, guideDict, motifDict, mismatch, bulge, source):
     guideDataFrame["Percentage"] = percentage_list
     guideDataFrame.columns = ["Count", "Percentage"]
 
-    try:
-        # dataframe for table creation
-        dataframe_table = guideDataFrame.loc[
-            [
-                "General",
-                "three_prime_UTR",
-                "five_prime_UTR",
-                "exon",
-                "CDS",
-                "gene",
-                "DNase-H3K4me3",
-                "CTCF-only",
-                "dELS",
-                "pELS",
-                "PLS",
-            ]
-        ]
-        # dataframe_table = guideDataFrame.loc[[
-        #     'General', '', 'pELS', 'dELS', 'PLS', '', 'exon', 'gene', 'CDS', '', '']]
-        dataframe_table.rename(
-            index={
-                "CTCF-only": "CTCF",
-                "General": "Total",
-                "three_prime_UTR": "3'UTR",
-                "five_prime_UTR": "5'UTR",
-            },
-            inplace=True,
-        )
-        dataframe_table.sort_values(by=["Percentage"], ascending=False, inplace=True)
-    except:
-        dataframe_table = guideDataFrame.loc[["General"]]
-        dataframe_table.rename(index={"General": "Total"}, inplace=True)
+    # Curated categories for the radar, in preferred order. Includes BOTH the
+    # legacy ENCODE-v3 / split-UTR names (three_prime_UTR, five_prime_UTR,
+    # DNase-H3K4me3) AND the current vocabulary (combined UTR, ENCODE SCREEN v4
+    # CA-*/PLS/pELS/dELS), and keeps ONLY the ones actually present in this run's
+    # annotation dict. The old code hard-coded a fixed .loc[] list, so any change
+    # in category names -- e.g. the shipped dhs+encode_screenv4+gencode+cosmic
+    # bundle uses "UTR"/"CA-H3K4me3", not "three_prime_UTR"/"DNase-H3K4me3" --
+    # raised KeyError; the bare except collapsed the table to "General" only, and
+    # the radar rendered as a single degenerate axis (an empty-looking chart).
+    preferred = [
+        "General",
+        "gene", "exon", "CDS",
+        "three_prime_UTR", "five_prime_UTR", "UTR",
+        "PLS", "pELS", "dELS",
+        "DNase-H3K4me3", "CA-H3K4me3", "CA-CTCF", "CA-TF",
+        "CTCF-only",
+    ]
+    selected = [c for c in preferred if c in guideDataFrame.index]
+    # Guarantee a usable polygon: if the curated set is thin for this annotation
+    # bundle, top up with the highest-count categories present (never KeyErrors).
+    if len([c for c in selected if c != "General"]) < 3:
+        for c in guideDataFrame.sort_values("Count", ascending=False).index:
+            if c != "General" and c not in selected:
+                selected.append(c)
+            if len(selected) >= 7:
+                break
+    dataframe_table = guideDataFrame.loc[selected]
+    dataframe_table.rename(
+        index={
+            "CTCF-only": "CTCF",
+            "General": "Total",
+            "three_prime_UTR": "3'UTR",
+            "five_prime_UTR": "5'UTR",
+        },
+        inplace=True,
+    )
+    dataframe_table.sort_values(by=["Percentage"], ascending=False, inplace=True)
 
     # print(dataframe_table)
 
