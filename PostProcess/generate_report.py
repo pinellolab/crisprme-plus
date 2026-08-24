@@ -783,11 +783,16 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     n_ontarget = int(ontarget.sum())
     n_offtarget = n_total - n_ontarget
 
-    # observed max mismatches+bulges -- variant-expanded / IUPAC-collapsed alignments
-    # can exceed the search's Max_total_edits cap, so surface the real observed max.
+    # observed max mismatches+bulges on the FEWEST-mm+b (score-neutral) alignment --
+    # the basis the off-target matrix uses. A site can still exceed the search cap
+    # here only when its minimal alignment against the shown allele does (it is then
+    # within budget against the OTHER allele). Falls back to the default mmb column.
     obs_max_mmb = None
-    if "mmb" in cols and cols["mmb"] in df.columns:
-        _mm = _to_int_series(df[cols["mmb"]])
+    _obs_col = "Mismatches+bulges_(fewest_mm+b)"
+    if _obs_col not in df.columns:
+        _obs_col = cols["mmb"] if ("mmb" in cols and cols["mmb"] in df.columns) else None
+    if _obs_col is not None:
+        _mm = _to_int_series(df[_obs_col])
         _mm = _mm[_mm >= 0]
         if len(_mm):
             obs_max_mmb = int(_mm.max())
@@ -852,8 +857,20 @@ def build_mmb_matrix(df, cols, meta):
         variant = pd.Series([False] * len(df), index=df.index)
     reference = ~variant
 
-    mm_series = _to_int_series(df[cols["mm"]]) if "mm" in cols else None
-    b_series = _to_int_series(df[cols["bulges"]]) if "bulges" in cols else None
+    # Place each site by its FEWEST-mismatch+bulge alignment -- the score-NEUTRAL
+    # view (it minimizes edits regardless of CFD vs CRISTA), so the matrix does not
+    # privilege the higher-edit highest-CFD alignment. Every off-target was found
+    # because its minimal alignment is within budget, so almost all sites land in
+    # budget here; the few remaining beyond-budget cells are sites within budget
+    # against their OTHER allele. Falls back to the default columns if absent.
+    _mm_col = "Mismatches_(fewest_mm+b)"
+    _b_col = "Bulges_(fewest_mm+b)"
+    if _mm_col not in df.columns:
+        _mm_col = cols["mm"] if "mm" in cols else None
+    if _b_col not in df.columns:
+        _b_col = cols["bulges"] if "bulges" in cols else None
+    mm_series = _to_int_series(df[_mm_col]) if _mm_col is not None else None
+    b_series = _to_int_series(df[_b_col]) if _b_col is not None else None
     if mm_series is None or b_series is None:
         return None
 
@@ -991,11 +1008,12 @@ def render_summary_and_matrix(meta, spec_score, matrix):
             f"{brna if brna is not None else 'n/a'}"
         )
 
-    # Max total edits is a SEARCH cap on the IUPAC-collapsed (variant) genome; the
-    # per-allele REFERENCE/variant reconstruction of a site that is WITHIN budget
-    # against one allele can carry more mismatches+bulges against the other. Those
-    # rows are kept (full-coverage / parity with classic CRISPRme) but are NOT extra
-    # off-target risk -- surface the observed max next to the value and explain it.
+    # The matrix places each site by its FEWEST-mismatch+bulge alignment (the
+    # score-neutral view). Since every off-target was found because some alignment is
+    # within budget, almost all land in budget here; a few still exceed it because
+    # their minimal alignment against the SHOWN allele does, while the OTHER allele is
+    # within budget -- the same distinct sites (not duplicates, not extra risk),
+    # greyed. Surface the observed max next to the value and explain it.
     _me = meta["max_edits"]
     _obs = meta.get("obs_max_mmb")
     _me_display, _me_footnote = _me, ""
@@ -1003,12 +1021,13 @@ def render_summary_and_matrix(meta, spec_score, matrix):
         if _obs is not None and int(_obs) > int(_me):
             _me_display = f"{_me} (search cap)"
             _me_footnote = (
-                f"Max total edits ({_me}) is the search budget on the variant-collapsed "
-                "genome. Some off-targets shown carry more mismatches+bulges than that "
-                f"(up to {_obs}): these are the reference/variant-reconstructed alignment "
-                "of a site that IS within budget against the other allele — kept for full "
-                "locus coverage (matching classic CRISPRme), NOT additional off-target "
-                "risk. In the matrix, cells beyond the budget are greyed."
+                f"Max total edits ({_me}) is the search budget. This matrix places each "
+                "site by its FEWEST-mismatch+bulge alignment — the score-neutral view (it "
+                "does not prefer CFD over CRISTA) — so almost every site is within budget. "
+                f"A few reach up to {_obs}: their minimal alignment against the shown allele "
+                "exceeds the budget while the OTHER allele is within it. These are the same "
+                "distinct sites (not duplicates, not extra off-target risk), kept for full "
+                "coverage; those cells are greyed."
             )
     except (TypeError, ValueError):
         pass
