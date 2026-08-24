@@ -991,8 +991,11 @@ def render_summary_and_matrix(meta, spec_score, matrix):
             f"{brna if brna is not None else 'n/a'}"
         )
 
-    # Max total edits is a SEARCH cap on the IUPAC-collapsed genome; variant-expanded
-    # alignments can exceed it -- surface the observed max right next to the value.
+    # Max total edits is a SEARCH cap on the IUPAC-collapsed (variant) genome; the
+    # per-allele REFERENCE/variant reconstruction of a site that is WITHIN budget
+    # against one allele can carry more mismatches+bulges against the other. Those
+    # rows are kept (full-coverage / parity with classic CRISPRme) but are NOT extra
+    # off-target risk -- surface the observed max next to the value and explain it.
     _me = meta["max_edits"]
     _obs = meta.get("obs_max_mmb")
     _me_display, _me_footnote = _me, ""
@@ -1000,9 +1003,12 @@ def render_summary_and_matrix(meta, spec_score, matrix):
         if _obs is not None and int(_obs) > int(_me):
             _me_display = f"{_me} (search cap)"
             _me_footnote = (
-                "Max total edits is the search cap on the variant-collapsed (IUPAC) "
-                "genome; individual variant-expanded alignments may exceed it — "
-                f"the largest reported here has {_obs} mismatches+bulges."
+                f"Max total edits ({_me}) is the search budget on the variant-collapsed "
+                "genome. Some off-targets shown carry more mismatches+bulges than that "
+                f"(up to {_obs}): these are the reference/variant-reconstructed alignment "
+                "of a site that IS within budget against the other allele — kept for full "
+                "locus coverage (matching classic CRISPRme), NOT additional off-target "
+                "risk. In the matrix, cells beyond the budget are greyed."
             )
     except (TypeError, ValueError):
         pass
@@ -1032,6 +1038,13 @@ def render_summary_and_matrix(meta, spec_score, matrix):
         head_cells += [f"<th>{m}MM</th>" for m in mm_cols]
         head_html = "".join(head_cells)
 
+        # beyond-budget boundary: cells whose MM+B exceeds the search budget hold
+        # reference/variant-reconstructed alignments of within-budget sites (kept for
+        # coverage, not extra risk) -- gray them so the in-budget region reads clearly.
+        try:
+            _budget = int(_me)
+        except (TypeError, ValueError):
+            _budget = None
         body = []
         for label, rows in matrix["groups"]:
             grp_total = sum(r[1] for r in rows)
@@ -1051,6 +1064,12 @@ def render_summary_and_matrix(meta, spec_score, matrix):
                     if b == 0 and mm_cols[mi] == 0 and c > 0:
                         cells.append(
                             f"<td style='font-weight:700;background:#fef2f2'>{c:,}</td>"
+                        )
+                    elif _budget is not None and (b + mm_cols[mi]) > _budget:
+                        cells.append(
+                            f"<td style='background:#f1f5f9;color:#94a3b8' "
+                            f"title='{b + mm_cols[mi]} edits &gt; search budget {_budget}: "
+                            f"reference/variant reconstruction, not extra off-target risk'>{c:,}</td>"
                         )
                     else:
                         cells.append(f"<td>{c:,}</td>")

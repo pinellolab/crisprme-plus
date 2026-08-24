@@ -2026,12 +2026,12 @@ def index_page() -> html.Div:
                         # max-edits=8 search resolves to 6 mismatches + up to 2 bulges. The
                         # default value stays 4 (matching the CLI); the Advanced per-type caps
                         # stay 6 / 2 / 2.
-                        max=(MAX_MMS - 1) + (MAX_BULGES - 1),
+                        max=(MAX_MMS - 1) + 2 * (MAX_BULGES - 1),
                         step=1,
                         value=4,
                         marks={
                             i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
-                            for i in range(1, (MAX_MMS - 1) + (MAX_BULGES - 1) + 1)
+                            for i in range(1, (MAX_MMS - 1) + 2 * (MAX_BULGES - 1) + 1)
                         },
                         tooltip={"placement": "bottom", "always_visible": False},
                     ),
@@ -2462,13 +2462,16 @@ def toggle_advanced_thresholds(n_clicks: int, is_open: bool) -> Tuple:
 )
 def sync_max_edits_bound(mms, dna, rna, cur_val) -> Tuple:
     """Compute the "Max edits" slider ceiling on the fly from the Advanced per-type
-    caps. The most total edits a single off-target can carry is
-    ``mismatches + max(DNA bulges, RNA bulges)`` -- a target is aligned with DNA OR
-    RNA bulges, so the larger of the two governs (not their sum). With the defaults
-    6 / 2 / 2 this is 6 + 2 = 8. The marks and the current value are kept within the
-    new ceiling. Fires whenever an Advanced dropdown changes, so returning to simple
-    mode reflects the user's per-type choices. The layout seeds the static max
-    (MAX_MMS-1 + MAX_BULGES-1 = 8) for the default caps before this first fires."""
+    caps. DNA and RNA bulges are INDEPENDENT per-type caps and a single alignment
+    can carry BOTH, so the most total edits a single off-target can carry is
+    ``mismatches + DNA bulges + RNA bulges`` (their SUM, not the larger of the two).
+    With the defaults 6 / 2 / 2 this is 6 + 2 + 2 = 10. This matches what the search
+    actually submits as --max-total-edits (change_url uses mm + dna + rna), so the
+    slider ceiling no longer under-reports the achievable total (which used to make
+    in-budget results look like they exceeded the slider's max). The marks and the
+    current value are kept within the new ceiling. Fires whenever an Advanced
+    dropdown changes. The layout seeds the static max (MAX_MMS-1 + 2*(MAX_BULGES-1))
+    for the default caps before this first fires."""
     def _as_int(v, default):
         try:
             return int(v)
@@ -2477,7 +2480,7 @@ def sync_max_edits_bound(mms, dna, rna, cur_val) -> Tuple:
     mm = _as_int(mms, MAX_MMS - 1)
     bd = _as_int(dna, 0)
     br = _as_int(rna, 0)
-    new_max = max(1, mm + max(bd, br))
+    new_max = max(1, mm + bd + br)
     marks = {
         i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
         for i in range(1, new_max + 1)
