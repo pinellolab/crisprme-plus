@@ -2328,7 +2328,8 @@ h2 { font-size: 1.25em; margin-top: 1.8em; border-bottom: 1px solid #e2e8f0;
 .subtitle { color: #4a5568; margin-top: 0; }
 .caption { color: #718096; font-size: 0.86em; margin: 0.3em 0 1.2em; }
 .summary-grid { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
-.summary-card { flex: 0 0 auto; }
+.summary-card { flex: 0 1 auto; max-width: 460px; min-width: 0; }
+.summary-card .caption { overflow-wrap: break-word; }
 .matrix-card { flex: 1 1 460px; min-width: 420px; }
 .matrix-title { font-weight: 600; margin-bottom: 0.4em; }
 table.summary-table { border-collapse: collapse; margin: 0.2em 0; width: 100%;
