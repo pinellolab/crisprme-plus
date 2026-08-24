@@ -33,8 +33,12 @@ import os
         Output("post-process-status", "children"),
         Output("merge-status", "children"),
         Output("images-status", "children"),
-        Output("database-status", "children"),
+        # NB: order matches the return tuples below (integrate_status then
+        # database_status) AND the step rows in the layout. Keep these two in sync
+        # -- they used to be swapped here and swapped again in the layout, which
+        # only happened to cancel out.
         Output("integrate-status", "children"),
+        Output("database-status", "children"),
         Output("view-results", "href"),
         Output("no-directory-error", "children"),
         Output("button-remove-result", "hidden"),
@@ -549,66 +553,38 @@ def load_page(job_link: str = "link") -> List:
         html.Div(
             [
                 html.H4("Status report"),
+                # One row per step, laid out as a 2-column grid (label | live
+                # status) so each status always lines up with its step and the
+                # statuses form a clean column. The previous layout put labels and
+                # statuses in two separate <ul>s side by side, so a long label that
+                # wrapped -- or the <p> margins the callback injects into the status
+                # cells -- pushed the two columns out of vertical sync.
                 html.Div(
                     [
-                        html.Div(
-                            html.Ul(
-                                [
-                                    html.Li("Preparing genome index (instant when precomputed)"),
-                                    html.Li("Searching off-targets"),
-                                    html.Li("Post processing"),
-                                    html.Li("Merging targets"),
-                                    html.Li("Annotating and generating images"),
-                                    html.Li("Integrating results"),
-                                    html.Li("Populating database"),
-                                ]
+                        cell
+                        for label, status_id in [
+                            (
+                                "Preparing genome index (instant when precomputed)",
+                                "index-status",
                             ),
-                            style={"flex": "0 0 20%"},
-                        ),
-                        html.Div(
-                            html.Ul(
-                                [
-                                    html.Li(
-                                        "To do",
-                                        style={"color": "red"},
-                                        id="index-status",
-                                    ),
-                                    html.Li(
-                                        "To do",
-                                        style={"color": "red"},
-                                        id="search-status",
-                                    ),
-                                    html.Li(
-                                        "To do",
-                                        style={"color": "red"},
-                                        id="post-process-status",
-                                    ),
-                                    html.Li(
-                                        "To do",
-                                        style={"color": "red"},
-                                        id="merge-status",
-                                    ),
-                                    html.Li(
-                                        "To do",
-                                        style={"color": "red"},
-                                        id="images-status",
-                                    ),
-                                    html.Li(
-                                        "To do",
-                                        style={"color": "red"},
-                                        id="database-status",
-                                    ),
-                                    html.Li(
-                                        "To do",
-                                        style={"color": "red"},
-                                        id="integrate-status",
-                                    ),
-                                ],
-                                style={"list-style-type": "none"},
-                            )
-                        ),
+                            ("Searching off-targets", "search-status"),
+                            ("Post processing", "post-process-status"),
+                            ("Merging targets", "merge-status"),
+                            ("Annotating and generating images", "images-status"),
+                            ("Integrating results", "integrate-status"),
+                            ("Populating database", "database-status"),
+                        ]
+                        for cell in (
+                            html.Div(label, className="status-step-label"),
+                            html.Div(
+                                "To do",
+                                id=status_id,
+                                className="status-step-value",
+                                style={"color": "red"},
+                            ),
+                        )
                     ],
-                    className="flex-status",
+                    className="status-grid",
                 ),
                 html.Div(
                     [

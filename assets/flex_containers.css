@@ -225,6 +225,23 @@
   justify-content: flex-start;
 }
 
+/* Status report: one grid row per pipeline step, "label | status" so the two
+   always stay aligned regardless of label length or the <p> the status callback
+   injects. Replaces the old two-<ul> .flex-status columns that drifted apart. */
+.status-grid{
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 24px;
+  row-gap: 4px;
+  align-items: baseline;
+  max-width: 680px;
+  margin-top: 6px;
+}
+/* the status callback replaces a value cell's children with a <p>; strip its
+   default margins so the status text baseline lines up with its step label */
+.status-grid .status-step-value p{ margin: 0; }
+.status-step-value{ white-space: nowrap; }
+
 .flex-view-images{
   /* We first create a flex layout context */
   display: flex;
