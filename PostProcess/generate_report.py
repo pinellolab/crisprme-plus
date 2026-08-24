@@ -1336,10 +1336,25 @@ def panel_and_variants_note(dataset_counts, variant_count=None):
 
 
 # --------------------------------------------------------------------------- #
-# Plots (matplotlib -> in-memory PNG -> base64 data URI)
+# Plots (matplotlib -> in-memory figure -> base64 data URI)
 # --------------------------------------------------------------------------- #
+# SVG (vector) keeps every figure crisp at any zoom / print resolution -- IND-grade,
+# publication-quality -- and is the SAME matplotlib drawing as the PNG, just not
+# rasterized. Text is emitted as vector OUTLINES (svg.fonttype='path'), i.e. the
+# glyphs are embedded as paths taken from the exact font matplotlib used, so the
+# figure renders byte-identically in any browser/viewer with NO font dependency
+# (no fallback-font substitution). Flip _FIG_FORMAT to "png" to fall back to raster.
+_FIG_FORMAT = "svg"
+matplotlib.rcParams["svg.fonttype"] = "path"  # embed text as vector outlines
+
+
 def _fig_to_data_uri(fig, dpi=120):
     buf = io.BytesIO()
+    if _FIG_FORMAT == "svg":
+        fig.savefig(buf, format="svg", bbox_inches="tight")
+        plt.close(fig)
+        encoded = base64.b64encode(buf.getvalue()).decode()
+        return f"data:image/svg+xml;base64,{encoded}"
     fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     encoded = base64.b64encode(buf.getvalue()).decode()
@@ -2739,7 +2754,7 @@ def render_html(
             "panel can be expanded to any tier for review."
         )
 
-    logo_uri = _asset_data_uri("crisprme-logo.png")
+    logo_uri = _asset_data_uri("crisprme-logo.svg") or _asset_data_uri("crisprme-logo.png")
     # High-resolution seamless tile (1254px, ~0.85 MB JPEG) shown at 640px via
     # background-size, so the pattern keeps its density but stays crisp on
     # high-DPI/retina screens (the old 640px PNG was upscaled ~2x and looked soft).
