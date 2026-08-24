@@ -105,7 +105,7 @@ def logreg_on_fold(feature_sets, train, test, y, y_all, X, dim, dimsum, learn_op
         print("%s, %s" % (str(clf.intercept_ ), str(clf.coef_[0, keep_ind])))
         clf.fit(X[train][:,keep_ind], y[train].flatten())
         print("%s, %s" % (str(clf.intercept_ ), str(clf.coef_)))
-        import ipdb; ipdb.set_trace()               
+        # import ipdb; ipdb.set_trace()  # removed stray debugger breakpoint
 
     
     #y_pred = clf.predict(X[test])

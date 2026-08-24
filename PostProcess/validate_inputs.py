@@ -44,14 +44,14 @@ MIN_VCF_DATA_FIELDS = 8
 # '.'), but that flag isn't actually wired through to crispritz's add-variants
 # call (see validate_inputs_plan.md's "Known separate bug" section) --
 # unrelated to this constant, still a no-op today.
-# This constant already matches PR #36's target state ahead of PR #36 itself
-# shipping in a crispritz release CRISPRme depends on: until it does, a
-# FILTER='.' record validates as fine here but an older, still-installed
-# crispritz enricher silently drops it during enrichment (only 'PASS'
-# survives) -- a real, temporary gap between what this validator accepts and
-# what the installed enricher actually does, not a false pass (worst case is
-# an under-warned run, never a run the validator wrongly blesses as complete
-# that then silently loses data).
+# PR #36 now SHIPS in the crispritz the image builds (v2.8.2 --
+# Python_Scripts/Enrichment/enricher.py: `if line[6] not in ('PASS', '.')`), so
+# this validator and the installed enricher AGREE: a FILTER='.' record is accepted
+# by both and enriched normally -- no data loss. (Historically, with a pre-2.8.2
+# crispritz the enricher dropped '.', so '.' records validated here but were
+# silently lost during enrichment; that gap is now closed for the shipped image. A
+# user who points CRISPRme at an OLDER externally-installed crispritz could still
+# hit it -- worst case is under-warned data loss, never a wrongly-blessed run.)
 ENRICHER_PASS_VALUES = ("PASS", ".")
 STRUCTURAL_VARIANT_LEN = 50
 # enricher.py:302 builds indel context as genomeStr[pos-26 : pos+26+len(ref)];

@@ -159,7 +159,7 @@ def read_V1_data(data_file, learn_options, AML_file=cur_dir + "/data/V1_suppl_da
         Y['average threshold'] = Y['average rank'] < 0.2  # 1s are bad guides
         print ("press c to continue")
         import ipdb
-        ipdb.set_trace()
+        # ipdb.set_trace()  # removed stray debugger breakpoint
 
     return annotations, gene_position, target_genes, Xdf, Y
 

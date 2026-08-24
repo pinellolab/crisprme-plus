@@ -589,7 +589,7 @@ if __name__ == "__main__":
     #[theta_range, allp, pval, real_ndcg_diff, perm_ndcg_diff, ndcg1, ndcg2] = pickle.load(open(save_tmp_results, "rb" ))
 
 
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()  # removed stray debugger breakpoint
 
 
     # # e.g. where all predictions are the same
@@ -639,7 +639,7 @@ if __name__ == "__main__":
     pval, real_ndcg_diff,  perm_ndcg_diff, ndcg1, ndcg2 = ndcg_at_k_swap_perm_test(pred1, pred5, truth, nperm, method, k, normalize_from_below_too, theta=theta)    
     print("ndcg1=%f, ndcg2=%f, ndcg_diff=%f, p=%f" % (ndcg1, ndcg2, real_ndcg_diff, pval))
 
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()  # removed stray debugger breakpoint
 
 
     #print ndcg_at_k_ties(truth, truth, k, method=0, normalize_from_below_too=True)

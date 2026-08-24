@@ -102,7 +102,7 @@ def gp_on_fold(feature_sets, train, test, y, y_all, inputs, dim, dimsum, learn_o
         plt.imshow(m.kern.K(X,X))
         print m
         print "%.3f variance explained" % (m.Gaussian_noise.variance/y[train].var())
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()  # removed stray debugger breakpoint
         plt.close('all')
     else:
         m.optimize_restarts(3)

@@ -200,7 +200,7 @@ def organism_feature(data):
     '''
     organism = np.array(data['Organism'].values)
     feat = pandas.DataFrame(pandas.DataFrame(featarray))
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()  # removed stray debugger breakpoint
     return feat
 
 

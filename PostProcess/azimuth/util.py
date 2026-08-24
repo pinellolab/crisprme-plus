@@ -295,8 +295,11 @@ def guide_positional_features(guide_seq, gene, strand):
         return ""
     assert gene_seq[ind:(ind+len(guide_seq))]==guide_seq, "match not right"
     ## now get what we want from this:
-    import ipdb; ipdb.set_trace()
-    raise NotImplementedError("incomplete implentation for now")
+    # This helper was never finished and is not called anywhere in CRISPRme.
+    # Fail cleanly rather than the old `import ipdb; ipdb.set_trace()`, which would
+    # drop into a debugger if reached (or ImportError where ipdb isn't installed,
+    # e.g. the production image).
+    raise NotImplementedError("guide_positional_features is not implemented")
 
 
 def convert_to_thirty_one(guide_seq, gene, strand):
@@ -351,7 +354,7 @@ def concatenate_feature_sets(feature_sets, keys=None):
     if False:
         inputs.shape
         for j in keys: print(j + str(feature_sets[j].shape))
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()  # removed stray debugger breakpoint
 
     #print("final size of inputs matrix is (%d, %d)" % inputs.shape)
     return inputs, dim, dimsum, feature_names
@@ -1301,7 +1304,7 @@ def remove_top_right_on_plot(ax=None):
 
 
 if __name__ == '__main__':
-    get_thirty_one_mer_data(); import ipdb; ipdb.set_trace()
+    get_thirty_one_mer_data()
 
     # v3_v3_a_feat = 'tests/ens/'
     # v3_v3_d_feat = 'tests/ens2/'
