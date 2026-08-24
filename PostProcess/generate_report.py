@@ -2373,6 +2373,10 @@ table.summary-table { border-collapse: collapse; margin: 0.2em 0; width: 100%;
 table.summary-table td { border: 1px solid #e2e8f0; padding: 6px 10px;
                          vertical-align: top; }
 table.summary-table td.k { background: #f7fafc; font-weight: 600; width: 250px; }
+/* The standalone 'Analysis inputs & criteria' card is full page-width, so let its
+   table fill the card (matching the caption below it) instead of the 520px cap used
+   for the narrow flex-column summary-card table. */
+.inputs-card table.summary-table { max-width: none; }
 .matrix-wrap { overflow-x: auto; }
 table.matrix { border-collapse: collapse; font-size: 0.82em; }
 table.matrix th, table.matrix td { border: 1px solid #e2e8f0; padding: 4px 9px;
