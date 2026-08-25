@@ -66,16 +66,21 @@ def map_fake_offset_to_real(k, start_position, ref_len, alt_len):
     return start_position + k + (ref_len - alt_len)
 
 
-def overlay_sub_fasta(sub_fasta, start_position, ref, alt, enriched):
+def overlay_sub_fasta(sub_fasta, start_position, ref, alt, enriched, enriched_offset=0):
     """Return ``sub_fasta`` with SNP IUPAC codes overlaid on its flank bases.
 
     For every offset whose real position carries an IUPAC ambiguity code in the
     ``enriched`` chromosome (and only where the fake base currently equals a plain
     nucleotide, so we never clobber the indel ALT or an ``N`` pad), substitute the
     IUPAC code. Length is unchanged (1 char -> 1 char).
+
+    ``enriched_offset`` lets ``enriched`` be a SLICE rather than the whole
+    chromosome: ``enriched[i]`` holds the base at absolute position
+    ``i + enriched_offset`` (default 0 = full chromosome). Used by the CI fixture
+    oracle, which ships only each indel's small enriched window.
     """
     ref_len, alt_len = len(ref), len(alt)
-    n_enr = len(enriched)
+    n_enr = len(enriched) + enriched_offset
     out = list(sub_fasta)
     for k in range(len(sub_fasta)):
         # only overlay onto plain nucleotides of the fake flanks; leave ALT bases,
@@ -84,9 +89,9 @@ def overlay_sub_fasta(sub_fasta, start_position, ref, alt, enriched):
         if base not in "ACGTacgt":
             continue
         real = map_fake_offset_to_real(k, start_position, ref_len, alt_len)
-        if real is None or real < 0 or real >= n_enr:
+        if real is None or real < enriched_offset or real >= n_enr:
             continue
-        e = enriched[real]
+        e = enriched[real - enriched_offset]
         if e in _IUPAC_AMBIG:
             out[k] = e
     return "".join(out)

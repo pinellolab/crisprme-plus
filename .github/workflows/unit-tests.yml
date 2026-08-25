@@ -119,6 +119,19 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_chrom_subset -v
 
+      - name: "Indel+SNP co-occurrence (overlay, phased indel GT, cis join, brute-force oracle vs real chr22 fixture)"
+        # feature/indel-snp: SNP+indel co-occurring off-target discovery. Pure stdlib
+        # tests (no extra deps) + a ~16KB real-data fixture whose brute-force ORACLE
+        # independently reconstructs+aligns to cross-validate every coordinate hop
+        # (overlay, bulge+strand window map, co-occurrence decode, cis join). Each file
+        # is a function-based suite with a __main__ runner that raises on failure.
+        working-directory: PostProcess
+        run: |
+          python test_indel_snp_overlay.py
+          python test_indel_genotypes.py
+          python test_indel_snp_cis.py
+          python test_indel_snp_bruteforce.py
+
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
         run: python -m unittest test_bulge_cap -v
