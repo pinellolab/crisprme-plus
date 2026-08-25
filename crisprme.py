@@ -2257,6 +2257,48 @@ def build_index_only() -> None:
                         f"written ({_vc_err}); reports fall back to the .idx headers.",
                         flush=True,
                     )
+    # [indel-snp] STEP 1c (ADDITIVE, gated): emit the PHASED indel genotype store so
+    # the indel post-analysis can do CONFIRMED-cis SNP+indel co-occurrence. One
+    # gt_indel_<chrom>.tsv.gz per chromosome under indel_genotypes_<vcf>/ (sibling of
+    # the SNP tiers). GUARDED (stdout warning, never abort); absent -> the post-
+    # analysis degrades to PUTATIVE via the log's unphased carriers. No-op unless
+    # CRISPRME_INDEL_SNP is set.
+    if os.environ.get("CRISPRME_INDEL_SNP", "0") in ("1", "true", "True", "yes"):
+        try:
+            import build_indel_genotypes as _big
+            _igt_dir = os.path.join(workdir, "Dictionaries", f"indel_genotypes_{vcf_name}")
+            os.makedirs(_igt_dir, exist_ok=True)
+            _keep = None
+            if db_to_samplesid:  # union of the per-db panels (match the SNP tiers)
+                _keep = set()
+                for _sid in db_to_samplesid.values():
+                    if _sid and os.path.isfile(_sid):
+                        _keep |= _big._load_panel(_sid)
+                _keep = _keep or None
+            _n_ig = 0
+            for _vf in sorted(_glob(os.path.join(vcfdir, "*.vcf.gz"))
+                              + _glob(os.path.join(vcfdir, "*.vcf"))):
+                _chrom = None
+                _op = gzip.open(_vf, "rt") if _vf.endswith(".gz") else open(_vf)
+                with _op as _fh:
+                    for _ln in _fh:
+                        if _ln.startswith("#"):
+                            continue
+                        _cc = _ln.split("\t", 1)[0]
+                        _chrom = _cc if _cc.startswith("chr") else "chr" + _cc
+                        break
+                if _chrom is None:
+                    continue
+                _nrec = _big.compile_indel_genotypes(
+                    _vf, os.path.join(_igt_dir, f"gt_indel_{_chrom}.tsv.gz"),
+                    keep_samples=_keep)
+                _n_ig += 1
+                print(f"[indel-snp] phased indel GT {_chrom}: {_nrec} records", flush=True)
+            print(f"[indel-snp] phased indel genotype store: {_n_ig} chromosome(s) "
+                  f"-> {os.path.basename(_igt_dir)}", flush=True)
+        except Exception as _ig_err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
+            print(f"WARNING [indel-snp]: phased indel genotype store not built "
+                  f"({_ig_err}); indel post-analysis falls back to PUTATIVE.", flush=True)
     # STEP 2: index the enriched (SNP) genome
     if not os.path.isdir(snp_idx):
         print(f"Building variant index {os.path.basename(snp_idx)}...", flush=True)
