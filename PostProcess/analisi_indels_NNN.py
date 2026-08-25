@@ -893,6 +893,56 @@ with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, 
             splitted[6],
         ]
 # datastore = datastore.to_dict(orient='index')
+
+# [indel-snp] SNP+indel co-occurrence annotation (feature/indel-snp, gated).
+# GUARDED: any missing reader/import -> None and the feature degrades to a no-op;
+# the classic indel path is byte-identical when CRISPRME_INDEL_SNP is off. The SNP
+# registry/genotype tiers are SIBLINGS of the log_indels dir (sys.argv[4]) under
+# Dictionaries/, so no new CLI/shell args are needed. Emits SNP+indel co-occurring
+# off-targets to a companion TSV (never touches the fixed indel columns/scores).
+_indel_snp = os.environ.get("CRISPRME_INDEL_SNP", "0") in ("1", "true", "True", "yes")
+_isc = _reg = _gt = _indelgt = _cooc_out = None
+if _indel_snp:
+    try:
+        import indel_snp_cis as _isc
+        _droot = os.path.dirname(os.path.realpath(sys.argv[4]))
+        _vcf = os.path.basename(os.path.realpath(sys.argv[4]))[len("log_indels_"):]
+        try:
+            import tier0_registry as _t0
+            _rb = os.path.join(_droot, "registry_" + _vcf, "reg_" + current_chr + ".bin")
+            _ri = os.path.join(_droot, "registry_" + _vcf, "reg_" + current_chr + ".idx")
+            if os.path.isfile(_rb) and os.path.isfile(_ri):
+                _reg = _t0.RegistryReader(_rb, _ri)
+        except Exception:  # noqa: BLE001 - registry optional
+            _reg = None
+        try:
+            import tier1_genotypes as _t1
+            _gb = os.path.join(_droot, "genotypes_" + _vcf, "gt_" + current_chr + ".bin")
+            _gi = os.path.join(_droot, "genotypes_" + _vcf, "gt_" + current_chr + ".idx")
+            if os.path.isfile(_gb) and os.path.isfile(_gi):
+                _gt = _t1.GenotypeReader(_gb, _gi)
+        except Exception:  # noqa: BLE001 - genotype tier optional
+            _gt = None
+        try:
+            import build_indel_genotypes as _big
+            _ig = os.path.join(_droot, "indel_genotypes_" + _vcf,
+                               "gt_indel_" + current_chr + ".tsv.gz")
+            if os.path.isfile(_ig):
+                _indelgt = _big.IndelGenotypeReader(_ig)
+        except Exception:  # noqa: BLE001 - phased indel GT optional (-> PUTATIVE)
+            _indelgt = None
+        if _reg is not None:
+            _cooc_out = open(outputFile + ".indel_snp_cooc.tsv", "w")
+            _cooc_out.write(
+                "chrom\tindel_pos\tindel_ref\tindel_alt\tofftarget_start\tstrand\t"
+                "snp_dictpos\tsnp_rsid\tphase\tjoint_af\tn_cis\tcis_samples\n"
+            )
+        else:
+            _indel_snp = False  # no SNP tier for this chrom -> nothing to annotate
+    except Exception as _isp_err:  # noqa: BLE001 - never break the classic path
+        print(f"WARNING [indel-snp]: post-analysis annotation disabled ({_isp_err})",
+              flush=True)
+        _indel_snp = False
 print("Analysis of " + current_chr)
 
 save_cluster_targets = True
@@ -978,6 +1028,63 @@ for line in inResult:
     # real_start_cluster
     final_result[5] = str(true_start_target - diff_pos_clus)
 
+    # [indel-snp] SNP+indel co-occurrence (gated companion output; never touches the
+    # classic indel row). The overlaid search reports IUPAC codes in line[2] at
+    # overlaid SNP columns; decode which alt(s) the guide USES, look up phased SNP +
+    # indel genotypes, and record the cis co-occurrence + joint AF to the companion.
+    if _indel_snp and _cooc_out is not None:
+        try:
+            _ip = indel_data[4].split("_")   # chrN_pos_REF_ALT
+            _ipos, _iref, _ialt = int(_ip[-3]), _ip[-2], _ip[-1]
+            _strand = line[6]
+            _real_of = _isc.build_offset_to_real(
+                line[2], int(line[4]), _strand, int(indel_data[5]),
+                int(indel_data[0].split("_")[1].split("-")[0]), _iref, _ialt)
+
+            def _snp_at(real, _s=_strand):
+                pos1 = real + 1  # registry/genotype tiers are 1-based (dict key = real+1)
+                alts = _reg.alts_at(pos1)
+                if not alts:
+                    return None
+                alt = alts[0]  # biallelic SNP position
+                refb = _reg.ref(pos1, alt) or (
+                    genomeStr[real] if 0 <= real < len(genomeStr) else "N")
+                rsid = _reg.rsid(pos1, alt) or "."
+                gts = {}
+                if _gt is not None:
+                    for tok in _gt.carrier_tokens(pos1, alt):
+                        _sm, _, _g = tok.partition(":")
+                        gts[_sm] = _g
+                if _s == "-":  # orient forward alleles to the target's strand
+                    refb, alt = _isc.complement(refb), _isc.complement(alt)
+                return (refb, alt, rsid, gts)
+
+            _used = _isc.used_snps_for_target(line[1], line[2], lambda j: _real_of[j], _snp_at)
+            if _used:
+                # CONFIRMED-cis needs phased indel GT (the store); else fall back to the
+                # log's UNPHASED carriers -> PUTATIVE.
+                if _indelgt is not None:
+                    _igt = _indelgt.carriers_dict(_ipos, _iref, _ialt)
+                else:
+                    _igt = {s: "0/1" for s in indel_data[1].split(",") if s}
+                _cis, _phase, _ac = _isc.cis_cooccurrence(_igt, [g for _, _, g in _used])
+                if _cis:
+                    _an = 0
+                    try:
+                        _grp = _reg.lookup(_used[0][0] + 1, _reg.alts_at(_used[0][0] + 1)[0])
+                        _an = _grp["global"].AN if _grp and "global" in _grp else 0
+                    except Exception:  # noqa: BLE001
+                        _an = 0
+                    _cooc_out.write(
+                        current_chr + "\t" + str(_ipos) + "\t" + _iref + "\t" + _ialt
+                        + "\t" + final_result[4] + "\t" + _strand + "\t"
+                        + ";".join(str(u[0] + 1) for u in _used) + "\t"
+                        + ";".join(u[1] for u in _used) + "\t" + _phase + "\t"
+                        + ("%.6g" % _isc.joint_af(_ac, _an)) + "\t" + str(len(_cis))
+                        + "\t" + ",".join(sorted(_cis)[:50]) + "\n")
+        except Exception:  # noqa: BLE001 - annotation must never break the indel row
+            pass
+
     # real_target
     # t = final_result[2]
     # mm_new_t = 0
@@ -1035,6 +1142,8 @@ else:
     cfd_best.close()
     mmblg_best.close()
     crista_best.close()
+    if _cooc_out is not None:
+        _cooc_out.close()
     # update header
     os.system(
         "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
@@ -1080,6 +1189,8 @@ for count, cluster in enumerate(clusters_with_scores):
 cfd_best.close()
 mmblg_best.close()
 crista_best.close()
+if _cooc_out is not None:
+    _cooc_out.close()
 
 os.system(
     "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
