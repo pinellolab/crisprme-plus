@@ -147,6 +147,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_reference_row_downstream -v
 
+      - name: "Deterministic dedup ordering (#46: sample/rsID/AF/annotation lists sorted, not PYTHONHASHSEED-random)"
+        working-directory: PostProcess
+        run: python test_determinism.py
+
       - name: "Shareable report (self-contained ZIP: report.html + tsv.gz, base64 plots, top-N table)"
         working-directory: PostProcess
         run: python -m unittest test_generate_report -v

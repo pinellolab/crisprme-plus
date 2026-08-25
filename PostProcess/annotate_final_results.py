@@ -66,7 +66,9 @@ with open(file_final_results, "r") as f_in:
             if not found_bool:
                 last_annotation = "n"
             else:
-                last_annotation = ",".join(list(set(string_annotation)))
+                # sorted() for deterministic annotation order across processes
+                # (bare set() iteration is PYTHONHASHSEED-dependent)
+                last_annotation = ",".join(sorted(set(string_annotation)))
             splitted[14] = last_annotation  # bestCFD
             # splitted[36] = last_annotation #fewestMM_BUL
             # splitted[58] = last_annotation #bestCRISTA
