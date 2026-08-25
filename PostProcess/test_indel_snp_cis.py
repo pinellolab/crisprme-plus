@@ -113,6 +113,40 @@ def test_decode_then_cis_end_to_end():
     assert cis == {"S"} and phase == isc.CONFIRMED and ac == 1
 
 
+def test_offset_to_real_plus_strand_left_flank():
+    # '+' strand, no bulge, target starts in the left flank (fst<25) -> 1:1 map
+    # indel at real start 100, ref/alt len 2/1 (delta +1). target fake_start = indel
+    # fake_start + 3 (so fst=3, left flank).
+    real = isc.build_offset_to_real("ACGT", fake_start=13, strand="+",
+                                    indel_fake_start=10, indel_start=100,
+                                    ref="AT", alt="A")
+    # fst=3 -> real 103, then 104,105,106 (all left flank, 1:1)
+    assert real == [103, 104, 105, 106]
+
+
+def test_offset_to_real_minus_strand_reverses():
+    # '-' strand: leftmost column is the HIGHEST forward fake position
+    real = isc.build_offset_to_real("ACGT", fake_start=13, strand="-",
+                                    indel_fake_start=10, indel_start=100,
+                                    ref="AT", alt="A")
+    # 4 bases at forward fake 13,14,15,16 (fst 3,4,5,6 -> real 103..106); '-' reverses
+    assert real == [106, 105, 104, 103]
+
+
+def test_offset_to_real_rna_bulge_column_is_none():
+    # a '-' in the DNA (RNA bulge) consumes no fake position
+    real = isc.build_offset_to_real("AC-GT", fake_start=13, strand="+",
+                                    indel_fake_start=10, indel_start=100,
+                                    ref="AT", alt="A")
+    assert real[2] is None
+    assert real[0] == 103 and real[1] == 104 and real[3] == 105 and real[4] == 106
+
+
+def test_complement():
+    assert isc.complement("A") == "T" and isc.complement("g") == "c"
+    assert isc.complement("M") == "M"  # IUPAC/other unchanged
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

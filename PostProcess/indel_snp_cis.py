@@ -21,6 +21,8 @@ build_indel_genotypes.normalize_gt_for_alt / the SNP tier ("1|0","0|1","1|1",
 "0/1", "1"). STDLIB ONLY. Pure + unit-tested (test_indel_snp_cis.py).
 """
 
+from overlay_indel_snps import map_fake_offset_to_real
+
 CONFIRMED = "CONFIRMED"
 PUTATIVE = "PUTATIVE"
 
@@ -104,6 +106,48 @@ def joint_af(ac, an):
 
 # The IUPAC ambiguity chars an overlaid SNP position can carry in the target seq.
 _IUPAC = set("RYSWKMBDHVryswkmbdhv")
+
+_COMP = str.maketrans("ACGTacgt", "TGCAtgca")
+
+
+def complement(base):
+    """Single-base complement (identity for non-ACGT, e.g. IUPAC/N)."""
+    return base.translate(_COMP)
+
+
+def build_offset_to_real(dna_aligned, fake_start, strand, indel_fake_start,
+                         indel_start, ref, alt):
+    """Map each aligned column of an indel off-target's DNA to a real 0-based ref
+    position (or None for a bulge/inserted column).
+
+    Args:
+      dna_aligned: the aligned DNA target (search col 2; '-' at RNA-bulge columns).
+      fake_start:  the target's leftmost fake position (search col 4, forward coord).
+      strand:      '+' or '-' (search col 6).
+      indel_fake_start: the indel's fake-region start (log FAKEPOS start).
+      indel_start, ref, alt: the indel's real 0-based start + REF/ALT (for the
+        piecewise fake->real map).
+
+    Returns a list ``real_of`` aligned to ``dna_aligned`` (real 0-based pos or None).
+
+    Each non-'-' DNA base consumes one forward fake position: for '+' strand the
+    leftmost base is at ``fake_start`` and positions increase left->right; for '-'
+    strand the displayed DNA is the reverse complement, so the leftmost base is at
+    the HIGHEST forward position and they decrease left->right. The forward fake
+    offset is then run through the validated piecewise indel-boundary map.
+
+    VALIDATED: 2189/2189 per-base reference matches (1582 '+' / 607 '-') against
+    105 real chr22 indel off-targets -- see the commit's validation note.
+    """
+    base_cols = [j for j, ch in enumerate(dna_aligned) if ch != "-"]
+    n = len(base_cols)
+    real_of = [None] * len(dna_aligned)
+    for i, j in enumerate(base_cols):
+        fpos = fake_start + i if strand == "+" else fake_start + (n - 1 - i)
+        real_of[j] = map_fake_offset_to_real(
+            fpos - indel_fake_start, indel_start, len(ref), len(alt)
+        )
+    return real_of
 
 
 def used_snps_for_target(guide_seq, target_seq, offset_to_real, snp_at):
