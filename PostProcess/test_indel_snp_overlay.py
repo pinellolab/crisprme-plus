@@ -98,8 +98,8 @@ def _load_crista_resolver():
     src = open(
         os.path.join(os.path.dirname(__file__), "analisi_indels_NNN.py")
     ).read()
-    start = src.index("def _resolve_iupac_for_crista")
-    end = src.index("# For scoring of CFD", start)
+    start = src.index("def _resolve_overlaid_iupac")
+    end = src.index("# Whole-genome IUPAC", start)
     ns = {
         "iupac_code": {
             "R": ("A", "G"), "Y": ("C", "T"), "S": ("G", "C"), "W": ("A", "T"),
@@ -110,7 +110,7 @@ def _load_crista_resolver():
         }
     }
     exec(src[start:end], ns)
-    return ns["_resolve_iupac_for_crista"]
+    return ns["_resolve_overlaid_iupac"]
 
 
 def test_crista_resolver_is_classic_noop_and_kills_iupac():

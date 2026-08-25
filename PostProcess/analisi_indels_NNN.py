@@ -629,10 +629,10 @@ def preprocess_CRISTA_score(cluster_targets):
         # fake genome -- classic scores stay byte-identical). The aligned DNA is
         # resolved against the aligned guide (carrier allele that matched); the
         # genome-context window is resolved to the first listed allele.
-        DNA_aligned_list[-1] = _resolve_iupac_for_crista(
+        DNA_aligned_list[-1] = _resolve_overlaid_iupac(
             DNA_aligned_list[-1], str(target[1])
         )
-        complete_DNA_seq = _resolve_iupac_for_crista(complete_DNA_seq)
+        complete_DNA_seq = _resolve_overlaid_iupac(complete_DNA_seq)
 
         if (
             # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
@@ -700,10 +700,10 @@ def preprocess_CRISTA_score(cluster_targets):
         # fake genome -- classic scores stay byte-identical). The aligned DNA is
         # resolved against the aligned guide (carrier allele that matched); the
         # genome-context window is resolved to the first listed allele.
-        DNA_aligned_list[-1] = _resolve_iupac_for_crista(
+        DNA_aligned_list[-1] = _resolve_overlaid_iupac(
             DNA_aligned_list[-1], str(target[1])
         )
-        complete_DNA_seq = _resolve_iupac_for_crista(complete_DNA_seq)
+        complete_DNA_seq = _resolve_overlaid_iupac(complete_DNA_seq)
 
         if (
             # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
@@ -845,19 +845,19 @@ iupac_code = {
 }
 
 
-def _resolve_iupac_for_crista(seq, guide_aligned=None):
-    """Resolve IUPAC ambiguity bases to a concrete A/C/G/T for CRISTA scoring.
+def _resolve_overlaid_iupac(seq, guide_aligned=None):
+    """Resolve IUPAC ambiguity bases in an aligned sequence to a concrete A/C/G/T.
 
-    IUPAC codes reach the indel scorer only from the SNP-overlaid fake-indel
-    genome (CRISPRME_INDEL_SNP): the CRISTA model's ``agct2numerals`` does a
-    bare dict lookup and ``KeyError``s on any non-ACGT base, which aborts the
-    whole INDEL post-analysis (CFD tolerates IUPAC via a try/except; CRISTA does
-    not). When a position-aligned guide is supplied, pick the allele the guide
-    matches -- reconstructing the variant-carrier allele that actually created
-    the off-target; otherwise pick the first listed allele (deterministic). 'N'
-    is left untouched so the existing N-guard still nulls those windows. On the
-    classic, plain (non-overlaid) fake genome there are no IUPAC bases, so this
-    is a strict no-op and classic CRISTA scores stay byte-identical.
+    IUPAC codes reach the indel post-analysis only from the SNP-overlaid fake-
+    indel genome (CRISPRME_INDEL_SNP). Every ACGT-only consumer trips on them:
+    CRISTA's ``agct2numerals`` (bare dict lookup -> KeyError, aborts scoring) and
+    the radar/motif dict generator, ref-alignment, etc. (CFD alone tolerates them
+    via a try/except). When a position-aligned guide is supplied, pick the allele
+    the guide matches -- reconstructing the variant-carrier allele that actually
+    created the off-target; otherwise pick the first listed allele
+    (deterministic). 'N' is left untouched so the existing N-guard still nulls
+    those windows. On the classic, plain (non-overlaid) fake genome there are no
+    IUPAC bases, so this is a strict no-op and classic output stays byte-identical.
     """
     if guide_aligned is not None and len(guide_aligned) != len(seq):
         guide_aligned = None  # can't position-map; fall back to first-allele
@@ -876,6 +876,15 @@ def _resolve_iupac_for_crista(seq, guide_aligned=None):
             pick = alleles[0]
         out.append(pick if c.isupper() else pick.lower())
     return "".join(out)
+
+
+# Whole-genome IUPAC -> first-listed-allele map (fast str.translate), used to make
+# the SNP-overlaid fake-indel genomeStr concrete once at load. Mirrors iupac_code's
+# first entry: R->A Y->C S->G W->A K->G M->A B->C D->A H->A V->A. 'N' is absent, so
+# it survives for the existing N-guard. No-op on the classic (non-overlaid) genome.
+_IUPAC_FIRST_ALLELE_TAB = str.maketrans(
+    "RYSWKMBDHVryswkmbdhv", "ACGAGACAAAacgagacaaa"
+)
 
 
 # For scoring of CFD And Doench
@@ -907,6 +916,12 @@ genomeStr = inFasta.readlines()  # lettura fasta del chr
 genomeStr = "".join(genomeStr).upper()
 # string of the whole chromosome on single line
 genomeStr = genomeStr.replace("\n", "")
+# [indel-snp] The SNP-overlaid fake-indel genome (CRISPRME_INDEL_SNP) carries IUPAC
+# ambiguity bases; collapse them to a concrete allele once here so every genome-
+# derived output column (ref alignment, CRISTA context, motif/radar counts) is pure
+# A/C/G/T. Strict no-op on the classic plain fake genome (no IUPAC), so classic
+# output is byte-identical; 'N' is preserved for the existing N-guards.
+genomeStr = genomeStr.translate(_IUPAC_FIRST_ALLELE_TAB)
 
 
 start_time_total = time.time()
@@ -1138,6 +1153,14 @@ for line in inResult:
                         + "\t" + ",".join(sorted(_cis)[:50]) + "\n")
         except Exception:  # noqa: BLE001 - annotation must never break the indel row
             pass
+
+    # [indel-snp] The overlaid search reports IUPAC codes in the DNA column at
+    # overlaid SNP positions. The cis-decode above needed them; from here on write
+    # the concrete carrier allele (the base the aligned guide matched) so the
+    # ref-alignment, scoring and radar/motif steps never see a non-ACGT base.
+    # Gated + a strict no-op on the classic path (no IUPAC in the DNA column).
+    if _indel_snp:
+        final_result[2] = _resolve_overlaid_iupac(final_result[2], final_result[1])
 
     # real_target
     # t = final_result[2]
