@@ -2958,95 +2958,49 @@ def update_table_general_profile(
                 data_guides["Doench 2016"] = doench[i]
             else:
                 data_guides["Doench 2016"] = doench[i]
+        # Bulge ROWS span 0..(bDNA+bRNA); the count file (built by process_summaries
+        # with bDNA+bRNA+1 rows per origin) is the source of truth, so derive the row
+        # labels/placement from len(data_general_count), NOT Max_bulges (= max(bDNA,bRNA)).
+        # The old code hardcoded max_bulges in {0,1,2} and silently dropped the 3-/4-bulge
+        # rows of e.g. a 2/2 search from this summary table.
+        nb = len(data_general_count)
+        per_origin = (nb // 2) if genome_type == "both" else nb
         if genome_type == "both":
-            tmp = [str(j) for j in range(max_bulges + 1)] * 2
-            tmp.insert(len(tmp) // 2, "")
-            data_guides["# Bulges"] = "\n".join(tmp)
+            labels = [str(j) for j in range(per_origin)] * 2
+            labels.insert(len(labels) // 2, "")
+            data_guides["# Bulges"] = "\n".join(labels)
         else:
-            tmp = [str(j) for j in range(max_bulges + 1)]
-            data_guides["# Bulges"] = "\n".join(tmp)
+            data_guides["# Bulges"] = "\n".join(str(j) for j in range(per_origin))
         data_guides["Total"] = []
+        # Per-row Totals with REFERENCE/VARIANT labels centered in each origin block,
+        # aligned to the # Bulges / MM cells (which carry a blank separator between the
+        # two halves). ref_mid/var_mid reproduce the old hardcoded placement exactly for
+        # per_origin in {1,2,3} (max_bulges 0/1/2) and generalize to any bulge count.
+        totals = [str(sum(data_general_count.iloc[j, :])) for j in range(nb)]
         if genome_type == "both":
-            if max_bulges == 2:
-                for j in range(len(data_guides["# Bulges"].split("\n")) - 1):
-                    if j == 1:
-                        data_guides["Total"].append(
-                            "\t".join(
-                                ["REFERENCE", str(sum(data_general_count.iloc[j, :]))]
-                            )
-                        )
-                    elif j == 2:
-                        data_guides["Total"].append(
-                            f"\t{str(sum(data_general_count.iloc[j, :]))}"
-                        )
-                        data_guides["Total"].append("\t")
-                    elif j == 4:
-                        data_guides["Total"].append(
-                            "\t\t".join(
-                                ["VARIANT", str(sum(data_general_count.iloc[j, :]))]
-                            )
-                        )
-                    else:
-                        data_guides["Total"].append(
-                            f"\t{str(sum(data_general_count.iloc[j, :]))}"
-                        )
-            elif max_bulges == 1:
-                for j in range(len(data_guides["# Bulges"].split("\n")) - 1):
-                    if j == 1:
-                        data_guides["Total"].append(
-                            "\t".join(
-                                ["REFERENCE", str(sum(data_general_count.iloc[j, :]))]
-                            )
-                        )
-                        data_guides["Total"].append("\t")
-                    elif j == 3:
-                        data_guides["Total"].append(
-                            "\t\t".join(
-                                ["VARIANT", str(sum(data_general_count.iloc[j, :]))]
-                            )
-                        )
-                    else:
-                        data_guides["Total"].append(
-                            f"\t{str(sum(data_general_count.iloc[j, :]))}"
-                        )
-            else:
-                for j in range(len(data_guides["# Bulges"].split("\n")) - 1):
-                    if j == 0:
-                        data_guides["Total"].append(
-                            "\t".join(
-                                ["REFERENCE", str(sum(data_general_count.iloc[j, :]))]
-                            )
-                        )
-                        data_guides["Total"].append("\t")
-                    elif j == 1:
-                        data_guides["Total"].append(
-                            "\t\t".join(
-                                ["VARIANT", str(sum(data_general_count.iloc[j, :]))]
-                            )
-                        )
-        else:
-            for j in range(len(data_guides["# Bulges"].split("\n"))):
-                if j == len(data_guides["# Bulges"].split("\n")) // 2:
-                    data_guides["Total"].append(
-                        "\t".join(
-                            ["REFERENCE", str(sum(data_general_count.iloc[j, :]))]
-                        )
-                    )
+            ref_mid = per_origin // 2
+            var_mid = per_origin + (per_origin // 2)
+            for j, t in enumerate(totals):
+                if j == ref_mid:
+                    data_guides["Total"].append("REFERENCE\t" + t)
+                elif j == var_mid:
+                    data_guides["Total"].append("VARIANT\t\t" + t)
                 else:
-                    data_guides["Total"].append(
-                        f"\t{str(sum(data_general_count.iloc[j, :]))}"
-                    )
-        if genome_type == "both":
-            for i in range(mms + 1):
-                tmp = list(data_general_count.iloc[:, i].values.astype(str))
-                tmp.insert(len(tmp) // 2, "")
-                data_guides[str(i) + "MM"] = "\n".join(tmp)
+                    data_guides["Total"].append("\t" + t)
+            data_guides["Total"].insert(len(data_guides["Total"]) // 2, "")
         else:
-            for j in range(mms + 1):
-                tmp = list(data_general_count.iloc[:, j].values.astype(str))
-                tmp = tmp[: max_bulges + 1]
-                # tmp.insert(len(tmp)//2, "")
-                data_guides[str(j) + "MM"] = "\n".join(tmp)
+            mid = nb // 2
+            for j, t in enumerate(totals):
+                data_guides["Total"].append(
+                    ("REFERENCE\t" + t) if j == mid else ("\t" + t)
+                )
+        for mm_i in range(mms + 1):
+            col = list(data_general_count.iloc[:, mm_i].values.astype(str))
+            if genome_type == "both":
+                col.insert(len(col) // 2, "")  # blank separator between REF/VAR halves
+            # NO truncation: show every bulge row the data contains (was tmp[:max_bulges+1],
+            # which dropped rows with total bulges > max(bDNA,bRNA)).
+            data_guides[str(mm_i) + "MM"] = "\n".join(col)
         data_guides["Total"] = "\n".join(data_guides["Total"])
         df.append(data_guides)
     dff = pd.DataFrame(df)  # create data table
