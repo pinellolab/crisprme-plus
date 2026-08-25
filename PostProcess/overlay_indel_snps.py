@@ -50,6 +50,14 @@ def map_fake_offset_to_real(k, start_position, ref_len, alt_len):
     downstream real positions run ahead of the fake offset; negative for
     insertions). Verified against real chr22 log rows (AT>A deletion, G>GATAA
     insertion) in test_indel_snp_overlay.py.
+
+    COORDINATE CONVENTION (validated on real hg38_1000G chr22 -- see
+    validate_indel_snp_coords.py): the returned ``real`` is a 0-based index into
+    the enriched/reference sequence as read by read_enriched_chromosome (i.e.
+    enriched[real] is the base). The per-sample SNP dict (my_dict_<chrom>.json) is
+    keyed 1-BASED, so the Phase-3 indel post-analysis must look a SNP up at dict
+    key ``real + 1`` (equivalently, tier0_registry.retrieve_5tuple uses chr_pos+1
+    internally, so pass ``real`` as its 0-based chr_pos).
     """
     if k < LEFT_FLANK:
         return start_position + k
