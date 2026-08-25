@@ -624,6 +624,16 @@ def preprocess_CRISTA_score(cluster_targets):
         if target[6] == "-":
             complete_DNA_seq = reverse_complement_table(complete_DNA_seq)
 
+        # Resolve any IUPAC bases from the SNP-overlaid fake-indel genome so the
+        # CRISTA model can score the window (strict no-op on the classic, plain
+        # fake genome -- classic scores stay byte-identical). The aligned DNA is
+        # resolved against the aligned guide (carrier allele that matched); the
+        # genome-context window is resolved to the first listed allele.
+        DNA_aligned_list[-1] = _resolve_iupac_for_crista(
+            DNA_aligned_list[-1], str(target[1])
+        )
+        complete_DNA_seq = _resolve_iupac_for_crista(complete_DNA_seq)
+
         if (
             # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
             # an out-of-range/off-the-chromosome-end indel coordinate collapses the
@@ -684,6 +694,16 @@ def preprocess_CRISTA_score(cluster_targets):
         complete_DNA_seq = first_half + second_half
         if target[6] == "-":
             complete_DNA_seq = reverse_complement_table(complete_DNA_seq)
+
+        # Resolve any IUPAC bases from the SNP-overlaid fake-indel genome so the
+        # CRISTA model can score the window (strict no-op on the classic, plain
+        # fake genome -- classic scores stay byte-identical). The aligned DNA is
+        # resolved against the aligned guide (carrier allele that matched); the
+        # genome-context window is resolved to the first listed allele.
+        DNA_aligned_list[-1] = _resolve_iupac_for_crista(
+            DNA_aligned_list[-1], str(target[1])
+        )
+        complete_DNA_seq = _resolve_iupac_for_crista(complete_DNA_seq)
 
         if (
             # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
@@ -823,6 +843,40 @@ iupac_code = {
     "v": ("A", "C", "G"),
     "N": ("A", "T", "C", "G"),
 }
+
+
+def _resolve_iupac_for_crista(seq, guide_aligned=None):
+    """Resolve IUPAC ambiguity bases to a concrete A/C/G/T for CRISTA scoring.
+
+    IUPAC codes reach the indel scorer only from the SNP-overlaid fake-indel
+    genome (CRISPRME_INDEL_SNP): the CRISTA model's ``agct2numerals`` does a
+    bare dict lookup and ``KeyError``s on any non-ACGT base, which aborts the
+    whole INDEL post-analysis (CFD tolerates IUPAC via a try/except; CRISTA does
+    not). When a position-aligned guide is supplied, pick the allele the guide
+    matches -- reconstructing the variant-carrier allele that actually created
+    the off-target; otherwise pick the first listed allele (deterministic). 'N'
+    is left untouched so the existing N-guard still nulls those windows. On the
+    classic, plain (non-overlaid) fake genome there are no IUPAC bases, so this
+    is a strict no-op and classic CRISTA scores stay byte-identical.
+    """
+    if guide_aligned is not None and len(guide_aligned) != len(seq):
+        guide_aligned = None  # can't position-map; fall back to first-allele
+    out = []
+    for i, c in enumerate(seq):
+        if c in ("N", "n") or c not in iupac_code:
+            out.append(c)  # plain A/C/G/T (or N) -- leave as-is
+            continue
+        alleles = iupac_code[c]
+        pick = None
+        if guide_aligned is not None:
+            g = guide_aligned[i].upper()
+            if g in alleles:
+                pick = g  # the allele the guide matched = carrier's base
+        if pick is None:
+            pick = alleles[0]
+        out.append(pick if c.isupper() else pick.lower())
+    return "".join(out)
+
 
 # For scoring of CFD And Doench
 tab = str.maketrans("ACTGRYSWMKHDBVactgryswmkhdbv", "TGACYRSWKMDHVBtgacyrswkmdhvb")

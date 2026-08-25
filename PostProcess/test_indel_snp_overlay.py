@@ -88,6 +88,51 @@ def test_overlay_out_of_bounds_real_position():
     assert out == sub  # nothing overlaid (all downstream reals >= 95), no exception
 
 
+def _load_crista_resolver():
+    """Extract _resolve_iupac_for_crista from analisi_indels_NNN.py without
+    importing the module (its top level reads sys.argv + opens the fake genome).
+    The scorer's IUPAC-resolution guard is what keeps a SNP-overlaid indel window
+    from crashing CRISTA's agct2numerals; regress it here."""
+    import os
+
+    src = open(
+        os.path.join(os.path.dirname(__file__), "analisi_indels_NNN.py")
+    ).read()
+    start = src.index("def _resolve_iupac_for_crista")
+    end = src.index("# For scoring of CFD", start)
+    ns = {
+        "iupac_code": {
+            "R": ("A", "G"), "Y": ("C", "T"), "S": ("G", "C"), "W": ("A", "T"),
+            "K": ("G", "T"), "M": ("A", "C"), "B": ("C", "G", "T"),
+            "D": ("A", "G", "T"), "H": ("A", "C", "T"), "V": ("A", "C", "G"),
+            "r": ("A", "G"), "y": ("C", "T"), "k": ("G", "T"), "m": ("A", "C"),
+            "N": ("A", "T", "C", "G"),
+        }
+    }
+    exec(src[start:end], ns)
+    return ns["_resolve_iupac_for_crista"]
+
+
+def test_crista_resolver_is_classic_noop_and_kills_iupac():
+    R = _load_crista_resolver()
+    # classic (plain fake genome) -> strict no-op: byte-identical scoring input
+    assert R("ACGTACGT-ACGT") == "ACGTACGT-ACGT"
+    # N is never resolved (the existing N-guard nulls those windows)
+    assert "N" in R("ACGNT")
+    # guide-matched: K={G,T}, guide G -> pick the matched (carrier) allele
+    assert R("K", "G") == "G"
+    # guide not in the ambiguity set -> deterministic first allele
+    assert R("K", "A") == "G"
+    # no guide / length-mismatched guide -> first allele
+    assert R("RYK") == "ACG"
+    assert R("RYK", "AC") == "ACG"  # len(guide)!=len(seq) -> ignored
+    # a realistic overlaid minus-strand window resolves to pure A/C/G/T
+    tgt = "-TAAKCAGTTGCTATTTTAAAGRG"
+    gd = "CTAA-CAGTTGCTTTTATCACNNN"
+    out = R(tgt, gd)
+    assert set(out) <= set("ACGT-"), out  # no residual IUPAC reaches CRISTA
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
