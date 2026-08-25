@@ -100,3 +100,46 @@ def cis_cooccurrence(indel_gt_by_sample, snp_gts_by_sample):
 def joint_af(ac, an):
     """Joint indel+SNP cis allele frequency (ac / an), or 0.0 if an falsy."""
     return (ac / an) if an else 0.0
+
+
+# The IUPAC ambiguity chars an overlaid SNP position can carry in the target seq.
+_IUPAC = set("RYSWKMBDHVryswkmbdhv")
+
+
+def used_snps_for_target(guide_seq, target_seq, offset_to_real, snp_at):
+    """Identify the SNP alt alleles an indel off-target actually USES.
+
+    Args:
+      guide_seq, target_seq: the aligned spacer and DNA target (equal length; may
+        contain '-' gaps for bulges; target_seq carries IUPAC codes at overlaid
+        SNP positions).
+      offset_to_real(j): map aligned column j -> real reference position, or None
+        for a bulge/inserted column with no reference position. (The caller builds
+        this to handle bulge gaps, strand, and the piecewise indel-boundary shift.)
+      snp_at(real_pos): -> (ref_base, alt_base, rsID, {sample: normalized_gt}) or
+        None if no SNP at that position.
+
+    Returns a list of (real_pos, rsID, alt_gt_by_sample) for every column where the
+    target carries an IUPAC ambiguity AND the guide base equals the SNP ALT (not the
+    REF) -- i.e. the off-target REQUIRES the alt allele (a genuine SNP+indel
+    co-occurrence), not merely tolerates the reference. Ref-satisfied ambiguities
+    are skipped (the SNP is incidental, not enabling).
+    """
+    used = []
+    for j, (g, t) in enumerate(zip(guide_seq, target_seq)):
+        if t not in _IUPAC:
+            continue
+        gu = g.upper()
+        if gu in ("-", "N"):
+            continue
+        real = offset_to_real(j)
+        if real is None:
+            continue
+        snp = snp_at(real)
+        if snp is None:
+            continue
+        ref_base, alt_base, rsid, gt = snp
+        # USES the alt iff the guide matches the alt but not the ref
+        if gu == alt_base.upper() and gu != ref_base.upper():
+            used.append((real, rsid, gt))
+    return used

@@ -70,6 +70,49 @@ def test_population_mix_af():
     assert abs(isc.joint_af(ac, 6954) - 3 / 6954) < 1e-12
 
 
+def _snp_at(table):
+    return lambda pos: table.get(pos)
+
+
+def test_used_snp_guide_matches_alt():
+    # guide[1]='C' == alt 'C' (ref 'A') at an IUPAC 'M' target column -> USED
+    guide, target = "ACGT", "AMGT"
+    snps = {1: ("A", "C", "rs1", {"S": "1|0"})}
+    used = isc.used_snps_for_target(guide, target, lambda j: j, _snp_at(snps))
+    assert used == [(1, "rs1", {"S": "1|0"})]
+
+
+def test_ref_satisfied_ambiguity_skipped():
+    # guide[1]='A' == ref 'A' -> the reference works, SNP is incidental -> NOT used
+    guide, target = "AAGT", "AMGT"
+    snps = {1: ("A", "C", "rs1", {"S": "1|0"})}
+    used = isc.used_snps_for_target(guide, target, lambda j: j, _snp_at(snps))
+    assert used == []
+
+
+def test_bulge_column_and_missing_snp_skipped():
+    guide, target = "ACGT", "AMMT"
+    snps = {2: ("A", "G", "rs2", {"S": "1|0"})}  # only col 2 has a SNP
+    # col1 IUPAC maps to None (bulge); col2 maps to a real pos with no matching alt
+    def o2r(j):
+        return None if j == 1 else j
+    used = isc.used_snps_for_target(guide, target, o2r, _snp_at(snps))
+    # col1 skipped (None); col2 guide 'G' == alt 'G' -> used
+    assert used == [(2, "rs2", {"S": "1|0"})]
+
+
+def test_decode_then_cis_end_to_end():
+    # off-target uses one SNP alt; join with the indel genotype -> CONFIRMED cis
+    guide, target = "ACGT", "AMGT"
+    snps = {1: ("A", "C", "rs1", {"S": "1|0", "T": "0|1"})}
+    used = isc.used_snps_for_target(guide, target, lambda j: j, _snp_at(snps))
+    snp_gts = [gt for _, _, gt in used]
+    indel_gt = {"S": "1|0", "T": "1|0"}
+    cis, phase, ac = isc.cis_cooccurrence(indel_gt, snp_gts)
+    # S: indel 1|0 + SNP 1|0 -> cis; T: indel 1|0 + SNP 0|1 -> trans (excluded)
+    assert cis == {"S"} and phase == isc.CONFIRMED and ac == 1
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
