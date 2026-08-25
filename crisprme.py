@@ -2273,6 +2273,26 @@ def build_index_only() -> None:
     # STEP 3: index the indels genome (pool_index_indels.py, as the pipeline does)
     if not os.path.isdir(indels_idx):
         print(f"Building indels index {os.path.basename(indels_idx)}...", flush=True)
+        # [indel-snp] Overlay SNP IUPAC codes onto the fake-indel flanks BEFORE
+        # indexing so this _INDELS index also finds SNP+indel co-occurring
+        # off-targets (searchTST matches IUPAC codes for free -- no -var needed).
+        # Gated: no-op unless CRISPRME_INDEL_SNP is set. GUARDED (stdout warning,
+        # never abort -- stderr is fatal here), mirroring the tier emission above.
+        if os.environ.get("CRISPRME_INDEL_SNP", "0") in ("1", "true", "True", "yes"):
+            try:
+                import overlay_indel_snps as _ois
+                _n = _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict])
+                print(
+                    f"[indel-snp] SNP-overlaid the fake-indel genome "
+                    f"({_n} flank bases IUPAC-coded).",
+                    flush=True,
+                )
+            except Exception as _ois_err:
+                print(
+                    f"WARNING [indel-snp]: fake-indel SNP overlay failed "
+                    f"({_ois_err}); this _INDELS index will be SNP-blind.",
+                    flush=True,
+                )
         pool = os.path.join(script_path, "pool_index_indels.py")
         code = subprocess.call(
             [

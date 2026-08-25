@@ -174,6 +174,8 @@ def main(argv):
         return 2
     indels_dir, enriched_dir, log_dir = argv[1], argv[2], argv[3]
     total = 0
+    # Progress goes to STDOUT: this runs inside the crisprme build where a subprocess
+    # writing to stderr is treated as fatal (see crisprme.py build-index-only).
     for entry in sorted(os.listdir(indels_dir)):
         sub = os.path.join(indels_dir, entry)
         if not os.path.isdir(sub) or not entry.startswith("fake_"):
@@ -188,13 +190,13 @@ def main(argv):
                 log_path = p
                 break
         if not (os.path.isfile(fake_fa) and os.path.isfile(enriched_fa) and log_path):
-            sys.stderr.write(f"overlay_indel_snps: skip {chrom} (missing inputs)\n")
+            print(f"overlay_indel_snps: skip {chrom} (missing inputs)", flush=True)
             continue
         n = overlay_fake_chromosome(fake_fa, enriched_fa, log_path)
         total += n
-        sys.stderr.write(f"overlay_indel_snps: {chrom} -> {n} SNP overlays\n")
-    sys.stderr.write(f"overlay_indel_snps: {total} total SNP overlays\n")
-    return 0
+        print(f"overlay_indel_snps: {chrom} -> {n} SNP overlays", flush=True)
+    print(f"overlay_indel_snps: {total} total SNP overlays", flush=True)
+    return total
 
 
 if __name__ == "__main__":
