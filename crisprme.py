@@ -6,6 +6,7 @@ from Bio.Seq import Seq
 import subprocess
 import itertools
 import pathlib
+import shutil
 import sys
 import os
 import re
