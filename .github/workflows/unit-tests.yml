@@ -171,3 +171,10 @@ jobs:
       - name: "Shareable report (self-contained ZIP: report.html + tsv.gz, base64 plots, top-N table)"
         working-directory: PostProcess
         run: python -m unittest test_generate_report -v
+
+      - name: "Additional coverage (annotation / tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile)"
+        working-directory: PostProcess
+        run: >
+          python -m unittest test_annotation test_assembly_reconcile
+          test_ensure_search_lists test_hvdr_greedy_cap test_registry_only_emit
+          test_representative_tiebreak test_sanitize_job_name test_tier0_compaction -v
