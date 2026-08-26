@@ -85,8 +85,6 @@ Per-chromosome variant counts (from the release's tabix indexes, via `bcftools i
 | chr7 | 4,140,924 | chr15 | 2,111,611 | chrX | 2,858,184 |
 | chr8 | 3,888,893 | chr16 | 2,366,114 | | |
 
-chrX (2,858,184) is shown for completeness; it is excluded from the default download (see [Known limitations](#known-limitations)).
-
 ### Sample and population metadata
 
 The sample → population → super-population mapping is **not** stored in the VCFs. For this release the authoritative source is the official 3,202-sample pedigree / population file `20130606_g1k_3202_samples_ped_population.txt`, in the parent `1000G_2504_high_coverage/` directory at IGSR/EBI ([link](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/20130606_g1k_3202_samples_ped_population.txt)). It is space-delimited, one row per sample, with columns `FamilyID`, `SampleID`, `FatherID`, `MotherID`, `Sex` (1 = male, 2 = female), `Population`, `Superpopulation`. A CRISPRme `samplesID` file (`#SAMPLE_ID  POPULATION_ID  SUPERPOPULATION_ID  SEX`) can be derived from it as a separate preparation step.
@@ -114,7 +112,7 @@ The data are openly accessible and require no credentials. The per-chromosome fi
 ## Known limitations
 
 * **No chrY or chrM.** This release does not include Y-chromosome or mitochondrial variant files.
-* **Working-directory snapshot.** Files were retrieved from the IGSR `working/` directory (pre-publication snapshot dated 2020-10-28); the canonical published release may differ slightly in filtering or sample metadata.
+* **Working-directory snapshot.** Files were retrieved from the IGSR `working/` directory (pre-publication snapshot dated 2020-10-28 extended to include all SNVs and INDELs on 2022-11-18); the canonical published release also includes structural variants.
 
 ---
 
