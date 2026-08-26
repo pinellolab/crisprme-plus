@@ -384,7 +384,16 @@ Phasing is resolved per haplotype from the genotypes (confirmed vs putative,
 
 **Limitations.** CRISPRme+ does **not** model somatic/mosaic variants, copy-number
 or large structural variants, epigenetic state beyond the supplied annotations, or
-chromatin accessibility as a cutting determinant. The `Max_total_edits` value is a
+chromatin accessibility as a cutting determinant. **SNP+indel co-occurrence** —
+by default the SNP and indel searches run as two independent passes (SNPs on the
+IUPAC-enriched genome, indels on a plain-reference fake-indel genome), so an
+off-target requiring **both** a nearby SNP **and** an indel in the same protospacer
+is not reported. This limitation is **lifted by an opt-in, experimental gate**
+(`CRISPRME_INDEL_SNP=1`, off by default; classic builds byte-identical): when
+enabled, the build overlays SNP IUPAC codes onto the fake-indel genome and compiles
+a phased indel genotype tier, and post-analysis reports CONFIRMED-cis (phased) /
+PUTATIVE (unphased) indel+SNP haplotypes with per-sample carriers + joint AF.
+The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded
 alignments may exceed it (the report surfaces the observed maximum). A reported MAF
 of `1e-05` is a **display floor** for a source-AF of 0, not a measured frequency

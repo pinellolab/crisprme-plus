@@ -282,3 +282,35 @@ itself is what `complete-search` consumes.
   rebuilding — so a missing/wrong download is caught immediately.
 ```
 
+## Optional: SNP+indel co-occurring off-targets (experimental, opt-in)
+
+By default CRISPRme searches **SNPs and indels in two independent passes** (SNPs on
+the IUPAC-enriched genome; indels on a fake-indel genome cut from the *plain*
+reference), then concatenates the results. An off-target that requires **both** a
+nearby SNP **and** an indel in the same protospacer window is therefore invisible to
+both passes.
+
+To lift this limitation, set the `CRISPRME_INDEL_SNP=1` environment variable **before
+building the index** (and before the search). It is **off by default** — with the
+gate unset, builds and searches are byte-identical to classic CRISPRme.
+
+```bash
+export CRISPRME_INDEL_SNP=1
+crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt \
+    --bDNA 1 --bRNA 1 --vcf VCFs/hg38_1000G --samplesID samplesID.listing.txt --path ./
+# then the variant-aware complete-search (same env var set) reports co-occurrences
+```
+
+When enabled, the build additionally (a) compiles a per-chromosome **phased indel
+genotype store** (`Dictionaries/indel_genotypes_<vcf>/`) and (b) **overlays SNP IUPAC
+codes** onto the fake-indel genome flanks before indexing the `_INDELS` companion, so
+the indel search can match SNP+indel haplotypes. Post-analysis then emits, per
+co-occurring off-target, a **CONFIRMED-cis** call (all covered variants phased on one
+haplotype) or **PUTATIVE** (unphased / can't prove cis), with the per-sample carriers
+and the joint allele frequency (`AC_cis / AN` over the VCF-genotyped panel).
+
+> **Note.** With `mm` at its maximum, raise `--max-total-edits` (e.g. `--max-total-edits
+> 6`) so the extra alignment budget for the indel bulge isn't consumed by mismatches,
+> or the co-occurring indel off-targets may be pruned. This feature is **experimental**
+> (branch `feature/indel-snp`); validate on small test cases first.
+

@@ -11,6 +11,22 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **SNP+indel co-occurring off-targets (experimental, opt-in).** Off-targets that
+  require BOTH a nearby SNP **and** an indel on the same haplotype within a
+  protospacer window can now be detected — a class the classic two-pass search
+  (SNPs on the enriched genome, indels on a plain-reference fake-indel genome)
+  could not see. Gated behind the `CRISPRME_INDEL_SNP=1` environment variable
+  (**off by default**; classic builds are byte-identical). When enabled, the build
+  compiles a per-chromosome phased indel genotype store and overlays SNP IUPAC
+  codes onto the fake-indel genome flanks, so the indel search surfaces SNP+indel
+  haplotypes; post-analysis reports **CONFIRMED-cis** (phased) and **PUTATIVE**
+  (unphased) co-occurring variants with per-sample carriers + joint allele
+  frequency. Also adds a pre-flight guard + build-time auto-fix so an over-listing
+  `--samplesID` can no longer inflate the AN denominator (deflating every reported
+  allele frequency). Ships on the `feature/indel-snp` branch; see
+  `docs/PRECOMPUTED_INDEXES.md`.
+
 ## [2.4.0] - 2026-08-20
 
 ### Added
