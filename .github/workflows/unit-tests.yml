@@ -172,9 +172,12 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_generate_report -v
 
-      - name: "Additional coverage (annotation / tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile)"
+      - name: "Additional coverage (tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile)"
+        # NOTE: test_annotation is intentionally NOT here -- annotation.py imports
+        # pysam, which the light network-free CI does not install (mirrors why the
+        # heavier annotation path is covered by validate-benchmarks, not unit-tests).
         working-directory: PostProcess
         run: >
-          python -m unittest test_annotation test_assembly_reconcile
+          python -m unittest test_assembly_reconcile
           test_ensure_search_lists test_hvdr_greedy_cap test_registry_only_emit
           test_representative_tiebreak test_sanitize_job_name test_tier0_compaction -v
