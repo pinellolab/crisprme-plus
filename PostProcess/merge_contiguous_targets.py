@@ -277,11 +277,14 @@ def remove_duplicate_targets(
             fields.
     """
 
-    # remove duplicate values from snp ids, snp info, allele freqs, and samples
-    target[snpidx] = ",".join(set(target[snpidx].split(",")))
-    target[snpid_idx] = ",".join(set(target[snpid_idx].split(",")))
-    target[afidx] = ",".join(set(target[afidx].split(",")))
-    target[samplesidx] = ",".join(set(target[samplesidx].split(",")))
+    # remove duplicate values from snp ids, snp info, allele freqs, and samples.
+    # sorted() makes the dedup order deterministic across processes (a bare set()
+    # iterates in PYTHONHASHSEED-dependent order, so the same site emitted
+    # different sample/rsID/AF orderings run-to-run). Same elements, stable order.
+    target[snpidx] = ",".join(sorted(set(target[snpidx].split(","))))
+    target[snpid_idx] = ",".join(sorted(set(target[snpid_idx].split(","))))
+    target[afidx] = ",".join(sorted(set(target[afidx].split(","))))
+    target[samplesidx] = ",".join(sorted(set(target[samplesidx].split(","))))
     return target
 
 

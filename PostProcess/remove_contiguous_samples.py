@@ -77,14 +77,16 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     temp_final_list_best_var = list()
     # for target in final_list_best_var:
     for target in final_list_best_var:
+        # remove duplicates; sorted() keeps the order deterministic across
+        # processes (bare set() iteration is PYTHONHASHSEED-dependent).
         # remove duplicates into snp info col
-        target[snp_info] = ",".join(set(target[snp_info].split(",")))
+        target[snp_info] = ",".join(sorted(set(target[snp_info].split(","))))
         # remove duplicate into rsID col
-        target[snp_info - 2] = ",".join(set(target[snp_info - 2].split(",")))
+        target[snp_info - 2] = ",".join(sorted(set(target[snp_info - 2].split(","))))
         # remove duplicate into AF col
-        target[snp_info - 1] = ",".join(set(target[snp_info - 1].split(",")))
+        target[snp_info - 1] = ",".join(sorted(set(target[snp_info - 1].split(","))))
         # remove duplicate into samples col
-        target[true_guide - 2] = ",".join(set(target[true_guide - 2].split(",")))
+        target[true_guide - 2] = ",".join(sorted(set(target[true_guide - 2].split(","))))
         # append to temp list
         temp_final_list_best_var.append(target)
 

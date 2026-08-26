@@ -15,7 +15,7 @@ HTML is a self-contained IND-briefing-book digest (report v2.4):
   * the canonical partition invariant holds:
     variant-created + reference + on-target == total EXACTLY,
   * SECTION 2: exactly FOUR ref/alt scatter panels are embedded as inline base64
-    PNGs when CRISTA is computed (by CFD, by CFD delta, by CRISTA, by CRISTA
+    SVGs when CRISTA is computed (by CFD, by CFD delta, by CRISTA, by CRISTA
     delta); 2 panels when CRISTA is absent,
   * CURATED COLUMNS (report v2.4): ONE curated column set is shared by BOTH the
     in-report top-1000 table AND every download file (top1000.tsv,
@@ -555,12 +555,14 @@ class TestGenerateReport(unittest.TestCase):
         html = self._read(os.path.join(extract, "report.html"))
         # strip the branding logo <img> so we count only PLOT images
         plot_html = re.sub(r'<img class="logo"[^>]*>', "", html)
-        imgs = re.findall(r'src="data:image/png;base64,([A-Za-z0-9+/=]+)"', plot_html)
-        # 4 scatter panels + 1 population plot => 5 inline PNGs; each decodable
+        imgs = re.findall(
+            r'src="data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)"', plot_html
+        )
+        # 4 scatter panels + 1 population plot => 5 inline SVGs; each decodable
         self.assertEqual(len(imgs), 5)
         for encoded in imgs:
             raw = base64.b64decode(encoded)
-            self.assertEqual(raw[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertTrue(raw[:5] == b"<?xml" or b"<svg" in raw[:256])
         # exactly the FOUR panel titles are present because CRISTA is computed
         self.assertIn("By CFD score", html)
         self.assertIn("By variant effect (CFD ALT - REF delta)", html)
@@ -1051,7 +1053,7 @@ class TestGenerateReport(unittest.TestCase):
                 "brna": 2, "bmax": "2", "max_edits": "5", "obs_max_mmb": 9}
         hs = gr.render_summary_and_matrix(meta, "6.1", None)
         self.assertIn("search cap", hs)
-        self.assertIn("has 9 mismatches+bulges", hs)
+        self.assertIn("up to 9 total edits", hs)
         # perfect-match banner tags REF vs variant-created origin
         b = gr.render_perfect_match_banner({
             "n_perfect": 1, "max_perfect_per_guide": 1, "n_guides_with_perfect": 1,

@@ -1067,21 +1067,23 @@ for nline, line in enumerate(inCrispritzResults):
         else:
             encode_annotations.add(elem)
 
+    # sorted() so annotation-column order is deterministic across processes
+    # (bare set iteration is PYTHONHASHSEED-dependent; issue #46)
     if len(DHS_annotations):
-        saveDict["Annotation_DHS"] = ",".join(DHS_annotations)
+        saveDict["Annotation_DHS"] = ",".join(sorted(DHS_annotations))
 
     if len(cosmic_annotations):
-        saveDict["Annotation_COSMIC"] = ",".join(cosmic_annotations)
+        saveDict["Annotation_COSMIC"] = ",".join(sorted(cosmic_annotations))
 
     if len(personal_annotations):
-        saveDict["Annotation_personal"] = ",".join(personal_annotations)
+        saveDict["Annotation_personal"] = ",".join(sorted(personal_annotations))
         check_personal_existence = True
 
     if len(encode_annotations):
-        saveDict["Annotation_ENCODE"] = ",".join(encode_annotations)
+        saveDict["Annotation_ENCODE"] = ",".join(sorted(encode_annotations))
 
     if len(gencode_annotations):
-        saveDict["Annotation_GENCODE"] = ",".join(gencode_annotations)
+        saveDict["Annotation_GENCODE"] = ",".join(sorted(gencode_annotations))
 
     foundEmpirical = sorted(empiricalTree[int(target[6]) - 4 : int(target[6]) + 4])
 
