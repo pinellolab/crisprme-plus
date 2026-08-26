@@ -79,6 +79,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_validate_inputs -v
 
+      - name: "samplesID over-listing guard (#46: phantom samples inflate AN / deflate AF)"
+        working-directory: PostProcess
+        run: python test_samplesid_overlisting.py
+
       - name: post_process.sh writes temps to output dir, not install dir
         working-directory: PostProcess
         run: python -m unittest test_post_process_tempdir -v

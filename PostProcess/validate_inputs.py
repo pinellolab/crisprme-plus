@@ -923,6 +923,54 @@ def check_samples_in_vcf_header(vcf_path: str, sample_ids: List[str]) -> List[Is
     ]
 
 
+def check_samplesid_overlisting(
+    vcf_files: List[str], sample_ids: List[str]
+) -> List[Issue]:
+    """Warn when --samplesID lists samples genotyped in NONE of the VCFs (#46).
+
+    Such phantom samples are counted as hom-ref when the Tier-0 panel AN is built
+    from the samplesID file (tier0_registry.PanelIndex), inflating the AN
+    denominator by ~ploidy per phantom and silently DEFLATING every reported
+    allele frequency (Samples / AF / MAF) -- no crash, just wrong numbers. The fix
+    is a VCF-filtered samplesID (genotyped samples only) or the registry_fix_an
+    transform. Comparing against the UNION of every VCF's #CHROM header keeps this
+    correct for multi-dataset runs: a legitimately genotyped sample appears in
+    some dataset's VCF, so only truly-absent samples are flagged.
+    """
+    if not sample_ids or not vcf_files:
+        return []
+    genotyped = set()
+    for vf in vcf_files:
+        try:
+            with gzip.open(vf, "rt") as fin:
+                for line in fin:
+                    if "#CHROM" in line:
+                        genotyped.update(line.strip().split("\t")[9:])
+                        break
+        except OSError:
+            continue  # header-read failures are reported by check_vcf_content
+    if not genotyped:
+        return []
+    panel = set(sample_ids)
+    phantom = sorted(panel - genotyped)
+    if not phantom:
+        return []
+    n_panel, n_gt = len(panel), len(genotyped)
+    factor = (n_panel / n_gt) if n_gt else 0.0
+    shown = ", ".join(phantom[:5]) + (", ..." if len(phantom) > 5 else "")
+    return [
+        Issue(
+            WARN,
+            f"--samplesID lists {len(phantom)} sample(s) genotyped in no VCF "
+            f"({shown}). Phantom samples are counted as hom-ref, inflating the "
+            f"panel AN by ~{2 * len(phantom)} alleles (listed {n_panel} vs "
+            f"genotyped {n_gt}) and DEFLATING every reported allele frequency by "
+            f"~{factor:.2f}x. Provide a VCF-filtered samplesID (genotyped samples "
+            f"only) or apply the registry_fix_an transform (issue #46).",
+        )
+    ]
+
+
 def run_lightweight(
     genomedir: str,
     vcf_dataset_dirs: List[str],
@@ -982,6 +1030,7 @@ def run_lightweight(
         else []
     )
 
+    all_vcf_files: List[str] = []
     for vcf_dir in vcf_dataset_dirs:
         if not os.path.isdir(vcf_dir):
             # Batteries-included install: `download --what index` fetches a
@@ -1012,6 +1061,7 @@ def run_lightweight(
             for f in sorted(os.listdir(vcf_dir))
             if f.endswith(".vcf.gz")
         ]
+        all_vcf_files.extend(vcf_files)
         if not vcf_files:
             report.add(
                 [Issue(ERROR, f"No .vcf.gz files found in VCF dataset directory: {vcf_dir}")]
@@ -1039,6 +1089,12 @@ def run_lightweight(
                     ok_message=f"{os.path.basename(vf)}: all VCF samples found in --samplesID",
                 )
         report.add(check_tbi_files(vcf_dir))
+
+    if has_samplesfile and sample_ids:
+        report.add(
+            check_samplesid_overlisting(all_vcf_files, sample_ids),
+            ok_message="--samplesID: no phantom samples (all genotyped in a VCF)",
+        )
 
     report.add(check_pam_file(pamfile), ok_message=f"PAM file: {os.path.basename(pamfile)}")
     report.add(
