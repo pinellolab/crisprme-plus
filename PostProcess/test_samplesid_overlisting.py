@@ -62,6 +62,26 @@ def test_empty_inputs_are_silent():
     assert vi.check_samplesid_overlisting(["x.vcf.gz"], []) == []
 
 
+def test_panel_autofix_drops_phantoms():
+    # #46 auto-fix: tier0_compile.build_sample_meta filters the panel to the
+    # VCF-genotyped set (so AN = ploidy x genotyped), a strict no-op when None.
+    import tier0_compile as t0c
+
+    d = tempfile.mkdtemp()
+    sid = os.path.join(d, "panel.samplesID.txt")
+    with open(sid, "w") as f:
+        f.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+        for s in ("S1", "S2", "PHANTOM"):
+            f.write(f"{s}\tPOP\tSUPER\tM\n")
+    db = {"DS": sid}
+    all_meta, _ = t0c.build_sample_meta(db)
+    noop_meta, _ = t0c.build_sample_meta(db, genotyped_samples=None)
+    filt_meta, _ = t0c.build_sample_meta(db, genotyped_samples={"S1", "S2"})
+    assert set(all_meta) == {"S1", "S2", "PHANTOM"}
+    assert set(noop_meta) == set(all_meta)          # None -> byte-identical no-op
+    assert set(filt_meta) == {"S1", "S2"}           # phantom dropped -> AN correct
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
