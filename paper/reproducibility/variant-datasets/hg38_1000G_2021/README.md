@@ -89,6 +89,16 @@ Per-chromosome variant counts (from the release's tabix indexes, via `bcftools i
 
 The sample → population → super-population mapping is **not** stored in the VCFs. For this release the authoritative source is the official 3,202-sample pedigree / population file `20130606_g1k_3202_samples_ped_population.txt`, in the parent `1000G_2504_high_coverage/` directory at IGSR/EBI ([link](https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/20130606_g1k_3202_samples_ped_population.txt)). It is space-delimited, one row per sample, with columns `FamilyID`, `SampleID`, `FatherID`, `MotherID`, `Sex` (1 = male, 2 = female), `Population`, `Superpopulation`. A CRISPRme `samplesID` file (`#SAMPLE_ID  POPULATION_ID  SUPERPOPULATION_ID  SEX`) can be derived from it as a separate preparation step.
 
+### Provenance & population-aware search notes
+
+- **Phasing:** phased (autosomes SHAPEIT2-duohmm, trio-aware; chrX Eagle2 v2).
+- **indel+SNP co-occurrence:** **CONFIRMED-capable.** Because SNVs and indels are jointly phased onto the same haplotypes, an off-target that requires an indel together with one or more nearby SNVs can be validated as co-occurring on a single observed haplotype and reported as **CONFIRMED** (not merely PUTATIVE).
+- **Conventions:** MAF filter **none** (site-level QC only — rare and singleton alleles are retained, no allele-frequency cutoff); contigs `chr`-prefixed.
+- **Caveats:**
+  - The 698 related samples **inflate the `AN` denominator** relative to the 2,504-unrelated panel; account for relatedness when reporting or interpreting allele frequencies (use the unrelated subset if unbiased population frequencies are needed).
+  - **chrX is excluded by default:** it is Eagle2-phased with haploid males encoded as `0/1` (not diploid-safe), so the default run is autosomes (chr1–chr22) only. Re-enable chrX only if your pipeline handles the haploid-male encoding.
+  - No chrY or chrM in this release (see [Known limitations](#known-limitations)).
+
 ---
 
 ## Source

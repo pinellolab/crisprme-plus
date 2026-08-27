@@ -77,6 +77,13 @@ The sample → population mapping is **not** stored in this directory; two disti
 * **To run CRISPRme**, use CRISPRme's own sample-ID list, `test/data/samplesIDs/samplesIDs.HGDP.txt` in the CRISPRme repository. This is the file the CRISPRme pipeline actually consumes to match VCF samples.
 * **For the real population / sex / QC metadata** (population name, latitude and longitude, continental region, sex, sequencing coverage and QC), the official Sanger release ships its own metadata file alongside the VCFs, at `https://ngs.sanger.ac.uk/production/hgdp/hgdp_wgs.20190516/metadata/hgdp_wgs.20190516.metadata.txt`. It is tab-separated, one row per sample, with columns: `sample`, `library`, `sample_accession`, `source`, `library_type`, `population`, `latitude`, `longitude`, `region`, `sex`, `coverage`, `freemix`, `capmq`, `insert_size_average`, `array_non_reference_discordance` `library_alias_ENA`. Note this content differs from CRISPRme's ID list.
 
+### Provenance & population-aware search notes
+
+- **Phasing:** genotyped but **UNPHASED** — real per-sample genotypes (GATK HaplotypeCaller + VQSR) are present, but haplotype phase is **not** resolved in this release.
+- **indel+SNP co-occurrence:** **PUTATIVE-only.** Because HGDP genotypes are unphased, a co-occurring indel and SNV **cannot be proven to sit in *cis*** on the same haplotype, so any indel+SNP off-target derived from HGDP is flagged PUTATIVE, never CONFIRMED.
+- **Conventions:** MAF filter **none** (raw `AC`/`AN`/`AF` reported, no allele-frequency cutoff); contigs `chr`-prefixed (`chr1`…`chrX`, `chrY` included).
+- **Caveats:** In the shipped **combined 1000G + HGDP index**, off-targets are a mix of **CONFIRMED** (1000G — phased) and **PUTATIVE** (HGDP — unphased); do not treat HGDP-derived multi-variant haplotypes as confirmed *cis*. Isolated/bottlenecked HGDP populations also show higher homozygosity and distinct LD (see [Known limitations](#known-limitations)).
+
 ---
 
 ## Source

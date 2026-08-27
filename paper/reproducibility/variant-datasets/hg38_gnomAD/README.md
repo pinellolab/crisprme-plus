@@ -92,6 +92,13 @@ Variant counts per chromosome in the final prepared set, after conversion and th
 
 Because gnomAD is aggregate-only, the "samples" CRISPRme uses are the ancestry groups themselves, treated as pseudo-individuals. CRISPRme ships this mapping as `samplesIDs.gnomad.v41.txt` (in the repository's `test/data/samplesIDs/`); a copy is **bundled next to the retrieval script** in this folder, which the pipeline uses automatically. It is a tab-separated file (`#SAMPLE_ID  POPULATION_ID  SUPERPOPULATION_ID  SEX`) listing the 10 ancestry groups above with `SEX = n` (not applicable).
 
+### Provenance & population-aware search notes
+
+- **Phasing:** aggregate (sites-only, no genotypes) — phasing is **not applicable**; gnomAD carries only `INFO`-column allele counts/frequencies, with no `FORMAT`/genotype data to phase.
+- **indel+SNP co-occurrence:** **not applicable** (aggregate, no per-sample genotypes). With no individual genotypes, co-occurring indel+SNP haplotypes can neither be observed nor phased; each variant contributes only its aggregate allele frequency (`AF_joint`), never a CONFIRMED or PUTATIVE combined haplotype.
+- **Conventions:** MAF filter **`>0.001`** (`INFO/AF > 0.001`); contigs `chr`-prefixed (`chr1`…`chrX`, `chrY`).
+- **Caveats:** sites-only aggregate — supports population-level allele-frequency statistics only, never per-sample analyses; the "samples" are the 10 ancestry groups treated as pseudo-individuals.
+
 ---
 
 ## Source

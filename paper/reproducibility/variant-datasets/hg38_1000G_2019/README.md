@@ -1,6 +1,8 @@
 # 1000 Genomes Project — GRCh38 2019 biallelic reanalysis (`hg38_1000G_2019`)
 
-Phased, population-scale germline variants from the **1000 Genomes Project (1KGP) Phase 3** sample panel, called directly on the **GRCh38 / hg38** assembly (the March 2019 *biallelic SNV + INDEL* release). This is the default 1000 Genomes resource used by CRISPRme+ for population-aware off-target nomination.
+Phased, population-scale germline variants from the **1000 Genomes Project (1KGP) Phase 3** sample panel, called directly on the **GRCh38 / hg38** assembly (the March 2019 *biallelic SNV + INDEL* release).
+
+> **Legacy dataset.** For CRISPRme+ this low-coverage (~7×) 2019 reanalysis is **superseded by the high-coverage (~30×) 2021 release** (`hg38_1000G_2021`), which is the 1000 Genomes source used for CRISPRme+ indexes. The 2019 set is retained here for paper reproducibility and is **not** part of the shipped/merged CRISPRme+ index.
 
 ---
 
@@ -85,6 +87,13 @@ The sample → population → super-population mapping is **not** stored in the 
 
 * **To run CRISPRme**, use CRISPRme's own sample-ID list, `test/data/samplesIDs/samplesIDs.1000G.txt` in the CRISPRme repository (installed as `hg38_1000G.samplesID.txt` and pulled automatically by the tool's setup). 
 * **For the underlying population definitions** (the 26 populations and five super-populations, with their sample assignments) refer to the standard 1000 Genomes / IGSR sample metadata, available through the IGSR data portal ([internationalgenome.org](https://www.internationalgenome.org/data-portal/)).
+
+### Provenance & population-aware search notes
+
+- **Status:** **legacy** — superseded by the high-coverage 2021 release (`hg38_1000G_2021`) for CRISPRme+ indexes; retained for reproducibility.
+- **Phasing:** phased (SHAPEIT2-integrated; `GT` uses the `|` separator).
+- **indel+SNP co-occurrence:** **CONFIRMED-capable** (phased) — a co-occurring SNV and indel can be resolved onto the same observed sample haplotype and reported as CONFIRMED rather than dropped. (In practice CRISPRme+ uses the 2021 release for this.)
+- **Conventions:** MAF filter **none** (rare and singleton alleles retained; sensitivity bounded only by the ~7× source coverage); contigs **UNPREFIXED** (`22`, `X`, …) — rename to `chr`-prefixed before combining with the UCSC hg38 FASTA.
 
 ---
 

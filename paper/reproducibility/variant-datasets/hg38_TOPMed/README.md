@@ -14,7 +14,7 @@ Aggregate allele-frequency data from the **NHLBI TOPMed** program, on **GRCh38 /
 | Data type | Aggregate — single pseudo-sample; allele counts/frequencies, **no individual genotypes** |
 | Access | **Controlled** — provided to the authors; not a public download |
 | Distributed set | `more_than_001/` — variants with MAF > 0.001 (same threshold as gnomAD) |
-| Variant types | SNVs and short INDELs (multiallelic ALTs preserved), unphased |
+| Variant types | SNVs and short INDELs (multiallelic ALTs preserved); aggregate, no individual genotypes |
 | File format | bgzip-compressed VCF (`VCFv4.2`) + tabix index |
 | Files | `chr<chrom>.topmed.unphased.sorted.vcf.gz` (+ `.tbi`) |
 | Chromosomes | chr1–chr22 and chrX (23 files) |
@@ -40,7 +40,7 @@ The distributed VCFs contain **no individual-level genotypes**. They carry a **s
 ### Variant types
 
 * **SNVs** and **short INDELs**; multiallelic ALT alleles are preserved (`REF` + comma-separated `ALT`).
-* Genotypes are **unphased** (the single pseudo-sample's `GT` uses `/`).
+* There are **no individual genotypes** — a single aggregate pseudo-sample carries `AC`/`AN`/`AF`/`HOM` only; the pseudo-sample's `GT` is a synthetic placeholder and carries no phase information (phased vs unphased does not apply).
 * The distributed set is filtered to **MAF > 0.001** (see [Source](#source)), matching the threshold applied to gnomAD.
 
 ### Reference genome and coordinates
@@ -79,6 +79,13 @@ Per-chromosome counts of the distributed MAF > 0.001:
 ### Sample and population metadata
 
 These files use a single pseudo-sample, `TopMed` (no real individuals, no per-population breakdown). For a CRISPRme run, a matching `samplesID` file with a single `TopMed` row (with `SEX = n`) is required. Unlike gnomAD, no such file is bundled in the CRISPRme test data, so it must be supplied alongside the VCFs.
+
+### Provenance & population-aware search notes
+
+- **Phasing:** aggregate (sites-only, no genotypes). The distributed VCFs carry a single aggregate pseudo-sample (`TopMed`) with only `AC`/`AN`/`AF`/`HOM` in `INFO`; there are no per-individual genotypes, so there is no genotype-level phase (phased vs unphased does not apply).
+- **indel+SNP co-occurrence:** **not applicable** (aggregate, no per-sample genotypes). CRISPRme cannot report a SNP and an indel as co-occurring on the same allele here — neither CONFIRMED nor PUTATIVE — because establishing co-occurrence requires per-sample genotypes/haplotypes, which this sites-only aggregate does not provide; each variant is scored independently.
+- **Conventions:** MAF filter **`>0.001`** (`INFO/AF > 0.001`); contigs `chr`-prefixed.
+- **Caveats:** the pseudo-sample `GT` is a synthetic placeholder, not an observed genotype — do not treat `TopMed` as a genotyped panel. A single-row `samplesID` (`TopMed`, `SEX = n`) must be supplied; `HOM` may be 0 if the source lacked homozygote counts.
 
 ---
 
