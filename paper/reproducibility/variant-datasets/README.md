@@ -35,7 +35,7 @@ An aggregate, **sites-only** allele-frequency resource (730,947 exomes + 76,215 
 NHLBI TOPMed aggregate allele frequencies as a single `TopMed` pseudo-sample. TOPMed is **controlled-access**: these files were provided directly to the authors (not downloadable) and normalised into a clean VCF, then filtered to MAF > 0.001. Not reproducible by public download. → [details](hg38_TOPMed/README.md)
 
 ### All of Us (`hg38_AoU`)
-NIH All of Us aggregate allele frequencies as a single `AOU` pseudo-sample. All of Us has no bulk VCF release; the data are **built** by scraping the public Data Browser API, assembling per-chromosome VCFs, and filtering to MAF > 0.001. → [details](hg38_AoU/README.md)
+NIH All of Us aggregate allele frequencies as a single `AllOfUs` pseudo-sample. All of Us has no bulk VCF release; the data are **built** by scraping the public Data Browser API, assembling per-chromosome VCFs, and filtering to MAF > 0.001. → [details](hg38_AoU/README.md)
 
 ---
 
@@ -76,7 +76,7 @@ Merge **everything** — the genotyped panels plus the aggregate single-pseudo-s
 
 * **Format.** All variant data are bgzip-compressed VCFs, split by chromosome.
 * **Reference / contigs.** GRCh38 / hg38 throughout. Contig naming is `chr`-prefixed in every dataset **except** the legacy 1000G 2019 (unprefixed, e.g. `22`); CRISPRme handles the matching internally.
-* **Aggregate resources** carry a single pseudo-sample (gnomAD's ancestry groups; `TopMed`; `AOU`) with `INFO` allele frequencies (`AF`/`AC`/`AN`[/`HOM`]) and no real genotypes (not available from source).
+* **Aggregate resources** carry a single pseudo-sample (gnomAD's ancestry groups; `TopMed`; `AllOfUs`) with `INFO` allele frequencies (`AF`/`AC`/`AN`[/`HOM`]) and no real genotypes (not available from source).
 * **Sample metadata.** Each dataset needs a `samplesID` file mapping samples (or pseudo-samples) to populations for CRISPRme's population-aware statistics; see the per-dataset READMEs for where each comes from.
 
 ## Required tools
