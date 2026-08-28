@@ -14,8 +14,8 @@ mapping. IUPAC is compact (1 char per SNP), so record LENGTHS are preserved and
 the existing ``FAKEPOS`` / ``INDELS_tree`` remap stays valid; the CRISPRitz index
 then matches SNP+indel targets for free (searchTST matches IUPAC codes).
 
-Run AFTER ``add-variants`` and BEFORE indexing the ``_INDELS`` genome. No-op unless
-``CRISPRME_INDEL_SNP`` is truthy (the feature gate).
+Run AFTER ``add-variants`` and BEFORE indexing the ``_INDELS`` genome. Enabled by
+default; set ``CRISPRME_INDEL_SNP=0`` to disable (opt-out).
 
 Geometry reference: CRISPRitz enricher.py ``indel_to_fasta`` (25 bp left flank,
 REF->ALT re.sub at offset 25, ``refseq``/``FAKEPOS`` = matched-length window,
@@ -174,11 +174,11 @@ def overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=None):
 def main(argv):
     """CLI: overlay_indel_snps.py <indels_genome_dir> <enriched_genome_dir> <log_indels_dir>
 
-    Gated: no-op unless CRISPRME_INDEL_SNP is truthy. For each fake<chrom>.fa under
-    <indels_genome_dir>/fake_<vcf>_<chrom>/, overlay using the matching enriched
-    <chrom>.enriched.fa and log_indels/log<chrom>.txt[.gz].
+    Enabled by default (opt-out): no-op only if CRISPRME_INDEL_SNP=0. For each
+    fake<chrom>.fa under <indels_genome_dir>/fake_<vcf>_<chrom>/, overlay using the
+    matching enriched <chrom>.enriched.fa and log_indels/log<chrom>.txt[.gz].
     """
-    if os.environ.get("CRISPRME_INDEL_SNP", "0") not in ("1", "true", "True", "yes"):
+    if os.environ.get("CRISPRME_INDEL_SNP", "1") not in ("1", "true", "True", "yes"):
         return 0
     if len(argv) < 4:
         sys.stderr.write(

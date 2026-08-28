@@ -963,13 +963,13 @@ with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, 
         ]
 # datastore = datastore.to_dict(orient='index')
 
-# [indel-snp] SNP+indel co-occurrence annotation (feature/indel-snp, gated).
+# [indel-snp] SNP+indel co-occurrence annotation (feature/indel-snp, default-on).
 # GUARDED: any missing reader/import -> None and the feature degrades to a no-op;
-# the classic indel path is byte-identical when CRISPRME_INDEL_SNP is off. The SNP
+# the classic indel path is byte-identical when CRISPRME_INDEL_SNP=0. The SNP
 # registry/genotype tiers are SIBLINGS of the log_indels dir (sys.argv[4]) under
 # Dictionaries/, so no new CLI/shell args are needed. Emits SNP+indel co-occurring
 # off-targets to a companion TSV (never touches the fixed indel columns/scores).
-_indel_snp = os.environ.get("CRISPRME_INDEL_SNP", "0") in ("1", "true", "True", "yes")
+_indel_snp = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
 _isc = _reg = _gt = _indelgt = _cooc_out = None
 if _indel_snp:
     try:

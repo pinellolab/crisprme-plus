@@ -162,9 +162,9 @@ def _load_panel(samplesid_path):
 def main(argv):
     """CLI: build_indel_genotypes.py <vcf> <out_store.tsv.gz> [<samplesID>]
 
-    Gated: no-op unless CRISPRME_INDEL_SNP is set.
+    Enabled by default (opt-out): no-op only if CRISPRME_INDEL_SNP=0.
     """
-    if os.environ.get("CRISPRME_INDEL_SNP", "0") not in ("1", "true", "True", "yes"):
+    if os.environ.get("CRISPRME_INDEL_SNP", "1") not in ("1", "true", "True", "yes"):
         return 0
     if len(argv) < 3:
         sys.stderr.write("usage: build_indel_genotypes.py <vcf> <out.tsv.gz> [samplesID]\n")

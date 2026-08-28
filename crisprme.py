@@ -1486,6 +1486,20 @@ def complete_search() -> None:
                 f"bulge(s) of each type from --max-total-edits {max_total_edits} "
                 f"(reachable index bulge depth {_idx_cap})."
             )
+    # [max-total-edits] Surface the silent combined-edit prune (issue #107): when the
+    # requested mm + bulges exceed the cap, any alignment stacking more than
+    # max_total_edits edits is PRUNED inside the TST search -- the exact reason a deep
+    # off-target (e.g. chr14:63727708 = 5mm + 2 bulges = 7 edits) is missed on a default
+    # run. Keep the conservative default (advanced users raise it), but never silent.
+    if 0 <= max_total_edits < mm + bDNA + bRNA:
+        print(
+            f"WARNING [complete-search]: --max-total-edits {max_total_edits} is below the "
+            f"requested {mm}mm + {bDNA} DNA + {bRNA} RNA bulges = {mm + bDNA + bRNA} total "
+            f"edits. Alignments needing more than {max_total_edits} COMBINED edits are "
+            f"PRUNED (e.g. a 5mm+2-bulge = 7-edit off-target is dropped). Raise "
+            f"--max-total-edits to {mm + bDNA + bRNA} to keep such deep off-targets.",
+            flush=True,
+        )
     if bMax != 0:
         search_index = True
     else:
@@ -2262,9 +2276,9 @@ def build_index_only() -> None:
     # the indel post-analysis can do CONFIRMED-cis SNP+indel co-occurrence. One
     # gt_indel_<chrom>.tsv.gz per chromosome under indel_genotypes_<vcf>/ (sibling of
     # the SNP tiers). GUARDED (stdout warning, never abort); absent -> the post-
-    # analysis degrades to PUTATIVE via the log's unphased carriers. No-op unless
-    # CRISPRME_INDEL_SNP is set.
-    if os.environ.get("CRISPRME_INDEL_SNP", "0") in ("1", "true", "True", "yes"):
+    # analysis degrades to PUTATIVE via the log's unphased carriers. Enabled by
+    # default (opt-out): set CRISPRME_INDEL_SNP=0 to disable.
+    if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
         try:
             import build_indel_genotypes as _big
             _igt_dir = os.path.join(workdir, "Dictionaries", f"indel_genotypes_{vcf_name}")
@@ -2319,9 +2333,9 @@ def build_index_only() -> None:
         # [indel-snp] Overlay SNP IUPAC codes onto the fake-indel flanks BEFORE
         # indexing so this _INDELS index also finds SNP+indel co-occurring
         # off-targets (searchTST matches IUPAC codes for free -- no -var needed).
-        # Gated: no-op unless CRISPRME_INDEL_SNP is set. GUARDED (stdout warning,
-        # never abort -- stderr is fatal here), mirroring the tier emission above.
-        if os.environ.get("CRISPRME_INDEL_SNP", "0") in ("1", "true", "True", "yes"):
+        # Enabled by default (opt-out): set CRISPRME_INDEL_SNP=0 to disable. GUARDED
+        # (stdout warning, never abort -- stderr is fatal here), mirroring the tiers above.
+        if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
             try:
                 import overlay_indel_snps as _ois
                 _n = _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict])
