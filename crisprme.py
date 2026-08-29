@@ -2186,21 +2186,51 @@ def build_index_only() -> None:
                 f"{', '.join(db_to_samplesid)})...",
                 flush=True,
             )
-            _emitted = 0
-            for _dfile in _dict_files:
-                _b = os.path.basename(_dfile)
-                # strip "my_dict_" prefix and the .json / .json.gz suffix -> <chrom>
-                _stem = _b[len("my_dict_"):]
+            # [tier-parallel] Tier emission is embarrassingly parallel per chromosome
+            # (each call writes its own reg_<chrom>/gt_<chrom>). At high-coverage scale
+            # the per-chrom dict is multi-GB and peaks at ~150-180GB RSS, so bound
+            # concurrency by RAM: CRISPRME_TIER_WORKERS (default 4 -> ~700GB peak).
+            # Biggest dicts first so peak-RAM chromosomes don't pile up at the tail.
+            # emit_dictless_tiers_guarded never raises and returns a picklable metadata
+            # dict (or None), so it is safe to fan out over a fork pool.
+            def _tier_chrom(_dfile):
+                _stem = os.path.basename(_dfile)[len("my_dict_"):]
                 for _suf in (".json.gz", ".json"):
                     if _stem.endswith(_suf):
-                        _stem = _stem[: -len(_suf)]
-                        break
-                _chrom = _stem
-                _res = _bdt.emit_dictless_tiers_guarded(
-                    _dfile, db_to_samplesid, _chrom, dict_folder
-                )
-                if _res is not None:
-                    _emitted += 1
+                        return _stem[: -len(_suf)]
+                return _stem
+            _tier_jobs = [
+                (_dfile, db_to_samplesid, _tier_chrom(_dfile), dict_folder)
+                for _dfile in sorted(_dict_files, key=os.path.getsize, reverse=True)
+            ]
+            try:
+                _tier_workers = int(os.environ.get("CRISPRME_TIER_WORKERS", "4"))
+            except ValueError:
+                _tier_workers = 4
+            _tier_workers = max(1, min(_tier_workers, len(_tier_jobs)))
+            _emitted = 0
+            if _tier_workers > 1:
+                print(f"  emitting tiers with {_tier_workers} parallel worker(s) "
+                      "(RAM-bounded; set CRISPRME_TIER_WORKERS to tune)", flush=True)
+                import multiprocessing as _mp
+                try:
+                    with _mp.get_context("fork").Pool(_tier_workers) as _tpool:
+                        for _r in _tpool.starmap(
+                            _bdt.emit_dictless_tiers_guarded, _tier_jobs
+                        ):
+                            if _r is not None:
+                                _emitted += 1
+                except Exception as _tperr:  # noqa: BLE001 - degrade to sequential
+                    print(f"WARNING [tier-parallel]: pool failed ({_tperr}); "
+                          "re-emitting sequentially.", flush=True)
+                    _emitted = 0
+                    for _job in _tier_jobs:
+                        if _bdt.emit_dictless_tiers_guarded(*_job) is not None:
+                            _emitted += 1
+            else:
+                for _job in _tier_jobs:
+                    if _bdt.emit_dictless_tiers_guarded(*_job) is not None:
+                        _emitted += 1
             print(
                 f"Dictless tier emission complete: {_emitted}/{len(_dict_files)} "
                 "chromosome(s) emitted (registry_<vcf>/ + genotypes_<vcf>/ siblings "
