@@ -2199,16 +2199,29 @@ def build_index_only() -> None:
                     if _stem.endswith(_suf):
                         return _stem[: -len(_suf)]
                 return _stem
-            _tier_jobs = [
-                (_dfile, db_to_samplesid, _tier_chrom(_dfile), dict_folder)
-                for _dfile in sorted(_dict_files, key=os.path.getsize, reverse=True)
-            ]
+            # Skip chromosomes already emitted so a restart resumes instead of
+            # re-reading multi-GB dicts (reg_<chrom>.bin / gt_<chrom>.bin are written
+            # atomically at completion, so presence == done).
+            _reg_dir = os.path.join(os.path.dirname(dict_folder), f"registry_{vcf_name}")
+            _gt_dir = os.path.join(os.path.dirname(dict_folder), f"genotypes_{vcf_name}")
+            _tier_jobs = []
+            _tier_present = 0
+            for _dfile in sorted(_dict_files, key=os.path.getsize, reverse=True):
+                _c = _tier_chrom(_dfile)
+                if (os.path.isfile(os.path.join(_reg_dir, f"reg_{_c}.bin"))
+                        and os.path.isfile(os.path.join(_gt_dir, f"gt_{_c}.bin"))):
+                    _tier_present += 1
+                    continue
+                _tier_jobs.append((_dfile, db_to_samplesid, _c, dict_folder))
+            if _tier_present:
+                print(f"  {_tier_present} chromosome(s) already emitted; resuming "
+                      f"{len(_tier_jobs)} remaining", flush=True)
             try:
                 _tier_workers = int(os.environ.get("CRISPRME_TIER_WORKERS", "4"))
             except ValueError:
                 _tier_workers = 4
-            _tier_workers = max(1, min(_tier_workers, len(_tier_jobs)))
-            _emitted = 0
+            _tier_workers = max(1, min(_tier_workers, len(_tier_jobs) or 1))
+            _emitted = _tier_present
             if _tier_workers > 1:
                 print(f"  emitting tiers with {_tier_workers} parallel worker(s) "
                       "(RAM-bounded; set CRISPRME_TIER_WORKERS to tune)", flush=True)
@@ -2321,6 +2334,10 @@ def build_index_only() -> None:
                         _keep |= _big._load_panel(_sid)
                 _keep = _keep or None
             _n_ig = 0
+            # Build (vcf, out, keep) jobs; detect chrom from the first data line (the
+            # filename may not carry it). Skip chromosomes already built so a restart
+            # resumes instead of re-streaming 20GB VCFs.
+            _ig_jobs = []
             for _vf in sorted(_glob(os.path.join(vcfdir, "*.vcf.gz"))
                               + _glob(os.path.join(vcfdir, "*.vcf"))):
                 _chrom = None
@@ -2334,11 +2351,32 @@ def build_index_only() -> None:
                         break
                 if _chrom is None:
                     continue
-                _nrec = _big.compile_indel_genotypes(
-                    _vf, os.path.join(_igt_dir, f"gt_indel_{_chrom}.tsv.gz"),
-                    keep_samples=_keep)
-                _n_ig += 1
-                print(f"[indel-snp] phased indel GT {_chrom}: {_nrec} records", flush=True)
+                _igt_out = os.path.join(_igt_dir, f"gt_indel_{_chrom}.tsv.gz")
+                if os.path.isfile(_igt_out) and os.path.getsize(_igt_out) > 0:
+                    _n_ig += 1  # already built (resume)
+                    continue
+                _ig_jobs.append((_vf, _igt_out, _keep))
+            # compile_indel_genotypes streams the VCF (low RAM, I/O + gzip bound), so
+            # fan out wide -- CRISPRME_INDELGT_WORKERS (default 8). Guarded worker so a
+            # single bad chromosome cannot sink the store.
+            if _ig_jobs:
+                try:
+                    _igw = int(os.environ.get("CRISPRME_INDELGT_WORKERS", "8"))
+                except ValueError:
+                    _igw = 8
+                _igw = max(1, min(_igw, len(_ig_jobs)))
+                print(f"[indel-snp] building phased indel GT for {len(_ig_jobs)} "
+                      f"chromosome(s) with {_igw} parallel worker(s)", flush=True)
+                if _igw > 1:
+                    import multiprocessing as _mp
+                    with _mp.get_context("fork").Pool(_igw) as _igpool:
+                        _ig_res = _igpool.starmap(
+                            _big.compile_indel_genotypes_safe, _ig_jobs)
+                    _n_ig += sum(1 for _r in _ig_res if _r is not None and _r >= 0)
+                else:
+                    for _job in _ig_jobs:
+                        if _big.compile_indel_genotypes_safe(*_job) >= 0:
+                            _n_ig += 1
             print(f"[indel-snp] phased indel genotype store: {_n_ig} chromosome(s) "
                   f"-> {os.path.basename(_igt_dir)}", flush=True)
         except Exception as _ig_err:  # noqa: BLE001 - store is optional (-> PUTATIVE)

@@ -112,6 +112,27 @@ def compile_indel_genotypes(vcf_path, out_path, keep_samples=None):
     return n
 
 
+def compile_indel_genotypes_safe(vcf_path, out_path, keep_samples=None):
+    """Guarded ``compile_indel_genotypes`` for parallel fan-out: returns the record
+    count, or -1 on any failure (never raises) so one bad chromosome cannot sink the
+    whole store. Removes any partial output on failure so a later resume re-attempts
+    it."""
+    try:
+        return compile_indel_genotypes(vcf_path, out_path, keep_samples=keep_samples)
+    except Exception as err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
+        try:
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        except OSError:
+            pass
+        print(
+            f"WARNING [indel-snp]: compile_indel_genotypes failed for "
+            f"{os.path.basename(vcf_path)} ({err})",
+            flush=True,
+        )
+        return -1
+
+
 class IndelGenotypeReader(object):
     """Read a phased indel genotype store (one chromosome) into a dict keyed by
     ``<pos>_<REF>_<ALT>``. Small enough to hold in memory (indels << SNPs)."""
