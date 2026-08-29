@@ -12,7 +12,7 @@ import os
 import re
 
 
-version = "2.4.0"  #  CRISPRme version; TODO: update when required
+version = "2.5.0-dev"  #  CRISPRme version; drop -dev when tagging v2.5.0
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
