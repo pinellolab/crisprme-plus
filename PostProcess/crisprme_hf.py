@@ -1233,6 +1233,7 @@ def publish_index(
         indel_name = f"log_indels_{vcf_name}"
         registry_name = f"registry_{vcf_name}"
         genotypes_name = f"genotypes_{vcf_name}"
+        indel_gt_name = f"indel_genotypes_{vcf_name}"
         # DEFAULT (classic) main-tarball members: SNP dicts + indel logs, exactly
         # as before. DICTLESS: drop the (152GB) per-sample SNP dicts but KEEP the
         # indel logs (the tiers are SNP-only). Missing-dir handling is unchanged:
@@ -1258,6 +1259,15 @@ def publish_index(
         if os.path.isdir(reg_p) and os.listdir(reg_p):
             dict_dirs.append(reg_p)
             manifest["has_registry"] = True
+        # ADDITIVE (SNP+indel feature): bundle the phased indel-genotype store in the
+        # MAIN tarball so CONFIRMED-cis SNP+indel co-occurrence survives download
+        # (indel_genotypes_<vcf>/ -> Dictionaries/ on install, where analisi_indels
+        # reads it). It is << the per-sample SNP genotype store; absent (feature-off
+        # index) => no-op. Already-gzipped .tsv.gz, so it adds ~its on-disk size.
+        indel_gt_p = os.path.join(dicts_root, indel_gt_name)
+        if os.path.isdir(indel_gt_p) and os.listdir(indel_gt_p):
+            dict_dirs.append(indel_gt_p)
+            manifest["has_indel_genotypes"] = True
         # ADDITIVE Tier-1: the big genotype store travels as a SEPARATE tarball
         # (see below), never inside the main archive.
         gt_p = os.path.join(dicts_root, genotypes_name)
