@@ -491,6 +491,18 @@ def summarize(pos_alts, tier0_reader, gt_reader, axis, ploidy_of, phased,
         return PopSummary(pos_alts, phased=phased, groups=groups)
 
     # ---- k >= 2 : combination via the genotype tier + panel denominators. ---- #
+    # GRACEFUL DEGRADATION (registry-only build): a k>=2 combination frequency is a
+    # HAPLOTYPE (co-occurrence) property that CANNOT be computed without the Tier-1
+    # genotype store (carriers) and the sample axis (denominators). When either is
+    # absent (a --no-genotypes / registry-only install, gt_reader/axis None) we must
+    # NOT build Panel(axis=None) -- that raises len(None) (TypeError) and the caller
+    # would SKIP the whole off-target. Instead return an empty-groups PopSummary: the
+    # None-group path renders it as a 'requires genotype tier' row (freqs NA for the
+    # conservative unphased default, observed False) so the row is EMITTED, not
+    # silently dropped -- the contract population_summary_companion already promises.
+    if gt_reader is None or axis is None:
+        return PopSummary(pos_alts, phased=phased, groups={})
+
     if panel is None:
         panel = Panel(axis, ploidy_of)
 

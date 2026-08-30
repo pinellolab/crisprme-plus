@@ -304,6 +304,25 @@ class TestSingleVariantExact(unittest.TestCase):
         self.assertEqual(summary.global_carrier_n, 0)
         self.assertEqual(summary.global_af, 0.0)
 
+    def test_combination_without_gt_tier_degrades_not_raises(self):
+        # k>=2 on a registry-only build (gt_reader=None, axis=None): a haplotype
+        # frequency is uncomputable, but summarize must DEGRADE (empty groups) and
+        # NOT raise on Panel(None) -- so the caller emits a 'requires genotype tier'
+        # row instead of dropping the off-target.
+        summary = ps.summarize(
+            [(100, "A"), (200, "C")], self.t0r, None, None, self.ploidy_of,
+            phased=False)
+        self.assertEqual(summary.groups, {})
+        self.assertFalse(summary.observed)
+        self.assertEqual(summary.global_carrier_n, 0)
+        self.assertTrue(math.isnan(summary.global_af))  # unphased -> AF undefined (NA)
+        # phased variant: AF is DEFINED (0.0), still no groups, still EMITTED (no raise)
+        summary_ph = ps.summarize(
+            [(100, "A"), (200, "C")], self.t0r, None, None, self.ploidy_of,
+            phased=True)
+        self.assertEqual(summary_ph.groups, {})
+        self.assertEqual(summary_ph.global_af, 0.0)
+
 
 # --------------------------------------------------------------------------- #
 # Shared two-SNP combination fixture for (b)(c)(e).

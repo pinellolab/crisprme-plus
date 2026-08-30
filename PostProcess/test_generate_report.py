@@ -336,8 +336,13 @@ class TestGenerateReport(unittest.TestCase):
             h.write(
                 "#chrom\tstart\tend\tguide\tn_variants\tsamples_with_alt\tiupac_protospacer\n"
             )
-            # overlaps the chr3:200 top-N off-target so it survives the top-N scoping
-            h.write("chr3\t190\t213\tGUIDE\t12\tHG00096,HG00097\tACGTNNNNACGTACGTACGTNGG\n")
+            # overlaps the chr3:200 top-N off-target so it survives the top-N scoping.
+            # Written 3x (per-chrom beds carry duplicate region rows) to exercise the
+            # dedup in the merge -- the bundle must contain it exactly ONCE.
+            _dupe = "chr3\t190\t213\tGUIDE\t12\tHG00096,HG00097\tACGTNNNNACGTACGTACGTNGG\n"
+            h.write(_dupe)
+            h.write(_dupe)
+            h.write(_dupe)
         out_zip = gr.build_report(
             result_dir=rd,
             samplesid_dir=self.sid_dir,
@@ -352,6 +357,8 @@ class TestGenerateReport(unittest.TestCase):
         bed = self._read(self._dpath(extract, "high_variant_density_regions.bed"))
         self.assertIn("iupac_protospacer", bed)
         self.assertIn("ACGTNNNNACGTACGTACGTNGG", bed)
+        # dedup: the 3 identical per-chrom rows collapse to ONE in the bundle
+        self.assertEqual(bed.count("chr3\t190\t213\tGUIDE"), 1)
         html = self._read(os.path.join(extract, "report.html"))
         self.assertIn("Highly complex (high-variant-density) regions", html)
         self.assertIn('href="data/high_variant_density_regions.bed"', html)
@@ -360,6 +367,58 @@ class TestGenerateReport(unittest.TestCase):
             self._dpath(extract, "top1000.tsv")
         ).splitlines()[0].split("\t")
         self.assertIn("High_complexity_region", top_header)
+
+    def test_indel_snp_cooc_bundled_and_surfaced(self):
+        # a run with per-chromosome *.indel_snp_cooc.tsv sidecars: the report
+        # merges them (single header), bundles the merged TSV, links it, and shows
+        # the confirmed-cis count (cis rows only, not trans/candidate rows).
+        rd = os.path.join(self.tmp, "cooc_run")
+        os.makedirs(rd)
+        tsv = os.path.join(
+            rd, f"{_GUIDE}+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv"
+        )
+        with open(tsv, "w") as h:
+            h.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                h.write("\t".join(row) + "\n")
+        _cooc_header = (
+            "chrom\tindel_pos\tindel_ref\tindel_alt\tofftarget_start\tstrand\t"
+            "snp_dictpos\tsnp_rsid\tphase\tjoint_af\tn_cis\tcis_samples\n"
+        )
+        # chr3 sidecar: 1 confirmed-cis row + 1 trans row (must NOT count as cis)
+        with open(os.path.join(rd, "job_chr3.indel_snp_cooc.tsv"), "w") as h:
+            h.write(_cooc_header)
+            h.write("chr3\t190\tAT\tA\t200\t-\tchr3_195_C_T\trs900\tcis\t0.0021\t2\tHG00096,HG00097\n")
+            h.write("chr3\t250\tG\tGA\t260\t+\tchr3_255_A_G\trs901\ttrans\t0.0011\t1\tHG00097\n")
+        # chr7 sidecar: 1 confirmed-cis row (has its OWN header -> dedup to one)
+        with open(os.path.join(rd, "job_chr7.indel_snp_cooc.tsv"), "w") as h:
+            h.write(_cooc_header)
+            h.write("chr7\t600\tC\tCTT\t600\t+\tchr7_601_A_C\trs444\tcis\t0.0033\t1\tHGDP00003\n")
+        out_zip = gr.build_report(
+            result_dir=rd,
+            samplesid_dir=self.sid_dir,
+            out_zip=os.path.join(self.tmp, "cooc_report.zip"),
+        )
+        extract = os.path.join(self.tmp, "cooc_extract")
+        with zipfile.ZipFile(out_zip) as zf:
+            names = zf.namelist()
+            zf.extractall(extract)
+        # (1) bundled into the ZIP under data/
+        self.assertIn("data/indel_snp_cooc.tsv", names)
+        merged = self._read(self._dpath(extract, "indel_snp_cooc.tsv"))
+        lines = [ln for ln in merged.splitlines() if ln.strip()]
+        # (2) exactly ONE header (dedup across the two per-chrom files) + both chroms
+        self.assertEqual(lines[0].split("\t")[0], "chrom")
+        self.assertEqual(sum(1 for ln in lines if ln.startswith("chrom\t")), 1)
+        self.assertTrue(any(ln.startswith("chr3\t") for ln in lines))
+        self.assertTrue(any(ln.startswith("chr7\t") for ln in lines))
+        # (3) report.html links the file + names the CONFIRMED-CIS count (2 cis rows,
+        #     NOT the 3 total candidate rows: the trans row is excluded)
+        html = self._read(os.path.join(extract, "report.html"))
+        self.assertIn('href="data/indel_snp_cooc.tsv"', html)
+        self.assertIn("SNP + indel cis co-occurrences", html)
+        self.assertIn("2 confirmed-cis", html)
+        self.assertIn("of 3 candidate", html)
 
     def test_load_sample_dataset_native_provenance(self):
         """sample -> native per-db label, read from the files (no hardcoding)."""

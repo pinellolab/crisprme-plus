@@ -1547,8 +1547,16 @@ def _write_population_summary_companion():
         ploidy_of = _t0c.ploidy_of_for_chrom(current_chr)
         out_path = outputFile + ".population_summary.tsv"
 
+        # Aggregate per-row companion errors into ONE summary line per chromosome
+        # instead of one print per skipped off-target (a dense registry-only run
+        # produced ~7,355 near-identical lines). Keep the first message as an
+        # exemplar so a real (non-degradation) failure is still visible.
+        _row_err = {"n": 0, "first": None}
+
         def _on_row_error(ot, err):
-            print("population-summary companion: skipped one off-target -", err)
+            _row_err["n"] += 1
+            if _row_err["first"] is None:
+                _row_err["first"] = str(err)
 
         wrote = _popsum_companion.write_companion(
             out_path,
@@ -1572,6 +1580,12 @@ def _write_population_summary_companion():
                 "Wrote population-summary companion (%d variant off-target row[s]) to %s"
                 % (len(_variant_off_targets), out_path)
             )
+            if _row_err["n"]:
+                print(
+                    "population-summary companion: %d off-target row[s] on %s could "
+                    "not be summarized (e.g. %s)"
+                    % (_row_err["n"], current_chr, _row_err["first"])
+                )
     except Exception as _ps_err:  # ADDITIVE + guarded: never break the run
         print("population-summary companion skipped for", current_chr, "-", _ps_err)
 

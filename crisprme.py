@@ -1552,6 +1552,25 @@ def complete_search() -> None:
         # the binding total-edits cap the search actually used (the "Max edits" the
         # user set): the report + web read this; without it they showed "n/a".
         p.write("Max_total_edits\t" + str(max_total_edits) + "\n")
+        # Persist the silent-prune WARN into the run sidecar so it reaches
+        # .Params.txt -> report.zip. The parent-stdout WARN (printed earlier in
+        # complete_search) is NOT captured: log_verbose.txt only redirects the child
+        # job. generate_report reads .Params.txt as a kv sidecar AND bundles it
+        # verbatim. Single physical line (no embedded newline) so the reader parses
+        # it cleanly. Guarded by the SAME condition as the stdout WARN.
+        if 0 <= max_total_edits < mm + bDNA + bRNA:
+            p.write(
+                "Pruning_note\t"
+                + (
+                    f"--max-total-edits {max_total_edits} is below the requested "
+                    f"{mm}mm + {bDNA} DNA + {bRNA} RNA bulges = {mm + bDNA + bRNA} total "
+                    f"edits; alignments needing more than {max_total_edits} COMBINED edits "
+                    f"were PRUNED (e.g. a 5mm+2-bulge = 7-edit off-target is dropped). "
+                    f"Raise --max-total-edits to {mm + bDNA + bRNA} to keep such deep "
+                    f"off-targets."
+                )
+                + "\n"
+            )
         p.write("Annotation\t" + str(annotation_name) + "\n")
         p.write("Nuclease\t" + str(nuclease) + "\n")
         # p.write('Gecko\t' + str(gecko_comp) + '\n')

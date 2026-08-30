@@ -2748,6 +2748,7 @@ def render_html(
     table_html, tsv_gz_name, top1000_name, footer_html,
     panel_top100_name=None, tier_downloads=None,
     hvdr_bundle_name=None, hvdr_n_regions=0, perfect_banner="",
+    cooc_bundle_name=None, cooc_n_rows=0, cooc_n_cis=0,
     table_crista_html="", inputs_criteria_html="", legend_html=None,
     next_steps_html="",
 ):
@@ -2793,6 +2794,28 @@ def render_html(
             f"bundled as <code>{_esc(hvdr_bundle_name)}</code>. The <strong>complete "
             f"genome-wide</strong> flag is in the <code>High_variant_density_region</code> "
             f"column of the integrated results (every site).</p>"
+        )
+
+    # SNP+indel cis co-occurrence companion: download link + a callout naming the
+    # CONFIRMED-cis site count (a phased indel + nearby SNP on the same haplotype).
+    cooc_download = ""
+    cooc_callout = ""
+    if cooc_bundle_name:
+        cooc_download = (
+            f'\n  <a class="download" href="{_dl_href(cooc_bundle_name)}" download>'
+            f"SNP + indel cis co-occurrences ({cooc_n_cis:,} confirmed-cis) &mdash; TSV</a>"
+        )
+        cooc_callout = (
+            f'<p class="caption" style="border-left:4px solid #2563eb;'
+            f'padding-left:0.7em;background:#eff6ff">'
+            f"<strong>SNP + indel cis co-occurrences:</strong> "
+            f"{cooc_n_cis:,} confirmed-cis site(s) (of {cooc_n_rows:,} candidate "
+            f"co-occurrences) where an indel and a nearby SNP fall on the <em>same "
+            f"haplotype</em> (phased), so both edits are carried together by the same "
+            f"individuals &mdash; a joint off-target that neither variant produces "
+            f"alone. Each row lists the indel, the cis SNP (rsID), the phase, the "
+            f"joint allele frequency, and the carrier sample(s); the full list is "
+            f"bundled as <code>{_esc(cooc_bundle_name)}</code>.</p>"
         )
 
     # per-tier curated downloads (Section 5). ``tier_downloads`` is a list of
@@ -2885,9 +2908,10 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 <h2>5. Downloads</h2>
 <p>
   <a class="download" href="{_dl_href(tsv_gz_name)}" download>Complete raw integrated results (all columns, TSV gzip)</a>
-  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}
+  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}{cooc_download}
 </p>{tier_download_html}
 {hvdr_callout}
+{cooc_callout}
 <p class="caption">All files are bundled alongside this HTML in the same ZIP;
 the links resolve after unzipping on any machine. The top-1000 TSV, the panel,
 and the per-tier subsets share the SAME curated, readable columns as the table
@@ -3296,6 +3320,7 @@ def build_report(
 
         if _hvdr_files:
             _hvdr_path = os.path.join(staging, "high_variant_density_regions.bed")
+            _hvdr_seen = set()  # dedup: per-chrom beds carry duplicate region rows
             with open(_hvdr_path, "w") as _out:
                 _out.write(
                     "#chrom\tstart\tend\tguide\tn_variants\t"
@@ -3312,6 +3337,13 @@ def build_report(
                                     continue
                             except (IndexError, ValueError):
                                 continue
+                        # count + write each unique region ONCE (the per-chrom writer
+                        # emits a row per flagged window per alignment/pass, so the
+                        # same window recurs; key on the full normalized row).
+                        _key = _ln.rstrip("\n")
+                        if _key in _hvdr_seen:
+                            continue
+                        _hvdr_seen.add(_key)
                         _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
                         hvdr_n_regions += 1
             if hvdr_n_regions:
@@ -3321,6 +3353,51 @@ def build_report(
     except Exception as exc:  # noqa: BLE001 - never abort on the sidecar bundle
         sys.stderr.write(f"generate-report: HVDR bed bundle unavailable: {exc}\n")
         hvdr_bundle_name = None
+
+    # ---- SNP+indel cis co-occurrence companion (*.indel_snp_cooc.tsv) --------
+    # The indel post-analysis writes ONE 12-column *.indel_snp_cooc.tsv per
+    # chromosome (header at analisi_indels_NNN.py); nothing merges them, so the
+    # flagship SNP+indel cis co-occurrence output is otherwise invisible in the
+    # report. Concat them here into a single bundled file (keep the FIRST header
+    # only) and count the CONFIRMED-cis rows (phase field contains "cis") so the
+    # Downloads section can link the file + show the count. Mirrors the HVDR merge
+    # above; never aborts the report on a malformed sidecar.
+    cooc_bundle_name = None
+    cooc_n_rows = 0
+    cooc_n_cis = 0
+    try:
+        _cooc_src_dir = result_dir if result_dir else os.path.dirname(integrated_tsv)
+        _cooc_files = sorted(
+            glob.glob(os.path.join(_cooc_src_dir, "*indel_snp_cooc.tsv"))
+        )
+        if _cooc_files:
+            _cooc_path = os.path.join(staging, "indel_snp_cooc.tsv")
+            _cooc_header_written = False
+            with open(_cooc_path, "w") as _out:
+                for _cf in _cooc_files:
+                    with open(_cf) as _src:
+                        for _i, _ln in enumerate(_src):
+                            if _i == 0:  # each per-chrom file has its own header
+                                if not _cooc_header_written:
+                                    _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
+                                    _cooc_header_written = True
+                                continue
+                            if not _ln.strip():
+                                continue
+                            _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
+                            cooc_n_rows += 1
+                            # phase is col index 8 (0-based); CONFIRMED-cis rows
+                            # carry "cis" in the phase field.
+                            _parts = _ln.rstrip("\n").split("\t")
+                            if len(_parts) > 8 and "cis" in _parts[8].strip().lower():
+                                cooc_n_cis += 1
+            if cooc_n_rows:
+                cooc_bundle_name = "indel_snp_cooc.tsv"
+            else:
+                os.remove(_cooc_path)
+    except Exception as exc:  # noqa: BLE001 - never abort on the sidecar bundle
+        sys.stderr.write(f"generate-report: indel_snp_cooc bundle unavailable: {exc}\n")
+        cooc_bundle_name = None
 
     # ---- FOOTER (unnumbered; section 7 is the annotation legend, built in
     #      render_html via build_annotation_legend_html) -----------------------
@@ -3346,6 +3423,9 @@ def build_report(
         tier_downloads=tier_downloads,
         hvdr_bundle_name=hvdr_bundle_name,
         hvdr_n_regions=hvdr_n_regions,
+        cooc_bundle_name=cooc_bundle_name,
+        cooc_n_rows=cooc_n_rows,
+        cooc_n_cis=cooc_n_cis,
         perfect_banner=perfect_banner,
         next_steps_html=render_next_steps_box(vp),
         table_crista_html=table_crista_html,
@@ -3366,6 +3446,8 @@ def build_report(
         _linkable.add(panel_top100_name)
     if hvdr_bundle_name:
         _linkable.add(hvdr_bundle_name)
+    if cooc_bundle_name:
+        _linkable.add(cooc_bundle_name)
     if top_crista_df is not None and len(top_crista_df):
         _linkable.add("top1000_crista.tsv")
     _linkable.update(v for v in tier_links.values() if v)
@@ -3411,6 +3493,8 @@ def build_report(
         bundle += staged_tier_paths
         if hvdr_bundle_name:
             bundle.append(os.path.join(staging, hvdr_bundle_name))
+        if cooc_bundle_name:
+            bundle.append(os.path.join(staging, cooc_bundle_name))
 
         # machine-readable run manifest (IND traceability) + the raw .Params.txt, so
         # the ZIP is self-sufficient for re-execution. Never break the report on it.
