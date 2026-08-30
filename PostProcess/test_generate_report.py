@@ -385,15 +385,17 @@ class TestGenerateReport(unittest.TestCase):
             "chrom\tindel_pos\tindel_ref\tindel_alt\tofftarget_start\tstrand\t"
             "snp_dictpos\tsnp_rsid\tphase\tjoint_af\tn_cis\tcis_samples\n"
         )
-        # chr3 sidecar: 1 confirmed-cis row + 1 trans row (must NOT count as cis)
+        # phase vocabulary is CONFIRMED / PUTATIVE (indel_snp_cis.py) -- every row IS
+        # a cis co-occurrence; CONFIRMED = proven phasing. chr3 sidecar: 1 CONFIRMED
+        # + 1 PUTATIVE (PUTATIVE must NOT count toward confirmed-cis).
         with open(os.path.join(rd, "job_chr3.indel_snp_cooc.tsv"), "w") as h:
             h.write(_cooc_header)
-            h.write("chr3\t190\tAT\tA\t200\t-\tchr3_195_C_T\trs900\tcis\t0.0021\t2\tHG00096,HG00097\n")
-            h.write("chr3\t250\tG\tGA\t260\t+\tchr3_255_A_G\trs901\ttrans\t0.0011\t1\tHG00097\n")
-        # chr7 sidecar: 1 confirmed-cis row (has its OWN header -> dedup to one)
+            h.write("chr3\t190\tAT\tA\t200\t-\tchr3_195_C_T\trs900\tCONFIRMED\t0.0021\t2\tHG00096,HG00097\n")
+            h.write("chr3\t250\tG\tGA\t260\t+\tchr3_255_A_G\trs901\tPUTATIVE\t0.0011\t1\tHG00097\n")
+        # chr7 sidecar: 1 CONFIRMED row (has its OWN header -> dedup to one)
         with open(os.path.join(rd, "job_chr7.indel_snp_cooc.tsv"), "w") as h:
             h.write(_cooc_header)
-            h.write("chr7\t600\tC\tCTT\t600\t+\tchr7_601_A_C\trs444\tcis\t0.0033\t1\tHGDP00003\n")
+            h.write("chr7\t600\tC\tCTT\t600\t+\tchr7_601_A_C\trs444\tCONFIRMED\t0.0033\t1\tHGDP00003\n")
         out_zip = gr.build_report(
             result_dir=rd,
             samplesid_dir=self.sid_dir,

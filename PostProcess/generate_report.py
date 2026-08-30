@@ -3386,10 +3386,12 @@ def build_report(
                                 continue
                             _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
                             cooc_n_rows += 1
-                            # phase is col index 8 (0-based); CONFIRMED-cis rows
-                            # carry "cis" in the phase field.
+                            # phase (col index 8, 0-based) is CONFIRMED or PUTATIVE
+                            # -- EVERY row is already a cis co-occurrence; CONFIRMED
+                            # means the same-haplotype phasing is proven (all carriers
+                            # phased). Count the CONFIRMED subset (indel_snp_cis.py).
                             _parts = _ln.rstrip("\n").split("\t")
-                            if len(_parts) > 8 and "cis" in _parts[8].strip().lower():
+                            if len(_parts) > 8 and _parts[8].strip().upper() == "CONFIRMED":
                                 cooc_n_cis += 1
             if cooc_n_rows:
                 cooc_bundle_name = "indel_snp_cooc.tsv"
