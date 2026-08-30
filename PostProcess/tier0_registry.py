@@ -32,6 +32,7 @@ from __future__ import annotations
 import bisect
 import json
 import mmap
+import os
 import struct
 import zlib
 
@@ -958,8 +959,15 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
             fh.write(group_blob_bytes)
             fh.write(string_pool_bytes)
 
-    with open(out_idx, "w") as fh:
+    # Write the .idx LAST and ATOMICALLY (temp + os.replace). The .bin is fully
+    # written and closed above, so a present .idx is the completion marker for this
+    # chromosome; the STEP-1b resume skips on .idx presence (never on the .bin, which
+    # a kill mid-write could leave truncated). tmp+replace guarantees a partial .idx
+    # never occupies the final path.
+    _idx_tmp = out_idx + ".tmp"
+    with open(_idx_tmp, "w") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True)
+    os.replace(_idx_tmp, out_idx)
 
     return manifest
 

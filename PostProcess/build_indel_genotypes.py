@@ -96,35 +96,93 @@ def iter_indel_genotypes(vcf_path, keep_samples=None):
                     yield int(pos), ref, alt, carriers
 
 
+def _done_marker(out_path):
+    """Sidecar path written ONLY after ``out_path`` is fully in place (record count)."""
+    return out_path + ".done"
+
+
+def store_is_complete(out_path):
+    """True iff the indel store at ``out_path`` is a complete, non-truncated file.
+
+    Fast path: a ``.done`` marker (written only after the atomic rename) exists and is
+    at least as new as the store. Otherwise fall back to a streaming gzip integrity
+    check (equivalent to ``gzip -t``) so a legacy store written by the old non-atomic
+    code, or one truncated by a hard kill/OOM mid-write, is detected and re-built on
+    resume instead of being silently skipped as "done" (the gt_indel_chr1 truncation
+    bug). A size>0 file that fails to fully decompress returns False."""
+    if not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
+        return False
+    marker = _done_marker(out_path)
+    try:
+        if os.path.isfile(marker) and os.path.getmtime(marker) >= os.path.getmtime(out_path):
+            return True
+    except OSError:
+        pass
+    # No trusted marker -> verify the gzip stream end-to-end (catches truncation).
+    try:
+        with gzip.open(out_path, "rb") as fh:
+            while fh.read(1 << 20):
+                pass
+        return True
+    except (OSError, EOFError, gzip.BadGzipFile):
+        return False
+
+
 def compile_indel_genotypes(vcf_path, out_path, keep_samples=None):
     """Write the phased indel genotype store for one chromosome's VCF.
 
     Format (gzipped TSV, one line per indel alt):
         <pos>_<REF>_<ALT> \t sample:gt,sample:gt,...
     Returns the number of indel records written.
+
+    The write is ATOMIC: rows stream into ``<out_path>.tmp`` and the temp file is
+    ``os.replace``d onto the final path only after a clean close, then a ``.done``
+    marker is dropped. A SIGKILL/OOM/interrupt mid-write leaves only the temp file
+    (removed here), never a truncated final file that a resume would accept as done.
     """
+    tmp_path = out_path + ".tmp"
+    marker = _done_marker(out_path)
+    try:
+        os.remove(marker)  # a stale marker must never outlive a rebuild
+    except OSError:
+        pass
     n = 0
-    with gzip.open(out_path, "wt") as out:
-        for pos, ref, alt, carriers in iter_indel_genotypes(vcf_path, keep_samples):
-            toks = ",".join(f"{s}:{g}" for s, g in carriers.items())
-            out.write(f"{pos}_{ref}_{alt}\t{toks}\n")
-            n += 1
+    try:
+        with gzip.open(tmp_path, "wt") as out:
+            for pos, ref, alt, carriers in iter_indel_genotypes(vcf_path, keep_samples):
+                toks = ",".join(f"{s}:{g}" for s, g in carriers.items())
+                out.write(f"{pos}_{ref}_{alt}\t{toks}\n")
+                n += 1
+        os.replace(tmp_path, out_path)  # atomic: final path is complete-or-absent
+    except BaseException:  # noqa: BLE001 - incl. KeyboardInterrupt/SystemExit/kill
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+    try:
+        with open(marker, "w") as m:
+            m.write(f"{n}\n")
+    except OSError:
+        pass
     return n
 
 
 def compile_indel_genotypes_safe(vcf_path, out_path, keep_samples=None):
     """Guarded ``compile_indel_genotypes`` for parallel fan-out: returns the record
     count, or -1 on any failure (never raises) so one bad chromosome cannot sink the
-    whole store. Removes any partial output on failure so a later resume re-attempts
-    it."""
+    whole store. The atomic writer already cleans up its temp file; here we also drop
+    any stale final/marker so a later resume re-attempts cleanly."""
     try:
         return compile_indel_genotypes(vcf_path, out_path, keep_samples=keep_samples)
     except Exception as err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
-        try:
-            if os.path.exists(out_path):
-                os.remove(out_path)
-        except OSError:
-            pass
+        for _p in (out_path + ".tmp", _done_marker(out_path)):
+            try:
+                if os.path.exists(_p):
+                    os.remove(_p)
+            except OSError:
+                pass
         print(
             f"WARNING [indel-snp]: compile_indel_genotypes failed for "
             f"{os.path.basename(vcf_path)} ({err})",

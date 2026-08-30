@@ -2200,16 +2200,19 @@ def build_index_only() -> None:
                         return _stem[: -len(_suf)]
                 return _stem
             # Skip chromosomes already emitted so a restart resumes instead of
-            # re-reading multi-GB dicts (reg_<chrom>.bin / gt_<chrom>.bin are written
-            # atomically at completion, so presence == done).
+            # re-reading multi-GB dicts. Key on the .idx sidecars: each writer emits
+            # the .bin, then writes its .idx LAST and ATOMICALLY (tmp+os.replace), so a
+            # present .idx is the completion marker. The .bin alone is NOT -- a kill
+            # mid-write leaves a truncated .bin that a presence check would wrongly
+            # accept as done (silently shipping a short tier store).
             _reg_dir = os.path.join(os.path.dirname(dict_folder), f"registry_{vcf_name}")
             _gt_dir = os.path.join(os.path.dirname(dict_folder), f"genotypes_{vcf_name}")
             _tier_jobs = []
             _tier_present = 0
             for _dfile in sorted(_dict_files, key=os.path.getsize, reverse=True):
                 _c = _tier_chrom(_dfile)
-                if (os.path.isfile(os.path.join(_reg_dir, f"reg_{_c}.bin"))
-                        and os.path.isfile(os.path.join(_gt_dir, f"gt_{_c}.bin"))):
+                if (os.path.isfile(os.path.join(_reg_dir, f"reg_{_c}.idx"))
+                        and os.path.isfile(os.path.join(_gt_dir, f"gt_{_c}.idx"))):
                     _tier_present += 1
                     continue
                 _tier_jobs.append((_dfile, db_to_samplesid, _c, dict_folder))
@@ -2352,7 +2355,10 @@ def build_index_only() -> None:
                 if _chrom is None:
                     continue
                 _igt_out = os.path.join(_igt_dir, f"gt_indel_{_chrom}.tsv.gz")
-                if os.path.isfile(_igt_out) and os.path.getsize(_igt_out) > 0:
+                # Resume only if the store is a COMPLETE, non-truncated gzip -- a
+                # size>0 check would skip a file left partial by an OOM/SIGKILL
+                # mid-write and silently ship a short store (the gt_indel_chr1 bug).
+                if os.path.isfile(_igt_out) and _big.store_is_complete(_igt_out):
                     _n_ig += 1  # already built (resume)
                     continue
                 _ig_jobs.append((_vf, _igt_out, _keep))

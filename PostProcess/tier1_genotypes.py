@@ -40,6 +40,7 @@ from __future__ import annotations
 import bisect
 import json
 import mmap
+import os
 import struct
 
 import tier0_compile as t0c
@@ -378,8 +379,13 @@ def compile_genotypes(records, sample_axis, out_bin, out_idx):
         "compression": "none",
         "store_layout": "combined-global-axis",
     }
-    with open(out_idx, "w") as fh:
+    # .idx written LAST and ATOMICALLY: a present .idx marks this chromosome's store
+    # complete (the .bin is closed above), so a resume keys on .idx and never skips a
+    # kill-truncated .bin. tmp+replace keeps a partial .idx off the final path.
+    _idx_tmp = out_idx + ".tmp"
+    with open(_idx_tmp, "w") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True)
+    os.replace(_idx_tmp, out_idx)
 
     return manifest
 

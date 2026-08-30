@@ -109,6 +109,114 @@ def test_keep_samples_panel_filter():
     assert (200, "G", "GATAA") in recs and recs[(200, "G", "GATAA")] == {"HG1": "0|1"}
 
 
+def _mkstore():
+    fd, store = tempfile.mkstemp(suffix=".tsv.gz")
+    os.close(fd)
+    os.remove(store)  # start absent; compile creates it
+    return store
+
+
+def _cleanup(*paths):
+    for p in paths:
+        for q in (p, p + ".tmp", big._done_marker(p)):
+            try:
+                os.remove(q)
+            except OSError:
+                pass
+
+
+def test_compile_is_atomic_and_marks_done():
+    # A clean compile leaves the final store + a .done marker (record count) and NO
+    # leftover .tmp; store_is_complete must accept it via the fast marker path.
+    vcf = _write_vcf(gz=True)
+    store = _mkstore()
+    try:
+        n = big.compile_indel_genotypes(vcf, store)
+        assert n == 3
+        assert os.path.isfile(store)
+        assert not os.path.exists(store + ".tmp")           # atomic: no temp residue
+        marker = big._done_marker(store)
+        assert os.path.isfile(marker)
+        with open(marker) as m:
+            assert m.read().strip() == "3"                  # marker carries the count
+        assert big.store_is_complete(store) is True
+    finally:
+        _cleanup(store)
+        os.remove(vcf)
+
+
+def test_store_is_complete_detects_truncation():
+    # THE gt_indel_chr1 bug: a size>0 but truncated gzip must NOT be accepted as done,
+    # so a resume rebuilds it instead of silently shipping a short store.
+    vcf = _write_vcf(gz=True)
+    store = _mkstore()
+    try:
+        big.compile_indel_genotypes(vcf, store)
+        full = os.path.getsize(store)
+        assert full > 20
+        with open(store, "r+b") as fh:                      # lop off the gzip tail
+            fh.truncate(full // 2)
+        os.remove(big._done_marker(store))                  # marker gone -> integrity path
+        assert os.path.getsize(store) > 0                   # size check WOULD have passed
+        assert big.store_is_complete(store) is False        # integrity check catches it
+    finally:
+        _cleanup(store)
+        os.remove(vcf)
+
+
+def test_store_is_complete_adopts_valid_legacy_without_marker():
+    # A store written by the old (pre-atomic) code has a valid gzip but no marker;
+    # the integrity fallback must accept it so we don't needlessly rebuild good chroms.
+    vcf = _write_vcf(gz=True)
+    store = _mkstore()
+    try:
+        big.compile_indel_genotypes(vcf, store)
+        os.remove(big._done_marker(store))
+        assert big.store_is_complete(store) is True         # valid gzip -> adopted
+    finally:
+        _cleanup(store)
+        os.remove(vcf)
+
+
+def test_store_is_complete_rejects_absent_and_empty():
+    store = _mkstore()
+    try:
+        assert big.store_is_complete(store) is False        # absent
+        open(store, "wb").close()                           # zero-byte
+        assert big.store_is_complete(store) is False
+    finally:
+        _cleanup(store)
+
+
+def test_compile_leaves_no_partial_final_on_kill(monkeypatch=None):
+    # Simulate an OOM/SIGKILL mid-write: the row generator dies after one record.
+    # compile must NOT leave a partial FINAL file (only a temp, which it cleans up),
+    # so the final path stays absent and a resume re-attempts from scratch.
+    vcf = _write_vcf(gz=True)
+    store = _mkstore()
+
+    def _boom(_vcf, _keep=None):
+        yield 100, "AT", "A", {"HG1": "1|0"}
+        raise RuntimeError("simulated OOM kill mid-write")
+
+    orig = big.iter_indel_genotypes
+    big.iter_indel_genotypes = _boom
+    try:
+        raised = False
+        try:
+            big.compile_indel_genotypes(vcf, store)
+        except RuntimeError:
+            raised = True
+        assert raised
+        assert not os.path.exists(store)                    # no truncated final file
+        assert not os.path.exists(store + ".tmp")           # temp cleaned up
+        assert big.store_is_complete(store) is False        # resume will rebuild
+    finally:
+        big.iter_indel_genotypes = orig
+        _cleanup(store)
+        os.remove(vcf)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
