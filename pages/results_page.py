@@ -1124,10 +1124,8 @@ def result_page_assembly(job_id: str) -> html.Div:
         mmb_summary_block = [
             html.H4("Mismatch + bulge breakdown (mapped sites only)"),
             html.P(
-                "Same shape as complete-search's own Summary by "
-                "Mismatches/Bulges table, with Paternal/Maternal standing "
-                "in for Reference/Variant. Excludes the haplotype-private "
-                "(non-mappable) sites shown separately above.",
+                "Excludes the haplotype-private (non-mappable) sites shown "
+                "separately above.",
                 style={"font-size": "0.95rem", "color": "#777"},
             ),
             html.Table(
@@ -1187,9 +1185,8 @@ def result_page_assembly(job_id: str) -> html.Div:
                             style={"margin": "0 0 8px 0", "fontWeight": "700", "color": "#1a365d"},
                         ),
                         html.P(
-                            "No single combined report yet -- each haplotype's own "
-                            "full complete-search report, before reconciliation "
-                            "against the other haplotype.",
+                            "Each haplotype's own full complete-search report, "
+                            "before reconciliation against the other haplotype.",
                             style={"margin": "0 0 10px 0", "fontSize": "0.95rem", "color": "#334155"},
                         ),
                         html.Div(
@@ -1505,9 +1502,7 @@ def result_page_assembly(job_id: str) -> html.Div:
             "haplotypes were matched on, so they're shared between them by "
             "construction. hg38_end is lifted independently per haplotype "
             "and can differ by a few bp when an indel private to one "
-            "haplotype shifts where its alignment ends in hg38 space -- "
-            "hg38_end_paternal/hg38_end_maternal are both kept for that "
-            "reason, rather than merged into one column.",
+            "haplotype shifts where its alignment ends in hg38 space.",
             style={
                 "font-size": "1.0rem",
                 "color": "#777",
@@ -1637,7 +1632,19 @@ def result_page_assembly(job_id: str) -> html.Div:
     # not literal guide bases, to not overclaim exactness. Built from each
     # haplotype's full prediction set (not mapped-only): this is a per-
     # haplotype sequence-composition statistic, not tied to hg38 mappability.
-    def _position_tallies(hap: str) -> Dict[str, List[int]]:
+    # Real gap found on re-reading radar_chart_dict_generator.py's fillDict()
+    # more carefully: at a guide position that's a literal "N" -- a PAM
+    # wildcard, e.g. positions 21-23 of a 20bp-NGG guide's padded
+    # "...NNN" -- it tallies whatever base is actually present there
+    # UNCONDITIONALLY (`if guide[count] == "N": motifDict[...][count] += 1`),
+    # not only on mismatch. That's why complete-search's own chart shows a
+    # full bar at G for the "GG" of NGG: PAM must match exactly for a target
+    # to be reported at all, so every single off-target has G there --
+    # never flagged lowercase/mismatched (an N position can't "mismatch"
+    # anything), so the mismatch-only tally below would show nothing at
+    # those positions without this. The middle "N" of NGG (any base allowed)
+    # correctly still shows a real mixed distribution.
+    def _position_tallies(hap: str, guide_seq: str) -> Dict[str, List[int]]:
         hap_df = hap_predictions_all.get(hap)
         ref_col = "Aligned_protospacer+PAM_REF_(fewest_mm+b)"
         spacer_col = "Aligned_spacer+PAM_(fewest_mm+b)"
@@ -1650,8 +1657,27 @@ def result_page_assembly(job_id: str) -> html.Div:
             return {}
         tallies = {k: [0] * width for k in ("A", "C", "G", "T", "RNA bulge", "DNA bulge")}
         for seq in ref_seqs:
+            n = len(seq)
             for i, ch in enumerate(seq):
-                if ch.islower() and ch.upper() in "ACGT":
+                is_pam_wildcard = i < len(guide_seq) and guide_seq[i] == "N"
+                if is_pam_wildcard:
+                    # PAM sits at the END of the alignment. A DNA bulge
+                    # earlier in the spacer inserts a "-" mid-string, which
+                    # shifts every later index (including the PAM's) right
+                    # by one on that row -- so a fixed start-relative index
+                    # would grab the wrong character on bulge-affected rows,
+                    # diluting what should be a pure PAM match. Index from
+                    # the end instead (offset = distance from the guide's
+                    # own end), which lands on the true PAM regardless of an
+                    # earlier bulge. (PAM itself is never bulged -- it must
+                    # match exactly for a target to be reported at all.)
+                    offset_from_end = len(guide_seq) - i
+                    true_ch = seq[-offset_from_end] if offset_from_end <= n else ch
+                    if true_ch.upper() in "ACGT":
+                        tallies[true_ch.upper()][i] += 1
+                    elif true_ch == "-":
+                        tallies["RNA bulge"][i] += 1
+                elif ch.islower() and ch.upper() in "ACGT":
                     tallies[ch.upper()][i] += 1
                 elif ch == "-":
                     tallies["RNA bulge"][i] += 1
@@ -1675,7 +1701,7 @@ def result_page_assembly(job_id: str) -> html.Div:
     _guide_seq = guides_seen[0] if guides_seen else ""
     position_figs = []
     for hap, label in (("paternal", "Paternal"), ("maternal", "Maternal")):
-        tallies = _position_tallies(hap)
+        tallies = _position_tallies(hap, _guide_seq)
         if not tallies:
             continue
         width = len(next(iter(tallies.values())))
