@@ -44,6 +44,22 @@ MODEFILE = ".mode_type.txt"  # running mode report file
 HOST = "0.0.0.0"  # server host
 PORTWEB = "80"  # website port
 PORTLOCAL = "8080"  # local server port
+
+
+def _is_assembly_job(job_id: str) -> bool:
+    """Whether a Results/ job directory is an assembly-search job, per its
+    .Params.txt (written by submit_assembly_search_job) -- same
+    substring-check style refresh_search already uses for Ref_comp. Shared
+    by both the /load and /result routes below so the check isn't
+    duplicated a third time."""
+    params_path = os.path.join(current_working_directory, "Results", job_id, ".Params.txt")
+    if not os.path.isfile(params_path):
+        return False
+    try:
+        with open(params_path) as params_handle:
+            return "Genome_type\tassembly" in params_handle.read()
+    except OSError:
+        return False
 CRISPRME_DIRS = [
     "Genomes",
     "Results",
@@ -53,6 +69,10 @@ CRISPRME_DIRS = [
     "PAMs",
     "samplesIDs",
     "Settings",
+    "LiftoverFiles",  # chain + chromAlias files for assembly-search; see
+    # LIFTOVER_DIR in pages_utils.py -- deliberately NOT in crisprme.py's own
+    # CRISPRMEDIRS, since assembly_search() takes these as arbitrary file
+    # paths and doesn't need this directory to exist for its own correctness
 ]  # crisprme directory tree
 
 
@@ -149,10 +169,31 @@ def change_page(href: str, path: str, search: str, hash_guide: str) -> Tuple:
         job_link = f"{job_loading_url}/load{search}"
         # render the copyable link inline on the load page; the second return
         # value keeps feeding the persistent hidden job-link placeholder in the
-        # base layout so the multi-output callback target always exists
+        # base layout so the multi-output callback target always exists.
+        # An assembly-search job's .Params.txt carries Genome_type\tassembly
+        # (written at submit time by submit_assembly_search_job) -- so it
+        # gets its own status-report layout (different pipeline stages, see
+        # load_page_assembly) rather than complete-search's, which would
+        # never progress for it.
+        if _is_assembly_job(job_id):
+            return (load_page.load_page_assembly(job_link), job_link)
         return (load_page.load_page(job_link), job_link)
     if path == "/result":  # display results page
         job_id = search.split("=")[-1]  # recover job id from url
+        # result_page() crashes on an assembly-search job: it does unguarded
+        # .Params.txt field lookups (Genome_idx, Ref_comp, ...) and assumes
+        # complete-search's exact output filenames from its very first
+        # lines, well before its own genome_type tab-set branch -- see
+        # assembly_search_web_plan.md component D. Bypass it entirely for
+        # an assembly job rather than trying to partially branch into it.
+        # No sub-hash routes (guidePagev3/sample_page/cluster_page below)
+        # apply to assembly-search results, so only the base case needs
+        # this check.
+        if _is_assembly_job(job_id):
+            return (
+                results_page.result_page_assembly(job_id),
+                os.path.join(URL, "load", search),
+            )
         if not hash_guide or hash_guide is None:
             return results_page.result_page(job_id), os.path.join(URL, "load", search)
         elif "new" in hash_guide:  # targets table tab

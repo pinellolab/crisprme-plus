@@ -227,6 +227,16 @@ PAMS_DIR = "PAMs"
 VCFS_DIR = "VCFs"
 # genomes directory
 GENOMES_DIR = "Genomes"
+# liftOver chain + chromAlias files directory, for assembly-search
+# (paternal/maternal personal-genome search). Holds both file kinds together
+# (not split into two directories) since they're always used in pairs for
+# the same haplotype -- one "how does this genome map to hg38" bundle per
+# assembly, same precedent as ANNOTATIONS_DIR holding both annotation beds
+# and their gencode companions. Website-only convention: assembly_search()
+# itself takes these as arbitrary file paths and has no opinion on where
+# they live, so this directory is NOT in crisprme.py's own CRISPRMEDIRS --
+# only in index.py's website-side CRISPRME_DIRS.
+LIFTOVER_DIR = "LiftoverFiles"
 # App-wide bulge ceiling: the largest index N the search form / build path targets
 # (index folder "<pam>_<N>_<genome>", usable bulges = N-1). Single-sourced here so the
 # reference-bulge-capacity helper (which pages_utils owns) and main_page's dropdown
@@ -1222,6 +1232,44 @@ def get_available_genomes() -> List:
         {"label": d, "value": d} for d in genomes if ("+" not in d and "None" not in d)
     ]
     return genomes_dirs
+
+
+def get_available_liftover_files(kind: str) -> List:
+    """Recover chain or chromAlias files available in the /LiftoverFiles
+    directory, for assembly-search's paternal/maternal genome mapping.
+
+    Both file kinds live together in one directory (see LIFTOVER_DIR's own
+    comment) and are told apart here by filename suffix -- a plain extension
+    filter, not a naming-convention assumption about anything outside this
+    directory's own purpose.
+
+    Parameters
+    ----------
+    kind : str
+        Either "chain" (matches *.chain / *.chain.gz) or "chromalias"
+        (matches *.chromAlias.txt).
+
+    Returns
+    -------
+    List
+        Dropdown options; value is the bare filename (resolved against
+        LIFTOVER_DIR by the caller), label is the same filename.
+    """
+    liftover_root = os.path.join(current_working_directory, LIFTOVER_DIR)
+    if not os.path.isdir(liftover_root):
+        return []
+    if kind == "chain":
+        matches = lambda f: f.endswith(".chain") or f.endswith(".chain.gz")
+    elif kind == "chromalias":
+        matches = lambda f: f.endswith(".chromAlias.txt")
+    else:
+        raise ValueError(f"Unknown liftover file kind: {kind!r}")
+    files = [
+        f
+        for f in os.listdir(liftover_root)
+        if os.path.isfile(os.path.join(liftover_root, f)) and matches(f)
+    ]
+    return [{"label": f, "value": f} for f in sorted(files)]
 
 
 def get_available_indexes() -> List:
