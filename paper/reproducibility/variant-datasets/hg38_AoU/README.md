@@ -1,6 +1,6 @@
 # All of Us (AoU) — aggregate variant frequencies, scrape-built (`hg38_AoU`)
 
-Aggregate allele-frequency data from the NIH **All of Us Research Program**, on **GRCh38 / hg38**. All of Us offers **no bulk VCF download**: the aggregate frequencies are only reachable through the Data Browser's public API. This dataset is therefore **built** by scraping that API per chromosome, assembling the results into an aggregate VCF with a single `AllOfUs` pseudo-sample, and filtering to MAF > 0.001. Only the filtered set is distributed (July 2025 snapshot).
+Aggregate allele-frequency data from the NIH **All of Us Research Program**, on **GRCh38 / hg38**. All of Us offers **no bulk VCF download**: the aggregate frequencies are only reachable through the Data Browser's public API. This dataset is therefore **built** by scraping that API per chromosome, assembling the results into an aggregate VCF with a single `AllOfUs` pseudo-sample, and filtering to MAF > 0.001. Only the filtered set is distributed (August 2026 snapshot).
 
 ---
 
@@ -87,7 +87,7 @@ These files use a single pseudo-sample, `AllOfUs` (no real individuals, no per-p
 - **Phasing:** aggregate (sites-only, no genotypes) — the single pseudo-sample `GT` is *synthesised* from `AC`/`AN`/`HOM`, not a real observed genotype, so "phased" vs "unphased" does not apply.
 - **indel+SNP co-occurrence:** **not applicable** (aggregate, no per-sample genotypes) — CRISPRme cannot tag an indel+SNP haplotype as CONFIRMED or PUTATIVE here because there are no genotypes to establish co-occurrence; each record is treated as an independent site-level allele frequency.
 - **Conventions:** MAF filter **`>0.001`** (`INFO/AF > 0.001`; the distributed `more_than_001/` set); contigs `chr`-prefixed.
-- **Caveats:** the single pseudo-sample is named **`AllOfUs`** (matching the build script `csv_to_vcf.py`, `header.add_sample("AllOfUs")`, and verified in the distributed VCFs via `bcftools query -l`), so the accompanying `samplesID` must contain a single **`AllOfUs`** row (`SEX = n`) to match. The dataset is a **moving snapshot** (live API, July 2025) with no fixed checksum.
+- **Caveats:** the single pseudo-sample is named **`AllOfUs`** (matching the build script `csv_to_vcf.py`, `header.add_sample("AllOfUs")`, and verified in the distributed VCFs via `bcftools query -l`), so the accompanying `samplesID` must contain a single **`AllOfUs`** row (`SEX = n`) to match. The dataset is a **moving snapshot** (live API, August 2026) with no fixed checksum.
 
 ---
 
