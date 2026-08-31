@@ -1028,14 +1028,16 @@ def result_page_assembly(job_id: str) -> html.Div:
     # here Paternal/Maternal stand in for Reference/Variant, and Combined is
     # their sum, same as complete-search's own definition (checked directly
     # against a real summary_by_guide.*.txt file: Combined = Reference +
-    # Variant, not a distinct-site count). One real difference worth being
-    # upfront about: complete-search's Reference/Variant are mutually
+    # Variant, not a distinct-site count). No Combined/Both column here,
+    # deliberately -- complete-search's Reference/Variant are mutually
     # exclusive categories of the SAME distinct-site list, so summing them
-    # can't double-count a site. Paternal/Maternal here are two independent
-    # per-genome searches, so a site reconciled as `origin: both` DOES
-    # contribute to both the Paternal and the Maternal tally (and so to
-    # Combined) -- Combined is "total (site, haplotype) observations at
-    # this combo", not "distinct reconciled sites".
+    # can't double-count a site. Paternal/Maternal aren't: a site reconciled
+    # as `origin: both` can land on a DIFFERENT mismatch/bulge combo on each
+    # haplotype (measured elsewhere on this page: differs in a real
+    # low-single-digit percent of `both` rows), so there's no single combo
+    # to attribute a "both" count to without picking a somewhat arbitrary
+    # rule. Paternal/Maternal alone are unambiguous; a combined count isn't
+    # worth the ambiguity it would introduce.
     #
     # "Mapped only" = restricted to each haplotype's own off_target_ids
     # that appear in the reconciled table `df` (df only ever contains
@@ -1078,7 +1080,6 @@ def result_page_assembly(job_id: str) -> html.Div:
             "Bulge Size": key[2],
             "Paternal": int(_pat_mmb.get(key, 0)),
             "Maternal": int(_mat_mmb.get(key, 0)),
-            "Combined": int(_pat_mmb.get(key, 0)) + int(_mat_mmb.get(key, 0)),
         }
         for key in sorted(set(_pat_mmb.index) | set(_mat_mmb.index), key=lambda k: (k[1], k[2], k[0]))
     ]
@@ -1101,11 +1102,11 @@ def result_page_assembly(job_id: str) -> html.Div:
                     html.Th("Bulge Type", rowSpan="2", style=_cell_style),
                     html.Th("Mismatches", rowSpan="2", style=_cell_style),
                     html.Th("Bulge Size", rowSpan="2", style=_cell_style),
-                    html.Th("Off-targets found (mapped)", colSpan="3", style=_cell_style),
+                    html.Th("Off-targets found (mapped)", colSpan="2", style=_cell_style),
                 ]
             ),
             html.Tr(
-                [html.Th(x, style=_cell_style) for x in ["Paternal", "Maternal", "Combined"]]
+                [html.Th(x, style=_cell_style) for x in ["Paternal", "Maternal"]]
             ),
         ]
         mmb_body = [
@@ -1116,7 +1117,6 @@ def result_page_assembly(job_id: str) -> html.Div:
                     html.Td(r["Bulge Size"], style=_cell_style),
                     html.Td(r["Paternal"], style=_cell_style),
                     html.Td(r["Maternal"], style=_cell_style),
-                    html.Td(r["Combined"], style=_cell_style),
                 ]
             )
             for r in mmb_rows
@@ -1259,6 +1259,44 @@ def result_page_assembly(job_id: str) -> html.Div:
                 style_cell={"textAlign": "center", "padding": "6px"},
             ),
         ]
+        # Explanatory paragraphs directly below the table -- complete-search
+        # has these under its own general-profile-table (the same slot),
+        # adapted here: no REFERENCE/VARIANT split (no VCF), Paternal/
+        # Maternal are two independent per-genome searches instead.
+        _explain_style = {
+            "margin": "0",
+            "fontSize": "1.02rem",
+            "color": "#334155",
+            "lineHeight": "1.5",
+        }
+        guide_summary_block.append(
+            html.Div(
+                [
+                    html.P(
+                        [
+                            "Each entry counts ",
+                            html.Strong("distinct off-target sites found in that haplotype's own search"),
+                            ", grouped by mismatch count and bulge size. Paternal and Maternal are two "
+                            "independent searches (not a reference-vs-variant split -- there's no VCF "
+                            "here) -- a site present in both haplotypes is counted once in each.",
+                        ],
+                        style=_explain_style,
+                    ),
+                    html.P(
+                        [
+                            "The ",
+                            html.Strong("0 Mismatches / 0 Bulges"),
+                            " entry holds the guide's ",
+                            html.Strong("perfect genomic match(es)"),
+                            " in that haplotype -- the candidate on-target(s). The intended on-target "
+                            "cannot be told from a perfect-match off-target by sequence alone.",
+                        ],
+                        style={**_explain_style, "marginTop": "0.5em"},
+                    ),
+                ],
+                style={"marginTop": "6px", "marginBottom": "6px"},
+            )
+        )
         # Plain-language burden callout -- "which haplotype carries more
         # off-target risk", computed directly from the row above (no new
         # data), one sentence per guide.
@@ -1410,7 +1448,57 @@ def result_page_assembly(job_id: str) -> html.Div:
             )
         )
     # ---- "Custom Ranking" tab content: the main reconciled table ----
+    # Sort-criteria controls before the table -- a simplified version of
+    # complete-search's own Custom Ranking tab, which has real query-builder
+    # controls (group-by x2, min/max thresholds, ascending/descending,
+    # submit/reset) ahead of its table. That full version is built around a
+    # SQL-backed multi-guide/multi-sample dataset, most of which doesn't
+    # apply here (one guide, no samples/VCF) -- this keeps the "choose
+    # criteria before the table" shape without the parts that don't apply.
+    # Drives the table's native sort_by prop via a small callback below --
+    # the same sort_by the table's own clickable column headers already set,
+    # just reachable from a labeled control up front instead of only by
+    # knowing to click a header.
+    _SORT_OPTIONS = [
+        {"label": "CFD score (Paternal)", "value": "CFD_score_(fewest_mm+b)_paternal"},
+        {"label": "CFD score (Maternal)", "value": "CFD_score_(fewest_mm+b)_maternal"},
+        {"label": "Mismatches (Paternal)", "value": "Mismatches_(fewest_mm+b)_paternal"},
+        {"label": "Mismatches (Maternal)", "value": "Mismatches_(fewest_mm+b)_maternal"},
+        {"label": "Genomic position (hg38)", "value": "hg38_start"},
+    ]
     custom_ranking_tab = [
+        html.Br(),
+        dbc.Row(
+            [
+                dbc.Col(
+                    [
+                        html.H6("Sort by"),
+                        dcc.Dropdown(
+                            id="assembly-sort-by-dropdown",
+                            options=_SORT_OPTIONS,
+                            value="CFD_score_(fewest_mm+b)_paternal",
+                            clearable=False,
+                        ),
+                    ],
+                    width=4,
+                ),
+                dbc.Col(
+                    [
+                        html.H6("Order"),
+                        dcc.RadioItems(
+                            id="assembly-sort-order-radio",
+                            options=[
+                                {"label": " Ascending", "value": "asc"},
+                                {"label": " Descending", "value": "desc"},
+                            ],
+                            value="desc",
+                            labelStyle={"display": "inline-block", "marginRight": "14px"},
+                        ),
+                    ],
+                    width=4,
+                ),
+            ]
+        ),
         html.Br(),
         html.P(
             "hg38_chr/hg38_start (and strand) are the coordinates the two "
@@ -1433,6 +1521,7 @@ def result_page_assembly(job_id: str) -> html.Div:
             data=df.to_dict("records"),
             page_size=25,
             sort_action="native",
+            sort_by=[{"column_id": "CFD_score_(fewest_mm+b)_paternal", "direction": "desc"}],
             filter_action="native",
             style_table={"overflowX": "auto"},
             style_data={"whiteSpace": "normal", "height": "auto", "font-size": "1.05rem"},
@@ -1465,10 +1554,10 @@ def result_page_assembly(job_id: str) -> html.Div:
             html.Div(
                 [html.H6(label)]
                 + [
-                    html.Img(src=src, style={"maxWidth": "420px", "margin": "6px"})
+                    html.Img(src=src, style={"maxWidth": "700px", "width": "100%", "margin": "6px 0"})
                     for _, src in encoded
                 ],
-                style={"display": "inline-block", "verticalAlign": "top", "marginRight": "24px"},
+                style={"width": "100%", "maxWidth": "700px"},
             )
         )
 
@@ -1590,7 +1679,17 @@ def result_page_assembly(job_id: str) -> html.Div:
         if not tallies:
             continue
         width = len(next(iter(tallies.values())))
-        x = [_guide_seq[i] if i < len(_guide_seq) else "" for i in range(width)]
+        # Real bug from the previous pass: using the guide's own letters as
+        # the bar x-VALUES (not just their tick labels) means plotly treats
+        # x as categorical and merges every bar sharing the same letter onto
+        # one x-slot -- a guide has repeated letters (this one has 5 A's,
+        # for instance), so most positions silently vanished/overlapped,
+        # which is why the chart "didn't go across all positions". Fixed:
+        # bars are placed at true numeric positions (matching the original
+        # matplotlib plot's `ind = np.arange(len(guide))`), and the letters
+        # are attached only as tick TEXT via xaxis.tickvals/ticktext.
+        x_pos = list(range(width))
+        x_labels = [_guide_seq[i] if i < len(_guide_seq) else "" for i in range(width)]
         totals_per_position = [sum(tallies[s][i] for s in tallies) for i in range(width)]
         maxmax = max(totals_per_position) if totals_per_position else 0
         normalized = (
@@ -1600,12 +1699,12 @@ def result_page_assembly(job_id: str) -> html.Div:
         )
         fig = go.Figure()
         for series in ("A", "C", "G", "T", "RNA bulge", "DNA bulge"):
-            fig.add_trace(go.Bar(x=x, y=normalized[series], name=series))
+            fig.add_trace(go.Bar(x=x_pos, y=normalized[series], name=series))
         fig.update_layout(
             **_PLOTLY_LAYOUT,
             barmode="stack",
             title=label,
-            xaxis_title="Guide position",
+            xaxis=dict(title="Guide position", tickmode="array", tickvals=x_pos, ticktext=x_labels),
             yaxis=dict(title="Fraction of most-covered position's total", range=[0, 1]),
         )
         # stacked in one column (not side by side) so each is bigger/more
@@ -1660,6 +1759,22 @@ def result_page_assembly(job_id: str) -> html.Div:
     )
 
     return html.Div(final_list, style={"margin": "1%"})
+
+
+@app.callback(
+    Output("assembly-results-table", "sort_by"),
+    [
+        Input("assembly-sort-by-dropdown", "value"),
+        Input("assembly-sort-order-radio", "value"),
+    ],
+    prevent_initial_call=True,
+)
+def update_assembly_results_sort(column_id: str, order: str) -> List[Dict[str, str]]:
+    """Drives assembly-results-table's sort_by from the Custom Ranking tab's
+    'Sort by' / 'Order' controls -- see result_page_assembly()."""
+    if not isinstance(column_id, str) or not isinstance(order, str):
+        raise PreventUpdate
+    return [{"column_id": column_id, "direction": order}]
 
 
 # store drop-down value in auxiliary file
