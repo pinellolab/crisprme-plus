@@ -2590,10 +2590,21 @@ def _run_haplotype_search(
     python_exe = sys.executable
     crisprme_script = os.path.abspath(__file__)
     debug_flag = "--debug" if debug else ""
+    # --max-total-edits (issue #107, added after this subcommand already existed):
+    # complete-search's own CLI default is 4 total edits (mismatches+bulges), applied
+    # unconditionally whenever the flag isn't passed. Without this, a haplotype search
+    # requesting e.g. --mm 4 --bDNA 1 --bRNA 1 (6 edits worth of budget) was silently
+    # capped at 4, dropping any alignment that combined mismatches with a bulge --
+    # verified against a real HG01255 full-genome run: 32,072 loci uncapped vs 579
+    # capped for the same guide/genome/mm/bDNA/bRNA. mm+bDNA+bRNA mirrors the same
+    # "advanced mode" total the website's own complete-search submission already uses
+    # (main_page.py, max_total_edits = mm + dna + rna).
+    max_total_edits = mm + bDNA + bRNA
     cmd = (
         f"{python_exe} {crisprme_script} complete-search --genome {genomedir} "
         f"--guide {guidefile} --pam {pamfile} --mm {mm} --bDNA {bDNA} --bRNA {bRNA} "
-        f"--merge {merge_t} --output {output_name} --thread {thread} {debug_flag}"
+        f"--merge {merge_t} --max-total-edits {max_total_edits} "
+        f"--output {output_name} --thread {thread} {debug_flag}"
     )
     output_folder = os.path.join(current_working_directory, CRISPRMEDIRS[1], output_name)
     code = subprocess.call(cmd, shell=True, cwd=current_working_directory)
