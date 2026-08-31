@@ -1390,7 +1390,7 @@ def result_page_assembly(job_id: str) -> html.Div:
                     ),
                     dash_table.DataTable(
                         id=f"assembly-private-table-{hap}",
-                        columns=[{"name": c, "id": c} for c in private.columns],
+                        columns=[{"name": c, "id": c, "hideable": True} for c in private.columns],
                         data=private.to_dict("records"),
                         page_size=25,
                         sort_action="native",
@@ -1426,7 +1426,7 @@ def result_page_assembly(job_id: str) -> html.Div:
         ),
         dash_table.DataTable(
             id="assembly-results-table",
-            columns=[{"name": c, "id": c} for c in display_cols],
+            columns=[{"name": c, "id": c, "hideable": True} for c in display_cols],
             data=df.to_dict("records"),
             page_size=25,
             sort_action="native",
