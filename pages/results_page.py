@@ -1625,25 +1625,23 @@ def result_page_assembly(job_id: str) -> html.Div:
     # mismatches/RNA-bulges, Aligned_spacer+PAM_(fewest_mm+b) for DNA-bulges
     # -- confirmed directly against real rows: lowercase = mismatch base,
     # "-" on the REF side = RNA bulge, "-" on the spacer side = DNA bulge,
-    # same convention). Position is the index within the aligned strings
-    # (which can be one longer than the guide itself when there's a DNA
-    # bulge), not re-derived against the original script's guide-relative
-    # edge-case handling for N-padded PAMs -- labeled "alignment position",
-    # not literal guide bases, to not overclaim exactness. Built from each
-    # haplotype's full prediction set (not mapped-only): this is a per-
-    # haplotype sequence-composition statistic, not tied to hg38 mappability.
-    # Real gap found on re-reading radar_chart_dict_generator.py's fillDict()
-    # more carefully: at a guide position that's a literal "N" -- a PAM
-    # wildcard, e.g. positions 21-23 of a 20bp-NGG guide's padded
-    # "...NNN" -- it tallies whatever base is actually present there
-    # UNCONDITIONALLY (`if guide[count] == "N": motifDict[...][count] += 1`),
-    # not only on mismatch. That's why complete-search's own chart shows a
-    # full bar at G for the "GG" of NGG: PAM must match exactly for a target
-    # to be reported at all, so every single off-target has G there --
-    # never flagged lowercase/mismatched (an N position can't "mismatch"
-    # anything), so the mismatch-only tally below would show nothing at
-    # those positions without this. The middle "N" of NGG (any base allowed)
-    # correctly still shows a real mixed distribution.
+    # same convention). Built from each haplotype's full prediction set
+    # (not mapped-only): this is a per-haplotype sequence-composition
+    # statistic, not tied to hg38 mappability.
+    #
+    # Verified directly against this exact haplotype's own real, already-
+    # computed .motif_dict_*.json (ground truth, not just re-derivation):
+    # array width is always exactly len(guide) -- never elongated past it,
+    # even for a DNA-bulge-affected alignment -- and a guide position that's
+    # a literal "N" (a PAM wildcard, e.g. positions 21-23 of a 20bp-NGG
+    # guide's padded "...NNN") tallies whatever base is actually present
+    # UNCONDITIONALLY, not only on mismatch. PAM must match exactly for a
+    # target to be reported at all, so every off-target has the same base
+    # there (e.g. G for the "GG" of NGG) and it's never flagged lowercase/
+    # mismatched (an N position can't "mismatch" anything) or bulged --
+    # confirmed the real motif_dict never records a bulge at a PAM position
+    # either. The middle "N" of NGG (any base allowed) correctly still
+    # shows a real mixed distribution.
     def _position_tallies(hap: str, guide_seq: str) -> Dict[str, List[int]]:
         hap_df = hap_predictions_all.get(hap)
         ref_col = "Aligned_protospacer+PAM_REF_(fewest_mm+b)"
@@ -1770,7 +1768,12 @@ def result_page_assembly(job_id: str) -> html.Div:
                     html.P(
                         "Per-position tally of which base an off-target "
                         "mismatches to, and where RNA/DNA bulges occur, "
-                        "across all off-targets found in that haplotype.",
+                        "across all off-targets found in that haplotype -- "
+                        "each bar is a fraction of the most-covered "
+                        "position's total, not a raw count. The PAM "
+                        "positions (the last 3, matching the PAM used) are "
+                        "expected to look full or near-full: the PAM must "
+                        "match exactly for a site to be reported at all.",
                         style={"font-size": "0.95rem", "color": "#777"},
                     ),
                 ]

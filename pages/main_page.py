@@ -2431,6 +2431,19 @@ def index_page() -> html.Div:
                             "predictions across both haplotypes against hg38.",
                             style={"font-size": "1.25rem", "color": "#555"},
                         ),
+                        html.P(
+                            "The genome, chain file, and chromAlias file "
+                            "dropdowns below aren't linked to each other -- "
+                            "make sure each \"Paternal\"/\"Maternal\" selection "
+                            "is the matching file for the same individual "
+                            "and haplotype, since mismatched files won't be "
+                            "caught automatically.",
+                            style={
+                                "font-size": "1.0rem",
+                                "color": "#8a6d3b",
+                                "fontStyle": "italic",
+                            },
+                        ),
                         html.Div(
                             [
                                 html.P("Paternal genome"),
