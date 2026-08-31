@@ -1652,14 +1652,23 @@ def result_page_assembly(job_id: str) -> html.Div:
             return {}
         ref_seqs = hap_df[ref_col].dropna().astype(str)
         spacer_seqs = hap_df[spacer_col].dropna().astype(str)
-        width = max([len(s) for s in ref_seqs] + [len(s) for s in spacer_seqs] + [0])
+        # Width is the guide's OWN length, never elongated -- checked
+        # directly against the real, already-computed .motif_dict_*.json
+        # this same haplotype's own complete-search run wrote (ground
+        # truth, not the reimplementation): its arrays are always exactly
+        # len(guide) long, confirming the original never extends past it
+        # even for DNA-bulge-elongated alignments (it slices the bulge back
+        # out instead of growing the array). An earlier pass here grew the
+        # array to the longest observed alignment, adding a spurious extra
+        # trailing position.
+        width = len(guide_seq)
         if width == 0:
             return {}
         tallies = {k: [0] * width for k in ("A", "C", "G", "T", "RNA bulge", "DNA bulge")}
         for seq in ref_seqs:
             n = len(seq)
-            for i, ch in enumerate(seq):
-                is_pam_wildcard = i < len(guide_seq) and guide_seq[i] == "N"
+            for i in range(width):
+                is_pam_wildcard = guide_seq[i] == "N"
                 if is_pam_wildcard:
                     # PAM sits at the END of the alignment. A DNA bulge
                     # earlier in the spacer inserts a "-" mid-string, which
@@ -1669,21 +1678,33 @@ def result_page_assembly(job_id: str) -> html.Div:
                     # diluting what should be a pure PAM match. Index from
                     # the end instead (offset = distance from the guide's
                     # own end), which lands on the true PAM regardless of an
-                    # earlier bulge. (PAM itself is never bulged -- it must
-                    # match exactly for a target to be reported at all.)
-                    offset_from_end = len(guide_seq) - i
-                    true_ch = seq[-offset_from_end] if offset_from_end <= n else ch
+                    # earlier bulge. Verified against the real motif_dict:
+                    # PAM positions there are 100% pure, no mismatch/bulge
+                    # ever recorded (PAM must match exactly for a target to
+                    # be reported at all) -- this now matches exactly.
+                    offset_from_end = width - i
+                    true_ch = seq[-offset_from_end] if offset_from_end <= n else ""
                     if true_ch.upper() in "ACGT":
                         tallies[true_ch.upper()][i] += 1
                     elif true_ch == "-":
                         tallies["RNA bulge"][i] += 1
-                elif ch.islower() and ch.upper() in "ACGT":
-                    tallies[ch.upper()][i] += 1
-                elif ch == "-":
-                    tallies["RNA bulge"][i] += 1
+                elif i < n:
+                    ch = seq[i]
+                    if ch.islower() and ch.upper() in "ACGT":
+                        tallies[ch.upper()][i] += 1
+                    elif ch == "-":
+                        tallies["RNA bulge"][i] += 1
         for seq in spacer_seqs:
-            for i, ch in enumerate(seq):
-                if ch == "-":
+            for i in range(width):
+                # Same real-data check confirms DNA bulge is NEVER recorded
+                # at a PAM position (bulges are structurally confined to the
+                # spacer) -- excluded here too. A "-" landing at a raw index
+                # inside the PAM stretch is a bulge-shift artifact (the true
+                # bulge is earlier in this same row's spacer), not a real
+                # signal at this position.
+                if guide_seq[i] == "N":
+                    continue
+                if i < len(seq) and seq[i] == "-":
                     tallies["DNA bulge"][i] += 1
         return tallies
 
