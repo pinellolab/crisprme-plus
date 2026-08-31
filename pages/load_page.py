@@ -10,17 +10,18 @@ are automatically deleted and could not be accessed anymore.
 """
 
 from app import app, current_working_directory, URL
-from .pages_utils import RESULTS_DIR, GUIDES_FILE, LOG_FILE, PARAMS_FILE
+from .pages_utils import RESULTS_DIR, GUIDES_FILE, LOG_FILE, PARAMS_FILE, QUEUE_FILE
 
 from dash import Input, Output, State
 from dash.exceptions import PreventUpdate
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from dash import dcc
 from dash import html
 import dash_bootstrap_components as dbc
 
 import subprocess
+import shutil
 import os
 
 
@@ -332,6 +333,353 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
         dbc.Alert("The selected result does not exist", color="danger"),
         True,
     )
+
+
+# =============================================================================
+# Assembly-search (personal diploid genome) status polling
+#
+# A fully independent parallel of refresh_search/remove_result/show_full_log
+# above, with its own component ids and its own dcc.Interval -- NOT an
+# extension of those existing callbacks. refresh_search's parser is hardwired
+# to complete-search's 7 pipeline stage strings (Index/Search/Post-process/
+# Merge/Images/Integrate/Database) read via a "Ref_comp\tTrue" check in
+# .Params.txt; an assembly-search job's log.txt never contains any of those
+# strings (assembly_search() prints its own, completely different stage
+# transitions -- see assembly_search_web_plan.md component B), so it would
+# just show "To do" forever, never reaching the done gate. Building a
+# separate, small parser for the 4 real stage-transition prints
+# assembly_search() already emits is far lower-risk than threading
+# genome_type-awareness through the existing, working complete-search
+# parser.
+#
+# remove_result also can't be reused as-is: it deletes exactly one directory
+# (the one named in ?job=), but an assembly-search job's canonical URL points
+# at only <job_id>_combined -- reusing it would silently orphan the
+# <job_id>_paternal/_maternal directories on "Remove result".
+# =============================================================================
+def _assembly_status_cell(started: bool, done: bool, progress_label: str) -> html.P:
+    if done:
+        return html.P("Done", style={"color": "green"})
+    if started:
+        return html.P(progress_label, style={"color": "orange"})
+    return html.P("To do", style={"color": "red"})
+
+
+@app.callback(
+    [
+        Output("assembly-view-results", "style"),
+        Output("assembly-paternal-status", "children"),
+        Output("assembly-maternal-status", "children"),
+        Output("assembly-reconcile-status", "children"),
+        Output("assembly-view-results", "href"),
+        Output("assembly-no-directory-error", "children"),
+        Output("assembly-button-remove-result", "hidden"),
+    ],
+    [Input("assembly-load-page-check", "n_intervals")],
+    [State("url", "search")],
+)
+def refresh_assembly_search(n: int, dir_name: str) -> Tuple:
+    """Polls an assembly-search job's Results/<job_id>_combined/log.txt,
+    matching assembly_search()'s own real stage-transition prints (paternal
+    search start/reuse, maternal search start/reuse, reconciliation
+    start, reconciliation complete) -- no new instrumentation needed on the
+    crisprme.py side. Same visual conventions (red/orange/green
+    To-do/in-progress/Done) as refresh_search, for a consistent look."""
+    if n is None:
+        raise PreventUpdate
+    not_avail = html.P("Not available", style={"color": "red"})
+    job_id = dir_name.split("=")[-1]
+    job_dir = os.path.join(current_working_directory, RESULTS_DIR, job_id)
+    if not os.path.isdir(job_dir):
+        return (
+            {"visibility": "hidden"}, not_avail, not_avail, not_avail, "",
+            dbc.Alert("The selected result does not exist", color="danger"),
+            True,
+        )
+    log_path = os.path.join(job_dir, LOG_FILE)
+    if not os.path.isfile(log_path):
+        if os.path.isfile(os.path.join(job_dir, QUEUE_FILE)):
+            queued = html.P("Queued", style={"color": "red"})
+            return (
+                {"visibility": "hidden"}, queued, queued, queued, "",
+                dbc.Alert("Job submitted. Current status: IN QUEUE", color="info"),
+                True,
+            )
+        return ({"visibility": "hidden"}, not_avail, not_avail, not_avail, "", "", True)
+
+    with open(log_path, errors="replace") as handle_log:
+        current_log = handle_log.read()
+
+    paternal_started = (
+        "Running paternal haplotype search" in current_log
+        or "Found existing completed paternal search results" in current_log
+    )
+    maternal_started = (
+        "Running maternal haplotype search" in current_log
+        or "Found existing completed maternal search results" in current_log
+    )
+    reconcile_started = "Reconciling paternal and maternal predictions" in current_log
+    # Only printed AFTER combined.to_csv() succeeds (assembly_search(),
+    # crisprme.py:2653-2654) -- seeing this string is itself proof the
+    # combined TSV was written, no separate file-existence check needed.
+    reconcile_done = "Reconciliation complete. Wrote" in current_log
+
+    paternal_status = _assembly_status_cell(
+        paternal_started, maternal_started or reconcile_started, "Searching paternal haplotype..."
+    )
+    maternal_status = _assembly_status_cell(
+        maternal_started, reconcile_started, "Searching maternal haplotype..."
+    )
+    reconcile_status = _assembly_status_cell(
+        reconcile_started, reconcile_done, "Reconciling against hg38..."
+    )
+
+    # Mirrors refresh_search's log_error.txt-non-empty check, adapted for a
+    # single merged log.txt (stdout+stderr combined -- see
+    # _run_assembly_search_job): a clean crisprme.py error() call always
+    # writes "Error: ..." to stderr before exiting; an unhandled exception
+    # writes a Python traceback; the web launcher's own defensive except
+    # clause prefixes with "[web] launcher error:". Not exhaustive -- a raw
+    # shell-level failure (e.g. a command not found) won't match any of
+    # these and would just appear to hang at "To do" -- known gap, not
+    # solved here.
+    failed = (
+        "\nError: " in current_log
+        or current_log.startswith("Error: ")
+        or "Traceback (most recent call last)" in current_log
+        or "[web] launcher error:" in current_log
+    )
+    if failed and not reconcile_done:
+        return (
+            {"visibility": "hidden"}, not_avail, not_avail, not_avail, "",
+            dbc.Alert(
+                "The selected result encountered some errors, please remove "
+                "it and try to submit again.",
+                color="danger",
+            ),
+            False,
+        )
+    if reconcile_done:
+        return (
+            {"visibility": "visible"},
+            paternal_status,
+            maternal_status,
+            reconcile_status,
+            os.path.join(URL, f"result?job={job_id}"),
+            "",
+            False,
+        )
+    return (
+        {"visibility": "hidden"},
+        paternal_status,
+        maternal_status,
+        reconcile_status,
+        "",
+        "",
+        True,
+    )
+
+
+@app.callback(
+    Output("assembly-result-deleted", "children"),
+    [Input("assembly-button-remove-result", "n_clicks")],
+    [State("url", "search")],
+)
+def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
+    """Deletes all three sibling directories a completed assembly-search job
+    left behind (<id>_paternal, _maternal, _combined) -- not just the single
+    <id>_combined directory named in the URL. Reads Paternal_dir/
+    Maternal_dir from .Params.txt (written explicitly at submit time by
+    submit_assembly_search_job, see assembly_search_web_plan.md) rather than
+    re-deriving the sibling names by string convention here too."""
+    if not n:
+        raise PreventUpdate
+    combined_dir_name = dir_name.split("=")[-1]
+    combined_dir = os.path.join(current_working_directory, RESULTS_DIR, combined_dir_name)
+    dirs_to_remove = [combined_dir]
+    params_path = os.path.join(combined_dir, PARAMS_FILE)
+    if os.path.isfile(params_path):
+        params = {}
+        with open(params_path) as pf:
+            for line in pf:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) >= 3:
+                    params[fields[1]] = fields[2]
+        for key in ("Paternal_dir", "Maternal_dir"):
+            name = params.get(key)
+            if name:
+                sibling_dir = os.path.join(current_working_directory, RESULTS_DIR, name)
+                if os.path.isdir(sibling_dir):
+                    dirs_to_remove.append(sibling_dir)
+    for d in dirs_to_remove:
+        shutil.rmtree(d, ignore_errors=True)
+    return html.P("Results deleted")
+
+
+@app.callback(
+    [Output("assembly-full-log-container", "hidden"), Output("assembly-full-log-text", "value")],
+    [Input("assembly-button-show-log", "n_clicks")],
+    [State("url", "search"), State("assembly-full-log-container", "hidden")],
+)
+def show_assembly_full_log(n: int, dir_name: str, currently_hidden: bool) -> Tuple[bool, str]:
+    """Same collapsible copy-pasteable log pattern as show_full_log, reading
+    log.txt (assembly-search's single merged stdout+stderr log) instead of
+    the separate log_error.txt/log_verbose.txt complete-search writes."""
+    if not n:
+        raise PreventUpdate
+    if not currently_hidden:
+        return True, ""
+    job_dir = os.path.join(current_working_directory, RESULTS_DIR, dir_name.split("=")[-1])
+    path = os.path.join(job_dir, LOG_FILE)
+    if not os.path.isfile(path):
+        return False, "No log file found for this job yet."
+    try:
+        with open(path, errors="replace") as fh:
+            lines = fh.readlines()
+    except OSError as exc:
+        return False, f"(could not read {LOG_FILE}: {exc})"
+    tail = 400
+    if len(lines) > tail:
+        lines = [f"... (showing last {tail} lines) ...\n"] + lines[-tail:]
+    text = "".join(lines).rstrip() or "(empty)"
+    return False, text
+
+
+def load_page_assembly(job_link: str = "link") -> html.Div:
+    """Assembly-search's own /load page layout -- a parallel of load_page()
+    below (not a branch inside it), since the pipeline stages, "remove
+    result" semantics (3 directories, not 1), and log file shape (one
+    merged log.txt, not log_error.txt/log_verbose.txt) all differ enough
+    that sharing the layout/callbacks would mean threading conditional
+    logic through code Luca already built and maintains for
+    complete-search."""
+    final_list = []
+    final_list.append(
+        html.Div(
+            html.Div(
+                html.Div(
+                    [
+                        html.P(
+                            "Job submitted. Copy this link to view the status "
+                            "and the result page:"
+                        ),
+                        html.Div(
+                            html.P(
+                                job_link,
+                                style={"margin-top": "0.75rem", "font-size": "large"},
+                            ),
+                            style={
+                                "border-radius": "5px",
+                                "border": "2px solid",
+                                "border-color": "blue",
+                                "width": "100%",
+                                "display": "inline-block",
+                                "margin": "5px",
+                            },
+                        ),
+                        html.P("Results will be kept available for 3 days"),
+                    ],
+                    style={"display": "inline-block"},
+                ),
+                style={
+                    "display": "inline-block",
+                    "background-color": "rgba(154, 208, 150, 0.39)",
+                    "border-radius": "10px",
+                    "border": "1px solid black",
+                    "width": "70%",
+                },
+            ),
+            style={"text-align": "center"},
+        )
+    )
+    view_results = dcc.Link(
+        html.Button(
+            "View Results",
+            style={
+                "font-size": "large",
+                "width": "700 px",
+                "margin-top": "0.75rem",
+                "border-radius": "5px",
+                "border": "2px solid",
+            },
+        ),
+        style={"visibility": "hidden"},
+        id="assembly-view-results",
+        href=URL,
+    )
+    final_list.append(
+        html.Div(
+            [
+                html.H4("Status report"),
+                html.Div(
+                    [
+                        cell
+                        for label, status_id in [
+                            ("Paternal haplotype search", "assembly-paternal-status"),
+                            ("Maternal haplotype search", "assembly-maternal-status"),
+                            ("Reconciling against hg38", "assembly-reconcile-status"),
+                        ]
+                        for cell in (
+                            html.Div(label, className="status-step-label"),
+                            html.Div(
+                                "To do",
+                                id=status_id,
+                                className="status-step-value",
+                                style={"color": "red"},
+                            ),
+                        )
+                    ],
+                    className="status-grid",
+                ),
+                html.Div(
+                    [
+                        html.Div([view_results]),
+                        html.Div(id="assembly-no-directory-error"),
+                        html.Div(
+                            [
+                                html.Button(
+                                    "Remove result",
+                                    id="assembly-button-remove-result",
+                                    n_clicks=0,
+                                    hidden=True,
+                                ),
+                                html.Button(
+                                    "Show full log",
+                                    id="assembly-button-show-log",
+                                    n_clicks=0,
+                                    style={"margin-left": "8px"},
+                                ),
+                            ]
+                        ),
+                        html.Div(id="assembly-result-deleted"),
+                        html.Div(
+                            dcc.Textarea(
+                                id="assembly-full-log-text",
+                                value="",
+                                readOnly=True,
+                                style={
+                                    "width": "100%",
+                                    "height": "320px",
+                                    "fontFamily": "monospace",
+                                    "fontSize": "12px",
+                                    "whiteSpace": "pre",
+                                    "overflow": "auto",
+                                },
+                            ),
+                            id="assembly-full-log-container",
+                            hidden=True,
+                            style={"marginTop": "8px"},
+                        ),
+                    ]
+                ),
+            ],
+            id="div-assembly-status-report",
+        )
+    )
+    final_list.append(html.Div([view_results], style={"text-align": "center"}))
+    final_list.append(html.P("", id="assembly-done"))
+    final_list.append(dcc.Interval(id="assembly-load-page-check", interval=(3 * 1000)))
+    return html.Div(final_list, style={"margin": "1%"})
 
 
 # remove job results
