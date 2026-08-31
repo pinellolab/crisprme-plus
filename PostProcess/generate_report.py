@@ -3373,6 +3373,9 @@ def build_report(
         if _cooc_files:
             _cooc_path = os.path.join(staging, "indel_snp_cooc.tsv")
             _cooc_header_written = False
+            _cooc_seen = set()  # dedup: the writer emits a cooc row per alignment
+            #                     pass for the same off-target (~10x duplication on
+            #                     real data), so count + bundle each UNIQUE row once.
             with open(_cooc_path, "w") as _out:
                 for _cf in _cooc_files:
                     with open(_cf) as _src:
@@ -3384,13 +3387,17 @@ def build_report(
                                 continue
                             if not _ln.strip():
                                 continue
+                            _key = _ln.rstrip("\n")
+                            if _key in _cooc_seen:
+                                continue
+                            _cooc_seen.add(_key)
                             _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
                             cooc_n_rows += 1
                             # phase (col index 8, 0-based) is CONFIRMED or PUTATIVE
                             # -- EVERY row is already a cis co-occurrence; CONFIRMED
                             # means the same-haplotype phasing is proven (all carriers
                             # phased). Count the CONFIRMED subset (indel_snp_cis.py).
-                            _parts = _ln.rstrip("\n").split("\t")
+                            _parts = _key.split("\t")
                             if len(_parts) > 8 and _parts[8].strip().upper() == "CONFIRMED":
                                 cooc_n_cis += 1
             if cooc_n_rows:

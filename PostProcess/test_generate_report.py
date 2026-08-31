@@ -388,9 +388,11 @@ class TestGenerateReport(unittest.TestCase):
         # phase vocabulary is CONFIRMED / PUTATIVE (indel_snp_cis.py) -- every row IS
         # a cis co-occurrence; CONFIRMED = proven phasing. chr3 sidecar: 1 CONFIRMED
         # + 1 PUTATIVE (PUTATIVE must NOT count toward confirmed-cis).
+        _conf_row = "chr3\t190\tAT\tA\t200\t-\tchr3_195_C_T\trs900\tCONFIRMED\t0.0021\t2\tHG00096,HG00097\n"
         with open(os.path.join(rd, "job_chr3.indel_snp_cooc.tsv"), "w") as h:
             h.write(_cooc_header)
-            h.write("chr3\t190\tAT\tA\t200\t-\tchr3_195_C_T\trs900\tCONFIRMED\t0.0021\t2\tHG00096,HG00097\n")
+            h.write(_conf_row)
+            h.write(_conf_row)  # duplicate (writer emits per alignment pass) -> dedup
             h.write("chr3\t250\tG\tGA\t260\t+\tchr3_255_A_G\trs901\tPUTATIVE\t0.0011\t1\tHG00097\n")
         # chr7 sidecar: 1 CONFIRMED row (has its OWN header -> dedup to one)
         with open(os.path.join(rd, "job_chr7.indel_snp_cooc.tsv"), "w") as h:
@@ -414,6 +416,8 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(sum(1 for ln in lines if ln.startswith("chrom\t")), 1)
         self.assertTrue(any(ln.startswith("chr3\t") for ln in lines))
         self.assertTrue(any(ln.startswith("chr7\t") for ln in lines))
+        # dedup: the duplicated CONFIRMED row collapses to ONE in the bundle
+        self.assertEqual(merged.count("chr3\t190\tAT\tA"), 1)
         # (3) report.html links the file + names the CONFIRMED-CIS count (2 cis rows,
         #     NOT the 3 total candidate rows: the trans row is excluded)
         html = self._read(os.path.join(extract, "report.html"))
