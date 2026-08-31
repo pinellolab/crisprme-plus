@@ -1321,13 +1321,17 @@ def result_page_assembly(job_id: str) -> html.Div:
                     marker_color=color,
                 )
             )
+        _origin_layout = {**_PLOTLY_LAYOUT, "margin": dict(t=70, b=40)}
         _origin_fig.update_layout(
-            **_PLOTLY_LAYOUT,
+            **_origin_layout,
             barmode="stack",
-            height=180,
+            height=220,
             xaxis_title="Reconciled off-target sites",
             yaxis=dict(visible=False),
-            legend=dict(orientation="h", y=-0.3),
+            # legend above the plot, not below -- below collided with the
+            # x-axis title in the same cramped margin (the previous cause of
+            # the overlap).
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         )
         origin_chart_block = [dcc.Graph(figure=_origin_fig, id="assembly-origin-split-graph")]
 
@@ -1345,7 +1349,6 @@ def result_page_assembly(job_id: str) -> html.Div:
         html.Hr(),
         *report_box,
         *guide_summary_block,
-        *mmb_summary_block,
         html.H4("Haplotype coverage"),
         html.Div(
             [
@@ -1569,14 +1572,17 @@ def result_page_assembly(job_id: str) -> html.Div:
                     tallies["DNA bulge"][i] += 1
         return tallies
 
-    # x-axis labels: complete-search's original plot uses the guide's own
-    # letters as tick labels (plt.xticks(ticks=ind, labels=list(guide))) --
-    # mirrored here (as "position:base", the position prefix disambiguates
-    # a guide's repeated letters, which the original bare-letter labels
-    # don't) for the positions the guide actually covers; any position past
-    # the guide's own length (only reachable via a DNA-bulge-elongated
-    # alignment, see _position_tallies) has no letter to show and is
-    # labeled by position number alone.
+    # x-axis labels: bare guide letters, matching the original exactly
+    # (plt.xticks(ticks=ind, labels=list(guide))) -- an earlier pass here
+    # added a "position:" prefix to disambiguate the guide's repeated
+    # letters, which is NOT what the original does; reverted to match.
+    # y-axis: the original normalizes each position's stacked values by
+    # that position's own total-across-all-series divided into the GLOBAL
+    # max such total (generate_img_radar_chart.py:243-252: `maxmax =
+    # max(totalMotif)`, `motifDict[nuc][count] /= maxmax`) -- i.e. every
+    # bar's height is relative to the single most-covered position, 0-1,
+    # not a raw count. Re-read that code and initially didn't carry this
+    # through; fixed here to match.
     _guide_seq = guides_seen[0] if guides_seen else ""
     position_figs = []
     for hap, label in (("paternal", "Paternal"), ("maternal", "Maternal")):
@@ -1584,24 +1590,30 @@ def result_page_assembly(job_id: str) -> html.Div:
         if not tallies:
             continue
         width = len(next(iter(tallies.values())))
-        x = [
-            f"{i + 1}:{_guide_seq[i]}" if i < len(_guide_seq) else str(i + 1)
-            for i in range(width)
-        ]
+        x = [_guide_seq[i] if i < len(_guide_seq) else "" for i in range(width)]
+        totals_per_position = [sum(tallies[s][i] for s in tallies) for i in range(width)]
+        maxmax = max(totals_per_position) if totals_per_position else 0
+        normalized = (
+            {s: [v / maxmax for v in tallies[s]] for s in tallies}
+            if maxmax
+            else tallies
+        )
         fig = go.Figure()
         for series in ("A", "C", "G", "T", "RNA bulge", "DNA bulge"):
-            fig.add_trace(go.Bar(x=x, y=tallies[series], name=series))
+            fig.add_trace(go.Bar(x=x, y=normalized[series], name=series))
         fig.update_layout(
             **_PLOTLY_LAYOUT,
             barmode="stack",
             title=label,
-            xaxis_title="Alignment position",
-            yaxis_title="Count",
+            xaxis_title="Guide position",
+            yaxis=dict(title="Fraction of most-covered position's total", range=[0, 1]),
         )
+        # stacked in one column (not side by side) so each is bigger/more
+        # readable, per request.
         position_figs.append(
             html.Div(
                 dcc.Graph(figure=fig, id=f"assembly-position-mmb-barplot-{hap}"),
-                style={"display": "inline-block", "verticalAlign": "top", "width": "48%"},
+                style={"width": "100%", "maxWidth": "900px"},
             )
         )
     if position_figs:
@@ -1626,11 +1638,22 @@ def result_page_assembly(job_id: str) -> html.Div:
         else [html.Br(), html.P("No graphical reports available for this job.")]
     )
 
+    # Own tab, matching complete-search's actual "Summary by
+    # Mismatches/Bulges" tab (moved out of the always-visible top section --
+    # an earlier pass put it there since only 2 tabs were planned at the
+    # time; now a 3rd tab matching complete-search's real tab set instead).
+    mmb_tab = (
+        [html.Br()] + mmb_summary_block
+        if mmb_summary_block
+        else [html.Br(), html.P("No mismatch+bulge summary available for this job.")]
+    )
+
     final_list.append(html.Hr())
     final_list.append(
         dcc.Tabs(
             [
                 dcc.Tab(label="Custom Ranking", children=custom_ranking_tab),
+                dcc.Tab(label="Summary by Mismatches/Bulges", children=mmb_tab),
                 dcc.Tab(label="Graphical Reports", children=graphical_reports_tab),
             ]
         )
