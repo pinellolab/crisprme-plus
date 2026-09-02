@@ -11,21 +11,50 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-09-01
+
 ### Added
-- **SNP+indel co-occurring off-targets (experimental, opt-in).** Off-targets that
+- **SNP+indel co-occurring off-targets — now enabled by default** (opt out with
+  `CRISPRME_INDEL_SNP=0`; previously experimental/opt-in). Detects off-targets that
   require BOTH a nearby SNP **and** an indel on the same haplotype within a
-  protospacer window can now be detected — a class the classic two-pass search
-  (SNPs on the enriched genome, indels on a plain-reference fake-indel genome)
-  could not see. Gated behind the `CRISPRME_INDEL_SNP=1` environment variable
-  (**off by default**; classic builds are byte-identical). When enabled, the build
-  compiles a per-chromosome phased indel genotype store and overlays SNP IUPAC
-  codes onto the fake-indel genome flanks, so the indel search surfaces SNP+indel
+  protospacer window — a class the classic two-pass search could not see. The build
+  compiles a per-chromosome **phased indel genotype store** and overlays SNP IUPAC
+  codes onto the fake-indel genome, so the indel search surfaces SNP+indel
   haplotypes; post-analysis reports **CONFIRMED-cis** (phased) and **PUTATIVE**
-  (unphased) co-occurring variants with per-sample carriers + joint allele
-  frequency. Also adds a pre-flight guard + build-time auto-fix so an over-listing
-  `--samplesID` can no longer inflate the AN denominator (deflating every reported
-  allele frequency). Ships on the `feature/indel-snp` branch; see
-  `docs/PRECOMPUTED_INDEXES.md`.
+  (unphased) co-occurrences with per-sample carriers + joint allele frequency, and
+  the shareable report bundles `indel_snp_cooc.tsv` and surfaces a
+  "SNP + indel cis co-occurrences (N confirmed-cis)" section.
+- **New 1000G-2021 + HGDP NRG variant index** published to HuggingFace
+  (`NRG_3_hg38+hg38_1000G2021_HGDP`): 3,202 high-coverage phased 1000G samples +
+  929 HGDP. `download --what index` yields a searchable, variant-ready dict-less
+  install (registry + genotype + phased indel-genotype tiers bundled).
+- Shareable report: publication-grade inline **vector SVG** figures.
+
+### Changed
+- **Dict-less observed-haplotype enumerator** replaces the legacy 2^k IUPAC lattice
+  + greedy cap on the variant post-analysis path: every haplotype real individuals
+  carry is emitted (sensitivity-first, **no truncation**), and dense/hypervariable
+  windows are logged to `high_variant_density_regions.bed` for visibility rather
+  than dropped — resolving the phased multi-SNP haplotype under-report on the
+  default path. (Exhaustive worst-case coverage of *unobserved* haplotypes in dense
+  windows remains a documented, flagged limitation; a lossless two-pass fix is planned.)
+- `--max-total-edits` pruning now emits a WARNING and persists a `Pruning_note`
+  into the run params so the "deep off-targets were pruned" signal reaches the
+  report bundle.
+
+### Fixed
+- **Atomic per-chromosome build writes + integrity-checked resume** for the Tier-0
+  registry, Tier-1 genotype, and phased indel-genotype stores: a SIGKILL/OOM
+  mid-write no longer leaves a truncated file that a restart accepts as "done" (a
+  silent-truncation class that had shipped a short chr1 indel-genotype store).
+  Writers use tmp + `os.replace`; resume verifies integrity, not mere presence.
+- Report: high-variant-density region count is **deduplicated** (was inflated by
+  duplicate per-chromosome rows), and the co-occurrence TSV is deduplicated (the
+  writer emits a row per alignment pass). Population-summary companion **degrades
+  gracefully** (emits an NA-frequency row) instead of dropping multi-variant rows
+  on a registry-only install.
+- Pre-flight guard + build-time auto-fix so an over-listing `--samplesID` can no
+  longer inflate the AN denominator (which deflated every reported allele frequency).
 
 ## [2.4.0] - 2026-08-20
 
@@ -969,7 +998,9 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.3.3...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.0
+[2.4.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.4.0
 [2.3.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.3
 [2.3.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.2
 [2.3.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.1
