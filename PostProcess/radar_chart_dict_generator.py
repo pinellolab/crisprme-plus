@@ -46,7 +46,8 @@ random.seed(a=None, version=2)
 inGuideFile = open(sys.argv[1], "r")  # guide file used during search
 inFinalFile = open(sys.argv[2], "r")  # final result file from search
 inSamplesIDFile = open(sys.argv[3], "r").readlines()  # sampleID file
-inSamplesIDFile.pop(0)  # pop header from sampleID file
+if inSamplesIDFile:  # empty for an aggregate / sites-only index (mega): no header,
+    inSamplesIDFile.pop(0)  # no per-sample rows -> per-sample radar charts are N/A
 # annotation file used during search
 annotation_fname = sys.argv[4]
 inAnnotationsFile = None if os.path.basename(annotation_fname) == "vuoto.txt" else pysam.TabixFile(sys.argv[4], "r")

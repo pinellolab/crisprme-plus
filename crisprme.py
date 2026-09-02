@@ -959,7 +959,18 @@ def _check_samples_ids(args: List[str], variant: bool) -> str:
             does not exist.
     """
     if variant and "--samplesID" not in args:
-        error("Missing --samplesID argument for variant-aware offtargets search")
+        # A sites-only / aggregate variant index (e.g. the "mega" all-source panel)
+        # has NO per-sample roster: its per-dataset allele frequencies come from the
+        # Tier-0 registry (registry_<vcf>/), not a samplesID. Allow the search to
+        # proceed with the empty mock sample set rather than hard-failing; the report
+        # still gets per-dataset AF from the registry, just no per-individual columns.
+        sys.stderr.write(
+            "WARNING: variant-aware search without --samplesID -- using an empty "
+            "sample set. Per-dataset allele frequencies still come from the registry; "
+            "there will be no per-individual sample columns (correct for an aggregate/"
+            "sites-only index such as the mega all-source panel).\n"
+        )
+        return os.path.join(script_path, "vuoto.txt")
     if not variant and "--samplesID" in args:
         error("Missing --samplesID selected, but missing --vcf argument")
     if not variant:  # use mock file for samples if variant not used

@@ -436,11 +436,14 @@ def check_vcf_content(vcf_path: str) -> List[Issue]:
             if len(header_fields) < MIN_VCF_HEADER_FIELDS:
                 issues.append(
                     Issue(
-                        ERROR,
-                        f"{fname}: #CHROM header has {len(header_fields)} columns, "
-                        f"expected >={MIN_VCF_HEADER_FIELDS} (no sample genotype "
-                        "columns — this looks like a sites-only VCF; every "
-                        "variant will silently get zero sample associations)",
+                        WARN,
+                        f"{fname}: #CHROM header has {len(header_fields)} columns "
+                        "(no per-sample genotype columns — a sites-only VCF). This is "
+                        "EXPECTED for an aggregate index such as the mega all-source "
+                        "panel, where per-dataset allele frequencies come from the "
+                        "Tier-0 registry, not sample genotypes. For a genotype-based "
+                        "(dict) search, however, it means variants get zero per-sample "
+                        "associations — pass a VCF with sample columns in that case.",
                     )
                 )
             # first data record, regardless of FILTER (matches enricher.py

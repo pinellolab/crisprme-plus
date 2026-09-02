@@ -1736,11 +1736,25 @@ if t1_gt is not None:
 # rsID/AF are still surfaced, just without per-sample resolution. This is False on
 # every other install (legacy: myreg None; registry+dict: dict_tier_present;
 # dictless-with-genotypes: mygt set), so those paths stay byte-identical.
-registry_only_mode = (myreg is not None) and (mygt is None) and (not dict_tier_present)
+# An AGGREGATE registry (aggregation == "info_af", e.g. the sites-only "mega"
+# all-source panel) carries per-dataset AF but NO per-sample data. build-index-only
+# still emits a genotype-LESS SNP dict for it (variant positions, empty Samples), so
+# ``dict_tier_present`` is True even though that dict cannot resolve carriers. Treat
+# such a registry as registry-only regardless of the dict, so variant off-targets are
+# emitted with AF from the registry (Samples = NA) instead of being dropped by the
+# dict path. Genotyped registries ("carriers"/"panel") are unaffected.
+_aggregate_registry = (
+    myreg is not None
+    and getattr(myreg, "manifest", {}).get("aggregation") == "info_af"
+)
+registry_only_mode = (myreg is not None) and (mygt is None) and (
+    (not dict_tier_present) or _aggregate_registry
+)
 if registry_only_mode:
     print(
         f"Registry-only install for {current_chr}: emitting variant off-targets "
-        f"with degraded (NA) Samples -- no genotype tier to resolve carriers."
+        f"with degraded (NA) Samples -- no genotype tier to resolve carriers"
+        f"{' (aggregate info_af registry; sample-less dict ignored)' if _aggregate_registry else ''}."
     )
 
 # check PAM position and relative coordinates on targets
