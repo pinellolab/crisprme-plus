@@ -1259,6 +1259,15 @@ def publish_index(
         if os.path.isdir(reg_p) and os.listdir(reg_p):
             dict_dirs.append(reg_p)
             manifest["has_registry"] = True
+        # ADDITIVE (mega / aggregate index): bundle the sites-only INDEL AF sidecar
+        # (indel_af_<vcf>/) in the MAIN tarball so indel off-targets from an aggregate
+        # all-source panel carry per-dataset AF on download -- exactly like the SNP
+        # registry does for SNPs (analisi_indels_NNN reads it from Dictionaries/ on
+        # install). Small gzipped TSVs; absent (genotyped index) => no-op.
+        indel_af_p = os.path.join(dicts_root, f"indel_af_{vcf_name}")
+        if os.path.isdir(indel_af_p) and os.listdir(indel_af_p):
+            dict_dirs.append(indel_af_p)
+            manifest["has_indel_af"] = True
         # ADDITIVE (SNP+indel feature): bundle the phased indel-genotype store in the
         # MAIN tarball so CONFIRMED-cis SNP+indel co-occurrence survives download
         # (indel_genotypes_<vcf>/ -> Dictionaries/ on install, where analisi_indels
