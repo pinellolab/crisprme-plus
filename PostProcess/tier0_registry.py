@@ -790,6 +790,119 @@ def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
                            compress=compress, block_records=block_records)
 
 
+# --------------------------------------------------------------------------- #
+# (C) Sites-only INFO-AF registry -- the "mega" all-source merged index
+# --------------------------------------------------------------------------- #
+#
+# compile_registry / compile_registry_panel COUNT per-sample genotypes. The mega
+# index is a merged, SITES-ONLY VCF (genotypes stripped): each dataset contributes
+# a per-dataset allele frequency (INFO/AF_<dataset>) and the site carries AF_max.
+# There are no genotypes to count, so this builder reads the pre-computed AFs
+# directly. AF is reproduced EXACTLY (to within 0.5/AN of the input); individual
+# carrier/hom counts do not exist for aggregate data, so they are 0 (the report
+# renders them N/A for aggregate_af_only groups -- never a fabricated estimate).
+def _af_only_counts(af, an_nominal, n_called):
+    """Synthesize integer ``Counts`` for ONE aggregate (db, alt) record from a
+    site-level allele frequency, with NO genotypes available.
+
+    ``AC = round(af * AN)`` reproduces ``AF = AC/AN`` EXACTLY to within ``0.5/AN``
+    of ``af`` **provided** ``af >= ~1/(2*AN)`` (true for every mega source under the
+    MAF>0.001 filter, since 0.001 > 1/(2*AN) for all of them). A positive ``af``
+    smaller than that (only reachable if this helper is called OUTSIDE the recipe)
+    is floored to ``AC=1`` so a MAF-passing site is never dropped -- at the cost of
+    over-stating that one site's AF; the floor branch does not occur for
+    recipe-produced input.
+
+    Aggregate data carries NO per-individual genotypes, so ``n_carrier`` / ``n_hom``
+    are **0** -- they are NOT observed and are NOT modelled (the user chose AF-only;
+    the report renders them as N/A for ``aggregate_af_only`` groups rather than
+    showing a fabricated Hardy-Weinberg estimate). ``n_called`` carries the nominal
+    cohort size so the group is non-empty and AN is meaningful.
+    """
+    an_nominal = int(an_nominal)
+    n_called = max(int(n_called), 0)
+    if af <= 0.0 or an_nominal <= 0:
+        # af<=0: monomorphic. an_nominal<=0: misconfigured dataset (no cohort) --
+        # return a degenerate all-zero group rather than an AC>AN record.
+        return Counts(AC=0, AN=max(an_nominal, 0), n_called_indiv=n_called)
+    ac = int(round(af * an_nominal))
+    if ac <= 0:
+        ac = 1  # MAF-passing site never dropped (unreachable under the recipe)
+    elif ac > an_nominal:
+        ac = an_nominal  # defensive: a caller-supplied af>1 cannot exceed AN
+    return Counts(AC=ac, AN=an_nominal, n_carrier_indiv=0, n_hom_indiv=0,
+                  n_called_indiv=n_called)
+
+
+def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
+                                  compress=False,
+                                  block_records=DEFAULT_BLOCK_RECORDS):
+    """Compile a SITES-ONLY merged VCF's per-dataset AF INFO fields into the
+    mmap registry (the "mega" all-source index) -- NO genotypes required.
+
+    Each dataset becomes one db-level group (``db_group_id``); the GLOBAL group
+    carries AF_max (the max per-dataset AF at the site) over a pooled nominal
+    denominator. The binary format is IDENTICAL to ``compile_registry`` (this
+    reuses ``_write_registry``); only the source of the counts differs. The
+    manifest ``aggregation`` tag is ``"info_af"`` and each database's taxonomy
+    carries ``aggregate_af_only: True`` so readers can flag the provenance.
+
+    Args:
+      records: iterable of ``(pos:int, ref:str, alt:str, rsid:str,
+        af_by_dataset:dict[dataset_label -> af_float])``. Only datasets with a
+        defined, positive AF at the site need appear. Multiallelic => multiple
+        records at the same pos with distinct alt (the merge splits with
+        ``bcftools norm -m -any`` upstream). Need not be pre-sorted.
+      dataset_meta: ``dataset_label -> {"sample_count": N, "an_nominal": 2N}``.
+        ``an_nominal`` defaults to ``2 * sample_count`` when absent; it is the
+        allele-number denominator shown for that dataset (use each cohort's true
+        2N so the displayed AN is meaningful and AF is precise).
+      out_bin/out_idx: registry binary + json manifest paths.
+
+    Returns the manifest dict (also written to out_idx).
+    """
+    an_of, n_of = {}, {}
+    for ds, meta in dataset_meta.items():
+        n = int(meta["sample_count"])
+        n_of[ds] = n
+        an_of[ds] = int(meta.get("an_nominal", 2 * n))
+
+    def _af_groups(af_by_dataset, _alt_index):
+        # aggregate_fn contract: (payload, alt_index) -> {group_id: Counts}. Here
+        # the payload IS the per-dataset AF dict (no genotypes to aggregate).
+        result = {}
+        best_af, gN, gAN = 0.0, 0, 0
+        for ds, af in af_by_dataset.items():
+            if af is None or af <= 0.0 or ds not in an_of:
+                continue
+            result[db_group_id(ds)] = _af_only_counts(af, an_of[ds], n_of[ds])
+            if af > best_af:
+                best_af = af
+            gN += n_of[ds]
+            gAN += an_of[ds]
+        if best_af > 0.0:  # GLOBAL group == AF_max over the pooled nominal panel
+            result[GLOBAL_GROUP_ID] = _af_only_counts(best_af, gAN, gN)
+        return result
+
+    recs = [(int(p), ref, alt, rsid, af_by_ds)
+            for (p, ref, alt, rsid, af_by_ds) in records]
+    recs.sort(key=lambda r: (r[0], r[2]))
+
+    taxonomy = {
+        ds: {
+            "sample_count": n_of[ds],
+            "phased_placeholder": False,   # aggregate: no phase
+            "subpopulations": [],
+            "aggregate_af_only": True,     # INFO-AF provenance marker
+        }
+        for ds in dataset_meta
+    }
+
+    return _write_registry(recs, _af_groups, {}, taxonomy, out_bin, out_idx,
+                           alt_index="1", aggregation="info_af",
+                           compress=compress, block_records=block_records)
+
+
 def _choose_count_width(max_count):
     """Pick the smallest safe count field width (2=u16, 4=u32) for a max count.
 

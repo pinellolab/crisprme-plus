@@ -136,6 +136,45 @@ allele frequency low. CRISPRme+ therefore defines the panel from the samples
 **actually present in the VCF** (VCF-filtered `samplesID`), giving the correct
 AN (here 2×(2,548 + 929) = 6,954 for combined 1000G+HGDP autosomes).
 
+### Two panel modes (genotyped vs sites-only)
+The merge above is the **genotyped, cis-capable** mode (`merge_vcf_panels.sh` /
+`build_combined_panel.sh`): it keeps per-sample genotypes, recomputes a **pooled**
+`INFO/AF` (AC/AN over the union of genotyped samples, `bcftools +fill-tags`), and
+feeds the genotype-counting Tier-0 registry. It is correct only when *every* merged
+source is genotyped, and it is what enables indel+SNP cis reconstruction.
+
+CRISPRme+ also ships a **sites-only "mega" panel** (`merge_mega_sites.sh`) that
+merges heterogeneous **aggregate** resources — 1000 Genomes 2021, HGDP, gnomAD v4.1,
+TOPMed, and All-of-Us — where genotypes are unavailable or meaningless (gnomAD is
+frequency-only, TOPMed distributes `AN=0`, All-of-Us is a single aggregate
+pseudo-sample). Because there is no honest pooled AC/AN across such sources, and no
+shared samples to reconstruct cross-source haplotypes, the mega:
+
+1. **normalizes** each source (`bcftools norm -m -any -f REF`: split multiallelics to
+   biallelic and left-align, so the same variant from two sources is represented
+   identically and merges rather than duplicating; `AF` is `Number=A`, so the correct
+   per-alt frequency is carried without reading genotypes);
+2. applies a uniform **MAF > 0.001** filter and **strips genotypes** (`view -G`);
+3. keeps each source's frequency verbatim as `AF_<source>` and, after
+   `bcftools merge -m none`, annotates a per-site **`AF_max`** — the maximum
+   `AF_<source>` at that site — as the global summary frequency (no pooled `AF`).
+
+The mega's Tier-0 registry is built **directly from these frequencies**
+(`compile_registry_from_info_af`, not from genotypes): each source becomes one
+database group with allele count `AC = round(AF · AN_nom)` and `AN = AN_nom` (twice
+the source's nominal sample size — so the reported allele frequency reproduces the
+source AF exactly, to within `0.5/AN`, and the reported AN is the source's true
+cohort size), and the GLOBAL group carries `AF_max`. Per-individual carrier and
+homozygote counts do not exist for aggregate data, so they are reported as
+Hardy–Weinberg expectations from the allele frequency (the frequency itself is exact;
+carrier/hom are flagged as estimates). The registry stores SNPs only (single-base
+ref/alt); indels (~24 % of merged sites) are surfaced as off-targets through the
+fake-indel genome but are not yet frequency-annotated in this mode.
+
+The two modes are therefore complementary: the genotyped panel gives phased,
+cis-capable frequencies over a curated sample set; the mega gives one-scan,
+frequency-annotated coverage across the widest set of population resources.
+
 ---
 
 ## 3. Allele-frequency estimation

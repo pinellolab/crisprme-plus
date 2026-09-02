@@ -1012,6 +1012,29 @@ if _indel_snp:
         print(f"WARNING [indel-snp]: post-analysis annotation disabled ({_isp_err})",
               flush=True)
         _indel_snp = False
+
+# [mega] sites-only INDEL per-dataset AF sidecar (INDEPENDENT of indel+SNP cooc):
+# a merged all-source "mega" index has no genotypes, so indel off-targets cannot get
+# their per-dataset AF from the fake-indel MAF (which is empty). When present, the
+# build_mega_indel_af.py sidecar (indel_af_<vcf>/indel_af_<chrom>.tsv.gz, a sibling
+# of registry_<vcf>/) supplies per-dataset AF + AF_max, emitted to a companion TSV.
+# Fully guarded: absent sidecar or any error -> no-op; classic indel row untouched.
+_indel_af = _indel_af_out = None
+try:
+    import build_mega_indel_af as _bia
+    _root2 = os.path.dirname(os.path.realpath(sys.argv[4]))
+    _vcf2 = os.path.basename(os.path.realpath(sys.argv[4]))[len("log_indels_"):]
+    _iaf = os.path.join(_root2, "indel_af_" + _vcf2,
+                        "indel_af_" + current_chr + ".tsv.gz")
+    if os.path.isfile(_iaf):
+        _indel_af = _bia.IndelAfReader(_iaf)
+        _indel_af_out = open(outputFile + ".indel_af.tsv", "w")
+        _indel_af_out.write(
+            "chrom\tofftarget_start\tindel_pos\tindel_ref\tindel_alt\t"
+            + "\t".join("AF_" + _l for _l in _indel_af._labels) + "\tAF_max\n")
+except Exception as _iaf_err:  # noqa: BLE001 - never break the classic path
+    print(f"WARNING [mega-indel-af]: sidecar disabled ({_iaf_err})", flush=True)
+    _indel_af = _indel_af_out = None
 print("Analysis of " + current_chr)
 
 save_cluster_targets = True
@@ -1096,6 +1119,24 @@ for line in inResult:
     final_result[4] = str(true_start_target)
     # real_start_cluster
     final_result[5] = str(true_start_target - diff_pos_clus)
+
+    # [mega] per-dataset INDEL AF sidecar lookup -> companion row (guarded no-op if
+    # the sidecar is absent). indel_data[4] is "chrN_pos_REF_ALT"; the SNP-only
+    # Tier-0 registry cannot hold the indel, so its per-dataset AF comes from here.
+    if _indel_af is not None:
+        try:
+            _iap = indel_data[4].split("_")  # chrN_pos_REF_ALT
+            _iarec = _indel_af.lookup(int(_iap[-3]), _iap[-2], _iap[-1])
+            if _iarec is not None:
+                _iavals = [_iarec.get(_l) for _l in _indel_af._labels]
+                _indel_af_out.write(
+                    current_chr + "\t" + final_result[4] + "\t" + _iap[-3] + "\t"
+                    + _iap[-2] + "\t" + _iap[-1] + "\t"
+                    + "\t".join("." if _v is None else ("%.6g" % _v) for _v in _iavals)
+                    + "\t" + ("." if _iarec.get("AF_max") is None
+                              else ("%.6g" % _iarec["AF_max"])) + "\n")
+        except Exception:  # noqa: BLE001 - never break the classic indel row
+            pass
 
     # [indel-snp] SNP+indel co-occurrence (gated companion output; never touches the
     # classic indel row). The overlaid search reports IUPAC codes in line[2] at
@@ -1221,6 +1262,8 @@ else:
     crista_best.close()
     if _cooc_out is not None:
         _cooc_out.close()
+    if _indel_af_out is not None:
+        _indel_af_out.close()
     # update header
     os.system(
         "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
@@ -1268,6 +1311,8 @@ mmblg_best.close()
 crista_best.close()
 if _cooc_out is not None:
     _cooc_out.close()
+if _indel_af_out is not None:
+    _indel_af_out.close()
 
 os.system(
     "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
