@@ -146,6 +146,18 @@ and show only AF + AF_max (report-side branch — pending, part of report integr
   before it `OverflowError`s a whole chromosome build; count multiallelic + no-AF
   drops (nothing silently discarded); uppercase the SNP gate; guard `n_called==0`;
   document that a `--datasets` subset recomputes GLOBAL.
+- **Hardening round** (second workflow, 17 confirmed latent findings — 0 BLOCKER/MAJOR):
+  the indel store now DEDUPS duplicate `(pos,ref,alt)` keys by **max** per-dataset AF
+  (`bcftools norm` emits ~19 such keys genome-wide in VNTR regions; previously the
+  reader silently kept last-wins); both builders honor `--chrom` (multi-contig
+  safety — the registry is keyed by (pos,alt) with no chrom); the merge awk emits
+  `.` not `0` for an all-AF-missing row; `_find_vcf` fails on ambiguity instead of
+  silent `head -1`; chrom-token grep anchored to the basename; registry skips
+  phantom empty-group records; `IndelAfReader` validates its header + parses AF_max
+  by position; the indel hook warns-once instead of pure silent swallow.
+- **Full 24-chrom verification** (`verify_mega_chrom.py`): registry + indel sidecar
+  PARTITION all 66.9M sites (SNP registry XOR indel store, no gap/overlap) and
+  sampled AFs round-trip on **every** chromosome — ALL PASS.
 
 ## Files
 - `PostProcess/tier0_registry.py` — `compile_registry_from_info_af`, `_hwe_counts_from_af`

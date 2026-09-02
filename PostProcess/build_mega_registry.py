@@ -122,8 +122,12 @@ def build(vcf, chrom, out_dir, dataset_meta=None, compress=False):
     stats = {"snps": 0, "indels": 0, "multiallelic": 0, "no_af": 0}
 
     def _snp_records():
+        # chrom= filters to the target contig: the Tier-0 registry is keyed by
+        # (pos, alt) with NO chromosome, so a multi-contig VCF would collide
+        # same-POS records across chroms. The per-chrom mega VCFs carry one contig,
+        # so this is a safety guard (a no-op for them).
         for (pos, ref, alt, rsid, afs) in iter_vcf_af_records(vcf, datasets,
-                                                              stats=stats):
+                                                              chrom=chrom, stats=stats):
             ref_u, alt_u = ref.upper(), alt.upper()
             if len(ref_u) == 1 and len(alt_u) == 1 and ref_u in "ACGT" and alt_u in "ACGT":
                 stats["snps"] += 1

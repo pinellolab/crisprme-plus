@@ -884,8 +884,16 @@ def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
             result[GLOBAL_GROUP_ID] = _af_only_counts(best_af, gAN, gN)
         return result
 
+    def _has_group(af_by_ds):
+        # matches the group-emit condition in _af_groups; skips a record that would
+        # otherwise be written as a phantom n_groups=0 entry (no dataset in
+        # dataset_meta carries a positive AF at the site).
+        return any(af is not None and af > 0.0 and ds in an_of
+                   for ds, af in af_by_ds.items())
+
     recs = [(int(p), ref, alt, rsid, af_by_ds)
-            for (p, ref, alt, rsid, af_by_ds) in records]
+            for (p, ref, alt, rsid, af_by_ds) in records
+            if _has_group(af_by_ds)]
     recs.sort(key=lambda r: (r[0], r[2]))
 
     taxonomy = {

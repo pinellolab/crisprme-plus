@@ -110,5 +110,33 @@ class TestBuildEndToEnd(unittest.TestCase):
         self.assertIsNone(reader.lookup(2000, "TA"))
 
 
+class TestChromFilterAndGlobal(unittest.TestCase):
+    def test_chrom_filter_excludes_other_contigs(self):
+        # a multi-contig VCF must not leak other chroms into the registry (the
+        # registry is keyed by (pos,alt) with NO chrom -> same-POS would collide).
+        d = tempfile.mkdtemp()
+        vcf = os.path.join(d, "multi.vcf.gz")
+        _write_vcf(vcf, [
+            ("chr1", 500, "rsA", "C", "T", "AF_HGDP=0.10;AF_max=0.10"),
+            ("chr2", 500, "rsB", "C", "T", "AF_HGDP=0.90;AF_max=0.90"),  # same POS, other chrom
+        ])
+        manifest, binp, idxp, stats = bmr.build(vcf, "chr1", d)
+        self.assertEqual(stats["snps"], 1)  # chr2 excluded
+        reg = RegistryReader(binp, idxp)
+        g = reg.lookup(500, "T")
+        self.assertLessEqual(abs(g[db_group_id("HGDP")].allele_freq() - 0.10), 1e-3)  # chr1's, not 0.90
+
+    def test_global_matches_vcf_afmax_token(self):
+        # the GLOBAL group's AF must equal the VCF's ACTUAL INFO/AF_max token, not
+        # just a value re-derived inside the test.
+        d = tempfile.mkdtemp()
+        vcf = os.path.join(d, "mega.chr1.afmax.vcf.gz")
+        _write_vcf(vcf, [("chr1", 700, "rsC", "C", "T",
+                          "AF_1000G2021=0.0377889;AF_HGDP=0.030541;AF_max=0.0377889")])
+        _, binp, idxp, _ = bmr.build(vcf, "chr1", d)
+        gg = RegistryReader(binp, idxp).lookup(700, "T")[GLOBAL_GROUP_ID]
+        self.assertLessEqual(abs(gg.allele_freq() - 0.0377889), 1e-4)  # == the AF_max token
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

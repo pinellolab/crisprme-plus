@@ -53,9 +53,11 @@ def _parse_af_max(info):
     return None
 
 
-def iter_indel_af_records(vcf, datasets):
+def iter_indel_af_records(vcf, datasets, chrom=None):
     """Yield (pos:str, ref, alt, af_by_dataset:dict, af_max:float|None) for each
-    biallelic INDEL record of a sites-only merged VCF. Comma-ALT rows are skipped."""
+    biallelic INDEL record of a sites-only merged VCF. Comma-ALT rows are skipped.
+    ``chrom`` (optional) restricts to one contig (defends against a multi-contig VCF
+    whose same-POS records on different chroms would otherwise collide by key)."""
     opener = gzip.open if vcf.endswith(".gz") else open
     with opener(vcf, "rt") as fh:
         for line in fh:
@@ -64,7 +66,9 @@ def iter_indel_af_records(vcf, datasets):
             f = line.rstrip("\n").split("\t")
             if len(f) < 8:
                 continue
-            _c, pos, _vid, ref, alt, _q, _fl, info = f[:8]
+            c, pos, _vid, ref, alt, _q, _fl, info = f[:8]
+            if chrom is not None and c != chrom:
+                continue
             if "," in alt or not _is_indel(ref, alt):
                 continue
             afs = _parse_info_afs(info, datasets)
@@ -84,24 +88,46 @@ def build_indel_af_store(vcf, chrom, out_dir, dataset_meta=None):
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, "indel_af_%s.tsv.gz" % chrom)
     tmp = out + ".tmp"
-    n = 0
+    # Accumulate, deduping duplicate (pos,ref,alt) keys by MAX per-dataset AF (and
+    # max AF_max). bcftools norm -m -any can emit two identical biallelic indels in
+    # repetitive/VNTR regions (distinct original ALTs left-aligning to the same
+    # representation); ~19 such keys exist genome-wide. Keeping the max is
+    # conservative for off-target risk and, crucially, makes the store's keys UNIQUE
+    # so IndelAfReader's dict cannot silently drop a record (the key never collides).
+    acc = {}  # (pos:int, ref, alt) -> [ [af|None per label], af_max|None ]
+    n_dup = 0
+    for pos, ref, alt, afs, af_max in iter_indel_af_records(vcf, datasets, chrom=chrom):
+        key = (int(pos), ref.upper(), alt.upper())
+        newvals = [afs.get(d) for d in labels]
+        cur = acc.get(key)
+        if cur is None:
+            acc[key] = [newvals, af_max]
+        else:
+            n_dup += 1
+            for i, v in enumerate(newvals):
+                if v is not None and (cur[0][i] is None or v > cur[0][i]):
+                    cur[0][i] = v
+            if af_max is not None and (cur[1] is None or af_max > cur[1]):
+                cur[1] = af_max
     try:
         with gzip.open(tmp, "wt") as fh:
             fh.write("#pos\tref\talt\t%s\tAF_max\n"
                      % "\t".join("AF_" + d for d in labels))
-            for pos, ref, alt, afs, af_max in iter_indel_af_records(vcf, datasets):
-                cols = [afs.get(d) for d in labels]
-                fh.write("%s\t%s\t%s\t%s\t%s\n" % (
-                    pos, ref.upper(), alt.upper(),
-                    "\t".join("." if c is None else repr(c) for c in cols),
+            for pos, ref, alt in sorted(acc):
+                vals, af_max = acc[(pos, ref, alt)]
+                fh.write("%d\t%s\t%s\t%s\t%s\n" % (
+                    pos, ref, alt,
+                    "\t".join("." if v is None else repr(v) for v in vals),
                     "." if af_max is None else repr(af_max)))
-                n += 1
         os.replace(tmp, out)
     except BaseException:
         if os.path.isfile(tmp):
             os.remove(tmp)
         raise
-    return n, out
+    if n_dup:
+        sys.stderr.write("  [indel-af] %s: merged %d duplicate (pos,ref,alt) key(s) "
+                         "by max AF\n" % (chrom, n_dup))
+    return len(acc), out
 
 
 class IndelAfReader(object):
@@ -115,20 +141,24 @@ class IndelAfReader(object):
         opener = gzip.open if store_path.endswith(".gz") else open
         with opener(store_path, "rt") as fh:
             header = fh.readline().rstrip("\n")
-            # "#pos ref alt AF_<ds>.. AF_max" -> the dataset labels between alt and AF_max
+            # "#pos ref alt AF_<ds>.. AF_max" -> the dataset labels between alt and AF_max.
             cols = header.lstrip("#").split("\t")
+            if len(cols) < 4 or cols[0] != "pos" or cols[-1] != "AF_max":
+                raise ValueError("indel-AF store: unexpected header %r" % header)
             self._labels = [c[len("AF_"):] for c in cols[3:-1]]
+            nfields = len(cols)  # pos, ref, alt, <labels...>, AF_max
+            afm_col = 3 + len(self._labels)  # AF_max column by POSITION (not f[-1])
             for line in fh:
                 f = line.rstrip("\n").split("\t")
-                if len(f) < 4:
-                    continue
+                if len(f) != nfields:
+                    continue  # skip a malformed row rather than mis-parse AF_max
                 pos, ref, alt = int(f[0]), f[1], f[2]
                 rec = {}
                 for i, lab in enumerate(self._labels):
                     v = f[3 + i]
                     if v != ".":
                         rec[lab] = float(v)
-                afm = f[-1]
+                afm = f[afm_col]
                 if afm != ".":
                     rec["AF_max"] = float(afm)
                 self._d[(pos, ref.upper(), alt.upper())] = rec

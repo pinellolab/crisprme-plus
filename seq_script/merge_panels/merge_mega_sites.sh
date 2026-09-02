@@ -81,13 +81,21 @@ REF="$REFDIR/$CHR.fa"
 WORK=$(mktemp -d -p "${TMPDIR:-$OUTDIR}")
 trap 'rm -rf "$WORK"' EXIT
 
-# match a chrom token exactly (chr2 must not match chr20/chr21/chr22)
-_find_vcf() { ls $1 2>/dev/null | grep -E "${CHR}([^0-9]|$)" | head -1; }
-
 prepped=(); names=()
 for entry in "${SOURCES[@]}"; do
   IFS='|' read -r name dir glob <<<"$entry"
-  vcf=$(_find_vcf "${dir}/${glob//\{C\}/$CHR}")
+  # Match the chrom token exactly, ANCHORED TO THE BASENAME: "${CHR}([^0-9]|$)"
+  # keeps chr2 from matching chr20/21/22; the trailing "[^/]*$" requires the token
+  # be after the last slash, so a chr-token in a PARENT DIR name cannot false-match.
+  # Ambiguity (>1 match, e.g. a sharded source or a stray sidecar) is FATAL, never
+  # a silent head -1 truncation.
+  hits=$(ls ${dir}/${glob//\{C\}/$CHR} 2>/dev/null | grep -E "${CHR}([^0-9]|\$)[^/]*\$")
+  nhit=$(printf '%s' "$hits" | grep -c .)
+  if [ "$nhit" -gt 1 ]; then
+    echo "[error] $name: $nhit VCFs match $CHR (ambiguous) — refusing to pick one:" >&2
+    printf '  %s\n' $hits >&2; exit 1
+  fi
+  vcf=$(printf '%s\n' "$hits" | head -1)
   [ -n "$vcf" ] || { echo "[warn] $name has no VCF for $CHR — skipping this source"; continue; }
   echo "[$name] $(basename "$vcf")"
   printf "INFO/AF AF_%s\n" "$name" > "$WORK/ren_$name.txt"
@@ -110,7 +118,7 @@ qfmt='%CHROM\t%POS\t%REF\t%ALT'; for n in "${names[@]}"; do qfmt="$qfmt\t%INFO/A
 # emit the max TWICE (col 5 -> INFO/AF_max, col 6 -> plain INFO/AF); annotate maps
 # columns to targets positionally, so one value cannot fan out to two fields.
 "$BCFTOOLS" query -f "$qfmt\n" "$WORK/mega.noafmax.vcf.gz" \
-  | awk -F'\t' 'BEGIN{OFS="\t"}{m=0; for(i=5;i<=NF;i++){ if($i!="."){ v=$i+0; if(v>m)m=v } } print $1,$2,$3,$4,m,m}' \
+  | awk -F'\t' 'BEGIN{OFS="\t"}{m=""; for(i=5;i<=NF;i++){ if($i!="."){ v=$i+0; if(m==""||v>m)m=v } } if(m=="")m="."; print $1,$2,$3,$4,m,m}' \
   | bgzip > "$WORK/afmax.tab.gz"
 tabix -s1 -b2 -e2 "$WORK/afmax.tab.gz"
 # Annotate BOTH AF_max AND a plain INFO/AF (= AF_max). The plain AF is the single

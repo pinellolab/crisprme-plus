@@ -1020,6 +1020,7 @@ if _indel_snp:
 # of registry_<vcf>/) supplies per-dataset AF + AF_max, emitted to a companion TSV.
 # Fully guarded: absent sidecar or any error -> no-op; classic indel row untouched.
 _indel_af = _indel_af_out = None
+_indel_af_errs = [0]  # emission-error counter (warn once, never break classic path)
 try:
     import build_mega_indel_af as _bia
     _root2 = os.path.dirname(os.path.realpath(sys.argv[4]))
@@ -1135,8 +1136,11 @@ for line in inResult:
                     + "\t".join("." if _v is None else ("%.6g" % _v) for _v in _iavals)
                     + "\t" + ("." if _iarec.get("AF_max") is None
                               else ("%.6g" % _iarec["AF_max"])) + "\n")
-        except Exception:  # noqa: BLE001 - never break the classic indel row
-            pass
+        except Exception as _iae:  # noqa: BLE001 - never break the classic indel row
+            _indel_af_errs[0] += 1
+            if _indel_af_errs[0] == 1:
+                print("WARNING [mega-indel-af]: emission error (further "
+                      "occurrences suppressed): %s" % _iae, flush=True)
 
     # [indel-snp] SNP+indel co-occurrence (gated companion output; never touches the
     # classic indel row). The overlaid search reports IUPAC codes in line[2] at
