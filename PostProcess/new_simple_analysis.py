@@ -927,6 +927,26 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         replaceTarget,  # full IUPAC protospacer (dig-in aid)
                     )
                 )
+            # PAM-validity of a candidate (mirrors the finalizer's pam_ok gate). Used
+            # ONLY under _FAST_MODE to break mismatch ties toward a valid PAM, so a
+            # PAM-region variant is not decided by lex order (which drops ~half the
+            # PAM-creation off-targets). When _FAST_MODE is off, `_pam_bad_leg` is a
+            # constant 0, so the selection key reduces to (mismatch, lex) and the
+            # dense-window greedy output stays BYTE-IDENTICAL to the shipped behavior.
+            def _pam_ok_leg(seq_list):
+                _s = reverse_complement_table("".join(seq_list)) if revert else "".join(seq_list)
+                _tl = list(_s)
+                for _p, _c in enumerate(realTarget):
+                    if _c == "-":
+                        _tl.insert(_p, "-")
+                for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
+                    if _ch.upper() not in iupac_code_set[pam[_i]]:
+                        return False
+                return True
+
+            def _pam_bad_leg(seq_list):
+                return 1 if (_FAST_MODE and not _pam_ok_leg(seq_list)) else 0
+
             # Build the greedy representative per haplotype and REPLACE the per-SNP
             # level-0 entries with that single entry, so the finalization below scores
             # exactly one row (bulges/PAM/creation/CFD via the existing code path).
@@ -938,22 +958,20 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 greedy_seq = list(refSeq)  # pre-revert reference
                 greedy_samples, greedy_info = set(), []
                 for pos_c, cands in by_pos.items():
-                    ref_allele = refSeq[pos_c]
                     ref_mm = _aligned_mm(greedy_seq, realTarget, guide_no_pam, revert)
-                    best_elem, best_mm, best_v = ref_allele, ref_mm, None
+                    # key of KEEPING the reference base ("\xff" lex -> an alt wins a full
+                    # (mm, pam) tie). Selection key = (mismatch, pam_invalid, alt): fewest
+                    # mismatches FIRST (lossless), then a valid PAM among ties (fast mode
+                    # only), then the lexicographically-smaller alt (deterministic, #139).
+                    best_key = (ref_mm, _pam_bad_leg(greedy_seq), "\xff")
+                    best_elem, best_v = None, None
                     for elem, v in cands:
                         trial = list(greedy_seq)
                         trial[pos_c] = elem
                         m = _aligned_mm(trial, realTarget, guide_no_pam, revert)
-                        # strict improvement, or tie preferring an alt (keeps PAM-
-                        # creating / present variants where mismatch is unaffected).
-                        # Among alts, a mm-neutral tie prefers the lexicographically-
-                        # smaller alt (deterministic), so this legacy greedy rep matches
-                        # the dict-less one regardless of alt order (#139).
-                        if m < best_mm or (
-                            m == best_mm and (best_v is None or elem < best_elem)
-                        ):
-                            best_mm, best_elem, best_v = m, elem, v
+                        key = (m, _pam_bad_leg(trial), elem)
+                        if key < best_key:
+                            best_key, best_elem, best_v = key, elem, v
                     if best_v is not None:
                         greedy_seq[pos_c] = best_elem
                         greedy_samples |= best_v[1]
