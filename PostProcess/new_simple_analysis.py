@@ -1060,6 +1060,89 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 totalDict[count][0] = {
                     ("greedy", 0): [greedy_seq, greedy_samples, greedy_info]
                 }
+                # WORST-CASE CFD representative (mirrors the observed fast path,
+                # new_simple_analysis.py:700). The min-mismatch greedy above does NOT
+                # maximize CFD (CFD is a position-WEIGHTED product -- a seed mismatch
+                # outweighs several distal ones), so scoring only it UNDER-states the
+                # worst-case CFD on THIS dict/registry (mega) path too. CFD factorizes
+                # per position, so the per-column argmax is EXACT (bounded brute-force
+                # fallback covers the JOINT-PAM factor). Emit it as a SECOND level-0
+                # entry: ``capped`` skips the lattice growth (range(0)) AND the peel
+                # (`not capped`), so two level-0 entries are finalized INDEPENDENTLY
+                # (never crossed), and the downstream best-CFD selection then reports the
+                # true worst-possible CFD. GATED on _FAST_MODE + do_scores so the dense-
+                # cap (non-fast IUPAC_CAP) path stays BYTE-IDENTICAL. The finalizer's own
+                # carrier/budget/PAM gates (lines ~1167/1215/1217) drop a non-emittable
+                # rep -- so we constrain the argmax to EMITTABLE combos (``valid_fn``),
+                # else the argmax could be a dropped combo and a WEAKER emittable rep
+                # would win (the observed-path residual). ``_cols`` is the fast branch's
+                # per-position candidate schema (defined above under the same _FAST_MODE
+                # guard); ``registry_only_mode`` tolerates the empty carrier set the
+                # sites-only mega index produces (matches the finalizer's line-1167 gate).
+                if (
+                    _FAST_MODE
+                    and _twopass_emit is not None
+                    and globals().get("do_scores")
+                    and globals().get("mm_scores") is not None
+                ):
+                    def _cfd_fast_leg(_seq_list):
+                        _s = (
+                            reverse_complement_table("".join(_seq_list))
+                            if revert
+                            else "".join(_seq_list)
+                        )
+                        _tl = list(_s)
+                        for _p, _c in enumerate(realTarget):
+                            if _c == "-":
+                                _tl.insert(_p, "-")
+                        _t = "".join(_tl).upper()
+                        _bs = int(split[bulge_pos])
+                        if split[0] == "DNA":
+                            return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
+                                            mm_scores, pam_scores, do_scores)
+                        return calc_cfd(split[1], _t[:-3], _t[-2:],
+                                        mm_scores, pam_scores, do_scores)
+
+                    def _emittable_leg(_seq_list, _chosen):
+                        # KEEP only what the finalizer keeps: >=1 carrier (unless
+                        # registry-only) AND within the mismatch budget (count bulges
+                        # exactly as the finalizer does, then subtract split[8]) AND a
+                        # valid PAM.
+                        if not registry_only_mode and not any(
+                            _chosen[_pc]["carriers"] for _pc in _chosen
+                        ):
+                            return False
+                        _s = (
+                            reverse_complement_table("".join(_seq_list))
+                            if revert
+                            else "".join(_seq_list)
+                        )
+                        _tl = list(_s)
+                        for _p, _c in enumerate(realTarget):
+                            if _c == "-":
+                                _tl.insert(_p, "-")
+                        _mm = 0
+                        for _i, _ch in enumerate(_tl[pos_beg:pos_end]):
+                            if _i < len(guide_no_pam) and _ch.upper() != guide_no_pam[_i]:
+                                _mm += 1
+                        if _mm - int(split[8]) > allowed_mms:
+                            return False
+                        for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
+                            if _ch.upper() not in iupac_code_set[pam[_i]]:
+                                return False
+                        return True
+
+                    _cfd_rep = _twopass_emit.greedy_max_score(
+                        _cols, refSeq, realTarget, guide_no_pam, revert,
+                        pos_beg, pos_end, reverse_complement_table, _cfd_fast_leg,
+                        valid_fn=_emittable_leg,
+                    )
+                    if _cfd_rep["info"] and list(_cfd_rep["seq"]) != list(greedy_seq):
+                        totalDict[count][0][("greedy_cfd", 1)] = [
+                            list(_cfd_rep["seq"]),
+                            set(_cfd_rep["carriers"]),
+                            list(_cfd_rep["info"]),
+                        ]
         if revert:
             refSeq = reverse_complement_table(refSeq)
         for count in totalDict:
