@@ -183,19 +183,59 @@ def greedy_worst_case(columns, ref_seq, real_target, guide_no_pam, revert,
     return {"seq": greedy_seq, "carriers": carriers, "info": info}
 
 
+def _max_score_brute(columns, ref_seq, real_target, guide_no_pam, revert,
+                     pos_beg, pos_end, revcom_fn, score_fn, cap):
+    """EXACT max-``score_fn`` assignment over the window's alt combos (each column: its
+    reference base or any candidate alt), or None if the product exceeds ``cap``. Used to
+    make the worst-case CFD EXACT: CFD does NOT fully factorize (the PAM factor is a joint
+    lookup over the PAM bases, not a per-position product), so a per-column greedy is not
+    guaranteed optimal. Returns ``{"seq": list, "chosen": {pos_c: candidate}}``."""
+    import itertools
+    opts, total = [], 1
+    for col in columns:
+        col_opts = [None] + list(col["candidates"])   # None = keep the reference base
+        total *= len(col_opts)
+        if total > cap:
+            return None
+        opts.append([(col["pos_c"], o) for o in col_opts])
+    best = None   # (score, seq, chosen)
+    for combo in itertools.product(*opts):
+        seq = list(ref_seq)
+        chosen = {}
+        for pc, o in combo:
+            if o is not None:
+                seq[pc] = o["alt"]
+                chosen[pc] = o
+        s = score_fn(seq)
+        if best is None or s > best[0]:
+            best = (s, seq, chosen)
+    return None if best is None else {"seq": best[1], "chosen": best[2]}
+
+
 def greedy_max_score(columns, ref_seq, real_target, guide_no_pam, revert,
-                     pos_beg, pos_end, revcom_fn, score_fn):
-    """Greedy per-column MAXIMIZATION of ``score_fn`` -- the strongest (worst) off-target
-    the window can form under a score where HIGHER = worse (e.g. worst-case CFD). For a
-    score that FACTORIZES per position (CFD = a product of per-position factors x one PAM
-    factor), changing one column changes only its own factor, so greedy-per-column equals
-    the GLOBAL max -- and a min-MISMATCH representative does NOT: CFD is position-weighted
-    (a seed mismatch outweighs several distal ones), so the min-mismatch rep can UNDER-state
-    the worst-case CFD. A bounded multi-pass converges the joint PAM factor (a PAM base
-    shared across <=3 columns; an invalid PAM makes CFD 0, so the max naturally lands on a
-    PAM-valid combination when one exists). ``score_fn(seq_prerevert_list) -> float`` MUST
-    already fold in the alignment + PAM (the caller mirrors the finalizer's CFD). Returns
-    ``{"seq": list, "carriers": set, "info": [[rsID,AF,snp], ...]}``."""
+                     pos_beg, pos_end, revcom_fn, score_fn, cap=_PAM_REPAIR_CAP):
+    """The strongest (worst) off-target the window can form under a score where HIGHER =
+    worse (e.g. worst-case CFD) -- a min-MISMATCH representative does NOT maximize CFD (CFD
+    is position-weighted, so a seed mismatch outweighs several distal ones). EXACT: over a
+    small window (allele-combo product <= ``cap``) it brute-forces the true argmax, because
+    CFD does NOT fully factorize -- the PAM factor is a JOINT lookup over the PAM bases, so
+    a per-column greedy can stall at a local max and UNDER-state the worst case (measured on
+    real chr22 double-bulge windows). Over a large (dense, separately-flagged) window it
+    falls back to a greedy per-column argmax + bounded multi-pass. ``score_fn(seq_prerevert
+    _list) -> float`` MUST already fold in the alignment + PAM. Returns ``{"seq": list,
+    "carriers": set, "info": [[rsID,AF,snp], ...]}``."""
+    exact = _max_score_brute(columns, ref_seq, real_target, guide_no_pam, revert,
+                             pos_beg, pos_end, revcom_fn, score_fn, cap)
+    if exact is not None:
+        carriers, info = set(), []
+        for col in columns:
+            ch = exact["chosen"].get(col["pos_c"])
+            if ch is not None:
+                carriers |= set(ch["carriers"])
+                info.append(ch["info"])
+        return {"seq": exact["seq"], "carriers": carriers, "info": info}
+
+    # dense window (> cap combos): greedy per-column argmax + bounded multi-pass (best-effort).
     greedy_seq = list(ref_seq)
 
     def _select(col):

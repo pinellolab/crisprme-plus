@@ -234,6 +234,24 @@ class TestGreedyWorstCase(unittest.TestCase):
                 best = max(best, score(seq))
             self.assertAlmostEqual(got, best, places=9)
 
+    def test_greedy_max_score_exact_for_nonfactorizing_joint(self):
+        # A JOINT interaction like CFD's PAM lookup: the score is high only if BOTH columns
+        # take their alt (a per-column greedy from the reference can stall at a local max;
+        # the exact brute-force must find the joint optimum). This is the real double-bulge
+        # CFD residual in miniature.
+        guide = "ACGT"
+        ref = "ACGT"
+        cols = [
+            {"pos_c": 0, "candidates": [{"alt": "T", "carriers": {"s0"}, "info": ["r0", "0.1", "s"]}]},
+            {"pos_c": 3, "candidates": [{"alt": "A", "carriers": {"s3"}, "info": ["r3", "0.2", "s"]}]},
+        ]
+        def score(seq):   # 1.0 only when seq[0]==T AND seq[3]==A; each alone is worse
+            return 1.0 if (seq[0] == "T" and seq[3] == "A") else 0.1
+        r = te.greedy_max_score(cols, ref, ref, guide, False, 0, None, _revcom, score)
+        self.assertEqual(r["seq"][0], "T")
+        self.assertEqual(r["seq"][3], "A")
+        self.assertEqual(r["carriers"], {"s0", "s3"})   # both alts surfaced
+
     def test_unproductive_column_left_at_reference(self):
         # an alt that only ADDS a mismatch is not chosen; its carriers do not leak in.
         guide = "ACGTACGT"
