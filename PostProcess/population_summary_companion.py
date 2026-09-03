@@ -211,14 +211,31 @@ def _fmt_freq(value):
     return "%.6g" % value
 
 
-def _encode_group_breakdowns(summary, global_group_id, sep):
+def _is_aggregate_af_only(tier0_reader):
+    """True when the Tier-0 registry is an AGGREGATE (sites-only, AF-only) panel -- the
+    "mega" all-source index built by compile_registry_from_info_af (manifest
+    ``aggregation == "info_af"``). Such a registry carries real per-dataset allele
+    frequencies but NO genotypes, so its carrier / homozygote counts are 0 by
+    construction (an ARTIFACT, not a measurement). The companion must render those
+    carrier/hom fields as "NA" (unknown), never a fabricated 0. Allele-frequency fields
+    are unaffected (they are real). Guarded: any reader without a manifest -> False, so
+    every genotyped / legacy panel is unchanged."""
+    try:
+        return getattr(tier0_reader, "manifest", {}).get("aggregation") == "info_af"
+    except Exception:
+        return False
+
+
+def _encode_group_breakdowns(summary, global_group_id, sep, aggregate_af_only=False):
     """Return (allele_freq_by_group, carrier_freq_by_group, carrier_n_by_group).
 
     Each is a compact ';'-joined "group=value" string over the (db x subpop) AND db
     groups the summary reports (SPARSE: only groups with >=1 carrier), in sorted
     group-id order (deterministic). GLOBAL is omitted here (it has dedicated
     columns). Allele freq is 'NA' for a group whose AF is undefined (unphased
-    combination).
+    combination). When ``aggregate_af_only`` (an AF-only "mega" panel), the per-group
+    CARRIER freq / count are rendered 'NA' (genotypes absent -> carrier count unknown,
+    not zero); the allele-freq breakdown is unaffected.
     """
     af_parts = []
     cf_parts = []
@@ -228,8 +245,12 @@ def _encode_group_breakdowns(summary, global_group_id, sep):
             continue
         gs = summary.groups[gid]
         af_parts.append("%s=%s" % (gid, _fmt_af(gs.allele_freq, gs.allele_freq_defined)))
-        cf_parts.append("%s=%s" % (gid, _fmt_freq(gs.carrier_freq)))
-        n_parts.append("%s=%d" % (gid, gs.n_carrier))
+        if aggregate_af_only:
+            cf_parts.append("%s=NA" % gid)
+            n_parts.append("%s=NA" % gid)
+        else:
+            cf_parts.append("%s=%s" % (gid, _fmt_freq(gs.carrier_freq)))
+            n_parts.append("%s=%d" % (gid, gs.n_carrier))
     return (";".join(af_parts), ";".join(cf_parts), ";".join(n_parts))
 
 
@@ -256,7 +277,12 @@ def summarize_off_target(off_target, tier0_reader, gt_reader, axis, ploidy_of,
     summary = population_summary.summarize(
         pos_alts, tier0_reader, gt_reader, axis, ploidy_of, phased, panel=panel)
 
-    af_by, cf_by, n_by = _encode_group_breakdowns(summary, global_group_id, sep)
+    # AGGREGATE (AF-only "mega") registry: real per-dataset AF, but NO genotypes, so
+    # carrier / homozygote counts are 0 by construction (an artifact). Render every
+    # carrier/hom field as "NA" (unknown), never a fabricated 0; AF fields stay.
+    agg = _is_aggregate_af_only(tier0_reader)
+    af_by, cf_by, n_by = _encode_group_breakdowns(
+        summary, global_group_id, sep, aggregate_af_only=agg)
 
     return {
         "Chromosome": _get(off_target, "Chromosome"),
@@ -267,16 +293,17 @@ def summarize_off_target(off_target, tier0_reader, gt_reader, axis, ploidy_of,
         "SNP": "" if snp_field is None else str(snp_field),
         "n_variants": str(summary.k),
         "global_allele_freq": _fmt_af(summary.global_af, summary.allele_freq_defined),
-        "global_carrier_freq": _fmt_freq(summary.global_carrier_freq),
-        "global_carrier_n": str(summary.global_carrier_n),
-        "global_hom_freq": _fmt_freq(summary.global_hom_freq),
+        "global_carrier_freq": "NA" if agg else _fmt_freq(summary.global_carrier_freq),
+        "global_carrier_n": "NA" if agg else str(summary.global_carrier_n),
+        "global_hom_freq": "NA" if agg else _fmt_freq(summary.global_hom_freq),
         "max_subpop_af": _fmt_af(summary.max_subpop_af, True),
         "max_subpop_label": "" if summary.max_subpop_af_label is None
                             else str(summary.max_subpop_af_label),
         "observed": "1" if summary.observed else "0",
         "allele_freq_defined": "1" if summary.allele_freq_defined else "0",
         "phased": "1" if phased else "0",
-        "global_carrier_freq_lower_bound": _global_carrier_lower(summary),
+        "global_carrier_freq_lower_bound": "NA" if agg
+                                           else _global_carrier_lower(summary),
         "allele_freq_by_group": af_by,
         "carrier_freq_by_group": cf_by,
         "carrier_n_by_group": n_by,

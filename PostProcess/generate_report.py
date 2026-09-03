@@ -2749,6 +2749,7 @@ def render_html(
     panel_top100_name=None, tier_downloads=None,
     hvdr_bundle_name=None, hvdr_n_regions=0, perfect_banner="",
     cooc_bundle_name=None, cooc_n_rows=0, cooc_n_cis=0,
+    indel_af_bundle_name=None, indel_af_n_rows=0,
     table_crista_html="", inputs_criteria_html="", legend_html=None,
     next_steps_html="",
 ):
@@ -2816,6 +2817,27 @@ def render_html(
             f"alone. Each row lists the indel, the cis SNP (rsID), the phase, the "
             f"joint allele frequency, and the carrier sample(s); the full list is "
             f"bundled as <code>{_esc(cooc_bundle_name)}</code>.</p>"
+        )
+
+    # per-dataset INDEL allele frequency companion (mega sites-only panel): download
+    # link + a short callout. The SNP-only registry cannot carry indel AF, so this
+    # sidecar is the source of per-dataset AF_<label> + AF_max for indel off-targets.
+    indel_af_download = ""
+    indel_af_callout = ""
+    if indel_af_bundle_name:
+        indel_af_download = (
+            f'\n  <a class="download" href="{_dl_href(indel_af_bundle_name)}" download>'
+            f"Indel per-dataset allele frequencies ({indel_af_n_rows:,}) &mdash; TSV</a>"
+        )
+        indel_af_callout = (
+            f'<p class="caption" style="border-left:4px solid #0891b2;'
+            f'padding-left:0.7em;background:#ecfeff">'
+            f"<strong>Indel per-dataset allele frequencies:</strong> "
+            f"{indel_af_n_rows:,} indel off-target row(s) annotated with each source "
+            f"panel's allele frequency (<code>AF_&lt;dataset&gt;</code>) and the "
+            f"cross-panel maximum (<code>AF_max</code>). The SNP-only Tier-0 registry "
+            f"cannot hold indels, so an indel off-target's per-dataset AF comes from "
+            f"this sidecar; bundled as <code>{_esc(indel_af_bundle_name)}</code>.</p>"
         )
 
     # per-tier curated downloads (Section 5). ``tier_downloads`` is a list of
@@ -2908,10 +2930,11 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 <h2>5. Downloads</h2>
 <p>
   <a class="download" href="{_dl_href(tsv_gz_name)}" download>Complete raw integrated results (all columns, TSV gzip)</a>
-  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}{cooc_download}
+  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}{cooc_download}{indel_af_download}
 </p>{tier_download_html}
 {hvdr_callout}
 {cooc_callout}
+{indel_af_callout}
 <p class="caption">All files are bundled alongside this HTML in the same ZIP;
 the links resolve after unzipping on any machine. The top-1000 TSV, the panel,
 and the per-tier subsets share the SAME curated, readable columns as the table
@@ -3408,6 +3431,49 @@ def build_report(
         sys.stderr.write(f"generate-report: indel_snp_cooc bundle unavailable: {exc}\n")
         cooc_bundle_name = None
 
+    # ---- per-dataset INDEL allele-frequency companion (*.indel_af.tsv) ---------
+    # The mega sites-only panel supplies indel AF via the build_mega_indel_af.py
+    # sidecar; the SNP-only Tier-0 registry cannot hold indels, so the indel post-
+    # analysis writes ONE *.indel_af.tsv per chromosome (chrom / offtarget_start /
+    # indel pos+ref+alt / per-dataset AF_<label> / AF_max -- header at
+    # analisi_indels_NNN.py). Nothing merges them, so the indel per-dataset AF is
+    # otherwise invisible in the report. Concat here (first header only), dedup exact
+    # duplicate rows (the emitter writes one per alignment pass), count, and bundle so
+    # Downloads can link it. Mirrors the cooc merge above; never aborts the report.
+    indel_af_bundle_name = None
+    indel_af_n_rows = 0
+    try:
+        _iaf_src_dir = result_dir if result_dir else os.path.dirname(integrated_tsv)
+        _iaf_files = sorted(glob.glob(os.path.join(_iaf_src_dir, "*indel_af.tsv")))
+        if _iaf_files:
+            _iaf_path = os.path.join(staging, "indel_af.tsv")
+            _iaf_header_written = False
+            _iaf_seen = set()
+            with open(_iaf_path, "w") as _out:
+                for _f in _iaf_files:
+                    with open(_f) as _src:
+                        for _i, _ln in enumerate(_src):
+                            if _i == 0:  # each per-chrom file has its own header
+                                if not _iaf_header_written:
+                                    _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
+                                    _iaf_header_written = True
+                                continue
+                            if not _ln.strip():
+                                continue
+                            _key = _ln.rstrip("\n")
+                            if _key in _iaf_seen:
+                                continue
+                            _iaf_seen.add(_key)
+                            _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
+                            indel_af_n_rows += 1
+            if indel_af_n_rows:
+                indel_af_bundle_name = "indel_af.tsv"
+            else:
+                os.remove(_iaf_path)
+    except Exception as exc:  # noqa: BLE001 - never abort on the sidecar bundle
+        sys.stderr.write(f"generate-report: indel_af bundle unavailable: {exc}\n")
+        indel_af_bundle_name = None
+
     # ---- FOOTER (unnumbered; section 7 is the annotation legend, built in
     #      render_html via build_annotation_legend_html) -----------------------
     footer_html = build_footer(meta, version, os.path.basename(integrated_tsv))
@@ -3435,6 +3501,8 @@ def build_report(
         cooc_bundle_name=cooc_bundle_name,
         cooc_n_rows=cooc_n_rows,
         cooc_n_cis=cooc_n_cis,
+        indel_af_bundle_name=indel_af_bundle_name,
+        indel_af_n_rows=indel_af_n_rows,
         perfect_banner=perfect_banner,
         next_steps_html=render_next_steps_box(vp),
         table_crista_html=table_crista_html,
