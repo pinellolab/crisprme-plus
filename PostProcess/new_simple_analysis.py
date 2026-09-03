@@ -927,12 +927,9 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         replaceTarget,  # full IUPAC protospacer (dig-in aid)
                     )
                 )
-            # PAM-validity of a candidate (mirrors the finalizer's pam_ok gate). Used
-            # ONLY under _FAST_MODE to break mismatch ties toward a valid PAM, so a
-            # PAM-region variant is not decided by lex order (which drops ~half the
-            # PAM-creation off-targets). When _FAST_MODE is off, `_pam_bad_leg` is a
-            # constant 0, so the selection key reduces to (mismatch, lex) and the
-            # dense-window greedy output stays BYTE-IDENTICAL to the shipped behavior.
+            # PAM-validity of a candidate (mirrors the finalizer's pam_ok gate); consumed
+            # by the fast-mode greedy so a PAM-region variant is not decided by lex order
+            # (which drops ~half the PAM-creation off-targets).
             def _pam_ok_leg(seq_list):
                 _s = reverse_complement_table("".join(seq_list)) if revert else "".join(seq_list)
                 _tl = list(_s)
@@ -944,9 +941,6 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         return False
                 return True
 
-            def _pam_bad_leg(seq_list):
-                return 1 if (_FAST_MODE and not _pam_ok_leg(seq_list)) else 0
-
             # Build the greedy representative per haplotype and REPLACE the per-SNP
             # level-0 entries with that single entry, so the finalization below scores
             # exactly one row (bulges/PAM/creation/CFD via the existing code path).
@@ -955,27 +949,48 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 by_pos = {}
                 for (pos_c, elem), v in totalDict[count][0].items():
                     by_pos.setdefault(pos_c, []).append((elem, v))
-                greedy_seq = list(refSeq)  # pre-revert reference
-                greedy_samples, greedy_info = set(), []
-                for pos_c, cands in by_pos.items():
-                    ref_mm = _aligned_mm(greedy_seq, realTarget, guide_no_pam, revert)
-                    # key of KEEPING the reference base ("\xff" lex -> an alt wins a full
-                    # (mm, pam) tie). Selection key = (mismatch, pam_invalid, alt): fewest
-                    # mismatches FIRST (lossless), then a valid PAM among ties (fast mode
-                    # only), then the lexicographically-smaller alt (deterministic, #139).
-                    best_key = (ref_mm, _pam_bad_leg(greedy_seq), "\xff")
-                    best_elem, best_v = None, None
-                    for elem, v in cands:
-                        trial = list(greedy_seq)
-                        trial[pos_c] = elem
-                        m = _aligned_mm(trial, realTarget, guide_no_pam, revert)
-                        key = (m, _pam_bad_leg(trial), elem)
-                        if key < best_key:
-                            best_key, best_elem, best_v = key, elem, v
-                    if best_v is not None:
-                        greedy_seq[pos_c] = best_elem
-                        greedy_samples |= best_v[1]
-                        greedy_info.extend(best_v[2])
+                if _FAST_MODE and _twopass_emit is not None:
+                    # FAST MODE: the PAM-aware, multi-pass + brute-force greedy
+                    # (twopass_emit.greedy_worst_case) -- lossless, prefers PAM-creating
+                    # alleles so a PAM-region variant off-target is not silently dropped
+                    # (the real-data 141-miss fix). v[1] is the carrier set; v[2] a
+                    # one-element [[rsID, AF, snp]] list (per-SNP level-0 entry).
+                    _cols = [
+                        {"pos_c": _pc,
+                         "candidates": [{"alt": _elem, "carriers": _v[1], "info": _v[2][0]}
+                                        for _elem, _v in _cands]}
+                        for _pc, _cands in by_pos.items()
+                    ]
+                    _rep = _twopass_emit.greedy_worst_case(
+                        _cols, refSeq, realTarget, guide_no_pam, revert,
+                        pos_beg, pos_end, reverse_complement_table, pam_valid_fn=_pam_ok_leg)
+                    greedy_seq = _rep["seq"]
+                    greedy_samples = set(_rep["carriers"])
+                    greedy_info = list(_rep["info"])
+                else:
+                    # DEFAULT (dense >IUPAC_CAP window): the legacy min-mismatch greedy,
+                    # BYTE-IDENTICAL to the shipped behavior -- strict improvement, or a
+                    # mismatch-neutral tie preferring an alt (lexicographically-smaller;
+                    # #139). No PAM awareness here (the dense-window rep is an approximation
+                    # already flagged in the high-variant-density BED).
+                    greedy_seq = list(refSeq)  # pre-revert reference
+                    greedy_samples, greedy_info = set(), []
+                    for pos_c, cands in by_pos.items():
+                        ref_allele = refSeq[pos_c]
+                        ref_mm = _aligned_mm(greedy_seq, realTarget, guide_no_pam, revert)
+                        best_elem, best_mm, best_v = ref_allele, ref_mm, None
+                        for elem, v in cands:
+                            trial = list(greedy_seq)
+                            trial[pos_c] = elem
+                            m = _aligned_mm(trial, realTarget, guide_no_pam, revert)
+                            if m < best_mm or (
+                                m == best_mm and (best_v is None or elem < best_elem)
+                            ):
+                                best_mm, best_elem, best_v = m, elem, v
+                        if best_v is not None:
+                            greedy_seq[pos_c] = best_elem
+                            greedy_samples |= best_v[1]
+                            greedy_info.extend(best_v[2])
                 if not greedy_info:  # no allele changed anything: document the region anyway
                     any_v = next(iter(totalDict[count][0].values()), None)
                     if any_v is not None:
