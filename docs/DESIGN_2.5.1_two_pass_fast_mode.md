@@ -41,8 +41,9 @@ Two passes, both **score-agnostic** and **enumeration-free**:
   - **min-edit**: `D` directly. Parity tiebreak = greedy over PAM-region alleles (prefer
     PAM-creating) + bulge placement (prefer distal-from-seed) — score-free biology.
   - **CFD**: EXACT worst-case via factorization (§7), `O(guide)`, no enumeration.
-  - **CRISTA**: non-factorizable (RandomForest) → evaluate on a low-edit candidate SET; flag
-    CRISTA-approximate where the set is large. NOT exhaustive — state this in the report.
+  - **CRISTA**: non-factorizable (RandomForest) → evaluate on the emitted representatives
+    (min-edit + max-CFD); flagged best-effort worst-case. NOT exhaustive — measured gap is
+    ≤0.04 and sub-threshold (§9a), so NO shortlist is built. State the flag in the report.
   - Scope is **worst-POSSIBLE, not worst-observed**: unphased (HGDP) / pop-only (gnomAD, TOPMed,
     AoU) have no/partial haplotypes; the phased store (SNP tiers + indel_genotypes) is only an
     ANNOTATION ("is this worst-case actually carried?"), never a dependency.
@@ -149,11 +150,14 @@ at load (required for the factorization max to be valid). **CRISTA is OUT OF SCO
 3. **Pass-1 module** (`twopass_find.py`): banded set-membership min-edit DP over enriched ref +
    single-indel contigs; emit region + `D` + ambiguity map. Multi-indel handling = fix (a) initially
    (flag-all-≥2-cis-indel-windows), (c) as an optimization later.
-4. **Pass-2 min-edit + CFD** (`twopass_score.py`): factorized exact worst-case CFD (Python first,
-   validated against `calc_cfd` via the oracle test), CRISTA candidate-set eval with the approximate flag.
+4. **Pass-2 min-edit + CFD** (`twopass_emit.py`): exact worst-case CFD via per-column argmax +
+   bounded brute-force for the joint-PAM factor (validated against `calc_cfd`; `test_twopass_emit`,
+   `test_twopass_legacy_cfd`, and the ml007 fast-vs-slow benchmark = 0 under-reports). CRISTA is
+   evaluated on the emitted reps and flagged best-effort (§9a: measured gap ≤0.04, sub-threshold).
 5. **C++ CFD** (`cfd_exact.cpp`) gated by §7's equivalence suite + `CRISPRME_CFD_SHADOW`.
-6. **Fast-mode CLI**: a `--fast` mode that runs Pass-1 only (region + min-edit, no ML score) as a
-   screen; full mode adds Pass-2. Report states CRISTA is shortlist-only / not exhaustive.
+6. **Fast-mode CLI**: `--fast` on `complete-search` sets `CRISPRME_FAST_MODE` for the whole
+   post-analysis subprocess tree; emits worst-possible reps per window. CLI notice + `--help` state
+   CFD is exact worst-case and CRISTA is best-effort (run without `--fast` for exact CRISTA).
 7. **Regression**: extend `test_twopass_lynchpin_counterexamples.py`; add the CFD oracle + shadow tests.
 
 ## 9. Risks / residuals
@@ -163,7 +167,33 @@ at load (required for the factorization max to be valid). **CRISTA is OUT OF SCO
 - Candidate-generation masking (enriched index dropping the ref k-mer) is an EXTERNAL no-miss
   dependency, not a property of `D` — audit the enricher/index for union-only behavior.
 - CFD C++ IEEE-754 order + per-file N divergence are the equivalence-breakers — the shadow gate catches them.
-- CRISTA remains approximate in the fast path — acceptable if flagged; exact CRISTA only via local enum in flagged windows if ever contractually required.
+- CRISTA remains approximate in the fast path — acceptable if flagged (see §9a for the MEASURED gap); exact CRISTA only via local enum / full (non-`--fast`) run if ever contractually required.
+
+## 9a. CRISTA fast-mode gap — MEASURED (2026-09-03) → flag, not shortlist
+
+Decision between **(i) flag CRISTA best-effort** and **(ii) build a low-edit CRISTA
+shortlist** was made data-driven, not by intuition. Fast (emitted reps) vs slow (full
+observed enumeration) per-locus max CRISTA on the real chr22 1000G-2021+HGDP slice
+(`fastbench_cfd_compare.py` on the `bestCRISTA` outputs; in `bestCRISTA.txt` the col-21
+"CFD" field IS the CRISTA score):
+
+- **Strong off-targets (decision-relevant):** slice max CRISTA 0.275; **all top-12 loci fast ≥ slow**; fast finds *more* actionable off-targets than slow (**12 vs 9** at ≥0.2) — it reports a conservative (stronger) worst-case (e.g. locus 15853833 slow 0.000 → fast 0.207).
+- **Weak tail (the only under-reports):** 312/2494 loci under-report, but **all have slow CRISTA < 0.19**, median gap **0.006**, max gap **0.04**, and **zero threshold flips** at 0.2/0.3/0.4/0.5.
+
+**Why structural, not luck:** high-CRISTA off-targets are LOW-edit, and the min-edit +
+max-CFD reps span the low-edit shell — so fast nails exactly the threshold-crossing
+off-targets and only drifts ≤0.04 on 5mm+3bulge junk below the action line. A shortlist
+(ii) would spend CRISTA (the fast-mode compute bottleneck: a 5×1000-tree RandomForest)
+chasing sub-0.04 gaps nobody acts on — a bad trade. **Chosen: (i)** — CFD is the exact
+worst-case; CRISTA is flagged best-effort (CLI notice + `complete-search --help` + here).
+Two-tier: `--fast` = screening (CFD exact, CRISTA near-exact/flagged); non-`--fast` =
+confirmatory/IND (exact per-haplotype CRISTA via enumeration). (iii) a sound RandomForest
+interval bound is a multi-day post-2.5.1 option, deferred.
+
+> NB — this is the OPPOSITE of CFD: CFD's per-position weighting makes the legacy/mega
+> min-mm rep under-report by up to **0.143** (threshold-crossing), so CFD gets an EXACT
+> second (max-CFD) rep on every path (§7, `test_twopass_legacy_cfd.py`). CRISTA's gap is
+> ≤0.04 and sub-threshold, so it does not.
 
 ## 10. Interim (pre-2.5.1) stopgap
 MAF≥0.1% index for routine runs (collapses the dense-region blowup); full 95.6M-SNP panel overnight

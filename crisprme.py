@@ -349,8 +349,9 @@ def print_help_complete_search() -> None:
         "reports ONE worst-POSSIBLE off-target per variant window instead of "
         "enumerating every haplotype (the enumeration-free fix for the intractable "
         "dense-panel post-analysis). Trades per-sample phased resolution (rows are "
-        "worst-possible / PUTATIVE) for tractability; recommended for high-density / "
-        "unphased / aggregate panels [OPTIONAL]\n")
+        "worst-possible / PUTATIVE) for tractability. CFD is the EXACT worst-case; "
+        "CRISTA is best-effort (run without --fast for a guaranteed CRISTA worst-case). "
+        "Recommended for high-density / unphased / aggregate panels [OPTIONAL]\n")
     sys.exit(1)
 
 
@@ -1703,8 +1704,12 @@ def complete_search() -> None:
         print(
             "[complete-search] FAST MODE (--fast): variant post-analysis reports one "
             "WORST-POSSIBLE off-target per window (no 2^k haplotype enumeration; rows "
-            "are worst-possible / PUTATIVE, not per-sample phased). See "
-            "docs/DESIGN_2.5.1_two_pass_fast_mode.md."
+            "are worst-possible / PUTATIVE, not per-sample phased). CFD is the EXACT "
+            "worst-case; CRISTA is a best-effort worst-case over the reported "
+            "representatives (empirically bounded: every off-target with CRISTA >= 0.2 "
+            "is reported at full strength, under-reporting <= 0.04 and confined to "
+            "CRISTA < 0.19). For a guaranteed per-haplotype CRISTA worst-case, run "
+            "without --fast. See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
         )
     print(
         f"Launching job {outputfolder}. The stdout is redirected in log_verbose.txt and stderr is redirected in log_error.txt"
