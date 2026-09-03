@@ -183,6 +183,59 @@ def greedy_worst_case(columns, ref_seq, real_target, guide_no_pam, revert,
     return {"seq": greedy_seq, "carriers": carriers, "info": info}
 
 
+def greedy_max_score(columns, ref_seq, real_target, guide_no_pam, revert,
+                     pos_beg, pos_end, revcom_fn, score_fn):
+    """Greedy per-column MAXIMIZATION of ``score_fn`` -- the strongest (worst) off-target
+    the window can form under a score where HIGHER = worse (e.g. worst-case CFD). For a
+    score that FACTORIZES per position (CFD = a product of per-position factors x one PAM
+    factor), changing one column changes only its own factor, so greedy-per-column equals
+    the GLOBAL max -- and a min-MISMATCH representative does NOT: CFD is position-weighted
+    (a seed mismatch outweighs several distal ones), so the min-mismatch rep can UNDER-state
+    the worst-case CFD. A bounded multi-pass converges the joint PAM factor (a PAM base
+    shared across <=3 columns; an invalid PAM makes CFD 0, so the max naturally lands on a
+    PAM-valid combination when one exists). ``score_fn(seq_prerevert_list) -> float`` MUST
+    already fold in the alignment + PAM (the caller mirrors the finalizer's CFD). Returns
+    ``{"seq": list, "carriers": set, "info": [[rsID,AF,snp], ...]}``."""
+    greedy_seq = list(ref_seq)
+
+    def _select(col):
+        pc = col["pos_c"]
+        greedy_seq[pc] = ref_seq[pc]                       # reference baseline for this col
+        # maximize score: minimize the key (-score, is_ref, alt) -> higher score first,
+        # an alt preferred over the reference on a full tie, then lex (deterministic).
+        best_key, best = (-score_fn(greedy_seq), 1, _REF_SENTINEL), None
+        for cand in col["candidates"]:
+            greedy_seq[pc] = cand["alt"]
+            key = (-score_fn(greedy_seq), 0, cand["alt"])
+            if key < best_key:
+                best_key, best = key, cand
+        greedy_seq[pc] = best["alt"] if best is not None else ref_seq[pc]
+        return best
+
+    chosen = {col["pos_c"]: _select(col) for col in columns}
+    prev = score_fn(greedy_seq)
+    for _ in range(len(columns)):
+        changed = False
+        for col in columns:
+            p = chosen[col["pos_c"]]
+            c = _select(col)
+            if (c["alt"] if c else None) != (p["alt"] if p else None):
+                changed = True
+            chosen[col["pos_c"]] = c
+        cur = score_fn(greedy_seq)
+        if not changed or cur <= prev:            # fixpoint or no improvement
+            break
+        prev = cur
+
+    carriers, info = set(), []
+    for col in columns:
+        ch = chosen[col["pos_c"]]
+        if ch is not None:
+            carriers |= set(ch["carriers"])
+            info.append(ch["info"])
+    return {"seq": greedy_seq, "carriers": carriers, "info": info}
+
+
 def brute_force_min_mismatch(columns, ref_seq, real_target, guide_no_pam, revert,
                              pos_beg, pos_end, revcom_fn):
     """Reference oracle for the tests: the true minimum mismatch count over EVERY

@@ -183,6 +183,57 @@ class TestGreedyWorstCase(unittest.TestCase):
         self.assertTrue(pam_ok(r["seq"]))
         self.assertEqual("".join(r["seq"]), "AAGT")   # valid-PAM (mm1) beats invalid-PAM (mm0)
 
+    def test_greedy_max_score_beats_min_mismatch_at_forced_mismatch(self):
+        # At a forced-mismatch column (guide base in NO allele), min-mismatch breaks the
+        # tie by lex (-> A) but the worst-case CFD wants the higher-scoring allele (-> T).
+        # This is exactly why the min-mismatch rep under-states CFD; greedy_max_score fixes it.
+        guide = "ACGT"
+        ref = "AGGT"       # pos1 ref G != guide C; alts A and T also mismatch C (forced)
+        cols = [{"pos_c": 1, "candidates": [
+            {"alt": "A", "carriers": {"sA"}, "info": ["rA", "0.1", "s"]},
+            {"alt": "T", "carriers": {"sT"}, "info": ["rT", "0.2", "s"]}]}]
+        mm = te.greedy_worst_case(cols, ref, ref, guide, False, 0, None, _revcom)
+        self.assertEqual(mm["seq"][1], "A")            # min-mismatch: lex tie -> A
+        score = lambda seq: {"A": 0.5, "T": 0.9, "G": 0.3}.get(seq[1], 0.1)
+        mx = te.greedy_max_score(cols, ref, ref, guide, False, 0, None, _revcom, score)
+        self.assertEqual(mx["seq"][1], "T")            # max score -> T (higher CFD factor)
+        self.assertEqual(mx["carriers"], {"sT"})
+        self.assertEqual(mx["info"], [["rT", "0.2", "s"]])
+
+    def test_greedy_max_score_matches_bruteforce(self):
+        # greedy_max_score == argmax over all allele combos for a FACTORIZING score
+        # (product of per-position factors -- like CFD).
+        import itertools
+        random.seed(7)
+        fac = {}
+        for _ in range(300):
+            glen = random.randint(4, 8)
+            guide = "".join(random.choice("ACGT") for _ in range(glen))
+            ref = "".join(random.choice("ACGT") for _ in range(glen))
+            cols = []
+            for pc in sorted(random.sample(range(glen), random.randint(1, min(4, glen)))):
+                alts = random.sample([b for b in "ACGT" if b != ref[pc]], random.randint(1, 3))
+                cols.append({"pos_c": pc, "candidates": [{"alt": a, "carriers": set(), "info": [a, "0.1", "s"]} for a in alts]})
+            # a factorizing score: product over positions of a per-(pos,base) factor in (0,1]
+            for pc in range(glen):
+                for b in "ACGT":
+                    fac[(pc, b)] = random.uniform(0.1, 1.0)
+            def score(seq, _fac=dict(fac)):
+                p = 1.0
+                for i, b in enumerate(seq):
+                    p *= _fac[(i, b)]
+                return p
+            got = score(te.greedy_max_score(cols, ref, ref, guide, False, 0, None, _revcom, score)["seq"])
+            choices = [[ref[c["pos_c"]]] + [x["alt"] for x in c["candidates"]] for c in cols]
+            pcs = [c["pos_c"] for c in cols]
+            best = 0.0
+            for combo in itertools.product(*choices):
+                seq = list(ref)
+                for pc, b in zip(pcs, combo):
+                    seq[pc] = b
+                best = max(best, score(seq))
+            self.assertAlmostEqual(got, best, places=9)
+
     def test_unproductive_column_left_at_reference(self):
         # an alt that only ADDS a mismatch is not chosen; its carriers do not leak in.
         guide = "ACGTACGT"

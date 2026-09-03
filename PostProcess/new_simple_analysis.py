@@ -689,6 +689,37 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                 revert, "".join(_rep["seq"]), sorted(_rep["carriers"]),
                 _rep["info"], _obshap.PUTATIVE, cluster_to_save,
             )
+        # WORST-CASE CFD representative. The min-mismatch rep above does NOT maximize CFD
+        # (CFD is a position-WEIGHTED product -- a seed mismatch outweighs several distal
+        # ones), so scoring only it UNDER-states the worst-case CFD. CFD factorizes per
+        # position, so a greedy per-column argmax over the allele sets is EXACT. Emit that
+        # rep too (do_scores regime only) so the downstream best-CFD selection reports the
+        # true worst-possible CFD; deduped against the min-mismatch rep by sequence.
+        # ``do_scores`` / mm_scores / pam_scores are runtime globals (set after the FASTA
+        # opens); globals().get keeps this a safe no-op under the pure-function unit harness.
+        if globals().get("do_scores") and globals().get("mm_scores") is not None:
+            def _cfd_fast(_seq_list):
+                _s = reverse_complement_table("".join(_seq_list)) if revert else "".join(_seq_list)
+                _tl = list(_s)
+                for _p, _c in enumerate(realTarget):
+                    if _c == "-":
+                        _tl.insert(_p, "-")
+                _t = "".join(_tl).upper()
+                _bs = int(split[bulge_pos])
+                if split[0] == "DNA":
+                    return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
+                                    mm_scores, pam_scores, do_scores)
+                return calc_cfd(split[1], _t[:-3], _t[-2:], mm_scores, pam_scores, do_scores)
+            _cfd_rep = _twopass_emit.greedy_max_score(
+                _columns, refSeq, realTarget, guide_no_pam, revert,
+                pos_beg, pos_end, reverse_complement_table, _cfd_fast,
+            )
+            if _cfd_rep["info"] and _cfd_rep["seq"] != _rep["seq"]:
+                _finalize_observed_entry(
+                    split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
+                    revert, "".join(_cfd_rep["seq"]), sorted(_cfd_rep["carriers"]),
+                    _cfd_rep["info"], _obshap.PUTATIVE, cluster_to_save,
+                )
         # visibility: still log genuinely-dense windows to the shared BED (as the cap does)
         if IUPAC_CAP >= 0 and len(positions) > IUPAC_CAP:
             try:
