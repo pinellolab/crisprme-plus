@@ -11,6 +11,39 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **Two-pass fast mode (`complete-search --fast`, opt-in)** for dense / aggregate variant
+  panels where per-haplotype enumeration is intractable (measured **49 h+ without
+  completing** on a 4×-density 1000G+HGDP panel). Instead of enumerating the 2^k IUPAC
+  haplotype lattice per window, it emits a small set of **worst-possible representatives**
+  (reference + minimum-edit + maximum-CFD), propagated to the whole post-analysis via
+  `CRISPRME_FAST_MODE`. Validated **lossless for locus detection** and **non-understating
+  for the worst-case score** against the slow full-enumeration path on a real chr22
+  1000G-2021+HGDP slice (0 CFD under-reports; surfaces *stronger* worst cases at 182 loci).
+  The default (non-`--fast`) path is **byte-identical**. See
+  `docs/DESIGN_2.5.1_two_pass_fast_mode.md` and METHODS §5/§8.
+
+### Fixed
+- **Fast-mode worst-case CFD is now exact on every path.** CFD is position-weighted, so the
+  fewest-mismatch representative does not maximize CFD; fast mode now also emits the exact
+  **maximum-CFD** representative (per-position argmax + bounded brute-force for the joint
+  two-base PAM factor). On the **legacy dict / aggregate-panel (mega) path** this closes a
+  **threshold-crossing** under-report (up to **0.14** CFD). Cross-checked against an
+  independent factorized CFD oracle (4,000 random windows, joint-PAM case included) and a
+  real CFD-scored multiallelic fixture.
+
+### Notes
+- In fast mode, **CFD is the exact worst case; CRISTA is best-effort** (a non-factorizable
+  RandomForest). Measured (chr22 1000G-2021+HGDP, fast vs slow full enumeration): every
+  off-target with **CRISTA ≥ 0.2 is reported at full or greater strength**, and
+  under-reporting is **≤ 0.04 and confined to the sub-0.19 weak tail** (no threshold
+  crossings). Run **without** `--fast` for a guaranteed per-haplotype CRISTA worst case.
+- **Multi-indel residual (documented):** the indel search materializes one indel per fake
+  contig, so an off-target needing **≥ 2 co-occurring cis indels in one protospacer** is not
+  a candidate (pre-existing single-indel-search property). Low-frequency: **~1–2%** of indel
+  loci after repeat-masking/dedup; genuinely-missed off-targets **~0.1–0.2%**, all at the
+  weakest (≈0-CFD) edit-budget ceiling.
+
 ## [2.5.0] - 2026-09-01
 
 ### Added
