@@ -95,6 +95,48 @@ class TestGreedyWorstCase(unittest.TestCase):
         self.assertEqual(got["info"], [["rs1", "0.2", "i1"], ["rs2", "0.3", "i2"]])
         self.assertEqual(te.aligned_mismatches(got["seq"], ref, guide, False, 0, None, _revcom), 0)
 
+    def test_pam_aware_picks_valid_pam_allele_over_lex(self):
+        # A PAM-region variant column (mismatch-neutral: outside the protospacer window
+        # ref[0:-1]) with alts A and G, where only G yields a valid PAM. Lexicographic
+        # order prefers A (invalid). Without pam_valid_fn the greedy picks A (the rep is
+        # then PAM-invalid and the off-target would be dropped downstream -- the real
+        # chr22 141-miss bug). With pam_valid_fn the greedy must pick G.
+        guide = "ACGT"
+        ref = "ACGTC"          # protospacer ref[0:-1]="ACGT" matches guide (mm 0); last = PAM
+        cols = [{"pos_c": 4, "candidates": [
+            {"alt": "A", "carriers": {"sA"}, "info": ["rsA", "0.1", "iA"]},
+            {"alt": "G", "carriers": {"sG"}, "info": ["rsG", "0.2", "iG"]}]}]
+        # PAM valid iff the last base is G
+        pam_ok = lambda seq: seq[4] == "G"
+
+        # PAM-blind: lex order -> A (invalid PAM)
+        blind = te.greedy_worst_case(cols, ref, ref, guide, False, 0, -1, _revcom)
+        self.assertEqual(blind["seq"][4], "A")
+        self.assertFalse(pam_ok(blind["seq"]))
+
+        # PAM-aware: mismatch-neutral -> prefer the valid-PAM allele G
+        aware = te.greedy_worst_case(cols, ref, ref, guide, False, 0, -1, _revcom,
+                                     pam_valid_fn=pam_ok)
+        self.assertEqual(aware["seq"][4], "G")
+        self.assertTrue(pam_ok(aware["seq"]))
+        self.assertEqual(aware["carriers"], {"sG"})
+        self.assertEqual(aware["info"], [["rsG", "0.2", "iG"]])
+
+    def test_pam_aware_never_raises_mismatch(self):
+        # A PAM-valid allele must NOT be chosen if it costs a mismatch (mismatch is the
+        # primary key -> losslessness preserved). Column INSIDE the protospacer: alt C
+        # matches guide (mm 0) but is "PAM-invalid"; alt A mismatches (mm 1) but "valid".
+        guide = "ACGT"
+        ref = "AAGT"           # pos1 ref A != guide C (mm 1); alt C fixes it
+        cols = [{"pos_c": 1, "candidates": [
+            {"alt": "A", "carriers": {"sA"}, "info": ["rA", "0.1", "s"]},
+            {"alt": "C", "carriers": {"sC"}, "info": ["rC", "0.2", "s"]}]}]
+        pam_ok = lambda seq: seq[1] == "A"    # perversely calls the mm-worsening allele "valid"
+        r = te.greedy_worst_case(cols, ref, ref, guide, False, 0, None, _revcom,
+                                 pam_valid_fn=pam_ok)
+        self.assertEqual("".join(r["seq"]), "ACGT")   # C chosen (mm 0) despite pam_ok(A)
+        self.assertEqual(te.aligned_mismatches(r["seq"], ref, guide, False, 0, None, _revcom), 0)
+
     def test_unproductive_column_left_at_reference(self):
         # an alt that only ADDS a mismatch is not chosen; its carriers do not leak in.
         guide = "ACGTACGT"

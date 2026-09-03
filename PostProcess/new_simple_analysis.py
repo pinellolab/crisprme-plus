@@ -665,9 +665,23 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                  for _i in range(len(_col["alts"]))]}
             for _col in positions
         ]
+        # PAM-validity checker (mirrors _finalize_observed_entry's pam_ok gate) so the
+        # greedy prefers PAM-creating/PAM-preserving alleles at PAM-region variant columns
+        # -- WITHOUT it a PAM-region variant is chosen by lex order and ~half the time the
+        # rep is PAM-invalid -> the off-target is dropped (verified: 141 missed on chr22).
+        def _pam_valid_fast(_seq_list):
+            _s = reverse_complement_table("".join(_seq_list)) if revert else "".join(_seq_list)
+            _tl = list(_s)
+            for _p, _c in enumerate(realTarget):
+                if _c == "-":
+                    _tl.insert(_p, "-")
+            for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
+                if _ch.upper() not in iupac_code_set[pam[_i]]:
+                    return False
+            return True
         _rep = _twopass_emit.greedy_worst_case(
             _columns, refSeq, realTarget, guide_no_pam, revert,
-            pos_beg, pos_end, reverse_complement_table,
+            pos_beg, pos_end, reverse_complement_table, pam_valid_fn=_pam_valid_fast,
         )
         if _rep["info"]:  # >=1 alt lowered/held the alignment vs the reference
             _finalize_observed_entry(

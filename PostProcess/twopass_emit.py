@@ -42,8 +42,13 @@ def aligned_mismatches(seq_prerevert, real_target, guide_no_pam, revert,
     return mm
 
 
+_PAM_INVALID = 1   # worse than _PAM_OK in the selection key (prefer a valid PAM on ties)
+_PAM_OK = 0
+_REF_SENTINEL = "\xff"   # sorts after every ACGT base -> an alt wins a full (mm,pam) tie
+
+
 def greedy_worst_case(columns, ref_seq, real_target, guide_no_pam, revert,
-                      pos_beg, pos_end, revcom_fn):
+                      pos_beg, pos_end, revcom_fn, pam_valid_fn=None):
     """Build the greedy worst-possible representative haplotype for one window.
 
     Args:
@@ -54,29 +59,44 @@ def greedy_worst_case(columns, ref_seq, real_target, guide_no_pam, revert,
       ref_seq: the pre-revert reference sequence spanning the window.
       real_target / guide_no_pam / revert / pos_beg / pos_end / revcom_fn: the fixed
         bulge-alignment context (see ``aligned_mismatches``).
+      pam_valid_fn: OPTIONAL ``callable(seq_prerevert_list) -> bool`` reporting whether the
+        candidate produces a VALID PAM (mirrors the finalizer's ``pam_ok`` gate). When
+        given, a mismatch-neutral column at a PAM position picks the PAM-*valid* allele
+        instead of the lexicographic one -- WITHOUT this, a PAM-region variant (e.g. an
+        ``R`` = A/G column where only G yields a valid NRG PAM) is decided by lex order,
+        so ~half the time the greedy rep is PAM-invalid and the off-target is silently
+        DROPPED (verified on real chr22 data: 141 PAM-creation off-targets missed). Never
+        raises mismatch to gain a PAM (mismatch is the primary key), so it is lossless.
 
     Returns ``{"seq": <list of bases>, "carriers": <set>, "info": <list of [rsID,AF,snp]>}``.
-    At each column pick the alt that most lowers the mismatch count (strict improvement,
-    or a mismatch-neutral tie preferring an alt -- keeping PAM-creating / present variants
-    -- broken deterministically toward the lexicographically-smaller alt so the result is
-    order-independent). Mismatch is additive per column under the fixed alignment, so this
-    greedy equals the argmin edit over all 2^k combinations. Columns whose every alt only
-    raises the mismatch count are left at the reference base (they contribute nothing to a
-    worst-case off-target)."""
+    At each column pick the alt minimizing the selection key ``(mismatch, pam_invalid,
+    alt)``: fewest mismatches first (additive per column under the fixed alignment, so the
+    greedy equals the argmin edit over all 2^k combinations), then -- among mismatch ties
+    -- a valid PAM, then the lexicographically-smaller alt (deterministic). An alt is
+    preferred over the reference base on a full tie (keeps PAM-creating / present variants).
+    Columns whose every alt only raises the mismatch count are left at the reference base."""
     greedy_seq = list(ref_seq)
     carriers, info = set(), []
+
+    def _pam_flag(seq):
+        return _PAM_INVALID if (pam_valid_fn is not None and not pam_valid_fn(seq)) else _PAM_OK
+
     for col in columns:
         pc = col["pos_c"]
-        best_mm = aligned_mismatches(greedy_seq, real_target, guide_no_pam, revert,
+        base_mm = aligned_mismatches(greedy_seq, real_target, guide_no_pam, revert,
                                      pos_beg, pos_end, revcom_fn)
+        # key of KEEPING the reference base here (no alt); the sentinel lex makes any
+        # alt win a full (mm, pam) tie, matching the legacy "prefer an alt on ties".
+        best_key = (base_mm, _pam_flag(greedy_seq), _REF_SENTINEL)
         best = None  # (alt, carriers, info)
         for cand in col["candidates"]:
             trial = list(greedy_seq)
             trial[pc] = cand["alt"]
             m = aligned_mismatches(trial, real_target, guide_no_pam, revert,
                                    pos_beg, pos_end, revcom_fn)
-            if m < best_mm or (m == best_mm and (best is None or cand["alt"] < best[0])):
-                best_mm, best = m, (cand["alt"], cand["carriers"], cand["info"])
+            key = (m, _pam_flag(trial), cand["alt"])
+            if key < best_key:
+                best_key, best = key, (cand["alt"], cand["carriers"], cand["info"])
         if best is not None:
             greedy_seq[pc] = best[0]
             carriers |= set(best[1])
