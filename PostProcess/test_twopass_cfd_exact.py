@@ -22,6 +22,7 @@ import unittest
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 import twopass_cfd_exact as tp  # noqa: E402
+import twopass_emit as te  # noqa: E402
 
 
 def _extract_defs(src, names):
@@ -113,6 +114,73 @@ class TestWorstCaseFactorizationOracle(unittest.TestCase):
         allele_sets = [list("ACGT") for _ in range(20)]
         got = tp.cfd_worst_case(guide, allele_sets, ["GG"], MM, PAM)
         self.assertEqual(got, PAM.get("GG", 0.0))
+
+
+class TestGreedyMaxScoreVsFactorizedOracle(unittest.TestCase):
+    """2.5.1 item (c): the PRODUCTION worst-case-CFD path
+    (``twopass_emit.greedy_max_score`` -> bounded brute-force with the REAL calc_cfd as
+    score_fn) must agree with the INDEPENDENT factorized oracle
+    (``twopass_cfd_exact.cfd_worst_case``). Two separately-written EXACT implementations
+    returning the same worst-case CFD -- including the JOINT-PAM case that breaks a
+    per-column greedy (the PAM factor is a 2-base joint lookup). Windows are kept small so
+    the combo product stays <= greedy_max_score's brute cap (exact path, not the dense
+    greedy fallback). PAM sets are built as a per-column PRODUCT so the same allele space
+    is representable both as greedy_max_score PAM COLUMNS and as the oracle's ``pam_set``."""
+
+    def _one(self, guide, proto_sets, pam_c1, pam_c2):
+        L = len(guide)
+        ref = [sorted(s)[0] for s in proto_sets] + [sorted(pam_c1)[0], sorted(pam_c2)[0]]
+        ref_str = "".join(ref)
+        columns = []
+        # protospacer variant columns
+        for i, s in enumerate(proto_sets):
+            alts = [b for b in sorted(s) if b != ref[i]]
+            if alts:
+                columns.append({"pos_c": i, "candidates":
+                                [{"alt": b, "carriers": {"S"}, "info": ["rs", "0.1", "snp"]}
+                                 for b in alts]})
+        # the two CFD-relevant PAM columns (positions L, L+1 = the last 2 PAM bases)
+        for j, s in ((0, pam_c1), (1, pam_c2)):
+            pc = L + j
+            alts = [b for b in sorted(s) if b != ref[pc]]
+            if alts:
+                columns.append({"pos_c": pc, "candidates":
+                                [{"alt": b, "carriers": {"S"}, "info": ["rs", "0.1", "snp"]}
+                                 for b in alts]})
+
+        def score_fn(seq_list):
+            s = "".join(seq_list)
+            return tp.cfd_concrete(guide, s[:L], s[L:L + 2], MM, PAM)
+
+        rep = te.greedy_max_score(columns, ref_str, ref_str, guide, False, 0, L,
+                                  _ref["revcom"], score_fn)
+        rs = "".join(rep["seq"])
+        got = tp.cfd_concrete(guide, rs[:L], rs[L:L + 2], MM, PAM)
+        pam_set = sorted({a + b for a in pam_c1 for b in pam_c2})
+        oracle = tp.cfd_worst_case(guide, [sorted(s) for s in proto_sets], pam_set, MM, PAM)
+        # combos stayed under the brute cap (else greedy_max_score used the inexact
+        # fallback and the comparison would not be meaningful).
+        total = 1
+        for c in columns:
+            total *= (1 + len(c["candidates"]))
+        return got, oracle, total
+
+    def test_random_matches_oracle(self):
+        random.seed(11)
+        cap = 1 << 12
+        for _ in range(4000):
+            L = random.randint(4, 6)                      # 3^6 * 2 * 2 = 2916 <= 4096 cap
+            guide = "".join(random.choice("ACGT") for _ in range(L))
+            proto_sets = [set(random.choice("ACGT") for _ in range(random.randint(1, 3)))
+                          for _ in range(L)]
+            pam_c1 = set(random.choice("ACGT") for _ in range(random.randint(1, 2)))
+            pam_c2 = set(random.choice("ACGT") for _ in range(random.randint(1, 2)))
+            got, oracle, total = self._one(guide, proto_sets, pam_c1, pam_c2)
+            self.assertLessEqual(total, cap, "window exceeded brute cap (test setup bug)")
+            self.assertEqual(got, oracle,
+                             "greedy_max_score vs factorized oracle: %r != %r "
+                             "(guide=%s proto=%s pam=%s/%s)"
+                             % (got, oracle, guide, proto_sets, pam_c1, pam_c2))
 
 
 if __name__ == "__main__":
