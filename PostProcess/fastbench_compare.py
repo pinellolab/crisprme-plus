@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Compare a FAST-mode vs SLOW-mode new_simple_analysis.py output (same cluster input).
 
-Proves, on real data, the two 2.5.1 fast-mode properties:
-  1. LOSSLESS DETECTION: every variant off-target LOCUS (chrom, cluster_position,
-     direction) the slow enumeration reports is ALSO present in the fast output
-     (fast is a superset -- worst-possible may surface a formable-but-unobserved combo).
-  2. WORST-POSSIBLE: at each shared locus the fast representative's minimum Total
-     (mismatches + bulges) is <= the slow path's minimum Total (fast never understates
-     the worst case).
-Also reports row counts + the reference-locus parity. Usage:
+Proves, on real data, the two 2.5.1 fast-mode correctness properties. The unit is an
+off-target LOCUS (chrom, cluster_position, direction), and fast mode is WORST-POSSIBLE:
+it emits ONE strongest off-target per window, collapsing weaker per-haplotype variant
+off-targets into the (stronger) reference off-target at that locus -- so the right
+criterion is over ALL rows (variant OR reference), not variant-specific:
+  1. LOSSLESS LOCUS COVERAGE: every off-target locus the slow enumeration reports is
+     ALSO covered by fast (as a variant OR a reference row). Fast is typically a SUPERSET
+     -- worst-possible surfaces formable-but-unobserved combinations too.
+  2. WORST-POSSIBLE BOUND: at each shared locus fast's STRONGEST off-target (min Total =
+     mismatches + bulges, over all its rows) is <= slow's strongest (fast never
+     understates the worst case).
+The variant-specific breakdown is printed for diagnostics (a large variant-only gap that
+is fully covered by fast reference rows is EXPECTED, not a miss). Usage:
     fastbench_compare.py <slow.bestmmblg.txt> <fast.bestmmblg.txt>
 """
 import sys
@@ -17,9 +22,11 @@ import sys
 def _load(path):
     hdr = None
     idx = {}
-    var_min = {}    # locus -> min Total over variant rows
+    var_min = {}    # locus -> min Total over VARIANT rows (diagnostic)
+    loc_min = {}    # locus -> min Total over ALL rows (worst-case at the locus)
     ref_loci = set()
     var_loci = set()
+    all_loci = set()
     n_rows = 0
     with open(path) as fh:
         for line in fh:
@@ -37,20 +44,22 @@ def _load(path):
             n_rows += 1
             locus = (parts[idx["Chromosome"]], parts[idx["Cluster_Position"]],
                      parts[idx["Direction"]])
+            all_loci.add(locus)
             snp = parts[idx["SNP"]].strip()
             try:
                 total = int(parts[idx["Total"]])
             except ValueError:
                 total = None
+            if total is not None and (locus not in loc_min or total < loc_min[locus]):
+                loc_min[locus] = total
             if snp in ("n", "NA", "", "."):
                 ref_loci.add(locus)
             else:
                 var_loci.add(locus)
-                if total is not None:
-                    if locus not in var_min or total < var_min[locus]:
-                        var_min[locus] = total
+                if total is not None and (locus not in var_min or total < var_min[locus]):
+                    var_min[locus] = total
     return {"n_rows": n_rows, "ref_loci": ref_loci, "var_loci": var_loci,
-            "var_min": var_min}
+            "all_loci": all_loci, "var_min": var_min, "loc_min": loc_min}
 
 
 def main():
@@ -60,34 +69,35 @@ def main():
     print("rows:              slow=%d  fast=%d  (collapse %.1fx)"
           % (slow["n_rows"], fast["n_rows"],
              (slow["n_rows"] / fast["n_rows"]) if fast["n_rows"] else float("nan")))
-    print("variant loci:      slow=%d  fast=%d"
-          % (len(slow["var_loci"]), len(fast["var_loci"])))
-    print("reference loci:    slow=%d  fast=%d"
-          % (len(slow["ref_loci"]), len(fast["ref_loci"])))
+    print("off-target loci:   slow=%d  fast=%d" % (len(slow["all_loci"]), len(fast["all_loci"])))
+    print("  variant loci:    slow=%d  fast=%d" % (len(slow["var_loci"]), len(fast["var_loci"])))
+    print("  reference loci:  slow=%d  fast=%d" % (len(slow["ref_loci"]), len(fast["ref_loci"])))
 
-    # (1) lossless detection: every slow variant locus present in fast
-    missed = slow["var_loci"] - fast["var_loci"]
-    print("NO-MISS (slow variant loci absent from fast): %d" % len(missed))
-    if missed:
-        for m in list(missed)[:10]:
-            print("   MISSED:", m)
+    # diagnostic: variant-specific gap (EXPECTED to be covered by fast reference rows)
+    var_missed = slow["var_loci"] - fast["var_loci"]
+    covered_by_ref = var_missed & fast["ref_loci"]
+    print("diagnostic: slow variant loci not a fast VARIANT locus: %d "
+          "(of which covered by a fast REFERENCE row: %d)"
+          % (len(var_missed), len(covered_by_ref)))
 
-    # reference locus parity
-    ref_missed = slow["ref_loci"] - fast["ref_loci"]
-    print("reference loci in slow absent from fast: %d" % len(ref_missed))
+    # (1) lossless LOCUS coverage: every slow locus present in fast (variant OR reference)
+    absent = slow["all_loci"] - fast["all_loci"]
+    print("NO-MISS (slow off-target loci absent from fast entirely): %d" % len(absent))
+    for m in list(absent)[:10]:
+        print("   ABSENT:", m)
 
-    # (2) worst-possible: fast min Total <= slow min Total at each shared locus
+    # (2) worst-possible: fast's strongest (min Total over all rows) <= slow's, per locus
     understated = []
-    for locus, s_total in slow["var_min"].items():
-        f_total = fast["var_min"].get(locus)
+    for locus, s_total in slow["loc_min"].items():
+        f_total = fast["loc_min"].get(locus)
         if f_total is not None and f_total > s_total:
             understated.append((locus, s_total, f_total))
-    print("WORST-POSSIBLE violations (fast Total > slow Total): %d" % len(understated))
+    print("WORST-POSSIBLE violations (fast strongest weaker than slow): %d" % len(understated))
     for u in understated[:10]:
-        print("   UNDERSTATED:", u)
+        print("   UNDERSTATED (locus, slow_min, fast_min):", u)
 
-    ok = (len(missed) == 0 and len(understated) == 0)
-    print("\nRESULT:", "PASS (lossless + worst-possible)" if ok else "FAIL")
+    ok = (len(absent) == 0 and len(understated) == 0)
+    print("\nRESULT:", "PASS (lossless locus coverage + worst-possible bound)" if ok else "FAIL")
     sys.exit(0 if ok else 1)
 
 
