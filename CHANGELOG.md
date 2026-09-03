@@ -49,6 +49,14 @@ and the `release-crisprme` skill.
   subprocess per worker) and no deadlock.
 - **Mega (all-source) index hardening.** Resolved 17 adversarial-review findings in the
   sites-only aggregate index path and de-duplicated colliding indel registry keys.
+- **Clear pre-flight error when a variant search has no prebuilt index.** `complete-search
+  --vcf` without a prebuilt index used to fall back to a legacy on-demand enrichment that
+  builds a classic per-sample dict WITHOUT the dict-less tiers (registry/genotype) and
+  could leave the indel coordinate map (`log_indels`) empty — crashing the variant/indel
+  post-analysis ~30 min in with a cryptic `FileNotFoundError: log<chrom>.txt`. It now
+  detects the missing tiers per dataset up front and stops immediately with an actionable
+  message pointing to `download --what index` (recommended) or `build-index-only` first.
+  Override for advanced/legacy on-demand builds with `CRISPRME_ALLOW_ONDEMAND_BUILD=1`.
 - **Fast-mode worst-case CFD is now exact on every path.** CFD is position-weighted, so the
   fewest-mismatch representative does not maximize CFD; fast mode now also emits the exact
   **maximum-CFD** representative (per-position argmax + bounded brute-force for the joint

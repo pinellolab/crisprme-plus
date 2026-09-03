@@ -1700,6 +1700,53 @@ def complete_search() -> None:
     ):
         sys.exit(1)
 
+    # Pre-flight: a variant search needs a PREBUILT variant index. A fresh
+    # `complete-search --vcf` with no prebuilt index falls back to a legacy on-demand
+    # enrichment that produces a classic per-sample dict WITHOUT the dict-less tiers
+    # (Tier-0 registry + Tier-1 genotype -- only build-index-only emits those), and whose
+    # indel `log_indels` map does not reliably materialize -- so the variant/indel
+    # post-analysis crashes ~30 min in with a cryptic `FileNotFoundError: log<chrom>.txt`.
+    # Detect it up front by the presence of the POST-ANALYSIS tiers per dataset: the SNP
+    # tier (per-sample `dictionaries_<vcf>/` OR dict-less `registry_<vcf>/`) AND the indel
+    # coordinate map (`log_indels_<vcf>/`). NB: check the tiers, NOT an enriched-genome
+    # dir -- a dict-less DOWNLOAD ships the search index (`genome_library/`) + tiers but
+    # not the `Genomes/<ref>+<vcf>` enrichment intermediate, so an enriched-genome check
+    # would false-fire on legit downloaded installs. The source VCFs are not shipped with
+    # the index, so a dict-less variant index cannot be built on demand -- download it, or
+    # build-index-only first. Override for advanced / legacy on-demand builds with
+    # CRISPRME_ALLOW_ONDEMAND_BUILD=1.
+    if variant and not os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
+        _dict_root = os.path.join(current_working_directory, "Dictionaries")
+        _missing = []
+        for _vdir in vcf_dataset_dirs:
+            _vn = os.path.basename(os.path.normpath(_vdir))
+            _have_snp = os.path.isdir(
+                os.path.join(_dict_root, f"dictionaries_{_vn}")
+            ) or os.path.isdir(os.path.join(_dict_root, f"registry_{_vn}"))
+            _have_indel = os.path.isdir(os.path.join(_dict_root, f"log_indels_{_vn}"))
+            if not (_have_snp and _have_indel):
+                _missing.append(_vn)
+        if _missing:
+            error(
+                "No prebuilt variant index found for: %s.\n\n"
+                "`complete-search --vcf` does NOT build a variant index on demand -- the "
+                "dict-less tiers (registry/genotype) and the indel coordinate map are "
+                "produced only at build time, and the source VCFs are not shipped with the "
+                "index. Build or download the index FIRST, then re-run complete-search:\n\n"
+                "  download a prebuilt index (recommended):\n"
+                "    crisprme.py download --what index --index-name "
+                "NRG_3_hg38+hg38_1000G2021_HGDP --path .\n\n"
+                "  or build it locally (source VCFs required):\n"
+                "    crisprme.py build-index-only --genome %s --vcf %s --samplesID "
+                "<samplesID> --pam %s --bMax <N>\n\n"
+                "then:\n"
+                "    crisprme.py complete-search ... --index-path genome_library\n\n"
+                "(advanced: set CRISPRME_ALLOW_ONDEMAND_BUILD=1 to force the legacy "
+                "on-demand build, which produces a classic dict-only index and may fail "
+                "the indel post-analysis.)"
+                % (", ".join(_missing), genomedir, vcfdir, pamfile)
+            )
+
     if fast_mode:
         print(
             "[complete-search] FAST MODE (--fast): variant post-analysis reports one "
