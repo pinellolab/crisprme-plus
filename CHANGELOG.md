@@ -34,8 +34,21 @@ and the `release-crisprme` skill.
   co-occurrence TSV, and renders carrier / homozygote frequencies as **"NA"** for aggregate
   (sites-only) groups — where only allele frequencies exist and per-individual carrier counts
   are undefined — instead of fabricating numbers.
+- **`download` always ships the shared reference index** alongside a variant index, so a
+  reference-genome scan (or an on-demand variant-index rebuild) works immediately after a
+  download with no separate build step.
 
 ### Fixed
+- **Post-analysis no longer deadlocks at high thread counts.** A genome-wide variant
+  post-analysis launched with a large `--thread` (e.g. 200 on a 200-core host) could hang
+  indefinitely: a `multiprocessing.Pool` with hundreds of workers makes every worker inherit
+  every other worker's internal sentinel pipe at fork, so the pool's join never finalizes
+  (all per-chromosome tasks complete, the parent hangs in `pool.map` forever). Both the SNP
+  and indel post-analysis pools now cap the worker count (default 32, override
+  `CRISPRME_POSTPROC_MAX_WORKERS`) — no speed loss (post-analysis is I/O-bound, one
+  subprocess per worker) and no deadlock.
+- **Mega (all-source) index hardening.** Resolved 17 adversarial-review findings in the
+  sites-only aggregate index path and de-duplicated colliding indel registry keys.
 - **Fast-mode worst-case CFD is now exact on every path.** CFD is position-weighted, so the
   fewest-mismatch representative does not maximize CFD; fast mode now also emits the exact
   **maximum-CFD** representative (per-position argmax + bounded brute-force for the joint
