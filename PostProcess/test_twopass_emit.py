@@ -252,6 +252,25 @@ class TestGreedyWorstCase(unittest.TestCase):
         self.assertEqual(r["seq"][3], "A")
         self.assertEqual(r["carriers"], {"s0", "s3"})   # both alts surfaced
 
+    def test_greedy_max_score_respects_emittable_valid_fn(self):
+        # The highest-score combo (col0=T, seq TCGT, score 1.0) has NO carriers, so the
+        # finalizer would DROP it. Adding col3=A gives a carrier but lowers the score to
+        # 0.5; col3=A alone scores 0.1. The max EMITTABLE (carrier-bearing) combo is
+        # therefore TCGA @0.5, NOT the carrier-less TCGT @1.0. (The real chr22 residual.)
+        guide, ref = "ACGT", "ACGT"
+        cols = [{"pos_c": 0, "candidates": [{"alt": "T", "carriers": set(), "info": ["r0", "0.1", "s"]}]},
+                {"pos_c": 3, "candidates": [{"alt": "A", "carriers": {"s3"}, "info": ["r3", "0.2", "s"]}]}]
+        def score(seq):
+            if seq[0] == "T" and seq[3] != "A":
+                return 1.0
+            if seq[0] == "T" and seq[3] == "A":
+                return 0.5
+            return 0.1
+        valid = lambda seq, chosen: any(chosen[pc]["carriers"] for pc in chosen)
+        r = te.greedy_max_score(cols, ref, ref, guide, False, 0, None, _revcom, score, valid_fn=valid)
+        self.assertEqual("".join(r["seq"]), "TCGA")     # max emittable, not carrier-less TCGT
+        self.assertEqual(r["carriers"], {"s3"})
+
     def test_unproductive_column_left_at_reference(self):
         # an alt that only ADDS a mismatch is not chosen; its carriers do not leak in.
         guide = "ACGTACGT"

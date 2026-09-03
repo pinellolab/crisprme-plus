@@ -710,9 +710,39 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                     return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
                                     mm_scores, pam_scores, do_scores)
                 return calc_cfd(split[1], _t[:-3], _t[-2:], mm_scores, pam_scores, do_scores)
+
+            def _emittable_fast(_seq_list, _chosen):
+                # the finalizer KEEPS a variant off-target only if it has >=1 carrier AND
+                # is within the mismatch budget AND has a valid PAM. Restrict the max-CFD
+                # search to such combos, else the argmax can be a carrier-less combo the
+                # finalizer drops -> a weaker EMITTABLE combo (the true worst-possible
+                # carried off-target) would be reported instead (verified: chr22 residual).
+                if not any(_chosen[_pc]["carriers"] for _pc in _chosen):
+                    return False
+                _s = reverse_complement_table("".join(_seq_list)) if revert else "".join(_seq_list)
+                _tl = list(_s)
+                for _p, _c in enumerate(realTarget):
+                    if _c == "-":
+                        _tl.insert(_p, "-")
+                # count EXACTLY as _finalize_observed_entry does: every window position
+                # whose base differs from the guide, INCLUDING bulge ('-') positions (the
+                # finalizer does NOT skip them); the shared `- int(split[8])` then nets to
+                # the real mismatch budget. Skipping bulges here under-counts and lets an
+                # over-budget rep look valid (the chr22 double-bulge residual).
+                _mm = 0
+                for _i, _ch in enumerate(_tl[pos_beg:pos_end]):
+                    if _i < len(guide_no_pam) and _ch.upper() != guide_no_pam[_i]:
+                        _mm += 1
+                if _mm - int(split[8]) > allowed_mms:
+                    return False
+                for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
+                    if _ch.upper() not in iupac_code_set[pam[_i]]:
+                        return False
+                return True
             _cfd_rep = _twopass_emit.greedy_max_score(
                 _columns, refSeq, realTarget, guide_no_pam, revert,
                 pos_beg, pos_end, reverse_complement_table, _cfd_fast,
+                valid_fn=_emittable_fast,
             )
             if _cfd_rep["info"] and _cfd_rep["seq"] != _rep["seq"]:
                 _finalize_observed_entry(

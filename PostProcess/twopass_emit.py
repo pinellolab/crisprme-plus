@@ -184,12 +184,17 @@ def greedy_worst_case(columns, ref_seq, real_target, guide_no_pam, revert,
 
 
 def _max_score_brute(columns, ref_seq, real_target, guide_no_pam, revert,
-                     pos_beg, pos_end, revcom_fn, score_fn, cap):
+                     pos_beg, pos_end, revcom_fn, score_fn, cap, valid_fn=None):
     """EXACT max-``score_fn`` assignment over the window's alt combos (each column: its
-    reference base or any candidate alt), or None if the product exceeds ``cap``. Used to
-    make the worst-case CFD EXACT: CFD does NOT fully factorize (the PAM factor is a joint
-    lookup over the PAM bases, not a per-position product), so a per-column greedy is not
-    guaranteed optimal. Returns ``{"seq": list, "chosen": {pos_c: candidate}}``."""
+    reference base or any candidate alt), or None if the product exceeds ``cap`` (or no
+    combo satisfies ``valid_fn``). Used to make the worst-case CFD EXACT: CFD does NOT
+    fully factorize (the PAM factor is a joint lookup over the PAM bases), so a per-column
+    greedy is not guaranteed optimal. ``valid_fn(seq, chosen) -> bool`` restricts the max
+    to EMITTABLE combos (mirroring the finalizer: a variant off-target must have >=1
+    carrier + be in the mismatch budget + have a valid PAM) -- WITHOUT it the argmax can be
+    a carrier-less combo the finalizer drops, so a weaker emittable combo (the true
+    worst-possible carried off-target) is reported instead. Returns ``{"seq": list,
+    "chosen": {pos_c: candidate}}``."""
     import itertools
     opts, total = [], 1
     for col in columns:
@@ -206,6 +211,8 @@ def _max_score_brute(columns, ref_seq, real_target, guide_no_pam, revert,
             if o is not None:
                 seq[pc] = o["alt"]
                 chosen[pc] = o
+        if valid_fn is not None and not valid_fn(seq, chosen):
+            continue
         s = score_fn(seq)
         if best is None or s > best[0]:
             best = (s, seq, chosen)
@@ -213,7 +220,8 @@ def _max_score_brute(columns, ref_seq, real_target, guide_no_pam, revert,
 
 
 def greedy_max_score(columns, ref_seq, real_target, guide_no_pam, revert,
-                     pos_beg, pos_end, revcom_fn, score_fn, cap=_PAM_REPAIR_CAP):
+                     pos_beg, pos_end, revcom_fn, score_fn, cap=_PAM_REPAIR_CAP,
+                     valid_fn=None):
     """The strongest (worst) off-target the window can form under a score where HIGHER =
     worse (e.g. worst-case CFD) -- a min-MISMATCH representative does NOT maximize CFD (CFD
     is position-weighted, so a seed mismatch outweighs several distal ones). EXACT: over a
@@ -225,7 +233,7 @@ def greedy_max_score(columns, ref_seq, real_target, guide_no_pam, revert,
     _list) -> float`` MUST already fold in the alignment + PAM. Returns ``{"seq": list,
     "carriers": set, "info": [[rsID,AF,snp], ...]}``."""
     exact = _max_score_brute(columns, ref_seq, real_target, guide_no_pam, revert,
-                             pos_beg, pos_end, revcom_fn, score_fn, cap)
+                             pos_beg, pos_end, revcom_fn, score_fn, cap, valid_fn=valid_fn)
     if exact is not None:
         carriers, info = set(), []
         for col in columns:
