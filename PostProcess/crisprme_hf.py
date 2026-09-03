@@ -930,6 +930,33 @@ def download_component(
                         f"Installed Tier-1 genotype store genotypes_{vcf_name}/ "
                         f"into {os.path.join(workdir, 'Dictionaries')}\n"
                     )
+            # ALWAYS-SHIP the shared reference index. A variant index tarball
+            # (<pam>_<N>_<ref>+<vcf>) does NOT bundle the reference index
+            # (<pam>_<N>_<ref>) -- it is common to every variant dataset, so it
+            # travels once, not inside each variant archive. Fetch it here so a
+            # fresh download is IMMEDIATELY searchable: the search needs BOTH the
+            # variant AND the reference index (the latter for reference off-targets).
+            # No-op if it is already installed. Non-fatal on failure -- the search
+            # falls back to building it on demand from the raw genome.
+            ref_index_name = install_name.partition("+")[0]  # <pam>_<N>_<ref>
+            if ref_index_name and not os.path.isdir(
+                os.path.join(local_dir, ref_index_name)
+            ):
+                try:
+                    download_component(
+                        "index", workdir, repo=repo, ref=ref,
+                        index_name=ref_index_name, token=token, genotypes=False,
+                    )
+                    sys.stdout.write(
+                        f"Also installed the shared reference index "
+                        f"'{ref_index_name}' (needed for reference off-targets).\n"
+                    )
+                except Exception as exc:  # non-fatal: build-on-demand fallback exists
+                    sys.stdout.write(
+                        f"NOTE: could not fetch the reference index "
+                        f"'{ref_index_name}' ({exc}); the search will build it on "
+                        f"demand from the raw genome (a shared base component).\n"
+                    )
                 else:
                     sys.stdout.write(
                         f"NOTE: index '{index_name}' has no genotypes_{vcf_name}.tar.gz "
