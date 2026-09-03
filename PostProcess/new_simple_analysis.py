@@ -61,6 +61,21 @@ try:
 except Exception:  # module absent in an old deploy -> legacy dict path only
     _obshap = None
     _phase_companion = None
+
+# 2.5.1 two-pass FAST MODE (docs/DESIGN_2.5.1_two_pass_fast_mode.md). Opt-in via the
+# CRISPRME_FAST_MODE env var (set by `crisprme.py ... --fast` through the post-analysis
+# script chain). When ON, every IUPAC window emits a SINGLE worst-POSSIBLE representative
+# off-target (the greedy min-mismatch / max-CFD haplotype -- the same rep the shipped code
+# already builds for dense `CRISPRME_IUPAC_CAP` windows) instead of enumerating the 2^k
+# haplotype lattice / the observed per-sample haplotypes -- the enumeration-free fix for the
+# intractable dense-panel post-analysis (49h+). Guarded import so an old deploy without the
+# module (or the flag unset) is byte-identical to the legacy path. Default OFF.
+try:
+    import twopass_emit as _twopass_emit
+except Exception:  # module absent -> fast mode unavailable, legacy path unchanged
+    _twopass_emit = None
+_FAST_MODE = bool(int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")) and \
+    _twopass_emit is not None
 # Accumulator for the ADDITIVE phase-confirmation companion TSV (one row per emitted
 # dict-less variant off-target: identity columns + CONFIRMED/PUTATIVE). Populated ONLY
 # on the ``mygt is not None`` branch; dead/empty on every legacy install so the
@@ -618,6 +633,63 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     if not positions:
         return
 
+    # --- 2.5.1 FAST MODE: worst-POSSIBLE representative, NO haplotype enumeration ------
+    # Emit the candidate's reference off-target (locus coverage) + ONE greedy worst-case
+    # variant haplotype (the min-mismatch / max-CFD representative -- twopass_emit, brute-
+    # force verified == argmin edit over all 2^k combinations), then RETURN without
+    # enumerating the observed per-sample haplotypes. This is the enumeration-free
+    # replacement for the intractable dense-panel post-analysis (49h+); the per-sample
+    # phased resolution is traded for tractability (the rep is tagged PUTATIVE, its
+    # carriers the union of the chosen alts' carriers). GATED on _FAST_MODE (opt-in via
+    # CRISPRME_FAST_MODE); the observed/legacy enumeration below is untouched when OFF.
+    if _FAST_MODE:
+        refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
+        refSeq_with_bulges = list(refSeq_final)
+        for _p, _ch in enumerate(realTarget):
+            if _ch == "-":
+                refSeq_with_bulges.insert(_p, "-")
+        refSeq_with_bulges = "".join(refSeq_with_bulges)
+        # reference off-target ONCE (LOCUS-COVERAGE FIX), identical to the non-fast path.
+        _finalize_reference_entry(
+            split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
+            revert, cluster_to_save,
+        )
+        # normalize the gathered variant columns -> twopass_emit's candidate schema, then
+        # build the single greedy worst-case representative haplotype.
+        _columns = [
+            {"pos_c": _col["pos_c"],
+             "candidates": [
+                 {"alt": _col["alts"][_i],
+                  "carriers": set(_col["carrier_gts"][_i].keys()),
+                  "info": _col["info"][_i]}
+                 for _i in range(len(_col["alts"]))]}
+            for _col in positions
+        ]
+        _rep = _twopass_emit.greedy_worst_case(
+            _columns, refSeq, realTarget, guide_no_pam, revert,
+            pos_beg, pos_end, reverse_complement_table,
+        )
+        if _rep["info"]:  # >=1 alt lowered/held the alignment vs the reference
+            _finalize_observed_entry(
+                split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
+                revert, "".join(_rep["seq"]), sorted(_rep["carriers"]),
+                _rep["info"], _obshap.PUTATIVE, cluster_to_save,
+            )
+        # visibility: still log genuinely-dense windows to the shared BED (as the cap does)
+        if IUPAC_CAP >= 0 and len(positions) > IUPAC_CAP:
+            try:
+                _start = int(split[4])
+                hvdr_bed.write(
+                    "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
+                    % (split[3], _start, _start + len(replaceTarget),
+                       split[1].replace("-", ""), len(positions),
+                       ",".join(sorted(_rep["carriers"])) if _rep["carriers"] else ".",
+                       replaceTarget))
+            except Exception:
+                pass  # BED logging is best-effort; never break the run
+        return
+    # --- end fast mode ----------------------------------------------------------------
+
     # 2) Enumerate the distinct observed haplotypes (bounded by ~ploidy*n_carriers).
     #    NOTE: this may be EMPTY (a candidate whose registry variants are absent /
     #    unproductive in every individual). We must NOT early-return on an empty
@@ -815,25 +887,32 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
         # exact min-mismatch / max-CFD haplotype (mismatch is additive per position,
         # so the greedy equals the argmin over all 2^k combinations) without the
         # blow-up. The region is logged to <out>.high_variant_density_regions.bed.
-        capped = IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP
+        # FAST MODE forces the greedy representative for EVERY window (never enumerate the
+        # 2^k lattice); otherwise it triggers only above IUPAC_CAP ambiguity codes. The
+        # greedy rep is the exact min-mismatch / max-CFD haplotype either way.
+        capped = _FAST_MODE or (IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP)
         if capped:
-            _samples = set()
-            for _cnt in totalDict:
-                for _v in totalDict[_cnt][0].values():
-                    _samples |= _v[1]
-            _start = int(split[4])
-            hvdr_bed.write(
-                "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
-                % (
-                    split[3],
-                    _start,
-                    _start + len(replaceTarget),
-                    split[1].replace("-", ""),
-                    countIUPAC,
-                    ",".join(sorted(_samples)) if _samples else ".",
-                    replaceTarget,  # full IUPAC protospacer (dig-in aid)
+            # Log only GENUINELY-dense windows to the BED (in fast mode ``capped`` is forced
+            # for every window, but the high-variant-density BED must still list only the
+            # hypervariable ones -- byte-identical to the non-fast BED contents).
+            if IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP:
+                _samples = set()
+                for _cnt in totalDict:
+                    for _v in totalDict[_cnt][0].values():
+                        _samples |= _v[1]
+                _start = int(split[4])
+                hvdr_bed.write(
+                    "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
+                    % (
+                        split[3],
+                        _start,
+                        _start + len(replaceTarget),
+                        split[1].replace("-", ""),
+                        countIUPAC,
+                        ",".join(sorted(_samples)) if _samples else ".",
+                        replaceTarget,  # full IUPAC protospacer (dig-in aid)
+                    )
                 )
-            )
             # Build the greedy representative per haplotype and REPLACE the per-SNP
             # level-0 entries with that single entry, so the finalization below scores
             # exactly one row (bulges/PAM/creation/CFD via the existing code path).
