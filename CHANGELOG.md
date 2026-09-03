@@ -22,6 +22,18 @@ and the `release-crisprme` skill.
   1000G-2021+HGDP slice (0 CFD under-reports; surfaces *stronger* worst cases at 182 loci).
   The default (non-`--fast`) path is **byte-identical**. See
   `docs/DESIGN_2.5.1_two_pass_fast_mode.md` and METHODS §5/§8.
+- **All-source "mega" sites-only index (5 datasets).** A new merged panel — 1000 Genomes
+  2021, HGDP, gnomAD v4.1, TOPMed, All-of-Us — built directly from each source's aggregate
+  `INFO/AF` (these carry no shared samples to reconstruct cross-source haplotypes), with
+  per-dataset AF plus a per-site **`AF_max`** (the maximum across sources) as the reported
+  global frequency. `merge_mega_sites.sh` + `build_mega_registry.py` compile the Tier-0
+  registry directly from the frequencies (byte-identical binary; SNPs, with an indel-AF
+  companion store), and the enricher tolerates sites-only VCFs. See METHODS §2/§3.
+- **Report companions for aggregate panels.** The report now bundles the per-dataset
+  **`indel_af.tsv`** companion (indel allele frequencies by source) alongside the SNP+indel
+  co-occurrence TSV, and renders carrier / homozygote frequencies as **"NA"** for aggregate
+  (sites-only) groups — where only allele frequencies exist and per-individual carrier counts
+  are undefined — instead of fabricating numbers.
 
 ### Fixed
 - **Fast-mode worst-case CFD is now exact on every path.** CFD is position-weighted, so the

@@ -423,7 +423,12 @@ panel: 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyp
 panel; a variant present in the panel but whose source allele frequency is exactly
 0 (e.g. a secondary allele of a multiallelic site) is shown at a **display floor of
 1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
-read as "present, frequency effectively 0", not a measured frequency.
+read as "present, frequency effectively 0", not a measured frequency. For an
+**aggregate (sites-only) panel** (e.g. the all-source mega index, §2), only allele
+frequencies exist — there are no per-individual genotypes — so carrier and homozygote
+frequencies are rendered **NA** rather than fabricated, and a per-dataset **`indel_af.tsv`**
+companion carries indel allele frequencies by source alongside the SNP+indel co-occurrence
+table.
 
 ## 8. Off-target scoring, assumptions and limitations
 
