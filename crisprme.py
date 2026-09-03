@@ -344,7 +344,13 @@ def print_help_complete_search() -> None:
         "\t--full_input_validate, also run a full per-VCF-record scan (chromosome "
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
-        "default lightweight checks, so opt-in [OPTIONAL]\n")
+        "default lightweight checks, so opt-in [OPTIONAL]\n"
+        "\t--fast, two-pass FAST MODE for dense variant panels: the post-analysis "
+        "reports ONE worst-POSSIBLE off-target per variant window instead of "
+        "enumerating every haplotype (the enumeration-free fix for the intractable "
+        "dense-panel post-analysis). Trades per-sample phased resolution (rows are "
+        "worst-possible / PUTATIVE) for tractability; recommended for high-density / "
+        "unphased / aggregate panels [OPTIONAL]\n")
     sys.exit(1)
 
 
@@ -1385,6 +1391,19 @@ def complete_search() -> None:
             raise ValueError("Missing input for --vcf-filter-pass-values") from e
     full_input_validate = "--full_input_validate" in args
 
+    # 2.5.1 two-pass FAST MODE (--fast): the variant post-analysis emits ONE
+    # worst-POSSIBLE representative off-target per IUPAC window instead of enumerating
+    # the 2^k haplotype lattice / the observed per-sample haplotypes -- the enumeration-
+    # free fix for the intractable dense-panel post-analysis (49h+; see
+    # docs/DESIGN_2.5.1_two_pass_fast_mode.md). It trades per-sample phased resolution
+    # (rows are tagged PUTATIVE, worst-possible) for tractability. Propagated to the
+    # whole post-analysis subprocess tree via CRISPRME_FAST_MODE (submit_job -> pools ->
+    # post_analisi_*.sh -> new_simple_analysis.py all inherit os.environ), so no shell
+    # arg-contract changes are needed. Advanced users can also set the env var directly.
+    fast_mode = "--fast" in args
+    if fast_mode:
+        os.environ["CRISPRME_FAST_MODE"] = "1"
+
     # optional prebuilt/staged reference-index library (--index-path). When
     # given, the reference index is looked up here (e.g. an index made with
     # build-index-only, or one downloaded ahead of time) rather than built under
@@ -1680,6 +1699,13 @@ def complete_search() -> None:
     ):
         sys.exit(1)
 
+    if fast_mode:
+        print(
+            "[complete-search] FAST MODE (--fast): variant post-analysis reports one "
+            "WORST-POSSIBLE off-target per window (no 2^k haplotype enumeration; rows "
+            "are worst-possible / PUTATIVE, not per-sample phased). See "
+            "docs/DESIGN_2.5.1_two_pass_fast_mode.md."
+        )
     print(
         f"Launching job {outputfolder}. The stdout is redirected in log_verbose.txt and stderr is redirected in log_error.txt"
     )
