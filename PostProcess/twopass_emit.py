@@ -45,6 +45,43 @@ def aligned_mismatches(seq_prerevert, real_target, guide_no_pam, revert,
 _PAM_INVALID = 1   # worse than _PAM_OK in the selection key (prefer a valid PAM on ties)
 _PAM_OK = 0
 _REF_SENTINEL = "\xff"   # sorts after every ACGT base -> an alt wins a full (mm,pam) tie
+# Bound on the alt-combo brute-force used ONLY to repair the rare joint-PAM residual the
+# greedy leaves PAM-invalid. 2^12: a window with <=12 variant columns is fully repaired;
+# denser windows (already flagged as high-variant-density) skip the fallback.
+_PAM_REPAIR_CAP = 1 << 12
+
+
+def _pam_valid_min_mm(columns, ref_seq, real_target, guide_no_pam, revert,
+                      pos_beg, pos_end, revcom_fn, pam_valid_fn, cap):
+    """Exact min-mismatch VALID-PAM assignment over the window's alt combos, or None if
+    no valid-PAM combo exists (or the product exceeds ``cap``). Each column may take its
+    reference base or any candidate alt. Used as the fallback when the greedy + multi-pass
+    leaves the rep PAM-invalid but slow (enumeration) still forms a valid-PAM off-target
+    (e.g. a valid PAM needing the REFERENCE allele at a variant PAM column). Returns
+    ``{"seq": [...], "chosen": {pos_c: candidate}}``."""
+    import itertools
+    opts, total = [], 1
+    for col in columns:
+        col_opts = [None] + list(col["candidates"])   # None = keep the reference base
+        total *= len(col_opts)
+        if total > cap:
+            return None
+        opts.append([(col["pos_c"], o) for o in col_opts])
+    best = None   # (mm, seq, chosen)
+    for combo in itertools.product(*opts):
+        seq = list(ref_seq)
+        chosen = {}
+        for pc, o in combo:
+            if o is not None:
+                seq[pc] = o["alt"]
+                chosen[pc] = o
+        if not pam_valid_fn(seq):
+            continue
+        mm = aligned_mismatches(seq, real_target, guide_no_pam, revert,
+                                pos_beg, pos_end, revcom_fn)
+        if best is None or mm < best[0]:
+            best = (mm, seq, chosen)
+    return None if best is None else {"seq": best[1], "chosen": best[2]}
 
 
 def greedy_worst_case(columns, ref_seq, real_target, guide_no_pam, revert,
@@ -76,31 +113,73 @@ def greedy_worst_case(columns, ref_seq, real_target, guide_no_pam, revert,
     preferred over the reference base on a full tie (keeps PAM-creating / present variants).
     Columns whose every alt only raises the mismatch count are left at the reference base."""
     greedy_seq = list(ref_seq)
-    carriers, info = set(), []
 
     def _pam_flag(seq):
         return _PAM_INVALID if (pam_valid_fn is not None and not pam_valid_fn(seq)) else _PAM_OK
 
-    for col in columns:
+    def _select(col):
+        """Pick the best allele for ``col`` given the CURRENT greedy_seq (every other
+        column fixed at its current value). Mutates greedy_seq[pc] to the choice. Returns
+        the chosen candidate dict, or None when the reference base wins."""
         pc = col["pos_c"]
+        greedy_seq[pc] = ref_seq[pc]                      # reference baseline for this col
         base_mm = aligned_mismatches(greedy_seq, real_target, guide_no_pam, revert,
                                      pos_beg, pos_end, revcom_fn)
-        # key of KEEPING the reference base here (no alt); the sentinel lex makes any
-        # alt win a full (mm, pam) tie, matching the legacy "prefer an alt on ties".
-        best_key = (base_mm, _pam_flag(greedy_seq), _REF_SENTINEL)
-        best = None  # (alt, carriers, info)
+        # sentinel lex on the reference makes any alt win a full (mm, pam) tie.
+        best_key, best = (base_mm, _pam_flag(greedy_seq), _REF_SENTINEL), None
         for cand in col["candidates"]:
-            trial = list(greedy_seq)
-            trial[pc] = cand["alt"]
-            m = aligned_mismatches(trial, real_target, guide_no_pam, revert,
+            greedy_seq[pc] = cand["alt"]
+            m = aligned_mismatches(greedy_seq, real_target, guide_no_pam, revert,
                                    pos_beg, pos_end, revcom_fn)
-            key = (m, _pam_flag(trial), cand["alt"])
+            key = (m, _pam_flag(greedy_seq), cand["alt"])
             if key < best_key:
-                best_key, best = key, (cand["alt"], cand["carriers"], cand["info"])
-        if best is not None:
-            greedy_seq[pc] = best[0]
-            carriers |= set(best[1])
-            info.append(best[2])
+                best_key, best = key, cand
+        greedy_seq[pc] = best["alt"] if best is not None else ref_seq[pc]
+        return best
+
+    chosen = {col["pos_c"]: _select(col) for col in columns}
+
+    # A PAM needing a specific allele at 2+ variant columns (e.g. GMR = M:A AND R:G) may
+    # not resolve in one left-to-right pass (one column is decided before the other is
+    # set). Re-select each column given the others' current choices until the PAM is valid
+    # or a fixpoint; each pass fixes >=1 PAM column so it converges in <= (#columns) passes.
+    # Skipped when not PAM-aware (idempotent there) so pam_valid_fn=None stays single-pass.
+    # Mismatch is the primary key, so a re-selection never raises the mismatch count
+    # (position-independent) -- losslessness is preserved.
+    if pam_valid_fn is not None:
+        for _ in range(len(columns)):
+            if pam_valid_fn(greedy_seq):
+                break
+            changed = False
+            for col in columns:
+                prev = chosen[col["pos_c"]]
+                cur = _select(col)
+                if (cur["alt"] if cur else None) != (prev["alt"] if prev else None):
+                    changed = True
+                chosen[col["pos_c"]] = cur
+            if not changed:
+                break
+
+        # Fallback for the rare joint-PAM residual the coordinate-ascent can't resolve (a
+        # valid PAM that needs the REFERENCE allele at a variant PAM column, or 2+
+        # simultaneous non-lex flips): bounded brute-force for the exact min-mismatch
+        # VALID-PAM assignment. Runs ONLY when the rep is still PAM-invalid, so it is off
+        # the common path. A win here is a real off-target the greedy would otherwise drop.
+        if not pam_valid_fn(greedy_seq):
+            repaired = _pam_valid_min_mm(columns, ref_seq, real_target, guide_no_pam,
+                                         revert, pos_beg, pos_end, revcom_fn,
+                                         pam_valid_fn, _PAM_REPAIR_CAP)
+            if repaired is not None:
+                greedy_seq = repaired["seq"]
+                chosen = {col["pos_c"]: repaired["chosen"].get(col["pos_c"])
+                          for col in columns}
+
+    carriers, info = set(), []
+    for col in columns:                                  # rebuild in column order
+        ch = chosen[col["pos_c"]]
+        if ch is not None:
+            carriers |= set(ch["carriers"])
+            info.append(ch["info"])
     return {"seq": greedy_seq, "carriers": carriers, "info": info}
 
 
