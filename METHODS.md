@@ -475,9 +475,8 @@ screening-vs-confirmatory two-tier split of Section 5.
 
 The same split governs **SNP+indel co-occurrence** under `--fast`. Because the fast path
 emits worst-possible representatives instead of enumerating observed per-sample haplotypes,
-it reports co-occurring SNPs only for those representatives — so it **under-reports
-per-sample cooc** (measured ~half the cooc off-target positions vs the full path on a real
-chr22 1000G-2021+HGDP test). Off-target *detection* is preserved (a representative is
+it reports co-occurring SNPs only for those representatives and does not enumerate the
+per-sample cis co-occurrences. Off-target *detection* is preserved (a representative is
 emitted for every window), but the per-sample *attribution* — which individual carries the
 indel and the SNP in cis — collapses. For complete SNP+indel co-occurrence, run without
 `--fast`.

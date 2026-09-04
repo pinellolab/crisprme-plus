@@ -76,14 +76,15 @@ and the `release-crisprme` skill.
   a candidate (pre-existing single-indel-search property). Low-frequency: **~1–2%** of indel
   loci after repeat-masking/dedup; genuinely-missed off-targets **~0.1–0.2%**, all at the
   weakest (≈0-CFD) edit-budget ceiling.
-- **`--fast` under-reports SNP+indel co-occurrence.** Because `--fast` emits worst-possible
-  representatives per window instead of enumerating observed per-sample haplotypes, it
-  reports only the co-occurring SNPs of those reps — measured **~half** the cooc off-target
-  positions vs the full path on a real chr22 test (1000G-2021+HGDP: 229/426). Off-target
-  **detection is preserved** (a representative is emitted for every window); it is the
-  **per-sample cooc annotation** (which individual carries indel+SNP in cis) that collapses.
-  **Run without `--fast` for complete SNP+indel co-occurrence** — the same screening
-  (`--fast`) vs confirmatory (non-`--fast`) split as CRISTA and phased haplotypes.
+- **`--fast` reports SNP+indel co-occurrence only for the representatives.** Because `--fast`
+  emits worst-possible representatives per window instead of enumerating observed per-sample
+  haplotypes, it reports co-occurring SNPs only for those reps — it does **not** enumerate
+  the per-sample cis co-occurrences (which individual carries indel+SNP together). Off-target
+  detection still holds (a representative is emitted for every window); it is the per-sample
+  cooc *attribution* that collapses. **Run without `--fast` for complete SNP+indel
+  co-occurrence** — the same screening (`--fast`) vs confirmatory (non-`--fast`) split as
+  CRISTA and phased haplotypes. (A quantified fast-vs-full cooc-locus comparison is pending a
+  completed matched run.)
 
 ## [2.5.0] - 2026-09-01
 

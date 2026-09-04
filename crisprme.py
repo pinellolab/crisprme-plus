@@ -1755,10 +1755,10 @@ def complete_search() -> None:
             "worst-case; CRISTA is a best-effort worst-case over the reported "
             "representatives (empirically bounded: every off-target with CRISTA >= 0.2 "
             "is reported at full strength, under-reporting <= 0.04 and confined to "
-            "CRISTA < 0.19). SNP+indel co-occurrence is likewise under-reported in "
-            "--fast (per-sample cooc collapses to the representatives; ~half the cooc "
-            "off-targets on a chr22 test) -- run without --fast for complete "
-            "co-occurrence. See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
+            "CRISTA < 0.19). SNP+indel co-occurrence is reported only for those "
+            "representatives (per-sample cis co-occurrence is not enumerated) -- run "
+            "without --fast for complete co-occurrence. See "
+            "docs/DESIGN_2.5.1_two_pass_fast_mode.md."
         )
     print(
         f"Launching job {outputfolder}. The stdout is redirected in log_verbose.txt and stderr is redirected in log_error.txt"
