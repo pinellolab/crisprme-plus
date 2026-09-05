@@ -473,13 +473,14 @@ min-edit + max-CFD representatives already span the low-edit shell. A **guarante
 per-haplotype CRISTA worst case** is available by running without `--fast`; this is the
 screening-vs-confirmatory two-tier split of Section 5.
 
-The same split governs **SNP+indel co-occurrence** under `--fast`. Because the fast path
-emits worst-possible representatives instead of enumerating observed per-sample haplotypes,
-it reports co-occurring SNPs only for those representatives and does not enumerate the
-per-sample cis co-occurrences. Off-target *detection* is preserved (a representative is
-emitted for every window), but the per-sample *attribution* — which individual carries the
-indel and the SNP in cis — collapses. For complete SNP+indel co-occurrence, run without
-`--fast`.
+**SNP+indel co-occurrence is unaffected by `--fast`.** `--fast` collapses only the *SNP*
+worst-possible representative emission in `integrated_results.tsv` (Section 5); the SNP+indel
+co-occurrence companion (`indel_snp_cooc.tsv`) is produced by the indel post-analysis' cis
+phasing pass over the genotype tiers, which `--fast` does not touch. Measured on the complete
+genome-wide matrix (2021 panel, same guide, `--fast` vs non-`--fast`): the two `indel_snp_cooc.tsv`
+files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
+per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
+carries the indel and SNP together — is preserved identically in fast and non-fast runs.
 
 **Assumptions.** (i) Results are relative to the chosen **reference assembly** and
 its coordinates. (ii) The variant panel is only as representative as the input

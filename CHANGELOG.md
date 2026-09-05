@@ -19,9 +19,11 @@ and the `release-crisprme` skill.
   (reference + minimum-edit + maximum-CFD), propagated to the whole post-analysis via
   `CRISPRME_FAST_MODE`. Validated **lossless for locus detection** and **non-understating
   for the worst-case score** against the slow full-enumeration path on a real chr22
-  1000G-2021+HGDP slice (0 CFD under-reports; surfaces *stronger* worst cases at 182 loci).
-  The default (non-`--fast`) path is **byte-identical**. See
-  `docs/DESIGN_2.5.1_two_pass_fast_mode.md` and METHODS §5/§8.
+  1000G-2021+HGDP slice (0 CFD under-reports; surfaces *stronger* worst cases at 182 loci),
+  and **confirmed genome-wide** (V2 non-`--fast` vs V3 `--fast` on the 2021 panel: V3 is a
+  locus-level superset, **0 of V2's 1,458 CFD≥0.2 loci lost or demoted**, CFD exact-or-
+  conservative, CRISTA screen-grade only near the 0.2 line). The default (non-`--fast`) path
+  is **byte-identical**. See `docs/DESIGN_2.5.1_two_pass_fast_mode.md` and METHODS §5/§8.
 - **All-source "mega" sites-only index (5 datasets).** A new merged panel — 1000 Genomes
   2021, HGDP, gnomAD v4.1, TOPMed, All-of-Us — built directly from each source's aggregate
   `INFO/AF` (these carry no shared samples to reconstruct cross-source haplotypes), with
@@ -37,6 +39,18 @@ and the `release-crisprme` skill.
 - **`download` always ships the shared reference index** alongside a variant index, so a
   reference-genome scan (or an on-demand variant-index rebuild) works immediately after a
   download with no separate build step.
+
+### Performance
+- **CRISTA scoring: load the model once + skip eager per-pentamer work.** The 276 MB CRISTA
+  RandomForest ensemble was re-`pickle.load()`ed on every scoring batch (both the SNP and
+  INDEL post-analysis); it is now cached at module scope and loaded once per process.
+  Separately, `get_features` no longer runs an eager per-pentamer `re.sub` + `random.choice`
+  on N-free windows (guarded behind `if "N" in ...`), which also removes a latent
+  nondeterminism from the hot path. Both are **byte-identical** at the reported score
+  precision (validated against the shipped model); `get_features` micro-benchmarks ~1.6×
+  faster. The dense-panel INDEL post-analysis remains dominated by single-threaded per-target
+  CRISTA compute (profiled scoring-bound, not enumeration-bound); parallelizing it is tracked
+  separately.
 
 ### Fixed
 - **Post-analysis no longer deadlocks at high thread counts.** A genome-wide variant
@@ -76,15 +90,14 @@ and the `release-crisprme` skill.
   a candidate (pre-existing single-indel-search property). Low-frequency: **~1–2%** of indel
   loci after repeat-masking/dedup; genuinely-missed off-targets **~0.1–0.2%**, all at the
   weakest (≈0-CFD) edit-budget ceiling.
-- **`--fast` reports SNP+indel co-occurrence only for the representatives.** Because `--fast`
-  emits worst-possible representatives per window instead of enumerating observed per-sample
-  haplotypes, it reports co-occurring SNPs only for those reps — it does **not** enumerate
-  the per-sample cis co-occurrences (which individual carries indel+SNP together). Off-target
-  detection still holds (a representative is emitted for every window); it is the per-sample
-  cooc *attribution* that collapses. **Run without `--fast` for complete SNP+indel
-  co-occurrence** — the same screening (`--fast`) vs confirmatory (non-`--fast`) split as
-  CRISTA and phased haplotypes. (A quantified fast-vs-full cooc-locus comparison is pending a
-  completed matched run.)
+- **`--fast` does NOT change SNP+indel co-occurrence.** `--fast` collapses only the *SNP*
+  representative emission in `integrated_results.tsv`; the `indel_snp_cooc.tsv` companion is
+  produced by the indel post-analysis' cis-phasing pass over the genotype tiers, which `--fast`
+  does not touch. Measured on the completed genome-wide matrix (2021 panel, `--fast` vs
+  non-`--fast`, guide TGCTTGGTCGGCACTGATAG): the two `indel_snp_cooc.tsv` files are
+  **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full per-sample
+  `cis_samples` + joint-AF in both). Per-sample cis attribution is preserved in fast runs.
+  (Corrects an earlier note that claimed `--fast` collapsed cooc to representatives only.)
 
 ## [2.5.0] - 2026-09-01
 
