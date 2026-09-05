@@ -72,6 +72,13 @@ warnings.filterwarnings("ignore")
 
 # globals
 RF_PICKLE_PATH = "CRISTA_predictors.pkl"
+# PERF: the 276 MB CRISTA RandomForest ensemble was previously pickle.load()'d on
+# EVERY predict_crista_score() call (2x per 100k-target batch), i.e. tens of GB of
+# redundant unpickling per chromosome on both the SNP and INDEL post-analysis paths.
+# Cache the deserialized predictors at module scope and load exactly once per process
+# (workers are per-chromosome, single-threaded scorers -> one load each, reused across
+# all their batches). Output is byte-identical -- same model object, just not reloaded.
+_CRISTA_PREDICTORS = None
 MATCH_SCORE = 1.0
 MISMATCH_PENALTY = 0.0
 GAP_PENALTY = -1.25
@@ -407,6 +414,7 @@ def predict_crista_score(features_lst):
     mode: either full, nogenomic or noflanking
     :return: features df + prediction col
     """
+    global _CRISTA_PREDICTORS
     n_predictors = 5
 
     path = RF_PICKLE_PATH
@@ -449,8 +457,13 @@ def predict_crista_score(features_lst):
         except Exception:
             # Old sklearn (current image) or import failure: leave as-is.
             pass
-    with open(path, "rb") as pklr:
-        predictors = pickle.load(pklr)
+    # Load-once cache: only the 276 MB unpickle is guarded (the path-resolution and
+    # the sklearn-alias shim above are cheap + idempotent, so leaving them per-call is
+    # harmless). Subsequent calls in the same process reuse the deserialized ensemble.
+    if _CRISTA_PREDICTORS is None:
+        with open(path, "rb") as pklr:
+            _CRISTA_PREDICTORS = pickle.load(pklr)
+    predictors = _CRISTA_PREDICTORS
 
     predictions = []
     for i in range(n_predictors):
