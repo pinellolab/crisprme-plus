@@ -1272,6 +1272,100 @@ def get_available_liftover_files(kind: str) -> List:
     return [{"label": f, "value": f} for f in sorted(files)]
 
 
+def assembly_individual(root_dir: str, artifact_name: str) -> Optional[Tuple[str, str]]:
+    """Read back which individual/haplotype an assembly artifact belongs to.
+
+    Read-side counterpart of settings_page.py's ``_write_assembly_marker`` --
+    same one-marker-file-per-artifact shape as ``vcf_reference_genome``'s tier-1
+    lookup (``VCFs/.<dataset>.refgenome``), just for assembly-search's genome/
+    chain/chromAlias files instead of VCF datasets. A marker file
+    (``<root_dir>/.<artifact_name>.assembly_individual``) holds one
+    ``<individual>\\t<paternal|maternal>`` line. Deliberately per-artifact, not
+    one combined record per individual -- a missing/corrupt marker only drops
+    that ONE artifact's pairing info, it never blocks reading the other 5.
+
+    Parameters
+    ----------
+    root_dir : str
+        Directory the artifact lives in, e.g. ``Genomes`` or ``LiftoverFiles``
+        (resolved against ``current_working_directory``).
+    artifact_name : str
+        The artifact's own name (genome folder name, or chain/chromAlias
+        file name).
+
+    Returns
+    -------
+    Optional[Tuple[str, str]]
+        ``(individual, haplotype)`` if a valid marker exists, else ``None``.
+    """
+    marker = os.path.join(
+        current_working_directory, root_dir, f".{artifact_name}.assembly_individual"
+    )
+    try:
+        with open(marker) as fh:
+            line = fh.read().strip()
+    except OSError:
+        return None
+    individual, _sep, haplotype = line.partition("\t")
+    if not individual or haplotype not in ("paternal", "maternal"):
+        return None
+    return individual, haplotype
+
+
+def installed_assemblies() -> List[Dict]:
+    """Group marked assembly artifacts by individual, for the settings-page
+    "Installed personal assemblies" listing (and later, the launch form's
+    individual-centric dropdown).
+
+    Returns
+    -------
+    List[Dict]
+        One dict per individual with a marker on at least one artifact:
+        ``{"individual": str, "paternal": {...} | None, "maternal": {...} | None,
+        "complete": bool}``. A haplotype's dict (when present) has
+        ``{"genome", "chain", "chromalias"}``, each the artifact name if marked
+        and present, else ``None`` -- so a partially-registered haplotype (e.g.
+        genome marked but chain not yet) is visible, not hidden.
+        ``complete`` is True only when both haplotypes have all 3.
+    """
+    by_individual: Dict[str, Dict] = {}
+
+    def _note(individual: str, haplotype: str, kind: str, artifact_name: str) -> None:
+        entry = by_individual.setdefault(individual, {"paternal": None, "maternal": None})
+        hap = entry[haplotype]
+        if hap is None:
+            hap = entry[haplotype] = {"genome": None, "chain": None, "chromalias": None}
+        hap[kind] = artifact_name
+
+    for g in get_available_genomes():
+        pair = assembly_individual(GENOMES_DIR, g["value"].replace(" ", "_"))
+        if pair:
+            _note(pair[0], pair[1], "genome", g["value"])
+    for f in get_available_liftover_files("chain"):
+        pair = assembly_individual(LIFTOVER_DIR, f["value"])
+        if pair:
+            _note(pair[0], pair[1], "chain", f["value"])
+    for f in get_available_liftover_files("chromalias"):
+        pair = assembly_individual(LIFTOVER_DIR, f["value"])
+        if pair:
+            _note(pair[0], pair[1], "chromalias", f["value"])
+
+    def _hap_complete(hap: Optional[Dict]) -> bool:
+        return bool(hap) and all(hap.get(k) for k in ("genome", "chain", "chromalias"))
+
+    results = []
+    for individual, entry in sorted(by_individual.items()):
+        results.append(
+            {
+                "individual": individual,
+                "paternal": entry["paternal"],
+                "maternal": entry["maternal"],
+                "complete": _hap_complete(entry["paternal"]) and _hap_complete(entry["maternal"]),
+            }
+        )
+    return results
+
+
 def get_available_indexes() -> List:
     """Recover the USER-FACING precomputed CRISPRitz indexes under genome_library/.
 

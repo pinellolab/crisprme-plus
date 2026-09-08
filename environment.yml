@@ -42,7 +42,12 @@ dependencies:
   - huggingface_hub            # crisprme.py download / publish-index
   # --- Dash 2.x web stack
   - dash>=2.14,<3
-  - dash-bootstrap-components
+  - dash-bootstrap-components<2   # >=2.0.0 requires React 18 (Dash>=3); this app's
+                                   # dash-renderer is still React 16 -- dbc>=2.0.0
+                                   # silently renders some components (e.g. dbc.Tabs,
+                                   # via an internal useId() call) with null ids and
+                                   # empty content under React 16, no console error.
+                                   # Pin to the last React-16-compatible 1.x release.
   - dash-daq
   - flask
   - flask-caching

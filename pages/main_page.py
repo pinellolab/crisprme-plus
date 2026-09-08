@@ -37,6 +37,7 @@ from .pages_utils import (
     get_custom_VCF,
     get_available_genomes,
     get_available_liftover_files,
+    installed_assemblies,
     LIFTOVER_DIR,
     get_custom_annotations,
     sort_annotation,
@@ -284,6 +285,21 @@ def _pad_guides_for_pam(text_guides: str, pam_len: int, pam_begin: bool, guide_s
     return [line + pad for line in lines]
 
 
+def _complete_assembly_options() -> List[Dict]:
+    """Dropdown options for the "Individual" picker: only individuals whose
+    Data Manager registration is COMPLETE (both haplotypes, all 3 files
+    each) -- Luca's completeness-gating suggestion, implemented as simply
+    not offering an incomplete individual rather than offering it and
+    failing at submit time. Source of truth is the same
+    `installed_assemblies()` grouping the Settings page's "Installed
+    personal assemblies" listing uses (Component C)."""
+    return [
+        {"label": a["individual"], "value": a["individual"]}
+        for a in installed_assemblies()
+        if a["complete"]
+    ]
+
+
 # Directory convention ("Option 1" in assembly_search_web_plan.md): the job
 # id IS the `--output` value passed to `assembly-search` directly -- no
 # separate id, no mapping file. `assembly_search()` itself is never modified;
@@ -356,6 +372,45 @@ def _run_assembly_search_job(cmd: str, combined_dir: str) -> None:
 
 @app.callback(
     [
+        Output("genome-paternal", "value"),
+        Output("genome-maternal", "value"),
+        Output("chain-paternal", "value"),
+        Output("chain-maternal", "value"),
+        Output("chromalias-paternal", "value"),
+        Output("chromalias-maternal", "value"),
+    ],
+    [Input("assembly-individual", "value")],
+    prevent_initial_call=True,
+)
+def populate_assembly_fields_from_individual(individual: str) -> Tuple:
+    """Auto-derives the 6 hidden genome/chain/chromAlias fields from the
+    visible "Individual" picker, via the same `installed_assemblies()`
+    grouping Settings uses. `submit_assembly_search_job` below is otherwise
+    completely unchanged -- it still just reads these 6 State values, same
+    as when they were directly user-picked; only where the values come from
+    changed. Clearing the picker clears all 6 back to None.
+    """
+    if not individual:
+        return None, None, None, None, None, None
+    match = next(
+        (a for a in installed_assemblies() if a["individual"] == individual and a["complete"]),
+        None,
+    )
+    if match is None:  # picked value no longer complete/registered -- don't guess
+        return None, None, None, None, None, None
+    pat, mat = match["paternal"], match["maternal"]
+    return (
+        pat["genome"],
+        mat["genome"],
+        pat["chain"],
+        mat["chain"],
+        pat["chromalias"],
+        mat["chromalias"],
+    )
+
+
+@app.callback(
+    [
         Output("url", "pathname", allow_duplicate=True),
         Output("url", "search", allow_duplicate=True),
         # Reuses the SAME warning modal complete-search's check_input already
@@ -409,8 +464,11 @@ def submit_assembly_search_job(
     -- guides typed here get the same automatic PAM-length N-padding
     complete-search's own form applies (see `_pad_guides_for_pam` below),
     so there's no format difference between the two modes' guide boxes.
-    Genome/chain/chromAlias selection via a Data Manager UI is deferred
-    (component C in assembly_search_web_plan.md).
+    These 6 State values are auto-derived from the visible "Individual"
+    picker by `populate_assembly_fields_from_individual` above (component C
+    / Data Manager, built 2026-09-02) -- this function's own validation and
+    path-resolution logic is unchanged from when they were directly
+    user-picked dropdowns.
     """
     if not n:
         raise PreventUpdate
@@ -2377,149 +2435,173 @@ def index_page() -> html.Div:
         [
             html.H4("Select genome", style={"fontSize": "2.2rem"}),
             # Regular (reference / population-VCF) genome + variant pickers --
-            # hidden while the personal-assembly panel below is open, since the
-            # two are mutually exclusive search modes (assembly-search takes no
-            # VCF at all) and showing both at once would just be confusing.
-            html.Div(
+            # Two tabs instead of a collapsible toggle -- real Luca/Manuel
+            # meeting feedback (2026-09-02): 6 dropdowns collapsed inline
+            # under a "search a personal genome instead?" question read as
+            # cluttered/confusing; a dedicated tab reads more clearly as two
+            # distinct search modes. This is a pure presentation change --
+            # the "Reference genome" tab's content and the "Personal
+            # assembly" tab's 6 dropdowns are UNCHANGED from what they were
+            # inside the old toggle/collapse (same ids, same options-loading
+            # calls, same submit-field-swap behavior below) -- deliberately
+            # NOT redesigned into fewer/matched dropdowns yet, since that's
+            # real, separate work (the genome<->VCF-style matching/Data-
+            # Manager problem) that should happen once, not be built twice.
+            # See project memory for the phased plan this follows.
+            dbc.Tabs(
                 [
-                    html.Div(
-                        dcc.Dropdown(
-                            options=get_available_genomes(),
-                            value=_def_genome,
-                            clearable=False,
-                            id="available-genome",
-                        ),
-                        style={"width": "300px"},
-                    ),
-                    html.P("Variants", style={"margin": "8px 0 2px"}),
-                    html.Div(
-                        dcc.Dropdown(
-                            options=get_variant_dataset_options(_def_genome),
-                            value=_def_variants,
-                            clearable=False,
-                            id="variant-dataset",
-                            style={"width": "300px"},
-                        ),
-                    ),
-                ],
-                id="regular-genome-fields",
-            ),
-            # Personal-assembly (paternal/maternal, no VCF) search, via
-            # `crisprme.py assembly-search` -- collapsed by default, same
-            # "Advanced options ▾" pattern as thresholds_content below, so a
-            # user doing an ordinary complete-search never sees it. Genome
-            # dropdowns intentionally list ALL of Genomes/ unfiltered (so a
-            # single haplotype folder stays usable for an ordinary complete-
-            # search too); chain/chromAlias dropdowns list LiftoverFiles/ (see
-            # LIFTOVER_DIR in pages_utils.py). A real "paternal/maternal pair"
-            # concept in the Data Manager is deferred (component C in
-            # assembly_search_web_plan.md) -- this is the interim, simplest
-            # working version.
-            dbc.Button(
-                "Search a personal assembly genome instead? ▾",
-                id="assembly-search-toggle",
-                color="link",
-                n_clicks=0,
-                style={"padding": "0", "font-size": "1.25rem", "margin-top": "8px"},
-            ),
-            dbc.Collapse(
-                html.Div(
-                    [
-                        html.P(
-                            "Searches a fully assembled personal diploid genome "
-                            "directly (no VCF/population inference), reconciling "
-                            "predictions across both haplotypes against hg38.",
-                            style={"font-size": "1.25rem", "color": "#555"},
-                        ),
-                        html.P(
-                            "The genome, chain file, and chromAlias file "
-                            "dropdowns below aren't linked to each other -- "
-                            "make sure each \"Paternal\"/\"Maternal\" selection "
-                            "is the matching file for the same individual "
-                            "and haplotype, since mismatched files won't be "
-                            "caught automatically.",
-                            style={
-                                "font-size": "1.0rem",
-                                "color": "#8a6d3b",
-                                "fontStyle": "italic",
-                            },
-                        ),
+                    dbc.Tab(
                         html.Div(
                             [
-                                html.P("Paternal genome"),
-                                dcc.Dropdown(
-                                    options=get_available_genomes(),
-                                    value=None,
-                                    clearable=True,
-                                    id="genome-paternal",
+                                html.Div(
+                                    dcc.Dropdown(
+                                        options=get_available_genomes(),
+                                        value=_def_genome,
+                                        clearable=False,
+                                        id="available-genome",
+                                    ),
                                     style={"width": "300px"},
                                 ),
-                            ]
+                                html.P("Variants", style={"margin": "8px 0 2px"}),
+                                html.Div(
+                                    dcc.Dropdown(
+                                        options=get_variant_dataset_options(_def_genome),
+                                        value=_def_variants,
+                                        clearable=False,
+                                        id="variant-dataset",
+                                        style={"width": "300px"},
+                                    ),
+                                ),
+                            ],
+                            id="regular-genome-fields",
+                            style={"margin-top": "12px"},
                         ),
-                        html.P("Maternal genome", style={"margin": "8px 0 2px"}),
+                        label="Reference genome",
+                        tab_id="tab-reference-genome",
+                    ),
+                    # Personal-assembly (paternal/maternal, no VCF) search, via
+                    # `crisprme.py assembly-search`. User-facing selection is
+                    # one "Individual" dropdown (below), auto-derived from
+                    # the Data Manager's individual<->file pairing (component
+                    # C, built 2026-09-02 -- see installed_assemblies() in
+                    # pages_utils.py and settings_page.py's "Add a personal
+                    # assembly" card). The 6 underlying genome/chain/
+                    # chromAlias dropdowns still exist in the tree (hidden)
+                    # purely so submit_assembly_search_job's already-
+                    # validated State reads / path resolution stay untouched
+                    # -- get_available_genomes()/get_available_liftover_files()
+                    # remain their (unfiltered) option sources, but they're no
+                    # longer what the user picks directly. A manual/advanced
+                    # override UI for power users is deferred.
+                    dbc.Tab(
                         html.Div(
-                            dcc.Dropdown(
-                                options=get_available_genomes(),
-                                value=None,
-                                clearable=True,
-                                id="genome-maternal",
-                                style={"width": "300px"},
-                            ),
+                            [
+                                html.P(
+                                    "Searches a fully assembled personal diploid genome "
+                                    "directly (no VCF/population inference), reconciling "
+                                    "predictions across both haplotypes against hg38.",
+                                    style={"font-size": "1.25rem", "color": "#555"},
+                                ),
+                                # Individual-centric picker (Phase 3, 2026-09-02) --
+                                # replaces 6 independently-picked, unlinked
+                                # dropdowns with one selector over COMPLETE
+                                # registered individuals only (Luca's
+                                # completeness-gating suggestion: an
+                                # incomplete individual simply isn't offered,
+                                # rather than being pickable and failing at
+                                # submit time). `installed_assemblies()` is
+                                # the same Data Manager grouping used by the
+                                # Settings page's "Installed personal
+                                # assemblies" listing (Component C).
+                                html.Div(
+                                    [
+                                        html.P("Individual"),
+                                        dcc.Dropdown(
+                                            options=_complete_assembly_options(),
+                                            value=None,
+                                            clearable=True,
+                                            placeholder="select a registered individual",
+                                            id="assembly-individual",
+                                            style={"width": "300px"},
+                                        ),
+                                        html.Small(
+                                            "No complete personal assemblies registered "
+                                            "yet -- add one under Settings / Data Manager.",
+                                            id="assembly-individual-empty-hint",
+                                            style={
+                                                "color": "#8a6d3b",
+                                                "fontStyle": "italic",
+                                                "display": (
+                                                    "block"
+                                                    if not _complete_assembly_options()
+                                                    else "none"
+                                                ),
+                                            },
+                                        ),
+                                    ]
+                                ),
+                                # The 6 fields the launch callback actually reads --
+                                # hidden, auto-populated from the individual picker
+                                # above (see populate_assembly_fields_from_individual
+                                # below). Kept as real dropdown components (not a
+                                # dcc.Store) so submit_assembly_search_job's existing,
+                                # already-validated State reads and path-resolution
+                                # logic stay completely untouched -- only the input
+                                # SOURCE changed, not the submit callback itself.
+                                html.Div(
+                                    [
+                                        dcc.Dropdown(
+                                            options=get_available_genomes(),
+                                            value=None,
+                                            id="genome-paternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_genomes(),
+                                            value=None,
+                                            id="genome-maternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_liftover_files("chain"),
+                                            value=None,
+                                            id="chain-paternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_liftover_files("chain"),
+                                            value=None,
+                                            id="chain-maternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_liftover_files("chromalias"),
+                                            value=None,
+                                            id="chromalias-paternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_liftover_files("chromalias"),
+                                            value=None,
+                                            id="chromalias-maternal",
+                                        ),
+                                    ],
+                                    id="assembly-manual-fields",
+                                    style={"display": "none"},
+                                ),
+                                html.P(
+                                    "Uses the PAM, guide(s), mismatch and bulge settings below.",
+                                    style={
+                                        "font-size": "1.25rem",
+                                        "color": "#777",
+                                        "font-style": "italic",
+                                        "margin-top": "8px",
+                                    },
+                                ),
+                            ],
+                            style={"margin-top": "12px"},
                         ),
-                        html.P("Paternal liftOver chain file", style={"margin": "8px 0 2px"}),
-                        html.Div(
-                            dcc.Dropdown(
-                                options=get_available_liftover_files("chain"),
-                                value=None,
-                                clearable=True,
-                                id="chain-paternal",
-                                style={"width": "300px"},
-                            ),
-                        ),
-                        html.P("Maternal liftOver chain file", style={"margin": "8px 0 2px"}),
-                        html.Div(
-                            dcc.Dropdown(
-                                options=get_available_liftover_files("chain"),
-                                value=None,
-                                clearable=True,
-                                id="chain-maternal",
-                                style={"width": "300px"},
-                            ),
-                        ),
-                        html.P("Paternal chromAlias file", style={"margin": "8px 0 2px"}),
-                        html.Div(
-                            dcc.Dropdown(
-                                options=get_available_liftover_files("chromalias"),
-                                value=None,
-                                clearable=True,
-                                id="chromalias-paternal",
-                                style={"width": "300px"},
-                            ),
-                        ),
-                        html.P("Maternal chromAlias file", style={"margin": "8px 0 2px"}),
-                        html.Div(
-                            dcc.Dropdown(
-                                options=get_available_liftover_files("chromalias"),
-                                value=None,
-                                clearable=True,
-                                id="chromalias-maternal",
-                                style={"width": "300px"},
-                            ),
-                        ),
-                        html.P(
-                            "Uses the PAM, guide(s), mismatch and bulge settings below.",
-                            style={
-                                "font-size": "1.25rem",
-                                "color": "#777",
-                                "font-style": "italic",
-                                "margin-top": "8px",
-                            },
-                        ),
-                    ],
-                    style={"margin-top": "8px"},
-                ),
-                id="assembly-search-collapse",
-                is_open=False,
+                        label="Personal assembly",
+                        tab_id="tab-personal-assembly",
+                    ),
+                ],
+                id="genome-mode-tabs",
+                active_tab="tab-reference-genome",
             ),
         ]
     )
@@ -2809,11 +2891,22 @@ def index_page() -> html.Div:
             ),
             html.Div(
                 [
-                    dbc.Button(
-                        "Submit Assembly-Search Job",
+                    # Same look as the "Submit" button above (background,
+                    # width, font size) rather than a Bootstrap-primary blue
+                    # button with a longer label -- the "Reference genome" /
+                    # "Personal assembly" tab already tells the user which
+                    # mode they're in, so a differently-styled/worded submit
+                    # button under it reads as inconsistent, not informative.
+                    # id unchanged -- submit_assembly_search_job still fires
+                    # off Input("submit-assembly-job", "n_clicks").
+                    html.Button(
+                        "Submit",
                         id="submit-assembly-job",
-                        color="primary",
-                        style={"width": "300px", "fontSize": "1.5rem"},
+                        style={
+                            "background-color": "#E6E6E6",
+                            "width": "300px",
+                            "fontSize": "1.5rem",
+                        },
                     ),
                 ],
                 id="assembly-submit-fields",
@@ -3000,36 +3093,26 @@ def toggle_advanced_thresholds(n_clicks: int, is_open: bool) -> Tuple:
 
 @app.callback(
     [
-        Output("assembly-search-collapse", "is_open"),
-        Output("assembly-search-toggle", "children"),
-        Output("regular-genome-fields", "style"),
         Output("regular-submit-fields", "style"),
         Output("assembly-submit-fields", "style"),
     ],
-    [Input("assembly-search-toggle", "n_clicks")],
-    [State("assembly-search-collapse", "is_open")],
+    [Input("genome-mode-tabs", "active_tab")],
     prevent_initial_call=True,
 )
-def toggle_assembly_search_panel(n_clicks: int, is_open: bool) -> Tuple:
-    """Toggle the personal-assembly-search panel under Step 2. Opening it
-    hides the regular genome/variant dropdowns (assembly-search takes no
-    VCF -- showing both search modes' genome pickers at once would just be
-    confusing), closing it restores them; same show/hide-on-toggle pattern
-    as `toggle_advanced_thresholds` above. Also swaps which of the two
-    (independent) submit buttons is visible down in the end-of-form submit
-    area, so only one submit action ever shows at a time."""
-    new_open = not is_open
-    label = (
-        "▴ Back to regular genome search"
-        if new_open
-        else "Search a personal assembly genome instead? ▾"
-    )
+def toggle_assembly_search_panel(active_tab: str) -> Tuple:
+    """Swaps which of the two (independent) submit buttons is visible down
+    in the end-of-form submit area, based on which Step 2 tab is active --
+    only one submit action ever shows at a time. Which set of genome/
+    variant-vs-assembly dropdowns is VISIBLE is now handled natively by
+    dbc.Tabs itself (only the active tab's content renders) -- this
+    callback only has the submit-button swap left to do, unlike the old
+    collapsible-toggle version it replaced, which also had to manually
+    show/hide the regular-genome-fields div and the toggle button's own
+    label."""
+    is_assembly = active_tab == "tab-personal-assembly"
     hidden = {"display": "none"}
     shown = {}
-    regular_style = hidden if new_open else shown
-    regular_submit_style = hidden if new_open else shown
-    assembly_submit_style = shown if new_open else hidden
-    return new_open, label, regular_style, regular_submit_style, assembly_submit_style
+    return (hidden if is_assembly else shown), (shown if is_assembly else hidden)
 
 
 @app.callback(
