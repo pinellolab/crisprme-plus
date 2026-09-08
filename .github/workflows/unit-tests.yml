@@ -181,3 +181,15 @@ jobs:
           python -m unittest test_assembly_reconcile
           test_ensure_search_lists test_hvdr_greedy_cap test_registry_only_emit
           test_representative_tiebreak test_sanitize_job_name test_tier0_compaction -v
+
+      - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF)"
+        # The 2.5.1 flagship features: --fast two-pass (lossless detection + worst-case
+        # bound), the all-source mega registry/indel-AF, and aggregate carrier/hom "NA".
+        # NOTE: test_fix1_crista_cache is intentionally NOT here -- it needs the 276 MB
+        # CRISTA model (absent in the light CI); its byte-identity is validated in the SIF.
+        working-directory: PostProcess
+        run: >
+          python -m unittest test_twopass_emit test_twopass_find test_twopass_score
+          test_twopass_cfd_exact test_twopass_fast_equivalence test_twopass_legacy_cfd
+          test_twopass_lynchpin_counterexamples test_aggregate_carrier_na
+          test_build_mega_registry test_build_mega_indel_af -v

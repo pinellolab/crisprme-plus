@@ -20,7 +20,14 @@ has been done.** v2.5.0 is already tagged; this is the next release (`crisprme.p
 - **Clean-room real-user e2e** (`cleanroom_250`, #178): TRAC guide, 2021 panel, log_error empty,
   cooc in report.
 - **V1/V2/V3 GW matrix:** V1 (2.4.0/2019) 325,530 → V2 (2.5.x/2021) 407,222 → V3 (`--fast`) 416,500.
-  V1→V2 gain **98.7% panel-driven / ~1.3% feature**; zero material off-target lost.
+  Delta computed on the **24 shared primary contigs** (V1's index also carries 10,620
+  alt/random/decoy-contig rows absent from V2's primary-only index — excluded to avoid a
+  contig-set confound). V1→V2 gain = **105,471 new off-targets: ~96.3% panel-driven** (2021
+  variant-created) **/ ~1.2% feature** (cooc; only 14 net-new beyond the panel), ~3.7%
+  high-edit boundary churn. **5 material reference off-targets (CFD 0.22–0.38, all mm+b 6–7
+  with bulges) are genuinely absent in V2** — the denser 2021 variant-enriched index masks
+  the reference-allele k-mer at those loci (compounded by the `--max-total-edits` default);
+  none are strong/high-risk.
 - **`--fast` GW-lossless:** V3 locus-level superset of V2; **0 of 1,458 CFD≥0.2 loci lost or
   demoted**; CFD exact-or-conservative; CRISTA screen-grade near 0.2 only.
 - **cooc:** byte-identical fast vs non-fast; 843 CONFIRMED / 1,886 PUTATIVE GW (see

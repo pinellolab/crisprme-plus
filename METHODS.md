@@ -469,7 +469,11 @@ made: **every off-target with CRISTA ≥ 0.2 is reported at full or greater stre
 mode even surfaces *more* actionable sites than per-sample enumeration), and under-reporting
 is **bounded to ≤ 0.04 and confined to the sub-0.19 weak tail** (median gap 0.006, no
 threshold crossings) — structurally, because high-CRISTA off-targets are low-edit and the
-min-edit + max-CFD representatives already span the low-edit shell. A **guaranteed
+min-edit + max-CFD representatives already span the low-edit shell. **At genome-wide scale
+the CRISTA tail is heavier than the chr22 slice:** across the full genome ~5 % of CRISTA
+≥ 0.2 loci can drop below 0.2 under `--fast` (largest observed gap ~0.12), whereas **CFD had
+zero ≥ 0.2 losses**. So in `--fast`, CFD is a safe actionable gate but **CRISTA is a screen**,
+not an action gate. A **guaranteed
 per-haplotype CRISTA worst case** is available by running without `--fast`; this is the
 screening-vs-confirmatory two-tier split of Section 5.
 

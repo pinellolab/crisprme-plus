@@ -1749,16 +1749,16 @@ def complete_search() -> None:
 
     if fast_mode:
         print(
-            "[complete-search] FAST MODE (--fast): variant post-analysis reports one "
-            "WORST-POSSIBLE off-target per window (no 2^k haplotype enumeration; rows "
-            "are worst-possible / PUTATIVE, not per-sample phased). CFD is the EXACT "
-            "worst-case; CRISTA is a best-effort worst-case over the reported "
-            "representatives (empirically bounded: every off-target with CRISTA >= 0.2 "
-            "is reported at full strength, under-reporting <= 0.04 and confined to "
-            "CRISTA < 0.19). SNP+indel co-occurrence is reported only for those "
-            "representatives (per-sample cis co-occurrence is not enumerated) -- run "
-            "without --fast for complete co-occurrence. See "
-            "docs/DESIGN_2.5.1_two_pass_fast_mode.md."
+            "[complete-search] FAST MODE (--fast): the SNP variant post-analysis reports one "
+            "WORST-POSSIBLE off-target per window (no 2^k haplotype enumeration; rows are "
+            "worst-possible / PUTATIVE, not per-sample phased). CFD is the EXACT worst case -- "
+            "a safe actionable gate (genome-wide validation: 0 CFD>=0.2 loci lost or demoted "
+            "vs the full path). CRISTA is a best-effort SCREEN: genome-wide, a small fraction "
+            "(~5%) of CRISTA>=0.2 loci can drop below 0.2 under --fast (largest observed gap "
+            "~0.12), so re-run WITHOUT --fast for a CRISTA-based action gate. SNP+indel "
+            "co-occurrence is UNCHANGED by --fast -- the indel_snp_cooc.tsv is byte-identical "
+            "to a non-fast run (--fast affects only the SNP representatives, not the indel "
+            "cis-phasing pass). See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
         )
     print(
         f"Launching job {outputfolder}. The stdout is redirected in log_verbose.txt and stderr is redirected in log_error.txt"

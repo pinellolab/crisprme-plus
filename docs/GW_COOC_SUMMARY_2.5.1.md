@@ -46,9 +46,11 @@ canonical GW 2.5.1 cooc reference; it supersedes the interim `gw_cooc_25` recove
 
 ## Interpretation
 - The co-occurrence feature identifies off-targets that require an indel **and** a SNP on the
-  same haplotype — a class 2.4.0 cannot represent. On this guide it contributes ~1.3–1.4K
-  loci (≈1.3% of the 2.5.x-vs-2.4.0 gain; see `docs`/deltas — the rest of the gain is the
-  denser 2021 panel).
+  same haplotype — a class 2.4.0 cannot represent. On this guide it accounts for ~1.2% of the
+  105,471 new off-targets on the 24 shared primary contigs (≈1,262 cooc-proximal loci, of
+  which only 14 are net-new beyond the panel expansion); the overwhelming majority (~96.3%)
+  of the 2.5.x-vs-2.4.0 gain is the **denser 2021 panel** (variant-created off-targets), not
+  the cooc feature. See `docs/RELEASE_CHECKLIST_2.5.1.md` for the confound-free delta.
 - **Frequency ≠ cut strength.** The high-AF co-occurrences above are *common variants that
   create a weak off-target*; most cooc loci sit at the low-CFD margin. The clinically
   actionable subset (high CFD **and** co-occurring) is small — the report's validation panel

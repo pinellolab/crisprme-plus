@@ -81,10 +81,12 @@ and the `release-crisprme` skill.
 
 ### Notes
 - In fast mode, **CFD is the exact worst case; CRISTA is best-effort** (a non-factorizable
-  RandomForest). Measured (chr22 1000G-2021+HGDP, fast vs slow full enumeration): every
-  off-target with **CRISTA ≥ 0.2 is reported at full or greater strength**, and
-  under-reporting is **≤ 0.04 and confined to the sub-0.19 weak tail** (no threshold
-  crossings). Run **without** `--fast` for a guaranteed per-haplotype CRISTA worst case.
+  RandomForest). On a chr22 1000G-2021+HGDP slice every CRISTA ≥ 0.2 off-target was reported
+  at full strength (under-reporting ≤ 0.04, sub-0.19 tail). **Genome-wide the CRISTA tail is
+  heavier:** ~5 % of CRISTA ≥ 0.2 loci can drop below 0.2 under `--fast` (largest gap ~0.12),
+  while **CFD had zero ≥ 0.2 losses** (V2-vs-V3 GW matrix). So `--fast` CFD is a safe
+  actionable gate but **CRISTA is a screen** — run **without** `--fast` for a guaranteed
+  per-haplotype CRISTA worst case / a CRISTA action gate.
 - **Multi-indel residual (documented):** the indel search materializes one indel per fake
   contig, so an off-target needing **≥ 2 co-occurring cis indels in one protospacer** is not
   a candidate (pre-existing single-indel-search property). Low-frequency: **~1–2%** of indel
