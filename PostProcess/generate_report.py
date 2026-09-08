@@ -624,6 +624,111 @@ def read_specificity_score(result_dir, job_id, guides):
 
 
 # --------------------------------------------------------------------------- #
+# Assembly-search per-guide MM x bulge grid (shared by the live Dash results
+# page AND this module's own combined-report builder -- moved here 2026-09-05
+# so both callers use one real implementation instead of two copies that
+# could drift apart).
+# --------------------------------------------------------------------------- #
+def load_general_target_count(hap_dir: str, hap_output_name: str, guide: str):
+    """Real per-haplotype MM x bulge count grid, read directly from that
+    haplotype's own already-existing file -- the SAME file complete-search's
+    own Result Summary table reads
+    (`.{job_id}.general_target_count.{guide}_{filter}.txt`), produced
+    automatically by that haplotype's underlying complete-search run.
+
+    The file on disk is always TWO equal-sized stacked blocks (see
+    `process_summaries.py`: `general_table[guide]["ref"]` then `["var"]`,
+    each `np.zeros((bDNA+bRNA+1, mm+1))`, concatenated unconditionally) --
+    complete-search's own REFERENCE/VARIANT split, keyed per-ROW on whether
+    that row's underlying alignment had a sample attached (`splitted[13] ==
+    "NA"`), NOT on the CLI's `genome_type` argument. assembly-search never
+    runs with `--vcf`, so EVERY row has no sample attached, so the whole
+    "var" block is always structurally zero. Real bug, caught 2026-09-06 by
+    a real screenshot showing the last 3 of 6 rows all-zero for BOTH
+    haplotypes on a run whose real bulge budget (bDNA=1+bRNA=1=2) could only
+    ever populate rows 0-2 -- this function used to return all 6 rows as if
+    they were real bulge levels 0-5. Only the first half is real; take it."""
+    path = os.path.join(
+        hap_dir, f".{hap_output_name}.general_target_count.{guide}_CFD.txt"
+    )
+    if not os.path.isfile(path):
+        return None
+    try:
+        grid = pd.read_csv(path, sep="\t", na_filter=False)
+    except (OSError, pd.errors.ParserError):
+        return None
+    return grid.iloc[: len(grid) // 2].reset_index(drop=True)
+
+
+def grid_totals(grid) -> List[str]:
+    return [str(int(grid.iloc[j, :].astype(float).sum())) for j in range(len(grid))]
+
+
+def build_grid_row_cells(
+    pat_grid, mat_grid, n_mm_cols: int, max_total_edits: Optional[int] = None
+) -> Dict[str, str]:
+    """Mirrors complete-search's own "both" (REF/VAR) stacking exactly
+    (results_page.py's update_table_general_profile: per-origin bulge
+    labels, a REFERENCE/VARIANT tag on each block's middle row, a blank
+    separator line between blocks) -- Paternal/Maternal stand in for
+    Reference/Variant, sourced from two independent files instead of one
+    shared file split in half. Returns multi-line ("\\n"-joined) cell
+    strings; render with a monospace/whiteSpace:pre style (Dash's
+    style_data, or an inline `style="white-space:pre"` in plain HTML).
+
+    `max_total_edits`, when given, marks a cell "-" instead of showing its
+    real (guaranteed-zero) value whenever that row's bulge count + that
+    column's mismatch count exceeds the cap -- that combination was never
+    searchable at all, so a bare "0" there reads as "searched, found none"
+    when it should read as "not applicable" (2026-09-06, requested after a
+    real run showed a plain 0 in an unreachable cell)."""
+    pat_n = len(pat_grid) if pat_grid is not None else 0
+    mat_n = len(mat_grid) if mat_grid is not None else 0
+    bulge_lines = [str(j) for j in range(pat_n)] + [""] + [str(j) for j in range(mat_n)]
+    pat_totals = grid_totals(pat_grid) if pat_grid is not None else []
+    mat_totals = grid_totals(mat_grid) if mat_grid is not None else []
+    pat_mid, mat_mid = pat_n // 2, mat_n // 2
+    # Fixed-width space padding, not tabs: a tab's rendered width depends on
+    # the preceding text's length, so "PATERNAL\t"/"MATERNAL\t" don't land at
+    # the same column as a bare "\t" on the unlabeled lines (verified
+    # directly -- this is what produced misaligned numbers on the live page
+    # before this fix). ljust() to a fixed character width is deterministic
+    # in a monospace, whiteSpace:pre cell regardless of label length.
+    _LABEL_WIDTH = 10
+    total_lines = [
+        f"{'PATERNAL' if j == pat_mid else '':<{_LABEL_WIDTH}}{t}"
+        for j, t in enumerate(pat_totals)
+    ]
+    total_lines.append("")
+    total_lines += [
+        f"{'MATERNAL' if j == mat_mid else '':<{_LABEL_WIDTH}}{t}"
+        for j, t in enumerate(mat_totals)
+    ]
+    def _col_values(grid, mm_i: int) -> List[str]:
+        if grid is None or mm_i >= grid.shape[1]:
+            return []
+        out = []
+        for bulge_i in range(len(grid)):
+            # bulge count (row) + mismatch count (this column) exceeding the
+            # run's own --max-total-edits cap was never a searchable
+            # combination -- its real value is guaranteed 0, but showing a
+            # bare "0" there reads as "searched, found none" rather than
+            # "not applicable". "-" instead, only when the cap is known.
+            if max_total_edits is not None and (bulge_i + mm_i) > max_total_edits:
+                out.append("-")
+            else:
+                out.append(str(grid.iloc[bulge_i, mm_i]))
+        return out
+
+    cells = {"# Bulges": "\n".join(bulge_lines), "Total": "\n".join(total_lines)}
+    for mm_i in range(n_mm_cols):
+        pat_col = _col_values(pat_grid, mm_i)
+        mat_col = _col_values(mat_grid, mm_i)
+        cells[f"{mm_i}MM"] = "\n".join(pat_col + [""] + mat_col)
+    return cells
+
+
+# --------------------------------------------------------------------------- #
 # Summary metadata: .Params.txt / .version.txt / filename fallback
 # --------------------------------------------------------------------------- #
 def _read_kv_sidecar(path):
@@ -3483,6 +3588,530 @@ def build_report(
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
+    return out_zip
+
+
+def _combined_origin_split_figure_uri(summary):
+    """Static PNG (base64 data URI) of the paternal/maternal origin split --
+    same 3 real counts and colors as the live results page's plotly bar
+    (assembly-origin-split-graph), redrawn in matplotlib since this report
+    has no <script>. Uses matplotlib.pyplot (already imported + backend
+    configured module-level, `matplotlib.use("Agg")` above)."""
+    both = summary.get("both", 0)
+    pat_only = summary.get("paternal_only", 0)
+    mat_only = summary.get("maternal_only", 0)
+    if both + pat_only + mat_only == 0:
+        return None
+    fig, ax = plt.subplots(figsize=(7.2, 1.5))
+    left = 0
+    for value, color, label in (
+        (both, "#2b6cb0", f"Both haplotypes ({both})"),
+        (pat_only, "#63b3ed", f"Paternal-only ({pat_only})"),
+        (mat_only, "#f6ad55", f"Maternal-only ({mat_only})"),
+    ):
+        ax.barh([0], [value], left=left, color=color, label=label)
+        left += value
+    ax.set_yticks([])
+    ax.set_xlabel("Reconciled off-target sites")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.55), ncol=3, frameon=False, fontsize=9)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+# Curated view of the reconciled (paternal/maternal-paired) schema -- NOT
+# build_curated_frame()/build_table_html() (those are tied to complete-
+# search's REF/ALT schema and don't apply to this table's shape), but reuses
+# their exact output CSS classes (ottable/ottable-wrap) so it's styled
+# identically for free.
+_COMBINED_TABLE_COLS = [
+    ("Spacer+PAM", "Spacer+PAM"),
+    ("hg38_chr", "Chromosome"),
+    ("hg38_start", "Start"),
+    ("Strand_(fewest_mm+b)", "Strand"),
+    ("CFD_score_(fewest_mm+b)_paternal", "CFD (Paternal)"),
+    ("CFD_score_(fewest_mm+b)_maternal", "CFD (Maternal)"),
+    ("Mismatches_(fewest_mm+b)_paternal", "MM (Paternal)"),
+    ("Mismatches_(fewest_mm+b)_maternal", "MM (Maternal)"),
+    ("origin", "Origin"),
+]
+
+
+def _combined_curated_top_df(combined_df, top_n=1000):
+    """Top-N reconciled sites, sorted by best CFD across either haplotype,
+    with display-friendly column names. Shared by the HTML table AND the
+    bundled curated TSV download, so both always show the same rows."""
+    if combined_df.empty:
+        return pd.DataFrame(columns=["Rank"] + [label for _, label in _COMBINED_TABLE_COLS])
+    df = combined_df.copy()
+    # There is no bare "Spacer+PAM" column -- it's always haplotype-suffixed
+    # (Spacer+PAM_paternal/_maternal). Same combine_first merge the live
+    # results page already does (results_page.py's result_page_assembly):
+    # the two are always identical on "both" rows (same guide regardless of
+    # haplotype), so fall back to whichever haplotype actually has a value
+    # on paternal_only/maternal_only rows.
+    if "Spacer+PAM_paternal" in df.columns and "Spacer+PAM_maternal" in df.columns:
+        df["Spacer+PAM"] = df["Spacer+PAM_paternal"].combine_first(df["Spacer+PAM_maternal"])
+    present_cols = [src for src, _ in _COMBINED_TABLE_COLS if src in df.columns]
+    label_cols = [label for label in dict(_COMBINED_TABLE_COLS).values()]
+    if not present_cols:
+        return pd.DataFrame(columns=["Rank"] + label_cols)
+    cfd_cols = [
+        c for c in ("CFD_score_(fewest_mm+b)_paternal", "CFD_score_(fewest_mm+b)_maternal")
+        if c in df.columns
+    ]
+    if cfd_cols:
+        df["_best_cfd"] = pd.concat(
+            [pd.to_numeric(df[c], errors="coerce") for c in cfd_cols], axis=1
+        ).max(axis=1)
+        df = df.sort_values("_best_cfd", ascending=False)
+    df = df.head(top_n)
+    out = df[present_cols].rename(columns=dict(_COMBINED_TABLE_COLS)).reset_index(drop=True)
+    out.insert(0, "Rank", range(1, len(out) + 1))
+    return out
+
+
+def _combined_ranked_table_html(curated_df):
+    if curated_df.empty:
+        return "<p>No reconciled off-targets to show.</p>"
+    head_html = "".join(f"<th>{_esc(c)}</th>" for c in curated_df.columns)
+    rows = [
+        "<tr>" + "".join(f"<td>{_esc(v)}</td>" for v in row) + "</tr>"
+        for _, row in curated_df.iterrows()
+    ]
+    return (
+        '<div class="ottable-wrap"><table class="ottable">'
+        f"<thead><tr>{head_html}</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table></div>"
+    )
+
+
+def _combined_criteria_html(params):
+    """Run-parameters card, same summary-card/summary-table CSS as the
+    haplotype-coverage card -- the assembly-search analog of build_report()'s
+    own 'inputs & criteria' box (that one is FDA-variant-guidance-specific
+    language about a VCF's inclusion policy, which doesn't apply here at all
+    -- there's no VCF -- so this is a plain parameters list, not an adaptation
+    of their text)."""
+    rows = [
+        ("Paternal genome", params.get("Genome_paternal", "n/a")),
+        ("Maternal genome", params.get("Genome_maternal", "n/a")),
+        ("PAM / nuclease", params.get("Pam", "n/a")),
+        ("Mismatches", params.get("Mismatches", "n/a")),
+        ("DNA bulges", params.get("DNA", "n/a")),
+        ("RNA bulges", params.get("RNA", "n/a")),
+        ("Max total edits", params.get("Max_total_edits", "n/a")),
+    ]
+    body = "".join(f"<tr><td>{_esc(k)}</td><td><strong>{_esc(v)}</strong></td></tr>" for k, v in rows)
+    return f'<div class="summary-card"><table class="summary-table"><tbody>{body}</tbody></table></div>'
+
+
+def _combined_perfect_match_banner(combined_df):
+    """Adapted from render_perfect_match_banner()'s real concept (2+ perfect
+    genomic matches -> can't tell the intended on-target from an off-target
+    by sequence alone) -- not a call to that function itself, since it's
+    built on the REF/ALT validation-panel object, which doesn't exist here.
+    Checks each haplotype's own 0-mismatch/0-bulge count directly against
+    the reconciled table's own columns."""
+    if combined_df.empty:
+        return ""
+
+    def _count_perfect(mm_col, b_col):
+        if mm_col not in combined_df.columns or b_col not in combined_df.columns:
+            return 0
+        mm = pd.to_numeric(combined_df[mm_col], errors="coerce")
+        b = pd.to_numeric(combined_df[b_col], errors="coerce")
+        return int(((mm == 0) & (b == 0)).sum())
+
+    n_perfect = max(
+        _count_perfect("Mismatches_(fewest_mm+b)_paternal", "Bulges_(fewest_mm+b)_paternal"),
+        _count_perfect("Mismatches_(fewest_mm+b)_maternal", "Bulges_(fewest_mm+b)_maternal"),
+    )
+    if n_perfect < 2:
+        return ""
+    return (
+        '<p class="caption" style="border-left:4px solid #b91c1c;padding-left:0.7em;'
+        'background:#fef2f2">'
+        f"<strong>Note:</strong> {n_perfect} perfect genomic match(es) (0 mismatches, "
+        "0 bulges) were found in at least one haplotype. A perfect-match off-target "
+        "cuts as efficiently as the intended on-target and cannot be distinguished "
+        "from it by sequence alone -- all perfect matches are included in the ranked "
+        "table below.</p>"
+    )
+
+
+def _combined_cfd_scatter_uri(combined_df):
+    """Paternal-vs-Maternal CFD scatter for sites found in both haplotypes --
+    the structural analog of build_report()'s own Reference-vs-Variant CFD
+    scatter (same comparison shape: how does this same site's score differ
+    across the two things being compared), redrawn in matplotlib since a
+    static report has no interactive plotly. Only 'both'-origin sites plot
+    meaningfully here -- a paternal_only/maternal_only site has no second
+    coordinate to plot against."""
+    cfd_pat_col = "CFD_score_(fewest_mm+b)_paternal"
+    cfd_mat_col = "CFD_score_(fewest_mm+b)_maternal"
+    if combined_df.empty or cfd_pat_col not in combined_df.columns or cfd_mat_col not in combined_df.columns:
+        return None
+    both = (
+        combined_df[combined_df["origin"] == "both"]
+        if "origin" in combined_df.columns
+        else combined_df
+    )
+    x = pd.to_numeric(both[cfd_pat_col], errors="coerce")
+    y = pd.to_numeric(both[cfd_mat_col], errors="coerce")
+    valid = x.notna() & y.notna()
+    if valid.sum() == 0:
+        return None
+    fig, ax = plt.subplots(figsize=(5.4, 5.1))
+    ax.scatter(x[valid], y[valid], s=14, alpha=0.6, color="#2b6cb0")
+    lim = max(1.0, float(max(x[valid].max(), y[valid].max())) * 1.05)
+    ax.plot([0, lim], [0, lim], linestyle="--", color="#94a3b8", linewidth=1)
+    ax.set_xlim(0, lim)
+    ax.set_ylim(0, lim)
+    ax.set_xlabel("Paternal CFD score")
+    ax.set_ylabel("Maternal CFD score")
+    ax.set_title(f"Sites found in both haplotypes (n={int(valid.sum())})", fontsize=11)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def _nl_to_br(text) -> str:
+    return _esc(text).replace("\n", "<br>")
+
+
+def _combined_guide_summary_table_html(
+    guides, guide_nuclease, hap_dirs, hap_output_names, mismatches, max_total_edits=None
+):
+    """Static-HTML render of the SAME per-guide MM x bulge grid the live
+    results page shows (load_general_target_count()/build_grid_row_cells(),
+    both now shared module-level functions above) -- rendered as a real
+    <table> with <br> line breaks instead of Dash's whiteSpace:pre trick,
+    since a plain <td> already supports multi-line content via <br>."""
+    if not guides:
+        return "<p>No guide summary available.</p>"
+    grid_by_guide = {}
+    n_mm_cols = 0
+    for guide in guides:
+        pat_grid = (
+            load_general_target_count(hap_dirs["paternal"], hap_output_names["paternal"], guide)
+            if hap_dirs.get("paternal") and hap_output_names.get("paternal")
+            else None
+        )
+        mat_grid = (
+            load_general_target_count(hap_dirs["maternal"], hap_output_names["maternal"], guide)
+            if hap_dirs.get("maternal") and hap_output_names.get("maternal")
+            else None
+        )
+        n_mm_cols = max(
+            n_mm_cols,
+            pat_grid.shape[1] if pat_grid is not None else 0,
+            mat_grid.shape[1] if mat_grid is not None else 0,
+        )
+        grid_by_guide[guide] = (pat_grid, mat_grid)
+    if n_mm_cols == 0:
+        try:
+            n_mm_cols = int(mismatches) + 1
+        except (TypeError, ValueError):
+            n_mm_cols = 1
+
+    specificity = {
+        hap: {
+            g: (
+                read_specificity_score(hap_dirs[hap], hap_output_names[hap], [g])
+                if hap_dirs.get(hap) and hap_output_names.get(hap)
+                else "CFD score not available"
+            )
+            for g in guides
+        }
+        for hap in ("paternal", "maternal")
+    }
+
+    mm_col_ids = [f"{i}MM" for i in range(n_mm_cols)]
+    head_html = (
+        "<tr><th rowspan='2'>Guide</th><th rowspan='2'>Nuclease</th>"
+        "<th colspan='2'>Specificity score</th>"
+        f"<th colspan='{2 + n_mm_cols}'>Off-targets for Mismatch (MM) and Bulge (B) Value</th></tr>"
+        "<tr><th>Paternal</th><th>Maternal</th><th>Total</th><th># Bulges</th>"
+        + "".join(f"<th>{_esc(c)}</th>" for c in mm_col_ids)
+        + "</tr>"
+    )
+    body_rows = []
+    for guide in guides:
+        pat_grid, mat_grid = grid_by_guide[guide]
+        cells = build_grid_row_cells(pat_grid, mat_grid, n_mm_cols, max_total_edits)
+        body_rows.append(
+            f"<tr><td>{_esc(guide)}</td><td>{_esc(guide_nuclease)}</td>"
+            f"<td>{_esc(specificity['paternal'].get(guide, ''))}</td>"
+            f"<td>{_esc(specificity['maternal'].get(guide, ''))}</td>"
+            f"<td>{_nl_to_br(cells['Total'])}</td>"
+            f"<td>{_nl_to_br(cells['# Bulges'])}</td>"
+            + "".join(f"<td>{_nl_to_br(cells[c])}</td>" for c in mm_col_ids)
+            + "</tr>"
+        )
+    return (
+        '<div class="matrix-wrap"><table class="matrix">'
+        f"<thead>{head_html}</thead><tbody>{''.join(body_rows)}</tbody></table></div>"
+    )
+
+
+def build_combined_report(
+    combined_output,
+    output_base,
+    combined_tsv,
+    summary,
+    paternal_zip,
+    maternal_zip,
+    top_n=1000,
+):
+    """Builds ``<output_base>_combined_report.zip`` for an assembly-search run:
+    a new, lightweight combined-haplotype landing page (front page, per the
+    "combined up front, paternal/maternal behind a click" design) plus the
+    two ALREADY-EXISTING, already-correct per-haplotype ``report.zip``
+    contents folded in unmodified under ``paternal/``/``maternal/``
+    subfolders -- no new report-generation logic for the two haplotype
+    views themselves, only the combined summary is new. Each haplotype's
+    own internal ``data/<file>`` links stay correct unmodified, since
+    they're relative to that haplotype's own ``report.html`` location
+    (now ``paternal/report.html`` / ``maternal/report.html``).
+
+    report.html deliberately has no ``<script>``/external ``<link>`` (same
+    constraint as ``build_report()``'s own output) -- navigation between
+    the combined/paternal/maternal views is plain ``<a href>`` links, not
+    JS-driven tabs.
+
+    Parameters
+    ----------
+    combined_output : str
+        The assembly-search job's ``<output_base>_combined`` directory;
+        the output ZIP is written here.
+    output_base : str
+        The run's ``--output`` value.
+    combined_tsv : str
+        Path to the already-written ``<output_base>_combined_hg38.tsv``.
+    summary : dict
+        The summary dict `reconcile_haplotypes()` returns (both/
+        paternal_only/maternal_only/paternal_non_mappable/
+        maternal_non_mappable counts).
+    paternal_zip, maternal_zip : str
+        Paths to that haplotype's own already-built ``<name>_report.zip``
+        (built automatically by its underlying complete-search run).
+        A missing file is skipped, not an error -- the combined report
+        still gets written with a note instead of that haplotype's link.
+
+    Returns
+    -------
+    str
+        Absolute path to the written combined-report ZIP.
+    """
+    both = summary.get("both", 0)
+    pat_only = summary.get("paternal_only", 0)
+    mat_only = summary.get("maternal_only", 0)
+    pat_nm = summary.get("paternal_non_mappable", 0)
+    mat_nm = summary.get("maternal_non_mappable", 0)
+
+    hap_links = []
+    for label, prefix, hap_zip in (
+        ("Paternal", "paternal", paternal_zip),
+        ("Maternal", "maternal", maternal_zip),
+    ):
+        if hap_zip and os.path.isfile(hap_zip):
+            hap_links.append(f'<a class="download" href="{prefix}/report.html">{label} haplotype report &rarr;</a>')
+        else:
+            hap_links.append(f"{label} haplotype report: not available")
+    hap_links_html = "<br>\n  ".join(hap_links)
+
+    combined_tsv_gz_name = f"{os.path.basename(combined_tsv)}.gz"
+    top_tsv_name = f"{output_base}_combined_top{top_n}.tsv"
+
+    # Same logo/background-tile treatment as build_report()'s own header
+    # (:2817-2828) -- reused verbatim via the same asset helper, not
+    # reimplemented.
+    logo_uri = _asset_data_uri("crisprme-logo.svg") or _asset_data_uri("crisprme-logo.png")
+    bg_uri = _asset_data_uri("crisprme_bg_report.jpg") or _asset_data_uri("crisprme_bg_tile.png")
+    logo_html = f'<img class="logo" src="{logo_uri}" alt="CRISPRme+ logo">' if logo_uri else ""
+    bg_style = (
+        f"<style>body {{ background-image: url('{bg_uri}');"
+        f" background-repeat: repeat; background-size: 640px 640px; }}</style>"
+        if bg_uri else ""
+    )
+
+    try:
+        combined_df = pd.read_csv(combined_tsv, sep="\t")
+    except (OSError, pd.errors.ParserError):
+        combined_df = pd.DataFrame()
+
+    # Run parameters + per-haplotype dirs/names, read from the combined job's
+    # own .Params.txt (written by submit_assembly_search_job / assembly_search()
+    # itself) -- same fields the live results page already reads.
+    run_params = {}
+    params_path = os.path.join(combined_output, ".Params.txt")
+    if os.path.isfile(params_path):
+        with open(params_path) as fh:
+            for line in fh:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) >= 3:
+                    run_params[fields[1]] = fields[2]
+    results_dir_parent = os.path.dirname(os.path.normpath(combined_output))
+    hap_output_names = {
+        "paternal": run_params.get("Paternal_dir", ""),
+        "maternal": run_params.get("Maternal_dir", ""),
+    }
+    hap_dirs = {
+        hap: os.path.join(results_dir_parent, name) if name else ""
+        for hap, name in hap_output_names.items()
+    }
+
+    # Nuclease name + Max_total_edits: each haplotype's own .Params.txt is
+    # complete-search's native 2-column format (key\tvalue), NOT the
+    # combined job's own 3-column format parsed above -- same distinction
+    # results_page.py's result_page_assembly() already makes. Both
+    # haplotypes are run with the same mm/bDNA/bRNA/max-total-edits by
+    # construction (assembly_search() passes one set of values to both
+    # _run_haplotype_search() calls), so paternal's own file is
+    # representative; fall back to maternal's if paternal's is missing.
+    guide_nuclease = "?"
+    for hap in ("paternal", "maternal"):
+        hap_params_path = os.path.join(hap_dirs.get(hap, ""), ".Params.txt")
+        hap_params = _read_kv_sidecar(hap_params_path)
+        if hap_params:
+            guide_nuclease = hap_params.get("Nuclease", guide_nuclease)
+            if "Max_total_edits" in hap_params:
+                run_params.setdefault("Max_total_edits", hap_params["Max_total_edits"])
+            break
+
+    guides = []
+    for col in ("Spacer+PAM_paternal", "Spacer+PAM_maternal"):
+        if col in combined_df.columns:
+            for g in combined_df[col].dropna().unique():
+                if g not in guides:
+                    guides.append(g)
+
+    try:
+        _max_total_edits_int = int(run_params.get("Max_total_edits"))
+    except (TypeError, ValueError):
+        _max_total_edits_int = None
+    guide_summary_html = _combined_guide_summary_table_html(
+        guides, guide_nuclease, hap_dirs, hap_output_names, run_params.get("Mismatches"),
+        _max_total_edits_int,
+    )
+    criteria_html = _combined_criteria_html(run_params)
+    perfect_banner = _combined_perfect_match_banner(combined_df)
+    curated_top_df = _combined_curated_top_df(combined_df, top_n=top_n)
+    ranked_table_html = _combined_ranked_table_html(curated_top_df)
+    origin_figure_uri = _combined_origin_split_figure_uri(summary)
+    origin_figure_html = (
+        f'<div class="plot"><img alt="Paternal/maternal origin split" src="{origin_figure_uri}"></div>'
+        if origin_figure_uri else ""
+    )
+    scatter_uri = _combined_cfd_scatter_uri(combined_df)
+    scatter_html = (
+        f'<div class="plot"><img alt="Paternal vs maternal CFD score" src="{scatter_uri}"></div>'
+        if scatter_uri else ""
+    )
+    legend_html = build_score_legend_html()
+    footer_html = build_footer({}, _package_version(), os.path.basename(combined_tsv))
+
+    combined_html = f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{_esc(output_base)} CRISPRme+ personal assembly report</title>
+<style>{_CSS}</style>
+{bg_style}
+</head><body>
+<div class="page">
+
+<div class="report-header">
+{logo_html}
+<div class="titles">
+<h1>Personal assembly off-target report</h1>
+<p class="subtitle">CRISPRme+ &mdash; reconciled paternal/maternal
+off-target prediction, mapped to hg38</p>
+</div>
+</div>
+
+<h2>1. Summary</h2>
+{guide_summary_html}
+<div class="summary-grid">
+  {criteria_html}
+  <div class="summary-card">
+    <table class="summary-table"><tbody>
+      <tr><td>Found in both haplotypes</td><td><strong>{both}</strong></td></tr>
+      <tr><td>Paternal-only</td><td><strong>{pat_only}</strong></td></tr>
+      <tr><td>Maternal-only</td><td><strong>{mat_only}</strong></td></tr>
+      <tr><td>Paternal non-mappable to hg38</td><td><strong>{pat_nm}</strong></td></tr>
+      <tr><td>Maternal non-mappable to hg38</td><td><strong>{mat_nm}</strong></td></tr>
+    </tbody></table>
+  </div>
+</div>
+{perfect_banner}
+<p class="caption">Non-mappable sites have no hg38 equivalent &mdash; invisible
+to any reference-based search. Their per-site detail (in that haplotype's
+own assembly coordinates) is in that haplotype's own report, linked below.
+There is no "Reference vs population origin" section here (unlike the
+per-haplotype reports) -- assembly-search takes no VCF/variant panel, so
+there's no population/superpopulation data to break down.</p>
+
+<h2>2. Key graphical report</h2>
+<p class="caption">Left: how the same guide's CFD score compares between the
+two haplotypes, for sites found in both. Right: the paternal/maternal
+origin split across all reconciled sites.</p>
+<div style="display:flex;flex-wrap:wrap;gap:1.5em;align-items:flex-start">
+{scatter_html}
+{origin_figure_html}
+</div>
+
+<h2>3. Recommended review table</h2>
+<p class="caption">Top {top_n} reconciled off-targets by best CFD score across
+either haplotype (the same reconciled table shown on the live results page).
+A more sophisticated multi-tier validation panel, like complete-search's own,
+is a possible future enhancement -- not built here.</p>
+{ranked_table_html}
+
+<h2>4. Downloads</h2>
+<p>
+  <a class="download" href="{_dl_href(combined_tsv_gz_name)}" download>Complete reconciled off-targets, both haplotypes (all columns, TSV gzip)</a>
+  <a class="download" href="{_dl_href(top_tsv_name)}" download>Top-{top_n} reconciled off-targets (curated TSV)</a>
+</p>
+
+<h2>5. Per-haplotype detail</h2>
+<p>Each haplotype was searched independently before reconciliation; its own
+full off-target report (identical to what a plain complete-search run on
+that genome alone would produce) is bundled alongside this one:</p>
+<p>
+  {hap_links_html}
+</p>
+
+<h2>6. Legend &mdash; scores, columns &amp; annotations</h2>
+{legend_html}
+
+{footer_html}
+
+</div>
+</body></html>
+"""
+
+    import zipfile
+
+    out_zip = os.path.join(combined_output, f"{output_base}_combined_report.zip")
+    if os.path.exists(out_zip):
+        os.remove(out_zip)
+    with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("report.html", combined_html)
+        with open(combined_tsv, "rb") as fh:
+            zf.writestr(f"{DATA_SUBDIR}/{combined_tsv_gz_name}", gzip.compress(fh.read()))
+        zf.writestr(f"{DATA_SUBDIR}/{top_tsv_name}", curated_top_df.to_csv(sep="\t", index=False))
+        for prefix, hap_zip in (("paternal", paternal_zip), ("maternal", maternal_zip)):
+            if not hap_zip or not os.path.isfile(hap_zip):
+                continue
+            with zipfile.ZipFile(hap_zip, "r") as hz:
+                for name in hz.namelist():
+                    zf.writestr(f"{prefix}/{name}", hz.read(name))
     return out_zip
 
 

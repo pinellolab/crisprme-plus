@@ -65,6 +65,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
 )
 from utils import download_reference_genome  # noqa: E402
 from assembly_reconcile import reconcile_haplotypes, check_liftover_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match  # noqa: E402
+from generate_report import build_combined_report  # noqa: E402
 
 cicd_test = False
 if "--ci-cd-test" in input_args:
@@ -2723,6 +2724,21 @@ def assembly_search() -> None:
     print(f"Reconciliation complete. Wrote {combined_tsv}")
     for category, count in summary.items():
         print(f"  {category}: {count}")
+
+    # Combined report zip: built here (not web-only) so a terminal user gets
+    # it too, same as the two per-haplotype report.zips already do (each
+    # built automatically by that haplotype's own underlying complete-search
+    # run). Skips cleanly, not an error, if a haplotype report isn't there
+    # yet (e.g. generate_report.py disabled for that run).
+    paternal_zip = os.path.join(paternal_results, f"{paternal_output_name}_report.zip")
+    maternal_zip = os.path.join(maternal_results, f"{maternal_output_name}_report.zip")
+    try:
+        combined_zip = build_combined_report(
+            combined_output, output_base, combined_tsv, summary, paternal_zip, maternal_zip
+        )
+        print(f"Combined report written to {combined_zip}")
+    except OSError as e:
+        print(f"Warning: could not build the combined report ({e}) -- per-haplotype reports are unaffected.")
 
 
 def target_integration():
