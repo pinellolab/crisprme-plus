@@ -13,8 +13,10 @@ that window (proof, doc section 5: per-position set-containment for SNPs +
 alignment-reuse for bulges -- adversarially verified, 0 failures over ~1.3M
 cases). So thresholding `D <= k` is LOSSLESS FOR DETECTION, for the cases the
 bound covers. It BREAKS only for >=2 cis indels in one protospacer and
-equal-length MNVs (doc section 6); those windows are flagged, not silently
-dropped. This module is the enumeration-free replacement for the intractable 2^k
+equal-length MNVs (doc section 6). Such windows CAN be flag-all'd for lossless
+over-reporting (this primitive supports it; proven in
+test_twopass_lynchpin_counterexamples) -- but that guard is NOT yet wired into the
+production indel search. This module is the enumeration-free replacement for the intractable 2^k
 haplotype-lattice post-analysis (49h+ on the 4x dense panel).
 
 STDLIB only. Pass-2 scoring (exact CFD via twopass_cfd_exact, min-edit, CRISTA

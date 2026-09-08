@@ -1747,6 +1747,31 @@ def complete_search() -> None:
                 % (", ".join(_missing), genomedir, vcfdir, pamfile)
             )
 
+        # SNP+indel co-occurrence needs the dict-less registry tier SPECIFICALLY (the
+        # guard above accepts EITHER the classic per-sample dict OR the registry). A
+        # classic-dict-only index (e.g. a local build-index-only run WITHOUT --samplesID)
+        # passes the guard but then reports NO co-occurrence -- previously silent. Warn once.
+        _cooc_on = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
+        if _cooc_on:
+            _no_reg = [
+                os.path.basename(os.path.normpath(_v))
+                for _v in vcf_dataset_dirs
+                if not os.path.isdir(
+                    os.path.join(
+                        _dict_root, "registry_" + os.path.basename(os.path.normpath(_v))
+                    )
+                )
+            ]
+            if _no_reg:
+                print(
+                    "WARNING [complete-search]: SNP+indel co-occurrence is ON but the "
+                    "dict-less registry tier (registry_<vcf>/) is missing for: %s. This "
+                    "index has only the classic per-sample dict, so co-occurrence will NOT "
+                    "be reported (not an error -- the rest of the search runs normally). To "
+                    "enable it, download the index from HuggingFace or rebuild with "
+                    "build-index-only --samplesID." % ", ".join(_no_reg)
+                )
+
     if fast_mode:
         print(
             "[complete-search] FAST MODE (--fast): the SNP variant post-analysis reports one "

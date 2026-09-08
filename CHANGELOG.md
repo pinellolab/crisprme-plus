@@ -71,6 +71,12 @@ and the `release-crisprme` skill.
   detects the missing tiers per dataset up front and stops immediately with an actionable
   message pointing to `download --what index` (recommended) or `build-index-only` first.
   Override for advanced/legacy on-demand builds with `CRISPRME_ALLOW_ONDEMAND_BUILD=1`.
+- **Warn when SNP+indel co-occurrence is requested but the registry tier is absent.** The
+  pre-flight guard accepts either the classic per-sample dict OR the dict-less registry, but
+  co-occurrence needs the **registry** specifically. A classic-dict-only index (e.g. a local
+  `build-index-only` run **without `--samplesID`**) previously ran cooc as a **silent no-op**;
+  `complete-search` now prints a WARNING at launch naming the datasets missing the registry
+  tier, so the missing co-occurrence output is no longer silent.
 - **Fast-mode worst-case CFD is now exact on every path.** CFD is position-weighted, so the
   fewest-mismatch representative does not maximize CFD; fast mode now also emits the exact
   **maximum-CFD** representative (per-position argmax + bounded brute-force for the joint
@@ -87,6 +93,14 @@ and the `release-crisprme` skill.
   while **CFD had zero ≥ 0.2 losses** (V2-vs-V3 GW matrix). So `--fast` CFD is a safe
   actionable gate but **CRISTA is a screen** — run **without** `--fast` for a guaranteed
   per-haplotype CRISTA worst case / a CRISTA action gate.
+- **`--fast` scope + index/version compatibility.** `--fast` accelerates only the SNP
+  post-analysis; the indel post-analysis is single-threaded and **unaffected** by it (and the
+  `indel_snp_cooc.tsv` companion is byte-identical with/without `--fast`). The feature-on 2021
+  index requires CRISPRme **≥ 2.5.0** — stock 2.4.0's indel post-analysis fails on it (2.4.0
+  users use the 2019 / `-dictless` indices). The **mega** index currently searches **SNPs
+  only** (its fake-indel genome is not built); searchable indels + PUTATIVE
+  co-occurrence-without-genotypes (SNP+SNP and SNP+indel possible haplotypes from AF) are
+  planned for **2.5.2**.
 - **Multi-indel residual (documented):** the indel search materializes one indel per fake
   contig, so an off-target needing **≥ 2 co-occurring cis indels in one protospacer** is not
   a candidate (pre-existing single-indel-search property). Low-frequency: **~1–2%** of indel

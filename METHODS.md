@@ -354,6 +354,12 @@ byte-identical; `--fast` is opt-in. This yields a **two-tier workflow**: `--fast
 routine, high-density, or aggregate-panel *screening*, and the full enumeration path for
 *confirmatory / pre-IND* runs where per-sample phased haplotype resolution is required.
 
+**Scope of `--fast`.** `--fast` accelerates only the **SNP** post-analysis (it collapses the
+2^k IUPAC haplotype lattice). The **indel** post-analysis is single-threaded and
+CRISTA-scoring-bound, and is **unaffected by `--fast`** — a dense indel search pays the full
+indel cost regardless (parallelizing that path is a follow-up). Correspondingly, the
+`indel_snp_cooc.tsv` companion is **byte-identical** with and without `--fast` (§8).
+
 ---
 
 ## 6. Functional annotation of off-targets
@@ -513,8 +519,9 @@ the indel search materializes **one indel per fake contig**, so an off-target re
 (which off-target analysis should soft-mask), falling to **~1–2%** of indel loci after
 repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**
 of indel off-targets — all at the edit-budget ceiling (the weakest, ≈0-CFD tier). Windows
-carrying ≥ 2 cis indels can additionally be flagged for conservative (lossless
-over-reporting) treatment. The `Max_total_edits` value is a
+carrying ≥ 2 cis indels **can** be flag-all'd for conservative (lossless over-reporting)
+treatment — a design option the min-edit primitive supports (proven lossless in
+`test_twopass_lynchpin_counterexamples`), **not yet wired into the production indel search**. The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded
 alignments may exceed it (the report surfaces the observed maximum). A reported MAF
 of `1e-05` is a **display floor** for a source-AF of 0, not a measured frequency

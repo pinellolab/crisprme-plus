@@ -50,11 +50,24 @@ has been done.** v2.5.0 is already tagged; this is the next release (`crisprme.p
 - **Index republish:** NOT required for the 2.5.1 *code* release — the shipped HF indices
   (2021 feature-on, mega, old 2019) are compatible. Republish only if you want the perf/doc
   changes reflected in a bundled index (they don't change index format).
-- **`--fast` indel parallelization (~cores×):** DEFERRED — needs a risky `analisi_indels`
-  `__main__`-guard refactor + real-run validation. Not in 2.5.1; tracked for a follow-up.
-- **#185 mega `indel_af` live demo:** reclassified — the mega has no *searchable* indels (empty
-  fake-indel genome, SNP-only build), so the companion is code-verified but not live-exercisable
-  on the mega; not a blocker (see `mega-indel-stores-empty-not-searchable`).
+- **Indel-scoring perf:** the byte-identical CRISTA float-coercion (~4× on predict) + model
+  cache landed in 2.5.1. Further ~cores× *process* parallelization of the single-threaded
+  indel post-analysis is DEFERRED to 2.5.2 (needs the `analisi_indels` `__main__`-guard).
+  `--fast` accelerates only the SNP path; the indel post-analysis is unaffected by it.
+- **Mega indel search + no-samplesID PUTATIVE cooc (2.5.2 feature):** the mega currently
+  searches **SNPs only** — its fake-indel genome was not built (SNP-only build), so an indel
+  search on the mega returns zero indel off-targets today. Its `indel_af` table (15.7M records)
+  is the AF source for the planned 2.5.2 work: (a) build the mega fake-indel genome so indels
+  are searchable, and (b) report **SNP+SNP and SNP+indel co-occurrence as PUTATIVE possible
+  haplotypes** from per-dataset AF when genotypes/`--samplesID` are absent (no per-sample cis).
+  #185 (live `indel_af.tsv`) is exercised once (a) lands. Not a 2.5.1 blocker.
+- **Index ⟷ image compatibility:** the feature-on 2021 index requires CRISPRme **≥ 2.5.0**;
+  stock **2.4.0**'s indel post-analysis fails on it (2.4.0 users use the 2019 / `-dictless`
+  indices). Upgrade the image before the index.
+- **Local-build cooc:** SNP+indel co-occurrence needs the dict-less **registry** tier; a local
+  `build-index-only` **without `--samplesID`** produces the classic dict only → cooc is a no-op.
+  2.5.1 now WARNs at launch when the registry tier is absent; the 2.5.2 PUTATIVE path (above)
+  will make cooc work from AF even without genotypes.
 
 ## NOT to do without explicit approval
 Tagging, image build, HF publish, `main` merge, `prepare_release.py`. All gated.
