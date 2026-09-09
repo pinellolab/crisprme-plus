@@ -39,6 +39,30 @@ and the `release-crisprme` skill.
 - **`download` always ships the shared reference index** alongside a variant index, so a
   reference-genome scan (or an on-demand variant-index rebuild) works immediately after a
   download with no separate build step.
+- **SNP+SNP co-occurrence companion (`<output>.snp_snp_cooc.tsv`).** The SNP-side analogue
+  of the SNP+indel co-occurrence companion: one joinable row per emitted variant off-target
+  that USES ≥2 co-occurring SNP alt alleles, recorded from BOTH the observed-haplotype
+  enumerator (genotyped panels → `CONFIRMED`/`PUTATIVE`, exact phase) and the registry-only /
+  capped finalizer (sites-only panels → `PUTATIVE`). Reports the phase, a conservative
+  `MinAF_bound` (the minimum participating marginal AF — a valid upper bound on the joint cis
+  AF for both phases), and the observed carriers (`NA` on the sites-only path). Gated on a
+  variant registry being present, so a legacy dict install is byte- and allocation-identical.
+- **SNP+indel PUTATIVE co-occurrence on sites-only panels (mega).** The SNP+indel
+  co-occurrence emission previously wrote a row only when cis carriers were countable, so on
+  an aggregate sites-only panel (no per-sample genotypes) an indel + used SNP alt that
+  co-occur at a locus produced no row. It now emits a `PUTATIVE` row with the conservative
+  `min`-AF joint bound (over the indel `AF_max` + each used SNP's registry AF) and `NA`
+  carrier fields. Gated on genotype ABSENCE, so a genotyped panel's real no-cis-carrier call
+  is never turned into a phantom row.
+- **Lossless dense-region worst-case haplotype (`CRISPRME_LOSSLESS_DENSE`, opt-in, default
+  OFF).** In a capped dense window the min-mismatch representative can be a strict subset of a
+  genuine carried haplotype, so a sites-only off-target requiring ≥4 co-occurring variants on
+  one haplotype could be dropped. When enabled, the registry-only (sites-only) path also emits
+  the full co-located variant union — the maximal PUTATIVE haplotype — as an extra
+  representative, bounded (not the 2^k lattice) and gated by the finalizer's own mm/PAM budget
+  so nothing over-budget or PAM-invalid is emitted. Default OFF keeps output byte-identical;
+  the genotyped path is already lossless via the observed enumerator, so this is scoped to the
+  sites-only case (a per-sample union there would risk phantom trans-as-cis haplotypes).
 
 ### Performance
 - **CRISTA scoring: load the model once + skip eager per-pentamer work.** The 276 MB CRISTA
