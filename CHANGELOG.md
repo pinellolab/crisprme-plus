@@ -11,6 +11,8 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-09-09
+
 ### Added
 - **Two-pass fast mode (`complete-search --fast`, opt-in)** for dense / aggregate variant
   panels where per-haplotype enumeration is intractable (measured **49 h+ without
@@ -1130,7 +1132,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.5.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.5.2...HEAD
+[2.5.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.2
 [2.5.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.0
 [2.4.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.4.0
 [2.3.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.3
