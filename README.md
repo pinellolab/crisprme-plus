@@ -7,7 +7,7 @@
   <img src="assets/readme/crisprme-logo.png" alt="CRISPRme" width="700"/>
 </p>
 
-# CRISPRme+ (2.5.0)
+# CRISPRme+ (2.5.2)
 
 ### 📦 Repository, releases & issues → **https://github.com/pinellolab/crisprme-plus**
 
@@ -28,6 +28,8 @@ through an interactive web-based interface.
 - **Observed-haplotype enumeration** — multi-variant off-targets are enumerated only as haplotypes that occur in a real individual (confirmed for phased data, putative for unphased / mixed), removing phantom off-targets and restoring dropped real haplotypes. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
 - **SNP+indel co-occurring off-targets** *(now on by default)* — off-targets that need **both** a nearby SNP **and** an indel on the same haplotype are detected, a class the classic two-pass search (SNPs and indels searched separately) could not see. Enabled by default (opt out with `CRISPRME_INDEL_SNP=0`); reports CONFIRMED-cis (phased) / PUTATIVE (unphased) with per-sample carriers + joint AF, and surfaces a co-occurrence section in the shareable report. Shipped on the new high-coverage **1000G-2021 + HGDP** NRG index (`NRG_3_hg38+hg38_1000G2021_HGDP`). ([details](docs/PRECOMPUTED_INDEXES.md))
 - **Two-pass fast mode for dense panels** *(`--fast`, opt-in)* — for merged / aggregate panels where per-haplotype enumeration is intractable (measured **49 h+ without completing** on a 4×-density panel), `complete-search --fast` reports a small set of **worst-possible** representatives per variant window (reference + minimum-edit + maximum-CFD) instead of the 2^k IUPAC lattice. **CFD is the exact worst case; CRISTA is best-effort** (run without `--fast` for a guaranteed CRISTA worst case). Validated **lossless** for locus detection against the slow path; the default path is byte-identical. ([methods](METHODS.md#5-search-space-control-for-high-variant-density-regions))
+- **All-source "mega" index + sites-only co-occurrence** *(new in 2.5.2)* — a merged **five-source** panel (1000 Genomes 2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us), built from each source's aggregate allele frequency, with **per-dataset AF + a cross-source `AF_max`** as variant provenance (which sources report each variant, and at what frequency). It has **no shared samples** to reconstruct haplotypes, so co-occurrence is reported as **PUTATIVE possible haplotypes** with a conservative **min-AF** joint bound — for **both SNP+SNP and SNP+indel** — so a co-occurring off-target is never dropped merely for lack of genotypes. Ships with **searchable indels genome-wide** (`NRG_3_hg38+hg38_mega`). The two production indices are complementary: **1000G-2021 + HGDP** (sample-level genotypes → observed / CONFIRMED haplotypes with per-sample carriers) and the **mega** (sites-only → PUTATIVE haplotypes with min-AF bounds). ([details](docs/PRECOMPUTED_INDEXES.md))
+- **SNP+SNP co-occurring off-targets** *(new in 2.5.2)* — the SNP-side analogue of SNP+indel: off-targets that require **≥2 nearby SNP alt alleles together** are surfaced in a `snp_snp_cooc.tsv` companion (CONFIRMED phased-cis on a genotyped panel / PUTATIVE min-AF on a sites-only panel) and bundled into the shareable report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
 - **COSMIC cancer-gene annotation** — off-targets are flagged when they fall in a Cancer Gene Census gene (tier + oncogene/TSG/fusion), alongside updated ENCODE SCREEN v4, GENCODE and DHS annotations. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
 - **Shareable off-target assessment report** — every run auto-generates a self-contained, branded HTML report (summary, graphical report, recommended validation panel, annotated top-1000, per-tier downloads, annotation legend), downloadable from the results page. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
 - **Prebuilt indexes on demand** — pull reference data + precomputed indexes from a HuggingFace CDN (`crisprme.py download`).
@@ -85,14 +87,17 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 mkdir -p ~/crisprme && cd ~/crisprme
 # 1) fast-download the reference data + reference index (minutes, HuggingFace CDN)
 #    (this does NOT include the variant index — that is step 2)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.0 crisprme.py download --what all --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.2 crisprme.py download --what all --path /DATA
 # 2) grab the prebuilt SpCas9 (NRG = NAG+NGG) indexes so no long index build is needed:
 #    the reference index, and the compact dict-less variant-aware hg38 + 1000G + HGDP
 #    index (the web default; combined allele frequencies + per-individual samples)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.0 crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.0 crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.2 crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.2 crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
+#    ...or the all-source sites-only "mega" index (5 datasets, per-dataset AF + AF_max,
+#    searchable indels, SNP+SNP & SNP+indel PUTATIVE co-occurrence):
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.2 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
 # 3) launch the web interface, then open http://127.0.0.1:8080
-docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:v2.5.0 crisprme.py web-interface
+docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:v2.5.2 crisprme.py web-interface
 ```
 
 **Full step-by-step (with variants, more indexes, troubleshooting):
@@ -107,7 +112,7 @@ example search and generate the shareable report — no web UI needed:
 # a genome-wide SpCas9 (NRG) search over hg38 + 1000G + HGDP, up to 6 mismatches
 # + 2 DNA / 2 RNA bulges, with combined allele frequencies, rsIDs and annotations
 echo "CTAACAGTTGCTTTTATCACNNN" > guide.txt
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.0 crisprme.py complete-search \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.2 crisprme.py complete-search \
   --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --guide guide.txt \
   --vcf list_vcf.txt --samplesID list_samplesID.txt \
   --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
@@ -115,7 +120,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.0 crisprme.p
   --mm 6 --bDNA 2 --bRNA 2 --output my_search --thread 8
 
 # build the self-contained, shareable HTML report (report.html + a data/ folder)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.0 crisprme.py generate-report \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.2 crisprme.py generate-report \
   --result-dir Results/my_search
 # -> open Results/my_search/<jobid>_report.zip, then report.html
 ```
@@ -173,16 +178,16 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
-> **Which version do I get?** For **CRISPRme+ (2.5.0, this release)** use **Docker**
+> **Which version do I get?** For **CRISPRme+ (2.5.2, this release)** use **Docker**
 > (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above, or
 > §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
-> 2.5.0 line** — use it only if you specifically want the stable release. If in doubt,
+> 2.5.2 line** — use it only if you specifically want the stable release. If in doubt,
 > use Docker.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.5.0)](#12-install-crisprme-via-docker)
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.5.2)](#12-install-crisprme-via-docker)
 
 - [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
@@ -193,7 +198,7 @@ respective sections below.
 ### 1.1 Install CRISPRme via Conda/Mamba
 ---
 
-> **Note:** Conda/Bioconda installs the **stable 2.1.x** line — for CRISPRme+ 2.5.0
+> **Note:** Conda/Bioconda installs the **stable 2.1.x** line — for CRISPRme+ 2.5.2
 > use [Docker](#12-install-crisprme-via-docker) or [source (§1.3)](#13-install-crisprme-from-source-without-bioconda).
 
 This section is organized into three subsections to guide you through the installation 
@@ -248,11 +253,11 @@ By completing these steps, your system will be fully prepared for installing CRI
 #### 1.1.2 Installing CRISPRme
 ---
 
-> **CRISPRme+ (2.5.0) runs on Python 3.11 and installs from source** — the build
+> **CRISPRme+ (2.5.2) runs on Python 3.11 and installs from source** — the build
 > compiles CRISPRitz 2.8.1 and installs both tools into a conda environment. A native
-> Bioconda `crisprme=2.5.0` package is **in preparation**; until it lands, the Bioconda
+> Bioconda `crisprme=2.5.2` package is **in preparation**; until it lands, the Bioconda
 > `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** this
-> 2.5.0 line.
+> 2.5.2 line.
 
 To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
 (`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
@@ -287,7 +292,7 @@ This updates within the **stable 2.1.x** Bioconda line (latest is `crisprme=2.1.
 ```bash
 mamba install crisprme=2.1.14
 ```
-For **2.5.0 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.5.0 package yet.
+For **2.5.2 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.5.2 package yet.
 If you're using `Conda`, replace `mamba` with `conda` in the commands above.
 
 **Step 3: Verify the Update**
@@ -398,7 +403,7 @@ For more examples and ideas, visit:
 After installing Docker, you can download and build the CRISPRme Docker image by 
 running the following command in a terminal:
 ```bash
-docker pull pinellolab/crisprme:v2.5.0
+docker pull pinellolab/crisprme:v2.5.2
 ```
 
 This command retrieves the latest pre-built CRISPRme image from Docker Hub and sets 
@@ -415,25 +420,25 @@ docker images
 Look for an entry similar to the following:
 ```
 REPOSITORY          TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme   v2.5.0    <image_id>     <timestamp>    ~818MB
+pinellolab/crisprme   v2.5.2    <image_id>     <timestamp>    ~818MB
 ```
 
 You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run an unreleased line (e.g. **2.5.0**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run an unreleased line (e.g. **2.5.2**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
 ```bash
-# 1. clone the repository (2.5.0 development lives on the main branch)
+# 1. clone the repository (2.5.2 development lives on the main branch)
 git clone https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
 mamba env create -f environment.yml
-mamba activate crisprme-2.5.0
+mamba activate crisprme-2.5.2
 
 # 3. build CRISPRitz 2.8.1 from source and install both tools into the env
 bash install_from_source.sh
@@ -515,9 +520,9 @@ The directory organization required by CRISPRme is illustrated below:
 
 > **Running the examples.** Each example below is the bare `crisprme.py <command> …`.
 > To run it in **Docker**, prefix it with
-> `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:v2.5.0`
+> `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:v2.5.2`
 > (add `-p 8080:8080` for `web-interface`). From a **source / Conda** install, run
-> it as-is inside the activated `crisprme-2.5.0` environment.
+> it as-is inside the activated `crisprme-2.5.2` environment.
 
 This section provides a comprehensive overview of CRISPRme's core functions, 
 detailing each feature, the required input data and formats, and the resulting 
@@ -587,7 +592,7 @@ single command — `download --what index` already wrote the `list_vcf.txt` /
 
 ```bash
 printf '%s\n' ACTGAAATCTGTAAGCAGGC > my_guide.txt
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.2 \
   crisprme.py complete-search \
     --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
     --guide my_guide.txt --vcf list_vcf.txt --samplesID list_samplesID.txt \
@@ -1632,7 +1637,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.5.0`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.5.2`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**
