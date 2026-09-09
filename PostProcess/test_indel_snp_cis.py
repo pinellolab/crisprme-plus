@@ -70,6 +70,14 @@ def test_population_mix_af():
     assert abs(isc.joint_af(ac, 6954) - 3 / 6954) < 1e-12
 
 
+def test_putative_joint_af_min_bound():
+    # no genotypes: joint cis AF <= the rarest participating allele's AF -> report min
+    assert abs(isc.putative_joint_af([0.5, 0.1, 0.3]) - 0.1) < 1e-12
+    assert isc.putative_joint_af([0.2]) == 0.2
+    assert isc.putative_joint_af([]) == 0.0          # empty -> 0
+    assert isc.putative_joint_af([0.5, None]) == 0.0  # any marginal missing -> 0
+
+
 def _snp_at(table):
     return lambda pos: table.get(pos)
 

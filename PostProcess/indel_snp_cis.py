@@ -104,6 +104,20 @@ def joint_af(ac, an):
     return (ac / an) if an else 0.0
 
 
+def putative_joint_af(marginal_afs):
+    """PUTATIVE joint allele frequency when genotypes are UNAVAILABLE (sites-only /
+    aggregate panels such as the mega): with no per-sample genotypes we cannot count
+    cis carriers, but the cis co-occurrence frequency of a set of variants can never
+    exceed the frequency of the RAREST participating allele -- so report min(marginal
+    AFs) as a conservative upper bound (matches the PUTATIVE = upper-bound semantics).
+    Returns 0.0 if the set is empty or any marginal AF is missing (None), so we never
+    emit a misleadingly-high joint frequency from incomplete information."""
+    afs = list(marginal_afs)
+    if not afs or any(a is None for a in afs):
+        return 0.0
+    return min(afs)
+
+
 # The IUPAC ambiguity chars an overlaid SNP position can carry in the target seq.
 _IUPAC = set("RYSWKMBDHVryswkmbdhv")
 
