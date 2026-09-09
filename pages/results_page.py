@@ -1667,46 +1667,83 @@ def result_page_assembly(job_id: str) -> html.Div:
     # different tools.
     _PLOTLY_LAYOUT = dict(template="plotly_white", font=dict(size=14), margin=dict(t=50))
 
-    # Origin-split visual: a proportional horizontal bar rather than a
-    # geometrically-precise Venn diagram -- a true Venn's circle-overlap
-    # areas would need to be drawn to scale to not visually mislead about
-    # the real proportions, which is real design/implementation work of its
-    # own; a proportional bar shows the same three real counts accurately
-    # with much less risk of that, so it's the safer honest default. Not
-    # mapped-only -- deliberately covers the origin split which BY
-    # DEFINITION only exists among mapped sites (non-mappable sites have no
-    # origin category), so no filtering question applies here.
+    # Haplotype-coverage visual (2026-09-10): ported from the combined
+    # report's own `_combined_haplotype_coverage_figure_uri()` (matplotlib,
+    # itself ported from the pangenome paper figure's "panel d" style) for
+    # consistency between the live page and the static report/zip -- same
+    # three categories (Both haplotypes / Maternal / Paternal), same
+    # Mapped/Unmapped colors (#4C72B0 / #C44E52), same "one consolidated
+    # annotation per bar" fix for the label-collision problem a per-segment
+    # label has on a narrow segment (a segment's own label is wider than the
+    # segment). Replaces the OLDER, mapped-only 3-way origin-split bar
+    # (both/paternal-only/maternal-only, no mapped/unmapped breakdown) --
+    # this version is a strict superset of that one's information (same
+    # three groups, each now also split by mappability) and surfaces the
+    # non-mappable counts this page's Custom Ranking tab already treats as a
+    # first-class site set, so the two views use one consistent picture of
+    # "found where" instead of two different ones.
+    #
+    # `summary_counts` (log_verbose.txt) is the ONLY source for the two
+    # non-mappable counts (dropped from `df` entirely -- see the comment
+    # above `origin_counts`); the three mapped counts prefer the same
+    # source for consistency, falling back to `origin_counts` (derived
+    # straight from `df`) if log_verbose.txt is missing/unparsed.
     origin_chart_block = []
-    _origin_total = sum(origin_counts.get(k, 0) for k in ("both", "paternal_only", "maternal_only"))
-    if _origin_total:
-        _origin_fig = go.Figure()
-        for key, label, color in (
-            ("both", "Both haplotypes", "#2b6cb0"),
-            ("paternal_only", "Paternal-only", "#63b3ed"),
-            ("maternal_only", "Maternal-only", "#f6ad55"),
-        ):
-            _origin_fig.add_trace(
-                go.Bar(
-                    y=["Origin"],
-                    x=[origin_counts.get(key, 0)],
-                    name=f"{label} ({origin_counts.get(key, 0)})",
-                    orientation="h",
-                    marker_color=color,
+    _cov_both = summary_counts.get("both", origin_counts.get("both", 0))
+    _cov_pat_mapped = summary_counts.get("paternal_only", origin_counts.get("paternal_only", 0))
+    _cov_mat_mapped = summary_counts.get("maternal_only", origin_counts.get("maternal_only", 0))
+    _cov_pat_unmapped = summary_counts.get("paternal_non_mappable", 0)
+    _cov_mat_unmapped = summary_counts.get("maternal_non_mappable", 0)
+    _cov_total = _cov_both + _cov_pat_mapped + _cov_mat_mapped + _cov_pat_unmapped + _cov_mat_unmapped
+    if _cov_total:
+        # listed Paternal->Maternal->"Both haplotypes"; autorange="reversed"
+        # below then puts "Both haplotypes" at the TOP, matching the static
+        # report's bar order.
+        _cov_categories = ["Paternal", "Maternal", "Both haplotypes"]
+        _cov_mapped = [_cov_pat_mapped, _cov_mat_mapped, _cov_both]
+        _cov_unmapped = [_cov_pat_unmapped, _cov_mat_unmapped, 0]
+        _cov_fig = go.Figure()
+        _cov_fig.add_trace(
+            go.Bar(
+                y=_cov_categories, x=_cov_mapped, name="Mapped (has hg38 coordinate)",
+                orientation="h", marker_color="#4C72B0",
+            )
+        )
+        _cov_fig.add_trace(
+            go.Bar(
+                y=_cov_categories, x=_cov_unmapped, name="Unmapped (no hg38 coordinate)",
+                orientation="h", marker_color="#C44E52",
+            )
+        )
+        # one consolidated annotation per bar (total + mapped/unmapped
+        # breakdown), placed just past the bar's own end -- never per
+        # segment, which is what collided on a narrow segment before.
+        _cov_annotations = []
+        for cat, mapped, unmapped in zip(_cov_categories, _cov_mapped, _cov_unmapped):
+            total = mapped + unmapped
+            text = f"<b>{total:,} total</b>" + (
+                f"<br>({mapped:,} mapped, {unmapped:,} unmapped)" if unmapped else ""
+            )
+            _cov_annotations.append(
+                dict(
+                    x=total, y=cat, text=text, showarrow=False,
+                    xanchor="left", xshift=8, align="left", font=dict(size=13),
                 )
             )
-        _origin_layout = {**_PLOTLY_LAYOUT, "margin": dict(t=70, b=40)}
-        _origin_fig.update_layout(
-            **_origin_layout,
+        _cov_layout = {**_PLOTLY_LAYOUT, "margin": dict(t=70, b=40, r=160)}
+        _cov_fig.update_layout(
+            **_cov_layout,
             barmode="stack",
-            height=220,
+            height=260,
             xaxis_title="Reconciled off-target sites",
-            yaxis=dict(visible=False),
-            # legend above the plot, not below -- below collided with the
-            # x-axis title in the same cramped margin (the previous cause of
-            # the overlap).
+            yaxis=dict(autorange="reversed"),
+            annotations=_cov_annotations,
+            # legend above the plot -- below collided with the x-axis title
+            # in the same cramped margin (the origin-split bar's own prior
+            # fix for the same issue, carried over here).
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
         )
-        origin_chart_block = [dcc.Graph(figure=_origin_fig, id="assembly-origin-split-graph")]
+        origin_chart_block = [dcc.Graph(figure=_cov_fig, id="assembly-origin-split-graph")]
 
     final_list = [
         html.H3(f"Personal Assembly Search Results — {job_id}"),
