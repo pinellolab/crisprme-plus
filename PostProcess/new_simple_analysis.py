@@ -78,16 +78,22 @@ except Exception:  # module absent -> fast mode unavailable, legacy path unchang
     _twopass_emit = None
 _FAST_MODE = bool(int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")) and \
     _twopass_emit is not None
-# 2.5.2 LOSSLESS-DENSE (CRISPRME_LOSSLESS_DENSE, opt-in, default OFF). In a CAPPED dense
-# window the min-mismatch greedy representative can be a strict SUBSET of a genuine carried
-# haplotype (an mm-neutral/raising alt is left at the reference), so an off-target that needs
-# >=4 co-occurring variants on ONE haplotype is dropped -- the "don't miss a region" invariant
-# is violated. When ON, additionally emit the maximal CARRIED haplotype(s) as extra level-0
-# entries: per-sample OBSERVED combos when carriers exist (genotyped), else the co-located
-# union (registry-only, PUTATIVE). Bounded by carrier groups + window width (NOT the 2^k
-# lattice), and each is gated by the finalizer's own mm/PAM budget so nothing over-budget or
-# PAM-invalid is emitted (no phantom rows). Default OFF => output byte-identical.
-_LOSSLESS_DENSE = bool(int(os.environ.get("CRISPRME_LOSSLESS_DENSE", "0") or "0"))
+# 2.5.2 LOSSLESS-DENSE (CRISPRME_LOSSLESS_DENSE). In a CAPPED dense window the min-mismatch
+# greedy representative can be a strict SUBSET of a genuine carried haplotype (an mm-neutral/
+# raising alt is left at the reference), so an off-target that needs >=4 co-occurring variants
+# on ONE haplotype is dropped -- the "don't miss a region" invariant is violated. When ON, the
+# registry-only (sites-only) path additionally emits the co-located variant UNION as an extra
+# level-0 entry (the maximal PUTATIVE haplotype), gated by the finalizer's own mm/PAM budget so
+# nothing over-budget or PAM-invalid is emitted (no phantom rows).
+#
+# DEFAULT = ON. The effect is SCOPED to ``registry_only_mode`` (the emission gate below also
+# requires it), so this is BYTE-IDENTICAL for every genotyped / legacy / dict install -- those
+# never enter the registry-only branch, and the genotyped path is already lossless via the
+# observed enumerator. It changes ONLY the sites-only (e.g. mega) path, where it fulfils the
+# "don't miss a region" invariant that a min-mismatch-only representative would otherwise break.
+# Set CRISPRME_LOSSLESS_DENSE=0 to opt OUT (sites-only reverts to greedy-representative-only).
+_env_ld = os.environ.get("CRISPRME_LOSSLESS_DENSE")
+_LOSSLESS_DENSE = True if _env_ld is None else bool(int(_env_ld or "0"))
 # Accumulator for the ADDITIVE phase-confirmation companion TSV (one row per emitted
 # dict-less variant off-target: identity columns + CONFIRMED/PUTATIVE). Populated ONLY
 # on the ``mygt is not None`` branch; dead/empty on every legacy install so the

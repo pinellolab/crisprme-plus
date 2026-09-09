@@ -54,15 +54,19 @@ and the `release-crisprme` skill.
   `min`-AF joint bound (over the indel `AF_max` + each used SNP's registry AF) and `NA`
   carrier fields. Gated on genotype ABSENCE, so a genotyped panel's real no-cis-carrier call
   is never turned into a phantom row.
-- **Lossless dense-region worst-case haplotype (`CRISPRME_LOSSLESS_DENSE`, opt-in, default
-  OFF).** In a capped dense window the min-mismatch representative can be a strict subset of a
-  genuine carried haplotype, so a sites-only off-target requiring ≥4 co-occurring variants on
-  one haplotype could be dropped. When enabled, the registry-only (sites-only) path also emits
+- **Lossless dense-region worst-case haplotype (`CRISPRME_LOSSLESS_DENSE`, default ON for
+  sites-only).** In a capped dense window the min-mismatch representative can be a strict subset
+  of a genuine carried haplotype, so a sites-only off-target requiring ≥4 co-occurring variants
+  on one haplotype could be dropped. The registry-only (sites-only) path therefore also emits
   the full co-located variant union — the maximal PUTATIVE haplotype — as an extra
   representative, bounded (not the 2^k lattice) and gated by the finalizer's own mm/PAM budget
-  so nothing over-budget or PAM-invalid is emitted. Default OFF keeps output byte-identical;
-  the genotyped path is already lossless via the observed enumerator, so this is scoped to the
-  sites-only case (a per-sample union there would risk phantom trans-as-cis haplotypes).
+  so nothing over-budget or PAM-invalid is emitted. The effect is **scoped to sites-only**
+  (`registry_only_mode`), so it is **byte-identical for every genotyped / legacy / dict install**
+  (those never enter the branch, and the genotyped path is already lossless via the observed
+  enumerator). It is **on by default** so the sites-only panel fulfils "don't miss a region";
+  set `CRISPRME_LOSSLESS_DENSE=0` to opt out (sites-only reverts to a greedy representative
+  only). A per-sample union on the genotyped path is intentionally *not* done — it would risk
+  phantom trans-as-cis haplotypes.
 
 ### Performance
 - **CRISTA scoring: load the model once + skip eager per-pentamer work.** The 276 MB CRISTA

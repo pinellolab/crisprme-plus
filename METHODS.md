@@ -345,14 +345,16 @@ On a **genotyped** panel the observed-haplotype enumerator (§4) already emits e
 carried multi-variant haplotype exactly, so the greedy representative is only a
 tractability fallback for pathological windows. On a **sites-only** panel there are no
 carriers to enumerate, so a dense window emits only the greedy min-mismatch
-representative — which can be a strict subset of a genuinely co-located haplotype. The
-opt-in `CRISPRME_LOSSLESS_DENSE` flag closes this gap for sites-only panels: it
-additionally emits the **full co-located variant union** for the window (the maximal
-PUTATIVE haplotype), bounded by the carrier-free union rather than the 2ᵏ lattice and
-gated by the same mismatch/PAM budget so no over-budget or PAM-invalid row is produced.
-It is default-off (output byte-identical) and scoped to the sites-only path — the
-genotyped path is already lossless, and a per-sample union there would risk
-trans-as-cis phantoms.
+representative — which can be a strict subset of a genuinely co-located haplotype.
+`CRISPRME_LOSSLESS_DENSE` closes this gap for sites-only panels: it additionally emits
+the **full co-located variant union** for the window (the maximal PUTATIVE haplotype),
+bounded by the carrier-free union rather than the 2ᵏ lattice and gated by the same
+mismatch/PAM budget so no over-budget or PAM-invalid row is produced. It is **on by
+default** (so a sites-only panel fulfils "don't miss a region") but **scoped to the
+sites-only path** — the effect requires `registry_only_mode`, so it is byte-identical
+for every genotyped / legacy install (the genotyped path is already lossless via the
+observed enumerator). Set `CRISPRME_LOSSLESS_DENSE=0` to opt out. A per-sample union on
+the genotyped path is intentionally *not* done — it would risk trans-as-cis phantoms.
 
 ### Two-pass fast mode (`--fast`, opt-in)
 
