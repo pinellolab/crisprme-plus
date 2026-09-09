@@ -426,6 +426,49 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("2 confirmed-cis", html)
         self.assertIn("of 3 candidate", html)
 
+    def test_snp_snp_cooc_bundled_and_surfaced(self):
+        # per-chromosome *.snp_snp_cooc.tsv sidecars (comment banner + #Chromosome
+        # header + rows): merged (single header), bundled, linked, CONFIRMED counted.
+        rd = os.path.join(self.tmp, "snpsnp_run")
+        os.makedirs(rd)
+        tsv = os.path.join(
+            rd, f"{_GUIDE}+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv"
+        )
+        with open(tsv, "w") as h:
+            h.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                h.write("\t".join(row) + "\n")
+        _banner = "# CRISPRme+ SNP+SNP co-occurrence companion.\n"
+        _hdr = ("#Chromosome\tPosition\tDirection\tcrRNA\tDNA\tSNP_positions\trsIDs\t"
+                "Phase\tMinAF_bound\tN_carriers\tCarriers\n")
+        _conf = "chr3\t200\t-\tGUIDE\tACGT\t195;198\trs1;rs2\tCONFIRMED\t0.0021\t2\tHG00096,HG00097\n"
+        with open(os.path.join(rd, "job_chr3.snp_snp_cooc.tsv"), "w") as h:
+            h.write(_banner); h.write(_hdr)
+            h.write(_conf); h.write(_conf)  # dup -> dedup
+            h.write("chr3\t260\t+\tGUIDE\tACGT\t255;259\trs3;rs4\tPUTATIVE\t0.0011\tNA\tNA\n")
+        with open(os.path.join(rd, "job_chr7.snp_snp_cooc.tsv"), "w") as h:
+            h.write(_banner); h.write(_hdr)  # own header -> dedup to one
+            h.write("chr7\t600\t+\tGUIDE\tACGT\t601;605\trs5;rs6\tPUTATIVE\t0.0033\tNA\tNA\n")
+        out_zip = gr.build_report(
+            result_dir=rd, samplesid_dir=self.sid_dir,
+            out_zip=os.path.join(self.tmp, "snpsnp_report.zip"),
+        )
+        extract = os.path.join(self.tmp, "snpsnp_extract")
+        with zipfile.ZipFile(out_zip) as zf:
+            names = zf.namelist(); zf.extractall(extract)
+        self.assertIn("data/snp_snp_cooc.tsv", names)
+        merged = self._read(self._dpath(extract, "snp_snp_cooc.tsv"))
+        lines = [ln for ln in merged.splitlines() if ln.strip()]
+        # exactly ONE #Chromosome header across the two files
+        self.assertEqual(sum(1 for ln in lines if ln.startswith("#Chromosome")), 1)
+        # dedup: duplicated CONFIRMED row collapses to one
+        self.assertEqual(merged.count("chr3\t200\t-"), 1)
+        self.assertTrue(any(ln.startswith("chr7\t") for ln in lines))
+        html = self._read(os.path.join(extract, "report.html"))
+        self.assertIn('href="data/snp_snp_cooc.tsv"', html)
+        self.assertIn("SNP + SNP co-occurrences", html)
+        self.assertIn("1 confirmed", html)  # 1 CONFIRMED (the 2 PUTATIVE excluded)
+
     def test_load_sample_dataset_native_provenance(self):
         """sample -> native per-db label, read from the files (no hardcoding)."""
         import tempfile

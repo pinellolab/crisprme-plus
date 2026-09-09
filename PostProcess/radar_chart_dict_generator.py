@@ -93,6 +93,17 @@ def guideDictCreation(annotationsSet):
     return guideDict
 
 
+def _motif_inc(over_dict, key, count):
+    """Increment the motif count for ``key`` at position ``count``, SKIPPING any base
+    the radar axes don't track (A/C/G/T/RNA/DNA). The registry-only / sites-only panel
+    (e.g. the mega) can carry an UNRESOLVED IUPAC base (W/M/R/...) in the target DNA --
+    CFD tolerates it, so the report must too, rather than KeyError-crashing the whole
+    variants summary pipeline (report-robustness). Canonical bases are unaffected."""
+    col = over_dict.get(key)
+    if col is not None:
+        col[count] += 1
+
+
 def fillDict(guide, guideDict, motifDict):
     # fill dictionary with info read from the final file
     inFinalFile.seek(0)
@@ -138,26 +149,26 @@ def fillDict(guide, guideDict, motifDict):
             if "DNA" not in split[0]:
                 for count, nucleotide in enumerate(alignedSequence):
                     if nucleotide.islower():
-                        motifDict[over][nucleotide.upper()][count] += 1
+                        _motif_inc(motifDict[over], nucleotide.upper(), count)
                     elif nucleotide == "-":
-                        motifDict[over][split[0]][count] += 1
+                        _motif_inc(motifDict[over], split[0], count)
                     if guide[count] == "N":
-                        motifDict[over][nucleotide.upper()][count] += 1
+                        _motif_inc(motifDict[over], nucleotide.upper(), count)
             else:
                 alignedGuide = split[1]
                 for count, nucleotide in enumerate(alignedGuide[bulge:]):
                     if nucleotide == "-":
-                        motifDict[over][split[0]][count] += 1
+                        _motif_inc(motifDict[over], split[0], count)
                 for count, nucleotide in enumerate(alignedSequence[bulge:]):
                     if nucleotide.islower():
-                        motifDict[over][nucleotide.upper()][count] += 1
+                        _motif_inc(motifDict[over], nucleotide.upper(), count)
                     if guide[0] != "N":
                         if guide[count] == "N":
-                            motifDict[over][nucleotide.upper()][count] += 1
+                            _motif_inc(motifDict[over], nucleotide.upper(), count)
                 # to correct reading of guides N's when upstream PAM
                 for count, ennes in enumerate(guide):
                     if ennes == "N":
-                        motifDict[over][alignedSequence[count].upper()][count] += 1
+                        _motif_inc(motifDict[over], alignedSequence[count].upper(), count)
                     else:
                         break
 
