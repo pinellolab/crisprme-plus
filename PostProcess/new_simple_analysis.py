@@ -76,6 +76,16 @@ except Exception:  # module absent -> fast mode unavailable, legacy path unchang
     _twopass_emit = None
 _FAST_MODE = bool(int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")) and \
     _twopass_emit is not None
+# 2.5.2 LOSSLESS-DENSE (CRISPRME_LOSSLESS_DENSE, opt-in, default OFF). In a CAPPED dense
+# window the min-mismatch greedy representative can be a strict SUBSET of a genuine carried
+# haplotype (an mm-neutral/raising alt is left at the reference), so an off-target that needs
+# >=4 co-occurring variants on ONE haplotype is dropped -- the "don't miss a region" invariant
+# is violated. When ON, additionally emit the maximal CARRIED haplotype(s) as extra level-0
+# entries: per-sample OBSERVED combos when carriers exist (genotyped), else the co-located
+# union (registry-only, PUTATIVE). Bounded by carrier groups + window width (NOT the 2^k
+# lattice), and each is gated by the finalizer's own mm/PAM budget so nothing over-budget or
+# PAM-invalid is emitted (no phantom rows). Default OFF => output byte-identical.
+_LOSSLESS_DENSE = bool(int(os.environ.get("CRISPRME_LOSSLESS_DENSE", "0") or "0"))
 # Accumulator for the ADDITIVE phase-confirmation companion TSV (one row per emitted
 # dict-less variant off-target: identity columns + CONFIRMED/PUTATIVE). Populated ONLY
 # on the ``mygt is not None`` branch; dead/empty on every legacy install so the
@@ -1142,6 +1152,27 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             list(_cfd_rep["seq"]),
                             set(_cfd_rep["carriers"]),
                             list(_cfd_rep["info"]),
+                        ]
+                # 2.5.2 LOSSLESS-DENSE (registry-only / sites-only, e.g. the mega): with no
+                # per-sample genotypes we cannot confirm cis, but the co-located variants
+                # form a PUTATIVE maximal haplotype that the min-mismatch greedy drops. Emit
+                # the full co-located union as an extra level-0 entry so a dense window's
+                # multi-variant off-target is not MISSED. Carriers empty -> the finalizer
+                # emits it with the "NA" Samples sentinel (registry_only_mode); its mm/PAM
+                # budget gate drops the union if it is over budget or PAM-invalid (no phantom
+                # rows). Scoped to registry-only: the genotyped dict-less path is already
+                # lossless via the observed enumerator, and a per-sample union would risk
+                # phantom (trans-as-cis) haplotypes. Default OFF -> byte-identical.
+                if _LOSSLESS_DENSE and registry_only_mode:
+                    _union_seq = list(refSeq)
+                    _union_info = []
+                    for _pc, _cands in by_pos.items():
+                        for _elem, _v in _cands:
+                            _union_seq[_pc] = _elem
+                            _union_info.extend(_v[2])
+                    if _union_seq != list(greedy_seq):
+                        totalDict[count][0][("lossless_hap", 2)] = [
+                            _union_seq, set(), _union_info
                         ]
         if revert:
             refSeq = reverse_complement_table(refSeq)

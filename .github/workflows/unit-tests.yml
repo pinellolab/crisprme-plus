@@ -192,4 +192,4 @@ jobs:
           python -m unittest test_twopass_emit test_twopass_find test_twopass_score
           test_twopass_cfd_exact test_twopass_fast_equivalence test_twopass_legacy_cfd
           test_twopass_lynchpin_counterexamples test_aggregate_carrier_na
-          test_build_mega_registry test_build_mega_indel_af -v
+          test_build_mega_registry test_build_mega_indel_af test_lossless_dense -v
