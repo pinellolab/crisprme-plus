@@ -1196,6 +1196,39 @@ for line in inResult:
                         + ";".join(u[1] for u in _used) + "\t" + _phase + "\t"
                         + ("%.6g" % _isc.joint_af(_ac, _an)) + "\t" + str(len(_cis))
                         + "\t" + ",".join(sorted(_cis)[:50]) + "\n")
+                elif _gt is None or _indelgt is None:
+                    # [indel-snp] PUTATIVE fallback (2.5.2): the indel + used SNP alt(s)
+                    # co-occur at this locus but we have NO per-sample genotypes to confirm
+                    # cis -- the sites-only / aggregate case (e.g. the mega, where _gt and
+                    # _indelgt are both absent). Rather than drop the co-occurrence, report
+                    # the SITE as a PUTATIVE haplotype with the conservative min-AF bound
+                    # (a cis haplotype can never be more frequent than its rarest allele);
+                    # n_cis / cis_samples are "NA" (uncountable without genotypes). Gated on
+                    # genotype ABSENCE so the genotyped path (present-but-empty _cis = a real
+                    # no-cis-carrier call) is never turned into a phantom PUTATIVE row.
+                    _snp_afs = []
+                    for (_sp, _rs, _g) in _used:
+                        try:
+                            _sgrp = _reg.lookup(_sp + 1, _reg.alts_at(_sp + 1)[0])
+                            _snp_afs.append(
+                                _sgrp["global"].allele_freq()
+                                if _sgrp and "global" in _sgrp else None)
+                        except Exception:  # noqa: BLE001
+                            _snp_afs.append(None)
+                    _iaf = None
+                    if _indel_af is not None:
+                        try:
+                            _iar = _indel_af.lookup(_ipos, _iref, _ialt)
+                            _iaf = _iar.get("AF_max") if _iar else None
+                        except Exception:  # noqa: BLE001
+                            _iaf = None
+                    _cooc_out.write(
+                        current_chr + "\t" + str(_ipos) + "\t" + _iref + "\t" + _ialt
+                        + "\t" + final_result[4] + "\t" + _strand + "\t"
+                        + ";".join(str(u[0] + 1) for u in _used) + "\t"
+                        + ";".join(u[1] for u in _used) + "\t" + _isc.PUTATIVE + "\t"
+                        + ("%.6g" % _isc.putative_joint_af([_iaf] + _snp_afs))
+                        + "\tNA\tNA\n")
         except Exception:  # noqa: BLE001 - annotation must never break the indel row
             pass
 

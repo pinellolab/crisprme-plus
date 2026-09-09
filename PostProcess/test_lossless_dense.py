@@ -59,8 +59,11 @@ class TestLosslessDense(unittest.TestCase):
         ns = _load_pure_functions(overrides)
         ns["_phase_confirmation_rows"].clear()
         ns["_phase_confirmation_keys"].clear()
+        ns["_snp_snp_cooc_rows"].clear()
+        ns["_snp_snp_cooc_keys"].clear()
         cluster = []
         ns["iupac_decomposition"](split, GUIDE.replace("-", ""), GUIDE_NO_PAM, cluster)
+        self._ns = ns
         return cluster
 
     def _has_col3_alt(self, cluster):
@@ -80,6 +83,25 @@ class TestLosslessDense(unittest.TestCase):
                            "lossless-dense should add the dropped union haplotype")
         self.assertTrue(self._has_col3_alt(on),
                         "flag on must emit the multi-variant union haplotype (col3 alt)")
+
+    def test_snp_snp_cooc_recorded_putative(self):
+        # a capped registry-only multi-SNP off-target (the greedy applies alts at cols
+        # 0,1,2) must be surfaced in the SNP+SNP co-occurrence companion, PUTATIVE, with
+        # >=2 SNP positions and a conservative min-AF bound.
+        self._run(lossless=True)
+        rows = self._ns["_snp_snp_cooc_rows"]
+        self.assertTrue(rows, "a multi-SNP registry-only off-target should record a row")
+        self.assertTrue(all(r["Phase"] == "PUTATIVE" for r in rows),
+                        "registry-only path must be PUTATIVE")
+        multi = [r for r in rows if len(set(
+            p for p in str(r["SNP_positions"]).split(",") if p not in ("", "NA", "."))) >= 2]
+        self.assertTrue(multi, "at least one row must carry >=2 distinct SNP positions")
+        self.assertTrue(all(r["N_carriers"] == "NA" for r in rows),
+                        "registry-only path has no countable carriers")
+        # min-AF bound is a real float on the recorded rows
+        for r in multi:
+            self.assertNotEqual(r["MinAF_bound"], ".")
+            float(r["MinAF_bound"])
 
 
 if __name__ == "__main__":

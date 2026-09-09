@@ -58,9 +58,11 @@ except Exception:  # any module absent in an old deploy -> no companion summary
 try:
     import observed_haplotypes as _obshap
     import phase_confirmation_companion as _phase_companion
+    import snp_snp_cooc_companion as _snpsnp_companion
 except Exception:  # module absent in an old deploy -> legacy dict path only
     _obshap = None
     _phase_companion = None
+    _snpsnp_companion = None
 
 # 2.5.1 two-pass FAST MODE (docs/DESIGN_2.5.1_two_pass_fast_mode.md). Opt-in via the
 # CRISPRME_FAST_MODE env var (set by `crisprme.py ... --fast` through the post-analysis
@@ -92,6 +94,12 @@ _LOSSLESS_DENSE = bool(int(os.environ.get("CRISPRME_LOSSLESS_DENSE", "0") or "0"
 # legacy path stays allocation-identical, not just byte-identical.
 _phase_confirmation_rows = []
 _phase_confirmation_keys = set()
+# 2.5.2 SNP+SNP co-occurrence companion accumulator (one row per emitted variant
+# off-target that USES >=2 co-occurring SNP alt alleles). Populated from BOTH the
+# observed enumerator (CONFIRMED/PUTATIVE) and the registry-only/capped finalizer
+# (PUTATIVE); gated on ``myreg`` so a legacy dict install stays allocation-identical.
+_snp_snp_cooc_rows = []
+_snp_snp_cooc_keys = set()
 
 # Module-level dictless state, DEFAULTED here in the import prologue so
 # retrieveFromDict() / _collect_variant_off_target() / _write_population_summary_
@@ -377,6 +385,56 @@ def _record_phase_confirmation(final_line, phase_state):
     _phase_confirmation_rows.append(rec)
 
 
+def _record_snp_snp_cooc(final_line, phase_state):
+    """Record one variant off-target that USES >=2 co-occurring SNP alt alleles for the
+    ADDITIVE SNP+SNP co-occurrence companion. PURE w.r.t. ``final_line`` (reads, never
+    mutates). GATED on ``myreg`` (a variant-aware 2.5.x install) so a legacy dict install
+    stays allocation-identical. Deduped by the SAME identity key as the phase companion.
+
+    final_line[15]/[16]/[17] carry the creating SNPs' rsIDs / AFs / positions (comma-
+    joined for a multi-SNP haplotype); final_line[12] carries the carrier samples (or the
+    "NA" sentinel on the registry-only path). We emit a row ONLY when >=2 DISTINCT SNP
+    positions contribute -- a genuine SNP+SNP co-occurrence -- and report the min marginal
+    AF as the conservative joint-AF upper bound (see the companion module)."""
+    if myreg is None or _snpsnp_companion is None:
+        return  # GATE: no registry -> not a 2.5.x variant install -> no companion
+    try:
+        positions = str(final_line[17]).split(",")  # creating-SNP positions
+        afs = str(final_line[16]).split(",")         # creating-SNP marginal AFs
+        # need >=2 DISTINCT, non-sentinel SNP positions to be a SNP+SNP co-occurrence
+        real_pos = [p for p in positions if p not in ("", "NA", ".", "n")]
+        if len(set(real_pos)) < 2:
+            return
+        key = (final_line[3], final_line[4], final_line[6], final_line[1], final_line[2])
+        if key in _snp_snp_cooc_keys:
+            return
+        _snp_snp_cooc_keys.add(key)
+        # min marginal AF = conservative upper bound on the joint cis AF (both phases)
+        min_af = "."
+        parsed = []
+        for a in afs:
+            try:
+                parsed.append(float(a))
+            except (ValueError, TypeError):
+                pass
+        if parsed:
+            min_af = "%.6g" % min(parsed)
+        carriers = str(final_line[12])
+        n_carriers = (
+            "NA" if carriers in ("", "NA", ".")
+            else str(len([c for c in carriers.split(",") if c]))
+        )
+        _snp_snp_cooc_rows.append({
+            "Chromosome": final_line[3], "Position": final_line[4],
+            "Direction": final_line[6], "crRNA": final_line[1], "DNA": final_line[2],
+            "SNP_positions": final_line[17], "rsIDs": final_line[15],
+            "Phase": phase_state, "MinAF_bound": min_af,
+            "N_carriers": n_carriers, "Carriers": carriers,
+        })
+    except Exception:  # noqa: BLE001 - companion must never break the off-target row
+        return
+
+
 def _finalize_observed_entry(split, realTarget, refSeq_prerevert,
                              refSeq_with_bulges, guide_no_pam, revert, seq_prerevert,
                              carriers, info, phase_state, cluster_to_save):
@@ -452,6 +510,7 @@ def _finalize_observed_entry(split, realTarget, refSeq_prerevert,
     # final_line so the bestMerge column count + scoring sentinels are unchanged) and
     # the ADDITIVE population-summary companion, both gated / deduped by identity.
     _record_phase_confirmation(final_line, phase_state)
+    _record_snp_snp_cooc(final_line, phase_state)
     _collect_variant_off_target(final_line)
 
 
@@ -1363,6 +1422,11 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             final_line.append(tmp_pos_mms)
                             # append processed target to cluster to save
                             cluster_to_save.append(final_line)
+                            # 2.5.2 SNP+SNP co-occurrence companion (registry-only /
+                            # capped / --fast finalizer): this path does NOT compute a
+                            # confirmed-cis phase, so a multi-SNP off-target is recorded
+                            # PUTATIVE (conservative). GATED on ``myreg`` + >=2 SNPs.
+                            _record_snp_snp_cooc(final_line, "PUTATIVE")
                             # ADDITIVE (Phase 3c): record this VARIANT off-target's
                             # identity + creating-variant (SNP) columns for the
                             # companion population-summary TSV. GATED on ``myreg``
@@ -1918,6 +1982,29 @@ def _write_phase_confirmation_companion():
         print("phase-confirmation companion skipped for", current_chr, "-", _pc_err)
 
 
+def _write_snp_snp_cooc_companion():
+    """ADDITIVE SNP+SNP co-occurrence companion write. FULLY GUARDED + GATED on
+    ``myreg`` (a variant-aware 2.5.x install: dict-less genotyped OR registry-only).
+
+    Writes ``<outputFile>.snp_snp_cooc.tsv`` -- a SEPARATE joinable file, one row per
+    variant off-target that USES >=2 co-occurring SNP alts, with the CONFIRMED/PUTATIVE
+    phase + the conservative min-AF joint bound. Byte-identical on a legacy dict install
+    (``myreg`` None -> nothing recorded, nothing written). Any error is caught + skipped."""
+    if myreg is None or _snpsnp_companion is None:
+        return  # GATE: no registry -> not a 2.5.x variant install -> no companion
+    if not _snp_snp_cooc_rows:
+        return  # no off-target used >=2 co-occurring SNPs on this chromosome
+    try:
+        out_path = outputFile + ".snp_snp_cooc.tsv"
+        n = _snpsnp_companion.write_companion(out_path, _snp_snp_cooc_rows)
+        print(
+            "Wrote SNP+SNP co-occurrence companion (%d off-target row[s]) to %s"
+            % (n, out_path)
+        )
+    except Exception as _sc_err:  # ADDITIVE + guarded: never break the run
+        print("SNP+SNP co-occurrence companion skipped for", current_chr, "-", _sc_err)
+
+
 # INPUT AND SETTINGS
 # fasta of the reference chromosome
 inFasta = open(sys.argv[1], "r")
@@ -2185,6 +2272,8 @@ else:
     _write_population_summary_companion()
     # ADDITIVE + guarded + gated-on-mygt: dict-less phase-confirmation companion TSV.
     _write_phase_confirmation_companion()
+    # ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
+    _write_snp_snp_cooc_companion()
     # print complete and exit with no error
     print("ANALYSIS COMPLETE IN", time.time() - global_start)
     exit(0)
@@ -2237,5 +2326,7 @@ cfd_dataframe.to_csv(outputFile + ".CFDGraph.txt", sep="\t", index=False)
 _write_population_summary_companion()
 # ADDITIVE + guarded + gated-on-mygt: dict-less phase-confirmation companion TSV.
 _write_phase_confirmation_companion()
+# ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
+_write_snp_snp_cooc_companion()
 
 print("ANALYSIS COMPLETE IN", time.time() - global_start)
