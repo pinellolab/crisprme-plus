@@ -270,6 +270,28 @@ input genotypes:
 Confirmed and putative haplotypes are reported distinctly, so a reviewer can
 weight them appropriately.
 
+### Sites-only panels and co-occurrence without genotypes
+On a **sites-only / aggregate panel** (the mega index, or any download without a
+genotype tier) there are no per-sample genotypes to reconstruct cis, but the
+variants co-located in a window still form **putative** haplotypes. CRISPRme+
+reports these too, forming a three-rung confidence model:
+
+1. **CONFIRMED** — phased genotypes prove the variants are carried together in
+   cis (e.g. 1000 Genomes); exact carriers and joint frequency.
+2. **PUTATIVE (co-carrier)** — genotyped but unphased (e.g. HGDP); the individuals
+   who carry all the variants are known (a both-carrier count), but cis is unproven.
+3. **PUTATIVE (estimated)** — sites-only; no genotypes at all. The variants are
+   known to segregate in the population at their marginal allele frequencies, so the
+   joint cis frequency is reported as a **conservative upper bound = the minimum
+   participating marginal AF** (a cis haplotype can never be more frequent than its
+   rarest allele; no LD assumed).
+
+This applies to **both** co-occurrence dimensions: **SNP+SNP** (an off-target that
+requires ≥2 nearby SNP alt alleles together; `snp_snp_cooc.tsv`) and **SNP+indel**
+(`indel_snp_cooc.tsv`). On a genotyped panel both are emitted CONFIRMED/PUTATIVE with
+carriers; on a sites-only panel both fall to rung 3 (PUTATIVE, min-AF, no carriers) —
+so the co-occurrence signal is never silently dropped for lack of genotypes.
+
 ### Locus completeness
 For every candidate window, CRISPRme+ additionally emits the **reference**
 off-target (the site as it appears in the reference genome, independent of any
@@ -318,6 +340,19 @@ complementary controls:
 
 Together these keep genome-wide variant search tractable while making any bound
 that was applied explicit and reviewable, and guaranteeing no region is dropped.
+
+On a **genotyped** panel the observed-haplotype enumerator (§4) already emits every
+carried multi-variant haplotype exactly, so the greedy representative is only a
+tractability fallback for pathological windows. On a **sites-only** panel there are no
+carriers to enumerate, so a dense window emits only the greedy min-mismatch
+representative — which can be a strict subset of a genuinely co-located haplotype. The
+opt-in `CRISPRME_LOSSLESS_DENSE` flag closes this gap for sites-only panels: it
+additionally emits the **full co-located variant union** for the window (the maximal
+PUTATIVE haplotype), bounded by the carrier-free union rather than the 2ᵏ lattice and
+gated by the same mismatch/PAM budget so no over-budget or PAM-invalid row is produced.
+It is default-off (output byte-identical) and scoped to the sites-only path — the
+genotyped path is already lossless, and a per-sample union there would risk
+trans-as-cis phantoms.
 
 ### Two-pass fast mode (`--fast`, opt-in)
 
@@ -491,6 +526,16 @@ genome-wide matrix (2021 panel, same guide, `--fast` vs non-`--fast`): the two `
 files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
 per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
 carries the indel and SNP together — is preserved identically in fast and non-fast runs.
+
+**Two co-occurrence companions.** Alongside `indel_snp_cooc.tsv` (SNP+indel),
+`snp_snp_cooc.tsv` reports **SNP+SNP** co-occurrences — off-targets that require ≥2
+nearby SNP alt alleles together. Both use the same three-rung confidence model (§4):
+CONFIRMED (phased cis, exact carriers + joint AF), PUTATIVE co-carrier (genotyped
+unphased), and PUTATIVE estimated (sites-only, min marginal AF as a conservative
+upper bound, no carriers). On a sites-only panel the SNP+indel companion likewise
+falls back to a PUTATIVE min-AF row rather than emitting nothing, so a co-occurrence
+is never dropped merely for lack of genotypes. Both companions are bundled into the
+report ZIP with a confirmed-count summary.
 
 **Assumptions.** (i) Results are relative to the chosen **reference assembly** and
 its coordinates. (ii) The variant panel is only as representative as the input
