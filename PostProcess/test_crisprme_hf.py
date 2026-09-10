@@ -234,5 +234,99 @@ class TestDownloadIntegrity(unittest.TestCase):
         self.assertIsNotNone(hf.verify_download_file(p, deep=True))
 
 
+class _FakeResp:
+    def __init__(self, status, retry_after=None):
+        self.status_code = status
+        self.headers = {} if retry_after is None else {"Retry-After": retry_after}
+
+
+class _HTTPErr(Exception):
+    def __init__(self, msg, status=None, retry_after=None):
+        super().__init__(msg)
+        if status is not None:
+            self.response = _FakeResp(status, retry_after)
+
+
+class TestHfRetry(unittest.TestCase):
+    """The retry-on-429/5xx helper (network-free): classification, Retry-After
+    honoring, backoff, exhaustion, and the CRISPRME_HF_MAX_RETRIES override."""
+
+    def test_retryable_classification(self):
+        self.assertTrue(hf._hf_retryable(_HTTPErr("rate", status=429)))
+        self.assertTrue(hf._hf_retryable(_HTTPErr("boom", status=503)))
+        self.assertTrue(hf._hf_retryable(_HTTPErr("429 Too Many Requests")))
+        self.assertTrue(hf._hf_retryable(_HTTPErr("503 Service Unavailable")))
+        # 404 / auth / generic errors are NOT retried
+        self.assertFalse(hf._hf_retryable(_HTTPErr("not found", status=404)))
+        self.assertFalse(hf._hf_retryable(_HTTPErr("401 Unauthorized")))
+        self.assertFalse(hf._hf_retryable(ValueError("bad arg")))
+
+    def test_retry_after_parsed_and_capped(self):
+        self.assertEqual(hf._hf_retry_after(_HTTPErr("x", 429, "12")), 12.0)
+        self.assertIsNone(hf._hf_retry_after(_HTTPErr("x", 429, "99999")))  # capped
+        self.assertIsNone(hf._hf_retry_after(_HTTPErr("x", 429, "nope")))  # unparsable
+        self.assertIsNone(hf._hf_retry_after(_HTTPErr("x", 429)))  # no header
+
+    def test_succeeds_after_transient_429(self):
+        calls = {"n": 0}
+
+        def flaky(**kw):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise _HTTPErr("429 Too Many Requests", status=429)
+            return "ok"
+
+        with mock.patch.object(hf.time, "sleep") as slept:
+            out = hf._hf_call_with_retry(flaky, _what="test")
+        self.assertEqual(out, "ok")
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(slept.call_count, 2)  # slept before each retry
+
+    def test_honors_retry_after_header(self):
+        seq = [_HTTPErr("429", 429, "7"), "ok"]
+
+        def flaky(**kw):
+            v = seq.pop(0)
+            if isinstance(v, Exception):
+                raise v
+            return v
+
+        with mock.patch.object(hf.time, "sleep") as slept:
+            hf._hf_call_with_retry(flaky)
+        slept.assert_called_once_with(7.0)
+
+    def test_non_retryable_reraised_immediately(self):
+        def boom(**kw):
+            raise _HTTPErr("404 not found", status=404)
+
+        with mock.patch.object(hf.time, "sleep") as slept:
+            with self.assertRaises(_HTTPErr):
+                hf._hf_call_with_retry(boom)
+        slept.assert_not_called()
+
+    def test_exhaustion_reraises_last(self):
+        def always429(**kw):
+            raise _HTTPErr("429", status=429)
+
+        with mock.patch.dict(os.environ, {"CRISPRME_HF_MAX_RETRIES": "3"}):
+            with mock.patch.object(hf.time, "sleep") as slept:
+                with self.assertRaises(_HTTPErr):
+                    hf._hf_call_with_retry(always429)
+        self.assertEqual(slept.call_count, 2)  # 3 attempts => 2 sleeps
+
+    def test_disable_via_env(self):
+        calls = {"n": 0}
+
+        def always429(**kw):
+            calls["n"] += 1
+            raise _HTTPErr("429", status=429)
+
+        with mock.patch.dict(os.environ, {"CRISPRME_HF_MAX_RETRIES": "1"}):
+            with mock.patch.object(hf.time, "sleep"):
+                with self.assertRaises(_HTTPErr):
+                    hf._hf_call_with_retry(always429)
+        self.assertEqual(calls["n"], 1)  # no retry
+
+
 if __name__ == "__main__":
     unittest.main()

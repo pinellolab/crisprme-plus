@@ -40,6 +40,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 from datetime import datetime, timezone
 
 # Default HuggingFace dataset repo. Overridable per-invocation with --hf-repo or
@@ -421,6 +422,79 @@ def _staged_files(local_dir: str) -> List[str]:
     return out
 
 
+# HTTP statuses worth retrying: 429 (rate limit) + transient 5xx from the CDN.
+_HF_RETRY_STATUS = (429, 500, 502, 503, 504)
+
+
+def _hf_retryable(exc: BaseException) -> bool:
+    """True when ``exc`` is a transient HF HTTP error worth retrying — a 429
+    rate-limit or a 5xx. Prefers the structured ``response.status_code`` and
+    falls back to matching the status in the message (some hub errors don't
+    expose ``.response``)."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status in _HF_RETRY_STATUS:
+        return True
+    msg = str(exc)
+    return (
+        "Too Many Requests" in msg
+        or "rate limit" in msg.lower()
+        or "Service Unavailable" in msg
+        or any((" %d " % c) in (" %s " % msg) for c in _HF_RETRY_STATUS)
+    )
+
+
+def _hf_retry_after(exc: BaseException) -> Optional[float]:
+    """Return the server-advertised ``Retry-After`` (seconds) if present + sane,
+    so we wait exactly as long as the rate-limiter asks instead of guessing."""
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    raw = headers.get("Retry-After") or headers.get("retry-after")
+    if not raw:
+        return None
+    try:
+        secs = float(raw)
+    except (TypeError, ValueError):
+        return None
+    # cap a hostile/absurd value so a bad header can't wedge the download
+    return secs if 0 < secs <= 300 else None
+
+
+def _hf_call_with_retry(fn, *args, _what: str = "download",
+                        _max_attempts: int = 6, **kwargs):
+    """Call ``fn(*args, **kwargs)``, retrying transient HF HTTP errors (429
+    rate-limit + 5xx) with exponential backoff. Anonymous downloads of the
+    many-small-file indices hit 429 easily; without this the whole download
+    aborts on the first rate-limit. ``snapshot_download`` resumes (already-present
+    files are skipped) so a retry is cheap. Honors CRISPRME_HF_MAX_RETRIES; set
+    it to 1 to disable retrying."""
+    try:
+        _max_attempts = max(
+            1, int(os.environ.get("CRISPRME_HF_MAX_RETRIES", _max_attempts))
+        )
+    except (TypeError, ValueError):
+        pass
+    delay = 4.0
+    for attempt in range(1, _max_attempts + 1):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:  # noqa: BLE001 - re-raised below if not retryable
+            if attempt >= _max_attempts or not _hf_retryable(e):
+                raise
+            wait = _hf_retry_after(e)
+            if wait is None:
+                wait = delay
+            status = getattr(getattr(e, "response", None), "status_code", "?")
+            sys.stderr.write(
+                f"HF {_what}: transient error (HTTP {status}); retry "
+                f"{attempt}/{_max_attempts - 1} in {wait:.0f}s "
+                f"(set CRISPRME_HF_MAX_RETRIES=1 to disable, or authenticate "
+                f"with an HF token to avoid rate limits)...\n"
+            )
+            sys.stderr.flush()
+            time.sleep(wait)
+            delay = min(delay * 2, 60.0)
+    raise RuntimeError("unreachable")  # pragma: no cover
+
+
 def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
                  token: Optional[str] = None, retries: int = 2) -> str:
     """Download the files matching ``allow_patterns`` from ``repo`` into
@@ -431,18 +505,22 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
     ``local_dir``. Set CRISPRME_SKIP_VERIFY=1 to bypass (not recommended)."""
     hf = _require_hf()
     os.makedirs(local_dir, exist_ok=True)
-    hf.snapshot_download(
+    _hf_call_with_retry(
+        hf.snapshot_download,
         repo_id=repo,
         repo_type="dataset",
         allow_patterns=allow_patterns,
         local_dir=local_dir,
         token=token,
+        _what="snapshot",
     )
     if os.environ.get("CRISPRME_SKIP_VERIFY") == "1":
         return local_dir
 
     rels = _staged_files(local_dir)
-    sizes = _remote_sizes(hf, repo, rels, token)
+    sizes = _hf_call_with_retry(
+        _remote_sizes, hf, repo, rels, token, _what="size-check"
+    )
     for attempt in range(retries + 1):
         bad = {}
         for rel in _staged_files(local_dir):
@@ -472,13 +550,15 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
                 os.remove(os.path.join(local_dir, rel))
             except OSError:
                 pass
-        hf.snapshot_download(
+        _hf_call_with_retry(
+            hf.snapshot_download,
             repo_id=repo,
             repo_type="dataset",
             allow_patterns=list(bad),  # exact remote paths of the bad files
             local_dir=local_dir,
             token=token,
             force_download=True,
+            _what="snapshot-refetch",
         )
     return local_dir
 
