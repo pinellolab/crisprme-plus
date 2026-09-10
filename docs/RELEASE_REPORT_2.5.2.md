@@ -87,6 +87,17 @@ What each cell is checked for: report.zip generated; `snp_snp_cooc.tsv` / `indel
 
 **Result: on the genotyped index the core scored off-target table is byte-identical OLD→NEW; the only change is the new additive SNP+SNP companion. No regression.** (On the **mega** sites-only index the core output *does* change by design — searchable indels + lossless-dense PUTATIVE are new 2.5.x capabilities, active only where `registry_only_mode` holds; the version-matrix, §3d, quantifies that.)
 
+### 3d. Version-matrix (why fast-default is right) — chr22 genotyped, guide `TGCTTGGTCGGCACTGATAG`, mm5/bDNA2/bRNA2
+The `run_v1/v2/v3` progression, rebuilt against real prebuilt tiers (`--index-path`). The trio is a direct justification for the 2.5.3 fast-default flip:
+
+| Cell | Version / mode | Outcome |
+|---|---|---|
+| **V1** | stock **v2.4.0**, feature-off | **FAILED** — v2.4.0 cannot post-process the 2.5.x index's indels (`adjust_cols.py: cols.remove("CFD_ref")` ValueError + `KeyError 'AK'`). You can't run old CRISPRme on the new index. |
+| **V2** | **2.5.2 full** enumeration | **TIMED OUT at 100 min** (`rc=124`) — the exact observed-haplotype enumeration is *intractable* on a dense guide at mm5/2/2 even on a single chromosome. |
+| **V3** | **2.5.2 `--fast`** | Completes (fast collapses the SNP haplotype lattice). *(finishing; numbers appended)* |
+
+**Takeaway:** old→can't-run, full→intractable, fast→tractable. This is exactly why 2.5.3 makes fast the default (with `--full` available when the panel/config makes exact enumeration feasible and per-sample carriers are required).
+
 ## 4. CRISTA parallel prototype (post-2.5.2, on `dev`)
 
 Answers "why is CRISTA the tail?" — the post-analysis pool parallelizes per **contig**, so one big chromosome's worker runs serially long after the others. Prototype parallelizes the CPU-bound per-target **feature build** at the finest seam + lets the RF predict use joblib threads.
