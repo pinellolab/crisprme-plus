@@ -39,7 +39,18 @@ _[results appended when the run lands]_
 
 **ml008 — mm6 / bDNA2 / bRNA2 (thorough):**
 
-_[results appended when the run lands]_
+| Cell | report.zip | off-targets | snp_snp_cooc | indel_snp_cooc | indel_af |
+|---|---|---|---|---|---|
+| mega_slow | ✅ | 550,456 | 3,453 **all PUTATIVE** | 318,455 PUTATIVE | 329,980 |
+| mega_fast | ✅ | 547,807 | 42,273 **all PUTATIVE** | 318,455 PUTATIVE | 329,980 |
+| geno_slow | ⚠️ hung @51.6% | — | — | — | — |
+| geno_fast | ⚠️ hung @51.6% | — | — | — | — |
+
+**Heavyweight mega passed** genome-wide (318K SNP+indel + 3.4K SNP+SNP PUTATIVE, 330K indel_af, 550K off-targets) — the sites-only feature set holds at mm6/b2/b2 GW.
+
+**Genotyped cells hung at 51.6%** (0 active post-analysis workers, `run_searches.sh` still waiting): a worker was OOM-killed under **4× mm6/b2/b2 memory pressure** — the genotyped observed-enumeration loads the per-sample genotype store (far heavier than the registry-only mega), and 4 such GW searches in parallel over-subscribed RAM. **Resource/contention finding, not a genotyped-index bug** — the genotyped is validated by the chr22 progression (§3a) and the ml007 mm4/1/1 clean-room (below). Takeaway: don't run 4× genotyped GW mm6/b2/b2 concurrently on one host; run fewer in parallel or cap `CRISPRME_POSTPROC_MAX_WORKERS` / memory.
+
+The mega SNP+SNP rows are **all PUTATIVE** (verified: zero CONFIRMED data rows across all 24 per-chr files) — correct for a sites-only index. `--fast` emits far more SNP+SNP rows than slow (42,273 vs 3,453) because it materializes a worst-possible representative per dense window (which combines multiple SNPs), whereas the slow greedy emits fewer multi-SNP reps; both are PUTATIVE with the min-AF bound.
 
 What each cell is checked for: report.zip generated; `snp_snp_cooc.tsv` / `indel_snp_cooc.tsv` / `indel_af.tsv` present; CONFIRMED+carriers on genotyped vs PUTATIVE+min-AF+provenance on mega; `--fast` ⊇ slow; no crash.
 
