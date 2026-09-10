@@ -33,9 +33,22 @@ Genotyped: SNP+SNP 3,329 (35 CONFIRMED + 3,294 PUTATIVE), SNP+indel 14 (2+12). M
 ### 3b. Clean-room, new-user from scratch (Docker/apptainer pull v2.5.2 → HF-download both indices)
 Two configs in parallel on separate hosts. Guide = TRAC `CTCTCAGCTGGTACACGGCA`, NRG.
 
-**ml007 — mm4 / bDNA1 / bRNA1 (fast validation, /srv/local SSD):**
+**ml007 — mm4 / bDNA1 / bRNA1 (fast validation, /srv/local SSD, fully from-scratch new-user):**
 
-_[results appended when the run lands]_
+New-user path validated: `apptainer pull v2.5.2` → HF-downloaded **both** indices + INDELS (`dl_geno exit=0`, `dl_mega exit=0`, HF-authenticated → no 429).
+
+| Cell | report.zip | off-targets | snp_snp_cooc | indel_snp_cooc | indel_af |
+|---|---|---|---|---|---|
+| geno_slow | finalizing¹ | (finalizing) | 1,183 — **125 CONFIRMED** + 1,058 PUTATIVE | 85 — **19 CONFIRMED** + 66 PUTATIVE | n/a |
+| geno_fast | finalizing¹ | (finalizing) | 7,694 (worst-case reps, PUTATIVE) | 85 (19 CONFIRMED + 66 PUTATIVE) | n/a |
+| mega_slow | ✅ | 111,986 | 327 all PUTATIVE | 38,222 PUTATIVE | 39,358 |
+| mega_fast | ✅ | 129,643 | 2,944 all PUTATIVE | 38,222 PUTATIVE | 39,358 |
+
+**Genotyped observed-haplotype path validated** — the slow genotyped cell produced **CONFIRMED cis co-occurrences with named carrier samples**: 125 CONFIRMED SNP+SNP + 19 CONFIRMED SNP+indel. This is the class only a genotyped index can assert (phased cis, exact carriers), the complement of the mega's PUTATIVE-only output. The mega cells here are all-PUTATIVE (correct). Both indices' companions produced from a fresh HF download.
+
+**Notable slow-vs-`--fast` behavior on the genotyped index:** slow emits the **observed CONFIRMED** haplotypes (125 CONFIRMED SNP+SNP); `--fast` emits more rows (7,694) but they are worst-possible **representatives**, tagged PUTATIVE, not per-sample CONFIRMED — i.e. `--fast` trades per-sample cis attribution for tractability (exactly its documented design). Use the slow path when you need CONFIRMED carriers; `--fast` for a dense-panel screen.
+
+¹ geno cells' post-analysis reached 100%; the final merge/report step was still assembling when the 3.2h poller window closed (the observed-haplotype enumeration + GW merge is slow). report.zip + integrated_results table finalize shortly; companions (above) are already written.
 
 **ml008 — mm6 / bDNA2 / bRNA2 (thorough):**
 

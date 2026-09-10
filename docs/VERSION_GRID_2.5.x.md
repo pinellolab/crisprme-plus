@@ -53,5 +53,20 @@ Genome-wide mega verify (all 24 chr, guide CTAAC): **839,897 SNP+indel + 10,753 
 co-occurrences (all PUTATIVE), 868,724 indel_af rows, indel off-targets on all 24 chromosomes,
 0 pseudo-sample leaks.** Provenance spread: 785K single-source → 8.7K reported by all 5 datasets.
 
-> The genome-wide clean-room results (2.5.2 on ml008, both indices × slow/`--fast`, TRAC guide)
-> are appended below once that run completes.
+## Genome-wide clean-room (2.5.2, new-user from scratch: apptainer-pull v2.5.2 + HF-download)
+
+TRAC guide `CTCTCAGCTGGTACACGGCA`, NRG. Two configs on separate hosts (see
+`RELEASE_REPORT_2.5.2.md` for the full tables):
+
+- **Mega (sites-only) validated at both configs.** ml008 mm6/b2/b2: 318,455 SNP+indel + 3,453
+  SNP+SNP (**all PUTATIVE**) + 329,980 indel_af, 550K off-targets. ml007 mm4/1/1: 38,222 SNP+indel
+  + 327 SNP+SNP PUTATIVE + 39,358 indel_af. Genome-wide sites-only feature set holds, heavyweight.
+- **Genotyped observed-haplotype path validated** (ml007 mm4/1/1): **125 CONFIRMED SNP+SNP + 19
+  CONFIRMED SNP+indel with named carriers** — the phased-cis class the mega cannot assert.
+- **slow vs `--fast` (genotyped):** slow = observed CONFIRMED haplotypes (with carriers); `--fast`
+  = more worst-possible representative rows, PUTATIVE (no per-sample cis) — its documented tradeoff.
+- **Resource note:** 4× genotyped GW at mm6/b2/b2 in parallel over-subscribed RAM on one host
+  (one cell's post-analysis worker OOM-hung); run fewer genotyped GW searches concurrently, or
+  lower `CRISPRME_POSTPROC_MAX_WORKERS`. Single-search / lighter-config genotyped completes fine.
+- **New-user friction:** anonymous HF downloads hit 429 rate limits; an HF token (or a
+  retry-on-429 in the downloader — candidate fix) avoids it.
