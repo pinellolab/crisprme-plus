@@ -15,14 +15,17 @@ and the `release-crisprme` skill.
 - **Parallel CRISTA scoring (`CRISPRME_CRISTA_PARALLEL`, opt-in, default OFF)** — prototype
   that removes the per-contig CRISTA-scoring tail (one large chromosome's worker running
   serially long after the others finish). The per-contig post-analysis pool is unchanged; this
-  parallelizes the CPU-bound per-target **feature build** (`get_features`) at the finest seam
-  (`CRISTA_predict_list`) across a small bounded **fork** pool, and lets each RandomForest
-  `predict` use N joblib threads. The 276 MB model + the predict reduction stay in the parent.
-  **Byte-identical by construction** (a score is a pure per-target function; contiguous,
-  order-preserving chunks; same trees → same average) and default OFF ⇒ output + process count
-  unchanged. Fork (not spawn) because the post-analysis entry points run their main at module
-  top level. Measured feature-build speedup ≈ 3.8× at 8 workers. Test
-  `test_crista_parallel_equivalence`.
+  parallelizes the CPU-bound per-target **feature build** (`get_features`) — the genuinely
+  serial part — at the finest seam (`CRISTA_predict_list`) across a small bounded **fork** pool.
+  The 276 MB model stays in the parent (children only build features). **Bit-identical feature
+  matrix by construction** (a feature row is a pure per-target function; contiguous,
+  order-preserving chunks) and default OFF ⇒ output + process count unchanged. Fork (not spawn)
+  because the post-analysis entry points run their main at module top level. Measured
+  feature-build speedup ≈ 3.8× at 8 workers; test `test_crista_parallel_equivalence`. The RF
+  `predict` is left untouched — the pickled predictors already carry `n_jobs=-1` (all cores), so
+  it is already parallel (and, as a result, non-deterministic at the raw-float level: two serial
+  runs differ ~5e-17, identical to the emitted 3 decimals — CRISTA output has always been
+  reproducible only to the emitted precision, which this preserves).
 
 ## [2.5.2] - 2026-09-09
 

@@ -60,10 +60,12 @@ What each cell is checked for: report.zip generated; `snp_snp_cooc.tsv` / `indel
 
 Answers "why is CRISTA the tail?" — the post-analysis pool parallelizes per **contig**, so one big chromosome's worker runs serially long after the others. Prototype parallelizes the CPU-bound per-target **feature build** at the finest seam + lets the RF predict use joblib threads.
 
-- `CRISPRME_CRISTA_PARALLEL` (opt-in, **default OFF** = byte-identical). `dev` commits `7771b66` → `c5fff0d` (fork fix) → `3d7aa44` (predict n_jobs).
-- **Byte-identical by construction** (pure per-target scores, order-preserving contiguous chunks, same trees). Test `test_crista_parallel_equivalence` (in CI).
+- `CRISPRME_CRISTA_PARALLEL` (opt-in, **default OFF**). `dev` commits `7771b66` → `c5fff0d` (fork) → `3d7aa44`/`a0e7f16` (measurement-driven scope-down).
+- **Parallelizes only the per-target feature build** (`get_features`) — the genuinely serial part — across a small bounded **fork** pool (bit-identical feature matrix; contiguous order-preserving chunks). Test `test_crista_parallel_equivalence` (in CI).
 - **Fork, not spawn** — the post-analysis callers run their main at module top level (no `__main__` guard), so spawn would re-run the whole analysis in each child; fork is safe (caller is an isolated `subprocess.call` child; inner pool bounded ≤8).
-- **Measured** feature-build speedup (10-core mac, 20k targets): **1.36× (2w) / 2.49× (4w) / 3.82× (8w)**. Predict-`n_jobs` speedup + full byte-identical prediction check: **pending** (needs the container SIF — the model pickle won't unpickle off-container).
+- **Measured** (on-SIF, 20k real targets): feature-build alone **3.8× @ 8w**; full `CRISTA_predict_list` **~1.2–2×** (modest — see below). Feature-build-only, 10-core mac: 1.36× (2w) / 2.49× (4w) / 3.82× (8w).
+- **Key measurement finding:** the pickled RF predictors already carry **`n_jobs=-1`** → the predict already fans across all cores (it's the dominant per-batch cost, ~4× the feature build), so parallelizing the predict further only over-subscribes. It is also therefore **non-deterministic at the raw-float level** — two *serial* predict runs differ by ~5e-17, **identical to the emitted 3 decimals**. So CRISTA output has *always* been reproducible only to the emitted precision (not raw bits); this prototype preserves exactly that.
+- **Takeaway:** the bigger lever for the per-contig skew tail is **outer-level balanced contig batching** (tracked #174), not per-batch predict parallelism. The feature-build fork pool is a clean, bit-identical, opt-in partial win.
 
 ## 5. Pending / for your decision
 
