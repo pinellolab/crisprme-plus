@@ -493,6 +493,21 @@ def predict_crista_score(features_lst):
             _CRISTA_PREDICTORS = pickle.load(pklr)
     predictors = _CRISTA_PREDICTORS
 
+    # PERF (opt-in, same CRISPRME_CRISTA_PARALLEL flag as the parallel feature build): let each
+    # RandomForest.predict use N joblib THREADS for the tree traversal. sklearn releases the GIL
+    # in the C tree-predict path, so this is in-process (NO new processes, none of the spawn /
+    # fork / FD hazards) and byte-identical (same trees -> same per-row average). Complements the
+    # parallel feature build; the two run in sequence within CRISTA_predict_list so they never
+    # contend. Default (workers<=1) leaves the pickled predictors' n_jobs untouched.
+    _w, _ = _crista_parallel_cfg()
+    if _w > 1:
+        _nj = min(_w, _CRISTA_INNER_CEIL)
+        for _p in predictors:
+            try:
+                _p.n_jobs = _nj
+            except Exception:  # noqa: BLE001 - never break scoring on a predictor attr
+                pass
+
     # PERF: coerce the feature batch to a contiguous float64 array ONCE. get_features builds
     # each row via np.array over a mix of floats and STRING numerals (agct2numerals), so
     # features_lst is a string-dtype (<U..) matrix; each of the 5 rf.predict(features_lst)
