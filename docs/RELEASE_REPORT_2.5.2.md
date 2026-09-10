@@ -105,3 +105,17 @@ Answers "why is CRISTA the tail?" — the post-analysis pool parallelizes per **
 3. **HF 429**: add a retry-on-429 to the downloader (and/or a docs note that a token avoids it).
 4. **GitHub release notes** object (command above) — cosmetic; the tag + image are live.
 5. `pinellolab/crisprme-data` vs `lucapinello/crisprme-data`: the published indices + the code default (`DEFAULT_HF_REPO`) are both `lucapinello/crisprme-data` — consistent, but confirm that's the intended long-term home.
+
+## 6. 2.5.3 (staged on `dev`, GATED — awaiting your approval to tag/build)
+
+**What it adds** (on top of 2.5.2):
+- **Fast mode is now the DEFAULT; `--full` opts into exact per-sample enumeration.** The SNP post-analysis reports worst-possible PUTATIVE representatives by default (tractable on any panel); `--full` gives observed haplotypes with CONFIRMED cis + named carriers + exact joint AF. `--fast` kept as a deprecated no-op alias. The carrier trade-off is surfaced in **three** non-silent places: the launch message, a **web "Search mode" control** (with explanation), and a **report "Search mode" row** (index-aware). *(Your call: global fast-default + `--full`.)*
+- **HF-429 download retry** (`b58a0b1`) — new-user rate-limit resilience.
+- **Parallel CRISTA feature build** (`CRISPRME_CRISTA_PARALLEL`, opt-in, default OFF).
+
+**Validation (all green):**
+- **Unit:** 667 passed (1 failure is the local Mac lacking `sklearn`; green in CI); +2 new report-note tests.
+- **Fast/full e2e** (chr22 genotyped, guide CTAAC, mm4/1/1): default → `.search_mode=fast`, report shows the fast caveat, ~0 CONFIRMED (PUTATIVE reps), 1,975 rows; `--full` → `.search_mode=full`, report shows the enumeration note, **36 CONFIRMED SNP+SNP with carriers**, 1,733 rows. Markers + notes correct in both.
+- **Byte-identity chain (md5 `91ce3b68…`):** `2.5.1-dev full ≡ 2.5.2 full ≡ 2.5.3 --full ≡ 2.5.3 --full + CRISPRME_CRISTA_PARALLEL=1`. The exact-enumeration path is unchanged across every version; the flip only swaps the *default*, and the CRISTA-parallel flag is **bit-identical** end-to-end.
+
+**To release when you approve:** `release-crisprme 2.5.3` (tag → Docker → `pinellolab/crisprme:v2.5.3`). Version is already bumped to `2.5.3-dev` on `dev`; CHANGELOG staged.
