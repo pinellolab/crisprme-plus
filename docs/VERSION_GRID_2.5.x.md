@@ -61,8 +61,9 @@ TRAC guide `CTCTCAGCTGGTACACGGCA`, NRG. Two configs on separate hosts (see
 - **Mega (sites-only) validated at both configs.** ml008 mm6/b2/b2: 318,455 SNP+indel + 3,453
   SNP+SNP (**all PUTATIVE**) + 329,980 indel_af, 550K off-targets. ml007 mm4/1/1: 38,222 SNP+indel
   + 327 SNP+SNP PUTATIVE + 39,358 indel_af. Genome-wide sites-only feature set holds, heavyweight.
-- **Genotyped observed-haplotype path validated** (ml007 mm4/1/1): **125 CONFIRMED SNP+SNP + 19
-  CONFIRMED SNP+indel with named carriers** — the phased-cis class the mega cannot assert.
+- **Genotyped observed-haplotype path validated** (ml007 mm4/1/1, all 4 cells passed): **124
+  CONFIRMED SNP+SNP + 18 CONFIRMED SNP+indel with named carriers**, 119K off-targets, report.zip
+  — the phased-cis class the mega cannot assert.
 - **slow vs `--fast` (genotyped):** slow = observed CONFIRMED haplotypes (with carriers); `--fast`
   = more worst-possible representative rows, PUTATIVE (no per-sample cis) — its documented tradeoff.
 - **Resource note:** 4× genotyped GW at mm6/b2/b2 in parallel over-subscribed RAM on one host

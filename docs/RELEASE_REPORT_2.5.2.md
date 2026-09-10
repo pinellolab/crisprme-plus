@@ -39,16 +39,18 @@ New-user path validated: `apptainer pull v2.5.2` → HF-downloaded **both** indi
 
 | Cell | report.zip | off-targets | snp_snp_cooc | indel_snp_cooc | indel_af |
 |---|---|---|---|---|---|
-| geno_slow | finalizing¹ | (finalizing) | 1,183 — **125 CONFIRMED** + 1,058 PUTATIVE | 85 — **19 CONFIRMED** + 66 PUTATIVE | n/a |
-| geno_fast | finalizing¹ | (finalizing) | 7,694 (worst-case reps, PUTATIVE) | 85 (19 CONFIRMED + 66 PUTATIVE) | n/a |
+| geno_slow | ✅ | 119,082 | 1,183 — **124 CONFIRMED** + 1,059 PUTATIVE | 85 — **18 CONFIRMED** + 67 PUTATIVE | n/a |
+| geno_fast | ✅ | 132,021 | 7,694 (worst-case reps, PUTATIVE) | 85 (18 CONFIRMED + 67 PUTATIVE) | n/a |
 | mega_slow | ✅ | 111,986 | 327 all PUTATIVE | 38,222 PUTATIVE | 39,358 |
 | mega_fast | ✅ | 129,643 | 2,944 all PUTATIVE | 38,222 PUTATIVE | 39,358 |
 
+**All 4 cells passed** (report.zip + companions, exit 0).
+
 **Genotyped observed-haplotype path validated** — the slow genotyped cell produced **CONFIRMED cis co-occurrences with named carrier samples**: 125 CONFIRMED SNP+SNP + 19 CONFIRMED SNP+indel. This is the class only a genotyped index can assert (phased cis, exact carriers), the complement of the mega's PUTATIVE-only output. The mega cells here are all-PUTATIVE (correct). Both indices' companions produced from a fresh HF download.
 
-**Notable slow-vs-`--fast` behavior on the genotyped index:** slow emits the **observed CONFIRMED** haplotypes (125 CONFIRMED SNP+SNP); `--fast` emits more rows (7,694) but they are worst-possible **representatives**, tagged PUTATIVE, not per-sample CONFIRMED — i.e. `--fast` trades per-sample cis attribution for tractability (exactly its documented design). Use the slow path when you need CONFIRMED carriers; `--fast` for a dense-panel screen.
+**Notable slow-vs-`--fast` behavior on the genotyped index:** slow emits the **observed CONFIRMED** haplotypes (124 CONFIRMED SNP+SNP + 18 CONFIRMED SNP+indel); `--fast` emits more rows (7,694) but they are worst-possible **representatives**, tagged PUTATIVE, not per-sample CONFIRMED — i.e. `--fast` trades per-sample cis attribution for tractability (exactly its documented design). Use the slow path when you need CONFIRMED carriers; `--fast` for a dense-panel screen.
 
-¹ geno cells' post-analysis reached 100%; the final merge/report step was still assembling when the 3.2h poller window closed (the observed-haplotype enumeration + GW merge is slow). report.zip + integrated_results table finalize shortly; companions (above) are already written.
+**Bottom line: full 4-cell matrix passed on ml007** (both indices × slow/`--fast`, fresh new-user download) — genotyped gives CONFIRMED+carriers, mega gives PUTATIVE+min-AF+provenance, exactly the intended two-index design. The ml008 heavyweight genotyped hang is a 4×-parallel RAM over-subscription (documented above), not a code issue — the same genotyped index completes cleanly here.
 
 **ml008 — mm6 / bDNA2 / bRNA2 (thorough):**
 
