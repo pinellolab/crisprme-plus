@@ -11,6 +11,24 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Changed
+- **Fast mode is now the DEFAULT search behavior; `--full` opts into exact enumeration.**
+  The SNP variant post-analysis now reports one worst-possible representative per variant
+  window by default (exact worst-case CFD; CRISTA is a best-effort screen), instead of
+  enumerating every observed haplotype — so a search stays tractable on dense / aggregate
+  panels out of the box (the full enumeration was measured 49 h+ without completing on a
+  4×-density panel). **Trade-off: per-sample carriers, CONFIRMED cis phasing and exact joint
+  allele frequency are NOT computed in fast mode** — pass `--full` (CLI) or pick **Full** in
+  the web search form for that per-sample resolution (recommended for genotyped panels /
+  clinical validation). `--fast` is retained as a deprecated no-op alias. The web search form
+  exposes a **Search mode** control with an inline explanation, and the shareable report now
+  carries a **Search mode** row stating which mode was used and its implications. SNP+indel
+  co-occurrence is unchanged by the search mode. A launch-time message and the report note
+  make the carrier trade-off explicit (never silent). Mechanics unchanged: the resolved mode
+  propagates through the post-analysis subprocess tree via `CRISPRME_FAST_MODE`
+  (`0`=full, `1`=fast); a direct `new_simple_analysis.py` call still defaults to full, so unit
+  tests and the byte-identical guarantee for the enumeration path are unaffected.
+
 ### Added
 - **Parallel CRISTA scoring (`CRISPRME_CRISTA_PARALLEL`, opt-in, default OFF)** — prototype
   that removes the per-contig CRISTA-scoring tail (one large chromosome's worker running

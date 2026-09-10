@@ -735,6 +735,19 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     if params_override:
         params = {**params, **params_override}
 
+    # search mode marker written by complete-search (.search_mode = "fast"|"full").
+    # As of 2.5.3 the default is fast; treat a missing marker as fast (the default),
+    # so older result dirs still surface the correct caveat.
+    search_mode = "fast"
+    if result_dir:
+        try:
+            with open(os.path.join(result_dir, ".search_mode")) as _smf:
+                _sm = _smf.read().strip().lower()
+                if _sm in ("fast", "full"):
+                    search_mode = _sm
+        except OSError:
+            pass
+
     fn = _parse_results_filename(tsv_path)
 
     guides = []
@@ -819,6 +832,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "n_ontarget": n_ontarget,
         "n_offtarget": n_offtarget,
         "obs_max_mmb": obs_max_mmb,
+        "search_mode": search_mode,
     }
 
 
@@ -944,8 +958,28 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     bdna, brna = meta.get("bdna"), meta.get("brna")
     bulges = f"{bdna if bdna is not None else 'n/a'} / {brna if brna is not None else 'n/a'}"
     max_edits = meta.get("max_edits", "n/a")
+    if meta.get("search_mode") == "full":
+        sm_note = (
+            "<strong>Full</strong> (<code>--full</code>) &mdash; exact observed-haplotype "
+            "enumeration. Every per-sample haplotype is reported with CONFIRMED cis phasing, "
+            "named carrier samples and exact joint allele frequency (the per-sample resolution "
+            "genotyped panels are built for)."
+        )
+    else:
+        sm_note = (
+            "<strong>Fast</strong> (default) &mdash; the SNP off-target analysis reports one "
+            "<em>worst-possible</em> representative per variant window instead of enumerating "
+            "every haplotype. CFD is the <strong>exact worst case</strong>; CRISTA is a "
+            "best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing and exact "
+            "joint allele frequency are NOT computed in fast mode</strong> &mdash; re-run the "
+            "search with <code>--full</code> for that per-sample resolution (recommended for "
+            "genotyped panels / clinical validation). For sites-only (aggregate) panels there "
+            "are no per-sample genotypes, so fast mode loses nothing. SNP+indel co-occurrence "
+            "is unaffected by the search mode."
+        )
     rows = [
         ("Variant database(s)", _esc(ds)),
+        ("Search mode", sm_note),
         ("Variants included",
          "All variants present in the database(s) &mdash; common and rare, genic "
          "and intergenic, SNPs and insertions/deletions (indels)."

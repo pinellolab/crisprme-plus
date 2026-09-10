@@ -345,13 +345,17 @@ def print_help_complete_search() -> None:
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
         "default lightweight checks, so opt-in [OPTIONAL]\n"
-        "\t--fast, two-pass FAST MODE for dense variant panels: the post-analysis "
-        "reports ONE worst-POSSIBLE off-target per variant window instead of "
-        "enumerating every haplotype (the enumeration-free fix for the intractable "
-        "dense-panel post-analysis). Trades per-sample phased resolution (rows are "
-        "worst-possible / PUTATIVE) for tractability. CFD is the EXACT worst-case; "
-        "CRISTA is best-effort (run without --fast for a guaranteed CRISTA worst-case). "
-        "Recommended for high-density / unphased / aggregate panels [OPTIONAL]\n")
+        "\t--full, run the EXACT observed-haplotype enumeration for the SNP variant "
+        "post-analysis instead of the default fast mode: reports every per-sample "
+        "haplotype with CONFIRMED cis phasing + named carrier samples + exact joint AF "
+        "(the per-sample resolution the genotyped indexes are built for). Slower, and "
+        "can be intractable on dense / aggregate panels (measured 49h+ without "
+        "completing on a 4x-density panel) -- recommended for genotyped panels / "
+        "clinical validation, NOT for dense sites-only panels [OPTIONAL]\n"
+        "\t--fast, DEPRECATED no-op: FAST MODE is the default as of 2.5.3 (worst-"
+        "POSSIBLE PUTATIVE representative per variant window; exact worst-case CFD; "
+        "no per-sample carriers -- use --full for those). Accepted for back-compat "
+        "[OPTIONAL]\n")
     sys.exit(1)
 
 
@@ -1392,18 +1396,22 @@ def complete_search() -> None:
             raise ValueError("Missing input for --vcf-filter-pass-values") from e
     full_input_validate = "--full_input_validate" in args
 
-    # 2.5.1 two-pass FAST MODE (--fast): the variant post-analysis emits ONE
+    # FAST MODE is the DEFAULT as of 2.5.3. The SNP variant post-analysis emits ONE
     # worst-POSSIBLE representative off-target per IUPAC window instead of enumerating
     # the 2^k haplotype lattice / the observed per-sample haplotypes -- the enumeration-
-    # free fix for the intractable dense-panel post-analysis (49h+; see
-    # docs/DESIGN_2.5.1_two_pass_fast_mode.md). It trades per-sample phased resolution
-    # (rows are tagged PUTATIVE, worst-possible) for tractability. Propagated to the
-    # whole post-analysis subprocess tree via CRISPRME_FAST_MODE (submit_job -> pools ->
-    # post_analisi_*.sh -> new_simple_analysis.py all inherit os.environ), so no shell
-    # arg-contract changes are needed. Advanced users can also set the env var directly.
-    fast_mode = "--fast" in args
-    if fast_mode:
-        os.environ["CRISPRME_FAST_MODE"] = "1"
+    # free path that stays tractable on dense/aggregate panels (the full enumeration was
+    # measured 49h+ without completing on a 4x-density panel; see
+    # docs/DESIGN_2.5.1_two_pass_fast_mode.md). Rows are worst-possible / PUTATIVE with an
+    # EXACT worst-case CFD; per-sample phased resolution (CONFIRMED cis + named carriers)
+    # is NOT computed in fast mode -- pass --full for that (recommended for genotyped
+    # panels / clinical validation). Propagated to the whole post-analysis subprocess tree
+    # via CRISPRME_FAST_MODE (submit_job -> pools -> post_analisi_*.sh ->
+    # new_simple_analysis.py all inherit os.environ). --fast is kept as a no-op back-compat
+    # alias (fast is already the default); --full opts into exact observed-haplotype
+    # enumeration. We ALWAYS set the env var explicitly so the resolved mode propagates.
+    full_mode = "--full" in args
+    os.environ["CRISPRME_FAST_MODE"] = "0" if full_mode else "1"
+    fast_mode = not full_mode
 
     # optional prebuilt/staged reference-index library (--index-path). When
     # given, the reference index is looked up here (e.g. an index made with
@@ -1774,17 +1782,31 @@ def complete_search() -> None:
 
     if fast_mode:
         print(
-            "[complete-search] FAST MODE (--fast): the SNP variant post-analysis reports one "
+            "[complete-search] FAST MODE (default): the SNP variant post-analysis reports one "
             "WORST-POSSIBLE off-target per window (no 2^k haplotype enumeration; rows are "
             "worst-possible / PUTATIVE, not per-sample phased). CFD is the EXACT worst case -- "
             "a safe actionable gate (genome-wide validation: 0 CFD>=0.2 loci lost or demoted "
             "vs the full path). CRISTA is a best-effort SCREEN: genome-wide, a small fraction "
-            "(~5%) of CRISTA>=0.2 loci can drop below 0.2 under --fast (largest observed gap "
-            "~0.12), so re-run WITHOUT --fast for a CRISTA-based action gate. SNP+indel "
-            "co-occurrence is UNCHANGED by --fast -- the indel_snp_cooc.tsv is byte-identical "
-            "to a non-fast run (--fast affects only the SNP representatives, not the indel "
-            "cis-phasing pass). See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
+            "(~5%) of CRISTA>=0.2 loci can drop below 0.2 in fast mode (largest observed gap "
+            "~0.12). **Per-sample carriers, CONFIRMED cis phasing and exact joint AF are NOT "
+            "computed in fast mode** -- re-run with --full for that per-sample resolution "
+            "(recommended for genotyped panels / clinical validation). SNP+indel co-occurrence "
+            "is UNCHANGED by fast mode (the indel cis-phasing pass is unaffected). "
+            "See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
         )
+    else:
+        print(
+            "[complete-search] FULL MODE (--full): exact observed-haplotype enumeration -- "
+            "per-sample haplotypes with CONFIRMED cis phasing, named carrier samples and exact "
+            "joint AF. Slower than the default fast mode and can be intractable on dense / "
+            "aggregate (sites-only) panels; for those, omit --full to use fast mode."
+        )
+    # record the resolved search mode so generate-report can surface it (the report note).
+    try:
+        with open(os.path.join(outputfolder, ".search_mode"), "w") as _sm:
+            _sm.write("full" if full_mode else "fast")
+    except OSError:
+        pass
     print(
         f"Launching job {outputfolder}. The stdout is redirected in log_verbose.txt and stderr is redirected in log_error.txt"
     )

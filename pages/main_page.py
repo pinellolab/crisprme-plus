@@ -313,6 +313,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         State("job-name", "value"),
         State("max-edits-slider", "value"),
         State("advanced-thresholds-collapse", "is_open"),
+        State("search-mode", "value"),
     ],
 )
 def change_url(
@@ -335,6 +336,7 @@ def change_url(
     job_name: str,
     max_edits_val: int,
     advanced_open: bool,
+    search_mode: str = "fast",
 ) -> Tuple[str, str]:
     """Launch the targets search and generates the input files for
     post-processing operations, and results visualization.
@@ -1170,7 +1172,13 @@ def change_url(
     # can never disagree.
     # args 23-25 keep submit_job's defaults (cicd_test, vcf-filter-pass-values,
     # index_path) so that arg 26 (max_total_edits) lands in the right position.
-    cmd = f"{run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
+    # Search mode (2.5.3): fast is the default. The web launches submit_job directly
+    # (not `crisprme.py complete-search`), so it must set CRISPRME_FAST_MODE itself for
+    # the whole post-analysis subprocess tree to inherit it (mirrors the CLI --full/--fast).
+    # "full" => exact observed-haplotype enumeration (per-sample carriers + CONFIRMED cis);
+    # anything else => fast (worst-possible PUTATIVE reps, no per-sample carriers).
+    fast_env = "0" if str(search_mode) == "full" else "1"
+    cmd = f"CRISPRME_FAST_MODE={fast_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
     return ("/load", f"?job={job_id}")
@@ -2064,6 +2072,42 @@ def index_page() -> html.Div:
                         "results (its count is reported against the reference); "
                         "reference off-targets always stay within the limit.",
                         style={"font-size": "1.25rem", "color": "#777", "font-style": "italic"},
+                    ),
+                ],
+                style={"max-width": "420px", "margin-bottom": "12px"},
+            ),
+            # SEARCH MODE (2.5.3): fast (default) vs full observed-haplotype enumeration.
+            html.Div(
+                [
+                    html.P(
+                        "Search mode",
+                        style={"margin-bottom": "2px", "font-weight": "600"},
+                    ),
+                    dcc.RadioItems(
+                        id="search-mode",
+                        options=[
+                            {"label": " Fast (default) — worst-possible screen", "value": "fast"},
+                            {"label": " Full — per-sample carriers & CONFIRMED cis", "value": "full"},
+                        ],
+                        value="fast",
+                        labelStyle={"display": "block", "margin-bottom": "4px",
+                                    "font-size": "1.3rem"},
+                    ),
+                    html.P(
+                        [
+                            html.B("Fast"),
+                            " reports one worst-possible off-target per variant window "
+                            "(exact worst-case CFD; CRISTA is a best-effort screen). It stays "
+                            "tractable on dense / aggregate panels, but does NOT compute "
+                            "per-sample carriers, CONFIRMED cis phasing or exact joint allele "
+                            "frequency. ",
+                            html.B("Full"),
+                            " runs the exact observed-haplotype enumeration (per-sample "
+                            "carriers + CONFIRMED cis + exact joint AF) — recommended for "
+                            "genotyped panels / clinical validation, but slower and can be "
+                            "intractable on dense (e.g. all-source sites-only) panels.",
+                        ],
+                        style={"font-size": "1.25rem", "color": "#555"},
                     ),
                 ],
                 style={"max-width": "420px", "margin-bottom": "12px"},

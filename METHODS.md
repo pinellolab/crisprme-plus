@@ -356,16 +356,16 @@ for every genotyped / legacy install (the genotyped path is already lossless via
 observed enumerator). Set `CRISPRME_LOSSLESS_DENSE=0` to opt out. A per-sample union on
 the genotyped path is intentionally *not* done — it would risk trans-as-cis phantoms.
 
-### Two-pass fast mode (`--fast`, opt-in)
+### Fast mode (default) and `--full` exact enumeration
 
 The controls above bound any *single* window, but a **dense panel** (many merged
 sources) or a **sites-only aggregate panel** can present so many variant-dense windows
 that even the observed-haplotype enumeration of Section 4 becomes intractable — measured
-at **49 h+ without completing** on a 4×-density 1000G+HGDP panel. For these workloads
-CRISPRme+ offers an opt-in **two-pass fast mode** (`complete-search --fast`, propagated to
-the whole post-analysis via `CRISPRME_FAST_MODE`). Instead of enumerating the 2ᵏ IUPAC
-haplotype lattice per window, it emits a small fixed set of **worst-possible
-representatives** per window:
+at **49 h+ without completing** on a 4×-density 1000G+HGDP panel. So as of 2.5.3 CRISPRme+
+runs a **two-pass fast mode by default** (propagated to the whole post-analysis via
+`CRISPRME_FAST_MODE`); `--full` opts into the exact observed-haplotype enumeration of
+Section 4. Instead of enumerating the 2ᵏ IUPAC haplotype lattice per window, fast mode
+emits a small fixed set of **worst-possible representatives** per window:
 
 - **Pass 1 — score-free find.** The window's per-position IUPAC allele sets yield a
   **minimum-edit** representative whose edit distance `D` (the additive-per-column argmin)
@@ -386,10 +386,15 @@ be **lossless for locus detection and non-understating for the worst-case score*
 the slow full-enumeration path on a real chr22 1000G-2021+HGDP slice (0 CFD under-reports;
 it in fact surfaces *stronger* worst cases at 182 loci that per-sample enumeration misses),
 and it collapses ~1.9× fewer rows on that 1× slice, growing with density — turning the
-otherwise-intractable 4× panel into a tractable run. The default (non-`--fast`) path is
-byte-identical; `--fast` is opt-in. This yields a **two-tier workflow**: `--fast` for
-routine, high-density, or aggregate-panel *screening*, and the full enumeration path for
-*confirmatory / pre-IND* runs where per-sample phased haplotype resolution is required.
+otherwise-intractable 4× panel into a tractable run. **The trade-off is that per-sample
+carriers, CONFIRMED cis phasing and exact joint allele frequency are not computed in fast
+mode** (rows are PUTATIVE worst cases); the launch-time message, the web **Search mode**
+control and the report's **Search mode** row all state this explicitly, so it is never
+silent. This yields a **two-tier workflow**: the default fast mode for routine, high-density,
+or aggregate-panel *screening*, and `--full` (byte-identical to the pre-2.5.3 enumeration
+path) for *confirmatory / pre-IND* runs where per-sample phased haplotype resolution is
+required. On sites-only (aggregate) panels there are no per-sample genotypes to recover, so
+fast mode loses nothing there and `--full` only pays the 2ᵏ cost.
 
 **Scope of `--fast`.** `--fast` accelerates only the **SNP** post-analysis (it collapses the
 2^k IUPAC haplotype lattice). The **indel** post-analysis is single-threaded and
