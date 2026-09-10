@@ -83,15 +83,21 @@ RF_PICKLE_PATH = "CRISTA_predictors.pkl"
 # all their batches). Output is byte-identical -- same model object, just not reloaded.
 _CRISTA_PREDICTORS = None
 # PERF (opt-in): parallelize the per-target CRISTA FEATURE BUILD (get_features) across a small
-# SPAWN ProcessPoolExecutor. The feature build is the CPU-bound per-target loop; the RF predict
-# + the 276MB model stay in the PARENT (children only build features, NEVER load the model, so
-# the _CRISTA_PREDICTORS cache is untouched). This attacks the per-contig scoring tail WITHOUT
-# adding more chromosome-level workers. Default OFF (CRISPRME_CRISTA_PARALLEL=1 => serial) =>
-# byte-identical AND process-count-identical to today. SPAWN (not fork) => children do not
-# inherit the parent's pipe FDs, so it does NOT re-trigger the multiprocessing.Pool
-# FD-inheritance deadlock (see pool_post_analisi_snp.py). The executor is created LAZILY and
-# keyed to os.getpid() so it is never inherited across the outer per-contig fork; the inner
-# worker count is bounded by an absolute ceiling so outer_workers x inner stays modest.
+# bounded FORK ProcessPoolExecutor. The feature build is the CPU-bound per-target loop; the RF
+# predict + the 276MB model stay in the PARENT (children only build features, NEVER load the
+# model, so the _CRISTA_PREDICTORS cache is untouched). This attacks the per-contig scoring
+# tail WITHOUT adding more chromosome-level workers. Default OFF (CRISPRME_CRISTA_PARALLEL=1 =>
+# serial) => byte-identical AND process-count-identical to today.
+#
+# WHY FORK (not spawn): the callers new_simple_analysis.py / analisi_indels_NNN.py run their
+# main code at MODULE TOP LEVEL (no `if __name__ == "__main__"` guard), so a SPAWN worker would
+# re-import __main__ and re-execute the whole analysis (with side effects) in every child. Fork
+# inherits the running state instead of re-importing, so it is safe with the unguarded callers.
+# The FD-inheritance deadlock that capped the OUTER per-contig pool does NOT apply here: (a) the
+# caller is launched via subprocess.call (Python3 close_fds=True) so it never inherited the
+# outer multiprocessing.Pool sentinel pipes, and (b) the inner pool is hard-bounded (<= 8), so
+# its FD fan-out is negligible (the deadlock was observed only at ~200 workers). The executor is
+# lazy + pid-keyed (dropped/rebuilt if inherited across a fork) with atexit shutdown(wait=True).
 _CRISTA_EXECUTOR = None
 _CRISTA_EXECUTOR_PID = None
 _CRISTA_INNER_CEIL = 8
@@ -632,7 +638,7 @@ def _get_crista_executor(workers):
         if _CRISTA_EXECUTOR is not None and _CRISTA_EXECUTOR_PID == os.getpid():
             return _CRISTA_EXECUTOR
         _CRISTA_EXECUTOR = ProcessPoolExecutor(
-            max_workers=w, mp_context=_mp.get_context("spawn")
+            max_workers=w, mp_context=_mp.get_context("fork")
         )
         _CRISTA_EXECUTOR_PID = os.getpid()
         atexit.register(_shutdown_crista_executor)
