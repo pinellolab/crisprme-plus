@@ -87,16 +87,21 @@ What each cell is checked for: report.zip generated; `snp_snp_cooc.tsv` / `indel
 
 **Result: on the genotyped index the core scored off-target table is byte-identical OLD→NEW; the only change is the new additive SNP+SNP companion. No regression.** (On the **mega** sites-only index the core output *does* change by design — searchable indels + lossless-dense PUTATIVE are new 2.5.x capabilities, active only where `registry_only_mode` holds; the version-matrix, §3d, quantifies that.)
 
-### 3d. Version-matrix (why fast-default is right) — chr22 genotyped, guide `TGCTTGGTCGGCACTGATAG`, mm5/bDNA2/bRNA2
-The `run_v1/v2/v3` progression, rebuilt against real prebuilt tiers (`--index-path`). The trio is a direct justification for the 2.5.3 fast-default flip:
+### 3d. Version-matrix — chr22 genotyped, guide `TGCTTGGTCGGCACTGATAG`, mm5/bDNA2/bRNA2 (a deliberately pathological, very-dense config)
+The `run_v1/v2/v3` progression, rebuilt against real prebuilt tiers (`--index-path`), each capped at a 100-min timeout:
 
-| Cell | Version / mode | Outcome |
-|---|---|---|
-| **V1** | stock **v2.4.0**, feature-off | **FAILED** — v2.4.0 cannot post-process the 2.5.x index's indels (`adjust_cols.py: cols.remove("CFD_ref")` ValueError + `KeyError 'AK'`). You can't run old CRISPRme on the new index. |
-| **V2** | **2.5.2 full** enumeration | **TIMED OUT at 100 min** (`rc=124`) — the exact observed-haplotype enumeration is *intractable* on a dense guide at mm5/2/2 even on a single chromosome. |
-| **V3** | **2.5.2 `--fast`** | Completes (fast collapses the SNP haplotype lattice). *(finishing; numbers appended)* |
+| Cell | Version / mode | Outcome | Partial output before cutoff |
+|---|---|---|---|
+| **V1** | stock **v2.4.0**, feature-off | **FAILED** | v2.4.0 cannot post-process the 2.5.x index's indels (`adjust_cols.py: cols.remove("CFD_ref")` ValueError + `KeyError 'AK'`) — you can't run old CRISPRme on the new index. |
+| **V2** | **2.5.2 full** enumeration | **TIMED OUT** (`rc=124`) | 52,962 SNP+SNP (**3,644 CONFIRMED + carriers**); the SNP phase alone took 60 min, then the indel phase ran out the clock. |
+| **V3** | **2.5.2 `--fast`** | **TIMED OUT** (`rc=124`) | 104,712 SNP+SNP (**0 CONFIRMED**, all PUTATIVE) — more rows (worst-possible reps per window), no carriers. |
 
-**Takeaway:** old→can't-run, full→intractable, fast→tractable. This is exactly why 2.5.3 makes fast the default (with `--full` available when the panel/config makes exact enumeration feasible and per-sample carriers are required).
+**Honest takeaways (this is a worst-case stress config, not a typical run):**
+1. **v2.4.0 cannot run on the 2.5.x index** at all — the clearest reason the index/version move forward together.
+2. **The CONFIRMED-vs-PUTATIVE contrast is exactly as designed** even in the partial output: full produced 3,644 CONFIRMED SNP+SNP *with carriers*; `--fast` produced 0 (all PUTATIVE).
+3. **`--fast` is not a universal cure.** On this guide *both* modes exceed 100 min because the bottleneck here is **candidate-volume CRISTA scoring + the single-threaded indel post-analysis** — which `--fast` does **not** touch (it collapses only the SNP 2ᵏ haplotype lattice). `--fast`'s decisive, measured win is on **enumeration-bound dense panels** (the #183 4×-density panel: 49 h+ → tractable) and on typical guides (the mm4/1/1 clean-room + §6 e2e complete in minutes). The CRISTA-scoring tail on high-mm/bulge dense guides is the separate **#174** lever (outer-level contig/CRISTA parallelism), still open.
+
+**Net for fast-default:** still correct — `--fast` never does *more* work than full and it removes the enumeration wall; but the matrix keeps us honest that it doesn't fix the CRISTA/indel tail, so the docs frame it as "tractable on any panel" for the *enumeration* cost, not a blanket speed guarantee.
 
 ## 4. CRISTA parallel prototype (post-2.5.2, on `dev`)
 
