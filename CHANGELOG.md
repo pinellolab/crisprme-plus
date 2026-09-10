@@ -27,6 +27,16 @@ and the `release-crisprme` skill.
   runs differ ~5e-17, identical to the emitted 3 decimals — CRISTA output has always been
   reproducible only to the emitted precision, which this preserves).
 
+### Fixed
+- **HuggingFace download resilience against rate limits (HTTP 429).** A first-time,
+  unauthenticated `crisprme download` of the many-small-file indices could hit HF's
+  "Too Many Requests" and abort the whole download. The downloader now retries transient
+  429 / 5xx responses with exponential backoff (honoring a sane `Retry-After` header) around
+  both the snapshot fetch and the size-verification pass; `snapshot_download` resumes, so a
+  retry only re-pulls what's missing. 4xx / auth errors still fail fast. Tunable via
+  `CRISPRME_HF_MAX_RETRIES` (set to `1` to disable). Authenticating with an HF token still
+  avoids the limit entirely.
+
 ## [2.5.2] - 2026-09-09
 
 ### Added
