@@ -58,11 +58,14 @@
 #########################################################################
 
 import argparse
+import atexit
+import multiprocessing as _mp
 import os
 import pickle
 import random
 import re
 import sys
+from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import PA_limitedIndel as PA_script
 import pandas as pd
@@ -79,6 +82,19 @@ RF_PICKLE_PATH = "CRISTA_predictors.pkl"
 # (workers are per-chromosome, single-threaded scorers -> one load each, reused across
 # all their batches). Output is byte-identical -- same model object, just not reloaded.
 _CRISTA_PREDICTORS = None
+# PERF (opt-in): parallelize the per-target CRISTA FEATURE BUILD (get_features) across a small
+# SPAWN ProcessPoolExecutor. The feature build is the CPU-bound per-target loop; the RF predict
+# + the 276MB model stay in the PARENT (children only build features, NEVER load the model, so
+# the _CRISTA_PREDICTORS cache is untouched). This attacks the per-contig scoring tail WITHOUT
+# adding more chromosome-level workers. Default OFF (CRISPRME_CRISTA_PARALLEL=1 => serial) =>
+# byte-identical AND process-count-identical to today. SPAWN (not fork) => children do not
+# inherit the parent's pipe FDs, so it does NOT re-trigger the multiprocessing.Pool
+# FD-inheritance deadlock (see pool_post_analisi_snp.py). The executor is created LAZILY and
+# keyed to os.getpid() so it is never inherited across the outer per-contig fork; the inner
+# worker count is bounded by an absolute ceiling so outer_workers x inner stays modest.
+_CRISTA_EXECUTOR = None
+_CRISTA_EXECUTOR_PID = None
+_CRISTA_INNER_CEIL = 8
 MATCH_SCORE = 1.0
 MISMATCH_PENALTY = 0.0
 GAP_PENALTY = -1.25
@@ -574,6 +590,83 @@ def _crista_features_one(args):
     return features[0]
 
 
+def _crista_features_chunk(chunk):
+    """Build features for a CONTIGUOUS slice of targets, preserving order. Top-level +
+    picklable so a spawn ProcessPoolExecutor worker can run it; batches many targets per
+    task to amortize IPC. Children only build features -- they never load the RF model."""
+    return [_crista_features_one(a) for a in chunk]
+
+
+def _crista_parallel_cfg():
+    """(workers, minbatch) from the env. Default workers=1 => serial (byte-identical)."""
+    try:
+        w = max(1, int(os.environ.get("CRISPRME_CRISTA_PARALLEL", "1") or "1"))
+    except (ValueError, TypeError):
+        w = 1
+    try:
+        mb = max(1, int(os.environ.get("CRISPRME_CRISTA_PARALLEL_MINBATCH", "20000") or "20000"))
+    except (ValueError, TypeError):
+        mb = 20000
+    return w, mb
+
+
+def _shutdown_crista_executor():
+    global _CRISTA_EXECUTOR
+    try:
+        if _CRISTA_EXECUTOR is not None:
+            _CRISTA_EXECUTOR.shutdown(wait=True)  # verified join, no parent hang
+    except Exception:  # noqa: BLE001
+        pass
+    _CRISTA_EXECUTOR = None
+
+
+def _get_crista_executor(workers):
+    """Lazily build ONE bounded SPAWN ProcessPoolExecutor for feature building, keyed to the
+    current pid (so a value inherited across the outer per-contig fork is dropped + rebuilt in
+    the child). Returns None on any failure -> caller falls back to the serial path."""
+    global _CRISTA_EXECUTOR, _CRISTA_EXECUTOR_PID
+    w = min(workers, _CRISTA_INNER_CEIL)
+    if w <= 1:
+        return None
+    try:
+        if _CRISTA_EXECUTOR is not None and _CRISTA_EXECUTOR_PID == os.getpid():
+            return _CRISTA_EXECUTOR
+        _CRISTA_EXECUTOR = ProcessPoolExecutor(
+            max_workers=w, mp_context=_mp.get_context("spawn")
+        )
+        _CRISTA_EXECUTOR_PID = os.getpid()
+        atexit.register(_shutdown_crista_executor)
+        return _CRISTA_EXECUTOR
+    except Exception:  # noqa: BLE001 - any spawn/config failure -> serial fallback
+        return None
+
+
+def _build_crista_features(inputs):
+    """Build the per-target CRISTA feature matrix for ``inputs`` (list of upper-cased
+    (sgRNA, aligned_off, 29nt) tuples), preserving input order. Feature build is the
+    parallelizable per-target work; default (CRISPRME_CRISTA_PARALLEL<=1 or small batch) is
+    the exact serial list-comp (byte-identical). The parallel path splits into CONTIGUOUS
+    slices and executor.map preserves order, so the reassembled matrix is element-for-element
+    identical to serial. Any executor failure falls back to a full serial rebuild."""
+    n = len(inputs)
+    workers, minbatch = _crista_parallel_cfg()
+    executor = _get_crista_executor(workers) if (workers > 1 and n >= minbatch) else None
+    if executor is None:
+        return [_crista_features_one(a) for a in inputs]
+    nchunks = min(workers, _CRISTA_INNER_CEIL, n)
+    step = (n + nchunks - 1) // nchunks
+    chunks = [inputs[i : i + step] for i in range(0, n, step)]
+    try:
+        feats = []
+        for part in executor.map(_crista_features_chunk, chunks):
+            feats.extend(part)
+        if len(feats) != n:  # defensive: never emit a short/misaligned matrix
+            raise RuntimeError("crista parallel feature count mismatch")
+        return feats
+    except Exception:  # noqa: BLE001 - any executor failure -> full serial rebuild
+        return [_crista_features_one(a) for a in inputs]
+
+
 def CRISTA_predict_list(sgseq_aligned_list, offseq_aligned_list, genomic_seq_29nt_list):
     n = len(sgseq_aligned_list)
     inputs = [
@@ -584,7 +677,9 @@ def CRISTA_predict_list(sgseq_aligned_list, offseq_aligned_list, genomic_seq_29n
         )
         for i in range(n)
     ]
-    crista_features = [_crista_features_one(a) for a in inputs]
+    # feature build (parallelizable) then the RF predict (stays serial in THIS process, so the
+    # 276MB model cache is untouched + never re-pickled per worker).
+    crista_features = _build_crista_features(inputs)
     predictions = predict_crista_score(crista_features)
     return predictions
 
