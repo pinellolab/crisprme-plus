@@ -69,7 +69,23 @@ The mega SNP+SNP rows are **all PUTATIVE** (verified: zero CONFIRMED data rows a
 
 What each cell is checked for: report.zip generated; `snp_snp_cooc.tsv` / `indel_snp_cooc.tsv` / `indel_af.tsv` present; CONFIRMED+carriers on genotyped vs PUTATIVE+min-AF+provenance on mega; `--fast` ⊇ slow; no crash.
 
-**New-user friction found:** anonymous HF downloads hit **429 "Too Many Requests"** (the `--what all` many-small-file API calls); authenticating (HF token) fixes it. Worth a docs note + a retry-on-429 in the downloader (candidate fix).
+**New-user friction found:** anonymous HF downloads hit **429 "Too Many Requests"** (the `--what all` many-small-file API calls); authenticating (HF token) fixes it. **FIXED** on `dev` (`b58a0b1`): retry-on-429/5xx with backoff (honoring `Retry-After`), tunable `CRISPRME_HF_MAX_RETRIES`; ships in 2.5.3.
+
+### 3c. Old-vs-new correctness (does 2.5.2 regress the prior version?)
+**v2.5.0 was never tagged**, so the "old" reference is `722ea4b` = **2.5.1-dev** (has 2.5.1's `--fast` + CRISTA-perf but *not* the 2.5.2 co-occurrence/lossless-dense work). Verified two ways:
+
+**Static proof (airtight).** The entire 2.5.2 search-path delta is **pure insertion, 0 deletions**: `new_simple_analysis.py` +128/-0, `analisi_indels_NNN.py` +33/-0 — so every pre-existing line is byte-identical, and every *new* branch is **dead on the genotyped path**: lossless-dense gated `registry_only_mode` (genotyped isn't registry-only); SNP+indel PUTATIVE fallback gated `_gt is None or _indelgt is None` (genotyped has both — the code comment explicitly guards against phantom PUTATIVE rows); `_record_snp_snp_cooc` is a pure side-write to a *new* companion file (never mutates the emitted row, try/except-wrapped, gated on `myreg`).
+
+**Empirical diff (confirms it).** OLD `722ea4b` vs NEW `72c8e27` overlaid on the **same** base SIF (isolating the code delta), identical chr22 genotyped search (guide `CTAAC`, NRG, mm4/1/1, `--index-path`):
+
+| | OLD (2.5.1-dev) | NEW (2.5.2) |
+|---|---|---|
+| `integrated_results` rows | 1,734 | 1,734 |
+| `integrated_results` md5 (sorted) | `91ce3b68…eb25` | `91ce3b68…eb25` — **IDENTICAL** |
+| `bestMerge` (sorted) | — | **identical to OLD** |
+| `snp_snp_cooc.tsv` files | 0 | 1 (**additive**) |
+
+**Result: on the genotyped index the core scored off-target table is byte-identical OLD→NEW; the only change is the new additive SNP+SNP companion. No regression.** (On the **mega** sites-only index the core output *does* change by design — searchable indels + lossless-dense PUTATIVE are new 2.5.x capabilities, active only where `registry_only_mode` holds; the version-matrix, §3d, quantifies that.)
 
 ## 4. CRISTA parallel prototype (post-2.5.2, on `dev`)
 
