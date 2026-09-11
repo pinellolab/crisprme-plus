@@ -11,6 +11,8 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.5.3] - 2026-09-11
+
 ### Performance
 - **All indexes ship the Tier-0 registry uncompressed (raw) by default — "speed over space."**
   Registry lookups (millions per dense search, scattered across a chromosome) are now direct
@@ -1211,7 +1213,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.5.2...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.5.3...HEAD
+[2.5.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.3
 [2.5.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.2
 [2.5.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.0
 [2.4.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.4.0
