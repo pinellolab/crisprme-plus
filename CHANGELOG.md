@@ -31,9 +31,11 @@ and the `release-crisprme` skill.
   the enlarged cache exposed a second tail the small cache had hidden: the LRU was a plain
   list, so every cache hit did an O(cache-size) `list.remove()` — **43 s / 26 %** of a dense
   indel post-analysis at ~15 M hits. Replaced with an `OrderedDict` (`move_to_end` /
-  `popitem`, all O(1)); byte-identical LRU semantics. **Indel post-analysis 167 s → 121 s.**
-  This makes a large cache free of per-hit bookkeeping cost, so the block-count bump above is
-  a clean win on both the SNP and indel paths.
+  `popitem`, all O(1)); byte-identical LRU semantics. **Indel post-analysis 167 s → 121 s**,
+  and it also roughly halved the SNP path (cache=512: 89 s list-LRU → 43 s O(1)). A clean
+  cache sweep shows the hot working set is tiny (plateau at ~128 blocks), so the combined
+  cache + O(1)-LRU fix is **326 s → 43 s ≈ 7.6×** on a dense chr22 SNP post-analysis, and the
+  4096 default is generous headroom that fills only to touched blocks (~8-40 MB in practice).
 
 ### Changed
 - **Fast mode is now the DEFAULT search behavior; `--full` opts into exact enumeration.**
