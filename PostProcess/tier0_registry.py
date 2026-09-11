@@ -32,6 +32,7 @@ from __future__ import annotations
 import bisect
 import json
 import mmap
+from collections import OrderedDict
 import os
 import struct
 import zlib
@@ -1475,8 +1476,11 @@ class RegistryReader(object):
                 # codec 0 => v3 framing but raw blocks (still needs block index to
                 # locate the covering block); codec 1 => zlib.
                 self._compressed = True
-                self._block_cache = {}
-                self._block_order = []
+                # O(1) LRU: OrderedDict.move_to_end / popitem(last=False). A plain
+                # list with list.remove() was O(cache_size) per hit and became the tail
+                # once the cache was enlarged (~43 s / 26% of a dense indel post-analysis
+                # at 15 M cache hits); this makes a large cache free of bookkeeping cost.
+                self._block_cache = OrderedDict()
                 self._record_blocks = self.manifest["record_blocks"]
                 self._group_blocks = self.manifest["group_blocks"]
                 self._pool_blocks = self.manifest["pool_blocks"]
@@ -1518,23 +1522,14 @@ class RegistryReader(object):
     def _cache_get(self, key):
         buf = self._block_cache.get(key)
         if buf is not None:
-            # touch: move to MRU end.
-            try:
-                self._block_order.remove(key)
-            except ValueError:
-                pass
-            self._block_order.append(key)
+            self._block_cache.move_to_end(key)  # touch -> MRU, O(1)
         return buf
 
     def _cache_put(self, key, buf):
         self._block_cache[key] = buf
-        self._block_order.append(key)
-        while len(self._block_order) > _LRU_BLOCKS:
-            old = self._block_order.pop(0)
-            # a key may appear once (put) then be re-touched (remove+append), so
-            # only evict if it is truly no longer the live entry.
-            if old not in self._block_order:
-                self._block_cache.pop(old, None)
+        self._block_cache.move_to_end(key)      # O(1)
+        if len(self._block_cache) > _LRU_BLOCKS:
+            self._block_cache.popitem(last=False)  # evict LRU, O(1)
 
     def _decompress_block(self, section, block_idx, comp_off, comp_len):
         key = (section, block_idx)
