@@ -217,10 +217,13 @@ def emit_dictless_tiers(dict_path, db_to_samplesid, chrom, dictionaries_dir=None
     os.makedirs(os.path.dirname(reg_bin), exist_ok=True)
     os.makedirs(os.path.dirname(gt_bin), exist_ok=True)
 
-    # Ship the v3 block-compressed registry (Issue #99): ~3.6x smaller on-disk,
-    # logically identical, and the reader is backward-compatible (reads v2 + v3).
-    # The build now emits v3 directly instead of requiring a manual post-build
-    # transcode_registry pass.
+    # Registry codec: ship RAW (uncompressed) by DEFAULT so lookups never pay
+    # decompression — a measured ~2x faster per-lookup than zlib+cache, matching the
+    # mega sites-only index (all indexes are RAW for consistency + lookup speed;
+    # "speed over space"). The reader stays backward-compatible (reads v2 raw + v3
+    # zlib), and zlib block-compression (Issue #99, ~3.6x smaller on disk) remains
+    # available opt-in via CRISPRME_REGISTRY_COMPRESS=1 for space-constrained builds.
+    _reg_compress = bool(int(os.environ.get("CRISPRME_REGISTRY_COMPRESS", "0") or "0"))
     # #46 auto-fix: filter the panel to VCF-genotyped samples so an over-listing
     # samplesID cannot inflate AN (deflating every AF). Best-effort + guarded: if
     # the source VCF for this dataset/chrom is not on disk (batteries install) or
@@ -229,7 +232,7 @@ def emit_dictless_tiers(dict_path, db_to_samplesid, chrom, dictionaries_dir=None
     genotyped = _genotyped_samples_for_dict(resolved_dict, chrom)
     reg_stats = t0c.compile_from_dict(
         resolved_dict, db_to_samplesid, chrom, reg_bin, reg_idx,
-        subpop_field=subpop_field, compress=True, genotyped_samples=genotyped,
+        subpop_field=subpop_field, compress=_reg_compress, genotyped_samples=genotyped,
     )
     gt_stats = t1g.compile_genotypes_from_dict(
         resolved_dict, db_to_samplesid, chrom, gt_bin, gt_idx,
