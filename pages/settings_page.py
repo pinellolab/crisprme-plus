@@ -30,6 +30,8 @@ from .pages_utils import (
     get_available_CAS,
     get_all_vcf_datasets,
     get_custom_annotations,
+    get_available_liftover_files,
+    installed_assemblies,
     index_build_pam,
     validate_annotation_bed,
     read_enabled_annotations,
@@ -38,6 +40,8 @@ from .pages_utils import (
     write_email_config,
     BUILTIN_ANNOTATION_HG38,
     resolve_builtin_annotation,
+    GENOMES_DIR,
+    LIFTOVER_DIR,
 )
 
 from dash import Input, Output, State, html, dcc, no_update
@@ -54,6 +58,7 @@ import base64
 import shutil
 import gzip
 import os
+import sys
 import time
 
 SETTINGS_DIR = "Settings"
@@ -128,6 +133,20 @@ def _finalize_upload(
         os.replace(part_path, os.path.join(dest_dir, name))
         _write_vcf_marker(dataset, genome)  # record the reference genome
         return dataset
+    if target == "chain":
+        if not name.endswith((".chain", ".chain.gz")):
+            raise ValueError("chain upload must be a .chain or .chain.gz file")
+        dest_dir = os.path.join(current_working_directory, LIFTOVER_DIR)
+        os.makedirs(dest_dir, exist_ok=True)
+        os.replace(part_path, os.path.join(dest_dir, name))
+        return name
+    if target == "chromalias":
+        if not name.endswith(".chromAlias.txt"):
+            raise ValueError("chromAlias upload must be a .chromAlias.txt file")
+        dest_dir = os.path.join(current_working_directory, LIFTOVER_DIR)
+        os.makedirs(dest_dir, exist_ok=True)
+        os.replace(part_path, os.path.join(dest_dir, name))
+        return name
     raise ValueError(f"unknown upload target {target!r}")
 
 
@@ -145,7 +164,7 @@ def _settings_upload_chunk():
         total = int(request.headers.get("X-Total-Chunks", "1"))
     except ValueError:
         return ("bad chunk headers", 400)
-    if target not in ("genome", "vcf", "annotation") or not name or ".." in name:
+    if target not in ("genome", "vcf", "annotation", "chain", "chromalias") or not name or ".." in name:
         return ("bad target or file name", 400)
     # validate the destination name on the FIRST chunk so a bad name fails now,
     # not after a multi-GB upload has already streamed to disk
@@ -229,10 +248,12 @@ def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
             lt.write(f"{stage}\tFAILED\n")
 
 
-def launch_settings_job(argv: List[str], stage: str) -> str:
-    """Launch ``crisprme.py <argv...> --path <cwd>`` as a detached job.
-
-    Returns the job id; progress is polled by :func:`refresh_settings_job`.
+def _launch_job_cmd(cmd: str, stage: str) -> str:
+    """Shared job-tracking setup (id, jobdir, Queued marker, executor submit)
+    behind both `launch_settings_job` (crisprme.py subcommands) and
+    `launch_settings_job_raw` (an arbitrary shell command, e.g.
+    download_hprc_assembly.py) -- same polling contract either way via
+    :func:`refresh_settings_job`.
     """
     job_id = _new_job_id()
     jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
@@ -241,12 +262,32 @@ def launch_settings_job(argv: List[str], stage: str) -> str:
     # executor actually begins running it, so the banner can distinguish the two.
     with open(os.path.join(jobdir, "log.txt"), "w") as lt:
         lt.write(f"{stage}\tQueued\n")
+    settings_executor.submit(_run_settings_job, cmd, jobdir, stage)
+    return job_id
+
+
+def launch_settings_job(argv: List[str], stage: str) -> str:
+    """Launch ``crisprme.py <argv...> --path <cwd>`` as a detached job.
+
+    Returns the job id; progress is polled by :func:`refresh_settings_job`.
+    """
     # crisprme.py is on PATH inside the activated env; append --path so data
     # lands under the app's working directory.
     quoted = " ".join(_shlex_quote(a) for a in argv)
     cmd = f"crisprme.py {quoted} --path {_shlex_quote(current_working_directory)}"
-    settings_executor.submit(_run_settings_job, cmd, jobdir, stage)
-    return job_id
+    return _launch_job_cmd(cmd, stage)
+
+
+def launch_settings_job_raw(cmd: str, stage: str) -> str:
+    """Launch an arbitrary shell command as a detached, pollable job -- same
+    tracking/logging contract as `launch_settings_job`, but for tools that
+    aren't a `crisprme.py <subcommand>` (e.g. download_hprc_assembly.py,
+    which isn't routed through crisprme.py's own CLI dispatch -- kept as an
+    independent script, same reasoning as the rest of assembly-search's web
+    integration: build parallel code paths rather than growing crisprme.py's
+    core dispatch for something this self-contained).
+    """
+    return _launch_job_cmd(cmd, stage)
 
 
 def _shlex_quote(s: str) -> str:
@@ -315,6 +356,164 @@ def _write_vcf_marker(dataset: str, genome: str) -> None:
             fh.write(genome.replace(" ", "_"))
     except OSError:
         pass
+
+
+def _write_assembly_marker(root_dir: str, artifact_name: str, individual: str, haplotype: str) -> None:
+    """Record which individual/haplotype an assembly-search artifact (genome
+    folder, chain file, or chromAlias file) belongs to -- a marker file beside
+    the artifact, same shape/robustness as ``_write_vcf_marker`` (one small
+    best-effort file per artifact, never a hard failure). Read back by
+    ``pages_utils.assembly_individual`` / ``installed_assemblies``.
+    """
+    if not root_dir or not artifact_name or not individual or haplotype not in (
+        "paternal",
+        "maternal",
+    ):
+        return
+    d = os.path.join(current_working_directory, root_dir)
+    os.makedirs(d, exist_ok=True)
+    try:
+        with open(os.path.join(d, f".{artifact_name}.assembly_individual"), "w") as fh:
+            fh.write(f"{individual}\t{haplotype}")
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Personal-assembly pairing validation (chain/chromAlias/genome consistency)
+# ---------------------------------------------------------------------------
+# Real chromosome sizes for a fixed hg38 build -- used only as a fingerprint to
+# catch a chain file that doesn't actually target hg38 (chain format has no
+# literal assembly-name field). Three major chromosomes are enough.
+_HG38_CHROM_SIZES = {"chr1": 248956422, "chr2": 242193529, "chrX": 156040895}
+
+
+def _open_maybe_gzip(path: str):
+    return gzip.open(path, "rt") if path.endswith(".gz") else open(path, "rt")
+
+
+def _chain_targets_hg38(chain_path: str) -> Optional[str]:
+    """None if the chain's query side (its target-of-liftover / hg38 side)
+    looks like real hg38, else a human-readable error. Checks chromosome
+    sizes, since chain format has no assembly-name field to check directly."""
+    found = {}
+    try:
+        with _open_maybe_gzip(chain_path) as fh:
+            for line in fh:
+                if not line.startswith("chain "):
+                    continue
+                parts = line.split()
+                if len(parts) >= 9:
+                    qname, qsize = parts[7], parts[8]
+                    if qname in _HG38_CHROM_SIZES and qname not in found:
+                        try:
+                            found[qname] = int(qsize)
+                        except ValueError:
+                            pass
+                if len(found) >= len(_HG38_CHROM_SIZES):
+                    break
+    except OSError as e:
+        return f"could not read chain file ({e})"
+    if not found:
+        return "no chr1/chr2/chrX found on the chain's target side -- doesn't look like an hg38-targeting chain"
+    mismatches = [c for c, sz in found.items() if sz != _HG38_CHROM_SIZES[c]]
+    if mismatches:
+        return f"{', '.join(mismatches)} size doesn't match hg38 -- wrong target assembly?"
+    return None
+
+
+def _chain_target_names(chain_path: str) -> set:
+    """All 'tName' (target/own-genome side) identifiers used in a chain file."""
+    names = set()
+    with _open_maybe_gzip(chain_path) as fh:
+        for line in fh:
+            if line.startswith("chain "):
+                parts = line.split()
+                if len(parts) >= 3:
+                    names.add(parts[2])
+    return names
+
+
+def _read_chrom_alias_ucsc_to_genbank(chromalias_path: str) -> dict:
+    """ucsc -> genbank mapping, read positionally (same convention as
+    download_hprc_assembly.split_fasta_by_chromalias / assembly_reconcile.
+    load_chrom_alias): column 0 = raw header, column 1 = ucsc, column 2 =
+    genbank. Lines starting with '#' (including the real header row) are
+    skipped, matching every other reader of this file format in this repo."""
+    mapping = {}
+    with open(chromalias_path) as fh:
+        for line in fh:
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 3:
+                mapping[parts[1]] = parts[2]
+    return mapping
+
+
+def _genome_contigs_uncovered_by_chromalias(genome_dir: str, ucsc_to_genbank: dict) -> list:
+    """Contig names (derived from filenames) present in the genome folder
+    but missing from the chromAlias 'ucsc' column -- these would silently
+    become non-mappable during reconciliation (assembly_reconcile.py's
+    build_offtarget_bed drops anything ucsc_to_genbank can't look up)."""
+    if not os.path.isdir(genome_dir):
+        return []
+    names = set()
+    for f in os.listdir(genome_dir):
+        if not os.path.isfile(os.path.join(genome_dir, f)) or f.endswith(".fai"):
+            continue
+        name = f
+        for ext in (".fa", ".fasta"):
+            if name.endswith(ext):
+                name = name[: -len(ext)]
+                break
+        names.add(name)
+    return sorted(n for n in names if n not in ucsc_to_genbank)
+
+
+def validate_assembly_pairing(genome_dir: str, chain_path: str, chromalias_path: str) -> Optional[str]:
+    """Real cross-file consistency checks for a (genome, chain, chromAlias)
+    triplet, run at registration time (before writing markers) rather than
+    deferred to an actual search -- a naming mismatch here otherwise fails
+    silently, folded into reconciliation's "non-mappable" count instead of
+    raising an error. Returns None if everything checks out, else one
+    human-readable error describing the first problem found.
+    """
+    hg38_err = _chain_targets_hg38(chain_path)
+    if hg38_err:
+        return f"Chain file doesn't look right: {hg38_err}."
+    try:
+        ucsc_to_genbank = _read_chrom_alias_ucsc_to_genbank(chromalias_path)
+    except OSError as e:
+        return f"Could not read chromAlias file: {e}"
+    if not ucsc_to_genbank:
+        return "chromAlias file has no usable rows (expected tab-separated '# assembly / ucsc / genbank' columns)."
+    uncovered = _genome_contigs_uncovered_by_chromalias(genome_dir, ucsc_to_genbank)
+    if uncovered:
+        shown = ", ".join(uncovered[:5]) + ("…" if len(uncovered) > 5 else "")
+        return (
+            f"chromAlias file doesn't cover this genome's contig(s): {shown}. "
+            "Those would silently be dropped as non-mappable during a search -- "
+            "fix the chromAlias file or pick a different genome/chromAlias pair."
+        )
+    # Direction matters here: a chromAlias file legitimately describes MORE
+    # contigs than a chain file ever aligns (small/unplaced contigs often
+    # have no alignment block at all -- real, benign, not a mismatch;
+    # verified against actual HG01255 data: chromAlias names 92 contigs,
+    # the real chain only ever aligns 44 of them). The load-bearing
+    # direction is the other way: every contig the chain CAN align must be
+    # translatable via chromAlias, or liftOver output for it can never be
+    # mapped back by this app at all.
+    chain_targets = _chain_target_names(chain_path)
+    genbank_values = set(ucsc_to_genbank.values())
+    untranslatable = sorted(chain_targets - genbank_values)
+    if untranslatable:
+        shown = ", ".join(untranslatable[:5]) + ("…" if len(untranslatable) > 5 else "")
+        return (
+            f"chain file aligns contig(s) the chromAlias file can't translate: {shown}. "
+            "The chain and chromAlias files don't look like they belong together."
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +595,27 @@ def _hf_catalog(component: str) -> List[dict]:
     return _HF_CATALOG[component]
 
 
+# Real HPRC release-2 sample ids (network fetch), cached once per app run --
+# same shape as _hf_catalog above: fetch once, [] (empty dropdown) if offline
+# or the fetch otherwise fails, never a hard crash of the Settings page.
+_HPRC_SAMPLE_IDS: Optional[List[str]] = None
+
+
+def _hprc_sample_id_options() -> List[dict]:
+    """Dropdown options for the real Release-2 'hprc'-source sample ids
+    (download_hprc_assembly.fetch_all_sample_ids), so a user picks from
+    what actually exists instead of typing a blind id."""
+    global _HPRC_SAMPLE_IDS
+    if _HPRC_SAMPLE_IDS is None:
+        try:
+            import download_hprc_assembly
+
+            _HPRC_SAMPLE_IDS = download_hprc_assembly.fetch_all_sample_ids()
+        except Exception:
+            _HPRC_SAMPLE_IDS = []
+    return [{"label": s, "value": s} for s in _HPRC_SAMPLE_IDS]
+
+
 def _hf_options(component: str, installed: List[str]) -> List[dict]:
     """Dropdown options for a HuggingFace component, size-labelled + installed-marked."""
     inst = set(installed)
@@ -455,6 +675,28 @@ def _table(rows: List[str], empty: str) -> html.Div:
     return html.Ul([html.Li(r) for r in rows], style={"margin": "6px 0"})
 
 
+def _render_assembly_rows() -> List[str]:
+    """One display line per registered individual, flagging incompleteness
+    rather than hiding it -- same principle as get_custom_VCF()'s
+    "(reference genome unverified)" label for unmatched VCFs."""
+    rows = []
+    for a in installed_assemblies():
+        if a["complete"]:
+            rows.append(f"{a['individual']} — paternal + maternal complete")
+            continue
+        missing = []
+        for hap in ("paternal", "maternal"):
+            h = a[hap]
+            if not h:
+                missing.append(f"{hap} not started")
+            else:
+                gaps = [k for k in ("genome", "chain", "chromalias") if not h.get(k)]
+                if gaps:
+                    missing.append(f"{hap} missing {', '.join(gaps)}")
+        rows.append(f"{a['individual']} — incomplete ({'; '.join(missing)})")
+    return rows
+
+
 def _render_all_tables() -> html.Div:
     genomes = [g["value"] for g in get_available_genomes()]
     indexes = [i["value"] for i in get_available_indexes()]
@@ -462,6 +704,7 @@ def _render_all_tables() -> html.Div:
     anns = [a["value"] for a in get_custom_annotations()]
     cas = [c["label"] for c in get_available_CAS()]
     pams = [p["value"] for p in get_available_PAM()]
+    assemblies = _render_assembly_rows()
     return html.Div(
         [
             html.Details(
@@ -473,6 +716,12 @@ def _render_all_tables() -> html.Div:
             ),
             html.Details(
                 [html.Summary(f"Installed VCF datasets ({len(vcfs)})"), _table(vcfs, "none yet")]
+            ),
+            html.Details(
+                [
+                    html.Summary(f"Installed personal assemblies ({len(assemblies)})"),
+                    _table(assemblies, "none yet"),
+                ]
             ),
             html.Details(
                 [html.Summary(f"Installed annotations ({len(anns)})"), _table(anns, "none yet")]
@@ -501,6 +750,13 @@ def _deletable_options() -> List:
         opts.append({"label": f"Annotation: {a['value']}", "value": f"annotation:{a['value']}"})
     for pm in get_available_PAM():
         opts.append({"label": f"PAM: {pm['value']}", "value": f"pam:{pm['value']}"})
+    for a in installed_assemblies():
+        opts.append(
+            {
+                "label": f"Personal assembly pairing: {a['individual']}",
+                "value": f"assembly:{a['individual']}",
+            }
+        )
     return opts
 
 
@@ -541,6 +797,40 @@ def _delete_targets(kind: str, name: str) -> List[str]:
     if kind == "pam":
         leaf = name if name.endswith(".txt") else name + ".txt"
         return [os.path.join(cwd, "PAMs", leaf)]
+    if kind == "assembly":
+        # Deliberately removes only the pairing MARKERS, never the underlying
+        # genome/chain/chromAlias files -- the genome folders in particular are
+        # shared with plain single-haplotype complete-search (Component A's
+        # genome dropdowns are intentionally unfiltered for exactly this
+        # reason), so silently deleting them here on an "un-pair this
+        # individual" action would be a real, surprising data-loss footgun.
+        # Underlying files, if the user wants them gone too, are removed one
+        # at a time via the existing "genome"/(future chain/chromAlias)
+        # delete kinds, with their own explicit confirmation.
+        targets = []
+        for a in installed_assemblies():
+            if a["individual"] != name:
+                continue
+            for hap_key in ("paternal", "maternal"):
+                hap = a[hap_key]
+                if not hap:
+                    continue
+                if hap.get("genome"):
+                    targets.append(
+                        os.path.join(
+                            cwd,
+                            GENOMES_DIR,
+                            f".{hap['genome'].replace(' ', '_')}.assembly_individual",
+                        )
+                    )
+                for kind2 in ("chain", "chromalias"):
+                    if hap.get(kind2):
+                        targets.append(
+                            os.path.join(
+                                cwd, LIFTOVER_DIR, f".{hap[kind2]}.assembly_individual"
+                            )
+                        )
+        return targets
     raise ValueError(f"unknown data type {kind!r}")
 
 
@@ -610,8 +900,16 @@ def _delete_summary(item: str) -> str:
         "vcf": "VCF dataset",
         "annotation": "annotation",
         "pam": "PAM",
+        "assembly": "personal assembly pairing",
     }.get(kind, kind)
     extra = " (with its _INDELS companion)" if kind == "index" and has_indels else ""
+    if kind == "assembly":
+        return (
+            f"Un-pair personal assembly “{name}”?\n\nThis removes only the "
+            "individual/haplotype markers (frees negligible space) -- the "
+            "underlying genome, chain, and chromAlias files are NOT deleted "
+            "and can still be used or re-paired later."
+        )
     return (
         f"Delete {label} “{name}”{extra}?\n\nThis frees about {_fmt_size(total)} and "
         f"cannot be undone — you can download or rebuild it later."
@@ -957,6 +1255,140 @@ def settings_page() -> List:
         ],
     )
 
+    # ---- Personal assemblies ------------------------------------------------
+    # Pairs already-installed genome/chain/chromAlias files to an individual +
+    # haplotype, so assembly-search's launch form can eventually offer a
+    # single "pick an individual" control instead of 6 independent dropdowns
+    # (deferred -- this only builds the pairing/registration side). Files
+    # themselves are added the normal way first (the genome card above, plus
+    # placing chain/chromAlias files under LiftoverFiles/ -- upload support
+    # for those two is its own later increment); this card just tags files
+    # that already exist with which individual/haplotype they belong to.
+    assembly_card = _add_card(
+        "Add a personal assembly",
+        "Register one haplotype of a personal assembly -- fetch automatically "
+        "from HPRC, or upload and register your own genome, chain, and "
+        "chromAlias files.",
+        [
+            html.B("Fetch an individual from HPRC (Release 2)"),
+            html.P(
+                "Downloads and registers both haplotypes' genome, liftOver "
+                "chain, and chromAlias file automatically from HPRC "
+                "(Release 2). ~1.7-2 GB combined; takes a few minutes.",
+                style={"color": "#555", "fontSize": "0.9em"},
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Dropdown(
+                            id="hprc-fetch-sample",
+                            options=_hprc_sample_id_options(),
+                            placeholder="Search HPRC sample id, e.g. HG01255",
+                            searchable=True,
+                        ),
+                        width=8,
+                    ),
+                    dbc.Col(html.Button("Fetch from HPRC", id="hprc-fetch-btn"), width=4),
+                ]
+            ),
+            html.Div(id="hprc-fetch-feedback", style={"margin-top": "0.4rem"}),
+            html.Hr(),
+            html.B("Or upload your own files"),
+            html.P(
+                "Upload this haplotype's genome (split into one file per "
+                "chromosome, as a .tar.gz -- or a single .fa/.fa.gz only if "
+                "it's one contig), liftOver chain file (.chain/.chain.gz, vs "
+                "hg38), and chromAlias file (.chromAlias.txt). Already have "
+                "one of these installed? Skip that upload and just pick it "
+                "below. Then fill in the individual name and haplotype, pick "
+                "your files, and click 'Register haplotype'.",
+                style={"color": "#555", "fontSize": "0.9em"},
+            ),
+            html.Small("Genome FASTA -- one file per chromosome as a .tar.gz (or a single .fa/.fa.gz if single-contig)"),
+            html.Div(
+                className="crisprme-chunk-upload",
+                style={"margin-top": "0.2rem", "margin-bottom": "0.5rem"},
+                **{"data-target": "genome"},
+            ),
+            html.Small("LiftOver chain file (.chain / .chain.gz)"),
+            html.Div(
+                className="crisprme-chunk-upload",
+                style={"margin-top": "0.2rem", "margin-bottom": "0.5rem"},
+                **{"data-target": "chain"},
+            ),
+            html.Small("chromAlias file (.chromAlias.txt)"),
+            html.Div(
+                className="crisprme-chunk-upload",
+                style={"margin-top": "0.2rem", "margin-bottom": "0.5rem"},
+                **{"data-target": "chromalias"},
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Input(
+                            id="assembly-individual-name",
+                            placeholder="individual, e.g. HG01255",
+                            type="text",
+                            style={"width": "100%"},
+                        ),
+                        width=6,
+                    ),
+                    dbc.Col(
+                        dcc.RadioItems(
+                            id="assembly-haplotype",
+                            options=[
+                                {"label": " Paternal", "value": "paternal"},
+                                {"label": " Maternal", "value": "maternal"},
+                            ],
+                            value="paternal",
+                            inline=True,
+                        ),
+                        width=6,
+                    ),
+                ]
+            ),
+            html.Div(
+                [
+                    html.Small("Genome"),
+                    dcc.Dropdown(
+                        id="assembly-genome-select",
+                        options=installed_genomes,
+                        placeholder="installed genome folder",
+                    ),
+                ],
+                style={"margin-top": "0.4rem"},
+            ),
+            html.Div(
+                [
+                    html.Small("LiftOver chain file"),
+                    dcc.Dropdown(
+                        id="assembly-chain-select",
+                        options=get_available_liftover_files("chain"),
+                        placeholder="chain file under LiftoverFiles/",
+                    ),
+                ],
+                style={"margin-top": "0.4rem"},
+            ),
+            html.Div(
+                [
+                    html.Small("chromAlias file"),
+                    dcc.Dropdown(
+                        id="assembly-chromalias-select",
+                        options=get_available_liftover_files("chromalias"),
+                        placeholder="chromAlias file under LiftoverFiles/",
+                    ),
+                ],
+                style={"margin-top": "0.4rem"},
+            ),
+            html.Button(
+                "Register haplotype",
+                id="assembly-add-btn",
+                style={"margin-top": "0.6rem"},
+            ),
+            html.Div(id="assembly-feedback", style={"color": "#b00", "margin-top": "0.4rem"}),
+        ],
+    )
+
     # ---- Annotations -------------------------------------------------------
     annotation_card = _add_card(
         "Add an annotation (BED)",
@@ -1212,6 +1644,7 @@ def settings_page() -> List:
                                 genome_card,
                                 index_card,
                                 vcf_card,
+                                assembly_card,
                                 annotation_card,
                                 annotation_manage_card,
                                 email_card,
@@ -1477,6 +1910,113 @@ def add_vcf(n, name, source, path, hf_name, ref_genome):
         _render_all_tables(),
         _render_storage(),
     )
+
+
+@app.callback(
+    [
+        Output("assembly-feedback", "children"),
+        Output("settings-tables-container", "children", allow_duplicate=True),
+        Output("settings-storage", "children", allow_duplicate=True),
+    ],
+    [Input("assembly-add-btn", "n_clicks")],
+    [
+        State("assembly-individual-name", "value"),
+        State("assembly-haplotype", "value"),
+        State("assembly-genome-select", "value"),
+        State("assembly-chain-select", "value"),
+        State("assembly-chromalias-select", "value"),
+    ],
+    prevent_initial_call=True,
+)
+def add_assembly(n, individual, haplotype, genome, chain, chromalias):
+    if n is None or ONLINE:
+        raise PreventUpdate
+    err = _validate_name(individual or "")
+    if err:
+        return err, no_update, no_update
+    if haplotype not in ("paternal", "maternal"):
+        return "Select a haplotype.", no_update, no_update
+    missing = [
+        label
+        for label, val in (("genome", genome), ("chain file", chain), ("chromAlias file", chromalias))
+        if not val
+    ]
+    if missing:
+        return f"Select a {', '.join(missing)}.", no_update, no_update
+    individual = individual.strip()
+    # Real cross-file consistency checks, run now (before writing any marker)
+    # rather than deferred to an actual search -- a mismatch here otherwise
+    # fails silently, folded into reconciliation's "non-mappable" count
+    # instead of raising an error. Deliberately more than add_vcf's own
+    # genome pairing does (presence-only): a personal-assembly triplet has
+    # more ways to be silently mismatched than a single VCF+genome pair.
+    genome_dir = os.path.join(current_working_directory, GENOMES_DIR, str(genome).replace(" ", "_"))
+    chain_path = os.path.join(current_working_directory, LIFTOVER_DIR, chain)
+    chromalias_path = os.path.join(current_working_directory, LIFTOVER_DIR, chromalias)
+    pairing_err = validate_assembly_pairing(genome_dir, chain_path, chromalias_path)
+    if pairing_err:
+        return pairing_err, no_update, no_update
+    # three independent marker writes, same reasoning as _write_vcf_marker --
+    # each is small and best-effort; if one fails the other two still land,
+    # rather than an all-or-nothing transaction (see plan doc's C section for
+    # why per-artifact markers were chosen over one combined record).
+    _write_assembly_marker(GENOMES_DIR, str(genome).replace(" ", "_"), individual, haplotype)
+    _write_assembly_marker(LIFTOVER_DIR, chain, individual, haplotype)
+    _write_assembly_marker(LIFTOVER_DIR, chromalias, individual, haplotype)
+    return (
+        html.Span(
+            f"Registered {individual}'s {haplotype} haplotype.", style={"color": "green"}
+        ),
+        _render_all_tables(),
+        _render_storage(),
+    )
+
+
+@app.callback(
+    [
+        Output("settings-active-job", "data", allow_duplicate=True),
+        Output("settings-check", "disabled", allow_duplicate=True),
+        Output("hprc-fetch-feedback", "children"),
+    ],
+    [Input("hprc-fetch-btn", "n_clicks")],
+    [State("hprc-fetch-sample", "value")],
+    prevent_initial_call=True,
+)
+def fetch_from_hprc(n, sample_id):
+    """Runs download_hprc_assembly.py as a background job (same single-slot
+    executor + log.txt polling every other Settings download uses), rather
+    than blocking the browser request for the several minutes a real ~1.7GB
+    fetch takes. Not routed through crisprme.py -- download_hprc_assembly.py
+    is an independent script (see its own module docstring), launched here
+    via launch_settings_job_raw instead of launch_settings_job.
+    """
+    if n is None or ONLINE:
+        raise PreventUpdate
+    err = _validate_name(sample_id or "")
+    if err:
+        return no_update, no_update, err
+    sample_id = sample_id.strip()
+    # ~2GB is the real measured size for one individual (2026-09-02, HG01255);
+    # _preflight_disk's own 3x/floor logic covers the temp .fa.gz + its split
+    # output existing on disk at once during the run.
+    derr = _preflight_disk(2 * 1024**3)
+    if derr:
+        return no_update, no_update, derr
+    script = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "download_hprc_assembly.py"
+    )
+    cmd = " ".join(
+        [
+            _shlex_quote(sys.executable),
+            _shlex_quote(script),
+            _shlex_quote(sample_id),
+            "--register",
+            "--genomes-dir", _shlex_quote(os.path.join(current_working_directory, GENOMES_DIR)),
+            "--liftover-dir", _shlex_quote(os.path.join(current_working_directory, LIFTOVER_DIR)),
+        ]
+    )
+    job_id = launch_settings_job_raw(cmd, f"Fetch {sample_id} from HPRC")
+    return _start(job_id)
 
 
 @app.callback(

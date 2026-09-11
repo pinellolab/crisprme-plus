@@ -227,6 +227,16 @@ PAMS_DIR = "PAMs"
 VCFS_DIR = "VCFs"
 # genomes directory
 GENOMES_DIR = "Genomes"
+# liftOver chain + chromAlias files directory, for assembly-search
+# (paternal/maternal personal-genome search). Holds both file kinds together
+# (not split into two directories) since they're always used in pairs for
+# the same haplotype -- one "how does this genome map to hg38" bundle per
+# assembly, same precedent as ANNOTATIONS_DIR holding both annotation beds
+# and their gencode companions. Website-only convention: assembly_search()
+# itself takes these as arbitrary file paths and has no opinion on where
+# they live, so this directory is NOT in crisprme.py's own CRISPRMEDIRS --
+# only in index.py's website-side CRISPRME_DIRS.
+LIFTOVER_DIR = "LiftoverFiles"
 # App-wide bulge ceiling: the largest index N the search form / build path targets
 # (index folder "<pam>_<N>_<genome>", usable bulges = N-1). Single-sourced here so the
 # reference-bulge-capacity helper (which pages_utils owns) and main_page's dropdown
@@ -1222,6 +1232,138 @@ def get_available_genomes() -> List:
         {"label": d, "value": d} for d in genomes if ("+" not in d and "None" not in d)
     ]
     return genomes_dirs
+
+
+def get_available_liftover_files(kind: str) -> List:
+    """Recover chain or chromAlias files available in the /LiftoverFiles
+    directory, for assembly-search's paternal/maternal genome mapping.
+
+    Both file kinds live together in one directory (see LIFTOVER_DIR's own
+    comment) and are told apart here by filename suffix -- a plain extension
+    filter, not a naming-convention assumption about anything outside this
+    directory's own purpose.
+
+    Parameters
+    ----------
+    kind : str
+        Either "chain" (matches *.chain / *.chain.gz) or "chromalias"
+        (matches *.chromAlias.txt).
+
+    Returns
+    -------
+    List
+        Dropdown options; value is the bare filename (resolved against
+        LIFTOVER_DIR by the caller), label is the same filename.
+    """
+    liftover_root = os.path.join(current_working_directory, LIFTOVER_DIR)
+    if not os.path.isdir(liftover_root):
+        return []
+    if kind == "chain":
+        matches = lambda f: f.endswith(".chain") or f.endswith(".chain.gz")
+    elif kind == "chromalias":
+        matches = lambda f: f.endswith(".chromAlias.txt")
+    else:
+        raise ValueError(f"Unknown liftover file kind: {kind!r}")
+    files = [
+        f
+        for f in os.listdir(liftover_root)
+        if os.path.isfile(os.path.join(liftover_root, f)) and matches(f)
+    ]
+    return [{"label": f, "value": f} for f in sorted(files)]
+
+
+def assembly_individual(root_dir: str, artifact_name: str) -> Optional[Tuple[str, str]]:
+    """Read back which individual/haplotype an assembly artifact belongs to.
+
+    Read-side counterpart of settings_page.py's ``_write_assembly_marker`` --
+    same one-marker-file-per-artifact shape as ``vcf_reference_genome``'s tier-1
+    lookup (``VCFs/.<dataset>.refgenome``), just for assembly-search's genome/
+    chain/chromAlias files instead of VCF datasets. A marker file
+    (``<root_dir>/.<artifact_name>.assembly_individual``) holds one
+    ``<individual>\\t<paternal|maternal>`` line. Deliberately per-artifact, not
+    one combined record per individual -- a missing/corrupt marker only drops
+    that ONE artifact's pairing info, it never blocks reading the other 5.
+
+    Parameters
+    ----------
+    root_dir : str
+        Directory the artifact lives in, e.g. ``Genomes`` or ``LiftoverFiles``
+        (resolved against ``current_working_directory``).
+    artifact_name : str
+        The artifact's own name (genome folder name, or chain/chromAlias
+        file name).
+
+    Returns
+    -------
+    Optional[Tuple[str, str]]
+        ``(individual, haplotype)`` if a valid marker exists, else ``None``.
+    """
+    marker = os.path.join(
+        current_working_directory, root_dir, f".{artifact_name}.assembly_individual"
+    )
+    try:
+        with open(marker) as fh:
+            line = fh.read().strip()
+    except OSError:
+        return None
+    individual, _sep, haplotype = line.partition("\t")
+    if not individual or haplotype not in ("paternal", "maternal"):
+        return None
+    return individual, haplotype
+
+
+def installed_assemblies() -> List[Dict]:
+    """Group marked assembly artifacts by individual, for the settings-page
+    "Installed personal assemblies" listing (and later, the launch form's
+    individual-centric dropdown).
+
+    Returns
+    -------
+    List[Dict]
+        One dict per individual with a marker on at least one artifact:
+        ``{"individual": str, "paternal": {...} | None, "maternal": {...} | None,
+        "complete": bool}``. A haplotype's dict (when present) has
+        ``{"genome", "chain", "chromalias"}``, each the artifact name if marked
+        and present, else ``None`` -- so a partially-registered haplotype (e.g.
+        genome marked but chain not yet) is visible, not hidden.
+        ``complete`` is True only when both haplotypes have all 3.
+    """
+    by_individual: Dict[str, Dict] = {}
+
+    def _note(individual: str, haplotype: str, kind: str, artifact_name: str) -> None:
+        entry = by_individual.setdefault(individual, {"paternal": None, "maternal": None})
+        hap = entry[haplotype]
+        if hap is None:
+            hap = entry[haplotype] = {"genome": None, "chain": None, "chromalias": None}
+        hap[kind] = artifact_name
+
+    for g in get_available_genomes():
+        pair = assembly_individual(GENOMES_DIR, g["value"].replace(" ", "_"))
+        if pair:
+            _note(pair[0], pair[1], "genome", g["value"])
+    for f in get_available_liftover_files("chain"):
+        pair = assembly_individual(LIFTOVER_DIR, f["value"])
+        if pair:
+            _note(pair[0], pair[1], "chain", f["value"])
+    for f in get_available_liftover_files("chromalias"):
+        pair = assembly_individual(LIFTOVER_DIR, f["value"])
+        if pair:
+            _note(pair[0], pair[1], "chromalias", f["value"])
+
+    def _hap_complete(hap: Optional[Dict]) -> bool:
+        return bool(hap) and all(hap.get(k) for k in ("genome", "chain", "chromalias"))
+
+    results = []
+    for individual, entry in sorted(by_individual.items()):
+        results.append(
+            {
+                "individual": individual,
+                "paternal": entry["paternal"],
+                "maternal": entry["maternal"],
+                "complete": _hap_complete(entry["paternal"]) and _hap_complete(entry["maternal"]),
+            }
+        )
+    return results
 
 
 def get_available_indexes() -> List:

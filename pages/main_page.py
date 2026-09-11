@@ -36,6 +36,9 @@ from .pages_utils import (
     get_pam_options,
     get_custom_VCF,
     get_available_genomes,
+    get_available_liftover_files,
+    installed_assemblies,
+    LIFTOVER_DIR,
     get_custom_annotations,
     sort_annotation,
     compress_file,
@@ -65,7 +68,9 @@ import subprocess
 import filecmp
 import random
 import re
+import shlex
 import shutil
+import sys
 import string
 import os
 
@@ -207,6 +212,441 @@ def split_filter_part(filter_part: str) -> Tuple:
                 # but we don't want these later
                 return name, operator_type[0].strip(), value
     return [None] * 3
+
+
+# ---------------------------------------------------------------------------
+# Assembly-search (personal diploid genome) job launch
+#
+# Deliberately separate from `change_url`/`check_input` above rather than
+# threaded into them: those two are already an ~900-line, deeply
+# variant/VCF/email/reuse-detection-coupled pair built for complete-search,
+# and assembly-search takes no VCF at all -- bolting a second job type into
+# that logic would be high-risk for low benefit. This mirrors the existing
+# `launch_settings_job`/`_run_settings_job` pattern in settings_page.py
+# (module-level, picklable launcher function; safe shlex-quoted argv) rather
+# than change_url's cruder raw-string `cmd` interpolation.
+#
+def _parse_pam(pam: str) -> Optional[Tuple[int, bool, int]]:
+    """Parses a PAM name + its file the same way `change_url` (~line 899,
+    ~line 819) and `check_input` (~line 1624) both already independently do,
+    to get the three facts needed to auto-pad guide sequences: how many N's
+    the PAM contributes and whether they belong before the guide (a 5' PAM,
+    e.g. Cas12a's TTTN) or after it (a 3' PAM, e.g. SpCas9's NGG -- the
+    common case), plus the raw protospacer length the PAM name itself
+    encodes (e.g. 20 for "20bp-NGG-SpCas9"). Written here as its own small
+    helper for `submit_assembly_search_job` rather than touching either
+    existing (already near-identical) copy of this logic.
+
+    Returns None if the PAM file/name can't be read/parsed, so the caller
+    can surface that as a normal validation failure instead of an exception.
+    """
+    guide_seqlen = None
+    for chunk in pam.split("-"):
+        if "bp" in chunk:
+            try:
+                guide_seqlen = int(chunk.replace("bp", ""))
+            except ValueError:
+                pass
+    if guide_seqlen is None:
+        return None
+    pam_file = os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
+    try:
+        with open(pam_file) as handle_pam:
+            line = handle_pam.readline()
+            index_pam_value = int(line.split()[-1])
+    except (OSError, ValueError, IndexError):
+        return None
+    pam_begin = index_pam_value < 0
+    pam_len = abs(index_pam_value)
+    return pam_len, pam_begin, guide_seqlen
+
+
+def _pad_guides_for_pam(text_guides: str, pam_len: int, pam_begin: bool, guide_seqlen: int) -> List[str]:
+    """Adds the PAM-length N's CRISPRitz's index expects to each guide line
+    -- the same transformation `change_url` applies (~line 690) before
+    writing complete-search's own guide file, so assembly-search's guide
+    box behaves identically: type a bare protospacer, not
+    `<protospacer><PAM-length N's>` by hand.
+
+    Lines not matching the PAM's raw protospacer length are dropped, same
+    protection `change_url` (~line 810) already has -- catches an
+    already-padded or otherwise wrong-length guide (e.g. pasted from
+    somewhere that already included the PAM placeholder) rather than
+    silently double-padding it into a corrupt search.
+    """
+    lines = [
+        line.strip().upper()
+        for line in (text_guides or "").splitlines()
+        if line.strip() and len(line.strip()) == guide_seqlen
+    ]
+    pad = "N" * pam_len
+    if pam_begin:
+        return [pad + line for line in lines]
+    return [line + pad for line in lines]
+
+
+def _complete_assembly_options() -> List[Dict]:
+    """Dropdown options for the "Individual" picker: only individuals whose
+    Data Manager registration is COMPLETE (both haplotypes, all 3 files
+    each) -- Luca's completeness-gating suggestion, implemented as simply
+    not offering an incomplete individual rather than offering it and
+    failing at submit time. Source of truth is the same
+    `installed_assemblies()` grouping the Settings page's "Installed
+    personal assemblies" listing uses (Component C)."""
+    return [
+        {"label": a["individual"], "value": a["individual"]}
+        for a in installed_assemblies()
+        if a["complete"]
+    ]
+
+
+# Directory convention: the job id IS the `--output` value passed to
+# `assembly-search` directly -- no separate id, no mapping file.
+# `assembly_search()` itself is never modified;
+# it already writes `Results/<id>_paternal/`, `_maternal/`, `_combined/` on
+# its own, and only guards a re-run by checking whether the final
+# `<id>_combined_hg38.tsv` file exists -- so pre-creating an empty
+# `<id>_combined/` here to hold our own tracking files (queue.txt,
+# .Params.txt, log.txt) is safe and doesn't collide with that guard.
+def _new_assembly_job_id() -> str:
+    """A short unique job id for an assembly-search run.
+
+    Checked against all three sibling Results/ suffixes (assembly-search
+    writes `<id>_paternal` / `_maternal` / `_combined`, not a single `<id>/`
+    like complete-search), mirroring `change_url`'s own id-collision loop.
+    """
+    results_root = os.path.join(current_working_directory, RESULTS_DIR)
+    id_len = 10
+    job_id = ""
+    for i in range(JOBID_ITERATIONS_MAX):
+        job_id = "".join(random.choices(string.ascii_uppercase + string.digits, k=id_len))
+        if not any(
+            os.path.isdir(os.path.join(results_root, f"{job_id}_{suffix}"))
+            for suffix in ("paternal", "maternal", "combined")
+        ):
+            return job_id
+        if i > 7:
+            i = 0
+            id_len += 1
+            if id_len > JOBID_MAXLEN:
+                break
+    return job_id
+
+
+def _run_assembly_search_job(cmd: str, combined_dir: str) -> None:
+    """Runs `crisprme.py assembly-search` in the background.
+
+    Module-level (picklable) so it can be submitted to the
+    `ProcessPoolExecutor`. `assembly_search()` already prints its own stage
+    transitions (paternal search start, maternal search start, reconciliation
+    start/complete) to stdout -- redirecting those straight into `log.txt`
+    means a future status-poller can read real stage markers with no changes
+    needed on the `crisprme.py` side. `queue.txt` is removed the moment the
+    subprocess actually starts, mirroring
+    `submit_job_automated_new_multiple_vcfs.sh`'s own "no longer queued"
+    convention (that script removes it at the same point, before running the
+    real command).
+    """
+    queue_file = os.path.join(combined_dir, QUEUE_FILE)
+    log_path = os.path.join(combined_dir, LOG_FILE)
+    try:
+        if os.path.isfile(queue_file):
+            os.remove(queue_file)
+        # assembly-search's real dependencies (liftOver, minimap2, impg, ...)
+        # are conda binaries, not Python packages -- sys.executable fixes
+        # which `python` runs, but a dev server started without `conda
+        # activate` still won't have this env's bin/ on PATH for those.
+        # Prepend it explicitly rather than relying on activation state.
+        env = os.environ.copy()
+        env_bin = os.path.dirname(sys.executable)
+        env["PATH"] = env_bin + os.pathsep + env.get("PATH", "")
+        with open(log_path, "a") as log_out:
+            proc = subprocess.Popen(
+                cmd, shell=True, stdout=log_out, stderr=subprocess.STDOUT, env=env
+            )
+            proc.wait()
+    except Exception as e:  # pragma: no cover - defensive
+        with open(log_path, "a") as log_out:
+            log_out.write(f"\n[web] launcher error: {e}\n")
+
+
+@app.callback(
+    [
+        Output("genome-paternal", "value"),
+        Output("genome-maternal", "value"),
+        Output("chain-paternal", "value"),
+        Output("chain-maternal", "value"),
+        Output("chromalias-paternal", "value"),
+        Output("chromalias-maternal", "value"),
+    ],
+    [Input("assembly-individual", "value")],
+    prevent_initial_call=True,
+)
+def populate_assembly_fields_from_individual(individual: str) -> Tuple:
+    """Auto-derives the 6 hidden genome/chain/chromAlias fields from the
+    visible "Individual" picker, via the same `installed_assemblies()`
+    grouping Settings uses. `submit_assembly_search_job` below is otherwise
+    completely unchanged -- it still just reads these 6 State values, same
+    as when they were directly user-picked; only where the values come from
+    changed. Clearing the picker clears all 6 back to None.
+    """
+    if not individual:
+        return None, None, None, None, None, None
+    match = next(
+        (a for a in installed_assemblies() if a["individual"] == individual and a["complete"]),
+        None,
+    )
+    if match is None:  # picked value no longer complete/registered -- don't guess
+        return None, None, None, None, None, None
+    pat, mat = match["paternal"], match["maternal"]
+    return (
+        pat["genome"],
+        mat["genome"],
+        pat["chain"],
+        mat["chain"],
+        pat["chromalias"],
+        mat["chromalias"],
+    )
+
+
+@app.callback(
+    [
+        Output("url", "pathname", allow_duplicate=True),
+        Output("url", "search", allow_duplicate=True),
+        # Reuses the SAME warning modal complete-search's check_input already
+        # uses (Luca's existing component, defined once in the layout) rather
+        # than a separate assembly-search-only warning UI -- the "did you fill
+        # in the required fields" need isn't actually specific to either
+        # search mode. allow_duplicate=True since check_input already owns
+        # these Outputs; check_input itself is untouched.
+        Output("modal", "is_open", allow_duplicate=True),
+        Output("warning-list", "children", allow_duplicate=True),
+    ],
+    [Input("submit-assembly-job", "n_clicks")],
+    [
+        State("genome-paternal", "value"),
+        State("genome-maternal", "value"),
+        State("chain-paternal", "value"),
+        State("chain-maternal", "value"),
+        State("chromalias-paternal", "value"),
+        State("chromalias-maternal", "value"),
+        State("available-pam", "value"),
+        State("text-guides", "value"),
+        State("mms", "value"),
+        State("dna", "value"),
+        State("rna", "value"),
+        State("job-name", "value"),
+    ],
+    prevent_initial_call=True,
+)
+def submit_assembly_search_job(
+    n: int,
+    genome_paternal: str,
+    genome_maternal: str,
+    chain_paternal: str,
+    chain_maternal: str,
+    chromalias_paternal: str,
+    chromalias_maternal: str,
+    pam: str,
+    text_guides: str,
+    mms: int,
+    dna: int,
+    rna: int,
+    job_name: str,
+) -> Tuple:
+    """Validates and launches a personal-assembly (paternal/maternal, no VCF)
+    off-target search, submitted via `crisprme.py assembly-search`.
+
+    MVP scope: reuses the existing guide/PAM/mismatch/bulge form fields
+    (shared component ids with the complete-search form -- reading the same
+    `State` from two callbacks is fine in Dash), but does NOT yet replicate
+    `change_url`'s PAM-derived N-padding convenience for the guide textbox
+    -- guides typed here get the same automatic PAM-length N-padding
+    complete-search's own form applies (see `_pad_guides_for_pam` below),
+    so there's no format difference between the two modes' guide boxes.
+    These 6 State values are auto-derived from the visible "Individual"
+    picker by `populate_assembly_fields_from_individual` above (component C
+    / Data Manager, built 2026-09-02) -- this function's own validation and
+    path-resolution logic is unchanged from when they were directly
+    user-picked dropdowns.
+    """
+    if not n:
+        raise PreventUpdate
+
+    # chain-paternal/-maternal/chromalias-paternal/-maternal arrive as bare
+    # filenames (dcc.Dropdown values sourced from LiftoverFiles/, not typed
+    # paths) -- resolve to full paths before anything downstream uses them.
+    liftover_root = os.path.join(current_working_directory, LIFTOVER_DIR)
+    chain_paternal = os.path.join(liftover_root, chain_paternal) if chain_paternal else None
+    chain_maternal = os.path.join(liftover_root, chain_maternal) if chain_maternal else None
+    chromalias_paternal = (
+        os.path.join(liftover_root, chromalias_paternal) if chromalias_paternal else None
+    )
+    chromalias_maternal = (
+        os.path.join(liftover_root, chromalias_maternal) if chromalias_maternal else None
+    )
+
+    missing = []
+    if not genome_paternal:
+        missing.append("paternal genome")
+    if not genome_maternal:
+        missing.append("maternal genome")
+    # Assembly-search-specific check with no complete-search equivalent to
+    # mirror -- complete-search only ever picks one genome, so this footgun
+    # (picking the same folder for both haplotypes, almost certainly a
+    # mis-click) doesn't exist there.
+    if genome_paternal and genome_maternal and genome_paternal == genome_maternal:
+        missing.append("paternal and maternal genome must be different")
+    if not chain_paternal or not os.path.isfile(chain_paternal):
+        missing.append("paternal chain file")
+    if not chain_maternal or not os.path.isfile(chain_maternal):
+        missing.append("maternal chain file")
+    if not chromalias_paternal or not os.path.isfile(chromalias_paternal):
+        missing.append("paternal chromAlias file")
+    if not chromalias_maternal or not os.path.isfile(chromalias_maternal):
+        missing.append("maternal chromAlias file")
+    # Parity with check_input's own validation of these same shared fields --
+    # they carry dropdown defaults so this rarely fires in practice, but
+    # there's no reason assembly-search's checklist should be less defensive
+    # than complete-search's for identical fields.
+    if mms is None:
+        missing.append("mismatches")
+    if dna is None:
+        missing.append("DNA bulges")
+    if rna is None:
+        missing.append("RNA bulges")
+    if not pam:
+        missing.append("PAM")
+        guide_lines = []
+    else:
+        pam_parsed = _parse_pam(pam)
+        if pam_parsed is None:
+            missing.append("PAM (file unreadable)")
+            guide_lines = []
+        else:
+            guide_lines = _pad_guides_for_pam(text_guides, *pam_parsed)
+    if not guide_lines:
+        missing.append("at least one guide sequence")
+    if missing:
+        return (
+            no_update,
+            no_update,
+            True,
+            html.Ul([html.Li(m) for m in missing]),
+        )
+
+    genome_paternal_dir = os.path.join(
+        current_working_directory, GENOMES_DIR, str(genome_paternal).replace(" ", "_")
+    )
+    genome_maternal_dir = os.path.join(
+        current_working_directory, GENOMES_DIR, str(genome_maternal).replace(" ", "_")
+    )
+    if not os.path.isdir(genome_paternal_dir) or not os.path.isdir(genome_maternal_dir):
+        return (
+            no_update,
+            no_update,
+            True,
+            html.Ul([html.Li("Selected genome folder(s) not found under Genomes/")]),
+        )
+
+    job_id = _new_assembly_job_id()
+    if job_name and job_name != "None":
+        safe_job_name = _sanitize_job_name(job_name)
+        if safe_job_name:
+            job_id = f"{safe_job_name}_{job_id}"
+
+    results_root = os.path.join(current_working_directory, RESULTS_DIR)
+    combined_dir = os.path.join(results_root, f"{job_id}_combined")
+    try:
+        os.makedirs(combined_dir)
+    except OSError as error:
+        raise ValueError(f"An error occurred while creating {combined_dir}: {error}")
+    open(os.path.join(combined_dir, QUEUE_FILE), "a").close()
+
+    guide_file = os.path.join(combined_dir, GUIDES_FILE)
+    with open(guide_file, "w") as gf:
+        gf.write("\n".join(guide_lines) + "\n")
+    pam_file = os.path.join(current_working_directory, PAMS_DIR, f"{pam}.txt")
+
+    # Written by the web layer, not by crisprme.py itself -- assembly_search()
+    # writes no tracking files of its own (see module docstring above). Sits
+    # inside <job_id>_combined/, which history_page.py's existing "any
+    # Results/ subdir with a .Params.txt is a real job" scan already picks up
+    # unmodified, since _combined lands as its own top-level Results/ entry.
+    params_lines = [
+        ("Genome_type", "assembly"),
+        ("Genome_paternal", os.path.basename(genome_paternal_dir)),
+        ("Genome_maternal", os.path.basename(genome_maternal_dir)),
+        ("Chain_paternal", chain_paternal),
+        ("Chain_maternal", chain_maternal),
+        ("ChromAlias_paternal", chromalias_paternal),
+        ("ChromAlias_maternal", chromalias_maternal),
+        ("Pam", pam),
+        ("Mismatches", str(mms)),
+        ("DNA", str(dna)),
+        ("RNA", str(rna)),
+        ("Output_base", job_id),
+        ("Paternal_dir", f"{job_id}_paternal"),
+        ("Maternal_dir", f"{job_id}_maternal"),
+        ("Combined_dir", f"{job_id}_combined"),
+    ]
+    with open(os.path.join(combined_dir, PARAMS_FILE), "w") as pf:
+        for i, (key, value) in enumerate(params_lines, start=1):
+            pf.write(f"{i}\t{key}\t{value}\n")
+
+    # Absolute interpreter + script path, not a bare `crisprme.py` on PATH:
+    # this dev server isn't launched through `conda activate`, so PATH alone
+    # can't be trusted to resolve to the right (or any) `crisprme.py`.
+    # sys.executable is the exact interpreter already running this app,
+    # guaranteeing the same env/dependencies -- same fix already used
+    # elsewhere in this codebase (crisprme.py, generate_sample_card.py) for
+    # the identical bare-`python`-on-PATH problem.
+    crisprme_script = os.path.join(app_directory, "crisprme.py")
+    cmd = " ".join(
+        [
+            shlex.quote(sys.executable),
+            # -u: unbuffered stdout. Confirmed necessary, not precautionary --
+            # without it, log.txt only received assembly_search()'s own stage
+            # prints (paternal/maternal search start, reconciliation
+            # start/complete) in one block at process exit, not as they
+            # happened; a future live status-poller needs them incrementally.
+            "-u",
+            shlex.quote(crisprme_script),
+            "assembly-search",
+            "--genome-paternal",
+            shlex.quote(genome_paternal_dir),
+            "--genome-maternal",
+            shlex.quote(genome_maternal_dir),
+            "--chain-paternal",
+            shlex.quote(chain_paternal),
+            "--chain-maternal",
+            shlex.quote(chain_maternal),
+            "--chrom-alias-paternal",
+            shlex.quote(chromalias_paternal),
+            "--chrom-alias-maternal",
+            shlex.quote(chromalias_maternal),
+            "--guide",
+            shlex.quote(guide_file),
+            "--pam",
+            shlex.quote(pam_file),
+            "--mm",
+            str(int(mms)),
+            "--bDNA",
+            str(int(dna)),
+            "--bRNA",
+            str(int(rna)),
+            "--merge",
+            "3",
+            "--output",
+            shlex.quote(job_id),
+            "--thread",
+            "4",
+            "--debug",
+        ]
+    )
+    print(f"Submitted ASSEMBLY-SEARCH job {job_id}. Output > {LOG_FILE}")
+    pool_executor.submit(_run_assembly_search_job, cmd, combined_dir)
+    return "/load", f"?job={job_id}_combined", False, no_update
 
 
 # load example data
@@ -1994,24 +2434,174 @@ def index_page() -> html.Div:
     genome_content = html.Div(
         [
             html.H4("Select genome", style={"fontSize": "2.2rem"}),
-            html.Div(
-                dcc.Dropdown(
-                    options=get_available_genomes(),
-                    value=_def_genome,
-                    clearable=False,
-                    id="available-genome",
-                ),
-                style={"width": "300px"},
-            ),
-            html.P("Variants", style={"margin": "8px 0 2px"}),
-            html.Div(
-                dcc.Dropdown(
-                    options=get_variant_dataset_options(_def_genome),
-                    value=_def_variants,
-                    clearable=False,
-                    id="variant-dataset",
-                    style={"width": "300px"},
-                ),
+            # Regular (reference / population-VCF) genome + variant pickers --
+            # Two tabs instead of a collapsible toggle -- real Luca/Manuel
+            # meeting feedback (2026-09-02): 6 dropdowns collapsed inline
+            # under a "search a personal genome instead?" question read as
+            # cluttered/confusing; a dedicated tab reads more clearly as two
+            # distinct search modes. This is a pure presentation change --
+            # the "Reference genome" tab's content and the "Personal
+            # assembly" tab's 6 dropdowns are UNCHANGED from what they were
+            # inside the old toggle/collapse (same ids, same options-loading
+            # calls, same submit-field-swap behavior below) -- deliberately
+            # NOT redesigned into fewer/matched dropdowns yet, since that's
+            # real, separate work (the genome<->VCF-style matching/Data-
+            # Manager problem) that should happen once, not be built twice.
+            # See project memory for the phased plan this follows.
+            dbc.Tabs(
+                [
+                    dbc.Tab(
+                        html.Div(
+                            [
+                                html.Div(
+                                    dcc.Dropdown(
+                                        options=get_available_genomes(),
+                                        value=_def_genome,
+                                        clearable=False,
+                                        id="available-genome",
+                                    ),
+                                    style={"width": "300px"},
+                                ),
+                                html.P("Variants", style={"margin": "8px 0 2px"}),
+                                html.Div(
+                                    dcc.Dropdown(
+                                        options=get_variant_dataset_options(_def_genome),
+                                        value=_def_variants,
+                                        clearable=False,
+                                        id="variant-dataset",
+                                        style={"width": "300px"},
+                                    ),
+                                ),
+                            ],
+                            id="regular-genome-fields",
+                            style={"margin-top": "12px"},
+                        ),
+                        label="Reference genome",
+                        tab_id="tab-reference-genome",
+                    ),
+                    # Personal-assembly (paternal/maternal, no VCF) search, via
+                    # `crisprme.py assembly-search`. User-facing selection is
+                    # one "Individual" dropdown (below), auto-derived from
+                    # the Data Manager's individual<->file pairing (component
+                    # C, built 2026-09-02 -- see installed_assemblies() in
+                    # pages_utils.py and settings_page.py's "Add a personal
+                    # assembly" card). The 6 underlying genome/chain/
+                    # chromAlias dropdowns still exist in the tree (hidden)
+                    # purely so submit_assembly_search_job's already-
+                    # validated State reads / path resolution stay untouched
+                    # -- get_available_genomes()/get_available_liftover_files()
+                    # remain their (unfiltered) option sources, but they're no
+                    # longer what the user picks directly. A manual/advanced
+                    # override UI for power users is deferred.
+                    dbc.Tab(
+                        html.Div(
+                            [
+                                html.P(
+                                    "Searches a fully assembled personal diploid genome "
+                                    "directly (no VCF/population inference), reconciling "
+                                    "predictions across both haplotypes against hg38.",
+                                    style={"font-size": "1.25rem", "color": "#555"},
+                                ),
+                                # Individual-centric picker (Phase 3, 2026-09-02) --
+                                # replaces 6 independently-picked, unlinked
+                                # dropdowns with one selector over COMPLETE
+                                # registered individuals only (Luca's
+                                # completeness-gating suggestion: an
+                                # incomplete individual simply isn't offered,
+                                # rather than being pickable and failing at
+                                # submit time). `installed_assemblies()` is
+                                # the same Data Manager grouping used by the
+                                # Settings page's "Installed personal
+                                # assemblies" listing (Component C).
+                                html.Div(
+                                    [
+                                        html.P("Individual"),
+                                        dcc.Dropdown(
+                                            options=_complete_assembly_options(),
+                                            value=None,
+                                            clearable=True,
+                                            placeholder="select a registered individual",
+                                            id="assembly-individual",
+                                            style={"width": "300px"},
+                                        ),
+                                        html.Small(
+                                            "No complete personal assemblies registered "
+                                            "yet -- add one under Settings / Data Manager.",
+                                            id="assembly-individual-empty-hint",
+                                            style={
+                                                "color": "#8a6d3b",
+                                                "fontStyle": "italic",
+                                                "display": (
+                                                    "block"
+                                                    if not _complete_assembly_options()
+                                                    else "none"
+                                                ),
+                                            },
+                                        ),
+                                    ]
+                                ),
+                                # The 6 fields the launch callback actually reads --
+                                # hidden, auto-populated from the individual picker
+                                # above (see populate_assembly_fields_from_individual
+                                # below). Kept as real dropdown components (not a
+                                # dcc.Store) so submit_assembly_search_job's existing,
+                                # already-validated State reads and path-resolution
+                                # logic stay completely untouched -- only the input
+                                # SOURCE changed, not the submit callback itself.
+                                html.Div(
+                                    [
+                                        dcc.Dropdown(
+                                            options=get_available_genomes(),
+                                            value=None,
+                                            id="genome-paternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_genomes(),
+                                            value=None,
+                                            id="genome-maternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_liftover_files("chain"),
+                                            value=None,
+                                            id="chain-paternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_liftover_files("chain"),
+                                            value=None,
+                                            id="chain-maternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_liftover_files("chromalias"),
+                                            value=None,
+                                            id="chromalias-paternal",
+                                        ),
+                                        dcc.Dropdown(
+                                            options=get_available_liftover_files("chromalias"),
+                                            value=None,
+                                            id="chromalias-maternal",
+                                        ),
+                                    ],
+                                    id="assembly-manual-fields",
+                                    style={"display": "none"},
+                                ),
+                                html.P(
+                                    "Uses the PAM, guide(s), mismatch and bulge settings below.",
+                                    style={
+                                        "font-size": "1.25rem",
+                                        "color": "#777",
+                                        "font-style": "italic",
+                                        "margin-top": "8px",
+                                    },
+                                ),
+                            ],
+                            style={"margin-top": "12px"},
+                        ),
+                        label="Personal assembly",
+                        tab_id="tab-personal-assembly",
+                    ),
+                ],
+                id="genome-mode-tabs",
+                active_tab="tab-reference-genome",
             ),
         ]
     )
@@ -2274,18 +2864,54 @@ def index_page() -> html.Div:
         ]
     )
     # submit button
+    # One submit button visible at a time, in the one natural end-of-form
+    # spot, matching whichever mode Step 2's toggle is in -- NOT two
+    # different-looking submit actions in two different places on the page.
+    # The two underlying callbacks (change_url / submit_assembly_search_job)
+    # stay fully independent regardless -- this is purely a visibility
+    # toggle over which button shows, driven by the same
+    # toggle_assembly_search_panel callback that hides/shows the regular
+    # genome fields in Step 2.
     submit_content = html.Div(
         [
-            html.Button(
-                "Submit",
-                id="check-job",
-                style={
-                    "background-color": "#E6E6E6",
-                    "width": "300px",
-                    "fontSize": "1.5rem",
-                },
+            html.Div(
+                [
+                    html.Button(
+                        "Submit",
+                        id="check-job",
+                        style={
+                            "background-color": "#E6E6E6",
+                            "width": "300px",
+                            "fontSize": "1.5rem",
+                        },
+                    ),
+                    html.Button("", id="submit-job", style={"display": "none"}),
+                ],
+                id="regular-submit-fields",
             ),
-            html.Button("", id="submit-job", style={"display": "none"}),
+            html.Div(
+                [
+                    # Same look as the "Submit" button above (background,
+                    # width, font size) rather than a Bootstrap-primary blue
+                    # button with a longer label -- the "Reference genome" /
+                    # "Personal assembly" tab already tells the user which
+                    # mode they're in, so a differently-styled/worded submit
+                    # button under it reads as inconsistent, not informative.
+                    # id unchanged -- submit_assembly_search_job still fires
+                    # off Input("submit-assembly-job", "n_clicks").
+                    html.Button(
+                        "Submit",
+                        id="submit-assembly-job",
+                        style={
+                            "background-color": "#E6E6E6",
+                            "width": "300px",
+                            "fontSize": "1.5rem",
+                        },
+                    ),
+                ],
+                id="assembly-submit-fields",
+                style={"display": "none"},
+            ),
         ],
         style={"textAlign": "left"},  # left-align to match the inputs/dropdowns
     )
@@ -2463,6 +3089,30 @@ def toggle_advanced_thresholds(n_clicks: int, is_open: bool) -> Tuple:
     label = "Advanced options ▴" if new_open else "Advanced options ▾"
     # slider disabled (grayed out) exactly when the advanced panel is open
     return new_open, new_open, label
+
+
+@app.callback(
+    [
+        Output("regular-submit-fields", "style"),
+        Output("assembly-submit-fields", "style"),
+    ],
+    [Input("genome-mode-tabs", "active_tab")],
+    prevent_initial_call=True,
+)
+def toggle_assembly_search_panel(active_tab: str) -> Tuple:
+    """Swaps which of the two (independent) submit buttons is visible down
+    in the end-of-form submit area, based on which Step 2 tab is active --
+    only one submit action ever shows at a time. Which set of genome/
+    variant-vs-assembly dropdowns is VISIBLE is now handled natively by
+    dbc.Tabs itself (only the active tab's content renders) -- this
+    callback only has the submit-button swap left to do, unlike the old
+    collapsible-toggle version it replaced, which also had to manually
+    show/hide the regular-genome-fields div and the toggle button's own
+    label."""
+    is_assembly = active_tab == "tab-personal-assembly"
+    hidden = {"display": "none"}
+    shown = {}
+    return (hidden if is_assembly else shown), (shown if is_assembly else hidden)
 
 
 @app.callback(
