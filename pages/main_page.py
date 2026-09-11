@@ -300,9 +300,9 @@ def _complete_assembly_options() -> List[Dict]:
     ]
 
 
-# Directory convention ("Option 1" in assembly_search_web_plan.md): the job
-# id IS the `--output` value passed to `assembly-search` directly -- no
-# separate id, no mapping file. `assembly_search()` itself is never modified;
+# Directory convention: the job id IS the `--output` value passed to
+# `assembly-search` directly -- no separate id, no mapping file.
+# `assembly_search()` itself is never modified;
 # it already writes `Results/<id>_paternal/`, `_maternal/`, `_combined/` on
 # its own, and only guards a re-run by checking whether the final
 # `<id>_combined_hg38.tsv` file exists -- so pre-creating an empty

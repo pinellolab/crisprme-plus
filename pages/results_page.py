@@ -1044,10 +1044,8 @@ def result_page_assembly(job_id: str) -> html.Div:
     StopIteration) and assumes complete-search's exact output filenames
     (glob for *integrated*, a per-job SQLite .db, .acfd_CFD.txt) from its
     very first lines, well before its own genome_type tab-set branch --
-    none of that exists for an assembly-search job. See
-    assembly_search_web_plan.md component D for the full investigation
-    (confirmed by directly reading result_page() and generate_sample_card,
-    not assumed).
+    none of that exists for an assembly-search job (confirmed by directly
+    reading result_page() and generate_sample_card, not assumed).
 
     First-pass scope, deliberately: the reconciled off-target table (the 3
     real `origin` categories reconcile_haplotypes() can actually produce --
@@ -1161,8 +1159,7 @@ def result_page_assembly(job_id: str) -> html.Div:
     # {paternal,maternal}_offtargets_not_lifted.bed. Cross-referencing the
     # two recovers real per-site detail (coordinates/sequence/CFD in the
     # haplotype's OWN coordinate system, not hg38 -- these sites have none)
-    # with no core/CLI change (corrected an earlier wrong finding here --
-    # see assembly_search_web_plan.md component D). Only splits into
+    # with no core/CLI change. Only splits into
     # "private to paternal" / "private to maternal" -- NOT further resolved
     # against whether the same site is also present (under a different,
     # also-unmappable representation) in the other haplotype; that
@@ -1801,9 +1798,7 @@ def result_page_assembly(job_id: str) -> html.Div:
     # adds a genuine "Query Genomic Region" equivalent (the region filter
     # below) as a mode on this one table instead of a second, mostly-
     # overlapping tab -- both features are really "which subset of sites, in
-    # which coordinate space, am I browsing", see assembly_search_web_plan.md
-    # ("scoping pass -- Query Genomic Region tab (7) and Custom Ranking
-    # redesign (8)") for the full design discussion this implements.
+    # which coordinate space, am I browsing".
     custom_ranking_tab = [
         html.Br(),
         dbc.Row(

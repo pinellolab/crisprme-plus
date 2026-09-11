@@ -183,9 +183,9 @@ def change_page(href: str, path: str, search: str, hash_guide: str) -> Tuple:
         # result_page() crashes on an assembly-search job: it does unguarded
         # .Params.txt field lookups (Genome_idx, Ref_comp, ...) and assumes
         # complete-search's exact output filenames from its very first
-        # lines, well before its own genome_type tab-set branch -- see
-        # assembly_search_web_plan.md component D. Bypass it entirely for
-        # an assembly job rather than trying to partially branch into it.
+        # lines, well before its own genome_type tab-set branch. Bypass it
+        # entirely for an assembly job rather than trying to partially
+        # branch into it.
         # No sub-hash routes (guidePagev3/sample_page/cluster_page below)
         # apply to assembly-search results, so only the base case needs
         # this check.

@@ -476,8 +476,7 @@ def validate_assembly_pairing(genome_dir: str, chain_path: str, chromalias_path:
     triplet, run at registration time (before writing markers) rather than
     deferred to an actual search -- a naming mismatch here otherwise fails
     silently, folded into reconciliation's "non-mappable" count instead of
-    raising an error (see assembly_search_web_plan.md's H2 section for the
-    full reasoning). Returns None if everything checks out, else one
+    raising an error. Returns None if everything checks out, else one
     human-readable error describing the first problem found.
     """
     hg38_err = _chain_targets_hg38(chain_path)
@@ -1949,8 +1948,8 @@ def add_assembly(n, individual, haplotype, genome, chain, chromalias):
     # rather than deferred to an actual search -- a mismatch here otherwise
     # fails silently, folded into reconciliation's "non-mappable" count
     # instead of raising an error. Deliberately more than add_vcf's own
-    # genome pairing does (presence-only) -- see assembly_search_web_plan.md's
-    # H2 section for why that asymmetry is justified here.
+    # genome pairing does (presence-only): a personal-assembly triplet has
+    # more ways to be silently mismatched than a single VCF+genome pair.
     genome_dir = os.path.join(current_working_directory, GENOMES_DIR, str(genome).replace(" ", "_"))
     chain_path = os.path.join(current_working_directory, LIFTOVER_DIR, chain)
     chromalias_path = os.path.join(current_working_directory, LIFTOVER_DIR, chromalias)

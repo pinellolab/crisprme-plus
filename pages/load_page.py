@@ -345,8 +345,8 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
 # Merge/Images/Integrate/Database) read via a "Ref_comp\tTrue" check in
 # .Params.txt; an assembly-search job's log.txt never contains any of those
 # strings (assembly_search() prints its own, completely different stage
-# transitions -- see assembly_search_web_plan.md component B), so it would
-# just show "To do" forever, never reaching the done gate. Building a
+# transitions), so it would just show "To do" forever, never reaching the
+# done gate. Building a
 # separate, small parser for the 4 real stage-transition prints
 # assembly_search() already emits is far lower-risk than threading
 # genome_type-awareness through the existing, working complete-search
@@ -490,8 +490,8 @@ def remove_assembly_result(n: int, dir_name: str) -> Optional[html.P]:
     left behind (<id>_paternal, _maternal, _combined) -- not just the single
     <id>_combined directory named in the URL. Reads Paternal_dir/
     Maternal_dir from .Params.txt (written explicitly at submit time by
-    submit_assembly_search_job, see assembly_search_web_plan.md) rather than
-    re-deriving the sibling names by string convention here too."""
+    submit_assembly_search_job) rather than re-deriving the sibling names by
+    string convention here too."""
     if not n:
         raise PreventUpdate
     combined_dir_name = dir_name.split("=")[-1]
