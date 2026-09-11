@@ -1,5 +1,17 @@
 # Design: fast-mode CRISTA-skip / CFD-only fallback
 
+> **⚠️ SUPERSEDED by measurement (do not implement as a perf fix).** A direct CRISTA
+> throughput bench (on-SIF, 40k targets) measured **~7,500 targets/s serial** and only
+> **1.27× at 8 workers**. Cross-referenced against the version-matrix (179,843 bestCRISTA
+> rows in the 100-min-timeout run), **CRISTA is ~1–3% of the post-analysis tail** — the
+> ~58-min SNP step is row production (enumeration + Tier-0/1 lookups + CFD + emit) and the
+> indel post-analysis is single-threaded. A CRISTA-skip would save ~1–2 min of a 100-min
+> timeout. The real lever is **#174** (parallelize per-contig row production + the indel
+> path). This doc is retained only as the (correct-but-moot) design that *would* apply if
+> CRISTA were ever the bottleneck; the `--cfd-only` flag survives at most as a minor
+> convenience, not a performance mechanism. See `RELEASE_REPORT_2.5.2.md` §4.
+
+
 Grounded design (workflow `wf_f83df9e3`, 13 agents) for letting fast mode drop the
 expensive CRISTA best-effort screen so a search always **finishes** (CFD stays the
 exact worst case). Motivated by the version-matrix: a very-dense guide

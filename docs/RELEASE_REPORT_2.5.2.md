@@ -103,16 +103,23 @@ The `run_v1/v2/v3` progression, rebuilt against real prebuilt tiers (`--index-pa
 
 **Net for fast-default:** still correct — `--fast` never does *more* work than full and it removes the enumeration wall; but the matrix keeps us honest that it doesn't fix the CRISTA/indel tail, so the docs frame it as "tractable on any panel" for the *enumeration* cost, not a blanket speed guarantee.
 
-## 4. CRISTA parallel prototype (post-2.5.2, on `dev`)
+## 4. CRISTA speed + parallel prototype (post-2.5.2, on `dev`) — **CRISTA is NOT the tail**
 
-Answers "why is CRISTA the tail?" — the post-analysis pool parallelizes per **contig**, so one big chromosome's worker runs serially long after the others. Prototype parallelizes the CPU-bound per-target **feature build** at the finest seam + lets the RF predict use joblib threads.
+**Measured absolute throughput (on-SIF, 40k synthetic targets, 256-core host):**
 
-- `CRISPRME_CRISTA_PARALLEL` (opt-in, **default OFF**). `dev` commits `7771b66` → `c5fff0d` (fork) → `3d7aa44`/`a0e7f16` (measurement-driven scope-down).
-- **Parallelizes only the per-target feature build** (`get_features`) — the genuinely serial part — across a small bounded **fork** pool (bit-identical feature matrix; contiguous order-preserving chunks). Test `test_crista_parallel_equivalence` (in CI).
-- **Fork, not spawn** — the post-analysis callers run their main at module top level (no `__main__` guard), so spawn would re-run the whole analysis in each child; fork is safe (caller is an isolated `subprocess.call` child; inner pool bounded ≤8).
-- **Measured** (on-SIF, 20k real targets): feature-build alone **3.8× @ 8w**; full `CRISTA_predict_list` **~1.2–2×** (modest — see below). Feature-build-only, 10-core mac: 1.36× (2w) / 2.49× (4w) / 3.82× (8w).
-- **Key measurement finding:** the pickled RF predictors already carry **`n_jobs=-1`** → the predict already fans across all cores (it's the dominant per-batch cost, ~4× the feature build), so parallelizing the predict further only over-subscribes. It is also therefore **non-deterministic at the raw-float level** — two *serial* predict runs differ by ~5e-17, **identical to the emitted 3 decimals**. So CRISTA output has *always* been reproducible only to the emitted precision (not raw bits); this prototype preserves exactly that.
-- **Takeaway:** the bigger lever for the per-contig skew tail is **outer-level balanced contig batching** (tracked #174), not per-batch predict parallelism. The feature-build fork pool is a clean, bit-identical, opt-in partial win.
+| `CRISPRME_CRISTA_PARALLEL` | wall | throughput | speedup |
+|---|---|---|---|
+| 1 (serial) | 5.29 s | **7,557 targets/s** | 1.0× |
+| 4 | 4.37 s | 9,153 targets/s | 1.21× |
+| 8 | 4.16 s | 9,623 targets/s | 1.27× |
+
+Serial split: **feature-build 58%, predict 42%**. The predict already carries `n_jobs=-1` (all cores), so `CRISPRME_CRISTA_PARALLEL` only speeds the feature build → **1.27× at 8 workers**, not the ~3.8× the earlier feature-build-only micro-benchmark suggested end-to-end.
+
+**The load-bearing correction (measured):** CRISTA is **fast** (~7.5k targets/s) and is **NOT the post-analysis tail**. Cross-referencing the version-matrix (§3d): the dense guide produced ~118k variant SNP targets → **179,843 rows in bestCRISTA.txt**. At 7.5k/s (×2 for the alt+ref passes) that is **~100 seconds of CRISTA — ~1–3% of the 60-min SNP post-analysis.** The remaining ~58 min is **row production** (per-window IUPAC enumeration + Tier-0/Tier-1 registry/genotype lookups + CFD + emit, ≈20 ms/row), and the search *also* timed out in the **single-threaded indel post-analysis** — which `--fast` does not touch.
+
+Consequence: a **CRISTA-skip / CFD-only fallback would save ~1–2 min of a 100-min timeout** — it targets the wrong thing. We are **not** building it as a perf fix (see `docs/DESIGN_fast_crista_skip.md`, superseded by this measurement).
+
+The `CRISPRME_CRISTA_PARALLEL` fork-pool prototype (opt-in, default OFF, bit-identical — `test_crista_parallel_equivalence` in CI; `dev` `7771b66`→`c5fff0d`→`a0e7f16`) remains a clean but **minor** (1.27×) partial win. **The real lever is #174:** parallelize the per-contig SNP row-production (the 58-min step) and the single-threaded indel post-analysis, and/or reduce candidate volume. A row-production profile (enumeration vs tier-lookup vs CFD vs emit) is being captured to target #174 at the right sub-step.
 
 ## 5. Pending / for your decision
 
