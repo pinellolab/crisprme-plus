@@ -12,6 +12,15 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Performance
+- **All indexes ship the Tier-0 registry uncompressed (raw) by default — "speed over space."**
+  Registry lookups (millions per dense search, scattered across a chromosome) are now direct
+  memory-mapped reads with **no per-lookup decompression** — measured **~2× faster** than the
+  compressed path even with a warm cache. The genotyped build previously hard-coded zlib
+  (`compress=True`); it now defaults to raw, matching the sites-only mega index, so both
+  production indexes use **one consistent format**. Optional zlib block-compression (~3.5×
+  smaller on disk) remains available via `CRISPRME_REGISTRY_COMPRESS=1` at build time (or
+  `transcode_registry`); the reader reads either format byte-for-byte identically. The block
+  cache + O(1) LRU below now serve that opt-in compressed path.
 - **Tier-0 registry block-cache: ~3.7× faster dense variant post-analysis, genome-wide, byte-identical.**
   The genotyped v3 registry is zlib block-compressed (`~3.6×` smaller on disk); profiling a
   dense per-contig SNP post-analysis showed the cost had moved to lookup-time decompression —
