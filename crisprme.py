@@ -12,7 +12,7 @@ import os
 import re
 
 
-version = "2.4.0"  #  CRISPRme version; TODO: update when required
+version = "2.5.2"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -345,7 +345,14 @@ def print_help_complete_search() -> None:
         "\t--full_input_validate, also run a full per-VCF-record scan (chromosome "
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
-        "default lightweight checks, so opt-in [OPTIONAL]\n")
+        "default lightweight checks, so opt-in [OPTIONAL]\n"
+        "\t--fast, two-pass FAST MODE for dense variant panels: the post-analysis "
+        "reports ONE worst-POSSIBLE off-target per variant window instead of "
+        "enumerating every haplotype (the enumeration-free fix for the intractable "
+        "dense-panel post-analysis). Trades per-sample phased resolution (rows are "
+        "worst-possible / PUTATIVE) for tractability. CFD is the EXACT worst-case; "
+        "CRISTA is best-effort (run without --fast for a guaranteed CRISTA worst-case). "
+        "Recommended for high-density / unphased / aggregate panels [OPTIONAL]\n")
     sys.exit(1)
 
 
@@ -960,7 +967,18 @@ def _check_samples_ids(args: List[str], variant: bool) -> str:
             does not exist.
     """
     if variant and "--samplesID" not in args:
-        error("Missing --samplesID argument for variant-aware offtargets search")
+        # A sites-only / aggregate variant index (e.g. the "mega" all-source panel)
+        # has NO per-sample roster: its per-dataset allele frequencies come from the
+        # Tier-0 registry (registry_<vcf>/), not a samplesID. Allow the search to
+        # proceed with the empty mock sample set rather than hard-failing; the report
+        # still gets per-dataset AF from the registry, just no per-individual columns.
+        sys.stderr.write(
+            "WARNING: variant-aware search without --samplesID -- using an empty "
+            "sample set. Per-dataset allele frequencies still come from the registry; "
+            "there will be no per-individual sample columns (correct for an aggregate/"
+            "sites-only index such as the mega all-source panel).\n"
+        )
+        return os.path.join(script_path, "vuoto.txt")
     if not variant and "--samplesID" in args:
         error("Missing --samplesID selected, but missing --vcf argument")
     if not variant:  # use mock file for samples if variant not used
@@ -1375,6 +1393,19 @@ def complete_search() -> None:
             raise ValueError("Missing input for --vcf-filter-pass-values") from e
     full_input_validate = "--full_input_validate" in args
 
+    # 2.5.1 two-pass FAST MODE (--fast): the variant post-analysis emits ONE
+    # worst-POSSIBLE representative off-target per IUPAC window instead of enumerating
+    # the 2^k haplotype lattice / the observed per-sample haplotypes -- the enumeration-
+    # free fix for the intractable dense-panel post-analysis (49h+; see
+    # docs/DESIGN_2.5.1_two_pass_fast_mode.md). It trades per-sample phased resolution
+    # (rows are tagged PUTATIVE, worst-possible) for tractability. Propagated to the
+    # whole post-analysis subprocess tree via CRISPRME_FAST_MODE (submit_job -> pools ->
+    # post_analisi_*.sh -> new_simple_analysis.py all inherit os.environ), so no shell
+    # arg-contract changes are needed. Advanced users can also set the env var directly.
+    fast_mode = "--fast" in args
+    if fast_mode:
+        os.environ["CRISPRME_FAST_MODE"] = "1"
+
     # optional prebuilt/staged reference-index library (--index-path). When
     # given, the reference index is looked up here (e.g. an index made with
     # build-index-only, or one downloaded ahead of time) rather than built under
@@ -1487,6 +1518,20 @@ def complete_search() -> None:
                 f"bulge(s) of each type from --max-total-edits {max_total_edits} "
                 f"(reachable index bulge depth {_idx_cap})."
             )
+    # [max-total-edits] Surface the silent combined-edit prune (issue #107): when the
+    # requested mm + bulges exceed the cap, any alignment stacking more than
+    # max_total_edits edits is PRUNED inside the TST search -- the exact reason a deep
+    # off-target (e.g. chr14:63727708 = 5mm + 2 bulges = 7 edits) is missed on a default
+    # run. Keep the conservative default (advanced users raise it), but never silent.
+    if 0 <= max_total_edits < mm + bDNA + bRNA:
+        print(
+            f"WARNING [complete-search]: --max-total-edits {max_total_edits} is below the "
+            f"requested {mm}mm + {bDNA} DNA + {bRNA} RNA bulges = {mm + bDNA + bRNA} total "
+            f"edits. Alignments needing more than {max_total_edits} COMBINED edits are "
+            f"PRUNED (e.g. a 5mm+2-bulge = 7-edit off-target is dropped). Raise "
+            f"--max-total-edits to {mm + bDNA + bRNA} to keep such deep off-targets.",
+            flush=True,
+        )
     if bMax != 0:
         search_index = True
     else:
@@ -1539,6 +1584,25 @@ def complete_search() -> None:
         # the binding total-edits cap the search actually used (the "Max edits" the
         # user set): the report + web read this; without it they showed "n/a".
         p.write("Max_total_edits\t" + str(max_total_edits) + "\n")
+        # Persist the silent-prune WARN into the run sidecar so it reaches
+        # .Params.txt -> report.zip. The parent-stdout WARN (printed earlier in
+        # complete_search) is NOT captured: log_verbose.txt only redirects the child
+        # job. generate_report reads .Params.txt as a kv sidecar AND bundles it
+        # verbatim. Single physical line (no embedded newline) so the reader parses
+        # it cleanly. Guarded by the SAME condition as the stdout WARN.
+        if 0 <= max_total_edits < mm + bDNA + bRNA:
+            p.write(
+                "Pruning_note\t"
+                + (
+                    f"--max-total-edits {max_total_edits} is below the requested "
+                    f"{mm}mm + {bDNA} DNA + {bRNA} RNA bulges = {mm + bDNA + bRNA} total "
+                    f"edits; alignments needing more than {max_total_edits} COMBINED edits "
+                    f"were PRUNED (e.g. a 5mm+2-bulge = 7-edit off-target is dropped). "
+                    f"Raise --max-total-edits to {mm + bDNA + bRNA} to keep such deep "
+                    f"off-targets."
+                )
+                + "\n"
+            )
         p.write("Annotation\t" + str(annotation_name) + "\n")
         p.write("Nuclease\t" + str(nuclease) + "\n")
         # p.write('Gecko\t' + str(gecko_comp) + '\n')
@@ -1637,6 +1701,91 @@ def complete_search() -> None:
     ):
         sys.exit(1)
 
+    # Pre-flight: a variant search needs a PREBUILT variant index. A fresh
+    # `complete-search --vcf` with no prebuilt index falls back to a legacy on-demand
+    # enrichment that produces a classic per-sample dict WITHOUT the dict-less tiers
+    # (Tier-0 registry + Tier-1 genotype -- only build-index-only emits those), and whose
+    # indel `log_indels` map does not reliably materialize -- so the variant/indel
+    # post-analysis crashes ~30 min in with a cryptic `FileNotFoundError: log<chrom>.txt`.
+    # Detect it up front by the presence of the POST-ANALYSIS tiers per dataset: the SNP
+    # tier (per-sample `dictionaries_<vcf>/` OR dict-less `registry_<vcf>/`) AND the indel
+    # coordinate map (`log_indels_<vcf>/`). NB: check the tiers, NOT an enriched-genome
+    # dir -- a dict-less DOWNLOAD ships the search index (`genome_library/`) + tiers but
+    # not the `Genomes/<ref>+<vcf>` enrichment intermediate, so an enriched-genome check
+    # would false-fire on legit downloaded installs. The source VCFs are not shipped with
+    # the index, so a dict-less variant index cannot be built on demand -- download it, or
+    # build-index-only first. Override for advanced / legacy on-demand builds with
+    # CRISPRME_ALLOW_ONDEMAND_BUILD=1.
+    if variant and not os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
+        _dict_root = os.path.join(current_working_directory, "Dictionaries")
+        _missing = []
+        for _vdir in vcf_dataset_dirs:
+            _vn = os.path.basename(os.path.normpath(_vdir))
+            _have_snp = os.path.isdir(
+                os.path.join(_dict_root, f"dictionaries_{_vn}")
+            ) or os.path.isdir(os.path.join(_dict_root, f"registry_{_vn}"))
+            _have_indel = os.path.isdir(os.path.join(_dict_root, f"log_indels_{_vn}"))
+            if not (_have_snp and _have_indel):
+                _missing.append(_vn)
+        if _missing:
+            error(
+                "No prebuilt variant index found for: %s.\n\n"
+                "`complete-search --vcf` does NOT build a variant index on demand -- the "
+                "dict-less tiers (registry/genotype) and the indel coordinate map are "
+                "produced only at build time, and the source VCFs are not shipped with the "
+                "index. Build or download the index FIRST, then re-run complete-search:\n\n"
+                "  download a prebuilt index (recommended):\n"
+                "    crisprme.py download --what index --index-name "
+                "NRG_3_hg38+hg38_1000G2021_HGDP --path .\n\n"
+                "  or build it locally (source VCFs required):\n"
+                "    crisprme.py build-index-only --genome %s --vcf %s --samplesID "
+                "<samplesID> --pam %s --bMax <N>\n\n"
+                "then:\n"
+                "    crisprme.py complete-search ... --index-path genome_library\n\n"
+                "(advanced: set CRISPRME_ALLOW_ONDEMAND_BUILD=1 to force the legacy "
+                "on-demand build, which produces a classic dict-only index and may fail "
+                "the indel post-analysis.)"
+                % (", ".join(_missing), genomedir, vcfdir, pamfile)
+            )
+
+        # SNP+indel co-occurrence needs the dict-less registry tier SPECIFICALLY (the
+        # guard above accepts EITHER the classic per-sample dict OR the registry). A
+        # classic-dict-only index (e.g. a local build-index-only run WITHOUT --samplesID)
+        # passes the guard but then reports NO co-occurrence -- previously silent. Warn once.
+        _cooc_on = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
+        if _cooc_on:
+            _no_reg = [
+                os.path.basename(os.path.normpath(_v))
+                for _v in vcf_dataset_dirs
+                if not os.path.isdir(
+                    os.path.join(
+                        _dict_root, "registry_" + os.path.basename(os.path.normpath(_v))
+                    )
+                )
+            ]
+            if _no_reg:
+                print(
+                    "WARNING [complete-search]: SNP+indel co-occurrence is ON but the "
+                    "dict-less registry tier (registry_<vcf>/) is missing for: %s. This "
+                    "index has only the classic per-sample dict, so co-occurrence will NOT "
+                    "be reported (not an error -- the rest of the search runs normally). To "
+                    "enable it, download the index from HuggingFace or rebuild with "
+                    "build-index-only --samplesID." % ", ".join(_no_reg)
+                )
+
+    if fast_mode:
+        print(
+            "[complete-search] FAST MODE (--fast): the SNP variant post-analysis reports one "
+            "WORST-POSSIBLE off-target per window (no 2^k haplotype enumeration; rows are "
+            "worst-possible / PUTATIVE, not per-sample phased). CFD is the EXACT worst case -- "
+            "a safe actionable gate (genome-wide validation: 0 CFD>=0.2 loci lost or demoted "
+            "vs the full path). CRISTA is a best-effort SCREEN: genome-wide, a small fraction "
+            "(~5%) of CRISTA>=0.2 loci can drop below 0.2 under --fast (largest observed gap "
+            "~0.12), so re-run WITHOUT --fast for a CRISTA-based action gate. SNP+indel "
+            "co-occurrence is UNCHANGED by --fast -- the indel_snp_cooc.tsv is byte-identical "
+            "to a non-fast run (--fast affects only the SNP representatives, not the indel "
+            "cis-phasing pass). See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
+        )
     print(
         f"Launching job {outputfolder}. The stdout is redirected in log_verbose.txt and stderr is redirected in log_error.txt"
     )
@@ -2173,21 +2322,67 @@ def build_index_only() -> None:
                 f"{', '.join(db_to_samplesid)})...",
                 flush=True,
             )
-            _emitted = 0
-            for _dfile in _dict_files:
-                _b = os.path.basename(_dfile)
-                # strip "my_dict_" prefix and the .json / .json.gz suffix -> <chrom>
-                _stem = _b[len("my_dict_"):]
+            # [tier-parallel] Tier emission is embarrassingly parallel per chromosome
+            # (each call writes its own reg_<chrom>/gt_<chrom>). At high-coverage scale
+            # the per-chrom dict is multi-GB and peaks at ~150-180GB RSS, so bound
+            # concurrency by RAM: CRISPRME_TIER_WORKERS (default 4 -> ~700GB peak).
+            # Biggest dicts first so peak-RAM chromosomes don't pile up at the tail.
+            # emit_dictless_tiers_guarded never raises and returns a picklable metadata
+            # dict (or None), so it is safe to fan out over a fork pool.
+            def _tier_chrom(_dfile):
+                _stem = os.path.basename(_dfile)[len("my_dict_"):]
                 for _suf in (".json.gz", ".json"):
                     if _stem.endswith(_suf):
-                        _stem = _stem[: -len(_suf)]
-                        break
-                _chrom = _stem
-                _res = _bdt.emit_dictless_tiers_guarded(
-                    _dfile, db_to_samplesid, _chrom, dict_folder
-                )
-                if _res is not None:
-                    _emitted += 1
+                        return _stem[: -len(_suf)]
+                return _stem
+            # Skip chromosomes already emitted so a restart resumes instead of
+            # re-reading multi-GB dicts. Key on the .idx sidecars: each writer emits
+            # the .bin, then writes its .idx LAST and ATOMICALLY (tmp+os.replace), so a
+            # present .idx is the completion marker. The .bin alone is NOT -- a kill
+            # mid-write leaves a truncated .bin that a presence check would wrongly
+            # accept as done (silently shipping a short tier store).
+            _reg_dir = os.path.join(os.path.dirname(dict_folder), f"registry_{vcf_name}")
+            _gt_dir = os.path.join(os.path.dirname(dict_folder), f"genotypes_{vcf_name}")
+            _tier_jobs = []
+            _tier_present = 0
+            for _dfile in sorted(_dict_files, key=os.path.getsize, reverse=True):
+                _c = _tier_chrom(_dfile)
+                if (os.path.isfile(os.path.join(_reg_dir, f"reg_{_c}.idx"))
+                        and os.path.isfile(os.path.join(_gt_dir, f"gt_{_c}.idx"))):
+                    _tier_present += 1
+                    continue
+                _tier_jobs.append((_dfile, db_to_samplesid, _c, dict_folder))
+            if _tier_present:
+                print(f"  {_tier_present} chromosome(s) already emitted; resuming "
+                      f"{len(_tier_jobs)} remaining", flush=True)
+            try:
+                _tier_workers = int(os.environ.get("CRISPRME_TIER_WORKERS", "4"))
+            except ValueError:
+                _tier_workers = 4
+            _tier_workers = max(1, min(_tier_workers, len(_tier_jobs) or 1))
+            _emitted = _tier_present
+            if _tier_workers > 1:
+                print(f"  emitting tiers with {_tier_workers} parallel worker(s) "
+                      "(RAM-bounded; set CRISPRME_TIER_WORKERS to tune)", flush=True)
+                import multiprocessing as _mp
+                try:
+                    with _mp.get_context("fork").Pool(_tier_workers) as _tpool:
+                        for _r in _tpool.starmap(
+                            _bdt.emit_dictless_tiers_guarded, _tier_jobs
+                        ):
+                            if _r is not None:
+                                _emitted += 1
+                except Exception as _tperr:  # noqa: BLE001 - degrade to sequential
+                    print(f"WARNING [tier-parallel]: pool failed ({_tperr}); "
+                          "re-emitting sequentially.", flush=True)
+                    _emitted = 0
+                    for _job in _tier_jobs:
+                        if _bdt.emit_dictless_tiers_guarded(*_job) is not None:
+                            _emitted += 1
+            else:
+                for _job in _tier_jobs:
+                    if _bdt.emit_dictless_tiers_guarded(*_job) is not None:
+                        _emitted += 1
             print(
                 f"Dictless tier emission complete: {_emitted}/{len(_dict_files)} "
                 "chromosome(s) emitted (registry_<vcf>/ + genotypes_<vcf>/ siblings "
@@ -2259,6 +2454,76 @@ def build_index_only() -> None:
                         f"written ({_vc_err}); reports fall back to the .idx headers.",
                         flush=True,
                     )
+    # [indel-snp] STEP 1c (ADDITIVE, gated): emit the PHASED indel genotype store so
+    # the indel post-analysis can do CONFIRMED-cis SNP+indel co-occurrence. One
+    # gt_indel_<chrom>.tsv.gz per chromosome under indel_genotypes_<vcf>/ (sibling of
+    # the SNP tiers). GUARDED (stdout warning, never abort); absent -> the post-
+    # analysis degrades to PUTATIVE via the log's unphased carriers. Enabled by
+    # default (opt-out): set CRISPRME_INDEL_SNP=0 to disable.
+    if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+        try:
+            import build_indel_genotypes as _big
+            _igt_dir = os.path.join(workdir, "Dictionaries", f"indel_genotypes_{vcf_name}")
+            os.makedirs(_igt_dir, exist_ok=True)
+            _keep = None
+            if db_to_samplesid:  # union of the per-db panels (match the SNP tiers)
+                _keep = set()
+                for _sid in db_to_samplesid.values():
+                    if _sid and os.path.isfile(_sid):
+                        _keep |= _big._load_panel(_sid)
+                _keep = _keep or None
+            _n_ig = 0
+            # Build (vcf, out, keep) jobs; detect chrom from the first data line (the
+            # filename may not carry it). Skip chromosomes already built so a restart
+            # resumes instead of re-streaming 20GB VCFs.
+            _ig_jobs = []
+            for _vf in sorted(_glob(os.path.join(vcfdir, "*.vcf.gz"))
+                              + _glob(os.path.join(vcfdir, "*.vcf"))):
+                _chrom = None
+                _op = gzip.open(_vf, "rt") if _vf.endswith(".gz") else open(_vf)
+                with _op as _fh:
+                    for _ln in _fh:
+                        if _ln.startswith("#"):
+                            continue
+                        _cc = _ln.split("\t", 1)[0]
+                        _chrom = _cc if _cc.startswith("chr") else "chr" + _cc
+                        break
+                if _chrom is None:
+                    continue
+                _igt_out = os.path.join(_igt_dir, f"gt_indel_{_chrom}.tsv.gz")
+                # Resume only if the store is a COMPLETE, non-truncated gzip -- a
+                # size>0 check would skip a file left partial by an OOM/SIGKILL
+                # mid-write and silently ship a short store (the gt_indel_chr1 bug).
+                if os.path.isfile(_igt_out) and _big.store_is_complete(_igt_out):
+                    _n_ig += 1  # already built (resume)
+                    continue
+                _ig_jobs.append((_vf, _igt_out, _keep))
+            # compile_indel_genotypes streams the VCF (low RAM, I/O + gzip bound), so
+            # fan out wide -- CRISPRME_INDELGT_WORKERS (default 8). Guarded worker so a
+            # single bad chromosome cannot sink the store.
+            if _ig_jobs:
+                try:
+                    _igw = int(os.environ.get("CRISPRME_INDELGT_WORKERS", "8"))
+                except ValueError:
+                    _igw = 8
+                _igw = max(1, min(_igw, len(_ig_jobs)))
+                print(f"[indel-snp] building phased indel GT for {len(_ig_jobs)} "
+                      f"chromosome(s) with {_igw} parallel worker(s)", flush=True)
+                if _igw > 1:
+                    import multiprocessing as _mp
+                    with _mp.get_context("fork").Pool(_igw) as _igpool:
+                        _ig_res = _igpool.starmap(
+                            _big.compile_indel_genotypes_safe, _ig_jobs)
+                    _n_ig += sum(1 for _r in _ig_res if _r is not None and _r >= 0)
+                else:
+                    for _job in _ig_jobs:
+                        if _big.compile_indel_genotypes_safe(*_job) >= 0:
+                            _n_ig += 1
+            print(f"[indel-snp] phased indel genotype store: {_n_ig} chromosome(s) "
+                  f"-> {os.path.basename(_igt_dir)}", flush=True)
+        except Exception as _ig_err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
+            print(f"WARNING [indel-snp]: phased indel genotype store not built "
+                  f"({_ig_err}); indel post-analysis falls back to PUTATIVE.", flush=True)
     # STEP 2: index the enriched (SNP) genome
     if not os.path.isdir(snp_idx):
         print(f"Building variant index {os.path.basename(snp_idx)}...", flush=True)
@@ -2275,6 +2540,26 @@ def build_index_only() -> None:
     # STEP 3: index the indels genome (pool_index_indels.py, as the pipeline does)
     if not os.path.isdir(indels_idx):
         print(f"Building indels index {os.path.basename(indels_idx)}...", flush=True)
+        # [indel-snp] Overlay SNP IUPAC codes onto the fake-indel flanks BEFORE
+        # indexing so this _INDELS index also finds SNP+indel co-occurring
+        # off-targets (searchTST matches IUPAC codes for free -- no -var needed).
+        # Enabled by default (opt-out): set CRISPRME_INDEL_SNP=0 to disable. GUARDED
+        # (stdout warning, never abort -- stderr is fatal here), mirroring the tiers above.
+        if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+            try:
+                import overlay_indel_snps as _ois
+                _n = _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict])
+                print(
+                    f"[indel-snp] SNP-overlaid the fake-indel genome "
+                    f"({_n} flank bases IUPAC-coded).",
+                    flush=True,
+                )
+            except Exception as _ois_err:
+                print(
+                    f"WARNING [indel-snp]: fake-indel SNP overlay failed "
+                    f"({_ois_err}); this _INDELS index will be SNP-blind.",
+                    flush=True,
+                )
         pool = os.path.join(script_path, "pool_index_indels.py")
         code = subprocess.call(
             [

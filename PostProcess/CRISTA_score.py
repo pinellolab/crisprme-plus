@@ -72,6 +72,13 @@ warnings.filterwarnings("ignore")
 
 # globals
 RF_PICKLE_PATH = "CRISTA_predictors.pkl"
+# PERF: the 276 MB CRISTA RandomForest ensemble was previously pickle.load()'d on
+# EVERY predict_crista_score() call (2x per 100k-target batch), i.e. tens of GB of
+# redundant unpickling per chromosome on both the SNP and INDEL post-analysis paths.
+# Cache the deserialized predictors at module scope and load exactly once per process
+# (workers are per-chromosome, single-threaded scorers -> one load each, reused across
+# all their batches). Output is byte-identical -- same model object, just not reloaded.
+_CRISTA_PREDICTORS = None
 MATCH_SCORE = 1.0
 MISMATCH_PENALTY = 0.0
 GAP_PENALTY = -1.25
@@ -177,9 +184,15 @@ def get_DNAshape_features(dna_seq):
 
     for i in range(2, len(dna_seq) - 2):
         current_heptamer = dna_seq[i - 2 : i + 3]
-        current_heptamer = re.sub(
-            "N", random.choice(["A", "C", "G", "T"]), current_heptamer
-        )
+        # Fast path: for scored targets the window is pure ACGT (N-windows are nulled
+        # upstream in the caller), so the N-substitution is a no-op. Only run the
+        # re.sub + random.choice when an N is actually present -- this skips ~25 eager
+        # regex+random calls per target and is byte-identical on the N-free sequences
+        # that reach scoring (.replace with a single once-chosen base == the old re.sub).
+        if "N" in current_heptamer:
+            current_heptamer = current_heptamer.replace(
+                "N", random.choice(["A", "C", "G", "T"])
+            )
         current_nucleotide = DNASHAPE_DICT[current_heptamer]
         mgw += current_nucleotide["MGW"]
         roll += current_nucleotide["Roll"]
@@ -407,6 +420,7 @@ def predict_crista_score(features_lst):
     mode: either full, nogenomic or noflanking
     :return: features df + prediction col
     """
+    global _CRISTA_PREDICTORS
     n_predictors = 5
 
     path = RF_PICKLE_PATH
@@ -449,13 +463,30 @@ def predict_crista_score(features_lst):
         except Exception:
             # Old sklearn (current image) or import failure: leave as-is.
             pass
-    with open(path, "rb") as pklr:
-        predictors = pickle.load(pklr)
+    # Load-once cache: only the 276 MB unpickle is guarded (the path-resolution and
+    # the sklearn-alias shim above are cheap + idempotent, so leaving them per-call is
+    # harmless). Subsequent calls in the same process reuse the deserialized ensemble.
+    if _CRISTA_PREDICTORS is None:
+        with open(path, "rb") as pklr:
+            _CRISTA_PREDICTORS = pickle.load(pklr)
+    predictors = _CRISTA_PREDICTORS
 
+    # PERF: coerce the feature batch to a contiguous float64 array ONCE. get_features builds
+    # each row via np.array over a mix of floats and STRING numerals (agct2numerals), so
+    # features_lst is a string-dtype (<U..) matrix; each of the 5 rf.predict(features_lst)
+    # calls would otherwise re-run sklearn's string->float check_array coercion independently
+    # (the dominant per-batch predict cost). One shared coercion collapses a 100k-batch
+    # predict from ~12s to ~2s. Byte-identical: sklearn coerces the string matrix to the same
+    # floats internally, so pre-coercing changes nothing numerically and predict preserves row
+    # order. Fall back to the raw list if the batch is ragged (never break scoring).
+    try:
+        features_arr = np.asarray(features_lst, dtype=np.float64)
+    except (ValueError, TypeError):
+        features_arr = features_lst
     predictions = []
     for i in range(n_predictors):
         rf_predictor = predictors[i]
-        predictions.append(rf_predictor.predict(features_lst))
+        predictions.append(rf_predictor.predict(features_arr))
 
     return get_avg(predictions) / 8.22
 
@@ -529,20 +560,31 @@ def CRISTA_predict(sgseq_aligned, offseq_aligned, genomic_seq_29nt):
     return predictions
 
 
+def _crista_features_one(args):
+    """Build one target's CRISTA feature row. Top-level (picklable) so it can run in a
+    spawn ProcessPoolExecutor worker. Inputs are already upper-cased by the caller."""
+    sgRNA_seq, aligned_off_seq, dna_seq_29nt = args
+    max_score = get_alignment_score(sgRNA_seq, aligned_off_seq)
+    features = get_features(
+        full_dna_seq=dna_seq_29nt,
+        aligned_sgRNA=sgRNA_seq,
+        aligned_offtarget=aligned_off_seq,
+        pa_score=max_score,
+    )
+    return features[0]
+
+
 def CRISTA_predict_list(sgseq_aligned_list, offseq_aligned_list, genomic_seq_29nt_list):
-    crista_features = []
-    for i in range(len(sgseq_aligned_list)):
-        sgRNA_seq = sgseq_aligned_list[i].upper()
-        aligned_off_seq = offseq_aligned_list[i].upper()
-        dna_seq_29nt = genomic_seq_29nt_list[i].upper()
-        max_score = get_alignment_score(sgRNA_seq, aligned_off_seq)
-        features = get_features(
-            full_dna_seq=dna_seq_29nt,
-            aligned_sgRNA=sgRNA_seq,
-            aligned_offtarget=aligned_off_seq,
-            pa_score=max_score,
+    n = len(sgseq_aligned_list)
+    inputs = [
+        (
+            sgseq_aligned_list[i].upper(),
+            offseq_aligned_list[i].upper(),
+            genomic_seq_29nt_list[i].upper(),
         )
-        crista_features.append(features[0])
+        for i in range(n)
+    ]
+    crista_features = [_crista_features_one(a) for a in inputs]
     predictions = predict_crista_score(crista_features)
     return predictions
 

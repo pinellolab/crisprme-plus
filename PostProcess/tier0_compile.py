@@ -87,7 +87,8 @@ def read_samplesid(path, database, subpop_field="superpopulation"):
     return meta
 
 
-def build_sample_meta(db_to_samplesid, subpop_field="superpopulation"):
+def build_sample_meta(db_to_samplesid, subpop_field="superpopulation",
+                      genotyped_samples=None):
     """Read the ordered {database: samplesID_path} mapping into one sample_meta.
 
     Cross-db shared sample ids: for the current disjoint 1000G/HGDP panels this
@@ -107,6 +108,21 @@ def build_sample_meta(db_to_samplesid, subpop_field="superpopulation"):
             if sid in sample_meta and sample_meta[sid][0] != database:
                 overlaps.append(sid)
             sample_meta[sid] = row
+    if genotyped_samples is not None:
+        # #46 auto-fix: drop phantom samples listed in the samplesID file but
+        # genotyped in NO VCF -- otherwise they are counted as hom-ref and inflate
+        # the panel AN denominator, silently deflating every reported allele
+        # frequency. Filtering here makes AN = ploidy x genotyped, not x listed.
+        # No-op (byte-identical panel) when genotyped_samples is None or already a
+        # superset -- the common matched-panel + batteries (VCF-absent) cases.
+        gset = set(genotyped_samples)
+        before = len(sample_meta)
+        sample_meta = {s: r for s, r in sample_meta.items() if s in gset}
+        dropped = before - len(sample_meta)
+        if dropped:
+            print("tier0: dropped %d phantom samplesID sample(s) not genotyped in "
+                  "any VCF; panel AN now over the genotyped panel (#46)" % dropped,
+                  flush=True)
     return sample_meta, overlaps
 
 
@@ -232,7 +248,7 @@ def _emit_key(key, value, prefix):
 # --------------------------------------------------------------------------- #
 def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
                       *, alt_index="1", subpop_field="superpopulation",
-                      compress=False):
+                      compress=False, genotyped_samples=None):
     """Compile a legacy SNP dict into a panel-aware Tier-0 registry.
 
     Args:
@@ -257,7 +273,8 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
        "n_skipped_empty": int, "n_positions": int, "overlaps": [sample_id, ...]}.
     """
     sample_meta, overlaps = build_sample_meta(db_to_samplesid,
-                                              subpop_field=subpop_field)
+                                              subpop_field=subpop_field,
+                                              genotyped_samples=genotyped_samples)
     ploidy_of = ploidy_of_for_chrom(chrom)
 
     # Build the PanelIndex ONCE (per-group hom-ref baselines) and reuse it.

@@ -58,15 +58,54 @@ except Exception:  # any module absent in an old deploy -> no companion summary
 try:
     import observed_haplotypes as _obshap
     import phase_confirmation_companion as _phase_companion
+    import snp_snp_cooc_companion as _snpsnp_companion
 except Exception:  # module absent in an old deploy -> legacy dict path only
     _obshap = None
     _phase_companion = None
+    _snpsnp_companion = None
+
+# 2.5.1 two-pass FAST MODE (docs/DESIGN_2.5.1_two_pass_fast_mode.md). Opt-in via the
+# CRISPRME_FAST_MODE env var (set by `crisprme.py ... --fast` through the post-analysis
+# script chain). When ON, every IUPAC window emits a SINGLE worst-POSSIBLE representative
+# off-target (the greedy min-mismatch / max-CFD haplotype -- the same rep the shipped code
+# already builds for dense `CRISPRME_IUPAC_CAP` windows) instead of enumerating the 2^k
+# haplotype lattice / the observed per-sample haplotypes -- the enumeration-free fix for the
+# intractable dense-panel post-analysis (49h+). Guarded import so an old deploy without the
+# module (or the flag unset) is byte-identical to the legacy path. Default OFF.
+try:
+    import twopass_emit as _twopass_emit
+except Exception:  # module absent -> fast mode unavailable, legacy path unchanged
+    _twopass_emit = None
+_FAST_MODE = bool(int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")) and \
+    _twopass_emit is not None
+# 2.5.2 LOSSLESS-DENSE (CRISPRME_LOSSLESS_DENSE). In a CAPPED dense window the min-mismatch
+# greedy representative can be a strict SUBSET of a genuine carried haplotype (an mm-neutral/
+# raising alt is left at the reference), so an off-target that needs >=4 co-occurring variants
+# on ONE haplotype is dropped -- the "don't miss a region" invariant is violated. When ON, the
+# registry-only (sites-only) path additionally emits the co-located variant UNION as an extra
+# level-0 entry (the maximal PUTATIVE haplotype), gated by the finalizer's own mm/PAM budget so
+# nothing over-budget or PAM-invalid is emitted (no phantom rows).
+#
+# DEFAULT = ON. The effect is SCOPED to ``registry_only_mode`` (the emission gate below also
+# requires it), so this is BYTE-IDENTICAL for every genotyped / legacy / dict install -- those
+# never enter the registry-only branch, and the genotyped path is already lossless via the
+# observed enumerator. It changes ONLY the sites-only (e.g. mega) path, where it fulfils the
+# "don't miss a region" invariant that a min-mismatch-only representative would otherwise break.
+# Set CRISPRME_LOSSLESS_DENSE=0 to opt OUT (sites-only reverts to greedy-representative-only).
+_env_ld = os.environ.get("CRISPRME_LOSSLESS_DENSE")
+_LOSSLESS_DENSE = True if _env_ld is None else bool(int(_env_ld or "0"))
 # Accumulator for the ADDITIVE phase-confirmation companion TSV (one row per emitted
 # dict-less variant off-target: identity columns + CONFIRMED/PUTATIVE). Populated ONLY
 # on the ``mygt is not None`` branch; dead/empty on every legacy install so the
 # legacy path stays allocation-identical, not just byte-identical.
 _phase_confirmation_rows = []
 _phase_confirmation_keys = set()
+# 2.5.2 SNP+SNP co-occurrence companion accumulator (one row per emitted variant
+# off-target that USES >=2 co-occurring SNP alt alleles). Populated from BOTH the
+# observed enumerator (CONFIRMED/PUTATIVE) and the registry-only/capped finalizer
+# (PUTATIVE); gated on ``myreg`` so a legacy dict install stays allocation-identical.
+_snp_snp_cooc_rows = []
+_snp_snp_cooc_keys = set()
 
 # Module-level dictless state, DEFAULTED here in the import prologue so
 # retrieveFromDict() / _collect_variant_off_target() / _write_population_summary_
@@ -352,6 +391,56 @@ def _record_phase_confirmation(final_line, phase_state):
     _phase_confirmation_rows.append(rec)
 
 
+def _record_snp_snp_cooc(final_line, phase_state):
+    """Record one variant off-target that USES >=2 co-occurring SNP alt alleles for the
+    ADDITIVE SNP+SNP co-occurrence companion. PURE w.r.t. ``final_line`` (reads, never
+    mutates). GATED on ``myreg`` (a variant-aware 2.5.x install) so a legacy dict install
+    stays allocation-identical. Deduped by the SAME identity key as the phase companion.
+
+    final_line[15]/[16]/[17] carry the creating SNPs' rsIDs / AFs / positions (comma-
+    joined for a multi-SNP haplotype); final_line[12] carries the carrier samples (or the
+    "NA" sentinel on the registry-only path). We emit a row ONLY when >=2 DISTINCT SNP
+    positions contribute -- a genuine SNP+SNP co-occurrence -- and report the min marginal
+    AF as the conservative joint-AF upper bound (see the companion module)."""
+    if myreg is None or _snpsnp_companion is None:
+        return  # GATE: no registry -> not a 2.5.x variant install -> no companion
+    try:
+        positions = str(final_line[17]).split(",")  # creating-SNP positions
+        afs = str(final_line[16]).split(",")         # creating-SNP marginal AFs
+        # need >=2 DISTINCT, non-sentinel SNP positions to be a SNP+SNP co-occurrence
+        real_pos = [p for p in positions if p not in ("", "NA", ".", "n")]
+        if len(set(real_pos)) < 2:
+            return
+        key = (final_line[3], final_line[4], final_line[6], final_line[1], final_line[2])
+        if key in _snp_snp_cooc_keys:
+            return
+        _snp_snp_cooc_keys.add(key)
+        # min marginal AF = conservative upper bound on the joint cis AF (both phases)
+        min_af = "."
+        parsed = []
+        for a in afs:
+            try:
+                parsed.append(float(a))
+            except (ValueError, TypeError):
+                pass
+        if parsed:
+            min_af = "%.6g" % min(parsed)
+        carriers = str(final_line[12])
+        n_carriers = (
+            "NA" if carriers in ("", "NA", ".")
+            else str(len([c for c in carriers.split(",") if c]))
+        )
+        _snp_snp_cooc_rows.append({
+            "Chromosome": final_line[3], "Position": final_line[4],
+            "Direction": final_line[6], "crRNA": final_line[1], "DNA": final_line[2],
+            "SNP_positions": final_line[17], "rsIDs": final_line[15],
+            "Phase": phase_state, "MinAF_bound": min_af,
+            "N_carriers": n_carriers, "Carriers": carriers,
+        })
+    except Exception:  # noqa: BLE001 - companion must never break the off-target row
+        return
+
+
 def _finalize_observed_entry(split, realTarget, refSeq_prerevert,
                              refSeq_with_bulges, guide_no_pam, revert, seq_prerevert,
                              carriers, info, phase_state, cluster_to_save):
@@ -427,6 +516,7 @@ def _finalize_observed_entry(split, realTarget, refSeq_prerevert,
     # final_line so the bestMerge column count + scoring sentinels are unchanged) and
     # the ADDITIVE population-summary companion, both gated / deduped by identity.
     _record_phase_confirmation(final_line, phase_state)
+    _record_snp_snp_cooc(final_line, phase_state)
     _collect_variant_off_target(final_line)
 
 
@@ -617,6 +707,138 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
 
     if not positions:
         return
+
+    # --- 2.5.1 FAST MODE: worst-POSSIBLE representative, NO haplotype enumeration ------
+    # Emit the candidate's reference off-target (locus coverage) + ONE greedy worst-case
+    # variant haplotype (the min-mismatch / max-CFD representative -- twopass_emit, brute-
+    # force verified == argmin edit over all 2^k combinations), then RETURN without
+    # enumerating the observed per-sample haplotypes. This is the enumeration-free
+    # replacement for the intractable dense-panel post-analysis (49h+); the per-sample
+    # phased resolution is traded for tractability (the rep is tagged PUTATIVE, its
+    # carriers the union of the chosen alts' carriers). GATED on _FAST_MODE (opt-in via
+    # CRISPRME_FAST_MODE); the observed/legacy enumeration below is untouched when OFF.
+    if _FAST_MODE:
+        refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
+        refSeq_with_bulges = list(refSeq_final)
+        for _p, _ch in enumerate(realTarget):
+            if _ch == "-":
+                refSeq_with_bulges.insert(_p, "-")
+        refSeq_with_bulges = "".join(refSeq_with_bulges)
+        # reference off-target ONCE (LOCUS-COVERAGE FIX), identical to the non-fast path.
+        _finalize_reference_entry(
+            split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
+            revert, cluster_to_save,
+        )
+        # normalize the gathered variant columns -> twopass_emit's candidate schema, then
+        # build the single greedy worst-case representative haplotype.
+        _columns = [
+            {"pos_c": _col["pos_c"],
+             "candidates": [
+                 {"alt": _col["alts"][_i],
+                  "carriers": set(_col["carrier_gts"][_i].keys()),
+                  "info": _col["info"][_i]}
+                 for _i in range(len(_col["alts"]))]}
+            for _col in positions
+        ]
+        # PAM-validity checker (mirrors _finalize_observed_entry's pam_ok gate) so the
+        # greedy prefers PAM-creating/PAM-preserving alleles at PAM-region variant columns
+        # -- WITHOUT it a PAM-region variant is chosen by lex order and ~half the time the
+        # rep is PAM-invalid -> the off-target is dropped (verified: 141 missed on chr22).
+        def _pam_valid_fast(_seq_list):
+            _s = reverse_complement_table("".join(_seq_list)) if revert else "".join(_seq_list)
+            _tl = list(_s)
+            for _p, _c in enumerate(realTarget):
+                if _c == "-":
+                    _tl.insert(_p, "-")
+            for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
+                if _ch.upper() not in iupac_code_set[pam[_i]]:
+                    return False
+            return True
+        _rep = _twopass_emit.greedy_worst_case(
+            _columns, refSeq, realTarget, guide_no_pam, revert,
+            pos_beg, pos_end, reverse_complement_table, pam_valid_fn=_pam_valid_fast,
+        )
+        if _rep["info"]:  # >=1 alt lowered/held the alignment vs the reference
+            _finalize_observed_entry(
+                split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
+                revert, "".join(_rep["seq"]), sorted(_rep["carriers"]),
+                _rep["info"], _obshap.PUTATIVE, cluster_to_save,
+            )
+        # WORST-CASE CFD representative. The min-mismatch rep above does NOT maximize CFD
+        # (CFD is a position-WEIGHTED product -- a seed mismatch outweighs several distal
+        # ones), so scoring only it UNDER-states the worst-case CFD. CFD factorizes per
+        # position, so a greedy per-column argmax over the allele sets is EXACT. Emit that
+        # rep too (do_scores regime only) so the downstream best-CFD selection reports the
+        # true worst-possible CFD; deduped against the min-mismatch rep by sequence.
+        # ``do_scores`` / mm_scores / pam_scores are runtime globals (set after the FASTA
+        # opens); globals().get keeps this a safe no-op under the pure-function unit harness.
+        if globals().get("do_scores") and globals().get("mm_scores") is not None:
+            def _cfd_fast(_seq_list):
+                _s = reverse_complement_table("".join(_seq_list)) if revert else "".join(_seq_list)
+                _tl = list(_s)
+                for _p, _c in enumerate(realTarget):
+                    if _c == "-":
+                        _tl.insert(_p, "-")
+                _t = "".join(_tl).upper()
+                _bs = int(split[bulge_pos])
+                if split[0] == "DNA":
+                    return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
+                                    mm_scores, pam_scores, do_scores)
+                return calc_cfd(split[1], _t[:-3], _t[-2:], mm_scores, pam_scores, do_scores)
+
+            def _emittable_fast(_seq_list, _chosen):
+                # the finalizer KEEPS a variant off-target only if it has >=1 carrier AND
+                # is within the mismatch budget AND has a valid PAM. Restrict the max-CFD
+                # search to such combos, else the argmax can be a carrier-less combo the
+                # finalizer drops -> a weaker EMITTABLE combo (the true worst-possible
+                # carried off-target) would be reported instead (verified: chr22 residual).
+                if not any(_chosen[_pc]["carriers"] for _pc in _chosen):
+                    return False
+                _s = reverse_complement_table("".join(_seq_list)) if revert else "".join(_seq_list)
+                _tl = list(_s)
+                for _p, _c in enumerate(realTarget):
+                    if _c == "-":
+                        _tl.insert(_p, "-")
+                # count EXACTLY as _finalize_observed_entry does: every window position
+                # whose base differs from the guide, INCLUDING bulge ('-') positions (the
+                # finalizer does NOT skip them); the shared `- int(split[8])` then nets to
+                # the real mismatch budget. Skipping bulges here under-counts and lets an
+                # over-budget rep look valid (the chr22 double-bulge residual).
+                _mm = 0
+                for _i, _ch in enumerate(_tl[pos_beg:pos_end]):
+                    if _i < len(guide_no_pam) and _ch.upper() != guide_no_pam[_i]:
+                        _mm += 1
+                if _mm - int(split[8]) > allowed_mms:
+                    return False
+                for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
+                    if _ch.upper() not in iupac_code_set[pam[_i]]:
+                        return False
+                return True
+            _cfd_rep = _twopass_emit.greedy_max_score(
+                _columns, refSeq, realTarget, guide_no_pam, revert,
+                pos_beg, pos_end, reverse_complement_table, _cfd_fast,
+                valid_fn=_emittable_fast,
+            )
+            if _cfd_rep["info"] and _cfd_rep["seq"] != _rep["seq"]:
+                _finalize_observed_entry(
+                    split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
+                    revert, "".join(_cfd_rep["seq"]), sorted(_cfd_rep["carriers"]),
+                    _cfd_rep["info"], _obshap.PUTATIVE, cluster_to_save,
+                )
+        # visibility: still log genuinely-dense windows to the shared BED (as the cap does)
+        if IUPAC_CAP >= 0 and len(positions) > IUPAC_CAP:
+            try:
+                _start = int(split[4])
+                hvdr_bed.write(
+                    "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
+                    % (split[3], _start, _start + len(replaceTarget),
+                       split[1].replace("-", ""), len(positions),
+                       ",".join(sorted(_rep["carriers"])) if _rep["carriers"] else ".",
+                       replaceTarget))
+            except Exception:
+                pass  # BED logging is best-effort; never break the run
+        return
+    # --- end fast mode ----------------------------------------------------------------
 
     # 2) Enumerate the distinct observed haplotypes (bounded by ~ploidy*n_carriers).
     #    NOTE: this may be EMPTY (a candidate whose registry variants are absent /
@@ -815,25 +1037,46 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
         # exact min-mismatch / max-CFD haplotype (mismatch is additive per position,
         # so the greedy equals the argmin over all 2^k combinations) without the
         # blow-up. The region is logged to <out>.high_variant_density_regions.bed.
-        capped = IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP
+        # FAST MODE forces the greedy representative for EVERY window (never enumerate the
+        # 2^k lattice); otherwise it triggers only above IUPAC_CAP ambiguity codes. The
+        # greedy rep is the exact min-mismatch / max-CFD haplotype either way.
+        capped = _FAST_MODE or (IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP)
         if capped:
-            _samples = set()
-            for _cnt in totalDict:
-                for _v in totalDict[_cnt][0].values():
-                    _samples |= _v[1]
-            _start = int(split[4])
-            hvdr_bed.write(
-                "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
-                % (
-                    split[3],
-                    _start,
-                    _start + len(replaceTarget),
-                    split[1].replace("-", ""),
-                    countIUPAC,
-                    ",".join(sorted(_samples)) if _samples else ".",
-                    replaceTarget,  # full IUPAC protospacer (dig-in aid)
+            # Log only GENUINELY-dense windows to the BED (in fast mode ``capped`` is forced
+            # for every window, but the high-variant-density BED must still list only the
+            # hypervariable ones -- byte-identical to the non-fast BED contents).
+            if IUPAC_CAP >= 0 and countIUPAC > IUPAC_CAP:
+                _samples = set()
+                for _cnt in totalDict:
+                    for _v in totalDict[_cnt][0].values():
+                        _samples |= _v[1]
+                _start = int(split[4])
+                hvdr_bed.write(
+                    "%s\t%d\t%d\t%s\t%d\t%s\t%s\n"
+                    % (
+                        split[3],
+                        _start,
+                        _start + len(replaceTarget),
+                        split[1].replace("-", ""),
+                        countIUPAC,
+                        ",".join(sorted(_samples)) if _samples else ".",
+                        replaceTarget,  # full IUPAC protospacer (dig-in aid)
+                    )
                 )
-            )
+            # PAM-validity of a candidate (mirrors the finalizer's pam_ok gate); consumed
+            # by the fast-mode greedy so a PAM-region variant is not decided by lex order
+            # (which drops ~half the PAM-creation off-targets).
+            def _pam_ok_leg(seq_list):
+                _s = reverse_complement_table("".join(seq_list)) if revert else "".join(seq_list)
+                _tl = list(_s)
+                for _p, _c in enumerate(realTarget):
+                    if _c == "-":
+                        _tl.insert(_p, "-")
+                for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
+                    if _ch.upper() not in iupac_code_set[pam[_i]]:
+                        return False
+                return True
+
             # Build the greedy representative per haplotype and REPLACE the per-SNP
             # level-0 entries with that single entry, so the finalization below scores
             # exactly one row (bulges/PAM/creation/CFD via the existing code path).
@@ -842,29 +1085,48 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 by_pos = {}
                 for (pos_c, elem), v in totalDict[count][0].items():
                     by_pos.setdefault(pos_c, []).append((elem, v))
-                greedy_seq = list(refSeq)  # pre-revert reference
-                greedy_samples, greedy_info = set(), []
-                for pos_c, cands in by_pos.items():
-                    ref_allele = refSeq[pos_c]
-                    ref_mm = _aligned_mm(greedy_seq, realTarget, guide_no_pam, revert)
-                    best_elem, best_mm, best_v = ref_allele, ref_mm, None
-                    for elem, v in cands:
-                        trial = list(greedy_seq)
-                        trial[pos_c] = elem
-                        m = _aligned_mm(trial, realTarget, guide_no_pam, revert)
-                        # strict improvement, or tie preferring an alt (keeps PAM-
-                        # creating / present variants where mismatch is unaffected).
-                        # Among alts, a mm-neutral tie prefers the lexicographically-
-                        # smaller alt (deterministic), so this legacy greedy rep matches
-                        # the dict-less one regardless of alt order (#139).
-                        if m < best_mm or (
-                            m == best_mm and (best_v is None or elem < best_elem)
-                        ):
-                            best_mm, best_elem, best_v = m, elem, v
-                    if best_v is not None:
-                        greedy_seq[pos_c] = best_elem
-                        greedy_samples |= best_v[1]
-                        greedy_info.extend(best_v[2])
+                if _FAST_MODE and _twopass_emit is not None:
+                    # FAST MODE: the PAM-aware, multi-pass + brute-force greedy
+                    # (twopass_emit.greedy_worst_case) -- lossless, prefers PAM-creating
+                    # alleles so a PAM-region variant off-target is not silently dropped
+                    # (the real-data 141-miss fix). v[1] is the carrier set; v[2] a
+                    # one-element [[rsID, AF, snp]] list (per-SNP level-0 entry).
+                    _cols = [
+                        {"pos_c": _pc,
+                         "candidates": [{"alt": _elem, "carriers": _v[1], "info": _v[2][0]}
+                                        for _elem, _v in _cands]}
+                        for _pc, _cands in by_pos.items()
+                    ]
+                    _rep = _twopass_emit.greedy_worst_case(
+                        _cols, refSeq, realTarget, guide_no_pam, revert,
+                        pos_beg, pos_end, reverse_complement_table, pam_valid_fn=_pam_ok_leg)
+                    greedy_seq = _rep["seq"]
+                    greedy_samples = set(_rep["carriers"])
+                    greedy_info = list(_rep["info"])
+                else:
+                    # DEFAULT (dense >IUPAC_CAP window): the legacy min-mismatch greedy,
+                    # BYTE-IDENTICAL to the shipped behavior -- strict improvement, or a
+                    # mismatch-neutral tie preferring an alt (lexicographically-smaller;
+                    # #139). No PAM awareness here (the dense-window rep is an approximation
+                    # already flagged in the high-variant-density BED).
+                    greedy_seq = list(refSeq)  # pre-revert reference
+                    greedy_samples, greedy_info = set(), []
+                    for pos_c, cands in by_pos.items():
+                        ref_allele = refSeq[pos_c]
+                        ref_mm = _aligned_mm(greedy_seq, realTarget, guide_no_pam, revert)
+                        best_elem, best_mm, best_v = ref_allele, ref_mm, None
+                        for elem, v in cands:
+                            trial = list(greedy_seq)
+                            trial[pos_c] = elem
+                            m = _aligned_mm(trial, realTarget, guide_no_pam, revert)
+                            if m < best_mm or (
+                                m == best_mm and (best_v is None or elem < best_elem)
+                            ):
+                                best_mm, best_elem, best_v = m, elem, v
+                        if best_v is not None:
+                            greedy_seq[pos_c] = best_elem
+                            greedy_samples |= best_v[1]
+                            greedy_info.extend(best_v[2])
                 if not greedy_info:  # no allele changed anything: document the region anyway
                     any_v = next(iter(totalDict[count][0].values()), None)
                     if any_v is not None:
@@ -873,6 +1135,110 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                 totalDict[count][0] = {
                     ("greedy", 0): [greedy_seq, greedy_samples, greedy_info]
                 }
+                # WORST-CASE CFD representative (mirrors the observed fast path,
+                # new_simple_analysis.py:700). The min-mismatch greedy above does NOT
+                # maximize CFD (CFD is a position-WEIGHTED product -- a seed mismatch
+                # outweighs several distal ones), so scoring only it UNDER-states the
+                # worst-case CFD on THIS dict/registry (mega) path too. CFD factorizes
+                # per position, so the per-column argmax is EXACT (bounded brute-force
+                # fallback covers the JOINT-PAM factor). Emit it as a SECOND level-0
+                # entry: ``capped`` skips the lattice growth (range(0)) AND the peel
+                # (`not capped`), so two level-0 entries are finalized INDEPENDENTLY
+                # (never crossed), and the downstream best-CFD selection then reports the
+                # true worst-possible CFD. GATED on _FAST_MODE + do_scores so the dense-
+                # cap (non-fast IUPAC_CAP) path stays BYTE-IDENTICAL. The finalizer's own
+                # carrier/budget/PAM gates (lines ~1167/1215/1217) drop a non-emittable
+                # rep -- so we constrain the argmax to EMITTABLE combos (``valid_fn``),
+                # else the argmax could be a dropped combo and a WEAKER emittable rep
+                # would win (the observed-path residual). ``_cols`` is the fast branch's
+                # per-position candidate schema (defined above under the same _FAST_MODE
+                # guard); ``registry_only_mode`` tolerates the empty carrier set the
+                # sites-only mega index produces (matches the finalizer's line-1167 gate).
+                if (
+                    _FAST_MODE
+                    and _twopass_emit is not None
+                    and globals().get("do_scores")
+                    and globals().get("mm_scores") is not None
+                ):
+                    def _cfd_fast_leg(_seq_list):
+                        _s = (
+                            reverse_complement_table("".join(_seq_list))
+                            if revert
+                            else "".join(_seq_list)
+                        )
+                        _tl = list(_s)
+                        for _p, _c in enumerate(realTarget):
+                            if _c == "-":
+                                _tl.insert(_p, "-")
+                        _t = "".join(_tl).upper()
+                        _bs = int(split[bulge_pos])
+                        if split[0] == "DNA":
+                            return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
+                                            mm_scores, pam_scores, do_scores)
+                        return calc_cfd(split[1], _t[:-3], _t[-2:],
+                                        mm_scores, pam_scores, do_scores)
+
+                    def _emittable_leg(_seq_list, _chosen):
+                        # KEEP only what the finalizer keeps: >=1 carrier (unless
+                        # registry-only) AND within the mismatch budget (count bulges
+                        # exactly as the finalizer does, then subtract split[8]) AND a
+                        # valid PAM.
+                        if not registry_only_mode and not any(
+                            _chosen[_pc]["carriers"] for _pc in _chosen
+                        ):
+                            return False
+                        _s = (
+                            reverse_complement_table("".join(_seq_list))
+                            if revert
+                            else "".join(_seq_list)
+                        )
+                        _tl = list(_s)
+                        for _p, _c in enumerate(realTarget):
+                            if _c == "-":
+                                _tl.insert(_p, "-")
+                        _mm = 0
+                        for _i, _ch in enumerate(_tl[pos_beg:pos_end]):
+                            if _i < len(guide_no_pam) and _ch.upper() != guide_no_pam[_i]:
+                                _mm += 1
+                        if _mm - int(split[8]) > allowed_mms:
+                            return False
+                        for _i, _ch in enumerate(_tl[pam_begin:pam_end]):
+                            if _ch.upper() not in iupac_code_set[pam[_i]]:
+                                return False
+                        return True
+
+                    _cfd_rep = _twopass_emit.greedy_max_score(
+                        _cols, refSeq, realTarget, guide_no_pam, revert,
+                        pos_beg, pos_end, reverse_complement_table, _cfd_fast_leg,
+                        valid_fn=_emittable_leg,
+                    )
+                    if _cfd_rep["info"] and list(_cfd_rep["seq"]) != list(greedy_seq):
+                        totalDict[count][0][("greedy_cfd", 1)] = [
+                            list(_cfd_rep["seq"]),
+                            set(_cfd_rep["carriers"]),
+                            list(_cfd_rep["info"]),
+                        ]
+                # 2.5.2 LOSSLESS-DENSE (registry-only / sites-only, e.g. the mega): with no
+                # per-sample genotypes we cannot confirm cis, but the co-located variants
+                # form a PUTATIVE maximal haplotype that the min-mismatch greedy drops. Emit
+                # the full co-located union as an extra level-0 entry so a dense window's
+                # multi-variant off-target is not MISSED. Carriers empty -> the finalizer
+                # emits it with the "NA" Samples sentinel (registry_only_mode); its mm/PAM
+                # budget gate drops the union if it is over budget or PAM-invalid (no phantom
+                # rows). Scoped to registry-only: the genotyped dict-less path is already
+                # lossless via the observed enumerator, and a per-sample union would risk
+                # phantom (trans-as-cis) haplotypes. Default OFF -> byte-identical.
+                if _LOSSLESS_DENSE and registry_only_mode:
+                    _union_seq = list(refSeq)
+                    _union_info = []
+                    for _pc, _cands in by_pos.items():
+                        for _elem, _v in _cands:
+                            _union_seq[_pc] = _elem
+                            _union_info.extend(_v[2])
+                    if _union_seq != list(greedy_seq):
+                        totalDict[count][0][("lossless_hap", 2)] = [
+                            _union_seq, set(), _union_info
+                        ]
         if revert:
             refSeq = reverse_complement_table(refSeq)
         for count in totalDict:
@@ -1062,6 +1428,11 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             final_line.append(tmp_pos_mms)
                             # append processed target to cluster to save
                             cluster_to_save.append(final_line)
+                            # 2.5.2 SNP+SNP co-occurrence companion (registry-only /
+                            # capped / --fast finalizer): this path does NOT compute a
+                            # confirmed-cis phase, so a multi-SNP off-target is recorded
+                            # PUTATIVE (conservative). GATED on ``myreg`` + >=2 SNPs.
+                            _record_snp_snp_cooc(final_line, "PUTATIVE")
                             # ADDITIVE (Phase 3c): record this VARIANT off-target's
                             # identity + creating-variant (SNP) columns for the
                             # companion population-summary TSV. GATED on ``myreg``
@@ -1547,8 +1918,16 @@ def _write_population_summary_companion():
         ploidy_of = _t0c.ploidy_of_for_chrom(current_chr)
         out_path = outputFile + ".population_summary.tsv"
 
+        # Aggregate per-row companion errors into ONE summary line per chromosome
+        # instead of one print per skipped off-target (a dense registry-only run
+        # produced ~7,355 near-identical lines). Keep the first message as an
+        # exemplar so a real (non-degradation) failure is still visible.
+        _row_err = {"n": 0, "first": None}
+
         def _on_row_error(ot, err):
-            print("population-summary companion: skipped one off-target -", err)
+            _row_err["n"] += 1
+            if _row_err["first"] is None:
+                _row_err["first"] = str(err)
 
         wrote = _popsum_companion.write_companion(
             out_path,
@@ -1572,6 +1951,12 @@ def _write_population_summary_companion():
                 "Wrote population-summary companion (%d variant off-target row[s]) to %s"
                 % (len(_variant_off_targets), out_path)
             )
+            if _row_err["n"]:
+                print(
+                    "population-summary companion: %d off-target row[s] on %s could "
+                    "not be summarized (e.g. %s)"
+                    % (_row_err["n"], current_chr, _row_err["first"])
+                )
     except Exception as _ps_err:  # ADDITIVE + guarded: never break the run
         print("population-summary companion skipped for", current_chr, "-", _ps_err)
 
@@ -1601,6 +1986,29 @@ def _write_phase_confirmation_companion():
         )
     except Exception as _pc_err:  # ADDITIVE + guarded: never break the run
         print("phase-confirmation companion skipped for", current_chr, "-", _pc_err)
+
+
+def _write_snp_snp_cooc_companion():
+    """ADDITIVE SNP+SNP co-occurrence companion write. FULLY GUARDED + GATED on
+    ``myreg`` (a variant-aware 2.5.x install: dict-less genotyped OR registry-only).
+
+    Writes ``<outputFile>.snp_snp_cooc.tsv`` -- a SEPARATE joinable file, one row per
+    variant off-target that USES >=2 co-occurring SNP alts, with the CONFIRMED/PUTATIVE
+    phase + the conservative min-AF joint bound. Byte-identical on a legacy dict install
+    (``myreg`` None -> nothing recorded, nothing written). Any error is caught + skipped."""
+    if myreg is None or _snpsnp_companion is None:
+        return  # GATE: no registry -> not a 2.5.x variant install -> no companion
+    if not _snp_snp_cooc_rows:
+        return  # no off-target used >=2 co-occurring SNPs on this chromosome
+    try:
+        out_path = outputFile + ".snp_snp_cooc.tsv"
+        n = _snpsnp_companion.write_companion(out_path, _snp_snp_cooc_rows)
+        print(
+            "Wrote SNP+SNP co-occurrence companion (%d off-target row[s]) to %s"
+            % (n, out_path)
+        )
+    except Exception as _sc_err:  # ADDITIVE + guarded: never break the run
+        print("SNP+SNP co-occurrence companion skipped for", current_chr, "-", _sc_err)
 
 
 # INPUT AND SETTINGS
@@ -1722,11 +2130,25 @@ if t1_gt is not None:
 # rsID/AF are still surfaced, just without per-sample resolution. This is False on
 # every other install (legacy: myreg None; registry+dict: dict_tier_present;
 # dictless-with-genotypes: mygt set), so those paths stay byte-identical.
-registry_only_mode = (myreg is not None) and (mygt is None) and (not dict_tier_present)
+# An AGGREGATE registry (aggregation == "info_af", e.g. the sites-only "mega"
+# all-source panel) carries per-dataset AF but NO per-sample data. build-index-only
+# still emits a genotype-LESS SNP dict for it (variant positions, empty Samples), so
+# ``dict_tier_present`` is True even though that dict cannot resolve carriers. Treat
+# such a registry as registry-only regardless of the dict, so variant off-targets are
+# emitted with AF from the registry (Samples = NA) instead of being dropped by the
+# dict path. Genotyped registries ("carriers"/"panel") are unaffected.
+_aggregate_registry = (
+    myreg is not None
+    and getattr(myreg, "manifest", {}).get("aggregation") == "info_af"
+)
+registry_only_mode = (myreg is not None) and (mygt is None) and (
+    (not dict_tier_present) or _aggregate_registry
+)
 if registry_only_mode:
     print(
         f"Registry-only install for {current_chr}: emitting variant off-targets "
-        f"with degraded (NA) Samples -- no genotype tier to resolve carriers."
+        f"with degraded (NA) Samples -- no genotype tier to resolve carriers"
+        f"{' (aggregate info_af registry; sample-less dict ignored)' if _aggregate_registry else ''}."
     )
 
 # check PAM position and relative coordinates on targets
@@ -1856,6 +2278,8 @@ else:
     _write_population_summary_companion()
     # ADDITIVE + guarded + gated-on-mygt: dict-less phase-confirmation companion TSV.
     _write_phase_confirmation_companion()
+    # ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
+    _write_snp_snp_cooc_companion()
     # print complete and exit with no error
     print("ANALYSIS COMPLETE IN", time.time() - global_start)
     exit(0)
@@ -1908,5 +2332,7 @@ cfd_dataframe.to_csv(outputFile + ".CFDGraph.txt", sep="\t", index=False)
 _write_population_summary_companion()
 # ADDITIVE + guarded + gated-on-mygt: dict-less phase-confirmation companion TSV.
 _write_phase_confirmation_companion()
+# ADDITIVE + guarded + gated-on-myreg: SNP+SNP co-occurrence companion TSV.
+_write_snp_snp_cooc_companion()
 
 print("ANALYSIS COMPLETE IN", time.time() - global_start)

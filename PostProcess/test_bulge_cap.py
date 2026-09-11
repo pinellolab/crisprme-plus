@@ -289,6 +289,52 @@ class TestDictlessDefaults(unittest.TestCase):
                          "crisprme.py complete-search default max_total_edits must be 4")
 
 
+class TestPruningNotePersisted(unittest.TestCase):
+    """The --max-total-edits prune WARN is persisted into Params.txt so it reaches
+    .Params.txt -> report.zip (the parent-stdout WARN is NOT captured into the run
+    log: log_verbose.txt only redirects the child job)."""
+
+    def setUp(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(os.path.dirname(here), "crisprme.py")) as fh:
+            self.csrc = fh.read()
+
+    def test_pruning_note_written_to_params(self):
+        self.assertIn("Pruning_note", self.csrc,
+                      "crisprme.py must persist a Pruning_note key into Params.txt")
+
+    def test_pruning_note_guarded_by_prune_condition(self):
+        # guarded by the SAME condition as the stdout WARN -> the guard string
+        # occurs at least twice (the WARN and the Params write), so the note is
+        # written only when a prune actually happened.
+        self.assertGreaterEqual(
+            self.csrc.count("if 0 <= max_total_edits < mm + bDNA + bRNA:"), 2,
+            "Pruning_note write must be guarded by the same prune condition as the WARN")
+
+    def test_pruning_note_roundtrips_through_report_reader(self):
+        # behavioral: generate_report._read_kv_sidecar (the exact reader
+        # build_summary_meta uses) parses the persisted kv line back out.
+        try:
+            here = os.path.dirname(os.path.abspath(__file__))
+            if here not in sys.path:
+                sys.path.insert(0, here)
+            import generate_report
+        except Exception as exc:  # heavy deps (pandas/matplotlib) may be absent
+            self.skipTest("generate_report import unavailable: %s" % exc)
+        d = tempfile.mkdtemp(prefix="prunenote_")
+        try:
+            msg = ("--max-total-edits 4 is below the requested 6mm + 2 DNA + 2 RNA "
+                   "bulges = 10 total edits; alignments needing more than 4 COMBINED "
+                   "edits were PRUNED.")
+            with open(os.path.join(d, ".Params.txt"), "w") as fh:
+                fh.write("Max_total_edits\t4\nPruning_note\t" + msg + "\n")
+            kv = generate_report._read_kv_sidecar(os.path.join(d, ".Params.txt"))
+            self.assertEqual(kv.get("Pruning_note"), msg)
+            self.assertIn("PRUNED", kv["Pruning_note"])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 # --------------------------------------------------------------------------- #
 # (3) 0-BULGE INDEL ROUTING -- exercise pool_search_indels.search_indels directly.
 #

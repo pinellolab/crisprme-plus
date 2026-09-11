@@ -136,6 +136,45 @@ allele frequency low. CRISPRme+ therefore defines the panel from the samples
 **actually present in the VCF** (VCF-filtered `samplesID`), giving the correct
 AN (here 2×(2,548 + 929) = 6,954 for combined 1000G+HGDP autosomes).
 
+### Two panel modes (genotyped vs sites-only)
+The merge above is the **genotyped, cis-capable** mode (`merge_vcf_panels.sh` /
+`build_combined_panel.sh`): it keeps per-sample genotypes, recomputes a **pooled**
+`INFO/AF` (AC/AN over the union of genotyped samples, `bcftools +fill-tags`), and
+feeds the genotype-counting Tier-0 registry. It is correct only when *every* merged
+source is genotyped, and it is what enables indel+SNP cis reconstruction.
+
+CRISPRme+ also ships a **sites-only "mega" panel** (`merge_mega_sites.sh`) that
+merges heterogeneous **aggregate** resources — 1000 Genomes 2021, HGDP, gnomAD v4.1,
+TOPMed, and All-of-Us — where genotypes are unavailable or meaningless (gnomAD is
+frequency-only, TOPMed distributes `AN=0`, All-of-Us is a single aggregate
+pseudo-sample). Because there is no honest pooled AC/AN across such sources, and no
+shared samples to reconstruct cross-source haplotypes, the mega:
+
+1. **normalizes** each source (`bcftools norm -m -any -f REF`: split multiallelics to
+   biallelic and left-align, so the same variant from two sources is represented
+   identically and merges rather than duplicating; `AF` is `Number=A`, so the correct
+   per-alt frequency is carried without reading genotypes);
+2. applies a uniform **MAF > 0.001** filter and **strips genotypes** (`view -G`);
+3. keeps each source's frequency verbatim as `AF_<source>` and, after
+   `bcftools merge -m none`, annotates a per-site **`AF_max`** — the maximum
+   `AF_<source>` at that site — as the global summary frequency (no pooled `AF`).
+
+The mega's Tier-0 registry is built **directly from these frequencies**
+(`compile_registry_from_info_af`, not from genotypes): each source becomes one
+database group with allele count `AC = round(AF · AN_nom)` and `AN = AN_nom` (twice
+the source's nominal sample size — so the reported allele frequency reproduces the
+source AF exactly, to within `0.5/AN`, and the reported AN is the source's true
+cohort size), and the GLOBAL group carries `AF_max`. Per-individual carrier and
+homozygote counts do not exist for aggregate data, so they are reported as
+Hardy–Weinberg expectations from the allele frequency (the frequency itself is exact;
+carrier/hom are flagged as estimates). The registry stores SNPs only (single-base
+ref/alt); indels (~24 % of merged sites) are surfaced as off-targets through the
+fake-indel genome but are not yet frequency-annotated in this mode.
+
+The two modes are therefore complementary: the genotyped panel gives phased,
+cis-capable frequencies over a curated sample set; the mega gives one-scan,
+frequency-annotated coverage across the widest set of population resources.
+
 ---
 
 ## 3. Allele-frequency estimation
@@ -231,6 +270,28 @@ input genotypes:
 Confirmed and putative haplotypes are reported distinctly, so a reviewer can
 weight them appropriately.
 
+### Sites-only panels and co-occurrence without genotypes
+On a **sites-only / aggregate panel** (the mega index, or any download without a
+genotype tier) there are no per-sample genotypes to reconstruct cis, but the
+variants co-located in a window still form **putative** haplotypes. CRISPRme+
+reports these too, forming a three-rung confidence model:
+
+1. **CONFIRMED** — phased genotypes prove the variants are carried together in
+   cis (e.g. 1000 Genomes); exact carriers and joint frequency.
+2. **PUTATIVE (co-carrier)** — genotyped but unphased (e.g. HGDP); the individuals
+   who carry all the variants are known (a both-carrier count), but cis is unproven.
+3. **PUTATIVE (estimated)** — sites-only; no genotypes at all. The variants are
+   known to segregate in the population at their marginal allele frequencies, so the
+   joint cis frequency is reported as a **conservative upper bound = the minimum
+   participating marginal AF** (a cis haplotype can never be more frequent than its
+   rarest allele; no LD assumed).
+
+This applies to **both** co-occurrence dimensions: **SNP+SNP** (an off-target that
+requires ≥2 nearby SNP alt alleles together; `snp_snp_cooc.tsv`) and **SNP+indel**
+(`indel_snp_cooc.tsv`). On a genotyped panel both are emitted CONFIRMED/PUTATIVE with
+carriers; on a sites-only panel both fall to rung 3 (PUTATIVE, min-AF, no carriers) —
+so the co-occurrence signal is never silently dropped for lack of genotypes.
+
 ### Locus completeness
 For every candidate window, CRISPRme+ additionally emits the **reference**
 off-target (the site as it appears in the reference genome, independent of any
@@ -279,6 +340,62 @@ complementary controls:
 
 Together these keep genome-wide variant search tractable while making any bound
 that was applied explicit and reviewable, and guaranteeing no region is dropped.
+
+On a **genotyped** panel the observed-haplotype enumerator (§4) already emits every
+carried multi-variant haplotype exactly, so the greedy representative is only a
+tractability fallback for pathological windows. On a **sites-only** panel there are no
+carriers to enumerate, so a dense window emits only the greedy min-mismatch
+representative — which can be a strict subset of a genuinely co-located haplotype.
+`CRISPRME_LOSSLESS_DENSE` closes this gap for sites-only panels: it additionally emits
+the **full co-located variant union** for the window (the maximal PUTATIVE haplotype),
+bounded by the carrier-free union rather than the 2ᵏ lattice and gated by the same
+mismatch/PAM budget so no over-budget or PAM-invalid row is produced. It is **on by
+default** (so a sites-only panel fulfils "don't miss a region") but **scoped to the
+sites-only path** — the effect requires `registry_only_mode`, so it is byte-identical
+for every genotyped / legacy install (the genotyped path is already lossless via the
+observed enumerator). Set `CRISPRME_LOSSLESS_DENSE=0` to opt out. A per-sample union on
+the genotyped path is intentionally *not* done — it would risk trans-as-cis phantoms.
+
+### Two-pass fast mode (`--fast`, opt-in)
+
+The controls above bound any *single* window, but a **dense panel** (many merged
+sources) or a **sites-only aggregate panel** can present so many variant-dense windows
+that even the observed-haplotype enumeration of Section 4 becomes intractable — measured
+at **49 h+ without completing** on a 4×-density 1000G+HGDP panel. For these workloads
+CRISPRme+ offers an opt-in **two-pass fast mode** (`complete-search --fast`, propagated to
+the whole post-analysis via `CRISPRME_FAST_MODE`). Instead of enumerating the 2ᵏ IUPAC
+haplotype lattice per window, it emits a small fixed set of **worst-possible
+representatives** per window:
+
+- **Pass 1 — score-free find.** The window's per-position IUPAC allele sets yield a
+  **minimum-edit** representative whose edit distance `D` (the additive-per-column argmin)
+  **lower-bounds every realizable haplotype**. A window is therefore dropped only when `D`
+  already exceeds the requested budget — detection stays **lossless** (no locus is lost),
+  while the whole 2ᵏ expansion is skipped.
+- **Pass 2 — worst-case score.** Each surviving window emits (i) its **reference**
+  alignment, (ii) the **minimum-edit** representative, and (iii) the **maximum-CFD**
+  representative (Section 8). This collapses the per-sample lattice to O(1) rows per window
+  while preserving the window's worst-case scores; per-sample phasing becomes an
+  *annotation* rather than a dependency, and rows are tagged **PUTATIVE** (a synthetic
+  worst case, not an observed haplotype).
+
+The min-edit and max-CFD representatives are distinct because CFD is position-weighted
+(Section 8): the fewest-mismatch haplotype is often **not** the highest-scoring one, so
+both are emitted so the reported worst case is never understated. The mode is validated to
+be **lossless for locus detection and non-understating for the worst-case score** against
+the slow full-enumeration path on a real chr22 1000G-2021+HGDP slice (0 CFD under-reports;
+it in fact surfaces *stronger* worst cases at 182 loci that per-sample enumeration misses),
+and it collapses ~1.9× fewer rows on that 1× slice, growing with density — turning the
+otherwise-intractable 4× panel into a tractable run. The default (non-`--fast`) path is
+byte-identical; `--fast` is opt-in. This yields a **two-tier workflow**: `--fast` for
+routine, high-density, or aggregate-panel *screening*, and the full enumeration path for
+*confirmatory / pre-IND* runs where per-sample phased haplotype resolution is required.
+
+**Scope of `--fast`.** `--fast` accelerates only the **SNP** post-analysis (it collapses the
+2^k IUPAC haplotype lattice). The **indel** post-analysis is single-threaded and
+CRISTA-scoring-bound, and is **unaffected by `--fast`** — a dense indel search pays the full
+indel cost regardless (parallelizing that path is a follow-up). Correspondingly, the
+`indel_snp_cooc.tsv` companion is **byte-identical** with and without `--fast` (§8).
 
 ---
 
@@ -349,7 +466,12 @@ panel: 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyp
 panel; a variant present in the panel but whose source allele frequency is exactly
 0 (e.g. a secondary allele of a multiallelic site) is shown at a **display floor of
 1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
-read as "present, frequency effectively 0", not a measured frequency.
+read as "present, frequency effectively 0", not a measured frequency. For an
+**aggregate (sites-only) panel** (e.g. the all-source mega index, §2), only allele
+frequencies exist — there are no per-individual genotypes — so carrier and homozygote
+frequencies are rendered **NA** rather than fabricated, and a per-dataset **`indel_af.tsv`**
+companion carries indel allele frequencies by source alongside the SNP+indel co-occurrence
+table.
 
 ## 8. Off-target scoring, assumptions and limitations
 
@@ -372,6 +494,51 @@ should be read as relative risk indicators rather than calibrated probabilities.
 The CFD/CRISTA threshold tiers in the report are **model-relative** (CRISTA's
 cut points differ from CFD's because the two scores are on different scales).
 
+**Worst-case scoring in two-pass fast mode.** When `--fast` (§5) is used, each window is
+represented by worst-possible rows rather than every haplotype, so the *scores* attached to
+those rows are defined as worst cases over the window's allele combinations. **CFD is the
+exact worst case.** CFD factorizes as a product of per-position maxima times a **joint
+two-base PAM factor**, so the maximum over all combinations is found by a per-position
+argmax plus a bounded brute-force over the PAM region (the joint factor is why a naïve
+per-column greedy is insufficient). This exact maximizer is validated bit-for-bit against
+an independent factorized oracle and against the slow full-enumeration path — **zero CFD
+under-reports** on a real chr22 1000G+HGDP slice (and, on the legacy dict / aggregate-panel
+path, catching cases where the fewest-mismatch allele scores materially *lower* CFD than
+another carried allele, up to a threshold-crossing 0.14). **CRISTA is best-effort.** CRISTA
+is a non-factorizable RandomForest, so its worst case is taken as the maximum over the
+emitted representatives rather than an exhaustive per-haplotype search. Measured against the
+slow path (chr22 1000G-2021+HGDP), this approximation is tight exactly where decisions are
+made: **every off-target with CRISTA ≥ 0.2 is reported at full or greater strength** (fast
+mode even surfaces *more* actionable sites than per-sample enumeration), and under-reporting
+is **bounded to ≤ 0.04 and confined to the sub-0.19 weak tail** (median gap 0.006, no
+threshold crossings) — structurally, because high-CRISTA off-targets are low-edit and the
+min-edit + max-CFD representatives already span the low-edit shell. **At genome-wide scale
+the CRISTA tail is heavier than the chr22 slice:** across the full genome ~5 % of CRISTA
+≥ 0.2 loci can drop below 0.2 under `--fast` (largest observed gap ~0.12), whereas **CFD had
+zero ≥ 0.2 losses**. So in `--fast`, CFD is a safe actionable gate but **CRISTA is a screen**,
+not an action gate. A **guaranteed
+per-haplotype CRISTA worst case** is available by running without `--fast`; this is the
+screening-vs-confirmatory two-tier split of Section 5.
+
+**SNP+indel co-occurrence is unaffected by `--fast`.** `--fast` collapses only the *SNP*
+worst-possible representative emission in `integrated_results.tsv` (Section 5); the SNP+indel
+co-occurrence companion (`indel_snp_cooc.tsv`) is produced by the indel post-analysis' cis
+phasing pass over the genotype tiers, which `--fast` does not touch. Measured on the complete
+genome-wide matrix (2021 panel, same guide, `--fast` vs non-`--fast`): the two `indel_snp_cooc.tsv`
+files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
+per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
+carries the indel and SNP together — is preserved identically in fast and non-fast runs.
+
+**Two co-occurrence companions.** Alongside `indel_snp_cooc.tsv` (SNP+indel),
+`snp_snp_cooc.tsv` reports **SNP+SNP** co-occurrences — off-targets that require ≥2
+nearby SNP alt alleles together. Both use the same three-rung confidence model (§4):
+CONFIRMED (phased cis, exact carriers + joint AF), PUTATIVE co-carrier (genotyped
+unphased), and PUTATIVE estimated (sites-only, min marginal AF as a conservative
+upper bound, no carriers). On a sites-only panel the SNP+indel companion likewise
+falls back to a PUTATIVE min-AF row rather than emitting nothing, so a co-occurrence
+is never dropped merely for lack of genotypes. Both companions are bundled into the
+report ZIP with a confirmed-count summary.
+
 **Assumptions.** (i) Results are relative to the chosen **reference assembly** and
 its coordinates. (ii) The variant panel is only as representative as the input
 databases — **1000G + HGDP is broad but not exhaustive**, and a variant absent
@@ -384,7 +551,24 @@ Phasing is resolved per haplotype from the genotypes (confirmed vs putative,
 
 **Limitations.** CRISPRme+ does **not** model somatic/mosaic variants, copy-number
 or large structural variants, epigenetic state beyond the supplied annotations, or
-chromatin accessibility as a cutting determinant. The `Max_total_edits` value is a
+chromatin accessibility as a cutting determinant. **SNP+indel co-occurrence** is
+searched **by default** as of 2.5.0: the build overlays SNP IUPAC codes onto the
+fake-indel genome and compiles a phased indel genotype tier, and post-analysis reports
+off-targets that require **both** a nearby SNP **and** an indel in the same protospacer,
+tagged CONFIRMED-cis (phased) / PUTATIVE (unphased) with per-sample carriers and joint
+allele frequency. (The pre-2.5.0 behavior — two independent passes, SNPs on the
+IUPAC-enriched genome and indels on a plain-reference fake-indel genome — remains available
+by disabling the integration; classic dict builds are byte-identical.) One **residual**:
+the indel search materializes **one indel per fake contig**, so an off-target requiring
+**≥ 2 co-occurring cis indels within a single protospacer** is not generated as a candidate
+— a pre-existing single-indel-search property, independent of fast mode. This is a
+**low-frequency** case: raw multi-indel cis co-occurrence is dominated by STR/VNTR repeats
+(which off-target analysis should soft-mask), falling to **~1–2%** of indel loci after
+repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**
+of indel off-targets — all at the edit-budget ceiling (the weakest, ≈0-CFD tier). Windows
+carrying ≥ 2 cis indels **can** be flag-all'd for conservative (lossless over-reporting)
+treatment — a design option the min-edit primitive supports (proven lossless in
+`test_twopass_lynchpin_counterexamples`), **not yet wired into the production indel search**. The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded
 alignments may exceed it (the report surfaces the observed maximum). A reported MAF
 of `1e-05` is a **display floor** for a source-AF of 0, not a measured frequency
@@ -411,6 +595,14 @@ validate-test`. This is a one-time correctness check, not a per-search step:
   provably exact against brute-force argmin on **4,000/4,000 random cases** (both
   strands, with/without bulges), with PAM-creating-variant cases reproducing full
   enumeration (variant attribution identical).
+- The **two-pass fast mode** (§5) was validated against the slow full-enumeration path on a
+  real chr22 1000G-2021+HGDP slice: **lossless locus detection** and a **non-understating
+  worst-case bound** (0 CFD under-reports; 182 loci where fast surfaces a *stronger* worst
+  case). Its exact worst-case-CFD maximizer is additionally cross-checked on 4,000 random
+  windows against an independent factorized CFD oracle (agreement to the raw double,
+  including the joint-PAM case), and on the legacy dict / aggregate-panel path against a
+  real CFD-scored multiallelic fixture; the CRISTA best-effort bound is the measurement
+  reported under *Worst-case scoring in two-pass fast mode* above.
 
 This establishes that the engine **does not miss** off-targets relative to
 exhaustive search. It does **not** validate the *scoring* models' predictive
@@ -421,5 +613,5 @@ retrospective comparison of CFD/CRISTA ranking to experimental off-target assays
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.4.0 line; see the CHANGELOG and the referenced source files
-for implementation detail.*
+methods as of the 2.5.x line (default SNP+indel co-occurrence, two-pass `--fast`
+mode); see the CHANGELOG and the referenced source files for implementation detail.*

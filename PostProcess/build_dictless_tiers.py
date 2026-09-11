@@ -47,6 +47,50 @@ from __future__ import annotations
 import os
 
 
+def _genotyped_samples_for_dict(dict_path, chrom):
+    """Best-effort UNION of VCF-genotyped sample IDs for this dict's dataset+chrom.
+
+    Derives the source VCF dir from the dict path exactly as the tier folders are
+    (``Dictionaries/dictionaries_<vcf>`` -> ``VCFs/<vcf>``), finds this chromosome's
+    ``.vcf.gz``, and reads its ``#CHROM`` header. Returns a set of sample IDs, or
+    ``None`` if anything is missing/unreadable -- a batteries install ships no
+    source VCFs, and a combined-panel dict may have no single ``VCFs/<vcf>`` dir --
+    so the caller stays a strict no-op (existing behaviour) in those cases. Used to
+    drop phantom samplesID entries from the panel AN (#46).
+    """
+    try:
+        import glob
+        import gzip
+
+        dict_dir = os.path.dirname(dict_path)
+        folder = os.path.basename(dict_dir)
+        if not folder.startswith("dictionaries_"):
+            return None
+        vcf_name = folder[len("dictionaries_"):]
+        data_root = os.path.dirname(os.path.dirname(dict_dir))  # up past Dictionaries/
+        vcf_dir = os.path.join(data_root, "VCFs", vcf_name)
+        if not os.path.isdir(vcf_dir):
+            return None
+        bare = chrom[3:] if chrom.startswith("chr") else chrom
+        cands = [
+            f for f in sorted(glob.glob(os.path.join(vcf_dir, "*.vcf.gz")))
+            if chrom in os.path.basename(f)
+            or ("." + bare + ".") in os.path.basename(f)
+            or ("_" + bare + ".") in os.path.basename(f)
+        ]
+        if not cands:
+            return None
+        samples = set()
+        with gzip.open(cands[0], "rt") as fin:
+            for line in fin:
+                if line.startswith("#CHROM"):
+                    samples.update(line.rstrip("\n").split("\t")[9:])
+                    break
+        return samples or None
+    except Exception:  # noqa: BLE001 - any failure -> no-op (never break the build)
+        return None
+
+
 def _sibling_tier_dir(dict_path, prefix):
     """Return the sibling tier directory for a dict path, mirroring the resolvers.
 
@@ -177,9 +221,15 @@ def emit_dictless_tiers(dict_path, db_to_samplesid, chrom, dictionaries_dir=None
     # logically identical, and the reader is backward-compatible (reads v2 + v3).
     # The build now emits v3 directly instead of requiring a manual post-build
     # transcode_registry pass.
+    # #46 auto-fix: filter the panel to VCF-genotyped samples so an over-listing
+    # samplesID cannot inflate AN (deflating every AF). Best-effort + guarded: if
+    # the source VCF for this dataset/chrom is not on disk (batteries install) or
+    # can't be read, genotyped is None -> build_sample_meta is a strict no-op and
+    # the pre-flight WARN still surfaces the risk.
+    genotyped = _genotyped_samples_for_dict(resolved_dict, chrom)
     reg_stats = t0c.compile_from_dict(
         resolved_dict, db_to_samplesid, chrom, reg_bin, reg_idx,
-        subpop_field=subpop_field, compress=True,
+        subpop_field=subpop_field, compress=True, genotyped_samples=genotyped,
     )
     gt_stats = t1g.compile_genotypes_from_dict(
         resolved_dict, db_to_samplesid, chrom, gt_bin, gt_idx,

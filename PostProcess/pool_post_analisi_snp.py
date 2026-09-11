@@ -138,7 +138,21 @@ def memory_capped_workers(requested, n_tasks, dict_folder):
     usable_gb = max(1.0, budget_gb - max(2.0, budget_gb * 0.15))
     per_worker_gb = _estimate_worker_gb(dict_folder)
     cap = max(1, int(usable_gb // per_worker_gb))
-    workers = max(1, min(requested, cap, n_tasks))
+    # ABSOLUTE worker cap (default 32; override CRISPRME_POSTPROC_MAX_WORKERS).
+    # Post-analysis is I/O-bound -- each worker only spawns a per-chromosome
+    # subprocess -- so a huge pool buys no speed AND deadlocks: a multiprocessing
+    # Pool with hundreds of workers has every worker inherit every other worker's
+    # internal sentinel pipe at fork, so each pipe ends up held by hundreds of
+    # processes and the pool's completion/join never finalizes (all tasks finish,
+    # the parent hangs in pool.map forever -- observed at 200 workers / 455 contigs
+    # on a 200-core host). Capping keeps the FD-inheritance bounded and safe.
+    try:
+        abs_cap = int(os.environ.get("CRISPRME_POSTPROC_MAX_WORKERS", "32"))
+    except ValueError:
+        abs_cap = 32
+    if abs_cap < 1:
+        abs_cap = 32
+    workers = max(1, min(requested, cap, n_tasks, abs_cap))
     return workers, budget_gb, per_worker_gb
 
 

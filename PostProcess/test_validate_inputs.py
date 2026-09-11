@@ -416,7 +416,10 @@ class TestCheckVcfContent(unittest.TestCase):
             make_vcf_gz(path, [record], header=sites_only_header)
             issues = vi.check_vcf_content(path)
             self.assertEqual(len(issues), 1)
-            self.assertEqual(issues[0].severity, vi.ERROR)
+            # a sites-only VCF is a WARN, not an ERROR: it is EXPECTED for an
+            # aggregate index (the mega all-source panel), where per-dataset AF
+            # comes from the Tier-0 registry rather than sample genotypes.
+            self.assertEqual(issues[0].severity, vi.WARN)
             self.assertIn("sites-only", issues[0].message)
 
     def test_missing_af_field_entirely(self):

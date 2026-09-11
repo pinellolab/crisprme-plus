@@ -352,11 +352,14 @@ while read vcf_f; do
 		echo "Reference index present ($(basename "$idx_ref"))"
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>"$log"
 	elif [ "$index_path" != "_" ] && [ -n "$index_path" ]; then
-		# an index location was explicitly provided but no matching index was
-		# found there: fail loudly instead of silently rebuilding elsewhere
+		# an index location was explicitly provided but no matching reference index
+		# was found there. A downloaded variant index ships its matching reference
+		# index alongside it (crisprme_hf co-fetches <pam>_<N>_<ref>), so this should
+		# not happen from a normal `download`; fail loudly rather than silently
+		# rebuilding (extra compute) -- point the user at the one-download fix.
 		printf "ERROR: no matching reference index under --index-path '%s'\n" "$ref_lib" >&2
 		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s)\n" "$true_pam" "$ref_name" "$bMax" "$(basename "$idx_folder1")" >&2
-		printf "       build it first with 'crisprme.py build-index-only' (same --genome/--pam/--bDNA/--bRNA), or omit --index-path to build automatically.\n" >&2
+		printf "       re-run 'crisprme.py download --what index --index-name %s' (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$(basename "$idx_folder1")" >&2
 		exit 1
 	else
 		# no valid index found, compute it; use mkdir lock to prevent concurrent builds

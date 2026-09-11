@@ -79,6 +79,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_validate_inputs -v
 
+      - name: "samplesID over-listing guard (#46: phantom samples inflate AN / deflate AF)"
+        working-directory: PostProcess
+        run: python test_samplesid_overlisting.py
+
       - name: post_process.sh writes temps to output dir, not install dir
         working-directory: PostProcess
         run: python -m unittest test_post_process_tempdir -v
@@ -119,6 +123,19 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_chrom_subset -v
 
+      - name: "Indel+SNP co-occurrence (overlay, phased indel GT, cis join, brute-force oracle vs real chr22 fixture)"
+        # feature/indel-snp: SNP+indel co-occurring off-target discovery. Pure stdlib
+        # tests (no extra deps) + a ~16KB real-data fixture whose brute-force ORACLE
+        # independently reconstructs+aligns to cross-validate every coordinate hop
+        # (overlay, bulge+strand window map, co-occurrence decode, cis join). Each file
+        # is a function-based suite with a __main__ runner that raises on failure.
+        working-directory: PostProcess
+        run: |
+          python test_indel_snp_overlay.py
+          python test_indel_genotypes.py
+          python test_indel_snp_cis.py
+          python test_indel_snp_bruteforce.py
+
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
         run: python -m unittest test_bulge_cap -v
@@ -154,3 +171,25 @@ jobs:
       - name: "Shareable report (self-contained ZIP: report.html + tsv.gz, base64 plots, top-N table)"
         working-directory: PostProcess
         run: python -m unittest test_generate_report -v
+
+      - name: "Additional coverage (tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile)"
+        # NOTE: test_annotation is intentionally NOT here -- annotation.py imports
+        # pysam, which the light network-free CI does not install (mirrors why the
+        # heavier annotation path is covered by validate-benchmarks, not unit-tests).
+        working-directory: PostProcess
+        run: >
+          python -m unittest test_assembly_reconcile
+          test_ensure_search_lists test_hvdr_greedy_cap test_registry_only_emit
+          test_representative_tiebreak test_sanitize_job_name test_tier0_compaction -v
+
+      - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF)"
+        # The 2.5.1 flagship features: --fast two-pass (lossless detection + worst-case
+        # bound), the all-source mega registry/indel-AF, and aggregate carrier/hom "NA".
+        # NOTE: test_fix1_crista_cache is intentionally NOT here -- it needs the 276 MB
+        # CRISTA model (absent in the light CI); its byte-identity is validated in the SIF.
+        working-directory: PostProcess
+        run: >
+          python -m unittest test_twopass_emit test_twopass_find test_twopass_score
+          test_twopass_cfd_exact test_twopass_fast_equivalence test_twopass_legacy_cfd
+          test_twopass_lynchpin_counterexamples test_aggregate_carrier_na
+          test_build_mega_registry test_build_mega_indel_af test_lossless_dense -v

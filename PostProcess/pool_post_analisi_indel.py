@@ -154,7 +154,16 @@ def memory_capped_workers(requested, n_tasks, dict_folder):
     usable_gb = max(1.0, budget_gb - max(2.0, budget_gb * 0.15))
     per_worker_gb = _estimate_worker_gb(dict_folder)
     cap = max(1, int(usable_gb // per_worker_gb))
-    workers = max(1, min(requested, cap, n_tasks))
+    # ABSOLUTE worker cap (default 32; override CRISPRME_POSTPROC_MAX_WORKERS) --
+    # post-analysis is I/O-bound and a Pool with hundreds of workers DEADLOCKS via
+    # per-worker sentinel-pipe FD inheritance (see pool_post_analisi_snp.py twin).
+    try:
+        abs_cap = int(os.environ.get("CRISPRME_POSTPROC_MAX_WORKERS", "32"))
+    except ValueError:
+        abs_cap = 32
+    if abs_cap < 1:
+        abs_cap = 32
+    workers = max(1, min(requested, cap, n_tasks, abs_cap))
     return workers, budget_gb, per_worker_gb
 
 

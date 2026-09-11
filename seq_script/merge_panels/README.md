@@ -1,9 +1,26 @@
 # Combined multi-source VCF panels for CRISPRme (single-scan enrichment)
 
-**Status:** validated **genome-wide** (1000G + HGDP) — the full AF-provenance panel
-was built and both the **NGG** and **pamless NNN** combined indexes were produced
-from a single enrichment, with pooled AF confirmed correct. Opening this to compare
-with Ann's merge/provenance approach and converge on one.
+There are **two** merge modes, for two different purposes. Pick by whether the
+sources are all genotyped and whether you need cross-variant cis:
+
+| | **Mode 1 — genotyped panel** | **Mode 2 — sites-only "mega"** |
+|---|---|---|
+| Script | `merge_vcf_panels.sh` + `build_combined_panel.sh` | `merge_mega_sites.sh` + `build_mega_registry.py` |
+| Sources | fully genotyped (1000G-2021, HGDP) | any, incl. aggregate (gnomAD AF-only, TOPMed AN=0, AoU pseudo-sample) |
+| Genotypes | **kept** (per-sample GT) | **stripped** (`view -G`) |
+| AF reported | **pooled** `AF` (`+fill-tags` AC/AN over union) + `AF_<src>` | per-source `AF_<src>` + **`AF_max`** (pooled AC/AN not computable) |
+| Registry | genotype-counted (`compile_registry`, via `--samplesID`) | INFO-AF (`compile_registry_from_info_af`, no samples) |
+| indel+SNP cis | CONFIRMED (1000G phased) / PUTATIVE (HGDP) | **N/A** (aggregate, no phase) |
+| MAF filter | none | **> 0.001** (uniform) |
+
+**Status:** Mode 1 validated **genome-wide** (1000G + HGDP), both NGG and pamless
+NNN indexes built from one enrichment, pooled AF confirmed. Mode 2 merge + registry
+validated **genome-wide** (all 5 sources, 66.9M sites, 51.2M SNPs); hybrid index
+assembly (enrich + drop-in registry) pending. See §"Mode 2" below and
+`docs/DESIGN_mega_index.md`.
+
+---
+## Mode 1 — genotyped cis-capable panel (1000G-2021 + HGDP)
 
 ## Motivation
 CRISPRme enriches a reference with a VCF's variants and scans once. Running N
@@ -100,3 +117,70 @@ BCFTOOLS=bcftools ./merge_vcf_panels.sh /path/to/cwd/VCFs/hg38_1000G_HGDP chr22
 - Provenance: is `SRC` (+ `AF_<SRC>`) the same shape you use, or a different tag?
 - Pooled vs per-source AF: do you recompute pooled AF, keep per-source, or both?
 - Sites-only sources (gnomAD/TOPMed) and phasing policy.
+
+---
+## Mode 2 — sites-only "mega" all-source panel (`merge_mega_sites.sh`)
+
+The mega merges **all five** sources — 1000G-2021, HGDP, gnomAD v4.1, TOPMed,
+All-of-Us — into one **sites-only** index so a user scans once against the union of
+common variation, with each source's frequency kept separate plus a global max. It
+exists because Mode 1's pooled AF is only meaningful when every source is genotyped;
+gnomAD is AF-only, TOPMed ships `AN=0`, and AoU is a single pseudo-sample, so there
+is no honest pooled AC/AN and no cross-source cis. Individual-level data is
+intentionally discarded.
+
+### What it produces (per variant)
+| INFO field | Meaning |
+|---|---|
+| `AF_<src>` | each source's **original** per-alt AF; absent where the source lacks the variant |
+| `AF_max` | max over the present `AF_<src>` — the global frequency the mega registry's GLOBAL group carries |
+
+There is **no pooled `AF`** (unlike Mode 1): ΣAC/ΣAN is not computable across these
+sources, and averaging would be dishonest.
+
+### How it works (`merge_mega_sites.sh`, per chromosome)
+Per source: `bcftools norm -m -any -f <chr>.fa` (split multiallelics **and**
+left-align, so the same indel from two sources merges instead of duplicating — AF is
+`Number=A` so the per-alt AF is carried with no genotype read) → MAF filter
+`-e "AF<=0.001 || AF>=0.999"` (keeps 0.001<AF<0.999) → `view -G` (strip genotypes) →
+`annotate -x "^INFO/AF"` (keep **only** AF; note the `^` — `"INFO,^INFO/AF"` would
+strip everything) → rename `INFO/AF → AF_<src>`. Then `bcftools merge -m none` the
+sources (distinct `AF_<src>` co-exist at union sites) and add `AF_max` (query → awk
+max → `annotate`). Genome-wide: `xargs -P N` over `chr1..chrY`.
+
+Then `PostProcess/build_mega_registry.py` reads the merged `mega.<chr>.afmax.vcf.gz`
+and builds the Tier-0 registry via `tier0_registry.compile_registry_from_info_af`
+(each source → a db group with `AC=round(AF·AN_nom)`, `AN=AN_nom`=2×cohort-N so AF is
+exact and AN is meaningful; GLOBAL group = `AF_max`). The registry is **SNP-only**
+(the Tier-0 format packs single-char ref/alt); indels (~24% of sites) are counted and
+routed to the fake-indel path, not annotated with AF in v1.
+
+### Validation (genome-wide)
+- Merge: 24 chroms, **66,913,681 union sites**; chr22 1.10M, chr1 5.52M, chrX 2.44M,
+  chrY 187K (chrY correctly carries only HGDP/gnomAD/AoU — 1000G/TOPMed have none);
+  `AF_max = max(AF_<src>)` verified (0 violations).
+- Registry: **51,174,004 SNPs** (+15.7M indels routed out, 23.5%); read-back exact —
+  chr1:10147 C>G → gnomAD 0.004 / AoU 0.056 / global=`AF_max` 0.056; chrX:10072 G>T →
+  HGDP 0.065 / TOPMed 0.075 / global=`AF_max` 0.075.
+- 13 unit tests: `PostProcess/test_registry_from_info_af.py`, `test_build_mega_registry.py`.
+
+### Reproduce
+```bash
+# one chromosome (configure SOURCES + REF dir in the script / env):
+CRISPRME_REF_DIR=/path/to/Genomes/hg38 ./merge_mega_sites.sh /path/to/VCFs/hg38_mega chr22
+# genome-wide (6-way parallel):
+printf '%s\n' $(seq 1 22) X Y | sed 's/^/chr/' \
+  | CRISPRME_REF_DIR=/path/to/Genomes/hg38 xargs -P 6 -I{} ./merge_mega_sites.sh /path/to/VCFs/hg38_mega {}
+# registry per chrom:
+python3 ../../PostProcess/build_mega_registry.py --vcf /path/to/VCFs/hg38_mega/mega.chr22.afmax.vcf.gz \
+  --chrom chr22 --out-dir /path/to/Dictionaries/registry_hg38_mega
+```
+Then the hybrid index assembly (enrich via `build-index-only` **without**
+`--samplesID`, then drop `registry_hg38_mega/` in) — see `docs/DESIGN_mega_index.md`.
+
+### Gaps / open items
+- **Indel per-dataset AF absent in v1** (SNP-only registry). Indel off-targets are
+  still discovered via fake-indel contigs, just un-annotated. Fast-follow: a
+  sites-only indel-AF store.
+- **Carrier/hom counts are HWE expectations** from AF (AF itself is exact) — the
+  registry taxonomy sets `aggregate_af_only: True` so the report can mark them.

@@ -335,26 +335,54 @@ class TestSkipAndGate(_TwoSnp):
 # Per-row error isolation: a bad off-target must NOT sink the whole file.
 # --------------------------------------------------------------------------- #
 class TestPerRowErrorIsolation(_TwoSnp):
-    def test_bad_row_isolated(self):
+    def test_multi_variant_row_degrades_without_gt_tier(self):
+        # A multi-variant (k>=2) off-target on a registry-only build (gt_reader=None,
+        # axis=None) cannot compute a haplotype frequency, but must DEGRADE
+        # gracefully (row EMITTED with undefined freqs) rather than be dropped via
+        # on_error -- this INVERTS the old behavior where it raised and was skipped.
         good = _off_target(CHROM, 100, "+", "G", "g", _snp_token(100, "G", "A"))
-        # A multi-variant row with NO genotype tier record cannot be summarized
-        # without a gt tier -> raises inside summarize; but here we force an error
-        # by passing a SNP whose combination needs the gt tier while gt_reader=None.
-        bad = _off_target(CHROM, 100, "+", "G", "g",
-                         "%s,%s" % (_snp_token(100, "G", "A"),
-                                    _snp_token(200, "T", "C")))
+        multi = _off_target(CHROM, 100, "+", "G", "g",
+                            "%s,%s" % (_snp_token(100, "G", "A"),
+                                       _snp_token(200, "T", "C")))
         seen = []
-        out = os.path.join(self.d, "iso.population_summary.tsv")
+        out = os.path.join(self.d, "degrade.population_summary.tsv")
         wrote = psc.write_companion(
-            out, [bad, good], self.t0r, None, None, self.ploidy_of, ps,
+            out, [multi, good], self.t0r, None, None, self.ploidy_of, ps,
             panel_cls=ps.Panel, phased=True, global_group_id=t0.GLOBAL_GROUP_ID,
             on_error=lambda ot, err: seen.append((ot, err)))
         self.assertTrue(wrote)
         _header, rows = _read_companion(out)
-        # The single-variant good row survives (registry-exact, no gt tier needed);
-        # the multi-variant bad row raised and was isolated via on_error.
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["SNP"], _snp_token(100, "G", "A"))
+        # BOTH rows emitted; on_error NOT called (graceful degrade, not an error).
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(seen), 0)
+        _snps = {r["SNP"] for r in rows}
+        self.assertIn(_snp_token(100, "G", "A"), _snps)             # single
+        self.assertIn("%s,%s" % (_snp_token(100, "G", "A"),
+                                 _snp_token(200, "T", "C")), _snps)  # combination
+
+    def test_genuine_row_error_isolated(self):
+        # A row that GENUINELY raises during summarize is still isolated via
+        # on_error (the file is written; only the bad row is skipped) -- preserves
+        # the isolation contract independent of the graceful-degradation path.
+        ot = _off_target(CHROM, 100, "+", "G", "g", _snp_token(100, "G", "A"))
+        seen = []
+
+        def _boom(*a, **k):
+            raise RuntimeError("synthetic summarize failure")
+
+        _orig = ps.summarize
+        ps.summarize = _boom
+        out = os.path.join(self.d, "isolate.population_summary.tsv")
+        try:
+            wrote = psc.write_companion(
+                out, [ot], self.t0r, self.t1_phased, self.axis, self.ploidy_of, ps,
+                panel_cls=ps.Panel, phased=True, global_group_id=t0.GLOBAL_GROUP_ID,
+                on_error=lambda o, err: seen.append((o, err)))
+        finally:
+            ps.summarize = _orig
+        self.assertTrue(wrote)
+        _header, rows = _read_companion(out)
+        self.assertEqual(len(rows), 0)   # the only row raised -> isolated
         self.assertEqual(len(seen), 1)
 
 

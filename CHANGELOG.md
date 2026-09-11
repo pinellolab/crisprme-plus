@@ -11,6 +11,185 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-09-09
+
+### Added
+- **Two-pass fast mode (`complete-search --fast`, opt-in)** for dense / aggregate variant
+  panels where per-haplotype enumeration is intractable (measured **49 h+ without
+  completing** on a 4×-density 1000G+HGDP panel). Instead of enumerating the 2^k IUPAC
+  haplotype lattice per window, it emits a small set of **worst-possible representatives**
+  (reference + minimum-edit + maximum-CFD), propagated to the whole post-analysis via
+  `CRISPRME_FAST_MODE`. Validated **lossless for locus detection** and **non-understating
+  for the worst-case score** against the slow full-enumeration path on a real chr22
+  1000G-2021+HGDP slice (0 CFD under-reports; surfaces *stronger* worst cases at 182 loci),
+  and **confirmed genome-wide** (V2 non-`--fast` vs V3 `--fast` on the 2021 panel: V3 is a
+  locus-level superset, **0 of V2's 1,458 CFD≥0.2 loci lost or demoted**, CFD exact-or-
+  conservative, CRISTA screen-grade only near the 0.2 line). The default (non-`--fast`) path
+  is **byte-identical**. See `docs/DESIGN_2.5.1_two_pass_fast_mode.md` and METHODS §5/§8.
+- **All-source "mega" sites-only index (5 datasets).** A new merged panel — 1000 Genomes
+  2021, HGDP, gnomAD v4.1, TOPMed, All-of-Us — built directly from each source's aggregate
+  `INFO/AF` (these carry no shared samples to reconstruct cross-source haplotypes), with
+  per-dataset AF plus a per-site **`AF_max`** (the maximum across sources) as the reported
+  global frequency. `merge_mega_sites.sh` + `build_mega_registry.py` compile the Tier-0
+  registry directly from the frequencies (byte-identical binary; SNPs, with an indel-AF
+  companion store), and the enricher tolerates sites-only VCFs. See METHODS §2/§3.
+- **Report companions for aggregate panels.** The report now bundles the per-dataset
+  **`indel_af.tsv`** companion (indel allele frequencies by source) alongside the SNP+indel
+  co-occurrence TSV, and renders carrier / homozygote frequencies as **"NA"** for aggregate
+  (sites-only) groups — where only allele frequencies exist and per-individual carrier counts
+  are undefined — instead of fabricating numbers.
+- **`download` always ships the shared reference index** alongside a variant index, so a
+  reference-genome scan (or an on-demand variant-index rebuild) works immediately after a
+  download with no separate build step.
+- **SNP+SNP co-occurrence companion (`<output>.snp_snp_cooc.tsv`).** The SNP-side analogue
+  of the SNP+indel co-occurrence companion: one joinable row per emitted variant off-target
+  that USES ≥2 co-occurring SNP alt alleles, recorded from BOTH the observed-haplotype
+  enumerator (genotyped panels → `CONFIRMED`/`PUTATIVE`, exact phase) and the registry-only /
+  capped finalizer (sites-only panels → `PUTATIVE`). Reports the phase, a conservative
+  `MinAF_bound` (the minimum participating marginal AF — a valid upper bound on the joint cis
+  AF for both phases), and the observed carriers (`NA` on the sites-only path). Gated on a
+  variant registry being present, so a legacy dict install is byte- and allocation-identical.
+- **SNP+indel PUTATIVE co-occurrence on sites-only panels (mega).** The SNP+indel
+  co-occurrence emission previously wrote a row only when cis carriers were countable, so on
+  an aggregate sites-only panel (no per-sample genotypes) an indel + used SNP alt that
+  co-occur at a locus produced no row. It now emits a `PUTATIVE` row with the conservative
+  `min`-AF joint bound (over the indel `AF_max` + each used SNP's registry AF) and `NA`
+  carrier fields. Gated on genotype ABSENCE, so a genotyped panel's real no-cis-carrier call
+  is never turned into a phantom row.
+- **Lossless dense-region worst-case haplotype (`CRISPRME_LOSSLESS_DENSE`, default ON for
+  sites-only).** In a capped dense window the min-mismatch representative can be a strict subset
+  of a genuine carried haplotype, so a sites-only off-target requiring ≥4 co-occurring variants
+  on one haplotype could be dropped. The registry-only (sites-only) path therefore also emits
+  the full co-located variant union — the maximal PUTATIVE haplotype — as an extra
+  representative, bounded (not the 2^k lattice) and gated by the finalizer's own mm/PAM budget
+  so nothing over-budget or PAM-invalid is emitted. The effect is **scoped to sites-only**
+  (`registry_only_mode`), so it is **byte-identical for every genotyped / legacy / dict install**
+  (those never enter the branch, and the genotyped path is already lossless via the observed
+  enumerator). It is **on by default** so the sites-only panel fulfils "don't miss a region";
+  set `CRISPRME_LOSSLESS_DENSE=0` to opt out (sites-only reverts to a greedy representative
+  only). A per-sample union on the genotyped path is intentionally *not* done — it would risk
+  phantom trans-as-cis haplotypes.
+
+### Performance
+- **CRISTA scoring: load the model once + skip eager per-pentamer work.** The 276 MB CRISTA
+  RandomForest ensemble was re-`pickle.load()`ed on every scoring batch (both the SNP and
+  INDEL post-analysis); it is now cached at module scope and loaded once per process.
+  Separately, `get_features` no longer runs an eager per-pentamer `re.sub` + `random.choice`
+  on N-free windows (guarded behind `if "N" in ...`), which also removes a latent
+  nondeterminism from the hot path. Both are **byte-identical** at the reported score
+  precision (validated against the shipped model); `get_features` micro-benchmarks ~1.6×
+  faster. The dense-panel INDEL post-analysis remains dominated by single-threaded per-target
+  CRISTA compute (profiled scoring-bound, not enumeration-bound); parallelizing it is tracked
+  separately.
+
+### Fixed
+- **Post-analysis no longer deadlocks at high thread counts.** A genome-wide variant
+  post-analysis launched with a large `--thread` (e.g. 200 on a 200-core host) could hang
+  indefinitely: a `multiprocessing.Pool` with hundreds of workers makes every worker inherit
+  every other worker's internal sentinel pipe at fork, so the pool's join never finalizes
+  (all per-chromosome tasks complete, the parent hangs in `pool.map` forever). Both the SNP
+  and indel post-analysis pools now cap the worker count (default 32, override
+  `CRISPRME_POSTPROC_MAX_WORKERS`) — no speed loss (post-analysis is I/O-bound, one
+  subprocess per worker) and no deadlock.
+- **Mega (all-source) index hardening.** Resolved 17 adversarial-review findings in the
+  sites-only aggregate index path and de-duplicated colliding indel registry keys.
+- **Clear pre-flight error when a variant search has no prebuilt index.** `complete-search
+  --vcf` without a prebuilt index used to fall back to a legacy on-demand enrichment that
+  builds a classic per-sample dict WITHOUT the dict-less tiers (registry/genotype) and
+  could leave the indel coordinate map (`log_indels`) empty — crashing the variant/indel
+  post-analysis ~30 min in with a cryptic `FileNotFoundError: log<chrom>.txt`. It now
+  detects the missing tiers per dataset up front and stops immediately with an actionable
+  message pointing to `download --what index` (recommended) or `build-index-only` first.
+  Override for advanced/legacy on-demand builds with `CRISPRME_ALLOW_ONDEMAND_BUILD=1`.
+- **Warn when SNP+indel co-occurrence is requested but the registry tier is absent.** The
+  pre-flight guard accepts either the classic per-sample dict OR the dict-less registry, but
+  co-occurrence needs the **registry** specifically. A classic-dict-only index (e.g. a local
+  `build-index-only` run **without `--samplesID`**) previously ran cooc as a **silent no-op**;
+  `complete-search` now prints a WARNING at launch naming the datasets missing the registry
+  tier, so the missing co-occurrence output is no longer silent.
+- **Fast-mode worst-case CFD is now exact on every path.** CFD is position-weighted, so the
+  fewest-mismatch representative does not maximize CFD; fast mode now also emits the exact
+  **maximum-CFD** representative (per-position argmax + bounded brute-force for the joint
+  two-base PAM factor). On the **legacy dict / aggregate-panel (mega) path** this closes a
+  **threshold-crossing** under-report (up to **0.14** CFD). Cross-checked against an
+  independent factorized CFD oracle (4,000 random windows, joint-PAM case included) and a
+  real CFD-scored multiallelic fixture.
+
+### Notes
+- In fast mode, **CFD is the exact worst case; CRISTA is best-effort** (a non-factorizable
+  RandomForest). On a chr22 1000G-2021+HGDP slice every CRISTA ≥ 0.2 off-target was reported
+  at full strength (under-reporting ≤ 0.04, sub-0.19 tail). **Genome-wide the CRISTA tail is
+  heavier:** ~5 % of CRISTA ≥ 0.2 loci can drop below 0.2 under `--fast` (largest gap ~0.12),
+  while **CFD had zero ≥ 0.2 losses** (V2-vs-V3 GW matrix). So `--fast` CFD is a safe
+  actionable gate but **CRISTA is a screen** — run **without** `--fast` for a guaranteed
+  per-haplotype CRISTA worst case / a CRISTA action gate.
+- **`--fast` scope + index/version compatibility.** `--fast` accelerates only the SNP
+  post-analysis; the indel post-analysis is single-threaded and **unaffected** by it (and the
+  `indel_snp_cooc.tsv` companion is byte-identical with/without `--fast`). The feature-on 2021
+  index requires CRISPRme **≥ 2.5.0** — stock 2.4.0's indel post-analysis fails on it (2.4.0
+  users use the 2019 / `-dictless` indices). The **mega** index currently searches **SNPs
+  only** (its fake-indel genome is not built); searchable indels + PUTATIVE
+  co-occurrence-without-genotypes (SNP+SNP and SNP+indel possible haplotypes from AF) are
+  planned for **2.5.2**.
+- **Multi-indel residual (documented):** the indel search materializes one indel per fake
+  contig, so an off-target needing **≥ 2 co-occurring cis indels in one protospacer** is not
+  a candidate (pre-existing single-indel-search property). Low-frequency: **~1–2%** of indel
+  loci after repeat-masking/dedup; genuinely-missed off-targets **~0.1–0.2%**, all at the
+  weakest (≈0-CFD) edit-budget ceiling.
+- **`--fast` does NOT change SNP+indel co-occurrence.** `--fast` collapses only the *SNP*
+  representative emission in `integrated_results.tsv`; the `indel_snp_cooc.tsv` companion is
+  produced by the indel post-analysis' cis-phasing pass over the genotype tiers, which `--fast`
+  does not touch. Measured on the completed genome-wide matrix (2021 panel, `--fast` vs
+  non-`--fast`, guide TGCTTGGTCGGCACTGATAG): the two `indel_snp_cooc.tsv` files are
+  **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full per-sample
+  `cis_samples` + joint-AF in both). Per-sample cis attribution is preserved in fast runs.
+  (Corrects an earlier note that claimed `--fast` collapsed cooc to representatives only.)
+
+## [2.5.0] - 2026-09-01
+
+### Added
+- **SNP+indel co-occurring off-targets — now enabled by default** (opt out with
+  `CRISPRME_INDEL_SNP=0`; previously experimental/opt-in). Detects off-targets that
+  require BOTH a nearby SNP **and** an indel on the same haplotype within a
+  protospacer window — a class the classic two-pass search could not see. The build
+  compiles a per-chromosome **phased indel genotype store** and overlays SNP IUPAC
+  codes onto the fake-indel genome, so the indel search surfaces SNP+indel
+  haplotypes; post-analysis reports **CONFIRMED-cis** (phased) and **PUTATIVE**
+  (unphased) co-occurrences with per-sample carriers + joint allele frequency, and
+  the shareable report bundles `indel_snp_cooc.tsv` and surfaces a
+  "SNP + indel cis co-occurrences (N confirmed-cis)" section.
+- **New 1000G-2021 + HGDP NRG variant index** published to HuggingFace
+  (`NRG_3_hg38+hg38_1000G2021_HGDP`): 3,202 high-coverage phased 1000G samples +
+  929 HGDP. `download --what index` yields a searchable, variant-ready dict-less
+  install (registry + genotype + phased indel-genotype tiers bundled).
+- Shareable report: publication-grade inline **vector SVG** figures.
+
+### Changed
+- **Dict-less observed-haplotype enumerator** replaces the legacy 2^k IUPAC lattice
+  + greedy cap on the variant post-analysis path: every haplotype real individuals
+  carry is emitted (sensitivity-first, **no truncation**), and dense/hypervariable
+  windows are logged to `high_variant_density_regions.bed` for visibility rather
+  than dropped — resolving the phased multi-SNP haplotype under-report on the
+  default path. (Exhaustive worst-case coverage of *unobserved* haplotypes in dense
+  windows remains a documented, flagged limitation; a lossless two-pass fix is planned.)
+- `--max-total-edits` pruning now emits a WARNING and persists a `Pruning_note`
+  into the run params so the "deep off-targets were pruned" signal reaches the
+  report bundle.
+
+### Fixed
+- **Atomic per-chromosome build writes + integrity-checked resume** for the Tier-0
+  registry, Tier-1 genotype, and phased indel-genotype stores: a SIGKILL/OOM
+  mid-write no longer leaves a truncated file that a restart accepts as "done" (a
+  silent-truncation class that had shipped a short chr1 indel-genotype store).
+  Writers use tmp + `os.replace`; resume verifies integrity, not mere presence.
+- Report: high-variant-density region count is **deduplicated** (was inflated by
+  duplicate per-chromosome rows), and the co-occurrence TSV is deduplicated (the
+  writer emits a row per alignment pass). Population-summary companion **degrades
+  gracefully** (emits an NA-frequency row) instead of dropping multi-variant rows
+  on a registry-only install.
+- Pre-flight guard + build-time auto-fix so an over-listing `--samplesID` can no
+  longer inflate the AN denominator (which deflated every reported allele frequency).
+
 ## [2.4.0] - 2026-08-20
 
 ### Added
@@ -953,7 +1132,10 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.3.3...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.5.2...HEAD
+[2.5.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.2
+[2.5.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.0
+[2.4.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.4.0
 [2.3.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.3
 [2.3.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.2
 [2.3.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.3.1

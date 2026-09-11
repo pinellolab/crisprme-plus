@@ -930,6 +930,33 @@ def download_component(
                         f"Installed Tier-1 genotype store genotypes_{vcf_name}/ "
                         f"into {os.path.join(workdir, 'Dictionaries')}\n"
                     )
+            # ALWAYS-SHIP the shared reference index. A variant index tarball
+            # (<pam>_<N>_<ref>+<vcf>) does NOT bundle the reference index
+            # (<pam>_<N>_<ref>) -- it is common to every variant dataset, so it
+            # travels once, not inside each variant archive. Fetch it here so a
+            # fresh download is IMMEDIATELY searchable: the search needs BOTH the
+            # variant AND the reference index (the latter for reference off-targets).
+            # No-op if it is already installed. Non-fatal on failure -- the search
+            # falls back to building it on demand from the raw genome.
+            ref_index_name = install_name.partition("+")[0]  # <pam>_<N>_<ref>
+            if ref_index_name and not os.path.isdir(
+                os.path.join(local_dir, ref_index_name)
+            ):
+                try:
+                    download_component(
+                        "index", workdir, repo=repo, ref=ref,
+                        index_name=ref_index_name, token=token, genotypes=False,
+                    )
+                    sys.stdout.write(
+                        f"Also installed the shared reference index "
+                        f"'{ref_index_name}' (needed for reference off-targets).\n"
+                    )
+                except Exception as exc:  # non-fatal: build-on-demand fallback exists
+                    sys.stdout.write(
+                        f"NOTE: could not fetch the reference index "
+                        f"'{ref_index_name}' ({exc}); the search will build it on "
+                        f"demand from the raw genome (a shared base component).\n"
+                    )
                 else:
                     sys.stdout.write(
                         f"NOTE: index '{index_name}' has no genotypes_{vcf_name}.tar.gz "
@@ -1233,6 +1260,7 @@ def publish_index(
         indel_name = f"log_indels_{vcf_name}"
         registry_name = f"registry_{vcf_name}"
         genotypes_name = f"genotypes_{vcf_name}"
+        indel_gt_name = f"indel_genotypes_{vcf_name}"
         # DEFAULT (classic) main-tarball members: SNP dicts + indel logs, exactly
         # as before. DICTLESS: drop the (152GB) per-sample SNP dicts but KEEP the
         # indel logs (the tiers are SNP-only). Missing-dir handling is unchanged:
@@ -1258,6 +1286,24 @@ def publish_index(
         if os.path.isdir(reg_p) and os.listdir(reg_p):
             dict_dirs.append(reg_p)
             manifest["has_registry"] = True
+        # ADDITIVE (mega / aggregate index): bundle the sites-only INDEL AF sidecar
+        # (indel_af_<vcf>/) in the MAIN tarball so indel off-targets from an aggregate
+        # all-source panel carry per-dataset AF on download -- exactly like the SNP
+        # registry does for SNPs (analisi_indels_NNN reads it from Dictionaries/ on
+        # install). Small gzipped TSVs; absent (genotyped index) => no-op.
+        indel_af_p = os.path.join(dicts_root, f"indel_af_{vcf_name}")
+        if os.path.isdir(indel_af_p) and os.listdir(indel_af_p):
+            dict_dirs.append(indel_af_p)
+            manifest["has_indel_af"] = True
+        # ADDITIVE (SNP+indel feature): bundle the phased indel-genotype store in the
+        # MAIN tarball so CONFIRMED-cis SNP+indel co-occurrence survives download
+        # (indel_genotypes_<vcf>/ -> Dictionaries/ on install, where analisi_indels
+        # reads it). It is << the per-sample SNP genotype store; absent (feature-off
+        # index) => no-op. Already-gzipped .tsv.gz, so it adds ~its on-disk size.
+        indel_gt_p = os.path.join(dicts_root, indel_gt_name)
+        if os.path.isdir(indel_gt_p) and os.listdir(indel_gt_p):
+            dict_dirs.append(indel_gt_p)
+            manifest["has_indel_genotypes"] = True
         # ADDITIVE Tier-1: the big genotype store travels as a SEPARATE tarball
         # (see below), never inside the main archive.
         gt_p = os.path.join(dicts_root, genotypes_name)
