@@ -1,8 +1,9 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ⚠️ **Alpha release.** CRISPRme+ is a preview of the next major version; interfaces, data
-> layouts, and results may change between builds. For production or clinical/critical work,
-> use the frozen stable line **[CRISPRme 2.1.14](https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14)**.
+> ℹ️ **CRISPRme+ (v2.5.3)** is the current release of the next-generation line
+> (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, fast-by-default
+> analysis). For a frozen production/clinical baseline you can instead use the stable
+> line **[CRISPRme 2.1.14](https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14)**.
 
 This is the fastest way to get CRISPRme running with its point-and-click **web
 interface**, with **no conda, no compiling, and no 410 GB download**. You copy a
@@ -23,24 +24,24 @@ genome-wide 1000G+HGDP variant search is memory-intensive — give it **at least
 32 GB (64 GB recommended)**.
 
 > **Disk:** give Docker **≈ 100 GB free** for the batteries-included (variant-aware)
-> setup — it uses **~85 GB** on disk. v2.4.0 ships a **dict-less** variant index
-> (no per-sample dictionaries — that is the point of this release): the reference +
-> variant genome indexes are ~40 GB, the compact allele-frequency registry ~2 GB,
-> and the per-genotype store (used for optional per-sample annotation) ~26 GB. The
-> combined 1000G+HGDP variant index itself is a ~16 GB download. A reference-only
-> setup is far smaller (~25 GB).
+> setup — it uses **~85 GB** on disk. CRISPRme+ ships a **dict-less** variant index
+> (no per-sample dictionaries): the reference + variant genome indexes are ~40 GB, the
+> compact allele-frequency registry a few GB (shipped uncompressed for fast lookups),
+> and an optional per-genotype store (for per-sample carrier annotation) ~26 GB. The
+> genotyped **1000G-2021 + HGDP** index is a ~29 GB download; the sites-only **mega**
+> (five-source) index ~15 GB. A reference-only setup is far smaller (~25 GB).
 
 Check Docker works, then pull the CRISPRme+ image:
 
 ```bash
 docker run --rm hello-world
 
-# Pull the current CRISPRme+ alpha (multi-arch: Apple Silicon + Intel/Linux).
-docker pull pinellolab/crisprme:v2.4.0
+# Pull the current CRISPRme+ release (multi-arch: Apple Silicon + Intel/Linux).
+docker pull pinellolab/crisprme:v2.5.3
 ```
 
 > **Already have an older image?** Docker does **not** re-download a tag you already
-> have — run `docker pull pinellolab/crisprme:v2.4.0` again to update. Skipping this makes an
+> have — run `docker pull pinellolab/crisprme:v2.5.3` again to update. Skipping this makes an
 > old image error with `download is not an allowed command`.
 
 ## 2. Make a folder to hold your data and results
@@ -62,7 +63,7 @@ This pulls the human genome, annotations, PAM files and sample lists from the
 CRISPRme HuggingFace mirror (a fast CDN). It replaces the old multi-hour `setup`:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.3 \
   crisprme.py download --what all --path /DATA
 ```
 
@@ -72,33 +73,47 @@ Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
 minutes of CPU; instead, download the ready-made SpCas9 (NGG) index:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.3 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 ```
 
-For a variant-aware search (what the default web search uses), also download the
-1000 Genomes + HGDP enriched index:
+For a variant-aware search (what the default web search uses), download one of the two
+complementary production indexes:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
-  crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA
+# Genotyped panel — 1000 Genomes 2021 + HGDP (sample-level genotypes).
+# Observed / CONFIRMED haplotypes with per-sample carriers + exact joint AF (use --full).
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.3 \
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
+
+# Sites-only "mega" panel — five sources (1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + AoU),
+# per-dataset AF + cross-source AF_max. PUTATIVE haplotypes with a conservative min-AF bound.
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.3 \
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
 ```
 
 The web interface picks these up automatically — a search that uses the default NRG PAM
 (SpCas9, recognizes NGG + NAG) with up to 2 bulges will reuse them instead of rebuilding.
 (Need a different nuclease? See **"Installing more indexes"** at the bottom.)
 
+> **Fast vs full.** Searches run in **fast mode by default** — they report a small set of
+> worst-possible representatives per variant window (reference + minimum-edit + maximum-CFD),
+> which removes the per-haplotype enumeration wall on dense/aggregate panels. Add **`--full`**
+> (CLI) or pick **Full** in the web form to enumerate exact per-sample haplotypes with named
+> carriers + CONFIRMED cis phasing (recommended on the genotyped panel for clinical
+> validation). The shareable report states which mode was used.
+
 ## 5. (Optional, advanced) Add the raw 1000 Genomes VCFs
 
 CRISPRme's superpower is finding off-targets created by genetic variants — and the
-`NRG_3_hg38-dictless+hg38_1000G_HGDP` index you downloaded in step 2 **already** makes the
+`NRG_3_hg38+hg38_1000G2021_HGDP` index you downloaded in step 2 **already** makes the
 default web search variant-aware. You do **not** need the raw VCFs for that.
 
 Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level
 analyses / personal risk cards:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.3 \
   crisprme.py download --what vcf --dataset 1000G --path /DATA
 ```
 
@@ -106,7 +121,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.4.0 crisprme.py web-interface
+  pinellolab/crisprme:v2.5.3 crisprme.py web-interface
 ```
 
 `-p 8080:8080` connects the app inside the container to your browser. Leave this
@@ -156,7 +171,7 @@ the `list_vcf.txt` / `list_samplesID.txt` the search reads, so from `~/crisprme`
 ```bash
 printf '%s\n' CTAACAGTTGCTTTTATCAC > my_guide.txt
 
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.3 \
   crisprme.py complete-search \
     --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
     --guide my_guide.txt \
@@ -178,7 +193,7 @@ Build the same shareable one-file report the web **Download report** button
 produces (a self-contained `report.html` inside a ZIP):
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.3 \
   crisprme.py generate-report --result-dir Results/my_search
 # -> Results/my_search/<jobid>_report.zip
 ```
@@ -196,7 +211,7 @@ is `apptainer`, or `singularity` on older systems — they are interchangeable).
 
 ```bash
 # 1. build the image once (a ~2 GB .sif file; no root needed)
-apptainer pull crisprme.sif docker://pinellolab/crisprme:v2.4.0
+apptainer pull crisprme.sif docker://pinellolab/crisprme:v2.5.3
 
 # 2. download data + a prebuilt index into a working folder
 mkdir -p ~/crisprme && cd ~/crisprme
@@ -205,7 +220,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
 # optional (advanced): the raw 1000G VCFs (~16 GB) — only for CLI sample-level
 # analyses / personal risk cards; the index above already makes the web search
 # variant-aware
@@ -238,7 +253,7 @@ An index is specific to a **PAM + bulge count + genome**. Download whichever you
 need by its **exact published name** — for example the pamless variant index:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 crisprme.py download --what index --index-name NNN_3_hg38+hg38_1000G_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.3 crisprme.py download --what index --index-name NNN_3_hg38+hg38_1000G_HGDP --path /DATA
 ```
 
 To see which indexes are published, browse the dataset repository
@@ -287,7 +302,7 @@ and deleting data you no longer need. See
   2. Reference-only selected — keep the **1000G+HGDP** option (pre-selected by
      default) to get variant off-targets.
   3. Variant index not installed — re-run
-     `crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA`.
+     `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA`.
   4. Confirm success: `Results/<name>/log_error.txt` is empty and
      `*.integrated_results.tsv` is non-empty.
 
