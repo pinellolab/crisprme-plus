@@ -23,6 +23,7 @@ from tier0_registry import (
     RegistryReader,
     compile_registry_panel,
     transcode_registry,
+    decompress_registry,
     autosomal_ploidy,
     GLOBAL_GROUP_ID,
     VERSION,
@@ -309,3 +310,32 @@ class TestTranscodeGuards(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDecompressRegistry(_ParityMixin, unittest.TestCase):
+    """decompress_registry (v3 zlib -> v3 RAW) is lossless — the inverse of the
+    transcode compress direction, used to ship the registry uncompressed by default."""
+
+    def test_zlib_to_raw_roundtrip_equal(self):
+        d = tempfile.mkdtemp()
+        b2, i2 = _compile_v2(_small_records(), d)
+        bz, iz = os.path.join(d, "z.bin"), os.path.join(d, "z.idx")
+        transcode_registry(b2, i2, bz, iz)                    # v2 -> v3 zlib
+        br, ir = os.path.join(d, "r.bin"), os.path.join(d, "r.idx")
+        m = decompress_registry(bz, iz, br, ir)               # v3 zlib -> v3 raw
+        self.assertEqual(m["codec"], CODEC_RAW)
+        self.assertEqual(m["version"], VERSION_COMPRESSED)
+        for k in ("record_blocks", "group_blocks", "pool_blocks"):
+            self.assertIn(k, m)
+        with RegistryReader(br, ir) as rr:
+            self.assertEqual(rr._codec, CODEC_RAW)
+        # the raw reader equals the zlib source everywhere (hits + misses)
+        self.assert_readers_equal(bz, iz, br, ir, extra_miss=[(100, "C"), (250, "G")])
+
+    def test_refuses_raw_source(self):
+        d = tempfile.mkdtemp()
+        b2, i2 = _compile_v2(_small_records(), d)
+        br, ir = os.path.join(d, "r.bin"), os.path.join(d, "r.idx")
+        transcode_registry(b2, i2, br, ir, codec=CODEC_RAW)   # already raw
+        with self.assertRaises(ValueError):
+            decompress_registry(br, ir, os.path.join(d, "x.bin"), os.path.join(d, "x.idx"))

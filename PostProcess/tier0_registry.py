@@ -1317,6 +1317,47 @@ def transcode_registry(old_bin, old_idx, new_bin, new_idx,
     return manifest
 
 
+def decompress_registry(old_bin, old_idx, new_bin, new_idx,
+                        block_records=DEFAULT_BLOCK_RECORDS):
+    """Re-frame a v3 **zlib** registry into a v3 **RAW** (uncompressed) one, losslessly.
+
+    The inverse of ``transcode_registry``'s compress direction: it reads the three
+    decompressed sections back out of the compressed source (via the block index) and
+    re-emits them with ``codec=RAW`` (blocks stored uncompressed). No VCF re-parse; the
+    records, group counts, rsIDs and every lookup are byte-for-byte identical, only the
+    on-disk container changes. Used to convert an already-shipped compressed registry to
+    the raw format 2.5.3 ships by default. Block tuples: record = [first_pos, first_alt,
+    comp_off, comp_len, uncomp_off, uncomp_len]; group/pool = [uncomp_off, comp_off,
+    comp_len, uncomp_len]."""
+    r = RegistryReader(old_bin, old_idx)
+    try:
+        if getattr(r, "_codec", None) != CODEC_ZLIB:
+            raise ValueError(
+                "decompress_registry: source %s is not zlib-compressed (codec=%r); "
+                "nothing to do" % (old_bin, getattr(r, "_codec", None)))
+
+        def _cat(blocks, ci_off, ci_len, ci_uoff):
+            parts = []
+            for bb in sorted(blocks, key=lambda b: b[ci_uoff]):
+                raw = bytes(r._mm[bb[ci_off]:bb[ci_off] + bb[ci_len]])
+                parts.append(zlib.decompress(raw))
+            return b"".join(parts)
+
+        record_array = _cat(r._record_blocks, 2, 3, 4)
+        group_blob_bytes = _cat(r._group_blocks, 1, 2, 0)
+        string_pool_bytes = _cat(r._pool_blocks, 1, 2, 0)
+        manifest = dict(r.manifest)
+    finally:
+        r.close()
+
+    _emit_v3_raw(new_bin, manifest, record_array, group_blob_bytes,
+                 string_pool_bytes, manifest["n_records"], manifest["count_width"],
+                 manifest["code_width"], block_records)
+    with open(new_idx, "w") as out:
+        json.dump(manifest, out, indent=2, sort_keys=True)
+    return manifest
+
+
 def _emit_v3_raw(out_bin, manifest, record_array, group_blob_bytes,
                  string_pool_bytes, n_records, count_width, code_width,
                  block_records):
