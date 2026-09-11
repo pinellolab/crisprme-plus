@@ -132,6 +132,12 @@ A `cProfile` of the dense-guide SNP post-analysis (chr22, mm4/1/1, fast) found t
 
 **Indel-tail profiled → a second fix (O(1) LRU).** Once the box freed up, the indel post-analysis profiled cleanly and exposed something the SNP profile (which used cache=512) couldn't: with the 4096 cache the **LRU bookkeeping itself** became the tail — `list.remove()` at **43 s / 26%** (15.3 M cache hits), because the LRU was a plain list with O(cache_size) `remove`/`pop`. Converting it to an `OrderedDict` (`move_to_end`/`popitem`, **O(1)**) removed it entirely: **indel post-analysis 167 s → 121 s**, byte-identical (67 tests green). This also makes *any* large cache free of per-hit bookkeeping cost, so the block-count bump is a clean win on both paths. The remaining indel tail (~121 s) is now cheap O(1) registry access + intervaltree construction — algorithmic co-occurrence work, a deeper #174 follow-up, not a pathology.
 
+### 4b. Final decision — ship the registry RAW (all indexes), consistent + fastest
+Measured that a compressed registry costs **~2× on lookups** even with the warm cache (raw = direct mmap, no decompression), and that inside the gzipped `-dictless` tarball a RAW registry **gzips back to ~the zlib size** (RAW `reg_chr1` 649 MB → 179 MB gz ≈ 189 MB zlib on-disk) — so **all-RAW is ~free on download**, costs only *extracted* disk (+5.6 GB), and gains lookup speed. Decision: **ship both production indexes RAW** ("speed over space", one consistent format).
+- **Code:** `build_dictless_tiers` defaults RAW (`CRISPRME_REGISTRY_COMPRESS=1` opts into zlib); `decompress_registry` (v3-zlib→raw, lossless, tested) converts already-shipped indexes with no VCF reparse. Reader keeps both codecs. Cache + O(1)-LRU remain for the opt-in compressed path.
+- **HF:** genotyped registry converted → RAW (all 24 contigs, **0 mismatches**, 2.4→8.0 GB), the genotyped index **re-published** (`indexes/NRG_3_hg38+hg38_1000G2021_HGDP.tar.gz`, 28.7 GB, `rc=0`); the 6 GB genotypes companion preserved. Mega already RAW. Round-trip download-verify in progress.
+- **Cleanup:** ~2.3 TB of stale test scratch reclaimed on ml007; ml008 this-session scratch cleared (large ambiguous dirs held for confirmation). Other-project + shared-dep dirs untouched.
+
 ## 5. Pending / for your decision
 
 1. **Clean-room results** — appended above as they land (both running).
