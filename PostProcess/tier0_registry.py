@@ -656,7 +656,24 @@ CODEC_RAW = 0
 CODEC_ZLIB = 1
 DEFAULT_BLOCK_RECORDS = 4096
 DEFAULT_BLOCK_BYTES = DEFAULT_BLOCK_RECORDS * RECORD_SIZE  # group/pool byte-chunk size
-_LRU_BLOCKS = 8  # decompressed-block cache size (per reader)
+# Decompressed-block LRU cache size (per reader). The v3 registry is zlib
+# block-compressed (~3.6x smaller on disk); the cost moved to lookup-time
+# decompression. Profiling a dense per-contig SNP post-analysis showed the 8-block
+# default THRASHES — the IUPAC decomposition touches positions across the whole
+# chromosome (a chr22 registry is ~205 record blocks), so an 8-slot LRU re-decompresses
+# hot blocks ~1e6 times (zlib.decompress = 71% of the run). A cache large enough to
+# hold a chromosome's working set turns that into one-decompress-per-block. Override
+# with CRISPRME_REGISTRY_CACHE_BLOCKS (each block ~= DEFAULT_BLOCK_RECORDS records
+# decompressed, so budget memory accordingly across pool workers).
+# Default 512 (up from 8): a decompressed block is ~64 KB, so 512 blocks is ~32 MB per
+# reader worst case (well within the post-analysis pool's per-worker budget) and holds a
+# whole chr22-scale registry (~339 blocks) in cache. Measured: bumping 8->512 cut a dense
+# chr22 SNP post-analysis 326s -> 89s (3.66x), byte-identical output. Raise it on
+# big-RAM boxes to fully cache the largest contigs (e.g. chr1 ~3k blocks).
+try:
+    _LRU_BLOCKS = max(1, int(os.environ.get("CRISPRME_REGISTRY_CACHE_BLOCKS", "512") or "512"))
+except (TypeError, ValueError):
+    _LRU_BLOCKS = 512
 
 # Group-entry width is decided per file (count_width / code_width). The static
 # GROUP_SIZE below is the DEFAULT (u8 code + u16 counts = 11 B) exported for

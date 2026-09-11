@@ -119,7 +119,10 @@ Serial split: **feature-build 58%, predict 42%**. The predict already carries `n
 
 Consequence: a **CRISTA-skip / CFD-only fallback would save ~1–2 min of a 100-min timeout** — it targets the wrong thing. We are **not** building it as a perf fix (see `docs/DESIGN_fast_crista_skip.md`, superseded by this measurement).
 
-The `CRISPRME_CRISTA_PARALLEL` fork-pool prototype (opt-in, default OFF, bit-identical — `test_crista_parallel_equivalence` in CI; `dev` `7771b66`→`c5fff0d`→`a0e7f16`) remains a clean but **minor** (1.27×) partial win. **The real lever is #174:** parallelize the per-contig SNP row-production (the 58-min step) and the single-threaded indel post-analysis, and/or reduce candidate volume. A row-production profile (enumeration vs tier-lookup vs CFD vs emit) is being captured to target #174 at the right sub-step.
+The `CRISPRME_CRISTA_PARALLEL` fork-pool prototype (opt-in, default OFF, bit-identical — `test_crista_parallel_equivalence` in CI; `dev` `7771b66`→`c5fff0d`→`a0e7f16`) remains a clean but **minor** (1.27×) partial win.
+
+### 4a. The real tail, profiled + FIXED (folded into 2.5.3)
+A `cProfile` of the dense-guide SNP post-analysis (chr22, mm4/1/1, fast) found the tail was **not** CRISTA (~4%) or CFD (~4%) but **`zlib.decompress` at 71%** (953,103 calls): the v3 registry is zlib block-compressed and the decompressed-block LRU was only **8 blocks**, while a dense IUPAC decomposition touches positions across the whole chromosome (chr22 registry ≈ 339 blocks) — so hot blocks were re-decompressed ~10⁶ times. **Fix (byte-identical):** raise the cache default **8 → 512 blocks** (a block is ~64 KB ⇒ ~32 MB/reader worst case; holds a chr22-scale registry entirely), tunable via `CRISPRME_REGISTRY_CACHE_BLOCKS`. **Measured A/B (same dense search):** SNP post-analysis **326 s → 89 s = 3.66×**, `integrated_results` **byte-identical** (same md5, 2085 rows). 74 registry unit tests green. This is the #174 win — a one-line cache bump beats parallelism by ~3×, at ~64 KB/block memory. Folded into 2.5.3. (Remaining #174: the single-threaded indel post-analysis is a separate tail worth a follow-up profile.)
 
 ## 5. Pending / for your decision
 
