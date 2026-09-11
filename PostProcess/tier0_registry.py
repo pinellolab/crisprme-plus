@@ -665,15 +665,23 @@ DEFAULT_BLOCK_BYTES = DEFAULT_BLOCK_RECORDS * RECORD_SIZE  # group/pool byte-chu
 # hold a chromosome's working set turns that into one-decompress-per-block. Override
 # with CRISPRME_REGISTRY_CACHE_BLOCKS (each block ~= DEFAULT_BLOCK_RECORDS records
 # decompressed, so budget memory accordingly across pool workers).
-# Default 512 (up from 8): a decompressed block is ~64 KB, so 512 blocks is ~32 MB per
-# reader worst case (well within the post-analysis pool's per-worker budget) and holds a
-# whole chr22-scale registry (~339 blocks) in cache. Measured: bumping 8->512 cut a dense
-# chr22 SNP post-analysis 326s -> 89s (3.66x), byte-identical output. Raise it on
-# big-RAM boxes to fully cache the largest contigs (e.g. chr1 ~3k blocks).
+# Default 4096 (up from 8). Applies to ZLIB-compressed registries (the shipped genotyped
+# index, block-compressed for disk); RAW/uncompressed registries (e.g. the mega sites-only
+# index, codec=0) skip decompression entirely and are unaffected. A decompressed block is
+# ~64 KB and the LRU only grows to the blocks actually TOUCHED (≤ the contig's block count),
+# so this is "cache the whole contig registry" for any single contig. MEASURED block counts
+# for the genotyped index: chr22 = 339 blocks (~22 MB), chr1 (the largest) = 1,868 blocks
+# (~122 MB) — so 4096 holds EVERY genotyped contig fully, and the cap bounds even a
+# pathological merged panel at ~256 MB/reader (within the memory-capped pool's per-worker
+# budget). This eliminates the per-lookup zlib re-decompression that dominated dense
+# post-analysis (measured: 8→512 cut a dense chr22 SNP post-analysis 326s→89s = 3.66×; 4096
+# extends that to the largest contigs so fast mode is fast genome-wide, not just small chrs).
+# Byte-identical output (this is a cache size, not a code path). Override with
+# CRISPRME_REGISTRY_CACHE_BLOCKS (lower on very memory-constrained hosts).
 try:
-    _LRU_BLOCKS = max(1, int(os.environ.get("CRISPRME_REGISTRY_CACHE_BLOCKS", "512") or "512"))
+    _LRU_BLOCKS = max(1, int(os.environ.get("CRISPRME_REGISTRY_CACHE_BLOCKS", "4096") or "4096"))
 except (TypeError, ValueError):
-    _LRU_BLOCKS = 512
+    _LRU_BLOCKS = 4096
 
 # Group-entry width is decided per file (count_width / code_width). The static
 # GROUP_SIZE below is the DEFAULT (u8 code + u16 counts = 11 B) exported for

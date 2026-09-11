@@ -12,18 +12,21 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Performance
-- **Tier-0 registry block-cache: ~3.7× faster dense variant post-analysis (byte-identical).**
-  The v3 registry is zlib block-compressed (`~3.6×` smaller on disk); profiling a dense
-  per-contig SNP post-analysis showed the cost had moved to lookup-time decompression —
+- **Tier-0 registry block-cache: ~3.7× faster dense variant post-analysis, genome-wide, byte-identical.**
+  The genotyped v3 registry is zlib block-compressed (`~3.6×` smaller on disk); profiling a
+  dense per-contig SNP post-analysis showed the cost had moved to lookup-time decompression —
   **`zlib.decompress` was 71% of the run** — because the decompressed-block LRU was only 8
-  blocks while a dense IUPAC decomposition touches positions across the whole chromosome
-  (a chr22 registry is ~339 blocks), so hot blocks were re-decompressed ~10⁶ times. The
-  cache default is raised **8 → 512 blocks** (~32 MB/reader worst case; a block is ~64 KB,
-  so this holds a chr22-scale registry entirely) and is now tunable via
-  `CRISPRME_REGISTRY_CACHE_BLOCKS`. Measured on a dense chr22 SNP post-analysis:
-  **326 s → 89 s (3.66×), output byte-identical** (same md5). Raise the env var on
-  big-RAM hosts to fully cache the largest contigs (e.g. chr1 ~3k blocks). Also explains
-  why the earlier "CRISTA is the tail" assumption was wrong — CRISTA is ~4% of the run.
+  blocks while a dense IUPAC decomposition touches positions across the whole chromosome, so
+  hot blocks were re-decompressed ~10⁶ times. The cache default is raised **8 → 4096 blocks**
+  (tunable via `CRISPRME_REGISTRY_CACHE_BLOCKS`); the LRU only grows to the blocks actually
+  touched, so a block being ~64 KB, this "caches the whole contig registry" for any single
+  contig. **Measured** on a dense chr22 SNP post-analysis: **326 s → 89 s (3.66×), output
+  byte-identical** (same md5). Sized from measured block counts — genotyped chr22 = 339
+  blocks (~22 MB), chr1 (largest) = 1,868 blocks (~122 MB) — so **4096 holds every genotyped
+  contig fully**, extending the speedup genome-wide (not just small chromosomes), and the cap
+  bounds a pathological panel at ~256 MB/reader. The **mega sites-only index is uncompressed
+  (`codec=RAW`) → unaffected** (harmless no-op). Also corrects the earlier "CRISTA is the
+  tail" assumption — CRISTA is ~4% of the run; the registry decompression was the real tail.
 
 ### Changed
 - **Fast mode is now the DEFAULT search behavior; `--full` opts into exact enumeration.**

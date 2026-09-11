@@ -76,15 +76,28 @@ CRISPRme+ therefore stores the registry in a **block-compressed** format: each o
 the three sections is partitioned into fixed-size blocks (4,096 records) that are
 individually `zlib`-compressed, with a small sparse index of block offsets carried
 in the JSON manifest. A lookup bisects that sparse index to the one covering
-block, decompresses it (kept in a tiny LRU so clustered/adjacent lookups stay
-warm), and reads it exactly as before — so the public reader API and the
-`O(log n)` random access by genomic position are unchanged, while the
-near-constant count columns compress away. On the shipped 1000 Genomes + HGDP
-registry this is ≈3.5× on disk (≈7.5 GB → ≈2.1 GB after extraction). The reader is
-fully backward-compatible (it still reads an uncompressed registry byte-for-byte),
-and an existing registry is re-encoded **losslessly** by a verbatim block
-re-chunking (`transcode_registry`) with no VCF re-parse — the records, counts,
-rsIDs and lookups are identical, only the container changes.
+block, decompresses it (kept in an LRU cache), and reads it exactly as before — so
+the public reader API and the `O(log n)` random access by genomic position are
+unchanged, while the near-constant count columns compress away. On the shipped
+1000 Genomes + HGDP registry this is ≈3.5× on disk (≈7.5 GB → ≈2.1 GB after
+extraction). The reader is fully backward-compatible (it still reads an
+uncompressed registry byte-for-byte), and an existing registry is re-encoded
+**losslessly** by a verbatim block re-chunking (`transcode_registry`) with no VCF
+re-parse — the records, counts, rsIDs and lookups are identical, only the container
+changes.
+
+The decompressed-block **cache is sized to hold a whole chromosome's registry**
+(default 4,096 blocks ≈ ~256 MB ceiling; each block is ~64 KB, and the LRU only
+grows to the blocks actually touched — measured 339 blocks/~22 MB for chr22, 1,868
+blocks/~122 MB for chr1). This matters for a **dense variant search**: the
+per-window haplotype expansion looks up variant positions scattered across the
+whole chromosome, so a small cache would re-decompress the same hot blocks millions
+of times — profiling showed block `zlib` decompression at **~71 %** of a dense
+per-contig post-analysis. Caching the full contig turns that into one decompression
+per block; on a dense chr22 SNP post-analysis this cut the step **326 s → 89 s
+(~3.7×)** with **byte-identical** output. The size is tunable with
+`CRISPRME_REGISTRY_CACHE_BLOCKS`; aggregate sites-only registries (e.g. the mega
+index) are stored uncompressed and skip decompression entirely.
 
 ### Out-of-the-box variant search
 Because Tier-0/Tier-1 are small, they are shipped **with the pre-built index**

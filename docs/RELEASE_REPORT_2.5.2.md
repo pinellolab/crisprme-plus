@@ -121,8 +121,14 @@ Consequence: a **CRISTA-skip / CFD-only fallback would save ~1–2 min of a 100-
 
 The `CRISPRME_CRISTA_PARALLEL` fork-pool prototype (opt-in, default OFF, bit-identical — `test_crista_parallel_equivalence` in CI; `dev` `7771b66`→`c5fff0d`→`a0e7f16`) remains a clean but **minor** (1.27×) partial win.
 
-### 4a. The real tail, profiled + FIXED (folded into 2.5.3)
-A `cProfile` of the dense-guide SNP post-analysis (chr22, mm4/1/1, fast) found the tail was **not** CRISTA (~4%) or CFD (~4%) but **`zlib.decompress` at 71%** (953,103 calls): the v3 registry is zlib block-compressed and the decompressed-block LRU was only **8 blocks**, while a dense IUPAC decomposition touches positions across the whole chromosome (chr22 registry ≈ 339 blocks) — so hot blocks were re-decompressed ~10⁶ times. **Fix (byte-identical):** raise the cache default **8 → 512 blocks** (a block is ~64 KB ⇒ ~32 MB/reader worst case; holds a chr22-scale registry entirely), tunable via `CRISPRME_REGISTRY_CACHE_BLOCKS`. **Measured A/B (same dense search):** SNP post-analysis **326 s → 89 s = 3.66×**, `integrated_results` **byte-identical** (same md5, 2085 rows). 74 registry unit tests green. This is the #174 win — a one-line cache bump beats parallelism by ~3×, at ~64 KB/block memory. Folded into 2.5.3. (Remaining #174: the single-threaded indel post-analysis is a separate tail worth a follow-up profile.)
+### 4a. The real tail, profiled + FIXED + tuned genome-wide (folded into 2.5.3)
+A `cProfile` of the dense-guide SNP post-analysis (chr22, mm4/1/1, fast) found the tail was **not** CRISTA (~4%) or CFD (~4%) but **`zlib.decompress` at 71%** (953,103 calls): the genotyped v3 registry is zlib block-compressed (the #99 disk compaction) and the decompressed-block LRU was only **8 blocks**, while a dense IUPAC decomposition touches positions across the whole chromosome — so hot blocks were re-decompressed ~10⁶ times.
+
+**Fix (byte-identical):** raise the decompressed-block cache default **8 → 4096**, tunable via `CRISPRME_REGISTRY_CACHE_BLOCKS`. The LRU only grows to blocks actually touched (≤ the contig's block count), so this is effectively "cache the whole contig registry."
+
+**Measured A/B** (same dense chr22 search): SNP post-analysis **326 s → 89 s = 3.66×**, `integrated_results` **byte-identical** (same md5, 2085 rows).
+
+**Tuned for genome-wide "truly fast"** — measured genotyped-registry block counts (a block = ~64 KB decompressed): chr22 = **339 blocks** (~22 MB), chr1 (largest) = **1,868 blocks** (~122 MB). So **4096 holds *every* genotyped contig fully** (chr1 with headroom), extending the 3.66× from small chromosomes to the whole genome, and the 4096 cap bounds even a pathological panel at ~256 MB/reader — within the memory-capped pool's budget. **The mega sites-only index is `codec=RAW` (uncompressed) → no decompression, unaffected** (the cache change is a harmless no-op there). 67 registry unit tests green. A one-line cache bump beats CRISTA parallelism (~1.27×) by ~3×. **Remaining #174:** the single-threaded indel post-analysis is a separate tail (profile in progress; likely the same registry pattern, so the cache fix may already help it).
 
 ## 5. Pending / for your decision
 
