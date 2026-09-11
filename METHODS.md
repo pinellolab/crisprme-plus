@@ -401,8 +401,42 @@ control and the report's **Search mode** row all state this explicitly, so it is
 silent. This yields a **two-tier workflow**: the default fast mode for routine, high-density,
 or aggregate-panel *screening*, and `--full` (byte-identical to the pre-2.5.3 enumeration
 path) for *confirmatory / pre-IND* runs where per-sample phased haplotype resolution is
-required. On sites-only (aggregate) panels there are no per-sample genotypes to recover, so
-fast mode loses nothing there and `--full` only pays the 2ᵏ cost.
+required. On sites-only (aggregate) panels there are no per-sample genotypes to recover — verified on
+the released **mega** index: `--full` yields **zero CONFIRMED rows and no cis carriers** in
+either mode (there is no genotype store to enumerate), and the `indel_snp_cooc.tsv` /
+`indel_af.tsv` companions are **byte-identical** across modes. `--full`'s SNP path in fact
+emits *fewer* worst-possible windows (integrated 3,065 vs 3,224 rows; SNP+SNP co-occurrence
+4 vs 22 PUTATIVE rows), so fast — with its conservative worst-possible over-listing — is the
+more complete screen there, and `--full` is only meaningful on a **genotyped** panel.
+
+**Measured fast-vs-`--full` behavior (v2.5.3, adversarially verified).** Running both modes
+on the released 1000G-2021 + HGDP genotyped index for one guide (identical guide/PAM/thresholds;
+only `--full` differs) makes the trade concrete and confirms the guarantees hold end-to-end:
+
+- *Detection is lossless at the **window** level.* Every off-target window `--full` reports is
+  present in fast; fast in fact reports **more** loci (3,287 vs 3,103) because it emits
+  worst-possible representatives. A small number of windows are anchored a few bases apart
+  between the two modes — `--full` anchors each *observed* haplotype, fast anchors its
+  worst-possible representative — so a strict coordinate-equality comparison flags them as
+  "full-only" (24 loci here, all 1–10 bp shifts of a window fast did detect). Compared by
+  cluster they match exactly and fast is a strict superset. Losslessness is therefore a
+  **window/cluster** property, not byte-exact coordinate identity.
+- *The worst-case CFD bound holds exactly.* Across all 3,079 shared loci, `fast_CFD ≥ full_CFD`
+  with **zero** violations; fast is strictly higher only where it assumes worst-possible
+  co-occurrence (e.g. CFD 0.354 vs 0.113 at a 3-SNP window), never lower.
+- *`--full` corrects — and **tightens** — the carrier sets.* Fast lists a PUTATIVE **union** of
+  every sample carrying *any* contributing variant in the worst-possible window; `--full` prunes
+  to the actually-observed cis haplotype's carriers. Counterintuitively `--full` therefore names
+  **fewer** samples (1,447 vs 1,642 distinct here), not more — the fast list deliberately
+  over-includes non-cis carriers (a conservative screening bias). The SNP+SNP co-occurrence
+  companion is all-PUTATIVE in fast (0 CONFIRMED) and gains **106 CONFIRMED phased-cis rows**
+  with exact joint AF and single named carriers under `--full` (e.g. a locus that is a
+  175-carrier PUTATIVE union in fast resolves to a single confirmed carrier under `--full`).
+- *On a **genotyped** index fast does not blank carriers.* The `NA`-carrier behavior is specific
+  to sites-only panels; a genotyped panel still surfaces dataset-level carriers in fast, so the
+  real trade is **PUTATIVE-union vs CONFIRMED-exact-cis**, not named-vs-`NA`.
+- *For a single guide the two modes take essentially the same wall time* (~13–14 min); fast's
+  speedup targets the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
 
 **Scope of `--fast`.** `--fast` accelerates only the **SNP** post-analysis (it collapses the
 2^k IUPAC haplotype lattice). The **indel** post-analysis is single-threaded and
@@ -517,7 +551,10 @@ per-column greedy is insufficient). This exact maximizer is validated bit-for-bi
 an independent factorized oracle and against the slow full-enumeration path — **zero CFD
 under-reports** on a real chr22 1000G+HGDP slice (and, on the legacy dict / aggregate-panel
 path, catching cases where the fewest-mismatch allele scores materially *lower* CFD than
-another carried allele, up to a threshold-crossing 0.14). **CRISTA is best-effort.** CRISTA
+another carried allele, up to a threshold-crossing 0.14). A whole-index fast-vs-`--full`
+comparison on the released 1000G-2021 + HGDP panel reproduces this end-to-end: across all
+**3,079 shared off-target loci, `fast_CFD ≥ full_CFD` with zero violations** (fast is
+strictly higher only where it assumes worst-possible co-occurrence). **CRISTA is best-effort.** CRISTA
 is a non-factorizable RandomForest, so its worst case is taken as the maximum over the
 emitted representatives rather than an exhaustive per-haplotype search. Measured against the
 slow path (chr22 1000G-2021+HGDP), this approximation is tight exactly where decisions are
