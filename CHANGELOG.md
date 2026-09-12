@@ -12,6 +12,14 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
+- **IntOGen (CC0) cancer-driver genes as the default cancer-gene annotation.** With COSMIC
+  now licence-gated (below), CRISPRme+ ships **IntOGen** — a compendium of cancer *driver*
+  genes whose current release is **CC0** (public domain; free for academic AND commercial
+  use + redistribution) — **enabled by default** as the licence-free cancer-gene flag. New
+  report column `Annotation_INTOGEN` (mirrors `_COSMIC`), a default-on `intogen_drivers.hg38.bed.gz`
+  track (`seq_script/build_intogen_annotation.py` maps the CC0 driver symbols to GENCODE gene
+  spans), report legend, Settings label. So a default search still flags cancer-driver
+  off-targets — legally — and users with a COSMIC licence add the curated Census on top.
 - **COSMIC cancer annotations are now licence-gated and EXCLUDED by default.** COSMIC
   (Genome Research Ltd / Wellcome Sanger) is free for academic / non-commercial research
   but **commercial use requires a licence** ([terms](https://www.cosmickb.org/terms/)).

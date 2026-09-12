@@ -40,6 +40,7 @@ from .pages_utils import (
     cosmic_license_attestation,
     set_cosmic_license,
     BUILTIN_ANNOTATION_HG38,
+    BUILTIN_INTOGEN_HG38,
     resolve_builtin_annotation,
 )
 
@@ -648,9 +649,14 @@ def _annotation_choices(genome: str):
             "label": "Functional regions: ENCODE cCREs (SCREEN v4) + DHS + GENCODE + COSMIC (built-in)",
             "value": _builtin,
         })
+    if norm == "hg38" and os.path.isfile(os.path.join(d, BUILTIN_INTOGEN_HG38)):
+        options.append({
+            "label": "Cancer driver genes: IntOGen (CC0, licence-free) — on by default",
+            "value": BUILTIN_INTOGEN_HG38,
+        })
     for a in get_custom_annotations():
         name = a["value"]
-        if norm and norm in name:
+        if norm and norm in name and name != BUILTIN_INTOGEN_HG38:
             options.append({"label": name, "value": name})
     valid = {o["value"] for o in options}
     value = [e for e in read_enabled_annotations(genome) if e in valid]

@@ -192,6 +192,7 @@ CURATED_COLUMNS = (
     ("ENCODE", "encode"),
     ("DHS", "dhs"),
     ("COSMIC_cancer_gene", "cosmic"),  # Cancer Gene Census tier/role; "-" when none
+    ("IntOGen_cancer_driver", "intogen"),  # IntOGen (CC0) cancer-driver gene; "-" when none
     ("High_complexity_region", "complex_region"),  # dense window: greedy shown, more exist
 )
 # value used when a curated column's source is missing / blank
@@ -211,7 +212,7 @@ _DROP_MAF = False
 # that falsely implies the screen was performed. None => keep all (backward-compat);
 # build_report sets it to {kind : kind present in cols} for the run.
 _ANNOTATION_KINDS = frozenset(
-    {"gencode", "encode", "dhs", "cosmic", "gene_name", "gene_dist"}
+    {"gencode", "encode", "dhs", "cosmic", "intogen", "gene_name", "gene_dist"}
 )
 _PRESENT_ANN_KINDS = None
 
@@ -266,6 +267,7 @@ _COLS = {
     "encode": ["Annotation_ENCODE"],
     "dhs": ["Annotation_DHS"],
     "cosmic": ["Annotation_COSMIC"],
+    "intogen": ["Annotation_INTOGEN"],
     "complex_region": ["High_variant_density_region"],
     # CRISTA projection (present only when CRISTA was computed this run)
     "crista": [f"CRISTA_score_{_CRISTA_PROJ}", "CRISTA_score"],
@@ -2553,6 +2555,14 @@ _ANNOTATION_LEGEND = [
      "</ul>A blank cell (&ndash;) means the site is not in a Cancer Gene Census "
      "gene. This flag is context for prioritization, not evidence of risk on its "
      "own."),
+    ("intogen", "IntOGen (cancer driver genes)", "The off-target lies in a gene reported as a "
+     "cancer <b>driver</b> by IntOGen (Integrative OncoGenomics) &mdash; a compendium of "
+     "computationally-identified driver genes across tumour cohorts. IntOGen is released "
+     "under a permissive <b>CC0</b> licence and is shown <b>by default</b>; it complements "
+     "the curated COSMIC Cancer Gene Census (which is licence-gated and only shown if a "
+     "licence is attested). A blank cell (&ndash;) means the site is not in an IntOGen "
+     "driver gene. Like COSMIC, this flag is context for prioritization, not evidence of "
+     "risk on its own."),
 ]
 
 

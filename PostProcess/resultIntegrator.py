@@ -291,6 +291,7 @@ saveDict = {
     "Annotation_ENCODE": "NA",
     "Annotation_DHS": "NA",
     "Annotation_COSMIC": "NA",
+    "Annotation_INTOGEN": "NA",
     "Annotation_personal": "NA",
     "Susceptible_to_ABE": "NA",
     "Susceptible_to_CBE": "NA",
@@ -1052,6 +1053,7 @@ for nline, line in enumerate(inCrispritzResults):
     gencode_annotations = set()
     DHS_annotations = set()
     cosmic_annotations = set()
+    intogen_annotations = set()
 
     for elem in annotationList:
         if "_personal" in elem:
@@ -1064,6 +1066,10 @@ for nline, line in enumerate(inCrispritzResults):
             # Cancer Gene Census tier/role (e.g. Tier1_TSG, Tier1_oncogene_fusion);
             # must be bucketed BEFORE the ENCODE catch-all or it pollutes ENCODE.
             cosmic_annotations.add(elem.replace("_COSMIC", ""))
+        elif "_INTOGEN" in elem:
+            # IntOGen (CC0) cancer-driver gene; like COSMIC, bucket BEFORE the ENCODE
+            # catch-all. Reported by DEFAULT (COSMIC is licence-gated; IntOGen is not).
+            intogen_annotations.add(elem.replace("_INTOGEN", ""))
         else:
             encode_annotations.add(elem)
 
@@ -1074,6 +1080,9 @@ for nline, line in enumerate(inCrispritzResults):
 
     if len(cosmic_annotations):
         saveDict["Annotation_COSMIC"] = ",".join(sorted(cosmic_annotations))
+
+    if len(intogen_annotations):
+        saveDict["Annotation_INTOGEN"] = ",".join(sorted(intogen_annotations))
 
     if len(personal_annotations):
         saveDict["Annotation_personal"] = ",".join(sorted(personal_annotations))

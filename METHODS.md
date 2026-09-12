@@ -477,14 +477,23 @@ v4**) and adds a **COSMIC** cancer-gene column:
   (`PLS`), proximal / distal enhancer-like (`pELS` / `dELS`), and
   chromatin-accessible / TF classes (`CA-CTCF`, `CA-H3K4me3`, `CA-TF`, `CA`,
   `TF`).
+- **IntOGen (cancer driver genes)** — whether the off-target falls in a gene
+  reported as a cancer **driver** by IntOGen (Integrative OncoGenomics), a
+  compendium of computationally-identified drivers across tumour cohorts. This is
+  the **default** cancer-gene flag (`Annotation_INTOGEN`): IntOGen's current release
+  is **CC0** (public domain), so it is licence-free for any use — the open complement
+  to the licence-gated COSMIC.
 - **COSMIC (Cancer Gene Census)** — whether the off-target falls in a curated
   cancer gene, tagged by confidence **tier** (Tier 1: extensive curated causal
   evidence; Tier 2: strong but less-curated) and documented **role**
   (`oncogene`, `TSG`/tumor-suppressor, `fusion`). This flag is particularly
   relevant for therapeutic and pre-IND assessment, where an off-target in a
-  known cancer gene warrants scrutiny.
+  known cancer gene warrants scrutiny. Unlike IntOGen it is **licence-gated** (below).
 
-**COSMIC licence gate (excluded by default).** COSMIC (Genome Research Ltd /
+**Cancer-gene annotations: IntOGen by default, COSMIC by licence.** For cancer-gene
+context CRISPRme+ ships **IntOGen (CC0)** enabled by default (`intogen_drivers.hg38.bed.gz`,
+built by `seq_script/build_intogen_annotation.py` mapping the CC0 driver symbols to
+GENCODE gene spans) — legally clean for academic and commercial use. **COSMIC** (Genome Research Ltd /
 Wellcome Sanger) is free for academic / non-commercial research but its
 **commercial use requires a licence** ([terms](https://www.cosmickb.org/terms/)).
 Because the built-in bundle bakes COSMIC into a single BED, CRISPRme+ **strips the

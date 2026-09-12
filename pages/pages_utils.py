@@ -214,6 +214,11 @@ ANNOTATIONS_ENABLED_FILE = ".enabled.json"
 BUILTIN_ANNOTATION_HG38 = "dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz"
 BUILTIN_ANNOTATION_HG38_LEGACY = "dhs+encode+gencode.hg38.bed.gz"
 BUILTIN_GENCODE_HG38 = "gencode.protein_coding.bed"
+# IntOGen (Integrative OncoGenomics) cancer-driver genes, current CC0 release. Shipped
+# as its own track and enabled by DEFAULT: it is the licence-free cancer-gene annotation
+# (COSMIC, in the bundle above, is stripped unless the user attests a licence). Absent on
+# older installs -> build_active_annotation skips missing members, so no hard dependency.
+BUILTIN_INTOGEN_HG38 = "intogen_drivers.hg38.bed.gz"
 ACTIVE_ANNOTATION_PREFIX = ".active."  # -> Annotations/.active.<genome>.bed[.gz]
 MAX_ANNOTATION_BYTES = 200 * 1024 * 1024  # reject absurd annotation uploads
 # email notifications: SMTP settings for the completion mailer live in a hidden
@@ -1955,7 +1960,13 @@ def read_enabled_annotations(genome: str) -> List[str]:
     if not os.path.isfile(path):
         if g == "hg38":
             b = resolve_builtin_annotation()
-            return [b] if b else []
+            defaults = [b] if b else []
+            # IntOGen (CC0) cancer-driver track is enabled by DEFAULT when present --
+            # the licence-free cancer-gene annotation (COSMIC in the bundle is stripped
+            # unless a licence is attested).
+            if BUILTIN_INTOGEN_HG38 in installed:
+                defaults.append(BUILTIN_INTOGEN_HG38)
+            return defaults
         return []
     try:
         with open(path) as fh:
