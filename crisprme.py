@@ -936,6 +936,64 @@ def cosmic_license_cmd() -> None:
     )
 
 
+def _merge_default_intogen(annotationfile: str) -> str:
+    """Merge the default IntOGen (CC0) cancer-driver track into the annotation.
+
+    IntOGen is the licence-free cancer-gene flag and is ON by default. The web merges
+    it via the annotation manager; the CLI takes a single ``--annotation`` file, so
+    here we append the shipped IntOGen track (if installed and not already present) so
+    CLI searches flag driver genes (``Annotation_INTOGEN``) exactly like the web. No-op
+    when the track is absent (e.g. non-hg38) or already merged. Returns the path to use.
+    """
+    intogen = os.path.join(
+        current_working_directory, "Annotations", "intogen_drivers.hg38.bed.gz"
+    )
+    if not os.path.isfile(intogen):
+        return annotationfile
+    import gzip as _gz
+
+    def _op(p):
+        return _gz.open(p, "rt") if p.endswith(".gz") else open(p, "rt")
+
+    try:  # already carries IntOGen rows? -> nothing to do
+        with _op(annotationfile) as fh:
+            for line in fh:
+                if "_INTOGEN" in line:
+                    return annotationfile
+    except OSError:
+        return annotationfile
+    base = os.path.basename(annotationfile)
+    if base.endswith(".gz"):
+        base = base[:-3]
+    merged = os.path.join(os.path.dirname(annotationfile) or ".", f".withintogen.{base}")
+    try:
+        sig = f"{int(os.path.getmtime(annotationfile))}:{int(os.path.getmtime(intogen))}"
+    except OSError:
+        sig = "0:0"
+    sigp = merged + ".sig"
+    fresh = (
+        os.path.isfile(merged)
+        and os.path.isfile(sigp)
+        and open(sigp).read() == sig
+    )
+    if not fresh:
+        try:
+            with open(merged, "w") as out:
+                for src in (annotationfile, intogen):
+                    with _op(src) as fh:
+                        for line in fh:
+                            out.write(line if line.endswith("\n") else line + "\n")
+            with open(sigp, "w") as fh:
+                fh.write(sig)
+        except OSError:
+            return annotationfile  # not writable -> proceed without IntOGen rather than crash
+        print(
+            "[complete-search] IntOGen (CC0) cancer-driver annotations merged by default "
+            "(Annotation_INTOGEN)."
+        )
+    return merged
+
+
 def _check_annotation(args: List[str], annotation: bool) -> str:
     """Retrieves and validates the annotation file from command-line arguments.
 
@@ -964,6 +1022,7 @@ def _check_annotation(args: List[str], annotation: bool) -> str:
     if not os.path.isfile(annotationfile):
         error("The file specified for --annotation does not exist")
     annotationfile = _apply_cosmic_license(args, annotationfile)  # COSMIC licence gate
+    annotationfile = _merge_default_intogen(annotationfile)  # IntOGen (CC0) default-on
     return _sort_annotation(annotationfile)  # sort input annotation file
 
 
