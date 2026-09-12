@@ -22,25 +22,16 @@ genome analyses. CRISPRme automates the entire workflow, from data download to
 executing the search, and delivers detailed reports complete with tables and figures 
 through an interactive web-based interface.
 
-### ✨ What's new in CRISPRme+
+### ✨ Highlights
 
-- **Dictionary-less variant search** — a compact Tier-0 registry + Tier-1 genotype store replace the ~152 GB per-sample SNP dictionaries, so variant-aware search (with allele frequencies + rsIDs) ships with the index and runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
-- **Observed-haplotype enumeration** — multi-variant off-targets are enumerated only as haplotypes that occur in a real individual (confirmed for phased data, putative for unphased / mixed), removing phantom off-targets and restoring dropped real haplotypes. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
-- **SNP+indel co-occurring off-targets** *(now on by default)* — off-targets that need **both** a nearby SNP **and** an indel on the same haplotype are detected, a class the classic two-pass search (SNPs and indels searched separately) could not see. Enabled by default (opt out with `CRISPRME_INDEL_SNP=0`); reports CONFIRMED-cis (phased) / PUTATIVE (unphased) with per-sample carriers + joint AF, and surfaces a co-occurrence section in the shareable report. Shipped on the new high-coverage **1000G-2021 + HGDP** NRG index (`NRG_3_hg38+hg38_1000G2021_HGDP`). ([details](docs/PRECOMPUTED_INDEXES.md))
-- **Population-level analysis is the default; `--per-sample` resolves genotypes** *(default since 2.5.3; named in 2.5.4)* — the axis isn't speed, it's **genotype resolution**. By default the SNP off-target analysis reports a small set of **worst-possible** representatives per variant window (reference + minimum-edit + maximum-CFD) instead of the 2^k IUPAC / observed-haplotype lattice, removing the **per-haplotype enumeration wall** that makes dense / aggregate panels intractable (per-sample enumeration was measured **49 h+ without completing** on a 4×-density panel). (It does not change the separate CRISTA-scoring cost on very-dense high-mismatch/bulge guides.) **CFD is the exact worst case; CRISTA is best-effort.** The trade-off: **per-sample carriers, CONFIRMED cis phasing and exact joint AF are not computed by default** — add **`--per-sample`** (CLI) or pick **Per-sample** in the web form for that per-sample resolution on a **genotyped** panel (recommended for clinical validation; it's a no-op on sites-only panels, where the web form disables it). The shareable report states which mode was used. A whole-index comparison on the released 1000G-2021 + HGDP panel confirms the guarantees: **detection is lossless** at the window level (the default is a superset of the per-sample off-target windows) and **the default CFD never under-reports** (population-level CFD ≥ per-sample CFD at every shared locus, 0 violations). What `--per-sample` adds is *per-sample correctness*: it resolves the default's PUTATIVE co-occurrence into **CONFIRMED cis** with exact joint AF, and — counterintuitively — **tightens** the carrier lists (the default conservatively over-lists the union of everyone carrying any contributing variant; `--per-sample` prunes to the observed cis haplotype). ([methods](METHODS.md#5-search-space-control-for-high-variant-density-regions))
-- **Faster dense variant post-analysis** *(new in 2.5.4)* — the Tier-0 allele-frequency registry now ships **uncompressed (raw)** across all indexes, so registry lookups (millions per dense search) are direct memory-mapped reads with **no per-lookup decompression** — measured **~2× faster** than the compressed path. Profiling had found registry `zlib`-decompression at **~71 %** of a dense post-analysis; shipping raw removes it entirely (an optional zlib block-compressed format remains for space-constrained builds via `CRISPRME_REGISTRY_COMPRESS`, with a right-sized O(1) block cache). "Speed over space," and all indexes now use one consistent format. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
-- **All-source "mega" index + sites-only co-occurrence** *(new in 2.5.2)* — a merged **five-source** panel (1000 Genomes 2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us), built from each source's aggregate allele frequency, with **per-dataset AF + a cross-source `AF_max`** as variant provenance (which sources report each variant, and at what frequency). It has **no shared samples** to reconstruct haplotypes, so co-occurrence is reported as **PUTATIVE possible haplotypes** with a conservative **min-AF** joint bound — for **both SNP+SNP and SNP+indel** — so a co-occurring off-target is never dropped merely for lack of genotypes. Ships with **searchable indels genome-wide** (`NRG_3_hg38+hg38_mega`). The two production indices are complementary: **1000G-2021 + HGDP** (sample-level genotypes → observed / CONFIRMED haplotypes with per-sample carriers) and the **mega** (sites-only → PUTATIVE haplotypes with min-AF bounds). ([details](docs/PRECOMPUTED_INDEXES.md))
-- **SNP+SNP co-occurring off-targets** *(new in 2.5.2)* — the SNP-side analogue of SNP+indel: off-targets that require **≥2 nearby SNP alt alleles together** are surfaced in a `snp_snp_cooc.tsv` companion (CONFIRMED phased-cis on a genotyped panel / PUTATIVE min-AF on a sites-only panel) and bundled into the shareable report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
-- **Cancer-gene annotations: IntOGen by default, COSMIC by licence** *(new in 2.5.4)* — off-targets are flagged when they fall in a cancer **driver** gene using **IntOGen** (an `Annotation_INTOGEN` column); IntOGen's current release is **CC0** (public domain), free for academic **and** commercial use, so it is **on by default**. **COSMIC** (the curated Cancer Gene Census — tier + oncogene/TSG/fusion) is a richer catalogue whose **commercial use requires a licence** ([terms](https://www.cosmickb.org/terms/)), so it is **excluded by default** and included only after you attest a licence (web **Settings** checkbox, or `crisprme.py cosmic-license enable`). Both sit alongside updated ENCODE SCREEN v4, GENCODE and DHS annotations. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
-- **Shareable off-target assessment report** — every run auto-generates a self-contained, branded HTML report (summary, graphical report, recommended validation panel, annotated top-1000, per-tier downloads, annotation legend), downloadable from the results page. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
-- **Prebuilt indexes on demand** — pull reference data + precomputed indexes from a HuggingFace CDN (`crisprme.py download`).
-- **Build & publish your own dict-less indexes** — `build-index-only` produces a *self-complete* variant-aware index in one command (the CRISPRitz index + its `_INDELS` companion, the Tier-0 allele-frequency **registry**, the Tier-1 **genotype store**, the indel logs, the combined **samplesID** lists, and a build-time **variant-count manifest**), and `publish-index --dictless` uploads it (plus the genotype companion) to the HuggingFace CDN — so new precomputed dict-less indexes (new PAMs, genomes, or merged/phased panels) can be built and shared with no code change. Merged multi-dataset panels (`bcftools merge`) are supported with **per-dataset provenance** and **per-haplotype phasing** (phased datasets give confirmed haplotypes, unphased give putative, mixed panels handle each dataset on its own). ([protocol](docs/PRECOMPUTED_INDEXES.md))
-- **One-command web interface in Docker** — no conda, no giant local build (see the Quickstart below).
-- **Browser Data-Manager** — add genomes, indexes, VCFs, annotations and PAMs from the web UI, with dependency-aware deletion (Dash 2.x).
-- **Email notifications** — optionally get a results link emailed to you when a job finishes (SMTP configured once under **Settings → Email notifications**).
-- **PAM-geometry-aware search** — a pamless (`NNN`) index serves any PAM of the same length/orientation, so one index covers many PAM variants.
-- **Bounded complexity** — a `--max-total-edits` cap and a high-variant-density skip keep dense-variant searches tractable.
-- **Diploid `assembly-search`** and **merged VCF panels** (e.g. 1000G+HGDP) for single-scan population analyses.
+- **Dictionary-less variant-aware search** — a compact allele-frequency registry + genotype store ship with the index, so variant off-target search (with allele frequencies, rsIDs, and per-dataset provenance) runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
+- **Co-occurring off-targets** — off-targets that need two nearby variants on the same haplotype — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported CONFIRMED-cis (phased) / PUTATIVE (unphased) with carriers + joint AF, and surfaced in the report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
+- **Two complementary production indexes** — genotyped **1000G-2021 + HGDP** (`NRG_3_hg38+hg38_1000G2021_HGDP`: observed / CONFIRMED haplotypes with per-sample carriers) and the sites-only five-source **mega** (`NRG_3_hg38+hg38_mega`: + gnomAD v4.1 / TOPMed / All-of-Us, PUTATIVE haplotypes with min-AF bounds, searchable indels genome-wide). ([details](docs/PRECOMPUTED_INDEXES.md))
+- **Population-level by default; `--per-sample` for genotype resolution** — by default the SNP analysis reports worst-possible representatives per variant window (fast, and lossless for detection); add **`--per-sample`** (CLI) or pick **Per-sample** in the web form for CONFIRMED cis phasing + named carriers + exact joint AF on a genotyped panel. The report states which mode was used. ([methods](METHODS.md#5-search-space-control-for-high-variant-density-regions))
+- **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
+- **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, plots, recommended validation panel, annotated top hits, per-tier downloads, legend). ([methods](METHODS.md#7-shareable-off-target-assessment-report))
+- **One-command Docker web interface + indexes on demand** — no conda, no giant build; pull reference data + prebuilt indexes from the HuggingFace CDN (`crisprme.py download`), or **build & publish your own** dict-less indexes (`build-index-only` / `publish-index --dictless`), and manage genomes / indexes / VCFs / annotations / PAMs from the browser **Data Manager**. ([protocol](docs/PRECOMPUTED_INDEXES.md))
+- **Also** — diploid `assembly-search`, merged multi-dataset VCF panels (per-dataset provenance + per-haplotype phasing), PAM-geometry-aware (pamless) indexes, bounded-complexity controls (`--max-total-edits` + a high-variant-density skip), and optional email notifications.
 
 > ⚠️ **Note**  
 > The original public CRISPRme web service is no longer available.  
@@ -145,6 +136,7 @@ so the search above works out of the box on a fresh install.
 <br>&nbsp;&nbsp;1.2 [Install CRISPRme via Docker](#12-install-crisprme-via-docker)
 <br>&nbsp;&nbsp;&nbsp;&nbsp;1.2.1 [Installing Docker](#121-installing-docker)
 <br>&nbsp;&nbsp;&nbsp;&nbsp;1.2.2 [Building and Pulling CRISPRme Docker Image](#122-building-and-pulling-crisprme-docker-image)
+<br>&nbsp;&nbsp;1.3 [Install CRISPRme from source (without Bioconda)](#13-install-crisprme-from-source-without-bioconda)
 <br>2 [Usage](#2-usage)
 <br>&nbsp;&nbsp;2.1 [Directory Structure](#21-directory-structure)
 <br>&nbsp;&nbsp;2.2 [CRISPRme Functions](#22-crisprme-functions)
@@ -444,7 +436,7 @@ cd crisprme-plus
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
 mamba env create -f environment.yml
-mamba activate crisprme-2.5.4
+mamba activate crisprme
 
 # 3. build CRISPRitz 2.8.1 from source and install both tools into the env
 bash install_from_source.sh
@@ -528,7 +520,7 @@ The directory organization required by CRISPRme is illustrated below:
 > To run it in **Docker**, prefix it with
 > `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:v2.5.4`
 > (add `-p 8080:8080` for `web-interface`). From a **source / Conda** install, run
-> it as-is inside the activated `crisprme-2.5.4` environment.
+> it as-is inside the activated `crisprme` environment.
 
 This section provides a comprehensive overview of CRISPRme's core functions, 
 detailing each feature, the required input data and formats, and the resulting 
@@ -620,7 +612,7 @@ Usage Example for the Complete Search function:
     --guide sg1617.txt \
     --pam PAMs/20bp-NRG-SpCas9.txt \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
-    --gene_annotation Annotations/gencode.protein_coding.bed \
+    --gene_annotation Annotations/gencode.protein_coding.bed.gz \
     --samplesID samplesIDs.1000G.HGDP.txt \
     --be-window 4,8 \
     --be-base A,G \
