@@ -31,8 +31,16 @@ Notes:
 import argparse
 import gzip
 import os
+import re
 import subprocess
 import sys
+
+# Primary assembly contigs only (chr1..chr22, chrX/Y/M, with or without the "chr"
+# prefix). GENCODE places some genes on ALT/scaffold contigs too (e.g. KN.../GL.../KQ...
+# or chr*_alt); anchoring a driver gene there would put its interval on a contig the
+# search never reports off-targets on, so it would silently never match. Restrict the
+# gene-span computation to primary contigs.
+_PRIMARY_CHROM = re.compile(r"^(chr)?([0-9]{1,2}|X|Y|M|MT)$")
 
 
 def _open(path, mode="rt"):
@@ -75,6 +83,8 @@ def gene_intervals_from_gencode(gencode_bed):
             f = line.rstrip("\n").split("\t")
             if len(f) < 4:
                 continue
+            if not _PRIMARY_CHROM.match(f[0]):
+                continue  # skip ALT/scaffold placements (would never match search targets)
             attrs = f[-1]
             i = attrs.find("gene_name=")
             if i < 0:
