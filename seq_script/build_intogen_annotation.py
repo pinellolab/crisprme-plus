@@ -10,6 +10,12 @@ IMPORTANT: only the CURRENT release is CC0. Releases 2016.5-2023.05.31 were CC-B
 (non-commercial). Always build from the current CC0 drivers file
 (https://www.intogen.org/download -> IntOGen-Drivers-<date>.zip, CC0).
 
+SHIPPED-INDEX PROVENANCE: the intogen_drivers.hg38.bed.gz published for CRISPRme+ v2.5.4
+was built from the IntOGen **2024.09.20** release (zip label; internal release date
+2024-06-18), file Compendium_Cancer_Genes.tsv (633 unique driver gene symbols), LICENSE.txt
+= CC0 1.0. GENCODE input: the shipped Annotations/gencode.protein_coding.bed.gz. Rebuilding
+from a newer IntOGen release will drift the gene set — re-pin this line when you do.
+
 This maps each driver gene SYMBOL to its genomic interval via the GENCODE annotation
 CRISPRme already ships (gene_name= in the attribute column), and writes a BED whose
 4th column is ``<SYMBOL>_INTOGEN`` -- the label CRISPRme's resultIntegrator parses into
