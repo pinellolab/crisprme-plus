@@ -11,6 +11,41 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Verified
+- **New-user clean-room on the released v2.5.3 (image + both published RAW indexes).**
+  `apptainer pull docker://pinellolab/crisprme:v2.5.3` reports `v2.5.3`; a fresh
+  `download` of **both** production indexes confirms the Tier-0 registry ships
+  **uncompressed (`codec=0`, RAW)** as intended (`registry_hg38_1000G2021_HGDP` and
+  `registry_hg38_mega`); a fast-default `complete-search` on **each** completes `rc=0`
+  and produces a `report.zip` carrying the **Search-mode note + fast caveat**. Confirms
+  the two-index design end-to-end: genotyped (CONFIRMED-capable) vs mega (sites-only,
+  PUTATIVE + min-AF), and that the **mega now searches indels** (32-bin fake-indel
+  genome; 387 SNP+indel co-occurrence + 393 `indel_af` rows with 5-source per-dataset AF).
+- **Measured fast-vs-`--full` comparison on both indexes (adversarially verified).**
+  Genotyped 1000G-2021+HGDP: detection is **lossless at the window level** (fast a superset;
+  the 24 "full-only" loci are 1–10 bp anchor shifts of windows fast detected); **`fast_CFD ≥
+  full_CFD` with 0 violations across 3,079 shared loci**; `--full` **tightens** carrier sets
+  (fast over-lists a PUTATIVE union → 1,642 distinct samples; full prunes to observed cis →
+  1,447) and turns 0 CONFIRMED co-occurrence rows into **106 CONFIRMED phased-cis** rows with
+  exact joint AF + named carriers. Sites-only mega: `--full` yields **0 CONFIRMED / no
+  carriers** in either mode and the `indel_snp_cooc` / `indel_af` companions are
+  **byte-identical** — so `--full` is meaningful only on a genotyped panel. Single-guide
+  runtimes are near-equal (fast ~13.8 min vs full ~13.4 min); fast's speedup is a
+  dense/aggregate-panel effect, not a per-guide one.
+
+### Fixed
+- **New-user docs pinned stale artifacts.** `README.md` copy-paste commands referenced the
+  previous image `v2.5.2` → bumped to `v2.5.3`; `docs/DOCKER_QUICKSTART.md` was a v2.4.0-era
+  doc with a **dead index name** (`NRG_3_hg38-dictless+hg38_1000G_HGDP`, whose download would
+  fail) → fixed to `NRG_3_hg38+hg38_1000G2021_HGDP`, image tags bumped to `v2.5.3`, the mega
+  index added, the "Alpha release" banner replaced, and a fast-vs-full explanation added.
+
+### Documentation
+- **METHODS §5/§8 + README** now document the *measured* fast-vs-`--full` behavior above
+  (window-level losslessness, the exact worst-case CFD bound with 0 violations, carrier
+  tightening, and the verified sites-only inertness of `--full`), so the fast/full contract
+  is documented from data rather than design intent alone.
+
 ## [2.5.3] - 2026-09-11
 
 ### Performance
