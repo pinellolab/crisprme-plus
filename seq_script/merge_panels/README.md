@@ -33,12 +33,33 @@ then strips the pseudo-sample back out — this is what makes the sites-only meg
 searchable). Both take env-overridable paths; see their headers. `docs/DESIGN_mega_index.md`
 is the design rationale (its "REMAINING/pending" notes are historical — the work shipped).
 
+## HPRC pangenome index (single-source, phased) — `hprc_build.sh`
+
+A **third** production index, `NRG_3_hg38+hg38_HPRC`, is built by enriching hg38 with the
+**HPRC Minigraph-Cactus pangenome** decomposed to a per-chromosome VCF (`vg deconstruct` →
+`vcfbub` → `vcfwave`; 232 samples = 231 population individuals + CHM13, GRCh38, phased GTs
+with graph-coverage half-missingness like `1|.`). It is **not** a merge (single genotyped
+source), so it skips Mode 1/2 and uses the standard `build-index-only` directly:
+per-chrom `bcftools norm -m -any` → `+fill-tags` AF/AC/AN (recomputed from GTs; the vcfwave
+VCF ships no AF and AN must exclude the `.` alleles) → `bcftools sort` → build. Because the
+genotypes are **phased**, this index supports **CONFIRMED cis co-occurrence + per-sample
+carriers** (like Mode 1's 1000G-2021+HGDP), and it is RAW + SNP+indel-enabled like the others.
+See `hprc_build.sh` (as-run, env-overridable). It is **distinct from and orthogonal to** the
+`assembly-search` feature (which searches per-individual assembly FASTAs and takes no VCF).
+
+**Validated (v2.5.4, ml007):** clean genome-wide build (24 contigs, RAW registry, `_INDELS`
++ phased indel-GT stores); a `--per-sample` search returned 68,057 CONFIRMED phased-cis
+off-targets, 855 SNP+indel and 140 SNP+SNP co-occurring rows, with named cis carriers
+ground-truth-verified against the source GTs (e.g. HG03579 carries chr10:12896898 `TG>T` +
+chr10:12896900 `T>A` in cis; joint AF 1/464). **Held from HF publish pending review.**
+
 ## Source provenance (versions + access)
 
-The two shipped indexes are built from the callsets below. **Mode 1** (genotyped) uses the
-two fully-genotyped cohorts; **Mode 2** (mega, sites-only) adds the three aggregate/sites-only
-resources. Nominal AN in the registry is 2×cohort-N for genotyped sources (so reported AF is
-exact); aggregate sources contribute per-source AF only (no genotypes, no honest pooled AC/AN).
+The shipped indexes are built from the callsets below. **Mode 1** (genotyped) uses the two
+fully-genotyped cohorts; **Mode 2** (mega, sites-only) adds the three aggregate/sites-only
+resources; the **HPRC** index is a single phased pangenome source (`hprc_build.sh`, above).
+Nominal AN in the registry is 2×cohort-N for genotyped sources (so reported AF is exact);
+aggregate sources contribute per-source AF only (no genotypes, no honest pooled AC/AN).
 
 | Source | Version / build | Assembly | Data model | Cohort N (nominal AN) | Access | In index |
 |---|---|---|---|---|---|---|
@@ -47,6 +68,7 @@ exact); aggregate sources contribute per-source AF only (no genotypes, no honest
 | **gnomAD** | v4.1 (exomes + genomes joint) | GRCh38 | aggregate sites-only (AF) | ~807k individuals (aggregate) | open (gnomAD) | Mode 2 only |
 | **TOPMed** | Bravo freeze (sites-only, `AN=0` shipped) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (dbGaP) | Mode 2 only |
 | **All of Us** | genomic sites release (single pseudo-sample) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (Researcher Workbench) | Mode 2 only |
+| **HPRC** | Minigraph-Cactus pangenome → `vg deconstruct`/`vcfbub`/`vcfwave`, **phased** | GRCh38 | sample-level genotypes (graph-derived) | 232 incl. CHM13 (AN ≤464, half-missing) | open (HPRC) | HPRC (single-source) |
 
 Notes: (1) the **shipped Mode-1 index** used the **2021** 1000G callset (`hg38_1000G2021_HGDP`,
 4,131 samples); the committed `merge_vcf_panels.sh` defaults still point at the older **2019**
