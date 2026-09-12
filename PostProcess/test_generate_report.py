@@ -282,6 +282,7 @@ class TestGenerateReport(unittest.TestCase):
                 "REF/ALT_origin",
                 "PAM_creation", "Variant", "MAF", "Gene", "Gene_distance_kb",
                 "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
+                "IntOGen_cancer_driver",
                 "High_complexity_region",
             ],
         )
