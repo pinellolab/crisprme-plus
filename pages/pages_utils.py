@@ -2120,6 +2120,50 @@ def validate_annotation_bed(path: str) -> Optional[str]:
     return None
 
 
+def _cosmic_mod():
+    """Lazy, path-tolerant import of the stdlib COSMIC-licence helper
+    (PostProcess/cosmic_license.py). Returns the module, or None if unavailable
+    (in which case COSMIC is treated as NOT licensed -- the safe default)."""
+    try:
+        import cosmic_license as _c  # PostProcess is on sys.path via crisprme.py
+        return _c
+    except Exception:
+        try:
+            import importlib.util
+            p = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "PostProcess", "cosmic_license.py",
+            )
+            spec = importlib.util.spec_from_file_location("cosmic_license", p)
+            m = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(m)
+            return m
+        except Exception:
+            return None
+
+
+def cosmic_license_enabled() -> bool:
+    """True only if the user has attested a COSMIC licence in Settings (default False)."""
+    c = _cosmic_mod()
+    return bool(c and c.cosmic_enabled(_annotations_dir()))
+
+
+def cosmic_license_attestation() -> str:
+    """The stored COSMIC attestation text (empty when none)."""
+    c = _cosmic_mod()
+    return c.get_cosmic_license(_annotations_dir()).get("attestation", "") if c else ""
+
+
+def set_cosmic_license(enabled: bool, attestation: str = "") -> bool:
+    """Persist the COSMIC licence attestation. Returns False if the helper is
+    unavailable (COSMIC then stays excluded, the safe default)."""
+    c = _cosmic_mod()
+    if not c:
+        return False
+    c.set_cosmic_license(_annotations_dir(), enabled, attestation)
+    return True
+
+
 def build_active_annotation(genome: str) -> Tuple[str, str]:
     """Assemble the annotation the search applies, from the ENABLED set.
 
@@ -2137,15 +2181,26 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
     gencode = BUILTIN_GENCODE_HG38 if builtin_on else "vuoto.txt"
     if not enabled:
         return ("vuoto.txt", "vuoto.txt")
-    if len(enabled) == 1 and _is_builtin_annotation(enabled[0]):
-        return (enabled[0], gencode)  # fast path: single built-in bundle, no merge
+    # COSMIC licence gate: the built-in bundle bakes COSMIC in, and COSMIC commercial
+    # use requires a licence. Unless the user has attested a licence in Settings, STRIP
+    # COSMIC rows from the active annotation (default-off, licence-safe). Gated cheaply on
+    # the enabled bundle's name so the common case stays fast; the row-level filter runs
+    # during the merge below. The cosmic state is folded into the cache signature so the
+    # active bed is rebuilt when the attestation is toggled.
+    _c = _cosmic_mod()
+    cosmic_ok = bool(_c and _c.cosmic_enabled(d))
+    need_strip = (not cosmic_ok) and any("cosmic" in n.lower() for n in enabled)
     members = [os.path.join(d, n) for n in enabled if os.path.isfile(os.path.join(d, n))]
     if not members:
         return ("vuoto.txt", "vuoto.txt")
+    # fast path: a single built-in bundle is used as-is ONLY when there is nothing to
+    # strip; otherwise a filtered copy must be built.
+    if len(enabled) == 1 and _is_builtin_annotation(enabled[0]) and not need_strip:
+        return (enabled[0], gencode)
     active = os.path.join(d, f"{ACTIVE_ANNOTATION_PREFIX}{g}.bed")
     active_gz = active + ".gz"
     sig_path = os.path.join(d, f"{ACTIVE_ANNOTATION_PREFIX}{g}.sig")
-    sig = "|".join(sorted(enabled)) + "||" + ";".join(
+    sig = "|".join(sorted(enabled)) + f"||cosmic={'on' if cosmic_ok else 'off'}||" + ";".join(
         f"{os.path.basename(m)}:{os.path.getsize(m)}:{int(os.path.getmtime(m))}" for m in members
     )
     fresh = (
@@ -2160,6 +2215,8 @@ def build_active_annotation(genome: str) -> Tuple[str, str]:
                 opener = gzip.open if m.endswith(".gz") else open
                 with opener(m, "rt") as fh:
                     for line in fh:
+                        if need_strip and _c and _c.is_cosmic_row(line):
+                            continue  # COSMIC excluded until a licence is attested
                         out.write(line)
         os.replace(tmp, active)
         sort_annotation(active)  # sort + bgzip -> active_gz

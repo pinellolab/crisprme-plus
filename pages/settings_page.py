@@ -36,6 +36,9 @@ from .pages_utils import (
     write_enabled_annotations,
     read_email_config,
     write_email_config,
+    cosmic_license_enabled,
+    cosmic_license_attestation,
+    set_cosmic_license,
     BUILTIN_ANNOTATION_HG38,
     resolve_builtin_annotation,
 )
@@ -1016,6 +1019,51 @@ def settings_page() -> List:
         ],
     )
 
+    # ---- COSMIC licence attestation ---------------------------------------
+    # COSMIC (cancer) annotations are baked into the built-in bundle but their
+    # COMMERCIAL use requires a licence (Genome Research Ltd / Wellcome Sanger).
+    # CRISPRme+ EXCLUDES COSMIC from every search by default; the user opts in here
+    # by attesting they hold a licence. Toggling this rebuilds the active annotation.
+    cosmic_card = _add_card(
+        "COSMIC cancer annotations (licence)",
+        "COSMIC is EXCLUDED from searches by default. It is free for academic / "
+        "non-commercial research (with registration), but COMMERCIAL use requires a "
+        "licence from Genome Research Ltd (Wellcome Sanger Institute); data older than "
+        "12 months is CC BY-NC-SA 3.0 (non-commercial). Enable it ONLY if you hold a "
+        "COSMIC licence appropriate for your use.",
+        [
+            dcc.Checklist(
+                id="cosmic-license-checkbox",
+                options=[
+                    {
+                        "label": " I attest that I hold a COSMIC licence appropriate "
+                        "for my use (required for commercial use) — include COSMIC "
+                        "annotations in my searches",
+                        "value": "attested",
+                    }
+                ],
+                value=(["attested"] if cosmic_license_enabled() else []),
+                labelStyle={"display": "block"},
+                style={"margin": "0.4rem 0"},
+            ),
+            html.Div(
+                [
+                    "See the ",
+                    html.A(
+                        "COSMIC licensing terms",
+                        href="https://www.cosmickb.org/terms/",
+                        target="_blank",
+                    ),
+                    ". When disabled, COSMIC features are stripped from the annotation "
+                    "and never appear in results.",
+                ],
+                style={"font-size": "1.15rem", "color": "#555", "margin-bottom": "0.4rem"},
+            ),
+            html.Button("Save COSMIC setting", id="cosmic-license-save-btn"),
+            html.Div(id="cosmic-license-feedback", style={"margin-top": "0.4rem"}),
+        ],
+    )
+
     # ---- Email notifications (SMTP) ---------------------------------------
     _email_cfg = read_email_config()
     email_card = _add_card(
@@ -1214,6 +1262,7 @@ def settings_page() -> List:
                                 vcf_card,
                                 annotation_card,
                                 annotation_manage_card,
+                                cosmic_card,
                                 email_card,
                                 pam_card,
                                 delete_card,
@@ -1555,6 +1604,39 @@ def _ann_manage_save(n, genome, enabled):
         else f"Saved: no annotations enabled for {genome} (searches will be unannotated)."
     )
     return html.Span(msg, style={"color": "green"})
+
+
+@app.callback(
+    Output("cosmic-license-feedback", "children"),
+    [Input("cosmic-license-save-btn", "n_clicks")],
+    [State("cosmic-license-checkbox", "value")],
+    prevent_initial_call=True,
+)
+def _cosmic_license_save(n, value):
+    """Persist the COSMIC licence attestation. Toggling it changes the cache signature
+    in build_active_annotation, so the next search rebuilds the active annotation with
+    or without COSMIC accordingly."""
+    if n is None or ONLINE:
+        raise PreventUpdate
+    attested = bool(value) and "attested" in value
+    ok = set_cosmic_license(attested, "attested via web Settings" if attested else "")
+    if not ok:
+        return html.Span(
+            "Could not persist the COSMIC setting (licence helper unavailable); "
+            "COSMIC remains excluded.",
+            style={"color": "#b00"},
+        )
+    if attested:
+        return html.Span(
+            "Saved: COSMIC licence attested — COSMIC annotations will be INCLUDED in "
+            "searches.",
+            style={"color": "green"},
+        )
+    return html.Span(
+        "Saved: COSMIC disabled — COSMIC annotations are EXCLUDED from searches "
+        "(licence-safe default).",
+        style={"color": "green"},
+    )
 
 
 @app.callback(

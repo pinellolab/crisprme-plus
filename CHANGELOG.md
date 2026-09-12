@@ -11,6 +11,19 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **COSMIC cancer annotations are now licence-gated and EXCLUDED by default.** COSMIC
+  (Genome Research Ltd / Wellcome Sanger) is free for academic / non-commercial research
+  but **commercial use requires a licence** ([terms](https://www.cosmickb.org/terms/)).
+  Because the built-in hg38 bundle bakes COSMIC in, CRISPRme+ now **strips COSMIC features
+  from the annotation (and therefore the output) by default**, on both the web and the CLI.
+  The user opts in **once** (the choice persists in `Annotations/.cosmic_license.json`):
+  a **Settings → "COSMIC cancer annotations (licence)"** checkbox on the web (with a link to
+  the terms), or `crisprme.py cosmic-license {enable|disable|status}` on the CLI (`enable`
+  asks for confirmation; `--accept` for non-interactive/Docker use). New module
+  `PostProcess/cosmic_license.py` (attestation flag + row-level `_COSMIC` filter);
+  `build_active_annotation` and `complete-search` consult it. (`PostProcess/test_cosmic_license.py`.)
+
 ### Changed
 - **Renamed the analysis-mode control: default is now "population-level"; `--full` → `--per-sample`.**
   The measurements showed the two modes differ in **genotype resolution**, not intrinsic speed

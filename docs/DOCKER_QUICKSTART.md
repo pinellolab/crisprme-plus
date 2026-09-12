@@ -157,6 +157,12 @@ automatically — the built-in bundle is enabled by default, so there is nothing
 pick on the search form. To add your own annotation BEDs or turn tracks on/off, use
 **Settings → Data Manager → Manage annotations** (local mode only).
 
+> **COSMIC (cancer) annotations are OFF by default.** COSMIC commercial use requires a
+> licence ([terms](https://www.cosmickb.org/terms/)), so it is excluded from results
+> unless you attest a licence — the **Settings → "COSMIC cancer annotations (licence)"**
+> checkbox, or on the CLI `crisprme.py cosmic-license enable` (add `--accept` for a
+> non-interactive/Docker run). The choice persists, so you only set it once.
+
 Your results are saved on your computer under `~/crisprme/Results/<job name>/`.
 
 To stop the web server, press **Ctrl+C** in the terminal.

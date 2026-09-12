@@ -308,6 +308,11 @@ def print_help_complete_search() -> None:
         "regulatory elements, enhancers). The fourth column must contain the "
         "annotation name. The input BED files must be compressed using bgzip "
         "[OPTIONAL]\n"
+        "\t(COSMIC cancer annotations are EXCLUDED by default because their "
+        "commercial use requires a licence, Genome Research Ltd / Wellcome Sanger; "
+        "terms: https://www.cosmickb.org/terms/. To include them, attest your licence "
+        "ONCE with `crisprme.py cosmic-license enable` or in the web Settings -- the "
+        "choice persists. Without it, COSMIC features are stripped from the output.)\n"
         "\t--personal_annotation, specify BED files with personal genomic "
         "annotations. The fourth column must contain the annotation name. The "
         "input BED files must be compressed using bgzip [OPTIONAL]\n"
@@ -819,6 +824,118 @@ def _sort_annotation(annotationfile: str) -> str:
     return _compress_file(annotationfile_sorted)  # temp annotation.sorted.bed.gz
 
 
+def _apply_cosmic_license(args: List[str], annotationfile: str) -> str:
+    """Gate COSMIC on the user's licence attestation (licence-safe default).
+
+    COSMIC commercial use requires a licence (Genome Research Ltd / Wellcome
+    Sanger). CRISPRme+'s built-in bundle bakes COSMIC in, so unless the user has
+    persistently attested a licence -- via ``crisprme.py cosmic-license enable`` or
+    the web Settings (both stored in ``Annotations/.cosmic_license.json``) -- COSMIC
+    rows are stripped from the annotation to a cached sibling and that COSMIC-free
+    file is used instead. Returns the path to use (original when licensed or already
+    COSMIC-free).
+    """
+    try:
+        import cosmic_license as _c  # PostProcess is on sys.path (script_path)
+    except Exception:
+        return annotationfile  # helper unavailable -> leave annotation untouched
+    ann_dir = os.path.join(current_working_directory, "Annotations")
+    licensed = _c.cosmic_enabled(ann_dir)
+    if licensed or not _c.bed_has_cosmic(annotationfile):
+        return annotationfile
+    base = os.path.basename(annotationfile)
+    stripped = os.path.join(os.path.dirname(annotationfile), f".nocosmic.{base}")
+    try:
+        src_sig = str(int(os.path.getmtime(annotationfile)))
+    except OSError:
+        src_sig = "0"
+    sigp = stripped + ".sig"
+    fresh = (
+        os.path.isfile(stripped)
+        and os.path.isfile(sigp)
+        and open(sigp).read() == src_sig
+    )
+    if not fresh:
+        try:
+            _kept, dropped = _c.strip_cosmic(annotationfile, stripped)
+            with open(sigp, "w") as fh:
+                fh.write(src_sig)
+        except OSError:
+            import tempfile
+            stripped = os.path.join(tempfile.gettempdir(), f".nocosmic.{base}")
+            _kept, dropped = _c.strip_cosmic(annotationfile, stripped)
+        print(
+            "[complete-search] COSMIC EXCLUDED from annotation (licence-safe default): "
+            f"dropped {dropped} COSMIC feature(s). COSMIC commercial use requires a "
+            "licence (Genome Research Ltd / Wellcome Sanger; https://www.cosmickb.org/terms/). "
+            "To include it, run `crisprme.py cosmic-license enable` once, or attest in the "
+            "web Settings."
+        )
+    return stripped
+
+
+def cosmic_license_cmd() -> None:
+    """``crisprme.py cosmic-license {enable|disable|status}`` -- persist the COSMIC
+    annotation licence attestation.
+
+    The choice is stored once in ``<data>/Annotations/.cosmic_license.json`` (shared
+    with the web Settings toggle), so it need not be repeated per search. COSMIC is
+    EXCLUDED by default; ``enable`` requires an explicit confirmation (interactive, or
+    ``--accept`` / ``-y`` for non-interactive/Docker use). COSMIC commercial use
+    requires a licence (Genome Research Ltd / Wellcome Sanger); terms:
+    https://www.cosmickb.org/terms/ .
+    """
+    import cosmic_license as _c
+
+    ann_dir = os.path.join(current_working_directory, "Annotations")
+    args = sys.argv
+    action = args[2].lower() if len(args) > 2 else "status"
+    if action not in ("enable", "disable", "status"):
+        error("Usage: crisprme.py cosmic-license {enable|disable|status} [--accept]")
+    if action == "status":
+        rec = _c.get_cosmic_license(ann_dir)
+        on = bool(rec.get("enabled"))
+        print(
+            "COSMIC annotations: "
+            + ("ENABLED (licence attested)" if on else "DISABLED (default; excluded from output)")
+        )
+        if rec.get("attestation"):
+            print(f"  attestation: {rec['attestation']}")
+        print(f"  flag file: {_c.license_path(ann_dir)}")
+        return
+    if action == "disable":
+        _c.set_cosmic_license(ann_dir, False)
+        print(
+            "COSMIC DISABLED. COSMIC (cancer) annotations are now EXCLUDED from every "
+            "search (licence-safe default)."
+        )
+        return
+    # enable -> require an explicit confirmation
+    print(
+        "COSMIC (Catalogue Of Somatic Mutations In Cancer) is developed and owned by\n"
+        "Genome Research Ltd (Wellcome Sanger Institute). It is FREE for academic /\n"
+        "non-commercial research (with registration), but COMMERCIAL use requires a\n"
+        "separate licence from QIAGEN. Full terms: https://www.cosmickb.org/terms/\n"
+    )
+    accepted = any(f in args for f in ("--accept", "-y", "--yes"))
+    if not accepted:
+        try:
+            resp = input(
+                "Do you confirm you hold a COSMIC licence appropriate for your use? "
+                "Type 'yes' to confirm: "
+            ).strip().lower()
+        except EOFError:
+            resp = ""
+        if resp not in ("yes", "y"):
+            print("Not confirmed -- COSMIC remains DISABLED (excluded from output).")
+            return
+    _c.set_cosmic_license(ann_dir, True, "attested via CLI (cosmic-license enable)")
+    print(
+        "COSMIC ENABLED. COSMIC (cancer) annotations will be INCLUDED in searches. You "
+        "are responsible for holding a valid COSMIC licence appropriate for your use."
+    )
+
+
 def _check_annotation(args: List[str], annotation: bool) -> str:
     """Retrieves and validates the annotation file from command-line arguments.
 
@@ -846,6 +963,7 @@ def _check_annotation(args: List[str], annotation: bool) -> str:
         error("Missing input for --annotation. Annotation file must be specified")
     if not os.path.isfile(annotationfile):
         error("The file specified for --annotation does not exist")
+    annotationfile = _apply_cosmic_license(args, annotationfile)  # COSMIC licence gate
     return _sort_annotation(annotationfile)  # sort input annotation file
 
 
@@ -3752,6 +3870,11 @@ def crisprme_help() -> None:
         "\tBuilds a self-contained, shareable report (<jobid>_report.zip: "
         "offline report.html + integrated_results.tsv.gz) for a completed "
         "run\n\n"
+        "crisprme.py cosmic-license {enable|disable|status}\n"
+        "\tEnable/disable COSMIC (cancer) annotations, persistently. COSMIC is "
+        "EXCLUDED by default; its commercial use requires a licence (Genome "
+        "Research Ltd / Wellcome Sanger; https://www.cosmickb.org/terms/). `enable` "
+        "asks for confirmation (or --accept for non-interactive use)\n\n"
         "crisprme.py setup\n"
         "\tInitializes the legacy database by downloading all reference "
         "genomes, variant datasets, PAM definition files, and associated "
@@ -3791,6 +3914,8 @@ elif sys.argv[1] == "generate-personal-card":  # run create personal card
     personal_card()
 elif sys.argv[1] == "generate-report":  # build shareable self-contained report
     generate_report()
+elif sys.argv[1] == "cosmic-license":  # enable/disable COSMIC (cancer) annotations
+    cosmic_license_cmd()
 elif sys.argv[1] == "setup":  # run legacy database setup
     setup_database()
 elif sys.argv[1] == "web-interface":  # run web interface

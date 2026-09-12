@@ -484,6 +484,17 @@ v4**) and adds a **COSMIC** cancer-gene column:
   relevant for therapeutic and pre-IND assessment, where an off-target in a
   known cancer gene warrants scrutiny.
 
+**COSMIC licence gate (excluded by default).** COSMIC (Genome Research Ltd /
+Wellcome Sanger) is free for academic / non-commercial research but its
+**commercial use requires a licence** ([terms](https://www.cosmickb.org/terms/)).
+Because the built-in bundle bakes COSMIC into a single BED, CRISPRme+ **strips the
+COSMIC rows from the active annotation by default**, so no `Annotation_COSMIC`
+values appear in the output. The user opts in **once** — a Settings checkbox on the
+web (with a link to the terms) or `crisprme.py cosmic-license enable` on the CLI
+(both persist to `Annotations/.cosmic_license.json`); the CLI `enable` requires an
+explicit confirmation. Toggling it changes the active-annotation cache signature, so
+the next search rebuilds the annotation with or without COSMIC accordingly.
+
 Annotations are managed as an enable/disable set and applied automatically to
 every search; the shareable report includes a plain-language legend for every
 annotation value.
