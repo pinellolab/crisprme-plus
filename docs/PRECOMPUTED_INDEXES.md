@@ -5,10 +5,10 @@
 > sites-only **`NRG_3_hg38+hg38_mega`** (5 sources) — live in
 > [`seq_script/merge_panels/README.md`](../seq_script/merge_panels/README.md) (Mode 1 and
 > Mode 2, with the as-run `mega_gw_merge.sh` + `mega_build_indels.sh` drivers). This page
-> covers the generic single-dataset build/publish/download flow. **Naming note:** the shipped
-> indexes use `+hg38_1000G2021_HGDP` / `+hg38_mega` (no `-dictless` marker); some examples
-> below still use the older `-dictless` / `1000G_HGDP` naming and are illustrative of the
-> mechanism, not the exact shipped names.
+> covers the generic single-dataset build/publish/download flow. **Naming note:** `--dictless`
+> is a *publish flag* (it drops the ~152 GB per-sample SNP dictionaries; see below), **not** a
+> name marker — the shipped index names are simply `<pam>_<N>_<ref>+<vcf>`
+> (`NRG_3_hg38+hg38_1000G2021_HGDP`, `NRG_3_hg38+hg38_mega`).
 
 Bulge-enabled CRISPRme searches need a CRISPRitz **index** of the reference
 genome. Building it is the single most expensive one-time step of a search. That
@@ -31,7 +31,7 @@ separate samples download**:
 This document covers the download → build → publish workflow. It complements
 Section 3.5 of the data-setup guide (`docs/crisprme_data_setup_051826.md`).
 
-## The two production indexes (2.5.2)
+## The two production indexes (2.5.4)
 
 Two SpCas9 **NRG** (NAG+NGG) variant indexes ship prebuilt on HuggingFace — pick
 by whether you need per-sample carriers or the widest allele-frequency provenance.
@@ -64,8 +64,8 @@ Indexes live under `indexes/` in the CRISPRme dataset repo (default
 ```
 indexes/
   NRG_3_hg38.tar.gz                              # SpCas9 (NRG = NAG+NGG) reference index of hg38, up-to-2-bulge (DEFAULT)
-  NRG_3_hg38-dictless+hg38_1000G_HGDP.tar.gz     # SpCas9 (NRG) dict-less variant-aware index (1000G + HGDP), up-to-2-bulge (web default)
-  genotypes_hg38_1000G_HGDP.tar.gz               # SEPARATE Tier-1 genotype store companion for the variant index (rides along on download)
+  NRG_3_hg38+hg38_1000G2021_HGDP.tar.gz     # SpCas9 (NRG) dict-less variant-aware index (1000G + HGDP), up-to-2-bulge (web default)
+  genotypes_hg38_1000G2021_HGDP.tar.gz               # SEPARATE Tier-1 genotype store companion for the variant index (rides along on download)
 ```
 
 The **NRG** default matches SpCas9's broad recognition (NAG + NGG), so variant-created
@@ -74,27 +74,27 @@ box.
 
 **Two artifacts per variant index:**
 
-- **Main tarball** (`NRG_3_hg38-dictless+hg38_1000G_HGDP.tar.gz`) — the index
+- **Main tarball** (`NRG_3_hg38+hg38_1000G2021_HGDP.tar.gz`) — the index
   itself (`<name>/`), its `_INDELS` companion, the indel logs
   (`Dictionaries/log_indels_<vcf>/`), the Tier-0 `Dictionaries/registry_<vcf>/`,
   the samplesID lists (`samplesIDs/<vcf>.samplesID.txt` + the per-db
   `samplesIDs/<ref>_<db>.samplesID.txt`), and `manifest.json` at the archive
   root. In a **classic** (non-dict-less) publish the main tarball ALSO carries
   the per-sample SNP dicts (`Dictionaries/dictionaries_<vcf>/`).
-- **Genotype companion** (`genotypes_hg38_1000G_HGDP.tar.gz`) — the big Tier-1
+- **Genotype companion** (`genotypes_hg38_1000G2021_HGDP.tar.gz`) — the big Tier-1
   store, uploaded separately under the same `indexes/` prefix. `download --what
   index` fetches it automatically unless `--no-genotypes` is given.
 
-**The `-dictless` marker.** A dict-less variant index is published with a
-`-dictless` marker in the REF segment of its name
-(`NRG_3_hg38-dictless+hg38_1000G_HGDP`), so it extracts as
-`genome_library/NRG_3_hg38-dictless+hg38_1000G_HGDP/`. The search resolves an
-index by the convention `<pam>_<N>_<ref>+<vcf>` (ref segment == genome-folder
-basename), so **download strips the marker** and installs under the canonical
-name `NRG_3_hg38+hg38_1000G_HGDP` (the `+<vcf>` segment — shared with the
-`genotypes_<vcf>` companion — is preserved verbatim). A reference-only index
-(no `+`) unpacks to a single `genome_library/<name>/` directory plus
-`manifest.json` and is used with no extra steps.
+**Naming — `--dictless` is a flag, not a name marker.** `publish-index --dictless`
+controls *what goes in the tarball* (it drops the ~152 GB per-sample SNP
+dictionaries, keeping the compact Tier-0/Tier-1 stores), but it does **not** decorate
+the index name. A variant index is published and installed under the plain convention
+`<pam>_<N>_<ref>+<vcf>` — e.g. `NRG_3_hg38+hg38_1000G2021_HGDP`, extracting to
+`genome_library/NRG_3_hg38+hg38_1000G2021_HGDP/`. The search resolves an index by that
+same convention (the `<ref>` segment == the genome-folder basename; the `+<vcf>` segment
+is shared verbatim with the `genotypes_<vcf>` companion). A reference-only index (no `+`)
+unpacks to a single `genome_library/<name>/` directory plus `manifest.json` and is used
+with no extra steps.
 
 ## Dict-less flow (variant-aware index)
 
@@ -106,14 +106,14 @@ Build the variant-aware index with `--vcf` and `--samplesID`:
 crisprme.py build-index-only \
   --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
   --bDNA 2 --bRNA 2 --thread 16 \
-  --vcf VCFs/hg38_1000G_HGDP --samplesID samplesIDs.config.txt \
+  --vcf VCFs/hg38_1000G2021_HGDP --samplesID samplesIDs.config.txt \
   --path "$CRISPRME_DIR"
-# -> genome_library/NRG_3_hg38+hg38_1000G_HGDP/          (+ _INDELS companion)
-#    Dictionaries/registry_hg38_1000G_HGDP/              (Tier-0 allele-freq registry)
-#    Dictionaries/registry_hg38_1000G_HGDP/variant_count.json  (SNP + indel counts, for the report)
-#    Dictionaries/genotypes_hg38_1000G_HGDP/             (Tier-1 per-sample genotype store)
-#    Dictionaries/log_indels_hg38_1000G_HGDP/            (indel logs, for indel post-analysis)
-#    samplesIDs/hg38_1000G_HGDP.samplesID.txt            (combined, emitted by the build)
+# -> genome_library/NRG_3_hg38+hg38_1000G2021_HGDP/          (+ _INDELS companion)
+#    Dictionaries/registry_hg38_1000G2021_HGDP/              (Tier-0 allele-freq registry)
+#    Dictionaries/registry_hg38_1000G2021_HGDP/variant_count.json  (SNP + indel counts, for the report)
+#    Dictionaries/genotypes_hg38_1000G2021_HGDP/             (Tier-1 per-sample genotype store)
+#    Dictionaries/log_indels_hg38_1000G2021_HGDP/            (indel logs, for indel post-analysis)
+#    samplesIDs/hg38_1000G2021_HGDP.samplesID.txt            (combined, emitted by the build)
 ```
 
 **One command, all supporting files.** `build-index-only` writes *everything* a
@@ -151,10 +151,10 @@ for db in 1000G HGDP NewCohort; do
   bcftools norm -m -any -f hg38.fa "$db.vcf.gz" -Oz -o "$db.norm.vcf.gz" && bcftools index -t "$db.norm.vcf.gz"
 done
 # 2) merge into one combined panel (consistent reference build + contig naming across datasets)
-bcftools merge 1000G.norm.vcf.gz HGDP.norm.vcf.gz NewCohort.norm.vcf.gz -Oz -o VCFs/hg38_1000G_HGDP_NewCohort/merged.vcf.gz
+bcftools merge 1000G.norm.vcf.gz HGDP.norm.vcf.gz NewCohort.norm.vcf.gz -Oz -o VCFs/hg38_1000G2021_HGDP_NewCohort/merged.vcf.gz
 # 3) build the dict-less index (emits registry + genotypes + variant_count.json + combined samplesID)
 crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
-  --bDNA 2 --bRNA 2 --vcf VCFs/hg38_1000G_HGDP_NewCohort --samplesID samplesIDs.config.txt --path "$CRISPRME_DIR"
+  --bDNA 2 --bRNA 2 --vcf VCFs/hg38_1000G2021_HGDP_NewCohort --samplesID samplesIDs.config.txt --path "$CRISPRME_DIR"
 ```
 
 Two things the build handles for you, which matter as new merged panels are added:
@@ -181,9 +181,9 @@ Two things the build handles for you, which matter as new merged panels are adde
 
 ```bash
 export HF_TOKEN=hf_...        # your write token, in the shell only
-crisprme.py publish-index --index genome_library/NRG_3_hg38+hg38_1000G_HGDP --dictless
-# -> indexes/NRG_3_hg38+hg38_1000G_HGDP.tar.gz     (main: index + _INDELS + registry (+ variant_count.json) + indel logs + samplesIDs + manifest)
-# -> indexes/genotypes_hg38_1000G_HGDP.tar.gz      (separate Tier-1 companion)
+crisprme.py publish-index --index genome_library/NRG_3_hg38+hg38_1000G2021_HGDP --dictless
+# -> indexes/NRG_3_hg38+hg38_1000G2021_HGDP.tar.gz     (main: index + _INDELS + registry (+ variant_count.json) + indel logs + samplesIDs + manifest)
+# -> indexes/genotypes_hg38_1000G2021_HGDP.tar.gz      (separate Tier-1 companion)
 ```
 
 `--dictless` **drops the ~152 GB per-sample SNP dictionaries**
@@ -201,12 +201,13 @@ publishing is byte-for-byte the classic path plus these additive members.
 ```bash
 # fetch the variant-aware index (main tarball + genotype companion + bundled samplesIDs)
 crisprme.py download --what index \
-  --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path "$CRISPRME_DIR"
-# installs under the canonical name genome_library/NRG_3_hg38+hg38_1000G_HGDP/
+  --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path "$CRISPRME_DIR"
+# installs under the canonical name genome_library/NRG_3_hg38+hg38_1000G2021_HGDP/
 ```
 
-- The index installs under its **canonical** name (the `-dictless` marker is
-  stripped from the ref segment) so the search resolves it.
+- The index installs under its plain `<pam>_<N>_<ref>+<vcf>` name so the search
+  resolves it (there is no name decoration to strip — `--dictless` only affected
+  what the maintainer put in the tarball).
 - The **combined + per-db samplesID lists** are installed into
   `samplesIDs/` from the main tarball, so no `--what samples` / `--what all` is
   needed. (For a legacy index built before this bundling existed, download falls
@@ -214,7 +215,7 @@ crisprme.py download --what index \
 - The **Tier-1 genotype store** is fetched automatically. Add `--no-genotypes`
   to skip the big companion: off-target **detection still works** via the Tier-0
   registry, but per-sample `Samples` are degraded until the store is present.
-- The **CLI search-list files** `list_vcf.txt` (the dataset, `hg38_1000G_HGDP`)
+- The **CLI search-list files** `list_vcf.txt` (the dataset, `hg38_1000G2021_HGDP`)
   and `list_samplesID.txt` (its combined samplesID) are written at the install
   root, so a CLI search works out of the box — the same lists the web form builds
   per-search. Installing several variant indexes appends each dataset once.
@@ -269,7 +270,7 @@ A dict-less variant index adds the tier/companion/self-completeness fields:
 
 ```json
 {
-  "name": "NRG_3_hg38-dictless+hg38_1000G_HGDP",
+  "name": "NRG_3_hg38+hg38_1000G2021_HGDP",
   "created_at": "2026-08-05T12:00:00+00:00",
   "pam": "NRG",
   "index_bmax": "3",

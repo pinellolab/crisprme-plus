@@ -1580,7 +1580,7 @@ This writes `genome_library/NRG_3_hg38` (the folder number is `max(bDNA,bRNA)+1`
 Add `--vcf` (a VCF dataset directory) to also pre-build the **variant-aware** index (genome enrichment + SNP/indel indexes). Add `--samplesID` (a listing file, one samplesID filename per line under `samplesIDs/`; a combined panel lists both 1000G and HGDP) to make it **self-complete**: with `--samplesID` the build ALSO emits the dict-less Tier-0 registry + Tier-1 genotype tiers and, for a merged panel, writes the combined `samplesIDs/<vcf>.samplesID.txt` list. Without `--samplesID` you get a dicts-only index (no fast post-analysis).
 
 ```bash
-crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_1000G_HGDP --samplesID samplesIDs.config.txt --path /data/crisprme
+crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_1000G2021_HGDP --samplesID samplesIDs.config.txt --path /data/crisprme
 ```
 
 **`complete-search --index-path <dir>`** — reuse a prebuilt/staged index library instead of building one under the working directory. A missing matching index is a hard error (rather than a silent rebuild), which is what you want on a read-only shared mount.
@@ -1598,7 +1598,7 @@ crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --
 
 ```bash
 crisprme.py publish-index --index genome_library/NRG_3_hg38
-crisprme.py publish-index --index genome_library/NRG_3_hg38+hg38_1000G_HGDP --dictless
+crisprme.py publish-index --index genome_library/NRG_3_hg38+hg38_1000G2021_HGDP --dictless
 ```
 
 See the companion data-setup guide (`docs/crisprme_data_setup_051826.md`, Sections 2d and 3½) for the end-to-end workflow.

@@ -264,10 +264,11 @@ the Docker instructions above.
 ## Installing more indexes (as you need them)
 
 An index is specific to a **PAM + bulge count + genome**. Download whichever you
-need by its **exact published name** — for example the pamless variant index:
+need by its **exact published name** — for example the five-source sites-only
+**mega** index (a useful complement to the default genotyped 1000G-2021 + HGDP index):
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.py download --what index --index-name NNN_3_hg38+hg38_1000G_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
 ```
 
 To see which indexes are published, browse the dataset repository

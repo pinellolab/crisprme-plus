@@ -33,6 +33,27 @@ then strips the pseudo-sample back out — this is what makes the sites-only meg
 searchable). Both take env-overridable paths; see their headers. `docs/DESIGN_mega_index.md`
 is the design rationale (its "REMAINING/pending" notes are historical — the work shipped).
 
+## Source provenance (versions + access)
+
+The two shipped indexes are built from the callsets below. **Mode 1** (genotyped) uses the
+two fully-genotyped cohorts; **Mode 2** (mega, sites-only) adds the three aggregate/sites-only
+resources. Nominal AN in the registry is 2×cohort-N for genotyped sources (so reported AF is
+exact); aggregate sources contribute per-source AF only (no genotypes, no honest pooled AC/AN).
+
+| Source | Version / build | Assembly | Data model | Cohort N (nominal AN) | Access | In index |
+|---|---|---|---|---|---|---|
+| **1000 Genomes** | 2021 high-coverage (30×) NYGC/IGSR callset, **phased** | GRCh38 | sample-level genotypes | 3,202 (AN 6,404) | open (IGSR) | Mode 1 + Mode 2 |
+| **HGDP** | gnomAD-hosted HGDP callset, **unphased** | GRCh38 | sample-level genotypes | 929 (AN 1,858) | open (gnomAD) | Mode 1 + Mode 2 |
+| **gnomAD** | v4.1 (exomes + genomes joint) | GRCh38 | aggregate sites-only (AF) | ~807k individuals (aggregate) | open (gnomAD) | Mode 2 only |
+| **TOPMed** | Bravo freeze (sites-only, `AN=0` shipped) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (dbGaP) | Mode 2 only |
+| **All of Us** | genomic sites release (single pseudo-sample) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (Researcher Workbench) | Mode 2 only |
+
+Notes: (1) the **shipped Mode-1 index** used the **2021** 1000G callset (`hg38_1000G2021_HGDP`,
+4,131 samples); the committed `merge_vcf_panels.sh` defaults still point at the older **2019**
+Phase-3 callset — see the Mode-1 SOURCES caveat above to reproduce the shipped index. (2) The
+raw controlled-access source VCFs (TOPMed, All of Us) are **not** redistributed with CRISPRme;
+only per-source AF survives into the sites-only mega index, so no individual-level data is shipped.
+
 ---
 ## Mode 1 — genotyped cis-capable panel (1000G-2021 + HGDP)
 

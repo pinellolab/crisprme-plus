@@ -80,12 +80,12 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
 
 # the variant-aware index used by the default web search (1000G + HGDP)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
-  crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
 ```
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRG_3_hg38-dictless+hg38_1000G_HGDP` index already makes the default web
+pre-downloaded `NRG_3_hg38+hg38_1000G2021_HGDP` index already makes the default web
 search variant-aware — you do **not** need the raw VCFs for that. **Optional
 (advanced):** the raw 1000 Genomes VCFs (~16 GB) are only needed for CLI
 sample-level analyses / personal risk cards:
@@ -662,7 +662,7 @@ variants.
 2. **Reference-only selected** — keep the **1000G+HGDP** option (pre-selected by
    default) to get variant off-targets.
 3. **Variant index not installed** — re-run
-   `crisprme.py download --what index --index-name NRG_3_hg38-dictless+hg38_1000G_HGDP --path /DATA`.
+   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA`.
 4. **Confirm success** — `Results/<name>/log_error.txt` is empty and
    `*.integrated_results.tsv` is non-empty.
 

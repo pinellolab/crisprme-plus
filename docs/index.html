@@ -105,7 +105,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.27 \
 
 # the variant-aware index used by the default web search (1000G + HGDP)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.2.0-alpha.27 \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G_HGDP --path /DATA</code></pre>
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA</code></pre>
 
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
@@ -136,7 +136,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 
 # the variant-aware index used by the default web search (1000G + HGDP)
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G_HGDP --path /DATA</code></pre>
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA</code></pre>
 
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
