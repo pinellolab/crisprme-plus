@@ -1,6 +1,6 @@
 # CRISPRme+ — Methods
 
-This document describes the methods introduced in **CRISPRme+** (the 2.3/2.4
+This document describes the methods introduced in **CRISPRme+** (the 2.3–2.5
 line), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
