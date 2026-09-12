@@ -1,5 +1,15 @@
 # Precomputed CRISPRme indexes on HuggingFace
 
+> **Reproducing the two shipped production indexes.** The end-to-end recipes for the
+> two released variant indexes — genotyped **`NRG_3_hg38+hg38_1000G2021_HGDP`** and
+> sites-only **`NRG_3_hg38+hg38_mega`** (5 sources) — live in
+> [`seq_script/merge_panels/README.md`](../seq_script/merge_panels/README.md) (Mode 1 and
+> Mode 2, with the as-run `mega_gw_merge.sh` + `mega_build_indels.sh` drivers). This page
+> covers the generic single-dataset build/publish/download flow. **Naming note:** the shipped
+> indexes use `+hg38_1000G2021_HGDP` / `+hg38_mega` (no `-dictless` marker); some examples
+> below still use the older `-dictless` / `1000G_HGDP` naming and are illustrative of the
+> mechanism, not the exact shipped names.
+
 Bulge-enabled CRISPRme searches need a CRISPRitz **index** of the reference
 genome. Building it is the single most expensive one-time step of a search. That
 index depends only on the **genome + PAM + bulge count** (not on the guides or

@@ -13,11 +13,25 @@ sources are all genotyped and whether you need cross-variant cis:
 | indel+SNP cis | CONFIRMED (1000G phased) / PUTATIVE (HGDP) | **N/A** (aggregate, no phase) |
 | MAF filter | none | **> 0.001** (uniform) |
 
-**Status:** Mode 1 validated **genome-wide** (1000G + HGDP), both NGG and pamless
-NNN indexes built from one enrichment, pooled AF confirmed. Mode 2 merge + registry
-validated **genome-wide** (all 5 sources, 66.9M sites, 51.2M SNPs); hybrid index
-assembly (enrich + drop-in registry) pending. See §"Mode 2" below and
-`docs/DESIGN_mega_index.md`.
+**Status (shipped in v2.5.4):** both production indexes are **built, published, and
+clean-room-validated** — genotyped `NRG_3_hg38+hg38_1000G2021_HGDP` and sites-only
+`NRG_3_hg38+hg38_mega` (both on HF `lucapinello/crisprme-data`). Mode 2: genome-wide
+5-source merge (66.9M sites, 51.2M SNPs) + INFO-AF registry + searchable indels.
+
+> **Mode-1 SOURCES caveat.** The `merge_vcf_panels.sh` `SOURCES` + `build_combined_panel.sh`
+> defaults committed here target the **2019** 1000G Phase-3 callset (`hg38_1000G`, glob
+> `ALL.{C}.*.vcf.gz`, 2548 samples) and produce panel `hg38_1000G_HGDP`. The **shipped**
+> genotyped index used the **2021** high-coverage callset (`hg38_1000G_2021`, 3202 samples)
+> → panel `hg38_1000G2021_HGDP`. To reproduce the shipped index, repoint `SOURCES` at the
+> 2021 genotyped VCFs and regenerate the 3202-sample samplesID before running.
+
+**Whole-genome mega build scripts (as-run, in this folder):**
+`mega_gw_merge.sh` (the GW 24-contig 5-source merge driver around `merge_mega_sites.sh`)
+→ `mega_build_indels.sh` (the fake-indel assembly: `synth_sites_gt.py` adds a synthetic
+`MEGA` pseudo-sample so the enricher materializes fake contigs, builds the `_INDELS` genome,
+then strips the pseudo-sample back out — this is what makes the sites-only mega's indels
+searchable). Both take env-overridable paths; see their headers. `docs/DESIGN_mega_index.md`
+is the design rationale (its "REMAINING/pending" notes are historical — the work shipped).
 
 ---
 ## Mode 1 — genotyped cis-capable panel (1000G-2021 + HGDP)

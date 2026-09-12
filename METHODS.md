@@ -96,7 +96,8 @@ the right-sized cache plus an O(1) LRU cut a dense chr22 SNP post-analysis **326
 
 ### Out-of-the-box variant search
 Because Tier-0/Tier-1 are small, they are shipped **with the pre-built index**
-(compressed, read on the fly). A user who downloads a variant index can
+(the Tier-0 registry raw/uncompressed by default, memory-mapped and read on the
+fly; zlib block-compression is opt-in). A user who downloads a variant index can
 therefore run variant-aware searches — with correct allele frequencies and
 rsIDs — without ever materializing the 152 GB of per-sample dictionaries. The
 enriched reference genome and the raw VCFs are needed only at *build* time.
@@ -466,7 +467,8 @@ Each reported off-target is annotated with its genomic context by intersecting
 its coordinates with a 4-column BED (`chrom  start  end  label`), where the label
 is suffixed by its source. `resultIntegrator.py` buckets labels by suffix into
 dedicated columns; CRISPRme+ ships an updated annotation set (ENCODE **SCREEN
-v4**) and adds a **COSMIC** cancer-gene column:
+v4**) and adds cancer-gene columns — **IntOGen** (CC0) cancer-driver genes on by
+default and a licence-gated **COSMIC** Cancer Gene Census column:
 
 - **GENCODE** — gene-model context (`exon`, `CDS`, `UTR`, `transcript`,
   `start_codon`/`stop_codon`; `intergenic` otherwise), plus nearest-gene name
