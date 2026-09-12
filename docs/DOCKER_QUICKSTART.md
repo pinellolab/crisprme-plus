@@ -82,7 +82,7 @@ complementary production indexes:
 
 ```bash
 # Genotyped panel — 1000 Genomes 2021 + HGDP (sample-level genotypes).
-# Observed / CONFIRMED haplotypes with per-sample carriers + exact joint AF (use --full).
+# Observed / CONFIRMED haplotypes with per-sample carriers + exact joint AF (use --per-sample).
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.3 \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
 
@@ -96,12 +96,15 @@ The web interface picks these up automatically — a search that uses the defaul
 (SpCas9, recognizes NGG + NAG) with up to 2 bulges will reuse them instead of rebuilding.
 (Need a different nuclease? See **"Installing more indexes"** at the bottom.)
 
-> **Fast vs full.** Searches run in **fast mode by default** — they report a small set of
+> **Population-level (default) vs per-sample.** The axis is genotype resolution, not speed.
+> By default searches run a **population-level analysis** — they report a small set of
 > worst-possible representatives per variant window (reference + minimum-edit + maximum-CFD),
-> which removes the per-haplotype enumeration wall on dense/aggregate panels. Add **`--full`**
-> (CLI) or pick **Full** in the web form to enumerate exact per-sample haplotypes with named
-> carriers + CONFIRMED cis phasing (recommended on the genotyped panel for clinical
-> validation). The shareable report states which mode was used.
+> which removes the per-haplotype enumeration wall on dense/aggregate panels and is lossless
+> for detection. Add **`--per-sample`** (CLI) or pick **Per-sample** in the web form to resolve
+> per-sample genotypes into observed haplotypes with named carriers + CONFIRMED cis phasing +
+> exact joint AF (recommended on the **genotyped** panel for clinical validation). This needs
+> a genotyped panel — it's a no-op on the sites-only mega panel (no genotypes to resolve), and
+> the web form disables it there. The shareable report states which mode was used.
 
 ## 5. (Optional, advanced) Add the raw 1000 Genomes VCFs
 

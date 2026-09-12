@@ -1603,6 +1603,36 @@ def get_variant_dataset_options(genome: str) -> List:
     return options
 
 
+def variant_dataset_has_genotypes(genome: str, dataset_value: str) -> bool:
+    """True when the selected variant dataset ships a per-sample GENOTYPE store
+    (``Dictionaries/genotypes_<genome>_<dataset>``), i.e. ``--per-sample`` can
+    resolve per-sample observed haplotypes.
+
+    False for "Reference only" and for sites-only / aggregate panels (e.g. the
+    merged "mega" panel), which carry allele frequencies but no genotypes to
+    resolve -- there ``--per-sample`` is a no-op, so the web form disables it. The
+    dataset value is the dropdown's genome-stripped core (e.g. ``1000G2021_HGDP``,
+    ``mega``); the store name may or may not repeat the genome, so both are tried,
+    and the store must be non-empty (a real store, not a bare directory).
+    """
+    if not dataset_value or dataset_value in ("ref", "reference", "none"):
+        return False
+    genome_norm = (genome or "").replace(" ", "_")
+    dnorm = dataset_value.replace(" ", "_")
+    dic = os.path.join(current_working_directory, "Dictionaries")
+    if not os.path.isdir(dic):
+        return False
+    for name in (f"genotypes_{genome_norm}_{dnorm}", f"genotypes_{dnorm}"):
+        p = os.path.join(dic, name)
+        if os.path.isdir(p):
+            try:
+                if any(os.scandir(p)):  # a real (non-empty) genotype store
+                    return True
+            except OSError:
+                pass
+    return False
+
+
 def get_annotation_options(genome: str) -> List:
     """Annotation dropdown options for a selected genome.
 

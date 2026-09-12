@@ -606,29 +606,29 @@ class TestGenerateReport(unittest.TestCase):
         # per-mismatch columns up to the run's mm (6MM), on-target excluded
         self.assertIn(">6MM<", html)
 
-    def test_search_mode_note_fast_default_and_full(self):
-        """The 'Analysis inputs & criteria' card surfaces the search mode (2.5.3):
-        FAST (default) warns per-sample carriers are NOT computed and points to
-        --full; FULL states the exact observed-haplotype enumeration."""
+    def test_search_mode_note_population_level_default_and_per_sample(self):
+        """The 'Analysis inputs & criteria' card surfaces the analysis mode:
+        POPULATION-LEVEL (default) warns per-sample carriers are NOT computed and
+        points to --per-sample; PER-SAMPLE states the observed-haplotype resolution."""
         base = {"datasets": "1000G+HGDP", "mm": "6", "bdna": 2, "brna": 2,
                 "max_edits": "4"}
-        html_fast = gr.render_inputs_criteria({**base, "search_mode": "fast"})
-        self.assertIn("Search mode", html_fast)
-        self.assertIn("Fast", html_fast)
-        self.assertIn("NOT computed", html_fast)       # the carrier caveat
-        self.assertIn("--full", html_fast)              # points to the exact mode
-        html_full = gr.render_inputs_criteria({**base, "search_mode": "full"})
-        self.assertIn("observed-haplotype enumeration", html_full)
-        self.assertNotIn("NOT computed", html_full)     # no fast caveat in full mode
+        html_pop = gr.render_inputs_criteria({**base, "search_mode": "population-level"})
+        self.assertIn("Search mode", html_pop)
+        self.assertIn("Population-level", html_pop)
+        self.assertIn("NOT computed", html_pop)         # the carrier caveat
+        self.assertIn("--per-sample", html_pop)          # points to the exact mode
+        html_ps = gr.render_inputs_criteria({**base, "search_mode": "per-sample"})
+        self.assertIn("observed haplotypes", html_ps)
+        self.assertNotIn("NOT computed", html_ps)        # no caveat in per-sample mode
 
-    def test_search_mode_defaults_to_fast_when_marker_absent(self):
-        """A result dir with no .search_mode marker resolves to fast (the 2.5.3
+    def test_search_mode_defaults_to_population_level_when_marker_absent(self):
+        """A result dir with no .search_mode marker resolves to population-level (the
         default), so older/again-generated reports still carry the correct caveat."""
         import pandas as pd
         df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
         cols = gr._resolve(df.columns, list(gr._COLS.keys()))
         meta = gr.build_summary_meta(None, self.tsv, df, cols)
-        self.assertEqual(meta.get("search_mode"), "fast")
+        self.assertEqual(meta.get("search_mode"), "population-level")
 
     def test_section1_matrix_reconciles_to_grand_total(self):
         """Matrix INCLUDES perfect matches (mm+b==0): REFERENCE + VARIANT totals

@@ -364,16 +364,21 @@ for every genotyped / legacy install (the genotyped path is already lossless via
 observed enumerator). Set `CRISPRME_LOSSLESS_DENSE=0` to opt out. A per-sample union on
 the genotyped path is intentionally *not* done — it would risk trans-as-cis phantoms.
 
-### Fast mode (default) and `--full` exact enumeration
+### Population-level analysis (default) and `--per-sample` genotype resolution
 
 The controls above bound any *single* window, but a **dense panel** (many merged
 sources) or a **sites-only aggregate panel** can present so many variant-dense windows
 that even the observed-haplotype enumeration of Section 4 becomes intractable — measured
-at **49 h+ without completing** on a 4×-density 1000G+HGDP panel. So as of 2.5.3 CRISPRme+
-runs a **two-pass fast mode by default** (propagated to the whole post-analysis via
-`CRISPRME_FAST_MODE`); `--full` opts into the exact observed-haplotype enumeration of
-Section 4. Instead of enumerating the 2ᵏ IUPAC haplotype lattice per window, fast mode
-emits a small fixed set of **worst-possible representatives** per window:
+at **49 h+ without completing** on a 4×-density 1000G+HGDP panel. The two analysis modes
+are therefore not really a *speed* dial but a **genotype-resolution** dial: the default
+reports population-level worst-possible off-targets (works on any panel), while
+`--per-sample` resolves each individual's observed haplotype (only possible, and only
+meaningful, when the panel carries per-sample genotypes). So as of 2.5.4 CRISPRme+ runs a
+**two-pass population-level analysis by default** (propagated to the whole post-analysis via
+the internal `CRISPRME_FAST_MODE` env var); **`--per-sample`** opts into the exact
+observed-haplotype enumeration of Section 4. Instead of enumerating the 2ᵏ IUPAC haplotype
+lattice per window, the population-level analysis emits a small fixed set of
+**worst-possible representatives** per window:
 
 - **Pass 1 — score-free find.** The window's per-position IUPAC allele sets yield a
   **minimum-edit** representative whose edit distance `D` (the additive-per-column argmin)
@@ -389,60 +394,69 @@ emits a small fixed set of **worst-possible representatives** per window:
 
 The min-edit and max-CFD representatives are distinct because CFD is position-weighted
 (Section 8): the fewest-mismatch haplotype is often **not** the highest-scoring one, so
-both are emitted so the reported worst case is never understated. The mode is validated to
-be **lossless for locus detection and non-understating for the worst-case score** against
-the slow full-enumeration path on a real chr22 1000G-2021+HGDP slice (0 CFD under-reports;
-it in fact surfaces *stronger* worst cases at 182 loci that per-sample enumeration misses),
-and it collapses ~1.9× fewer rows on that 1× slice, growing with density — turning the
-otherwise-intractable 4× panel into a tractable run. **The trade-off is that per-sample
-carriers, CONFIRMED cis phasing and exact joint allele frequency are not computed in fast
-mode** (rows are PUTATIVE worst cases); the launch-time message, the web **Search mode**
-control and the report's **Search mode** row all state this explicitly, so it is never
-silent. This yields a **two-tier workflow**: the default fast mode for routine, high-density,
-or aggregate-panel *screening*, and `--full` (byte-identical to the pre-2.5.3 enumeration
-path) for *confirmatory / pre-IND* runs where per-sample phased haplotype resolution is
-required. On sites-only (aggregate) panels there are no per-sample genotypes to recover — verified on
-the released **mega** index: `--full` yields **zero CONFIRMED rows and no cis carriers** in
-either mode (there is no genotype store to enumerate), and the `indel_snp_cooc.tsv` /
-`indel_af.tsv` companions are **byte-identical** across modes. `--full`'s SNP path in fact
-emits *fewer* worst-possible windows (integrated 3,065 vs 3,224 rows; SNP+SNP co-occurrence
-4 vs 22 PUTATIVE rows), so fast — with its conservative worst-possible over-listing — is the
-more complete screen there, and `--full` is only meaningful on a **genotyped** panel.
+both are emitted so the reported worst case is never understated. The population-level
+analysis is validated to be **lossless for locus detection and non-understating for the
+worst-case score** against the exact per-sample enumeration path on a real chr22
+1000G-2021+HGDP slice (0 CFD under-reports; it in fact surfaces *stronger* worst cases at
+182 loci that per-sample enumeration misses), and it collapses ~1.9× fewer rows on that 1×
+slice, growing with density — turning the otherwise-intractable 4× panel into a tractable
+run. **The trade-off is that per-sample carriers, CONFIRMED cis phasing and exact joint
+allele frequency are not computed in the default mode** (rows are PUTATIVE worst cases); the
+launch-time message, the web **Analysis mode** control and the report's **Search mode** row
+all state this explicitly, so it is never silent. This yields a **two-tier workflow**: the
+default population-level analysis for routine, high-density, or aggregate-panel *screening*
+(and the only meaningful mode on sites-only panels), and `--per-sample` (byte-identical to
+the pre-2.5.3 enumeration path) for *confirmatory / pre-IND* runs on a genotyped panel where
+per-sample phased haplotype resolution is required. On sites-only (aggregate) panels there
+are no per-sample genotypes to recover — verified on the released **mega** index:
+`--per-sample` yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no
+genotype store to enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are
+**byte-identical** across modes. `--per-sample`'s SNP path in fact emits *fewer* worst-possible
+windows (integrated 3,065 vs 3,224 rows; SNP+SNP co-occurrence 4 vs 22 PUTATIVE rows), so the
+population-level analysis — with its conservative worst-possible over-listing — is the more
+complete screen there. Accordingly `--per-sample` is a **no-op (with a warning) on a sites-only
+index**, and the web form **disables** the per-sample option when a sites-only index is selected.
 
-**Measured fast-vs-`--full` behavior (v2.5.3, adversarially verified).** Running both modes
-on the released 1000G-2021 + HGDP genotyped index for one guide (identical guide/PAM/thresholds;
-only `--full` differs) makes the trade concrete and confirms the guarantees hold end-to-end:
+**Measured population-level vs `--per-sample` behavior (adversarially verified).** Running both
+modes on the released 1000G-2021 + HGDP genotyped index for one guide (identical
+guide/PAM/thresholds; only `--per-sample` differs) makes the trade concrete and confirms the
+guarantees hold end-to-end:
 
-- *Detection is lossless at the **window** level.* Every off-target window `--full` reports is
-  present in fast; fast in fact reports **more** loci (3,287 vs 3,103) because it emits
-  worst-possible representatives. A small number of windows are anchored a few bases apart
-  between the two modes — `--full` anchors each *observed* haplotype, fast anchors its
-  worst-possible representative — so a strict coordinate-equality comparison flags them as
-  "full-only" (24 loci here, all 1–10 bp shifts of a window fast did detect). Compared by
-  cluster they match exactly and fast is a strict superset. Losslessness is therefore a
-  **window/cluster** property, not byte-exact coordinate identity.
-- *The worst-case CFD bound holds exactly.* Across all 3,079 shared loci, `fast_CFD ≥ full_CFD`
-  with **zero** violations; fast is strictly higher only where it assumes worst-possible
-  co-occurrence (e.g. CFD 0.354 vs 0.113 at a 3-SNP window), never lower.
-- *`--full` corrects — and **tightens** — the carrier sets.* Fast lists a PUTATIVE **union** of
-  every sample carrying *any* contributing variant in the worst-possible window; `--full` prunes
-  to the actually-observed cis haplotype's carriers. Counterintuitively `--full` therefore names
-  **fewer** samples (1,447 vs 1,642 distinct here), not more — the fast list deliberately
-  over-includes non-cis carriers (a conservative screening bias). The SNP+SNP co-occurrence
-  companion is all-PUTATIVE in fast (0 CONFIRMED) and gains **106 CONFIRMED phased-cis rows**
-  with exact joint AF and single named carriers under `--full` (e.g. a locus that is a
-  175-carrier PUTATIVE union in fast resolves to a single confirmed carrier under `--full`).
-- *On a **genotyped** index fast does not blank carriers.* The `NA`-carrier behavior is specific
-  to sites-only panels; a genotyped panel still surfaces dataset-level carriers in fast, so the
-  real trade is **PUTATIVE-union vs CONFIRMED-exact-cis**, not named-vs-`NA`.
-- *For a single guide the two modes take essentially the same wall time* (~13–14 min); fast's
-  speedup targets the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
+- *Detection is lossless at the **window** level.* Every off-target window `--per-sample`
+  reports is present in the default analysis; the default in fact reports **more** loci
+  (3,287 vs 3,103) because it emits worst-possible representatives. A small number of windows
+  are anchored a few bases apart between the two modes — `--per-sample` anchors each *observed*
+  haplotype, the default anchors its worst-possible representative — so a strict
+  coordinate-equality comparison flags them as "per-sample-only" (24 loci here, all 1–10 bp
+  shifts of a window the default did detect). Compared by cluster they match exactly and the
+  default is a strict superset. Losslessness is therefore a **window/cluster** property, not
+  byte-exact coordinate identity.
+- *The worst-case CFD bound holds exactly.* Across all 3,079 shared loci, the population-level
+  CFD is **≥** the per-sample CFD with **zero** violations; it is strictly higher only where it
+  assumes worst-possible co-occurrence (e.g. CFD 0.354 vs 0.113 at a 3-SNP window), never lower.
+- *`--per-sample` corrects — and **tightens** — the carrier sets.* The default lists a PUTATIVE
+  **union** of every sample carrying *any* contributing variant in the worst-possible window;
+  `--per-sample` prunes to the actually-observed cis haplotype's carriers. Counterintuitively
+  `--per-sample` therefore names **fewer** samples (1,447 vs 1,642 distinct here), not more — the
+  default list deliberately over-includes non-cis carriers (a conservative screening bias). The
+  SNP+SNP co-occurrence companion is all-PUTATIVE by default (0 CONFIRMED) and gains **106
+  CONFIRMED phased-cis rows** with exact joint AF and single named carriers under `--per-sample`
+  (e.g. a locus that is a 175-carrier PUTATIVE union by default resolves to a single confirmed
+  carrier under `--per-sample`).
+- *On a **genotyped** index the default does not blank carriers.* The `NA`-carrier behavior is
+  specific to sites-only panels; a genotyped panel still surfaces dataset-level carriers in the
+  default analysis, so the real trade is **PUTATIVE-union vs CONFIRMED-exact-cis**, not
+  named-vs-`NA`.
+- *For a single guide the two modes take essentially the same wall time* (~13–14 min) — the
+  modes differ in genotype resolution, not intrinsic speed; the default's advantage materializes
+  only on the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
 
-**Scope of `--fast`.** `--fast` accelerates only the **SNP** post-analysis (it collapses the
-2^k IUPAC haplotype lattice). The **indel** post-analysis is single-threaded and
-CRISTA-scoring-bound, and is **unaffected by `--fast`** — a dense indel search pays the full
-indel cost regardless (parallelizing that path is a follow-up). Correspondingly, the
-`indel_snp_cooc.tsv` companion is **byte-identical** with and without `--fast` (§8).
+**Scope of the analysis mode.** The mode toggles only the **SNP** post-analysis (`--per-sample`
+re-enables the 2^k IUPAC haplotype lattice / observed-haplotype enumeration that the default
+collapses). The **indel** post-analysis is single-threaded and CRISTA-scoring-bound, and is
+**unaffected by the mode** — a dense indel search pays the full indel cost regardless
+(parallelizing that path is a follow-up). Correspondingly, the `indel_snp_cooc.tsv` companion is
+**byte-identical** in both modes (§8).
 
 ---
 
@@ -541,43 +555,43 @@ should be read as relative risk indicators rather than calibrated probabilities.
 The CFD/CRISTA threshold tiers in the report are **model-relative** (CRISTA's
 cut points differ from CFD's because the two scores are on different scales).
 
-**Worst-case scoring in two-pass fast mode.** When `--fast` (§5) is used, each window is
-represented by worst-possible rows rather than every haplotype, so the *scores* attached to
-those rows are defined as worst cases over the window's allele combinations. **CFD is the
-exact worst case.** CFD factorizes as a product of per-position maxima times a **joint
-two-base PAM factor**, so the maximum over all combinations is found by a per-position
-argmax plus a bounded brute-force over the PAM region (the joint factor is why a naïve
-per-column greedy is insufficient). This exact maximizer is validated bit-for-bit against
-an independent factorized oracle and against the slow full-enumeration path — **zero CFD
+**Worst-case scoring in the population-level analysis.** In the default population-level
+analysis (§5), each window is represented by worst-possible rows rather than every haplotype,
+so the *scores* attached to those rows are defined as worst cases over the window's allele
+combinations. **CFD is the exact worst case.** CFD factorizes as a product of per-position
+maxima times a **joint two-base PAM factor**, so the maximum over all combinations is found by
+a per-position argmax plus a bounded brute-force over the PAM region (the joint factor is why a
+naïve per-column greedy is insufficient). This exact maximizer is validated bit-for-bit against
+an independent factorized oracle and against the exact per-sample enumeration path — **zero CFD
 under-reports** on a real chr22 1000G+HGDP slice (and, on the legacy dict / aggregate-panel
 path, catching cases where the fewest-mismatch allele scores materially *lower* CFD than
-another carried allele, up to a threshold-crossing 0.14). A whole-index fast-vs-`--full`
-comparison on the released 1000G-2021 + HGDP panel reproduces this end-to-end: across all
-**3,079 shared off-target loci, `fast_CFD ≥ full_CFD` with zero violations** (fast is
-strictly higher only where it assumes worst-possible co-occurrence). **CRISTA is best-effort.** CRISTA
-is a non-factorizable RandomForest, so its worst case is taken as the maximum over the
-emitted representatives rather than an exhaustive per-haplotype search. Measured against the
-slow path (chr22 1000G-2021+HGDP), this approximation is tight exactly where decisions are
-made: **every off-target with CRISTA ≥ 0.2 is reported at full or greater strength** (fast
-mode even surfaces *more* actionable sites than per-sample enumeration), and under-reporting
-is **bounded to ≤ 0.04 and confined to the sub-0.19 weak tail** (median gap 0.006, no
-threshold crossings) — structurally, because high-CRISTA off-targets are low-edit and the
-min-edit + max-CFD representatives already span the low-edit shell. **At genome-wide scale
-the CRISTA tail is heavier than the chr22 slice:** across the full genome ~5 % of CRISTA
-≥ 0.2 loci can drop below 0.2 under `--fast` (largest observed gap ~0.12), whereas **CFD had
-zero ≥ 0.2 losses**. So in `--fast`, CFD is a safe actionable gate but **CRISTA is a screen**,
-not an action gate. A **guaranteed
-per-haplotype CRISTA worst case** is available by running without `--fast`; this is the
-screening-vs-confirmatory two-tier split of Section 5.
+another carried allele, up to a threshold-crossing 0.14). A whole-index comparison of the two
+modes on the released 1000G-2021 + HGDP panel reproduces this end-to-end: across all **3,079
+shared off-target loci, the population-level CFD ≥ the per-sample CFD with zero violations** (it
+is strictly higher only where it assumes worst-possible co-occurrence). **CRISTA is
+best-effort.** CRISTA is a non-factorizable RandomForest, so its worst case is taken as the
+maximum over the emitted representatives rather than an exhaustive per-haplotype search.
+Measured against the exact path (chr22 1000G-2021+HGDP), this approximation is tight exactly
+where decisions are made: **every off-target with CRISTA ≥ 0.2 is reported at full or greater
+strength** (the population-level analysis even surfaces *more* actionable sites than per-sample
+enumeration), and under-reporting is **bounded to ≤ 0.04 and confined to the sub-0.19 weak
+tail** (median gap 0.006, no threshold crossings) — structurally, because high-CRISTA
+off-targets are low-edit and the min-edit + max-CFD representatives already span the low-edit
+shell. **At genome-wide scale the CRISTA tail is heavier than the chr22 slice:** across the full
+genome ~5 % of CRISTA ≥ 0.2 loci can drop below 0.2 in the default analysis (largest observed
+gap ~0.12), whereas **CFD had zero ≥ 0.2 losses**. So by default CFD is a safe actionable gate
+but **CRISTA is a screen**, not an action gate. A **guaranteed per-haplotype CRISTA worst case**
+is available by running `--per-sample`; this is the screening-vs-confirmatory two-tier split of
+Section 5.
 
-**SNP+indel co-occurrence is unaffected by `--fast`.** `--fast` collapses only the *SNP*
-worst-possible representative emission in `integrated_results.tsv` (Section 5); the SNP+indel
-co-occurrence companion (`indel_snp_cooc.tsv`) is produced by the indel post-analysis' cis
-phasing pass over the genotype tiers, which `--fast` does not touch. Measured on the complete
-genome-wide matrix (2021 panel, same guide, `--fast` vs non-`--fast`): the two `indel_snp_cooc.tsv`
-files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
+**SNP+indel co-occurrence is unaffected by the analysis mode.** The default analysis collapses
+only the *SNP* worst-possible representative emission in `integrated_results.tsv` (Section 5);
+the SNP+indel co-occurrence companion (`indel_snp_cooc.tsv`) is produced by the indel
+post-analysis' cis phasing pass over the genotype tiers, which the mode does not touch. Measured
+on the complete genome-wide matrix (2021 panel, same guide, default vs `--per-sample`): the two
+`indel_snp_cooc.tsv` files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
 per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
-carries the indel and SNP together — is preserved identically in fast and non-fast runs.
+carries the indel and SNP together — is preserved identically in both analysis modes.
 
 **Two co-occurrence companions.** Alongside `indel_snp_cooc.tsv` (SNP+indel),
 `snp_snp_cooc.tsv` reports **SNP+SNP** co-occurrences — off-targets that require ≥2
@@ -611,7 +625,7 @@ IUPAC-enriched genome and indels on a plain-reference fake-indel genome — rema
 by disabling the integration; classic dict builds are byte-identical.) One **residual**:
 the indel search materializes **one indel per fake contig**, so an off-target requiring
 **≥ 2 co-occurring cis indels within a single protospacer** is not generated as a candidate
-— a pre-existing single-indel-search property, independent of fast mode. This is a
+— a pre-existing single-indel-search property, independent of the analysis mode. This is a
 **low-frequency** case: raw multi-indel cis co-occurrence is dominated by STR/VNTR repeats
 (which off-target analysis should soft-mask), falling to **~1–2%** of indel loci after
 repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**
@@ -645,14 +659,14 @@ validate-test`. This is a one-time correctness check, not a per-search step:
   provably exact against brute-force argmin on **4,000/4,000 random cases** (both
   strands, with/without bulges), with PAM-creating-variant cases reproducing full
   enumeration (variant attribution identical).
-- The **two-pass fast mode** (§5) was validated against the slow full-enumeration path on a
-  real chr22 1000G-2021+HGDP slice: **lossless locus detection** and a **non-understating
-  worst-case bound** (0 CFD under-reports; 182 loci where fast surfaces a *stronger* worst
-  case). Its exact worst-case-CFD maximizer is additionally cross-checked on 4,000 random
-  windows against an independent factorized CFD oracle (agreement to the raw double,
-  including the joint-PAM case), and on the legacy dict / aggregate-panel path against a
+- The **two-pass population-level analysis** (§5) was validated against the exact per-sample
+  enumeration path on a real chr22 1000G-2021+HGDP slice: **lossless locus detection** and a
+  **non-understating worst-case bound** (0 CFD under-reports; 182 loci where it surfaces a
+  *stronger* worst case). Its exact worst-case-CFD maximizer is additionally cross-checked on
+  4,000 random windows against an independent factorized CFD oracle (agreement to the raw
+  double, including the joint-PAM case), and on the legacy dict / aggregate-panel path against a
   real CFD-scored multiallelic fixture; the CRISTA best-effort bound is the measurement
-  reported under *Worst-case scoring in two-pass fast mode* above.
+  reported under *Worst-case scoring in the population-level analysis* above.
 
 This establishes that the engine **does not miss** off-targets relative to
 exhaustive search. It does **not** validate the *scoring* models' predictive
@@ -663,5 +677,6 @@ retrospective comparison of CFD/CRISTA ranking to experimental off-target assays
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.5.x line (default SNP+indel co-occurrence, two-pass `--fast`
-mode); see the CHANGELOG and the referenced source files for implementation detail.*
+methods as of the 2.5.x line (default SNP+indel co-occurrence, two-pass population-level
+analysis with opt-in `--per-sample` genotype resolution); see the CHANGELOG and the referenced
+source files for implementation detail.*

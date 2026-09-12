@@ -32,6 +32,7 @@ from .pages_utils import (
     variant_dataset_present,
     has_variant_index,
     get_variant_dataset_options,
+    variant_dataset_has_genotypes,
     build_active_annotation,
     get_pam_options,
     get_custom_VCF,
@@ -336,7 +337,7 @@ def change_url(
     job_name: str,
     max_edits_val: int,
     advanced_open: bool,
-    search_mode: str = "fast",
+    search_mode: str = "population-level",
 ) -> Tuple[str, str]:
     """Launch the targets search and generates the input files for
     post-processing operations, and results visualization.
@@ -1172,12 +1173,13 @@ def change_url(
     # can never disagree.
     # args 23-25 keep submit_job's defaults (cicd_test, vcf-filter-pass-values,
     # index_path) so that arg 26 (max_total_edits) lands in the right position.
-    # Search mode (2.5.3): fast is the default. The web launches submit_job directly
-    # (not `crisprme.py complete-search`), so it must set CRISPRME_FAST_MODE itself for
-    # the whole post-analysis subprocess tree to inherit it (mirrors the CLI --full/--fast).
-    # "full" => exact observed-haplotype enumeration (per-sample carriers + CONFIRMED cis);
-    # anything else => fast (worst-possible PUTATIVE reps, no per-sample carriers).
-    fast_env = "0" if str(search_mode) == "full" else "1"
+    # Analysis mode: population-level is the default. The web launches submit_job directly
+    # (not `crisprme.py complete-search`), so it must set the internal CRISPRME_FAST_MODE
+    # itself for the whole post-analysis subprocess tree to inherit it (mirrors the CLI).
+    # "per-sample" => resolve genotypes: observed-haplotype enumeration (named carriers +
+    # CONFIRMED cis + exact joint AF); anything else => population-level (worst-possible
+    # PUTATIVE reps, no per-sample carriers). ("full"/"fast" accepted as legacy 2.5.3 values.)
+    fast_env = "0" if str(search_mode) in ("per-sample", "full") else "1"
     cmd = f"CRISPRME_FAST_MODE={fast_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
@@ -1718,6 +1720,34 @@ def change_variant_dataset_options(genome_value: str) -> List:
     return [options, value]
 
 
+# Analysis-mode availability: --per-sample resolves per-sample GENOTYPES, so it is only
+# meaningful when the selected variant panel ships a genotype store. On a sites-only /
+# aggregate panel (e.g. the merged "mega" index) or "Reference only" there is nothing to
+# resolve, so the per-sample option is disabled (grayed out) and, if it was selected, the
+# choice falls back to the default population-level analysis. Mirrors the CLI, where
+# --per-sample is a no-op with a warning on a sites-only index.
+@app.callback(
+    [Output("search-mode", "options"), Output("search-mode", "value")],
+    [Input("variant-dataset", "value"), Input("available-genome", "value")],
+    [State("search-mode", "value")],
+)
+def update_search_mode_availability(dataset_value, genome_value, current_mode):
+    has_gt = variant_dataset_has_genotypes(genome_value, dataset_value)
+    ps_label = " Per-sample — resolve genotypes: carriers & CONFIRMED cis"
+    if not has_gt:
+        ps_label += " (needs a genotyped panel)"
+    options = [
+        {"label": " Population-level (default) — worst-possible screen",
+         "value": "population-level"},
+        {"label": ps_label, "value": "per-sample", "disabled": not has_gt},
+    ]
+    # a sites-only / reference panel cannot resolve genotypes: fall back to the default
+    value = current_mode if current_mode else "population-level"
+    if not has_gt and value == "per-sample":
+        value = "population-level"
+    return options, value
+
+
 # Limit the DNA/RNA bulge options to the bulge depth a search can REACH here.
 # Bulge searches need a per-PAM TST index; 0-bulge searches run index-free, so 0 is
 # always available. The cap is the min of the REFERENCE term and the VARIANT term, but
@@ -2076,36 +2106,40 @@ def index_page() -> html.Div:
                 ],
                 style={"max-width": "420px", "margin-bottom": "12px"},
             ),
-            # SEARCH MODE (2.5.3): fast (default) vs full observed-haplotype enumeration.
+            # ANALYSIS MODE: population-level (default) vs per-sample genotype resolution.
             html.Div(
                 [
                     html.P(
-                        "Search mode",
+                        "Analysis mode",
                         style={"margin-bottom": "2px", "font-weight": "600"},
                     ),
                     dcc.RadioItems(
                         id="search-mode",
                         options=[
-                            {"label": " Fast (default) — worst-possible screen", "value": "fast"},
-                            {"label": " Full — per-sample carriers & CONFIRMED cis", "value": "full"},
+                            {"label": " Population-level (default) — worst-possible screen",
+                             "value": "population-level"},
+                            {"label": " Per-sample — resolve genotypes: carriers & CONFIRMED cis",
+                             "value": "per-sample"},
                         ],
-                        value="fast",
+                        value="population-level",
                         labelStyle={"display": "block", "margin-bottom": "4px",
                                     "font-size": "1.3rem"},
                     ),
                     html.P(
                         [
-                            html.B("Fast"),
+                            html.B("Population-level"),
                             " reports one worst-possible off-target per variant window "
                             "(exact worst-case CFD; CRISTA is a best-effort screen). It stays "
-                            "tractable on dense / aggregate panels, but does NOT compute "
-                            "per-sample carriers, CONFIRMED cis phasing or exact joint allele "
-                            "frequency. ",
-                            html.B("Full"),
-                            " runs the exact observed-haplotype enumeration (per-sample "
+                            "tractable on any panel and is lossless for detection, but does NOT "
+                            "compute per-sample carriers, CONFIRMED cis phasing or exact joint "
+                            "allele frequency. ",
+                            html.B("Per-sample"),
+                            " resolves per-sample genotypes into observed haplotypes (named "
                             "carriers + CONFIRMED cis + exact joint AF) — recommended for "
                             "genotyped panels / clinical validation, but slower and can be "
-                            "intractable on dense (e.g. all-source sites-only) panels.",
+                            "intractable on dense panels. It requires a genotyped panel; on a "
+                            "sites-only (aggregate) panel there are no genotypes to resolve, so "
+                            "it falls back to the population-level analysis.",
                         ],
                         style={"font-size": "1.25rem", "color": "#555"},
                     ),

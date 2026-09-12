@@ -11,6 +11,24 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Changed
+- **Renamed the analysis-mode control: default is now "population-level"; `--full` → `--per-sample`.**
+  The measurements showed the two modes differ in **genotype resolution**, not intrinsic speed
+  (on a single guide the two take the same wall time; on a sites-only panel the opt-in mode does
+  nothing). So "fast/full" was the wrong framing. The CLI now runs a **population-level analysis**
+  by default (no flag) and exposes an opt-in **`--per-sample`** that resolves per-sample genotypes
+  into observed haplotypes (CONFIRMED cis + named carriers + exact joint AF). The web form's mode
+  control is relabeled **"Analysis mode: Population-level (default) / Per-sample"**, and the
+  report's Search-mode note + the `.search_mode` marker use the new names. `--per-sample` requires
+  a **genotyped** panel: on a sites-only index it is a **no-op with a warning**, and the web form
+  **disables** the per-sample option when a sites-only index is selected. The internal
+  `CRISPRME_FAST_MODE` env var (post-analysis plumbing) is unchanged and not user-facing.
+
+### Removed
+- **`--fast` / `--full` flags removed (clean break, no aliases).** They shipped only in 2.5.3 and
+  are replaced by the population-level default + `--per-sample` above. Legacy `.search_mode`
+  markers (`fast`/`full`) written by 2.5.3 are still recognized when rendering old result dirs.
+
 ### Verified
 - **New-user clean-room on the released v2.5.3 (image + both published RAW indexes).**
   `apptainer pull docker://pinellolab/crisprme:v2.5.3` reports `v2.5.3`; a fresh

@@ -64,17 +64,20 @@ except Exception:  # module absent in an old deploy -> legacy dict path only
     _phase_companion = None
     _snpsnp_companion = None
 
-# 2.5.1 two-pass FAST MODE (docs/DESIGN_2.5.1_two_pass_fast_mode.md). Opt-in via the
-# CRISPRME_FAST_MODE env var (set by `crisprme.py ... --fast` through the post-analysis
-# script chain). When ON, every IUPAC window emits a SINGLE worst-POSSIBLE representative
-# off-target (the greedy min-mismatch / max-CFD haplotype -- the same rep the shipped code
-# already builds for dense `CRISPRME_IUPAC_CAP` windows) instead of enumerating the 2^k
-# haplotype lattice / the observed per-sample haplotypes -- the enumeration-free fix for the
-# intractable dense-panel post-analysis (49h+). Guarded import so an old deploy without the
-# module (or the flag unset) is byte-identical to the legacy path. Default OFF.
+# Two-pass POPULATION-LEVEL analysis (docs/DESIGN_2.5.1_two_pass_fast_mode.md) -- the
+# DEFAULT since 2.5.3. Driven by the internal CRISPRME_FAST_MODE env var ("1" = default
+# population-level; "0" = per-sample genotype resolution, i.e. `crisprme.py ... --per-sample`)
+# propagated down the post-analysis script chain. When ON (population-level), every IUPAC
+# window emits a SINGLE worst-POSSIBLE representative off-target (the greedy min-mismatch /
+# max-CFD haplotype -- the same rep the shipped code already builds for dense
+# `CRISPRME_IUPAC_CAP` windows) instead of enumerating the 2^k haplotype lattice / the
+# observed per-sample haplotypes -- the enumeration-free fix for the intractable dense-panel
+# post-analysis (49h+). When OFF (--per-sample), the observed-haplotype enumeration runs.
+# Guarded import so an old deploy without the module (or the var unset) is byte-identical to
+# the legacy per-sample path. Default when the var is unset (standalone run): per-sample.
 try:
     import twopass_emit as _twopass_emit
-except Exception:  # module absent -> fast mode unavailable, legacy path unchanged
+except Exception:  # module absent -> population-level path unavailable, legacy path unchanged
     _twopass_emit = None
 _FAST_MODE = bool(int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")) and \
     _twopass_emit is not None
@@ -1429,7 +1432,7 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             # append processed target to cluster to save
                             cluster_to_save.append(final_line)
                             # 2.5.2 SNP+SNP co-occurrence companion (registry-only /
-                            # capped / --fast finalizer): this path does NOT compute a
+                            # capped / population-level finalizer): this path does NOT compute a
                             # confirmed-cis phase, so a multi-SNP off-target is recorded
                             # PUTATIVE (conservative). GATED on ``myreg`` + >=2 SNPs.
                             _record_snp_snp_cooc(final_line, "PUTATIVE")

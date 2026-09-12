@@ -12,7 +12,7 @@ import os
 import re
 
 
-version = "2.5.3"  # CRISPRme version
+version = "2.5.4-dev"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -345,17 +345,18 @@ def print_help_complete_search() -> None:
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
         "default lightweight checks, so opt-in [OPTIONAL]\n"
-        "\t--full, run the EXACT observed-haplotype enumeration for the SNP variant "
-        "post-analysis instead of the default fast mode: reports every per-sample "
-        "haplotype with CONFIRMED cis phasing + named carrier samples + exact joint AF "
-        "(the per-sample resolution the genotyped indexes are built for). Slower, and "
-        "can be intractable on dense / aggregate panels (measured 49h+ without "
-        "completing on a 4x-density panel) -- recommended for genotyped panels / "
-        "clinical validation, NOT for dense sites-only panels [OPTIONAL]\n"
-        "\t--fast, DEPRECATED no-op: FAST MODE is the default as of 2.5.3 (worst-"
-        "POSSIBLE PUTATIVE representative per variant window; exact worst-case CFD; "
-        "no per-sample carriers -- use --full for those). Accepted for back-compat "
-        "[OPTIONAL]\n")
+        "\t--per-sample, resolve per-sample genotypes into observed haplotypes for the "
+        "SNP variant post-analysis (instead of the default population-level analysis): "
+        "reports every per-sample haplotype with CONFIRMED cis phasing + named carrier "
+        "samples + exact joint AF (the per-sample resolution the genotyped indexes are "
+        "built for). Requires a genotyped index (no-op with a warning on sites-only "
+        "panels, which have no genotypes to resolve). Slower, and can be intractable on "
+        "dense panels (measured 49h+ without completing on a 4x-density panel) -- "
+        "recommended for genotyped panels / clinical validation [OPTIONAL]\n"
+        "\t(By default, with no flag, CRISPRme+ runs a POPULATION-LEVEL analysis: one "
+        "worst-possible PUTATIVE representative per variant window, exact worst-case "
+        "CFD, dataset-level allele frequencies -- lossless for detection, tractable on "
+        "any panel, and the only meaningful mode on sites-only panels.)\n")
     sys.exit(1)
 
 
@@ -1396,22 +1397,24 @@ def complete_search() -> None:
             raise ValueError("Missing input for --vcf-filter-pass-values") from e
     full_input_validate = "--full_input_validate" in args
 
-    # FAST MODE is the DEFAULT as of 2.5.3. The SNP variant post-analysis emits ONE
-    # worst-POSSIBLE representative off-target per IUPAC window instead of enumerating
-    # the 2^k haplotype lattice / the observed per-sample haplotypes -- the enumeration-
-    # free path that stays tractable on dense/aggregate panels (the full enumeration was
-    # measured 49h+ without completing on a 4x-density panel; see
+    # POPULATION-LEVEL analysis is the DEFAULT (no flag). The SNP variant post-analysis
+    # emits ONE worst-POSSIBLE representative off-target per IUPAC window instead of
+    # enumerating the 2^k haplotype lattice / the observed per-sample haplotypes -- the
+    # enumeration-free path that stays tractable on dense/aggregate panels (the per-sample
+    # enumeration was measured 49h+ without completing on a 4x-density panel; see
     # docs/DESIGN_2.5.1_two_pass_fast_mode.md). Rows are worst-possible / PUTATIVE with an
-    # EXACT worst-case CFD; per-sample phased resolution (CONFIRMED cis + named carriers)
-    # is NOT computed in fast mode -- pass --full for that (recommended for genotyped
-    # panels / clinical validation). Propagated to the whole post-analysis subprocess tree
-    # via CRISPRME_FAST_MODE (submit_job -> pools -> post_analisi_*.sh ->
-    # new_simple_analysis.py all inherit os.environ). --fast is kept as a no-op back-compat
-    # alias (fast is already the default); --full opts into exact observed-haplotype
-    # enumeration. We ALWAYS set the env var explicitly so the resolved mode propagates.
-    full_mode = "--full" in args
-    os.environ["CRISPRME_FAST_MODE"] = "0" if full_mode else "1"
-    fast_mode = not full_mode
+    # EXACT worst-case CFD and dataset-level allele frequencies; per-sample phased
+    # resolution (CONFIRMED cis + named carriers + exact joint AF) is computed only when
+    # the user opts in with --per-sample (requires a genotyped index; nothing to resolve
+    # on sites-only panels). Propagated to the whole post-analysis subprocess tree via the
+    # internal env var CRISPRME_FAST_MODE (submit_job -> pools -> post_analisi_*.sh ->
+    # new_simple_analysis.py all inherit os.environ): "1" = default population-level,
+    # "0" = --per-sample genotype resolution. We ALWAYS set it so the resolved mode
+    # propagates. (The env var keeps its internal name to avoid resweeping the shell chain;
+    # it is not user-facing. The pre-2.5.4 --fast/--full flags are gone.)
+    per_sample = "--per-sample" in args
+    os.environ["CRISPRME_FAST_MODE"] = "0" if per_sample else "1"
+    population_level = not per_sample
 
     # optional prebuilt/staged reference-index library (--index-path). When
     # given, the reference index is looked up here (e.g. an index made with
@@ -1780,31 +1783,31 @@ def complete_search() -> None:
                     "build-index-only --samplesID." % ", ".join(_no_reg)
                 )
 
-    if fast_mode:
+    if population_level:
         print(
-            "[complete-search] FAST MODE (default): the SNP variant post-analysis reports one "
-            "WORST-POSSIBLE off-target per window (no 2^k haplotype enumeration; rows are "
-            "worst-possible / PUTATIVE, not per-sample phased). CFD is the EXACT worst case -- "
-            "a safe actionable gate (genome-wide validation: 0 CFD>=0.2 loci lost or demoted "
-            "vs the full path). CRISTA is a best-effort SCREEN: genome-wide, a small fraction "
-            "(~5%) of CRISTA>=0.2 loci can drop below 0.2 in fast mode (largest observed gap "
+            "[complete-search] POPULATION-LEVEL analysis (default): the SNP variant post-analysis "
+            "reports one WORST-POSSIBLE off-target per variant window (no 2^k haplotype "
+            "enumeration; rows are worst-possible / PUTATIVE, not per-sample phased). CFD is the "
+            "EXACT worst case -- a safe actionable gate (genome-wide validation: 0 CFD>=0.2 loci "
+            "lost or demoted vs the per-sample path). CRISTA is a best-effort SCREEN: genome-wide, "
+            "a small fraction (~5%) of CRISTA>=0.2 loci can drop below 0.2 (largest observed gap "
             "~0.12). **Per-sample carriers, CONFIRMED cis phasing and exact joint AF are NOT "
-            "computed in fast mode** -- re-run with --full for that per-sample resolution "
-            "(recommended for genotyped panels / clinical validation). SNP+indel co-occurrence "
-            "is UNCHANGED by fast mode (the indel cis-phasing pass is unaffected). "
-            "See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
+            "computed** -- re-run with --per-sample for that per-sample resolution on a genotyped "
+            "panel (recommended for clinical validation). SNP+indel co-occurrence is UNCHANGED "
+            "(the indel cis-phasing pass is unaffected). See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
         )
     else:
         print(
-            "[complete-search] FULL MODE (--full): exact observed-haplotype enumeration -- "
-            "per-sample haplotypes with CONFIRMED cis phasing, named carrier samples and exact "
-            "joint AF. Slower than the default fast mode and can be intractable on dense / "
-            "aggregate (sites-only) panels; for those, omit --full to use fast mode."
+            "[complete-search] PER-SAMPLE analysis (--per-sample): resolving per-sample genotypes "
+            "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
+            "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
+            "-- the population-level analysis runs instead). Slower, and can be intractable on "
+            "dense panels; omit --per-sample for the default population-level analysis."
         )
     # record the resolved search mode so generate-report can surface it (the report note).
     try:
         with open(os.path.join(outputfolder, ".search_mode"), "w") as _sm:
-            _sm.write("full" if full_mode else "fast")
+            _sm.write("per-sample" if per_sample else "population-level")
     except OSError:
         pass
     print(

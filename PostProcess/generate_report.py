@@ -735,16 +735,20 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     if params_override:
         params = {**params, **params_override}
 
-    # search mode marker written by complete-search (.search_mode = "fast"|"full").
-    # As of 2.5.3 the default is fast; treat a missing marker as fast (the default),
-    # so older result dirs still surface the correct caveat.
-    search_mode = "fast"
+    # search mode marker written by complete-search
+    # (.search_mode = "population-level" | "per-sample"). The default is population-level;
+    # treat a missing marker as population-level (the default) so older result dirs still
+    # surface the correct caveat. Legacy 2.5.3 markers ("fast"/"full") are mapped for
+    # back-compat when rendering old result dirs.
+    search_mode = "population-level"
     if result_dir:
         try:
             with open(os.path.join(result_dir, ".search_mode")) as _smf:
                 _sm = _smf.read().strip().lower()
-                if _sm in ("fast", "full"):
-                    search_mode = _sm
+                if _sm in ("per-sample", "full"):  # "full" = legacy 2.5.3 alias
+                    search_mode = "per-sample"
+                elif _sm in ("population-level", "fast"):  # "fast" = legacy 2.5.3 alias
+                    search_mode = "population-level"
         except OSError:
             pass
 
@@ -958,24 +962,24 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     bdna, brna = meta.get("bdna"), meta.get("brna")
     bulges = f"{bdna if bdna is not None else 'n/a'} / {brna if brna is not None else 'n/a'}"
     max_edits = meta.get("max_edits", "n/a")
-    if meta.get("search_mode") == "full":
+    if meta.get("search_mode") == "per-sample":
         sm_note = (
-            "<strong>Full</strong> (<code>--full</code>) &mdash; exact observed-haplotype "
-            "enumeration. Every per-sample haplotype is reported with CONFIRMED cis phasing, "
-            "named carrier samples and exact joint allele frequency (the per-sample resolution "
-            "genotyped panels are built for)."
+            "<strong>Per-sample</strong> (<code>--per-sample</code>) &mdash; per-sample genotypes "
+            "resolved into observed haplotypes. Every per-sample haplotype is reported with "
+            "CONFIRMED cis phasing, named carrier samples and exact joint allele frequency (the "
+            "per-sample resolution genotyped panels are built for)."
         )
     else:
         sm_note = (
-            "<strong>Fast</strong> (default) &mdash; the SNP off-target analysis reports one "
-            "<em>worst-possible</em> representative per variant window instead of enumerating "
-            "every haplotype. CFD is the <strong>exact worst case</strong>; CRISTA is a "
-            "best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing and exact "
-            "joint allele frequency are NOT computed in fast mode</strong> &mdash; re-run the "
-            "search with <code>--full</code> for that per-sample resolution (recommended for "
-            "genotyped panels / clinical validation). For sites-only (aggregate) panels there "
-            "are no per-sample genotypes, so fast mode loses nothing. SNP+indel co-occurrence "
-            "is unaffected by the search mode."
+            "<strong>Population-level</strong> (default) &mdash; the SNP off-target analysis "
+            "reports one <em>worst-possible</em> representative per variant window instead of "
+            "enumerating every per-sample haplotype. CFD is the <strong>exact worst case</strong>; "
+            "CRISTA is a best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing "
+            "and exact joint allele frequency are NOT computed</strong> &mdash; re-run the search "
+            "with <code>--per-sample</code> for that per-sample resolution on a genotyped panel "
+            "(recommended for clinical validation). For sites-only (aggregate) panels there are no "
+            "per-sample genotypes, so this loses nothing (<code>--per-sample</code> is a no-op "
+            "there). SNP+indel co-occurrence is unaffected by the analysis mode."
         )
     rows = [
         ("Variant database(s)", _esc(ds)),
