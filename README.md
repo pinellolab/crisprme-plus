@@ -60,8 +60,11 @@ Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) 
 small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
 first time it downloads the reference + variant data automatically (~45 GB, once), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
-(A **genome-wide *variant* search needs a 64 GB workstation/HPC**; on a **laptop**,
-reference-only or **single-chromosome / target-region variant** searches fit **16 GB**.)
+(Memory: the **whole-genome *variant-aware* search** needs **~64 GB of RAM** — set that
+under Docker Desktop → Settings → Resources → Memory. Many current laptops ship with
+36–128 GB and can run it; otherwise use a workstation/HPC. **Reference-only or
+single-chromosome / target-region variant** searches fit **~16 GB**, so any laptop
+handles those.)
 Details: [`install/`](install/).
 
 ---
