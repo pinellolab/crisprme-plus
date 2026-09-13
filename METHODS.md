@@ -152,6 +152,17 @@ The merge above is the **genotyped, cis-capable** mode (`merge_vcf_panels.sh` /
 feeds the genotype-counting Tier-0 registry. It is correct only when *every* merged
 source is genotyped, and it is what enables indel+SNP cis reconstruction.
 
+CRISPRme+ also ships an **HPRC pangenome panel** (`hprc_build.sh`) in this same
+genotyped, cis-capable mode. It is a *single* source rather than a merge: the HPRC
+Minigraph-Cactus pangenome decomposed to a per-chromosome VCF (`vg deconstruct` →
+`vcfbub` → `vcfwave`), 232 assembly-derived genomes (231 individuals + the CHM13
+graph backbone). Because the genotypes are **phased** (each sample is two assembled
+haplotypes), it supports CONFIRMED cis co-occurrence and named per-sample carriers
+like the 1000G-2021 + HGDP panel, while capturing pangenome-specific variation
+absent from short-read call sets. The graph-coverage half-missingness (`1|.`) is
+handled by recomputing `AF/AC/AN` from the genotypes (`bcftools +fill-tags`), so the
+allele-number denominator excludes unassembled alleles.
+
 CRISPRme+ also ships a **sites-only "mega" panel** (`merge_mega_sites.sh`) that
 merges heterogeneous **aggregate** resources — 1000 Genomes 2021, HGDP, gnomAD v4.1,
 TOPMed, and All-of-Us — where genotypes are unavailable or meaningless (gnomAD is

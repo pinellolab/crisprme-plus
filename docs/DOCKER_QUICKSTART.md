@@ -1,6 +1,6 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ℹ️ **CRISPRme+ (v2.5.4)** is the current release of the next-generation line
+> ℹ️ **CRISPRme+ (v2.5.5)** is the current release of the next-generation line
 > (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, population-level
 > analysis by default with opt-in `--per-sample` genotype resolution). For a frozen
 > production/clinical baseline you can instead use the stable line
@@ -38,11 +38,11 @@ Check Docker works, then pull the CRISPRme+ image:
 docker run --rm hello-world
 
 # Pull the current CRISPRme+ release (multi-arch: Apple Silicon + Intel/Linux).
-docker pull pinellolab/crisprme:v2.5.4
+docker pull pinellolab/crisprme:v2.5.5
 ```
 
 > **Already have an older image?** Docker does **not** re-download a tag you already
-> have — run `docker pull pinellolab/crisprme:v2.5.4` again to update. Skipping this makes an
+> have — run `docker pull pinellolab/crisprme:v2.5.5` again to update. Skipping this makes an
 > old image error with `download is not an allowed command`.
 
 ## 2. Make a folder to hold your data and results
@@ -64,7 +64,7 @@ This pulls the human genome, annotations, PAM files and sample lists from the
 CRISPRme HuggingFace mirror (a fast CDN). It replaces the old multi-hour `setup`:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py download --what all --path /DATA
 ```
 
@@ -74,7 +74,7 @@ Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
 minutes of CPU; instead, download the ready-made SpCas9 (NGG) index:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 ```
 
@@ -84,12 +84,12 @@ complementary production indexes:
 ```bash
 # Genotyped panel — 1000 Genomes 2021 + HGDP (sample-level genotypes).
 # Observed / CONFIRMED haplotypes with per-sample carriers + exact joint AF (use --per-sample).
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
 
 # Sites-only "mega" panel — five sources (1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + AoU),
 # per-dataset AF + cross-source AF_max. PUTATIVE haplotypes with a conservative min-AF bound.
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
 ```
 
@@ -117,7 +117,7 @@ Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level
 analyses / personal risk cards:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py download --what vcf --dataset 1000G --path /DATA
 ```
 
@@ -125,7 +125,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 \
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.5.4 crisprme.py web-interface
+  pinellolab/crisprme:v2.5.5 crisprme.py web-interface
 ```
 
 `-p 8080:8080` connects the app inside the container to your browser. Leave this
@@ -185,7 +185,7 @@ the `list_vcf.txt` / `list_samplesID.txt` the search reads, so from `~/crisprme`
 ```bash
 printf '%s\n' CTAACAGTTGCTTTTATCAC > my_guide.txt
 
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py complete-search \
     --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
     --guide my_guide.txt \
@@ -207,7 +207,7 @@ Build the same shareable one-file report the web **Download report** button
 produces (a self-contained `report.html` inside a ZIP):
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py generate-report --result-dir Results/my_search
 # -> Results/my_search/<jobid>_report.zip
 ```
@@ -225,7 +225,7 @@ is `apptainer`, or `singularity` on older systems — they are interchangeable).
 
 ```bash
 # 1. build the image once (a ~2 GB .sif file; no root needed)
-apptainer pull crisprme.sif docker://pinellolab/crisprme:v2.5.4
+apptainer pull crisprme.sif docker://pinellolab/crisprme:v2.5.5
 
 # 2. download data + a prebuilt index into a working folder
 mkdir -p ~/crisprme && cd ~/crisprme
@@ -268,7 +268,7 @@ need by its **exact published name** — for example the five-source sites-only
 **mega** index (a useful complement to the default genotyped 1000G-2021 + HGDP index):
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
 ```
 
 To see which indexes are published, browse the dataset repository

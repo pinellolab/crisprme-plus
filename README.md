@@ -26,7 +26,7 @@ through an interactive web-based interface.
 
 - **Dictionary-less variant-aware search** — a compact allele-frequency registry + genotype store ship with the index, so variant off-target search (with allele frequencies, rsIDs, and per-dataset provenance) runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
 - **Co-occurring off-targets** — off-targets that need two nearby variants on the same haplotype — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported CONFIRMED-cis (phased) / PUTATIVE (unphased) with carriers + joint AF, and surfaced in the report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
-- **Two complementary production indexes** — genotyped **1000G-2021 + HGDP** (`NRG_3_hg38+hg38_1000G2021_HGDP`: observed / CONFIRMED haplotypes with per-sample carriers) and the sites-only five-source **mega** (`NRG_3_hg38+hg38_mega`: + gnomAD v4.1 / TOPMed / All-of-Us, PUTATIVE haplotypes with min-AF bounds, searchable indels genome-wide). ([details](docs/PRECOMPUTED_INDEXES.md))
+- **Three complementary production indexes** — genotyped **1000G-2021 + HGDP** (`NRG_3_hg38+hg38_1000G2021_HGDP`: observed / CONFIRMED haplotypes with per-sample carriers), the **HPRC pangenome** (`NRG_3_hg38+hg38_HPRC`: 232 phased assembly-derived genomes incl. CHM13 → CONFIRMED cis + named carriers, capturing pangenome-specific variation), and the sites-only five-source **mega** (`NRG_3_hg38+hg38_mega`: + gnomAD v4.1 / TOPMed / All-of-Us, PUTATIVE haplotypes with min-AF bounds). All three carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence. ([details](docs/PRECOMPUTED_INDEXES.md))
 - **Population-level by default; `--per-sample` for genotype resolution** — by default the SNP analysis reports worst-possible representatives per variant window (fast, and lossless for detection); add **`--per-sample`** (CLI) or pick **Per-sample** in the web form for CONFIRMED cis phasing + named carriers + exact joint AF on a genotyped panel. The report states which mode was used. ([methods](METHODS.md#5-search-space-control-for-high-variant-density-regions))
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
 - **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, plots, recommended validation panel, annotated top hits, per-tier downloads, legend). ([methods](METHODS.md#7-shareable-off-target-assessment-report))
@@ -79,17 +79,20 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 mkdir -p ~/crisprme && cd ~/crisprme
 # 1) fast-download the reference data + reference index (minutes, HuggingFace CDN)
 #    (this does NOT include the variant index — that is step 2)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.py download --what all --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py download --what all --path /DATA
 # 2) grab the prebuilt SpCas9 (NRG = NAG+NGG) indexes so no long index build is needed:
 #    the reference index, and the compact dict-less variant-aware hg38 + 1000G + HGDP
 #    index (the web default; combined allele frequencies + per-individual samples)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
+#    ...or the HPRC pangenome index (232 phased assembly-derived genomes incl. CHM13,
+#    CONFIRMED cis + named carriers, pangenome-specific variation, searchable indels):
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py download --what index --index-name NRG_3_hg38+hg38_HPRC --path /DATA
 #    ...or the all-source sites-only "mega" index (5 datasets, per-dataset AF + AF_max,
 #    searchable indels, SNP+SNP & SNP+indel PUTATIVE co-occurrence):
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
 # 3) launch the web interface, then open http://127.0.0.1:8080
-docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:v2.5.4 crisprme.py web-interface
+docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:v2.5.5 crisprme.py web-interface
 ```
 
 **Full step-by-step (with variants, more indexes, troubleshooting):
@@ -104,7 +107,7 @@ example search and generate the shareable report — no web UI needed:
 # a genome-wide SpCas9 (NRG) search over hg38 + 1000G + HGDP, up to 6 mismatches
 # + 2 DNA / 2 RNA bulges, with combined allele frequencies, rsIDs and annotations
 echo "CTAACAGTTGCTTTTATCACNNN" > guide.txt
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.py complete-search \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py complete-search \
   --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --guide guide.txt \
   --vcf list_vcf.txt --samplesID list_samplesID.txt \
   --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
@@ -117,7 +120,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.p
 #   validation (slower; a no-op on sites-only panels, which have no genotypes to resolve).
 
 # build the self-contained, shareable HTML report (report.html + a data/ folder)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 crisprme.py generate-report \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py generate-report \
   --result-dir Results/my_search
 # -> open Results/my_search/<jobid>_report.zip, then report.html
 ```
@@ -401,7 +404,7 @@ For more examples and ideas, visit:
 After installing Docker, you can download and build the CRISPRme Docker image by 
 running the following command in a terminal:
 ```bash
-docker pull pinellolab/crisprme:v2.5.4
+docker pull pinellolab/crisprme:v2.5.5
 ```
 
 This command retrieves the latest pre-built CRISPRme image from Docker Hub and sets 
@@ -418,7 +421,7 @@ docker images
 Look for an entry similar to the following:
 ```
 REPOSITORY          TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme   v2.5.4    <image_id>     <timestamp>    ~818MB
+pinellolab/crisprme   v2.5.5    <image_id>     <timestamp>    ~818MB
 ```
 
 You are now ready to run CRISPRme using Docker.
@@ -518,7 +521,7 @@ The directory organization required by CRISPRme is illustrated below:
 
 > **Running the examples.** Each example below is the bare `crisprme.py <command> …`.
 > To run it in **Docker**, prefix it with
-> `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:v2.5.4`
+> `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:v2.5.5`
 > (add `-p 8080:8080` for `web-interface`). From a **source / Conda** install, run
 > it as-is inside the activated `crisprme` environment.
 
@@ -590,7 +593,7 @@ single command — `download --what index` already wrote the `list_vcf.txt` /
 
 ```bash
 printf '%s\n' ACTGAAATCTGTAAGCAGGC > my_guide.txt
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.4 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py complete-search \
     --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
     --guide my_guide.txt --vcf list_vcf.txt --samplesID list_samplesID.txt \
@@ -1635,7 +1638,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.5.4`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.5.5`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**

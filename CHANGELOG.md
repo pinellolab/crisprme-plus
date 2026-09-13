@@ -11,6 +11,51 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.5.5] - 2026-09-13
+
+### Added
+- **HPRC pangenome production index** (`NRG_3_hg38+hg38_HPRC`) — a third prebuilt SpCas9
+  NRG variant index, published on HuggingFace alongside the genotyped 1000G-2021 + HGDP and
+  the sites-only mega. It enriches hg38 with the HPRC Minigraph-Cactus pangenome decomposed
+  to a per-chromosome VCF (`vg deconstruct` → `vcfbub` → `vcfwave`; 232 assembly-derived
+  genomes incl. CHM13). Genotypes are **phased**, so it supports CONFIRMED cis co-occurrence
+  and named per-sample carriers, and it captures pangenome-specific variation absent from
+  short-read panels. Reproducible recipe: `seq_script/merge_panels/hprc_build.sh` (RAW
+  registry + SNP+indel, consistent with the other two indexes). METHODS §merge documents it.
+- **`assembly-search` web interface** (PR #48) — the diploid personal-genome search
+  (paternal + maternal assembly FASTAs, liftOver-reconciled to hg38; no VCF) is now available
+  on the website: a "Personal assembly" tab under Select genome, a parallel status-polling
+  `/load` page, and a dedicated results view (`result_page_assembly`) that mirrors
+  complete-search's layout for two-haplotype data (haplotype-coverage stats, reconciled
+  off-target table, per-haplotype non-mappable sites, Graphical Reports). A combined
+  report.zip is produced at parity with complete-search (`build_combined_report`), and a
+  Settings "Add a personal assembly" card fetches an HPRC Release-2 individual
+  (`download_hprc_assembly.py`) or accepts uploaded assemblies.
+
+### Changed
+- Pinned **`dash-bootstrap-components<2`** (PR #48). dbc ≥ 2.0.0 requires React 18 / Dash ≥ 3;
+  this app targets React 16 / Dash 2.x, and the assembly-search `dbc.Tabs` do not render under
+  dbc 2.x. **A fresh image build from this release's `environment.yml` is required for the web
+  assembly-search feature** (the CLI is unaffected).
+
+### Fixed
+- `assembly-search` now passes `--max-total-edits {mm+bDNA+bRNA}` into each haplotype's
+  `complete-search` (PR #47) — previously it silently used the default cap of 4, pruning
+  mismatch+bulge off-targets.
+- `download_hprc_assembly.py`: the `--register` path used a bare `from pages_utils import …`
+  (→ `ModuleNotFoundError`, the only mode the Settings card invokes) — fixed to
+  `from pages.pages_utils import …`; and the multi-GB scratch `.fa.gz` is now removed after a
+  successful split and on MD5-mismatch abort (was leaking ~2 GB per haplotype).
+
+### Verified
+- HPRC index validated end-to-end (`--per-sample`): 68,057 CONFIRMED phased-cis off-targets,
+  855 SNP+indel and 140 SNP+SNP co-occurring rows, with named cis carriers ground-truth-verified
+  against the source genotypes (e.g. HG03579 carries chr10:12896898 `TG>T` + chr10:12896900
+  `T>A` in cis, joint AF 1/464). Assembly-search validated e2e (HG01255 chr19, merged code):
+  reconciliation + combined report.zip. Full web click-through: tabs render (dbc<2), Load
+  Example, Per-sample gray-out survives the assembly-tab round-trip, Settings cards, assembly
+  results page. HPRC download card exercised against real HPRC S3 (92 contigs, register, leak-free).
+
 ## [2.5.4] - 2026-09-11
 
 ### Added
@@ -1289,7 +1334,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.5.4...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.5.5...HEAD
+[2.5.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.5
 [2.5.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.4
 [2.5.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.3
 [2.5.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.2
