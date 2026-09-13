@@ -7,6 +7,7 @@ Pure stdlib (no pandas / dash), so it runs anywhere:
 
     python -m unittest PostProcess.test_personal_assembly -v
 """
+import io
 import os
 import sys
 import tarfile
@@ -156,8 +157,33 @@ class TestBundleImport(unittest.TestCase):
             for n in ("A/x", "B/y"):
                 p = os.path.join(self.cwd, n)
                 os.makedirs(os.path.dirname(p), exist_ok=True)
-                open(p, "w").write("z")
+                with open(p, "w") as fh:
+                    fh.write("z")
                 t.add(p, arcname=n)
+        with self.assertRaises(ValueError):
+            pa.import_archive(arc, tempfile.mkdtemp())
+
+    def _tar_with_raw_names(self, path, names):
+        """Build a .tar.gz whose members have EXACTLY the given (possibly
+        malicious) stored names, bypassing tarfile.add's own normalization."""
+        with tarfile.open(path, "w:gz") as t:
+            for nm in names:
+                data = b"x"
+                ti = tarfile.TarInfo(name=nm)
+                ti.size = len(data)
+                t.addfile(ti, io.BytesIO(data))
+
+    def test_reject_absolute_path_member(self):
+        # A member with an absolute path (e.g. /etc/evil) must be refused BEFORE
+        # extraction -- it must not survive an lstrip('/') and get written out.
+        arc = os.path.join(self.cwd, "abs.tar.gz")
+        self._tar_with_raw_names(arc, ["/malicious/metadata.json"])
+        with self.assertRaises(ValueError):
+            pa.import_archive(arc, tempfile.mkdtemp())
+
+    def test_reject_dotdot_traversal_member(self):
+        arc = os.path.join(self.cwd, "dd.tar.gz")
+        self._tar_with_raw_names(arc, ["HG01255/../../evil.txt"])
         with self.assertRaises(ValueError):
             pa.import_archive(arc, tempfile.mkdtemp())
 

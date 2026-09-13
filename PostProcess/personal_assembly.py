@@ -260,15 +260,30 @@ def validate_bundle_dir(bundle_dir: str) -> Optional[str]:
 
 
 def _safe_members_top_dir(names: List[str]) -> Optional[str]:
-    """The single top-level directory all archive entries live under, or None
-    (rejects absolute paths and ``..`` traversal)."""
+    """The single top-level directory all archive entries live under, or None.
+
+    Rejects, BEFORE any normalization, absolute paths (POSIX ``/x`` or Windows
+    ``C:\\x``) and every form of ``..`` traversal -- so a member like
+    ``/etc/passwd`` (which would otherwise survive an ``lstrip('/')``) or
+    ``a/../..`` is refused rather than silently rewritten. Every member is
+    checked, not just the first, so a pass here guarantees all entries are
+    relative and confined under one top folder."""
     tops = set()
-    for n in names:
-        n = n.replace("\\", "/").lstrip("/")
-        if not n or n.startswith("../") or "/../" in n or n == "..":
+    for raw in names:
+        n = raw.replace("\\", "/")
+        # absolute paths: POSIX (leading /) or Windows drive (X:...)
+        if n.startswith("/") or (len(n) >= 2 and n[1] == ":"):
+            return None
+        if (
+            not n
+            or n == ".."
+            or n.startswith("../")
+            or "/../" in n
+            or n.endswith("/..")
+        ):
             return None
         top = n.split("/", 1)[0]
-        if not top:
+        if not top or top == ".":
             return None
         tops.add(top)
     if len(tops) != 1:
@@ -288,9 +303,11 @@ def import_archive(archive_path: str, cwd: str) -> str:
     if archive_path.endswith((".tar.gz", ".tgz")):
         opener = lambda: tarfile.open(archive_path, "r:gz")  # noqa: E731
         namer = lambda a: a.getnames()  # noqa: E731
+        is_tar = True
     elif archive_path.endswith(".zip"):
         opener = lambda: zipfile.ZipFile(archive_path)  # noqa: E731
         namer = lambda a: a.namelist()  # noqa: E731
+        is_tar = False
     else:
         raise ValueError("bundle must be a .zip or .tar.gz/.tgz archive")
 
@@ -313,6 +330,23 @@ def import_archive(archive_path: str, cwd: str) -> str:
             shutil.rmtree(staging, ignore_errors=True)
         os.makedirs(staging)
         try:
+            # Defense-in-depth: _safe_members_top_dir already rejected absolute
+            # and '..' members, but also (1) refuse tar symlink/hardlink/device
+            # entries -- a symlink member could otherwise redirect a later
+            # write outside staging -- and (2) verify every member still
+            # resolves inside staging before extracting anything.
+            if is_tar:
+                for m in arch.getmembers():
+                    if not (m.isreg() or m.isdir()):
+                        raise ValueError(
+                            f"unsupported archive entry {m.name!r} "
+                            "(only regular files and directories are allowed)"
+                        )
+            staging_real = os.path.realpath(staging)
+            for n in names:
+                target = os.path.realpath(os.path.join(staging, n))
+                if target != staging_real and not target.startswith(staging_real + os.sep):
+                    raise ValueError(f"archive member escapes the extraction directory: {n!r}")
             # extract into staging/<top>/… then validate before publishing
             arch.extractall(staging)
             extracted = os.path.join(staging, top)
