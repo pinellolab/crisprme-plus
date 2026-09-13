@@ -268,12 +268,22 @@ def process_individual(
         print("  verifying FASTA checksum...")
         if not _verify_md5(fasta_tmp, urls["fasta_md5"]):
             print(f"  MD5 MISMATCH for {fasta_tmp} -- aborting, not registering a possibly-corrupt download.")
+            try:
+                os.remove(fasta_tmp)  # don't leave a multi-GB corrupt scratch file behind
+            except OSError:
+                pass
             sys.exit(1)
 
         genome_dest_dir = os.path.join(genomes_dir, f"{sample_id}_{hap}")
         print(f"  splitting FASTA into {genome_dest_dir}/ (one file per contig)...")
         written = split_fasta_by_chromalias(fasta_tmp, chromalias_dest, genome_dest_dir)
         print(f"  wrote {len(written)} contig files")
+        # Remove the multi-GB scratch FASTA now that per-contig files are written
+        # (otherwise ~2GB/haplotype accumulates under <genomes-dir>/.tmp/).
+        try:
+            os.remove(fasta_tmp)
+        except OSError:
+            pass
 
         registered[hap] = {
             "genome": f"{sample_id}_{hap}",
@@ -287,7 +297,7 @@ def process_individual(
         # rather than re-implementing marker-writing here.
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         from pages.settings_page import _write_assembly_marker  # noqa: E402
-        from pages_utils import GENOMES_DIR as _GD, LIFTOVER_DIR as _LD  # noqa: E402
+        from pages.pages_utils import GENOMES_DIR as _GD, LIFTOVER_DIR as _LD  # noqa: E402
 
         for hap, files in registered.items():
             _write_assembly_marker(_GD, files["genome"], sample_id, hap)
