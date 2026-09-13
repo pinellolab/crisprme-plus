@@ -163,6 +163,18 @@ absent from short-read call sets. The graph-coverage half-missingness (`1|.`) is
 handled by recomputing `AF/AC/AN` from the genotypes (`bcftools +fill-tags`), so the
 allele-number denominator excludes unassembled alleles.
 
+> **Assembly-search (a complementary, VCF-free approach).** For an individual whose
+> genome is fully assembled, CRISPRme+ also offers `assembly-search`, which sidesteps
+> variant inference entirely: it searches the two haplotype assemblies (paternal +
+> maternal FASTAs) **directly**, lifts each haplotype's off-targets to hg38 via a
+> liftOver chain, and reconciles them — a site found on both haplotypes is
+> homozygous-equivalent, on one is heterozygous-equivalent, and one with no hg38
+> equivalent is *haplotype-non-mappable* (invisible to any reference-based search).
+> This is the assembly-level counterpart to the vcfwave-derived HPRC index above: the
+> index scans one enriched reference for population-level HPRC variation, while
+> assembly-search scans a specific individual's assembled genome. It is available on the
+> CLI (`crisprme.py assembly-search`) and the web interface.
+
 CRISPRme+ also ships a **sites-only "mega" panel** (`merge_mega_sites.sh`) that
 merges heterogeneous **aggregate** resources — 1000 Genomes 2021, HGDP, gnomAD v4.1,
 TOPMed, and All-of-Us — where genotypes are unavailable or meaningless (gnomAD is

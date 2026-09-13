@@ -71,15 +71,15 @@ legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 (NGG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
 # the variant-aware index used by the default web search (1000G + HGDP)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.4.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
 ```
 
@@ -99,13 +99,13 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.4.0 crisprme.py web-interface
+  pinellolab/crisprme:v2.5.5 crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
 
 > **Using a Conda/Mamba install instead?** Activate your environment
-> (`mamba activate crisprme-2.2.0` — the env the 2.4.0 source build creates — or
+> (`mamba activate crisprme` — the env the source build creates — or
 > `conda` if you use conda), `cd` into your working
 > directory, and run `crisprme.py web-interface`. Everything else in this guide is
 > identical.
@@ -373,10 +373,56 @@ interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.4.0 crisprme.py web-interface
+>   pinellolab/crisprme:v2.5.5 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
-> # (Conda users: mamba activate crisprme-2.2.0 && crisprme.py web-interface)
+> # (Conda users: mamba activate crisprme && crisprme.py web-interface)
 > ```
+
+---
+
+## Searching a personal assembly genome (assembly-search)
+
+Alongside the standard reference + variant search, the web interface can search a
+**fully assembled personal diploid genome** directly — the two haplotype assemblies
+(e.g. paternal and maternal) — *instead of* inferring variants from population data via
+a reference genome + VCF. Each haplotype is searched independently, lifted to hg38 via
+its liftOver chain, and the two are **reconciled**: an off-target found on **both**
+haplotypes is homozygous-equivalent, found on **one** is heterozygous-equivalent, and a
+prediction with **no hg38 equivalent** is *haplotype-non-mappable* — invisible to any
+reference-based search. This is useful for individuals whose genome is not well
+represented by short-read variant panels (e.g. HPRC pangenome assemblies).
+
+**Step 1 — register an assembly (Settings → Data Manager → "Add a personal assembly").**
+Two ways to provide the inputs:
+- **Fetch from HPRC (Release 2):** enter an HPRC sample id (e.g. `HG01255`) and click
+  fetch — CRISPRme downloads that individual's paternal + maternal assembly FASTAs, the
+  liftOver chains, and the chromAlias files, and registers them with the Data Manager.
+- **Upload your own:** provide, per haplotype, a per-chromosome assembly FASTA folder, a
+  liftOver `.chain(.gz)` versus GRCh38, and a `.chromAlias.txt` file (the HPRC-style
+  tab-separated file with `# assembly`, `ucsc`, `genbank` columns), then **Register
+  assembly**.
+
+**Step 2 — launch the search.** On the search form, under **Step 2: Select genome**,
+switch from the **Reference genome** tab to the **Personal assembly** tab and pick a
+registered **Individual**. The guide/PAM/threshold fields are the same as a standard
+search (the analysis-mode radio does not apply — an assembly *is* the individual's
+genome, so there is nothing to infer). Click **Submit**; the job launches as an
+`assembly-search` run and the interface navigates to a status page tailored to its
+pipeline stages (per-haplotype search → liftOver → reconciliation).
+
+**Results.** A completed assembly-search job opens a **Personal Assembly Search
+Results** page that mirrors the standard results layout for two-haplotype data:
+haplotype-coverage counts (both / paternal-only / maternal-only / non-mappable) with a
+coverage plot, a reconciled hg38 off-target table (with a **Custom Ranking** tab —
+site-set picker for mappable vs per-haplotype-unmappable sites, region filter, sort — and
+a **Summary by Mismatches/Bulges** tab), CFD-distribution and per-position plots, and a
+**combined `report.zip`** download that bundles the reconciled report plus each
+haplotype's own complete-search report.
+
+> **CLI equivalent:** `crisprme.py assembly-search --genome-paternal … --genome-maternal …
+> --chain-paternal … --chain-maternal … --chrom-alias-paternal … --chrom-alias-maternal …
+> --guide … --pam … --mm … [--bDNA … --bRNA …] --output <name>` (see `crisprme.py
+> assembly-search --help`).
 
 ---
 
@@ -741,7 +787,7 @@ expires or you close the tab:
    a persistent terminal multiplexer before opening the browser:
    ```bash
    tmux new -s crisprme
-   mamba activate crisprme-2.2.0
+   mamba activate crisprme
    cd "$CRISPRME_DIR"
    crisprme.py web-interface
    # Press Ctrl+B, then D to detach. The server keeps running.
