@@ -397,10 +397,26 @@ Two ways to provide the inputs:
 - **Fetch from HPRC (Release 2):** enter an HPRC sample id (e.g. `HG01255`) and click
   fetch — CRISPRme downloads that individual's paternal + maternal assembly FASTAs, the
   liftOver chains, and the chromAlias files, and registers them with the Data Manager.
-- **Upload your own:** provide, per haplotype, a per-chromosome assembly FASTA folder, a
-  liftOver `.chain(.gz)` versus GRCh38, and a `.chromAlias.txt` file (the HPRC-style
-  tab-separated file with `# assembly`, `ucsc`, `genbank` columns), then **Register
-  assembly**.
+- **Bring your own bundle:** upload a single `.zip`/`.tar.gz` whose one top-level
+  `<individual>/` folder holds the same structure and a valid `metadata.json` (see below);
+  CRISPRme extracts, validates, and registers it.
+
+**How an assembly is stored.** Each individual is one self-contained folder,
+`Assemblies/<individual>/`, holding both haplotypes and a single `metadata.json` that
+describes every file:
+
+```
+Assemblies/HG01255/
+  metadata.json
+  paternal/  genome/ chr1.fa … chrN.fa   +  <asm>_vs_GRCh38.chain.gz  +  <asm>.chromAlias.txt
+  maternal/  genome/ chr1.fa … chrN.fa   +  <asm>_vs_GRCh38.chain.gz  +  <asm>.chromAlias.txt
+```
+
+Because everything for one person lives in one folder, **removing an individual deletes
+that one folder and reclaims all its space** (Settings → Data Manager → Delete → *Personal
+assembly*), and an assembly is portable — zip the `<individual>/` folder to share it or move
+it between machines. (Assemblies registered with older CRISPRme versions, using the flat
+`Genomes/`+`LiftoverFiles/` layout, are still recognized.)
 
 **Step 2 — launch the search.** On the search form, under **Step 2: Select genome**,
 switch from the **Reference genome** tab to the **Personal assembly** tab and pick a
@@ -419,10 +435,15 @@ a **Summary by Mismatches/Bulges** tab), CFD-distribution and per-position plots
 **combined `report.zip`** download that bundles the reconciled report plus each
 haplotype's own complete-search report.
 
-> **CLI equivalent:** `crisprme.py assembly-search --genome-paternal … --genome-maternal …
-> --chain-paternal … --chain-maternal … --chrom-alias-paternal … --chrom-alias-maternal …
-> --guide … --pam … --mm … [--bDNA … --bRNA …] --output <name>` (see `crisprme.py
-> assembly-search --help`).
+> **CLI equivalent.** Simplest, using a registered bundle:
+> `crisprme.py assembly-search --assembly-individual HG01255 --guide … --pam … --mm …
+> [--bDNA … --bRNA …] --output <name>` — the six genome/chain/chromAlias paths are read
+> from `Assemblies/HG01255/metadata.json`. You can still pass them explicitly (and this is
+> how the legacy flat layout is searched):
+> `--genome-paternal … --genome-maternal … --chain-paternal … --chain-maternal …
+> --chrom-alias-paternal … --chrom-alias-maternal …`. To fetch an HPRC individual from the
+> terminal: `python download_hprc_assembly.py HG01255 --data-dir <your data folder>` (writes
+> the bundle above). See `crisprme.py assembly-search --help`.
 
 ---
 

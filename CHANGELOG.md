@@ -11,6 +11,31 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Changed
+- **Personal-assembly storage is now one self-contained folder per individual with a
+  single `metadata.json`.** `Assemblies/<individual>/{paternal,maternal}/genome/*.fa`
+  plus each haplotype's `*_vs_GRCh38.chain.gz` and `*.chromAlias.txt`, described by a
+  relocatable `metadata.json` (paths relative to the folder). This replaces the flat
+  layout that scattered files across `Genomes/` + `LiftoverFiles/` with six hidden
+  `.assembly_individual` marker files. Benefits: deleting an individual removes one
+  folder and reclaims all its space (the old delete only removed markers), clear
+  separation between individuals, and portable bring-your-own bundles. The old flat
+  layout is still discovered for backward compatibility. New shared module
+  `PostProcess/personal_assembly.py` (+ `test_personal_assembly.py`).
+
+### Added
+- **`assembly-search --assembly-individual <name>`** — resolve both haplotypes'
+  genome/chain/chromAlias from a registered `Assemblies/<name>/` bundle instead of
+  passing the six paths explicitly (the six flags still work, incl. the legacy layout).
+- **Bring-your-own personal assembly** — the Settings uploader accepts a `.zip`/`.tar.gz`
+  bundle (one top-level `<individual>/` folder + a valid `metadata.json`); it is
+  extracted, validated, and registered (`personal_assembly.import_archive`).
+- **Single canonical installer** — the clickable-app `install.sh`/`install.ps1` now live
+  only in the served GitHub Pages repo (`pinellolab/CRISPRme` `docs/`); the drift-prone
+  duplicate under `install/` was removed and replaced with a pointer README. Docs clarify
+  that only the whole-genome variant-aware search needs ~64 GB RAM (many current laptops
+  have it); reference-only / single-chromosome / region searches fit ~16 GB.
+
 ## [2.5.5] - 2026-09-13
 
 ### Added
