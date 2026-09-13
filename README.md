@@ -7,7 +7,7 @@
   <img src="assets/readme/crisprme-logo.png" alt="CRISPRme" width="700"/>
 </p>
 
-# CRISPRme+ (2.5.4)
+# CRISPRme+ (2.5.5)
 
 ### 📦 Repository, releases & issues → **https://github.com/pinellolab/crisprme-plus**
 
@@ -58,10 +58,11 @@ irm https://pinellolab.github.io/CRISPRme/install.ps1 | iex
 ```
 Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) — a
 small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
-first time it downloads the reference + variant data automatically (~85 GB, once), then
+first time it downloads the reference + variant data automatically (~45 GB, once), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
-(Genome-wide *variant* search needs 64 GB RAM; reference-only fits 16 GB.) Details:
-[`install/`](install/).
+(A **genome-wide *variant* search needs a 64 GB workstation/HPC**; on a **laptop**,
+reference-only or **single-chromosome / target-region variant** searches fit **16 GB**.)
+Details: [`install/`](install/).
 
 ---
 
@@ -95,6 +96,14 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.p
 # 3) launch the web interface, then open http://127.0.0.1:8080
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:v2.5.5 crisprme.py web-interface
 ```
+
+> **Which variant index should I pick?** You only need **one** — if unsure, use the
+> **default 1000G-2021 + HGDP** (`NRG_3_hg38+hg38_1000G2021_HGDP`, downloaded in step 2):
+> sample-level genotypes with named per-sample carriers, and it covers most use cases.
+> Pick **HPRC** (`+hg38_HPRC`) for pangenome / assembly-derived variation, or **mega**
+> (`+hg38_mega`) for the widest allele-frequency provenance across five databases. Grab the
+> others any time from the web **Settings** or by re-running the download with a different
+> `--index-name`.
 
 **Full step-by-step (with variants, more indexes, troubleshooting):
 [`docs/DOCKER_QUICKSTART.md`](docs/DOCKER_QUICKSTART.md).**
@@ -180,16 +189,16 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
-> **Which version do I get?** For **CRISPRme+ (2.5.4, this release)** use **Docker**
+> **Which version do I get?** For **CRISPRme+ (2.5.5, this release)** use **Docker**
 > (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above, or
 > §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
-> 2.5.4 line** — use it only if you specifically want the stable release. If in doubt,
+> 2.5.5 line** — use it only if you specifically want the stable release. If in doubt,
 > use Docker.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.5.4)](#12-install-crisprme-via-docker)
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.5.5)](#12-install-crisprme-via-docker)
 
 - [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
@@ -200,7 +209,7 @@ respective sections below.
 ### 1.1 Install CRISPRme via Conda/Mamba
 ---
 
-> **Note:** Conda/Bioconda installs the **stable 2.1.x** line — for CRISPRme+ 2.5.4
+> **Note:** Conda/Bioconda installs the **stable 2.1.x** line — for CRISPRme+ 2.5.5
 > use [Docker](#12-install-crisprme-via-docker) or [source (§1.3)](#13-install-crisprme-from-source-without-bioconda).
 
 This section is organized into three subsections to guide you through the installation 
@@ -255,11 +264,11 @@ By completing these steps, your system will be fully prepared for installing CRI
 #### 1.1.2 Installing CRISPRme
 ---
 
-> **CRISPRme+ (2.5.4) runs on Python 3.11 and installs from source** — the build
+> **CRISPRme+ (2.5.5) runs on Python 3.11 and installs from source** — the build
 > compiles CRISPRitz 2.8.1 and installs both tools into a conda environment. A native
-> Bioconda `crisprme=2.5.4` package is **in preparation**; until it lands, the Bioconda
+> Bioconda `crisprme=2.5.5` package is **in preparation**; until it lands, the Bioconda
 > `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** this
-> 2.5.4 line.
+> 2.5.5 line.
 
 To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
 (`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
@@ -294,7 +303,7 @@ This updates within the **stable 2.1.x** Bioconda line (latest is `crisprme=2.1.
 ```bash
 mamba install crisprme=2.1.14
 ```
-For **2.5.4 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.5.4 package yet.
+For **2.5.5 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.5.5 package yet.
 If you're using `Conda`, replace `mamba` with `conda` in the commands above.
 
 **Step 3: Verify the Update**
@@ -429,12 +438,12 @@ You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run an unreleased line (e.g. **2.5.4**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run an unreleased line (e.g. **2.5.5**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
 ```bash
-# 1. clone the repository (2.5.4 development lives on the main branch)
+# 1. clone the repository (2.5.5 development lives on the main branch)
 git clone https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
@@ -593,7 +602,7 @@ single command — `download --what index` already wrote the `list_vcf.txt` /
 `list_samplesID.txt` the search reads, and the guide is auto-padded to the PAM:
 
 ```bash
-printf '%s\n' ACTGAAATCTGTAAGCAGGC > my_guide.txt
+printf '%s\n' ACTGAAATCTGTAAGCAGGCNNN > my_guide.txt   # 20-nt spacer + NNN for the PAM positions
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
   crisprme.py complete-search \
     --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
@@ -1605,7 +1614,7 @@ crisprme.py publish-index --index genome_library/NRG_3_hg38
 crisprme.py publish-index --index genome_library/NRG_3_hg38+hg38_1000G2021_HGDP --dictless
 ```
 
-See the companion data-setup guide (`docs/crisprme_data_setup_051826.md`, Sections 2d and 3½) for the end-to-end workflow.
+See the companion data-setup guide (`docs/crisprme_data_setup_051826.md`, Sections 2d and 3.5) for the end-to-end workflow.
 
 ## 3 Test
 
