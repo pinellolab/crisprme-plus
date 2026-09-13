@@ -169,7 +169,9 @@ allele-number denominator excludes unassembled alleles.
 > maternal FASTAs) **directly**, lifts each haplotype's off-targets to hg38 via a
 > liftOver chain, and reconciles them — a site found on both haplotypes is
 > homozygous-equivalent, on one is heterozygous-equivalent, and one with no hg38
-> equivalent is *haplotype-non-mappable* (invisible to any reference-based search).
+> equivalent is *haplotype-non-mappable* (invisible to any reference-based search). A
+> haplotype with **no** off-targets at all is a valid outcome, not an error — it
+> contributes nothing, so every locus on the other haplotype is heterozygous-equivalent.
 > This is the assembly-level counterpart to the vcfwave-derived HPRC index above: the
 > index scans one enriched reference for population-level HPRC variation, while
 > assembly-search scans a specific individual's assembled genome. It is available on the

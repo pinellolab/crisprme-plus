@@ -27,14 +27,25 @@ and the `release-crisprme` skill.
 - **`assembly-search --assembly-individual <name>`** — resolve both haplotypes'
   genome/chain/chromAlias from a registered `Assemblies/<name>/` bundle instead of
   passing the six paths explicitly (the six flags still work, incl. the legacy layout).
-- **Bring-your-own personal assembly** — the Settings uploader accepts a `.zip`/`.tar.gz`
-  bundle (one top-level `<individual>/` folder + a valid `metadata.json`); it is
-  extracted, validated, and registered (`personal_assembly.import_archive`).
+- **Bring-your-own personal assembly** — the "Add a personal assembly" Settings card has a
+  file-picker to upload a `.zip`/`.tar.gz` bundle (one top-level `<individual>/` folder + a
+  valid `metadata.json`); it is extracted, validated, and registered
+  (`personal_assembly.import_archive`). Extraction is path-traversal-safe (rejects
+  absolute / `..` members and tar symlink/device entries, and verifies every member stays
+  within the staging directory).
 - **Single canonical installer** — the clickable-app `install.sh`/`install.ps1` now live
   only in the served GitHub Pages repo (`pinellolab/CRISPRme` `docs/`); the drift-prone
   duplicate under `install/` was removed and replaced with a pointer README. Docs clarify
   that only the whole-genome variant-aware search needs ~64 GB RAM (many current laptops
   have it); reference-only / single-chromosome / region searches fit ~16 GB.
+
+### Fixed
+- **`assembly-search` no longer crashes when a haplotype has zero off-targets.** A
+  haplotype whose search finds no hits on the assembly is a legitimate result, not an
+  error; reconciliation now treats it as an empty set — every locus on the other haplotype
+  becomes heterozygous-equivalent (`<other>_only`), and the empty side contributes 0
+  non-mappable — instead of aborting on the missing `*_integrated_results.tsv`. Unsupported
+  multi-guide runs (more than one results file) still error.
 
 ## [2.5.5] - 2026-09-13
 
