@@ -66,10 +66,22 @@ from app import (
 )
 from PostProcess.supportFunctions.loadSample import associateSample
 from PostProcess import CFDGraph, query_manager
+from PostProcess.assembly_reconcile import (
+    PRED_COLS,
+    find_results_prefix,
+    load_crisprme_predictions,
+    load_unlifted_ids,
+)
+from PostProcess.generate_report import (
+    read_specificity_score,
+    load_general_target_count,
+    build_grid_row_cells,
+)
 
+import dash
 from dash.exceptions import PreventUpdate
 from dash import Input, Output, State
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 from glob import glob
 
 from dash import html
@@ -80,6 +92,9 @@ import pandas as pd
 import subprocess
 import math
 import base64  # for decoding upload content
+import plotly
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from dash import dash_table
 import sqlite3
 import flask
@@ -773,6 +788,1557 @@ def result_page(job_id: str) -> html.Div:
     )
     result_page = html.Div(final_list, style={"margin": "1%"})
     return result_page
+
+
+def _encode_png(path: str) -> Optional[str]:
+    """Base64 data-URI for a PNG file, or None if it can't be read -- same
+    inline-embedding pattern already used throughout this file for
+    complete-search's own Graphical Reports plots (e.g. the radar-chart and
+    top-N images), reused as-is here rather than reinvented."""
+    try:
+        with open(path, "rb") as fh:
+            return "data:image/png;base64," + base64.b64encode(fh.read()).decode()
+    except OSError:
+        return None
+
+
+# --------------------------------------------------------------------------- #
+# Custom Ranking tab (2026-09-06 redesign): "site set" picker + genomic-region
+# filter, replacing the old single reconciled-only table + two separate
+# always-visible private-off-target Details blocks. These loaders re-read
+# from disk fresh on every call rather than reusing result_page_assembly()'s
+# own render-time variables -- Dash callbacks fire independently of any
+# particular page render, so there's no render-time Python object to reuse
+# (the same reason query_manager.py's shold()/noshold() reconnect to their
+# job's .db fresh on every query instead of caching a connection). Kept
+# genuinely small: reloading a ~600-row TSV or one haplotype's own
+# predictions is cheap, nothing like the multi-hour search itself.
+# --------------------------------------------------------------------------- #
+_SITE_SET_OPTIONS = [
+    {"label": "Mappable (hg38)", "value": "mappable"},
+    {"label": "Maternal-unmappable", "value": "maternal_unmappable"},
+    {"label": "Paternal-unmappable", "value": "paternal_unmappable"},
+]
+
+# Sort-by options per site set -- "mappable" offers both haplotypes' own
+# score/mismatch columns plus hg38 position (matches the columns display_cols
+# actually shows); an unmappable site set only has ITS OWN haplotype's native
+# columns (there's no hg38 coordinate to sort by -- these sites have none).
+_MAPPABLE_SORT_OPTIONS = [
+    {"label": "CFD score (Paternal)", "value": "CFD_score_(fewest_mm+b)_paternal"},
+    {"label": "CFD score (Maternal)", "value": "CFD_score_(fewest_mm+b)_maternal"},
+    {"label": "Mismatches (Paternal)", "value": "Mismatches_(fewest_mm+b)_paternal"},
+    {"label": "Mismatches (Maternal)", "value": "Mismatches_(fewest_mm+b)_maternal"},
+    {"label": "Genomic position (hg38)", "value": "hg38_start"},
+]
+_UNMAPPABLE_SORT_OPTIONS = [
+    {"label": "CFD score", "value": "CFD_score_(fewest_mm+b)"},
+    {"label": "Mismatches", "value": "Mismatches_(fewest_mm+b)"},
+    {"label": "Genomic position (own assembly)", "value": "Start_coordinate_(fewest_mm+b)"},
+]
+_MAPPABLE_DEFAULT_SORT = "CFD_score_(fewest_mm+b)_paternal"
+_UNMAPPABLE_DEFAULT_SORT = "CFD_score_(fewest_mm+b)"
+
+
+def _job_id_from_search(search: str) -> str:
+    return (search or "").split("=")[-1]
+
+
+def _assembly_job_params(job_directory: str) -> Dict[str, str]:
+    """Reload the combined job's own .Params.txt (3-column index/key/value)
+    fresh from disk -- see the module docstring above this section for why."""
+    params: Dict[str, str] = {}
+    params_path = os.path.join(job_directory, PARAMS_FILE)
+    if os.path.isfile(params_path):
+        with open(params_path) as pf:
+            for line in pf:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) >= 3:
+                    params[fields[1]] = fields[2]
+    return params
+
+
+def _assembly_mappable_frame(job_directory: str) -> Tuple[pd.DataFrame, List[str]]:
+    """The reconciled hg38 table (`both`/`paternal_only`/`maternal_only`
+    rows) -- same loading + display-column trimming result_page_assembly()
+    itself does for its initial render (kept in sync manually; both are
+    small enough that a shared extraction would cost more indirection than
+    it saves for now)."""
+    combined_tsv_matches = glob(os.path.join(job_directory, "*_combined_hg38.tsv"))
+    if not combined_tsv_matches:
+        return pd.DataFrame(), []
+    df = pd.read_csv(combined_tsv_matches[0], sep="\t")
+    if "Spacer+PAM_paternal" in df.columns and "Spacer+PAM_maternal" in df.columns:
+        df["Spacer+PAM"] = df["Spacer+PAM_paternal"].combine_first(
+            df["Spacer+PAM_maternal"]
+        )
+    hidden_cols = {
+        "Spacer+PAM_paternal",
+        "Spacer+PAM_maternal",
+        "off_target_id_paternal",
+        "off_target_id_maternal",
+        "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_paternal",
+        "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_maternal",
+    }
+    display_cols = ["Spacer+PAM"] if "Spacer+PAM" in df.columns else []
+    display_cols += [
+        c for c in df.columns if c not in hidden_cols and c != "Spacer+PAM"
+    ]
+    return df, display_cols
+
+
+def _assembly_unmappable_frame(job_directory: str, hap: str) -> pd.DataFrame:
+    """One haplotype's own off-targets that never lifted to hg38 (no hg38
+    coordinate at all), in that haplotype's own native columns -- the exact
+    same rows the old per-haplotype 'private' Details table showed."""
+    params = _assembly_job_params(job_directory)
+    dirname_key = "Paternal_dir" if hap == "paternal" else "Maternal_dir"
+    hap_dir_name = params.get(dirname_key)
+    if not hap_dir_name:
+        return pd.DataFrame()
+    hap_results_dir = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name)
+    try:
+        prefix = find_results_prefix(hap_results_dir)
+        hap_predictions = load_crisprme_predictions(
+            hap_results_dir, prefix, merge_bp=3,
+            cols=PRED_COLS + ["Bulge_type_(fewest_mm+b)"],
+        )
+    except (FileNotFoundError, OSError):
+        return pd.DataFrame()
+    hap_predictions["off_target_id"] = hap_predictions["off_target_id"].astype(str)
+    not_lifted_path = os.path.join(job_directory, f"{hap}_offtargets_not_lifted.bed")
+    if not os.path.isfile(not_lifted_path):
+        return pd.DataFrame()
+    unlifted_ids = load_unlifted_ids(not_lifted_path)
+    if not unlifted_ids:
+        return pd.DataFrame()
+    private = hap_predictions[hap_predictions["off_target_id"].isin(unlifted_ids)]
+    return private.drop(columns=["off_target_id"]) if not private.empty else pd.DataFrame()
+
+
+def _assembly_site_set_frame(job_directory: str, site_set: str) -> Tuple[pd.DataFrame, List[str]]:
+    """Dispatch to the right loader for the currently-selected site set."""
+    if site_set == "maternal_unmappable":
+        frame = _assembly_unmappable_frame(job_directory, "maternal")
+        return frame, list(frame.columns)
+    if site_set == "paternal_unmappable":
+        frame = _assembly_unmappable_frame(job_directory, "paternal")
+        return frame, list(frame.columns)
+    return _assembly_mappable_frame(job_directory)
+
+
+# Which column holds the chromosome / start coordinate for each coordinate
+# space a region filter can search in. "mappable" has three real choices
+# (hg38 always populated; Maternal/Paternal populated only on rows that
+# actually have that haplotype's own coordinate -- `both` rows have both,
+# `maternal_only` rows have only Maternal, `paternal_only` rows have only
+# Paternal -- confirmed directly against real data). An unmappable site set
+# has exactly one native coordinate space, no choice needed.
+_COORD_SPACE_COLS = {
+    "hg38": ("hg38_chr", "hg38_start"),
+    "maternal": ("Chromosome_maternal", "Start_coordinate_(fewest_mm+b)_maternal"),
+    "paternal": ("Chromosome_paternal", "Start_coordinate_(fewest_mm+b)_paternal"),
+}
+_UNMAPPABLE_COORD_COLS = ("Chromosome", "Start_coordinate_(fewest_mm+b)")
+
+
+def _assembly_region_chrom_options(df: pd.DataFrame, chrom_col: str) -> List[Dict[str, str]]:
+    if df.empty or chrom_col not in df.columns:
+        return []
+    chroms = sorted(df[chrom_col].dropna().unique().tolist())
+    return [{"label": c, "value": c} for c in chroms]
+
+
+def _assembly_region_filter_children(job_directory: str, site_set: str, coord_space: str) -> List:
+    """Builds the region filter's controls (coordinate-space choice, when
+    relevant, + chromosome dropdown + Start/End inputs + Filter/Clear
+    buttons) -- shared by the tab's initial render and the site-set-change
+    callback below so both build it identically. "assembly-coord-space-
+    radio" always exists (a real 3-way choice for "mappable", a hidden
+    single fixed value otherwise) so downstream callbacks always have a
+    value to read regardless of which site set is active."""
+    if site_set == "mappable":
+        coord_row = [
+            html.H6("Coordinate space"),
+            dcc.RadioItems(
+                id="assembly-coord-space-radio",
+                options=[
+                    {"label": " hg38", "value": "hg38"},
+                    {"label": " Maternal", "value": "maternal"},
+                    {"label": " Paternal", "value": "paternal"},
+                ],
+                value=coord_space if coord_space in _COORD_SPACE_COLS else "hg38",
+                labelStyle={"display": "inline-block", "marginRight": "14px"},
+            ),
+        ]
+        df, _ = _assembly_mappable_frame(job_directory)
+        chrom_col, _ = _COORD_SPACE_COLS.get(coord_space, _COORD_SPACE_COLS["hg38"])
+    else:
+        # No real choice for an unmappable site set -- exactly one
+        # coordinate system exists. Kept present (hidden) so the region-
+        # filter callbacks always find "assembly-coord-space-radio".
+        coord_row = [
+            dcc.RadioItems(
+                id="assembly-coord-space-radio",
+                options=[{"label": "", "value": "native"}],
+                value="native",
+                style={"display": "none"},
+            )
+        ]
+        df, _ = _assembly_site_set_frame(job_directory, site_set)
+        chrom_col = _UNMAPPABLE_COORD_COLS[0]
+    chrom_options = _assembly_region_chrom_options(df, chrom_col)
+    return coord_row + [
+        dbc.Row(
+            [
+                dbc.Col(
+                    dcc.Dropdown(
+                        id="assembly-region-chrom-dropdown",
+                        options=chrom_options,
+                        placeholder="Chromosome",
+                    ),
+                    width=3,
+                ),
+                dbc.Col(
+                    dcc.Input(id="assembly-region-start-input", type="number", placeholder="Start"),
+                    width=3,
+                ),
+                dbc.Col(
+                    dcc.Input(id="assembly-region-end-input", type="number", placeholder="End"),
+                    width=3,
+                ),
+                dbc.Col(
+                    [
+                        html.Button("Filter", id="assembly-region-filter-btn", style={"marginRight": "8px"}),
+                        html.Button("Clear", id="assembly-region-clear-btn"),
+                    ],
+                    width=3,
+                ),
+            ]
+        ),
+    ]
+
+
+def _assembly_site_set_note(job_directory: str, site_set: str) -> str:
+    if site_set == "mappable":
+        return (
+            "hg38_chr/hg38_start (and strand) are the coordinates the two "
+            "haplotypes were matched on, so they're shared between them by "
+            "construction. hg38_end is lifted independently per haplotype "
+            "and can differ by a few bp when an indel private to one "
+            "haplotype shifts where its alignment ends in hg38 space."
+        )
+    hap_label = "Maternal" if site_set == "maternal_unmappable" else "Paternal"
+    frame, _ = _assembly_site_set_frame(job_directory, site_set)
+    return (
+        f"These {len(frame)} sites never lifted to hg38 -- there is no hg38 "
+        f"equivalent to show. Coordinates are in {hap_label}'s own assembly."
+    )
+
+
+def result_page_assembly(job_id: str) -> html.Div:
+    """Results page for an assembly-search (personal diploid genome) job --
+    fully independent from result_page() above, not a branch inside it.
+    result_page() crashes on this job type: it does unguarded .Params.txt
+    lookups (Genome_idx, Ref_comp, Genome_selected -- no fallback, so
+    StopIteration) and assumes complete-search's exact output filenames
+    (glob for *integrated*, a per-job SQLite .db, .acfd_CFD.txt) from its
+    very first lines, well before its own genome_type tab-set branch --
+    none of that exists for an assembly-search job (confirmed by directly
+    reading result_page() and generate_sample_card, not assumed).
+
+    First-pass scope, deliberately: the reconciled off-target table (the 3
+    real `origin` categories reconcile_haplotypes() can actually produce --
+    paternal_only, maternal_only, both; a 4th, "both_haplotype_private", is
+    defined in assembly_reconcile.py but not called anywhere in the current
+    pipeline -- confirmed by grepping for its call sites -- so it can't
+    appear in real data yet) plus a haplotype-coverage summary, including
+    the two non-mappable ("haplotype-private") site COUNTS.
+    reconcile_haplotypes() doesn't persist per-site detail for non-mappable
+    predictions anywhere, only a count, so a detailed haplotype-private
+    table isn't buildable from current pipeline output -- not a UI choice,
+    a real upstream data gap. A per-haplotype (maternal vs. paternal)
+    comparison view, in the spirit of complete-search's "Personal Risk
+    Cards" (a UX-shape precedent only -- none of its actual code, built on
+    a per-job SQLite database and VCF-sample files, applies here), is
+    deferred pending design discussion.
+    """
+    if not isinstance(job_id, str):
+        raise TypeError(f"Expected {str.__name__}, got {type(job_id).__name__}")
+    job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
+    if not os.path.isdir(job_directory):
+        return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
+
+    params = {}
+    params_path = os.path.join(job_directory, PARAMS_FILE)
+    if os.path.isfile(params_path):
+        with open(params_path) as pf:
+            for line in pf:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) >= 3:
+                    params[fields[1]] = fields[2]
+
+    combined_tsv_matches = glob(os.path.join(job_directory, "*_combined_hg38.tsv"))
+    if not combined_tsv_matches:
+        return html.Div(
+            html.Div(
+                [
+                    html.H3(f"Personal Assembly Search Results — {job_id}"),
+                    dbc.Alert(
+                        "This job's reconciled results file was not found -- "
+                        "the run may not have finished yet.",
+                        color="warning",
+                    ),
+                ],
+                style={"margin": "1%"},
+            )
+        )
+    df = pd.read_csv(combined_tsv_matches[0], sep="\t")
+
+    # Display-only column trimming -- doesn't touch combined_hg38.tsv on
+    # disk or the assembly_reconcile.py PRED_COLS that produced it, just
+    # what this table renders:
+    #  - Spacer+PAM_paternal/_maternal are always identical (checked
+    #    against real diverse test data: 0/542 "both" rows differ -- it's
+    #    the same guide regardless of haplotype), so merge into one
+    #    "Spacer+PAM" column, falling back to whichever haplotype actually
+    #    has a value on paternal_only/maternal_only rows.
+    #  - The *_ALT_(fewest_mm+b)_* columns are always "NA": there's no VCF
+    #    in an assembly-search haplotype search, so there's no alternate
+    #    allele for them to hold (REF/ALT_origin_(fewest_mm+b) is "ref" for
+    #    every row, checked directly).
+    #  - off_target_id_paternal/_maternal are internal join/dedup keys, not
+    #    something a user needs to read.
+    if "Spacer+PAM_paternal" in df.columns and "Spacer+PAM_maternal" in df.columns:
+        df["Spacer+PAM"] = df["Spacer+PAM_paternal"].combine_first(
+            df["Spacer+PAM_maternal"]
+        )
+    _HIDDEN_DISPLAY_COLS = {
+        "Spacer+PAM_paternal",
+        "Spacer+PAM_maternal",
+        "off_target_id_paternal",
+        "off_target_id_maternal",
+        "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_paternal",
+        "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_maternal",
+    }
+    display_cols = ["Spacer+PAM"] if "Spacer+PAM" in df.columns else []
+    display_cols += [
+        c for c in df.columns if c not in _HIDDEN_DISPLAY_COLS and c != "Spacer+PAM"
+    ]
+
+    # Haplotype coverage summary, parsed from reconcile_haplotypes()'s own
+    # structured log (log_verbose.txt, NOT log.txt -- the latter only has
+    # assembly_search()'s coarser stage-transition prints, see component B)
+    # -- the only place the non-mappable counts are available at all; there
+    # is no per-site detail for them anywhere in current pipeline output.
+    summary_counts = {}
+    log_verbose_path = os.path.join(job_directory, "log_verbose.txt")
+    if os.path.isfile(log_verbose_path):
+        with open(log_verbose_path, errors="replace") as lf:
+            lines = lf.read().splitlines()
+        if "Reconciliation complete:" in lines:
+            start = lines.index("Reconciliation complete:") + 1
+            for line in lines[start:]:
+                line = line.strip()
+                if not line or ":" not in line:
+                    break
+                key, _, val = line.partition(":")
+                try:
+                    summary_counts[key.strip()] = int(val.strip())
+                except ValueError:
+                    break
+
+    origin_counts = df["origin"].value_counts().to_dict() if "origin" in df.columns else {}
+
+    # Per-haplotype non-mappable ("private") sites: dropped from `df`'s rows
+    # entirely (reconcile_haplotypes() only carries successfully-lifted
+    # predictions into the combined table), but their per-site detail is
+    # NOT actually lost -- it's sitting untouched in each haplotype's own
+    # complete-search output, and reconcile_haplotypes() already writes the
+    # exact non-mappable off_target_id list to
+    # {paternal,maternal}_offtargets_not_lifted.bed. Cross-referencing the
+    # two recovers real per-site detail (coordinates/sequence/CFD in the
+    # haplotype's OWN coordinate system, not hg38 -- these sites have none)
+    # with no core/CLI change. Only splits into
+    # "private to paternal" / "private to maternal" -- NOT further resolved
+    # against whether the same site is also present (under a different,
+    # also-unmappable representation) in the other haplotype; that
+    # resolution needs impg and is deferred (see design doc).
+    #
+    # 2026-09-06: the per-site "private" (now "unmappable") detail itself is
+    # no longer built here -- it moved into the Custom Ranking tab's Site
+    # set dropdown (_assembly_unmappable_frame(), re-loaded fresh by that
+    # tab's own callbacks, same reasoning as query_manager.py's shold()/
+    # noshold() reconnecting fresh per query rather than reusing a render-
+    # time object). This loop now only loads each haplotype's FULL
+    # prediction set (hap_predictions_all), still needed by the guide
+    # summary table/CFD distribution/position-tally plots below.
+    hap_predictions_all: Dict[str, pd.DataFrame] = {}
+    hap_results_dirs: Dict[str, str] = {}
+    for hap, dirname_key in (("paternal", "Paternal_dir"), ("maternal", "Maternal_dir")):
+        hap_dir_name = params.get(dirname_key)
+        if not hap_dir_name:
+            continue
+        hap_results_dir = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name)
+        hap_results_dirs[hap] = hap_results_dir
+        try:
+            prefix = find_results_prefix(hap_results_dir)
+            # merge_bp hardcoded to 3: matches the --merge value
+            # submit_assembly_search_job's cmd always passes today (not yet
+            # user-configurable). Must match what the job actually ran with
+            # -- cluster_collapse's row order (and therefore the
+            # off_target_id -> row mapping) depends on it, same as
+            # reconcile_haplotypes()'s own call.
+            # Widened past the default PRED_COLS (web-side only -- doesn't
+            # touch assembly_reconcile.py or what the CLI itself writes) to
+            # also pull Bulge_type_(fewest_mm+b), needed for the mismatch +
+            # bulge breakdown table below to show the same "Bulge Type"
+            # column complete-search's own summary table has.
+            hap_predictions = load_crisprme_predictions(
+                hap_results_dir, prefix, merge_bp=3,
+                cols=PRED_COLS + ["Bulge_type_(fewest_mm+b)"],
+            )
+        except (FileNotFoundError, OSError):
+            continue
+        hap_predictions["off_target_id"] = hap_predictions["off_target_id"].astype(str)
+        hap_predictions_all[hap] = hap_predictions
+
+    # Per-haplotype guide summary, in the spirit of complete-search's own
+    # Result Summary table (one row per guide: Guide/Nuclease/aggregate
+    # specificity score/Total) -- adapted to show paternal vs. maternal
+    # side by side instead of a single reference-genome value.
+    # read_specificity_score() is complete-search's own aggregate-score
+    # reader (PostProcess/generate_report.py, unmodified, read-only reuse)
+    # -- same "100/(100+sum_cfds)" definition already shown on every
+    # complete-search results page, not a new formula invented here.
+    guide_nuclease = "?"
+    for hap in ("paternal", "maternal"):
+        hap_params_path = os.path.join(hap_results_dirs.get(hap, ""), PARAMS_FILE)
+        if os.path.isfile(hap_params_path):
+            with open(hap_params_path) as hp:
+                for line in hp:
+                    # each haplotype's .Params.txt is complete-search's own
+                    # native format: "key\tvalue" (2 columns, no leading
+                    # index) -- NOT the combined job's own .Params.txt
+                    # format parsed into `params` above ("index\tkey\tvalue",
+                    # 3 columns). Different files, different shapes.
+                    fields = line.rstrip("\n").split("\t")
+                    if len(fields) < 2:
+                        continue
+                    if fields[0] == "Nuclease":
+                        guide_nuclease = fields[1]
+                    elif fields[0] == "Max_total_edits" and "Max_total_edits" not in params:
+                        # both haplotypes are run with the same mm/bDNA/bRNA/
+                        # max-total-edits by construction, so either
+                        # haplotype's own file is representative -- merged
+                        # into the same `params` dict the top summary line
+                        # already reads from, so it can show it alongside
+                        # Mismatches/DNA/RNA (2026-09-06, requested after a
+                        # real run showed an unreachable grid cell as a bare
+                        # "0" with no indication it was capped).
+                        params["Max_total_edits"] = fields[1]
+            break
+    guides_seen: List[str] = []
+    for hap in ("paternal", "maternal"):
+        for g in hap_predictions_all.get(hap, pd.DataFrame(columns=["Spacer+PAM"]))["Spacer+PAM"]:
+            if g not in guides_seen:
+                guides_seen.append(g)
+    guide_summary_rows = []
+    for guide in guides_seen:
+        row = {"Guide": guide, "Nuclease": guide_nuclease}
+        for hap, label in (("paternal", "Paternal"), ("maternal", "Maternal")):
+            hap_df = hap_predictions_all.get(hap)
+            hap_dir_name = params.get(f"{label}_dir")
+            if hap_df is not None:
+                row[f"Total off-targets ({label})"] = int(
+                    (hap_df["Spacer+PAM"] == guide).sum()
+                )
+            else:
+                row[f"Total off-targets ({label})"] = "?"
+            if hap_dir_name and hap in hap_results_dirs:
+                row[f"Specificity score ({label})"] = read_specificity_score(
+                    hap_results_dirs[hap], hap_dir_name, [guide]
+                )
+            else:
+                row[f"Specificity score ({label})"] = "CFD score not available"
+        guide_summary_rows.append(row)
+
+    # Real per-haplotype MM x bulge count grid -- moved to generate_report.py
+    # 2026-09-05 (shared with this module's own combined-report builder, one
+    # real implementation instead of two copies that could drift apart).
+    _load_general_target_count = load_general_target_count
+    _build_grid_row_cells = build_grid_row_cells
+
+    grid_by_guide: Dict[str, Dict] = {}
+    _n_mm_cols = 0
+    for guide in guides_seen:
+        pat_dir_name = params.get("Paternal_dir")
+        mat_dir_name = params.get("Maternal_dir")
+        pat_grid = (
+            _load_general_target_count(hap_results_dirs["paternal"], pat_dir_name, guide)
+            if pat_dir_name and "paternal" in hap_results_dirs
+            else None
+        )
+        mat_grid = (
+            _load_general_target_count(hap_results_dirs["maternal"], mat_dir_name, guide)
+            if mat_dir_name and "maternal" in hap_results_dirs
+            else None
+        )
+        _n_mm_cols = max(
+            _n_mm_cols,
+            pat_grid.shape[1] if pat_grid is not None else 0,
+            mat_grid.shape[1] if mat_grid is not None else 0,
+        )
+        grid_by_guide[guide] = (pat_grid, mat_grid)
+    if _n_mm_cols == 0:
+        try:
+            _n_mm_cols = int(params.get("Mismatches", 0)) + 1
+        except ValueError:
+            _n_mm_cols = 1
+    try:
+        _max_total_edits_int = int(params.get("Max_total_edits"))
+    except (TypeError, ValueError):
+        _max_total_edits_int = None
+
+    # Mismatch+bulge breakdown, MAPPED sites only, same column shape as
+    # complete-search's own "Summary by Mismatches/Bulges" table (Bulge
+    # Type / Mismatches / Bulge Size / Reference / Variant / Combined) --
+    # here Paternal/Maternal stand in for Reference/Variant, and Combined is
+    # their sum, same as complete-search's own definition (checked directly
+    # against a real summary_by_guide.*.txt file: Combined = Reference +
+    # Variant, not a distinct-site count). No Combined/Both column here,
+    # deliberately -- complete-search's Reference/Variant are mutually
+    # exclusive categories of the SAME distinct-site list, so summing them
+    # can't double-count a site. Paternal/Maternal aren't: a site reconciled
+    # as `origin: both` can land on a DIFFERENT mismatch/bulge combo on each
+    # haplotype (measured elsewhere on this page: differs in a real
+    # low-single-digit percent of `both` rows), so there's no single combo
+    # to attribute a "both" count to without picking a somewhat arbitrary
+    # rule. Paternal/Maternal alone are unambiguous; a combined count isn't
+    # worth the ambiguity it would introduce.
+    #
+    # "Mapped only" = restricted to each haplotype's own off_target_ids
+    # that appear in the reconciled table `df` (df only ever contains
+    # successfully-lifted-to-hg38 predictions) -- the haplotype-private
+    # (non-mappable) sites already have their own tables above and are
+    # deliberately excluded here, per request.
+    mapped_ids: Dict[str, set] = {}
+    for hap in ("paternal", "maternal"):
+        id_col = f"off_target_id_{hap}"
+        if id_col in df.columns:
+            mapped_ids[hap] = set(
+                df[id_col].dropna().astype(float).astype(int).astype(str)
+            )
+        else:
+            mapped_ids[hap] = set()
+
+    def _mmb_counts(hap: str) -> "pd.Series":
+        hap_df = hap_predictions_all.get(hap)
+        btype_col = "Bulge_type_(fewest_mm+b)"
+        if hap_df is None or btype_col not in hap_df.columns:
+            return pd.Series(dtype=int)
+        mapped = hap_df[hap_df["off_target_id"].isin(mapped_ids.get(hap, set()))]
+        if mapped.empty:
+            return pd.Series(dtype=int)
+        mm = pd.to_numeric(mapped["Mismatches_(fewest_mm+b)"], errors="coerce")
+        b = pd.to_numeric(mapped["Bulges_(fewest_mm+b)"], errors="coerce")
+        bt = mapped[btype_col]
+        valid = mm.notna() & b.notna()
+        if not valid.any():
+            return pd.Series(dtype=int)
+        return pd.Series(
+            list(zip(bt[valid], mm[valid].astype(int), b[valid].astype(int)))
+        ).value_counts()
+
+    _pat_mmb, _mat_mmb = _mmb_counts("paternal"), _mmb_counts("maternal")
+    mmb_rows = [
+        {
+            "Bulge Type": key[0],
+            "Mismatches": key[1],
+            "Bulge Size": key[2],
+            "Paternal": int(_pat_mmb.get(key, 0)),
+            "Maternal": int(_mat_mmb.get(key, 0)),
+        }
+        for key in sorted(set(_pat_mmb.index) | set(_mat_mmb.index), key=lambda k: (k[1], k[2], k[0]))
+    ]
+    # Same html.Table + rowSpan/colSpan grouped-header structure as
+    # complete-search's own Summary by Mismatches/Bulges table
+    # (pages_utils.py generate_table(): Bulge type/Mismatches/Bulge
+    # Size/PAM Creation each row-span both header rows, "Targets found in
+    # Genome" col-spans 3 sub-columns Reference/Variant/Combined) -- not a
+    # dash_table.DataTable at all, which is the real structural difference
+    # behind the "different visual layout" (generate_table() itself sets no
+    # header color -- grepped, no style_header/CSS rule anywhere styles it,
+    # so the layout, not a specific color, is the verifiable thing to
+    # mirror here).
+    _cell_style = {"vertical-align": "middle", "text-align": "center", "padding": "6px 10px"}
+    mmb_summary_block = []
+    if mmb_rows:
+        mmb_header = [
+            html.Tr(
+                [
+                    html.Th("Bulge Type", rowSpan="2", style=_cell_style),
+                    html.Th("Mismatches", rowSpan="2", style=_cell_style),
+                    html.Th("Bulge Size", rowSpan="2", style=_cell_style),
+                    html.Th("Off-targets found (mapped)", colSpan="2", style=_cell_style),
+                ]
+            ),
+            html.Tr(
+                [html.Th(x, style=_cell_style) for x in ["Paternal", "Maternal"]]
+            ),
+        ]
+        mmb_body = [
+            html.Tr(
+                [
+                    html.Td(r["Bulge Type"], style=_cell_style),
+                    html.Td(r["Mismatches"], style=_cell_style),
+                    html.Td(r["Bulge Size"], style=_cell_style),
+                    html.Td(r["Paternal"], style=_cell_style),
+                    html.Td(r["Maternal"], style=_cell_style),
+                ]
+            )
+            for r in mmb_rows
+        ]
+        mmb_summary_block = [
+            html.H4("Mismatch + bulge breakdown (mapped sites only)"),
+            html.P(
+                "Excludes the haplotype-private (non-mappable) sites shown "
+                "separately above.",
+                style={"font-size": "0.95rem", "color": "#777"},
+            ),
+            html.Table(
+                mmb_header + mmb_body,
+                id="assembly-mmb-summary-table",
+                style={"display": "inline-block", "borderCollapse": "collapse"},
+            ),
+            html.Br(),
+        ]
+
+    def _stat(label: str, value) -> html.Div:
+        return html.Div(
+            [
+                html.Div(str(value), style={"font-size": "1.8rem", "font-weight": "700"}),
+                html.Div(label, style={"font-size": "1.0rem", "color": "#555"}),
+            ],
+            style={"display": "inline-block", "margin-right": "36px", "textAlign": "center"},
+        )
+
+    # Report downloads: a combined report.zip (built automatically by
+    # assembly_search() itself, 2026-09-05 -- see build_combined_report() in
+    # generate_report.py) plus each haplotype's own self-contained
+    # report.zip (built automatically by that haplotype's complete-search
+    # run). 2026-09-06: the combined zip is now the ONLY prominent button --
+    # it's meant to be the only thing most users need -- with the per-
+    # haplotype zips demoted to small inline links inside the aside note
+    # right above it, still one click away for anyone who wants to dig into
+    # a single haplotype's own (pre-reconciliation) report.
+    output_base = params.get("Output_base", "")
+    combined_zip_name = f"{output_base}_combined_report.zip"
+    combined_zip_path = os.path.join(job_directory, combined_zip_name)
+    have_combined_zip = bool(output_base) and os.path.isfile(combined_zip_path)
+
+    hap_links = []
+    for hap, label, dirname_key in (
+        ("paternal", "Paternal", "Paternal_dir"),
+        ("maternal", "Maternal", "Maternal_dir"),
+    ):
+        hap_dir_name = params.get(dirname_key)
+        if not hap_dir_name:
+            continue
+        zip_name = f"{hap_dir_name}_report.zip"
+        zip_path = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name, zip_name)
+        if os.path.isfile(zip_path):
+            hap_links.append(
+                html.A(
+                    label,
+                    href=os.path.join(URL, RESULTS_DIR, hap_dir_name, zip_name),
+                    target="_blank",
+                    style={
+                        "fontWeight": "600",
+                        "fontSize": "0.85rem",
+                        "color": "#2b6cb0",
+                        "textDecoration": "underline",
+                    },
+                )
+            )
+
+    report_box = []
+    if have_combined_zip or hap_links:
+        aside_children = [
+            "The combined report reconciles both haplotypes against hg38 -- "
+            "it's the only thing most people need. "
+        ]
+        if hap_links:
+            aside_children.append("Each haplotype's own report (before reconciliation) is also available: ")
+            for i, link in enumerate(hap_links):
+                if i:
+                    aside_children.append(" · ")
+                aside_children.append(link)
+            aside_children.append(".")
+        report_box = [
+            html.Div(
+                html.Div(
+                    [
+                        html.H4(
+                            "📄 Off-target report",
+                            style={"margin": "0 0 8px 0", "fontWeight": "700", "color": "#1a365d"},
+                        ),
+                        html.P(
+                            aside_children,
+                            style={"margin": "0 0 14px 0", "fontSize": "0.95rem", "color": "#334155"},
+                        ),
+                        html.Div(
+                            html.A(
+                                "⬇ Combined report (.zip)",
+                                href=os.path.join(URL, RESULTS_DIR, job_id, combined_zip_name),
+                                target="_blank",
+                                style={"fontWeight": "700", "color": "#fff"},
+                            ),
+                            style={"background": "#2b6cb0", "borderRadius": "8px", "padding": "10px 18px", "display": "inline-block"},
+                        )
+                        if have_combined_zip
+                        else None,
+                    ],
+                    style={"textAlign": "center"},
+                ),
+                style={
+                    "textAlign": "center",
+                    "margin": "16px auto 24px auto",
+                    "padding": "22px",
+                    "background": "#eef6ff",
+                    "border": "2px solid #2b6cb0",
+                    "borderRadius": "12px",
+                    "boxShadow": "0 2px 10px rgba(43,108,176,0.18)",
+                },
+            )
+        ]
+
+    # Per-haplotype guide summary table, complete-search's own Result
+    # Summary table (Guide/Nuclease/aggregate specificity score/Total)
+    # adapted to show paternal vs. maternal side by side -- same slot in
+    # the layout (right after the report box, before the main table).
+    # 2026-09-05: rebuilt to be a REAL mirror of complete-search's actual
+    # "general-profile-table" (:329-360, :3994-4067, :568-570), not just a
+    # simplified lookalike -- one row per guide, with "Total"/"# Bulges"/
+    # each "NMM" column holding a `\n`-joined MULTI-LINE string rendered via
+    # style_data whiteSpace: "pre" (the same trick complete-search's real
+    # table uses to show a tall per-bulge-count breakdown inside one row),
+    # stacking a PATERNAL block then a MATERNAL block where complete-search
+    # stacks REFERENCE then VARIANT. (Their table's blue header tint isn't
+    # backed by any style_header/CSS rule anywhere in this codebase --
+    # grepped for both and found neither, so the exact color can't be
+    # confirmed from source; applying this page's own already-established
+    # blue instead of guessing theirs.)
+    guide_summary_block = []
+    if guide_summary_rows:
+        _gcol_defs = (
+            [("", "Guide"), ("", "Nuclease")]
+            + [("Specificity score", l) for l in ("Paternal", "Maternal")]
+        )
+        _mmb_group = "Off-targets for Mismatch (MM) and Bulge (B) Value"
+        _grid_col_ids = ["Total", "# Bulges"] + [f"{i}MM" for i in range(_n_mm_cols)]
+        table_columns = [
+            {"name": [top, sub], "id": f"{top} {sub}".strip()} for top, sub in _gcol_defs
+        ] + [{"name": [_mmb_group, cid], "id": cid} for cid in _grid_col_ids]
+        table_data = []
+        for row in guide_summary_rows:
+            guide = row["Guide"]
+            pat_grid, mat_grid = grid_by_guide.get(guide, (None, None))
+            data_row = {
+                "Guide": guide,
+                "Nuclease": row["Nuclease"],
+                "Specificity score Paternal": row.get("Specificity score (Paternal)"),
+                "Specificity score Maternal": row.get("Specificity score (Maternal)"),
+                **_build_grid_row_cells(pat_grid, mat_grid, _n_mm_cols, _max_total_edits_int),
+            }
+            table_data.append(data_row)
+        guide_summary_block = [
+            html.H4("Guide summary"),
+            dash_table.DataTable(
+                id="assembly-guide-summary-table",
+                columns=table_columns,
+                data=table_data,
+                merge_duplicate_headers=True,
+                page_action="none",
+                # No style_header override: checked directly, real
+                # complete-search headers have no fill at all (plain
+                # default) -- an earlier pass here guessed a blue header
+                # fill, which was wrong (confirmed by the user against a
+                # real screenshot). The light tint on the DATA row in that
+                # same screenshot isn't a style_data background either --
+                # it's Dash's own default selected/active-row highlight,
+                # which general-profile-table gets from setting
+                # selected_cells + this exact css rule (results_page.py
+                # :536-548) -- reproduced verbatim here instead of guessing
+                # a static fill color.
+                selected_cells=[{"row": 0, "column": 0}],
+                css=[
+                    {
+                        "selector": "td.cell--selected, td.focused",
+                        "rule": "background-color: rgba(0, 0, 255,0.15) !important;",
+                    },
+                    {
+                        "selector": "td.cell--selected *, td.focused *",
+                        "rule": "background-color: rgba(0, 0, 255,0.15) !important;",
+                    },
+                ],
+                style_table={"overflowX": "auto"},
+                style_data={"whiteSpace": "pre", "height": "auto", "font-size": "1.15rem"},
+                style_cell={"textAlign": "center", "padding": "6px"},
+                style_cell_conditional=[
+                    {"if": {"column_id": "Total"}, "textAlign": "left"},
+                ],
+            ),
+        ]
+        # Explanatory paragraphs directly below the table -- complete-search
+        # has these under its own general-profile-table (the same slot),
+        # adapted here: PATERNAL/MATERNAL stand in for REFERENCE/VARIANT --
+        # there's no VCF here, so it's two independent per-genome searches,
+        # not a reference-vs-variant split.
+        _explain_style = {
+            "margin": "0",
+            "fontSize": "1.02rem",
+            "color": "#334155",
+            "lineHeight": "1.5",
+        }
+        guide_summary_block.append(
+            html.Div(
+                [
+                    html.P(
+                        [
+                            "Each entry counts ",
+                            html.Strong("distinct off-target sites found in that haplotype's own search"),
+                            ", grouped by mismatch count and bulge size. Paternal and Maternal are two "
+                            "independent searches (not a reference-vs-variant split -- there's no VCF "
+                            "here) -- a site present in both haplotypes is counted once in each.",
+                        ],
+                        style=_explain_style,
+                    ),
+                    html.P(
+                        [
+                            "The ",
+                            html.Strong("0 Mismatches / 0 Bulges"),
+                            " entry holds the guide's ",
+                            html.Strong("perfect genomic match(es)"),
+                            " in that haplotype -- the candidate on-target(s). The intended on-target "
+                            "cannot be told from a perfect-match off-target by sequence alone.",
+                        ],
+                        style={**_explain_style, "marginTop": "0.5em"},
+                    ),
+                ],
+                style={"marginTop": "6px", "marginBottom": "6px"},
+            )
+        )
+        # Plain-language burden callout -- "which haplotype carries more
+        # off-target risk", computed directly from the row above (no new
+        # data), one sentence per guide.
+        _callouts = []
+        for row in guide_summary_rows:
+            pat_n = row.get("Total off-targets (Paternal)")
+            mat_n = row.get("Total off-targets (Maternal)")
+            if not isinstance(pat_n, int) or not isinstance(mat_n, int) or pat_n == mat_n:
+                continue
+            more, fewer, diff = (
+                ("Maternal", "Paternal", mat_n - pat_n)
+                if mat_n > pat_n
+                else ("Paternal", "Maternal", pat_n - mat_n)
+            )
+            _callouts.append(
+                html.Li(
+                    f"{row['Guide']}: {more} haplotype has {diff} more off-target(s) "
+                    f"than {fewer} ({pat_n} vs {mat_n})."
+                )
+            )
+        if _callouts:
+            guide_summary_block.append(
+                html.Ul(_callouts, style={"font-size": "0.95rem", "color": "#334155"})
+            )
+        guide_summary_block.append(html.Br())
+
+    # Shared layout applied to every plotly figure on this page -- "plotly_white"
+    # instead of plotly's default (grey plot background, purple/blue default
+    # trace colors) for a cleaner look closer to the rest of the page, plus a
+    # font size matching the fontsize=17 convention complete-search's own
+    # matplotlib images use (generate_img_radar_chart.py) so the interactive
+    # and static plots on this page don't look like they're from two
+    # different tools.
+    _PLOTLY_LAYOUT = dict(template="plotly_white", font=dict(size=14), margin=dict(t=50))
+
+    # Haplotype-coverage visual (2026-09-10): ported from the combined
+    # report's own `_combined_haplotype_coverage_figure_uri()` (matplotlib,
+    # itself ported from the pangenome paper figure's "panel d" style) for
+    # consistency between the live page and the static report/zip -- same
+    # three categories (Both haplotypes / Maternal / Paternal), same
+    # Mapped/Unmapped colors (#4C72B0 / #C44E52), same "one consolidated
+    # annotation per bar" fix for the label-collision problem a per-segment
+    # label has on a narrow segment (a segment's own label is wider than the
+    # segment). Replaces the OLDER, mapped-only 3-way origin-split bar
+    # (both/paternal-only/maternal-only, no mapped/unmapped breakdown) --
+    # this version is a strict superset of that one's information (same
+    # three groups, each now also split by mappability) and surfaces the
+    # non-mappable counts this page's Custom Ranking tab already treats as a
+    # first-class site set, so the two views use one consistent picture of
+    # "found where" instead of two different ones.
+    #
+    # `summary_counts` (log_verbose.txt) is the ONLY source for the two
+    # non-mappable counts (dropped from `df` entirely -- see the comment
+    # above `origin_counts`); the three mapped counts prefer the same
+    # source for consistency, falling back to `origin_counts` (derived
+    # straight from `df`) if log_verbose.txt is missing/unparsed.
+    origin_chart_block = []
+    _cov_both = summary_counts.get("both", origin_counts.get("both", 0))
+    _cov_pat_mapped = summary_counts.get("paternal_only", origin_counts.get("paternal_only", 0))
+    _cov_mat_mapped = summary_counts.get("maternal_only", origin_counts.get("maternal_only", 0))
+    _cov_pat_unmapped = summary_counts.get("paternal_non_mappable", 0)
+    _cov_mat_unmapped = summary_counts.get("maternal_non_mappable", 0)
+    _cov_total = _cov_both + _cov_pat_mapped + _cov_mat_mapped + _cov_pat_unmapped + _cov_mat_unmapped
+    if _cov_total:
+        # listed Paternal->Maternal->"Both haplotypes"; autorange="reversed"
+        # below then puts "Both haplotypes" at the TOP, matching the static
+        # report's bar order.
+        _cov_categories = ["Paternal", "Maternal", "Both haplotypes"]
+        _cov_mapped = [_cov_pat_mapped, _cov_mat_mapped, _cov_both]
+        _cov_unmapped = [_cov_pat_unmapped, _cov_mat_unmapped, 0]
+        _cov_fig = go.Figure()
+        _cov_fig.add_trace(
+            go.Bar(
+                y=_cov_categories, x=_cov_mapped, name="Mapped (has hg38 coordinate)",
+                orientation="h", marker_color="#4C72B0",
+            )
+        )
+        _cov_fig.add_trace(
+            go.Bar(
+                y=_cov_categories, x=_cov_unmapped, name="Unmapped (no hg38 coordinate)",
+                orientation="h", marker_color="#C44E52",
+            )
+        )
+        # one consolidated annotation per bar (total + mapped/unmapped
+        # breakdown), placed just past the bar's own end -- never per
+        # segment, which is what collided on a narrow segment before.
+        _cov_annotations = []
+        for cat, mapped, unmapped in zip(_cov_categories, _cov_mapped, _cov_unmapped):
+            total = mapped + unmapped
+            text = f"<b>{total:,} total</b>" + (
+                f"<br>({mapped:,} mapped, {unmapped:,} unmapped)" if unmapped else ""
+            )
+            _cov_annotations.append(
+                dict(
+                    x=total, y=cat, text=text, showarrow=False,
+                    xanchor="left", xshift=8, align="left", font=dict(size=13),
+                )
+            )
+        _cov_layout = {**_PLOTLY_LAYOUT, "margin": dict(t=70, b=40, r=160)}
+        _cov_fig.update_layout(
+            **_cov_layout,
+            barmode="stack",
+            height=260,
+            xaxis_title="Reconciled off-target sites",
+            yaxis=dict(autorange="reversed"),
+            annotations=_cov_annotations,
+            # legend above the plot -- below collided with the x-axis title
+            # in the same cramped margin (the origin-split bar's own prior
+            # fix for the same issue, carried over here).
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        )
+        origin_chart_block = [dcc.Graph(figure=_cov_fig, id="assembly-origin-split-graph")]
+
+    final_list = [
+        html.H3(f"Personal Assembly Search Results — {job_id}"),
+        html.P(
+            f"Paternal genome: {params.get('Genome_paternal', '?')}  |  "
+            f"Maternal genome: {params.get('Genome_maternal', '?')}  |  "
+            f"PAM: {params.get('Pam', '?')}  |  "
+            f"Mismatches: {params.get('Mismatches', '?')}  |  "
+            f"DNA bulges: {params.get('DNA', '?')}  |  "
+            f"RNA bulges: {params.get('RNA', '?')}  |  "
+            f"Max total edits: {params.get('Max_total_edits', '?')}",
+            style={"color": "#555"},
+        ),
+        html.Hr(),
+        *report_box,
+        *guide_summary_block,
+        html.H4("Haplotype coverage"),
+        html.Div(
+            [
+                _stat("Found in both haplotypes", origin_counts.get("both", 0)),
+                _stat("Paternal-only", origin_counts.get("paternal_only", 0)),
+                _stat("Maternal-only", origin_counts.get("maternal_only", 0)),
+                _stat(
+                    "Paternal non-mappable to hg38",
+                    summary_counts.get("paternal_non_mappable", "?"),
+                ),
+                _stat(
+                    "Maternal non-mappable to hg38",
+                    summary_counts.get("maternal_non_mappable", "?"),
+                ),
+            ]
+        ),
+        *origin_chart_block,
+        html.P(
+            "Non-mappable sites have no hg38 equivalent -- invisible to any "
+            "reference-based search. Their per-site detail (in each "
+            "haplotype's own assembly coordinates) is in the Custom Ranking "
+            "tab below, under Site set -> Maternal-unmappable / "
+            "Paternal-unmappable.",
+            style={
+                "font-size": "1.0rem",
+                "color": "#777",
+                "font-style": "italic",
+                "marginTop": "6px",
+            },
+        ),
+    ]
+    # ---- "Custom Ranking" tab content (2026-09-06 redesign) ----
+    # Was: the reconciled table alone, plus two separate always-visible
+    # "private off-targets" Details expandables above (removed -- folded in
+    # as two of the three "Site set" options below). Was ALSO a simplified
+    # version of complete-search's own Custom Ranking tab (group-by x2,
+    # min/max thresholds, submit/reset, SQL-backed) -- still simplified here
+    # (one guide, no samples/VCF, no SQL db for assembly-search), but now
+    # adds a genuine "Query Genomic Region" equivalent (the region filter
+    # below) as a mode on this one table instead of a second, mostly-
+    # overlapping tab -- both features are really "which subset of sites, in
+    # which coordinate space, am I browsing".
+    custom_ranking_tab = [
+        html.Br(),
+        dbc.Row(
+            [
+                dbc.Col(
+                    [
+                        html.H6("Site set"),
+                        dcc.Dropdown(
+                            id="assembly-site-set-dropdown",
+                            options=_SITE_SET_OPTIONS,
+                            value="mappable",
+                            clearable=False,
+                        ),
+                    ],
+                    width=4,
+                ),
+            ]
+        ),
+        html.Br(),
+        html.Details(
+            [
+                html.Summary(
+                    "Filter by genomic region",
+                    style={"cursor": "pointer", "fontWeight": "600"},
+                ),
+                html.Div(
+                    id="assembly-region-filter-body",
+                    children=_assembly_region_filter_children(job_directory, "mappable", "hg38"),
+                    style={"marginTop": "10px"},
+                ),
+            ]
+        ),
+        dcc.Store(id="assembly-region-filter-store"),
+        html.Br(),
+        dbc.Row(
+            [
+                dbc.Col(
+                    [
+                        html.H6("Sort by"),
+                        dcc.Dropdown(
+                            id="assembly-sort-by-dropdown",
+                            options=_MAPPABLE_SORT_OPTIONS,
+                            value=_MAPPABLE_DEFAULT_SORT,
+                            clearable=False,
+                        ),
+                    ],
+                    width=4,
+                ),
+                dbc.Col(
+                    [
+                        html.H6("Order"),
+                        dcc.RadioItems(
+                            id="assembly-sort-order-radio",
+                            options=[
+                                {"label": " Ascending", "value": "asc"},
+                                {"label": " Descending", "value": "desc"},
+                            ],
+                            value="desc",
+                            labelStyle={"display": "inline-block", "marginRight": "14px"},
+                        ),
+                    ],
+                    width=4,
+                ),
+            ]
+        ),
+        html.Br(),
+        html.P(
+            id="assembly-site-set-note",
+            children=_assembly_site_set_note(job_directory, "mappable"),
+            style={
+                "font-size": "1.0rem",
+                "color": "#777",
+                "font-style": "italic",
+                "marginTop": "6px",
+            },
+        ),
+        dash_table.DataTable(
+            id="assembly-results-table",
+            columns=[{"name": c, "id": c, "hideable": True} for c in display_cols],
+            data=df.to_dict("records"),
+            page_size=25,
+            sort_action="native",
+            sort_by=[{"column_id": _MAPPABLE_DEFAULT_SORT, "direction": "desc"}],
+            filter_action="native",
+            style_table={"overflowX": "auto"},
+            style_data={"whiteSpace": "normal", "height": "auto", "font-size": "1.05rem"},
+            style_cell={"textAlign": "left", "padding": "4px"},
+        ),
+    ]
+
+    # ---- "Graphical Reports" tab content ----
+    # Top-1000 image: reuse each haplotype's own pre-rendered CFD plot
+    # (already generated by that haplotype's underlying complete-search
+    # run, nothing new computed here). Only CFD -- not the CRISTA or fewest
+    # mm+b variants (per request), and not the "_by_variant_effect" sibling,
+    # which splits/colors by REF-vs-ALT variant origin -- always degenerate
+    # here (no VCF, so always "ref"), same reasoning as dropping the ALT
+    # table columns above.
+    # 2026-09-06: pulled out of the "Graphical Reports" tab into the always-
+    # visible section, per request -- reordered to coverage -> CFD lollipop
+    # (side by side) -> CFD-score distribution -> mm/bulge distribution
+    # (side by side, shared legend). Before this change these all lived
+    # inside graphical_reports_tab, stacked one haplotype under the other
+    # (see git history / the plan doc's "before" note for the old layout if
+    # this needs reverting -- nothing here was deleted, just reordered and
+    # laid out side by side).
+    graphical_blocks = []
+    lollipop_cols = []
+    for hap, label, dirname_key in (
+        ("paternal", "Paternal", "Paternal_dir"),
+        ("maternal", "Maternal", "Maternal_dir"),
+    ):
+        hap_dir_name = params.get(dirname_key)
+        if not hap_dir_name:
+            continue
+        imgs_dir = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name, "imgs")
+        img_paths = sorted(glob(os.path.join(imgs_dir, "CRISPRme_CFD_top_1000_log_for_main_text_*.png")))
+        encoded = [p for p in ((path, _encode_png(path)) for path in img_paths) if p[1]]
+        if not encoded:
+            continue
+        lollipop_cols.append(
+            html.Div(
+                [html.H6(label, style={"textAlign": "center"})]
+                + [
+                    html.Img(src=src, style={"maxWidth": "100%", "width": "100%", "margin": "6px 0"})
+                    for _, src in encoded
+                ],
+                style={"flex": "1 1 0", "minWidth": "0", "padding": "0 10px"},
+            )
+        )
+    if lollipop_cols:
+        graphical_blocks.append(
+            html.Div(
+                [html.H4("CFD score, top 1000 off-targets")]
+                + [
+                    html.Div(
+                        lollipop_cols,
+                        style={"display": "flex", "flexWrap": "wrap", "gap": "10px"},
+                    )
+                ]
+            )
+        )
+
+    # Paternal-vs-maternal CFD-score distribution: same area-plot shape as
+    # complete-search's own CFDGraph (PostProcess/CFDGraph.py, REF vs VAR
+    # series), but that module's legend labels are hardcoded strings inside
+    # createGraph() (not parameters), so it can't be reused as-is for a
+    # paternal/maternal split without editing that file -- which per-branch
+    # convention this work doesn't touch. New, independent figure instead:
+    # same plotly area-plot approach, correct labels, built from data this
+    # page already loaded above (hap_predictions_all), not a new file format.
+    # CFD is natively 0-1 (same scale shown everywhere else on this page,
+    # e.g. the CFD_score_(fewest_mm+b) column) -- bucketed at 0.01 resolution
+    # (101 buckets) for a reasonably smooth curve, but the axis stays on the
+    # native 0-1 scale rather than rescaled to 0-100.
+    def _cfd_bucket_counts(hap: str) -> List[int]:
+        counts = [0] * 101
+        hap_df = hap_predictions_all.get(hap)
+        if hap_df is None or "CFD_score_(fewest_mm+b)" not in hap_df.columns:
+            return counts
+        for v in pd.to_numeric(hap_df["CFD_score_(fewest_mm+b)"], errors="coerce").dropna():
+            counts[min(100, max(0, int(round(v * 100))))] += 1
+        return counts
+
+    if hap_predictions_all:
+        cfd_fig = go.Figure()
+        for hap, label in (("paternal", "Paternal"), ("maternal", "Maternal")):
+            cfd_fig.add_trace(
+                go.Scatter(
+                    x=[i / 100 for i in range(101)],
+                    y=_cfd_bucket_counts(hap),
+                    fill="tozeroy",
+                    name=label,
+                )
+            )
+        cfd_fig.update_layout(
+            **_PLOTLY_LAYOUT,
+            xaxis_title="CFD score (0-1)",
+            # dtick=1 on a log axis means "one tick per decade" (1, 10, 100,
+            # ...) -- without it plotly's auto-ticking on this data (many
+            # zero/near-zero buckets next to a handful of large ones) mixes
+            # tick spacings inconsistently, which is what looked "weird".
+            yaxis=dict(title="Number of off-targets (log scale)", type="log", dtick=1),
+            hovermode="x",
+        )
+        graphical_blocks.append(
+            html.Div(
+                [
+                    html.H6("CFD-score distribution, paternal vs. maternal"),
+                    dcc.Graph(figure=cfd_fig, id="assembly-cfd-distribution-graph"),
+                ]
+            )
+        )
+
+    # Per-position mismatch/bulge distribution -- what complete-search's own
+    # Graphical Reports tab actually shows for "what basepair it is
+    # mismatched/bulged to around the guide": the bottom bar-chart panel of
+    # generate_img_radar_chart.py's combined ENCODE/GENCODE+motif figure
+    # (PostProcess/generate_img_radar_chart.py:258-283, driven by a
+    # motifDict built in PostProcess/radar_chart_dict_generator.py from the
+    # raw per-alignment aligned strings: lowercase letter = mismatch-to-that-
+    # base, "-" = bulge). Not reused directly -- that combined figure bundles
+    # an ENCODE/GENCODE annotation radar chart in the SAME image, which
+    # would render degenerate here (this run's annotation is "vuoto.txt" /
+    # empty, so every Annotation_* column is "NA" -- see the annotation
+    # column decision elsewhere on this page), and its motifDict is built
+    # from raw CRISPRitz target-file columns this page doesn't load. New,
+    # independent tally instead, against the SAME aligned-sequence columns
+    # this page already has (Aligned_protospacer+PAM_REF_(fewest_mm+b) for
+    # mismatches/RNA-bulges, Aligned_spacer+PAM_(fewest_mm+b) for DNA-bulges
+    # -- confirmed directly against real rows: lowercase = mismatch base,
+    # "-" on the REF side = RNA bulge, "-" on the spacer side = DNA bulge,
+    # same convention). Built from each haplotype's full prediction set
+    # (not mapped-only): this is a per-haplotype sequence-composition
+    # statistic, not tied to hg38 mappability.
+    #
+    # Verified directly against this exact haplotype's own real, already-
+    # computed .motif_dict_*.json (ground truth, not just re-derivation):
+    # array width is always exactly len(guide) -- never elongated past it,
+    # even for a DNA-bulge-affected alignment -- and a guide position that's
+    # a literal "N" (a PAM wildcard, e.g. positions 21-23 of a 20bp-NGG
+    # guide's padded "...NNN") tallies whatever base is actually present
+    # UNCONDITIONALLY, not only on mismatch. PAM must match exactly for a
+    # target to be reported at all, so every off-target has the same base
+    # there (e.g. G for the "GG" of NGG) and it's never flagged lowercase/
+    # mismatched (an N position can't "mismatch" anything) or bulged --
+    # confirmed the real motif_dict never records a bulge at a PAM position
+    # either. The middle "N" of NGG (any base allowed) correctly still
+    # shows a real mixed distribution.
+    def _position_tallies(hap: str, guide_seq: str) -> Dict[str, List[int]]:
+        hap_df = hap_predictions_all.get(hap)
+        ref_col = "Aligned_protospacer+PAM_REF_(fewest_mm+b)"
+        spacer_col = "Aligned_spacer+PAM_(fewest_mm+b)"
+        if hap_df is None or ref_col not in hap_df.columns or spacer_col not in hap_df.columns:
+            return {}
+        ref_seqs = hap_df[ref_col].dropna().astype(str)
+        spacer_seqs = hap_df[spacer_col].dropna().astype(str)
+        # Width is the guide's OWN length, never elongated -- checked
+        # directly against the real, already-computed .motif_dict_*.json
+        # this same haplotype's own complete-search run wrote (ground
+        # truth, not the reimplementation): its arrays are always exactly
+        # len(guide) long, confirming the original never extends past it
+        # even for DNA-bulge-elongated alignments (it slices the bulge back
+        # out instead of growing the array). An earlier pass here grew the
+        # array to the longest observed alignment, adding a spurious extra
+        # trailing position.
+        width = len(guide_seq)
+        if width == 0:
+            return {}
+        tallies = {k: [0] * width for k in ("A", "C", "G", "T", "RNA bulge", "DNA bulge")}
+        for seq in ref_seqs:
+            n = len(seq)
+            for i in range(width):
+                is_pam_wildcard = guide_seq[i] == "N"
+                if is_pam_wildcard:
+                    # PAM sits at the END of the alignment. A DNA bulge
+                    # earlier in the spacer inserts a "-" mid-string, which
+                    # shifts every later index (including the PAM's) right
+                    # by one on that row -- so a fixed start-relative index
+                    # would grab the wrong character on bulge-affected rows,
+                    # diluting what should be a pure PAM match. Index from
+                    # the end instead (offset = distance from the guide's
+                    # own end), which lands on the true PAM regardless of an
+                    # earlier bulge. Verified against the real motif_dict:
+                    # PAM positions there are 100% pure, no mismatch/bulge
+                    # ever recorded (PAM must match exactly for a target to
+                    # be reported at all) -- this now matches exactly.
+                    offset_from_end = width - i
+                    true_ch = seq[-offset_from_end] if offset_from_end <= n else ""
+                    if true_ch.upper() in "ACGT":
+                        tallies[true_ch.upper()][i] += 1
+                    elif true_ch == "-":
+                        tallies["RNA bulge"][i] += 1
+                elif i < n:
+                    ch = seq[i]
+                    if ch.islower() and ch.upper() in "ACGT":
+                        tallies[ch.upper()][i] += 1
+                    elif ch == "-":
+                        tallies["RNA bulge"][i] += 1
+        for seq in spacer_seqs:
+            for i in range(width):
+                # Same real-data check confirms DNA bulge is NEVER recorded
+                # at a PAM position (bulges are structurally confined to the
+                # spacer) -- excluded here too. A "-" landing at a raw index
+                # inside the PAM stretch is a bulge-shift artifact (the true
+                # bulge is earlier in this same row's spacer), not a real
+                # signal at this position.
+                if guide_seq[i] == "N":
+                    continue
+                if i < len(seq) and seq[i] == "-":
+                    tallies["DNA bulge"][i] += 1
+        return tallies
+
+    # x-axis labels: bare guide letters, matching the original exactly
+    # (plt.xticks(ticks=ind, labels=list(guide))) -- an earlier pass here
+    # added a "position:" prefix to disambiguate the guide's repeated
+    # letters, which is NOT what the original does; reverted to match.
+    # y-axis: the original normalizes each position's stacked values by
+    # that position's own total-across-all-series divided into the GLOBAL
+    # max such total (generate_img_radar_chart.py:243-252: `maxmax =
+    # max(totalMotif)`, `motifDict[nuc][count] /= maxmax`) -- i.e. every
+    # bar's height is relative to the single most-covered position, 0-1,
+    # not a raw count. Re-read that code and initially didn't carry this
+    # through; fixed here to match.
+    _guide_seq = guides_seen[0] if guides_seen else ""
+    # 2026-09-06: was two independent full-legend figures stacked in one
+    # column ("per request", see the git history for that exact reasoning if
+    # this ever needs reverting). Now one make_subplots figure, side by
+    # side, ONE shared legend (only the paternal column's traces register in
+    # the legend; the maternal column's matching series reuse the same
+    # legendgroup so clicking a legend entry toggles both sides together) --
+    # subplot_titles are centered over their own column by plotly's default
+    # annotation placement.
+    _series_names = ("A", "C", "G", "T", "RNA bulge", "DNA bulge")
+    _hap_cols = [
+        (hap, label, col)
+        for col, (hap, label) in enumerate((("paternal", "Paternal"), ("maternal", "Maternal")), start=1)
+        if _position_tallies(hap, _guide_seq)
+    ]
+    if _hap_cols:
+        position_fig = make_subplots(
+            rows=1, cols=len(_hap_cols),
+            subplot_titles=[label for _, label, _ in _hap_cols],
+        )
+        for hap, label, col in _hap_cols:
+            tallies = _position_tallies(hap, _guide_seq)
+            width = len(next(iter(tallies.values())))
+            # Real bug from a previous pass: using the guide's own letters as
+            # the bar x-VALUES (not just their tick labels) means plotly
+            # treats x as categorical and merges every bar sharing the same
+            # letter onto one x-slot -- a guide has repeated letters (this
+            # one has 5 A's, for instance), so most positions silently
+            # vanished/overlapped, which is why the chart "didn't go across
+            # all positions". Fixed: bars are placed at true numeric
+            # positions (matching the original matplotlib plot's `ind =
+            # np.arange(len(guide))`), and the letters are attached only as
+            # tick TEXT via xaxis.tickvals/ticktext.
+            x_pos = list(range(width))
+            x_labels = [_guide_seq[i] if i < len(_guide_seq) else "" for i in range(width)]
+            totals_per_position = [sum(tallies[s][i] for s in tallies) for i in range(width)]
+            maxmax = max(totals_per_position) if totals_per_position else 0
+            normalized = (
+                {s: [v / maxmax for v in tallies[s]] for s in tallies}
+                if maxmax
+                else tallies
+            )
+            for series in _series_names:
+                position_fig.add_trace(
+                    go.Bar(
+                        x=x_pos,
+                        y=normalized[series],
+                        name=series,
+                        legendgroup=series,
+                        showlegend=(col == 1),  # one shared legend, from the first column only
+                        marker_color=plotly.colors.qualitative.Plotly[_series_names.index(series)],
+                    ),
+                    row=1, col=col,
+                )
+            position_fig.update_xaxes(
+                title_text="Guide position", tickmode="array", tickvals=x_pos, ticktext=x_labels,
+                row=1, col=col,
+            )
+            position_fig.update_yaxes(
+                title_text="Fraction of most-covered position's total" if col == 1 else None,
+                range=[0, 1], row=1, col=col,
+            )
+        position_fig.update_layout(**_PLOTLY_LAYOUT, barmode="stack", height=440)
+        graphical_blocks.append(
+            html.Div(
+                [
+                    html.H4("Mismatch/bulge distribution by alignment position"),
+                    html.P(
+                        "Per-position tally of which base an off-target "
+                        "mismatches to, and where RNA/DNA bulges occur, "
+                        "across all off-targets found in that haplotype -- "
+                        "each bar is a fraction of the most-covered "
+                        "position's total, not a raw count. The PAM "
+                        "positions (the last 3, matching the PAM used) are "
+                        "expected to look full or near-full: the PAM must "
+                        "match exactly for a site to be reported at all.",
+                        style={"font-size": "0.95rem", "color": "#777"},
+                    ),
+                    dcc.Graph(figure=position_fig, id="assembly-position-mmb-barplot"),
+                ]
+            )
+        )
+
+    # 2026-09-06: these used to live in their own "Graphical Reports" tab
+    # (graphical_reports_tab, dropped below) -- moved into the always-visible
+    # section per request, right after the haplotype-coverage block/private-
+    # off-target tables above.
+    final_list.extend(graphical_blocks)
+
+    # Own tab, matching complete-search's actual "Summary by
+    # Mismatches/Bulges" tab (moved out of the always-visible top section --
+    # an earlier pass put it there since only 2 tabs were planned at the
+    # time; now a 3rd tab matching complete-search's real tab set instead).
+    mmb_tab = (
+        [html.Br()] + mmb_summary_block
+        if mmb_summary_block
+        else [html.Br(), html.P("No mismatch+bulge summary available for this job.")]
+    )
+
+    final_list.append(html.Hr())
+    final_list.append(
+        dcc.Tabs(
+            [
+                dcc.Tab(label="Custom Ranking", children=custom_ranking_tab),
+                dcc.Tab(label="Summary by Mismatches/Bulges", children=mmb_tab),
+            ]
+        )
+    )
+
+    return html.Div(final_list, style={"margin": "1%"})
+
+
+@app.callback(
+    Output("assembly-region-filter-body", "children"),
+    Output("assembly-sort-by-dropdown", "options"),
+    Output("assembly-sort-by-dropdown", "value"),
+    Output("assembly-site-set-note", "children"),
+    Input("assembly-site-set-dropdown", "value"),
+    State("url", "search"),
+    prevent_initial_call=True,
+)
+def update_assembly_site_set_controls(site_set: str, search: str) -> Tuple:
+    """Rebuilds the region-filter controls, Sort-by options, and the
+    explanatory note under 'Sort by' whenever the Site set dropdown changes
+    -- see result_page_assembly()'s Custom Ranking tab (2026-09-06
+    redesign) and _assembly_region_filter_children()/_assembly_site_set_note()
+    above, which this reuses so the initial render and this callback build
+    identical content."""
+    if not isinstance(site_set, str):
+        raise PreventUpdate
+    job_id = _job_id_from_search(search)
+    job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
+    region_children = _assembly_region_filter_children(job_directory, site_set, "hg38")
+    sort_options = _MAPPABLE_SORT_OPTIONS if site_set == "mappable" else _UNMAPPABLE_SORT_OPTIONS
+    sort_default = _MAPPABLE_DEFAULT_SORT if site_set == "mappable" else _UNMAPPABLE_DEFAULT_SORT
+    note = _assembly_site_set_note(job_directory, site_set)
+    return region_children, sort_options, sort_default, note
+
+
+@app.callback(
+    Output("assembly-region-chrom-dropdown", "options"),
+    Output("assembly-region-chrom-dropdown", "value"),
+    Input("assembly-coord-space-radio", "value"),
+    State("assembly-site-set-dropdown", "value"),
+    State("url", "search"),
+    prevent_initial_call=True,
+)
+def update_assembly_region_chrom_options(coord_space: str, site_set: str, search: str) -> Tuple:
+    """Re-populates the chromosome dropdown when the coordinate-space choice
+    changes within the 'mappable' site set (hg38/Maternal/Paternal each have
+    their own real chromosome list). A no-op for an unmappable site set's
+    hidden single-value radio -- its chromosome options are already set
+    correctly by update_assembly_site_set_controls() above."""
+    if coord_space not in _COORD_SPACE_COLS:
+        raise PreventUpdate
+    job_id = _job_id_from_search(search)
+    job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
+    df, _ = _assembly_mappable_frame(job_directory)
+    chrom_col, _ = _COORD_SPACE_COLS[coord_space]
+    return _assembly_region_chrom_options(df, chrom_col), None
+
+
+@app.callback(
+    Output("assembly-region-filter-store", "data"),
+    Input("assembly-region-filter-btn", "n_clicks"),
+    Input("assembly-region-clear-btn", "n_clicks"),
+    Input("assembly-site-set-dropdown", "value"),
+    State("assembly-coord-space-radio", "value"),
+    State("assembly-region-chrom-dropdown", "value"),
+    State("assembly-region-start-input", "value"),
+    State("assembly-region-end-input", "value"),
+    prevent_initial_call=True,
+)
+def update_assembly_region_filter_store(
+    n_filter: int, n_clear: int, site_set: str,
+    coord_space: str, chrom: str, start, end,
+) -> Optional[Dict]:
+    """Holds the CURRENTLY ACTIVE region filter (if any), independent of
+    whatever control most recently fired -- a Store rather than reacting to
+    trigger identity in the table callback below, so an active filter
+    survives the user then changing Sort-by/Order without needing to
+    re-click Filter. Cleared on Clear, and also whenever Site set itself
+    changes (a filter's chromosome/coordinate-space choice doesn't carry
+    over to a different site set)."""
+    triggered = dash.ctx.triggered_id
+    if triggered == "assembly-region-filter-btn" and chrom:
+        return {
+            "site_set": site_set, "coord_space": coord_space,
+            "chrom": chrom, "start": start, "end": end,
+        }
+    return None  # Clear button, or Site set changed underneath the filter
+
+
+@app.callback(
+    Output("assembly-results-table", "columns"),
+    Output("assembly-results-table", "data"),
+    Output("assembly-results-table", "sort_by"),
+    Input("assembly-site-set-dropdown", "value"),
+    Input("assembly-sort-by-dropdown", "value"),
+    Input("assembly-sort-order-radio", "value"),
+    Input("assembly-region-filter-store", "data"),
+    State("url", "search"),
+    prevent_initial_call=True,
+)
+def update_assembly_results_table(
+    site_set: str, sort_col: str, sort_order: str,
+    region_filter: Optional[Dict], search: str,
+) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+    """Rebuilds assembly-results-table's columns/data/sort_by from the
+    Custom Ranking tab's Site set / Sort by / Order controls plus whatever
+    region filter is currently active (from the Store above) -- see
+    result_page_assembly()'s Custom Ranking tab (2026-09-06 redesign)."""
+    if not isinstance(site_set, str) or not isinstance(sort_col, str) or not isinstance(sort_order, str):
+        raise PreventUpdate
+    job_id = _job_id_from_search(search)
+    job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
+    df, display_cols = _assembly_site_set_frame(job_directory, site_set)
+    if df.empty:
+        return [], [], []
+    if region_filter and region_filter.get("site_set") == site_set and region_filter.get("chrom"):
+        if site_set == "mappable":
+            chrom_col, start_col = _COORD_SPACE_COLS.get(
+                region_filter.get("coord_space", "hg38"), _COORD_SPACE_COLS["hg38"]
+            )
+        else:
+            chrom_col, start_col = _UNMAPPABLE_COORD_COLS
+        mask = df[chrom_col] == region_filter["chrom"]
+        starts = pd.to_numeric(df[start_col], errors="coerce")
+        if region_filter.get("start") is not None:
+            mask &= starts >= region_filter["start"]
+        if region_filter.get("end") is not None:
+            mask &= starts <= region_filter["end"]
+        df = df[mask]
+    columns = [{"name": c, "id": c, "hideable": True} for c in display_cols]
+    sort_by = [{"column_id": sort_col, "direction": sort_order}] if sort_col in display_cols else []
+    return columns, df.to_dict("records"), sort_by
 
 
 # store drop-down value in auxiliary file

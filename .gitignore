@@ -182,3 +182,4 @@ samplesIDs/*
 *.zip
 PostProcess/dnaShape.pkl
 .mode_type.txt
+LiftoverFiles/
