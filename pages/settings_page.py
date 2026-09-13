@@ -185,7 +185,7 @@ def _settings_upload_chunk():
         total = int(request.headers.get("X-Total-Chunks", "1"))
     except ValueError:
         return ("bad chunk headers", 400)
-    if target not in ("genome", "vcf", "annotation", "chain", "chromalias") or not name or ".." in name:
+    if target not in ("genome", "vcf", "annotation", "chain", "chromalias", "assembly-bundle") or not name or ".." in name:
         return ("bad target or file name", 400)
     # validate the destination name on the FIRST chunk so a bad name fails now,
     # not after a multi-GB upload has already streamed to disk
@@ -1332,6 +1332,24 @@ def settings_page() -> List:
                 ]
             ),
             html.Div(id="hprc-fetch-feedback", style={"margin-top": "0.4rem"}),
+            html.Hr(),
+            html.B("Or import a complete bundle"),
+            html.P(
+                "Upload a ready-made personal assembly as a single .zip or .tar.gz "
+                "whose one top-level <individual>/ folder holds a metadata.json plus "
+                "paternal/ and maternal/ subfolders (each with a genome/ directory, a "
+                "liftOver chain, and a chromAlias file) -- exactly the layout the "
+                "'Fetch from HPRC' option above produces. It is extracted, validated, "
+                "and registered automatically; you can then pick the individual on the "
+                "search form.",
+                style={"color": "#555", "fontSize": "0.9em"},
+            ),
+            html.Small("Personal assembly bundle (.zip / .tar.gz)"),
+            html.Div(
+                className="crisprme-chunk-upload",
+                style={"margin-top": "0.2rem", "margin-bottom": "0.5rem"},
+                **{"data-target": "assembly-bundle"},
+            ),
             html.Hr(),
             html.B("Or upload your own files"),
             html.P(

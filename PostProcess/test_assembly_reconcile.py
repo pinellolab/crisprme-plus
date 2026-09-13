@@ -695,6 +695,75 @@ class TestReconcileHaplotypes(unittest.TestCase):
             self.assertEqual(summary["maternal_non_mappable"], 0)
             self.assertEqual(len(combined), 3)
 
+    def test_empty_haplotype_treated_as_no_offtargets(self):
+        # A haplotype whose search found ZERO off-targets (no
+        # *_integrated_results.tsv at all) must NOT crash reconcile: every locus
+        # on the other haplotype becomes <other>_only (never "both"), and the
+        # empty side contributes 0 non-mappable. Regression for the pre-existing
+        # find_results_prefix FileNotFoundError abort.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paternal_dir = os.path.join(tmpdir, "paternal_results")
+            os.makedirs(paternal_dir, exist_ok=True)  # empty: no integrated_results file
+            maternal_dir = self._make_haplotype_results(
+                tmpdir, "maternal",
+                [self._pred_row("chr1", 1000, 0.9), self._pred_row("chr1", 9000, 0.4)],
+            )
+            haplotypes = {
+                "paternal": {
+                    "chrom_alias_file": self._make_chrom_alias(tmpdir, "paternal"),
+                    "chain_file": "unused.chain",
+                    "results_dir": paternal_dir,
+                },
+                "maternal": {
+                    "chrom_alias_file": self._make_chrom_alias(tmpdir, "maternal"),
+                    "chain_file": "unused.chain",
+                    "results_dir": maternal_dir,
+                },
+            }
+
+            def fake_run_liftover(bed_path, chain_file, mapped_path, unmapped_path, env="liftover_env"):
+                bed = pd.read_csv(bed_path, sep="\t", header=None,
+                                   names=["chrom", "start", "end", "off_target_id"])
+                lift_map = {1000: 50000, 9000: 70000}
+                with open(mapped_path, "w") as mf, open(unmapped_path, "w"):
+                    for _, r in bed.iterrows():
+                        hg38_end = lift_map[r["end"]]
+                        mf.write(f"chr1\t{hg38_end - 1}\t{hg38_end}\t{r['off_target_id']}\n")
+                return mapped_path, unmapped_path
+
+            with patch.object(ar, "run_liftover", side_effect=fake_run_liftover):
+                combined, summary = ar.reconcile_haplotypes(haplotypes, workdir=tmpdir, merge_bp=3)
+
+            self.assertEqual(summary["both"], 0)
+            self.assertEqual(summary["paternal_only"], 0)
+            self.assertEqual(summary["maternal_only"], 2)
+            self.assertEqual(summary["paternal_non_mappable"], 0)
+            self.assertEqual(summary["maternal_non_mappable"], 0)
+            self.assertEqual(len(combined), 2)
+            self.assertTrue((combined["origin"] == "maternal_only").all())
+
+    def test_both_haplotypes_empty_yields_empty_combined(self):
+        # A guide with no off-targets on EITHER haplotype: reconcile must not
+        # crash, and reports all-zero counts + an empty combined table that
+        # still carries the 'origin' column.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pat = os.path.join(tmpdir, "paternal_results"); os.makedirs(pat, exist_ok=True)
+            mat = os.path.join(tmpdir, "maternal_results"); os.makedirs(mat, exist_ok=True)
+            haplotypes = {
+                "paternal": {"chrom_alias_file": self._make_chrom_alias(tmpdir, "paternal"),
+                             "chain_file": "unused.chain", "results_dir": pat},
+                "maternal": {"chrom_alias_file": self._make_chrom_alias(tmpdir, "maternal"),
+                             "chain_file": "unused.chain", "results_dir": mat},
+            }
+            combined, summary = ar.reconcile_haplotypes(haplotypes, workdir=tmpdir, merge_bp=3)
+            self.assertEqual(summary["both"], 0)
+            self.assertEqual(summary["paternal_only"], 0)
+            self.assertEqual(summary["maternal_only"], 0)
+            self.assertEqual(summary["paternal_non_mappable"], 0)
+            self.assertEqual(summary["maternal_non_mappable"], 0)
+            self.assertEqual(len(combined), 0)
+            self.assertIn("origin", combined.columns)
+
     def test_unliftable_locus_counted_as_non_mappable_not_dropped(self):
         # 3 loci per haplotype, not 1: check_liftover_failure_rate exists
         # specifically to catch a suspiciously high liftOver rejection rate,

@@ -686,7 +686,26 @@ def reconcile_haplotypes(
 
         for name, cfg in haplotypes.items():
             log(f"Loading {name} predictions...")
-            prefix = cfg.get("results_prefix") or find_results_prefix(cfg["results_dir"])
+            try:
+                prefix = cfg.get("results_prefix") or find_results_prefix(cfg["results_dir"])
+            except FileNotFoundError:
+                # A haplotype whose search produced zero off-targets is a
+                # legitimate outcome (a guide with no hits on that assembly),
+                # not an error -- there is simply no *_integrated_results.tsv to
+                # read. Treat it as an empty prediction set so reconciliation
+                # still runs: every locus on the OTHER haplotype then becomes
+                # <other>_only (never "both"), and this haplotype contributes 0
+                # non-mappable. The column schemas match the real loaders
+                # (load_crisprme_predictions -> PRED_COLS + off_target_id;
+                # load_lifted_bed -> hg38 cols + off_target_id) so the merge and
+                # cluster_collapse below operate on a well-formed empty frame.
+                log(f"{name}: no off-targets found -- treating as an empty result")
+                predictions[name] = pd.DataFrame(columns=PRED_COLS + ["off_target_id"])
+                lifted[name] = pd.DataFrame(
+                    columns=["hg38_chr", "hg38_start", "hg38_end", "off_target_id"]
+                )
+                unlifted_ids[name] = set()
+                continue
             _, ucsc_to_genbank = load_chrom_alias(cfg["chrom_alias_file"])
 
             predictions[name] = load_crisprme_predictions(cfg["results_dir"], prefix, merge_bp)
