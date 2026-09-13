@@ -51,7 +51,7 @@ RUN micromamba install -y -n base \
         ucsc-liftover \
         huggingface_hub \
         importlib-metadata \
-        "dash>=2.14,<3" dash-bootstrap-components dash-daq \
+        "dash>=2.14,<3" "dash-bootstrap-components<2" dash-daq \
         flask flask-caching flask-compress gunicorn werkzeug \
     && micromamba clean --all --yes
 
@@ -91,8 +91,10 @@ COPY . ${PREFIX}/opt/crisprme/
 RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
     && chmod +x ${PREFIX}/bin/crisprme.py \
     && rm -rf ${PREFIX}/opt/crisprme/.git \
-    # dash-bootstrap-components 2.0.3 ships a stray site-packages/pyproject.toml that
-    # makes Biopython emit a BiopythonWarning at import; drop it so startup is clean.
+    # dbc is pinned <2 above (dbc>=2.0.0 needs React 18/Dash>=3, and its assembly-search
+    # dbc.Tabs don't render under 2.x). Defensive: some dbc builds dropped a stray
+    # site-packages/pyproject.toml that made Biopython emit a BiopythonWarning at import;
+    # remove it if present (no-op otherwise) so startup is clean.
     && rm -f ${PREFIX}/lib/python3.11/site-packages/pyproject.toml \
     # unzip the CRISTA model at build time (the 276 MB pickle ships zipped in git)
     && if [ -f ${PREFIX}/opt/crisprme/PostProcess/CRISTA_predictors.zip ]; then \

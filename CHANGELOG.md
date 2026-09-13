@@ -33,10 +33,12 @@ and the `release-crisprme` skill.
   (`download_hprc_assembly.py`) or accepts uploaded assemblies.
 
 ### Changed
-- Pinned **`dash-bootstrap-components<2`** (PR #48). dbc ≥ 2.0.0 requires React 18 / Dash ≥ 3;
-  this app targets React 16 / Dash 2.x, and the assembly-search `dbc.Tabs` do not render under
-  dbc 2.x. **A fresh image build from this release's `environment.yml` is required for the web
-  assembly-search feature** (the CLI is unaffected).
+- Pinned **`dash-bootstrap-components<2`** in both `environment.yml` (PR #48) **and the
+  `Dockerfile`** — the Docker build installs deps directly (not from `environment.yml`), so the
+  image pin is what actually reaches users. dbc ≥ 2.0.0 requires React 18 / Dash ≥ 3; this app
+  targets React 16 / Dash 2.x, and the assembly-search `dbc.Tabs` do not render under dbc 2.x.
+  The published v2.5.5 image ships dbc 1.7.x so the web assembly-search feature renders (the CLI
+  is unaffected).
 
 ### Fixed
 - `assembly-search` now passes `--max-total-edits {mm+bDNA+bRNA}` into each haplotype's
