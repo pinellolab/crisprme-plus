@@ -97,6 +97,16 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.p
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:v2.5.5 crisprme.py web-interface
 ```
 
+**The three prebuilt SpCas9 (NRG = NAG+NGG) variant indexes.** All three carry searchable
+indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever you need with
+`--what index --index-name <name>` (or grab more later from the web **Settings**):
+
+| Index (`--index-name`) | Variant sources | Resolution | Best for |
+|---|---|---|---|
+| **1000G-2021 + HGDP** — `NRG_3_hg38+hg38_1000G2021_HGDP` *(default)* | 1000 Genomes 2021 (3202) + HGDP (929), genotyped | phased → **CONFIRMED cis** + named per-sample carriers | most use cases; the web default |
+| **HPRC pangenome** — `NRG_3_hg38+hg38_HPRC` | HPRC Minigraph-Cactus — 232 assembly-derived genomes incl. CHM13, phased | CONFIRMED cis + named carriers; captures **pangenome-specific** variation | assembly-derived / pangenome variation |
+| **mega (sites-only)** — `NRG_3_hg38+hg38_mega` | 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us (aggregate) | population-level, **PUTATIVE** haplotypes with min-AF bounds (no per-sample) | widest allele-frequency provenance across 5 databases |
+
 > **Which variant index should I pick?** You only need **one** — if unsure, use the
 > **default 1000G-2021 + HGDP** (`NRG_3_hg38+hg38_1000G2021_HGDP`, downloaded in step 2):
 > sample-level genotypes with named per-sample carriers, and it covers most use cases.
