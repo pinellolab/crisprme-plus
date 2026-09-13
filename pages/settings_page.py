@@ -46,7 +46,9 @@ from .pages_utils import (
     resolve_builtin_annotation,
     GENOMES_DIR,
     LIFTOVER_DIR,
+    ASSEMBLIES_DIR,
 )
+import personal_assembly
 
 from dash import Input, Output, State, html, dcc, no_update
 from dash.exceptions import PreventUpdate
@@ -151,6 +153,21 @@ def _finalize_upload(
         os.makedirs(dest_dir, exist_ok=True)
         os.replace(part_path, os.path.join(dest_dir, name))
         return name
+    if target == "assembly-bundle":
+        # Bring-your-own personal assembly: a .zip/.tar.gz whose single
+        # top-level <individual>/ folder holds the bundle structure + a valid
+        # metadata.json (see personal_assembly.import_archive, which extracts to
+        # Assemblies/<individual>/ and validates before publishing).
+        ext = next((s for s in (".tar.gz", ".tgz", ".zip") if name.endswith(s)), None)
+        if ext is None:
+            raise ValueError("personal-assembly bundle must be a .zip or .tar.gz/.tgz archive")
+        scratch = part_path + ext  # import_archive picks zip vs tar by extension
+        os.replace(part_path, scratch)
+        try:
+            return personal_assembly.import_archive(scratch, current_working_directory)
+        finally:
+            if os.path.exists(scratch):
+                os.remove(scratch)
     raise ValueError(f"unknown upload target {target!r}")
 
 
@@ -755,9 +772,10 @@ def _deletable_options() -> List:
     for pm in get_available_PAM():
         opts.append({"label": f"PAM: {pm['value']}", "value": f"pam:{pm['value']}"})
     for a in installed_assemblies():
+        _alabel = "Personal assembly" if a.get("layout") == "bundle" else "Personal assembly pairing"
         opts.append(
             {
-                "label": f"Personal assembly pairing: {a['individual']}",
+                "label": f"{_alabel}: {a['individual']}",
                 "value": f"assembly:{a['individual']}",
             }
         )
@@ -802,15 +820,21 @@ def _delete_targets(kind: str, name: str) -> List[str]:
         leaf = name if name.endswith(".txt") else name + ".txt"
         return [os.path.join(cwd, "PAMs", leaf)]
     if kind == "assembly":
-        # Deliberately removes only the pairing MARKERS, never the underlying
-        # genome/chain/chromAlias files -- the genome folders in particular are
-        # shared with plain single-haplotype complete-search (Component A's
+        # Bundle layout (Assemblies/<individual>/ + metadata.json): the
+        # individual is one self-contained folder, so delete removes the WHOLE
+        # folder -- reclaiming every genome/chain/chromAlias file for that
+        # person, which is what "remove this individual" should do.
+        bundle = personal_assembly.delete_target(cwd, name)
+        if bundle is not None:
+            return [bundle]
+        # Legacy flat layout: remove only the pairing MARKERS, never the
+        # underlying genome/chain/chromAlias files -- the genome folders there
+        # are shared with plain single-haplotype complete-search (Component A's
         # genome dropdowns are intentionally unfiltered for exactly this
-        # reason), so silently deleting them here on an "un-pair this
-        # individual" action would be a real, surprising data-loss footgun.
-        # Underlying files, if the user wants them gone too, are removed one
-        # at a time via the existing "genome"/(future chain/chromAlias)
-        # delete kinds, with their own explicit confirmation.
+        # reason), so silently deleting them on an "un-pair this individual"
+        # action would be a surprising data-loss footgun. Those legacy files,
+        # if wanted gone too, are removed one at a time via the "genome" delete
+        # kind with its own explicit confirmation.
         targets = []
         for a in installed_assemblies():
             if a["individual"] != name:
@@ -908,6 +932,13 @@ def _delete_summary(item: str) -> str:
     }.get(kind, kind)
     extra = " (with its _INDELS companion)" if kind == "index" and has_indels else ""
     if kind == "assembly":
+        if personal_assembly.delete_target(current_working_directory, name) is not None:
+            return (
+                f"Delete personal assembly “{name}”?\n\nThis removes the whole "
+                f"Assemblies/{name}/ folder — both haplotypes' genome, chain and "
+                f"chromAlias files — and frees about {_fmt_size(total)}. This "
+                "cannot be undone; you can re-download or re-import it later."
+            )
         return (
             f"Un-pair personal assembly “{name}”?\n\nThis removes only the "
             "individual/haplotype markers (frees negligible space) -- the "
@@ -2065,9 +2096,7 @@ def fetch_from_hprc(n, sample_id):
             _shlex_quote(sys.executable),
             _shlex_quote(script),
             _shlex_quote(sample_id),
-            "--register",
-            "--genomes-dir", _shlex_quote(os.path.join(current_working_directory, GENOMES_DIR)),
-            "--liftover-dir", _shlex_quote(os.path.join(current_working_directory, LIFTOVER_DIR)),
+            "--data-dir", _shlex_quote(current_working_directory),
         ]
     )
     job_id = launch_settings_job_raw(cmd, f"Fetch {sample_id} from HPRC")

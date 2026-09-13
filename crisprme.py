@@ -66,6 +66,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
 from utils import download_reference_genome  # noqa: E402
 from assembly_reconcile import reconcile_haplotypes, check_liftover_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
+import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
 
 cicd_test = False
 if "--ci-cd-test" in input_args:
@@ -2990,14 +2991,19 @@ def print_help_assembly_search() -> None:
         "are haplotype-non-mappable -- invisible to any reference-based search.\n"
     )
     sys.stderr.write(
-        "Options:\n"
+        "Inputs -- either name a registered individual, OR give the 6 paths:\n"
+        "\t--assembly-individual, the name of a personal assembly registered under "
+        "Assemblies/<name>/ (fetched by download_hprc_assembly.py, or imported/"
+        "registered via the web Data Manager). Its metadata.json supplies both "
+        "haplotypes' genome/chain/chromAlias, so the 6 flags below are not needed. "
+        "[REQUIRED unless the 6 paths below are given]\n"
         "\t--genome-paternal, --genome-maternal, one haplotype's per-chromosome "
-        "FASTA folder each [REQUIRED]\n"
+        "FASTA folder each [REQUIRED unless --assembly-individual]\n"
         "\t--chain-paternal, --chain-maternal, one haplotype's liftOver chain "
-        "file vs. GRCh38 each [REQUIRED]\n"
+        "file vs. GRCh38 each [REQUIRED unless --assembly-individual]\n"
         "\t--chrom-alias-paternal, --chrom-alias-maternal, one haplotype's "
         "chromAlias file each (tab-separated, columns '# assembly', 'ucsc', "
-        "'genbank' -- HPRC-style) [REQUIRED]\n"
+        "'genbank' -- HPRC-style) [REQUIRED unless --assembly-individual]\n"
         "\t--guide, specify a file containing guide RNAs [REQUIRED]\n"
         "\t--pam, specify a file containing the PAM sequence [REQUIRED]\n"
         "\t--mm, number of mismatches allowed in the search [REQUIRED]\n"
@@ -3040,12 +3046,16 @@ def _check_named_file(args: List[str], flag: str, description: str) -> str:
 
 
 def _check_mandatory_args_assembly_search(args: List[str]) -> None:
-    required = [
-        "--genome-paternal", "--genome-maternal",
-        "--chain-paternal", "--chain-maternal",
-        "--chrom-alias-paternal", "--chrom-alias-maternal",
-        "--guide", "--pam", "--mm", "--output",
-    ]
+    always = ["--guide", "--pam", "--mm", "--output"]
+    if "--assembly-individual" in args:
+        # the individual folder supplies the 6 genome/chain/chromAlias paths
+        required = always
+    else:
+        required = [
+            "--genome-paternal", "--genome-maternal",
+            "--chain-paternal", "--chain-maternal",
+            "--chrom-alias-paternal", "--chrom-alias-maternal",
+        ] + always
     for flag in required:
         if flag not in args:
             error(f"{flag} is required")
@@ -3122,12 +3132,50 @@ def assembly_search() -> None:
     _check_mandatory_args_assembly_search(args)
     check_liftover_available()
 
-    genome_paternal = _check_named_dir(args, "--genome-paternal", "Paternal genome folder")
-    genome_maternal = _check_named_dir(args, "--genome-maternal", "Maternal genome folder")
-    chain_paternal = _check_named_file(args, "--chain-paternal", "Paternal liftOver chain file")
-    chain_maternal = _check_named_file(args, "--chain-maternal", "Maternal liftOver chain file")
-    chrom_alias_paternal = _check_named_file(args, "--chrom-alias-paternal", "Paternal chromAlias file")
-    chrom_alias_maternal = _check_named_file(args, "--chrom-alias-maternal", "Maternal chromAlias file")
+    # A registered personal assembly (Assemblies/<individual>/ + metadata.json)
+    # supplies all 6 genome/chain/chromAlias paths from its metadata, so the
+    # user need only name the individual -- the same folder+metadata layout the
+    # web form and download_hprc_assembly.py use. The 6 explicit flags remain
+    # available (and still work with the legacy flat layout).
+    individual = None
+    if "--assembly-individual" in args:
+        try:
+            individual = args[args.index("--assembly-individual") + 1]
+        except IndexError:
+            error("Missing input for --assembly-individual. An individual name must be specified")
+
+    if individual:
+        resolved = personal_assembly.resolve(current_working_directory, individual)
+        if resolved is None:
+            error(
+                f"No personal assembly named {individual!r} found under "
+                f"{personal_assembly.ASSEMBLIES_DIR}/. Fetch one with "
+                "download_hprc_assembly.py, or register it via the web Data Manager."
+            )
+        if not resolved["complete"]:
+            error(
+                f"Personal assembly {individual!r} is incomplete -- it needs both "
+                "paternal and maternal genome + chain + chromAlias files. "
+                "Re-fetch or complete it before searching."
+            )
+
+        def _abs(rel: str) -> str:
+            return os.path.join(current_working_directory, rel)
+
+        genome_paternal = _abs(resolved["paternal"]["genome_path"])
+        genome_maternal = _abs(resolved["maternal"]["genome_path"])
+        chain_paternal = _abs(resolved["paternal"]["chain_path"])
+        chain_maternal = _abs(resolved["maternal"]["chain_path"])
+        chrom_alias_paternal = _abs(resolved["paternal"]["chromalias_path"])
+        chrom_alias_maternal = _abs(resolved["maternal"]["chromalias_path"])
+        print(f"Resolved personal assembly {individual!r} -> {resolved['root']}/")
+    else:
+        genome_paternal = _check_named_dir(args, "--genome-paternal", "Paternal genome folder")
+        genome_maternal = _check_named_dir(args, "--genome-maternal", "Maternal genome folder")
+        chain_paternal = _check_named_file(args, "--chain-paternal", "Paternal liftOver chain file")
+        chain_maternal = _check_named_file(args, "--chain-maternal", "Maternal liftOver chain file")
+        chrom_alias_paternal = _check_named_file(args, "--chrom-alias-paternal", "Paternal chromAlias file")
+        chrom_alias_maternal = _check_named_file(args, "--chrom-alias-maternal", "Maternal chromAlias file")
     guidefile = _check_guide(args, True)
     pamfile = _check_pam(args)
     mm = _check_mm(args)

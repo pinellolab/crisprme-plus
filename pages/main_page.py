@@ -40,6 +40,7 @@ from .pages_utils import (
     get_available_liftover_files,
     installed_assemblies,
     LIFTOVER_DIR,
+    ASSEMBLIES_DIR,
     get_custom_annotations,
     sort_annotation,
     compress_file,
@@ -301,6 +302,22 @@ def _complete_assembly_options() -> List[Dict]:
     ]
 
 
+def _assembly_genome_label(genome_dir: str) -> str:
+    """Human-friendly label for a haplotype's genome dir, for the run's
+    .Params.txt display (read back by the results/report pages). In the bundle
+    layout ``Assemblies/<individual>/<hap>/genome`` the per-contig folder is
+    literally named ``genome``, so show ``<individual> (<hap>)`` instead; the
+    legacy ``Genomes/<name>_<hap>`` layout keeps showing the folder name."""
+    parts = os.path.normpath(genome_dir).split(os.sep)
+    if ASSEMBLIES_DIR in parts:
+        i = parts.index(ASSEMBLIES_DIR)
+        individual = parts[i + 1] if i + 1 < len(parts) else ""
+        hap = parts[i + 2] if i + 2 < len(parts) else ""
+        if individual and hap:
+            return f"{individual} ({hap})"
+    return os.path.basename(genome_dir.rstrip(os.sep))
+
+
 # Directory convention: the job id IS the `--output` value passed to
 # `assembly-search` directly -- no separate id, no mapping file.
 # `assembly_search()` itself is never modified;
@@ -400,13 +417,17 @@ def populate_assembly_fields_from_individual(individual: str) -> Tuple:
     if match is None:  # picked value no longer complete/registered -- don't guess
         return None, None, None, None, None, None
     pat, mat = match["paternal"], match["maternal"]
+    # cwd-relative resolved paths (identical shape for bundle + legacy layouts),
+    # resolved to absolute by submit_assembly_search_job. These 6 hidden fields
+    # therefore carry PATHS, not bare names -- submit passes them straight
+    # through rather than re-joining against Genomes/ or LiftoverFiles/.
     return (
-        pat["genome"],
-        mat["genome"],
-        pat["chain"],
-        mat["chain"],
-        pat["chromalias"],
-        mat["chromalias"],
+        pat["genome_path"],
+        mat["genome_path"],
+        pat["chain_path"],
+        mat["chain_path"],
+        pat["chromalias_path"],
+        mat["chromalias_path"],
     )
 
 
@@ -474,29 +495,31 @@ def submit_assembly_search_job(
     if not n:
         raise PreventUpdate
 
-    # chain-paternal/-maternal/chromalias-paternal/-maternal arrive as bare
-    # filenames (dcc.Dropdown values sourced from LiftoverFiles/, not typed
-    # paths) -- resolve to full paths before anything downstream uses them.
-    liftover_root = os.path.join(current_working_directory, LIFTOVER_DIR)
-    chain_paternal = os.path.join(liftover_root, chain_paternal) if chain_paternal else None
-    chain_maternal = os.path.join(liftover_root, chain_maternal) if chain_maternal else None
-    chromalias_paternal = (
-        os.path.join(liftover_root, chromalias_paternal) if chromalias_paternal else None
-    )
-    chromalias_maternal = (
-        os.path.join(liftover_root, chromalias_maternal) if chromalias_maternal else None
-    )
+    # All 6 fields arrive as cwd-RELATIVE paths, auto-derived from the
+    # "Individual" picker by populate_assembly_fields_from_individual (which
+    # resolves them identically for the bundle Assemblies/<id>/ layout and the
+    # legacy Genomes/+LiftoverFiles/ layout). Resolve to absolute here; no
+    # Genomes/ or LiftoverFiles/ re-joining is done anymore.
+    def _abs(p: str) -> Optional[str]:
+        return os.path.join(current_working_directory, p) if p else None
+
+    genome_paternal_dir = _abs(genome_paternal)
+    genome_maternal_dir = _abs(genome_maternal)
+    chain_paternal = _abs(chain_paternal)
+    chain_maternal = _abs(chain_maternal)
+    chromalias_paternal = _abs(chromalias_paternal)
+    chromalias_maternal = _abs(chromalias_maternal)
 
     missing = []
-    if not genome_paternal:
+    if not genome_paternal_dir:
         missing.append("paternal genome")
-    if not genome_maternal:
+    if not genome_maternal_dir:
         missing.append("maternal genome")
     # Assembly-search-specific check with no complete-search equivalent to
     # mirror -- complete-search only ever picks one genome, so this footgun
     # (picking the same folder for both haplotypes, almost certainly a
     # mis-click) doesn't exist there.
-    if genome_paternal and genome_maternal and genome_paternal == genome_maternal:
+    if genome_paternal_dir and genome_maternal_dir and genome_paternal_dir == genome_maternal_dir:
         missing.append("paternal and maternal genome must be different")
     if not chain_paternal or not os.path.isfile(chain_paternal):
         missing.append("paternal chain file")
@@ -536,18 +559,12 @@ def submit_assembly_search_job(
             html.Ul([html.Li(m) for m in missing]),
         )
 
-    genome_paternal_dir = os.path.join(
-        current_working_directory, GENOMES_DIR, str(genome_paternal).replace(" ", "_")
-    )
-    genome_maternal_dir = os.path.join(
-        current_working_directory, GENOMES_DIR, str(genome_maternal).replace(" ", "_")
-    )
     if not os.path.isdir(genome_paternal_dir) or not os.path.isdir(genome_maternal_dir):
         return (
             no_update,
             no_update,
             True,
-            html.Ul([html.Li("Selected genome folder(s) not found under Genomes/")]),
+            html.Ul([html.Li("Selected genome folder(s) not found on disk")]),
         )
 
     job_id = _new_assembly_job_id()
@@ -576,8 +593,8 @@ def submit_assembly_search_job(
     # unmodified, since _combined lands as its own top-level Results/ entry.
     params_lines = [
         ("Genome_type", "assembly"),
-        ("Genome_paternal", os.path.basename(genome_paternal_dir)),
-        ("Genome_maternal", os.path.basename(genome_maternal_dir)),
+        ("Genome_paternal", _assembly_genome_label(genome_paternal_dir)),
+        ("Genome_maternal", _assembly_genome_label(genome_maternal_dir)),
         ("Chain_paternal", chain_paternal),
         ("Chain_maternal", chain_maternal),
         ("ChromAlias_paternal", chromalias_paternal),

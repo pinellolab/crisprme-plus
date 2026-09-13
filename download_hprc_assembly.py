@@ -32,20 +32,34 @@ and the real index CSV, 2026-09-02 -- not guessed):
 
 FASTA SPLITTING: HPRC's release FASTA is one gzipped multi-record file
 with PanSN-style headers (e.g. ">HG01255#1#CM086702.1"), but CRISPRme's
-Genomes/<name>/ layout expects one plain .fa file per contig, named by
-its UCSC-style chromosome name (see the existing Genomes/HG01255_paternal/
-folder for the convention this matches exactly). The downloaded
-chromAlias.txt's own "assembly" (PanSN header) -> "ucsc" columns are the
-exact, already-correct mapping for this -- confirmed directly against the
-real file, including compound names like "chr14_JBHDTB010000001.1_random"
-for non-canonical contigs. No heuristic/guessing involved: this script
-looks up each record's real PanSN header in that mapping and uses the
-ucsc name verbatim as the output filename.
+search engine expects one plain .fa file per contig, named by its
+UCSC-style chromosome name. The downloaded chromAlias.txt's own "assembly"
+(PanSN header) -> "ucsc" columns are the exact, already-correct mapping for
+this -- confirmed directly against the real file, including compound names
+like "chr14_JBHDTB010000001.1_random" for non-canonical contigs. No
+heuristic/guessing involved: this script looks up each record's real PanSN
+header in that mapping and uses the ucsc name verbatim as the output name.
+
+ON-DISK LAYOUT: everything for one individual lands in a single
+self-contained folder with a metadata.json describing every file (see
+personal_assembly.py for the full rationale)::
+
+    <data-dir>/Assemblies/HG01255/
+      metadata.json
+      paternal/ genome/ chr1.fa … chrN.fa
+                HG01255_paternal_<acc>_vs_GRCh38.chain.gz
+                HG01255_paternal_<acc>.chromAlias.txt
+      maternal/ …
+
+so the individual can be removed with a single `rm -rf`, and shared/imported
+as a .zip/.tar.gz of the same structure. Writing metadata.json IS the
+registration -- the Settings Data Manager and the search forms discover the
+individual from it, no separate marker files.
 
 Usage:
     python download_hprc_assembly.py HG01255
-    python download_hprc_assembly.py HG01255 --register
     python download_hprc_assembly.py HG01255 --haplotypes paternal
+    python download_hprc_assembly.py HG01255 --data-dir /path/to/crisprme-data
 """
 from __future__ import annotations
 
@@ -58,6 +72,10 @@ import os
 import sys
 import urllib.request
 from typing import Dict, List, Optional, Tuple
+
+# personal_assembly lives in PostProcess/ (shared with crisprme.py + the web app)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "PostProcess"))
+import personal_assembly  # noqa: E402
 
 INDEX_CSV_URL = (
     "https://raw.githubusercontent.com/human-pangenomics/"
@@ -166,14 +184,15 @@ def _download(url: str, dest: str, note: str = "") -> None:
     os.replace(tmp, dest)
 
 
-def _verify_md5(path: str, md5_url: str) -> bool:
+def _verify_md5(path: str, md5_url: str) -> Optional[str]:
+    """Returns the expected MD5 hex string if the file matches it, else None."""
     with urllib.request.urlopen(md5_url, timeout=15) as resp:
         expected = resp.read().decode("utf-8").split()[0].strip()
     h = hashlib.md5()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             h.update(chunk)
-    return h.hexdigest() == expected
+    return expected if h.hexdigest() == expected else None
 
 
 def split_fasta_by_chromalias(fasta_gz_path: str, chromalias_path: str, dest_dir: str) -> List[str]:
@@ -231,9 +250,7 @@ def split_fasta_by_chromalias(fasta_gz_path: str, chromalias_path: str, dest_dir
 def process_individual(
     sample_id: str,
     haplotypes: List[str],
-    genomes_dir: str,
-    liftover_dir: str,
-    register: bool,
+    data_dir: str,
     work_dir: str,
 ) -> None:
     rows = fetch_index_rows(sample_id)
@@ -251,22 +268,30 @@ def process_individual(
         print(f"No {', '.join(missing_hap)} row found for {sample_id} in the index.")
         sys.exit(1)
 
+    # One self-contained folder per individual: <data-dir>/Assemblies/<sample>/
+    ind_dir = personal_assembly.individual_dir(data_dir, sample_id)
+    source = "HPRC release2 (human-pangenomics)"
+
     registered = {}
     for hap, row in by_hap.items():
         assembly_name = row["assembly_name"]
         print(f"\n{sample_id} {hap} ({assembly_name}):")
         urls = resolve_haplotype_urls(row)  # raises clearly if this row can't be trusted
 
-        chromalias_dest = os.path.join(liftover_dir, f"{assembly_name}.chromAlias.txt")
+        hap_dir = os.path.join(ind_dir, hap)
+        chromalias_name = f"{assembly_name}.chromAlias.txt"
+        chromalias_dest = os.path.join(hap_dir, chromalias_name)
         _download(urls["chromalias"], chromalias_dest, "chromAlias")
 
-        chain_dest = os.path.join(liftover_dir, f"{assembly_name}_vs_GRCh38.chain.gz")
+        chain_name = f"{assembly_name}_vs_GRCh38.chain.gz"
+        chain_dest = os.path.join(hap_dir, chain_name)
         _download(urls["chain"], chain_dest, "liftOver chain")
 
         fasta_tmp = os.path.join(work_dir, f"{assembly_name}.fa.gz")
         _download(urls["fasta"], fasta_tmp, "genome FASTA (large)")
         print("  verifying FASTA checksum...")
-        if not _verify_md5(fasta_tmp, urls["fasta_md5"]):
+        fasta_md5 = _verify_md5(fasta_tmp, urls["fasta_md5"])
+        if fasta_md5 is None:
             print(f"  MD5 MISMATCH for {fasta_tmp} -- aborting, not registering a possibly-corrupt download.")
             try:
                 os.remove(fasta_tmp)  # don't leave a multi-GB corrupt scratch file behind
@@ -274,41 +299,41 @@ def process_individual(
                 pass
             sys.exit(1)
 
-        genome_dest_dir = os.path.join(genomes_dir, f"{sample_id}_{hap}")
+        genome_dest_dir = os.path.join(hap_dir, "genome")
         print(f"  splitting FASTA into {genome_dest_dir}/ (one file per contig)...")
         written = split_fasta_by_chromalias(fasta_tmp, chromalias_dest, genome_dest_dir)
         print(f"  wrote {len(written)} contig files")
         # Remove the multi-GB scratch FASTA now that per-contig files are written
-        # (otherwise ~2GB/haplotype accumulates under <genomes-dir>/.tmp/).
+        # (otherwise ~2GB/haplotype accumulates under the scratch dir).
         try:
             os.remove(fasta_tmp)
         except OSError:
             pass
 
-        registered[hap] = {
-            "genome": f"{sample_id}_{hap}",
-            "chain": os.path.basename(chain_dest),
-            "chromalias": os.path.basename(chromalias_dest),
-        }
-
-    if register:
-        # Reuses the exact marker mechanism the Settings page's "Add a
-        # personal assembly" card uses (settings_page._write_assembly_marker),
-        # rather than re-implementing marker-writing here.
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from pages.settings_page import _write_assembly_marker  # noqa: E402
-        from pages.pages_utils import GENOMES_DIR as _GD, LIFTOVER_DIR as _LD  # noqa: E402
-
-        for hap, files in registered.items():
-            _write_assembly_marker(_GD, files["genome"], sample_id, hap)
-            _write_assembly_marker(_LD, files["chain"], sample_id, hap)
-            _write_assembly_marker(_LD, files["chromalias"], sample_id, hap)
-        print(f"\nRegistered {sample_id} ({', '.join(registered)}) with the Data Manager.")
-    else:
-        print(
-            f"\nDownloaded {sample_id} ({', '.join(registered)}). Not registered "
-            "-- re-run with --register, or register via Settings / Data Manager."
+        # Record this haplotype in the individual's metadata.json (paths relative
+        # to the individual folder). Writing metadata IS the registration -- the
+        # Data Manager and search forms discover the individual from it.
+        personal_assembly.write_haplotype(
+            data_dir,
+            sample_id,
+            hap,
+            {
+                "assembly_name": assembly_name,
+                "genome_dir": f"{hap}/genome",
+                "chain": f"{hap}/{chain_name}",
+                "chromalias": f"{hap}/{chromalias_name}",
+                "n_contigs": len(written),
+                "fasta_md5": fasta_md5,
+            },
+            source=source,
         )
+        registered[hap] = assembly_name
+
+    print(
+        f"\nRegistered {sample_id} ({', '.join(registered)}) -> "
+        f"{os.path.relpath(ind_dir, data_dir)}/ (metadata.json written). "
+        "It will appear in the Data Manager and the assembly-search form."
+    )
 
 
 def main() -> None:
@@ -318,16 +343,23 @@ def main() -> None:
         "--haplotypes", nargs="+", choices=["paternal", "maternal"],
         default=["paternal", "maternal"], help="Which haplotype(s) to fetch (default: both)",
     )
-    ap.add_argument("--register", action="store_true", help="Register with the Data Manager after download")
-    ap.add_argument("--genomes-dir", default="Genomes", help="Destination for split FASTA folders")
-    ap.add_argument("--liftover-dir", default="LiftoverFiles", help="Destination for chain/chromAlias files")
-    ap.add_argument("--work-dir", default=None, help="Scratch dir for the raw .fa.gz download (default: --genomes-dir/.tmp)")
+    ap.add_argument(
+        "--data-dir", default=".",
+        help="CRISPRme data folder; the assembly is written to <data-dir>/Assemblies/<sample>/ (default: .)",
+    )
+    ap.add_argument(
+        "--register", action="store_true",
+        help="Accepted for backward compatibility; registration is now automatic (metadata.json is written)",
+    )
+    ap.add_argument(
+        "--work-dir", default=None,
+        help="Scratch dir for the raw .fa.gz download (default: <data-dir>/Assemblies/.tmp)",
+    )
     args = ap.parse_args()
 
-    work_dir = args.work_dir or os.path.join(args.genomes_dir, ".tmp")
-    process_individual(
-        args.sample_id, args.haplotypes, args.genomes_dir, args.liftover_dir, args.register, work_dir,
-    )
+    data_dir = os.path.abspath(args.data_dir)
+    work_dir = args.work_dir or os.path.join(data_dir, personal_assembly.ASSEMBLIES_DIR, ".tmp")
+    process_individual(args.sample_id, args.haplotypes, data_dir, work_dir)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,16 @@ import os
 import json
 import gzip
 
+# personal_assembly lives in PostProcess/ (like assembly_reconcile), which
+# crisprme.py puts on sys.path at web-app boot. Insert it explicitly too so this
+# module-top import is robust regardless of import order.
+_POSTPROCESS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "PostProcess"
+)
+if _POSTPROCESS_PATH not in sys.path:
+    sys.path.insert(0, _POSTPROCESS_PATH)
+import personal_assembly  # noqa: E402
+
 
 # Define DNA alphabet
 DNA_ALPHABET = ["A", "C", "G", "T"]
@@ -242,6 +252,13 @@ GENOMES_DIR = "Genomes"
 # they live, so this directory is NOT in crisprme.py's own CRISPRMEDIRS --
 # only in index.py's website-side CRISPRME_DIRS.
 LIFTOVER_DIR = "LiftoverFiles"
+# Personal-assembly directory: one self-contained folder per individual
+# (paternal/maternal genome + chain + chromAlias + a metadata.json describing
+# each file), the preferred layout for assembly-search inputs. See
+# personal_assembly.py for the format + rationale. The older flat layout
+# (Genomes/<name>_<hap>/ + LiftoverFiles/ + hidden .assembly_individual markers)
+# is still read for backward compatibility by installed_assemblies().
+ASSEMBLIES_DIR = "Assemblies"
 # App-wide bulge ceiling: the largest index N the search form / build path targets
 # (index folder "<pam>_<N>_<genome>", usable bulges = N-1). Single-sourced here so the
 # reference-bulge-capacity helper (which pages_utils owns) and main_page's dropdown
@@ -1317,43 +1334,41 @@ def assembly_individual(root_dir: str, artifact_name: str) -> Optional[Tuple[str
     return individual, haplotype
 
 
-def installed_assemblies() -> List[Dict]:
-    """Group marked assembly artifacts by individual, for the settings-page
-    "Installed personal assemblies" listing (and later, the launch form's
-    individual-centric dropdown).
-
-    Returns
-    -------
-    List[Dict]
-        One dict per individual with a marker on at least one artifact:
-        ``{"individual": str, "paternal": {...} | None, "maternal": {...} | None,
-        "complete": bool}``. A haplotype's dict (when present) has
-        ``{"genome", "chain", "chromalias"}``, each the artifact name if marked
-        and present, else ``None`` -- so a partially-registered haplotype (e.g.
-        genome marked but chain not yet) is visible, not hidden.
-        ``complete`` is True only when both haplotypes have all 3.
-    """
+def _legacy_installed_assemblies() -> List[Dict]:
+    """Backward-compatible discovery of the OLD flat layout: genome folders
+    under ``Genomes/<name>_<hap>/`` + chain/chromAlias files under
+    ``LiftoverFiles/`` tied together by hidden ``.<name>.assembly_individual``
+    markers. New installs use the folder+``metadata.json`` bundle layout
+    (``personal_assembly.discover_bundles``); this keeps pre-existing installs
+    working. Each haplotype dict carries both display names (``genome`` /
+    ``chain`` / ``chromalias``) and cwd-relative resolved paths
+    (``*_path``) so callers resolve identically to bundle entries."""
     by_individual: Dict[str, Dict] = {}
 
-    def _note(individual: str, haplotype: str, kind: str, artifact_name: str) -> None:
+    def _note(individual: str, haplotype: str, kind: str, name: str, path: str) -> None:
         entry = by_individual.setdefault(individual, {"paternal": None, "maternal": None})
         hap = entry[haplotype]
         if hap is None:
-            hap = entry[haplotype] = {"genome": None, "chain": None, "chromalias": None}
-        hap[kind] = artifact_name
+            hap = entry[haplotype] = {
+                "genome": None, "chain": None, "chromalias": None,
+                "genome_path": None, "chain_path": None, "chromalias_path": None,
+            }
+        hap[kind] = name
+        hap[f"{kind}_path"] = path
 
     for g in get_available_genomes():
         pair = assembly_individual(GENOMES_DIR, g["value"].replace(" ", "_"))
         if pair:
-            _note(pair[0], pair[1], "genome", g["value"])
+            _note(pair[0], pair[1], "genome", g["value"],
+                  os.path.join(GENOMES_DIR, g["value"].replace(" ", "_")))
     for f in get_available_liftover_files("chain"):
         pair = assembly_individual(LIFTOVER_DIR, f["value"])
         if pair:
-            _note(pair[0], pair[1], "chain", f["value"])
+            _note(pair[0], pair[1], "chain", f["value"], os.path.join(LIFTOVER_DIR, f["value"]))
     for f in get_available_liftover_files("chromalias"):
         pair = assembly_individual(LIFTOVER_DIR, f["value"])
         if pair:
-            _note(pair[0], pair[1], "chromalias", f["value"])
+            _note(pair[0], pair[1], "chromalias", f["value"], os.path.join(LIFTOVER_DIR, f["value"]))
 
     def _hap_complete(hap: Optional[Dict]) -> bool:
         return bool(hap) and all(hap.get(k) for k in ("genome", "chain", "chromalias"))
@@ -1363,12 +1378,52 @@ def installed_assemblies() -> List[Dict]:
         results.append(
             {
                 "individual": individual,
+                "layout": "legacy",
+                "root": None,
+                "source": None,
                 "paternal": entry["paternal"],
                 "maternal": entry["maternal"],
                 "complete": _hap_complete(entry["paternal"]) and _hap_complete(entry["maternal"]),
             }
         )
     return results
+
+
+def installed_assemblies() -> List[Dict]:
+    """Every registered personal assembly, for the Settings "Installed personal
+    assemblies" listing, the assembly-search individual picker, and delete.
+
+    Merges the two layouts, **bundle wins** on a name clash:
+
+    * **bundle** -- ``Assemblies/<individual>/`` with a ``metadata.json``
+      (``personal_assembly.discover_bundles``); the preferred layout.
+    * **legacy** -- the old flat ``Genomes/<name>_<hap>/`` + ``LiftoverFiles/``
+      + ``.assembly_individual`` markers (``_legacy_installed_assemblies``).
+
+    Returns
+    -------
+    List[Dict]
+        One dict per individual::
+
+            {"individual": str, "layout": "bundle"|"legacy",
+             "root": <cwd-rel bundle dir or None>, "source": <str or None>,
+             "paternal": {...} | None, "maternal": {...} | None,
+             "complete": bool}
+
+        Each haplotype dict (when present) has display names
+        ``{"genome", "chain", "chromalias"}`` plus cwd-relative resolved paths
+        ``{"genome_path", "chain_path", "chromalias_path"}`` (and, for bundles,
+        ``assembly_name``). ``complete`` is True only when both haplotypes
+        resolve all three files on disk.
+    """
+    cwd = current_working_directory
+    by_name: Dict[str, Dict] = {}
+    # legacy first, then let bundles override a same-named individual
+    for entry in _legacy_installed_assemblies():
+        by_name[entry["individual"]] = entry
+    for entry in personal_assembly.discover_bundles(cwd):
+        by_name[entry["individual"]] = entry
+    return [by_name[k] for k in sorted(by_name)]
 
 
 def get_available_indexes() -> List:
