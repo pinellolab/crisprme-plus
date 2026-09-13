@@ -689,16 +689,24 @@ def reconcile_haplotypes(
             try:
                 prefix = cfg.get("results_prefix") or find_results_prefix(cfg["results_dir"])
             except FileNotFoundError:
-                # A haplotype whose search produced zero off-targets is a
-                # legitimate outcome (a guide with no hits on that assembly),
-                # not an error -- there is simply no *_integrated_results.tsv to
-                # read. Treat it as an empty prediction set so reconciliation
-                # still runs: every locus on the OTHER haplotype then becomes
-                # <other>_only (never "both"), and this haplotype contributes 0
-                # non-mappable. The column schemas match the real loaders
-                # (load_crisprme_predictions -> PRED_COLS + off_target_id;
-                # load_lifted_bed -> hg38 cols + off_target_id) so the merge and
-                # cluster_collapse below operate on a well-formed empty frame.
+                # find_results_prefix raises FileNotFoundError for BOTH zero and
+                # >1 *_integrated_results.tsv matches. Only the ZERO case is a
+                # benign result to absorb: a haplotype whose search produced no
+                # off-targets at all (a guide with no hits on that assembly) is
+                # legitimate, not an error. The >1 case is an unsupported
+                # multi-guide run and must still surface -- so re-raise it.
+                n_matches = len(
+                    glob.glob(os.path.join(cfg["results_dir"], "*_integrated_results.tsv"))
+                )
+                if n_matches != 0:
+                    raise
+                # Empty haplotype: substitute a well-formed empty prediction set
+                # so reconciliation still runs -- every locus on the OTHER
+                # haplotype then becomes <other>_only (never "both"), and this
+                # haplotype contributes 0 non-mappable. Column schemas match the
+                # real loaders (load_crisprme_predictions -> PRED_COLS +
+                # off_target_id; load_lifted_bed -> hg38 cols + off_target_id)
+                # so the merge and cluster_collapse below get a valid empty frame.
                 log(f"{name}: no off-targets found -- treating as an empty result")
                 predictions[name] = pd.DataFrame(columns=PRED_COLS + ["off_target_id"])
                 lifted[name] = pd.DataFrame(

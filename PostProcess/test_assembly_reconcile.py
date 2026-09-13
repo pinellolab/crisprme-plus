@@ -764,6 +764,25 @@ class TestReconcileHaplotypes(unittest.TestCase):
             self.assertEqual(len(combined), 0)
             self.assertIn("origin", combined.columns)
 
+    def test_multiguide_results_still_raise_not_swallowed_as_empty(self):
+        # find_results_prefix raises FileNotFoundError for >1 matches too (an
+        # unsupported multi-guide run). The empty-haplotype absorption must only
+        # swallow the ZERO-match case -- a >1-match must still surface as error.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pat = os.path.join(tmpdir, "paternal_results")
+            os.makedirs(pat, exist_ok=True)
+            for g in ("guideA", "guideB"):  # two = multi-guide (unsupported)
+                open(os.path.join(pat, f"{g}_PAM_pat_mm4_bMax2_integrated_results.tsv"), "w").close()
+            mat = self._make_haplotype_results(tmpdir, "maternal", [self._pred_row("chr1", 1000, 0.9)])
+            haplotypes = {
+                "paternal": {"chrom_alias_file": self._make_chrom_alias(tmpdir, "paternal"),
+                             "chain_file": "unused.chain", "results_dir": pat},
+                "maternal": {"chrom_alias_file": self._make_chrom_alias(tmpdir, "maternal"),
+                             "chain_file": "unused.chain", "results_dir": mat},
+            }
+            with self.assertRaises(FileNotFoundError):
+                ar.reconcile_haplotypes(haplotypes, workdir=tmpdir, merge_bp=3)
+
     def test_unliftable_locus_counted_as_non_mappable_not_dropped(self):
         # 3 loci per haplotype, not 1: check_liftover_failure_rate exists
         # specifically to catch a suspiciously high liftOver rejection rate,
