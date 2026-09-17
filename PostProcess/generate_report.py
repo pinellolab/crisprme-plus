@@ -1192,7 +1192,57 @@ def build_mmb_matrix(df, cols, meta):
         ("REFERENCE", _rows_for(reference)),
         ("VARIANT", _rows_for(variant)),
     ]
-    return {"mm_cols": mm_cols, "groups": groups}
+
+    # --- Per-(DNA,RNA)-bulge breakdown (report comment 1: count off-targets by
+    # bulge TYPE, not just total). A DNA bulge is an extra base in the DNA, shown
+    # as a gap '-' in the GUIDE-aligned string (always populated); RNA bulges are
+    # then total - DNA (the protospacer-aligned string is often NA for
+    # reference-origin rows, so we DERIVE RNA rather than count its gaps). The
+    # Bulge_type column only lists the distinct types present, so it can't split
+    # a mixed count -- the guide-gap method can. Validated on 4.24M real mega rows:
+    # dna<=total and rna>=0 for every row. Feature-detected: omitted (None) when
+    # the guide-aligned column is absent, so nothing breaks on older inputs.
+    guide_aln_col = next(
+        (c for c in ("Aligned_spacer+PAM_(fewest_mm+b)", "Aligned_spacer+PAM")
+         if c in df.columns),
+        None,
+    )
+    bulge_type_groups = None
+    if guide_aln_col is not None:
+        b_pos = b_series.clip(lower=0)
+        dna_series = (
+            df[guide_aln_col].astype(str).str.count("-").fillna(0).astype(int)
+            .clip(lower=0)
+        )
+        dna_series = pd.Series(
+            np.minimum(dna_series.to_numpy(), b_pos.to_numpy()), index=df.index
+        )
+        # only meaningful where a bulge count is known (b>=0); elsewhere dna=0
+        dna_series = dna_series.where(b_series >= 0, 0)
+
+        def _bulge_rows_for(mask):
+            rows = []
+            for tot in range(1, max_b + 1):  # tot==0 has no bulge type to split
+                for d in range(0, tot + 1):
+                    r = tot - d
+                    pair = mask & (b_series == tot) & (dna_series == d)
+                    total = int(pair.sum())
+                    if total == 0:
+                        continue
+                    per_mm = [int((pair & (mm_series == m)).sum()) for m in mm_cols]
+                    rows.append(((d, r), total, per_mm))
+            return rows
+
+        bulge_type_groups = [
+            ("REFERENCE", _bulge_rows_for(reference)),
+            ("VARIANT", _bulge_rows_for(variant)),
+        ]
+
+    return {
+        "mm_cols": mm_cols,
+        "groups": groups,
+        "bulge_type_groups": bulge_type_groups,
+    }
 
 
 def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
@@ -1358,6 +1408,7 @@ def render_summary_and_matrix(meta, spec_score, matrix):
     )
 
     # right: the MM/B matrix
+    bulge_type_html = ""
     if matrix is None:
         matrix_html = "<p>Off-target matrix unavailable (missing MM/bulge columns).</p>"
     else:
@@ -1408,6 +1459,48 @@ def render_summary_and_matrix(meta, spec_score, matrix):
             f"<tbody>{''.join(body)}</tbody></table></div>"
         )
 
+        # per-(DNA,RNA)-bulge breakdown table (report comment 1): the total-bulge
+        # rows above, split into DNA vs RNA bulges so off-targets are countable by
+        # bulge type. Shown only when the guide-aligned column was available.
+        btg = matrix.get("bulge_type_groups")
+        if btg and any(rows for _, rows in btg):
+            bt_head = (
+                ['<th class="grp">Origin</th>', "<th>DNA bulges</th>",
+                 "<th>RNA bulges</th>", "<th>Total</th>"]
+                + [f"<th>{m}MM</th>" for m in mm_cols]
+            )
+            bt_body = []
+            for label, rows in btg:
+                if not rows:
+                    continue
+                grp_total = sum(r[1] for r in rows)
+                first = True
+                for (d, r), total, per_mm in rows:
+                    cells = []
+                    if first:
+                        cells.append(
+                            f'<td class="grp" rowspan="{len(rows)}">{_esc(label)}'
+                            f'<br><span class="grp-total">({grp_total:,})</span></td>'
+                        )
+                        first = False
+                    cells.append(f"<td>{d}</td><td>{r}</td>")
+                    cells.append(f"<td class='tot'>{total:,}</td>")
+                    cells += [f"<td>{c:,}</td>" for c in per_mm]
+                    bt_body.append("<tr>" + "".join(cells) + "</tr>")
+            bulge_type_html = (
+                '<div class="matrix-title" style="margin-top:1.4em">Putative off-targets '
+                "by bulge type (DNA vs RNA)</div>"
+                '<div class="matrix-wrap"><table class="matrix">'
+                f"<thead><tr>{''.join(bt_head)}</tr></thead>"
+                f"<tbody>{''.join(bt_body)}</tbody></table></div>"
+                '<p class="caption">The bulge counts above, split into <strong>DNA</strong> '
+                "vs <strong>RNA</strong> bulges &mdash; a <strong>DNA bulge</strong> is an "
+                "extra base in the genomic DNA (a gap in the guide), an <strong>RNA bulge</strong> "
+                "an extra base in the spacer (a gap in the DNA). Each row is one observed "
+                "(DNA,&nbsp;RNA) combination; Total&nbsp;= row sum across mismatches. Bulge-free "
+                "sites (0&nbsp;B) are omitted here (they appear in the matrix above).</p>"
+            )
+
     return f"""
 <div class="summary-grid">
   <div class="summary-card">
@@ -1430,6 +1523,7 @@ def render_summary_and_matrix(meta, spec_score, matrix):
     and is placed here <strong>once</strong> &mdash; by its <strong>fewest-mismatch+bulge</strong>
     alignment, the score-neutral view (it does not prefer CFD over CRISTA). A site is never
     double-counted across cells.{_greyed_note}</p>
+    {bulge_type_html}
   </div>
 </div>
 """
