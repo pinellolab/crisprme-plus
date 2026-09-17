@@ -3267,12 +3267,18 @@ def build_footer(meta, version, tsv_basename):
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     crisprme_version = version or meta.get("version") or "n/a"
     return f"""<footer>
-<p class="license"><strong>License.</strong> CRISPRme+ is <strong>free for academic
-and non-profit research use</strong> (AGPL-3.0), for the user's own non-commercial
-research and teaching. <strong>Any commercial or for-profit use &mdash; of CRISPRme+
-or of any result or report it produces, including in a clinical trial, product, or
-development program, and regardless of who ran the software &mdash; requires a
-commercial license.</strong> To obtain a license, please contact
+<p class="license"><strong>License and permitted use.</strong> CRISPRme+ is licensed
+under the <strong>MGB Open Access License 1.0 (MGBOA&nbsp;1.0)</strong>. Use of the
+CRISPRme+ software, and of this report, is permitted only for
+<strong>non-commercial, non-revenue-generating academic purposes</strong>. By using or
+relying on this report, you agree that your use is limited to non-commercial,
+non-revenue-generating academic purposes. <strong>Any commercial or for-profit use,
+whether of the CRISPRme+ software or of any result or report it produces, including use
+in a clinical trial, product, or development program, and regardless of who ran the
+software, requires a commercial license.</strong> This notice may not be removed. Full
+license terms:
+<a href="https://github.com/MGB-Open-Science-Program-Office/open-science-license-library/blob/main/Open-Access-License-1.0/mgb-open-access-license-1.0.md">MGBOA&nbsp;1.0</a>.
+To obtain a commercial license, contact
 <a href="mailto:lpinello@mgh.harvard.edu">Luca Pinello (lpinello@mgh.harvard.edu)</a>.</p>
 <p class="disclaimer">{_esc(DISCLAIMER)}</p>
 <p class="feedback">Feedback or a bug to report? Please open an issue at

@@ -1,7 +1,7 @@
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/crisprme/README.html)
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/pinellolab/crisprme-plus?include_prereleases)
 ![Conda](https://img.shields.io/conda/dn/bioconda/crisprme)
-![license](https://img.shields.io/badge/license-AGPL--3.0-lightgrey)
+![license](https://img.shields.io/badge/license-MGBOA%201.0-lightgrey)
 
 <p align="center">
   <img src="assets/readme/crisprme-logo.png" alt="CRISPRme" width="700"/>
@@ -1788,10 +1788,11 @@ Epub 2022 Dec 15. PMID: 36522432; PMCID: PMC10272994.
 
 ## 6 License
 
-CRISPRme is licensed under the **AGPL-3.0** license, which permits its use **free
-of charge for academic and non-profit research and teaching**. Under the AGPL, any
-derivative work that is distributed or offered over a network (SaaS) must itself be
-released under the AGPL-3.0 with complete corresponding source code.
+Going forward (**version 2.5.6 and later**), CRISPRme+ is licensed under the **MGB
+Open Access License 1.0 (MGBOA 1.0)** ([full terms](LICENSE)), which permits use
+**only for non-commercial, non-revenue-generating, academic purposes**. Releases
+**2.5.5 and earlier remain available under AGPL-3.0**; this change applies going
+forward only and is not retroactive.
 
 ### Commercial licensing
 
@@ -1811,8 +1812,8 @@ no commercial rights to the outputs.
 
 The model is meant to be fair and to keep CRISPRme widely usable:
 
-- **Academic / non-profit users** use CRISPRme freely under the AGPL for their own
-  non-commercial research and teaching — no license, no fee, no time limit.
+- **Academic / non-profit users** use CRISPRme+ freely under MGBOA 1.0 for their own
+  non-commercial, non-revenue-generating research and teaching — no fee, no time limit.
 - **A commercial license covers running CRISPRme and the commercial use of what it
   produces.** Results generated under a valid commercial license may be used and
   transferred with the associated program — a downstream party (e.g. after an
