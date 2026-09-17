@@ -1788,11 +1788,9 @@ Epub 2022 Dec 15. PMID: 36522432; PMCID: PMC10272994.
 
 ## 6 License
 
-Going forward (**version 2.5.6 and later**), CRISPRme+ is licensed under the **MGB
-Open Access License 1.0 (MGBOA 1.0)** ([full terms](LICENSE)), which permits use
-**only for non-commercial, non-revenue-generating, academic purposes**. Releases
-**2.5.5 and earlier remain available under AGPL-3.0**; this change applies going
-forward only and is not retroactive.
+CRISPRme+ is licensed under the **MGB Open Access License 1.0 (MGBOA 1.0)**
+([full terms](LICENSE)), which permits its use **only for non-commercial,
+non-revenue-generating, academic purposes**.
 
 ### Commercial licensing
 
