@@ -1,7 +1,7 @@
 [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/crisprme/README.html)
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/pinellolab/crisprme-plus?include_prereleases)
 ![Conda](https://img.shields.io/conda/dn/bioconda/crisprme)
-![license](https://img.shields.io/badge/license-AGPL--3.0-lightgrey)
+![license](https://img.shields.io/badge/license-MGBOA%201.0-lightgrey)
 
 <p align="center">
   <img src="assets/readme/crisprme-logo.png" alt="CRISPRme" width="700"/>
@@ -31,7 +31,7 @@ through an interactive web-based interface.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
 - **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, plots, recommended validation panel, annotated top hits, per-tier downloads, legend). ([methods](METHODS.md#7-shareable-off-target-assessment-report))
 - **One-command Docker web interface + indexes on demand** — no conda, no giant build; pull reference data + prebuilt indexes from the HuggingFace CDN (`crisprme.py download`), or **build & publish your own** dict-less indexes (`build-index-only` / `publish-index --dictless`), and manage genomes / indexes / VCFs / annotations / PAMs from the browser **Data Manager**. ([protocol](docs/PRECOMPUTED_INDEXES.md))
-- **Personal-assembly search (CLI + web)** — `assembly-search` scans a fully assembled diploid genome (paternal + maternal haplotype FASTAs) directly, lifts each haplotype to hg38, and reconciles them (homozygous- / heterozygous-equivalent + haplotype-non-mappable sites) — no VCF inference. Available on the website (a "Personal assembly" tab + a Settings card that fetches an HPRC individual or takes uploaded assemblies) with a combined report. ([web guide](docs/crisprme_web_interface_user_guide.md#searching-a-personal-assembly-genome-assembly-search))
+- **Personal-assembly search (CLI + web)** — `assembly-search` scans a fully assembled diploid genome (paternal + maternal haplotype FASTAs) directly, lifts each haplotype to hg38, and reconciles them (homozygous- / heterozygous-equivalent + haplotype-non-mappable sites) — no VCF inference. Each individual is stored as one self-contained `Assemblies/<individual>/` folder + a `metadata.json` (fetch an HPRC individual, or bring your own as a `.zip`/`.tar.gz` bundle); `--assembly-individual <name>` runs a registered one from the CLI. Available on the website (a "Personal assembly" tab + a Settings card) with a combined report. ([web guide](docs/crisprme_web_interface_user_guide.md#searching-a-personal-assembly-genome-assembly-search))
 - **Also** — merged multi-dataset VCF panels (per-dataset provenance + per-haplotype phasing), PAM-geometry-aware (pamless) indexes, bounded-complexity controls (`--max-total-edits` + a high-variant-density skip), and optional email notifications.
 
 > ⚠️ **Note**  
@@ -60,8 +60,11 @@ Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) 
 small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
 first time it downloads the reference + variant data automatically (~45 GB, once), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
-(A **genome-wide *variant* search needs a 64 GB workstation/HPC**; on a **laptop**,
-reference-only or **single-chromosome / target-region variant** searches fit **16 GB**.)
+(Memory: the **whole-genome *variant-aware* search** needs **~64 GB of RAM** — set that
+under Docker Desktop → Settings → Resources → Memory. Many current laptops ship with
+36–128 GB and can run it; otherwise use a workstation/HPC. **Reference-only or
+single-chromosome / target-region variant** searches fit **~16 GB**, so any laptop
+handles those.)
 Details: [`install/`](install/).
 
 ---
@@ -1785,10 +1788,11 @@ Epub 2022 Dec 15. PMID: 36522432; PMCID: PMC10272994.
 
 ## 6 License
 
-CRISPRme is licensed under the **AGPL-3.0** license, which permits its use **free
-of charge for academic and non-profit research and teaching**. Under the AGPL, any
-derivative work that is distributed or offered over a network (SaaS) must itself be
-released under the AGPL-3.0 with complete corresponding source code.
+Going forward (**version 2.5.6 and later**), CRISPRme+ is licensed under the **MGB
+Open Access License 1.0 (MGBOA 1.0)** ([full terms](LICENSE)), which permits use
+**only for non-commercial, non-revenue-generating, academic purposes**. Releases
+**2.5.5 and earlier remain available under AGPL-3.0**; this change applies going
+forward only and is not retroactive.
 
 ### Commercial licensing
 
@@ -1808,8 +1812,8 @@ no commercial rights to the outputs.
 
 The model is meant to be fair and to keep CRISPRme widely usable:
 
-- **Academic / non-profit users** use CRISPRme freely under the AGPL for their own
-  non-commercial research and teaching — no license, no fee, no time limit.
+- **Academic / non-profit users** use CRISPRme+ freely under MGBOA 1.0 for their own
+  non-commercial, non-revenue-generating research and teaching — no fee, no time limit.
 - **A commercial license covers running CRISPRme and the commercial use of what it
   produces.** Results generated under a valid commercial license may be used and
   transferred with the associated program — a downstream party (e.g. after an
