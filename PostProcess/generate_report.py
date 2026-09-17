@@ -184,7 +184,7 @@ CURATED_COLUMNS = (
     ("CRISTA", "crista"),  # emitted only when crista_computed()
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
-    ("Variant", "variant"),  # rsID | genomic key when rsID absent
+    ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
@@ -193,7 +193,7 @@ CURATED_COLUMNS = (
     ("DHS", "dhs"),
     ("COSMIC_cancer_gene", "cosmic"),  # Cancer Gene Census tier/role; "-" when none
     ("IntOGen_cancer_driver", "intogen"),  # IntOGen (CC0) cancer-driver gene; "-" when none
-    ("High_complexity_region", "complex_region"),  # dense window: greedy shown, more exist
+    ("High_complexity_region", "complex_region"),  # TOTAL variants in the surrounding window (NOT this row's variant)
 )
 # value used when a curated column's source is missing / blank
 CURATED_MISSING = "-"
@@ -330,6 +330,76 @@ def _first_non_na(raw):
         if not _is_na(tok):
             return tok
     return None
+
+
+def _norm_one_variant(tok):
+    """Normalize ONE variant token to (``chrom;pos;ref;alt``, rsID_or_None).
+
+    Handles the three coexisting genomic-info forms seen in CRISPRme output:
+      * colon, no chr-prefix, optional ';rs' suffix:  '7:66994210:A:G;rs113993993'
+      * colon indel:                                  '16:60153651:CCTT:C'
+      * underscore, chr-prefixed (indels):            'chr12_113513560_G_A'
+      * bare rsID (no coordinate):                    'rs753117762'
+    Returns (coord, rsid) where coord is ``chr<chrom>;<pos>;<ref>;<alt>`` (or None
+    if the token carries no coordinate) and rsid is any rs-id found (or None)."""
+    tok = (tok or "").strip()
+    if not tok or _is_na(tok):
+        return None, None
+    rsid = None
+    core = tok
+    # split off an ';rs...' companion rsID if present (coord and rsid coexist)
+    if ";" in tok:
+        coord_parts, rs_parts = [], []
+        for p in tok.split(";"):
+            p = p.strip()
+            if not p:
+                continue
+            (rs_parts if p.lower().startswith("rs") else coord_parts).append(p)
+        rsid = rs_parts[0] if rs_parts else None
+        core = coord_parts[0] if coord_parts else None
+    if core is None:
+        return None, rsid
+    # a bare rsID with no coordinate
+    if core.lower().startswith("rs") and ":" not in core and "_" not in core:
+        return None, rsid or core
+    fields = core.split(":") if ":" in core else (core.split("_") if "_" in core else None)
+    if not fields or len(fields) < 4:
+        return None, rsid
+    chrom, pos, ref, alt = fields[0], fields[1], fields[2], fields[3]
+    if not str(chrom).lower().startswith("chr"):
+        chrom = "chr" + str(chrom)
+    return f"{chrom};{pos};{ref};{alt}", rsid
+
+
+def _format_variant_id(genome_raw, rsid_raw):
+    """Render the Variant cell as ``chrom;pos;ref;alt`` (the coordinate form the
+    user asked for), keeping the rsID as a companion in parentheses. Multi-SNP
+    haplotypes (comma-joined) are normalized per token. Falls back to the rsID
+    when no coordinate is available (e.g. an rsID-only row)."""
+    coords, rsids = [], []
+    if not _is_na(genome_raw):
+        for tok in str(genome_raw).split(","):
+            c, r = _norm_one_variant(tok)
+            if c:
+                coords.append(c)
+            if r:
+                rsids.append(r)
+    if not _is_na(rsid_raw):
+        for tok in str(rsid_raw).split(","):
+            tok = tok.strip()
+            if tok and tok.lower().startswith("rs"):
+                rsids.append(tok)
+    coords = list(dict.fromkeys(coords))   # dedup, preserve order
+    rsids = list(dict.fromkeys(rsids))
+    if coords:
+        out = ",".join(coords)
+        if rsids:
+            out += " (" + ",".join(rsids) + ")"
+        return out
+    if rsids:
+        return ",".join(rsids)
+    # last resort: whatever non-NA token the genome field holds
+    return _first_non_na(genome_raw)
 
 
 def _to_int_series(series):
@@ -474,10 +544,11 @@ def _curated_cell(kind, row, cols):
     elif kind == "pam_creation":
         v = _get("pam_creation")
     elif kind == "variant":
-        # rsID | genomic key when rsID absent
-        v = _first_non_na(_get("rsid")) if "rsid" in cols else None
-        if v is None and "var_genome" in cols:
-            v = _first_non_na(_get("var_genome"))
+        # chrom;pos;ref;alt (coordinate form) with the rsID kept as a companion;
+        # falls back to rsID only when no coordinate is available.
+        genome_raw = _get("var_genome") if "var_genome" in cols else None
+        rsid_raw = _get("rsid") if "rsid" in cols else None
+        v = _format_variant_id(genome_raw, rsid_raw)
     elif kind == "maf":
         maf = _min_maf(_get("maf")) if "maf" in cols else None
         # em-dash when blank (MAF footnote explains the blanks)
@@ -495,8 +566,10 @@ def _curated_cell(kind, row, cols):
     elif kind == "cosmic":
         v = _get("cosmic")
     elif kind == "complex_region":
-        # high-variant-density flag: compact "Yes (N var)" for the table; the full
-        # note + IUPAC live in integrated_results.tsv and the bundled regions BED.
+        # TOTAL variants in the surrounding protospacer window (NOT this row's
+        # variant) -- rendered "N in window" so it can't be misread as the
+        # per-target Variant count. Full note + IUPAC live in
+        # integrated_results.tsv and the bundled regions BED.
         v = _get("complex_region")
         if _is_na(v):
             return CURATED_MISSING
@@ -504,10 +577,10 @@ def _curated_cell(kind, row, cols):
         if "(" in s and " variants" in s:
             try:
                 n = s.split("(", 1)[1].split(" variants")[0].strip()
-                return f"Yes ({n} var)"
+                return f"{n} in window"
             except Exception:
                 pass
-        return "Yes"
+        return "dense window"
     elif kind == "perfect_match":
         # "Yes" for a perfect genomic match (0 mismatches + 0 bulges): a candidate
         # cut site with no a-priori on/off-target distinction. Blank otherwise.
@@ -2780,6 +2853,16 @@ _ANNOTATION_LEGEND = [
      "licence is attested). A blank cell (&ndash;) means the site is not in an IntOGen "
      "driver gene. Like COSMIC, this flag is context for prioritization, not evidence of "
      "risk on its own."),
+    ("complex_region", "High_complexity_region (variant-dense window)",
+     "The <b>total number of variants in the protospacer window</b> around this "
+     "off-target &mdash; a measure of <i>local variant density</i>, <b>not</b> the "
+     "variant that creates this off-target. The row&rsquo;s <code>Variant</code> column "
+     "names the specific variant(s) (as <code>chrom;pos;ref;alt</code>) that produce "
+     "THIS off-target; this column (e.g. <code>16 in window</code>) counts ALL variants "
+     "spanning the surrounding window, so a row can legitimately show one variant while "
+     "its window count is much larger. Such dense windows are reported greedily (one "
+     "representative alignment is shown; the full variant set for each window is in the "
+     "bundled <code>high_variant_density_regions.bed</code>)."),
 ]
 
 
