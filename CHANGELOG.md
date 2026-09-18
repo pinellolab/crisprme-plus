@@ -12,6 +12,25 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Changed
+- **License: CRISPRme+ is now the MGB Open Access License 1.0 (MGBOA 1.0).** The
+  software moves from AGPL-3.0 to MGBOA 1.0 (non-commercial, non-revenue-generating
+  academic use; commercial use requires a license). `LICENSE` carries the full MGBOA
+  text; the README, GitHub Pages footer, and the generated-report footer are updated
+  to match (the report footer uses the MGB-approved "License and permitted use" +
+  disclaimer language). The main `pinellolab/CRISPRme` repo is relicensed to match.
+- **Report: the off-target Mismatch/Bulge matrix is now resolved by bulge TYPE
+  (DNA vs RNA).** The single matrix splits each row into DNA-bulge and RNA-bulge
+  counts (derived from the guide-aligned gap positions), so off-targets are countable
+  by bulge type; the coarse total-bulge-only matrix is removed (the DNA/RNA table
+  includes the 0-bulge row, so it is a strict superset and keeps the perfect-match
+  highlight).
+- **Report: variant identifiers are shown as `chrom;pos;ref;alt`** (with the rsID as a
+  companion), instead of preferring the rsID — normalizing the previously mixed
+  rsID / `pos:ref:alt` / `chr_pos_ref_alt` forms; multi-SNP haplotypes are joined.
+- **Report: the high-variant-density column now reads "N in window"** (was
+  "Yes (N var)"), and the legend spells out that this counts total variants in the
+  surrounding window — distinct from the `Variant` column, which lists the variant(s)
+  that create the individual off-target.
 - **Personal-assembly storage is now one self-contained folder per individual with a
   single `metadata.json`.** `Assemblies/<individual>/{paternal,maternal}/genome/*.fa`
   plus each haplotype's `*_vs_GRCh38.chain.gz` and `*.chromAlias.txt`, described by a
