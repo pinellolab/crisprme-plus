@@ -1222,8 +1222,8 @@ def build_mmb_matrix(df, cols, meta):
 
         def _bulge_rows_for(mask):
             rows = []
-            for tot in range(1, max_b + 1):  # tot==0 has no bulge type to split
-                for d in range(0, tot + 1):
+            for tot in range(0, max_b + 1):  # include tot==0 (0D/0R) so this table
+                for d in range(0, tot + 1):  # is a strict superset of the MM/B matrix
                     r = tot - d
                     pair = mask & (b_series == tot) & (dna_series == d)
                     total = int(pair.sum())
@@ -1407,16 +1407,11 @@ def render_summary_and_matrix(meta, spec_score, matrix):
         for k, v in left_rows
     )
 
-    # right: the MM/B matrix
-    bulge_type_html = ""
+    # right: the MM/B matrix, resolved by bulge TYPE (DNA vs RNA) when available.
     if matrix is None:
         matrix_html = "<p>Off-target matrix unavailable (missing MM/bulge columns).</p>"
     else:
         mm_cols = matrix["mm_cols"]
-        head_cells = ['<th class="grp">Origin</th>', "<th>Bulges (B)</th>", "<th>Total</th>"]
-        head_cells += [f"<th>{m}MM</th>" for m in mm_cols]
-        head_html = "".join(head_cells)
-
         # beyond-budget boundary: cells whose MM+B exceeds the search budget hold
         # reference/variant-reconstructed alignments of within-budget sites (kept for
         # coverage, not extra risk) -- gray them so the in-budget region reads clearly.
@@ -1424,52 +1419,29 @@ def render_summary_and_matrix(meta, spec_score, matrix):
             _budget = int(_me)
         except (TypeError, ValueError):
             _budget = None
-        body = []
-        for label, rows in matrix["groups"]:
-            grp_total = sum(r[1] for r in rows)
-            first = True
-            for b, total, per_mm in rows:
-                cells = []
-                if first:
-                    cells.append(
-                        f'<td class="grp" rowspan="{len(rows)}">{_esc(label)}'
-                        f'<br><span class="grp-total">({grp_total:,})</span></td>'
-                    )
-                    first = False
-                cells.append(f"<td>{b}B</td>")
-                cells.append(f"<td class='tot'>{total:,}</td>")
-                for mi, c in enumerate(per_mm):
-                    # highlight the 0 MM / 0 B cell -- the perfect match(es)
-                    if b == 0 and mm_cols[mi] == 0 and c > 0:
-                        cells.append(
-                            f"<td style='font-weight:700;background:#fef2f2'>{c:,}</td>"
-                        )
-                    elif _budget is not None and (b + mm_cols[mi]) > _budget:
-                        cells.append(
-                            f"<td style='background:#f1f5f9;color:#94a3b8' "
-                            f"title='{b + mm_cols[mi]} edits &gt; search budget {_budget}: "
-                            f"reference/variant reconstruction, not extra off-target risk'>{c:,}</td>"
-                        )
-                    else:
-                        cells.append(f"<td>{c:,}</td>")
-                body.append("<tr>" + "".join(cells) + "</tr>")
-        matrix_html = (
-            '<div class="matrix-wrap"><table class="matrix">'
-            f"<thead><tr>{head_html}</tr></thead>"
-            f"<tbody>{''.join(body)}</tbody></table></div>"
-        )
 
-        # per-(DNA,RNA)-bulge breakdown table (report comment 1): the total-bulge
-        # rows above, split into DNA vs RNA bulges so off-targets are countable by
-        # bulge type. Shown only when the guide-aligned column was available.
+        def _mm_cell(count, b, mm):
+            # highlight the 0 MM / 0 B cell (the perfect match(es)); gray beyond-budget
+            if b == 0 and mm == 0 and count > 0:
+                return f"<td style='font-weight:700;background:#fef2f2'>{count:,}</td>"
+            if _budget is not None and (b + mm) > _budget:
+                return (
+                    f"<td style='background:#f1f5f9;color:#94a3b8' "
+                    f"title='{b + mm} edits &gt; search budget {_budget}: "
+                    f"reference/variant reconstruction, not extra off-target risk'>{count:,}</td>"
+                )
+            return f"<td>{count:,}</td>"
+
         btg = matrix.get("bulge_type_groups")
+        body = []
         if btg and any(rows for _, rows in btg):
-            bt_head = (
+            # DNA/RNA-resolved table (report comment 1) -- a strict superset of the
+            # coarse MM/B matrix (it includes the 0D/0R row), so it is the ONLY table.
+            head_html = "".join(
                 ['<th class="grp">Origin</th>', "<th>DNA bulges</th>",
                  "<th>RNA bulges</th>", "<th>Total</th>"]
                 + [f"<th>{m}MM</th>" for m in mm_cols]
             )
-            bt_body = []
             for label, rows in btg:
                 if not rows:
                     continue
@@ -1485,21 +1457,34 @@ def render_summary_and_matrix(meta, spec_score, matrix):
                         first = False
                     cells.append(f"<td>{d}</td><td>{r}</td>")
                     cells.append(f"<td class='tot'>{total:,}</td>")
-                    cells += [f"<td>{c:,}</td>" for c in per_mm]
-                    bt_body.append("<tr>" + "".join(cells) + "</tr>")
-            bulge_type_html = (
-                '<div class="matrix-title" style="margin-top:1.4em">Putative off-targets '
-                "by bulge type (DNA vs RNA)</div>"
-                '<div class="matrix-wrap"><table class="matrix">'
-                f"<thead><tr>{''.join(bt_head)}</tr></thead>"
-                f"<tbody>{''.join(bt_body)}</tbody></table></div>"
-                '<p class="caption">The bulge counts above, split into <strong>DNA</strong> '
-                "vs <strong>RNA</strong> bulges &mdash; a <strong>DNA bulge</strong> is an "
-                "extra base in the genomic DNA (a gap in the guide), an <strong>RNA bulge</strong> "
-                "an extra base in the spacer (a gap in the DNA). Each row is one observed "
-                "(DNA,&nbsp;RNA) combination; Total&nbsp;= row sum across mismatches. Bulge-free "
-                "sites (0&nbsp;B) are omitted here (they appear in the matrix above).</p>"
+                    cells += [_mm_cell(c, d + r, mm_cols[mi]) for mi, c in enumerate(per_mm)]
+                    body.append("<tr>" + "".join(cells) + "</tr>")
+        else:
+            # fallback: total-bulge only (guide-aligned column unavailable to split)
+            head_html = "".join(
+                ['<th class="grp">Origin</th>', "<th>Bulges (B)</th>", "<th>Total</th>"]
+                + [f"<th>{m}MM</th>" for m in mm_cols]
             )
+            for label, rows in matrix["groups"]:
+                grp_total = sum(r[1] for r in rows)
+                first = True
+                for b, total, per_mm in rows:
+                    cells = []
+                    if first:
+                        cells.append(
+                            f'<td class="grp" rowspan="{len(rows)}">{_esc(label)}'
+                            f'<br><span class="grp-total">({grp_total:,})</span></td>'
+                        )
+                        first = False
+                    cells.append(f"<td>{b}B</td>")
+                    cells.append(f"<td class='tot'>{total:,}</td>")
+                    cells += [_mm_cell(c, b, mm_cols[mi]) for mi, c in enumerate(per_mm)]
+                    body.append("<tr>" + "".join(cells) + "</tr>")
+        matrix_html = (
+            '<div class="matrix-wrap"><table class="matrix">'
+            f"<thead><tr>{head_html}</tr></thead>"
+            f"<tbody>{''.join(body)}</tbody></table></div>"
+        )
 
     return f"""
 <div class="summary-grid">
@@ -1516,14 +1501,15 @@ def render_summary_and_matrix(meta, spec_score, matrix):
     perfect-match off-target by sequence alone). Rows are split by origin &mdash;
     <strong>REFERENCE</strong> (the target exists in the reference genome, even if a
     variant also alters it) vs <strong>VARIANT</strong> (the target exists only because a
-    variant creates it; <code>Not_found_in_REF</code>) &mdash; then by bulge count;
-    Total&nbsp;= row sum across mismatches.</p>
+    variant creates it; <code>Not_found_in_REF</code>) &mdash; then by bulge count, split
+    into <strong>DNA bulges</strong> (an extra base in the genomic DNA; a gap in the guide)
+    vs <strong>RNA bulges</strong> (an extra base in the spacer; a gap in the DNA). Each
+    row is one observed (DNA,&nbsp;RNA) combination; Total&nbsp;= row sum across mismatches.</p>
     <p class="caption">Every site is <strong>one row</strong> that carries <em>both</em> its
     reference-genome alignment and its variant-carrier alignment as side-by-side columns,
     and is placed here <strong>once</strong> &mdash; by its <strong>fewest-mismatch+bulge</strong>
     alignment, the score-neutral view (it does not prefer CFD over CRISTA). A site is never
     double-counted across cells.{_greyed_note}</p>
-    {bulge_type_html}
   </div>
 </div>
 """
