@@ -564,6 +564,22 @@ a `Perfect_match` column, and called out in a prominent warning banner (red when
 there are several, listing the sites; amber "presumed on-target" when there is
 exactly one) — in both the report and the interactive web results page.
 
+An **`Observed`** column records whether each off-target is supported by at least
+one real individual: `reference` (present in the reference genome → carried by
+essentially every individual), `N carrier(s)` (a variant site carried by N named
+individuals in the panel), or `putative` (a worst-case variant/haplotype
+reconstruction that no single individual is observed to carry). On a genotyped
+index the carrier roster is populated in both analysis modes; under `--per-sample`
+it is pruned to the **exact cis carriers**, so `putative` cleanly marks
+reconstructions that no one actually carries — separating genuine haplotypes from
+worst-case combinations. The recommended validation panel uses this to
+**prioritize observed sites** among equally-severe candidates: `Observed` enters
+the ordering only as the first tie-break *after* worst-case severity, so a
+strictly-worse (higher-severity) reconstructed site is never displaced and
+worst-case coverage is preserved, while genuine real-carrier haplotypes of equal
+severity float to the top of the shortlist. The column and tie-break are omitted
+on a sites-only panel (e.g. the mega index) that carries no per-sample roster.
+
 The report ZIP places `report.html` at the top level with all data files under a
 `data/` subfolder, and its *Variants included* line states the genotyped panel
 size and the number of SNPs and indels searched. These database counts are read

@@ -43,6 +43,19 @@ and the `release-crisprme` skill.
   `PostProcess/personal_assembly.py` (+ `test_personal_assembly.py`).
 
 ### Added
+- **Report: an `Observed` column flagging off-targets supported by ≥1 real
+  individual.** Values are `reference` (present in the reference genome, so carried
+  by essentially every individual), `N carrier(s)` (a variant site carried by N
+  named individuals in the panel), or `putative` (a worst-case variant/haplotype
+  reconstruction that no single individual is observed to carry). On a genotyped
+  index the carrier roster is populated in both analysis modes; under `--per-sample`
+  it is pruned to the EXACT cis carriers, so the column cleanly separates genuine
+  haplotypes from worst-case reconstructions. The recommended validation panel now
+  **prioritizes observed (real-carrier) sites** among equally-severe candidates — as
+  the first tie-break *after* worst-case severity, so a strictly-worse reconstructed
+  site is never displaced (worst-case coverage preserved), and the panel summary
+  reports how many selected sites are observed. Automatically omitted on a sites-only
+  panel (e.g. `mega`) that carries no per-sample roster.
 - **`assembly-search --assembly-individual <name>`** — resolve both haplotypes'
   genome/chain/chromAlias from a registered `Assemblies/<name>/` bundle instead of
   passing the six paths explicitly (the six flags still work, incl. the legacy layout).

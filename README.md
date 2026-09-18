@@ -1567,7 +1567,17 @@ is under `data/`). Reading top to bottom:
   amber "presumed on-target" note instead.)
 - **4. Recommended validation panel** — CFD / CRISTA / edit-distance threshold
   tables plus a **hybrid worst-case ~100-site panel** (`data/panel_top100.tsv`) to
-  seed a targeted-NGS / rhAMP-Seq confirmation assay.
+  seed a targeted-NGS / rhAMP-Seq confirmation assay. Among equally-severe
+  candidates the panel **prioritizes sites observed in ≥1 real individual** (see the
+  `Observed` column) — real haplotypes are preferred over worst-case reconstructions
+  — without ever displacing a strictly-worse site, so worst-case coverage is kept.
+- **`Observed` column** — whether an off-target is supported by **at least one real
+  individual**: `reference` (in the reference genome → carried by essentially every
+  individual), `N carrier(s)` (a variant site carried by N named individuals), or
+  `putative` (a worst-case variant/haplotype reconstruction that no single individual
+  is observed to carry). Under **`--per-sample`** the carrier list is the exact cis
+  carriers, so `putative` cleanly marks reconstructions no one actually carries.
+  Absent on sites-only panels (e.g. `mega`, no per-sample roster).
 - **MAF column** — a value of **`1e-05` is a display floor** meaning "present but
   frequency effectively 0" (used so a zero-frequency allele still renders on the
   log-scale plots), **not** a measured frequency.
