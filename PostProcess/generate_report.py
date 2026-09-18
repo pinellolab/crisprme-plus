@@ -185,6 +185,7 @@ CURATED_COLUMNS = (
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
     ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
+    ("Observed", "observed"),  # supported by >=1 real individual (named carrier) = a genuine haplotype, not a worst-case reconstruction
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
@@ -216,6 +217,13 @@ _ANNOTATION_KINDS = frozenset(
 )
 _PRESENT_ANN_KINDS = None
 
+# The "Observed" column (named carriers) is only meaningful on a GENOTYPED index:
+# a sites-only panel (e.g. mega) has no per-sample roster, so every variant row
+# would read "putative" and the column would falsely imply nothing is observed.
+# build_report sets this to True only when the run actually carries >=1 named
+# carrier; None (backward-compat) / False => the column is dropped entirely.
+_HAS_SAMPLES = None
+
 
 def _active_columns():
     """``CURATED_COLUMNS`` minus MAF (when ``_DROP_MAF``) and minus any annotation
@@ -228,6 +236,9 @@ def _active_columns():
             c for c in cols
             if c[1] not in _ANNOTATION_KINDS or c[1] in _PRESENT_ANN_KINDS
         )
+    # drop the Observed (named-carrier) column on a sites-only run (no roster)
+    if _HAS_SAMPLES is False:
+        cols = tuple(c for c in cols if c[1] != "observed")
     return cols
 
 # --------------------------------------------------------------------------- #
@@ -330,6 +341,24 @@ def _first_non_na(raw):
         if not _is_na(tok):
             return tok
     return None
+
+
+def _count_samples(raw) -> int:
+    """Count NAMED carrier samples in a comma-joined ``Variant_samples`` field.
+
+    Each token is one individual (e.g. ``NA20853``, ``HGDP00779``); note real IDs
+    like ``NA20853`` are NOT NA tokens (only the bare word ``na`` is). Returns 0
+    for a blank / NA / placeholder field. On a genotyped index this list is
+    populated in both analysis modes; under ``--per-sample`` it is pruned to the
+    EXACT carriers of the (cis) haplotype, so a worst-possible reconstruction that
+    no single individual actually carries comes back 0 -> not observed."""
+    if _is_na(raw):
+        return 0
+    n = 0
+    for tok in str(raw).split(","):
+        if not _is_na(tok.strip()):
+            n += 1
+    return n
 
 
 def _norm_one_variant(tok):
@@ -587,6 +616,21 @@ def _curated_cell(kind, row, cols):
         raw = _get("mmb")
         num = pd.to_numeric(raw, errors="coerce") if raw is not None else None
         return "Yes" if (num is not None and pd.notna(num) and int(num) == 0) else CURATED_MISSING
+    elif kind == "observed":
+        # Is this off-target supported by >=1 REAL individual? A reference-genome
+        # site exists in (essentially) every individual -> universally real. A
+        # variant-created site is real for the NAMED carriers of its variant(s);
+        # under --per-sample the carrier list is the EXACT cis carriers, so a
+        # worst-possible reconstruction that no single individual carries reads 0
+        # -> "putative" (nominated conservatively, not seen in any one genome).
+        origin = _get("origin")
+        o = str(origin).strip().lower() if not _is_na(origin) else ""
+        if o == "ref":
+            return "reference"
+        n = _count_samples(_get("samples"))
+        if n > 0:
+            return f"{n} carrier{'' if n == 1 else 's'}"
+        return "putative"
     else:
         v = None
 
@@ -2248,19 +2292,37 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     # STAGE 1: hard-includes (mm+b <= floor OR CFD >= floor)
     hard_mask = (mmb <= PANEL_FLOOR_MMB) | (cfd >= PANEL_FLOOR_CFD)
 
+    # OBSERVED priority: a site supported by >=1 real individual (a reference site,
+    # present in every genome; or a variant site with >=1 named carrier) is a
+    # GENUINE haplotype, not a worst-case reconstruction -- worth prioritizing for
+    # validation. It enters ONLY as the first tie-break AFTER worst-case severity,
+    # so an observed site floats above an equally-severe reconstructed one without
+    # ever displacing a strictly-worse (higher-severity) site: worst-case coverage
+    # is preserved. On a sites-only panel every site is un-observed -> no effect.
+    if "origin" in cols and cols["origin"] in offt.columns:
+        _is_ref = offt[cols["origin"]].astype(str).str.strip().str.lower().eq("ref")
+    else:
+        _is_ref = pd.Series(False, index=offt.index)
+    if "samples" in cols and cols["samples"] in offt.columns:
+        _has_carrier = offt[cols["samples"]].map(lambda s: _count_samples(s) > 0)
+    else:
+        _has_carrier = pd.Series(False, index=offt.index)
+    observed = (_is_ref | _has_carrier).astype(bool)
+
     ordered = offt.assign(
         _severity=severity, _cfd=cfd, _crista=crista.fillna(-1.0), _mmb=mmb,
-        _hard=hard_mask,
+        _hard=hard_mask, _observed=observed,
     ).sort_values(
-        # hard-includes first, then by worst-case severity; ties CFD/CRISTA/mm+b
-        ["_hard", "_severity", "_cfd", "_crista", "_mmb"],
-        ascending=[False, True, False, False, True],
+        # hard-includes first, then worst-case severity; among equally-severe sites
+        # the OBSERVED (real-carrier) one is preferred; then CFD/CRISTA/mm+b.
+        ["_hard", "_severity", "_observed", "_cfd", "_crista", "_mmb"],
+        ascending=[False, True, False, False, False, True],
     )
 
     n_hard = int(hard_mask.sum())
     # if the hard-includes already exceed the cap keep them ALL; otherwise fill
     keep = max(cap, n_hard)
-    drop = ["_severity", "_cfd", "_crista", "_mmb", "_hard"]
+    drop = ["_severity", "_cfd", "_crista", "_mmb", "_hard", "_observed"]
     off_panel = ordered.head(keep).drop(columns=drop)
     # prepend the perfect matches (disjoint from off_panel by construction)
     if len(perfect):
@@ -2343,6 +2405,24 @@ def build_validation_panel(df, cols):
     else:
         panel_variant = 0
 
+    # how many of the selected panel are OBSERVED in >=1 real individual (a
+    # reference site, universal; or a variant site with >=1 named carrier) --
+    # the genuine haplotypes to prioritize for validation. Meaningful only on a
+    # genotyped index (_HAS_SAMPLES); 0/omitted on a sites-only panel.
+    panel_observed = None
+    if _HAS_SAMPLES:
+        _pref = (
+            panel_df[cols["origin"]].astype(str).str.strip().str.lower().eq("ref")
+            if "origin" in cols and cols["origin"] in panel_df.columns
+            else pd.Series(False, index=panel_df.index)
+        )
+        _pcar = (
+            panel_df[cols["samples"]].map(lambda s: _count_samples(s) > 0)
+            if "samples" in cols and cols["samples"] in panel_df.columns
+            else pd.Series(False, index=panel_df.index)
+        )
+        panel_observed = int((_pref | _pcar).sum())
+
     # per-tier off-target subsets (for the bundled curated downloads + links).
     # Each entry: (logical tier key, display label, sub-frame). Only non-empty
     # tiers are bundled/linked (decided by the caller).
@@ -2358,6 +2438,7 @@ def build_validation_panel(df, cols):
         "has_crista": has_crista,
         "panel_size": panel_size,
         "panel_variant": panel_variant,
+        "panel_observed": panel_observed,
         "panel_df": panel_df,
         "tiers": tiers,
         "n_perfect": len(perfect_sites),
@@ -2568,6 +2649,16 @@ def render_validation_panel(
         f" of the selected sites, <strong>{vp['panel_variant']:,}</strong> "
         "are variant-created."
     ) if show_variant_row else "."
+    # observed = supported by >=1 real individual (reference site, or variant with
+    # a named carrier). The panel already prefers these among equally-severe sites,
+    # so surface the count as a prioritization cue for panel selection.
+    _po = vp.get("panel_observed")
+    if _po is not None:
+        _panel_variant_note += (
+            f" <strong>{_po:,}</strong> are observed in &ge;1 individual "
+            "(a genuine haplotype &mdash; see the <code>Observed</code> column; "
+            "these are prioritized in the ordering)."
+        )
     return f"""
 <div class="panel-grid">
   <div>
@@ -2989,6 +3080,17 @@ _SCORE_LEGEND = [
     ("PAM_creation",
      "Flagged when a variant creates a new PAM absent from the reference, enabling an "
      "off-target that reference-only tools miss."),
+    ("Observed",
+     "Whether this off-target is supported by <b>at least one real individual</b>: "
+     "<code>reference</code> = present in the reference genome, so carried by "
+     "essentially every individual; <code>N&nbsp;carriers</code> = a variant site "
+     "carried by N named individuals in the panel; <code>putative</code> = a "
+     "variant/haplotype combination nominated by the worst-case reconstruction that "
+     "<b>no single individual</b> is observed to carry (conservative, not seen in one "
+     "genome). Under <code>--per-sample</code> the carrier list is the exact cis "
+     "carriers, so this cleanly separates genuine haplotypes (prioritized in the "
+     "validation panel) from worst-case reconstructions. Absent on sites-only panels "
+     "(no per-sample roster)."),
     ("MAF",
      "Minor-allele frequency of the contributing variant over the genotyped panel "
      "(blank for reference sites). A value of <b>1&times;10<sup>&minus;5</sup></b> is "
@@ -3623,6 +3725,17 @@ def build_report(
     # all-"-" COSMIC/ENCODE/... column implying a screen that was never performed)
     global _PRESENT_ANN_KINDS
     _PRESENT_ANN_KINDS = {k for k in _ANNOTATION_KINDS if k in cols}
+
+    # The "Observed" (named-carrier) column is meaningful only when the run
+    # actually carries a per-sample roster: keep it when the samples column is
+    # present AND at least one row names a carrier (a genotyped index in either
+    # analysis mode); drop it on a sites-only panel (mega) where every variant
+    # row would falsely read "putative".
+    global _HAS_SAMPLES
+    _HAS_SAMPLES = bool(
+        "samples" in cols
+        and df[cols["samples"]].map(lambda s: _count_samples(s) > 0).any()
+    )
 
     # De-duplicate REFERENCE off-target rows (locus-completeness can emit the same
     # variant-independent reference site once per co-located haplotype). Applied to
