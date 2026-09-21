@@ -363,7 +363,13 @@ def print_help_complete_search() -> None:
         "\t(By default, with no flag, CRISPRme+ runs a POPULATION-LEVEL analysis: one "
         "worst-possible PUTATIVE representative per variant window, exact worst-case "
         "CFD, dataset-level allele frequencies -- lossless for detection, tractable on "
-        "any panel, and the only meaningful mode on sites-only panels.)\n")
+        "any panel, and the only meaningful mode on sites-only panels.)\n"
+        "\t--alt-alignments / --no-alt-alignments, emit (or skip) the exhaustive "
+        "alternative-alignments file (*_all_results_with_alternative_alignments.tsv = the "
+        "non-best alignments per locus). Default follows the mode: OFF for the default "
+        "population-level analysis (the report is built from the best alignment per locus, "
+        "so this only adds a large, slow-to-build companion file), ON under --per-sample. "
+        "Use --alt-alignments to force it, --no-alt-alignments to suppress it [OPTIONAL]\n")
     sys.exit(1)
 
 
@@ -1595,6 +1601,31 @@ def complete_search() -> None:
     os.environ["CRISPRME_FAST_MODE"] = "0" if per_sample else "1"
     population_level = not per_sample
 
+    # ALTERNATIVE-ALIGNMENT output (the altMerge / *_all_results_with_alternative_alignments.tsv
+    # dump = the NON-best alignments per locus cluster). It grows combinatorially with the edit
+    # budget and its post-analysis (sort + resultIntegrator on the altMerge file) is the single
+    # most expensive step on a large search -- yet nothing in the report reads it (the report,
+    # summary tables, mm+b matrix and top-100 panel are all built from bestMerge ->
+    # integrated_results). Its only real consumer is assembly-search's haplotype reconciliation.
+    # So it is EMITTED BY MODE: OFF for the default population-level analysis, ON for --per-sample
+    # (where the observed-haplotype detail is wanted and bounded). --alt-alignments /
+    # --no-alt-alignments override explicitly. The default is purely MODE-driven here; the
+    # sites-only refinement in the plan's matrix (a sites-only panel should stay alt-off even
+    # under --per-sample) arrives with the Phase-2 data_type manifest flag -- until then, forcing
+    # --per-sample on a sites-only panel (already discouraged / grayed-out on the web) requests
+    # alt like any other per-sample run. Propagated to the post-analysis subprocess tree via the
+    # internal env var CRISPRME_EMIT_ALT_ALIGNMENTS ("1"=emit, "0"=skip), mirroring
+    # CRISPRME_FAST_MODE. assembly_search force-passes --alt-alignments (it needs the file).
+    if "--alt-alignments" in args and "--no-alt-alignments" in args:
+        error("--alt-alignments and --no-alt-alignments are mutually exclusive")
+    if "--no-alt-alignments" in args:
+        emit_alt = False
+    elif "--alt-alignments" in args:
+        emit_alt = True
+    else:
+        emit_alt = per_sample  # default: ON under --per-sample, OFF for population-level
+    os.environ["CRISPRME_EMIT_ALT_ALIGNMENTS"] = "1" if emit_alt else "0"
+
     # optional prebuilt/staged reference-index library (--index-path). When
     # given, the reference index is looked up here (e.g. an index made with
     # build-index-only, or one downloaded ahead of time) rather than built under
@@ -1987,6 +2018,13 @@ def complete_search() -> None:
     try:
         with open(os.path.join(outputfolder, ".search_mode"), "w") as _sm:
             _sm.write("per-sample" if per_sample else "population-level")
+    except OSError:
+        pass
+    # record whether alternative (non-best) alignments were emitted, so generate-report can
+    # note their absence in a population-level run (and how to get them).
+    try:
+        with open(os.path.join(outputfolder, ".alt_mode"), "w") as _am:
+            _am.write("alt-alignments" if emit_alt else "no-alt-alignments")
     except OSError:
         pass
     print(
@@ -3098,10 +3136,13 @@ def _run_haplotype_search(
     # "advanced mode" total the website's own complete-search submission already uses
     # (main_page.py, max_total_edits = mm + dna + rna).
     max_total_edits = mm + bDNA + bRNA
+    # assembly-search reconciliation (assembly_reconcile.load_crisprme_predictions) REQUIRES the
+    # alternative-alignments file to enumerate every alignment per locus before lifting to hg38,
+    # so force --alt-alignments here regardless of the mode-driven default.
     cmd = (
         f"{python_exe} {crisprme_script} complete-search --genome {genomedir} "
         f"--guide {guidefile} --pam {pamfile} --mm {mm} --bDNA {bDNA} --bRNA {bRNA} "
-        f"--merge {merge_t} --max-total-edits {max_total_edits} "
+        f"--merge {merge_t} --max-total-edits {max_total_edits} --alt-alignments "
         f"--output {output_name} --thread {thread} {debug_flag}"
     )
     output_folder = os.path.join(current_working_directory, CRISPRMEDIRS[1], output_name)

@@ -83,6 +83,16 @@ index_path="${25:-_}"
 # right after the search. "-1" (or unset) means no cap.
 max_total_edits="${26:-4}"  # default cap on total edits (mm+bulges); pruned in-search (#107)
 
+# Whether to emit the alternative-alignments (altMerge / all_results_with_alternative_alignments)
+# output = the NON-best alignments per locus cluster. Inherited from crisprme.py via the env var
+# CRISPRME_EMIT_ALT_ALIGNMENTS (default population-level=off, --per-sample=on; --alt-alignments /
+# --no-alt-alignments override; assembly-search force-enables). When "0" the non-best (discarded)
+# rows are dropped right after the merge, leaving an empty (header-only) alt result -- structurally
+# identical to a reference-only search's empty alt -- so every downstream step and consumer works
+# unchanged while the expensive alt annotation/sort/integration (the combinatorial blow-up on large
+# searches) is skipped. Defaults to "1" if unset so a standalone invocation keeps the old behavior.
+emit_alt_alignments="${CRISPRME_EMIT_ALT_ALIGNMENTS:-1}"
+
 # log files
 log="$output_folder/log.txt"
 touch $log
@@ -917,11 +927,23 @@ if [ -s $logerror ]; then
 fi
 # rename primary and alternative results files
 mv $final_res.bestCFD.txt.trimmed $final_res.bestCFD.txt
-mv $final_res.bestCFD.txt.trimmed.discarded_samples $final_res_alt.bestCFD.txt
 mv $final_res.bestmmblg.txt.trimmed $final_res.bestmmblg.txt
-mv $final_res.bestmmblg.txt.trimmed.discarded_samples $final_res_alt.bestmmblg.txt
 mv $final_res.bestCRISTA.txt.trimmed $final_res.bestCRISTA.txt
-mv $final_res.bestCRISTA.txt.trimmed.discarded_samples $final_res_alt.bestCRISTA.txt
+if [ "$emit_alt_alignments" = "1" ]; then
+	# keep the non-best (discarded) alignments as the alternative-alignments result
+	mv $final_res.bestCFD.txt.trimmed.discarded_samples $final_res_alt.bestCFD.txt
+	mv $final_res.bestmmblg.txt.trimmed.discarded_samples $final_res_alt.bestmmblg.txt
+	mv $final_res.bestCRISTA.txt.trimmed.discarded_samples $final_res_alt.bestCRISTA.txt
+else
+	# population-level default: DROP the non-best alignments (avoids the combinatorial altMerge
+	# annotation/sort/integration blow-up). The header-only $final_res_alt.best* stubs created
+	# earlier remain, so the rest of the pipeline produces a valid EMPTY alt result -- exactly
+	# like a reference-only search -- and every downstream step and consumer works unchanged.
+	echo "Alternative alignments suppressed (population-level default); dropping non-best rows"
+	rm -f $final_res.bestCFD.txt.trimmed.discarded_samples \
+	      $final_res.bestmmblg.txt.trimmed.discarded_samples \
+	      $final_res.bestCRISTA.txt.trimmed.discarded_samples
+fi
 echo -e 'Merging Targets\tEnd\t'$(date) >>$log
 # END STEP 5 - targets merge
 
