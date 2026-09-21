@@ -767,7 +767,7 @@ def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx
                pos with different alt. Need not be pre-sorted; we sort by
                (pos, alt).
       sample_meta: sample_id -> (database, subpopulation, sex).
-      taxonomy: dict describing databases -> {sample_count, phased_placeholder,
+      taxonomy: dict describing databases -> {sample_count, phased,
                 subpopulations:[...]}, or None to auto-derive from sample_meta.
       ploidy_of: callable(sample_id, sex) -> 1 or 2.
       out_bin: path for the binary.
@@ -925,7 +925,7 @@ def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
     taxonomy = {
         ds: {
             "sample_count": n_of[ds],
-            "phased_placeholder": False,   # aggregate: no phase
+            "phased": False,               # aggregate sites-only: no genotypes, no phase
             "subpopulations": [],
             "aggregate_af_only": True,     # INFO-AF provenance marker
         }
@@ -952,6 +952,53 @@ def _choose_count_width(max_count):
         "tier0_registry: a group count %d exceeds the u32 ceiling (%d); the "
         "panel is implausibly large -- refusing to overflow" % (max_count, _U32_MAX)
     )
+
+
+def _observe_phasing(recs, sample_meta):
+    """Cheap per-database phasing probe from the record genotypes.
+
+    A source panel's GTs are uniformly phased (``|``) or unphased (``/``), so we
+    only need the first separator-bearing GT per database -- this early-exits once
+    every database is decided (O(#databases) genotypes, not O(#records x #samples)).
+    Half-missing pangenome GTs (``1|.`` / ``0/.``) still carry the separator, so
+    they classify correctly. Returns {database: True|False|None}; None means no
+    diploid GT was observed for that database (e.g. an all-haploid contig)."""
+    dbs = set(meta[0] for meta in sample_meta.values()) if sample_meta else set()
+    decided = {}
+    if not dbs:
+        return {}
+    for rec in recs:
+        if len(decided) >= len(dbs):
+            break
+        alt_genotypes = rec[4] if len(rec) > 4 else None
+        if not alt_genotypes:
+            continue
+        for sample, gt in alt_genotypes.items():
+            meta = sample_meta.get(sample)
+            if not meta or meta[0] in decided or gt is None:
+                continue
+            if "|" in gt:
+                decided[meta[0]] = True
+            elif "/" in gt:
+                decided[meta[0]] = False
+    return {db: decided.get(db) for db in dbs}
+
+
+def _classify_data_type(aggregation, per_db_phased):
+    """Derive (data_type, overall_phased) for the manifest.
+
+    data_type in {sites-only, genotyped-unphased, genotyped-phased, hybrid}.
+    overall_phased is True only when every database with a known phasing is phased
+    (a hybrid of a phased + an unphased panel is therefore overall_phased=False)."""
+    if aggregation == "info_af":
+        return "sites-only", False
+    known = [v for v in per_db_phased.values() if v is not None]
+    overall_phased = bool(known) and all(known)
+    if len(per_db_phased) > 1:
+        return "hybrid", overall_phased
+    if overall_phased:
+        return "genotyped-phased", True
+    return "genotyped-unphased", False
 
 
 def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
@@ -1068,6 +1115,17 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
     if taxonomy is None:
         taxonomy = _derive_taxonomy(sample_meta)
 
+    # per-database phasing (observed from the genotypes) + a top-level data_type, so
+    # the search can pick CONFIRMED (phased) vs PUTATIVE (unphased) cis and the web
+    # can label the index WITHOUT scanning the multi-GB per-sample dict. Absent on
+    # older indices -> the runtime falls back to the dict scan (back-compat).
+    per_db_phased = _observe_phasing(recs, sample_meta)
+    for db, ph in per_db_phased.items():
+        if db in taxonomy:
+            taxonomy[db]["phased"] = ph
+            taxonomy[db].pop("phased_placeholder", None)  # replace the dead field
+    data_type, overall_phased = _classify_data_type(aggregation, per_db_phased)
+
     group_taxonomy = {}
     for gid, (kind, db, sp) in seen_group_ids.items():
         group_taxonomy[gid] = {"kind": kind, "database": db, "subpopulation": sp}
@@ -1086,6 +1144,9 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
         "alt_field_width": 1,
         "aggregation": aggregation,  # "carriers" (AN over listed only) or
                                      # "panel" (AN over the full panel)
+        "data_type": data_type,      # sites-only | genotyped-unphased |
+                                     # genotyped-phased | hybrid
+        "phased": overall_phased,    # True only if every db with a known phasing is phased
         "global_group_id": GLOBAL_GROUP_ID,
         "group_sep": SEP,
         "databases": taxonomy,
@@ -1427,12 +1488,15 @@ def _emit_v3_raw(out_bin, manifest, record_array, group_blob_bytes,
 
 
 def _derive_taxonomy(sample_meta):
-    """Auto-derive per-database {sample_count, phased_placeholder, subpops}."""
+    """Auto-derive per-database {sample_count, phased, subpops}.
+
+    ``phased`` starts as None (unknown) and is filled from the observed genotypes by
+    ``_write_registry`` (``_observe_phasing``)."""
     dbs = {}
     for sample_id, (database, subpopulation, sex) in sample_meta.items():
         d = dbs.setdefault(database, {
             "sample_count": 0,
-            "phased_placeholder": True,
+            "phased": None,
             "subpopulations": set(),
         })
         d["sample_count"] += 1
