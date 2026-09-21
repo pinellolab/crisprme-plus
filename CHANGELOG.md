@@ -12,6 +12,19 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Changed
+- **Alternative-alignments output is now mode-driven (off by default in the
+  population-level analysis).** The `..._all_results_with_alternative_alignments.tsv`
+  dump — the *non-best* alignments per locus — grows combinatorially with the edit
+  budget and its annotation/sort/integration was the single most expensive
+  post-analysis step on a large search, yet the report, summary tables, mismatch/bulge
+  matrix and top-100 panel are all built from the *best* alignment per locus and never
+  read it. It is now emitted only under `--per-sample` (and forced on for
+  `assembly-search`, which needs it); the default population-level run drops the
+  non-best rows right after the merge, skipping the expensive step. New
+  `--alt-alignments` / `--no-alt-alignments` flags override either way. (A worst-case
+  6mm/2+2/max-8 search on the 5-source mega had ballooned this file past 160 GB and
+  made the run take days; the default population path no longer pays that cost while
+  the report is byte-identical.)
 - **License: CRISPRme+ is now the MGB Open Access License 1.0 (MGBOA 1.0).** The
   software moves from AGPL-3.0 to MGBOA 1.0 (non-commercial, non-revenue-generating
   academic use; commercial use requires a license). `LICENSE` carries the full MGBOA
@@ -43,6 +56,18 @@ and the `release-crisprme` skill.
   `PostProcess/personal_assembly.py` (+ `test_personal_assembly.py`).
 
 ### Added
+- **`--alt-alignments` / `--no-alt-alignments`** (`complete-search`) — explicitly
+  emit or suppress the exhaustive alternative-alignments file, overriding the
+  mode-driven default (off in population-level, on under `--per-sample`).
+- **Index `data_type` / `phased` metadata in the registry manifest.** Each
+  `reg_<chrom>.idx` now records `data_type` (`sites-only` / `genotyped-unphased` /
+  `genotyped-phased` / `hybrid`) and a `phased` flag (per-database + overall),
+  observed from the genotypes at build time — so tooling can identify an index's
+  type without scanning the multi-GB per-sample dictionary. The variant-dataset
+  selector in the web UI reads it to label each dataset (falling back to
+  genotype-store presence for indexes whose manifest predates the flag). The three
+  shipped indexes (`1000G2021_HGDP` = hybrid, `HPRC` = genotyped-phased, `mega` =
+  sites-only) were backfilled in place on HuggingFace.
 - **Report: an `Observed` column flagging off-targets supported by ≥1 real
   individual.** Values are `reference` (present in the reference genome, so carried
   by essentially every individual), `N carrier(s)` (a variant site carried by N

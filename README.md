@@ -28,6 +28,7 @@ through an interactive web-based interface.
 - **Co-occurring off-targets** — off-targets that need two nearby variants on the same haplotype — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported CONFIRMED-cis (phased) / PUTATIVE (unphased) with carriers + joint AF, and surfaced in the report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
 - **Three complementary production indexes** — genotyped **1000G-2021 + HGDP** (`NRG_3_hg38+hg38_1000G2021_HGDP`: observed / CONFIRMED haplotypes with per-sample carriers), the **HPRC pangenome** (`NRG_3_hg38+hg38_HPRC`: 232 phased assembly-derived genomes incl. CHM13 → CONFIRMED cis + named carriers, capturing pangenome-specific variation), and the sites-only five-source **mega** (`NRG_3_hg38+hg38_mega`: + gnomAD v4.1 / TOPMed / All-of-Us, PUTATIVE haplotypes with min-AF bounds). All three carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence. ([details](docs/PRECOMPUTED_INDEXES.md))
 - **Population-level by default; `--per-sample` for genotype resolution** — by default the SNP analysis reports worst-possible representatives per variant window (fast, and lossless for detection); add **`--per-sample`** (CLI) or pick **Per-sample** in the web form for CONFIRMED cis phasing + named carriers + exact joint AF on a genotyped panel. The report states which mode was used. ([methods](METHODS.md#5-search-space-control-for-high-variant-density-regions))
+- **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in the default population-level run, **on** under `--per-sample` (and for `assembly-search`); override with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
 - **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, plots, recommended validation panel, annotated top hits, per-tier downloads, legend). ([methods](METHODS.md#7-shareable-off-target-assessment-report))
 - **One-command Docker web interface + indexes on demand** — no conda, no giant build; pull reference data + prebuilt indexes from the HuggingFace CDN (`crisprme.py download`), or **build & publish your own** dict-less indexes (`build-index-only` / `publish-index --dictless`), and manage genomes / indexes / VCFs / annotations / PAMs from the browser **Data Manager**. ([protocol](docs/PRECOMPUTED_INDEXES.md))
@@ -756,6 +757,15 @@ its purpose and usage:
   <br>NOTE: for a **variant-created** off-target you must also pass `--vcf` (or use a
   precomputed variant index); a reference-only search will not surface it regardless of
   this value.
+
+- `--alt-alignments` / `--no-alt-alignments` (*Optional*)
+  <br>Emit (or skip) the exhaustive alternative-alignments file
+  (`..._all_results_with_alternative_alignments.tsv` — the non-best alignments at each
+  locus). The default follows the analysis mode: **off** for the default
+  population-level run (the report is built from the best alignment per locus, so this
+  is a large, slow-to-build companion that nothing in the report reads), **on** under
+  `--per-sample`. `assembly-search` always enables it. Suppressing it does not change
+  the report or any reported number.
 
 - `--merge` (*Optional - Default: 3*)
   <br>Defines the window size (in base pairs) used to merge closely spaced 

@@ -209,6 +209,15 @@ The two modes are therefore complementary: the genotyped panel gives phased,
 cis-capable frequencies over a curated sample set; the mega gives one-scan,
 frequency-annotated coverage across the widest set of population resources.
 
+Each registry manifest (`reg_<chrom>.idx`) records the index's **`data_type`** —
+`sites-only`, `genotyped-unphased`, `genotyped-phased`, or `hybrid` — plus a
+`phased` flag per database and overall, observed from the genotypes at build time.
+This lets tooling (e.g. the web variant-dataset selector) identify an index's type
+and phasing without scanning the multi-GB per-sample dictionary; a missing flag on
+an older index falls back to genotype-store presence. The shipped indexes are
+`1000G2021_HGDP` = **hybrid** (phased 1000G-2021 + unphased HGDP), `HPRC` =
+**genotyped-phased**, and `mega` = **sites-only**.
+
 ---
 
 ## 3. Allele-frequency estimation
@@ -555,6 +564,15 @@ column schema; a scrollable **top-1000** table with the functional annotations;
 and the annotation legend of Section 6. Allele frequencies can be omitted
 (`--no-maf`) for runs where they are not yet finalized, so the site set and
 scores can be shared without misleading frequency values.
+
+The report and all of its tables are built from the **best alignment per locus**
+(`bestMerge`). The exhaustive **alternative-alignments** file
+(`..._all_results_with_alternative_alignments.tsv`, the non-best alignments at each
+locus) is a separate, optional artifact whose size grows combinatorially with the
+edit budget; it is emitted by mode — **off** for the default population-level
+analysis, **on** under `--per-sample` (and always for `assembly-search`, which
+consumes it) — with `--alt-alignments` / `--no-alt-alignments` to force either way.
+Suppressing it does not change the report or any reported number.
 
 A guide with **more than one perfect genomic match** (0 mismatch, 0 bulge) has no
 a-priori on-target — each is an equally-efficient candidate cut site, and a
