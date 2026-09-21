@@ -78,6 +78,18 @@ and the `release-crisprme` skill.
   becomes heterozygous-equivalent (`<other>_only`), and the empty side contributes 0
   non-mappable — instead of aborting on the missing `*_integrated_results.tsv`. Unsupported
   multi-guide runs (more than one results file) still error.
+- **`assembly-search` haplotype reconciliation reads only `*_integrated_results.tsv`.**
+  It previously also outer-merged in `*_all_results_with_alternative_alignments.tsv`
+  and re-clustered by CFD, on the theory that `integrated_results.tsv` alone
+  was missing real distinct sites. Re-derived: that theory was wrong — the
+  union's "duplicates" (up to 233 rows at one locus) were alt-file-only
+  representations of an already-counted site, not additional real
+  off-targets, and `integrated_results.tsv` already has exactly one row per
+  real physical cluster by construction. The representative-selection
+  criterion is also now consistently fewest-mismatches+bulges (matching
+  `merge_contiguous_targets.py`'s own choice) rather than highest-CFD at
+  every call site. Real genome-wide effect on a real dataset: net one fewer
+  `both` row (a duplicate collapsing), zero effect elsewhere. 58/58 tests.
 
 ## [2.5.5] - 2026-09-13
 
