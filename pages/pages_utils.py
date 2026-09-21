@@ -1802,6 +1802,13 @@ def get_variant_dataset_options(genome: str) -> List:
                 label = core.replace("_", " + ")  # "1000G_HGDP" -> "1000G + HGDP"
                 options.append({"label": label + _pam_note(core), "value": core})
                 seen.add(core)
+    # tag each variant option with its index data_type (Phase 2.2) so the user sees
+    # sites-only vs genotyped(-phased) at a glance (read from the registry manifest,
+    # with a store-presence fallback for pre-flag indices).
+    for opt in options:
+        dt = variant_dataset_data_type(genome_norm, opt.get("value"))
+        if dt:
+            opt["label"] = f"{opt['label']}  [{_DATA_TYPE_LABEL.get(dt, dt)}]"
     return options
 
 
@@ -1833,6 +1840,45 @@ def variant_dataset_has_genotypes(genome: str, dataset_value: str) -> bool:
             except OSError:
                 pass
     return False
+
+
+# Friendly labels for the registry manifest's ``data_type`` (Phase 2.1).
+_DATA_TYPE_LABEL = {
+    "sites-only": "sites-only (allele frequencies)",
+    "genotyped-unphased": "genotyped, unphased",
+    "genotyped-phased": "genotyped, phased",
+    "hybrid": "genotyped, mixed phasing",
+    "genotyped": "genotyped",  # inference fallback (phasing unknown)
+}
+
+
+def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
+    """Return the index ``data_type`` for the selected variant dataset, read from the
+    registry manifest (``Dictionaries/registry_<...>/reg_<chrom>.idx``, Phase 2.1):
+    one of ``sites-only`` / ``genotyped-unphased`` / ``genotyped-phased`` / ``hybrid``.
+
+    Falls back to genotype-store presence when the manifest predates the flag (older
+    shipped indices, pre-backfill): ``genotyped`` when a store exists, else
+    ``sites-only``. Returns None for reference-only / unknown selections."""
+    if not dataset_value or dataset_value in ("ref", "reference", "none"):
+        return None
+    genome_norm = (genome or "").replace(" ", "_")
+    dnorm = dataset_value.replace(" ", "_")
+    dic = os.path.join(current_working_directory, "Dictionaries")
+    for name in (f"registry_{genome_norm}_{dnorm}", f"registry_{dnorm}"):
+        regdir = os.path.join(dic, name)
+        if not os.path.isdir(regdir):
+            continue
+        try:
+            for f in sorted(os.listdir(regdir)):
+                if f.startswith("reg_") and f.endswith(".idx"):
+                    with open(os.path.join(regdir, f)) as fh:
+                        dt = json.load(fh).get("data_type")
+                    return dt or None  # all chroms share it; one read suffices
+        except (OSError, ValueError):
+            pass
+    # manifest flag absent (pre-Phase-2.1 / pre-backfill index): infer coarsely.
+    return "genotyped" if variant_dataset_has_genotypes(genome, dataset_value) else "sites-only"
 
 
 def get_annotation_options(genome: str) -> List:
