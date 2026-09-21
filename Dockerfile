@@ -52,6 +52,7 @@ RUN micromamba install -y -n base \
         ijson yajl cffi \
         pysam bcftools bedtools bedops samtools htslib axel gdown zip gsl pigz \
         ucsc-liftover \
+        minimap2 impg=0.5.0 \
         huggingface_hub \
         importlib-metadata \
         "dash>=2.14,<3" "dash-bootstrap-components<2" dash-daq \

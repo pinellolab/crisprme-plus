@@ -117,6 +117,17 @@ and the `release-crisprme` skill.
   duplicate under `install/` was removed and replaced with a pointer README. Docs clarify
   that only the whole-genome variant-aware search needs ~64 GB RAM (many current laptops
   have it); reference-only / single-chromosome / region searches fit ~16 GB.
+- **Direct haplotype-vs-haplotype reconciliation for `assembly-search`.** A
+  subset of each haplotype's non-mappable (no hg38 equivalent) off-target
+  predictions are now resolved by aligning the two haplotype genomes
+  directly to each other (`minimap2`/`impg`), independent of `liftOver`.
+  A prediction is only merged into the new `both_haplotype_private`
+  category when both a single unambiguous alignment hit and mutual
+  (bidirectional) reciprocal confirmation hold — real, measured directional
+  asymmetry between haplotypes required this over a simpler one-directional
+  check. `minimap2`/`impg` are new required dependencies for
+  `assembly-search` (`check_impg_available()` mirrors the existing
+  `check_liftover_available()` gate). 92/92 tests, real-data verified.
 
 ### Removed
 - **Legacy per-file personal-assembly upload in Settings.** The old "Add a personal

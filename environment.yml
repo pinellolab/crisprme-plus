@@ -33,6 +33,8 @@ dependencies:
   - samtools
   - htslib
   - ucsc-liftover              # assembly-search liftOver dependency
+  - minimap2                   # assembly-search direct haplotype-vs-haplotype alignment
+  - impg=0.5.0                 # assembly-search direct haplotype-vs-haplotype coordinate lookup (pinned: query_haplotype_alignment parses 0.5.x-specific bedpe/CLI behavior)
   - axel
   - gdown
   - zip

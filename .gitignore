@@ -183,3 +183,4 @@ samplesIDs/*
 PostProcess/dnaShape.pkl
 .mode_type.txt
 LiftoverFiles/
+haplotype_alignments/

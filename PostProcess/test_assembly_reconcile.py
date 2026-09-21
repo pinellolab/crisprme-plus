@@ -1091,5 +1091,750 @@ class TestReconcileHaplotypes(unittest.TestCase):
             self.assertEqual(second_call_log, first_call_log)  # not doubled
 
 
+class TestCheckImpgAvailable(unittest.TestCase):
+    def test_raises_when_missing(self):
+        with patch.object(ar.shutil, "which", return_value=None):
+            with self.assertRaises(RuntimeError) as ctx:
+                ar.check_impg_available()
+        self.assertIn("minimap2", str(ctx.exception))
+        self.assertIn("impg", str(ctx.exception))
+
+    def test_passes_when_both_on_path(self):
+        with patch.object(ar.shutil, "which", return_value="/usr/bin/tool"):
+            ar.check_impg_available()  # must not raise
+
+    def test_names_only_the_missing_tool(self):
+        def which(tool):
+            return None if tool == "impg" else "/usr/bin/minimap2"
+
+        with patch.object(ar.shutil, "which", side_effect=which):
+            with self.assertRaises(RuntimeError) as ctx:
+                ar.check_impg_available()
+        self.assertIn("impg", str(ctx.exception))
+        self.assertNotIn("minimap2 and impg", str(ctx.exception))
+
+
+class TestAlignmentCacheKey(unittest.TestCase):
+    def test_order_independent(self):
+        self.assertEqual(
+            ar._alignment_cache_key("/a/genome1", "/b/genome2"),
+            ar._alignment_cache_key("/b/genome2", "/a/genome1"),
+        )
+
+    def test_different_pairs_different_keys(self):
+        self.assertNotEqual(
+            ar._alignment_cache_key("/a/g1", "/b/g2"),
+            ar._alignment_cache_key("/a/g1", "/c/g3"),
+        )
+
+
+class TestHaplotypeAlignmentCacheValid(unittest.TestCase):
+    def _seed_cache(self, cache_dir, genome_a, genome_b, name_target="b", write_paf=True, write_index=True):
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(os.path.join(cache_dir, ar.ALIGNMENT_PARAMS_FILENAME), "w") as f:
+            for p in sorted([os.path.abspath(genome_a), os.path.abspath(genome_b)]):
+                f.write(p + "\n")
+        paf_path = os.path.join(cache_dir, ar._alignment_paf_filename(name_target))
+        if write_paf:
+            open(paf_path, "w").close()
+        if write_index:
+            open(paf_path + ".impg", "w").close()
+
+    def test_valid_when_paths_and_files_match(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            genome_a, genome_b = os.path.join(tmpdir, "a"), os.path.join(tmpdir, "b")
+            self._seed_cache(cache_dir, genome_a, genome_b, name_target="b")
+            self.assertTrue(ar._haplotype_alignment_cache_valid(cache_dir, genome_a, genome_b, "b"))
+            # order-independent: (b, a) is still a hit against the same cache,
+            # for the SAME target name
+            self.assertTrue(ar._haplotype_alignment_cache_valid(cache_dir, genome_b, genome_a, "b"))
+
+    def test_invalid_for_the_other_orientation_not_yet_built(self):
+        # only "b" was built -- "a" as target is a genuinely different,
+        # not-yet-cached alignment, even though it's the same genome pair
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            genome_a, genome_b = os.path.join(tmpdir, "a"), os.path.join(tmpdir, "b")
+            self._seed_cache(cache_dir, genome_a, genome_b, name_target="b")
+            self.assertFalse(ar._haplotype_alignment_cache_valid(cache_dir, genome_a, genome_b, "a"))
+
+    def test_invalid_when_sidecar_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            os.makedirs(cache_dir)
+            self.assertFalse(ar._haplotype_alignment_cache_valid(cache_dir, "/a", "/b", "b"))
+
+    def test_invalid_when_genome_paths_dont_match_sidecar(self):
+        # e.g. a hash collision, or (more realistically) a stale cache dir
+        # someone hand-edited -- must not be trusted just because it exists
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            genome_a, genome_b = os.path.join(tmpdir, "a"), os.path.join(tmpdir, "b")
+            self._seed_cache(cache_dir, genome_a, genome_b, name_target="b")
+            other_genome = os.path.join(tmpdir, "c")
+            self.assertFalse(ar._haplotype_alignment_cache_valid(cache_dir, genome_a, other_genome, "b"))
+
+    def test_invalid_when_index_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            genome_a, genome_b = os.path.join(tmpdir, "a"), os.path.join(tmpdir, "b")
+            self._seed_cache(cache_dir, genome_a, genome_b, name_target="b", write_index=False)
+            self.assertFalse(ar._haplotype_alignment_cache_valid(cache_dir, genome_a, genome_b, "b"))
+
+
+class TestBuildOrReuseHaplotypeAlignment(unittest.TestCase):
+    def test_cache_hit_skips_build_entirely(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            genome_a, genome_b = os.path.join(tmpdir, "genome_a"), os.path.join(tmpdir, "genome_b")
+            os.makedirs(genome_a)
+            os.makedirs(genome_b)
+            cache_root = os.path.join(tmpdir, "cache_root")
+            cache_dir = os.path.join(cache_root, ar._alignment_cache_key(genome_a, genome_b))
+            os.makedirs(cache_dir)
+            with open(os.path.join(cache_dir, ar.ALIGNMENT_PARAMS_FILENAME), "w") as f:
+                for p in sorted([os.path.abspath(genome_a), os.path.abspath(genome_b)]):
+                    f.write(p + "\n")
+            paf_path = os.path.join(cache_dir, ar._alignment_paf_filename("maternal"))
+            open(paf_path, "w").close()
+            open(paf_path + ".impg", "w").close()
+
+            with patch.object(ar.subprocess, "run") as mock_run:
+                result = ar.build_or_reuse_haplotype_alignment(
+                    genome_a, genome_b, "paternal", "maternal", cache_root,
+                )
+            mock_run.assert_not_called()
+            self.assertEqual(result, paf_path)
+
+    def test_lock_blocks_until_released_then_reuses_finished_build(self):
+        # simulates a second process finding the pair already being built:
+        # it must wait (poll the lock), not race in and rebuild. Once the
+        # "other process" finishes (releases the lock, cache now valid),
+        # this call should detect and reuse it rather than building again.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            genome_a, genome_b = os.path.join(tmpdir, "genome_a"), os.path.join(tmpdir, "genome_b")
+            os.makedirs(genome_a)
+            os.makedirs(genome_b)
+            cache_root = os.path.join(tmpdir, "cache_root")
+            os.makedirs(cache_root)
+            cache_dir = os.path.join(cache_root, ar._alignment_cache_key(genome_a, genome_b))
+            lock_path = f"{cache_dir}.target_maternal.lock"
+            os.makedirs(lock_path)  # pre-existing lock: "another process" is building
+            paf_path = os.path.join(cache_dir, ar._alignment_paf_filename("maternal"))
+
+            def fake_sleep(seconds):
+                os.makedirs(cache_dir, exist_ok=True)
+                with open(os.path.join(cache_dir, ar.ALIGNMENT_PARAMS_FILENAME), "w") as f:
+                    for p in sorted([os.path.abspath(genome_a), os.path.abspath(genome_b)]):
+                        f.write(p + "\n")
+                open(paf_path, "w").close()
+                open(paf_path + ".impg", "w").close()
+                os.rmdir(lock_path)  # "other process" releases the lock
+
+            with patch.object(ar.time, "sleep", side_effect=fake_sleep):
+                with patch.object(ar.subprocess, "run") as mock_run:
+                    result = ar.build_or_reuse_haplotype_alignment(
+                        genome_a, genome_b, "paternal", "maternal", cache_root,
+                    )
+            mock_run.assert_not_called()  # reused the other process's result
+            self.assertEqual(result, paf_path)
+
+    def test_both_orientations_build_independently_into_shared_cache_dir(self):
+        # real gap this covers: the two orientations share one (order-
+        # independent) cache_dir but must produce two DIFFERENT files and
+        # not stomp on each other or on the shared params sidecar.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            genome_a, genome_b = os.path.join(tmpdir, "genome_a"), os.path.join(tmpdir, "genome_b")
+            os.makedirs(genome_a)
+            open(os.path.join(genome_a, "chr1.fa"), "w").write(">chr1\nACGT\n")
+            os.makedirs(genome_b)
+            open(os.path.join(genome_b, "chr1.fa"), "w").write(">chr1\nACGT\n")
+            cache_root = os.path.join(tmpdir, "cache_root")
+
+            def fake_run(cmd, **kwargs):
+                # minimap2 call is a shell string ending in "> <raw_paf>";
+                # impg index call is an argv list -- write a minimal real
+                # PAF line for the minimap2 case so impg index (also
+                # mocked here) isn't actually needed.
+                result = type("R", (), {"returncode": 0, "stderr": ""})()
+                if isinstance(cmd, str) and cmd.startswith("minimap2"):
+                    raw_paf = cmd.rsplit("> ", 1)[1].strip()
+                    with open(raw_paf, "w") as f:
+                        f.write("chr1\t4\t0\t4\t+\tchr1\t4\t0\t4\t4\t4\t60\n")
+                return result
+
+            with patch.object(ar.subprocess, "run", side_effect=fake_run):
+                paf_a_target, paf_b_target = ar.build_or_reuse_haplotype_alignments_both_orientations(
+                    genome_a, genome_b, "paternal", "maternal", cache_root, threads=1,
+                )
+            self.assertNotEqual(paf_a_target, paf_b_target)
+            self.assertTrue(os.path.isfile(paf_a_target))
+            self.assertTrue(os.path.isfile(paf_b_target))
+            # both real, independent files -- not one overwriting the other --
+            # and each has the RIGHT genome in the target (col 6) position,
+            # not just present somewhere in the line
+            with open(paf_a_target) as f:
+                fields = f.read().strip().split("\t")
+            self.assertEqual(fields[5], "paternal_chr1")  # paf_a_target: paternal is target
+            with open(paf_b_target) as f:
+                fields = f.read().strip().split("\t")
+            self.assertEqual(fields[5], "maternal_chr1")  # paf_b_target: maternal is target
+
+
+class TestConcatGenomeFasta(unittest.TestCase):
+    def test_concatenates_all_fa_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            genome_dir = os.path.join(tmpdir, "genome")
+            os.makedirs(genome_dir)
+            with open(os.path.join(genome_dir, "chr1.fa"), "w") as f:
+                f.write(">chr1\nACGT\n")
+            with open(os.path.join(genome_dir, "chr2.fa"), "w") as f:
+                f.write(">chr2\nTTTT\n")
+            out_path = os.path.join(tmpdir, "combined.fa")
+            ar._concat_genome_fasta(genome_dir, out_path)
+            with open(out_path) as f:
+                content = f.read()
+            self.assertIn(">chr1", content)
+            self.assertIn(">chr2", content)
+
+    def test_raises_when_no_fa_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            genome_dir = os.path.join(tmpdir, "empty_genome")
+            os.makedirs(genome_dir)
+            with self.assertRaises(RuntimeError):
+                ar._concat_genome_fasta(genome_dir, os.path.join(tmpdir, "out.fa"))
+
+
+class TestRenamePafSequences(unittest.TestCase):
+    def test_prefixes_query_and_target_columns_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            raw_paf = os.path.join(tmpdir, "raw.paf")
+            with open(raw_paf, "w") as f:
+                f.write("chr19\t100\t0\t50\t+\tchr19\t100\t0\t50\t50\t50\t60\n")
+            out_paf = os.path.join(tmpdir, "renamed.paf")
+            ar._rename_paf_sequences(raw_paf, out_paf, "maternal", "paternal")
+            with open(out_paf) as f:
+                fields = f.read().rstrip("\n").split("\t")
+            self.assertEqual(fields[0], "maternal_chr19")
+            self.assertEqual(fields[5], "paternal_chr19")
+            # regression guard: this is the exact bug this renaming fixes --
+            # both sides sharing a bare name silently breaks impg's -r lookup
+            self.assertNotEqual(fields[0], fields[5])
+
+
+class TestQueryHaplotypeAlignment(unittest.TestCase):
+    def test_parses_bedpe_hit_and_strips_prefix(self):
+        bedpe_line = "maternal_chr9\t62934237\t62934389\tpaternal_chr9\t70115563\t70115713\n"
+        with patch.object(ar.subprocess, "run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = bedpe_line
+            hits = ar.query_haplotype_alignment("some.paf", "paternal", "chr9", 70115637, 70115638)
+        self.assertEqual(hits, [("chr9", 62934237, 62934389)])
+        cmd = mock_run.call_args[0][0]
+        # impg 0.5.0 rejects query ranges under 101bp -- the 1bp input range
+        # gets padded around its midpoint before being passed to impg
+        region_arg = cmd[cmd.index("-r") + 1]
+        self.assertTrue(region_arg.startswith("paternal_chr9:"))
+        region_start, region_end = (int(x) for x in region_arg.split(":")[1].split("-"))
+        self.assertGreaterEqual(region_end - region_start, 101)
+        self.assertLessEqual(region_start, 70115637)
+        self.assertGreaterEqual(region_end, 70115638)
+
+    def test_multiple_hits_all_returned_not_collapsed(self):
+        # deliberately NOT reduced to "the best hit" here -- the caller
+        # (resolve_haplotype_private) needs the full count to detect a
+        # repeat-family region and decline to resolve it
+        bedpe = (
+            "maternal_chr9\t100\t200\tpaternal_chr9\t10\t20\n"
+            "maternal_chr9\t300\t400\tpaternal_chr9\t10\t20\n"
+        )
+        with patch.object(ar.subprocess, "run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = bedpe
+            hits = ar.query_haplotype_alignment("some.paf", "paternal", "chr9", 10, 20)
+        self.assertEqual(len(hits), 2)
+
+    def test_no_hits_returns_empty_list(self):
+        with patch.object(ar.subprocess, "run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = ""
+            hits = ar.query_haplotype_alignment("some.paf", "paternal", "chr9", 10, 20)
+        self.assertEqual(hits, [])
+
+    def test_self_echo_from_bidirectional_alignment_skipped(self):
+        # impg's default bidirectional interpretation can echo a hit back on
+        # the query's own side; only genuine cross-haplotype hits count
+        bedpe = "paternal_chr9\t100\t200\tpaternal_chr9\t70115637\t70115638\n"
+        with patch.object(ar.subprocess, "run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = bedpe
+            hits = ar.query_haplotype_alignment("some.paf", "paternal", "chr9", 70115637, 70115638)
+        self.assertEqual(hits, [])
+
+    def test_raises_on_nonzero_exit(self):
+        with patch.object(ar.subprocess, "run") as mock_run:
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stderr = "boom"
+            with self.assertRaises(RuntimeError):
+                ar.query_haplotype_alignment("some.paf", "paternal", "chr9", 10, 20)
+
+    def test_sequence_not_in_index_returns_empty_not_a_crash(self):
+        # real bug found during genome-wide verification: a haplotype
+        # sequence with no alignment data at all (e.g. a short unplaced
+        # scaffold minimap2 never produced any PAF record for) makes impg
+        # exit non-zero with "not found in index" -- a real, valid "no
+        # counterpart" outcome, not a query failure that should crash the
+        # whole run.
+        with patch.object(ar.subprocess, "run") as mock_run:
+            mock_run.return_value.returncode = 1
+            mock_run.return_value.stderr = (
+                "[impg] ERROR: Sequence 'paternal_chrUn_JBHDTB010000029.1' not found in index\n"
+            )
+            hits = ar.query_haplotype_alignment("some.paf", "paternal", "chrUn_JBHDTB010000029.1", 10, 20)
+        self.assertEqual(hits, [])
+
+
+class TestResolveHaplotypePrivate(unittest.TestCase):
+    def _preds(self, rows):
+        """rows: list of (off_target_id, chrom, pos)."""
+        return pd.DataFrame([
+            {"off_target_id": i, "Chromosome": c, "Start_coordinate_(fewest_mm+b)": p}
+            for i, c, p in rows
+        ])
+
+    def test_reciprocal_single_hit_collapses_to_both_haplotype_private(self):
+        predictions = {
+            "paternal": self._preds([("p1", "chr9", 1000)]),
+            "maternal": self._preds([("m1", "chr9", 5000)]),
+        }
+        unlifted_ids = {"paternal": {"p1"}, "maternal": {"m1"}}
+
+        def fake_query(paf_path, from_name, chrom, start, end):
+            self.assertEqual(from_name, "paternal")
+            return [("chr9", 4999, 5001)]  # single hit, lands on m1
+
+        with patch.object(ar, "query_haplotype_alignment", side_effect=fake_query):
+            resolved, absorbed = ar.resolve_haplotype_private(
+                unlifted_ids, predictions, "some.paf", ["paternal", "maternal"], merge_bp=3,
+            )
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved.iloc[0]["origin"], "both_haplotype_private")
+        self.assertEqual(absorbed["paternal"], {"p1"})
+        self.assertEqual(absorbed["maternal"], {"m1"})
+
+    def test_multi_hit_left_unresolved_even_if_one_would_reciprocally_confirm(self):
+        # the repeat-family regression guard (real example: a chr9
+        # pericentromeric repeat family with 3 copies on one haplotype and
+        # 6 on the other). Ambiguity must not be silently resolved by
+        # picking any one hit.
+        predictions = {
+            "paternal": self._preds([("p1", "chr9", 1000)]),
+            "maternal": self._preds([("m1", "chr9", 5000)]),
+        }
+        unlifted_ids = {"paternal": {"p1"}, "maternal": {"m1"}}
+
+        def fake_query(paf_path, from_name, chrom, start, end):
+            return [("chr9", 4999, 5001), ("chr9", 9999, 10001)]  # 2 candidates
+
+        with patch.object(ar, "query_haplotype_alignment", side_effect=fake_query):
+            resolved, absorbed = ar.resolve_haplotype_private(
+                unlifted_ids, predictions, "some.paf", ["paternal", "maternal"], merge_bp=3,
+            )
+        self.assertEqual(len(resolved), 0)
+        self.assertEqual(absorbed["paternal"], set())
+        self.assertEqual(absorbed["maternal"], set())
+
+    def test_one_sided_match_left_unresolved(self):
+        # direct alignment finds a real counterpart position, but the other
+        # haplotype's own search never independently called an off-target
+        # there -- not a reciprocal confirmation, stays non-mappable
+        predictions = {
+            "paternal": self._preds([("p1", "chr9", 1000)]),
+            "maternal": self._preds([("m1", "chr9", 5000)]),  # unrelated locus
+        }
+        unlifted_ids = {"paternal": {"p1"}, "maternal": {"m1"}}
+
+        def fake_query(paf_path, from_name, chrom, start, end):
+            return [("chr9", 50000, 50001)]  # single hit, but nowhere near m1
+
+        with patch.object(ar, "query_haplotype_alignment", side_effect=fake_query):
+            resolved, absorbed = ar.resolve_haplotype_private(
+                unlifted_ids, predictions, "some.paf", ["paternal", "maternal"], merge_bp=3,
+            )
+        self.assertEqual(len(resolved), 0)
+        self.assertEqual(absorbed, {"paternal": set(), "maternal": set()})
+
+    def test_zero_hits_left_unresolved(self):
+        predictions = {
+            "paternal": self._preds([("p1", "chr9", 1000)]),
+            "maternal": self._preds([("m1", "chr9", 5000)]),
+        }
+        unlifted_ids = {"paternal": {"p1"}, "maternal": {"m1"}}
+
+        with patch.object(ar, "query_haplotype_alignment", return_value=[]):
+            resolved, absorbed = ar.resolve_haplotype_private(
+                unlifted_ids, predictions, "some.paf", ["paternal", "maternal"], merge_bp=3,
+            )
+        self.assertEqual(len(resolved), 0)
+        self.assertEqual(absorbed, {"paternal": set(), "maternal": set()})
+
+    def test_reciprocal_match_picks_nearest_not_first_in_iteration_order(self):
+        # real gap found 2026-09-02: two maternal-private loci both within
+        # merge_bp of the same hit (a tight local cluster) -- the match must
+        # be the nearer one, not whichever happens to iterate first. Order
+        # the predictions so the FARTHER candidate (m_far) comes first in the
+        # DataFrame -- if the code still picked "first in iteration order"
+        # this test would catch it by picking m_far instead of m_near.
+        predictions = {
+            "paternal": self._preds([("p1", "chr9", 1000)]),
+            "maternal": self._preds([("m_far", "chr9", 5002), ("m_near", "chr9", 5001)]),
+        }
+        unlifted_ids = {"paternal": {"p1"}, "maternal": {"m_far", "m_near"}}
+
+        def fake_query(paf_path, from_name, chrom, start, end):
+            return [("chr9", 4999, 5001)]  # hit_mid = 5000; m_near is 1bp away, m_far is 2bp away
+
+        with patch.object(ar, "query_haplotype_alignment", side_effect=fake_query):
+            resolved, absorbed = ar.resolve_haplotype_private(
+                unlifted_ids, predictions, "some.paf", ["paternal", "maternal"], merge_bp=3,
+            )
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved.iloc[0]["off_target_id_maternal"], "m_near")
+        self.assertEqual(absorbed["maternal"], {"m_near"})
+
+
+class TestResolveHaplotypePrivateBidirectional(unittest.TestCase):
+    """`resolve_haplotype_private_bidirectional` runs the single-direction
+    primitive both ways and keeps only pairs both directions confirm --
+    see that function's docstring for the real data behind this choice."""
+
+    def _preds(self, rows):
+        return pd.DataFrame([
+            {"off_target_id": i, "Chromosome": c, "Start_coordinate_(fewest_mm+b)": p}
+            for i, c, p in rows
+        ])
+
+    def test_pair_confirmed_when_both_directions_agree(self):
+        predictions = {
+            "paternal": self._preds([("p1", "chr9", 1000)]),
+            "maternal": self._preds([("m1", "chr9", 5000)]),
+        }
+        unlifted_ids = {"paternal": {"p1"}, "maternal": {"m1"}}
+
+        def fake_query(paf_path, from_name, chrom, start, end):
+            # each direction must be routed to ITS matched alignment: the
+            # paternal->maternal query (target=maternal) must use
+            # "paf.target_maternal", the maternal->paternal query
+            # (target=paternal) must use "paf.target_paternal"
+            if from_name == "paternal":
+                self.assertEqual(paf_path, "paf.target_maternal")
+                return [("chr9", 4999, 5001)]  # -> lands on m1
+            self.assertEqual(paf_path, "paf.target_paternal")
+            return [("chr9", 999, 1001)]  # maternal -> lands on p1
+
+        with patch.object(ar, "query_haplotype_alignment", side_effect=fake_query):
+            resolved, absorbed = ar.resolve_haplotype_private_bidirectional(
+                unlifted_ids, predictions, "paf.target_paternal", "paf.target_maternal",
+                ["paternal", "maternal"], merge_bp=3,
+            )
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(resolved.iloc[0]["origin"], "both_haplotype_private")
+        self.assertEqual(absorbed["paternal"], {"p1"})
+        self.assertEqual(absorbed["maternal"], {"m1"})
+        # Real bug, fixed 2026-09-10: a both_haplotype_private row used to
+        # carry no locus data at all (just the two internal ids + origin) --
+        # every one of 376 such rows in real production output was
+        # unlocatable. Each side's OWN native (non-hg38) coordinate must now
+        # be present, since that's the whole point of the row.
+        row = resolved.iloc[0]
+        self.assertEqual(row["Chromosome_paternal"], "chr9")
+        self.assertEqual(row["Start_coordinate_paternal"], 1000)
+        self.assertEqual(row["Chromosome_maternal"], "chr9")
+        self.assertEqual(row["Start_coordinate_maternal"], 5000)
+
+    def test_pair_excluded_when_only_forward_direction_agrees(self):
+        # real, measured shape: paternal->maternal is a clean single hit,
+        # but the reverse query for the same physical site is ambiguous
+        # (e.g. a repeat region) -- this must NOT merge.
+        predictions = {
+            "paternal": self._preds([("p1", "chr9", 1000)]),
+            "maternal": self._preds([("m1", "chr9", 5000)]),
+        }
+        unlifted_ids = {"paternal": {"p1"}, "maternal": {"m1"}}
+
+        def fake_query(paf_path, from_name, chrom, start, end):
+            if from_name == "paternal":
+                return [("chr9", 4999, 5001)]  # clean, single hit
+            return [("chr9", 999, 1001), ("chr9", 8999, 9001)]  # maternal -> ambiguous
+
+        with patch.object(ar, "query_haplotype_alignment", side_effect=fake_query):
+            resolved, absorbed = ar.resolve_haplotype_private_bidirectional(
+                unlifted_ids, predictions, "paf.target_paternal", "paf.target_maternal",
+                ["paternal", "maternal"], merge_bp=3,
+            )
+        self.assertEqual(len(resolved), 0)
+        self.assertEqual(absorbed, {"paternal": set(), "maternal": set()})
+
+    def test_pair_excluded_when_only_reverse_direction_agrees(self):
+        predictions = {
+            "paternal": self._preds([("p1", "chr9", 1000)]),
+            "maternal": self._preds([("m1", "chr9", 5000)]),
+        }
+        unlifted_ids = {"paternal": {"p1"}, "maternal": {"m1"}}
+
+        def fake_query(paf_path, from_name, chrom, start, end):
+            if from_name == "paternal":
+                return [("chr9", 4999, 5001), ("chr9", 8999, 9001)]  # paternal -> ambiguous
+            return [("chr9", 999, 1001)]  # maternal -> clean, single hit
+
+        with patch.object(ar, "query_haplotype_alignment", side_effect=fake_query):
+            resolved, absorbed = ar.resolve_haplotype_private_bidirectional(
+                unlifted_ids, predictions, "paf.target_paternal", "paf.target_maternal",
+                ["paternal", "maternal"], merge_bp=3,
+            )
+        self.assertEqual(len(resolved), 0)
+        self.assertEqual(absorbed, {"paternal": set(), "maternal": set()})
+
+    def test_neither_direction_agrees(self):
+        predictions = {
+            "paternal": self._preds([("p1", "chr9", 1000)]),
+            "maternal": self._preds([("m1", "chr9", 5000)]),
+        }
+        unlifted_ids = {"paternal": {"p1"}, "maternal": {"m1"}}
+
+        with patch.object(ar, "query_haplotype_alignment", return_value=[]):
+            resolved, absorbed = ar.resolve_haplotype_private_bidirectional(
+                unlifted_ids, predictions, "paf.target_paternal", "paf.target_maternal",
+                ["paternal", "maternal"], merge_bp=3,
+            )
+        self.assertEqual(len(resolved), 0)
+        self.assertEqual(absorbed, {"paternal": set(), "maternal": set()})
+
+
+class TestReconcileHaplotypesWithDirectAlignment(unittest.TestCase):
+    """Integration of resolve_haplotype_private into reconcile_haplotypes,
+    mocking build_or_reuse_haplotype_alignment/resolve_haplotype_private at
+    their own boundary -- matches how run_liftover is mocked for the rest of
+    this suite, no real minimap2/impg needed."""
+
+    def _make_haplotype_results(self, tmpdir, name, rows):
+        results_dir = os.path.join(tmpdir, f"{name}_results")
+        os.makedirs(results_dir, exist_ok=True)
+        prefix = f"guide_PAM_{name}_mm4_bMax2"
+        df = pd.DataFrame(rows, columns=ar.PRED_COLS)
+        df.to_csv(os.path.join(results_dir, f"{prefix}_integrated_results.tsv"), sep="\t", index=False)
+        pd.DataFrame(columns=ar.PRED_COLS).to_csv(
+            os.path.join(results_dir, f"{prefix}_all_results_with_alternative_alignments.tsv"),
+            sep="\t", index=False,
+        )
+        return results_dir
+
+    def _make_chrom_alias(self, tmpdir, name):
+        path = os.path.join(tmpdir, f"{name}.chromAlias.txt")
+        with open(path, "w") as f:
+            f.write("# assembly\tucsc\tgenbank\n")
+            f.write("chr1_asm\tchr1\tCM000001.1\n")
+        return path
+
+    def _pred_row(self, chrom, pos, cfd):
+        return {
+            "Spacer+PAM": "ACGT", "Chromosome": chrom,
+            "Start_coordinate_(fewest_mm+b)": pos, "Strand_(fewest_mm+b)": "+",
+            "Aligned_spacer+PAM_(fewest_mm+b)": "ACGT",
+            "Aligned_protospacer+PAM_REF_(fewest_mm+b)": "ACGT",
+            "Aligned_protospacer+PAM_ALT_(fewest_mm+b)": "ACGT",
+            "Mismatches_(fewest_mm+b)": 0, "Bulges_(fewest_mm+b)": 0,
+            "CFD_score_(fewest_mm+b)": cfd,
+        }
+
+    def test_direct_alignment_skipped_when_no_cache_root_given(self):
+        # backward-compatible default: omitting alignment_cache_root (as
+        # every pre-existing test in this suite does) must behave exactly
+        # as before this feature existed -- no both_haplotype_private key,
+        # no attempt to touch minimap2/impg at all.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # 3 loci per haplotype, not 1 -- check_liftover_failure_rate
+            # guards against a 100% rejection rate (see the pre-existing
+            # test_unliftable_locus_counted_as_non_mappable_not_dropped),
+            # only the first should genuinely fail to lift.
+            paternal_dir = self._make_haplotype_results(tmpdir, "paternal", [
+                self._pred_row("chr1", 1000, 0.9), self._pred_row("chr1", 5000, 0.5),
+                self._pred_row("chr1", 9000, 0.3),
+            ])
+            maternal_dir = self._make_haplotype_results(tmpdir, "maternal", [
+                self._pred_row("chr1", 1000, 0.9), self._pred_row("chr1", 5000, 0.5),
+                self._pred_row("chr1", 9000, 0.3),
+            ])
+            haplotypes = {
+                "paternal": {
+                    "chrom_alias_file": self._make_chrom_alias(tmpdir, "paternal"),
+                    "chain_file": "unused.chain", "results_dir": paternal_dir,
+                },
+                "maternal": {
+                    "chrom_alias_file": self._make_chrom_alias(tmpdir, "maternal"),
+                    "chain_file": "unused.chain", "results_dir": maternal_dir,
+                },
+            }
+            lift_map = {5000: 60000, 9000: 70000}
+
+            def fake_run_liftover(bed_path, chain_file, mapped_path, unmapped_path):
+                bed = pd.read_csv(bed_path, sep="\t", header=None,
+                                   names=["chrom", "start", "end", "off_target_id"])
+                with open(mapped_path, "w") as mf, open(unmapped_path, "w") as uf:
+                    for _, r in bed.iterrows():
+                        if r["end"] == 1000:
+                            uf.write("#Deleted in new\n")
+                            uf.write(f"{r['chrom']}\t{r['start']}\t{r['end']}\t{r['off_target_id']}\n")
+                        else:
+                            hg38_end = lift_map[r["end"]]
+                            mf.write(f"chr1\t{hg38_end - 1}\t{hg38_end}\t{r['off_target_id']}\n")
+
+            with patch.object(ar, "run_liftover", side_effect=fake_run_liftover), \
+                 patch.object(ar, "build_or_reuse_haplotype_alignments_both_orientations") as mock_build:
+                combined, summary = ar.reconcile_haplotypes(haplotypes, workdir=tmpdir, merge_bp=3)
+            mock_build.assert_not_called()  # the actual behavior under test
+            self.assertEqual(summary["both_haplotype_private"], 0)
+            self.assertEqual(summary["paternal_non_mappable"], 1)  # unresolved, step never ran
+            self.assertEqual(summary["maternal_non_mappable"], 1)
+
+    def test_resolved_pairs_removed_from_non_mappable_counts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # again 3 loci per haplotype so a single genuine rejection isn't
+            # itself flagged by check_liftover_failure_rate
+            paternal_dir = self._make_haplotype_results(tmpdir, "paternal", [
+                self._pred_row("chr1", 1000, 0.9), self._pred_row("chr1", 5000, 0.5),
+                self._pred_row("chr1", 9000, 0.3),
+            ])
+            maternal_dir = self._make_haplotype_results(tmpdir, "maternal", [
+                self._pred_row("chr1", 2000, 0.8), self._pred_row("chr1", 5000, 0.5),
+                self._pred_row("chr1", 9000, 0.3),
+            ])
+            haplotypes = {
+                "paternal": {
+                    "chrom_alias_file": self._make_chrom_alias(tmpdir, "paternal"),
+                    "chain_file": "unused.chain", "results_dir": paternal_dir,
+                    "genome_dir": "/unused/paternal_genome",
+                },
+                "maternal": {
+                    "chrom_alias_file": self._make_chrom_alias(tmpdir, "maternal"),
+                    "chain_file": "unused.chain", "results_dir": maternal_dir,
+                    "genome_dir": "/unused/maternal_genome",
+                },
+            }
+            lift_map = {5000: 60000, 9000: 70000}
+
+            def fake_run_liftover(bed_path, chain_file, mapped_path, unmapped_path):
+                bed = pd.read_csv(bed_path, sep="\t", header=None,
+                                   names=["chrom", "start", "end", "off_target_id"])
+                with open(mapped_path, "w") as mf, open(unmapped_path, "w") as uf:
+                    for _, r in bed.iterrows():
+                        if r["end"] in (1000, 2000):
+                            uf.write("#Deleted in new\n")
+                            uf.write(f"{r['chrom']}\t{r['start']}\t{r['end']}\t{r['off_target_id']}\n")
+                        else:
+                            hg38_end = lift_map[r["end"]]
+                            mf.write(f"chr1\t{hg38_end - 1}\t{hg38_end}\t{r['off_target_id']}\n")
+
+            def fake_resolve(unlifted_ids, predictions, paf_path, names, merge_bp):
+                a, b = names
+                a_id = next(iter(unlifted_ids[a]))
+                b_id = next(iter(unlifted_ids[b]))
+                a_row = predictions[a].set_index("off_target_id").loc[a_id]
+                resolved = pd.DataFrame([{
+                    f"off_target_id_{a}": a_id, f"off_target_id_{b}": b_id,
+                    # the queried-FROM haplotype's own native locus, same as
+                    # the real primitive -- consumed by the row-data lookup
+                    # in resolve_haplotype_private_bidirectional
+                    "Chromosome": a_row["Chromosome"],
+                    "Start_coordinate": a_row["Start_coordinate_(fewest_mm+b)"],
+                    "origin": "both_haplotype_private",
+                }])
+                return resolved, {a: {a_id}, b: {b_id}}
+
+            with patch.object(ar, "run_liftover", side_effect=fake_run_liftover), \
+                 patch.object(ar, "build_or_reuse_haplotype_alignments_both_orientations",
+                               return_value=("fake.target_paternal.paf", "fake.target_maternal.paf")), \
+                 patch.object(ar, "resolve_haplotype_private", side_effect=fake_resolve):
+                combined, summary = ar.reconcile_haplotypes(
+                    haplotypes, workdir=tmpdir, merge_bp=3, alignment_cache_root=tmpdir,
+                )
+
+            self.assertEqual(summary["both_haplotype_private"], 1)
+            self.assertEqual(summary["paternal_non_mappable"], 0)  # absorbed, not double-counted
+            self.assertEqual(summary["maternal_non_mappable"], 0)
+            self.assertIn("both_haplotype_private", combined["origin"].values)
+
+    def test_pair_stays_non_mappable_when_only_one_direction_agrees(self):
+        # end-to-end guard for the real, measured directional-asymmetry
+        # behavior: `resolve_haplotype_private` (the mocked primitive here)
+        # confirms the pair when queried paternal->maternal but returns
+        # nothing queried maternal->paternal -- reconcile_haplotypes must
+        # NOT merge it, and both ids must remain in their own non-mappable
+        # counts, not silently absorbed.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paternal_dir = self._make_haplotype_results(tmpdir, "paternal", [
+                self._pred_row("chr1", 1000, 0.9), self._pred_row("chr1", 5000, 0.5),
+                self._pred_row("chr1", 9000, 0.3),
+            ])
+            maternal_dir = self._make_haplotype_results(tmpdir, "maternal", [
+                self._pred_row("chr1", 2000, 0.8), self._pred_row("chr1", 5000, 0.5),
+                self._pred_row("chr1", 9000, 0.3),
+            ])
+            haplotypes = {
+                "paternal": {
+                    "chrom_alias_file": self._make_chrom_alias(tmpdir, "paternal"),
+                    "chain_file": "unused.chain", "results_dir": paternal_dir,
+                    "genome_dir": "/unused/paternal_genome",
+                },
+                "maternal": {
+                    "chrom_alias_file": self._make_chrom_alias(tmpdir, "maternal"),
+                    "chain_file": "unused.chain", "results_dir": maternal_dir,
+                    "genome_dir": "/unused/maternal_genome",
+                },
+            }
+            lift_map = {5000: 60000, 9000: 70000}
+
+            def fake_run_liftover(bed_path, chain_file, mapped_path, unmapped_path):
+                bed = pd.read_csv(bed_path, sep="\t", header=None,
+                                   names=["chrom", "start", "end", "off_target_id"])
+                with open(mapped_path, "w") as mf, open(unmapped_path, "w") as uf:
+                    for _, r in bed.iterrows():
+                        if r["end"] in (1000, 2000):
+                            uf.write("#Deleted in new\n")
+                            uf.write(f"{r['chrom']}\t{r['start']}\t{r['end']}\t{r['off_target_id']}\n")
+                        else:
+                            hg38_end = lift_map[r["end"]]
+                            mf.write(f"chr1\t{hg38_end - 1}\t{hg38_end}\t{r['off_target_id']}\n")
+
+            def fake_resolve(unlifted_ids, predictions, paf_path, names, merge_bp):
+                a, b = names
+                # only the paternal-first query direction "confirms" anything
+                if a != "paternal":
+                    return pd.DataFrame(), {a: set(), b: set()}
+                a_id = next(iter(unlifted_ids[a]))
+                b_id = next(iter(unlifted_ids[b]))
+                a_row = predictions[a].set_index("off_target_id").loc[a_id]
+                resolved = pd.DataFrame([{
+                    f"off_target_id_{a}": a_id, f"off_target_id_{b}": b_id,
+                    "Chromosome": a_row["Chromosome"],
+                    "Start_coordinate": a_row["Start_coordinate_(fewest_mm+b)"],
+                    "origin": "both_haplotype_private",
+                }])
+                return resolved, {a: {a_id}, b: {b_id}}
+
+            with patch.object(ar, "run_liftover", side_effect=fake_run_liftover), \
+                 patch.object(ar, "build_or_reuse_haplotype_alignments_both_orientations",
+                               return_value=("fake.target_paternal.paf", "fake.target_maternal.paf")), \
+                 patch.object(ar, "resolve_haplotype_private", side_effect=fake_resolve):
+                combined, summary = ar.reconcile_haplotypes(
+                    haplotypes, workdir=tmpdir, merge_bp=3, alignment_cache_root=tmpdir,
+                )
+
+            self.assertEqual(summary["both_haplotype_private"], 0)
+            self.assertEqual(summary["paternal_non_mappable"], 1)  # NOT absorbed
+            self.assertEqual(summary["maternal_non_mappable"], 1)  # NOT absorbed
+            self.assertNotIn("both_haplotype_private", combined["origin"].values)
+
+
 if __name__ == "__main__":
     unittest.main()
