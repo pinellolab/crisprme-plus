@@ -908,6 +908,40 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("Multiple perfect matches", bamb)
         self.assertIn("#dc2626", bamb)
 
+    def test_haplotype_coverage_figure_reflects_both_haplotype_private(self):
+        """The 'Both haplotypes' bar carries a real unmapped segment once
+        both_haplotype_private is nonzero -- real bug this guards against:
+        the function's own all-zero-summary short-circuit didn't know about
+        this key, so a summary with ONLY both_haplotype_private set (no
+        both/paternal_only/maternal_only/non_mappable at all) incorrectly
+        returned None (no figure at all) instead of a real one-bar chart."""
+        # old-style summary (predates this category): unaffected, still a
+        # real figure, and the key is simply absent -- not a KeyError.
+        old_summary = {
+            "both": 10, "paternal_only": 2, "maternal_only": 3,
+            "paternal_non_mappable": 1, "maternal_non_mappable": 1,
+        }
+        self.assertIsNotNone(gr._combined_haplotype_coverage_figure_uri(old_summary))
+        # a summary where both_haplotype_private is the ONLY nonzero count
+        # must still produce a real figure, not None.
+        only_private = {
+            "both": 0, "paternal_only": 0, "maternal_only": 0,
+            "paternal_non_mappable": 0, "maternal_non_mappable": 0,
+            "both_haplotype_private": 7,
+        }
+        uri = gr._combined_haplotype_coverage_figure_uri(only_private)
+        self.assertIsNotNone(uri)
+        self.assertTrue(uri.startswith("data:image/png;base64,"))
+        # an all-zero summary (including both_haplotype_private) still
+        # correctly returns None -- no real data, no figure.
+        self.assertIsNone(
+            gr._combined_haplotype_coverage_figure_uri({
+                "both": 0, "paternal_only": 0, "maternal_only": 0,
+                "paternal_non_mappable": 0, "maternal_non_mappable": 0,
+                "both_haplotype_private": 0,
+            })
+        )
+
     def test_annotation_columns_and_legend_drop_when_absent(self):
         """A run WITHOUT a given annotation must NOT show its all-'-' column NOR a
         legend entry documenting a screen that never ran; a no-annotation run omits

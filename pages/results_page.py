@@ -1047,16 +1047,16 @@ def result_page_assembly(job_id: str) -> html.Div:
     none of that exists for an assembly-search job (confirmed by directly
     reading result_page() and generate_sample_card, not assumed).
 
-    First-pass scope, deliberately: the reconciled off-target table (the 3
-    real `origin` categories reconcile_haplotypes() can actually produce --
-    paternal_only, maternal_only, both; a 4th, "both_haplotype_private", is
-    defined in assembly_reconcile.py but not called anywhere in the current
-    pipeline -- confirmed by grepping for its call sites -- so it can't
-    appear in real data yet) plus a haplotype-coverage summary, including
-    the two non-mappable ("haplotype-private") site COUNTS.
-    reconcile_haplotypes() doesn't persist per-site detail for non-mappable
-    predictions anywhere, only a count, so a detailed haplotype-private
-    table isn't buildable from current pipeline output -- not a UI choice,
+    The reconciled off-target table shows all 4 real `origin` categories
+    reconcile_haplotypes() can produce -- paternal_only, maternal_only,
+    both, and (since the direct haplotype-vs-haplotype alignment step was
+    added) both_haplotype_private, a site independently found on both
+    haplotypes that has no hg38 coordinate on either side -- plus a
+    haplotype-coverage summary, including the two one-sided non-mappable
+    ("haplotype-private") site COUNTS. reconcile_haplotypes() doesn't
+    persist per-site detail for the one-sided non-mappable predictions
+    anywhere, only a count, so a detailed haplotype-private table isn't
+    buildable from current pipeline output for those -- not a UI choice,
     a real upstream data gap. A per-haplotype (maternal vs. paternal)
     comparison view, in the spirit of complete-search's "Personal Risk
     Cards" (a UX-shape precedent only -- none of its actual code, built on
@@ -1691,14 +1691,29 @@ def result_page_assembly(job_id: str) -> html.Div:
     _cov_mat_mapped = summary_counts.get("maternal_only", origin_counts.get("maternal_only", 0))
     _cov_pat_unmapped = summary_counts.get("paternal_non_mappable", 0)
     _cov_mat_unmapped = summary_counts.get("maternal_non_mappable", 0)
-    _cov_total = _cov_both + _cov_pat_mapped + _cov_mat_mapped + _cov_pat_unmapped + _cov_mat_unmapped
+    # both_haplotype_private (2026-09-22): a site independently found on BOTH
+    # haplotypes that direct alignment (impg/minimap2) confirms is the same
+    # physical locus, but which has no hg38 coordinate on either side --
+    # the "Both haplotypes" bar's own unmapped segment, exactly like the
+    # Paternal/Maternal bars already have. Falls back to `origin_counts`
+    # for the same reason the three mapped counts do (log_verbose.txt
+    # missing/unparsed); both sources default to 0 on a combined_hg38.tsv
+    # from before this reconciliation category existed, so old jobs still
+    # render correctly with an all-mapped "Both haplotypes" bar.
+    _cov_both_private = summary_counts.get(
+        "both_haplotype_private", origin_counts.get("both_haplotype_private", 0)
+    )
+    _cov_total = (
+        _cov_both + _cov_pat_mapped + _cov_mat_mapped
+        + _cov_pat_unmapped + _cov_mat_unmapped + _cov_both_private
+    )
     if _cov_total:
         # listed Paternal->Maternal->"Both haplotypes"; autorange="reversed"
         # below then puts "Both haplotypes" at the TOP, matching the static
         # report's bar order.
         _cov_categories = ["Paternal", "Maternal", "Both haplotypes"]
         _cov_mapped = [_cov_pat_mapped, _cov_mat_mapped, _cov_both]
-        _cov_unmapped = [_cov_pat_unmapped, _cov_mat_unmapped, 0]
+        _cov_unmapped = [_cov_pat_unmapped, _cov_mat_unmapped, _cov_both_private]
         _cov_fig = go.Figure()
         _cov_fig.add_trace(
             go.Bar(
@@ -1761,6 +1776,12 @@ def result_page_assembly(job_id: str) -> html.Div:
         html.Div(
             [
                 _stat("Found in both haplotypes", origin_counts.get("both", 0)),
+                _stat(
+                    "Found in both haplotypes, non-mappable to hg38",
+                    summary_counts.get(
+                        "both_haplotype_private", origin_counts.get("both_haplotype_private", 0)
+                    ),
+                ),
                 _stat("Paternal-only", origin_counts.get("paternal_only", 0)),
                 _stat("Maternal-only", origin_counts.get("maternal_only", 0)),
                 _stat(
@@ -1776,9 +1797,14 @@ def result_page_assembly(job_id: str) -> html.Div:
         *origin_chart_block,
         html.P(
             "Non-mappable sites have no hg38 equivalent -- invisible to any "
-            "reference-based search. Their per-site detail (in each "
-            "haplotype's own assembly coordinates) is in the Custom Ranking "
-            "tab below, under Site set -> Maternal-unmappable / "
+            "reference-based search, unless direct haplotype-vs-haplotype "
+            "alignment independently confirms the same site on both "
+            "haplotypes (\"found in both haplotypes, non-mappable to "
+            "hg38\" above) -- those rows are in the main reconciled table "
+            "below, in each haplotype's own native coordinates. Purely "
+            "one-sided non-mappable sites' per-site detail (also in each "
+            "haplotype's own assembly coordinates) is in the Custom "
+            "Ranking tab below, under Site set -> Maternal-unmappable / "
             "Paternal-unmappable.",
             style={
                 "font-size": "1.0rem",
