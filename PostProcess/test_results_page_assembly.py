@@ -172,6 +172,70 @@ class TestHaplotypePrivateSiteSet(unittest.TestCase):
                 self.assertEqual(len(df), 1)
                 self.assertTrue(pd.isna(df.iloc[0]["CFD_score_(fewest_mm+b)_paternal"]))
 
+    # -- Zero-count edge cases -----------------------------------------
+    # The four tests above all construct at least one both_haplotype_private
+    # row. Real jobs overwhelmingly have ZERO of them: every pre-impg job
+    # (no "origin" column at all in combined_hg38.tsv) and any impg-enabled
+    # job whose direct alignment genuinely finds no haplotype-private pairs.
+    # Confirmed directly against the real diverseOriginTest2_INILXMVL7H_combined
+    # job (predates impg, no "origin" column) before adding these: the stat
+    # card showed a real "0", the coverage plot rendered normally, and the
+    # Custom Ranking dropdown's "Both haplotypes (non-mappable to hg38)"
+    # option produced an empty (not crashing) table. Pinning that here.
+    def _make_combined_job_no_origin_column(self, tmpdir, job_id):
+        """An old-style (pre-impg) combined_hg38.tsv: no "origin" column at
+        all, same as every real job reconciled before this feature existed."""
+        combined_dir = os.path.join(tmpdir, RESULTS_DIR, f"{job_id}_combined")
+        os.makedirs(combined_dir, exist_ok=True)
+        pd.DataFrame([{
+            "Chromosome_paternal": "chr1", "hg38_chr": "chr1", "hg38_start": 1000,
+            "off_target_id_paternal": 0, "off_target_id_maternal": 0,
+        }]).to_csv(
+            os.path.join(combined_dir, f"{job_id}_combined_hg38.tsv"), sep="\t", index=False,
+        )
+        with open(os.path.join(combined_dir, PARAMS_FILE), "w") as f:
+            f.write("1\tGenome_type\tassembly\n")
+        return combined_dir
+
+    def test_no_origin_column_at_all_returns_empty_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            combined_dir = self._make_combined_job_no_origin_column(tmpdir, "oldjob")
+            with patch.object(rp, "current_working_directory", tmpdir + os.sep):
+                df, cols = rp._assembly_haplotype_private_frame(combined_dir)
+                self.assertEqual(len(df), 0)
+                self.assertEqual(cols, [])
+                # site-set dispatch must not crash either, feeding the same
+                # empty-df path the Custom Ranking callback's own
+                # `if df.empty: return [], [], []` guard relies on
+                df2, cols2 = rp._assembly_site_set_frame(combined_dir, "both_haplotype_private")
+                self.assertTrue(df2.empty)
+
+    def test_origin_column_present_but_zero_private_rows(self):
+        # a real impg-enabled job whose direct alignment found zero
+        # haplotype-private pairs -- "origin" column exists, just no rows
+        # equal "both_haplotype_private"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_id = "job_zero_private"
+            combined_dir = os.path.join(tmpdir, RESULTS_DIR, f"{job_id}_combined")
+            os.makedirs(combined_dir, exist_ok=True)
+            pd.DataFrame([
+                {"origin": "both", "Chromosome_paternal": "chr1", "hg38_chr": "chr1",
+                 "hg38_start": 1000, "off_target_id_paternal": 0, "off_target_id_maternal": 0},
+                {"origin": "paternal_only", "Chromosome_paternal": "chr2", "hg38_chr": "chr2",
+                 "hg38_start": 2000, "off_target_id_paternal": 1, "off_target_id_maternal": None},
+            ]).to_csv(
+                os.path.join(combined_dir, f"{job_id}_combined_hg38.tsv"), sep="\t", index=False,
+            )
+            with open(os.path.join(combined_dir, PARAMS_FILE), "w") as f:
+                f.write("1\tGenome_type\tassembly\n")
+            with patch.object(rp, "current_working_directory", tmpdir + os.sep):
+                df, cols = rp._assembly_haplotype_private_frame(combined_dir)
+                self.assertEqual(len(df), 0)
+                self.assertEqual(cols, [])
+                # the other two real rows must be unaffected
+                mappable_df, _ = rp._assembly_mappable_frame(combined_dir)
+                self.assertEqual(len(mappable_df), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
