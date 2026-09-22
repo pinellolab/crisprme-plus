@@ -451,6 +451,68 @@ class TestHaplotypeParamsMatch(unittest.TestCase):
             self.assertFalse(ar.haplotype_params_match(tmp, **self._params()))
 
 
+class TestWriteCombinedParamsFile(unittest.TestCase):
+    def _write(self, combined_dir, paternal_dir, **overrides):
+        args = dict(
+            output_base="myjob", genome_paternal="/genomes/HG01255_paternal",
+            genome_maternal="/genomes/HG01255_maternal",
+            chain_paternal="/chains/pat.chain.gz", chain_maternal="/chains/mat.chain.gz",
+            chrom_alias_paternal="/alias/pat.chromAlias.txt",
+            chrom_alias_maternal="/alias/mat.chromAlias.txt",
+            paternal_results_dir=paternal_dir, mm=4, bDNA=1, bRNA=1,
+        )
+        args.update(overrides)
+        ar.write_combined_params_file(combined_dir, **args)
+
+    def _read_back(self, combined_dir):
+        # same 3-column parse results_page.py's _assembly_job_params() uses
+        params = {}
+        with open(os.path.join(combined_dir, ar.PARAMS_FILE)) as f:
+            for line in f:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) >= 3:
+                    params[fields[1]] = fields[2]
+        return params
+
+    def test_writes_expected_keys_and_values(self):
+        with tempfile.TemporaryDirectory() as combined_dir, \
+                tempfile.TemporaryDirectory() as paternal_dir:
+            with open(os.path.join(paternal_dir, ar.PARAMS_FILE), "w") as f:
+                f.write("Pam\tNGG\n")
+            self._write(combined_dir, paternal_dir)
+            params = self._read_back(combined_dir)
+            self.assertEqual(params["Genome_type"], "assembly")
+            self.assertEqual(params["Genome_paternal"], "HG01255_paternal")
+            self.assertEqual(params["Genome_maternal"], "HG01255_maternal")
+            self.assertEqual(params["Pam"], "NGG")
+            self.assertEqual(params["Mismatches"], "4")
+            self.assertEqual(params["DNA"], "1")
+            self.assertEqual(params["RNA"], "1")
+            self.assertEqual(params["Output_base"], "myjob")
+            self.assertEqual(params["Paternal_dir"], "myjob_paternal")
+            self.assertEqual(params["Maternal_dir"], "myjob_maternal")
+            self.assertEqual(params["Combined_dir"], "myjob_combined")
+            self.assertIn("Job_start", params)
+
+    def test_falls_back_to_unknown_pam_when_haplotype_params_missing(self):
+        with tempfile.TemporaryDirectory() as combined_dir, \
+                tempfile.TemporaryDirectory() as paternal_dir:
+            # no .Params.txt written in paternal_dir at all
+            self._write(combined_dir, paternal_dir)
+            params = self._read_back(combined_dir)
+            self.assertEqual(params["Pam"], "?")
+
+    def test_marks_job_as_assembly_type_for_is_assembly_job_style_checks(self):
+        # index.py's _is_assembly_job() does `"Genome_type\tassembly" in
+        # file_content` -- confirm the raw written line matches that substring
+        with tempfile.TemporaryDirectory() as combined_dir, \
+                tempfile.TemporaryDirectory() as paternal_dir:
+            self._write(combined_dir, paternal_dir)
+            with open(os.path.join(combined_dir, ar.PARAMS_FILE)) as f:
+                content = f.read()
+            self.assertIn("Genome_type\tassembly", content)
+
+
 class TestLoadChromAlias(unittest.TestCase):
     def test_parses_assembly_ucsc_genbank_columns(self):
         with tempfile.TemporaryDirectory() as d:
