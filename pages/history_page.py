@@ -17,6 +17,8 @@ from dash import html
 import pandas as pd
 import numpy as np
 
+from datetime import datetime
+
 import math
 import os
 import pathlib
@@ -211,6 +213,137 @@ def process_genome(genome_selected: str, genome_idx: str) -> Tuple[str, str]:
     return genome, variants
 
 
+# =============================================================================
+# Assembly-search jobs in the History table.
+#
+# An assembly-search combined job's own .Params.txt is a different SHAPE from
+# complete-search's (3-column index/key/value vs. 2-column key/value, and a
+# different key set entirely -- Genome_paternal/Genome_maternal instead of
+# Genome_selected/Genome_idx, no Genome_ref/Genome_idx at all), and its
+# log.txt is a raw merged stdout/stderr dump, not complete-search's
+# structured per-stage "stage\tStart"/"stage\tEnd" log read_job_info()
+# expects. Feeding an assembly job through read_params()/read_job_info()/
+# construct_history_summary()'s complete-search-only column logic mis-parses
+# the file (read_params()'s whitespace .split() maps the leading index
+# number as the key) and then KeyErrors on params["Genome_selected"] --
+# confirmed against every real assembly-search job already in Results/.
+#
+# A small independent set of helpers here, rather than threading
+# genome_type-awareness through the shared complete-search parsing, mirrors
+# the same call already made for /load's own status polling (see
+# refresh_assembly_search in load_page.py: "a fully independent parallel...
+# NOT an extension of the existing callback").
+# =============================================================================
+def _is_assembly_params(paramsfile: str) -> bool:
+    """Same content-substring check index.py's _is_assembly_job() uses,
+    applied to a .Params.txt path retrieve_resultsdirs() already confirmed
+    exists."""
+    try:
+        with open(paramsfile) as f:
+            return "Genome_type\tassembly" in f.read()
+    except OSError:
+        return False
+
+
+def _read_assembly_params_file(paramsfile: str) -> Dict[str, str]:
+    """Parses an assembly-search combined job's .Params.txt: 3-column
+    (index, key, value) -- unlike read_params()'s 2-column (key, value)
+    complete-search format."""
+    params: Dict[str, str] = {}
+    with open(paramsfile) as f:
+        for line in f:
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) >= 3:
+                params[fields[1]] = fields[2]
+    return params
+
+
+def _assembly_genome_display(paternal_label: str, maternal_label: str) -> str:
+    """A single Genome-column label for a two-haplotype job. Both known
+    Genome_paternal/Genome_maternal label shapes (main_page.py's
+    _assembly_genome_label()) end in a haplotype suffix -- strip it and
+    collapse to "<individual> (assembly)" when both sides name the same
+    individual; otherwise fall back to showing both labels plainly rather
+    than guessing."""
+    def _individual(label: str) -> Optional[str]:
+        for suffix in ("_paternal", "_maternal", " (paternal)", " (maternal)"):
+            if label.endswith(suffix):
+                return label[: -len(suffix)]
+        return None
+
+    pat, mat = _individual(paternal_label), _individual(maternal_label)
+    if pat and pat == mat:
+        return f"{pat} (assembly)"
+    return f"{paternal_label} / {maternal_label}"
+
+
+def _assembly_max_total_edits(params: Dict[str, str], results_directory: str) -> str:
+    """Assembly's own combined .Params.txt has no Max_total_edits field --
+    mirrors results_page.py's own fallback for the same gap: read it back
+    from either haplotype's own (complete-search-written) .Params.txt, both
+    run with the same mm/bDNA/bRNA/max-total-edits by construction."""
+    for dirname_key in ("Paternal_dir", "Maternal_dir"):
+        hap_dir = params.get(dirname_key)
+        if not hap_dir:
+            continue
+        hap_params_path = os.path.join(results_directory, hap_dir, PARAMS_FILE)
+        if not os.path.isfile(hap_params_path):
+            continue
+        with open(hap_params_path) as f:
+            for line in f:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) >= 2 and fields[0] == "Max_total_edits":
+                    return fields[1]
+    return "-"
+
+
+def _int_or_dash(value: Optional[str]):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return "-"
+
+
+def _assembly_history_row(jobid: str, params: Dict[str, str], results_directory: str) -> Dict[str, object]:
+    """Builds one History-table row for an assembly-search combined job:
+    complete-search's columns where they apply, sane assembly-specific
+    values where they don't (no single reference genome, no VCF variants,
+    no structured log.txt timestamp)."""
+    genome = _assembly_genome_display(
+        params.get("Genome_paternal", "?"), params.get("Genome_maternal", "?")
+    )
+    guides_file = os.path.join(results_directory, jobid, GUIDES_FILE)
+    try:
+        guidesnum = count_guides(guides_file, jobid)
+    except IOError:
+        guidesnum = 0
+    start = params.get("Job_start")
+    if not start:
+        # Pre-fix jobs (created before assembly_search() wrote its own
+        # .Params.txt, or web-submitted before Job_start was added) have no
+        # Job_start field -- the file's own mtime is a reasonable stand-in
+        # so these still sort/display sensibly rather than erroring.
+        params_path = os.path.join(results_directory, jobid, PARAMS_FILE)
+        try:
+            start = datetime.fromtimestamp(
+                os.path.getmtime(params_path)
+            ).strftime("%Y-%m-%d %H:%M:%S")
+        except OSError:
+            start = "-"
+    return {
+        "Job": jobid,
+        "Genome": genome,
+        "Variants": "-",
+        "Mismatches": _int_or_dash(params.get("Mismatches")),
+        "DNA bulge": _int_or_dash(params.get("DNA")),
+        "RNA bulge": _int_or_dash(params.get("RNA")),
+        "Max edits": _assembly_max_total_edits(params, results_directory),
+        "PAM": params.get("Pam", "?"),
+        "Number of Guides": guidesnum,
+        "Start": start,
+    }
+
+
 def construct_history_summary(results: List[str]) -> pd.DataFrame:
     """Construct a summary dataframe of CRISPRme job history.
 
@@ -225,7 +358,16 @@ def construct_history_summary(results: List[str]) -> pd.DataFrame:
         A pandas DataFrame summarizing the job history.
     """
     summary = {c: [] for c in SUMMARYTABCOLS}  # initialize table
+    results_directory = os.path.join(current_working_directory, RESULTS_DIR)
     for jobid in results:
+        paramsfile = os.path.join(results_directory, jobid, PARAMS_FILE)
+        if _is_assembly_params(paramsfile):
+            row = _assembly_history_row(
+                jobid, _read_assembly_params_file(paramsfile), results_directory
+            )
+            for col in SUMMARYTABCOLS:
+                summary[col].append(row[col])
+            continue
         params = read_params(os.path.join(current_working_directory, RESULTS_DIR, jobid, PARAMS_FILE), jobid)
         jobinfo = read_job_info(os.path.join(current_working_directory, RESULTS_DIR, jobid, LOG_FILE), jobid)
         guidesnum = count_guides(os.path.join(current_working_directory, RESULTS_DIR, jobid, GUIDES_FILE), jobid)
@@ -253,7 +395,22 @@ def construct_history_summary(results: List[str]) -> pd.DataFrame:
         summary[SUMMARYTABCOLS[9]].append(jobinfo)  # job start time
         print(jobinfo)
     summary = pd.DataFrame(summary)
-    summary[SUMMARYTABCOLS[9]] = pd.to_datetime(summary[SUMMARYTABCOLS[9]])
+    # format="mixed": complete-search's own Start values are a ctime-style
+    # string ("Fri 28 Aug 2026 04:09:43 PM UTC"); assembly-search rows above
+    # use "%Y-%m-%d %H:%M:%S" (see _assembly_history_row). Once both job
+    # types coexist in the same Results/ dir, pandas' default format
+    # inference locks onto whichever shape the first row happens to be and
+    # raises on every later row of the other shape -- format="mixed" parses
+    # each value independently instead (pandas' own suggested fix for
+    # exactly this error). utc=True: complete-search's ctime string carries
+    # an explicit "UTC" (tz-aware once parsed); assembly's naive string has
+    # none -- sort_values() can't compare tz-aware and tz-naive datetimes in
+    # the same column, and both times genuinely are UTC (Job_start is
+    # datetime.now() on this same server; the .Params.txt mtime fallback is
+    # too), so coercing both to UTC-aware is correct, not just convenient.
+    summary[SUMMARYTABCOLS[9]] = pd.to_datetime(
+        summary[SUMMARYTABCOLS[9]], format="mixed", utc=True
+    )
     summary = summary.sort_values([SUMMARYTABCOLS[9]], ascending=False)
     return summary
 
