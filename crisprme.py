@@ -64,7 +64,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
     DEFAULT_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
-from assembly_reconcile import reconcile_haplotypes, check_liftover_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, write_combined_params_file  # noqa: E402
+from assembly_reconcile import reconcile_haplotypes, check_liftover_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, write_combined_params_file, write_combined_guides_file  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
 
@@ -3303,6 +3303,9 @@ def assembly_search() -> None:
         chain_paternal, chain_maternal, chrom_alias_paternal, chrom_alias_maternal,
         paternal_results, mm, bDNA, bRNA,
     )
+    # Same gap, same fix, for the guide list -- see
+    # write_combined_guides_file()'s docstring.
+    write_combined_guides_file(combined_output, guidefile)
 
     print("Reconciling paternal and maternal predictions against hg38...")
     haplotypes = {

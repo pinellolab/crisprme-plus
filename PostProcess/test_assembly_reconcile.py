@@ -513,6 +513,29 @@ class TestWriteCombinedParamsFile(unittest.TestCase):
             self.assertIn("Genome_type\tassembly", content)
 
 
+class TestWriteCombinedGuidesFile(unittest.TestCase):
+    def test_copies_guide_file_content_verbatim(self):
+        with tempfile.TemporaryDirectory() as combined_dir, \
+                tempfile.TemporaryDirectory() as guide_dir:
+            guide_file = os.path.join(guide_dir, "my_guides.txt")
+            with open(guide_file, "w") as f:
+                f.write("GAAACAGTCGATTTTATCACNNN\n")
+            ar.write_combined_guides_file(combined_dir, guide_file)
+            with open(os.path.join(combined_dir, ar.GUIDES_FILE)) as f:
+                self.assertEqual(f.read(), "GAAACAGTCGATTTTATCACNNN\n")
+
+    def test_multiguide_file_copied_in_full(self):
+        with tempfile.TemporaryDirectory() as combined_dir, \
+                tempfile.TemporaryDirectory() as guide_dir:
+            guide_file = os.path.join(guide_dir, "my_guides.txt")
+            content = "GAAACAGTCGATTTTATCACNNN\nAAATCGATTTTATCACGGGNNN\n"
+            with open(guide_file, "w") as f:
+                f.write(content)
+            ar.write_combined_guides_file(combined_dir, guide_file)
+            with open(os.path.join(combined_dir, ar.GUIDES_FILE)) as f:
+                self.assertEqual(f.read(), content)
+
+
 class TestLoadChromAlias(unittest.TestCase):
     def test_parses_assembly_ucsc_genbank_columns(self):
         with tempfile.TemporaryDirectory() as d:

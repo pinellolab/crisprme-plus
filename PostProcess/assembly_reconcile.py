@@ -132,10 +132,12 @@ def find_results_prefix(results_dir: str) -> str:
 # true end, not just that some result files happened to get written along
 # the way.
 LOG_ERROR_NO_CHECK_FILENAME = "log_error_no_check.txt"
-# Same filename pages/pages_utils.py's own PARAMS_FILE constant names -- kept
-# as a separate constant here (not a shared import) since crisprme.py has no
-# dependency on the pages/ web layer and shouldn't gain one just for this.
+# Same filenames pages/pages_utils.py's own PARAMS_FILE/GUIDES_FILE constants
+# name -- kept as separate constants here (not a shared import) since
+# crisprme.py has no dependency on the pages/ web layer and shouldn't gain
+# one just for this.
 PARAMS_FILE = ".Params.txt"
+GUIDES_FILE = ".guides.txt"
 
 
 def haplotype_search_complete(results_dir: str) -> bool:
@@ -371,6 +373,28 @@ def write_combined_params_file(
     with open(os.path.join(combined_dir, PARAMS_FILE), "w") as pf:
         for i, (key, value) in enumerate(params_lines, start=1):
             pf.write(f"{i}\t{key}\t{value}\n")
+
+
+def write_combined_guides_file(combined_dir: str, guide_file: str) -> None:
+    """Copies the run's guide file into the combined job's own `.guides.txt`.
+
+    Same gap as `write_combined_params_file()`, confirmed the same way: a
+    real (not hand-built) `assembly-search` CLI run leaves the combined
+    directory with no `.guides.txt` at all, because -- exactly like
+    `.Params.txt` -- `complete_search()` unconditionally copies the guide
+    file into every output dir it produces (`crisprme.py`: copies to
+    `guides.txt`, then renames to `.guides.txt`), but `assembly_search()`
+    had no equivalent for its own combined output; only
+    `submit_assembly_search_job()` (the web form's submit handler) ever
+    wrote one. `history_page.py`'s `count_guides()` (and any future reader
+    of a combined job's guide list) needs this file to exist regardless of
+    whether the job was launched from the CLI or the web.
+
+    Args:
+        combined_dir: The `{output_base}_combined` output directory.
+        guide_file: The `--guide` file path the run was invoked with.
+    """
+    shutil.copyfile(guide_file, os.path.join(combined_dir, GUIDES_FILE))
 
 
 def load_chrom_alias(chrom_alias_file: str) -> Tuple[Dict[str, str], Dict[str, str]]:
