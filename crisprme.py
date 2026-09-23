@@ -64,7 +64,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
     DEFAULT_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
-from assembly_reconcile import reconcile_haplotypes, check_liftover_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match  # noqa: E402
+from assembly_reconcile import reconcile_haplotypes, check_liftover_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, write_combined_params_file, write_combined_guides_file  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
 
@@ -3312,6 +3312,21 @@ def assembly_search() -> None:
             genome_maternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
             maternal_output_name, thread, debug, max_total_edits,
         )
+
+    # Written here (not left to the web layer, which only did this for its
+    # own submitted jobs) so a CLI-only assembly-search run is just as
+    # recognizable/renderable by the web UI as one launched from the web
+    # form -- mirrors complete_search()'s own unconditional .Params.txt
+    # write. See write_combined_params_file()'s docstring for the gap this
+    # closes.
+    write_combined_params_file(
+        combined_output, output_base, genome_paternal, genome_maternal,
+        chain_paternal, chain_maternal, chrom_alias_paternal, chrom_alias_maternal,
+        paternal_results, mm, bDNA, bRNA,
+    )
+    # Same gap, same fix, for the guide list -- see
+    # write_combined_guides_file()'s docstring.
+    write_combined_guides_file(combined_output, guidefile)
 
     print("Reconciling paternal and maternal predictions against hg38...")
     haplotypes = {

@@ -16,6 +16,10 @@ on:
     paths:
       - "crisprme.py"
       - "PostProcess/**"
+      # Only this one pages/ file, not pages/** -- it's the one this
+      # workflow's own tests cover (via AST-extraction, no Dash needed);
+      # the rest of pages/ is covered by web-e2e.yml instead.
+      - "pages/history_page.py"
       - ".github/workflows/unit-tests.yml"
   push:
     branches: [ "main", "python3.11", "2.2.0-dev" ]
@@ -45,7 +49,11 @@ jobs:
         run: python -m pip install --upgrade pip requests numpy pandas matplotlib
 
       - name: Byte-compile the pipeline (syntax check)
-        run: python -m py_compile crisprme.py PostProcess/*.py
+        # pages/history_page.py: syntax-only (py_compile doesn't execute
+        # imports), included here since test_history_page_assembly.py below
+        # exercises it via AST-extraction rather than a normal import (it
+        # needs a live Dash `app`, which this light CI doesn't set up).
+        run: python -m py_compile crisprme.py PostProcess/*.py pages/history_page.py
 
       - name: HuggingFace download/publish + index unit tests (network-free)
         working-directory: PostProcess
@@ -172,7 +180,7 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_generate_report -v
 
-      - name: "Additional coverage (tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile)"
+      - name: "Additional coverage (tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile / history-page assembly jobs)"
         # NOTE: test_annotation is intentionally NOT here -- annotation.py imports
         # pysam, which the light network-free CI does not install (mirrors why the
         # heavier annotation path is covered by validate-benchmarks, not unit-tests).
@@ -180,7 +188,8 @@ jobs:
         run: >
           python -m unittest test_assembly_reconcile test_personal_assembly
           test_ensure_search_lists test_hvdr_greedy_cap test_registry_only_emit
-          test_representative_tiebreak test_sanitize_job_name test_tier0_compaction -v
+          test_representative_tiebreak test_sanitize_job_name test_tier0_compaction
+          test_history_page_assembly -v
 
       - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF)"
         # The two-pass population-level analysis (default since 2.5.3; opt-in `--fast` in
