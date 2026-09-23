@@ -3,9 +3,12 @@
 # third production index NRG_3_hg38+hg38_HPRC.
 #
 # WHAT THIS IS: a standard CRISPRme variant-aware index built by ENRICHING hg38 with the
-# HPRC Minigraph-Cactus pangenome, decomposed to a per-chromosome VCF with `vg deconstruct`
-# -> `vcfbub` -> `vcfwave` (INFO carries LV/PS/CONFLICT snarl fields; FILTER is '.'; GT is
-# diploid and PHASED, "a|b", with graph-coverage half-missingness like "1|."). 232 samples
+# HPRC Minigraph-Cactus pangenome -- specifically the HPRC RELEASE 2 graph `hprc-v2.0-mc-grch38`
+# (GRCh38), decomposed to a per-chromosome VCF with `vg deconstruct` -> `vcfbub` (clip.bub) ->
+# `vcfwave` (clip.wave, vcflib + WFA2-lib) then bcftools norm/concat/merge (per the source VCF
+# ##command header trail; decomposition Jan 2026, per-chrom split Mar 2026). INFO carries
+# LV/PS/CONFLICT snarl fields; FILTER is '.'; GT is diploid and PHASED, "a|b", with
+# graph-coverage half-missingness like "1|.". 232 samples
 # = 231 population individuals + CHM13 (the T2T graph backbone). GRCh38, chr-prefixed, all
 # chr1..22,X,Y. This is NOT Ann's `assembly-search` (which searches per-individual assembly
 # FASTAs and takes no VCF) — it is orthogonal to that feature.

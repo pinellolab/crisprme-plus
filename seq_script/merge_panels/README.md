@@ -36,9 +36,10 @@ is the design rationale (its "REMAINING/pending" notes are historical — the wo
 ## HPRC pangenome index (single-source, phased) — `hprc_build.sh`
 
 A **third** production index, `NRG_3_hg38+hg38_HPRC`, is built by enriching hg38 with the
-**HPRC Minigraph-Cactus pangenome** decomposed to a per-chromosome VCF (`vg deconstruct` →
-`vcfbub` → `vcfwave`; 232 samples = 231 population individuals + CHM13, GRCh38, phased GTs
-with graph-coverage half-missingness like `1|.`). It is **not** a merge (single genotyped
+**HPRC Minigraph-Cactus pangenome** — the **HPRC Release 2 graph `hprc-v2.0-mc-grch38`** (GRCh38)
+— decomposed to a per-chromosome VCF (`vg deconstruct` → `vcfbub` → `vcfwave`; 232 samples =
+231 population individuals + CHM13, GRCh38, phased GTs with graph-coverage half-missingness
+like `1|.`). It is **not** a merge (single genotyped
 source), so it skips Mode 1/2 and uses the standard `build-index-only` directly:
 per-chrom `bcftools norm -m -any` → `+fill-tags` AF/AC/AN (recomputed from GTs; the vcfwave
 VCF ships no AF and AN must exclude the `.` alleles) → `bcftools sort` → build. Because the
@@ -68,7 +69,7 @@ aggregate sources contribute per-source AF only (no genotypes, no honest pooled 
 | **gnomAD** | v4.1 (exomes + genomes joint) | GRCh38 | aggregate sites-only (AF) | ~807k individuals (aggregate) | open (gnomAD) | Mode 2 only |
 | **TOPMed** | Bravo freeze (sites-only, `AN=0` shipped) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (dbGaP) | Mode 2 only |
 | **All of Us** | genomic sites release (single pseudo-sample) | GRCh38 | aggregate sites-only (AF) | aggregate | controlled-access (Researcher Workbench) | Mode 2 only |
-| **HPRC** | Minigraph-Cactus pangenome → `vg deconstruct`/`vcfbub`/`vcfwave`, **phased** | GRCh38 | sample-level genotypes (graph-derived) | 232 incl. CHM13 (AN ≤464, half-missing) | open (HPRC) | HPRC (single-source) |
+| **HPRC** | Release 2 graph `hprc-v2.0-mc-grch38` (Minigraph-Cactus) → `vg deconstruct`/`vcfbub`/`vcfwave`, **phased** | GRCh38 | sample-level genotypes (graph-derived) | 232 incl. CHM13 (AN ≤464, half-missing) | open (HPRC) | HPRC (single-source) |
 
 Notes: (1) the **shipped Mode-1 index** used the **2021** 1000G callset (`hg38_1000G2021_HGDP`,
 4,131 samples); the committed `merge_vcf_panels.sh` defaults still point at the older **2019**

@@ -154,9 +154,9 @@ source is genotyped, and it is what enables indel+SNP cis reconstruction.
 
 CRISPRme+ also ships an **HPRC pangenome panel** (`hprc_build.sh`) in this same
 genotyped, cis-capable mode. It is a *single* source rather than a merge: the HPRC
-Minigraph-Cactus pangenome decomposed to a per-chromosome VCF (`vg deconstruct` →
-`vcfbub` → `vcfwave`), 232 assembly-derived genomes (231 individuals + the CHM13
-graph backbone). Because the genotypes are **phased** (each sample is two assembled
+Minigraph-Cactus pangenome — the **HPRC Release 2 graph `hprc-v2.0-mc-grch38`** (GRCh38) —
+decomposed to a per-chromosome VCF (`vg deconstruct` → `vcfbub` → `vcfwave`), 232
+assembly-derived genomes (231 individuals + the CHM13 graph backbone). Because the genotypes are **phased** (each sample is two assembled
 haplotypes), it supports CONFIRMED cis co-occurrence and named per-sample carriers
 like the 1000G-2021 + HGDP panel, while capturing pangenome-specific variation
 absent from short-read call sets. The graph-coverage half-missingness (`1|.`) is

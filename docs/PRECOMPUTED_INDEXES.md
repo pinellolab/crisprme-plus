@@ -41,7 +41,7 @@ allele-frequency provenance. They are **complementary**, not alternatives:
 | Index name | Sources | Data model | Co-occurrence confidence |
 |---|---|---|---|
 | `NRG_3_hg38+hg38_1000G2021_HGDP` | 1000 Genomes 2021 + HGDP | **sample-level genotypes** | **CONFIRMED** (phased cis) / **PUTATIVE** (unphased), with **named carrier samples** + exact joint AF |
-| `NRG_3_hg38+hg38_HPRC` | HPRC pangenome (232 assembly-derived genomes incl. CHM13) | **sample-level genotypes, phased** (graph-derived) | **CONFIRMED** phased cis with **named carrier samples** + exact joint AF; captures **pangenome-specific** variation absent from short-read panels |
+| `NRG_3_hg38+hg38_HPRC` | HPRC Release 2 pangenome `hprc-v2.0-mc-grch38` (232 assembly-derived genomes incl. CHM13) | **sample-level genotypes, phased** (graph-derived) | **CONFIRMED** phased cis with **named carrier samples** + exact joint AF; captures **pangenome-specific** variation absent from short-read panels |
 | `NRG_3_hg38+hg38_mega` | 5 sources — 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us | **sites-only** (allele frequencies, no shared samples) | **PUTATIVE** with a conservative **min-AF** joint bound + **per-dataset AF provenance** (`AF_1000G2021 … AF_AoU` + `AF_max`) |
 
 All three carry **searchable indels genome-wide** and report **SNP+SNP and SNP+indel**
