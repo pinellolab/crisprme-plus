@@ -379,26 +379,6 @@ def _write_vcf_marker(dataset: str, genome: str) -> None:
         pass
 
 
-def _write_assembly_marker(root_dir: str, artifact_name: str, individual: str, haplotype: str) -> None:
-    """Record which individual/haplotype an assembly-search artifact (genome
-    folder, chain file, or chromAlias file) belongs to -- a marker file beside
-    the artifact, same shape/robustness as ``_write_vcf_marker`` (one small
-    best-effort file per artifact, never a hard failure). Read back by
-    ``pages_utils.assembly_individual`` / ``installed_assemblies``.
-    """
-    if not root_dir or not artifact_name or not individual or haplotype not in (
-        "paternal",
-        "maternal",
-    ):
-        return
-    d = os.path.join(current_working_directory, root_dir)
-    os.makedirs(d, exist_ok=True)
-    try:
-        with open(os.path.join(d, f".{artifact_name}.assembly_individual"), "w") as fh:
-            fh.write(f"{individual}\t{haplotype}")
-    except OSError:
-        pass
-
 
 # ---------------------------------------------------------------------------
 # Personal-assembly pairing validation (chain/chromAlias/genome consistency)
@@ -1296,19 +1276,15 @@ def settings_page() -> List:
     )
 
     # ---- Personal assemblies ------------------------------------------------
-    # Pairs already-installed genome/chain/chromAlias files to an individual +
-    # haplotype, so assembly-search's launch form can eventually offer a
-    # single "pick an individual" control instead of 6 independent dropdowns
-    # (deferred -- this only builds the pairing/registration side). Files
-    # themselves are added the normal way first (the genome card above, plus
-    # placing chain/chromAlias files under LiftoverFiles/ -- upload support
-    # for those two is its own later increment); this card just tags files
-    # that already exist with which individual/haplotype they belong to.
+    # Two registration paths: auto-fetch both haplotypes from HPRC, or import
+    # a ready-made bundle (one <individual>/ folder + metadata.json). The
+    # third, older path -- uploading a genome/chain/chromAlias triplet one
+    # haplotype at a time and pairing them via marker files -- was removed at
+    # Luca's request once the bundle path covered the same need.
     assembly_card = _add_card(
         "Add a personal assembly",
-        "Register one haplotype of a personal assembly -- fetch automatically "
-        "from HPRC, or upload and register your own genome, chain, and "
-        "chromAlias files.",
+        "Register a personal assembly -- fetch automatically from HPRC, or "
+        "import a ready-made bundle.",
         [
             html.B("Fetch an individual from HPRC (Release 2)"),
             html.P(
@@ -1350,100 +1326,6 @@ def settings_page() -> List:
                 style={"margin-top": "0.2rem", "margin-bottom": "0.5rem"},
                 **{"data-target": "assembly-bundle"},
             ),
-            html.Hr(),
-            html.B("Or upload your own files"),
-            html.P(
-                "Upload this haplotype's genome (split into one file per "
-                "chromosome, as a .tar.gz -- or a single .fa/.fa.gz only if "
-                "it's one contig), liftOver chain file (.chain/.chain.gz, vs "
-                "hg38), and chromAlias file (.chromAlias.txt). Already have "
-                "one of these installed? Skip that upload and just pick it "
-                "below. Then fill in the individual name and haplotype, pick "
-                "your files, and click 'Register haplotype'.",
-                style={"color": "#555", "fontSize": "0.9em"},
-            ),
-            html.Small("Genome FASTA -- one file per chromosome as a .tar.gz (or a single .fa/.fa.gz if single-contig)"),
-            html.Div(
-                className="crisprme-chunk-upload",
-                style={"margin-top": "0.2rem", "margin-bottom": "0.5rem"},
-                **{"data-target": "genome"},
-            ),
-            html.Small("LiftOver chain file (.chain / .chain.gz)"),
-            html.Div(
-                className="crisprme-chunk-upload",
-                style={"margin-top": "0.2rem", "margin-bottom": "0.5rem"},
-                **{"data-target": "chain"},
-            ),
-            html.Small("chromAlias file (.chromAlias.txt)"),
-            html.Div(
-                className="crisprme-chunk-upload",
-                style={"margin-top": "0.2rem", "margin-bottom": "0.5rem"},
-                **{"data-target": "chromalias"},
-            ),
-            dbc.Row(
-                [
-                    dbc.Col(
-                        dcc.Input(
-                            id="assembly-individual-name",
-                            placeholder="individual, e.g. HG01255",
-                            type="text",
-                            style={"width": "100%"},
-                        ),
-                        width=6,
-                    ),
-                    dbc.Col(
-                        dcc.RadioItems(
-                            id="assembly-haplotype",
-                            options=[
-                                {"label": " Paternal", "value": "paternal"},
-                                {"label": " Maternal", "value": "maternal"},
-                            ],
-                            value="paternal",
-                            inline=True,
-                        ),
-                        width=6,
-                    ),
-                ]
-            ),
-            html.Div(
-                [
-                    html.Small("Genome"),
-                    dcc.Dropdown(
-                        id="assembly-genome-select",
-                        options=installed_genomes,
-                        placeholder="installed genome folder",
-                    ),
-                ],
-                style={"margin-top": "0.4rem"},
-            ),
-            html.Div(
-                [
-                    html.Small("LiftOver chain file"),
-                    dcc.Dropdown(
-                        id="assembly-chain-select",
-                        options=get_available_liftover_files("chain"),
-                        placeholder="chain file under LiftoverFiles/",
-                    ),
-                ],
-                style={"margin-top": "0.4rem"},
-            ),
-            html.Div(
-                [
-                    html.Small("chromAlias file"),
-                    dcc.Dropdown(
-                        id="assembly-chromalias-select",
-                        options=get_available_liftover_files("chromalias"),
-                        placeholder="chromAlias file under LiftoverFiles/",
-                    ),
-                ],
-                style={"margin-top": "0.4rem"},
-            ),
-            html.Button(
-                "Register haplotype",
-                id="assembly-add-btn",
-                style={"margin-top": "0.6rem"},
-            ),
-            html.Div(id="assembly-feedback", style={"color": "#b00", "margin-top": "0.4rem"}),
         ],
     )
 
@@ -2011,66 +1893,6 @@ def add_vcf(n, name, source, path, hf_name, ref_genome):
         no_update,
         no_update,
         f"Registered VCF dataset '{name}' for {ref_genome}.",
-        _render_all_tables(),
-        _render_storage(),
-    )
-
-
-@app.callback(
-    [
-        Output("assembly-feedback", "children"),
-        Output("settings-tables-container", "children", allow_duplicate=True),
-        Output("settings-storage", "children", allow_duplicate=True),
-    ],
-    [Input("assembly-add-btn", "n_clicks")],
-    [
-        State("assembly-individual-name", "value"),
-        State("assembly-haplotype", "value"),
-        State("assembly-genome-select", "value"),
-        State("assembly-chain-select", "value"),
-        State("assembly-chromalias-select", "value"),
-    ],
-    prevent_initial_call=True,
-)
-def add_assembly(n, individual, haplotype, genome, chain, chromalias):
-    if n is None or ONLINE:
-        raise PreventUpdate
-    err = _validate_name(individual or "")
-    if err:
-        return err, no_update, no_update
-    if haplotype not in ("paternal", "maternal"):
-        return "Select a haplotype.", no_update, no_update
-    missing = [
-        label
-        for label, val in (("genome", genome), ("chain file", chain), ("chromAlias file", chromalias))
-        if not val
-    ]
-    if missing:
-        return f"Select a {', '.join(missing)}.", no_update, no_update
-    individual = individual.strip()
-    # Real cross-file consistency checks, run now (before writing any marker)
-    # rather than deferred to an actual search -- a mismatch here otherwise
-    # fails silently, folded into reconciliation's "non-mappable" count
-    # instead of raising an error. Deliberately more than add_vcf's own
-    # genome pairing does (presence-only): a personal-assembly triplet has
-    # more ways to be silently mismatched than a single VCF+genome pair.
-    genome_dir = os.path.join(current_working_directory, GENOMES_DIR, str(genome).replace(" ", "_"))
-    chain_path = os.path.join(current_working_directory, LIFTOVER_DIR, chain)
-    chromalias_path = os.path.join(current_working_directory, LIFTOVER_DIR, chromalias)
-    pairing_err = validate_assembly_pairing(genome_dir, chain_path, chromalias_path)
-    if pairing_err:
-        return pairing_err, no_update, no_update
-    # three independent marker writes, same reasoning as _write_vcf_marker --
-    # each is small and best-effort; if one fails the other two still land,
-    # rather than an all-or-nothing transaction (see plan doc's C section for
-    # why per-artifact markers were chosen over one combined record).
-    _write_assembly_marker(GENOMES_DIR, str(genome).replace(" ", "_"), individual, haplotype)
-    _write_assembly_marker(LIFTOVER_DIR, chain, individual, haplotype)
-    _write_assembly_marker(LIFTOVER_DIR, chromalias, individual, haplotype)
-    return (
-        html.Span(
-            f"Registered {individual}'s {haplotype} haplotype.", style={"color": "green"}
-        ),
         _render_all_tables(),
         _render_storage(),
     )

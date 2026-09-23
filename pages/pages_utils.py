@@ -1297,8 +1297,9 @@ def get_available_liftover_files(kind: str) -> List:
 def assembly_individual(root_dir: str, artifact_name: str) -> Optional[Tuple[str, str]]:
     """Read back which individual/haplotype an assembly artifact belongs to.
 
-    Read-side counterpart of settings_page.py's ``_write_assembly_marker`` --
-    same one-marker-file-per-artifact shape as ``vcf_reference_genome``'s tier-1
+    Read-side counterpart of the (now-removed) legacy per-file upload UI's
+    marker writer -- kept so already-registered individuals from that path
+    keep working. Same one-marker-file-per-artifact shape as ``vcf_reference_genome``'s tier-1
     lookup (``VCFs/.<dataset>.refgenome``), just for assembly-search's genome/
     chain/chromAlias files instead of VCF datasets. A marker file
     (``<root_dir>/.<artifact_name>.assembly_individual``) holds one
