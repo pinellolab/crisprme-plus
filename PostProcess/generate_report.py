@@ -185,7 +185,7 @@ CURATED_COLUMNS = (
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
     ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
-    ("Observed", "observed"),  # supported by >=1 real individual (named carrier) = a genuine haplotype, not a worst-case reconstruction
+    ("Observed", "observed"),  # supported by >=1 real individual: reference / N carriers / observed (single variant) / putative (multi-variant, cis unconfirmed)
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
@@ -217,12 +217,13 @@ _ANNOTATION_KINDS = frozenset(
 )
 _PRESENT_ANN_KINDS = None
 
-# The "Observed" column (named carriers) is only meaningful on a GENOTYPED index:
-# a sites-only panel (e.g. mega) has no per-sample roster, so every variant row
-# would read "putative" and the column would falsely imply nothing is observed.
-# build_report sets this to True only when the run actually carries >=1 named
-# carrier; None (backward-compat) / False => the column is dropped entirely.
-_HAS_SAMPLES = None
+# The "Observed" column is meaningful whenever a run has VARIANT off-targets: it
+# marks each as present-in->=1-individual (reference = universal; a single variant =
+# guaranteed by AF>0; a named-carrier list = exact/CONFIRMED) vs "putative" (a
+# multi-variant combination whose cis co-occurrence can't be asserted on a sites-only
+# panel). build_report sets this True when the run has any variant off-target; None
+# (backward-compat) / False (reference-only run) => the column is dropped.
+_HAS_VARIANTS = None
 
 
 def _active_columns():
@@ -236,8 +237,8 @@ def _active_columns():
             c for c in cols
             if c[1] not in _ANNOTATION_KINDS or c[1] in _PRESENT_ANN_KINDS
         )
-    # drop the Observed (named-carrier) column on a sites-only run (no roster)
-    if _HAS_SAMPLES is False:
+    # drop the Observed column on a reference-only run (no variant off-targets)
+    if _HAS_VARIANTS is False:
         cols = tuple(c for c in cols if c[1] != "observed")
     return cols
 
@@ -352,6 +353,21 @@ def _count_samples(raw) -> int:
     populated in both analysis modes; under ``--per-sample`` it is pruned to the
     EXACT carriers of the (cis) haplotype, so a worst-possible reconstruction that
     no single individual actually carries comes back 0 -> not observed."""
+    if _is_na(raw):
+        return 0
+    n = 0
+    for tok in str(raw).split(","):
+        if not _is_na(tok.strip()):
+            n += 1
+    return n
+
+
+def _count_variants(raw) -> int:
+    """Count the distinct variants contributing to an off-target, from a comma-joined
+    variant field (e.g. ``Variant_info_genome``). Used to tell a SINGLE-variant
+    off-target (guaranteed present in >=1 individual whenever its AF>0) from a
+    MULTI-variant combination (whose cis co-occurrence cannot be asserted from a
+    sites-only panel). Returns 0 for a blank/NA field."""
     if _is_na(raw):
         return 0
     n = 0
@@ -617,12 +633,16 @@ def _curated_cell(kind, row, cols):
         num = pd.to_numeric(raw, errors="coerce") if raw is not None else None
         return "Yes" if (num is not None and pd.notna(num) and int(num) == 0) else CURATED_MISSING
     elif kind == "observed":
-        # Is this off-target supported by >=1 REAL individual? A reference-genome
-        # site exists in (essentially) every individual -> universally real. A
-        # variant-created site is real for the NAMED carriers of its variant(s);
-        # under --per-sample the carrier list is the EXACT cis carriers, so a
-        # worst-possible reconstruction that no single individual carries reads 0
-        # -> "putative" (nominated conservatively, not seen in any one genome).
+        # Is this off-target supported by >=1 REAL individual?
+        #   reference site          -> "reference"  (present in essentially everyone)
+        #   >=1 NAMED carrier       -> "N carrier(s)"  (genotyped index: exact carriers;
+        #                              under --per-sample these are the EXACT cis carriers)
+        #   single contributing variant, no roster (sites-only panel) -> "observed":
+        #                              a lone variant with AF>0 is by definition carried
+        #                              by >=1 individual, so the off-target is real even
+        #                              though we cannot name the carrier.
+        #   >=2 contributing variants, no roster -> "putative": the combination's cis
+        #                              co-occurrence cannot be asserted without genotypes.
         origin = _get("origin")
         o = str(origin).strip().lower() if not _is_na(origin) else ""
         if o == "ref":
@@ -630,7 +650,10 @@ def _curated_cell(kind, row, cols):
         n = _count_samples(_get("samples"))
         if n > 0:
             return f"{n} carrier{'' if n == 1 else 's'}"
-        return "putative"
+        nvar = _count_variants(_get("var_genome")) if "var_genome" in cols else 0
+        if nvar <= 1:
+            return "observed"  # single variant, AF>0 => carried by >=1 individual
+        return "putative"      # multi-variant combination, cis co-occurrence unconfirmed
     else:
         v = None
 
@@ -2405,12 +2428,12 @@ def build_validation_panel(df, cols):
     else:
         panel_variant = 0
 
-    # how many of the selected panel are OBSERVED in >=1 real individual (a
-    # reference site, universal; or a variant site with >=1 named carrier) --
-    # the genuine haplotypes to prioritize for validation. Meaningful only on a
-    # genotyped index (_HAS_SAMPLES); 0/omitted on a sites-only panel.
+    # how many of the selected panel are OBSERVED in >=1 real individual -- matching
+    # the Observed column: a reference site (universal), a variant site with >=1 named
+    # carrier, or a single-variant site (guaranteed present in >=1 individual by AF>0).
+    # NOT observed = a multi-variant combination with no carrier roster ("putative").
     panel_observed = None
-    if _HAS_SAMPLES:
+    if _HAS_VARIANTS:
         _pref = (
             panel_df[cols["origin"]].astype(str).str.strip().str.lower().eq("ref")
             if "origin" in cols and cols["origin"] in panel_df.columns
@@ -2421,7 +2444,12 @@ def build_validation_panel(df, cols):
             if "samples" in cols and cols["samples"] in panel_df.columns
             else pd.Series(False, index=panel_df.index)
         )
-        panel_observed = int((_pref | _pcar).sum())
+        _psingle = (
+            panel_df[cols["var_genome"]].map(lambda g: _count_variants(g) <= 1)
+            if "var_genome" in cols and cols["var_genome"] in panel_df.columns
+            else pd.Series(False, index=panel_df.index)
+        )
+        panel_observed = int((_pref | _pcar | _psingle).sum())
 
     # per-tier off-target subsets (for the bundled curated downloads + links).
     # Each entry: (logical tier key, display label, sub-frame). Only non-empty
@@ -3084,13 +3112,15 @@ _SCORE_LEGEND = [
      "Whether this off-target is supported by <b>at least one real individual</b>: "
      "<code>reference</code> = present in the reference genome, so carried by "
      "essentially every individual; <code>N&nbsp;carriers</code> = a variant site "
-     "carried by N named individuals in the panel; <code>putative</code> = a "
-     "variant/haplotype combination nominated by the worst-case reconstruction that "
-     "<b>no single individual</b> is observed to carry (conservative, not seen in one "
-     "genome). Under <code>--per-sample</code> the carrier list is the exact cis "
-     "carriers, so this cleanly separates genuine haplotypes (prioritized in the "
-     "validation panel) from worst-case reconstructions. Absent on sites-only panels "
-     "(no per-sample roster)."),
+     "carried by N named individuals in the panel (a genotyped index; under "
+     "<code>--per-sample</code> these are the exact cis carriers); "
+     "<code>observed</code> = a <b>single-variant</b> off-target whose variant has a "
+     "non-zero allele frequency, so it is by definition carried by &ge;1 individual "
+     "even on a sites-only panel that cannot name them; <code>putative</code> = a "
+     "<b>multi-variant combination</b> whose cis co-occurrence cannot be confirmed "
+     "(sites-only or unphased) &mdash; conservatively reported, may not exist in any "
+     "single genome. Use it to prioritise genuine haplotypes for validation; "
+     "<code>putative</code> multi-variant sites warrant the most scrutiny."),
     ("MAF",
      "Minor-allele frequency of the variant contributing to this off-target, over the "
      "genotyped panel (blank for reference sites). <b>When an off-target requires two or "
@@ -3733,16 +3763,14 @@ def build_report(
     global _PRESENT_ANN_KINDS
     _PRESENT_ANN_KINDS = {k for k in _ANNOTATION_KINDS if k in cols}
 
-    # The "Observed" (named-carrier) column is meaningful only when the run
-    # actually carries a per-sample roster: keep it when the samples column is
-    # present AND at least one row names a carrier (a genotyped index in either
-    # analysis mode); drop it on a sites-only panel (mega) where every variant
-    # row would falsely read "putative".
-    global _HAS_SAMPLES
-    _HAS_SAMPLES = bool(
-        "samples" in cols
-        and df[cols["samples"]].map(lambda s: _count_samples(s) > 0).any()
-    )
+    # The "Observed" column is meaningful whenever the run has VARIANT off-targets
+    # (it classifies each: reference / named carriers / single-variant "observed" /
+    # multi-variant "putative"). Keep it in that case -- including sites-only panels
+    # like mega, where a single variant is still guaranteed present in >=1 individual.
+    # Drop it only for a reference-only run (no variant off-targets at all).
+    global _HAS_VARIANTS
+    _var_mask, _ref_mask, _ot_mask = partition_masks(df, cols)
+    _HAS_VARIANTS = bool(_var_mask.any())
 
     # De-duplicate REFERENCE off-target rows (locus-completeness can emit the same
     # variant-independent reference site once per co-located haplotype). Applied to
