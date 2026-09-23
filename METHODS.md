@@ -570,8 +570,9 @@ The report and all of its tables are built from the **best alignment per locus**
 (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments at each
 locus) is a separate, optional artifact whose size grows combinatorially with the
 edit budget; it is emitted by mode — **off** for the default population-level
-analysis, **on** under `--per-sample` (and always for `assembly-search`, which
-consumes it) — with `--alt-alignments` / `--no-alt-alignments` to force either way.
+analysis, **on** under `--per-sample` — with `--alt-alignments` / `--no-alt-alignments`
+to force either way. (`assembly-search` reconciles its two haplotypes from each
+per-haplotype `integrated_results.tsv` alone, so it does not require this file.)
 Suppressing it does not change the report or any reported number.
 
 A guide with **more than one perfect genomic match** (0 mismatch, 0 bulge) has no

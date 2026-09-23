@@ -18,10 +18,11 @@ and the `release-crisprme` skill.
   budget and its annotation/sort/integration was the single most expensive
   post-analysis step on a large search, yet the report, summary tables, mismatch/bulge
   matrix and top-100 panel are all built from the *best* alignment per locus and never
-  read it. It is now emitted only under `--per-sample` (and forced on for
-  `assembly-search`, which needs it); the default population-level run drops the
-  non-best rows right after the merge, skipping the expensive step. New
-  `--alt-alignments` / `--no-alt-alignments` flags override either way. (A worst-case
+  read it. It is now emitted only under `--per-sample`; the default population-level
+  run drops the non-best rows right after the merge, skipping the expensive step. New
+  `--alt-alignments` / `--no-alt-alignments` flags override either way.
+  `assembly-search` no longer forces it on either (its haplotype reconciliation reads
+  only `*_integrated_results.tsv`), so its per-haplotype searches run lean too. (A worst-case
   6mm/2+2/max-8 search on the 5-source mega had ballooned this file past 160 GB and
   made the run take days; the default population path no longer pays that cost while
   the report is byte-identical.)
@@ -84,6 +85,16 @@ and the `release-crisprme` skill.
 - **`assembly-search --assembly-individual <name>`** — resolve both haplotypes'
   genome/chain/chromAlias from a registered `Assemblies/<name>/` bundle instead of
   passing the six paths explicitly (the six flags still work, incl. the legacy layout).
+- **`assembly-search --max-total-edits <N>`** — override the total mismatch+bulge
+  budget for the per-haplotype searches. The default is unchanged (the full
+  `mm + bDNA + bRNA` budget — a personal assembly is a plain resolved genome with no
+  IUPAC-variant lattice, so it does not need `complete-search`'s variant-density cap of
+  4), but the override lets you tighten or widen it explicitly. Also fixes reuse
+  detection so a re-run with the same parameters reuses the prior per-haplotype search.
+- **`assembly-search` run history + self-describing jobs.** Each assembly-search job
+  now records its parameters (individual, guide, PAM, edit budget, mode) alongside the
+  results, and the web **History** page lists past assembly-search runs next to the
+  standard searches so they can be reopened.
 - **Bring-your-own personal assembly** — the "Add a personal assembly" Settings card has a
   file-picker to upload a `.zip`/`.tar.gz` bundle (one top-level `<individual>/` folder + a
   valid `metadata.json`); it is extracted, validated, and registered
@@ -95,6 +106,14 @@ and the `release-crisprme` skill.
   duplicate under `install/` was removed and replaced with a pointer README. Docs clarify
   that only the whole-genome variant-aware search needs ~64 GB RAM (many current laptops
   have it); reference-only / single-chromosome / region searches fit ~16 GB.
+
+### Removed
+- **Legacy per-file personal-assembly upload in Settings.** The old "Add a personal
+  assembly" card that took the six individual files (two genomes, two chains, two
+  chromAlias) one at a time is gone; personal assemblies are now added as a single
+  self-contained `.zip`/`.tar.gz` bundle (see *Bring-your-own personal assembly*
+  above), matching the one-folder-per-individual storage layout. The CLI still accepts
+  the six explicit paths for scripted use.
 
 ### Fixed
 - **`assembly-search` no longer crashes when a haplotype has zero off-targets.** A
