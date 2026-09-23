@@ -208,7 +208,10 @@ def clean_incomplete_haplotype_output(
         shutil.rmtree(output_dir)
 
 
-_HAPLOTYPE_PARAM_FLAGS = ["--genome", "--guide", "--pam", "--mm", "--bDNA", "--bRNA", "--merge"]
+_HAPLOTYPE_PARAM_FLAGS = [
+    "--genome", "--guide", "--pam", "--mm", "--bDNA", "--bRNA", "--merge",
+    "--max-total-edits",
+]
 COMMAND_LINE_FILENAME = ".command_line.txt"
 
 
@@ -244,23 +247,30 @@ def _read_recorded_params(results_dir: str) -> Optional[Dict[str, str]]:
 
 def haplotype_params_match(
     results_dir: str, genome_dir: str, guide_file: str, pam_file: str,
-    mm: int, bDNA: int, bRNA: int, merge_bp: int,
+    mm: int, bDNA: int, bRNA: int, merge_bp: int, max_total_edits: int,
 ) -> bool:
     """Checks whether a haplotype's existing output directory was produced
     with the same search parameters as the current invocation.
 
     Without this, `assembly_search` would silently reuse a stale result if
     rerun with the same `--output` name but different `--genome-*`/`--guide`/
-    `--pam`/`--mm`/`--bDNA`/`--bRNA`/`--merge` values -- `haplotype_search_complete`
-    only checks that *a* complete result exists, not that it's the *current*
-    one. Reads the existing `.command_line.txt` `complete_search()` already
-    writes; no new files, no directory-naming changes.
+    `--pam`/`--mm`/`--bDNA`/`--bRNA`/`--merge`/`--max-total-edits` values --
+    `haplotype_search_complete` only checks that *a* complete result exists,
+    not that it's the *current* one. Reads the existing `.command_line.txt`
+    `complete_search()` already writes; no new files, no directory-naming
+    changes.
 
     Args:
         results_dir: The haplotype's output directory to check.
         genome_dir, guide_file, pam_file: Absolute paths, as resolved by
             `assembly_search()`'s own arg-checking (must match exactly).
         mm, bDNA, bRNA, merge_bp: The current invocation's values.
+        max_total_edits: The current invocation's resolved total-edits cap
+            (an explicit `--max-total-edits` override if the user gave one,
+            else `assembly_search()`'s own `mm+bDNA+bRNA` default) -- without
+            this, two runs with identical mm/bDNA/bRNA but different
+            `--max-total-edits` overrides would be wrongly treated as
+            reusable, silently reusing a search built with the wrong cap.
 
     Returns:
         True only if every recorded parameter matches exactly; False if
@@ -275,7 +285,7 @@ def haplotype_params_match(
     current = {
         "--genome": genome_dir, "--guide": guide_file, "--pam": pam_file,
         "--mm": str(mm), "--bDNA": str(bDNA), "--bRNA": str(bRNA),
-        "--merge": str(merge_bp),
+        "--merge": str(merge_bp), "--max-total-edits": str(max_total_edits),
     }
     return recorded == current
 
