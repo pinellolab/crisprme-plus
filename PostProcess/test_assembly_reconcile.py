@@ -377,12 +377,12 @@ class TestCleanIncompleteHaplotypeOutput(unittest.TestCase):
             self.assertFalse(os.path.isdir(stale))
 
 
-def _write_command_line_file(results_dir, genome, guide, pam, mm, bDNA, bRNA, merge_bp):
+def _write_command_line_file(results_dir, genome, guide, pam, mm, bDNA, bRNA, merge_bp, max_total_edits):
     os.makedirs(results_dir, exist_ok=True)
     cmd = (
         f"/usr/bin/python3 /path/crisprme.py complete-search --genome {genome} "
         f"--guide {guide} --pam {pam} --mm {mm} --bDNA {bDNA} --bRNA {bRNA} "
-        f"--merge {merge_bp} --output some_name --thread 4"
+        f"--merge {merge_bp} --max-total-edits {max_total_edits} --output some_name --thread 4"
     )
     with open(os.path.join(results_dir, ar.COMMAND_LINE_FILENAME), "w") as f:
         f.write(f"input_command\t{cmd}\n")
@@ -393,6 +393,7 @@ class TestHaplotypeParamsMatch(unittest.TestCase):
         base = dict(
             genome_dir="/genomes/g1", guide_file="/guides/g.txt",
             pam_file="/pams/p.txt", mm=4, bDNA=1, bRNA=1, merge_bp=3,
+            max_total_edits=6,
         )
         base.update(overrides)
         return base
@@ -402,7 +403,7 @@ class TestHaplotypeParamsMatch(unittest.TestCase):
             p = self._params()
             _write_command_line_file(
                 tmp, p["genome_dir"], p["guide_file"], p["pam_file"],
-                p["mm"], p["bDNA"], p["bRNA"], p["merge_bp"],
+                p["mm"], p["bDNA"], p["bRNA"], p["merge_bp"], p["max_total_edits"],
             )
             self.assertTrue(ar.haplotype_params_match(tmp, **p))
 
@@ -411,7 +412,7 @@ class TestHaplotypeParamsMatch(unittest.TestCase):
             p = self._params()
             _write_command_line_file(
                 tmp, p["genome_dir"], p["guide_file"], p["pam_file"],
-                p["mm"], p["bDNA"], p["bRNA"], p["merge_bp"],
+                p["mm"], p["bDNA"], p["bRNA"], p["merge_bp"], p["max_total_edits"],
             )
             changed = self._params(genome_dir="/genomes/g2_different")
             self.assertFalse(ar.haplotype_params_match(tmp, **changed))
@@ -421,7 +422,7 @@ class TestHaplotypeParamsMatch(unittest.TestCase):
             p = self._params()
             _write_command_line_file(
                 tmp, p["genome_dir"], p["guide_file"], p["pam_file"],
-                p["mm"], p["bDNA"], p["bRNA"], p["merge_bp"],
+                p["mm"], p["bDNA"], p["bRNA"], p["merge_bp"], p["max_total_edits"],
             )
             changed = self._params(guide_file="/guides/different_guide.txt")
             self.assertFalse(ar.haplotype_params_match(tmp, **changed))
@@ -431,9 +432,21 @@ class TestHaplotypeParamsMatch(unittest.TestCase):
             p = self._params()
             _write_command_line_file(
                 tmp, p["genome_dir"], p["guide_file"], p["pam_file"],
-                p["mm"], p["bDNA"], p["bRNA"], p["merge_bp"],
+                p["mm"], p["bDNA"], p["bRNA"], p["merge_bp"], p["max_total_edits"],
             )
             changed = self._params(mm=6)
+            self.assertFalse(ar.haplotype_params_match(tmp, **changed))
+
+    def test_no_match_when_max_total_edits_changed(self):
+        # the real gap this guards: identical mm/bDNA/bRNA but a different
+        # explicit --max-total-edits override must NOT be treated as reusable
+        with tempfile.TemporaryDirectory() as tmp:
+            p = self._params()
+            _write_command_line_file(
+                tmp, p["genome_dir"], p["guide_file"], p["pam_file"],
+                p["mm"], p["bDNA"], p["bRNA"], p["merge_bp"], p["max_total_edits"],
+            )
+            changed = self._params(max_total_edits=4)
             self.assertFalse(ar.haplotype_params_match(tmp, **changed))
 
     def test_no_match_when_command_line_file_missing(self):

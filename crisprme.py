@@ -3051,6 +3051,11 @@ def print_help_assembly_search() -> None:
         "using the highest scoring as pivot [default: 3] -- also used as the "
         "locus-clustering threshold when reconciling the two haplotypes, so it "
         "must describe both runs consistently\n"
+        "\t--max-total-edits, cap the TOTAL edits (mismatches + bulges) per "
+        "alignment [default: mm+bDNA+bRNA, i.e. no additional cap beyond what "
+        "--mm/--bDNA/--bRNA already imply -- unlike complete-search, whose own "
+        "bare default of 4 would otherwise silently drop most real off-targets "
+        "here; set this explicitly to tighten it, e.g. for performance]\n"
         "\t--output, base output name; each haplotype's results are saved in "
         "Results/<name>_paternal and Results/<name>_maternal, and the "
         "reconciled combined report in Results/<name>_combined [REQUIRED]\n"
@@ -3102,6 +3107,7 @@ def _check_mandatory_args_assembly_search(args: List[str]) -> None:
 def _run_haplotype_search(
     genomedir: str, guidefile: str, pamfile: str, mm: int, bDNA: int, bRNA: int,
     merge_t: int, output_name: str, thread: int, debug: bool,
+    max_total_edits: int,
 ) -> str:
     """Runs `complete-search` for one haplotype as a subprocess, mirroring the
     pattern already established by `complete_test_crisprme()` -- a subcommand
@@ -3120,22 +3126,19 @@ def _run_haplotype_search(
     capturing them here bought no real diagnostic value while hiding all
     progress output during what can be a multi-hour run.
 
+    Args:
+        max_total_edits: The resolved total-edits cap to pass through as
+            `complete-search`'s own `--max-total-edits` -- computed once by
+            `assembly_search()` (an explicit `--max-total-edits` override if
+            given, else `mm+bDNA+bRNA`; see its own comment for why the
+            latter differs from `complete-search`'s bare default of 4).
+
     Returns:
         The absolute path to the haplotype's `complete-search` output folder.
     """
     python_exe = sys.executable
     crisprme_script = os.path.abspath(__file__)
     debug_flag = "--debug" if debug else ""
-    # --max-total-edits (issue #107, added after this subcommand already existed):
-    # complete-search's own CLI default is 4 total edits (mismatches+bulges), applied
-    # unconditionally whenever the flag isn't passed. Without this, a haplotype search
-    # requesting e.g. --mm 4 --bDNA 1 --bRNA 1 (6 edits worth of budget) was silently
-    # capped at 4, dropping any alignment that combined mismatches with a bulge --
-    # verified against a real HG01255 full-genome run: 32,072 loci uncapped vs 579
-    # capped for the same guide/genome/mm/bDNA/bRNA. mm+bDNA+bRNA mirrors the same
-    # "advanced mode" total the website's own complete-search submission already uses
-    # (main_page.py, max_total_edits = mm + dna + rna).
-    max_total_edits = mm + bDNA + bRNA
     # assembly-search reconciliation (assembly_reconcile.load_crisprme_predictions) REQUIRES the
     # alternative-alignments file to enumerate every alignment per locus before lifting to hg38,
     # so force --alt-alignments here regardless of the mode-driven default.
@@ -3225,6 +3228,22 @@ def assembly_search() -> None:
     merge_t = _check_merge(args, "--merge" in args)
     thread = _check_threads(args, "--thread" in args)
     debug = "--debug" in args
+    # --max-total-edits: same flag `complete-search` accepts, but a different
+    # default when omitted. `complete-search`'s own bare default (4) was
+    # measured to silently drop the vast majority of real off-targets here --
+    # see `_run_haplotype_search()`'s docstring -- so `assembly_search()`
+    # defaults to the full mm+bDNA+bRNA budget instead, while still letting a
+    # user explicitly tighten (or further raise) it the same way they would
+    # for `complete-search`.
+    if "--max-total-edits" in args:
+        try:
+            max_total_edits = int(args[args.index("--max-total-edits") + 1])
+        except (IndexError, ValueError):
+            error("Please provide a non-negative integer for --max-total-edits")
+        if max_total_edits < 0:
+            error("--max-total-edits must be a non-negative integer")
+    else:
+        max_total_edits = mm + bDNA + bRNA
 
     try:
         output_base = args[args.index("--output") + 1]
@@ -3254,7 +3273,8 @@ def assembly_search() -> None:
     # reconciliation (a chromAlias/liftOver issue, say), not the searches
     paternal_complete = haplotype_search_complete(paternal_output_dir)
     paternal_reusable = paternal_complete and haplotype_params_match(
-        paternal_output_dir, genome_paternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t
+        paternal_output_dir, genome_paternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
+        max_total_edits,
     )
     if paternal_reusable:
         print(f"Found existing completed paternal search results at Results/{paternal_output_name}, reusing (not re-running)")
@@ -3269,12 +3289,13 @@ def assembly_search() -> None:
         print(f"Running paternal haplotype search -> Results/{paternal_output_name}")
         paternal_results = _run_haplotype_search(
             genome_paternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
-            paternal_output_name, thread, debug,
+            paternal_output_name, thread, debug, max_total_edits,
         )
 
     maternal_complete = haplotype_search_complete(maternal_output_dir)
     maternal_reusable = maternal_complete and haplotype_params_match(
-        maternal_output_dir, genome_maternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t
+        maternal_output_dir, genome_maternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
+        max_total_edits,
     )
     if maternal_reusable:
         print(f"Found existing completed maternal search results at Results/{maternal_output_name}, reusing (not re-running)")
@@ -3289,7 +3310,7 @@ def assembly_search() -> None:
         print(f"Running maternal haplotype search -> Results/{maternal_output_name}")
         maternal_results = _run_haplotype_search(
             genome_maternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
-            maternal_output_name, thread, debug,
+            maternal_output_name, thread, debug, max_total_edits,
         )
 
     print("Reconciling paternal and maternal predictions against hg38...")
