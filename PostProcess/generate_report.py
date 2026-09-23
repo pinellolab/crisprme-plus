@@ -3092,10 +3092,17 @@ _SCORE_LEGEND = [
      "validation panel) from worst-case reconstructions. Absent on sites-only panels "
      "(no per-sample roster)."),
     ("MAF",
-     "Minor-allele frequency of the contributing variant over the genotyped panel "
-     "(blank for reference sites). A value of <b>1&times;10<sup>&minus;5</sup></b> is "
-     "a display floor meaning &ldquo;present, frequency effectively&nbsp;0&rdquo;, "
-     "not a measured frequency."),
+     "Minor-allele frequency of the variant contributing to this off-target, over the "
+     "genotyped panel (blank for reference sites). <b>When an off-target requires two or "
+     "more co-occurring variants, the value shown is the MINIMUM allele frequency among "
+     "them</b> &mdash; a conservative <b>upper bound</b> on how often the full haplotype "
+     "(and therefore this off-target) can occur, because the haplotype can be no more "
+     "frequent than its rarest variant, and may be much rarer&nbsp;&mdash;&nbsp;or "
+     "absent&nbsp;&mdash;&nbsp;if the variants do not lie on the same haplotype. Under "
+     "<code>--per-sample</code> the EXACT joint (cis) allele frequency is computed from "
+     "the actual carriers instead. A value of <b>1&times;10<sup>&minus;5</sup></b> is a "
+     "display floor meaning &ldquo;present, frequency effectively&nbsp;0&rdquo;, not a "
+     "measured frequency."),
     ("Aligned protospacer+PAM notation",
      "In the aligned-sequence column: <b>UPPERCASE</b> = a base matching the guide, "
      "<b>lowercase</b> = a mismatch, and a dash <code>-</code> = a bulge/gap."),
