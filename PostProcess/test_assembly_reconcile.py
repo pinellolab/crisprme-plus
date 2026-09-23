@@ -15,9 +15,9 @@ neither real haplotype genomes nor the external ``liftOver`` binary/env --
 ``run_liftover``'s only external-tool call is stubbed out via
 ``unittest.mock.patch`` wherever a test needs to exercise the code around it
 (``reconcile_haplotypes``). The two duplicate-row bug cases (exact-coordinate
-and bulge-shifted near-duplicate) fixed by ``cluster_collapse()`` are the
-same cases documented in ``assembly_search_plan.md`` and caught against real
-HG01255 data; here they're reproduced with small synthetic fixtures instead.
+and bulge-shifted near-duplicate) fixed by ``cluster_collapse()`` were caught
+against real HG01255 data; here they're reproduced with small synthetic
+fixtures instead.
 """
 
 import os
@@ -308,23 +308,21 @@ class TestHaplotypeSearchComplete(unittest.TestCase):
             open(os.path.join(d, "guideX_PAM_genome_mm4_bMax2_integrated_results.tsv"), "w").close()
             self.assertFalse(ar.haplotype_search_complete(d))
 
-    def test_false_when_alt_alignments_file_missing(self):
-        # regression test: the integrated-results file and the alt-alignments
-        # file are written by two separate (if normally back-to-back) steps
-        # in the real pipeline -- a narrow interruption between them could
-        # leave one without the other. load_crisprme_predictions reads the
-        # alt-alignments file unconditionally, so treating this as
-        # "complete" would defer straight to an uncaught FileNotFoundError
-        # during reconciliation instead of a clean retry.
+    def test_true_when_alt_alignments_file_missing(self):
+        # 2026-09-10: the alt-alignments file is no longer read by
+        # load_crisprme_predictions() (integrated-results-only, see its own
+        # docstring), so its absence must NOT make an otherwise-genuinely-
+        # complete run look incomplete -- this is the inverse of this
+        # test's prior assertion, which was correct only while that file
+        # was still read unconditionally.
         with tempfile.TemporaryDirectory() as d:
             open(os.path.join(d, "guideX_PAM_genome_mm4_bMax2_integrated_results.tsv"), "w").close()
             open(os.path.join(d, ar.LOG_ERROR_NO_CHECK_FILENAME), "w").close()
-            self.assertFalse(ar.haplotype_search_complete(d))
+            self.assertTrue(ar.haplotype_search_complete(d))
 
-    def test_true_when_all_three_present(self):
+    def test_true_when_both_present(self):
         with tempfile.TemporaryDirectory() as d:
             open(os.path.join(d, "guideX_PAM_genome_mm4_bMax2_integrated_results.tsv"), "w").close()
-            open(os.path.join(d, "guideX_PAM_genome_mm4_bMax2_all_results_with_alternative_alignments.tsv"), "w").close()
             open(os.path.join(d, ar.LOG_ERROR_NO_CHECK_FILENAME), "w").close()
             self.assertTrue(ar.haplotype_search_complete(d))
 
@@ -614,18 +612,16 @@ class TestReconcileHaplotypes(unittest.TestCase):
             ar.reconcile_haplotypes({"paternal": {}}, workdir="/tmp/unused")
 
     def _make_haplotype_results(self, tmpdir, name, rows):
-        """Writes a minimal *_integrated_results.tsv (+ empty alt-alignments
-        file) for one haplotype, using the real PRED_COLS schema."""
+        """Writes a minimal *_integrated_results.tsv for one haplotype,
+        using the real PRED_COLS schema -- the only file
+        load_crisprme_predictions() reads (2026-09-10: no longer also
+        writes an alt-alignments file here, since nothing reads it)."""
         results_dir = os.path.join(tmpdir, f"{name}_results")
         os.makedirs(results_dir, exist_ok=True)
         prefix = f"guide_PAM_{name}_mm4_bMax2"
         df = pd.DataFrame(rows, columns=ar.PRED_COLS)
         df.to_csv(
             os.path.join(results_dir, f"{prefix}_integrated_results.tsv"),
-            sep="\t", index=False,
-        )
-        pd.DataFrame(columns=ar.PRED_COLS).to_csv(
-            os.path.join(results_dir, f"{prefix}_all_results_with_alternative_alignments.tsv"),
             sep="\t", index=False,
         )
         return results_dir

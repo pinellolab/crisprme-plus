@@ -10,25 +10,33 @@ only one is heterozygous-equivalent, and predictions that don't lift at all
 are haplotype-non-mappable -- invisible to any reference-genome-based search.
 
 This logic was developed and validated interactively against real HG01255
-(HPRC) data before being ported here -- see
-`assembly_search/assembly_search_generalized_071326.ipynb` in the project
-root for the exploratory version and the real numbers it produced. Two real
-bugs were caught during that validation and are fixed here from the start:
+(HPRC) data before being added here.
 
-1. The alternative-alignments file contains many rows per genomic locus with
-   the *exact* same coordinate (different mismatch/bulge interpretations of
-   one site -- measured up to 233 rows at one locus).
-2. A subtler case: ~5.7% of loci have a near-duplicate 1-3bp away on the same
-   chrom+strand, every one involving a bulge -- the *same* physical site
-   reported at a shifted anchor position because a bulge changes the
-   alignment's registration.
+Only `*_integrated_results.tsv` is read (2026-09-10 -- previously this
+module also read `*_all_results_with_alternative_alignments.tsv` and
+outer-merged it in, on the theory that `integrated_results.tsv` alone was
+missing real distinct sites; that theory was wrong, see
+`load_crisprme_predictions()`'s own docstring for the full derivation).
+`integrated_results.tsv` already has exactly one row per real physical
+cluster by construction (`merge_contiguous_targets.py`'s own
+`retrieve_best_target()` already picks one representative per cluster,
+sorted by fewest mismatches+bulges first for the `_(fewest_mm+b)` column
+family this module uses throughout).
 
-Both are handled by `cluster_collapse()`, which reuses the exact greedy
+One real, independent bug is still guarded against here: ~5.7% of loci land
+1-3bp off their "true" anchor when a bulge shifts the alignment's
+registration -- the *same* physical site reported at a shifted position, a
+real artifact even within one already-deduplicated `integrated_results.tsv`
+file. `cluster_collapse()` guards against this by reusing the exact greedy
 chained-gap clustering algorithm CRISPRme's own `--merge` step uses
 (`merge_contiguous_targets.py:531-596`), rather than exact-coordinate
-matching. The `merge_bp` passed to every function in this module should match
-the `--merge` value used for the underlying `complete-search` runs, since
-this is reusing CRISPRme's own definition of "one site."
+matching, sorted by fewest mismatches+bulges (matching
+`retrieve_best_target()`'s own primary criterion, not CFD -- picking a
+DIFFERENT criterion than the file's own already-correct choice was this
+module's real historical bug, now fixed at both call sites). The `merge_bp`
+passed to every function in this module should match the `--merge` value
+used for the underlying `complete-search` runs, since this is reusing
+CRISPRme's own definition of "one site."
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -46,7 +54,6 @@ PRED_COLS = [
     "Aligned_protospacer+PAM_REF_(fewest_mm+b)", "Aligned_protospacer+PAM_ALT_(fewest_mm+b)",
     "Mismatches_(fewest_mm+b)", "Bulges_(fewest_mm+b)", "CFD_score_(fewest_mm+b)",
 ]
-CHUNKSIZE = 10**6
 # if more than this fraction of a haplotype's predictions have a chromosome
 # missing from the chromAlias file, that's almost certainly a genome/alias
 # naming mismatch, not a handful of legitimately-unmappable decoy contigs --
@@ -60,7 +67,7 @@ LIFTOVER_FAILURE_ERROR_RATIO = 0.5
 
 def cluster_collapse(
     df: pd.DataFrame, chrom_col: str, strand_col: str, pos_col: str,
-    score_col: str, merge_bp: int,
+    score_col: str, merge_bp: int, ascending: bool = False,
 ) -> pd.DataFrame:
     """Collapses rows to one per proximity cluster.
 
@@ -74,14 +81,18 @@ def cluster_collapse(
         chrom_col: Column name holding the chromosome.
         strand_col: Column name holding the strand.
         pos_col: Column name holding the position to cluster on.
-        score_col: Column name to pick the best row per cluster (higher wins;
-            NaN sorts last).
+        score_col: Column name to pick the best row per cluster.
         merge_bp: Maximum gap (bp) between consecutive points to stay in the
             same cluster. Should match the `--merge` value used to generate
             the underlying CRISPRme results.
+        ascending: False (default) picks the HIGHEST `score_col` per cluster
+            (e.g. CFD -- higher is better). True picks the LOWEST (e.g.
+            mismatches+bulges -- fewer is better, matching
+            `merge_contiguous_targets.py`'s own `_(fewest_mm+b)` criterion).
+            Either way NaN sorts last, never picked over a real value.
 
     Returns:
-        One row per cluster, the highest-`score_col` row in each.
+        One row per cluster, the best-`score_col` row in each.
     """
     df = df.sort_values([chrom_col, strand_col, pos_col]).reset_index(drop=True)
     cluster_ids: List[int] = []
@@ -93,7 +104,7 @@ def cluster_collapse(
         cluster_ids.append(cluster_id)
         prev_chrom, prev_strand, prev_pos = chrom, strand, pos
     df = df.assign(_cluster_id=cluster_ids)
-    df = df.sort_values(score_col, ascending=False, na_position="last")
+    df = df.sort_values(score_col, ascending=ascending, na_position="last")
     df = df.drop_duplicates(subset=["_cluster_id"], keep="first")
     return df.drop(columns=["_cluster_id"]).reset_index(drop=True)
 
@@ -146,29 +157,24 @@ def haplotype_search_complete(results_dir: str) -> bool:
     used to decide whether `assembly_search` can skip re-running an
     already-completed haplotype search.
 
-    Also requires `*_all_results_with_alternative_alignments.tsv` to exist:
-    `load_crisprme_predictions` reads it unconditionally, but it and
-    `*_integrated_results.tsv` are written by two separate (if normally
-    back-to-back) steps in the real pipeline, so a sufficiently narrow
-    interruption between them could leave the latter without the former.
+    2026-09-10: no longer also requires
+    `*_all_results_with_alternative_alignments.tsv` to exist --
+    `load_crisprme_predictions` doesn't read that file anymore (see its own
+    docstring), so requiring it here would reject a genuinely complete run
+    over a file this pipeline no longer needs.
 
     Args:
         results_dir: A `complete-search` output folder.
 
     Returns:
-        True if the integrated results file, the alternative-alignments
-        file, and the post-completion log rename are all present.
+        True if the integrated results file and the post-completion log
+        rename are both present.
     """
     if not os.path.isdir(results_dir):
         return False
     try:
-        prefix = find_results_prefix(results_dir)
+        find_results_prefix(results_dir)
     except FileNotFoundError:
-        return False
-    alt_file = os.path.join(
-        results_dir, f"{prefix}_all_results_with_alternative_alignments.tsv"
-    )
-    if not os.path.isfile(alt_file):
         return False
     return os.path.isfile(os.path.join(results_dir, LOG_ERROR_NO_CHECK_FILENAME))
 
@@ -299,8 +305,38 @@ def load_chrom_alias(chrom_alias_file: str) -> Tuple[Dict[str, str], Dict[str, s
 def load_crisprme_predictions(
     results_dir: str, prefix: str, merge_bp: int, cols: Optional[List[str]] = None
 ) -> pd.DataFrame:
-    """Loads and combines one haplotype's CRISPRme output into one
-    deduplicated, one-row-per-genomic-locus table.
+    """Loads one haplotype's CRISPRme output into one deduplicated,
+    one-row-per-genomic-locus table.
+
+    Reads ONLY `*_integrated_results.tsv` -- CRISPRme's own merge step
+    (`merge_contiguous_targets.py`'s `retrieve_best_target()`) already picks
+    exactly one representative row per real physical cluster for the
+    `_(fewest_mm+b)` column family (sorted by fewest mismatches+bulges
+    FIRST, CFD isn't even in that primary key), so `integrated_results.tsv`
+    already has exactly one row per real site by construction.
+
+    2026-09-10, decided after real re-derivation (Manuel agreed; Luca
+    confirmed 2026-09-10): this function used to ALSO read
+    `*_all_results_with_alternative_alignments.tsv` and outer-merge it in,
+    on the theory that `integrated_results.tsv` alone was missing real
+    distinct sites. That theory was wrong -- the union's own "duplicates"
+    (up to 233 rows at one locus) were alt-file-only artifacts (multiple
+    alternative alignments for ONE already-counted site), not additional
+    real off-targets. Re-clustering the union by CFD (this function's own
+    old default) doesn't recover anything real; it just occasionally swaps
+    in a less-consistent representative than `integrated_results.tsv`'s own
+    already-correct fewest-mm+b choice.
+
+    `cluster_collapse()` is still applied (not redundant): it's real,
+    independent protection against a bulge-registration-drift artifact
+    documented at the top of this module (~5.7% of loci land 1-3bp off
+    their "true" anchor when a bulge shifts the alignment's registration) --
+    a real phenomenon `integrated_results.tsv` on its own doesn't rule out,
+    unrelated to the alt-file question above. Sorts by fewest
+    mismatches+bulges (ascending), matching the SAME `_(fewest_mm+b)`
+    criterion `retrieve_best_target()` already used to build this file in
+    the first place -- not CFD, which was this function's own prior (now
+    fixed) inconsistency, not `retrieve_best_target()`'s.
 
     Args:
         results_dir: A `complete-search` output folder.
@@ -315,25 +351,17 @@ def load_crisprme_predictions(
     if cols is None:
         cols = PRED_COLS
 
-    alt_file = os.path.join(results_dir, f"{prefix}_all_results_with_alternative_alignments.tsv")
     integrated_file = os.path.join(results_dir, f"{prefix}_integrated_results.tsv")
+    combined = pd.read_csv(integrated_file, sep="\t", usecols=cols)
 
-    with open(alt_file) as f:
-        num_lines = sum(1 for _ in f)
-    num_chunks = (num_lines - 1) // CHUNKSIZE + 1
-    chunks = [
-        chunk
-        for chunk in pd.read_csv(alt_file, sep="\t", usecols=cols, chunksize=CHUNKSIZE)
-    ]
-    alt_df = pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame(columns=cols)
-
-    integrated_df = pd.read_csv(integrated_file, sep="\t", usecols=cols)
-    combined = alt_df.merge(integrated_df, on=cols, how="outer").drop_duplicates(ignore_index=True)
-
-    combined = cluster_collapse(
-        combined, "Chromosome", "Strand_(fewest_mm+b)",
-        "Start_coordinate_(fewest_mm+b)", "CFD_score_(fewest_mm+b)", merge_bp,
+    mmb = (
+        pd.to_numeric(combined["Mismatches_(fewest_mm+b)"], errors="coerce")
+        + pd.to_numeric(combined["Bulges_(fewest_mm+b)"], errors="coerce")
     )
+    combined = cluster_collapse(
+        combined.assign(_mmb=mmb), "Chromosome", "Strand_(fewest_mm+b)",
+        "Start_coordinate_(fewest_mm+b)", "_mmb", merge_bp, ascending=True,
+    ).drop(columns=["_mmb"])
     combined["off_target_id"] = combined.index.astype(str)
     return combined
 
@@ -747,10 +775,22 @@ def reconcile_haplotypes(
             preds = predictions[name].copy()
             preds["off_target_id"] = preds["off_target_id"].astype(str)
             merged = preds.merge(lifted[name], on="off_target_id", how="inner")
-            merged = cluster_collapse(
-                merged, "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start",
-                "CFD_score_(fewest_mm+b)", merge_bp,
+            # Same fewest-mm+b criterion as load_crisprme_predictions()'s own
+            # cluster_collapse() call, applied here post-liftover: two
+            # native-coordinate loci can land on the same (or adjacent) hg38
+            # destination after liftOver -- a real liftOver-collision case,
+            # independent of the alt-file question load_crisprme_predictions()
+            # handles, but with the identical CFD-vs-fewest-mm+b criterion bug
+            # (both call sites fixed together -- this one is not a new
+            # finding, just the same criterion bug applied post-liftover).
+            mmb = (
+                pd.to_numeric(merged["Mismatches_(fewest_mm+b)"], errors="coerce")
+                + pd.to_numeric(merged["Bulges_(fewest_mm+b)"], errors="coerce")
             )
+            merged = cluster_collapse(
+                merged.assign(_mmb=mmb), "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start",
+                "_mmb", merge_bp, ascending=True,
+            ).drop(columns=["_mmb"])
             hg38_predictions[name] = merged
 
         names = list(haplotypes.keys())
