@@ -1615,7 +1615,8 @@ def complete_search() -> None:
     # --per-sample on a sites-only panel (already discouraged / grayed-out on the web) requests
     # alt like any other per-sample run. Propagated to the post-analysis subprocess tree via the
     # internal env var CRISPRME_EMIT_ALT_ALIGNMENTS ("1"=emit, "0"=skip), mirroring
-    # CRISPRME_FAST_MODE. assembly_search force-passes --alt-alignments (it needs the file).
+    # CRISPRME_FAST_MODE. (assembly-search reconciles from integrated_results.tsv only since
+    # PR #49, so it no longer force-passes --alt-alignments; its per-haplotype searches run lean.)
     if "--alt-alignments" in args and "--no-alt-alignments" in args:
         error("--alt-alignments and --no-alt-alignments are mutually exclusive")
     if "--no-alt-alignments" in args:
@@ -3139,13 +3140,14 @@ def _run_haplotype_search(
     python_exe = sys.executable
     crisprme_script = os.path.abspath(__file__)
     debug_flag = "--debug" if debug else ""
-    # assembly-search reconciliation (assembly_reconcile.load_crisprme_predictions) REQUIRES the
-    # alternative-alignments file to enumerate every alignment per locus before lifting to hg38,
-    # so force --alt-alignments here regardless of the mode-driven default.
+    # assembly-search reconciles from the integrated_results.tsv ONLY (PR #49:
+    # load_crisprme_predictions no longer reads the alternative-alignments file --
+    # integrated_results already has one row per real cluster), so the per-haplotype
+    # complete-search runs LEAN (no --alt-alignments) like any other population search.
     cmd = (
         f"{python_exe} {crisprme_script} complete-search --genome {genomedir} "
         f"--guide {guidefile} --pam {pamfile} --mm {mm} --bDNA {bDNA} --bRNA {bRNA} "
-        f"--merge {merge_t} --max-total-edits {max_total_edits} --alt-alignments "
+        f"--merge {merge_t} --max-total-edits {max_total_edits} "
         f"--output {output_name} --thread {thread} {debug_flag}"
     )
     output_folder = os.path.join(current_working_directory, CRISPRMEDIRS[1], output_name)
