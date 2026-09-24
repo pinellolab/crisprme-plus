@@ -57,6 +57,14 @@ and the `release-crisprme` skill.
   `PostProcess/personal_assembly.py` (+ `test_personal_assembly.py`).
 
 ### Added
+- **New recommended default variant index: single-source, phased
+  `NRG_3_hg38+hg38_1000G2021`** (published to HuggingFace). 1000 Genomes 2021,
+  3,202 samples, fully phased (`data_type=genotyped-phased`) — so every reported
+  co-occurrence is CONFIRMED cis with named per-sample carriers throughout (no
+  PUTATIVE-from-phasing): a clean, simple default of real observed haplotypes.
+  `NRG_3_hg38+hg38_1000G2021_HGDP` remains available as the broader-coverage option
+  (adds HGDP's 929 individuals; hybrid confidence). The docs and CLI download hints
+  now point at the single-source default first.
 - **`--alt-alignments` / `--no-alt-alignments`** (`complete-search`) — explicitly
   emit or suppress the exhaustive alternative-alignments file, overriding the
   mode-driven default (off in population-level, on under `--per-sample`).
