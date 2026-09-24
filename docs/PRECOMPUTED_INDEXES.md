@@ -40,9 +40,19 @@ allele-frequency provenance. They are **complementary**, not alternatives:
 
 | Index name | Sources | Data model | Co-occurrence confidence |
 |---|---|---|---|
-| `NRG_3_hg38+hg38_1000G2021_HGDP` | 1000 Genomes 2021 + HGDP | **sample-level genotypes** | **CONFIRMED** (phased cis) / **PUTATIVE** (unphased), with **named carrier samples** + exact joint AF |
+| `NRG_3_hg38+hg38_1000G2021_HGDP` *(recommended default)* | 1000 Genomes 2021 + HGDP | **sample-level genotypes** (hybrid: 1000G phased, HGDP unphased) | 1000G → **CONFIRMED** (phased cis); HGDP → **PUTATIVE** co-carrier (unphased), both with **named carrier samples** + joint AF |
 | `NRG_3_hg38+hg38_HPRC` | HPRC Release 2 pangenome `hprc-v2.0-mc-grch38` (232 assembly-derived genomes incl. CHM13) | **sample-level genotypes, phased** (graph-derived) | **CONFIRMED** phased cis with **named carrier samples** + exact joint AF; captures **pangenome-specific** variation absent from short-read panels |
-| `NRG_3_hg38+hg38_mega` | 5 sources — 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us | **sites-only** (allele frequencies, no shared samples) | **PUTATIVE** with a conservative **min-AF** joint bound + **per-dataset AF provenance** (`AF_1000G2021 … AF_AoU` + `AF_max`) |
+| `NRG_3_hg38+hg38_mega` | 5 sources — 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us | **sites-only** (allele frequencies, no shared samples) | **PUTATIVE** with a conservative **min-AF** joint bound + **per-dataset AF provenance** (`AF_1000G2021 … AF_AoU` + `AF_max`); a co-occurring haplotype here **may or may not exist in any real individual** — no carriers |
+
+**Choosing an index.** You only need **one**. For most use cases pick the **recommended
+default `NRG_3_hg38+hg38_1000G2021_HGDP`** (sample-level genotypes → named carriers;
+hybrid confidence — CONFIRMED on the phased 1000G portion, PUTATIVE co-carrier on the
+unphased HGDP portion). Pick **HPRC** for assembly-derived / pangenome variation
+(phased → CONFIRMED cis + carriers). **Escalate to `mega`** only for a widest-provenance
+worst-case screen when you must not miss a rare allele from any of five databases: it is
+**sites-only** (union of allele frequencies, no genotypes), so every multi-variant /
+co-occurring off-target is **PUTATIVE** (a worst-case reconstruction) with a min-AF bound
+and **no named carriers**.
 
 All three carry **searchable indels genome-wide** and report **SNP+SNP and SNP+indel**
 co-occurring off-targets. Download the reference data once, then any index:
@@ -67,9 +77,18 @@ Indexes live under `indexes/` in the CRISPRme dataset repo (default
 ```
 indexes/
   NRG_3_hg38.tar.gz                              # SpCas9 (NRG = NAG+NGG) reference index of hg38, up-to-2-bulge (DEFAULT)
-  NRG_3_hg38+hg38_1000G2021_HGDP.tar.gz     # SpCas9 (NRG) dict-less variant-aware index (1000G + HGDP), up-to-2-bulge (web default)
-  genotypes_hg38_1000G2021_HGDP.tar.gz               # SEPARATE Tier-1 genotype store companion for the variant index (rides along on download)
+  NRG_3_hg38+hg38_1000G2021_HGDP.tar.gz     # SpCas9 (NRG) dict-less variant-aware index (1000G + HGDP), up-to-2-bulge (recommended default)
+  genotypes_hg38_1000G2021_HGDP.tar.gz               # SEPARATE Tier-1 genotype store companion for the 1000G2021+HGDP index (rides along on download)
+  NRG_3_hg38+hg38_HPRC.tar.gz                    # SpCas9 (NRG) HPRC pangenome variant index (232 phased assembly-derived genomes)
+  genotypes_hg38_HPRC.tar.gz                          # SEPARATE Tier-1 genotype store companion for the HPRC index
+  NRG_3_hg38+hg38_mega.tar.gz                    # SpCas9 (NRG) sites-only mega index (5 sources) — NO genotype companion (sites-only)
 ```
+
+Each variant index stamps its **`data_type`** (`sites-only` / `genotyped-unphased` /
+`genotyped-phased` / `hybrid`) and a `phased` flag in every `registry_<vcf>/reg_<chrom>.idx`
+manifest, so tooling (e.g. the web variant-dataset selector) can label an index's type
+and phasing without scanning the multi-GB per-sample store — `1000G2021_HGDP` = **hybrid**,
+`HPRC` = **genotyped-phased**, `mega` = **sites-only**.
 
 The **NRG** default matches SpCas9's broad recognition (NAG + NGG), so variant-created
 NAG off-targets (e.g. the CPS1 off-target from the CRISPRme paper) are found out of the
@@ -319,37 +338,39 @@ itself is what `complete-search` consumes.
 - If `--index-path` is given but no matching index is found there,
   `complete-search` fails fast with a clear message rather than silently
   rebuilding — so a missing/wrong download is caught immediately.
-```
 
-## Optional: SNP+indel co-occurring off-targets (experimental, opt-in)
+## SNP+indel co-occurring off-targets (on by default)
 
-By default CRISPRme searches **SNPs and indels in two independent passes** (SNPs on
-the IUPAC-enriched genome; indels on a fake-indel genome cut from the *plain*
-reference), then concatenates the results. An off-target that requires **both** a
-nearby SNP **and** an indel in the same protospacer window is therefore invisible to
-both passes.
+CRISPRme+ searches **SNP+indel co-occurring off-targets** — those that require **both**
+a nearby SNP **and** an indel in the same protospacer window — **by default** since
+2.5.0. The prebuilt indexes are already built with this on, so a normal `download` +
+`complete-search` reports these co-occurrences **with no extra flag** (a class the
+classic two-independent-passes search could not see: SNPs on the IUPAC-enriched genome,
+indels on a fake-indel genome cut from the *plain* reference).
 
-To lift this limitation, set the `CRISPRME_INDEL_SNP=1` environment variable **before
-building the index** (and before the search). It is **off by default** — with the
-gate unset, builds and searches are byte-identical to classic CRISPRme.
+To reproduce the classic two-independent-passes behavior, set `CRISPRME_INDEL_SNP=0`
+**before both the build and the search**. With the gate off, builds and searches are
+byte-identical to classic CRISPRme.
 
 ```bash
-export CRISPRME_INDEL_SNP=1
-crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NGG-SpCas9.txt \
-    --bDNA 1 --bRNA 1 --vcf VCFs/hg38_1000G --samplesID samplesID.listing.txt --path ./
-# then the variant-aware complete-search (same env var set) reports co-occurrences
+# default (co-occurrence ON) — nothing to set:
+crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --bDNA 2 --bRNA 2 --vcf VCFs/hg38_1000G2021_HGDP --samplesID samplesID.listing.txt --path ./
+# to opt out and reproduce classic CRISPRme (byte-identical), set the gate to 0 first:
+#   export CRISPRME_INDEL_SNP=0   # before BOTH build and search
 ```
 
-When enabled, the build additionally (a) compiles a per-chromosome **phased indel
+With co-occurrence on, the build (a) compiles a per-chromosome **phased indel
 genotype store** (`Dictionaries/indel_genotypes_<vcf>/`) and (b) **overlays SNP IUPAC
 codes** onto the fake-indel genome flanks before indexing the `_INDELS` companion, so
 the indel search can match SNP+indel haplotypes. Post-analysis then emits, per
 co-occurring off-target, a **CONFIRMED-cis** call (all covered variants phased on one
 haplotype) or **PUTATIVE** (unphased / can't prove cis), with the per-sample carriers
-and the joint allele frequency (`AC_cis / AN` over the VCF-genotyped panel).
+and the joint allele frequency (`AC_cis / AN` over the VCF-genotyped panel). On a
+sites-only panel it falls back to a PUTATIVE min-AF bound with no carriers (see
+METHODS §4/§8).
 
 > **Note.** With `mm` at its maximum, raise `--max-total-edits` (e.g. `--max-total-edits
 > 6`) so the extra alignment budget for the indel bulge isn't consumed by mismatches,
-> or the co-occurring indel off-targets may be pruned. This feature is **experimental**
-> (branch `feature/indel-snp`); validate on small test cases first.
+> or the co-occurring indel off-targets may be pruned (the indel consumes a bulge slot).
 

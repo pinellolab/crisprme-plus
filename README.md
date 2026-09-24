@@ -25,15 +25,45 @@ through an interactive web-based interface.
 ### ✨ Highlights
 
 - **Dictionary-less variant-aware search** — a compact allele-frequency registry + genotype store ship with the index, so variant off-target search (with allele frequencies, rsIDs, and per-dataset provenance) runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
-- **Co-occurring off-targets** — off-targets that need two nearby variants on the same haplotype — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported CONFIRMED-cis (phased) / PUTATIVE (unphased) with carriers + joint AF, and surfaced in the report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
-- **Three complementary production indexes** — genotyped **1000G-2021 + HGDP** (`NRG_3_hg38+hg38_1000G2021_HGDP`: observed / CONFIRMED haplotypes with per-sample carriers), the **HPRC pangenome** (`NRG_3_hg38+hg38_HPRC`: 232 phased assembly-derived genomes incl. CHM13 → CONFIRMED cis + named carriers, capturing pangenome-specific variation), and the sites-only five-source **mega** (`NRG_3_hg38+hg38_mega`: + gnomAD v4.1 / TOPMed / All-of-Us, PUTATIVE haplotypes with min-AF bounds). All three carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence. ([details](docs/PRECOMPUTED_INDEXES.md))
-- **Population-level by default; `--per-sample` for genotype resolution** — by default the SNP analysis reports worst-possible representatives per variant window (fast, and lossless for detection); add **`--per-sample`** (CLI) or pick **Per-sample** in the web form for CONFIRMED cis phasing + named carriers + exact joint AF on a genotyped panel. The report states which mode was used. ([methods](METHODS.md#5-search-space-control-for-high-variant-density-regions))
-- **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in the default population-level run, **on** under `--per-sample`; override with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
+- **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
+- **Three complementary production indexes** — genotyped **1000G-2021 + HGDP** (`NRG_3_hg38+hg38_1000G2021_HGDP`: hybrid — CONFIRMED cis on the phased 1000G portion, PUTATIVE co-carrier on the unphased HGDP portion, with per-sample carriers throughout), the **HPRC pangenome** (`NRG_3_hg38+hg38_HPRC`: 232 phased assembly-derived genomes incl. CHM13 → CONFIRMED cis + named carriers, capturing pangenome-specific variation), and the sites-only five-source **mega** (`NRG_3_hg38+hg38_mega`: + gnomAD v4.1 / TOPMed / All-of-Us, PUTATIVE haplotypes with min-AF bounds, no carriers). All three carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence. ([details](docs/PRECOMPUTED_INDEXES.md))
+- **Population-level by default; `--per-sample` for genotype resolution** — by default the SNP analysis reports worst-possible representatives per variant window (lossless for detection, tractable on any panel including dense/aggregate ones); add **`--per-sample`** (CLI) or pick **Per-sample** in the web form for CONFIRMED cis phasing + named carriers + exact joint AF on a genotyped panel. This is a **genotype-resolution** dial, not a speed dial — for a single guide the two modes take about the same time; `--per-sample`'s cost shows up only on dense/aggregate panels, and it is inert on a sites-only index. The report states which mode was used. ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution))
+- **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in the default population-level run, **on** under `--per-sample` — on **both the CLI and the web**; override on the CLI with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
 - **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, plots, recommended validation panel, annotated top hits, per-tier downloads, legend). ([methods](METHODS.md#7-shareable-off-target-assessment-report))
 - **One-command Docker web interface + indexes on demand** — no conda, no giant build; pull reference data + prebuilt indexes from the HuggingFace CDN (`crisprme.py download`), or **build & publish your own** dict-less indexes (`build-index-only` / `publish-index --dictless`), and manage genomes / indexes / VCFs / annotations / PAMs from the browser **Data Manager**. ([protocol](docs/PRECOMPUTED_INDEXES.md))
 - **Personal-assembly search (CLI + web)** — `assembly-search` scans a fully assembled diploid genome (paternal + maternal haplotype FASTAs) directly, lifts each haplotype to hg38, and reconciles them (homozygous- / heterozygous-equivalent + haplotype-non-mappable sites) — no VCF inference. Each individual is stored as one self-contained `Assemblies/<individual>/` folder + a `metadata.json` (fetch an HPRC individual, or bring your own as a `.zip`/`.tar.gz` bundle); `--assembly-individual <name>` runs a registered one from the CLI. Available on the website (a "Personal assembly" tab + a Settings card) with a combined report. ([web guide](docs/crisprme_web_interface_user_guide.md#searching-a-personal-assembly-genome-assembly-search))
 - **Also** — merged multi-dataset VCF panels (per-dataset provenance + per-haplotype phasing), PAM-geometry-aware (pamless) indexes, bounded-complexity controls (`--max-total-edits` + a high-variant-density skip), and optional email notifications.
+
+### What changed vs stock CRISPRme (migration guide)
+
+Coming from the original CRISPRme? Here are the behavior deltas that matter most:
+
+| Topic | Before (stock / 2.5.3) | Now | What to do |
+|---|---|---|---|
+| Analysis-mode flags | `--fast` / `--full` | **removed** (no aliases); default is **population-level**, opt in with **`--per-sample`** (genotyped panels only) | Use `--per-sample`; the CLI now **warns** if you pass the retired `--fast`/`--full` ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution)) |
+| SNP+indel co-occurrence | experimental / opt-in | **on by default** | Nothing; opt out with `CRISPRME_INDEL_SNP=0` ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration)) |
+| Alternative-alignments TSV | always written | **off by default, on under `--per-sample`** (both CLI and web) | Force either way on the CLI with `--alt-alignments` / `--no-alt-alignments` ([methods](METHODS.md#7-shareable-off-target-assessment-report)) |
+| Default variant index | `NRG_3_hg38-dictless+hg38_1000G_HGDP` | `NRG_3_hg38+hg38_1000G2021_HGDP` (the old `-dictless` name is superseded; `-dictless` is now a publish flag, not part of the name) | Download it explicitly (Quickstart step 2) ([details](docs/PRECOMPUTED_INDEXES.md)) |
+| License | AGPL-3.0 | **MGB Open Access License 1.0** (non-commercial academic; commercial use requires a license) | See [§6 License](#6-license) |
+| Report | — | new **`Observed`** column (`reference` / `N carrier(s)` / `observed` / `putative`) | Read it in the report; details in [methods](METHODS.md#7-shareable-off-target-assessment-report) |
+
+> **Note on the retired flags.** `--fast` and `--full` were removed in 2.5.4 and are
+> **not** aliases. `--per-sample` is the replacement for `--full`. `complete-search` now
+> prints a **WARNING** if a saved script passes the retired `--fast`/`--full`, so a
+> pre-2.5.4 command no longer silently runs the population-level default with no
+> per-sample output.
+
+### Which analysis mode + which index should I use?
+
+- **Analysis mode.** The **default (no flag) = population-level** worst-possible screen;
+  it works on **any** index and is lossless for detection. Add **`--per-sample`** **only
+  on a genotyped index** (`1000G2021_HGDP` or `HPRC`) when you need named carriers /
+  CONFIRMED cis / exact joint AF. It is a genotype-resolution dial, not a speed dial.
+- **Index.** `1000G2021_HGDP` (recommended default, most cases) → `HPRC` (assembly /
+  pangenome variation) → **escalate to `mega`** only for a widest-provenance worst-case
+  screen (sites-only, all co-occurrences PUTATIVE, no carriers). See the index table in
+  the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) below.
 
 > ⚠️ **Note**  
 > The original public CRISPRme web service is no longer available.  
@@ -107,17 +137,20 @@ indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever yo
 
 | Index (`--index-name`) | Variant sources | Resolution | Best for |
 |---|---|---|---|
-| **1000G-2021 + HGDP** — `NRG_3_hg38+hg38_1000G2021_HGDP` *(default)* | 1000 Genomes 2021 (3202) + HGDP (929), genotyped | phased → **CONFIRMED cis** + named per-sample carriers | most use cases; the web default |
+| **1000G-2021 + HGDP** — `NRG_3_hg38+hg38_1000G2021_HGDP` *(default)* | 1000 Genomes 2021 (3202) + HGDP (929), genotyped | hybrid: 1000G phased → **CONFIRMED cis**; HGDP unphased → **PUTATIVE co-carrier**; named per-sample carriers throughout | most use cases; the web default |
 | **HPRC pangenome** — `NRG_3_hg38+hg38_HPRC` | HPRC Release 2 Minigraph-Cactus (`hprc-v2.0-mc-grch38`) — 232 assembly-derived genomes incl. CHM13, phased | CONFIRMED cis + named carriers; captures **pangenome-specific** variation | assembly-derived / pangenome variation |
-| **mega (sites-only)** — `NRG_3_hg38+hg38_mega` | 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us (aggregate) | population-level, **PUTATIVE** haplotypes with min-AF bounds (no per-sample) | widest allele-frequency provenance across 5 databases |
+| **mega (sites-only)** — `NRG_3_hg38+hg38_mega` | 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us (aggregate) | **sites-only** — union of allele frequencies, no genotypes; every multi-variant/co-occurring off-target is **PUTATIVE** with a min-AF bound and **no named carriers** | a conservative worst-case screen when you must not miss a rare allele from ANY of five databases (escalate here after a genotyped-index run) |
 
 > **Which variant index should I pick?** You only need **one** — if unsure, use the
 > **default 1000G-2021 + HGDP** (`NRG_3_hg38+hg38_1000G2021_HGDP`, downloaded in step 2):
 > sample-level genotypes with named per-sample carriers, and it covers most use cases.
-> Pick **HPRC** (`+hg38_HPRC`) for pangenome / assembly-derived variation, or **mega**
-> (`+hg38_mega`) for the widest allele-frequency provenance across five databases. Grab the
-> others any time from the web **Settings** or by re-running the download with a different
-> `--index-name`.
+> Pick **HPRC** (`+hg38_HPRC`) for pangenome / assembly-derived variation. **Escalate to
+> mega** (`+hg38_mega`) only for a widest-provenance worst-case screen across five
+> databases — it is **sites-only**, so every co-occurring off-target is **PUTATIVE** (a
+> worst-case reconstruction that may or may not exist in any real individual) with a min-AF
+> bound and **no named carriers**; run it after a genotyped-index run when you need maximal
+> allele-frequency breadth. Grab the others any time from the web **Settings** or by
+> re-running the download with a different `--index-name`.
 
 **Full step-by-step (with variants, more indexes, troubleshooting):
 [`docs/DOCKER_QUICKSTART.md`](docs/DOCKER_QUICKSTART.md).**
@@ -141,7 +174,13 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.p
 #   per-haplotype enumeration wall that makes dense/aggregate panels intractable).
 #   Add --per-sample to resolve per-sample genotypes — CONFIRMED cis phasing + named carrier
 #   samples + exact joint allele frequency — recommended for genotyped panels / clinical
-#   validation (slower; a no-op on sites-only panels, which have no genotypes to resolve).
+#   validation. This is a genotype-resolution mode, not a speed mode: for a single guide the
+#   runtimes are comparable, but it can be intractable on dense/aggregate panels; on a
+#   sites-only index (mega) it cannot resolve carriers (no genotypes) and is inert.
+# NOTE: --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget but the default --max-total-edits is 4,
+#   so alignments over 4 combined edits (including many SNP+indel co-occurrences, where the
+#   indel consumes a bulge slot) are PRUNED. Add --max-total-edits 6 (or the full budget) to
+#   keep them — slower.
 
 # build the self-contained, shareable HTML report (report.html + a data/ folder)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py generate-report \
@@ -624,6 +663,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed.gz \
     --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
+# NOTE: --mm 4 --bDNA 1 --bRNA 1 is a 6-edit budget but the default --max-total-edits is 4,
+#   so alignments over 4 combined edits (including SNP+indel co-occurrences, where the indel
+#   consumes a bulge slot) are PRUNED. Add --max-total-edits 6 to keep them — slower.
 # shareable report: crisprme.py generate-report --result-dir Results/my_search
 ```
 
@@ -758,6 +800,18 @@ its purpose and usage:
   precomputed variant index); a reference-only search will not surface it regardless of
   this value.
 
+- `--per-sample` (*Optional*)
+  <br>Resolve per-sample genotypes into observed haplotypes for the SNP post-analysis,
+  instead of the default population-level analysis. Reports each observed haplotype with
+  CONFIRMED cis phasing, named carrier samples, and exact joint allele frequency.
+  **Requires a genotyped index** (1000G-2021+HGDP or HPRC); on a sites-only index
+  (`mega`) it cannot resolve carriers (no genotypes) and `complete-search` warns. Can be
+  slow / intractable on dense or aggregate panels. By default (no flag) CRISPRme+ runs a
+  **population-level** analysis: one worst-possible representative per variant window
+  (exact worst-case CFD, dataset-level allele frequencies), lossless for detection and
+  tractable on any panel. It replaces the removed `--full` flag; `--per-sample` is a
+  genotype-resolution dial, not a speed dial (see METHODS §5).
+
 - `--alt-alignments` / `--no-alt-alignments` (*Optional*)
   <br>Emit (or skip) the exhaustive alternative-alignments file
   (`..._all_results_with_alternative_alignments.tsv` — the non-best alignments at each
@@ -819,6 +873,33 @@ results and understanding the impact of genetic diversity on CRISPR off-target.
     
     - **Purpose**: Facilitates a full exploration of CRISPRme's off-target 
     predictions and their functional relevance.
+    - **Note**: emitted **by analysis mode** — off in the default population-level
+    run, on under `--per-sample`; force either way with `--alt-alignments` /
+    `--no-alt-alignments`. Nothing in the report reads it.
+
+**Co-occurrence companion outputs** (the default-on SNP+SNP / SNP+indel co-occurrence
+feature; both are bundled into the report ZIP):
+
+2a. `*.indel_snp_cooc.tsv`
+
+    - **Contents**: One row per off-target requiring **both** a nearby SNP **and** an
+    indel in the same protospacer window — chrom, indel pos/ref/alt, off-target start,
+    strand, SNP positions + rsIDs, phase (`CONFIRMED`/`PUTATIVE`), joint AF, cis-carrier
+    count, and carrier samples.
+
+    - **Purpose**: Surfaces SNP+indel co-occurring off-targets, which the classic
+    two-independent-passes search could not see.
+
+2b. `*.snp_snp_cooc.tsv`
+
+    - **Contents**: One row per off-target requiring **≥2** nearby SNP alt alleles
+    together — Chromosome, Position, Direction, crRNA, DNA, SNP positions, rsIDs, Phase,
+    `MinAF_bound`, N carriers, and carriers.
+
+    - **Purpose**: Surfaces SNP+SNP co-occurring off-targets.
+
+    Both companions are joinable to the `bestMerge` tables by
+    `(Chromosome, Position, Direction, crRNA, DNA)`.
 
 **Guide-Specific Summary Files**
 
@@ -1583,12 +1664,16 @@ is under `data/`). Reading top to bottom:
   `Observed` column) — real haplotypes are preferred over worst-case reconstructions
   — without ever displacing a strictly-worse site, so worst-case coverage is kept.
 - **`Observed` column** — whether an off-target is supported by **at least one real
-  individual**: `reference` (in the reference genome → carried by essentially every
-  individual), `N carrier(s)` (a variant site carried by N named individuals), or
-  `putative` (a worst-case variant/haplotype reconstruction that no single individual
-  is observed to carry). Under **`--per-sample`** the carrier list is the exact cis
-  carriers, so `putative` cleanly marks reconstructions no one actually carries.
-  Absent on sites-only panels (e.g. `mega`, no per-sample roster).
+  individual**: `reference` (present in the reference genome — carried by essentially
+  every individual), `N carrier(s)` (a variant site carried by N named individuals in a
+  genotyped panel), `observed` (a single variant with non-zero allele frequency —
+  carried by ≥1 individual by definition, even on a sites-only panel that cannot name
+  the carrier), or `putative` (a multi-variant combination whose cis co-occurrence
+  cannot be confirmed). Under **`--per-sample`** the carrier list is the exact cis
+  carriers, so `putative` cleanly marks reconstructions no one actually carries. On a
+  sites-only panel (e.g. `mega`) there is no carrier roster, so `N carrier(s)` never
+  appears and the panel tie-break is inert, but the column is still shown (values
+  `observed` / `putative`); it is dropped only for a reference-only run.
 - **MAF column** — a value of **`1e-05` is a display floor** meaning "present but
   frequency effectively 0" (used so a zero-frequency allele still renders on the
   log-scale plots), **not** a measured frequency.

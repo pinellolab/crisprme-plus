@@ -21,6 +21,27 @@ candidate off-target's protospacer plus PAM (and any bulges), i.e. the interval
 in which an overlapping genetic variant can create, destroy, or modify an
 off-target site.
 
+**Terminology (used throughout).**
+- **cis** — two variants are *in cis* when they lie on the **same DNA molecule** (the
+  same haplotype / chromosome copy) in one individual, as opposed to *in trans* (on the
+  two homologous copies). A co-occurring off-target requires its variants **in cis**.
+- **observed haplotype** — a variant-set that occurs in **at least one real individual**
+  (§4), as opposed to a synthetic worst-case reconstruction assembled from the union of
+  all carriers.
+- **CONFIRMED** — phased genotypes prove the variants are carried together in cis (exact
+  carriers + joint AF). **PUTATIVE** — co-occurrence is possible but cis is unproven
+  (genotyped-unphased panels still name the co-carriers; sites-only panels give a
+  conservative min-AF bound with no carriers). See §4 for the three-rung model.
+- **worst-possible representative** — a single per-window off-target row that
+  upper-bounds the score/severity of every realizable haplotype in that window, emitted
+  by the default population-level analysis instead of enumerating each haplotype (§5).
+
+**Analysis-mode decision rule.** The **default** (no flag) is a **population-level**
+worst-possible screen and works on **any** index. Add **`--per-sample`** only on a
+**genotyped** index (`1000G2021_HGDP` or `HPRC`) when you need named carriers /
+CONFIRMED cis / exact joint AF — it is inert on a sites-only index (`mega`). See
+[§5, Analysis modes](#population-level-analysis-default-and---per-sample-genotype-resolution).
+
 ---
 
 ## 1. Variant-aware, dictionary-less data model
@@ -359,10 +380,16 @@ low-complexity region coincides with a permissive search (many mismatches/bulges
 minimal PAM constraint, unphased genotypes). CRISPRme+ bounds this with three
 complementary controls:
 
-- **`max_total_edits`.** The total number of edits (mismatches + bulges) of the
-  **reconstructed** reference/alternate alignment is enforced against the
-  user-requested budget, so a reported off-target never silently exceeds the
-  stated edit distance.
+- **`--max-total-edits` (default 4).** An independent cap on the combined number of
+  edits (mismatches + DNA/RNA bulges) per alignment, pruned inside the TST search. It
+  defaults to **4 regardless of the requested `--mm`/`--bDNA`/`--bRNA`**, so a
+  permissive request (e.g. `--mm 6 --bDNA 2 --bRNA 2`, budget 10) still drops any
+  alignment needing more than 4 combined edits unless raised. `complete-search` prints
+  a WARNING when the cap is below the requested budget; set `--max-total-edits` to
+  `mm+bDNA+bRNA` (or `-1`) to keep all requested-depth off-targets. It bounds the
+  variant-density combinatorial explosion. (`assembly-search` instead defaults it to
+  the full `mm+bDNA+bRNA` budget — a resolved diploid genome has no IUPAC-variant
+  lattice, so it needs no variant-density cap.)
 - **High-variant-density cap.** Windows exceeding a configurable variant-count
   threshold (`CRISPRME_IUPAC_CAP`) fall back to a bounded procedure instead of full
   2ᵏ enumeration, so a single pathological window cannot dominate runtime or memory.
@@ -446,11 +473,13 @@ per-sample phased haplotype resolution is required. On sites-only (aggregate) pa
 are no per-sample genotypes to recover — verified on the released **mega** index:
 `--per-sample` yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no
 genotype store to enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are
-**byte-identical** across modes. `--per-sample`'s SNP path in fact emits *fewer* worst-possible
-windows (integrated 3,065 vs 3,224 rows; SNP+SNP co-occurrence 4 vs 22 PUTATIVE rows), so the
-population-level analysis — with its conservative worst-possible over-listing — is the more
-complete screen there. Accordingly `--per-sample` is a **no-op (with a warning) on a sites-only
-index**, and the web form **disables** the per-sample option when a sites-only index is selected.
+**byte-identical** across modes. On a sites-only index `--per-sample` cannot resolve carriers
+(no genotypes), so the SNP post-analysis falls back to the registry-only worst-case emission —
+which emits *fewer* rows than the default two-pass population-level path (integrated 3,065 vs
+3,224 rows; SNP+SNP co-occurrence 4 vs 22 PUTATIVE rows), so the **default is the more complete
+screen** there. Because `--per-sample` buys nothing on a sites-only index (it changes the output
+without delivering carrier resolution), `complete-search` **warns** and the web form **disables**
+the per-sample option when a sites-only index is selected.
 
 **Measured population-level vs `--per-sample` behavior (adversarially verified).** Running both
 modes on the released 1000G-2021 + HGDP genotyped index for one guide (identical
@@ -585,19 +614,22 @@ exactly one) — in both the report and the interactive web results page.
 
 An **`Observed`** column records whether each off-target is supported by at least
 one real individual: `reference` (present in the reference genome → carried by
-essentially every individual), `N carrier(s)` (a variant site carried by N named
-individuals in the panel), or `putative` (a worst-case variant/haplotype
-reconstruction that no single individual is observed to carry). On a genotyped
-index the carrier roster is populated in both analysis modes; under `--per-sample`
-it is pruned to the **exact cis carriers**, so `putative` cleanly marks
-reconstructions that no one actually carries — separating genuine haplotypes from
-worst-case combinations. The recommended validation panel uses this to
-**prioritize observed sites** among equally-severe candidates: `Observed` enters
-the ordering only as the first tie-break *after* worst-case severity, so a
-strictly-worse (higher-severity) reconstructed site is never displaced and
-worst-case coverage is preserved, while genuine real-carrier haplotypes of equal
-severity float to the top of the shortlist. The column and tie-break are omitted
-on a sites-only panel (e.g. the mega index) that carries no per-sample roster.
+essentially every individual), `N carrier(s)` (named carriers in a genotyped
+panel), `observed` (a single AF>0 variant, carried by ≥1 individual even where the
+carriers can't be named), or `putative` (a multi-variant combination whose cis
+co-occurrence can't be confirmed). On a genotyped index the carrier roster is
+populated in both analysis modes; under `--per-sample` it is pruned to the **exact
+cis carriers**, so `putative` cleanly marks reconstructions that no one actually
+carries — separating genuine haplotypes from worst-case combinations. The
+recommended validation panel uses this to **prioritize observed sites** among
+equally-severe candidates: `Observed` enters the ordering only as the first
+tie-break *after* worst-case severity, so a strictly-worse (higher-severity)
+reconstructed site is never displaced and worst-case coverage is preserved, while
+genuine real-carrier haplotypes of equal severity float to the top of the
+shortlist. On a sites-only panel (e.g. the mega index) there is no per-sample
+roster, so the `N carrier(s)` value never appears and the panel tie-break has no
+effect (every site is `observed` or `putative`); the column itself is still shown.
+It is dropped only for a reference-only run with no variant off-targets.
 
 The report ZIP places `report.html` at the top level with all data files under a
 `data/` subfolder, and its *Variants included* line states the genotyped panel
