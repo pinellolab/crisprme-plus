@@ -149,7 +149,7 @@ jobs:
         run: |
           mkdir -p work
           n=0
-          until docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          until docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
                   set -e
                   cp /branch/crisprme.py /opt/conda/bin/crisprme.py
                   cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
@@ -166,7 +166,7 @@ jobs:
 
       - name: validate-test (chr22) — assert all benchmarks match the ground truth
         run: |
-          docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
