@@ -1598,6 +1598,19 @@ def complete_search() -> None:
     # propagates. (The env var keeps its internal name to avoid resweeping the shell chain;
     # it is not user-facing. The pre-2.5.4 --fast/--full flags are gone.)
     per_sample = "--per-sample" in args
+    # The pre-2.5.4 --fast / --full flags were removed (no aliases). argparse-free parsing
+    # here means an unknown flag is silently ignored, so a saved stock/2.5.3 script passing
+    # --full would quietly run the population-level default with NO per-sample carriers and
+    # no error. Warn loudly and point at the replacement so the no-op is not invisible.
+    for _retired in ("--full", "--fast"):
+        if _retired in args:
+            print(
+                f"WARNING [complete-search]: '{_retired}' was removed in 2.5.4 and is IGNORED. "
+                f"The default (no flag) is the population-level analysis; pass --per-sample for "
+                f"genotype-resolved observed haplotypes (CONFIRMED cis + named carriers), which "
+                f"is what '{_retired}' used to do.",
+                flush=True,
+            )
     os.environ["CRISPRME_FAST_MODE"] = "0" if per_sample else "1"
     population_level = not per_sample
 

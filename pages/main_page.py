@@ -1637,7 +1637,13 @@ def change_url(
     # CONFIRMED cis + exact joint AF); anything else => population-level (worst-possible
     # PUTATIVE reps, no per-sample carriers). ("full"/"fast" accepted as legacy 2.5.3 values.)
     fast_env = "0" if str(search_mode) in ("per-sample", "full") else "1"
-    cmd = f"CRISPRME_FAST_MODE={fast_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
+    # Mirror the CLI's mode-driven alternative-alignments emission on the web too: OFF for
+    # the population-level default, ON under --per-sample. Without this the submit_job shell
+    # default (CRISPRME_EMIT_ALT_ALIGNMENTS:-1) would emit the expensive non-best-alignments
+    # file on EVERY web run (including the default), contradicting the documented "off by
+    # default" and paying the combinatorial cost the default is meant to avoid.
+    alt_env = "1" if fast_env == "0" else "0"
+    cmd = f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
     return ("/load", f"?job={job_id}")
