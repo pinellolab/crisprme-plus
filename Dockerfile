@@ -4,8 +4,11 @@
 #   name. Skipping it keeps the build output clean.
 # CRISPRme+ 2.4.0 — Python 3.11 image, built FROM SOURCE.
 #
-# crispritz 2.8.2 is compiled from source (it is not yet on Bioconda for
-# Python 3.11) and crisprme is installed from this build context. The dependency
+# crispritz is compiled from source at a pinned GitHub tag (crispritz_ref) so the image
+# gets the exact, reproducible build we want -- including the latest fixes -- without
+# waiting on the Bioconda autobump lag. (Bioconda crispritz is for `conda install` users.)
+# v2.8.3 carries the add-variants .tbi/.csi enricher fix + the MGBOA relicense. crisprme
+# is installed from this build context. The dependency
 # pins mirror the from-scratch Python-3.11 validation on ml007 (see PR #131):
 #   - azimuth/CRISTA scoring stack: scikit-learn 1.1.3 / numpy 1.24.4 /
 #     pandas 2.0.3 / scipy 1.10.1 (the vendored models only unpickle on this combo)
@@ -17,7 +20,7 @@ FROM mambaorg/micromamba
 
 LABEL org.opencontainers.image.authors="ManuelTgn, lucapinello"
 
-ARG crispritz_ref=v2.8.2
+ARG crispritz_ref=v2.8.3
 ENV SHELL=bash
 ENV PREFIX=/opt/conda
 # Quiet the noisy-but-harmless startup warnings so a clean copy-paste run shows no
