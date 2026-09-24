@@ -33,6 +33,7 @@ from .pages_utils import (
     has_variant_index,
     get_variant_dataset_options,
     variant_dataset_has_genotypes,
+    variant_dataset_data_type,
     build_active_annotation,
     get_pam_options,
     get_custom_VCF,
@@ -2139,14 +2140,17 @@ def change_placeholder_guide_textbox(guide_type: str) -> List:
     return [place_holder_text]
 
 
-def _preferred_variant(option_values: List[str]) -> str:
+def _preferred_variant(option_values: List[str], genome: str = None) -> str:
     """Default variant selection, chosen DYNAMICALLY from the installed datasets —
     NO hardcoded 1000G/HGDP or genome names, so it works for any future genome or
     dataset (e.g. a pig susScr11 + a custom VCF). Prefer a variant-aware search over
-    reference-only, and among installed panels prefer the 'richest' one: the panel
-    whose dataset tokens are a superset of the most other panels (e.g. a combined
-    1000G+HGDP panel over either alone). Falls back to the first listed variant,
-    then 'ref' when none are installed."""
+    reference-only. Among installed panels, prefer a genotyped-PHASED panel — real
+    observed haplotypes with CONFIRMED cis co-occurrence + named carriers, the clean
+    default (e.g. the single-source phased 1000G-2021 over the hybrid 1000G+HGDP or the
+    sites-only mega). Phasing is read from each index's `data_type` manifest (still no
+    hardcoded names). Within the preferred tier, pick the 'richest' panel (dataset tokens
+    a superset of the most others), ties broken by listed order. Falls back to 'ref' when
+    no variant panel is installed."""
     variants = [v for v in option_values if v and v != "ref"]
     if not variants:
         return "ref"
@@ -2155,8 +2159,20 @@ def _preferred_variant(option_values: List[str]) -> str:
         toks = set(v.split("_"))
         return sum(1 for o in variants if o != v and set(o.split("_")) <= toks)
 
-    # most-covering (combined) first; ties broken by original listed order
-    return max(variants, key=lambda v: (_covers(v), -variants.index(v)))
+    # Prefer genotyped-phased panels (clean real-haplotype default) when the data_type is
+    # known; fall back to the full list if none are phased or phasing is undeterminable.
+    preferred = variants
+    if genome:
+        try:
+            phased = [v for v in variants
+                      if variant_dataset_data_type(genome, v) == "genotyped-phased"]
+            if phased:
+                preferred = phased
+        except Exception:
+            preferred = variants
+
+    # within the preferred tier: most-covering (combined) first, ties by listed order
+    return max(preferred, key=lambda v: (_covers(v), -variants.index(v)))
 
 
 # change variants options
@@ -2177,9 +2193,10 @@ def change_variant_dataset_options(genome_value: str) -> List:
     if genome_value is not None and not isinstance(genome_value, str):
         raise TypeError(f"Expected {str.__name__}, got {type(genome_value).__name__}")
     options = get_variant_dataset_options(genome_value)
-    # default to a variant-aware search, preferring the richest installed panel —
-    # chosen dynamically (no hardcoded dataset/genome names).
-    value = _preferred_variant([o["value"] for o in options])
+    # default to a variant-aware search, preferring a genotyped-PHASED panel (clean
+    # real-haplotype default), then the richest installed panel — chosen dynamically
+    # from the data_type manifest (no hardcoded dataset/genome names).
+    value = _preferred_variant([o["value"] for o in options], genome_value)
     return [options, value]
 
 
