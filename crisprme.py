@@ -2445,6 +2445,11 @@ def build_index_only() -> None:
     # temp dir to avoid collisions, then move the outputs into place.
     if not os.path.isdir(enriched):
         print(f"Enriching {genome_ref} with {vcf_name} (add-variants)...", flush=True)
+        # Ensure workdir/Genomes exists: the enriched genome lands here, but --genome
+        # may point at a reference staged ELSEWHERE (not under workdir), so this dir
+        # need not pre-exist. (It happened to exist when the reference was staged under
+        # workdir/Genomes; don't rely on that.)
+        os.makedirs(os.path.join(workdir, "Genomes"), exist_ok=True)
         tmp = tempfile.mkdtemp(prefix="run_", dir=os.path.join(workdir, "Genomes"))
         variants_tmp = os.path.join(tmp, "variants_genome")
         code = subprocess.call(
