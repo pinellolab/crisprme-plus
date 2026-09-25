@@ -621,6 +621,18 @@ def submit_assembly_search_job(
     # elsewhere in this codebase (crisprme.py, generate_sample_card.py) for
     # the identical bare-`python`-on-PATH problem.
     crisprme_script = os.path.join(app_directory, "crisprme.py")
+    # hg38 functional annotation of the reconciled sites: the same set of
+    # annotations enabled in Settings -> Annotations that complete-search
+    # applies (built-in bundle on by default, COSMIC stripped unless
+    # licensed). Assembly-search always reconciles to hg38, so the hg38 set.
+    # Omitted, not an error, when none is enabled/installed.
+    annotation_name, _ = build_active_annotation("hg38")
+    annotation_path = os.path.join(current_working_directory, ANNOTATIONS_DIR, annotation_name)
+    annotation_args = (
+        ["--annotation", shlex.quote(annotation_path)]
+        if annotation_name != "vuoto.txt" and os.path.isfile(annotation_path)
+        else []
+    )
     cmd = " ".join(
         [
             shlex.quote(sys.executable),
@@ -660,6 +672,7 @@ def submit_assembly_search_job(
             shlex.quote(job_id),
             "--thread",
             "4",
+            *annotation_args,
             "--debug",
         ]
     )

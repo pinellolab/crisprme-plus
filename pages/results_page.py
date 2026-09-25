@@ -820,6 +820,21 @@ _SITE_SET_OPTIONS = [
     {"label": "Paternal-unmappable", "value": "paternal_unmappable"},
 ]
 
+
+def _assembly_table_columns(display_cols: List[str]) -> List[Dict[str, object]]:
+    """DataTable column definitions for the Custom Ranking table.
+
+    Every column gets the table's native filter box and click-to-sort header.
+    `Annotation` (hg38 feature list, comma-separated -- e.g.
+    "exon_gencode,pELS_encode") is declared as text so a filter like
+    `exon` does a substring match on the list instead of an exact-value match.
+    """
+    return [
+        {"name": c, "id": c, "hideable": True, **({"type": "text"} if c == "Annotation" else {})}
+        for c in display_cols
+    ]
+
+
 # Sort-by options per site set -- "mappable" offers both haplotypes' own
 # score/mismatch columns plus hg38 position (matches the columns display_cols
 # actually shows); an unmappable site set only has ITS OWN haplotype's native
@@ -1877,7 +1892,7 @@ def result_page_assembly(job_id: str) -> html.Div:
         ),
         dash_table.DataTable(
             id="assembly-results-table",
-            columns=[{"name": c, "id": c, "hideable": True} for c in display_cols],
+            columns=_assembly_table_columns(display_cols),
             data=df.to_dict("records"),
             page_size=25,
             sort_action="native",
@@ -2336,7 +2351,7 @@ def update_assembly_results_table(
         if region_filter.get("end") is not None:
             mask &= starts <= region_filter["end"]
         df = df[mask]
-    columns = [{"name": c, "id": c, "hideable": True} for c in display_cols]
+    columns = _assembly_table_columns(display_cols)
     sort_by = [{"column_id": sort_col, "direction": sort_order}] if sort_col in display_cols else []
     return columns, df.to_dict("records"), sort_by
 

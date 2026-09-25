@@ -57,6 +57,15 @@ and the `release-crisprme` skill.
   `PostProcess/personal_assembly.py` (+ `test_personal_assembly.py`).
 
 ### Added
+- **`assembly-search` annotates reconciled sites against hg38.** New optional
+  `--annotation` flag (same file format, COSMIC licence gate and IntOGen handling as
+  `complete-search`'s) adds an `Annotation` column to `combined_hg38.tsv` for every site
+  with an hg38 coordinate (found on both haplotypes, or on one and mappable); sites with
+  no hg38 equivalent get none. The web form applies the annotations enabled in
+  Settings -> Annotations, like `complete-search`. In the results table the column is
+  filterable and sortable like every other one. The annotation describes the *lifted*
+  hg38 locus, not the haplotype's own sequence.
+
 - **New recommended default variant index: single-source, phased
   `NRG_3_hg38+hg38_1000G2021`** (published to HuggingFace). 1000 Genomes 2021,
   3,202 samples, fully phased (`data_type=genotyped-phased`) — so every reported
