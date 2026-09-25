@@ -280,7 +280,7 @@ class TestGenerateReport(unittest.TestCase):
                 "Aligned_protospacer+PAM", "Mismatches", "Bulges",
                 "Mismatches+bulges", "Perfect_match", "CFD", "CRISTA",
                 "REF/ALT_origin",
-                "PAM_creation", "Variant", "MAF", "Gene", "Gene_distance_kb",
+                "PAM_creation", "Variant", "Observed", "MAF", "Gene", "Gene_distance_kb",
                 "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
                 "IntOGen_cancer_driver",
                 "High_complexity_region",
@@ -295,7 +295,9 @@ class TestGenerateReport(unittest.TestCase):
         )
 
     def test_high_complexity_region_flag_projection(self):
-        # the curated cell compacts the integrated_results note to "Yes (N var)"
+        # the curated cell compacts the integrated_results note to "N in window"
+        # (total variants in the protospacer window -- worded so it isn't
+        # misread as the per-target Variant count)
         note = (
             "high_variant_density (12 variants): a greedy worst-case alignment is "
             "reported here; additional haplotype alignments may exist; full_IUPAC=ACGT"
@@ -305,7 +307,7 @@ class TestGenerateReport(unittest.TestCase):
             {"High_variant_density_region": note},
             {"complex_region": "High_variant_density_region"},
         )
-        self.assertEqual(cell, "Yes (12 var)")
+        self.assertEqual(cell, "12 in window")
         # "NA" -> the missing sentinel
         self.assertEqual(
             gr._curated_cell(
