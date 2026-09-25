@@ -236,6 +236,44 @@ class TestHaplotypePrivateSiteSet(unittest.TestCase):
                 mappable_df, _ = rp._assembly_mappable_frame(combined_dir)
                 self.assertEqual(len(mappable_df), 2)
 
+    def test_blank_alt_and_plain_start_columns_are_hidden(self):
+        # ALT alignment columns are structurally empty in assembly-search (no
+        # VCF), and the un-suffixed Start_coordinate_paternal/_maternal are
+        # populated only on both_haplotype_private rows -- neither should be
+        # rendered as an all-blank column in the tables where they're empty.
+        alt = "Aligned_protospacer+PAM_ALT_(fewest_mm+b)"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_id = "testjob"
+            self._make_haplotype_results(
+                tmpdir, f"{job_id}_paternal", _pred_row("chr9", 67041469, 1.0)
+            )
+            self._make_haplotype_results(
+                tmpdir, f"{job_id}_maternal", _pred_row("chr9", 70115639, 0.5)
+            )
+            combined_dir = self._make_combined_job(tmpdir, job_id)
+            with open(os.path.join(combined_dir, "paternal_offtargets_not_lifted.bed"), "w") as f:
+                f.write("# Deleted in new\nchr9\t1\t2\t0\n")
+            with patch.object(rp, "current_working_directory", tmpdir + os.sep):
+                _, mappable_cols = rp._assembly_mappable_frame(combined_dir)
+                self.assertNotIn("Start_coordinate_paternal", mappable_cols)
+                self.assertNotIn("Start_coordinate_maternal", mappable_cols)
+                self.assertIn("Start_coordinate_(fewest_mm+b)_paternal", mappable_cols)
+                self.assertNotIn(f"{alt}_paternal", mappable_cols)
+
+                unmappable, unmappable_cols = rp._assembly_site_set_frame(
+                    combined_dir, "paternal_unmappable"
+                )
+                self.assertEqual(len(unmappable), 1)
+                self.assertNotIn(alt, unmappable_cols)
+                self.assertIn("CFD_score_(fewest_mm+b)", unmappable_cols)
+
+                _, private_cols = rp._assembly_haplotype_private_frame(combined_dir)
+                self.assertNotIn(f"{alt}_paternal", private_cols)
+                self.assertNotIn(f"{alt}_maternal", private_cols)
+                # the private table's own native coordinates must stay visible
+                self.assertIn("Start_coordinate_paternal", private_cols)
+                self.assertIn("Start_coordinate_maternal", private_cols)
+
 
 if __name__ == "__main__":
     unittest.main()

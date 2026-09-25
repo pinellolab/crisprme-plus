@@ -906,12 +906,21 @@ def _assembly_mappable_frame(job_directory: str) -> Tuple[pd.DataFrame, List[str
         "off_target_id_maternal",
         "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_paternal",
         "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_maternal",
+        # Plain (un-suffixed) native start coordinates are populated only for
+        # the both_haplotype_private rows, which are excluded from this
+        # table -- so they'd be all-blank here. The (fewest_mm+b)-suffixed
+        # per-haplotype starts are the real ones and stay visible.
+        "Start_coordinate_paternal",
+        "Start_coordinate_maternal",
     }
     display_cols = ["Spacer+PAM"] if "Spacer+PAM" in df.columns else []
     display_cols += [
         c for c in df.columns if c not in hidden_cols and c != "Spacer+PAM"
     ]
     return df, display_cols
+
+
+_ALT_ALIGNED_COL = "Aligned_protospacer+PAM_ALT_(fewest_mm+b)"
 
 
 def _assembly_unmappable_frame(job_directory: str, hap: str) -> pd.DataFrame:
@@ -940,7 +949,11 @@ def _assembly_unmappable_frame(job_directory: str, hap: str) -> pd.DataFrame:
     if not unlifted_ids:
         return pd.DataFrame()
     private = hap_predictions[hap_predictions["off_target_id"].isin(unlifted_ids)]
-    return private.drop(columns=["off_target_id"]) if not private.empty else pd.DataFrame()
+    if private.empty:
+        return pd.DataFrame()
+    # ALT column is structurally empty in assembly-search (no VCF, so no
+    # alternate allele to hold) -- don't render an all-blank column.
+    return private.drop(columns=["off_target_id", _ALT_ALIGNED_COL], errors="ignore")
 
 
 _HAPLOTYPE_PRIVATE_DETAIL_COLS = [
@@ -1028,7 +1041,12 @@ def _assembly_haplotype_private_frame(job_directory: str) -> Tuple[pd.DataFrame,
     out = pd.DataFrame(rows)
     if "Spacer+PAM_paternal" in out.columns and "Spacer+PAM_maternal" in out.columns:
         out["Spacer+PAM"] = out["Spacer+PAM_paternal"].combine_first(out["Spacer+PAM_maternal"])
-    hidden_cols = {"Spacer+PAM_paternal", "Spacer+PAM_maternal"}
+    hidden_cols = {
+        "Spacer+PAM_paternal",
+        "Spacer+PAM_maternal",
+        f"{_ALT_ALIGNED_COL}_paternal",
+        f"{_ALT_ALIGNED_COL}_maternal",
+    }
     display_cols = ["Spacer+PAM"] if "Spacer+PAM" in out.columns else []
     display_cols += [c for c in out.columns if c not in hidden_cols and c != "Spacer+PAM"]
     return out, display_cols
@@ -1262,6 +1280,12 @@ def result_page_assembly(job_id: str) -> html.Div:
         "off_target_id_maternal",
         "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_paternal",
         "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_maternal",
+        # Plain (un-suffixed) native start coordinates are populated only for
+        # the both_haplotype_private rows, which are excluded from this
+        # table -- so they'd be all-blank here. The (fewest_mm+b)-suffixed
+        # per-haplotype starts are the real ones and stay visible.
+        "Start_coordinate_paternal",
+        "Start_coordinate_maternal",
     }
     display_cols = ["Spacer+PAM"] if "Spacer+PAM" in df.columns else []
     display_cols += [
