@@ -116,5 +116,29 @@ class TestAnnotateCombined(unittest.TestCase):
             self.assertNotIn("Annotation", df.columns)
 
 
+class TestAnnotationLogNote(unittest.TestCase):
+    """The web job runner writes its "no annotation" note to log.txt at job
+    start (not submit time), before the subprocess's own output."""
+
+    def _run(self, note):
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        sys.argv = ["x"]
+        import pages.main_page as mp
+        with tempfile.TemporaryDirectory() as tmp:
+            open(os.path.join(tmp, mp.QUEUE_FILE), "w").close()
+            mp._run_assembly_search_job("echo from-subprocess", tmp, note)
+            with open(os.path.join(tmp, mp.LOG_FILE)) as f:
+                return f.read(), os.path.isfile(os.path.join(tmp, mp.QUEUE_FILE))
+
+    def test_note_written_before_subprocess_output_and_queue_cleared(self):
+        log, queued = self._run("[web] No hg38 annotation is enabled")
+        self.assertEqual(log.splitlines(), ["[web] No hg38 annotation is enabled", "from-subprocess"])
+        self.assertFalse(queued)
+
+    def test_no_note_leaves_log_unchanged(self):
+        log, _ = self._run("")
+        self.assertEqual(log.splitlines(), ["from-subprocess"])
+
+
 if __name__ == "__main__":
     unittest.main()

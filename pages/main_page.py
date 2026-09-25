@@ -352,7 +352,7 @@ def _new_assembly_job_id() -> str:
     return job_id
 
 
-def _run_assembly_search_job(cmd: str, combined_dir: str) -> None:
+def _run_assembly_search_job(cmd: str, combined_dir: str, note: str = "") -> None:
     """Runs `crisprme.py assembly-search` in the background.
 
     Module-level (picklable) so it can be submitted to the
@@ -364,7 +364,9 @@ def _run_assembly_search_job(cmd: str, combined_dir: str) -> None:
     subprocess actually starts, mirroring
     `submit_job_automated_new_multiple_vcfs.sh`'s own "no longer queued"
     convention (that script removes it at the same point, before running the
-    real command).
+    real command). `note`, if given, is written to `log.txt` first -- at job
+    start rather than at submit time, so the load page still shows "Queued"
+    (it reads `log.txt`'s existence as "started").
     """
     queue_file = os.path.join(combined_dir, QUEUE_FILE)
     log_path = os.path.join(combined_dir, LOG_FILE)
@@ -380,6 +382,9 @@ def _run_assembly_search_job(cmd: str, combined_dir: str) -> None:
         env_bin = os.path.dirname(sys.executable)
         env["PATH"] = env_bin + os.pathsep + env.get("PATH", "")
         with open(log_path, "a") as log_out:
+            if note:
+                log_out.write(f"{note}\n")
+                log_out.flush()
             proc = subprocess.Popen(
                 cmd, shell=True, stdout=log_out, stderr=subprocess.STDOUT, env=env
             )
@@ -633,6 +638,12 @@ def submit_assembly_search_job(
         if annotation_name != "vuoto.txt" and os.path.isfile(annotation_path)
         else []
     )
+    annotation_note = (
+        ""
+        if annotation_args
+        else "[web] No hg38 annotation is enabled or installed (Settings -> Annotations), "
+        "so this job's results will have no Annotation column."
+    )
     cmd = " ".join(
         [
             shlex.quote(sys.executable),
@@ -677,7 +688,7 @@ def submit_assembly_search_job(
         ]
     )
     print(f"Submitted ASSEMBLY-SEARCH job {job_id}. Output > {LOG_FILE}")
-    pool_executor.submit(_run_assembly_search_job, cmd, combined_dir)
+    pool_executor.submit(_run_assembly_search_job, cmd, combined_dir, annotation_note)
     return "/load", f"?job={job_id}_combined", False, no_update
 
 

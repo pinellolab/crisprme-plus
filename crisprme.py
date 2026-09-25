@@ -3379,6 +3379,8 @@ def assembly_search() -> None:
         },
     }
     combined, summary = reconcile_haplotypes(haplotypes, combined_output, merge_bp=merge_t)
+    if not annotationfile:
+        print("Note: no --annotation given -- results will not include an Annotation column.")
     if annotationfile:
         # A failed annotation must not throw away a finished multi-hour
         # two-haplotype search -- the un-annotated results are still complete.
