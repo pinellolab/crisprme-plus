@@ -1715,29 +1715,39 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
             cluster_scored.append(t)
         return cluster_scored
 
-    def _sg(target):
-        # aligned sgRNA with the PAM region as N-G-G, exactly as the CRISTA path builds it
-        return str(target[1])[: len(str(target[1])) - 3] + "NGG"
+    # This CRISPR-Bulge ensemble scores a 23-mer protospacer+PAM with AT MOST ONE bulge
+    # (model input seq_len=24). Rows this model cannot score are nulled to -1 and replaced
+    # with a scoreable dummy so a single bad row can't fail the whole batch:
+    #   * N in the off-target, or sg/off length mismatch;
+    #   * >=2 total bulges -- counted as GAPS across the aligned pair, NOT column length:
+    #     two RNA bulges give a length-23 pair with 2 '-' in the off, which the 1-bulge
+    #     model silently scores as 0.0 (garbage). Gap-count is the correct criterion.
+    # CFD (the primary score) is unaffected; multi-bulge off-targets carry no CRISPR-Bulge score.
+    _MAXLEN = 24
+    _SG_DUMMY = "A" * 20 + "NGG"
+    _OFF_DUMMY = "A" * 20 + "AGG"
 
-    def _prep_off(sg, off, index):
-        # keep valid rows; substitute an equal-length dummy for unscoreable ones
-        off = str(off)
-        if ("N" in off) or ("n" in off) or (len(off) != len(sg)):
+    def _pair(target, off_field, index):
+        sg = str(target[1])[: len(str(target[1])) - 3] + "NGG"
+        off = str(off_field)
+        total_gaps = sg.count("-") + off.count("-")
+        if ("N" in off) or ("n" in off) or (len(off) != len(sg)) or total_gaps > 1 or (len(sg) > _MAXLEN):
             index_to_null.append(index)
-            return "A" * len(sg)
-        return off
+            return _SG_DUMMY, _OFF_DUMMY
+        return sg, off
 
     # ALT pass: aligned off-target = target[2]
-    sg_list = [_sg(t) for t in cluster_targets]
-    off_alt_list = [_prep_off(sg_list[i], cluster_targets[i][2], i) for i in range(len(cluster_targets))]
-    scores_alt = scorer_runner.CRISPR_BULGE_predict_list(sg_list, off_alt_list)
+    pairs_alt = [_pair(t, t[2], i) for i, t in enumerate(cluster_targets)]
+    scores_alt = scorer_runner.CRISPR_BULGE_predict_list(
+        [p[0] for p in pairs_alt], [p[1] for p in pairs_alt])
 
     # REF pass: aligned off-target = Reference_target (target[-3]) unless it carries an 'n'
-    off_ref_list = []
+    pairs_ref = []
     for i, target in enumerate(cluster_targets):
         ref = str(target[-3]) if "n" not in str(target[-3]) else str(target[2])
-        off_ref_list.append(_prep_off(sg_list[i], ref, i))
-    scores_ref = scorer_runner.CRISPR_BULGE_predict_list(sg_list, off_ref_list)
+        pairs_ref.append(_pair(target, ref, i))
+    scores_ref = scorer_runner.CRISPR_BULGE_predict_list(
+        [p[0] for p in pairs_ref], [p[1] for p in pairs_ref])
 
     for index, target in enumerate(cluster_targets):
         t = target.copy()

@@ -778,25 +778,33 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
             cluster_scored.append(t)
         return cluster_scored
 
-    def _sg(target):
-        return str(target[1])[: len(str(target[1])) - 3] + "NGG"
+    # seq_len=24 model: 23-mer protospacer+PAM + AT MOST ONE bulge. Null (with a scoreable
+    # dummy) rows with N in the off-target, sg/off length mismatch, or >=2 total bulges --
+    # counted as GAPS across the pair (two RNA bulges = length-23 pair w/ 2 '-', which the
+    # 1-bulge model would silently score 0.0). CFD (primary) is unaffected.
+    _MAXLEN = 24
+    _SG_DUMMY = "A" * 20 + "NGG"
+    _OFF_DUMMY = "A" * 20 + "AGG"
 
-    def _prep_off(sg, off, index):
-        off = str(off)
-        if ("N" in off) or ("n" in off) or (len(off) != len(sg)):
+    def _pair(target, off_field, index):
+        sg = str(target[1])[: len(str(target[1])) - 3] + "NGG"
+        off = str(off_field)
+        total_gaps = sg.count("-") + off.count("-")
+        if ("N" in off) or ("n" in off) or (len(off) != len(sg)) or total_gaps > 1 or (len(sg) > _MAXLEN):
             index_to_null.append(index)
-            return "A" * len(sg)
-        return off
+            return _SG_DUMMY, _OFF_DUMMY
+        return sg, off
 
-    sg_list = [_sg(t) for t in cluster_targets]
-    off_alt_list = [_prep_off(sg_list[i], cluster_targets[i][2], i) for i in range(len(cluster_targets))]
-    scores_alt = scorer_runner.CRISPR_BULGE_predict_list(sg_list, off_alt_list)
+    pairs_alt = [_pair(t, t[2], i) for i, t in enumerate(cluster_targets)]
+    scores_alt = scorer_runner.CRISPR_BULGE_predict_list(
+        [p[0] for p in pairs_alt], [p[1] for p in pairs_alt])
 
-    off_ref_list = []
+    pairs_ref = []
     for i, target in enumerate(cluster_targets):
         ref = str(target[-3]) if "n" not in str(target[-3]) else str(target[2])
-        off_ref_list.append(_prep_off(sg_list[i], ref, i))
-    scores_ref = scorer_runner.CRISPR_BULGE_predict_list(sg_list, off_ref_list)
+        pairs_ref.append(_pair(target, ref, i))
+    scores_ref = scorer_runner.CRISPR_BULGE_predict_list(
+        [p[0] for p in pairs_ref], [p[1] for p in pairs_ref])
 
     for index, target in enumerate(cluster_targets):
         t = target.copy()
