@@ -56,8 +56,13 @@ RUN micromamba install -y -n base \
         huggingface_hub \
         importlib-metadata \
         "dash>=2.14,<3" "dash-bootstrap-components<2" dash-daq \
-        flask flask-caching flask-compress gunicorn werkzeug \
+        "flask=3.1.3" "flask-caching=2.4.1" "flask-compress=1.24" gunicorn "werkzeug=3.1.8" "cachelib=0.17.0" \
     && micromamba clean --all --yes
+# ^ flask/flask-caching/werkzeug/cachelib PINNED to the versions the working v2.5.5 image
+#   shipped. They were unpinned and drifted: a newer flask-caching dropped the
+#   flask_caching.backends.filesystem submodule, so the web app crashed at import
+#   (werkzeug ImportStringError -> "module 'flask_caching.backends' has no attribute
+#   'filesystem'"), reddening web-e2e on every PR. Pin to the proven-good combo.
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
