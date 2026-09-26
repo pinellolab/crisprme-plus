@@ -265,3 +265,9 @@ def close_runner():
     if _SINGLETON is not None:
         _SINGLETON.close()
         _SINGLETON = None
+
+
+# clean up the persistent worker when the (per-chromosome) process exits
+import atexit  # noqa: E402
+
+atexit.register(close_runner)

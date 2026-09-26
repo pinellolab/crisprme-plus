@@ -314,6 +314,10 @@ with open(sys.argv[5]) as pam:
         pam_begin = len_pam * (-1)
         pam_end = None
 
+# Which ML scorer fills the second score column: 'crista' (default, byte-identical to
+# legacy) or 'crispr-bulge' (dedicated cbulge env via the scorer-runner).
+_SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crista").lower()
+
 do_scores = True
 if guide_len != 20 or len_pam != 3 or pam_at_beginning:
     # sys.stderr.write('CFD SCORE IS NOT CALCULATED WITH GUIDES LENGTH != 20 OR PAM LENGTH !=3 OR UPSTREAM PAM')
@@ -752,6 +756,66 @@ def preprocess_CRISTA_score(cluster_targets):
     return cluster_scored
 
 
+def preprocess_CRISPR_BULGE_score(cluster_targets):
+    """CRISPR-Bulge analogue of preprocess_CRISTA_score (indel path).
+
+    Identical output contract + alt/ref two-pass + null semantics as the CRISTA path,
+    but scores the aligned (sgRNA, off-target) pair only (NO 29-nt genomic window) via
+    the scorer-runner (dedicated cbulge env; graceful -1.0 if absent). Unscoreable rows
+    (N in aligned DNA, or length mismatch) get an equal-length dummy then are nulled by
+    index, so CRISPR-Bulge's per-row len(sg)==len(off) requirement always holds.
+    """
+    import scorer_runner  # lazy: only when CRISPR-Bulge is selected
+
+    cluster_scored = list()
+    index_to_null = list()
+
+    if not do_scores:
+        for target in cluster_targets:
+            t = target.copy()
+            t[-2] = "{:.3f}".format(-1)
+            t.append("{:.3f}".format(-1))
+            cluster_scored.append(t)
+        return cluster_scored
+
+    def _sg(target):
+        return str(target[1])[: len(str(target[1])) - 3] + "NGG"
+
+    def _prep_off(sg, off, index):
+        off = str(off)
+        if ("N" in off) or ("n" in off) or (len(off) != len(sg)):
+            index_to_null.append(index)
+            return "A" * len(sg)
+        return off
+
+    sg_list = [_sg(t) for t in cluster_targets]
+    off_alt_list = [_prep_off(sg_list[i], cluster_targets[i][2], i) for i in range(len(cluster_targets))]
+    scores_alt = scorer_runner.CRISPR_BULGE_predict_list(sg_list, off_alt_list)
+
+    off_ref_list = []
+    for i, target in enumerate(cluster_targets):
+        ref = str(target[-3]) if "n" not in str(target[-3]) else str(target[2])
+        off_ref_list.append(_prep_off(sg_list[i], ref, i))
+    scores_ref = scorer_runner.CRISPR_BULGE_predict_list(sg_list, off_ref_list)
+
+    for index, target in enumerate(cluster_targets):
+        t = target.copy()
+        if index in index_to_null:
+            s = -1
+            t[-2] = "{:.3f}".format(s)
+            t.append("{:.3f}".format(s))
+        else:
+            if t[-2] == 55:
+                t[-2] = "{:.3f}".format(scores_alt[index])
+                t.append("{:.3f}".format(scores_alt[index]))
+            if t[-2] == 33:
+                t[-2] = "{:.3f}".format(scores_ref[index])
+                t.append("{:.3f}".format(scores_alt[index]))
+        cluster_scored.append(t)
+
+    return cluster_scored
+
+
 def calculate_scores(cluster_to_save):
     # function to calculate score for each input target
     # input is target line splitted in list format
@@ -766,8 +830,12 @@ def calculate_scores(cluster_to_save):
         target_CFD = target.copy()
         cluster_with_CFD_score.append(preprocess_CFD_score(target_CFD))
 
-    # process score for each target in cluster, at the same time to improve execution time
-    cluster_with_CRISTA_score = preprocess_CRISTA_score(cluster_to_save)
+    # process score for each target in cluster, at the same time to improve execution time.
+    # CRISPRME_SCORER_SELECT picks the ML scorer for this second column (crista default).
+    if _SCORER_SELECT in ("crispr-bulge", "crispr_bulge", "cbulge"):
+        cluster_with_CRISTA_score = preprocess_CRISPR_BULGE_score(cluster_to_save)
+    else:
+        cluster_with_CRISTA_score = preprocess_CRISTA_score(cluster_to_save)
 
     # REMOVED TO CHECK IF FILE IS RETURN WITH IDENTICAL ROWS COUNT
 
