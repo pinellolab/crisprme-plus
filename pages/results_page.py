@@ -818,12 +818,15 @@ _SITE_SET_OPTIONS = [
     {"label": "Mappable (hg38)", "value": "mappable"},
     {"label": "Maternal-unmappable", "value": "maternal_unmappable"},
     {"label": "Paternal-unmappable", "value": "paternal_unmappable"},
+    {"label": "Both haplotypes (non-mappable to hg38)", "value": "both_haplotype_private"},
 ]
 
 # Sort-by options per site set -- "mappable" offers both haplotypes' own
 # score/mismatch columns plus hg38 position (matches the columns display_cols
 # actually shows); an unmappable site set only has ITS OWN haplotype's native
 # columns (there's no hg38 coordinate to sort by -- these sites have none).
+# both_haplotype_private has both haplotypes' own columns, like "mappable",
+# but no hg38 position (these sites have none, by definition).
 _MAPPABLE_SORT_OPTIONS = [
     {"label": "CFD score (Paternal)", "value": "CFD_score_(fewest_mm+b)_paternal"},
     {"label": "CFD score (Maternal)", "value": "CFD_score_(fewest_mm+b)_maternal"},
@@ -836,8 +839,23 @@ _UNMAPPABLE_SORT_OPTIONS = [
     {"label": "Mismatches", "value": "Mismatches_(fewest_mm+b)"},
     {"label": "Genomic position (own assembly)", "value": "Start_coordinate_(fewest_mm+b)"},
 ]
+_HAPLOTYPE_PRIVATE_SORT_OPTIONS = [
+    {"label": "CFD score (Paternal)", "value": "CFD_score_(fewest_mm+b)_paternal"},
+    {"label": "CFD score (Maternal)", "value": "CFD_score_(fewest_mm+b)_maternal"},
+    {"label": "Mismatches (Paternal)", "value": "Mismatches_(fewest_mm+b)_paternal"},
+    {"label": "Mismatches (Maternal)", "value": "Mismatches_(fewest_mm+b)_maternal"},
+    {"label": "Genomic position (Paternal)", "value": "Start_coordinate_paternal"},
+]
 _MAPPABLE_DEFAULT_SORT = "CFD_score_(fewest_mm+b)_paternal"
 _UNMAPPABLE_DEFAULT_SORT = "CFD_score_(fewest_mm+b)"
+_HAPLOTYPE_PRIVATE_DEFAULT_SORT = "CFD_score_(fewest_mm+b)_paternal"
+# Per-site-set (Sort-by options, default sort column) -- every site set
+# except "mappable" (handled separately below, the historical default).
+_SITE_SET_SORT_CONFIG = {
+    "maternal_unmappable": (_UNMAPPABLE_SORT_OPTIONS, _UNMAPPABLE_DEFAULT_SORT),
+    "paternal_unmappable": (_UNMAPPABLE_SORT_OPTIONS, _UNMAPPABLE_DEFAULT_SORT),
+    "both_haplotype_private": (_HAPLOTYPE_PRIVATE_SORT_OPTIONS, _HAPLOTYPE_PRIVATE_DEFAULT_SORT),
+}
 
 
 def _job_id_from_search(search: str) -> str:
@@ -863,11 +881,20 @@ def _assembly_mappable_frame(job_directory: str) -> Tuple[pd.DataFrame, List[str
     rows) -- same loading + display-column trimming result_page_assembly()
     itself does for its initial render (kept in sync manually; both are
     small enough that a shared extraction would cost more indirection than
-    it saves for now)."""
+    it saves for now).
+
+    Excludes `both_haplotype_private` rows: confirmed against real data,
+    every hg38/CFD/mismatch column is 100% NaN for them here (they have no
+    hg38 coordinate at all), which produced an all-blank-except-4-columns
+    row shape mixed into this otherwise-clean hg38 table. They get their
+    own dedicated frame instead -- see _assembly_haplotype_private_frame().
+    """
     combined_tsv_matches = glob(os.path.join(job_directory, "*_combined_hg38.tsv"))
     if not combined_tsv_matches:
         return pd.DataFrame(), []
-    df = pd.read_csv(combined_tsv_matches[0], sep="\t")
+    df = pd.read_csv(combined_tsv_matches[0], sep="\t", low_memory=False)
+    if "origin" in df.columns:
+        df = df[df["origin"] != "both_haplotype_private"]
     if "Spacer+PAM_paternal" in df.columns and "Spacer+PAM_maternal" in df.columns:
         df["Spacer+PAM"] = df["Spacer+PAM_paternal"].combine_first(
             df["Spacer+PAM_maternal"]
@@ -879,12 +906,21 @@ def _assembly_mappable_frame(job_directory: str) -> Tuple[pd.DataFrame, List[str
         "off_target_id_maternal",
         "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_paternal",
         "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_maternal",
+        # Plain (un-suffixed) native start coordinates are populated only for
+        # the both_haplotype_private rows, which are excluded from this
+        # table -- so they'd be all-blank here. The (fewest_mm+b)-suffixed
+        # per-haplotype starts are the real ones and stay visible.
+        "Start_coordinate_paternal",
+        "Start_coordinate_maternal",
     }
     display_cols = ["Spacer+PAM"] if "Spacer+PAM" in df.columns else []
     display_cols += [
         c for c in df.columns if c not in hidden_cols and c != "Spacer+PAM"
     ]
     return df, display_cols
+
+
+_ALT_ALIGNED_COL = "Aligned_protospacer+PAM_ALT_(fewest_mm+b)"
 
 
 def _assembly_unmappable_frame(job_directory: str, hap: str) -> pd.DataFrame:
@@ -913,7 +949,107 @@ def _assembly_unmappable_frame(job_directory: str, hap: str) -> pd.DataFrame:
     if not unlifted_ids:
         return pd.DataFrame()
     private = hap_predictions[hap_predictions["off_target_id"].isin(unlifted_ids)]
-    return private.drop(columns=["off_target_id"]) if not private.empty else pd.DataFrame()
+    if private.empty:
+        return pd.DataFrame()
+    # ALT column is structurally empty in assembly-search (no VCF, so no
+    # alternate allele to hold) -- don't render an all-blank column.
+    return private.drop(columns=["off_target_id", _ALT_ALIGNED_COL], errors="ignore")
+
+
+_HAPLOTYPE_PRIVATE_DETAIL_COLS = [
+    "Spacer+PAM", "Aligned_spacer+PAM_(fewest_mm+b)",
+    "Aligned_protospacer+PAM_REF_(fewest_mm+b)", "Aligned_protospacer+PAM_ALT_(fewest_mm+b)",
+    "Mismatches_(fewest_mm+b)", "Bulges_(fewest_mm+b)", "Bulge_type_(fewest_mm+b)",
+    "CFD_score_(fewest_mm+b)",
+]
+
+
+def _assembly_haplotype_private_frame(job_directory: str) -> Tuple[pd.DataFrame, List[str]]:
+    """Sites independently found on BOTH haplotypes that direct alignment
+    (impg/minimap2) confirms are the same physical locus, but which have no
+    hg38 coordinate on either side (the `both_haplotype_private` origin
+    rows) -- given their own dedicated frame instead of living inside
+    `_assembly_mappable_frame()`'s hg38 table.
+
+    Confirmed against real data (376 real rows): every hg38/CFD/mismatch
+    column combined_hg38.tsv carries for these rows is 100% NaN except the
+    native paternal/maternal chromosome+coordinate+off_target_id --
+    `resolve_haplotype_private_bidirectional()` only confirms locus
+    identity, it doesn't carry the original prediction columns forward.
+    Mixing these into the mappable table (as before) produced an
+    all-blank-except-4-columns row shape there instead. This rebuilds the
+    real Spacer+PAM/CFD/mismatches values for both haplotypes by joining
+    back to each haplotype's own predictions via off_target_id -- the same
+    lookup `_assembly_unmappable_frame()` already does for one-sided
+    non-mappable sites.
+    """
+    combined_tsv_matches = glob(os.path.join(job_directory, "*_combined_hg38.tsv"))
+    if not combined_tsv_matches:
+        return pd.DataFrame(), []
+    df = pd.read_csv(combined_tsv_matches[0], sep="\t", low_memory=False)
+    if "origin" not in df.columns:
+        return pd.DataFrame(), []
+    private = df[df["origin"] == "both_haplotype_private"]
+    if private.empty:
+        return pd.DataFrame(), []
+
+    params = _assembly_job_params(job_directory)
+
+    def _hap_predictions(hap: str) -> pd.DataFrame:
+        dirname_key = "Paternal_dir" if hap == "paternal" else "Maternal_dir"
+        hap_dir_name = params.get(dirname_key)
+        if not hap_dir_name:
+            return pd.DataFrame()
+        hap_results_dir = os.path.join(current_working_directory, RESULTS_DIR, hap_dir_name)
+        try:
+            prefix = find_results_prefix(hap_results_dir)
+            preds = load_crisprme_predictions(
+                hap_results_dir, prefix, merge_bp=3,
+                cols=PRED_COLS + ["Bulge_type_(fewest_mm+b)"],
+            )
+        except (FileNotFoundError, OSError):
+            return pd.DataFrame()
+        preds["off_target_id"] = preds["off_target_id"].astype(str)
+        return preds.set_index("off_target_id")
+
+    pat_preds = _hap_predictions("paternal")
+    mat_preds = _hap_predictions("maternal")
+
+    def _lookup(preds: pd.DataFrame, off_target_id) -> Dict[str, object]:
+        if preds.empty or pd.isna(off_target_id):
+            return {}
+        key = str(int(off_target_id))
+        if key not in preds.index:
+            return {}
+        row = preds.loc[key]
+        return {c: row.get(c) for c in _HAPLOTYPE_PRIVATE_DETAIL_COLS if c in preds.columns}
+
+    rows = []
+    for _, r in private.iterrows():
+        row = {
+            "Chromosome_paternal": r.get("Chromosome_paternal"),
+            "Start_coordinate_paternal": r.get("Start_coordinate_paternal"),
+            "Chromosome_maternal": r.get("Chromosome_maternal"),
+            "Start_coordinate_maternal": r.get("Start_coordinate_maternal"),
+        }
+        pat_detail = _lookup(pat_preds, r.get("off_target_id_paternal"))
+        mat_detail = _lookup(mat_preds, r.get("off_target_id_maternal"))
+        for c in _HAPLOTYPE_PRIVATE_DETAIL_COLS:
+            row[f"{c}_paternal"] = pat_detail.get(c)
+            row[f"{c}_maternal"] = mat_detail.get(c)
+        rows.append(row)
+    out = pd.DataFrame(rows)
+    if "Spacer+PAM_paternal" in out.columns and "Spacer+PAM_maternal" in out.columns:
+        out["Spacer+PAM"] = out["Spacer+PAM_paternal"].combine_first(out["Spacer+PAM_maternal"])
+    hidden_cols = {
+        "Spacer+PAM_paternal",
+        "Spacer+PAM_maternal",
+        f"{_ALT_ALIGNED_COL}_paternal",
+        f"{_ALT_ALIGNED_COL}_maternal",
+    }
+    display_cols = ["Spacer+PAM"] if "Spacer+PAM" in out.columns else []
+    display_cols += [c for c in out.columns if c not in hidden_cols and c != "Spacer+PAM"]
+    return out, display_cols
 
 
 def _assembly_site_set_frame(job_directory: str, site_set: str) -> Tuple[pd.DataFrame, List[str]]:
@@ -924,6 +1060,8 @@ def _assembly_site_set_frame(job_directory: str, site_set: str) -> Tuple[pd.Data
     if site_set == "paternal_unmappable":
         frame = _assembly_unmappable_frame(job_directory, "paternal")
         return frame, list(frame.columns)
+    if site_set == "both_haplotype_private":
+        return _assembly_haplotype_private_frame(job_directory)
     return _assembly_mappable_frame(job_directory)
 
 
@@ -940,6 +1078,19 @@ _COORD_SPACE_COLS = {
     "paternal": ("Chromosome_paternal", "Start_coordinate_(fewest_mm+b)_paternal"),
 }
 _UNMAPPABLE_COORD_COLS = ("Chromosome", "Start_coordinate_(fewest_mm+b)")
+# both_haplotype_private has two real native coordinate spaces, like
+# "mappable" -- kept to paternal-only here rather than adding a second
+# coord-space radio branch just for this one site set.
+_HAPLOTYPE_PRIVATE_COORD_COLS = ("Chromosome_paternal", "Start_coordinate_paternal")
+# Per-site-set lookup for the region filter's coordinate columns, for every
+# site set that has exactly one filterable coordinate space (i.e. every
+# site set except "mappable", which instead offers a real 3-way choice via
+# _COORD_SPACE_COLS above).
+_SITE_SET_NATIVE_COORD_COLS = {
+    "maternal_unmappable": _UNMAPPABLE_COORD_COLS,
+    "paternal_unmappable": _UNMAPPABLE_COORD_COLS,
+    "both_haplotype_private": _HAPLOTYPE_PRIVATE_COORD_COLS,
+}
 
 
 def _assembly_region_chrom_options(df: pd.DataFrame, chrom_col: str) -> List[Dict[str, str]]:
@@ -986,7 +1137,7 @@ def _assembly_region_filter_children(job_directory: str, site_set: str, coord_sp
             )
         ]
         df, _ = _assembly_site_set_frame(job_directory, site_set)
-        chrom_col = _UNMAPPABLE_COORD_COLS[0]
+        chrom_col = _SITE_SET_NATIVE_COORD_COLS.get(site_set, _UNMAPPABLE_COORD_COLS)[0]
     chrom_options = _assembly_region_chrom_options(df, chrom_col)
     return coord_row + [
         dbc.Row(
@@ -1028,8 +1179,17 @@ def _assembly_site_set_note(job_directory: str, site_set: str) -> str:
             "and can differ by a few bp when an indel private to one "
             "haplotype shifts where its alignment ends in hg38 space."
         )
-    hap_label = "Maternal" if site_set == "maternal_unmappable" else "Paternal"
     frame, _ = _assembly_site_set_frame(job_directory, site_set)
+    if site_set == "both_haplotype_private":
+        return (
+            f"These {len(frame)} sites were found independently on BOTH "
+            "haplotypes, and direct alignment (impg/minimap2) confirms "
+            "they're the same physical locus -- but neither side lifts to "
+            "hg38, so there is no hg38 equivalent to show. Coordinates and "
+            "off-target details are each haplotype's own native assembly "
+            "values; the region filter uses Paternal's coordinates."
+        )
+    hap_label = "Maternal" if site_set == "maternal_unmappable" else "Paternal"
     return (
         f"These {len(frame)} sites never lifted to hg38 -- there is no hg38 "
         f"equivalent to show. Coordinates are in {hap_label}'s own assembly."
@@ -1047,16 +1207,16 @@ def result_page_assembly(job_id: str) -> html.Div:
     none of that exists for an assembly-search job (confirmed by directly
     reading result_page() and generate_sample_card, not assumed).
 
-    First-pass scope, deliberately: the reconciled off-target table (the 3
-    real `origin` categories reconcile_haplotypes() can actually produce --
-    paternal_only, maternal_only, both; a 4th, "both_haplotype_private", is
-    defined in assembly_reconcile.py but not called anywhere in the current
-    pipeline -- confirmed by grepping for its call sites -- so it can't
-    appear in real data yet) plus a haplotype-coverage summary, including
-    the two non-mappable ("haplotype-private") site COUNTS.
-    reconcile_haplotypes() doesn't persist per-site detail for non-mappable
-    predictions anywhere, only a count, so a detailed haplotype-private
-    table isn't buildable from current pipeline output -- not a UI choice,
+    The reconciled off-target table shows all 4 real `origin` categories
+    reconcile_haplotypes() can produce -- paternal_only, maternal_only,
+    both, and (since the direct haplotype-vs-haplotype alignment step was
+    added) both_haplotype_private, a site independently found on both
+    haplotypes that has no hg38 coordinate on either side -- plus a
+    haplotype-coverage summary, including the two one-sided non-mappable
+    ("haplotype-private") site COUNTS. reconcile_haplotypes() doesn't
+    persist per-site detail for the one-sided non-mappable predictions
+    anywhere, only a count, so a detailed haplotype-private table isn't
+    buildable from current pipeline output for those -- not a UI choice,
     a real upstream data gap. A per-haplotype (maternal vs. paternal)
     comparison view, in the spirit of complete-search's "Personal Risk
     Cards" (a UX-shape precedent only -- none of its actual code, built on
@@ -1120,6 +1280,12 @@ def result_page_assembly(job_id: str) -> html.Div:
         "off_target_id_maternal",
         "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_paternal",
         "Aligned_protospacer+PAM_ALT_(fewest_mm+b)_maternal",
+        # Plain (un-suffixed) native start coordinates are populated only for
+        # the both_haplotype_private rows, which are excluded from this
+        # table -- so they'd be all-blank here. The (fewest_mm+b)-suffixed
+        # per-haplotype starts are the real ones and stay visible.
+        "Start_coordinate_paternal",
+        "Start_coordinate_maternal",
     }
     display_cols = ["Spacer+PAM"] if "Spacer+PAM" in df.columns else []
     display_cols += [
@@ -1149,6 +1315,19 @@ def result_page_assembly(job_id: str) -> html.Div:
                     break
 
     origin_counts = df["origin"].value_counts().to_dict() if "origin" in df.columns else {}
+
+    # both_haplotype_private rows dropped from `df` here (AFTER origin_counts
+    # above, which needs the real count) -- confirmed against real data,
+    # every hg38/CFD/mismatch column is 100% NaN for them in this table
+    # (they have no hg38 coordinate at all); they get their own dedicated
+    # site set instead (_assembly_haplotype_private_frame(), Custom Ranking
+    # tab). This also fixes the mapped_ids/_mmb_counts grid below, which was
+    # already documented as intending to exclude haplotype-private sites
+    # ("deliberately excluded here, per request") but was actually still
+    # counting their off_target_ids as "mapped" since they hadn't yet been
+    # dropped from `df` at that point.
+    if "origin" in df.columns:
+        df = df[df["origin"] != "both_haplotype_private"]
 
     # Per-haplotype non-mappable ("private") sites: dropped from `df`'s rows
     # entirely (reconcile_haplotypes() only carries successfully-lifted
@@ -1691,14 +1870,29 @@ def result_page_assembly(job_id: str) -> html.Div:
     _cov_mat_mapped = summary_counts.get("maternal_only", origin_counts.get("maternal_only", 0))
     _cov_pat_unmapped = summary_counts.get("paternal_non_mappable", 0)
     _cov_mat_unmapped = summary_counts.get("maternal_non_mappable", 0)
-    _cov_total = _cov_both + _cov_pat_mapped + _cov_mat_mapped + _cov_pat_unmapped + _cov_mat_unmapped
+    # both_haplotype_private (2026-09-22): a site independently found on BOTH
+    # haplotypes that direct alignment (impg/minimap2) confirms is the same
+    # physical locus, but which has no hg38 coordinate on either side --
+    # the "Both haplotypes" bar's own unmapped segment, exactly like the
+    # Paternal/Maternal bars already have. Falls back to `origin_counts`
+    # for the same reason the three mapped counts do (log_verbose.txt
+    # missing/unparsed); both sources default to 0 on a combined_hg38.tsv
+    # from before this reconciliation category existed, so old jobs still
+    # render correctly with an all-mapped "Both haplotypes" bar.
+    _cov_both_private = summary_counts.get(
+        "both_haplotype_private", origin_counts.get("both_haplotype_private", 0)
+    )
+    _cov_total = (
+        _cov_both + _cov_pat_mapped + _cov_mat_mapped
+        + _cov_pat_unmapped + _cov_mat_unmapped + _cov_both_private
+    )
     if _cov_total:
         # listed Paternal->Maternal->"Both haplotypes"; autorange="reversed"
         # below then puts "Both haplotypes" at the TOP, matching the static
         # report's bar order.
         _cov_categories = ["Paternal", "Maternal", "Both haplotypes"]
         _cov_mapped = [_cov_pat_mapped, _cov_mat_mapped, _cov_both]
-        _cov_unmapped = [_cov_pat_unmapped, _cov_mat_unmapped, 0]
+        _cov_unmapped = [_cov_pat_unmapped, _cov_mat_unmapped, _cov_both_private]
         _cov_fig = go.Figure()
         _cov_fig.add_trace(
             go.Bar(
@@ -1761,6 +1955,12 @@ def result_page_assembly(job_id: str) -> html.Div:
         html.Div(
             [
                 _stat("Found in both haplotypes", origin_counts.get("both", 0)),
+                _stat(
+                    "Found in both haplotypes, non-mappable to hg38",
+                    summary_counts.get(
+                        "both_haplotype_private", origin_counts.get("both_haplotype_private", 0)
+                    ),
+                ),
                 _stat("Paternal-only", origin_counts.get("paternal_only", 0)),
                 _stat("Maternal-only", origin_counts.get("maternal_only", 0)),
                 _stat(
@@ -1776,9 +1976,14 @@ def result_page_assembly(job_id: str) -> html.Div:
         *origin_chart_block,
         html.P(
             "Non-mappable sites have no hg38 equivalent -- invisible to any "
-            "reference-based search. Their per-site detail (in each "
-            "haplotype's own assembly coordinates) is in the Custom Ranking "
-            "tab below, under Site set -> Maternal-unmappable / "
+            "reference-based search, unless direct haplotype-vs-haplotype "
+            "alignment independently confirms the same site on both "
+            "haplotypes (\"found in both haplotypes, non-mappable to "
+            "hg38\" above) -- those rows are in the main reconciled table "
+            "below, in each haplotype's own native coordinates. Purely "
+            "one-sided non-mappable sites' per-site detail (also in each "
+            "haplotype's own assembly coordinates) is in the Custom "
+            "Ranking tab below, under Site set -> Maternal-unmappable / "
             "Paternal-unmappable.",
             style={
                 "font-size": "1.0rem",
@@ -2236,8 +2441,9 @@ def update_assembly_site_set_controls(site_set: str, search: str) -> Tuple:
     job_id = _job_id_from_search(search)
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     region_children = _assembly_region_filter_children(job_directory, site_set, "hg38")
-    sort_options = _MAPPABLE_SORT_OPTIONS if site_set == "mappable" else _UNMAPPABLE_SORT_OPTIONS
-    sort_default = _MAPPABLE_DEFAULT_SORT if site_set == "mappable" else _UNMAPPABLE_DEFAULT_SORT
+    sort_options, sort_default = _SITE_SET_SORT_CONFIG.get(
+        site_set, (_MAPPABLE_SORT_OPTIONS, _MAPPABLE_DEFAULT_SORT)
+    )
     note = _assembly_site_set_note(job_directory, site_set)
     return region_children, sort_options, sort_default, note
 
@@ -2328,7 +2534,7 @@ def update_assembly_results_table(
                 region_filter.get("coord_space", "hg38"), _COORD_SPACE_COLS["hg38"]
             )
         else:
-            chrom_col, start_col = _UNMAPPABLE_COORD_COLS
+            chrom_col, start_col = _SITE_SET_NATIVE_COORD_COLS.get(site_set, _UNMAPPABLE_COORD_COLS)
         mask = df[chrom_col] == region_filter["chrom"]
         starts = pd.to_numeric(df[start_col], errors="coerce")
         if region_filter.get("start") is not None:

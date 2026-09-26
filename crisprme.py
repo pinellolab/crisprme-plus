@@ -64,7 +64,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
     DEFAULT_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
-from assembly_reconcile import reconcile_haplotypes, check_liftover_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, write_combined_params_file, write_combined_guides_file  # noqa: E402
+from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
 
@@ -3198,6 +3198,7 @@ def assembly_search() -> None:
     check_crisprme_dirtree()
     _check_mandatory_args_assembly_search(args)
     check_liftover_available()
+    check_impg_available()
 
     # A registered personal assembly (Assemblies/<individual>/ + metadata.json)
     # supplies all 6 genome/chain/chromAlias paths from its metadata, so the
@@ -3357,14 +3358,20 @@ def assembly_search() -> None:
             "chrom_alias_file": chrom_alias_paternal,
             "chain_file": chain_paternal,
             "results_dir": paternal_results,
+            "genome_dir": genome_paternal,
         },
         "maternal": {
             "chrom_alias_file": chrom_alias_maternal,
             "chain_file": chain_maternal,
             "results_dir": maternal_results,
+            "genome_dir": genome_maternal,
         },
     }
-    combined, summary = reconcile_haplotypes(haplotypes, combined_output, merge_bp=merge_t)
+    alignment_cache_root = os.path.join(current_working_directory, HAPLOTYPE_ALIGNMENTS_DIRNAME)
+    combined, summary = reconcile_haplotypes(
+        haplotypes, combined_output, merge_bp=merge_t,
+        alignment_cache_root=alignment_cache_root, threads=thread,
+    )
     combined.to_csv(combined_tsv, sep="\t", index=False)
 
     print(f"Reconciliation complete. Wrote {combined_tsv}")

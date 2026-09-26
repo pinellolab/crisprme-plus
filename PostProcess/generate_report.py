@@ -5198,12 +5198,16 @@ def _combined_haplotype_coverage_figure_uri(summary):
     label is wider than the segment itself, so per-segment labels always
     collide with their neighbor regardless of placement).
 
-    'Both haplotypes' has no unmapped segment in this pipeline as currently
-    shipped -- there's no `both_haplotype_private` category without the
-    impg matched-orientation reconciliation (a separate, not-yet-merged
-    branch); shows as a pure mapped bar here, which is correct, not a
-    placeholder -- forward-compatible with a real unmapped segment once
-    that lands.
+    'Both haplotypes' DOES have a real unmapped segment (2026-09-22): the
+    direct haplotype-vs-haplotype alignment step (impg/minimap2) confirms
+    some sites as physically the same locus on both haplotypes even though
+    neither side has an hg38 coordinate (`both_haplotype_private` in
+    `summary`) -- exactly the same "found on both, but non-mappable" shape
+    the Paternal/Maternal bars already have, just resolved a different way
+    (direct alignment instead of liftOver). A `summary` from before this
+    reconciliation category existed simply has no such key, so `.get(...,
+    0)` renders the old all-mapped bar unchanged -- old jobs' reports don't
+    need regenerating.
 
     Styling deliberately matches the live results page's OWN Plotly version
     of this exact figure (`results_page.py`'s `origin_chart_block`) bar for
@@ -5212,8 +5216,11 @@ def _combined_haplotype_coverage_figure_uri(summary):
     to bring in line with the live page's already-fixed layout, 2026-09-10),
     a bold "N total" annotation with the mapped/unmapped breakdown as a
     lighter second line ONLY when there's a real non-mappable count to show
-    (a bare "(542 mapped, 0 unmappped)" under "Both haplotypes" is always
-    zero, every run, by construction -- redundant, not informative).
+    (a bare "(542 mapped, 0 unmapped)" reads as redundant, not
+    informative -- this used to always be true for "Both haplotypes"
+    before `both_haplotype_private` existed; now that bar can carry a real
+    unmapped count too, so it gets the breakdown line under the same
+    condition as Paternal/Maternal).
 
     Category order is Paternal (top) / Maternal / Both haplotypes (bottom)
     -- NOT the pangenome-paper-figure's own original Both/Maternal/Paternal
@@ -5231,13 +5238,14 @@ def _combined_haplotype_coverage_figure_uri(summary):
     pat_mapped = summary.get("paternal_only", 0)
     mat_unmapped = summary.get("maternal_non_mappable", 0)
     pat_unmapped = summary.get("paternal_non_mappable", 0)
-    if both + mat_mapped + pat_mapped + mat_unmapped + pat_unmapped == 0:
+    both_unmapped = summary.get("both_haplotype_private", 0)
+    if both + mat_mapped + pat_mapped + mat_unmapped + pat_unmapped + both_unmapped == 0:
         return None
 
     mapped_color, unmapped_color = "#4C72B0", "#C44E52"
     categories = ["Paternal", "Maternal", "Both haplotypes"]
     mapped_vals = [pat_mapped, mat_mapped, both]
-    unmapped_vals = [pat_unmapped, mat_unmapped, 0]
+    unmapped_vals = [pat_unmapped, mat_unmapped, both_unmapped]
 
     fig, ax = plt.subplots(figsize=(7.5, 3.4))
     max_total = max(m + u for m, u in zip(mapped_vals, unmapped_vals)) or 1
