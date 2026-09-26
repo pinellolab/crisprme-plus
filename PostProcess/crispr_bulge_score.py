@@ -25,7 +25,20 @@ Reference: Yaish & Orenstein, NAR 2024 (doi:10.1093/nar/gkae428). MIT license.
 import os
 import sys
 
-REPO = os.environ.get("CBULGE_REPO", "/srv/local/lp698/cbulge_bench/CRISPR-Bulge")
+
+def _repo():
+    """Resolve the CRISPR-Bulge source+weights dir: $CBULGE_REPO, else the install
+    location scorer_env provisions (pinned clone), else a dev fallback."""
+    r = os.environ.get("CBULGE_REPO")
+    if r:
+        return r
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import scorer_env
+        return scorer_env.default_cbulge_repo()
+    except Exception:
+        return "/srv/local/lp698/cbulge_bench/CRISPR-Bulge"
+
 
 # 5-model classification ensemble (c_2, aligned, GUIDE-seq finetuned) — the config
 # upstream's main_predict.py uses for the Refined_TrueOT ensemble prediction.
@@ -46,11 +59,12 @@ def _validated_repo():
     real CRISPR-Bulge checkout: this both hardens against a bogus/hostile value and
     turns a misconfiguration into a clear error instead of a confusing ImportError.
     """
-    repo = os.path.realpath(os.path.abspath(REPO))
+    src = _repo()
+    repo = os.path.realpath(os.path.abspath(src))
     if not os.path.isdir(repo) or not os.path.isdir(os.path.join(repo, "OT_deep_score_src")):
         raise RuntimeError(
-            f"CBULGE_REPO does not point to a CRISPR-Bulge checkout "
-            f"(missing OT_deep_score_src): {REPO!r}"
+            f"CRISPR-Bulge source not found (missing OT_deep_score_src): {src!r} "
+            f"-- provision with: crisprme.py scorer-env create"
         )
     return repo
 

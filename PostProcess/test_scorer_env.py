@@ -66,6 +66,37 @@ class TestCreateCommand(unittest.TestCase):
             self.assertIsNone(se.build_create_command("cbulge"))
 
 
+class TestProvision(unittest.TestCase):
+    def test_default_repo_precedence(self):
+        with mock.patch.dict(os.environ, {"CBULGE_REPO": "/explicit"}, clear=False):
+            self.assertEqual(se.default_cbulge_repo(), "/explicit")
+        with mock.patch.dict(os.environ, {"CRISPRME_CBULGE_HOME": "/home2"}, clear=False):
+            os.environ.pop("CBULGE_REPO", None)
+            self.assertEqual(se.default_cbulge_repo(), "/home2")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CBULGE_REPO", None)
+            os.environ.pop("CRISPRME_CBULGE_HOME", None)
+            # derived: <prefix>/opt/CRISPR-Bulge, ends with CRISPR-Bulge
+            self.assertTrue(se.default_cbulge_repo().endswith("CRISPR-Bulge"))
+
+    def test_pin_is_full_sha(self):
+        self.assertEqual(len(se.CBULGE_PIN), 40)
+        self.assertTrue(se.CBULGE_URL.endswith("CRISPR-Bulge.git"))
+
+    def test_provision_noop_when_present(self):
+        with mock.patch.object(se, "source_present", return_value=True):
+            ok, msg = se.provision_source("/some/repo")
+            self.assertTrue(ok)
+            self.assertIn("present", msg)
+
+    def test_provision_fails_without_git(self):
+        with mock.patch.object(se, "source_present", return_value=False), \
+             mock.patch("shutil.which", return_value=None):
+            ok, msg = se.provision_source("/some/repo")
+            self.assertFalse(ok)
+            self.assertIn("git", msg)
+
+
 class TestState(unittest.TestCase):
     def test_roundtrip_and_version_stamp(self):
         with tempfile.TemporaryDirectory() as d:

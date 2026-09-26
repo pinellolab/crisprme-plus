@@ -56,6 +56,69 @@ SCORER_ENVS: Dict[str, dict] = {
 DEFAULT_ENV = "cbulge"
 
 # ---------------------------------------------------------------------------
+# CRISPR-Bulge source + weights (the model itself)
+# ---------------------------------------------------------------------------
+# The 5-model ensemble weights (~53 MB) are committed inside the CRISPR-Bulge repo
+# (regular .h5 files; only the 524 MB datasets.zip is Git-LFS). So we provision the
+# model by cloning the repo at a PINNED commit with LFS smudge disabled — the same
+# pinned-source pattern crispritz uses. Overridable via env for air-gapped installs.
+CBULGE_URL = os.environ.get("CRISPRME_CBULGE_URL", "https://github.com/OrensteinLab/CRISPR-Bulge.git")
+CBULGE_PIN = os.environ.get("CRISPRME_CBULGE_PIN", "3eddcd5bfcaff00b2bdf29425116ec9756ace870")
+
+
+def default_cbulge_repo() -> str:
+    """Resolve where the CRISPR-Bulge source+weights live (no I/O).
+
+    Precedence: $CBULGE_REPO > $CRISPRME_CBULGE_HOME > `<prefix>/opt/CRISPR-Bulge`
+    derived from this file at `<prefix>/opt/crisprme/PostProcess` (sibling of the
+    crisprme + crispritz opt trees).
+    """
+    for var in ("CBULGE_REPO", "CRISPRME_CBULGE_HOME"):
+        v = os.environ.get(var)
+        if v:
+            return v
+    here = os.path.dirname(os.path.abspath(__file__))       # <prefix>/opt/crisprme/PostProcess
+    opt = os.path.dirname(os.path.dirname(here))            # <prefix>/opt
+    return os.path.join(opt, "CRISPR-Bulge")
+
+
+def source_present(repo: Optional[str] = None) -> bool:
+    repo = repo or default_cbulge_repo()
+    return os.path.isdir(os.path.join(repo, "OT_deep_score_src"))
+
+
+def provision_source(dest: Optional[str] = None, pin: Optional[str] = None,
+                     force: bool = False) -> Tuple[bool, str]:
+    """Clone the CRISPR-Bulge repo at the pinned commit (LFS smudge OFF) if absent.
+
+    Idempotent: a no-op success if the source is already present (unless force).
+    Returns (ok, message). Requires `git` on PATH.
+    """
+    dest = dest or default_cbulge_repo()
+    pin = pin or CBULGE_PIN
+    if source_present(dest) and not force:
+        return True, f"source present at {dest}"
+    if not shutil.which("git"):
+        return False, "git not found on PATH (cannot fetch CRISPR-Bulge source)"
+    if force and os.path.isdir(dest):
+        shutil.rmtree(dest, ignore_errors=True)
+    env = dict(os.environ, GIT_LFS_SKIP_SMUDGE="1")
+    sys.stderr.write(f"[scorer-env] provisioning CRISPR-Bulge @ {pin[:10]} -> {dest}\n")
+    cp = _run(["git", "clone", CBULGE_URL, dest], env=env)
+    if cp.returncode != 0:
+        return False, f"git clone failed: {cp.stderr[-400:]}"
+    cp = _run(["git", "-C", dest, "checkout", "--quiet", pin], env=env)
+    if cp.returncode != 0:
+        return False, f"git checkout {pin[:10]} failed: {cp.stderr[-400:]}"
+    if not source_present(dest):
+        return False, f"clone completed but OT_deep_score_src missing under {dest}"
+    # drop .git history to slim the footprint (~179 MB -> ~53 MB source+weights);
+    # re-provision with force re-clones from scratch
+    shutil.rmtree(os.path.join(dest, ".git"), ignore_errors=True)
+    return True, f"provisioned at {dest}"
+
+
+# ---------------------------------------------------------------------------
 # Env-manager detection
 # ---------------------------------------------------------------------------
 
@@ -175,24 +238,16 @@ def build_create_command(name: str, gpu: bool = False) -> Optional[List[str]]:
     )
 
 
-def create_env(name: str = DEFAULT_ENV, gpu: bool = False, force: bool = False,
-               stream: bool = True) -> Tuple[bool, str]:
-    """Create the scorer env (idempotent). Returns (ok, message).
-
-    If the env already exists and ``force`` is False, this is a no-op success.
-    GPU builds set CONDA_OVERRIDE_CUDA so the CUDA TF build resolves off-GPU hosts.
-    """
-    if name not in SCORER_ENVS:
-        return False, f"unknown scorer env '{name}'"
+def _create_conda_env(name, gpu, force, stream) -> Tuple[bool, str]:
+    """Create just the conda env (no source provisioning)."""
     if env_exists(name) and not force:
-        return True, f"env '{name}' already exists (use --force to recreate)"
+        return True, f"env '{name}' already exists"
     cmd = build_create_command(name, gpu=gpu)
     if cmd is None:
         return False, ("no conda env manager found (need micromamba/mamba/conda on "
                        "PATH, or set CRISPRME_CONDA_EXE)")
     if force and env_exists(name):
-        exe = cmd[0]
-        _run([exe, "env", "remove", "-y", "-n", name])
+        _run([cmd[0], "env", "remove", "-y", "-n", name])
     env = dict(os.environ)
     if gpu:
         env.setdefault("CONDA_OVERRIDE_CUDA", "12.0")
@@ -200,9 +255,26 @@ def create_env(name: str = DEFAULT_ENV, gpu: bool = False, force: bool = False,
     if stream:
         proc = subprocess.run(cmd, env=env)
         ok = proc.returncode == 0
-        return ok, ("created" if ok else f"create failed (exit {proc.returncode})")
+        return ok, ("env created" if ok else f"env create failed (exit {proc.returncode})")
     cp = _run(cmd, env=env)
     return cp.returncode == 0, (cp.stdout + cp.stderr)[-4000:]
+
+
+def create_env(name: str = DEFAULT_ENV, gpu: bool = False, force: bool = False,
+               stream: bool = True) -> Tuple[bool, str]:
+    """Create the scorer env AND provision its model source (idempotent).
+
+    Two independent steps: (1) the conda env, (2) the CRISPR-Bulge source+weights
+    (pinned clone). Both must succeed. GPU builds set CONDA_OVERRIDE_CUDA so the CUDA
+    TF build resolves off-GPU hosts.
+    """
+    if name not in SCORER_ENVS:
+        return False, f"unknown scorer env '{name}'"
+    ok_env, msg_env = _create_conda_env(name, gpu, force, stream)
+    if not ok_env:
+        return False, msg_env
+    ok_src, msg_src = provision_source(force=force)
+    return ok_src, f"{msg_env}; {msg_src}"
 
 
 def update_env(name: str = DEFAULT_ENV, gpu: bool = False) -> Tuple[bool, str]:
@@ -297,16 +369,16 @@ def health_check(name: str = DEFAULT_ENV) -> dict:
         rec["status"] = ERROR
         rec["issues"].append((ERROR, f"import '{mod}' failed in env: {err.splitlines()[0][:160]}"))
 
-    # weights / source presence (P4 will fetch from HF; for now via CBULGE_REPO)
-    repo = os.environ.get("CBULGE_REPO", "")
-    if repo and os.path.isdir(os.path.join(repo, "OT_deep_score_src")):
+    # model source + weights presence (pinned clone; see provision_source)
+    repo = default_cbulge_repo()
+    rec["cbulge_repo"] = repo
+    if source_present(repo):
         rec["weights_present"] = True
-        rec["cbulge_repo"] = repo
     else:
         if rec["status"] != ERROR:
             rec["status"] = WARN
-        rec["issues"].append((WARN, "CRISPR-Bulge source/weights not found "
-                                    "(set CBULGE_REPO; P4 will fetch from HuggingFace on first use)"))
+        rec["issues"].append((WARN, f"CRISPR-Bulge source/weights not found at {repo} "
+                                    "(provision with: crisprme.py scorer-env create)"))
     return rec
 
 

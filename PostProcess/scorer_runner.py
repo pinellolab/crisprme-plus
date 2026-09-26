@@ -85,6 +85,8 @@ class ScorerRunner:
         env = dict(os.environ)
         env["CRISPRME_COMPUTE_BACKEND"] = self.device
         env.setdefault("PYTHONUNBUFFERED", "1")
+        # point the worker at the provisioned CRISPR-Bulge source+weights
+        env.setdefault("CBULGE_REPO", scorer_env.default_cbulge_repo())
         cmd = [py, "-u", self.worker] + (["--gpu"] if self.device == "gpu" else [])
         try:
             self.proc = subprocess.Popen(
