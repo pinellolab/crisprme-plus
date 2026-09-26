@@ -1716,13 +1716,13 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
         return cluster_scored
 
     # This CRISPR-Bulge ensemble scores a 23-mer protospacer+PAM with AT MOST ONE bulge
-    # (model input seq_len=24). Rows this model cannot score are nulled to -1 and replaced
-    # with a scoreable dummy so a single bad row can't fail the whole batch:
-    #   * N in the off-target, or sg/off length mismatch;
-    #   * >=2 total bulges -- counted as GAPS across the aligned pair, NOT column length:
-    #     two RNA bulges give a length-23 pair with 2 '-' in the off, which the 1-bulge
-    #     model silently scores as 0.0 (garbage). Gap-count is the correct criterion.
-    # CFD (the primary score) is unaffected; multi-bulge off-targets carry no CRISPR-Bulge score.
+    # (model input seq_len=24). For off-targets with >=2 bulges we COLLAPSE the most-
+    # PAM-distal bulge(s) down to the single most-PAM-proximal (impactful) one, then
+    # score that -- a PAM-distal bulge contributes ~0 (validated), so the error is small
+    # and conservative (over-flag). Only rows we still cannot score -- N in the off-target,
+    # sg/off length mismatch, or (defensively) still over-length after collapse -- are
+    # nulled to -1 with a scoreable dummy so one bad row can't fail the whole batch. CFD
+    # (the primary score) is unaffected.
     _MAXLEN = 24
     _SG_DUMMY = "A" * 20 + "NGG"
     _OFF_DUMMY = "A" * 20 + "AGG"
@@ -1730,8 +1730,12 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
     def _pair(target, off_field, index):
         sg = str(target[1])[: len(str(target[1])) - 3] + "NGG"
         off = str(off_field)
-        total_gaps = sg.count("-") + off.count("-")
-        if ("N" in off) or ("n" in off) or (len(off) != len(sg)) or total_gaps > 1 or (len(sg) > _MAXLEN):
+        if ("N" in off) or ("n" in off) or (len(off) != len(sg)):
+            index_to_null.append(index)
+            return _SG_DUMMY, _OFF_DUMMY
+        if (sg.count("-") + off.count("-")) > 1:
+            sg, off = scorer_runner.collapse_distal_bulges(sg, off, 1)
+        if len(sg) > _MAXLEN or len(sg) != len(off):
             index_to_null.append(index)
             return _SG_DUMMY, _OFF_DUMMY
         return sg, off

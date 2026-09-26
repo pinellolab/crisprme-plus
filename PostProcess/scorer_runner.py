@@ -240,6 +240,33 @@ class ScorerRunner:
             return [-1.0] * n
 
 
+def collapse_distal_bulges(sg, off, max_gaps=1):
+    """Reduce a multi-bulge aligned (sg, off) pair to <= max_gaps bulges so the
+    1-bulge CRISPR-Bulge model (seq_len=24) can score it.
+
+    The PAM is at the 3' END (right), so column 0 is the most PAM-distal. Cas9
+    cleavage is dominated by the PAM-proximal seed; a PAM-distal bulge contributes
+    ~0 (validated: the model scores a distal DNA bulge = perfect match). So we drop
+    the most-PAM-distal (smallest-index) gap columns first, keeping the single most
+    PAM-proximal (most impactful) bulge. The dropped bulge is one the model would
+    have scored as ~0-impact anyway, and the error direction is conservative (a
+    slightly higher score = over-flag). Returns the (possibly shortened) pair.
+    """
+    sg = list(sg)
+    off = list(off)
+
+    def _gap_cols():
+        return [i for i in range(len(sg)) if sg[i] == "-" or off[i] == "-"]
+
+    cols = _gap_cols()
+    while len(cols) > max_gaps:
+        i = cols[0]  # most PAM-distal gap column
+        del sg[i]
+        del off[i]
+        cols = _gap_cols()
+    return "".join(sg), "".join(off)
+
+
 # ---------------------------------------------------------------------------
 # Module-level singleton convenience (what the pipeline seam will call in P4)
 # ---------------------------------------------------------------------------

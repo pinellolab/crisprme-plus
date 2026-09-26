@@ -778,10 +778,11 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
             cluster_scored.append(t)
         return cluster_scored
 
-    # seq_len=24 model: 23-mer protospacer+PAM + AT MOST ONE bulge. Null (with a scoreable
-    # dummy) rows with N in the off-target, sg/off length mismatch, or >=2 total bulges --
-    # counted as GAPS across the pair (two RNA bulges = length-23 pair w/ 2 '-', which the
-    # 1-bulge model would silently score 0.0). CFD (primary) is unaffected.
+    # seq_len=24 model: 23-mer protospacer+PAM + AT MOST ONE bulge. For >=2-bulge OTs,
+    # COLLAPSE the most-PAM-distal bulge(s) to the single most-PAM-proximal one, then score
+    # (a distal bulge is ~0-impact; error is small + conservative). Null (with a scoreable
+    # dummy) only rows still unscoreable: N in off, length mismatch, or over-length after
+    # collapse. CFD (primary) is unaffected.
     _MAXLEN = 24
     _SG_DUMMY = "A" * 20 + "NGG"
     _OFF_DUMMY = "A" * 20 + "AGG"
@@ -789,8 +790,12 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
     def _pair(target, off_field, index):
         sg = str(target[1])[: len(str(target[1])) - 3] + "NGG"
         off = str(off_field)
-        total_gaps = sg.count("-") + off.count("-")
-        if ("N" in off) or ("n" in off) or (len(off) != len(sg)) or total_gaps > 1 or (len(sg) > _MAXLEN):
+        if ("N" in off) or ("n" in off) or (len(off) != len(sg)):
+            index_to_null.append(index)
+            return _SG_DUMMY, _OFF_DUMMY
+        if (sg.count("-") + off.count("-")) > 1:
+            sg, off = scorer_runner.collapse_distal_bulges(sg, off, 1)
+        if len(sg) > _MAXLEN or len(sg) != len(off):
             index_to_null.append(index)
             return _SG_DUMMY, _OFF_DUMMY
         return sg, off

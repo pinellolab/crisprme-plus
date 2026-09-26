@@ -185,6 +185,37 @@ class TestRunnerProtocol(unittest.TestCase):
         self.assertEqual(scores, [1.0, 0.25, 1.0, 0.25, 1.0])
 
 
+class TestCollapseDistalBulges(unittest.TestCase):
+    def test_noop_when_within_budget(self):
+        # 0 and 1 bulge: unchanged
+        self.assertEqual(scorer_runner.collapse_distal_bulges("ACGTAAA", "ACGTAAA"), ("ACGTAAA", "ACGTAAA"))
+        self.assertEqual(scorer_runner.collapse_distal_bulges("AC-TAAA", "ACGTAAA"), ("AC-TAAA", "ACGTAAA"))
+
+    def test_drops_most_distal_gap(self):
+        # PAM is at the RIGHT; two DNA bulges -> keep the PAM-proximal (rightmost) gap
+        sg = "A-CG-TAGG"   # gaps at idx 1 (distal) and 4 (proximal)
+        off = "AACGTTAGG"
+        cs, co = scorer_runner.collapse_distal_bulges(sg, off, 1)
+        self.assertEqual(cs.count("-") + co.count("-"), 1)
+        # the surviving gap is the more PAM-proximal one (was at idx 4)
+        self.assertIn("-", cs)
+        self.assertEqual(len(cs), len(co))
+        self.assertEqual(len(cs), len(sg) - 1)
+
+    def test_collapses_rna_bulges_too(self):
+        # gaps on the off (RNA bulges)
+        sg = "AACGTTAGG"
+        off = "A-CG-TAGG"
+        cs, co = scorer_runner.collapse_distal_bulges(sg, off, 1)
+        self.assertEqual(cs.count("-") + co.count("-"), 1)
+
+    def test_reduces_to_max_gaps(self):
+        sg = "-A-C-GTAGG"
+        off = "AAACAGTAGG"
+        cs, co = scorer_runner.collapse_distal_bulges(sg, off, 1)
+        self.assertEqual(cs.count("-") + co.count("-"), 1)
+
+
 class TestModuleSingleton(unittest.TestCase):
     def test_predict_list_graceful_without_env(self):
         with mock.patch.object(scorer_env, "env_python", return_value=None):
