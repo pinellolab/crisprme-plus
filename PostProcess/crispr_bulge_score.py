@@ -39,8 +39,24 @@ _MODELS = None       # cached list of 5 loaded model instances
 _PREDICT = None      # cached (predict fn, Padding_type, Encoding_type)
 
 
+def _validated_repo():
+    """Resolve+validate CBULGE_REPO before it goes on sys.path.
+
+    CBULGE_REPO is trusted config, but we still refuse to inject a path that isn't a
+    real CRISPR-Bulge checkout: this both hardens against a bogus/hostile value and
+    turns a misconfiguration into a clear error instead of a confusing ImportError.
+    """
+    repo = os.path.realpath(os.path.abspath(REPO))
+    if not os.path.isdir(repo) or not os.path.isdir(os.path.join(repo, "OT_deep_score_src")):
+        raise RuntimeError(
+            f"CBULGE_REPO does not point to a CRISPR-Bulge checkout "
+            f"(missing OT_deep_score_src): {REPO!r}"
+        )
+    return repo
+
+
 def _ensemble_paths():
-    return [os.path.join(REPO, _ENSEMBLE_REL.format(i)) for i in range(5)]
+    return [os.path.join(_validated_repo(), _ENSEMBLE_REL.format(i)) for i in range(5)]
 
 
 def _select_device(device):
@@ -59,8 +75,9 @@ def load_models(device=None):
     if _MODELS is not None:
         return _MODELS
     requested = _select_device(device)
-    if REPO not in sys.path:
-        sys.path.insert(0, REPO)
+    repo = _validated_repo()
+    if repo not in sys.path:
+        sys.path.insert(0, repo)
     import tensorflow as tf  # noqa: F401  (import after CUDA_VISIBLE_DEVICES is set)
     from OT_deep_score_src.general_utilities import Encoding_type, Padding_type
     from OT_deep_score_src.models_inter import Model
@@ -82,18 +99,19 @@ def CRISPR_BULGE_predict_list(sgseq_aligned_list, offseq_aligned_list, device=No
     if n == 0:
         return []
 
-    import numpy as np
-    import pandas as pd
-    from OT_deep_score_src.general_utilities import OFF_TARGET, SG_RNA_SEQ
-
-    models = load_models(device)
-    predict, Padding_type, Encoding_type = _PREDICT
-
-    df = pd.DataFrame(
-        {SG_RNA_SEQ: [s.upper() for s in sgseq_aligned_list],
-         OFF_TARGET: [o.upper() for o in offseq_aligned_list]}
-    )
     try:
+        import numpy as np
+        import pandas as pd
+        from OT_deep_score_src.general_utilities import OFF_TARGET, SG_RNA_SEQ
+
+        # load-once (raises on missing env/weights/bad CBULGE_REPO) -> degrade to -1
+        models = load_models(device)
+        predict, Padding_type, Encoding_type = _PREDICT
+
+        df = pd.DataFrame(
+            {SG_RNA_SEQ: [s.upper() for s in sgseq_aligned_list],
+             OFF_TARGET: [o.upper() for o in offseq_aligned_list]}
+        )
         # exact upstream ensemble_predict kwargs -> guaranteed fidelity
         preds = []
         for m in models:

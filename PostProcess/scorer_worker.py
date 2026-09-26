@@ -19,10 +19,9 @@ import os
 import sys
 import time
 
-REPO = os.environ.get("CBULGE_REPO", "/srv/local/lp698/cbulge_bench/CRISPR-Bulge")
-if REPO not in sys.path:
-    sys.path.insert(0, REPO)
-# make crispr_bulge_score importable regardless of cwd
+# make crispr_bulge_score importable regardless of cwd. NOTE: we intentionally do
+# NOT put CBULGE_REPO on sys.path here — crispr_bulge_score.load_models() does that
+# via a validated path (single, guarded injection site).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -49,7 +48,14 @@ def main():
     import crispr_bulge_score as cb
 
     t0 = time.time()
-    cb.load_models(device)
+    try:
+        cb.load_models(device)
+    except Exception as e:
+        # fail-fast: tell the parent we're NOT ready so it disables cleanly instead
+        # of waiting out the handshake timeout
+        _log(f"model load failed: {e}")
+        send({"ready": False, "error": str(e)[:300]})
+        return
     _log(f"ready: 5 models loaded in {time.time()-t0:.2f}s (device={device})")
     send({"ready": True, "load_s": time.time() - t0})
 

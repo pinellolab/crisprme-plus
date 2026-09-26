@@ -944,6 +944,66 @@ def cosmic_license_cmd() -> None:
     )
 
 
+def scorer_env_cmd() -> None:
+    """``crisprme.py scorer-env {create|check|update|list|doctor} [--gpu] [--force]``
+
+    Manage the dedicated conda env(s) for the ML off-target scorers (CRISPR-Bulge),
+    which run in their own TensorFlow env so their pinned deps never touch the main
+    CRISPRme stack. ``check``/``doctor`` probe health (imports + weights) and persist
+    the result to ``<data>/Annotations/.scorer_env.json``; ``create``/``update`` build
+    or repair the env (CPU by default; ``--gpu`` for the CUDA build).
+    """
+    import scorer_env as _se
+
+    args = sys.argv
+    action = args[2].lower() if len(args) > 2 else "check"
+    if action not in ("create", "check", "update", "list", "doctor", "status"):
+        error("Usage: crisprme.py scorer-env {create|check|update|list|doctor} [--gpu] [--force]")
+    gpu = "--gpu" in args
+    force = "--force" in args
+    # optional explicit env name as the 3rd positional (else the default 'cbulge')
+    name = _se.DEFAULT_ENV
+    if len(args) > 3 and not args[3].startswith("-"):
+        name = args[3]
+    ann_dir = os.path.join(current_working_directory, "Annotations")
+
+    if action == "list":
+        mgr = _se.detect_env_manager()
+        print("Scorer environments:")
+        for env_name, spec in _se.SCORER_ENVS.items():
+            present = "present" if _se.env_exists(env_name) else "absent"
+            print(f"  {env_name}: {present} — {spec['description']}")
+        print(f"  env manager: {mgr[1] + ' (' + mgr[0] + ')' if mgr else 'NONE FOUND'}")
+        return
+
+    if name not in _se.SCORER_ENVS:
+        error(f"unknown scorer env '{name}' (known: {', '.join(sorted(_se.SCORER_ENVS))})")
+
+    if action in ("create", "update"):
+        if action == "create":
+            ok, msg = _se.create_env(name, gpu=gpu, force=force)
+        else:
+            ok, msg = _se.update_env(name, gpu=gpu)
+        print(f"[scorer-env] {name}: {msg}")
+        rec = _se.health_check(name)
+        print(_se.render_health(rec))
+        _se.set_scorer_env_state(ann_dir, rec)
+        sys.exit(0 if ok else 1)
+
+    # check / doctor / status -> probe + persist
+    rec = _se.health_check(name)
+    print(_se.render_health(rec))
+    _se.set_scorer_env_state(ann_dir, rec)
+    if action == "doctor" and rec["status"] != _se.OK:
+        print("\nSuggested fix:")
+        if any(level == _se.ERROR for level, _ in rec["issues"]):
+            print(f"  crisprme.py scorer-env create{' --gpu' if gpu else ''}")
+        else:
+            print("  set CBULGE_REPO to the CRISPR-Bulge source "
+                  "(P4 will fetch weights from HuggingFace automatically).")
+    sys.exit(0 if rec["status"] != _se.ERROR else 1)
+
+
 def _merge_default_intogen(annotationfile: str) -> str:
     """Merge the default IntOGen (CC0) cancer-driver track into the annotation.
 
@@ -4109,6 +4169,11 @@ def crisprme_help() -> None:
         "EXCLUDED by default; its commercial use requires a licence (Genome "
         "Research Ltd / Wellcome Sanger; https://www.cosmickb.org/terms/). `enable` "
         "asks for confirmation (or --accept for non-interactive use)\n\n"
+        "crisprme.py scorer-env {create|check|update|list|doctor} [--gpu] [--force]\n"
+        "\tManage the dedicated conda env(s) for ML off-target scorers "
+        "(CRISPR-Bulge). `create` builds the env, `check`/`doctor` diagnose it, "
+        "`update` repairs it, `list` shows status. Runs on CPU by default; --gpu "
+        "builds the CUDA variant\n\n"
         "crisprme.py setup\n"
         "\tInitializes the legacy database by downloading all reference "
         "genomes, variant datasets, PAM definition files, and associated "
@@ -4150,6 +4215,8 @@ elif sys.argv[1] == "generate-report":  # build shareable self-contained report
     generate_report()
 elif sys.argv[1] == "cosmic-license":  # enable/disable COSMIC (cancer) annotations
     cosmic_license_cmd()
+elif sys.argv[1] == "scorer-env":  # manage ML scorer conda env(s) (CRISPR-Bulge)
+    scorer_env_cmd()
 elif sys.argv[1] == "setup":  # run legacy database setup
     setup_database()
 elif sys.argv[1] == "web-interface":  # run web interface

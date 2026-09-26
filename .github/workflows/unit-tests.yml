@@ -191,6 +191,13 @@ jobs:
           test_representative_tiebreak test_sanitize_job_name test_tier0_compaction
           test_history_page_assembly -v
 
+      - name: "Modular scorer env-manager + runner (env lifecycle/state + subprocess protocol; no TF)"
+        # scorer_env: detect env manager, create-command shape, atomic state file,
+        # health-check probe. scorer_runner: real stdin/stdout worker protocol against
+        # a stdlib fake worker + graceful-degradation paths. Neither needs TensorFlow.
+        working-directory: PostProcess
+        run: python -m unittest test_scorer_env test_scorer_runner -v
+
       - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF)"
         # The two-pass population-level analysis (default since 2.5.3; opt-in `--fast` in
         # 2.5.1, renamed to the `--per-sample` opt-out in 2.5.4): lossless detection +

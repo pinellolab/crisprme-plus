@@ -82,6 +82,21 @@ if [ -f "${CONDA_PREFIX}/opt/crisprme/PostProcess/CRISTA_predictors.zip" ]; then
         && unzip -o CRISTA_predictors.zip && rm -f CRISTA_predictors.zip )
 fi
 
+# ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
+# Built in its OWN env so its TensorFlow/numpy pins never touch the main crisprme
+# stack (this is what lets the main env stay modern). CPU by default; the GPU
+# variant is opt-in later: 'crisprme.py scorer-env create --gpu'. Non-fatal +
+# skippable (CRISPRME_SKIP_SCORER_ENV=1); (re)create/repair anytime with
+# 'crisprme.py scorer-env create' / 'crisprme.py scorer-env doctor'.
+if [ "${CRISPRME_SKIP_SCORER_ENV:-0}" != "1" ]; then
+    echo ">> Creating the CRISPR-Bulge scorer env (set CRISPRME_SKIP_SCORER_ENV=1 to skip)"
+    if crisprme.py scorer-env create; then
+        echo "   scorer env ready."
+    else
+        echo "   WARNING: scorer env not created now; create later with 'crisprme.py scorer-env create'." >&2
+    fi
+fi
+
 echo ">> Installed:"
 echo "   crisprme.py  -> $(command -v crisprme.py)   ($(crisprme.py --version 2>/dev/null))"
 echo "   crispritz.py -> $(command -v crispritz.py)"

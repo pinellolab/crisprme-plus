@@ -110,5 +110,21 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
          && unzip -o CRISTA_predictors.zip && rm -f CRISTA_predictors.zip; \
        fi
 
+# ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
+# Built in its OWN micromamba env so its TensorFlow/numpy pins never touch the
+# main scoring stack. CPU-only here (GPU is opt-in at runtime via
+# 'crisprme.py scorer-env create --gpu'). Uses the single-source spec in
+# scorer_env.py so the package set never drifts from the CLI/health-check.
+# Set build_scorer_envs=0 for a lean image (create later with
+# 'crisprme.py scorer-env create'). Failure is non-fatal to the image build.
+ARG build_scorer_envs=1
+RUN if [ "$build_scorer_envs" = "1" ]; then \
+      ( python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
+import scorer_env; ok, msg = scorer_env.create_env('cbulge', stream=True); \
+print('[scorer-env]', msg); sys.exit(0 if ok else 1)" \
+        && micromamba clean --all --yes ) \
+      || echo 'WARN: scorer env not built; create at runtime with crisprme.py scorer-env create' ; \
+    fi
+
 WORKDIR /root
 CMD ["crisprme.py"]
