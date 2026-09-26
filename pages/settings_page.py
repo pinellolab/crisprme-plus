@@ -1361,7 +1361,10 @@ def settings_page() -> List:
         "Manage annotations (enable / disable)",
         "Choose which annotations searches apply for a genome. The built-in ENCODE "
         "cCREs (SCREEN) + DHS + GENCODE bundle is enabled by default; enable your "
-        "uploaded tracks here. Multiple enabled annotations are merged at search time.",
+        "uploaded tracks here. Multiple enabled annotations are merged at search time. "
+        "Personal-assembly searches apply the hg38 set to every site that maps to hg38 "
+        "(adding an Annotation column to the results); sites with no hg38 equivalent "
+        "are not annotated.",
         [
             dbc.Row(
                 [

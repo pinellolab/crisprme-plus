@@ -66,6 +66,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
 from utils import download_reference_genome  # noqa: E402
 from assembly_reconcile import reconcile_haplotypes, check_liftover_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, write_combined_params_file, write_combined_guides_file  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
+from assembly_annotate import add_annotation_column  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
 
 cicd_test = False
@@ -3078,6 +3079,13 @@ def print_help_assembly_search() -> None:
         "--mm/--bDNA/--bRNA already imply -- unlike complete-search, whose own "
         "bare default of 4 would otherwise silently drop most real off-targets "
         "here; set this explicitly to tighten it, e.g. for performance]\n"
+        "\t--annotation, an hg38 BED annotation file (bgzipped, fourth column = "
+        "feature name -- e.g. Annotations/dhs+encode_screenv4+gencode+cosmic."
+        "hg38.bed.gz) to annotate the reconciled sites with [OPTIONAL]. Adds an "
+        "'Annotation' column to the combined results for every site with an hg38 "
+        "coordinate (found on both haplotypes, or only one, and mappable); sites "
+        "with no hg38 equivalent get none. Same file format, COSMIC licence gate "
+        "and IntOGen handling as complete-search's --annotation.\n"
         "\t--output, base output name; each haplotype's results are saved in "
         "Results/<name>_paternal and Results/<name>_maternal, and the "
         "reconciled combined report in Results/<name>_combined [REQUIRED]\n"
@@ -3251,6 +3259,12 @@ def assembly_search() -> None:
     merge_t = _check_merge(args, "--merge" in args)
     thread = _check_threads(args, "--thread" in args)
     debug = "--debug" in args
+    # Optional hg38 annotation of the reconciled sites, applied once after
+    # reconciliation (see assembly_annotate.py). Goes through the same
+    # validation/licence-gate/IntOGen-merge/sort as complete-search's own
+    # --annotation; not passed to the per-haplotype searches, whose
+    # coordinates are in each haplotype's own assembly, not hg38.
+    annotationfile = _check_annotation(args, "--annotation" in args) if "--annotation" in args else None
     # --max-total-edits: same flag `complete-search` accepts, but a different
     # default when omitted. `complete-search`'s own bare default (4) was
     # measured to silently drop the vast majority of real off-targets here --
@@ -3365,6 +3379,16 @@ def assembly_search() -> None:
         },
     }
     combined, summary = reconcile_haplotypes(haplotypes, combined_output, merge_bp=merge_t)
+    if not annotationfile:
+        print("Note: no --annotation given -- results will not include an Annotation column.")
+    if annotationfile:
+        # A failed annotation must not throw away a finished multi-hour
+        # two-haplotype search -- the un-annotated results are still complete.
+        print("Annotating reconciled sites (hg38)...")
+        try:
+            combined = add_annotation_column(combined, annotationfile)
+        except Exception as e:
+            print(f"Warning: hg38 annotation failed ({e}) -- results are written without an Annotation column.")
     combined.to_csv(combined_tsv, sep="\t", index=False)
 
     print(f"Reconciliation complete. Wrote {combined_tsv}")
