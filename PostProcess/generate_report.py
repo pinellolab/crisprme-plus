@@ -162,10 +162,12 @@ PANEL_VARIANT_CFD_MIN = 0.05
 # --------------------------------------------------------------------------- #
 # Over the OFF-TARGET set (on-target mm+b==0 excluded), the panel is built in two
 # stages:
-#   1. HARD-INCLUDE every site that is close by sequence OR high-scoring, i.e.
-#      mm+bulges <= PANEL_FLOOR_MMB  OR  CFD >= PANEL_FLOOR_CFD. These are always
-#      in the panel even if they exceed the cap (a low-edit-distance or high-CFD
-#      site is never dropped from the confirmation panel).
+#   1. HARD-INCLUDE every site that is close by sequence OR high-scoring OR a pure
+#      bulge, i.e. mm+bulges <= PANEL_FLOOR_MMB  OR  CFD >= PANEL_FLOOR_CFD  OR
+#      (0 mismatches AND >=1 bulge). These are always in the panel even if they exceed
+#      the cap. The pure-bulge floor matters because >=2-bulge off-targets have no ML
+#      score (out of the CRISPR-Bulge domain) and only an uncalibrated CFD extrapolation,
+#      so a clean bulged site must not be dropped by a missing/low score.
 #   2. FILL the remaining slots up to PANEL_CAP by worst-case severity: each site
 #      is ranked independently by CFD (desc), CRISTA (desc; only when computed),
 #      and mm+bulges (asc, fewer = closer = worse); a site's SEVERITY is the BEST
@@ -2285,10 +2287,14 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     candidate cut site with no a-priori on/off-target distinction, never dropped.
     The OFF-TARGET rows are then selected in two stages (over the off-target set):
 
-    1. HARD-INCLUDE every site that is close by sequence OR high-scoring:
-       ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR ``CFD >= PANEL_FLOOR_CFD (0.5)``.
-       These are always kept; if the hard-includes already exceed ``cap`` we keep
-       them all (a low-edit-distance / high-CFD site is never dropped).
+    1. HARD-INCLUDE every site that is close by sequence OR high-scoring OR a pure bulge:
+       ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR ``CFD >= PANEL_FLOOR_CFD (0.5)`` OR a
+       PURE-BULGE site (0 mismatches, >=1 bulge). These are always kept; if the
+       hard-includes already exceed ``cap`` we keep them all (a low-edit-distance /
+       high-CFD / clean-bulge site is never dropped). The pure-bulge floor exists because
+       >=2-bulge off-targets have NO ML score (out of the CRISPR-Bulge domain) and only an
+       uncalibrated CFD extrapolation, so a clean bulged site must not be de-prioritized by
+       a missing/low score.
     2. FILL the remaining slots up to ``cap`` by worst-case severity. Each site
        is ranked independently by every available metric in
        ``PANEL_WORSTCASE_METRICS``: CFD (desc), CRISTA (desc; only when computed)
@@ -2328,6 +2334,15 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     # unparseable mmb -> -1 (from _to_int_series); clamp to a large sentinel so it is
     # neither hard-included (mmb <= floor) nor ranked most-severe (mmb asc rank=1)
     mmb = mmb.where(mmb >= 0, 10 ** 6)
+    # mismatches + bulges counts, for the PURE-BULGE hard-include floor below
+    mm_cnt = (
+        _to_int_series(offt[cols["mm"]]).where(lambda s: s >= 0, 10 ** 6)
+        if "mm" in cols else pd.Series(10 ** 6, index=offt.index)
+    )
+    bulge_cnt = (
+        _to_int_series(offt[cols["bulges"]]).where(lambda s: s >= 0, 0)
+        if "bulges" in cols else pd.Series(0, index=offt.index)
+    )
     has_crista = ((crista >= 0) & (crista <= 1)).any()
 
     # per-metric ranks (rank 1 == worst). ascending flag flips per direction:
@@ -2350,8 +2365,15 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     else:
         severity = pd.Series(1.0, index=offt.index)
 
-    # STAGE 1: hard-includes (mm+b <= floor OR CFD >= floor)
-    hard_mask = (mmb <= PANEL_FLOOR_MMB) | (cfd >= PANEL_FLOOR_CFD)
+    # STAGE 1: hard-includes -- close by sequence (mm+b <= floor) OR high CFD OR a
+    # PURE-BULGE site (0 mismatches, >=1 bulge). The pure-bulge floor guarantees a clean
+    # bulged off-target -- e.g. a distal 2-bulge with no mismatches (the "well-tolerated
+    # truncation" case) -- is ALWAYS in the panel and can never be de-prioritized, even
+    # though its CRISPR-Bulge score is N/A (>=2 bulges) and CFD there is an uncalibrated
+    # extrapolation. Bulges with 0 mismatches are the most likely to still cleave, so a
+    # missing/low model score must not drop them.
+    pure_bulge = (mm_cnt == 0) & (bulge_cnt >= 1)
+    hard_mask = (mmb <= PANEL_FLOOR_MMB) | (cfd >= PANEL_FLOOR_CFD) | pure_bulge
 
     # OBSERVED priority: a site supported by >=1 real individual (a reference site,
     # present in every genome; or a variant site with >=1 named carrier) is a
@@ -2659,16 +2681,23 @@ def render_validation_panel(
     note = (
         f"How the panel was chosen (hybrid, ~{PANEL_CAP} sites &mdash; may be more "
         f"when many sites are hard-included). "
-        f"First, every off-target that is CLOSE by sequence OR HIGH-scoring is "
-        f"hard-included &mdash; specifically every site with mismatches+bulges "
-        f"&le; {PANEL_FLOOR_MMB} OR CFD &ge; {PANEL_FLOOR_CFD}. These are always "
+        f"First, every off-target that is CLOSE by sequence OR HIGH-scoring OR a "
+        f"CLEAN BULGE is hard-included &mdash; specifically every site with "
+        f"mismatches+bulges &le; {PANEL_FLOOR_MMB} OR CFD &ge; {PANEL_FLOOR_CFD} OR "
+        f"0 mismatches with &ge;1 bulge. These are always "
         f"kept (if the hard-included sites already exceed {PANEL_CAP}, they are "
         f"all kept). The remaining slots up to {PANEL_CAP} are then filled by "
         f"worst-case severity: each site is ranked independently by "
         f"{metric_list}, and a site is prioritized if it is worst by ANY single "
         f"one of those metrics ({metric_or}) &mdash; so the highest-scoring "
         f"predicted cleavage sites AND the near-cognate low-edit-distance "
-        f"sequences that scoring models can under-weight both surface."
+        f"sequences that scoring models can under-weight both surface. "
+        f"<b>Off-targets needing &ge;2 bulges are outside both scoring models&rsquo; "
+        f"validated domain</b>: {scorer_label()} does not score them (shown as "
+        f"<code>-1</code> = N/A) and CFD is an uncalibrated extrapolation there &mdash; "
+        f"rank those by edit distance (mismatches+bulges) and verify them manually. "
+        f"The clean-bulge hard-include above guarantees a 0-mismatch bulged site is "
+        f"never dropped for lack of a model score."
         + (
             " There is NO category quota: variant-created sites qualify through "
             "the same floors and ranks as reference sites."
@@ -3114,9 +3143,10 @@ _SCORE_LEGEND = [
      "the on-target). Higher = more likely to be cut. <b>Rule of thumb:</b> treat "
      "CFD&nbsp;&ge;&nbsp;0.2 as worth validating (the recommended panel already "
      "hard-includes CFD&nbsp;&ge;&nbsp;0.5). <b>Caveat:</b> CFD was trained on "
-     "single-base mismatches; CFD values for sites containing DNA/RNA bulges "
+     "single-base mismatches; its values for sites containing DNA/RNA bulges "
      "(insertions/deletions) are an extrapolation beyond the model&rsquo;s training "
-     "domain &mdash; weigh CRISTA there."),
+     "domain &mdash; for a 1-bulge site weigh CRISTA there, and for a site needing "
+     "&ge;2 bulges (where the ML score is also N/A) rank by edit distance and verify manually."),
     ("CRISTA",
      "CRISTA score (Abadi <i>et al.</i>, <i>PLoS Comput. Biol.</i> 2017) &mdash; an "
      "<b>independent</b> machine-learning 0&ndash;1 estimate of cleavage propensity "
@@ -3186,8 +3216,12 @@ _CRISPR_BULGE_LEGEND_DEF = (
     "alongside CFD because the two models can disagree; <b>a site scored high by EITHER "
     "model warrants validation</b>. Its scale is model-relative (not directly comparable to "
     "CFD&rsquo;s), so its threshold tiers are its own. The model scores an alignment with at "
-    "most one 1-bp bulge; off-targets whose alignment needs &ge;2 bulges are shown as "
-    "<code>-1</code> (not scored) and should be judged by CFD + mismatches/bulges."
+    "most one 1-bp bulge (its training data &mdash; ~4.6M measured off-targets &mdash; "
+    "contains none with &ge;2 bulges); off-targets whose alignment needs &ge;2 bulges are "
+    "OUT OF DOMAIN and shown as <code>-1</code> (N/A, not scored). Judge those by edit "
+    "distance (mismatches+bulges) and manual review &mdash; CFD there is an uncalibrated "
+    "extrapolation, not a validated score. Clean bulged sites (0 mismatches) are always "
+    "hard-included in the validation panel so they are never dropped for lack of a score."
 )
 
 
