@@ -92,7 +92,11 @@ and the `release-crisprme` skill.
   the scorer detects the miscompute and transparently falls back to a CPU device context
   (bit-identical scores) rather than emit wrong ones. A CPU thread cap
   (`CRISPRME_SCORER_THREADS`, default `min(16, cores)`) prevents TensorFlow oversubscription
-  on many-core nodes.
+  on many-core nodes. **CUDA is validated on an NVIDIA A100** (Linux): the GRU is numerically
+  correct (~1e-5 of CPU) and scoring runs ~14.7k off-targets/s — ~1.6× the CPU rate, so a
+  genome-wide worst-case (6.77M off-targets) scores in ~8 min. The Docker image accepts a
+  `--build-arg scorer_backend=gpu` to bake in the CUDA scorer env (run with
+  `docker run --gpus all … --compute-backend cuda`); CFD stays on the CPU alongside it.
 - **New recommended default variant index: single-source, phased
   `NRG_3_hg38+hg38_1000G2021`** (published to HuggingFace). 1000 Genomes 2021,
   3,202 samples, fully phased (`data_type=genotyped-phased`) — so every reported
