@@ -185,35 +185,13 @@ class TestRunnerProtocol(unittest.TestCase):
         self.assertEqual(scores, [1.0, 0.25, 1.0, 0.25, 1.0])
 
 
-class TestCollapseDistalBulges(unittest.TestCase):
-    def test_noop_when_within_budget(self):
-        # 0 and 1 bulge: unchanged
-        self.assertEqual(scorer_runner.collapse_distal_bulges("ACGTAAA", "ACGTAAA"), ("ACGTAAA", "ACGTAAA"))
-        self.assertEqual(scorer_runner.collapse_distal_bulges("AC-TAAA", "ACGTAAA"), ("AC-TAAA", "ACGTAAA"))
+class TestMultiBulgeRemoved(unittest.TestCase):
+    """The fragile collapse_distal_bulges reduction was removed after an adversarial review;
+    >=2-bulge off-targets are now NULLED (-1) by the scoring preprocessors, not reduced."""
 
-    def test_drops_most_distal_gap(self):
-        # PAM is at the RIGHT; two DNA bulges -> keep the PAM-proximal (rightmost) gap
-        sg = "A-CG-TAGG"   # gaps at idx 1 (distal) and 4 (proximal)
-        off = "AACGTTAGG"
-        cs, co = scorer_runner.collapse_distal_bulges(sg, off, 1)
-        self.assertEqual(cs.count("-") + co.count("-"), 1)
-        # the surviving gap is the more PAM-proximal one (was at idx 4)
-        self.assertIn("-", cs)
-        self.assertEqual(len(cs), len(co))
-        self.assertEqual(len(cs), len(sg) - 1)
-
-    def test_collapses_rna_bulges_too(self):
-        # gaps on the off (RNA bulges)
-        sg = "AACGTTAGG"
-        off = "A-CG-TAGG"
-        cs, co = scorer_runner.collapse_distal_bulges(sg, off, 1)
-        self.assertEqual(cs.count("-") + co.count("-"), 1)
-
-    def test_reduces_to_max_gaps(self):
-        sg = "-A-C-GTAGG"
-        off = "AAACAGTAGG"
-        cs, co = scorer_runner.collapse_distal_bulges(sg, off, 1)
-        self.assertEqual(cs.count("-") + co.count("-"), 1)
+    def test_collapse_helper_is_gone(self):
+        self.assertFalse(hasattr(scorer_runner, "collapse_distal_bulges"),
+                         "collapse_distal_bulges must not be reintroduced without a proven error bound")
 
 
 class TestModuleSingleton(unittest.TestCase):

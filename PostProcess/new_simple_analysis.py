@@ -1540,14 +1540,20 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
             cluster_scored.append(t)
         return cluster_scored
 
-    # This CRISPR-Bulge ensemble scores a 23-mer protospacer+PAM with AT MOST ONE bulge
-    # (model input seq_len=24). For off-targets with >=2 bulges we COLLAPSE the most-
-    # PAM-distal bulge(s) down to the single most-PAM-proximal (impactful) one, then
-    # score that -- a PAM-distal bulge contributes ~0 (validated), so the error is small
-    # and conservative (over-flag). Only rows we still cannot score -- N in the off-target,
-    # sg/off length mismatch, or (defensively) still over-length after collapse -- are
-    # nulled to -1 with a scoreable dummy so one bad row can't fail the whole batch. CFD
-    # (the primary score) is unaffected.
+    # This CRISPR-Bulge ensemble faithfully scores a protospacer+PAM alignment with AT MOST
+    # ONE 1-bp bulge (model input seq_len=24). We deliberately score ONLY what the model can
+    # represent and NULL (-1) everything else, so a value in the column is always trustworthy:
+    #   * N in the aligned off-target, or sg/off length mismatch  -> null
+    #   * >1 gap column (>=2 bulges, OR a single >=2-bp bulge)     -> null
+    #   * over-length (> 24)                                        -> null
+    # Nulled rows fall back to CFD (the PRIMARY score) + mismatches/bulges, which still flag
+    # them. We deliberately do NOT collapse/reduce a multi-bulge alignment to a single bulge:
+    # an adversarial review showed the naive reduction corrupts the alignment (deletes real
+    # bases; mis-counts a 2-bp bulge as two events) and its "conservative" error direction is
+    # unprovable for a non-monotonic GRU -- an unacceptable silent under-flag risk in a clinical
+    # tool. Multi-bulge off-targets are the rare, heavily-disrupted (low-activity) tail; CFD +
+    # edit distance carry them. A scoreable equal-length dummy is substituted for nulled rows so
+    # one bad row can't fail the whole batch. CFD (the primary score) is unaffected.
     _MAXLEN = 24
     _SG_DUMMY = "A" * 20 + "NGG"
     _OFF_DUMMY = "A" * 20 + "AGG"
@@ -1555,12 +1561,9 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
     def _pair(target, off_field, index):
         sg = str(target[1])[: len(str(target[1])) - 3] + "NGG"
         off = str(off_field)
-        if ("N" in off) or ("n" in off) or (len(off) != len(sg)):
-            index_to_null.append(index)
-            return _SG_DUMMY, _OFF_DUMMY
-        if (sg.count("-") + off.count("-")) > 1:
-            sg, off = scorer_runner.collapse_distal_bulges(sg, off, 1)
-        if len(sg) > _MAXLEN or len(sg) != len(off):
+        total_gaps = sg.count("-") + off.count("-")
+        if (("N" in off) or ("n" in off) or (len(off) != len(sg))
+                or total_gaps > 1 or len(sg) > _MAXLEN):
             index_to_null.append(index)
             return _SG_DUMMY, _OFF_DUMMY
         return sg, off

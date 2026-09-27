@@ -251,31 +251,13 @@ class ScorerRunner:
             return [-1.0] * n
 
 
-def collapse_distal_bulges(sg, off, max_gaps=1):
-    """Reduce a multi-bulge aligned (sg, off) pair to <= max_gaps bulges so the
-    1-bulge CRISPR-Bulge model (seq_len=24) can score it.
-
-    The PAM is at the 3' END (right), so column 0 is the most PAM-distal. Cas9
-    cleavage is dominated by the PAM-proximal seed; a PAM-distal bulge contributes
-    ~0 (validated: the model scores a distal DNA bulge = perfect match). So we drop
-    the most-PAM-distal (smallest-index) gap columns first, keeping the single most
-    PAM-proximal (most impactful) bulge. The dropped bulge is one the model would
-    have scored as ~0-impact anyway, and the error direction is conservative (a
-    slightly higher score = over-flag). Returns the (possibly shortened) pair.
-    """
-    sg = list(sg)
-    off = list(off)
-
-    def _gap_cols():
-        return [i for i in range(len(sg)) if sg[i] == "-" or off[i] == "-"]
-
-    cols = _gap_cols()
-    while len(cols) > max_gaps:
-        i = cols[0]  # most PAM-distal gap column
-        del sg[i]
-        del off[i]
-        cols = _gap_cols()
-    return "".join(sg), "".join(off)
+# NOTE: a `collapse_distal_bulges()` helper used to reduce >=2-bulge alignments to one bulge
+# so the 1-bulge model could score them. An adversarial review found it corrupts alignments
+# (blind column deletion drops real bases; a single >=2-bp bulge is mis-counted as two events)
+# and its "conservative" error direction is unprovable for a non-monotonic GRU -- a silent
+# under-flag risk. It was removed: the callers (preprocess_CRISPR_BULGE_score) now NULL any
+# off-target with >1 gap column to -1 and let CFD + edit distance carry those rare, heavily-
+# disrupted sites. Do not reintroduce a reduction without a proven error bound.
 
 
 # ---------------------------------------------------------------------------

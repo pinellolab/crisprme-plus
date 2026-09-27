@@ -588,11 +588,15 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
             cluster_scored.append(t)
         return cluster_scored
 
-    # seq_len=24 model: 23-mer protospacer+PAM + AT MOST ONE bulge. For >=2-bulge OTs,
-    # COLLAPSE the most-PAM-distal bulge(s) to the single most-PAM-proximal one, then score
-    # (a distal bulge is ~0-impact; error is small + conservative). Null (with a scoreable
-    # dummy) only rows still unscoreable: N in off, length mismatch, or over-length after
-    # collapse. CFD (primary) is unaffected.
+    # seq_len=24 model: faithfully scores a protospacer+PAM alignment with AT MOST ONE 1-bp
+    # bulge. Score ONLY what the model represents and NULL (-1) everything else so a value is
+    # always trustworthy: N in the aligned off, sg/off length mismatch, >1 gap column (>=2
+    # bulges OR a single >=2-bp bulge), or over-length (>24). Nulled rows fall back to CFD
+    # (PRIMARY) + mismatches/bulges. We deliberately do NOT collapse/reduce multi-bulge
+    # alignments to one bulge -- an adversarial review showed the naive reduction corrupts the
+    # alignment and its "conservative" direction is unprovable for a non-monotonic GRU (silent
+    # under-flag risk). Multi-bulge OTs are the rare, heavily-disrupted tail; CFD + edit distance
+    # carry them. A scoreable equal-length dummy is substituted for nulled rows.
     _MAXLEN = 24
     _SG_DUMMY = "A" * 20 + "NGG"
     _OFF_DUMMY = "A" * 20 + "AGG"
@@ -600,12 +604,9 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
     def _pair(target, off_field, index):
         sg = str(target[1])[: len(str(target[1])) - 3] + "NGG"
         off = str(off_field)
-        if ("N" in off) or ("n" in off) or (len(off) != len(sg)):
-            index_to_null.append(index)
-            return _SG_DUMMY, _OFF_DUMMY
-        if (sg.count("-") + off.count("-")) > 1:
-            sg, off = scorer_runner.collapse_distal_bulges(sg, off, 1)
-        if len(sg) > _MAXLEN or len(sg) != len(off):
+        total_gaps = sg.count("-") + off.count("-")
+        if (("N" in off) or ("n" in off) or (len(off) != len(sg))
+                or total_gaps > 1 or len(sg) > _MAXLEN):
             index_to_null.append(index)
             return _SG_DUMMY, _OFF_DUMMY
         return sg, off
