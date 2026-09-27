@@ -117,11 +117,42 @@ REPORT_GENERATOR_VERSION = "2.4"
 # Recommended-validation-panel thresholds (module-level constants, section 4)
 # --------------------------------------------------------------------------- #
 CFD_THRESHOLDS = (0.5, 0.2, 0.05)
-# CRISTA is on a DIFFERENT scale than CFD -- reusing CFD's cut points made CRISTA>=0.05
-# select ~98% of off-targets (a meaningless "shortlist"). These CRISTA-appropriate,
-# higher cut points keep the tiers graduated + model-relative. CRISTA remains the
-# score to lean on for bulge/gapped sites (where CFD is out of its training domain).
+# The second (ML) score column is produced by whichever scorer ran (CRISPRME_SCORER_SELECT):
+# CRISTA (legacy) or CRISPR-Bulge. Each is on its OWN scale, so the report's display label,
+# tier thresholds, and plot titles for that column are chosen by the ACTIVE scorer -- read
+# from .Params.txt ("Scorer"), since generate-report runs after the search (no env vars).
+# The physical integrated_results column stays "*_(highest_CRISTA)" regardless (index-based).
+#
+# CRISTA cut points (0.6/0.4/0.2): higher than CFD -- reusing CFD's made CRISTA>=0.05 select
+# ~98% of off-targets. CRISPR-Bulge cut points (0.5/0.2/0.1): calibrated on Refined_TrueOT
+# (positives median 0.36; PR at 0.5=prec .67/rec .40, 0.2=prec .38/rec .55, 0.1=rec .64) --
+# graduated + model-relative on its own [0,1] cleavage-probability scale.
 CRISTA_THRESHOLDS = (0.6, 0.4, 0.2)
+CRISPR_BULGE_THRESHOLDS = (0.5, 0.2, 0.1)
+_SCORER_LABELS = {"crista": "CRISTA", "crispr-bulge": "CRISPR-Bulge"}
+_SCORER_THRESHOLDS = {"crista": CRISTA_THRESHOLDS, "crispr-bulge": CRISPR_BULGE_THRESHOLDS}
+# active scorer for THIS report invocation; set from .Params.txt in build_summary_meta().
+# generate-report processes one run per invocation, so a module-level value is safe and
+# avoids threading a scorer arg through ~30 display sites. The internal column key stays
+# "crista"; only the human-facing label + thresholds switch.
+_ACTIVE_SCORER = "crista"
+
+
+def _set_active_scorer(scorer):
+    global _ACTIVE_SCORER
+    _ACTIVE_SCORER = (scorer or "crista").lower()
+    if _ACTIVE_SCORER not in _SCORER_LABELS:
+        _ACTIVE_SCORER = "crista"
+
+
+def scorer_label():
+    """Human-facing label for the active second-score column ('CRISTA'|'CRISPR-Bulge')."""
+    return _SCORER_LABELS.get(_ACTIVE_SCORER, "CRISTA")
+
+
+def scorer_thresholds():
+    """Tier thresholds for the active second-score column (its own scale)."""
+    return _SCORER_THRESHOLDS.get(_ACTIVE_SCORER, CRISTA_THRESHOLDS)
 MMB_THRESHOLDS = (1, 2, 3, 4)
 # threshold-table variant-created CFD floor (kept for the full threshold table)
 PANEL_VARIANT_CFD_MIN = 0.05
@@ -663,9 +694,11 @@ def _curated_cell(kind, row, cols):
 
 
 def curated_headers(has_crista):
-    """The curated display headers, dropping CRISTA when not computed (and MAF
-    when ``_DROP_MAF`` is set)."""
-    return [h for h, kind in _active_columns() if kind != "crista" or has_crista]
+    """The curated display headers, dropping the ML-score column when not computed
+    (and MAF when ``_DROP_MAF`` is set). The ML-score header is relabeled by the active
+    scorer (CRISTA | CRISPR-Bulge); the internal kind stays "crista"."""
+    return [(scorer_label() if kind == "crista" else h)
+            for h, kind in _active_columns() if kind != "crista" or has_crista]
 
 
 def build_curated_frame(sub_df, cols, has_crista, start_rank=1):
@@ -1061,6 +1094,10 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
                 break
     if params_override:
         params = {**params, **params_override}
+
+    # which ML scorer produced the second score column (.Params.txt "Scorer"); sets the
+    # module-level active scorer that drives the column's display label + tier thresholds.
+    _set_active_scorer(params.get("Scorer"))
 
     # search mode marker written by complete-search
     # (.search_mode = "population-level" | "per-sample"). The default is population-level;
@@ -2116,48 +2153,49 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
         cr_samp = cols.get("crista_samples")
         cr_rsid = cols.get("crista_rsid")
 
-        # (c) by CRISTA score
+        # (c) by the active ML scorer (CRISTA | CRISPR-Bulge)
+        _sl = scorer_label()
         try:
             uri = _cfd_style_scatter(
                 _score_sorted(cr_score), cr_score, cr_ref, cr_alt,
-                xlabel="Candidate off-target site (ranked by CRISTA)",
-                title=f"Top {n_shown} candidates by CRISTA score",
-                score_name="CRISTA",
+                xlabel=f"Candidate off-target site (ranked by {_sl})",
+                title=f"Top {n_shown} candidates by {_sl} score",
+                score_name=_sl,
                 maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
             )
         except Exception as exc:  # noqa: BLE001
-            sys.stderr.write(f"generate-report: CRISTA scatter unavailable: {exc}\n")
-            uri = _placeholder_uri("CRISTA scatter unavailable")
+            sys.stderr.write(f"generate-report: {_sl} scatter unavailable: {exc}\n")
+            uri = _placeholder_uri(f"{_sl} scatter unavailable")
         panels.append((
-            "By CRISTA score",
-            "Independent CRISTA scoring model, ranked by CRISTA score. Included "
-            "because CRISTA scores were computed for this run.",
+            f"By {_sl} score",
+            f"Independent {_sl} scoring model, ranked by {_sl} score. Included "
+            f"because {_sl} scores were computed for this run.",
             uri,
         ))
 
-        # (d) by CRISTA DELTA -- only when the REF/ALT CRISTA columns exist
+        # (d) by ML-scorer DELTA -- only when the REF/ALT columns exist
         if "crista_ref" in cols and "crista_alt" in cols:
             try:
                 uri = _cfd_style_scatter(
                     _delta_sorted(cr_alt, cr_ref), cr_score, cr_ref, cr_alt,
                     xlabel="Candidate off-target site (ranked by variant effect ALT-REF)",
-                    title=f"Top {n_shown} by variant-induced CRISTA increase (ALT-REF)",
-                    score_name="CRISTA",
+                    title=f"Top {n_shown} by variant-induced {_sl} increase (ALT-REF)",
+                    score_name=_sl,
                     maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
                 )
             except Exception as exc:  # noqa: BLE001
                 sys.stderr.write(
-                    f"generate-report: CRISTA delta scatter unavailable: {exc}\n"
+                    f"generate-report: {_sl} delta scatter unavailable: {exc}\n"
                 )
-                uri = _placeholder_uri("CRISTA delta scatter unavailable")
+                uri = _placeholder_uri(f"{_sl} delta scatter unavailable")
             panels.append((
-                "By variant effect (CRISTA)",
+                f"By variant effect ({_sl})",
                 "The same ref/alt scatter as for the CFD score above, now with "
-                "CRISTA on the y-axis, "
-                "re-ranked by the variant-induced CRISTA change (ALT-REF, "
+                f"{_sl} on the y-axis, "
+                f"re-ranked by the variant-induced {_sl} change (ALT-REF, "
                 "descending): the population variants that most raise the "
-                "independent CRISTA cleavage score come first. Included because "
-                "CRISTA scores were computed for this run.",
+                f"independent {_sl} cleavage score come first. Included because "
+                f"{_sl} scores were computed for this run.",
                 uri,
             ))
 
@@ -2408,7 +2446,7 @@ def build_validation_panel(df, cols):
     cfd_counts = [(t, int((cfd >= t).sum())) for t in CFD_THRESHOLDS]
     mmb_counts = [(t, int(((mmb >= 0) & (mmb <= t)).sum())) for t in MMB_THRESHOLDS]
     crista_counts = (
-        [(t, int((crista >= t).sum())) for t in CRISTA_THRESHOLDS]
+        [(t, int((crista >= t).sum())) for t in scorer_thresholds()]
         if "crista" in cols and ((crista >= 0) & (crista <= 1)).any() else []
     )
 
@@ -2515,11 +2553,11 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crista=None):
             "df": sub,
         })
     if crista is not None and "crista" in cols and ((crista >= 0) & (crista <= 1)).any():
-        for t in CRISTA_THRESHOLDS:
+        for t in scorer_thresholds():
             sub = offt[(crista >= t).values]
             tiers.append({
-                "key": f"crista_{t:.2f}",
-                "label": f"CRISTA &ge; {t}",
+                "key": f"crista_{t:.2f}",  # internal key stays 'crista' (filenames stable)
+                "label": f"{scorer_label()} &ge; {t}",
                 "filename": _tier_filename(f"crista_{t:.2f}"),
                 "df": sub,
             })
@@ -2598,18 +2636,18 @@ def render_validation_panel(
     crista_table_block = ""
     if vp.get("crista_counts"):
         crista_rows = "".join(
-            f"<tr><td>CRISTA &ge; {t}</td><td class='num'>"
+            f"<tr><td>{scorer_label()} &ge; {t}</td><td class='num'>"
             f"{_tier_count_link(f'crista_{t:.2f}', c)}</td></tr>"
             for t, c in vp["crista_counts"]
         )
         crista_table_block = (
             '<div><table class="thr-table"><thead><tr>'
-            "<th>CRISTA threshold</th><th>Candidates (download)</th></tr></thead>"
+            f"<th>{scorer_label()} threshold</th><th>Candidates (download)</th></tr></thead>"
             f"<tbody>{crista_rows}</tbody></table></div>"
         )
     metric_names = ["CFD (desc)"]
     if vp.get("has_crista"):
-        metric_names.append("CRISTA (desc)")
+        metric_names.append(f"{scorer_label()} (desc)")
     metric_names.append("mismatches+bulges (asc)")
     metric_list = ", ".join(metric_names)
 
@@ -3482,7 +3520,7 @@ def render_html(
     crista_block = ""
     if table_crista_html:
         crista_block = (
-            '<h3 style="margin:1.4em 0 0.3em 0">Ranked by CRISTA score</h3>\n'
+            f'<h3 style="margin:1.4em 0 0.3em 0">Ranked by {scorer_label()} score</h3>\n'
             + table_crista_html
         )
 
@@ -3911,7 +3949,7 @@ def build_report(
                     top_crista_df, cols, has_crista, datasets=meta.get("datasets", "")
                 )
                 tier_downloads.append(
-                    ("Top-1000 by CRISTA (curated TSV)", "top1000_crista.tsv")
+                    (f"Top-1000 by {scorer_label()} (curated TSV)", "top1000_crista.tsv")
                 )
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: CRISTA table unavailable: {exc}\n")
@@ -4519,7 +4557,9 @@ def _combined_ranked_score_images_html(hap_dirs, hap_output_names, guide):
     page, not a reason to omit it from a static report whose whole point is
     matching complete-search's real report structure."""
     blocks = []
-    for score, label in (("CFD", "CFD score"), ("CRISTA", "CRISTA score")):
+    # 'score' is ALSO part of the image filename (CRISPRme_{score}_top_1000_...), so the
+    # key stays 'CRISTA'; only the display label follows the active scorer.
+    for score, label in (("CFD", "CFD score"), ("CRISTA", scorer_label() + " score")):
         cols = []
         for hap, hap_label in (("paternal", "Paternal"), ("maternal", "Maternal")):
             hap_dir = hap_dirs.get(hap)
@@ -5615,7 +5655,7 @@ def build_combined_report(
             top_crista_df = select_top_crista(_pooled_df, _pooled_cols, n=top_n)
             if len(top_crista_df):
                 top1000_crista_html = (
-                    '<h3 style="margin:1.2em 0 0.3em 0">Ranked by CRISTA score</h3>'
+                    f'<h3 style="margin:1.2em 0 0.3em 0">Ranked by {scorer_label()} score</h3>'
                     + _render_curated_table_html(
                         _curated_frame_with_category(
                             top_crista_df, _pooled_cols, _has_crista, _category, start_rank=1

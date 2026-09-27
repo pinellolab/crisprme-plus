@@ -180,6 +180,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_generate_report -v
 
+      - name: "Scorer-aware report column (CRISTA|CRISPR-Bulge label + thresholds from .Params.txt)"
+        working-directory: PostProcess
+        run: python -m unittest test_report_scorer_label -v
+
       - name: "Additional coverage (tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile / history-page assembly jobs)"
         # NOTE: test_annotation is intentionally NOT here -- annotation.py imports
         # pysam, which the light network-free CI does not install (mirrors why the

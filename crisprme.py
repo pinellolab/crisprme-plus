@@ -1946,6 +1946,12 @@ def complete_search() -> None:
         p.write("Nuclease\t" + str(nuclease) + "\n")
         # p.write('Gecko\t' + str(gecko_comp) + '\n')
         p.write("Ref_comp\t" + str(ref_comparison) + "\n")
+        # which ML off-target scorer produced the second score column ('crista' |
+        # 'crispr-bulge') + compute backend. generate-report + the web run as separate
+        # invocations (env vars gone), so they read the active scorer from here to label
+        # + threshold that column correctly.
+        p.write("Scorer\t" + str(scorer) + "\n")
+        p.write("Compute_backend\t" + str(compute_backend) + "\n")
         p.close()
     len_guide_sequence = total_pam_len - pam_len
     if sequence_use:
