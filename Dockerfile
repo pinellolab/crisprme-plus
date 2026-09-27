@@ -116,15 +116,20 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
 
 # ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
 # Built in its OWN micromamba env so its TensorFlow/numpy pins never touch the
-# main scoring stack. CPU-only here (GPU is opt-in at runtime via
-# 'crisprme.py scorer-env create --gpu'). Uses the single-source spec in
-# scorer_env.py so the package set never drifts from the CLI/health-check.
-# Set build_scorer_envs=0 for a lean image (create later with
-# 'crisprme.py scorer-env create'). Failure is non-fatal to the image build.
+# main scoring stack. Uses the single-source spec in scorer_env.py so the package
+# set never drifts from the CLI/health-check.
+#   scorer_backend=cpu (default): installs tensorflow-cpu (small, runs anywhere).
+#   scorer_backend=gpu: installs the conda-forge CUDA TensorFlow build (tensorflow=2.13=cuda*)
+#     -- validated correct + fast on an NVIDIA A100; the image then runs the scorer on the GPU
+#     when launched with the NVIDIA container runtime ('docker run --gpus all ... --compute-backend cuda').
+#     It also still runs on CPU if no GPU is visible. GPU images are larger (pulls cudatoolkit/cudnn).
+# Set build_scorer_envs=0 for a lean image (create later with 'crisprme.py scorer-env create').
+# Failure is non-fatal to the image build.
 ARG build_scorer_envs=1
+ARG scorer_backend=cpu
 RUN if [ "$build_scorer_envs" = "1" ]; then \
       ( python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
-import scorer_env; ok, msg = scorer_env.create_env('cbulge', stream=True); \
+import scorer_env; ok, msg = scorer_env.create_env('cbulge', gpu=('${scorer_backend}'=='gpu'), stream=True); \
 print('[scorer-env]', msg); sys.exit(0 if ok else 1)" \
         && micromamba clean --all --yes ) \
       || echo 'WARN: scorer env not built; create at runtime with crisprme.py scorer-env create' ; \

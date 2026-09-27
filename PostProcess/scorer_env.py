@@ -45,8 +45,12 @@ SCORER_ENVS: Dict[str, dict] = {
         "channels": ["conda-forge"],
         "python": "3.10",
         # CPU is mandatory; the GPU variant is opt-in and swaps in the CUDA TF build.
+        # Keep CPU and GPU on the SAME TF version (2.13) so the model behaves identically
+        # on both — the conda-forge cuda build (tensorflow=2.13=cuda*, e.g. cuda118) is the
+        # exact stack validated correct + fast on an A100 (14.7k OT/s, GRU numerically correct;
+        # unlike tensorflow-metal it does NOT miscompute). It also runs on CPU-only hosts.
         "cpu_packages": ["tensorflow-cpu=2.13"] + _COMMON,
-        "gpu_packages": ['tensorflow=2.12=cuda*'] + _COMMON,
+        "gpu_packages": ['tensorflow=2.13=cuda*'] + _COMMON,
         # Apple-Silicon Metal variant: conda-forge has no Metal TensorFlow, so the base
         # deps come from conda (NO tensorflow) and the Metal TF comes from pip
         # (tensorflow-macos + the tensorflow-metal PluggableDevice). hdf5 for h5py.
