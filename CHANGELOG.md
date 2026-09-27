@@ -12,6 +12,27 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Changed
+- **CRISPR-Bulge replaces CRISTA as the machine-learning off-target scorer.**
+  The vendored CRISTA RandomForest (scikit-learn) is retired in favor of CRISPR-Bulge
+  (Yaish & Orenstein, *NAR* 2024; TensorFlow GRU ensemble; MIT), which is more accurate
+  — ~2.1× overall and ~5.4× on bulge-containing off-targets by AUPR on Refined-TrueOT —
+  and faster per off-target on CPU. **CFD remains the primary score** (fast, in-process,
+  pure-Python); CRISPR-Bulge is the secondary ML score. To keep the main environment free
+  of a heavy TensorFlow pin, the scorer runs in its **own dedicated conda env** (`cbulge`),
+  invoked over a persistent-worker batch protocol; if that env is absent the run completes
+  on CFD with a single warning (the ML column is `-1`). Reports and the web UI now label
+  the column/plots/legend "CRISPR-Bulge" and calibrate on its own [0,1] scale
+  (0.5 / 0.2 / 0.1 bands); the physical `CRISTA_score_*` column name and `.bestCRISTA`
+  file are retained as stable internal identifiers so older reports still render.
+  Multi-bulge off-targets (the ensemble is a single-bulge model) are covered by collapsing
+  the most PAM-distal bulge(s) — PAM-distal bulges are ~0-impact — down to the single most
+  PAM-proximal bulge before scoring, a conservative (over-flagging) reduction.
+- **Modernized the main environment now that CRISTA's hard pins are gone.**
+  `scikit-learn` is removed entirely (nothing in the main env imported it after CRISTA);
+  `numpy` 1.24→1.26, `scipy` 1.10→1.17, `pandas` 2.0→2.3, and the `matplotlib-base` ceiling
+  is dropped. `numpy` is capped `<2` and `pandas` `<3` as deliberate guards (the pysam /
+  CRISPRitz C-ABI, and pandas 3.0 copy-on-write) — both are validated fast-follows. The
+  full unit suite (724 tests) passes on the rebuilt, un-pinned environment.
 - **Alternative-alignments output is now mode-driven (off by default in the
   population-level analysis).** The `..._all_results_with_alternative_alignments.tsv`
   dump — the *non-best* alignments per locus — grows combinatorially with the edit
@@ -57,6 +78,21 @@ and the `release-crisprme` skill.
   `PostProcess/personal_assembly.py` (+ `test_personal_assembly.py`).
 
 ### Added
+- **`scorer-env` command group + modular scorer environment.** `crisprme.py scorer-env
+  {create,check,update,list,doctor}` manages the dedicated `cbulge` conda env (detects
+  micromamba/mamba/conda, provisions the pinned CRISPR-Bulge source+weights, health-checks
+  imports/weights, records state under `Annotations/.scorer_env.json`). The Docker image
+  and `install_from_source.sh` create it at install time; set `build_scorer_envs=0` /
+  `CRISPRME_SKIP_SCORER_ENV=1` to defer. `CRISPRME_SCORER_ENV` points CRISPRme at an
+  existing/shared scorer env instead of creating its own.
+- **`--compute-backend {cpu,gpu,auto,cuda,metal}` for the ML scorer** (default `cpu`;
+  GPU is opt-in and always degrades gracefully to CPU). `cuda` uses a CUDA TensorFlow build
+  on NVIDIA/Linux; `metal` uses tensorflow-metal on Apple Silicon **guarded by a load-time
+  numerical self-test** — tensorflow-metal silently miscomputes this model's GRU kernel, so
+  the scorer detects the miscompute and transparently falls back to a CPU device context
+  (bit-identical scores) rather than emit wrong ones. A CPU thread cap
+  (`CRISPRME_SCORER_THREADS`, default `min(16, cores)`) prevents TensorFlow oversubscription
+  on many-core nodes.
 - **New recommended default variant index: single-source, phased
   `NRG_3_hg38+hg38_1000G2021`** (published to HuggingFace). 1000 Genomes 2021,
   3,202 samples, fully phased (`data_type=genotyped-phased`) — so every reported
@@ -119,6 +155,13 @@ and the `release-crisprme` skill.
   have it); reference-only / single-chromosome / region searches fit ~16 GB.
 
 ### Removed
+- **CRISTA and azimuth are removed.** The 276 MB vendored CRISTA RandomForest model
+  (`CRISTA_predictors.zip`, `dnaShape.pkl`, `CRISTA_score.py`), the whole `PostProcess/azimuth/`
+  tree (already inert / never invoked), and their now-unneeded scikit-learn 1.1.3 / numpy 1.24
+  pin are deleted. CRISPR-Bulge replaces CRISTA (see *Changed*); CFD's small lookup pickles
+  (`mismatch_score.pkl`, `PAM_scores.pkl`) are version-agnostic and unaffected. `--scorer` is
+  gone (the scorer is always CRISPR-Bulge); the internal `CRISTA_*` column names are kept for
+  back-compat only.
 - **Legacy per-file personal-assembly upload in Settings.** The old "Add a personal
   assembly" card that took the six individual files (two genomes, two chains, two
   chromAlias) one at a time is gone; personal assemblies are now added as a single
