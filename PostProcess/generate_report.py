@@ -1388,7 +1388,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "<strong>Population-level</strong> (default) &mdash; the SNP off-target analysis "
             "reports one <em>worst-possible</em> representative per variant window instead of "
             "enumerating every per-sample haplotype. CFD is the <strong>exact worst case</strong>; "
-            "CRISTA is a best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing "
+            f"{scorer_label()} is a best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing "
             "and exact joint allele frequency are NOT computed</strong> &mdash; re-run the search "
             "with <code>--per-sample</code> for that per-sample resolution on a genotyped panel "
             "(recommended for clinical validation). For sites-only (aggregate) panels there are no "
@@ -3177,12 +3177,35 @@ _SCORE_LEGEND = [
 ]
 
 
+# CRISPR-Bulge glossary definition, substituted for the CRISTA entry when that scorer ran.
+_CRISPR_BULGE_LEGEND_DEF = (
+    "CRISPR-Bulge score (Yaish &amp; Orenstein, <i>Nucleic Acids Res.</i> 2024) &mdash; an "
+    "<b>independent</b> deep-learning (GRU-ensemble) 0&ndash;1 estimate of cleavage "
+    "propensity, trained to handle DNA/RNA bulges &mdash; markedly more accurate than "
+    "earlier models on bulge/gapped off-targets. Higher = more likely to be cut. Reported "
+    "alongside CFD because the two models can disagree; <b>a site scored high by EITHER "
+    "model warrants validation</b>. Its scale is model-relative (not directly comparable to "
+    "CFD&rsquo;s), so its threshold tiers are its own."
+)
+
+
 def build_score_legend_html():
-    """Render the scores-&-columns legend (Section 7, always present)."""
+    """Render the scores-&-columns legend (Section 7, always present). The ML-score
+    entry (and the CFD entry's cross-reference) follow the active scorer."""
+    _sl = scorer_label()
+    legend = []
+    for term, definition in _SCORE_LEGEND:
+        if term == "CRISTA":
+            # relabel + redefine the second-score entry for the scorer that ran
+            legend.append((_sl, _CRISPR_BULGE_LEGEND_DEF if _sl == "CRISPR-Bulge" else definition))
+        elif term == "CFD":
+            legend.append((term, definition.replace("weigh CRISTA there", f"weigh {_sl} there")))
+        else:
+            legend.append((term, definition))
     items = "".join(
         '<div class="legend-item"><div class="legend-term">%s</div>'
         '<div class="legend-def">%s</div></div>' % (term, definition)
-        for term, definition in _SCORE_LEGEND
+        for term, definition in legend
     )
     return (
         '<p class="caption">What the score and key columns in the tables above (and '
@@ -3255,7 +3278,7 @@ def render_next_steps_box(vp, panel_filename=PANEL_TOP100_NAME, section_ref="Sec
         f"({section_ref}) &mdash; the worst-case shortlist across all metrics."
     )
     steps.append(
-        "<b>Prioritize within the panel</b> sites that are (i) high CFD or CRISTA, "
+        f"<b>Prioritize within the panel</b> sites that are (i) high CFD or {scorer_label()}, "
         "(ii) low edit-distance (few mismatches/bulges), and (iii) inside a gene "
         "&mdash; especially a COSMIC cancer gene."
     )
