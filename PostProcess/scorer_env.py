@@ -59,7 +59,11 @@ SCORER_ENVS: Dict[str, dict] = {
     },
 }
 
-DEFAULT_ENV = "cbulge"
+# The scorer conda env name. Overridable via CRISPRME_SCORER_ENV so a site can point
+# CRISPRme at an existing / shared scorer env (e.g. a lab-wide 'cbulge_cpu') instead of
+# creating its own. Resolved once at import; env_python() resolves ANY existing env by
+# name (it need not appear in SCORER_ENVS).
+DEFAULT_ENV = os.environ.get("CRISPRME_SCORER_ENV", "cbulge")
 
 # ---------------------------------------------------------------------------
 # CRISPR-Bulge source + weights (the model itself)
