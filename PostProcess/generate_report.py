@@ -2654,7 +2654,7 @@ def render_validation_panel(
     # C) EXPLICIT IN-REPORT METHODS NOTE (plain-language, using the real
     #    constants). Two hard-include floors, then fill by worst-case severity.
     metric_or = (
-        "CFD, CRISTA, or mm+b" if vp.get("has_crista") else "CFD or mm+b"
+        f"CFD, {scorer_label()}, or mm+b" if vp.get("has_crista") else "CFD or mm+b"
     )
     note = (
         f"How the panel was chosen (hybrid, ~{PANEL_CAP} sites &mdash; may be more "
