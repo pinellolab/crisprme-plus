@@ -52,7 +52,7 @@ ARG CONDA_CHANNEL_BASE=https://conda.anaconda.org
 RUN micromamba install -y -n base \
         -c ${CONDA_CHANNEL_BASE}/conda-forge -c ${CONDA_CHANNEL_BASE}/bioconda \
         python=3.11 \
-        "numpy>=1.26,<2" "scipy>=1.11" "pandas>=2.1" \
+        "numpy>=1.26,<2" "scipy>=1.11" "pandas>=2.1,<3" \
         "matplotlib-base>=3.8" \
         biopython more-itertools statsmodels intervaltree \
         ijson yajl cffi \
