@@ -87,6 +87,17 @@ class ScorerRunner:
         env.setdefault("PYTHONUNBUFFERED", "1")
         # point the worker at the provisioned CRISPR-Bulge source+weights
         env.setdefault("CBULGE_REPO", scorer_env.default_cbulge_repo())
+        # Bound the worker's CPU parallelism BEFORE it imports numpy/TF. compute_backend
+        # caps TF's intra-op threads, but the per-batch feature build also leans on the
+        # numpy/BLAS thread pool, which OMP_NUM_THREADS governs -- and OMP must be set
+        # before numpy import to take effect. Setting it here (in the child env) recovers
+        # the ~10% throughput that the TF cap alone leaves on the table, and prevents
+        # BLAS oversubscription on many-core nodes.
+        try:
+            import compute_backend as _cb
+            env.setdefault("OMP_NUM_THREADS", str(_cb._cpu_thread_cap()))
+        except Exception:
+            pass
         cmd = [py, "-u", self.worker] + (["--gpu"] if self.device == "gpu" else [])
         try:
             self.proc = subprocess.Popen(
