@@ -10,12 +10,16 @@
 # v2.8.3 carries the add-variants .tbi/.csi enricher fix + the MGBOA relicense. crisprme
 # is installed from this build context. The dependency
 # pins mirror the from-scratch Python-3.11 validation on ml007 (see PR #131):
-#   - scoring stack: scikit-learn 1.1.3 / numpy 1.24.4 / pandas 2.0.3 / scipy 1.10.1.
-#     LEGACY pin: it existed only because the vendored CRISTA + azimuth pickles needed this
-#     exact combo. CRISTA is retired (CRISPR-Bulge runs in its own conda env) and azimuth is
-#     gone, so no scorer needs it anymore (CFD uses version-agnostic lookup pickles). Kept
-#     conservatively; modernizing it is a separate full-suite-validated step.
-#   - matplotlib-base < 3.9  (>= 3.9 runtime-requires numpy >= 1.25; keep with the numpy pin)
+#   - numerical stack: MODERNIZED now that CRISTA is retired. It was once hard-pinned to
+#     scikit-learn 1.1.3 / numpy 1.24.4 / pandas 2.0.3 / scipy 1.10.1 SOLELY because the
+#     vendored CRISTA + azimuth pickles needed that combo. CRISTA runs in its own conda env
+#     (CRISPR-Bulge) and azimuth is gone, so: scikit-learn is DROPPED (nothing in the main
+#     env imports it), and numpy/scipy/pandas/matplotlib move to current maintained lines.
+#     CFD uses version-agnostic lookup pickles, so scoring is unaffected. numpy is capped
+#     < 2 on purpose: pysam/CRISPRitz C-extensions here are built against the numpy 1.x
+#     C-ABI; a numpy-2 ABI mismatch could silently corrupt results. numpy 2.x is a
+#     separately-validated fast-follow.
+#   - matplotlib-base ceiling dropped (was < 3.9); numpy >= 1.26 satisfies mpl >= 3.9.
 #   - Dash 2.x web stack (dash >= 2.14 bundles the old dash-core/html/renderer/
 #     table sub-packages, so those are intentionally dropped)
 FROM mambaorg/micromamba
@@ -48,8 +52,8 @@ ARG CONDA_CHANNEL_BASE=https://conda.anaconda.org
 RUN micromamba install -y -n base \
         -c ${CONDA_CHANNEL_BASE}/conda-forge -c ${CONDA_CHANNEL_BASE}/bioconda \
         python=3.11 \
-        scikit-learn=1.1.3 numpy=1.24.4 scipy=1.10.1 pandas=2.0.3 \
-        "matplotlib-base<3.9" \
+        "numpy>=1.26,<2" "scipy>=1.11" "pandas>=2.1" \
+        "matplotlib-base>=3.8" \
         biopython more-itertools statsmodels intervaltree \
         ijson yajl cffi \
         pysam bcftools bedtools bedops samtools htslib axel gdown zip gsl pigz \
