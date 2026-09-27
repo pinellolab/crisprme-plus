@@ -31,18 +31,31 @@ def _log(msg):
 
 
 def main():
+    # Quiet TensorFlow's own C++ logs BEFORE it is imported (crispr_bulge_score imports it).
+    os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")   # errors only, no INFO/WARNING spam
+
     # Pass the requested backend through verbatim; compute_backend.resolve_backend()
     # (called inside load_models) does detection + fallback for cpu|gpu|cuda|metal|auto.
     # --gpu is a legacy alias kept for back-compat with older spawn sites.
     device = os.environ.get("CRISPRME_COMPUTE_BACKEND") or ("gpu" if "--gpu" in sys.argv else "cpu")
 
-    # The scoring libs pollute stdout: build_sequence_features prints "The features
-    # sizes are ..." and Keras prints "1/1 [====]" progress bars to fd 1, which would
-    # corrupt the JSON line protocol. So dup fd 1 to a private protocol channel, then
-    # redirect fd 1 -> fd 2 (stderr) so ALL library noise is harmless. Only clean JSON
-    # goes to the real stdout the parent reads.
+    # The scoring libs are NOISY on BOTH stdout and stderr: build_sequence_features prints
+    # "The features sizes are ...", Keras prints "1/1 [====]" progress bars to fd 1, and
+    # TF/Keras emit retracing WARNINGs + C++ logs to fd 2. That output is harmless in
+    # isolation, but the CRISPRme post-analysis stage treats ANY bytes on the subprocess's
+    # stderr as fatal (`[ -s $logerror ]`), so routing this noise to stderr would fail every
+    # real search's post-analysis (CRISTA was quiet; TF is not). So: dup fd 1 to a PRIVATE
+    # protocol channel, then send BOTH fd 1 and fd 2 to /dev/null. The worker communicates
+    # exclusively over the proto channel (ready/error + score responses), so silencing the
+    # real fds loses nothing the parent needs. Set CRISPRME_SCORER_DEBUG=1 to keep the
+    # library noise on the real stderr for troubleshooting.
     proto = os.fdopen(os.dup(1), "w")
-    os.dup2(2, 1)
+    if os.environ.get("CRISPRME_SCORER_DEBUG"):
+        os.dup2(2, 1)  # legacy: library stdout -> stderr (visible, but fatal to post-analysis)
+    else:
+        _devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(_devnull, 1)   # library stdout noise -> /dev/null
+        os.dup2(_devnull, 2)   # library stderr noise (TF logs, retracing warnings) -> /dev/null
 
     def send(obj):
         proto.write(json.dumps(obj) + "\n")
