@@ -24,9 +24,12 @@ and the `release-crisprme` skill.
   the column/plots/legend "CRISPR-Bulge" and calibrate on its own [0,1] scale
   (0.5 / 0.2 / 0.1 bands); the physical `CRISTA_score_*` column name and `.bestCRISTA`
   file are retained as stable internal identifiers so older reports still render.
-  Multi-bulge off-targets (the ensemble is a single-bulge model) are covered by collapsing
-  the most PAM-distal bulge(s) — PAM-distal bulges are ~0-impact — down to the single most
-  PAM-proximal bulge before scoring, a conservative (over-flagging) reduction.
+  The ensemble is a single-bulge model, so off-targets whose alignment needs ≥2 bulges (or a
+  ≥2-bp bulge) are NOT ML-scored — they are nulled to `-1` and carried by CFD (the primary
+  score) + mismatch/bulge counts. (An earlier build reduced such alignments to a single bulge;
+  an adversarial review showed that reduction could corrupt the alignment and, on a non-monotonic
+  model, was not provably conservative, so it was removed in favor of the honest null. Each
+  off-target locus is still ML-scored on its best ≤1-bulge alignment when one exists.)
 - **Modernized the main environment now that CRISTA's hard pins are gone.**
   `scikit-learn` is removed entirely (nothing in the main env imported it after CRISTA);
   `numpy` 1.24→1.26, `scipy` 1.10→1.17, `pandas` 2.0→2.3, and the `matplotlib-base` ceiling
