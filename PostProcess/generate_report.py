@@ -3185,7 +3185,9 @@ _CRISPR_BULGE_LEGEND_DEF = (
     "earlier models on bulge/gapped off-targets. Higher = more likely to be cut. Reported "
     "alongside CFD because the two models can disagree; <b>a site scored high by EITHER "
     "model warrants validation</b>. Its scale is model-relative (not directly comparable to "
-    "CFD&rsquo;s), so its threshold tiers are its own."
+    "CFD&rsquo;s), so its threshold tiers are its own. The model scores an alignment with at "
+    "most one 1-bp bulge; off-targets whose alignment needs &ge;2 bulges are shown as "
+    "<code>-1</code> (not scored) and should be judged by CFD + mismatches/bulges."
 )
 
 
