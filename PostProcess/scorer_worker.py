@@ -31,7 +31,10 @@ def _log(msg):
 
 
 def main():
-    device = "gpu" if ("--gpu" in sys.argv or os.environ.get("CRISPRME_COMPUTE_BACKEND") == "gpu") else "cpu"
+    # Pass the requested backend through verbatim; compute_backend.resolve_backend()
+    # (called inside load_models) does detection + fallback for cpu|gpu|cuda|metal|auto.
+    # --gpu is a legacy alias kept for back-compat with older spawn sites.
+    device = os.environ.get("CRISPRME_COMPUTE_BACKEND") or ("gpu" if "--gpu" in sys.argv else "cpu")
 
     # The scoring libs pollute stdout: build_sequence_features prints "The features
     # sizes are ..." and Keras prints "1/1 [====]" progress bars to fd 1, which would

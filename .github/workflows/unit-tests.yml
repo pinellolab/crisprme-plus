@@ -202,6 +202,14 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_scorer_env test_scorer_runner -v
 
+      - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
+        # resolve_backend degradation (requested accelerator absent -> CPU), pre-import
+        # env, array_module (numpy vs cupy), and configure_tf device placement via a fake
+        # tf. The tensorflow-metal GRU miscompute + numerical self-test fallback is
+        # validated at runtime in crispr_bulge_score (needs the model, not in CI).
+        working-directory: PostProcess
+        run: python -m unittest test_compute_backend -v
+
       - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF)"
         # The two-pass population-level analysis (default since 2.5.3; opt-in `--fast` in
         # 2.5.1, renamed to the `--per-sample` opt-out in 2.5.4): lossless detection +

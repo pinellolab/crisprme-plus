@@ -1705,9 +1705,13 @@ def complete_search() -> None:
     # MIT-licensed model that runs in the dedicated cbulge conda env via the scorer-runner.
     # CRISPRME_SCORER_SELECT is retained as the internal signal (report/web read it from
     # .Params.txt to label the column) but is no longer user-selectable. --compute-backend
-    # cpu|gpu picks the device (GPU optional; graceful CPU fallback). Both thread through the
-    # post-analysis subprocess tree (submit_job -> pools -> new_simple_analysis/analisi_indels)
-    # as env vars, exactly like CRISPRME_FAST_MODE.
+    # selects the scorer device (GPU optional; ALWAYS a graceful CPU fallback):
+    #   cpu (default) | gpu/auto (auto-pick cuda->metal->cpu) | cuda (NVIDIA/Linux) |
+    #   metal (Apple Silicon). A requested accelerator that is absent -- or that
+    #   miscomputes the model, e.g. tensorflow-metal's GRU -- degrades to CPU with a
+    #   warning (see compute_backend.py + crispr_bulge_score.load_models). Both thread
+    #   through the post-analysis subprocess tree (submit_job -> pools ->
+    #   new_simple_analysis/analisi_indels) as env vars, exactly like CRISPRME_FAST_MODE.
     scorer = "crispr-bulge"
     os.environ["CRISPRME_SCORER_SELECT"] = scorer
 
@@ -1716,9 +1720,9 @@ def complete_search() -> None:
         try:
             compute_backend = args[args.index("--compute-backend") + 1].lower()
         except IndexError:
-            error("--compute-backend requires a value: cpu | gpu")
-        if compute_backend not in ("cpu", "gpu"):
-            error("--compute-backend must be 'cpu' or 'gpu'")
+            error("--compute-backend requires a value: cpu | gpu | auto | cuda | metal")
+        if compute_backend not in ("cpu", "gpu", "auto", "cuda", "metal"):
+            error("--compute-backend must be one of: cpu | gpu | auto | cuda | metal")
     os.environ["CRISPRME_COMPUTE_BACKEND"] = compute_backend
 
     # nudge the user if the CRISPR-Bulge env isn't healthy (the scorer-runner degrades

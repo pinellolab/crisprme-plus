@@ -45,21 +45,42 @@ class TestDetect(unittest.TestCase):
 
 
 class TestCreateCommand(unittest.TestCase):
+    # variant is passed explicitly so these are platform-independent (on a Mac the
+    # auto-picked variant is 'metal').
     def test_cpu_command_shape(self):
         with mock.patch.object(se, "detect_env_manager", return_value=("/m/micromamba", "micromamba")):
-            cmd = se.build_create_command("cbulge", gpu=False)
+            cmd = se.build_create_command("cbulge", variant="cpu")
         self.assertEqual(cmd[:5], ["/m/micromamba", "create", "-y", "-n", "cbulge"])
         self.assertIn("python=3.10", cmd)
-        self.assertIn("-c", cmd)
         self.assertIn("conda-forge", cmd)
         self.assertIn("numpy=1.23.5", cmd)
         self.assertIn("setuptools<81", cmd)
+        self.assertTrue(any(c.startswith("tensorflow-cpu") for c in cmd))
         self.assertFalse(any("cuda" in c for c in cmd))
 
     def test_gpu_command_uses_cuda(self):
         with mock.patch.object(se, "detect_env_manager", return_value=("/m/mamba", "mamba")):
-            cmd = se.build_create_command("cbulge", gpu=True)
+            cmd = se.build_create_command("cbulge", variant="cuda")
         self.assertTrue(any("cuda" in c for c in cmd))
+
+    def test_metal_command_has_no_tf_in_conda(self):
+        # Metal TF comes from pip, so the conda create must NOT include tensorflow
+        with mock.patch.object(se, "detect_env_manager", return_value=("/m/mamba", "mamba")):
+            cmd = se.build_create_command("cbulge", variant="metal")
+        self.assertIn("numpy=1.23.5", cmd)
+        self.assertIn("hdf5", cmd)
+        self.assertFalse(any("tensorflow" in c for c in cmd))
+        self.assertEqual(se.SCORER_ENVS["cbulge"]["metal_pip"][0].split("==")[0], "tensorflow-macos")
+
+    def test_variant_is_metal_on_apple_silicon(self):
+        with mock.patch("platform.system", return_value="Darwin"), \
+             mock.patch("platform.machine", return_value="arm64"):
+            self.assertEqual(se._variant(False), "metal")
+            self.assertEqual(se._variant(True), "metal")
+        with mock.patch("platform.system", return_value="Linux"), \
+             mock.patch("platform.machine", return_value="x86_64"):
+            self.assertEqual(se._variant(False), "cpu")
+            self.assertEqual(se._variant(True), "cuda")
 
     def test_no_manager_returns_none(self):
         with mock.patch.object(se, "detect_env_manager", return_value=None):
@@ -171,12 +192,15 @@ class TestHealthCheck(unittest.TestCase):
         self.assertTrue(rec["weights_present"])
 
     def test_warn_when_weights_absent(self):
+        # mock source_present directly so this is independent of whether a real
+        # CRISPR-Bulge checkout happens to exist on the test machine.
         with mock.patch.object(se, "detect_env_manager", return_value=("/m/mamba", "mamba")), \
              mock.patch.object(se, "env_python", return_value="/fake/py"), \
              mock.patch.object(se, "_run", return_value=self._probe_result()), \
-             mock.patch.dict(os.environ, {"CBULGE_REPO": ""}, clear=False):
+             mock.patch.object(se, "source_present", return_value=False):
             rec = se.health_check("cbulge")
         self.assertEqual(rec["status"], se.WARN)
+        self.assertFalse(rec["weights_present"])
 
     def test_render_health_smoke(self):
         rec = {"env": "cbulge", "status": "warn", "issues": [("warn", "no weights")],

@@ -27,6 +27,7 @@ import os
 import shutil
 import subprocess
 import sys
+import platform
 import tempfile
 from typing import Dict, List, Optional, Tuple
 
@@ -46,6 +47,11 @@ SCORER_ENVS: Dict[str, dict] = {
         # CPU is mandatory; the GPU variant is opt-in and swaps in the CUDA TF build.
         "cpu_packages": ["tensorflow-cpu=2.13"] + _COMMON,
         "gpu_packages": ['tensorflow=2.12=cuda*'] + _COMMON,
+        # Apple-Silicon Metal variant: conda-forge has no Metal TensorFlow, so the base
+        # deps come from conda (NO tensorflow) and the Metal TF comes from pip
+        # (tensorflow-macos + the tensorflow-metal PluggableDevice). hdf5 for h5py.
+        "metal_packages": ["hdf5"] + _COMMON,
+        "metal_pip": ["tensorflow-macos==2.13.0", "tensorflow-metal==1.0.1"],
         # import probe run INSIDE the env to confirm the scorer can load
         "probe_imports": [
             "tensorflow", "numpy", "pandas", "sklearn", "xgboost", "catboost", "pkg_resources",
@@ -217,60 +223,83 @@ def env_exists(name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _packages(spec: dict, gpu: bool) -> List[str]:
-    return spec["gpu_packages"] if gpu else spec["cpu_packages"]
+def _variant(gpu: bool) -> str:
+    """The TF variant to build: 'metal' on Apple-Silicon Macs (the only GPU stack there),
+    else 'cuda' when gpu is requested, else 'cpu'. On a Mac the ONE metal env serves both
+    CPU and GPU runs -- the compute backend picks the device at runtime."""
+    if platform.system() == "Darwin" and platform.machine() == "arm64":
+        return "metal"
+    return "cuda" if gpu else "cpu"
 
 
-def build_create_command(name: str, gpu: bool = False) -> Optional[List[str]]:
-    """Return the argv to create the env, or None if no manager is available."""
+def _conda_packages(spec: dict, variant: str) -> List[str]:
+    return {"metal": spec.get("metal_packages"), "cuda": spec.get("gpu_packages")}.get(
+        variant, spec["cpu_packages"]
+    )
+
+
+def build_create_command(name: str, gpu: bool = False, variant: Optional[str] = None) -> Optional[List[str]]:
+    """Return the argv to create the conda env, or None if no manager is available."""
     spec = SCORER_ENVS[name]
     mgr = detect_env_manager()
     if not mgr:
         return None
     exe, _ = mgr
+    variant = variant or _variant(gpu)
     channels = []
     for ch in spec["channels"]:
         channels += ["-c", ch]
     return (
         [exe, "create", "-y", "-n", name, "python=" + spec["python"]]
         + channels
-        + _packages(spec, gpu)
+        + _conda_packages(spec, variant)
     )
 
 
-def _create_conda_env(name, gpu, force, stream) -> Tuple[bool, str]:
-    """Create just the conda env (no source provisioning)."""
+def _create_conda_env(name, gpu, force, stream, variant) -> Tuple[bool, str]:
+    """Create the conda env (no source provisioning). For the Metal variant, the Metal
+    TensorFlow (tensorflow-macos + tensorflow-metal) is pip-installed after the conda env,
+    since conda-forge has no Metal TF build."""
     if env_exists(name) and not force:
         return True, f"env '{name}' already exists"
-    cmd = build_create_command(name, gpu=gpu)
+    cmd = build_create_command(name, gpu=gpu, variant=variant)
     if cmd is None:
         return False, ("no conda env manager found (need micromamba/mamba/conda on "
                        "PATH, or set CRISPRME_CONDA_EXE)")
     if force and env_exists(name):
         _run([cmd[0], "env", "remove", "-y", "-n", name])
     env = dict(os.environ)
-    if gpu:
+    if variant == "cuda":
         env.setdefault("CONDA_OVERRIDE_CUDA", "12.0")
-    sys.stderr.write(f"[scorer-env] creating '{name}' ({'gpu' if gpu else 'cpu'}): {' '.join(cmd)}\n")
-    if stream:
-        proc = subprocess.run(cmd, env=env)
-        ok = proc.returncode == 0
-        return ok, ("env created" if ok else f"env create failed (exit {proc.returncode})")
-    cp = _run(cmd, env=env)
-    return cp.returncode == 0, (cp.stdout + cp.stderr)[-4000:]
+    sys.stderr.write(f"[scorer-env] creating '{name}' ({variant}): {' '.join(cmd)}\n")
+    proc = subprocess.run(cmd, env=env) if stream else _run(cmd, env=env)
+    if proc.returncode != 0:
+        detail = "" if stream else (proc.stdout + proc.stderr)[-2000:]
+        return False, f"env create failed (exit {proc.returncode}) {detail}"
+    # Metal: install the Apple Metal TensorFlow into the fresh env via its pip
+    spec = SCORER_ENVS[name]
+    if variant == "metal" and spec.get("metal_pip"):
+        exe = cmd[0]
+        pip_cmd = [exe, "run", "-n", name, "pip", "install"] + spec["metal_pip"]
+        sys.stderr.write(f"[scorer-env] installing Metal TensorFlow: {' '.join(spec['metal_pip'])}\n")
+        pp = subprocess.run(pip_cmd) if stream else _run(pip_cmd)
+        if pp.returncode != 0:
+            return False, f"env created but Metal TensorFlow pip install failed (exit {pp.returncode})"
+    return True, f"env created ({variant})"
 
 
 def create_env(name: str = DEFAULT_ENV, gpu: bool = False, force: bool = False,
                stream: bool = True) -> Tuple[bool, str]:
     """Create the scorer env AND provision its model source (idempotent).
 
-    Two independent steps: (1) the conda env, (2) the CRISPR-Bulge source+weights
-    (pinned clone). Both must succeed. GPU builds set CONDA_OVERRIDE_CUDA so the CUDA
-    TF build resolves off-GPU hosts.
+    Two independent steps: (1) the conda env (CPU / CUDA / Metal variant, auto-picked by
+    platform -- Metal on Apple Silicon), (2) the CRISPR-Bulge source+weights (pinned clone).
+    Both must succeed.
     """
     if name not in SCORER_ENVS:
         return False, f"unknown scorer env '{name}'"
-    ok_env, msg_env = _create_conda_env(name, gpu, force, stream)
+    variant = _variant(gpu)
+    ok_env, msg_env = _create_conda_env(name, gpu, force, stream, variant)
     if not ok_env:
         return False, msg_env
     ok_src, msg_src = provision_source(force=force)
@@ -289,14 +318,20 @@ def update_env(name: str = DEFAULT_ENV, gpu: bool = False) -> Tuple[bool, str]:
     channels = []
     for ch in spec["channels"]:
         channels += ["-c", ch]
-    cmd = [exe, "install", "-y", "-n", name] + channels + _packages(spec, gpu)
+    variant = _variant(gpu)
+    cmd = [exe, "install", "-y", "-n", name] + channels + _conda_packages(spec, variant)
     env = dict(os.environ)
-    if gpu:
+    if variant == "cuda":
         env.setdefault("CONDA_OVERRIDE_CUDA", "12.0")
-    sys.stderr.write(f"[scorer-env] updating '{name}': {' '.join(cmd)}\n")
+    sys.stderr.write(f"[scorer-env] updating '{name}' ({variant}): {' '.join(cmd)}\n")
     proc = subprocess.run(cmd, env=env)
-    ok = proc.returncode == 0
-    return ok, ("updated" if ok else f"update failed (exit {proc.returncode})")
+    if proc.returncode != 0:
+        return False, f"update failed (exit {proc.returncode})"
+    if variant == "metal" and spec.get("metal_pip"):
+        pp = subprocess.run([exe, "run", "-n", name, "pip", "install", "-U"] + spec["metal_pip"])
+        if pp.returncode != 0:
+            return False, f"conda update ok but Metal TF pip update failed (exit {pp.returncode})"
+    return True, f"updated ({variant})"
 
 
 # ---------------------------------------------------------------------------
