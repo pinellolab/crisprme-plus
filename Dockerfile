@@ -10,10 +10,12 @@
 # v2.8.3 carries the add-variants .tbi/.csi enricher fix + the MGBOA relicense. crisprme
 # is installed from this build context. The dependency
 # pins mirror the from-scratch Python-3.11 validation on ml007 (see PR #131):
-#   - azimuth/CRISTA scoring stack: scikit-learn 1.1.3 / numpy 1.24.4 /
-#     pandas 2.0.3 / scipy 1.10.1 (the vendored models only unpickle on this combo)
-#   - matplotlib-base < 3.9  (matplotlib >= 3.9 runtime-requires numpy >= 1.25,
-#     which conflicts with the pinned numpy 1.24.4)
+#   - scoring stack: scikit-learn 1.1.3 / numpy 1.24.4 / pandas 2.0.3 / scipy 1.10.1.
+#     LEGACY pin: it existed only because the vendored CRISTA + azimuth pickles needed this
+#     exact combo. CRISTA is retired (CRISPR-Bulge runs in its own conda env) and azimuth is
+#     gone, so no scorer needs it anymore (CFD uses version-agnostic lookup pickles). Kept
+#     conservatively; modernizing it is a separate full-suite-validated step.
+#   - matplotlib-base < 3.9  (>= 3.9 runtime-requires numpy >= 1.25; keep with the numpy pin)
 #   - Dash 2.x web stack (dash >= 2.14 bundles the old dash-core/html/renderer/
 #     table sub-packages, so those are intentionally dropped)
 FROM mambaorg/micromamba
@@ -103,12 +105,10 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
     # dbc.Tabs don't render under 2.x). Defensive: some dbc builds dropped a stray
     # site-packages/pyproject.toml that made Biopython emit a BiopythonWarning at import;
     # remove it if present (no-op otherwise) so startup is clean.
-    && rm -f ${PREFIX}/lib/python3.11/site-packages/pyproject.toml \
-    # unzip the CRISTA model at build time (the 276 MB pickle ships zipped in git)
-    && if [ -f ${PREFIX}/opt/crisprme/PostProcess/CRISTA_predictors.zip ]; then \
-         cd ${PREFIX}/opt/crisprme/PostProcess \
-         && unzip -o CRISTA_predictors.zip && rm -f CRISTA_predictors.zip; \
-       fi
+    && rm -f ${PREFIX}/lib/python3.11/site-packages/pyproject.toml
+# CRISTA was retired in favor of CRISPR-Bulge (the 276 MB CRISTA model + its unzip step are
+# gone). The CRISPR-Bulge model is provisioned into its own conda env by scorer_env
+# (build_scorer_envs, below); CFD's tiny score pickles ship as plain files in PostProcess/.
 
 # ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
 # Built in its OWN micromamba env so its TensorFlow/numpy pins never touch the

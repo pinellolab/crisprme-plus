@@ -47,20 +47,11 @@ import json
 import gzip
 import sys
 import warnings
-from CRISTA_score import CRISTA_predict_list
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
-# import azimuth.model_comparison
 SIZE_DOENCH = 10000
 N_THR = 3
-
-# Return max doench value among list of extended targets
-# def doenchParallel(targets, model, result):
-#     doench_score =  azimuth.model_comparison.predict(targets,None, None, model= model, pam_audit=False)
-#     doench_score = [np.around(i * 100) for i in doench_score]
-#     max_doench = int(max(doench_score))
-#     result.append(max_doench)
 
 
 def doenchForIupac(sequence_doench, guide_seq, genome_type):
@@ -314,9 +305,9 @@ with open(sys.argv[5]) as pam:
         pam_begin = len_pam * (-1)
         pam_end = None
 
-# Which ML scorer fills the second score column: 'crista' (default, byte-identical to
-# legacy) or 'crispr-bulge' (dedicated cbulge env via the scorer-runner).
-_SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crista").lower()
+# Second (ML) score column = CRISPR-Bulge (CRISTA retired); env var kept only so the
+# report/web can label the column.
+_SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crispr-bulge").lower()
 
 do_scores = True
 if guide_len != 20 or len_pam != 3 or pam_at_beginning:
@@ -575,187 +566,6 @@ def preprocess_CFD_score(target):
     return target
 
 
-def preprocess_CRISTA_score(cluster_targets):
-    # list with scored targets
-    cluster_scored = list()
-    index_to_null = list()
-
-    # skip scoring for CRISTA, remove to activate scoring
-    # do_scores = False
-
-    if do_scores:
-        pass
-    else:
-        for target in cluster_targets:
-            target_CRISTA = target.copy()
-            crista_score = -1  # null score
-            target_CRISTA[-2] = "{:.3f}".format(crista_score)
-            target_CRISTA.append("{:.3f}".format(crista_score))
-            cluster_scored.append(target_CRISTA)
-        return cluster_scored
-
-    # preprocess target then calculate CRISTA score
-    sgRNA_non_aligned_list = list()
-    DNA_aligned_list = list()
-    DNAseq_from_genome_list = list()
-    # process all found targets
-    for index, target in enumerate(cluster_targets):
-        # list with non-aligned sgRNA
-        sgRNA_non_aligned_list.append(str(target[1])[: len(str(target[1])) - 3] + "NGG")
-        # list with aligned DNA
-        DNA_aligned_list.append(str(target[2]))
-        # first 5 nucleotide to add to protospacer
-        pre_protospacer_DNA = genomeStr[int(target[4]) - 5 : int(target[4])].upper()
-        # protospacer taken directly from the aligned target
-        protospacerDNA = str(target[2]).replace("-", "")
-        if target[6] == "-":
-            protospacerDNA = reverse_complement_table(protospacerDNA)
-        # last 5 nucleotides to add to protospacer
-        post_protospacer_DNA = genomeStr[
-            int(target[4]) + len(target[1]) : int(target[4]) + len(target[1]) + 5
-        ].upper()
-
-        # DNA seq extracted from genome and append to aligned DNA seq from CRISPRme
-        complete_DNA_seq = (
-            str(pre_protospacer_DNA) + protospacerDNA + str(post_protospacer_DNA)
-        )
-
-        # trim the 3' and 5' end to avoid sequences longer than 29
-        len_DNA_seq = len(complete_DNA_seq)
-        first_half = complete_DNA_seq[int(len_DNA_seq / 2) - 14 : int(len_DNA_seq / 2)]
-        second_half = complete_DNA_seq[int(len_DNA_seq / 2) : int(len_DNA_seq / 2) + 15]
-        complete_DNA_seq = first_half + second_half
-        if target[6] == "-":
-            complete_DNA_seq = reverse_complement_table(complete_DNA_seq)
-
-        # Resolve any IUPAC bases from the SNP-overlaid fake-indel genome so the
-        # CRISTA model can score the window (strict no-op on the classic, plain
-        # fake genome -- classic scores stay byte-identical). The aligned DNA is
-        # resolved against the aligned guide (carrier allele that matched); the
-        # genome-context window is resolved to the first listed allele.
-        DNA_aligned_list[-1] = _resolve_overlaid_iupac(
-            DNA_aligned_list[-1], str(target[1])
-        )
-        complete_DNA_seq = _resolve_overlaid_iupac(complete_DNA_seq)
-
-        if (
-            # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
-            # an out-of-range/off-the-chromosome-end indel coordinate collapses the
-            # window to <29 nt (down to empty), which then crashes get_features
-            # (min() on an empty DNAshape list / [-3] IndexError) and aborts the whole
-            # INDEL post-analysis. Null those targets (CRISTA score -1) like the N case.
-            len(complete_DNA_seq) != 29
-            or "N" in complete_DNA_seq
-            or "n" in complete_DNA_seq
-            or "N" in DNA_aligned_list[-1]
-            or "n" in DNA_aligned_list[-1]
-        ):
-            complete_DNA_seq = "A" * 29
-            DNA_aligned_list[-1] = "A" * len(str(target[2]))
-            index_to_null.append(index)
-
-        # append sequence to DNA list
-        DNAseq_from_genome_list.append(complete_DNA_seq)
-
-    # calculate scores for alt sequence
-    crista_score_list_alt = list()
-    if do_scores:
-        crista_score_list_alt = CRISTA_predict_list(
-            sgRNA_non_aligned_list, DNA_aligned_list, DNAseq_from_genome_list
-        )
-
-    # preprocess target then calculate CRISTA score
-    sgRNA_non_aligned_list = list()
-    DNA_aligned_list = list()
-    DNAseq_from_genome_list = list()
-    # process all ref sequences in targets
-    for index, target in enumerate(cluster_targets):
-        # list with non-aligned sgRNA
-        sgRNA_non_aligned_list.append(str(target[1])[: len(str(target[1])) - 3] + "NGG")
-        # list with aligned DNA
-        if "n" not in target[-3]:
-            DNA_aligned_list.append(str(target[-3]))
-        else:
-            DNA_aligned_list.append(str(target[2]))
-        # first 5 nucleotide to add to protospacer
-        pre_protospacer_DNA = genomeStr[int(target[4]) - 5 : int(target[4])]
-        # protospacer taken directly from the ref genome
-        protospacerDNA = genomeStr[int(target[4]) : int(target[4]) + len(target[1])]
-        # last 5 nucleotides to add to protospacer
-        post_protospacer_DNA = genomeStr[
-            int(target[4]) + len(target[1]) : int(target[4]) + len(target[1]) + 5
-        ]
-
-        # DNA seq extracted from genome and append to aligned DNA seq from CRISPRme
-        complete_DNA_seq = (
-            str(pre_protospacer_DNA) + protospacerDNA + str(post_protospacer_DNA)
-        )
-
-        # trim the 3' and 5' end to avoid sequences longer than 29
-        len_DNA_seq = len(complete_DNA_seq)
-        first_half = complete_DNA_seq[int(len_DNA_seq / 2) - 14 : int(len_DNA_seq / 2)]
-        second_half = complete_DNA_seq[int(len_DNA_seq / 2) : int(len_DNA_seq / 2) + 15]
-        complete_DNA_seq = first_half + second_half
-        if target[6] == "-":
-            complete_DNA_seq = reverse_complement_table(complete_DNA_seq)
-
-        # Resolve any IUPAC bases from the SNP-overlaid fake-indel genome so the
-        # CRISTA model can score the window (strict no-op on the classic, plain
-        # fake genome -- classic scores stay byte-identical). The aligned DNA is
-        # resolved against the aligned guide (carrier allele that matched); the
-        # genome-context window is resolved to the first listed allele.
-        DNA_aligned_list[-1] = _resolve_overlaid_iupac(
-            DNA_aligned_list[-1], str(target[1])
-        )
-        complete_DNA_seq = _resolve_overlaid_iupac(complete_DNA_seq)
-
-        if (
-            # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
-            # an out-of-range/off-the-chromosome-end indel coordinate collapses the
-            # window to <29 nt (down to empty), which then crashes get_features
-            # (min() on an empty DNAshape list / [-3] IndexError) and aborts the whole
-            # INDEL post-analysis. Null those targets (CRISTA score -1) like the N case.
-            len(complete_DNA_seq) != 29
-            or "N" in complete_DNA_seq
-            or "n" in complete_DNA_seq
-            or "N" in DNA_aligned_list[-1]
-            or "n" in DNA_aligned_list[-1]
-        ):
-            complete_DNA_seq = "A" * 29
-            DNA_aligned_list[-1] = "A" * len(str(target[2]))
-            index_to_null.append(index)
-
-        # append sequence to DNA list
-        DNAseq_from_genome_list.append(complete_DNA_seq)
-
-    # calculate score
-    crista_score_list_ref = list()
-    if do_scores:
-        crista_score_list_ref = CRISTA_predict_list(
-            sgRNA_non_aligned_list, DNA_aligned_list, DNAseq_from_genome_list
-        )
-
-    for index, target in enumerate(cluster_targets):
-        target_CRISTA = target.copy()
-        # if any of the scored target is not valid, due to Ns in the sequence, return a -1 score
-        if index in index_to_null:
-            crista_score = -1  # null score
-            target_CRISTA[-2] = "{:.3f}".format(crista_score)
-            target_CRISTA.append("{:.3f}".format(crista_score))
-        else:
-            # else report the correct score
-            if target_CRISTA[-2] == 55:  # reference target have duplicate score
-                target_CRISTA[-2] = "{:.3f}".format(crista_score_list_alt[index])
-                target_CRISTA.append("{:.3f}".format(crista_score_list_alt[index]))
-            if target_CRISTA[-2] == 33:  # alternative target scoring
-                target_CRISTA[-2] = "{:.3f}".format(crista_score_list_ref[index])
-                target_CRISTA.append("{:.3f}".format(crista_score_list_alt[index]))
-        # append to final score cluster
-        cluster_scored.append(target_CRISTA)
-
-    return cluster_scored
-
-
 def preprocess_CRISPR_BULGE_score(cluster_targets):
     """CRISPR-Bulge analogue of preprocess_CRISTA_score (indel path).
 
@@ -843,12 +653,9 @@ def calculate_scores(cluster_to_save):
         target_CFD = target.copy()
         cluster_with_CFD_score.append(preprocess_CFD_score(target_CFD))
 
-    # process score for each target in cluster, at the same time to improve execution time.
-    # CRISPRME_SCORER_SELECT picks the ML scorer for this second column (crista default).
-    if _SCORER_SELECT in ("crispr-bulge", "crispr_bulge", "cbulge"):
-        cluster_with_CRISTA_score = preprocess_CRISPR_BULGE_score(cluster_to_save)
-    else:
-        cluster_with_CRISTA_score = preprocess_CRISTA_score(cluster_to_save)
+    # second (ML) score column = CRISPR-Bulge (CRISTA retired); same .bestCRISTA.txt /
+    # CRISTA_score column names kept as stable identifiers (report/web label it CRISPR-Bulge).
+    cluster_with_CRISTA_score = preprocess_CRISPR_BULGE_score(cluster_to_save)
 
     # REMOVED TO CHECK IF FILE IS RETURN WITH IDENTICAL ROWS COUNT
 

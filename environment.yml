@@ -6,20 +6,24 @@
 #   mamba activate crisprme
 #   bash install_from_source.sh          # builds crispritz 2.8.2 + installs both
 #
-# The scoring stack pins (scikit-learn/numpy/scipy/pandas) are required: the
-# vendored azimuth/CRISTA models only unpickle on this exact combination.
+# NOTE: the scikit-learn/numpy/scipy/pandas pins below existed ONLY because the vendored
+# CRISTA + azimuth pickles required that exact combination. CRISTA has been RETIRED
+# (CRISPR-Bulge replaces it, in its own conda env) and azimuth is gone, so these pins are
+# no longer required by any scorer -- CFD uses tiny version-agnostic lookup pickles. They
+# are kept here conservatively; MODERNIZING them (current sklearn/numpy) is done + validated
+# against the full test suite in a dedicated pass (numpy 2.x has breaking changes).
 name: crisprme
 channels:
   - conda-forge
   - bioconda
 dependencies:
   - python=3.11
-  # --- azimuth / CRISTA scoring stack (do not bump: pickles are version-locked)
+  # --- scoring stack (legacy pin, no longer scorer-required; see note above)
   - scikit-learn=1.1.3
   - numpy=1.24.4
   - scipy=1.10.1
   - pandas=2.0.3
-  - matplotlib-base<3.9        # >=3.9 needs numpy>=1.25, conflicts with the pin
+  - matplotlib-base<3.9        # >=3.9 needs numpy>=1.25, conflicts with the numpy pin
   # --- pipeline / analysis
   - biopython
   - more-itertools

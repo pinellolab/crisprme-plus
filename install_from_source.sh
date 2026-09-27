@@ -75,12 +75,9 @@ cp -R "${REPO}/." "${CONDA_PREFIX}/opt/crisprme/"
 rm -rf "${CONDA_PREFIX}/opt/crisprme/.git"
 cp "${CONDA_PREFIX}/opt/crisprme/crisprme.py" "${CONDA_PREFIX}/bin/crisprme.py"
 chmod +x "${CONDA_PREFIX}/bin/crisprme.py"
-# unzip the CRISTA scoring model (ships zipped in git; also auto-unzips on first
-# use, but do it now so the first search is not slowed down)
-if [ -f "${CONDA_PREFIX}/opt/crisprme/PostProcess/CRISTA_predictors.zip" ]; then
-    ( cd "${CONDA_PREFIX}/opt/crisprme/PostProcess" \
-        && unzip -o CRISTA_predictors.zip && rm -f CRISTA_predictors.zip )
-fi
+# CRISTA was retired in favor of CRISPR-Bulge; there is no 276 MB model to unzip here
+# anymore. CFD's tiny score pickles ship as plain files; the CRISPR-Bulge model is
+# provisioned into its own conda env below.
 
 # ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
 # Built in its OWN env so its TensorFlow/numpy pins never touch the main crisprme

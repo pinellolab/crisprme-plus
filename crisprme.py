@@ -1700,20 +1700,15 @@ def complete_search() -> None:
         emit_alt = per_sample  # default: ON under --per-sample, OFF for population-level
     os.environ["CRISPRME_EMIT_ALT_ALIGNMENTS"] = "1" if emit_alt else "0"
 
-    # ML off-target scorer selection (the SECOND score column beside CFD; CFD stays the
-    # primary score). 'crista' (default) is byte-identical to legacy; 'crispr-bulge' runs
-    # in the dedicated cbulge conda env via the scorer-runner (more accurate, esp. on
-    # bulges). --compute-backend cpu|gpu picks the device (GPU optional; graceful CPU
-    # fallback). Threaded as env vars like CRISPRME_FAST_MODE so the whole post-analysis
-    # subprocess tree (submit_job -> pools -> new_simple_analysis / analisi_indels) inherits.
-    scorer = "crista"
-    if "--scorer" in args:
-        try:
-            scorer = args[args.index("--scorer") + 1].lower()
-        except IndexError:
-            error("--scorer requires a value: crista | crispr-bulge")
-        if scorer not in ("crista", "crispr-bulge", "crispr_bulge", "cbulge"):
-            error("--scorer must be 'crista' or 'crispr-bulge'")
+    # ML off-target scorer for the SECOND score column beside CFD (CFD stays the primary
+    # score). As of the CRISTA retirement this is ALWAYS CRISPR-Bulge -- the more accurate,
+    # MIT-licensed model that runs in the dedicated cbulge conda env via the scorer-runner.
+    # CRISPRME_SCORER_SELECT is retained as the internal signal (report/web read it from
+    # .Params.txt to label the column) but is no longer user-selectable. --compute-backend
+    # cpu|gpu picks the device (GPU optional; graceful CPU fallback). Both thread through the
+    # post-analysis subprocess tree (submit_job -> pools -> new_simple_analysis/analisi_indels)
+    # as env vars, exactly like CRISPRME_FAST_MODE.
+    scorer = "crispr-bulge"
     os.environ["CRISPRME_SCORER_SELECT"] = scorer
 
     compute_backend = "cpu"
@@ -1726,24 +1721,22 @@ def complete_search() -> None:
             error("--compute-backend must be 'cpu' or 'gpu'")
     os.environ["CRISPRME_COMPUTE_BACKEND"] = compute_backend
 
-    # if the CRISPR-Bulge scorer is requested, nudge the user if its env isn't healthy
-    # (the scorer-runner degrades gracefully to -1.0, but a heads-up avoids silent gaps)
-    if scorer in ("crispr-bulge", "crispr_bulge", "cbulge"):
-        try:
-            sys.path.insert(0, corrected_origin_path)
-            import scorer_env as _se
-            _hc = _se.health_check("cbulge")
-            if _hc.get("status") == "error":
-                print(
-                    "WARNING [complete-search]: --scorer crispr-bulge selected but the "
-                    "'cbulge' scorer env is not ready (" +
-                    "; ".join(m for _, m in _hc.get("issues", [])) +
-                    "). Off-target ML scores will be -1 until you run: "
-                    "crisprme.py scorer-env create",
-                    flush=True,
-                )
-        except Exception:
-            pass
+    # nudge the user if the CRISPR-Bulge env isn't healthy (the scorer-runner degrades
+    # gracefully to -1.0, but a heads-up avoids silent gaps in the ML score column)
+    try:
+        sys.path.insert(0, corrected_origin_path)
+        import scorer_env as _se
+        _hc = _se.health_check("cbulge")
+        if _hc.get("status") == "error":
+            print(
+                "WARNING [complete-search]: the 'cbulge' scorer env is not ready (" +
+                "; ".join(m for _, m in _hc.get("issues", [])) +
+                "). CRISPR-Bulge off-target scores will be -1 until you run: "
+                "crisprme.py scorer-env create",
+                flush=True,
+            )
+    except Exception:
+        pass
 
     # optional prebuilt/staged reference-index library (--index-path). When
     # given, the reference index is looked up here (e.g. an index made with
