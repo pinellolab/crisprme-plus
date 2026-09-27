@@ -12,6 +12,19 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Changed
+- **New default search: 4 mismatches + 1 DNA + 1 RNA bulge (6-edit budget).** The web form
+  and CLI now default to `--mm 4 --bDNA 1 --bRNA 1` with `--max-total-edits 6` (was a 6/2/2
+  ceiling with a 4-edit budget). This keeps the default in the CRISPR-Bulge scorer's validated
+  **single-bulge** domain and, crucially, sizes the total-edit budget to the params so a bulged
+  off-target at the full mismatch budget is no longer silently pruned. Simple mode (Advanced
+  panel closed) fixes the per-type bulge cap at 1; the CLI likewise defaults omitted
+  `--bDNA/--bRNA` to a single bulge of each type. Open the Advanced panel / pass explicit
+  `--bDNA/--bRNA` (and raise `--max-total-edits` to their sum) for deeper searches.
+- **Per-sample availability + label are index-aware on the web.** The "Per-sample" analysis
+  option is auto-enabled only for genotyped panels (grayed out + reverted for sites-only like
+  `mega`), and its label now states what it buys on the chosen index: **CONFIRMED cis + named
+  carriers on a phased panel**, **carriers with PUTATIVE cis on an unphased panel**, or the
+  hybrid mix.
 - **CRISPR-Bulge replaces CRISTA as the machine-learning off-target scorer.**
   The vendored CRISTA RandomForest (scikit-learn) is retired in favor of CRISPR-Bulge
   (Yaish & Orenstein, *NAR* 2024; TensorFlow GRU ensemble; MIT), which is more accurate

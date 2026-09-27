@@ -342,7 +342,8 @@ def print_help_complete_search() -> None:
         "reported alignment, pruned INSIDE the TST search so excess alignments "
         "are never generated (much faster + smaller intermediates). E.g. with "
         "--mm 6 --bDNA 2 --bRNA 2 --max-total-edits 6, a 4mm+1+1 alignment is "
-        "kept but a 6mm+2+2 (=10) one is skipped. Default 4; set it >= "
+        "kept but a 6mm+2+2 (=10) one is skipped. Default 6 (sized for the "
+        "recommended 4mm + 1 DNA + 1 RNA bulge); set it >= "
         "mm+bDNA+bRNA to effectively disable. NOTE: the cap is on the alignment "
         "against the searched (possibly variant-enriched) genome; a variant that "
         "matches the guide lowers the searched edit count, so a VARIANT off-target's "
@@ -1763,9 +1764,11 @@ def complete_search() -> None:
     # combined-edit alignments (e.g. 6mm+2+2 bulges = 10) from bloating the
     # intermediate files, scoring and post-analysis. Enforced INSIDE the TST
     # search (pruned before generation, --max-edits) with a post-search awk drop
-    # as a backstop for the -r/brute-force path. Default 4 (a real off-target
-    # rarely stacks many mismatches AND several bulges); -1 disables it.
-    max_total_edits = 4
+    # as a backstop for the -r/brute-force path. Default 6, sized for the recommended
+    # default search (4 mismatches + 1 DNA + 1 RNA bulge = 6) so a bulged off-target at the
+    # full mismatch budget is NOT silently pruned; it stays lowerable as a perf backstop and
+    # -1 disables it. (A real off-target rarely stacks many mismatches AND several bulges.)
+    max_total_edits = 6
     if "--max-total-edits" in args:
         try:
             max_total_edits = int(args[args.index("--max-total-edits") + 1])
@@ -1835,25 +1838,27 @@ def complete_search() -> None:
         )
     nuclease = pam_name_fields[2]
     # Treat --max-total-edits as the single "max edits" knob (mirroring the web slider):
-    # when the user did NOT specify per-type bulges, derive bDNA=bRNA from the max-edits
-    # budget, BOUNDED by the bulge depth a search can REACH here -- so e.g.
-    # `complete-search --vcf ... --max-total-edits 4` searches up to 2 bulges of each type
-    # (finding 2mm+1bulge / 2mm+2bulge patterns) with no bulge flags. The reference term of
-    # the cap is buildable-aware (the reference index is built on demand from the shipped
-    # raw genome, as the search shell does), so a fresh/dict-less install no longer silently
-    # derives 0 bulges; the variant term stays strictly installed-index-based (a variant
-    # index can't be built dict-less). Explicit --bDNA/--bRNA always win; if no index can
-    # supply bulges and no raw genome exists the search stays bulge-free (fast, safe).
+    # when the user did NOT specify per-type bulges, default to ONE DNA + ONE RNA bulge
+    # (bounded by the bulge depth a search can REACH here). We deliberately cap the derived
+    # default at a SINGLE bulge of each type: that is the recommended default search (4mm +
+    # 1 DNA + 1 RNA) and stays in the CRISPR-Bulge scorer's validated single-bulge domain
+    # (>=2-bulge sites are out of domain -- see the report scores legend). A deeper search
+    # is opt-in via explicit --bDNA/--bRNA (which always win). The reference term of the cap
+    # is buildable-aware (the reference index is built on demand from the shipped raw genome,
+    # as the search shell does), so a fresh/dict-less install still gets its 1 bulge; the
+    # variant term stays strictly installed-index-based. If no index can supply bulges and no
+    # raw genome exists the search stays bulge-free (fast, safe).
+    _SIMPLE_BULGE_CAP = 1
     if not _bdna_given and not _brna_given and max_total_edits > 0:
         _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant)
-        _derived = min(max_total_edits, _idx_cap)
+        _derived = min(max_total_edits, _idx_cap, _SIMPLE_BULGE_CAP)
         if _derived > 0:
             bDNA = bRNA = _derived
             bMax = max(bDNA, bRNA)
             print(
-                f"[complete-search] no --bDNA/--bRNA given: deriving up to {_derived} "
-                f"bulge(s) of each type from --max-total-edits {max_total_edits} "
-                f"(reachable index bulge depth {_idx_cap})."
+                f"[complete-search] no --bDNA/--bRNA given: defaulting to {_derived} "
+                f"bulge(s) of each type (single-bulge domain; reachable index bulge depth "
+                f"{_idx_cap}). Pass explicit --bDNA/--bRNA for a deeper search."
             )
     # [max-total-edits] Surface the silent combined-edit prune (issue #107): when the
     # requested mm + bulges exceed the cap, any alignment stacking more than

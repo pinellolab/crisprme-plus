@@ -181,18 +181,19 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.p
   --vcf list_vcf.txt --samplesID list_samplesID.txt \
   --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
   --gene_annotation Annotations/gencode.protein_coding.bed.gz \
-  --mm 6 --bDNA 2 --bRNA 2 --output my_search --thread 8
-# ^ runs the POPULATION-LEVEL analysis by default (worst-possible representatives; removes the
+  --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 8
+# ^ the recommended default search: up to 4 mismatches + 1 DNA and 1 RNA bulge (a 6-edit
+#   budget, matching the default --max-total-edits 6, so nothing is pruned). This sits in the
+#   CRISPR-Bulge scorer's validated single-bulge domain. Raise the caps for a deeper search,
+#   but also raise --max-total-edits to their sum or alignments over the budget are PRUNED
+#   (e.g. --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget → add --max-total-edits 10 to keep all).
+#   Runs the POPULATION-LEVEL analysis by default (worst-possible representatives; removes the
 #   per-haplotype enumeration wall that makes dense/aggregate panels intractable).
 #   Add --per-sample to resolve per-sample genotypes — CONFIRMED cis phasing + named carrier
 #   samples + exact joint allele frequency — recommended for genotyped panels / clinical
 #   validation. This is a genotype-resolution mode, not a speed mode: for a single guide the
 #   runtimes are comparable, but it can be intractable on dense/aggregate panels; on a
 #   sites-only index (mega) it cannot resolve carriers (no genotypes) and is inert.
-# NOTE: --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget but the default --max-total-edits is 4,
-#   so alignments over 4 combined edits (including many SNP+indel co-occurrences, where the
-#   indel consumes a bulge slot) are PRUNED. Add --max-total-edits 6 (or the full budget) to
-#   keep them — slower.
 
 # build the self-contained, shareable HTML report (report.html + a data/ folder)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py generate-report \
@@ -675,9 +676,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed.gz \
     --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
-# NOTE: --mm 4 --bDNA 1 --bRNA 1 is a 6-edit budget but the default --max-total-edits is 4,
-#   so alignments over 4 combined edits (including SNP+indel co-occurrences, where the indel
-#   consumes a bulge slot) are PRUNED. Add --max-total-edits 6 to keep them — slower.
+# ^ the recommended default: 4 mismatches + 1 DNA + 1 RNA bulge = a 6-edit budget, matching
+#   the default --max-total-edits 6, so nothing (incl. SNP+indel co-occurrences) is pruned.
+#   Raise the per-type caps for a deeper search, but raise --max-total-edits to their sum too.
 # shareable report: crisprme.py generate-report --result-dir Results/my_search
 ```
 
@@ -793,17 +794,18 @@ its purpose and usage:
 - `--mm` (*Required*)
   <br>Maximum number of mismatches allowed during off-target identification.
 
-- `--bDNA` (*Optional*, default derived from `--max-total-edits`)
-  <br>Maximum allowable DNA bulge size. If omitted (together with `--bRNA`), it is
-  derived from `--max-total-edits`, capped by the bulge depth the installed index
-  supports — so `--max-total-edits` acts as a single "max edits" knob. Pass it explicitly
-  to override. If no bulge-capable index is installed the search stays bulge-free.
+- `--bDNA` (*Optional*, default `1`)
+  <br>Maximum allowable DNA bulge size. If omitted (together with `--bRNA`), it defaults to
+  **1** (one DNA bulge), bounded by the bulge depth the installed index supports — the
+  recommended single-bulge default (the CRISPR-Bulge ML scorer's validated domain). Pass it
+  explicitly for a deeper search. If no bulge-capable index is installed the search stays
+  bulge-free.
 
-- `--bRNA` (*Optional*, default derived from `--max-total-edits`)
-  <br>Maximum allowable RNA bulge size. See `--bDNA` — the two are derived together from
-  `--max-total-edits` when neither is given.
+- `--bRNA` (*Optional*, default `1`)
+  <br>Maximum allowable RNA bulge size. See `--bDNA` — defaults to one RNA bulge when neither
+  is given.
 
-- `--max-total-edits` (*Optional*, default `4`)
+- `--max-total-edits` (*Optional*, default `6`)
   <br>Cap on the combined number of edits (mismatches + DNA/RNA bulges) considered
   per candidate off-target, and — when `--bDNA/--bRNA` are omitted — the budget the
   per-type bulge caps are derived from. Lower values speed up dense-variant searches;
