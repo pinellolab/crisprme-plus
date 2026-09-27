@@ -65,6 +65,41 @@ class TestPreImportEnv(unittest.TestCase):
             self.assertNotIn("CUDA_VISIBLE_DEVICES", os.environ)
 
 
+class TestCpuThreadCap(unittest.TestCase):
+    def test_explicit_override_wins(self):
+        with mock.patch.dict(os.environ, {"CRISPRME_SCORER_THREADS": "8"}, clear=False):
+            self.assertEqual(cb._cpu_thread_cap(), 8)
+
+    def test_omp_num_threads_honored(self):
+        env = {k: v for k, v in os.environ.items() if k not in ("CRISPRME_SCORER_THREADS",)}
+        env["OMP_NUM_THREADS"] = "4"
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(cb._cpu_thread_cap(), 4)
+
+    def test_default_caps_at_16(self):
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("CRISPRME_SCORER_THREADS", "OMP_NUM_THREADS")}
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch("os.cpu_count", return_value=256):
+            self.assertEqual(cb._cpu_thread_cap(), 16)
+
+    def test_default_uses_cpu_count_when_small(self):
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("CRISPRME_SCORER_THREADS", "OMP_NUM_THREADS")}
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch("os.cpu_count", return_value=8):
+            self.assertEqual(cb._cpu_thread_cap(), 8)
+
+    def test_configure_tf_sets_thread_caps(self):
+        cfg = TestConfigureTf._FakeConfig(gpus=[])
+        cfg.experimental = mock.Mock()
+        cfg.threading = mock.Mock()
+        tf = mock.Mock(config=cfg)
+        cb.configure_tf(tf, cb.CPU)
+        cfg.threading.set_intra_op_parallelism_threads.assert_called()
+        cfg.threading.set_inter_op_parallelism_threads.assert_called_with(2)
+
+
 class TestArrayModule(unittest.TestCase):
     def test_metal_and_cpu_use_numpy(self):
         import numpy as np

@@ -81,14 +81,38 @@ def pre_import_env(backend):
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 
+def _cpu_thread_cap():
+    """How many intra-op threads the scorer should use on CPU. TF's default grabs ALL
+    logical cores, which on a big shared node (e.g. a 256-core cluster box) OVERSUBSCRIBES
+    and runs ~40% slower than a modest cap (measured: 6.0k vs 8.3k OT/s at cap=16). Honor
+    an explicit override, else cap at 16."""
+    for var in ("CRISPRME_SCORER_THREADS", "OMP_NUM_THREADS"):
+        v = os.environ.get(var, "")
+        if v.isdigit() and int(v) > 0:
+            return int(v)
+    try:
+        return min(16, os.cpu_count() or 8)
+    except Exception:
+        return 8
+
+
 def configure_tf(tf, backend):
-    """Apply device placement AFTER `import tensorflow`. Returns the backend actually in
-    effect ('cpu' if the requested accelerator turned out to have no visible GPU device).
+    """Apply thread + device configuration AFTER `import tensorflow`. Returns the backend
+    actually in effect ('cpu' if the requested accelerator turned out to have no visible
+    GPU device).
 
     On Metal, tensorflow-metal exposes the Apple GPU as a 'GPU' physical device, so the
     same code path (enable memory growth, keep visible) drives both cuda and metal; for
     cpu we hide all GPU devices so TF stays on the CPU even if a device is present.
     """
+    # Cap CPU thread parallelism first (must precede any op execution). Harmless under
+    # cuda/metal -- it only bounds CPU-side ops -- and crucial for the CPU path + the
+    # Metal->CPU numerical fallback, which otherwise oversubscribe a many-core host.
+    try:
+        tf.config.threading.set_intra_op_parallelism_threads(_cpu_thread_cap())
+        tf.config.threading.set_inter_op_parallelism_threads(2)
+    except Exception:
+        pass
     try:
         gpus = tf.config.list_physical_devices("GPU")
     except Exception:
