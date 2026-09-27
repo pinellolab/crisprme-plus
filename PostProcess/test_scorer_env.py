@@ -152,6 +152,17 @@ class TestState(unittest.TestCase):
         self.assertEqual(rec["status"], se.ERROR)
         self.assertTrue(any("unknown scorer env" in m for _, m in rec["issues"]))
 
+    def test_health_check_override_env_uses_cbulge_spec(self):
+        # CRISPRME_SCORER_ENV -> a custom env name that IS the configured default is probed
+        # against the cbulge spec (not rejected as unknown); with no manager it errors on
+        # the manager, NOT on "unknown scorer env".
+        with mock.patch.object(se, "DEFAULT_ENV", "cbulge_cpu"), \
+             mock.patch.object(se, "detect_env_manager", return_value=None):
+            rec = se.health_check("cbulge_cpu")
+        self.assertEqual(rec["status"], se.ERROR)
+        self.assertFalse(any("unknown scorer env" in m for _, m in rec["issues"]))
+        self.assertTrue(any("manager" in m for _, m in rec["issues"]))
+
 
 class TestHealthCheck(unittest.TestCase):
     def _probe_result(self, bad=None, vers=None):

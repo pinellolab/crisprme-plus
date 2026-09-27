@@ -1730,10 +1730,11 @@ def complete_search() -> None:
     try:
         sys.path.insert(0, corrected_origin_path)
         import scorer_env as _se
-        _hc = _se.health_check("cbulge")
+        _scorer_name = _se.DEFAULT_ENV   # honors CRISPRME_SCORER_ENV; the runtime scorer uses the same
+        _hc = _se.health_check(_scorer_name)
         if _hc.get("status") == "error":
             print(
-                "WARNING [complete-search]: the 'cbulge' scorer env is not ready (" +
+                f"WARNING [complete-search]: the '{_scorer_name}' scorer env is not ready (" +
                 "; ".join(m for _, m in _hc.get("issues", [])) +
                 "). CRISPR-Bulge off-target scores will be -1 until you run: "
                 "crisprme.py scorer-env create",

@@ -358,10 +358,17 @@ def health_check(name: str = DEFAULT_ENV) -> dict:
     rec: dict = {"env": name, "status": OK, "issues": [], "versions": {},
                  "python_version": None, "weights_present": False}
     if spec is None:
-        rec["status"] = ERROR
-        rec["issues"].append((ERROR, f"unknown scorer env '{name}' "
-                                     f"(known: {', '.join(sorted(SCORER_ENVS))})"))
-        return rec
+        # A CRISPRME_SCORER_ENV override makes DEFAULT_ENV a user/site-provided
+        # CRISPR-Bulge env that isn't one of our named specs. Probe it against the
+        # 'cbulge' spec (same import contract) instead of declaring it unknown. An
+        # arbitrary unknown name (not the configured default) still errors as unknown.
+        if name == DEFAULT_ENV:
+            spec = SCORER_ENVS.get("cbulge")
+        if spec is None:
+            rec["status"] = ERROR
+            rec["issues"].append((ERROR, f"unknown scorer env '{name}' "
+                                         f"(known: {', '.join(sorted(SCORER_ENVS))})"))
+            return rec
 
     mgr = detect_env_manager()
     if not mgr:
