@@ -4,6 +4,7 @@ from operator import not_, truediv
 import operator
 from posixpath import expanduser
 from intervaltree import IntervalTree
+from utils import gene_region_class
 import sys
 import time
 import glob
@@ -288,6 +289,7 @@ saveDict = {
     "Annotation_closest_gene_name": "NA",
     "Annotation_closest_gene_ID": "NA",
     "Annotation_closest_gene_distance_(kb)": "NA",
+    "Annotation_gene_region": "NA",
     "Annotation_ENCODE": "NA",
     "Annotation_DHS": "NA",
     "Annotation_COSMIC": "NA",
@@ -1167,6 +1169,14 @@ for nline, line in enumerate(inCrispritzResults):
         )
     except (ValueError, IndexError):
         saveDict["High_variant_density_region"] = "NA"
+
+    # derive the single-class gene region from the finalized GENCODE feature-set +
+    # protein-coding gene distance (shared helper => identical to the report/web).
+    saveDict["Annotation_gene_region"] = gene_region_class(
+        saveDict["Annotation_GENCODE"],
+        saveDict["Annotation_closest_gene_distance_(kb)"],
+        missing="NA",
+    )
 
     save = "\t".join(list(saveDict.values()))
     save += "\n"

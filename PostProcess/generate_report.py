@@ -109,6 +109,7 @@ import matplotlib.patches as mpatches  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+from utils import gene_region_class  # noqa: E402  # shared with resultIntegrator + web
 
 # report-generator version -- bumped here, stamped in the footer provenance line.
 REPORT_GENERATOR_VERSION = "2.4"
@@ -577,38 +578,15 @@ def _gene_region_class(gencode_value, gene_dist=None):
     UTR, an intron, or intergenic space -- without parsing a set like
     ``"CDS,exon,gene,transcript(-)"``.
 
-    Kept COHERENT with the ``Gene`` / ``Gene_distance_kb`` columns (both anchored to
-    the nearest *protein-coding* gene): a non-zero ``gene_dist`` means the site is
-    outside every protein-coding gene body -> ``intergenic`` (so the region and the
-    distance never contradict each other). When the site IS inside a gene
-    (``gene_dist == 0``, or no distance available), the sub-region is read from the
-    ``Annotation_GENCODE`` feature-set the functional annotation carries for the
-    target -- ``gene``/``transcript`` span the whole gene BODY (introns included),
-    ``exon`` the spliced transcript, ``CDS`` the coding sequence,
-    ``five_prime_UTR``/``three_prime_UTR`` the UTRs, ``start_codon``/``stop_codon``
-    (coding). Precedence = most functionally significant first:
-    CDS > 5'UTR > 3'UTR > exon > intron > intergenic; a site inside a gene body but
-    overlapping no exon is an ``intron``.
+    Thin report-side wrapper over the shared ``utils.gene_region_class`` -- the SINGLE
+    source of truth also used by ``resultIntegrator`` (the raw ``Annotation_gene_region``
+    column) and the web, so every report surface reports the SAME class for a site. It
+    stays coherent with the ``Gene`` / ``Gene_distance_kb`` columns: a non-zero
+    ``gene_dist`` (outside every protein-coding gene body) -> ``intergenic``; when inside
+    a gene the sub-region is read from the ``Annotation_GENCODE`` feature-set with
+    precedence CDS > 5'UTR > 3'UTR > exon > intron. See ``utils.gene_region_class``.
     """
-    d = pd.to_numeric(gene_dist, errors="coerce") if gene_dist is not None else None
-    if d is not None and pd.notna(d) and d != 0:
-        return "intergenic"  # outside every protein-coding gene (matches Gene_distance_kb)
-    if _is_na(gencode_value):
-        return CURATED_MISSING
-    s = str(gencode_value).lower()
-    if "cds" in s or "codon" in s:          # CDS / start_codon / stop_codon / selenocysteine
-        return "CDS"
-    if "five_prime_utr" in s:
-        return "5'UTR"
-    if "three_prime_utr" in s:
-        return "3'UTR"
-    if "exon" in s:                          # exon w/o CDS/UTR = noncoding-transcript exon
-        return "exon"
-    if "gene" in s or "transcript" in s:     # inside gene body, no exon overlap
-        return "intron"
-    if "intergenic" in s:
-        return "intergenic"
-    return CURATED_MISSING
+    return gene_region_class(gencode_value, gene_dist, missing=CURATED_MISSING)
 
 
 def _curated_cell(kind, row, cols):

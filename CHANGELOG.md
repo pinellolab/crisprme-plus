@@ -12,16 +12,19 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
-- **`Gene_region` report column — exon/intron/UTR granularity for the gene annotation.**
-  The report's curated table and every download TSV now carry a `Gene_region` column that
-  states, in one word, where an off-target sits relative to the nearest protein-coding gene:
-  `CDS` (coding exon), `5'UTR`, `3'UTR`, `exon` (non-coding-transcript exon), `intron`
-  (inside a gene body but not an exon), or `intergenic`. It is derived from the existing
-  `Annotation_GENCODE` feature-set (no new pipeline pass) and kept coherent with the
-  `Gene` / `Gene_distance_kb` columns — `intergenic` is defined by `Gene_distance_kb > 0`, so
-  the region never contradicts the distance. The raw `GENCODE` column still keeps the full
-  overlapping feature-set. Documented in the report's annotation legend. Works retroactively
-  on existing `integrated_results.tsv` files (report-curation-only derivation).
+- **`Gene_region` column — exon/intron/UTR granularity for the gene annotation, on every
+  report surface.** States in one word where an off-target sits relative to the nearest
+  protein-coding gene: `CDS` (coding exon), `5'UTR`, `3'UTR`, `exon` (non-coding-transcript
+  exon), `intron` (inside a gene body but not an exon), or `intergenic`. Computed from the
+  existing `Annotation_GENCODE` feature-set (no new pipeline pass) and kept coherent with the
+  `Gene` / `Gene_distance_kb` columns — `intergenic` is pinned to `Gene_distance_kb > 0`, so
+  the region never contradicts the distance. Surfaced **consistently everywhere** from ONE
+  shared helper (`utils.gene_region_class`): the raw `integrated_results.tsv`
+  (`Annotation_gene_region`, written by the integrator), the in-report curated table, and
+  every download TSV (all tiers, panel, top1000, variant_created); documented in the report's
+  annotation legend. The raw `GENCODE` column still keeps the full overlapping feature-set.
+  Report curation also derives it on the fly, so it renders on pre-existing
+  `integrated_results.tsv` files too.
 
 ## [2.6.0] - 2026-09-28
 
