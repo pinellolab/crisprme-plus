@@ -18,7 +18,8 @@ Open it from the **"Settings / Data Manager"** button on the home page, or go to
 Type an assembly name and pick a source:
 - **UCSC** — downloads the assembly by name from UCSC (e.g. the pig genome
   `susScr11`). CRISPRme handles both UCSC layouts (per-chromosome archive or a
-  single multi-FASTA) automatically.
+  single multi-FASTA) automatically: a single multi-FASTA download is split into one
+  file per sequence, which is the layout every search requires.
 - **HuggingFace** — pulls a genome we host on the CRISPRme data repo.
 - **Direct URL** — any `.fa.gz` / `.tar.gz` link.
 - **Upload** — pick a local genome file; it is sent in chunks, so there is no

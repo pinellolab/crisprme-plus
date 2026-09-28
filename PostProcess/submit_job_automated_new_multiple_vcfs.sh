@@ -114,6 +114,16 @@ if [ $6 != "_" ] && [ -w "$6" ]; then
 	echo >>$6
 fi
 
+# Genome layout guard: CRISPRme keys its chromosome list (and so all post-analysis)
+# by FASTA FILE NAME, one sequence per file. A genome delivered as one multi-sequence
+# file (e.g. UCSC's susScr11.fa) indexes and searches fine but then silently yields an
+# EMPTY result, so refuse it up front, with the fix (see genome_layout.py). Fast: one
+# header line per file. Covers the web-launched path, which does not run the validator.
+if ! python "$starting_dir/genome_layout.py" "$ref_folder" >&2; then
+	printf "ERROR: reference genome folder %s is not one FASTA file per sequence\n" "$ref_folder" >&2
+	exit 1
+fi
+
 # iterate over each variant dataset to compute the enriched genomes, index each
 # enriched genome, search off-targets, reconstruct haplotypes (if input VCFs are
 # phased), and score off-targets

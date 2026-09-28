@@ -486,11 +486,13 @@ def download_reference_genome(
     Handles UCSC assembly-layout variability: prefer the per-chromosome
     ``bigZips/<assembly>.chromFa.tar.gz`` archive and, when it is absent (many
     non-human assemblies such as the pig ``susScr11``), fall back to the single
-    multi-FASTA ``bigZips/<assembly>.fa.gz``. CRISPRitz indexes a *directory* of
-    FASTA files, so a single ``<assembly>.fa`` inside the assembly folder is a
-    valid genome. The download lands in a staging dir and is promoted only on
-    success, so a failed/partial download never leaves a half-written,
-    auto-discoverable ``Genomes/<assembly>`` folder.
+    multi-FASTA ``bigZips/<assembly>.fa.gz``, which is then split into one
+    ``<sequence>.fa`` file per sequence: CRISPRitz would index a single
+    multi-sequence file, but CRISPRme keys its whole post-analysis by FASTA file
+    name and would silently drop every result (see ``genome_layout.py``).
+    The download lands in a staging dir and is promoted only on success, so a
+    failed/partial download never leaves a half-written, auto-discoverable
+    ``Genomes/<assembly>`` folder.
 
     Parameters
     ----------
@@ -569,6 +571,18 @@ def download_reference_genome(
         os.makedirs(dest_dir)
         for fa in fastas:
             shutil.move(fa, os.path.join(dest_dir, os.path.basename(fa)))
+        # CRISPRme identifies chromosomes by FASTA file name, one sequence per file
+        # (see genome_layout.py). UCSC assemblies without a per-chromosome archive
+        # (e.g. the pig susScr11) arrive as ONE multi-sequence .fa, which indexes and
+        # searches fine but then silently yields an empty result -- split it now.
+        # On failure remove the half-built folder so it is never auto-discovered.
+        try:
+            from genome_layout import split_multi_record_fastas
+
+            split_multi_record_fastas(dest_dir)
+        except BaseException:
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     return dest_dir
