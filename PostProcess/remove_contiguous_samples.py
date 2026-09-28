@@ -103,7 +103,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
 
     # extract best target for each criteria
     if sort_order == "score":
-        # sort per score (CFD or CRISTA)
+        # sort per score (CFD or CRISPR-Bulge)
         if validity_check_ref:
             if sort_criteria == "mm+bulges":
                 final_list_best_ref = sorted(

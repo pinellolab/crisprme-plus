@@ -88,11 +88,11 @@ def test_overlay_out_of_bounds_real_position():
     assert out == sub  # nothing overlaid (all downstream reals >= 95), no exception
 
 
-def _load_crista_resolver():
-    """Extract _resolve_iupac_for_crista from analisi_indels_NNN.py without
+def _load_crispr_bulge_resolver():
+    """Extract _resolve_iupac_for_crispr_bulge from analisi_indels_NNN.py without
     importing the module (its top level reads sys.argv + opens the fake genome).
     The scorer's IUPAC-resolution guard is what keeps a SNP-overlaid indel window
-    from crashing CRISTA's agct2numerals; regress it here."""
+    from crashing CRISPR-Bulge's agct2numerals; regress it here."""
     import os
 
     src = open(
@@ -113,8 +113,8 @@ def _load_crista_resolver():
     return ns["_resolve_overlaid_iupac"]
 
 
-def test_crista_resolver_is_classic_noop_and_kills_iupac():
-    R = _load_crista_resolver()
+def test_crispr_bulge_resolver_is_classic_noop_and_kills_iupac():
+    R = _load_crispr_bulge_resolver()
     # classic (plain fake genome) -> strict no-op: byte-identical scoring input
     assert R("ACGTACGT-ACGT") == "ACGTACGT-ACGT"
     # N is never resolved (the existing N-guard nulls those windows)
@@ -130,7 +130,7 @@ def test_crista_resolver_is_classic_noop_and_kills_iupac():
     tgt = "-TAAKCAGTTGCTATTTTAAAGRG"
     gd = "CTAA-CAGTTGCTTTTATCACNNN"
     out = R(tgt, gd)
-    assert set(out) <= set("ACGT-"), out  # no residual IUPAC reaches CRISTA
+    assert set(out) <= set("ACGT-"), out  # no residual IUPAC reaches CRISPR-Bulge
 
 
 if __name__ == "__main__":

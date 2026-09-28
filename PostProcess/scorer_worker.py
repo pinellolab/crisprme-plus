@@ -44,7 +44,7 @@ def main():
     # TF/Keras emit retracing WARNINGs + C++ logs to fd 2. That output is harmless in
     # isolation, but the CRISPRme post-analysis stage treats ANY bytes on the subprocess's
     # stderr as fatal (`[ -s $logerror ]`), so routing this noise to stderr would fail every
-    # real search's post-analysis (CRISTA was quiet; TF is not). So: dup fd 1 to a PRIVATE
+    # real search's post-analysis (CRISPR-Bulge was quiet; TF is not). So: dup fd 1 to a PRIVATE
     # protocol channel, then send BOTH fd 1 and fd 2 to /dev/null. The worker communicates
     # exclusively over the proto channel (ready/error + score responses), so silencing the
     # real fds loses nothing the parent needs. Set CRISPRME_SCORER_DEBUG=1 to keep the

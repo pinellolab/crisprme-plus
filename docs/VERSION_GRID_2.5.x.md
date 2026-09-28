@@ -16,7 +16,7 @@ first landed on `dev`.
 | COSMIC + ENCODE SCREEN v4 + GENCODE + DHS annotation | ✅ | ✅ | ✅ |
 | Shareable HTML off-target report | ✅ | ✅ | ✅ |
 | High-variant-density cap + `--max-total-edits` | ✅ | ✅ | ✅ |
-| **Two-pass `--fast` mode** (worst-possible reps for dense panels; exact CFD, screen-grade CRISTA) | ❌ | ✅ opt-in | ✅ |
+| **Two-pass `--fast` mode** (worst-possible reps for dense panels; exact CFD, screen-grade CRISPR-Bulge) | ❌ | ✅ opt-in | ✅ |
 | **All-source "mega" index** (1000G-2021 + HGDP + gnomAD + TOPMed + AoU; sites-only, per-dataset AF + `AF_max`) | ❌ | ⚠️ SNP-only (indels not searchable) | ✅ **searchable indels genome-wide** |
 | Per-dataset **indel AF** companion (`indel_af.tsv`) | ❌ | ✅ emitted | ✅ emitted + **bundled** into report.zip |
 | **SNP + SNP** co-occurrence companion (`snp_snp_cooc.tsv`) | ❌ | ❌ | ✅ **new** |

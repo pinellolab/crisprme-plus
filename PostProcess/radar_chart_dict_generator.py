@@ -55,7 +55,7 @@ outDir = sys.argv[5]  # directory to output the figures
 threads = int(sys.argv[6])  # number of concurrent execution of image creation
 max_mm = int(sys.argv[7])
 max_bulges = int(sys.argv[8])
-# criteria to generate the plots (CFD,CRISTA,FEWEST)
+# criteria to generate the plots (CFD,CRISPR-Bulge,FEWEST)
 selection_criteria = sys.argv[9]
 
 web_server = False

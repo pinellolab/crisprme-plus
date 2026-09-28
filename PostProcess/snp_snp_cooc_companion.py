@@ -8,7 +8,7 @@ crRNA, DNA) so a downstream/web join is a straight key match.
 
 WHY A COMPANION FILE (not a new bestMerge column): identical reasoning to
 ``phase_confirmation_companion`` -- the finalized ``final_line`` addresses its
-Reference / ref-score-sentinel / tmp_pos_mms tail by NEGATIVE index in the CFD/CRISTA
+Reference / ref-score-sentinel / tmp_pos_mms tail by NEGATIVE index in the CFD/CRISPR-Bulge
 scorers, so appending a trailing column silently corrupts every variant row's score,
 and the positional/name-list downstream consumers would desync or drop it.
 
@@ -53,7 +53,7 @@ def write_companion(out_path, rows):
         fh.write(
             "# CRISPRme+ SNP+SNP co-occurrence companion. One row per variant off-target\n"
             "# that USES >=2 co-occurring SNP alt alleles (deduped by identity). Join FROM\n"
-            "# bestMerge/bestCFD/bestCRISTA by (Chromosome, Position, Direction, crRNA, DNA).\n"
+            "# bestMerge/bestCFD/bestCRISPR_BULGE by (Chromosome, Position, Direction, crRNA, DNA).\n"
             "#   Phase CONFIRMED = phased same-phase-set cis haplotype (genotyped path).\n"
             "#   Phase PUTATIVE  = unphased / cross-phase-set / registry-only (sites-only).\n"
             "#   MinAF_bound     = min marginal AF = conservative upper bound on joint cis AF.\n"

@@ -91,12 +91,12 @@ count" — the flush condition is at line 808, `>= 100000`. Confirmed exact.]**
 625          target_CFD = target.copy()
 626          cluster_with_CFD_score.append(preprocess_CFD_score(target_CFD))
 ...
-629      cluster_with_CRISTA_score = preprocess_CRISTA_score(cluster_to_save)
+629      cluster_with_CRISPR_BULGE_score = preprocess_CRISPR_BULGE_score(cluster_to_save)
 ...
-679      return [cluster_with_CFD_score, cluster_with_CRISTA_score]
+679      return [cluster_with_CFD_score, cluster_with_CRISPR_BULGE_score]
 ```
 `calculate_scores` builds a **full CFD copy** of the batch (`target.copy()` per
-row, line 625, accumulated into `cluster_with_CFD_score`) **and** a full CRISTA
+row, line 625, accumulated into `cluster_with_CFD_score`) **and** a full CRISPR-Bulge
 list (line 629), then returns both. So at the flush point the peak is roughly
 **3x the batch**: the original `cluster_to_save` plus two scored copies, all
 live simultaneously. Combined with 1.2 and 1.3, this is the mechanism behind
@@ -117,14 +117,14 @@ tables:
 # flush block (>= 100k rows), lines 812-826:
 818      cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
 820      mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-825      crista_best.write("\t".join(target) + "\t" + str(0) + "\n")
+825      crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
 # tail block (final < 1M rows), lines 863-877:
 870      cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
 872      mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-877      crista_best.write("\t".join(target) + "\t" + str(0) + "\n")
+877      crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
 ```
 Every expanded alternative target from `iupac_decomposition` (1.2) is written
-to **three** `best*` files (`.bestCFD.txt`, `.bestmmblg.txt`, `.bestCRISTA.txt`)
+to **three** `best*` files (`.bestCFD.txt`, `.bestmmblg.txt`, `.bestCRISPR_BULGE.txt`)
 **before any cluster consolidation happens**. These files hold the full,
 un-deduplicated fan-out — on the order of **~48 GB each** at mm6+2+2 on a large
 chromosome, i.e. the observed **~207 GB** aggregate (three tables + the
@@ -148,7 +148,7 @@ best target(s) — but it runs **downstream**, consuming the already-materialize
 disk. From `PostProcess/submit_job_automated_new_multiple_vcfs.sh`:
 ```
 608  tail -n +2 $final_res.bestCFD.txt    | LC_ALL=C sort ... >> $final_res.tmp && mv $final_res.tmp $final_res.bestCFD.txt
-611  tail -n +2 $final_res.bestCRISTA.txt | LC_ALL=C sort ... >> $final_res.tmp && mv $final_res.tmp $final_res.bestCRISTA.txt
+611  tail -n +2 $final_res.bestCRISPR_BULGE.txt | LC_ALL=C sort ... >> $final_res.tmp && mv $final_res.tmp $final_res.bestCRISPR_BULGE.txt
 614  tail -n +2 $final_res.bestmmblg.txt  | LC_ALL=C sort ... >> $final_res.tmp && mv $final_res.tmp $final_res.bestmmblg.txt
 ```
 Each `sort` writes a **full second copy** (`$final_res.tmp`) of a ~48 GB table
@@ -202,16 +202,16 @@ table.
    clusters across flushes (which currently also corrupts the per-cluster
    "best" selection at the boundary).
 2. In `calculate_scores` (lines 617-679), drop the per-target `target.copy()`
-   (line 625) and the parallel full CFD/CRISTA lists; score **in place** /
+   (line 625) and the parallel full CFD/CRISPR-Bulge lists; score **in place** /
    stream each scored row straight to the writer, so peak is ~1x the batch
    instead of ~3x.
 
 **Correctness risk.** Moderate. The boundary detection must match the exact key
 the downstream consolidation (`remove_contiguous_samples.get_best_targets`)
 assumes, or "best" selection changes. Removing `.copy()` (line 625) requires
-confirming `preprocess_CFD_score` / `preprocess_CRISTA_score` do not mutate the
+confirming `preprocess_CFD_score` / `preprocess_CRISPR_BULGE_score` do not mutate the
 row in a way the *other* scorer then reads — currently the copy hides exactly
-that coupling, so it must be untangled (score CRISTA from the original before
+that coupling, so it must be untangled (score CRISPR-Bulge from the original before
 CFD mutates, or have each scorer take/return its own row). This is the fix that
 directly resolves the #108 OOM.
 

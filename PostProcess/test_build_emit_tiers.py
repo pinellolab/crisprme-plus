@@ -6,7 +6,7 @@ directory + file names it writes MUST EXACTLY match what the SEARCH-side resolve
 read, or a freshly-built install silently ignores the tiers.
 
 We do NOT import ``new_simple_analysis`` (it executes module-level code reading
-sys.argv and imports numpy/pandas/CRISTA_score -- not available in the light CI).
+sys.argv and imports numpy/pandas/CRISPR_BULGE_score -- not available in the light CI).
 Instead we:
   1. Re-derive the resolver-expected paths with an INDEPENDENT re-implementation of
      the resolver algorithm (``_resolver_registry_paths`` / ``_resolver_genotype_

@@ -64,28 +64,28 @@ version is here.
 ### 2a. Get the data (one time)
 
 Make a folder for your data and results, then fast-download the reference data and
-a prebuilt SpCas9 (NGG) index from the CRISPRme mirror (minutes, not the multi-hour
+a prebuilt SpCas9 NRG (NGG+NAG) index from the CRISPRme mirror (minutes, not the multi-hour
 legacy setup):
 
 ```bash
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
   crisprme.py download --what all --path /DATA
 
-# a ready-made SpCas9 (NGG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
+# a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
-# the variant-aware index used by the default web search (1000G + HGDP)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
+# the recommended default variant-aware index (1000G-2021, single-source, fully phased)
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
 ```
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRG_3_hg38+hg38_1000G2021_HGDP` index already makes the default web
+pre-downloaded `NRG_3_hg38+hg38_1000G2021` index already makes the default web
 search variant-aware — you do **not** need the raw VCFs for that. **Optional
 (advanced):** the raw 1000 Genomes VCFs (~16 GB) are only needed for CLI
 sample-level analyses / personal risk cards:
@@ -99,7 +99,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.5.5 crisprme.py web-interface
+  pinellolab/crisprme:v2.6.0 crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -152,7 +152,8 @@ distinguished from optional ones. The three steps cover:
 - **Step 1 — Spacer and PAM selection:** Define what to search for.
 - **Step 2 — Genome selection and threshold configuration:** Define where to search
   and how permissively. By default a single **Maximum edits** slider (total
-  mismatches + bulges, default 3) controls stringency; **Advanced options** exposes
+  mismatches + bulges, default 6, resolving to 4 mismatches + 1 DNA + 1 RNA bulge)
+  controls stringency; **Advanced options** exposes
   the per-type caps (mismatches up to 6, DNA bulges up to 2, RNA bulges up to 2),
   and a candidate must satisfy each per-type cap **and** the overall budget.
 - **Step 3 — Email notification and job name:** Label the job (functional
@@ -275,7 +276,8 @@ the CLI; it is not configurable from this form.
 
 By default the form exposes a single **Maximum edits** slider — the total number
 of differences (mismatches + DNA/RNA bulges) allowed between a guide and an
-off-target (default **3**; raise it for a deeper, slower search). This is all you
+off-target (default **6**, which resolves to 4 mismatches + 1 DNA + 1 RNA bulge;
+raise it for a deeper, slower search). This is all you
 need for a quick search.
 
 Open **Advanced options** to set the per-type caps individually instead:
@@ -295,7 +297,7 @@ The web interface uses only precomputed indexes and will **not** build one on th
 fly — if you request a PAM/bulge/genome combination with no installed index it
 blocks and asks you to install one first (see the Docker Quickstart, "Installing
 more indexes"). The variant selector is a dropdown pre-set to the variant-aware
-**1000G+HGDP** index, with a **Reference only** option if you want a reference-genome
+**1000G-2021** index, with a **Reference only** option if you want a reference-genome
 search.
 
 > **Performance note:** Enabling bulge searching substantially increases runtime.
@@ -373,7 +375,7 @@ interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.5.5 crisprme.py web-interface
+>   pinellolab/crisprme:v2.6.0 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme && crisprme.py web-interface)
 > ```
@@ -519,6 +521,12 @@ the entire search. For each guide RNA submitted, the table shows:
   as the number of mismatches increases, the score declines non-linearly. Comparisons
   between searches that used different mismatch or bulge thresholds, or different
   variant datasets, should therefore be made with caution.
+- **CRISPR-Bulge score** — a deep-learning off-target activity score (Yaish &
+  Orenstein, *NAR* 2024; a TensorFlow GRU model) reported alongside CFD as a
+  complementary, bulge-aware prediction. It uses its own interpretation thresholds
+  (0.5 / 0.2 / 0.1). CRISPR-Bulge was trained on off-targets with at most a single
+  bulge, so any off-target that requires **two or more bulges** is out-of-domain and
+  its CRISPR-Bulge score is shown as "-" (N/A); use the CFD score for those sites.
 - **Off-Targets Reference (0–n Mismatches + Bulges)** — the number of potential
   off-target sites identified in the reference genome, tabulated per mismatch and
   bulge count combination.
@@ -726,10 +734,10 @@ variants.
 
 1. **Thresholds too strict** — raise **Maximum edits**; if you opened Advanced
    options, check the DNA and RNA bulges are not both `0`.
-2. **Reference-only selected** — keep the **1000G+HGDP** option (pre-selected by
+2. **Reference-only selected** — keep the **1000G-2021** option (pre-selected by
    default) to get variant off-targets.
 3. **Variant index not installed** — re-run
-   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA`.
+   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA`.
 4. **Confirm success** — `Results/<name>/log_error.txt` is empty and
    `*.integrated_results.tsv` is non-empty.
 
@@ -862,8 +870,8 @@ to its corresponding CLI flag for cross-reference.
 | Variant dataset(s) | `--vcf` | Optional |
 | Samples ID config | `--samplesID` | Required if `--vcf` provided |
 | Mismatches | `--mm` | Yes |
-| DNA bulges | `--bDNA` | Optional (default 0) |
-| RNA bulges | `--bRNA` | Optional (default 0) |
+| DNA bulges | `--bDNA` | Optional (web default 1) |
+| RNA bulges | `--bRNA` | Optional (web default 1) |
 | Base editing window | `--be-window` | Optional |
 | Base editor nucleotide | `--be-base` | Optional (required if window set) |
 | Functional annotation | `--annotation` | Optional |

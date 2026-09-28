@@ -1,15 +1,16 @@
-# CRISPRme+ 2.4.0 runtime environment (Python 3.11), for installing FROM SOURCE
+# CRISPRme+ 2.6.0 runtime environment (Python 3.11), for installing FROM SOURCE
 # without the Bioconda crisprme/crispritz packages. Mirrors the dependency set
 # validated in the project Dockerfile.
 #
 #   mamba env create -f environment.yml
 #   mamba activate crisprme
-#   bash install_from_source.sh          # builds crispritz 2.8.2 + installs both
+#   bash install_from_source.sh          # builds crispritz 2.8.3 + installs both
 #
 # NOTE: the scikit-learn/numpy/scipy/pandas versions were once hard-pinned to
 # scikit-learn=1.1.3 / numpy=1.24.4 / scipy=1.10.1 / pandas=2.0.3 ONLY because the
-# vendored CRISTA + azimuth pickles required that exact combination. CRISTA is RETIRED
-# (CRISPR-Bulge replaces it, in its own conda env) and azimuth is gone, so:
+# legacy RandomForest scorer + azimuth pickles required that exact
+# combination; that scorer is RETIRED (CRISPR-Bulge replaces it, in its own cbulge
+# env, and imposes none of these main-env pins) and azimuth is gone, so:
 #   * scikit-learn is REMOVED -- nothing in the main env imports it anymore (the only
 #     remaining use is the dev-only bench_cbulge.py, which runs in the cbulge env).
 #   * numpy / scipy / pandas / matplotlib are MODERNIZED (2-year jump, current maintained
@@ -23,8 +24,8 @@ channels:
   - bioconda
 dependencies:
   - python=3.11
-  # --- numerical stack (modernized; CRISTA's hard pins retired -- see note above)
-  - numpy>=1.26,<2      # was 1.24.4 (CRISTA pin); <2 guards the pysam/CRISPRitz C-ABI
+  # --- numerical stack (modernized; the legacy scorer's hard pins retired -- see note above)
+  - numpy>=1.26,<2      # was 1.24.4 (legacy-scorer pin); <2 guards the pysam/CRISPRitz C-ABI
   - scipy>=1.11         # was 1.10.1; used by the radar-chart distance calc
   - pandas>=2.1,<3      # was 2.0.3; <3 caps out pandas 3.0's copy-on-write semantic
                         # change until the real pipeline (heavy in-place DataFrame

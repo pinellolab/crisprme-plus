@@ -42,14 +42,14 @@ Report structure (top -> bottom)
 2. KEY GRAPHICAL REPORT: the CRISPRme-paper ref/alt scatter (site index log-x vs
    score, red REF / blue ALT points sized by allele frequency, ref->alt arrows,
    top site rsID-annotated), in up to FOUR panels: by CFD, by variant effect
-   (CFD ALT-REF delta), by CRISTA, and by variant effect (CRISTA ALT-REF delta).
-   The two CRISTA panels appear only when CRISTA was computed -> 4 panels with
-   CRISTA, 2 without.
+   (CFD ALT-REF delta), by CRISPR-Bulge, and by variant effect (CRISPR-Bulge ALT-REF delta).
+   The two CRISPR-Bulge panels appear only when CRISPR-Bulge was computed -> 4 panels with
+   CRISPR-Bulge, 2 without.
 3. SIMPLIFIED reference-vs-population plot (v1 single view).
 4. RECOMMENDED VALIDATION PANEL: the full threshold table (candidate counts at
    CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS the
    HYBRID worst-case top-100 panel: HARD-INCLUDE every site with mm+b<=2 OR
-   CFD>=0.5, then FILL to 100 by worst-case severity across CFD desc / CRISTA
+   CFD>=0.5, then FILL to 100 by worst-case severity across CFD desc / CRISPR-Bulge
    desc (if computed) / mm+b asc (no variant quota). An explicit in-report
    methods note (plain-language, real constants) sits under the panel. The panel
    and each non-empty threshold tier are exported (curated columns) and linked.
@@ -57,7 +57,7 @@ Report structure (top -> bottom)
    panel_top100.tsv + every non-empty per-tier curated TSV.
 6. SCROLLABLE TOP-1000 TABLE (by CFD desc, mm+b<=1 excluded) in the CURATED
    columns, including the annotation columns (gene, distance, GENCODE, ENCODE,
-   DHS) and CRISTA when computed.
+   DHS) and CRISPR-Bulge when computed.
 7. ANNOTATION LEGEND: plain-language meaning of every annotation column value
    (GENCODE / DHS / ENCODE SCREEN v4 cCREs / COSMIC Cancer Gene Census).
 FOOTER (unnumbered): CRISPRme version + provenance stamp + fixed research-only
@@ -70,7 +70,7 @@ Design goals / robustness posture
   opens with ``file://`` on any machine.
 * Columns are selected BY NAME from the header (never fixed indices), because
   the dict-less 85-col schema and the dict-based schema differ in column set /
-  order. Missing columns (CRISTA, per-dataset, annotation on dict-less) are
+  order. Missing columns (CRISPR-Bulge, per-dataset, annotation on dict-less) are
   optional -- the report degrades, it never crashes.
 * ONE canonical partition everywhere: variant-created := Not_found_in_REF=="y";
   reference := the rest; on-target := mm+b==0 (reported separately).
@@ -109,6 +109,7 @@ import matplotlib.patches as mpatches  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
+from utils import gene_region_class  # noqa: E402  # shared with resultIntegrator + web
 
 # report-generator version -- bumped here, stamped in the footer provenance line.
 REPORT_GENERATOR_VERSION = "2.4"
@@ -117,42 +118,31 @@ REPORT_GENERATOR_VERSION = "2.4"
 # Recommended-validation-panel thresholds (module-level constants, section 4)
 # --------------------------------------------------------------------------- #
 CFD_THRESHOLDS = (0.5, 0.2, 0.05)
-# The second (ML) score column is produced by whichever scorer ran (CRISPRME_SCORER_SELECT):
-# CRISTA (legacy) or CRISPR-Bulge. Each is on its OWN scale, so the report's display label,
-# tier thresholds, and plot titles for that column are chosen by the ACTIVE scorer -- read
-# from .Params.txt ("Scorer"), since generate-report runs after the search (no env vars).
-# The physical integrated_results column stays "*_(highest_CRISTA)" regardless (index-based).
+# The second (ML) score column is produced by the CRISPR-Bulge scorer
+# (CRISPRME_SCORER_SELECT). It has its OWN [0,1] scale, so the report's display
+# label, tier thresholds, and plot titles for that column are fixed to CRISPR-Bulge.
+# The physical integrated_results column is "*_(highest_CRISPR_BULGE)" (index-based).
 #
-# CRISTA cut points (0.6/0.4/0.2): higher than CFD -- reusing CFD's made CRISTA>=0.05 select
-# ~98% of off-targets. CRISPR-Bulge cut points (0.5/0.2/0.1): calibrated on Refined_TrueOT
-# (positives median 0.36; PR at 0.5=prec .67/rec .40, 0.2=prec .38/rec .55, 0.1=rec .64) --
+# CRISPR-Bulge cut points (0.5/0.2/0.1): calibrated on Refined_TrueOT (positives
+# median 0.36; PR at 0.5=prec .67/rec .40, 0.2=prec .38/rec .55, 0.1=rec .64) --
 # graduated + model-relative on its own [0,1] cleavage-probability scale.
-CRISTA_THRESHOLDS = (0.6, 0.4, 0.2)
 CRISPR_BULGE_THRESHOLDS = (0.5, 0.2, 0.1)
-_SCORER_LABELS = {"crista": "CRISTA", "crispr-bulge": "CRISPR-Bulge"}
-_SCORER_THRESHOLDS = {"crista": CRISTA_THRESHOLDS, "crispr-bulge": CRISPR_BULGE_THRESHOLDS}
-# active scorer for THIS report invocation; set from .Params.txt in build_summary_meta().
-# generate-report processes one run per invocation, so a module-level value is safe and
-# avoids threading a scorer arg through ~30 display sites. The internal column key stays
-# "crista"; only the human-facing label + thresholds switch.
-_ACTIVE_SCORER = "crista"
 
 
-def _set_active_scorer(scorer):
-    global _ACTIVE_SCORER
-    _ACTIVE_SCORER = (scorer or "crista").lower()
-    if _ACTIVE_SCORER not in _SCORER_LABELS:
-        _ACTIVE_SCORER = "crista"
+def _set_active_scorer(scorer=None):
+    """Retained for call compatibility (build_summary_meta passes .Params 'Scorer').
+    CRISPR-Bulge is the sole ML scorer, so this is a no-op."""
+    return
 
 
 def scorer_label():
-    """Human-facing label for the active second-score column ('CRISTA'|'CRISPR-Bulge')."""
-    return _SCORER_LABELS.get(_ACTIVE_SCORER, "CRISTA")
+    """Human-facing label for the second (ML) score column."""
+    return "CRISPR-Bulge"
 
 
 def scorer_thresholds():
-    """Tier thresholds for the active second-score column (its own scale)."""
-    return _SCORER_THRESHOLDS.get(_ACTIVE_SCORER, CRISTA_THRESHOLDS)
+    """Tier thresholds for the second (ML) score column (its own [0,1] scale)."""
+    return CRISPR_BULGE_THRESHOLDS
 MMB_THRESHOLDS = (1, 2, 3, 4)
 # threshold-table variant-created CFD floor (kept for the full threshold table)
 PANEL_VARIANT_CFD_MIN = 0.05
@@ -169,10 +159,10 @@ PANEL_VARIANT_CFD_MIN = 0.05
 #      score (out of the CRISPR-Bulge domain) and only an uncalibrated CFD extrapolation,
 #      so a clean bulged site must not be dropped by a missing/low score.
 #   2. FILL the remaining slots up to PANEL_CAP by worst-case severity: each site
-#      is ranked independently by CFD (desc), CRISTA (desc; only when computed),
+#      is ranked independently by CFD (desc), CRISPR-Bulge (desc; only when computed),
 #      and mm+bulges (asc, fewer = closer = worse); a site's SEVERITY is the BEST
 #      (minimum) rank across its available metrics, so a site that is worst by ANY
-#      single metric floats up. Ties: CFD desc -> CRISTA desc -> mm+b asc.
+#      single metric floats up. Ties: CFD desc -> CRISPR-Bulge desc -> mm+b asc.
 # There is NO variant-created quota: variant-created sites enter through the same
 # floors/ranks as reference sites.
 PANEL_CAP = 100
@@ -182,7 +172,7 @@ PANEL_FLOOR_CFD = 0.5  # hard-include every off-target with CFD >= this
 # direction "desc" => higher is worse; "asc" => lower is worse (closer sequence).
 PANEL_WORSTCASE_METRICS = (
     ("cfd", "desc"),
-    ("crista", "desc"),
+    ("crispr_bulge", "desc"),
     ("mmb", "asc"),
 )
 # bundled worst-case-panel filename (extra download alongside top1000.tsv)
@@ -200,9 +190,9 @@ TIER_GZIP_BYTES = 2 * 1024 * 1024  # ~2 MB
 # ``curated_row`` / ``build_curated_frame``. Columns are resolved BY NAME from
 # the integrated_results header (highest_CFD projection); a column whose source
 # is missing degrades to "-" rather than being dropped, so every download and the
-# table always carry the same, readable, Excel-ready schema. "rank" and "crista"
-# are handled specially (rank is 1-based row order; CRISTA appears only when
-# crista_computed()). The full 85-column raw dump stays as integrated_results.tsv.gz.
+# table always carry the same, readable, Excel-ready schema. "rank" and "crispr_bulge"
+# are handled specially (rank is 1-based row order; CRISPR-Bulge appears only when
+# crispr_bulge_computed()). The full 85-column raw dump stays as integrated_results.tsv.gz.
 CURATED_COLUMNS = (
     ("rank", "rank"),
     ("Chromosome", "chrom"),
@@ -214,7 +204,7 @@ CURATED_COLUMNS = (
     ("Mismatches+bulges", "mmb"),
     ("Perfect_match", "perfect_match"),  # "Yes" when mm+b==0: a perfect genomic match
     ("CFD", "cfd"),
-    ("CRISTA", "crista"),  # emitted only when crista_computed()
+    ("CRISPR-Bulge", "crispr_bulge"),  # emitted only when crispr_bulge_computed()
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
     ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
@@ -222,6 +212,7 @@ CURATED_COLUMNS = (
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
+    ("Gene_region", "gene_region"),  # CDS / 5'UTR / 3'UTR / exon / intron / intergenic (collapsed from GENCODE)
     ("GENCODE", "gencode"),
     ("ENCODE", "encode"),
     ("DHS", "dhs"),
@@ -246,7 +237,7 @@ _DROP_MAF = False
 # that falsely implies the screen was performed. None => keep all (backward-compat);
 # build_report sets it to {kind : kind present in cols} for the run.
 _ANNOTATION_KINDS = frozenset(
-    {"gencode", "encode", "dhs", "cosmic", "intogen", "gene_name", "gene_dist"}
+    {"gencode", "gene_region", "encode", "dhs", "cosmic", "intogen", "gene_name", "gene_dist"}
 )
 _PRESENT_ANN_KINDS = None
 
@@ -282,7 +273,7 @@ def _active_columns():
 # ranking the IND reviewer cares about). We resolve every column by its base
 # name against whichever suffixes a given schema uses.
 _PROJ = "(highest_CFD)"
-_CRISTA_PROJ = "(highest_CRISTA)"
+_CRISPR_BULGE_PROJ = "(highest_CRISPR_BULGE)"
 
 # base-name -> preferred header suffix list (first match wins)
 _COLS = {
@@ -309,19 +300,20 @@ _COLS = {
     "gene_name": ["Annotation_closest_gene_name"],
     "gene_dist": ["Annotation_closest_gene_distance_(kb)"],
     "gencode": ["Annotation_GENCODE"],
+    "gene_region": ["Annotation_GENCODE"],  # derived class; sources the same GENCODE feature-set
     "encode": ["Annotation_ENCODE"],
     "dhs": ["Annotation_DHS"],
     "cosmic": ["Annotation_COSMIC"],
     "intogen": ["Annotation_INTOGEN"],
     "complex_region": ["High_variant_density_region"],
-    # CRISTA projection (present only when CRISTA was computed this run)
-    "crista": [f"CRISTA_score_{_CRISTA_PROJ}", "CRISTA_score"],
-    "crista_ref": [f"CRISTA_score_REF_{_CRISTA_PROJ}"],
-    "crista_alt": [f"CRISTA_score_ALT_{_CRISTA_PROJ}"],
-    "crista_mmb": [f"Mismatches+bulges_{_CRISTA_PROJ}"],
-    "crista_maf": [f"Variant_MAF_{_CRISTA_PROJ}"],
-    "crista_samples": [f"Variant_samples_{_CRISTA_PROJ}"],
-    "crista_rsid": [f"Variant_rsID_{_CRISTA_PROJ}"],
+    # CRISPR-Bulge projection (present only when CRISPR-Bulge was computed this run)
+    "crispr_bulge": [f"CRISPR_BULGE_score_{_CRISPR_BULGE_PROJ}", "CRISPR_BULGE_score"],
+    "crispr_bulge_ref": [f"CRISPR_BULGE_score_REF_{_CRISPR_BULGE_PROJ}"],
+    "crispr_bulge_alt": [f"CRISPR_BULGE_score_ALT_{_CRISPR_BULGE_PROJ}"],
+    "crispr_bulge_mmb": [f"Mismatches+bulges_{_CRISPR_BULGE_PROJ}"],
+    "crispr_bulge_maf": [f"Variant_MAF_{_CRISPR_BULGE_PROJ}"],
+    "crispr_bulge_samples": [f"Variant_samples_{_CRISPR_BULGE_PROJ}"],
+    "crispr_bulge_rsid": [f"Variant_rsID_{_CRISPR_BULGE_PROJ}"],
 }
 
 _NA_TOKENS = {"", "na", "n", ".", "nan", "none", "-1"}
@@ -537,7 +529,7 @@ def _to_float_series(series):
 
 
 def _scored(num):
-    """CFD/CRISTA are defined on [0,1]. Anything else -- the ``do_scores=False``
+    """CFD/CRISPR-Bulge are defined on [0,1]. Anything else -- the ``do_scores=False``
     sentinel ``-1.000`` that the pipeline writes for non-SpCas9 / non-3nt-PAM /
     5'-PAM nucleases (Cas12a etc.), plus NaN/None -- is 'not scored' -> None."""
     if num is None:
@@ -566,26 +558,43 @@ def cfd_computed(df, cols):
     return bool(_in_range(df[cols["cfd"]]).notna().any())
 
 
-def crista_computed(df, cols):
-    """True when the CRISTA_score projection column exists AND has >=1 in-range
-    [0,1] value. The stable schema always ships the CRISTA columns; a dict-less /
-    CRISTA-off / non-SpCas9 run either omits them or fills them with the -1
-    sentinel. We include the CRISTA path only when a real score is present.
+def crispr_bulge_computed(df, cols):
+    """True when the CRISPR_BULGE_score projection column exists AND has >=1 in-range
+    [0,1] value. The stable schema always ships the CRISPR-Bulge columns; a dict-less /
+    CRISPR-Bulge-off / non-SpCas9 run either omits them or fills them with the -1
+    sentinel. We include the CRISPR-Bulge path only when a real score is present.
     """
-    if "crista" not in cols or cols["crista"] not in df.columns:
+    if "crispr_bulge" not in cols or cols["crispr_bulge"] not in df.columns:
         return False
-    return bool(_in_range(df[cols["crista"]]).notna().any())
+    return bool(_in_range(df[cols["crispr_bulge"]]).notna().any())
 
 
 # --------------------------------------------------------------------------- #
 # Curated column projection (ONE set shared by the table + every download file)
 # --------------------------------------------------------------------------- #
+def _gene_region_class(gencode_value, gene_dist=None):
+    """Collapse the site's gene context into ONE readable region class, so a
+    reviewer can tell at a glance whether an off-target sits in a coding exon, a
+    UTR, an intron, or intergenic space -- without parsing a set like
+    ``"CDS,exon,gene,transcript(-)"``.
+
+    Thin report-side wrapper over the shared ``utils.gene_region_class`` -- the SINGLE
+    source of truth also used by ``resultIntegrator`` (the raw ``Annotation_gene_region``
+    column) and the web, so every report surface reports the SAME class for a site. It
+    stays coherent with the ``Gene`` / ``Gene_distance_kb`` columns: a non-zero
+    ``gene_dist`` (outside every protein-coding gene body) -> ``intergenic``; when inside
+    a gene the sub-region is read from the ``Annotation_GENCODE`` feature-set with
+    precedence CDS > 5'UTR > 3'UTR > exon > intron. See ``utils.gene_region_class``.
+    """
+    return gene_region_class(gencode_value, gene_dist, missing=CURATED_MISSING)
+
+
 def _curated_cell(kind, row, cols):
     """Compute the display value for one curated column of one row.
 
     Values are resolved BY NAME (via ``cols``) from the highest_CFD projection;
     anything missing / blank degrades to ``CURATED_MISSING`` ("-"). ``rank`` and
-    ``crista`` are handled by the caller (rank is positional; CRISTA is dropped
+    ``crispr_bulge`` are handled by the caller (rank is positional; CRISPR-Bulge is dropped
     entirely when not computed). Returns a plain string, Excel-ready.
     """
     def _get(key):
@@ -611,8 +620,8 @@ def _curated_cell(kind, row, cols):
     elif kind == "cfd":
         num = _scored(pd.to_numeric(_get("cfd"), errors="coerce")) if "cfd" in cols else None
         return f"{num:.4f}" if num is not None else CURATED_MISSING
-    elif kind == "crista":
-        num = _scored(pd.to_numeric(_get("crista"), errors="coerce")) if "crista" in cols else None
+    elif kind == "crispr_bulge":
+        num = _scored(pd.to_numeric(_get("crispr_bulge"), errors="coerce")) if "crispr_bulge" in cols else None
         return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "origin":
         v = _get("origin")
@@ -635,6 +644,10 @@ def _curated_cell(kind, row, cols):
         v = _get("gene_name")
     elif kind == "gene_dist":
         v = _get("gene_dist")
+    elif kind == "gene_region":
+        # derived single-class region: intergenic pinned to the protein-coding
+        # Gene_distance_kb (coherent with the Gene columns), sub-region from GENCODE
+        return _gene_region_class(_get("gene_region"), _get("gene_dist"))
     elif kind == "gencode":
         v = _get("gencode")
     elif kind == "encode":
@@ -695,25 +708,25 @@ def _curated_cell(kind, row, cols):
     return str(v)
 
 
-def curated_headers(has_crista):
+def curated_headers(has_crispr_bulge):
     """The curated display headers, dropping the ML-score column when not computed
-    (and MAF when ``_DROP_MAF`` is set). The ML-score header is relabeled by the active
-    scorer (CRISTA | CRISPR-Bulge); the internal kind stays "crista"."""
-    return [(scorer_label() if kind == "crista" else h)
-            for h, kind in _active_columns() if kind != "crista" or has_crista]
+    (and MAF when ``_DROP_MAF`` is set). The ML-score header is "CRISPR-Bulge"; the
+    internal kind stays "crispr_bulge"."""
+    return [(scorer_label() if kind == "crispr_bulge" else h)
+            for h, kind in _active_columns() if kind != "crispr_bulge" or has_crispr_bulge]
 
 
-def build_curated_frame(sub_df, cols, has_crista, start_rank=1):
+def build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=1):
     """Project a sub-frame onto the ONE curated column set (rows in input order).
 
     The result is a plain string DataFrame with the curated display headers as
-    columns (``rank`` first, CRISTA only when computed), used BOTH to write the
+    columns (``rank`` first, CRISPR-Bulge only when computed), used BOTH to write the
     exported TSVs (top1000/panel/per-tier) and, via ``build_table_html``, the
     in-report table -- so the table and every download share exactly the same
     columns, in the same order, resolved by name (missing -> "-").
     """
-    headers = curated_headers(has_crista)
-    kinds = [kind for _h, kind in _active_columns() if kind != "crista" or has_crista]
+    headers = curated_headers(has_crispr_bulge)
+    kinds = [kind for _h, kind in _active_columns() if kind != "crispr_bulge" or has_crispr_bulge]
     data = {h: [] for h in headers}
     for offset, (_idx, row) in enumerate(sub_df.iterrows()):
         for h, kind in zip(headers, kinds):
@@ -724,9 +737,9 @@ def build_curated_frame(sub_df, cols, has_crista, start_rank=1):
     return pd.DataFrame(data, columns=headers)
 
 
-def write_curated_tsv(sub_df, cols, has_crista, path, start_rank=1):
+def write_curated_tsv(sub_df, cols, has_crispr_bulge, path, start_rank=1):
     """Write a sub-frame as a curated-column TSV (shared by every download)."""
-    build_curated_frame(sub_df, cols, has_crista, start_rank=start_rank).to_csv(
+    build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=start_rank).to_csv(
         path, sep="\t", index=False
     )
 
@@ -1242,7 +1255,7 @@ def build_mmb_matrix(df, cols, meta):
     reference = ~variant
 
     # Place each site by its FEWEST-mismatch+bulge alignment -- the score-NEUTRAL
-    # view (it minimizes edits regardless of CFD vs CRISTA), so the matrix does not
+    # view (it minimizes edits regardless of CFD vs CRISPR-Bulge), so the matrix does not
     # privilege the higher-edit highest-CFD alignment. Every off-target was found
     # because its minimal alignment is within budget, so almost all sites land in
     # budget here; the few remaining beyond-budget cells are sites within budget
@@ -1614,7 +1627,7 @@ def render_summary_and_matrix(meta, spec_score, matrix):
     <p class="caption">Every site is <strong>one row</strong> that carries <em>both</em> its
     reference-genome alignment and its variant-carrier alignment as side-by-side columns,
     and is placed here <strong>once</strong> &mdash; by its <strong>fewest-mismatch+bulge</strong>
-    alignment, the score-neutral view (it does not prefer CFD over CRISTA). A site is never
+    alignment, the score-neutral view (it does not prefer CFD over CRISPR-Bulge). A site is never
     double-counted across cells.{_greyed_note}</p>
   </div>
 </div>
@@ -1920,14 +1933,14 @@ def _cfd_style_scatter(
     sub, score_key, ref_key, alt_key, xlabel, title,
     score_name="CFD", maf_col=None, samp_col=None, rsid_col=None,
 ):
-    """The CRISPRme-paper CFD/CRISTA scatter, adapted from
+    """The CRISPRme-paper CFD/CRISPR-Bulge scatter, adapted from
     CRISPRme_plots.py:plot_with_CFD_score (~L347).
 
     Generalized over the score family: ``score_key`` / ``ref_key`` / ``alt_key``
-    are the resolved combined/REF/ALT score-column names (CFD or CRISTA), and
+    are the resolved combined/REF/ALT score-column names (CFD or CRISPR-Bulge), and
     ``maf_col`` / ``samp_col`` / ``rsid_col`` are the resolved allele-frequency /
     samples / rsID column names for that same projection. ``score_name`` is the
-    y-axis / annotation label ("CFD" or "CRISTA").
+    y-axis / annotation label ("CFD" or "CRISPR-Bulge").
 
     ``sub`` is an ALREADY-ORDERED (top-first) top-N frame. Red REF points and
     blue ALT points, both sized by allele frequency; gray arrows connect the
@@ -2068,15 +2081,15 @@ def _num_ok(tok):
         return False
 
 
-def plot_scatter_panels(df, cols, n=1000, include_crista=False):
+def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
     """Produce the key graphical-report scatter panels (section 2).
 
     Returns a list of (title, caption, data_uri). Panels:
       (a) top-N by CFD score
       (b) top-N by CFD DELTA = ALT CFD - REF CFD (largest variant increase first)
-      (c) top-N by CRISTA score               -- only when include_crista is True
-      (d) top-N by CRISTA DELTA = ALT - REF    -- only when include_crista is True
-    So: CRISTA computed -> 4 panels; CRISTA absent -> 2 panels. Every panel is
+      (c) top-N by CRISPR-Bulge score               -- only when include_crispr_bulge is True
+      (d) top-N by CRISPR-Bulge DELTA = ALT - REF    -- only when include_crispr_bulge is True
+    So: CRISPR-Bulge computed -> 4 panels; CRISPR-Bulge absent -> 2 panels. Every panel is
     guarded; a failing panel yields a placeholder URI (never aborts).
     """
     panels = []
@@ -2146,16 +2159,16 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
             uri,
         ))
 
-    # (c) + (d) CRISTA, only when computed
-    if include_crista:
-        cr_score = cols.get("crista", "")
-        cr_ref = cols.get("crista_ref", "")
-        cr_alt = cols.get("crista_alt", "")
-        cr_maf = cols.get("crista_maf")
-        cr_samp = cols.get("crista_samples")
-        cr_rsid = cols.get("crista_rsid")
+    # (c) + (d) CRISPR-Bulge, only when computed
+    if include_crispr_bulge:
+        cr_score = cols.get("crispr_bulge", "")
+        cr_ref = cols.get("crispr_bulge_ref", "")
+        cr_alt = cols.get("crispr_bulge_alt", "")
+        cr_maf = cols.get("crispr_bulge_maf")
+        cr_samp = cols.get("crispr_bulge_samples")
+        cr_rsid = cols.get("crispr_bulge_rsid")
 
-        # (c) by the active ML scorer (CRISTA | CRISPR-Bulge)
+        # (c) by the ML scorer (CRISPR-Bulge)
         _sl = scorer_label()
         try:
             uri = _cfd_style_scatter(
@@ -2176,7 +2189,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
         ))
 
         # (d) by ML-scorer DELTA -- only when the REF/ALT columns exist
-        if "crista_ref" in cols and "crista_alt" in cols:
+        if "crispr_bulge_ref" in cols and "crispr_bulge_alt" in cols:
             try:
                 uri = _cfd_style_scatter(
                     _delta_sorted(cr_alt, cr_ref), cr_score, cr_ref, cr_alt,
@@ -2297,11 +2310,11 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
        a missing/low score.
     2. FILL the remaining slots up to ``cap`` by worst-case severity. Each site
        is ranked independently by every available metric in
-       ``PANEL_WORSTCASE_METRICS``: CFD (desc), CRISTA (desc; only when computed)
+       ``PANEL_WORSTCASE_METRICS``: CFD (desc), CRISPR-Bulge (desc; only when computed)
        and mm+bulges (asc, fewer = closer sequence = worse); rank 1 == worst. A
        site's SEVERITY is the BEST (minimum) rank across its available metrics,
        so a site that is worst by ANY single metric floats up. Fill sites are
-       taken by ascending severity; ties are broken by CFD desc -> CRISTA desc ->
+       taken by ascending severity; ties are broken by CFD desc -> CRISPR-Bulge desc ->
        mm+b asc.
 
     There is NO variant-created quota: variant-created sites qualify through the
@@ -2323,9 +2336,9 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
         _to_float_series(offt[cols["cfd"]]).fillna(-1.0)
         if "cfd" in cols else pd.Series(-1.0, index=offt.index)
     )
-    crista = (
-        _to_float_series(offt[cols["crista"]])
-        if "crista" in cols else pd.Series(np.nan, index=offt.index)
+    crispr_bulge = (
+        _to_float_series(offt[cols["crispr_bulge"]])
+        if "crispr_bulge" in cols else pd.Series(np.nan, index=offt.index)
     )
     mmb = (
         _to_int_series(offt[cols["mmb"]])
@@ -2343,16 +2356,16 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
         _to_int_series(offt[cols["bulges"]]).where(lambda s: s >= 0, 0)
         if "bulges" in cols else pd.Series(0, index=offt.index)
     )
-    has_crista = ((crista >= 0) & (crista <= 1)).any()
+    has_crispr_bulge = ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any()
 
     # per-metric ranks (rank 1 == worst). ascending flag flips per direction:
     #   desc metric -> higher is worse -> rank ascending=False
     #   asc  metric -> lower  is worse -> rank ascending=True
-    series_by_key = {"cfd": cfd, "crista": crista, "mmb": mmb}
+    series_by_key = {"cfd": cfd, "crispr_bulge": crispr_bulge, "mmb": mmb}
     rank_frames = []
     for key, direction in PANEL_WORSTCASE_METRICS:
-        if key == "crista" and not has_crista:
-            continue  # CRISTA absent -> this metric does not contribute
+        if key == "crispr_bulge" and not has_crispr_bulge:
+            continue  # CRISPR-Bulge absent -> this metric does not contribute
         s = series_by_key.get(key)
         if s is None:
             continue
@@ -2393,19 +2406,19 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     observed = (_is_ref | _has_carrier).astype(bool)
 
     ordered = offt.assign(
-        _severity=severity, _cfd=cfd, _crista=crista.fillna(-1.0), _mmb=mmb,
+        _severity=severity, _cfd=cfd, _crispr_bulge=crispr_bulge.fillna(-1.0), _mmb=mmb,
         _hard=hard_mask, _observed=observed,
     ).sort_values(
         # hard-includes first, then worst-case severity; among equally-severe sites
-        # the OBSERVED (real-carrier) one is preferred; then CFD/CRISTA/mm+b.
-        ["_hard", "_severity", "_observed", "_cfd", "_crista", "_mmb"],
+        # the OBSERVED (real-carrier) one is preferred; then CFD/CRISPR-Bulge/mm+b.
+        ["_hard", "_severity", "_observed", "_cfd", "_crispr_bulge", "_mmb"],
         ascending=[False, True, False, False, False, True],
     )
 
     n_hard = int(hard_mask.sum())
     # if the hard-includes already exceed the cap keep them ALL; otherwise fill
     keep = max(cap, n_hard)
-    drop = ["_severity", "_cfd", "_crista", "_mmb", "_hard", "_observed"]
+    drop = ["_severity", "_cfd", "_crispr_bulge", "_mmb", "_hard", "_observed"]
     off_panel = ordered.head(keep).drop(columns=drop)
     # prepend the perfect matches (disjoint from off_panel by construction)
     if len(perfect):
@@ -2456,26 +2469,31 @@ def build_validation_panel(df, cols):
     # INDEX-ALIGNED sentinel fallbacks (mirror select_worstcase_panel): a length-0
     # Series here would make (cfd>=t)/(mmb<=t) length-0 and raise "wrong length"
     # (ValueError) that silently wipes the entire Section-4 validation panel for a
-    # CRISTA-only / mm+b-only / CFD-skipped run. Full-length sentinels -> empty tiers.
+    # CRISPR-Bulge-only / mm+b-only / CFD-skipped run. Full-length sentinels -> empty tiers.
     cfd = _to_float_series(offt[cols["cfd"]]) if "cfd" in cols else pd.Series(-1.0, index=offt.index)
     mmb = _to_int_series(offt[cols["mmb"]]) if "mmb" in cols else pd.Series(10 ** 6, index=offt.index)
-    crista = (
-        _to_float_series(offt[cols["crista"]]) if "crista" in cols
+    crispr_bulge = (
+        _to_float_series(offt[cols["crispr_bulge"]]) if "crispr_bulge" in cols
         else pd.Series(np.nan, index=offt.index)
     )
     var_off = variant[~ontarget]
 
     cfd_counts = [(t, int((cfd >= t).sum())) for t in CFD_THRESHOLDS]
     mmb_counts = [(t, int(((mmb >= 0) & (mmb <= t)).sum())) for t in MMB_THRESHOLDS]
-    crista_counts = (
-        [(t, int((crista >= t).sum())) for t in scorer_thresholds()]
-        if "crista" in cols and ((crista >= 0) & (crista <= 1)).any() else []
+    crispr_bulge_counts = (
+        [(t, int((crispr_bulge >= t).sum())) for t in scorer_thresholds()]
+        if "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any() else []
     )
 
     n_variant = int(var_off.sum())
     n_variant_cfd = int((var_off & (cfd >= PANEL_VARIANT_CFD_MIN)).sum())
 
-    has_crista = crista_computed(df, cols)
+    has_crispr_bulge = crispr_bulge_computed(df, cols)
+    # count of >=2-bulge off-targets the single-bulge ML model cannot score (rendered as
+    # "-" = N/A); surfaced as a live figure in the panel note so a mostly-empty
+    # CRISPR-Bulge column is explained rather than looking like missing data.
+    n_ml_na = int((crispr_bulge == -1).sum()) if has_crispr_bulge else 0
+    n_ot_total = int(len(crispr_bulge))
 
     # hybrid worst-case top-100 panel
     panel_df = select_worstcase_panel(df, cols, cap=PANEL_CAP)
@@ -2514,16 +2532,18 @@ def build_validation_panel(df, cols):
     # per-tier off-target subsets (for the bundled curated downloads + links).
     # Each entry: (logical tier key, display label, sub-frame). Only non-empty
     # tiers are bundled/linked (decided by the caller).
-    tiers = build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crista)
+    tiers = build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge)
 
     return {
         "cfd_counts": cfd_counts,
-        "crista_counts": crista_counts,
+        "crispr_bulge_counts": crispr_bulge_counts,
         "mmb_counts": mmb_counts,
         "n_variant": n_variant,
         "n_variant_cfd": n_variant_cfd,
         "n_offtarget": int((~ontarget).sum()),
-        "has_crista": has_crista,
+        "has_crispr_bulge": has_crispr_bulge,
+        "n_ml_na": n_ml_na,
+        "n_ot_total": n_ot_total,
         "panel_size": panel_size,
         "panel_variant": panel_variant,
         "panel_observed": panel_observed,
@@ -2547,14 +2567,14 @@ def _tier_filename(key):
         return PANEL_TOP100_NAME
     if key.startswith("cfd_"):
         return f"cfd_ge_{key.split('_', 1)[1]}.tsv"
-    if key.startswith("crista_"):
-        return f"crista_ge_{key.split('_', 1)[1]}.tsv"
+    if key.startswith("crispr_bulge_"):
+        return f"crispr_bulge_ge_{key[len('crispr_bulge_'):]}.tsv"
     if key.startswith("mmb_"):
         return f"mmb_le_{key.split('_', 1)[1]}.tsv"
     return f"{key}.tsv"
 
 
-def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crista=None):
+def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=None):
     """Off-target subsets for each threshold tier (section-4 downloads).
 
     Returns a list of dicts ``{key, label, filename, df}`` for the CFD>= and
@@ -2574,13 +2594,13 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crista=None):
             "filename": _tier_filename(f"cfd_{t:.2f}"),
             "df": sub,
         })
-    if crista is not None and "crista" in cols and ((crista >= 0) & (crista <= 1)).any():
+    if crispr_bulge is not None and "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any():
         for t in scorer_thresholds():
-            sub = offt[(crista >= t).values]
+            sub = offt[(crispr_bulge >= t).values]
             tiers.append({
-                "key": f"crista_{t:.2f}",  # internal key stays 'crista' (filenames stable)
+                "key": f"crispr_bulge_{t:.2f}",  # internal key stays 'crispr_bulge' (filenames stable)
                 "label": f"{scorer_label()} &ge; {t}",
-                "filename": _tier_filename(f"crista_{t:.2f}"),
+                "filename": _tier_filename(f"crispr_bulge_{t:.2f}"),
                 "df": sub,
             })
     for t in MMB_THRESHOLDS:
@@ -2619,7 +2639,7 @@ def render_validation_panel(
     href, so the download itself is unchanged -- only the visible label
     shrinks. Added for assembly-search's combined report, whose bundled
     filenames carry a category prefix (`reconciled_cfd_ge_0.50.tsv`) long
-    enough that showing it as the link text was the reason the CFD/CRISTA/
+    enough that showing it as the link text was the reason the CFD/CRISPR-Bulge/
     edit-distance threshold tables no longer fit three-per-row like
     complete-search's own report does.
 
@@ -2654,21 +2674,21 @@ def render_validation_panel(
         f"{_tier_count_link(f'mmb_{t}', c)}</td></tr>"
         for t, c in vp["mmb_counts"]
     )
-    # CRISTA thresholds, symmetric with CFD (only when CRISTA was computed)
-    crista_table_block = ""
-    if vp.get("crista_counts"):
-        crista_rows = "".join(
+    # CRISPR-Bulge thresholds, symmetric with CFD (only when CRISPR-Bulge was computed)
+    crispr_bulge_table_block = ""
+    if vp.get("crispr_bulge_counts"):
+        crispr_bulge_rows = "".join(
             f"<tr><td>{scorer_label()} &ge; {t}</td><td class='num'>"
-            f"{_tier_count_link(f'crista_{t:.2f}', c)}</td></tr>"
-            for t, c in vp["crista_counts"]
+            f"{_tier_count_link(f'crispr_bulge_{t:.2f}', c)}</td></tr>"
+            for t, c in vp["crispr_bulge_counts"]
         )
-        crista_table_block = (
+        crispr_bulge_table_block = (
             '<div><table class="thr-table"><thead><tr>'
             f"<th>{scorer_label()} threshold</th><th>Candidates (download)</th></tr></thead>"
-            f"<tbody>{crista_rows}</tbody></table></div>"
+            f"<tbody>{crispr_bulge_rows}</tbody></table></div>"
         )
     metric_names = ["CFD (desc)"]
-    if vp.get("has_crista"):
+    if vp.get("has_crispr_bulge"):
         metric_names.append(f"{scorer_label()} (desc)")
     metric_names.append("mismatches+bulges (asc)")
     metric_list = ", ".join(metric_names)
@@ -2676,7 +2696,7 @@ def render_validation_panel(
     # C) EXPLICIT IN-REPORT METHODS NOTE (plain-language, using the real
     #    constants). Two hard-include floors, then fill by worst-case severity.
     metric_or = (
-        f"CFD, {scorer_label()}, or mm+b" if vp.get("has_crista") else "CFD or mm+b"
+        f"CFD, {scorer_label()}, or mm+b" if vp.get("has_crispr_bulge") else "CFD or mm+b"
     )
     note = (
         f"How the panel was chosen (hybrid, ~{PANEL_CAP} sites &mdash; may be more "
@@ -2694,8 +2714,15 @@ def render_validation_panel(
         f"sequences that scoring models can under-weight both surface. "
         f"<b>Off-targets needing &ge;2 bulges are outside both scoring models&rsquo; "
         f"validated domain</b>: {scorer_label()} does not score them (shown as "
-        f"<code>-1</code> = N/A) and CFD is an uncalibrated extrapolation there &mdash; "
+        f"<code>-</code> = N/A) and CFD is an uncalibrated extrapolation there &mdash; "
         f"rank those by edit distance (mismatches+bulges) and verify them manually. "
+        + (
+            f"<b>In this run, {vp.get('n_ml_na', 0):,} of {vp.get('n_ot_total', 0):,} "
+            f"off-targets are &ge;2-bulge and therefore show <code>-</code> (N/A) in the "
+            f"{scorer_label()} column</b> &mdash; they are ranked by CFD and edit distance "
+            f"instead, not dropped. "
+            if vp.get("has_crispr_bulge") and vp.get("n_ml_na") else ""
+        ) +
         f"The clean-bulge hard-include above guarantees a 0-mismatch bulged site is "
         f"never dropped for lack of a model score."
         + (
@@ -2760,7 +2787,7 @@ def render_validation_panel(
     <table class="thr-table"><thead><tr><th>CFD threshold</th><th>Candidates (download)</th></tr></thead>
     <tbody>{cfd_rows}</tbody></table>
   </div>
-  {crista_table_block}
+  {crispr_bulge_table_block}
   <div>
     <table class="thr-table"><thead><tr><th>Edit-distance threshold</th><th>Candidates (download)</th></tr></thead>
     <tbody>{mmb_rows}</tbody></table>
@@ -2801,21 +2828,21 @@ def select_top(df, cols, n=1000):
     return work.head(n)
 
 
-def select_top_crista(df, cols, n=1000):
-    """Top-N off-targets by CRISTA desc (mm+b > 1), when CRISTA is computed.
+def select_top_crispr_bulge(df, cols, n=1000):
+    """Top-N off-targets by CRISPR-Bulge desc (mm+b > 1), when CRISPR-Bulge is computed.
 
     Mirrors :func:`select_top` (same on-/near-on-target filter, same curated
-    columns) but ranks by the CRISTA score instead of CFD. Returns an EMPTY frame
-    when CRISTA is absent, so the caller renders the CRISTA table only when it
+    columns) but ranks by the CRISPR-Bulge score instead of CFD. Returns an EMPTY frame
+    when CRISPR-Bulge is absent, so the caller renders the CRISPR-Bulge table only when it
     exists.
     """
-    if "crista" not in cols:
+    if "crispr_bulge" not in cols:
         return df.iloc[0:0]
     work = df.copy()
     if "mmb" in cols:
         work = work[_to_int_series(work[cols["mmb"]]) > 1]
     work = work.assign(
-        _cr=pd.to_numeric(work[cols["crista"]], errors="coerce").fillna(-1.0)
+        _cr=pd.to_numeric(work[cols["crispr_bulge"]], errors="coerce").fillna(-1.0)
     ).sort_values("_cr", ascending=False).drop(columns=["_cr"])
     return work.head(n)
 
@@ -2876,18 +2903,18 @@ def maf_footnote(datasets=None):
     )
 
 
-def build_table_html(top_df, cols, has_crista, datasets=""):
+def build_table_html(top_df, cols, has_crispr_bulge, datasets=""):
     """Scrollable inline top-N table, sorted by CFD desc; no JS (opens offline).
 
     Renders EXACTLY the ONE curated column set (``CURATED_COLUMNS``) that every
     download file uses -- so the table and top1000.tsv / panel_top100.tsv / the
     per-tier TSVs all show the same columns, including the annotation columns
-    (Gene, Gene_distance_kb, GENCODE, ENCODE, DHS) and CRISTA when computed. Cells
+    (Gene, Gene_distance_kb, GENCODE, ENCODE, DHS) and CRISPR-Bulge when computed. Cells
     come from ``build_curated_frame`` (values resolved by name; missing -> "-").
     The aligned protospacer+PAM cell is wrapped in <code>; the MAF em-dash keeps
     its footnote. Extra columns don't break the scroll box / sticky header.
     """
-    curated = build_curated_frame(top_df, cols, has_crista, start_rank=1)
+    curated = build_curated_frame(top_df, cols, has_crispr_bulge, start_rank=1)
     headers = list(curated.columns)
     head_html = "".join(f"<th>{_esc(h)}</th>" for h in headers)
 
@@ -2924,9 +2951,9 @@ def build_table_html(top_df, cols, has_crista, datasets=""):
     return table + footnote
 
 
-def write_top1000_tsv(top_df, cols, has_crista, path):
+def write_top1000_tsv(top_df, cols, has_crispr_bulge, path):
     """Write the top-N rows as a CURATED-column TSV (shared curated schema)."""
-    write_curated_tsv(top_df, cols, has_crista, path, start_rank=1)
+    write_curated_tsv(top_df, cols, has_crispr_bulge, path, start_rank=1)
 
 
 # --------------------------------------------------------------------------- #
@@ -3069,6 +3096,16 @@ _ANNOTATION_LEGEND = [
      "is then a genic feature, not <code>intergenic</code>); a non-zero value&rsquo;s "
      "magnitude is the distance to the nearest gene boundary and its sign indicates "
      "the side (upstream vs downstream of the gene)."),
+    ("gene_region", "Gene_region", "The single, most functionally significant gene "
+     "region of the off-target, for readability: <code>CDS</code> (protein-coding "
+     "exon), <code>5'UTR</code> / <code>3'UTR</code>, <code>exon</code> "
+     "(non-coding-transcript exon), <code>intron</code> (inside a gene body but not in "
+     "an exon), or <code>intergenic</code> (outside protein-coding genes). "
+     "<code>intergenic</code> is defined by <code>Gene_distance_kb &gt; 0</code> so it "
+     "always agrees with the <code>Gene</code>/<code>Gene_distance_kb</code> columns; "
+     "the sub-region is then read from the GENCODE feature-set (precedence "
+     "CDS &gt; 5'UTR &gt; 3'UTR &gt; exon &gt; intron). The raw <code>GENCODE</code> "
+     "column keeps the full overlapping feature-set."),
     ("gencode", "GENCODE", "Gene-model context of the site as labeled by the "
      "supplied GENCODE annotation: commonly <code>exon</code>, <code>CDS</code> "
      "(protein-coding sequence), <code>UTR</code>, <code>transcript</code>, "
@@ -3145,16 +3182,24 @@ _SCORE_LEGEND = [
      "hard-includes CFD&nbsp;&ge;&nbsp;0.5). <b>Caveat:</b> CFD was trained on "
      "single-base mismatches; its values for sites containing DNA/RNA bulges "
      "(insertions/deletions) are an extrapolation beyond the model&rsquo;s training "
-     "domain &mdash; for a 1-bulge site weigh CRISTA there, and for a site needing "
+     "domain &mdash; for a 1-bulge site weigh CRISPR-Bulge there, and for a site needing "
      "&ge;2 bulges (where the ML score is also N/A) rank by edit distance and verify manually."),
-    ("CRISTA",
-     "CRISTA score (Abadi <i>et al.</i>, <i>PLoS Comput. Biol.</i> 2017) &mdash; an "
-     "<b>independent</b> machine-learning 0&ndash;1 estimate of cleavage propensity "
-     "that also models bulges/indels. Higher = more likely to be cut. Reported "
-     "alongside CFD because the two models can disagree; <b>a site scored high by "
-     "EITHER model warrants validation</b>. CRISTA&rsquo;s scale is not directly "
-     "comparable to CFD&rsquo;s &mdash; the same number means different things in "
-     "each, so its threshold tiers are model-relative."),
+    ("CRISPR-Bulge",
+     "CRISPR-Bulge score (Yaish &amp; Orenstein, <i>Nucleic Acids Res.</i> 2024) &mdash; an "
+     "<b>independent</b> deep-learning (GRU-ensemble) 0&ndash;1 estimate of cleavage "
+     "propensity, trained to handle DNA/RNA bulges &mdash; markedly more accurate than "
+     "earlier models on bulge/gapped off-targets. Higher = more likely to be cut. Reported "
+     "alongside CFD because the two models can disagree; <b>a site scored high by EITHER "
+     "model warrants validation</b>. Its scale is model-relative (not directly comparable to "
+     "CFD&rsquo;s), so its threshold tiers are its own. The model scores an alignment with at "
+     "most one 1-bp bulge (its training data &mdash; ~4.6M measured off-targets &mdash; "
+     "contains none with &ge;2 bulges); off-targets whose alignment needs &ge;2 bulges are "
+     "OUT OF DOMAIN and reported as N/A (shown as <code>-</code> in these tables, "
+     "recorded as <code>-1</code> in the raw <code>integrated_results.tsv</code>; never scored "
+     "or ranked). Judge those by edit "
+     "distance (mismatches+bulges) and manual review &mdash; CFD there is an uncalibrated "
+     "extrapolation, not a validated score. Clean bulged sites (0 mismatches) are always "
+     "hard-included in the validation panel so they are never dropped for lack of a score."),
     ("Mismatches",
      "Number of base substitutions between the guide and the genomic site (fewer = "
      "closer sequence match = generally higher off-target risk)."),
@@ -3207,37 +3252,9 @@ _SCORE_LEGEND = [
 ]
 
 
-# CRISPR-Bulge glossary definition, substituted for the CRISTA entry when that scorer ran.
-_CRISPR_BULGE_LEGEND_DEF = (
-    "CRISPR-Bulge score (Yaish &amp; Orenstein, <i>Nucleic Acids Res.</i> 2024) &mdash; an "
-    "<b>independent</b> deep-learning (GRU-ensemble) 0&ndash;1 estimate of cleavage "
-    "propensity, trained to handle DNA/RNA bulges &mdash; markedly more accurate than "
-    "earlier models on bulge/gapped off-targets. Higher = more likely to be cut. Reported "
-    "alongside CFD because the two models can disagree; <b>a site scored high by EITHER "
-    "model warrants validation</b>. Its scale is model-relative (not directly comparable to "
-    "CFD&rsquo;s), so its threshold tiers are its own. The model scores an alignment with at "
-    "most one 1-bp bulge (its training data &mdash; ~4.6M measured off-targets &mdash; "
-    "contains none with &ge;2 bulges); off-targets whose alignment needs &ge;2 bulges are "
-    "OUT OF DOMAIN and shown as <code>-1</code> (N/A, not scored). Judge those by edit "
-    "distance (mismatches+bulges) and manual review &mdash; CFD there is an uncalibrated "
-    "extrapolation, not a validated score. Clean bulged sites (0 mismatches) are always "
-    "hard-included in the validation panel so they are never dropped for lack of a score."
-)
-
-
 def build_score_legend_html():
-    """Render the scores-&-columns legend (Section 7, always present). The ML-score
-    entry (and the CFD entry's cross-reference) follow the active scorer."""
-    _sl = scorer_label()
-    legend = []
-    for term, definition in _SCORE_LEGEND:
-        if term == "CRISTA":
-            # relabel + redefine the second-score entry for the scorer that ran
-            legend.append((_sl, _CRISPR_BULGE_LEGEND_DEF if _sl == "CRISPR-Bulge" else definition))
-        elif term == "CFD":
-            legend.append((term, definition.replace("weigh CRISTA there", f"weigh {_sl} there")))
-        else:
-            legend.append((term, definition))
+    """Render the scores-&-columns legend (Section 7, always present)."""
+    legend = list(_SCORE_LEGEND)
     items = "".join(
         '<div class="legend-item"><div class="legend-term">%s</div>'
         '<div class="legend-def">%s</div></div>' % (term, definition)
@@ -3425,7 +3442,7 @@ def render_html(
     cooc_bundle_name=None, cooc_n_rows=0, cooc_n_cis=0,
     snp_snp_bundle_name=None, snp_snp_n_rows=0, snp_snp_n_confirmed=0,
     indel_af_bundle_name=None, indel_af_n_rows=0,
-    table_crista_html="", inputs_criteria_html="", legend_html=None,
+    table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
     next_steps_html="",
 ):
     scatter_html = []
@@ -3576,11 +3593,11 @@ def render_html(
         f"\n<h2>7. Legend &mdash; scores, columns &amp; annotations</h2>\n{legend_html}"
         if legend_html else ""
     )
-    crista_block = ""
-    if table_crista_html:
-        crista_block = (
+    crispr_bulge_block = ""
+    if table_crispr_bulge_html:
+        crispr_bulge_block = (
             f'<h3 style="margin:1.4em 0 0.3em 0">Ranked by {scorer_label()} score</h3>\n'
-            + table_crista_html
+            + table_crispr_bulge_html
         )
 
     return f"""<!DOCTYPE html>
@@ -3651,7 +3668,7 @@ locally with <code>crisprme.py web-interface</code>.</p>
 <h2>6. Top 1000 putative off-targets</h2>
 <h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>
 {table_html}
-{crista_block}
+{crispr_bulge_block}
 
 {legend_section}
 
@@ -3879,7 +3896,7 @@ def build_report(
         result_dir, integrated_tsv, df, cols, params_override=params_override
     )
     version = meta.get("version") or _package_version()
-    has_crista = crista_computed(df, cols)
+    has_crispr_bulge = crispr_bulge_computed(df, cols)
 
     spec_score = read_specificity_score(result_dir, job_id, meta["guides"])
 
@@ -3904,7 +3921,7 @@ def build_report(
     # ---- SECTION 2: scatter panels -----------------------------------------
     try:
         scatter_panels = plot_scatter_panels(
-            df, cols, n=top_n, include_crista=has_crista
+            df, cols, n=top_n, include_crispr_bulge=has_crispr_bulge
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: scatter panels unavailable: {exc}\n")
@@ -3941,7 +3958,7 @@ def build_report(
         (plain .tsv otherwise, per spec)."""
         plain = os.path.join(staging, base_name)
         try:
-            write_curated_tsv(sub_df, cols, has_crista, plain, start_rank=1)
+            write_curated_tsv(sub_df, cols, has_crispr_bulge, plain, start_rank=1)
         except Exception as exc:  # noqa: BLE001 - never abort on a bundled TSV
             sys.stderr.write(f"generate-report: {base_name} unavailable: {exc}\n")
             return None
@@ -3992,27 +4009,27 @@ def build_report(
 
     # ---- SECTION 6: top-1000 table (curated columns incl. annotations) ------
     try:
-        table_html = build_table_html(top_df, cols, has_crista, datasets=meta.get("datasets", ""))
+        table_html = build_table_html(top_df, cols, has_crispr_bulge, datasets=meta.get("datasets", ""))
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
         table_html = "<p>Top-1000 table unavailable.</p>"
-    # Second top-1000 table ranked by CRISTA (only when CRISTA was computed), with
+    # Second top-1000 table ranked by CRISPR-Bulge (only when CRISPR-Bulge was computed), with
     # a bundled curated TSV alongside top1000.tsv.
-    table_crista_html = ""
-    top_crista_df = None
-    if has_crista:
+    table_crispr_bulge_html = ""
+    top_crispr_bulge_df = None
+    if has_crispr_bulge:
         try:
-            top_crista_df = select_top_crista(df, cols, n=top_n)
-            if len(top_crista_df):
-                table_crista_html = build_table_html(
-                    top_crista_df, cols, has_crista, datasets=meta.get("datasets", "")
+            top_crispr_bulge_df = select_top_crispr_bulge(df, cols, n=top_n)
+            if len(top_crispr_bulge_df):
+                table_crispr_bulge_html = build_table_html(
+                    top_crispr_bulge_df, cols, has_crispr_bulge, datasets=meta.get("datasets", "")
                 )
                 tier_downloads.append(
-                    (f"Top-1000 by {scorer_label()} (curated TSV)", "top1000_crista.tsv")
+                    (f"Top-1000 by {scorer_label()} (curated TSV)", "top1000_crispr_bulge.tsv")
                 )
         except Exception as exc:  # noqa: BLE001
-            sys.stderr.write(f"generate-report: CRISTA table unavailable: {exc}\n")
-            table_crista_html, top_crista_df = "", None
+            sys.stderr.write(f"generate-report: CRISPR-Bulge table unavailable: {exc}\n")
+            table_crispr_bulge_html, top_crispr_bulge_df = "", None
 
     # ---- high-variant-density ("highly complex") regions BED (#144) ----------
     # Merge the per-chromosome beds the search wrote into ONE bundled file (single
@@ -4267,7 +4284,7 @@ def build_report(
         indel_af_n_rows=indel_af_n_rows,
         perfect_banner=perfect_banner,
         next_steps_html=render_next_steps_box(vp),
-        table_crista_html=table_crista_html,
+        table_crispr_bulge_html=table_crispr_bulge_html,
         inputs_criteria_html=inputs_criteria_html,
         legend_html=(
             '<h3 style="margin:0.6em 0 0.3em">Scores &amp; columns</h3>'
@@ -4287,8 +4304,8 @@ def build_report(
         _linkable.add(hvdr_bundle_name)
     if cooc_bundle_name:
         _linkable.add(cooc_bundle_name)
-    if top_crista_df is not None and len(top_crista_df):
-        _linkable.add("top1000_crista.tsv")
+    if top_crispr_bulge_df is not None and len(top_crispr_bulge_df):
+        _linkable.add("top1000_crispr_bulge.tsv")
     _linkable.update(v for v in tier_links.values() if v)
     html_doc = _linkify_bundled_filenames(html_doc, _linkable)
 
@@ -4301,21 +4318,21 @@ def build_report(
         # top1000.tsv -- curated columns (same schema as the table + downloads)
         top1000_path = os.path.join(staging, top1000_name)
         try:
-            write_top1000_tsv(top_df, cols, has_crista, top1000_path)
+            write_top1000_tsv(top_df, cols, has_crispr_bulge, top1000_path)
         except Exception as exc:  # noqa: BLE001 - never abort on the bundled TSV
             sys.stderr.write(f"generate-report: top1000.tsv unavailable: {exc}\n")
             with open(top1000_path, "w") as handle:
-                handle.write("\t".join(curated_headers(has_crista)) + "\n")
+                handle.write("\t".join(curated_headers(has_crispr_bulge)) + "\n")
 
-        # top1000_crista.tsv -- the CRISTA-ranked companion (same curated schema)
-        if top_crista_df is not None and len(top_crista_df):
+        # top1000_crispr_bulge.tsv -- the CRISPR-Bulge-ranked companion (same curated schema)
+        if top_crispr_bulge_df is not None and len(top_crispr_bulge_df):
             try:
                 write_top1000_tsv(
-                    top_crista_df, cols, has_crista,
-                    os.path.join(staging, "top1000_crista.tsv"),
+                    top_crispr_bulge_df, cols, has_crispr_bulge,
+                    os.path.join(staging, "top1000_crispr_bulge.tsv"),
                 )
             except Exception as exc:  # noqa: BLE001 - never abort on the bundled TSV
-                sys.stderr.write(f"generate-report: top1000_crista.tsv unavailable: {exc}\n")
+                sys.stderr.write(f"generate-report: top1000_crispr_bulge.tsv unavailable: {exc}\n")
 
         # the complete RAW results (all 85 columns) stay as the gzip
         gz_path = os.path.join(staging, tsv_gz_name)
@@ -4326,9 +4343,9 @@ def build_report(
                 shutil.copyfileobj(src, dst, length=1024 * 1024)
 
         bundle = [html_path, gz_path, top1000_path]
-        _crista_path = os.path.join(staging, "top1000_crista.tsv")
-        if os.path.isfile(_crista_path):
-            bundle.append(_crista_path)
+        _crispr_bulge_path = os.path.join(staging, "top1000_crispr_bulge.tsv")
+        if os.path.isfile(_crispr_bulge_path):
+            bundle.append(_crispr_bulge_path)
         bundle += staged_tier_paths
         if hvdr_bundle_name:
             bundle.append(os.path.join(staging, hvdr_bundle_name))
@@ -4345,8 +4362,8 @@ def build_report(
         # the ZIP is self-sufficient for re-execution. Never break the report on it.
         try:
             _manifest = {
-                "crisprme_version": meta.get("version") or "2.4.0",
-                "report_generator": "v2.4",
+                "crisprme_version": meta.get("version") or "2.6.0",
+                "report_generator": "v" + (meta.get("version") or "2.6.0"),
                 "generated_date": meta.get("date"),
                 "guides": meta.get("guides"),
                 "nuclease": meta.get("nuclease"),
@@ -4373,9 +4390,8 @@ def build_report(
                 "database": _reg_vc,  # {n_records SNPs, n_indels, databases} or None
                 "source_integrated_results": os.path.basename(integrated_tsv),
                 "crispritz_note": (
-                    "search-engine (CRISPRitz) version is recorded in the build; the "
-                    "pinellolab/crisprme:v2.4.0 image builds CRISPRitz v2.8.2. See "
-                    "Params.txt for the exact run parameters."
+                    "search-engine (CRISPRitz v2.8.3) version is recorded in the build. "
+                    "See Params.txt for the exact run parameters."
                 ),
             }
             _man_path = os.path.join(staging, "run_manifest.json")
@@ -4596,11 +4612,11 @@ def _encode_png_file(path):
 
 
 def _combined_ranked_score_images_html(hap_dirs, hap_output_names, guide):
-    """Paternal | Maternal, side by side, for each of CFD and CRISTA --
-    build_report()'s own 'By CFD score' / 'By CRISTA score' subsections
+    """Paternal | Maternal, side by side, for each of CFD and CRISPR-Bulge --
+    build_report()'s own 'By CFD score' / 'By CRISPR-Bulge score' subsections
     (the real complete-search 'Key graphical report'), reusing each
     haplotype's own already-rendered
-    `imgs/CRISPRme_{CFD,CRISTA}_top_1000_log_for_main_text_<guide>.png`
+    `imgs/CRISPRme_{CFD,CRISPR-Bulge}_top_1000_log_for_main_text_<guide>.png`
     (written automatically by that haplotype's own complete-search run,
     same file the live results page's 'CFD score, top 1000 off-targets'
     section already re-embeds) -- no new plot-generation code, and nothing
@@ -4610,15 +4626,16 @@ def _combined_ranked_score_images_html(hap_dirs, hap_output_names, guide):
     only is the CORRECT rendering here (assembly-search has no VCF), not a
     degraded case.
 
-    Deliberately includes CRISTA here even though the live results page's
+    Deliberately includes CRISPR-Bulge here even though the live results page's
     own CFD-plot section deliberately excludes it ('per request', see that
     section's own comment) -- that was a scope call for the interactive
     page, not a reason to omit it from a static report whose whole point is
     matching complete-search's real report structure."""
     blocks = []
     # 'score' is ALSO part of the image filename (CRISPRme_{score}_top_1000_...), so the
-    # key stays 'CRISTA'; only the display label follows the active scorer.
-    for score, label in (("CFD", "CFD score"), ("CRISTA", scorer_label() + " score")):
+    # key must match the plot files the scorer wrote ('CRISPR_BULGE', underscore);
+    # only the display label follows the active scorer.
+    for score, label in (("CFD", "CFD score"), ("CRISPR_BULGE", scorer_label() + " score")):
         cols = []
         for hap, hap_label in (("paternal", "Paternal"), ("maternal", "Maternal")):
             hap_dir = hap_dirs.get(hap)
@@ -4818,10 +4835,10 @@ def _reconciled_panel_frame(combined_df):
     one side (the other is NaN), so max/min collapse to that single real
     value automatically -- no special-casing needed.
 
-    No CRISTA here: the reconciled table only bundles the fewest-mm+b
-    projection (no highest_CRISTA columns), so this panel's threshold table
-    has no CRISTA section -- a real, documented gap (each haplotype's OWN
-    panel below does have CRISTA), not a bug.
+    No CRISPR-Bulge here: the reconciled table only bundles the fewest-mm+b
+    projection (no highest_CRISPR_BULGE columns), so this panel's threshold table
+    has no CRISPR-Bulge section -- a real, documented gap (each haplotype's OWN
+    panel below does have CRISPR-Bulge), not a bug.
 
     No REF/ALT/variant distinction either (deliberately un-set in `cols`):
     assembly-search never runs with `--vcf`, and combined_df's OWN "origin"
@@ -4838,7 +4855,7 @@ def _reconciled_panel_frame(combined_df):
     b_m = pd.to_numeric(df.get("Bulges_(fewest_mm+b)_maternal"), errors="coerce")
     # NOTE: named "_recon_*", NOT "_cfd"/"_mmb" -- select_worstcase_panel()
     # internally builds its OWN working columns literally named "_cfd"/
-    # "_crista"/"_mmb"/"_severity"/"_hard" (for sorting) and DROPS them
+    # "_crispr_bulge"/"_mmb"/"_severity"/"_hard" (for sorting) and DROPS them
     # before returning. Naming these the same got silently overwritten then
     # dropped, wiping every real value to "-" in the exported TSV (caught
     # 2026-09-10 by checking the actual bundled panel TSV, not just that the
@@ -4957,10 +4974,10 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
     report.html (which uses the real complete-search default) -- a real,
     deliberate, documented tradeoff in favor of pooled-ranking correctness.
 
-    CRISTA has no fewest-mm+b projection in the raw data AT ALL (checked
-    directly: only `CRISTA_score_(highest_CRISTA)` exists) -- private rows
-    use that (the only CRISTA number that exists), reconciled rows get NaN
-    (that schema carries no CRISTA yet). Real, visible, partial column, not
+    CRISPR-Bulge has no fewest-mm+b projection in the raw data AT ALL (checked
+    directly: only `CRISPR_BULGE_score_(highest_CRISPR_BULGE)` exists) -- private rows
+    use that (the only CRISPR-Bulge number that exists), reconciled rows get NaN
+    (that schema carries no CRISPR-Bulge yet). Real, visible, partial column, not
     fabricated.
 
     Returns ``(pooled_df, cols)`` -- `cols` is a standard `_COLS`-shaped
@@ -4984,7 +5001,7 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             "Bulges": recon_df["_recon_bulges"],
             "Mismatches+bulges": recon_df["_recon_mmb"],
             "CFD_score": recon_df["_recon_cfd"],
-            "CRISTA_score": np.nan,
+            "CRISPR_BULGE_score": np.nan,
             "_pv_category": "Reconciled (hg38)",
         }))
 
@@ -5008,7 +5025,7 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             "Bulges": pd.to_numeric(priv_df.get("Bulges_(fewest_mm+b)"), errors="coerce"),
             "Mismatches+bulges": pd.to_numeric(priv_df.get("Mismatches+bulges_(fewest_mm+b)"), errors="coerce"),
             "CFD_score": pd.to_numeric(priv_df.get("CFD_score_(fewest_mm+b)"), errors="coerce"),
-            "CRISTA_score": pd.to_numeric(priv_df.get("CRISTA_score_(highest_CRISTA)"), errors="coerce"),
+            "CRISPR_BULGE_score": pd.to_numeric(priv_df.get("CRISPR_BULGE_score_(highest_CRISPR_BULGE)"), errors="coerce"),
             "_pv_category": label,
         }))
 
@@ -5018,7 +5035,7 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
     cols = {
         "guide": "Spacer+PAM", "chrom": "Chromosome", "pos": "Start_coordinate",
         "strand": "Strand", "mm": "Mismatches", "bulges": "Bulges",
-        "mmb": "Mismatches+bulges", "cfd": "CFD_score", "crista": "CRISTA_score",
+        "mmb": "Mismatches+bulges", "cfd": "CFD_score", "crispr_bulge": "CRISPR_BULGE_score",
     }
     if "Aligned_protospacer+PAM_REF" in pooled.columns:
         cols["aln_ref"] = "Aligned_protospacer+PAM_REF"
@@ -5026,12 +5043,12 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
     return pooled, cols
 
 
-def _curated_frame_with_category(sub_df, cols, has_crista, category_series, start_rank=1):
+def _curated_frame_with_category(sub_df, cols, has_crispr_bulge, category_series, start_rank=1):
     """`build_curated_frame()`'s real curated columns plus one more,
     `Site_category` -- looked up by ORIGINAL index from `category_series`
     (the pooled frame's `_pv_category`), so it survives `select_worstcase_panel()`'s/
     `select_top()`'s sort/filter/head() (all index-preserving)."""
-    frame = build_curated_frame(sub_df, cols, has_crista, start_rank=start_rank)
+    frame = build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=start_rank)
     frame["Site_category"] = [category_series.get(idx, CURATED_MISSING) for idx in sub_df.index]
     return frame
 
@@ -5099,7 +5116,7 @@ def _combined_validation_panel_html(combined_df, hap_dirs, guide, staging_dir):
         sys.stderr.write(f"generate-report: pooled validation panel unavailable: {exc}\n")
         return "<p class='caption'>Validation panel unavailable.</p>", "", [], None
 
-    has_crista = vp.get("has_crista", False)
+    has_crispr_bulge = vp.get("has_crispr_bulge", False)
     category = pooled_df["_pv_category"]
     staged = []
     panel_name = None
@@ -5108,7 +5125,7 @@ def _combined_validation_panel_html(combined_df, hap_dirs, guide, staging_dir):
     def _stage(sub_df, base_name):
         path = os.path.join(staging_dir, base_name)
         try:
-            _curated_frame_with_category(sub_df, cols, has_crista, category, start_rank=1).to_csv(
+            _curated_frame_with_category(sub_df, cols, has_crispr_bulge, category, start_rank=1).to_csv(
                 path, sep="\t", index=False
             )
         except Exception as exc:  # noqa: BLE001
@@ -5146,8 +5163,8 @@ def _combined_validation_panel_html(combined_df, hap_dirs, guide, staging_dir):
         "(including, in this run, the guide's only perfect match) can't be "
         "missed just because it lacks an hg38 coordinate. Every row is "
         "scored on its fewest-mismatches+bulges alignment for a fair "
-        "cross-category ranking; CRISTA is real for non-mappable rows (the "
-        "only CRISTA projection the raw data carries) and blank for "
+        "cross-category ranking; CRISPR-Bulge is real for non-mappable rows (the "
+        "only CRISPR-Bulge projection the raw data carries) and blank for "
         "reconciled rows (not yet carried through reconciliation). Each "
         "row's <code>Site_category</code> column (in the table below and "
         "every bundled TSV) says which category it came from and, for a "
@@ -5699,33 +5716,33 @@ def build_combined_report(
 
     # Section 5: pooled Top-1000 (reconciled + both private sets), standard
     # curated columns + Site_category -- real complete-search's own
-    # select_top()/select_top_crista() + build_curated_frame(), unmodified,
+    # select_top()/select_top_crispr_bulge() + build_curated_frame(), unmodified,
     # on the same pooled frame the validation panel used (2026-09-10, was
     # previously a reconciled-only paternal/maternal side-by-side table --
     # see _combined_curated_top_df()'s docstring).
     top1000_html = "<p>No off-targets to show.</p>"
-    top1000_crista_html = ""
+    top1000_crispr_bulge_html = ""
     _top1000_curated_for_tsv = None
     if pooled_vp is not None:
         _pooled_df, _pooled_cols = _pooled_validation_frame(
             combined_df, hap_dirs, guides[0] if guides else None
         )
-        _has_crista = pooled_vp.get("has_crista", False)
+        _has_crispr_bulge = pooled_vp.get("has_crispr_bulge", False)
         _category = _pooled_df["_pv_category"]
         top_df = select_top(_pooled_df, _pooled_cols, n=top_n)
         if len(top_df):
             _top1000_curated_for_tsv = _curated_frame_with_category(
-                top_df, _pooled_cols, _has_crista, _category, start_rank=1
+                top_df, _pooled_cols, _has_crispr_bulge, _category, start_rank=1
             )
             top1000_html = _render_curated_table_html(_top1000_curated_for_tsv)
-        if _has_crista:
-            top_crista_df = select_top_crista(_pooled_df, _pooled_cols, n=top_n)
-            if len(top_crista_df):
-                top1000_crista_html = (
+        if _has_crispr_bulge:
+            top_crispr_bulge_df = select_top_crispr_bulge(_pooled_df, _pooled_cols, n=top_n)
+            if len(top_crispr_bulge_df):
+                top1000_crispr_bulge_html = (
                     f'<h3 style="margin:1.2em 0 0.3em 0">Ranked by {scorer_label()} score</h3>'
                     + _render_curated_table_html(
                         _curated_frame_with_category(
-                            top_crista_df, _pooled_cols, _has_crista, _category, start_rank=1
+                            top_crispr_bulge_df, _pooled_cols, _has_crispr_bulge, _category, start_rank=1
                         )
                     )
                 )
@@ -5814,7 +5831,7 @@ reconciled-only -- same pooled frame as the validation panel above, tagged
 with <code>Site_category</code>.</p>
 <h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>
 {top1000_html}
-{top1000_crista_html}
+{top1000_crispr_bulge_html}
 
 <h2>6. Per-haplotype detail</h2>
 <p>Each haplotype was searched independently before reconciliation; its own

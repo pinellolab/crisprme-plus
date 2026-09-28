@@ -2,9 +2,9 @@
 """Tests for twopass_score (Pass-2 worst-possible per-window scoring).
 
 Verifies the integration of Pass-1 min-edit + exact worst-case CFD, and the
-CRISTA best-effort shortlist (ordering toward low-edit haplotypes, truncation
+CRISPR-Bulge best-effort shortlist (ordering toward low-edit haplotypes, truncation
 flag, worst = max over the evaluated set). CFD-vs-brute-force is re-checked as an
-oracle here too. STDLIB only (a mock crista_fn stands in for the RandomForest).
+oracle here too. STDLIB only (a mock crispr_bulge_fn stands in for the RandomForest).
 """
 import itertools
 import os
@@ -26,7 +26,7 @@ class TestScoreWindow(unittest.TestCase):
         r = ts.score_window(guide, sets, ["GG"], MM, PAM)
         self.assertEqual(r["min_edit"][0], 0)              # perfect -> D=0
         self.assertEqual(r["cfd_worst"], PAM.get("GG", 0.0))  # perfect proto -> max PAM
-        self.assertIsNone(r["crista_worst"])              # no crista_fn -> skipped
+        self.assertIsNone(r["crispr_bulge_worst"])              # no crispr_bulge_fn -> skipped
 
     def test_cfd_worst_matches_bruteforce(self):
         # short guide so itertools.product is tractable; the scorer's cfd_worst must
@@ -48,7 +48,7 @@ class TestScoreWindow(unittest.TestCase):
             self.assertEqual(got, best, f"guide={guide} sets={sets}")
 
 
-class TestCristaShortlist(unittest.TestCase):
+class TestCRISPRBulgeShortlist(unittest.TestCase):
     def test_low_edit_ordering_puts_guide_base_first(self):
         guide = "ACGT"
         sets = [frozenset("CA"), frozenset("C"), frozenset("GA"), frozenset("T")]
@@ -65,26 +65,26 @@ class TestCristaShortlist(unittest.TestCase):
         self.assertEqual(len(haps), 10)
         self.assertEqual(haps[0], "AAAAAA")  # guide-matching first
 
-    def test_crista_worst_is_max_over_shortlist_and_flags_approx(self):
+    def test_crispr_bulge_worst_is_max_over_shortlist_and_flags_approx(self):
         guide = "ACGTAC"
         sets = [frozenset("ACGT")] * 6  # huge product -> truncated
-        # mock CRISTA: score = number of positions equal to the guide (max at the
+        # mock CRISPR-Bulge: score = number of positions equal to the guide (max at the
         # guide itself, which the low-edit ordering surfaces first).
-        def mock_crista(triples):
+        def mock_crispr_bulge(triples):
             return [sum(a == b for a, b in zip(g, d)) for (g, d, p) in triples]
         r = ts.score_window(guide, sets, ["GG"], MM, PAM,
-                            crista_fn=mock_crista, crista_cap=20)
-        self.assertTrue(r["crista_approx"])                 # truncated -> approximate
-        self.assertEqual(r["crista_worst"], len(guide))     # guide hap scores full length
-        self.assertEqual(r["crista_n_evaluated"], 20)       # cap x 1 pam
+                            crispr_bulge_fn=mock_crispr_bulge, crispr_bulge_cap=20)
+        self.assertTrue(r["crispr_bulge_approx"])                 # truncated -> approximate
+        self.assertEqual(r["crispr_bulge_worst"], len(guide))     # guide hap scores full length
+        self.assertEqual(r["crispr_bulge_n_evaluated"], 20)       # cap x 1 pam
 
-    def test_crista_exhaustive_not_flagged(self):
+    def test_crispr_bulge_exhaustive_not_flagged(self):
         guide = "ACG"
         sets = [frozenset("A"), frozenset("C"), frozenset("G")]  # single haplotype
         r = ts.score_window(guide, sets, ["GG"], MM, PAM,
-                            crista_fn=lambda tr: [1.0] * len(tr))
-        self.assertFalse(r["crista_approx"])
-        self.assertEqual(r["crista_n_evaluated"], 1)
+                            crispr_bulge_fn=lambda tr: [1.0] * len(tr))
+        self.assertFalse(r["crispr_bulge_approx"])
+        self.assertEqual(r["crispr_bulge_n_evaluated"], 1)
 
 
 if __name__ == "__main__":

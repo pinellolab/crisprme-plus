@@ -19,7 +19,7 @@ test_twopass_lynchpin_counterexamples) -- but that guard is NOT yet wired into t
 production indel search. This module is the enumeration-free replacement for the intractable 2^k
 haplotype-lattice post-analysis (49h+ on the 4x dense panel).
 
-STDLIB only. Pass-2 scoring (exact CFD via twopass_cfd_exact, min-edit, CRISTA
+STDLIB only. Pass-2 scoring (exact CFD via twopass_cfd_exact, min-edit, CRISPR-Bulge
 shortlist) runs only on the windows this pass keeps.
 """
 import functools
