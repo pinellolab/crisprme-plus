@@ -11,6 +11,8 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-09-28
+
 ### Added
 - **The default image is now GPU-capable — one image, both modes.** `pinellolab/crisprme:latest`
   (and `:<tag>`) builds its **amd64** layer with the conda-forge CUDA TensorFlow
@@ -1632,7 +1634,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.1...HEAD
+[2.6.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.1
 [2.6.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.0
 [2.5.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.5
 [2.5.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.4
