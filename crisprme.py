@@ -342,7 +342,8 @@ def print_help_complete_search() -> None:
         "reported alignment, pruned INSIDE the TST search so excess alignments "
         "are never generated (much faster + smaller intermediates). E.g. with "
         "--mm 6 --bDNA 2 --bRNA 2 --max-total-edits 6, a 4mm+1+1 alignment is "
-        "kept but a 6mm+2+2 (=10) one is skipped. Default 4; set it >= "
+        "kept but a 6mm+2+2 (=10) one is skipped. Default 6 (sized for the "
+        "recommended 4mm + 1 DNA + 1 RNA bulge); set it >= "
         "mm+bDNA+bRNA to effectively disable. NOTE: the cap is on the alignment "
         "against the searched (possibly variant-enriched) genome; a variant that "
         "matches the guide lowers the searched edit count, so a VARIANT off-target's "
@@ -942,6 +943,66 @@ def cosmic_license_cmd() -> None:
         "COSMIC ENABLED. COSMIC (cancer) annotations will be INCLUDED in searches. You "
         "are responsible for holding a valid COSMIC licence appropriate for your use."
     )
+
+
+def scorer_env_cmd() -> None:
+    """``crisprme.py scorer-env {create|check|update|list|doctor} [--gpu] [--force]``
+
+    Manage the dedicated conda env(s) for the ML off-target scorers (CRISPR-Bulge),
+    which run in their own TensorFlow env so their pinned deps never touch the main
+    CRISPRme stack. ``check``/``doctor`` probe health (imports + weights) and persist
+    the result to ``<data>/Annotations/.scorer_env.json``; ``create``/``update`` build
+    or repair the env (CPU by default; ``--gpu`` for the CUDA build).
+    """
+    import scorer_env as _se
+
+    args = sys.argv
+    action = args[2].lower() if len(args) > 2 else "check"
+    if action not in ("create", "check", "update", "list", "doctor", "status"):
+        error("Usage: crisprme.py scorer-env {create|check|update|list|doctor} [--gpu] [--force]")
+    gpu = "--gpu" in args
+    force = "--force" in args
+    # optional explicit env name as the 3rd positional (else the default 'cbulge')
+    name = _se.DEFAULT_ENV
+    if len(args) > 3 and not args[3].startswith("-"):
+        name = args[3]
+    ann_dir = os.path.join(current_working_directory, "Annotations")
+
+    if action == "list":
+        mgr = _se.detect_env_manager()
+        print("Scorer environments:")
+        for env_name, spec in _se.SCORER_ENVS.items():
+            present = "present" if _se.env_exists(env_name) else "absent"
+            print(f"  {env_name}: {present} — {spec['description']}")
+        print(f"  env manager: {mgr[1] + ' (' + mgr[0] + ')' if mgr else 'NONE FOUND'}")
+        return
+
+    if name not in _se.SCORER_ENVS:
+        error(f"unknown scorer env '{name}' (known: {', '.join(sorted(_se.SCORER_ENVS))})")
+
+    if action in ("create", "update"):
+        if action == "create":
+            ok, msg = _se.create_env(name, gpu=gpu, force=force)
+        else:
+            ok, msg = _se.update_env(name, gpu=gpu)
+        print(f"[scorer-env] {name}: {msg}")
+        rec = _se.health_check(name)
+        print(_se.render_health(rec))
+        _se.set_scorer_env_state(ann_dir, rec)
+        sys.exit(0 if ok else 1)
+
+    # check / doctor / status -> probe + persist
+    rec = _se.health_check(name)
+    print(_se.render_health(rec))
+    _se.set_scorer_env_state(ann_dir, rec)
+    if action == "doctor" and rec["status"] != _se.OK:
+        print("\nSuggested fix:")
+        if any(level == _se.ERROR for level, _ in rec["issues"]):
+            print(f"  crisprme.py scorer-env create{' --gpu' if gpu else ''}")
+        else:
+            print("  set CBULGE_REPO to the CRISPR-Bulge source "
+                  "(P4 will fetch weights from HuggingFace automatically).")
+    sys.exit(0 if rec["status"] != _se.ERROR else 1)
 
 
 def _merge_default_intogen(annotationfile: str) -> str:
@@ -1640,6 +1701,49 @@ def complete_search() -> None:
         emit_alt = per_sample  # default: ON under --per-sample, OFF for population-level
     os.environ["CRISPRME_EMIT_ALT_ALIGNMENTS"] = "1" if emit_alt else "0"
 
+    # ML off-target scorer for the SECOND score column beside CFD (CFD stays the primary
+    # score). As of the CRISTA retirement this is ALWAYS CRISPR-Bulge -- the more accurate,
+    # MIT-licensed model that runs in the dedicated cbulge conda env via the scorer-runner.
+    # CRISPRME_SCORER_SELECT is retained as the internal signal (report/web read it from
+    # .Params.txt to label the column) but is no longer user-selectable. --compute-backend
+    # selects the scorer device (GPU optional; ALWAYS a graceful CPU fallback):
+    #   cpu (default) | gpu/auto (auto-pick cuda->metal->cpu) | cuda (NVIDIA/Linux) |
+    #   metal (Apple Silicon). A requested accelerator that is absent -- or that
+    #   miscomputes the model, e.g. tensorflow-metal's GRU -- degrades to CPU with a
+    #   warning (see compute_backend.py + crispr_bulge_score.load_models). Both thread
+    #   through the post-analysis subprocess tree (submit_job -> pools ->
+    #   new_simple_analysis/analisi_indels) as env vars, exactly like CRISPRME_FAST_MODE.
+    scorer = "crispr-bulge"
+    os.environ["CRISPRME_SCORER_SELECT"] = scorer
+
+    compute_backend = "cpu"
+    if "--compute-backend" in args:
+        try:
+            compute_backend = args[args.index("--compute-backend") + 1].lower()
+        except IndexError:
+            error("--compute-backend requires a value: cpu | gpu | auto | cuda | metal")
+        if compute_backend not in ("cpu", "gpu", "auto", "cuda", "metal"):
+            error("--compute-backend must be one of: cpu | gpu | auto | cuda | metal")
+    os.environ["CRISPRME_COMPUTE_BACKEND"] = compute_backend
+
+    # nudge the user if the CRISPR-Bulge env isn't healthy (the scorer-runner degrades
+    # gracefully to -1.0, but a heads-up avoids silent gaps in the ML score column)
+    try:
+        sys.path.insert(0, corrected_origin_path)
+        import scorer_env as _se
+        _scorer_name = _se.DEFAULT_ENV   # honors CRISPRME_SCORER_ENV; the runtime scorer uses the same
+        _hc = _se.health_check(_scorer_name)
+        if _hc.get("status") == "error":
+            print(
+                f"WARNING [complete-search]: the '{_scorer_name}' scorer env is not ready (" +
+                "; ".join(m for _, m in _hc.get("issues", [])) +
+                "). CRISPR-Bulge off-target scores will be -1 until you run: "
+                "crisprme.py scorer-env create",
+                flush=True,
+            )
+    except Exception:
+        pass
+
     # optional prebuilt/staged reference-index library (--index-path). When
     # given, the reference index is looked up here (e.g. an index made with
     # build-index-only, or one downloaded ahead of time) rather than built under
@@ -1660,9 +1764,11 @@ def complete_search() -> None:
     # combined-edit alignments (e.g. 6mm+2+2 bulges = 10) from bloating the
     # intermediate files, scoring and post-analysis. Enforced INSIDE the TST
     # search (pruned before generation, --max-edits) with a post-search awk drop
-    # as a backstop for the -r/brute-force path. Default 4 (a real off-target
-    # rarely stacks many mismatches AND several bulges); -1 disables it.
-    max_total_edits = 4
+    # as a backstop for the -r/brute-force path. Default 6, sized for the recommended
+    # default search (4 mismatches + 1 DNA + 1 RNA bulge = 6) so a bulged off-target at the
+    # full mismatch budget is NOT silently pruned; it stays lowerable as a perf backstop and
+    # -1 disables it. (A real off-target rarely stacks many mismatches AND several bulges.)
+    max_total_edits = 6
     if "--max-total-edits" in args:
         try:
             max_total_edits = int(args[args.index("--max-total-edits") + 1])
@@ -1732,25 +1838,27 @@ def complete_search() -> None:
         )
     nuclease = pam_name_fields[2]
     # Treat --max-total-edits as the single "max edits" knob (mirroring the web slider):
-    # when the user did NOT specify per-type bulges, derive bDNA=bRNA from the max-edits
-    # budget, BOUNDED by the bulge depth a search can REACH here -- so e.g.
-    # `complete-search --vcf ... --max-total-edits 4` searches up to 2 bulges of each type
-    # (finding 2mm+1bulge / 2mm+2bulge patterns) with no bulge flags. The reference term of
-    # the cap is buildable-aware (the reference index is built on demand from the shipped
-    # raw genome, as the search shell does), so a fresh/dict-less install no longer silently
-    # derives 0 bulges; the variant term stays strictly installed-index-based (a variant
-    # index can't be built dict-less). Explicit --bDNA/--bRNA always win; if no index can
-    # supply bulges and no raw genome exists the search stays bulge-free (fast, safe).
+    # when the user did NOT specify per-type bulges, default to ONE DNA + ONE RNA bulge
+    # (bounded by the bulge depth a search can REACH here). We deliberately cap the derived
+    # default at a SINGLE bulge of each type: that is the recommended default search (4mm +
+    # 1 DNA + 1 RNA) and stays in the CRISPR-Bulge scorer's validated single-bulge domain
+    # (>=2-bulge sites are out of domain -- see the report scores legend). A deeper search
+    # is opt-in via explicit --bDNA/--bRNA (which always win). The reference term of the cap
+    # is buildable-aware (the reference index is built on demand from the shipped raw genome,
+    # as the search shell does), so a fresh/dict-less install still gets its 1 bulge; the
+    # variant term stays strictly installed-index-based. If no index can supply bulges and no
+    # raw genome exists the search stays bulge-free (fast, safe).
+    _SIMPLE_BULGE_CAP = 1
     if not _bdna_given and not _brna_given and max_total_edits > 0:
         _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant)
-        _derived = min(max_total_edits, _idx_cap)
+        _derived = min(max_total_edits, _idx_cap, _SIMPLE_BULGE_CAP)
         if _derived > 0:
             bDNA = bRNA = _derived
             bMax = max(bDNA, bRNA)
             print(
-                f"[complete-search] no --bDNA/--bRNA given: deriving up to {_derived} "
-                f"bulge(s) of each type from --max-total-edits {max_total_edits} "
-                f"(reachable index bulge depth {_idx_cap})."
+                f"[complete-search] no --bDNA/--bRNA given: defaulting to {_derived} "
+                f"bulge(s) of each type (single-bulge domain; reachable index bulge depth "
+                f"{_idx_cap}). Pass explicit --bDNA/--bRNA for a deeper search."
             )
     # [max-total-edits] Surface the silent combined-edit prune (issue #107): when the
     # requested mm + bulges exceed the cap, any alignment stacking more than
@@ -1841,6 +1949,12 @@ def complete_search() -> None:
         p.write("Nuclease\t" + str(nuclease) + "\n")
         # p.write('Gecko\t' + str(gecko_comp) + '\n')
         p.write("Ref_comp\t" + str(ref_comparison) + "\n")
+        # which ML off-target scorer produced the second score column ('crista' |
+        # 'crispr-bulge') + compute backend. generate-report + the web run as separate
+        # invocations (env vars gone), so they read the active scorer from here to label
+        # + threshold that column correctly.
+        p.write("Scorer\t" + str(scorer) + "\n")
+        p.write("Compute_backend\t" + str(compute_backend) + "\n")
         p.close()
     len_guide_sequence = total_pam_len - pam_len
     if sequence_use:
@@ -4116,6 +4230,11 @@ def crisprme_help() -> None:
         "EXCLUDED by default; its commercial use requires a licence (Genome "
         "Research Ltd / Wellcome Sanger; https://www.cosmickb.org/terms/). `enable` "
         "asks for confirmation (or --accept for non-interactive use)\n\n"
+        "crisprme.py scorer-env {create|check|update|list|doctor} [--gpu] [--force]\n"
+        "\tManage the dedicated conda env(s) for ML off-target scorers "
+        "(CRISPR-Bulge). `create` builds the env, `check`/`doctor` diagnose it, "
+        "`update` repairs it, `list` shows status. Runs on CPU by default; --gpu "
+        "builds the CUDA variant\n\n"
         "crisprme.py setup\n"
         "\tInitializes the legacy database by downloading all reference "
         "genomes, variant datasets, PAM definition files, and associated "
@@ -4157,6 +4276,8 @@ elif sys.argv[1] == "generate-report":  # build shareable self-contained report
     generate_report()
 elif sys.argv[1] == "cosmic-license":  # enable/disable COSMIC (cancer) annotations
     cosmic_license_cmd()
+elif sys.argv[1] == "scorer-env":  # manage ML scorer conda env(s) (CRISPR-Bulge)
+    scorer_env_cmd()
 elif sys.argv[1] == "setup":  # run legacy database setup
     setup_database()
 elif sys.argv[1] == "web-interface":  # run web interface

@@ -117,11 +117,42 @@ REPORT_GENERATOR_VERSION = "2.4"
 # Recommended-validation-panel thresholds (module-level constants, section 4)
 # --------------------------------------------------------------------------- #
 CFD_THRESHOLDS = (0.5, 0.2, 0.05)
-# CRISTA is on a DIFFERENT scale than CFD -- reusing CFD's cut points made CRISTA>=0.05
-# select ~98% of off-targets (a meaningless "shortlist"). These CRISTA-appropriate,
-# higher cut points keep the tiers graduated + model-relative. CRISTA remains the
-# score to lean on for bulge/gapped sites (where CFD is out of its training domain).
+# The second (ML) score column is produced by whichever scorer ran (CRISPRME_SCORER_SELECT):
+# CRISTA (legacy) or CRISPR-Bulge. Each is on its OWN scale, so the report's display label,
+# tier thresholds, and plot titles for that column are chosen by the ACTIVE scorer -- read
+# from .Params.txt ("Scorer"), since generate-report runs after the search (no env vars).
+# The physical integrated_results column stays "*_(highest_CRISTA)" regardless (index-based).
+#
+# CRISTA cut points (0.6/0.4/0.2): higher than CFD -- reusing CFD's made CRISTA>=0.05 select
+# ~98% of off-targets. CRISPR-Bulge cut points (0.5/0.2/0.1): calibrated on Refined_TrueOT
+# (positives median 0.36; PR at 0.5=prec .67/rec .40, 0.2=prec .38/rec .55, 0.1=rec .64) --
+# graduated + model-relative on its own [0,1] cleavage-probability scale.
 CRISTA_THRESHOLDS = (0.6, 0.4, 0.2)
+CRISPR_BULGE_THRESHOLDS = (0.5, 0.2, 0.1)
+_SCORER_LABELS = {"crista": "CRISTA", "crispr-bulge": "CRISPR-Bulge"}
+_SCORER_THRESHOLDS = {"crista": CRISTA_THRESHOLDS, "crispr-bulge": CRISPR_BULGE_THRESHOLDS}
+# active scorer for THIS report invocation; set from .Params.txt in build_summary_meta().
+# generate-report processes one run per invocation, so a module-level value is safe and
+# avoids threading a scorer arg through ~30 display sites. The internal column key stays
+# "crista"; only the human-facing label + thresholds switch.
+_ACTIVE_SCORER = "crista"
+
+
+def _set_active_scorer(scorer):
+    global _ACTIVE_SCORER
+    _ACTIVE_SCORER = (scorer or "crista").lower()
+    if _ACTIVE_SCORER not in _SCORER_LABELS:
+        _ACTIVE_SCORER = "crista"
+
+
+def scorer_label():
+    """Human-facing label for the active second-score column ('CRISTA'|'CRISPR-Bulge')."""
+    return _SCORER_LABELS.get(_ACTIVE_SCORER, "CRISTA")
+
+
+def scorer_thresholds():
+    """Tier thresholds for the active second-score column (its own scale)."""
+    return _SCORER_THRESHOLDS.get(_ACTIVE_SCORER, CRISTA_THRESHOLDS)
 MMB_THRESHOLDS = (1, 2, 3, 4)
 # threshold-table variant-created CFD floor (kept for the full threshold table)
 PANEL_VARIANT_CFD_MIN = 0.05
@@ -131,10 +162,12 @@ PANEL_VARIANT_CFD_MIN = 0.05
 # --------------------------------------------------------------------------- #
 # Over the OFF-TARGET set (on-target mm+b==0 excluded), the panel is built in two
 # stages:
-#   1. HARD-INCLUDE every site that is close by sequence OR high-scoring, i.e.
-#      mm+bulges <= PANEL_FLOOR_MMB  OR  CFD >= PANEL_FLOOR_CFD. These are always
-#      in the panel even if they exceed the cap (a low-edit-distance or high-CFD
-#      site is never dropped from the confirmation panel).
+#   1. HARD-INCLUDE every site that is close by sequence OR high-scoring OR a pure
+#      bulge, i.e. mm+bulges <= PANEL_FLOOR_MMB  OR  CFD >= PANEL_FLOOR_CFD  OR
+#      (0 mismatches AND >=1 bulge). These are always in the panel even if they exceed
+#      the cap. The pure-bulge floor matters because >=2-bulge off-targets have no ML
+#      score (out of the CRISPR-Bulge domain) and only an uncalibrated CFD extrapolation,
+#      so a clean bulged site must not be dropped by a missing/low score.
 #   2. FILL the remaining slots up to PANEL_CAP by worst-case severity: each site
 #      is ranked independently by CFD (desc), CRISTA (desc; only when computed),
 #      and mm+bulges (asc, fewer = closer = worse); a site's SEVERITY is the BEST
@@ -663,9 +696,11 @@ def _curated_cell(kind, row, cols):
 
 
 def curated_headers(has_crista):
-    """The curated display headers, dropping CRISTA when not computed (and MAF
-    when ``_DROP_MAF`` is set)."""
-    return [h for h, kind in _active_columns() if kind != "crista" or has_crista]
+    """The curated display headers, dropping the ML-score column when not computed
+    (and MAF when ``_DROP_MAF`` is set). The ML-score header is relabeled by the active
+    scorer (CRISTA | CRISPR-Bulge); the internal kind stays "crista"."""
+    return [(scorer_label() if kind == "crista" else h)
+            for h, kind in _active_columns() if kind != "crista" or has_crista]
 
 
 def build_curated_frame(sub_df, cols, has_crista, start_rank=1):
@@ -1062,6 +1097,10 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     if params_override:
         params = {**params, **params_override}
 
+    # which ML scorer produced the second score column (.Params.txt "Scorer"); sets the
+    # module-level active scorer that drives the column's display label + tier thresholds.
+    _set_active_scorer(params.get("Scorer"))
+
     # search mode marker written by complete-search
     # (.search_mode = "population-level" | "per-sample"). The default is population-level;
     # treat a missing marker as population-level (the default) so older result dirs still
@@ -1351,7 +1390,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "<strong>Population-level</strong> (default) &mdash; the SNP off-target analysis "
             "reports one <em>worst-possible</em> representative per variant window instead of "
             "enumerating every per-sample haplotype. CFD is the <strong>exact worst case</strong>; "
-            "CRISTA is a best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing "
+            f"{scorer_label()} is a best-effort screen. <strong>Per-sample carriers, CONFIRMED cis phasing "
             "and exact joint allele frequency are NOT computed</strong> &mdash; re-run the search "
             "with <code>--per-sample</code> for that per-sample resolution on a genotyped panel "
             "(recommended for clinical validation). For sites-only (aggregate) panels there are no "
@@ -2116,48 +2155,49 @@ def plot_scatter_panels(df, cols, n=1000, include_crista=False):
         cr_samp = cols.get("crista_samples")
         cr_rsid = cols.get("crista_rsid")
 
-        # (c) by CRISTA score
+        # (c) by the active ML scorer (CRISTA | CRISPR-Bulge)
+        _sl = scorer_label()
         try:
             uri = _cfd_style_scatter(
                 _score_sorted(cr_score), cr_score, cr_ref, cr_alt,
-                xlabel="Candidate off-target site (ranked by CRISTA)",
-                title=f"Top {n_shown} candidates by CRISTA score",
-                score_name="CRISTA",
+                xlabel=f"Candidate off-target site (ranked by {_sl})",
+                title=f"Top {n_shown} candidates by {_sl} score",
+                score_name=_sl,
                 maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
             )
         except Exception as exc:  # noqa: BLE001
-            sys.stderr.write(f"generate-report: CRISTA scatter unavailable: {exc}\n")
-            uri = _placeholder_uri("CRISTA scatter unavailable")
+            sys.stderr.write(f"generate-report: {_sl} scatter unavailable: {exc}\n")
+            uri = _placeholder_uri(f"{_sl} scatter unavailable")
         panels.append((
-            "By CRISTA score",
-            "Independent CRISTA scoring model, ranked by CRISTA score. Included "
-            "because CRISTA scores were computed for this run.",
+            f"By {_sl} score",
+            f"Independent {_sl} scoring model, ranked by {_sl} score. Included "
+            f"because {_sl} scores were computed for this run.",
             uri,
         ))
 
-        # (d) by CRISTA DELTA -- only when the REF/ALT CRISTA columns exist
+        # (d) by ML-scorer DELTA -- only when the REF/ALT columns exist
         if "crista_ref" in cols and "crista_alt" in cols:
             try:
                 uri = _cfd_style_scatter(
                     _delta_sorted(cr_alt, cr_ref), cr_score, cr_ref, cr_alt,
                     xlabel="Candidate off-target site (ranked by variant effect ALT-REF)",
-                    title=f"Top {n_shown} by variant-induced CRISTA increase (ALT-REF)",
-                    score_name="CRISTA",
+                    title=f"Top {n_shown} by variant-induced {_sl} increase (ALT-REF)",
+                    score_name=_sl,
                     maf_col=cr_maf, samp_col=cr_samp, rsid_col=cr_rsid,
                 )
             except Exception as exc:  # noqa: BLE001
                 sys.stderr.write(
-                    f"generate-report: CRISTA delta scatter unavailable: {exc}\n"
+                    f"generate-report: {_sl} delta scatter unavailable: {exc}\n"
                 )
-                uri = _placeholder_uri("CRISTA delta scatter unavailable")
+                uri = _placeholder_uri(f"{_sl} delta scatter unavailable")
             panels.append((
-                "By variant effect (CRISTA)",
+                f"By variant effect ({_sl})",
                 "The same ref/alt scatter as for the CFD score above, now with "
-                "CRISTA on the y-axis, "
-                "re-ranked by the variant-induced CRISTA change (ALT-REF, "
+                f"{_sl} on the y-axis, "
+                f"re-ranked by the variant-induced {_sl} change (ALT-REF, "
                 "descending): the population variants that most raise the "
-                "independent CRISTA cleavage score come first. Included because "
-                "CRISTA scores were computed for this run.",
+                f"independent {_sl} cleavage score come first. Included because "
+                f"{_sl} scores were computed for this run.",
                 uri,
             ))
 
@@ -2247,10 +2287,14 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     candidate cut site with no a-priori on/off-target distinction, never dropped.
     The OFF-TARGET rows are then selected in two stages (over the off-target set):
 
-    1. HARD-INCLUDE every site that is close by sequence OR high-scoring:
-       ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR ``CFD >= PANEL_FLOOR_CFD (0.5)``.
-       These are always kept; if the hard-includes already exceed ``cap`` we keep
-       them all (a low-edit-distance / high-CFD site is never dropped).
+    1. HARD-INCLUDE every site that is close by sequence OR high-scoring OR a pure bulge:
+       ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR ``CFD >= PANEL_FLOOR_CFD (0.5)`` OR a
+       PURE-BULGE site (0 mismatches, >=1 bulge). These are always kept; if the
+       hard-includes already exceed ``cap`` we keep them all (a low-edit-distance /
+       high-CFD / clean-bulge site is never dropped). The pure-bulge floor exists because
+       >=2-bulge off-targets have NO ML score (out of the CRISPR-Bulge domain) and only an
+       uncalibrated CFD extrapolation, so a clean bulged site must not be de-prioritized by
+       a missing/low score.
     2. FILL the remaining slots up to ``cap`` by worst-case severity. Each site
        is ranked independently by every available metric in
        ``PANEL_WORSTCASE_METRICS``: CFD (desc), CRISTA (desc; only when computed)
@@ -2290,6 +2334,15 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     # unparseable mmb -> -1 (from _to_int_series); clamp to a large sentinel so it is
     # neither hard-included (mmb <= floor) nor ranked most-severe (mmb asc rank=1)
     mmb = mmb.where(mmb >= 0, 10 ** 6)
+    # mismatches + bulges counts, for the PURE-BULGE hard-include floor below
+    mm_cnt = (
+        _to_int_series(offt[cols["mm"]]).where(lambda s: s >= 0, 10 ** 6)
+        if "mm" in cols else pd.Series(10 ** 6, index=offt.index)
+    )
+    bulge_cnt = (
+        _to_int_series(offt[cols["bulges"]]).where(lambda s: s >= 0, 0)
+        if "bulges" in cols else pd.Series(0, index=offt.index)
+    )
     has_crista = ((crista >= 0) & (crista <= 1)).any()
 
     # per-metric ranks (rank 1 == worst). ascending flag flips per direction:
@@ -2312,8 +2365,15 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     else:
         severity = pd.Series(1.0, index=offt.index)
 
-    # STAGE 1: hard-includes (mm+b <= floor OR CFD >= floor)
-    hard_mask = (mmb <= PANEL_FLOOR_MMB) | (cfd >= PANEL_FLOOR_CFD)
+    # STAGE 1: hard-includes -- close by sequence (mm+b <= floor) OR high CFD OR a
+    # PURE-BULGE site (0 mismatches, >=1 bulge). The pure-bulge floor guarantees a clean
+    # bulged off-target -- e.g. a distal 2-bulge with no mismatches (the "well-tolerated
+    # truncation" case) -- is ALWAYS in the panel and can never be de-prioritized, even
+    # though its CRISPR-Bulge score is N/A (>=2 bulges) and CFD there is an uncalibrated
+    # extrapolation. Bulges with 0 mismatches are the most likely to still cleave, so a
+    # missing/low model score must not drop them.
+    pure_bulge = (mm_cnt == 0) & (bulge_cnt >= 1)
+    hard_mask = (mmb <= PANEL_FLOOR_MMB) | (cfd >= PANEL_FLOOR_CFD) | pure_bulge
 
     # OBSERVED priority: a site supported by >=1 real individual (a reference site,
     # present in every genome; or a variant site with >=1 named carrier) is a
@@ -2408,7 +2468,7 @@ def build_validation_panel(df, cols):
     cfd_counts = [(t, int((cfd >= t).sum())) for t in CFD_THRESHOLDS]
     mmb_counts = [(t, int(((mmb >= 0) & (mmb <= t)).sum())) for t in MMB_THRESHOLDS]
     crista_counts = (
-        [(t, int((crista >= t).sum())) for t in CRISTA_THRESHOLDS]
+        [(t, int((crista >= t).sum())) for t in scorer_thresholds()]
         if "crista" in cols and ((crista >= 0) & (crista <= 1)).any() else []
     )
 
@@ -2515,11 +2575,11 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crista=None):
             "df": sub,
         })
     if crista is not None and "crista" in cols and ((crista >= 0) & (crista <= 1)).any():
-        for t in CRISTA_THRESHOLDS:
+        for t in scorer_thresholds():
             sub = offt[(crista >= t).values]
             tiers.append({
-                "key": f"crista_{t:.2f}",
-                "label": f"CRISTA &ge; {t}",
+                "key": f"crista_{t:.2f}",  # internal key stays 'crista' (filenames stable)
+                "label": f"{scorer_label()} &ge; {t}",
                 "filename": _tier_filename(f"crista_{t:.2f}"),
                 "df": sub,
             })
@@ -2598,39 +2658,46 @@ def render_validation_panel(
     crista_table_block = ""
     if vp.get("crista_counts"):
         crista_rows = "".join(
-            f"<tr><td>CRISTA &ge; {t}</td><td class='num'>"
+            f"<tr><td>{scorer_label()} &ge; {t}</td><td class='num'>"
             f"{_tier_count_link(f'crista_{t:.2f}', c)}</td></tr>"
             for t, c in vp["crista_counts"]
         )
         crista_table_block = (
             '<div><table class="thr-table"><thead><tr>'
-            "<th>CRISTA threshold</th><th>Candidates (download)</th></tr></thead>"
+            f"<th>{scorer_label()} threshold</th><th>Candidates (download)</th></tr></thead>"
             f"<tbody>{crista_rows}</tbody></table></div>"
         )
     metric_names = ["CFD (desc)"]
     if vp.get("has_crista"):
-        metric_names.append("CRISTA (desc)")
+        metric_names.append(f"{scorer_label()} (desc)")
     metric_names.append("mismatches+bulges (asc)")
     metric_list = ", ".join(metric_names)
 
     # C) EXPLICIT IN-REPORT METHODS NOTE (plain-language, using the real
     #    constants). Two hard-include floors, then fill by worst-case severity.
     metric_or = (
-        "CFD, CRISTA, or mm+b" if vp.get("has_crista") else "CFD or mm+b"
+        f"CFD, {scorer_label()}, or mm+b" if vp.get("has_crista") else "CFD or mm+b"
     )
     note = (
         f"How the panel was chosen (hybrid, ~{PANEL_CAP} sites &mdash; may be more "
         f"when many sites are hard-included). "
-        f"First, every off-target that is CLOSE by sequence OR HIGH-scoring is "
-        f"hard-included &mdash; specifically every site with mismatches+bulges "
-        f"&le; {PANEL_FLOOR_MMB} OR CFD &ge; {PANEL_FLOOR_CFD}. These are always "
+        f"First, every off-target that is CLOSE by sequence OR HIGH-scoring OR a "
+        f"CLEAN BULGE is hard-included &mdash; specifically every site with "
+        f"mismatches+bulges &le; {PANEL_FLOOR_MMB} OR CFD &ge; {PANEL_FLOOR_CFD} OR "
+        f"0 mismatches with &ge;1 bulge. These are always "
         f"kept (if the hard-included sites already exceed {PANEL_CAP}, they are "
         f"all kept). The remaining slots up to {PANEL_CAP} are then filled by "
         f"worst-case severity: each site is ranked independently by "
         f"{metric_list}, and a site is prioritized if it is worst by ANY single "
         f"one of those metrics ({metric_or}) &mdash; so the highest-scoring "
         f"predicted cleavage sites AND the near-cognate low-edit-distance "
-        f"sequences that scoring models can under-weight both surface."
+        f"sequences that scoring models can under-weight both surface. "
+        f"<b>Off-targets needing &ge;2 bulges are outside both scoring models&rsquo; "
+        f"validated domain</b>: {scorer_label()} does not score them (shown as "
+        f"<code>-1</code> = N/A) and CFD is an uncalibrated extrapolation there &mdash; "
+        f"rank those by edit distance (mismatches+bulges) and verify them manually. "
+        f"The clean-bulge hard-include above guarantees a 0-mismatch bulged site is "
+        f"never dropped for lack of a model score."
         + (
             " There is NO category quota: variant-created sites qualify through "
             "the same floors and ranks as reference sites."
@@ -3076,9 +3143,10 @@ _SCORE_LEGEND = [
      "the on-target). Higher = more likely to be cut. <b>Rule of thumb:</b> treat "
      "CFD&nbsp;&ge;&nbsp;0.2 as worth validating (the recommended panel already "
      "hard-includes CFD&nbsp;&ge;&nbsp;0.5). <b>Caveat:</b> CFD was trained on "
-     "single-base mismatches; CFD values for sites containing DNA/RNA bulges "
+     "single-base mismatches; its values for sites containing DNA/RNA bulges "
      "(insertions/deletions) are an extrapolation beyond the model&rsquo;s training "
-     "domain &mdash; weigh CRISTA there."),
+     "domain &mdash; for a 1-bulge site weigh CRISTA there, and for a site needing "
+     "&ge;2 bulges (where the ML score is also N/A) rank by edit distance and verify manually."),
     ("CRISTA",
      "CRISTA score (Abadi <i>et al.</i>, <i>PLoS Comput. Biol.</i> 2017) &mdash; an "
      "<b>independent</b> machine-learning 0&ndash;1 estimate of cleavage propensity "
@@ -3139,12 +3207,41 @@ _SCORE_LEGEND = [
 ]
 
 
+# CRISPR-Bulge glossary definition, substituted for the CRISTA entry when that scorer ran.
+_CRISPR_BULGE_LEGEND_DEF = (
+    "CRISPR-Bulge score (Yaish &amp; Orenstein, <i>Nucleic Acids Res.</i> 2024) &mdash; an "
+    "<b>independent</b> deep-learning (GRU-ensemble) 0&ndash;1 estimate of cleavage "
+    "propensity, trained to handle DNA/RNA bulges &mdash; markedly more accurate than "
+    "earlier models on bulge/gapped off-targets. Higher = more likely to be cut. Reported "
+    "alongside CFD because the two models can disagree; <b>a site scored high by EITHER "
+    "model warrants validation</b>. Its scale is model-relative (not directly comparable to "
+    "CFD&rsquo;s), so its threshold tiers are its own. The model scores an alignment with at "
+    "most one 1-bp bulge (its training data &mdash; ~4.6M measured off-targets &mdash; "
+    "contains none with &ge;2 bulges); off-targets whose alignment needs &ge;2 bulges are "
+    "OUT OF DOMAIN and shown as <code>-1</code> (N/A, not scored). Judge those by edit "
+    "distance (mismatches+bulges) and manual review &mdash; CFD there is an uncalibrated "
+    "extrapolation, not a validated score. Clean bulged sites (0 mismatches) are always "
+    "hard-included in the validation panel so they are never dropped for lack of a score."
+)
+
+
 def build_score_legend_html():
-    """Render the scores-&-columns legend (Section 7, always present)."""
+    """Render the scores-&-columns legend (Section 7, always present). The ML-score
+    entry (and the CFD entry's cross-reference) follow the active scorer."""
+    _sl = scorer_label()
+    legend = []
+    for term, definition in _SCORE_LEGEND:
+        if term == "CRISTA":
+            # relabel + redefine the second-score entry for the scorer that ran
+            legend.append((_sl, _CRISPR_BULGE_LEGEND_DEF if _sl == "CRISPR-Bulge" else definition))
+        elif term == "CFD":
+            legend.append((term, definition.replace("weigh CRISTA there", f"weigh {_sl} there")))
+        else:
+            legend.append((term, definition))
     items = "".join(
         '<div class="legend-item"><div class="legend-term">%s</div>'
         '<div class="legend-def">%s</div></div>' % (term, definition)
-        for term, definition in _SCORE_LEGEND
+        for term, definition in legend
     )
     return (
         '<p class="caption">What the score and key columns in the tables above (and '
@@ -3217,7 +3314,7 @@ def render_next_steps_box(vp, panel_filename=PANEL_TOP100_NAME, section_ref="Sec
         f"({section_ref}) &mdash; the worst-case shortlist across all metrics."
     )
     steps.append(
-        "<b>Prioritize within the panel</b> sites that are (i) high CFD or CRISTA, "
+        f"<b>Prioritize within the panel</b> sites that are (i) high CFD or {scorer_label()}, "
         "(ii) low edit-distance (few mismatches/bulges), and (iii) inside a gene "
         "&mdash; especially a COSMIC cancer gene."
     )
@@ -3482,7 +3579,7 @@ def render_html(
     crista_block = ""
     if table_crista_html:
         crista_block = (
-            '<h3 style="margin:1.4em 0 0.3em 0">Ranked by CRISTA score</h3>\n'
+            f'<h3 style="margin:1.4em 0 0.3em 0">Ranked by {scorer_label()} score</h3>\n'
             + table_crista_html
         )
 
@@ -3911,7 +4008,7 @@ def build_report(
                     top_crista_df, cols, has_crista, datasets=meta.get("datasets", "")
                 )
                 tier_downloads.append(
-                    ("Top-1000 by CRISTA (curated TSV)", "top1000_crista.tsv")
+                    (f"Top-1000 by {scorer_label()} (curated TSV)", "top1000_crista.tsv")
                 )
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: CRISTA table unavailable: {exc}\n")
@@ -4519,7 +4616,9 @@ def _combined_ranked_score_images_html(hap_dirs, hap_output_names, guide):
     page, not a reason to omit it from a static report whose whole point is
     matching complete-search's real report structure."""
     blocks = []
-    for score, label in (("CFD", "CFD score"), ("CRISTA", "CRISTA score")):
+    # 'score' is ALSO part of the image filename (CRISPRme_{score}_top_1000_...), so the
+    # key stays 'CRISTA'; only the display label follows the active scorer.
+    for score, label in (("CFD", "CFD score"), ("CRISTA", scorer_label() + " score")):
         cols = []
         for hap, hap_label in (("paternal", "Paternal"), ("maternal", "Maternal")):
             hap_dir = hap_dirs.get(hap)
@@ -5623,7 +5722,7 @@ def build_combined_report(
             top_crista_df = select_top_crista(_pooled_df, _pooled_cols, n=top_n)
             if len(top_crista_df):
                 top1000_crista_html = (
-                    '<h3 style="margin:1.2em 0 0.3em 0">Ranked by CRISTA score</h3>'
+                    f'<h3 style="margin:1.2em 0 0.3em 0">Ranked by {scorer_label()} score</h3>'
                     + _render_curated_table_html(
                         _curated_frame_with_category(
                             top_crista_df, _pooled_cols, _has_crista, _category, start_rank=1

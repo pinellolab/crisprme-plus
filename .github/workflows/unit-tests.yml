@@ -180,6 +180,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_generate_report -v
 
+      - name: "Scorer-aware report column (CRISTA|CRISPR-Bulge label + thresholds from .Params.txt)"
+        working-directory: PostProcess
+        run: python -m unittest test_report_scorer_label -v
+
       - name: "Additional coverage (tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile / history-page assembly jobs)"
         # NOTE: test_annotation is intentionally NOT here -- annotation.py imports
         # pysam, which the light network-free CI does not install (mirrors why the
@@ -191,17 +195,29 @@ jobs:
           test_representative_tiebreak test_sanitize_job_name test_tier0_compaction
           test_history_page_assembly -v
 
+      - name: "Modular scorer env-manager + runner (env lifecycle/state + subprocess protocol; no TF)"
+        # scorer_env: detect env manager, create-command shape, atomic state file,
+        # health-check probe. scorer_runner: real stdin/stdout worker protocol against
+        # a stdlib fake worker + graceful-degradation paths. Neither needs TensorFlow.
+        working-directory: PostProcess
+        run: python -m unittest test_scorer_env test_scorer_runner -v
+
+      - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
+        # resolve_backend degradation (requested accelerator absent -> CPU), pre-import
+        # env, array_module (numpy vs cupy), and configure_tf device placement via a fake
+        # tf. The tensorflow-metal GRU miscompute + numerical self-test fallback is
+        # validated at runtime in crispr_bulge_score (needs the model, not in CI).
+        working-directory: PostProcess
+        run: python -m unittest test_compute_backend -v
+
       - name: "2.5.1 fast mode + mega + scoring (two-pass equivalence/CFD oracle, aggregate carrier-NA, mega registry/indel-AF)"
         # The two-pass population-level analysis (default since 2.5.3; opt-in `--fast` in
         # 2.5.1, renamed to the `--per-sample` opt-out in 2.5.4): lossless detection +
         # worst-case bound. Plus the all-source mega registry/indel-AF and aggregate
         # carrier/hom "NA".
-        # NOTE: test_fix1_crista_cache is intentionally NOT here -- it needs the 276 MB
-        # CRISTA model (absent in the light CI); its byte-identity is validated in the SIF.
         working-directory: PostProcess
         run: >
           python -m unittest test_twopass_emit test_twopass_find test_twopass_score
           test_twopass_cfd_exact test_twopass_fast_equivalence test_twopass_legacy_cfd
           test_twopass_lynchpin_counterexamples test_aggregate_carrier_na
-          test_build_mega_registry test_build_mega_indel_af test_lossless_dense
-          test_crista_parallel_equivalence -v
+          test_build_mega_registry test_build_mega_indel_af test_lossless_dense -v

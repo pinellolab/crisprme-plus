@@ -9,7 +9,6 @@ import pickle
 import numpy as np
 import pandas as pd
 import time
-from CRISTA_score import CRISTA_predict_list
 
 # Tier-0 compact variant registry (CRISPRme+ dictless redesign). GUARDED /
 # lazy: an old deploy may not ship tier0_registry, and most installs have no
@@ -81,6 +80,9 @@ except Exception:  # module absent -> population-level path unavailable, legacy 
     _twopass_emit = None
 _FAST_MODE = bool(int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")) and \
     _twopass_emit is not None
+# The second (ML) score column is CRISPR-Bulge (CRISTA was retired). CRISPRME_SCORER_SELECT
+# is kept only so the report/web can label the column; scoring always uses CRISPR-Bulge.
+_SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crispr-bulge").lower()
 # 2.5.2 LOSSLESS-DENSE (CRISPRME_LOSSLESS_DENSE). In a CAPPED dense window the min-mismatch
 # greedy representative can be a strict SUBSET of a genuine carried haplotype (an mm-neutral/
 # raising alt is left at the reference), so an off-target that needs >=4 co-occurring variants
@@ -1510,175 +1512,90 @@ def preprocess_CFD_score(target):
     return target
 
 
-def preprocess_CRISTA_score(cluster_targets):
-    # list with scored targets
+def preprocess_CRISPR_BULGE_score(cluster_targets):
+    """CRISPR-Bulge analogue of preprocess_CRISTA_score.
+
+    Same output contract (target[-2] marker -> score, plus an appended score), same
+    alt/ref two-pass + null semantics, so the write loop + report are unchanged. The
+    ONLY differences vs CRISTA: (1) the model needs just the aligned (sgRNA, off-target)
+    pair -- NO 29-nt genomic window -- and (2) scoring runs in the dedicated `cbulge`
+    conda env via the scorer-runner (persistent worker). The runner degrades gracefully
+    to -1.0 if the env/model is absent, so a run never breaks.
+
+    CRISPR-Bulge's encoder requires per-row len(sg)==len(off); for rows we cannot score
+    (N in the aligned DNA, or a length mismatch) we substitute an equal-length dummy so
+    the batch stays valid, then null them by index afterwards (mirrors the CRISTA path,
+    which substitutes 'A'*29).
+    """
+    import scorer_runner  # lazy: only when CRISPR-Bulge is selected
+
     cluster_scored = list()
     index_to_null = list()
 
-    # skip scoring for CRISTA, remove to activate scoring
-    # do_scores = False
-
-    if do_scores:
-        pass
-    else:
+    if not do_scores:
         for target in cluster_targets:
-            target_CRISTA = target.copy()
-            crista_score = -1  # null score
-            target_CRISTA[-2] = "{:.3f}".format(crista_score)
-            target_CRISTA.append("{:.3f}".format(crista_score))
-            cluster_scored.append(target_CRISTA)
+            t = target.copy()
+            t[-2] = "{:.3f}".format(-1)
+            t.append("{:.3f}".format(-1))
+            cluster_scored.append(t)
         return cluster_scored
 
-    # preprocess target then calculate CRISTA score
-    sgRNA_non_aligned_list = list()
-    DNA_aligned_list = list()
-    DNAseq_from_genome_list = list()
-    # process all found targets
-    for index, target in enumerate(cluster_targets):
-        # list with non-aligned sgRNA
-        sgRNA_non_aligned_list.append(str(target[1])[: len(str(target[1])) - 3] + "NGG")
-        # list with aligned DNA
-        DNA_aligned_list.append(str(target[2]))
-        # first 5 nucleotide to add to protospacer
-        pre_protospacer_DNA = genomeStr[int(target[4]) - 5 : int(target[4])].upper()
-        # protospacer taken directly from the aligned target
-        protospacerDNA = str(target[2]).replace("-", "")
-        if target[6] == "-":
-            protospacerDNA = reverse_complement_table(protospacerDNA)
-        # last 5 nucleotides to add to protospacer
-        post_protospacer_DNA = genomeStr[
-            int(target[4]) + len(target[1]) : int(target[4]) + len(target[1]) + 5
-        ].upper()
+    # This CRISPR-Bulge ensemble faithfully scores a protospacer+PAM alignment with AT MOST
+    # ONE 1-bp bulge (model input seq_len=24). We deliberately score ONLY what the model can
+    # represent and NULL (-1) everything else, so a value in the column is always trustworthy:
+    #   * N in the aligned off-target, or sg/off length mismatch  -> null
+    #   * >1 gap column (>=2 bulges, OR a single >=2-bp bulge)     -> null
+    #   * over-length (> 24)                                        -> null
+    # Nulled rows fall back to CFD (the PRIMARY score) + mismatches/bulges, which still flag
+    # them. We deliberately do NOT collapse/reduce a multi-bulge alignment to a single bulge:
+    # an adversarial review showed the naive reduction corrupts the alignment (deletes real
+    # bases; mis-counts a 2-bp bulge as two events) and its "conservative" error direction is
+    # unprovable for a non-monotonic GRU -- an unacceptable silent under-flag risk in a clinical
+    # tool. Multi-bulge off-targets are the rare, heavily-disrupted (low-activity) tail; CFD +
+    # edit distance carry them. A scoreable equal-length dummy is substituted for nulled rows so
+    # one bad row can't fail the whole batch. CFD (the primary score) is unaffected.
+    _MAXLEN = 24
+    _SG_DUMMY = "A" * 20 + "NGG"
+    _OFF_DUMMY = "A" * 20 + "AGG"
 
-        # DNA seq extracted from genome and append to aligned DNA seq from CRISPRme
-        complete_DNA_seq = (
-            str(pre_protospacer_DNA) + protospacerDNA + str(post_protospacer_DNA)
-        )
-
-        for elem in iupac_nucleotides:
-            if elem in complete_DNA_seq:
-                complete_DNA_seq = complete_DNA_seq.replace(elem, "")
-
-        # trim the 3' and 5' end to avoid sequences longer than 29
-        len_DNA_seq = len(complete_DNA_seq)
-        first_half = complete_DNA_seq[int(len_DNA_seq / 2) - 14 : int(len_DNA_seq / 2)]
-        second_half = complete_DNA_seq[int(len_DNA_seq / 2) : int(len_DNA_seq / 2) + 15]
-        complete_DNA_seq = first_half + second_half
-        if target[6] == "-":
-            complete_DNA_seq = reverse_complement_table(complete_DNA_seq)
-
-        # if 'N' is present in the reference DNA seq, we must use a fake DNA seq to complete the aligned
-        # that will be discarded after
-        if (
-            # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
-            # near a chromosome boundary, or on the variant-enriched combined index a
-            # window can be stripped down to empty by the IUPAC removal above, which
-            # then hit `len(full_dna_seq)==0` -> ZeroDivisionError and aborted the whole
-            # post-analysis. Null those targets (CRISTA score -1) like the N case.
-            len(complete_DNA_seq) != 29
-            or "N" in complete_DNA_seq
-            or "n" in complete_DNA_seq
-            or "N" in DNA_aligned_list[-1]
-            or "n" in DNA_aligned_list[-1]
-        ):
-            complete_DNA_seq = "A" * 29
-            DNA_aligned_list[-1] = "A" * len(str(target[2]))
+    def _pair(target, off_field, index):
+        sg = str(target[1])[: len(str(target[1])) - 3] + "NGG"
+        off = str(off_field)
+        total_gaps = sg.count("-") + off.count("-")
+        if (("N" in off) or ("n" in off) or (len(off) != len(sg))
+                or total_gaps > 1 or len(sg) > _MAXLEN):
             index_to_null.append(index)
+            return _SG_DUMMY, _OFF_DUMMY
+        return sg, off
 
-        # append sequence to DNA list
-        DNAseq_from_genome_list.append(complete_DNA_seq)
+    # ALT pass: aligned off-target = target[2]
+    pairs_alt = [_pair(t, t[2], i) for i, t in enumerate(cluster_targets)]
+    scores_alt = scorer_runner.CRISPR_BULGE_predict_list(
+        [p[0] for p in pairs_alt], [p[1] for p in pairs_alt])
 
-    # calculate scores for alt sequence
-    crista_score_list_alt = list()
-    if do_scores:
-        crista_score_list_alt = CRISTA_predict_list(
-            sgRNA_non_aligned_list, DNA_aligned_list, DNAseq_from_genome_list
-        )
-
-    # preprocess target then calculate CRISTA score
-    sgRNA_non_aligned_list = list()
-    DNA_aligned_list = list()
-    DNAseq_from_genome_list = list()
-    # process all ref sequences in targets
-    for index, target in enumerate(cluster_targets):
-        # list with non-aligned sgRNA
-        sgRNA_non_aligned_list.append(str(target[1])[: len(str(target[1])) - 3] + "NGG")
-        # list with aligned DNA
-        if "n" not in target[-3]:
-            DNA_aligned_list.append(str(target[-3]))
-        else:
-            DNA_aligned_list.append(str(target[2]))
-        # first 5 nucleotide to add to protospacer
-        pre_protospacer_DNA = genomeStr[int(target[4]) - 5 : int(target[4])]
-        # protospacer taken directly from the ref genome
-        protospacerDNA = genomeStr[int(target[4]) : int(target[4]) + len(target[1])]
-        # last 5 nucleotides to add to protospacer
-        post_protospacer_DNA = genomeStr[
-            int(target[4]) + len(target[1]) : int(target[4]) + len(target[1]) + 5
-        ]
-
-        # DNA seq extracted from genome and append to aligned DNA seq from CRISPRme
-        complete_DNA_seq = (
-            str(pre_protospacer_DNA) + protospacerDNA + str(post_protospacer_DNA)
-        )
-
-        for elem in iupac_nucleotides:
-            if elem in complete_DNA_seq:
-                complete_DNA_seq = complete_DNA_seq.replace(elem, "")
-
-        # trim the 3' and 5' end to avoid sequences longer than 29
-        len_DNA_seq = len(complete_DNA_seq)
-        first_half = complete_DNA_seq[int(len_DNA_seq / 2) - 14 : int(len_DNA_seq / 2)]
-        second_half = complete_DNA_seq[int(len_DNA_seq / 2) : int(len_DNA_seq / 2) + 15]
-        complete_DNA_seq = first_half + second_half
-        if target[6] == "-":
-            complete_DNA_seq = reverse_complement_table(complete_DNA_seq)
-
-        # if 'N' is present in the reference DNA seq, we must use a fake DNA seq to complete the aligned
-        # that will be discarded after
-        if (
-            # A CRISTA window that isn't a full 29 nt of A/C/G/T cannot be scored:
-            # near a chromosome boundary, or on the variant-enriched combined index a
-            # window can be stripped down to empty by the IUPAC removal above, which
-            # then hit `len(full_dna_seq)==0` -> ZeroDivisionError and aborted the whole
-            # post-analysis. Null those targets (CRISTA score -1) like the N case.
-            len(complete_DNA_seq) != 29
-            or "N" in complete_DNA_seq
-            or "n" in complete_DNA_seq
-            or "N" in DNA_aligned_list[-1]
-            or "n" in DNA_aligned_list[-1]
-        ):
-            complete_DNA_seq = "A" * 29
-            DNA_aligned_list[-1] = "A" * len(str(target[2]))
-            index_to_null.append(index)
-
-        # append sequence to DNA list
-        DNAseq_from_genome_list.append(complete_DNA_seq)
-
-    # calculate score
-    crista_score_list_ref = list()
-    if do_scores:
-        crista_score_list_ref = CRISTA_predict_list(
-            sgRNA_non_aligned_list, DNA_aligned_list, DNAseq_from_genome_list
-        )
+    # REF pass: aligned off-target = Reference_target (target[-3]) unless it carries an 'n'
+    pairs_ref = []
+    for i, target in enumerate(cluster_targets):
+        ref = str(target[-3]) if "n" not in str(target[-3]) else str(target[2])
+        pairs_ref.append(_pair(target, ref, i))
+    scores_ref = scorer_runner.CRISPR_BULGE_predict_list(
+        [p[0] for p in pairs_ref], [p[1] for p in pairs_ref])
 
     for index, target in enumerate(cluster_targets):
-        target_CRISTA = target.copy()
-        # if any of the scored target is not valid, due to Ns in the sequence, return a -1 score
+        t = target.copy()
         if index in index_to_null:
-            crista_score = -1  # null score
-            target_CRISTA[-2] = "{:.3f}".format(crista_score)
-            target_CRISTA.append("{:.3f}".format(crista_score))
+            s = -1
+            t[-2] = "{:.3f}".format(s)
+            t.append("{:.3f}".format(s))
         else:
-            # else report the correct score
-            if target_CRISTA[-2] == 55:  # reference target have duplicate score
-                target_CRISTA[-2] = "{:.3f}".format(crista_score_list_alt[index])
-                target_CRISTA.append("{:.3f}".format(crista_score_list_alt[index]))
-            if target_CRISTA[-2] == 33:  # alternative target scoring
-                target_CRISTA[-2] = "{:.3f}".format(crista_score_list_ref[index])
-                target_CRISTA.append("{:.3f}".format(crista_score_list_alt[index]))
-        # append to final score cluster
-        cluster_scored.append(target_CRISTA)
+            # mirror the CRISTA marker convention exactly (55 = ref row, 33 = alt row)
+            if t[-2] == 55:
+                t[-2] = "{:.3f}".format(scores_alt[index])
+                t.append("{:.3f}".format(scores_alt[index]))
+            if t[-2] == 33:
+                t[-2] = "{:.3f}".format(scores_ref[index])
+                t.append("{:.3f}".format(scores_alt[index]))
+        cluster_scored.append(t)
 
     return cluster_scored
 
@@ -1694,8 +1611,10 @@ def calculate_scores(cluster_to_save):
         target_CFD = target.copy()
         cluster_with_CFD_score.append(preprocess_CFD_score(target_CFD))
 
-    # process score for each target in cluster, at the same time to improve execution time
-    cluster_with_CRISTA_score = preprocess_CRISTA_score(cluster_to_save)
+    # second (ML) score column = CRISPR-Bulge (CRISTA retired). Written to the same
+    # .bestCRISTA.txt / CRISTA_score column names (stable identifiers; the report + web
+    # label the column "CRISPR-Bulge"). The variable name is legacy.
+    cluster_with_CRISTA_score = preprocess_CRISPR_BULGE_score(cluster_to_save)
 
     # REMOVED TO CHECK IF FILE IS RETURN WITH IDENTICAL ROWS COUNT
 

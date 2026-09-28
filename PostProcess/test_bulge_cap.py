@@ -265,28 +265,35 @@ class TestDictlessDefaults(unittest.TestCase):
         self.assertIsNotNone(m, f"could not locate value=... id={comp_id} block")
         return int(m.group(1))
 
-    def test_mismatch_default_is_6(self):
-        self.assertEqual(self._dropdown_value("mms"), 6)
+    def test_mismatch_default_is_4(self):
+        self.assertEqual(self._dropdown_value("mms"), 4)
 
-    def test_dna_bulge_default_is_2(self):
-        self.assertEqual(self._dropdown_value("dna"), 2)
+    def test_dna_bulge_default_is_1(self):
+        self.assertEqual(self._dropdown_value("dna"), 1)
 
-    def test_rna_bulge_default_is_2(self):
-        self.assertEqual(self._dropdown_value("rna"), 2)
+    def test_rna_bulge_default_is_1(self):
+        self.assertEqual(self._dropdown_value("rna"), 1)
 
-    def test_max_edits_slider_default_is_4(self):
+    def test_max_edits_slider_default_is_6(self):
         import re
         m = re.search(r'id="max-edits-slider".*?value=(\d+)', self.src, re.S)
         self.assertIsNotNone(m, "could not locate the max-edits-slider value")
-        self.assertEqual(int(m.group(1)), 4)
+        self.assertEqual(int(m.group(1)), 6)
 
-    def test_cli_max_total_edits_default_is_4(self):
-        """CLI parity: complete-search --max-total-edits default is 4."""
+    def test_simple_mode_bulge_cap_is_one(self):
+        """Simple mode (Advanced closed) fixes the per-type bulge cap at 1, keeping the
+        default path in the single-bulge domain."""
+        self.assertIn("_SIMPLE_BULGE_CAP = 1", self.src)
+
+    def test_cli_max_total_edits_default_is_6(self):
+        """CLI parity: complete-search --max-total-edits default is 6 (4mm + 1 DNA + 1 RNA)."""
         here = os.path.dirname(os.path.abspath(__file__))
         with open(os.path.join(os.path.dirname(here), "crisprme.py")) as fh:
             csrc = fh.read()
-        self.assertRegex(csrc, r"max_total_edits\s*=\s*4",
-                         "crisprme.py complete-search default max_total_edits must be 4")
+        self.assertRegex(csrc, r"max_total_edits\s*=\s*6",
+                         "crisprme.py complete-search default max_total_edits must be 6")
+        # and the CLI bulge derivation is capped at a single bulge of each type
+        self.assertRegex(csrc, r"_SIMPLE_BULGE_CAP\s*=\s*1")
 
 
 class TestPruningNotePersisted(unittest.TestCase):

@@ -152,6 +152,25 @@ def _perfect_match_sites(integrated_tsv):
         return []
 
 
+def _job_scorer_label(job_id: str) -> str:
+    """Display label for the job's second (ML) score column -- 'CRISTA' or
+    'CRISPR-Bulge' -- read from its .Params.txt 'Scorer' line. The internal filter
+    value + physical column name stay 'CRISTA' (index/style/plot-filename stable);
+    only the human-facing dropdown label changes. Defaults to 'CRISTA'."""
+    try:
+        pth = os.path.join(current_working_directory, "Results", job_id, ".Params.txt")
+        with open(pth) as p:
+            for line in p:
+                if line.startswith("Scorer\t"):
+                    s = line.rstrip("\n").split("\t")[-1].strip().lower()
+                    if s in ("crispr-bulge", "crispr_bulge", "cbulge"):
+                        return "CRISPR-Bulge"
+                    break
+    except OSError:
+        pass
+    return "CRISTA"
+
+
 def result_page(job_id: str) -> html.Div:
     """Print the results page layout (guides table + images).
     The guides table contains the research profile found during
@@ -698,7 +717,9 @@ def result_page(job_id: str) -> html.Div:
                             dcc.Dropdown(
                                 options=[
                                     {"label": "CFD score", "value": "CFD"},
-                                    {"label": "CRISTA Score", "value": "CRISTA"},
+                                    # value stays "CRISTA" (internal filter key + column
+                                    # name); label follows the scorer that actually ran.
+                                    {"label": f"{_job_scorer_label(job_id)} score", "value": "CRISTA"},
                                     {
                                         "label": "Fewest Mismatches and Bulges",
                                         "value": "fewest",

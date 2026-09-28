@@ -75,11 +75,23 @@ cp -R "${REPO}/." "${CONDA_PREFIX}/opt/crisprme/"
 rm -rf "${CONDA_PREFIX}/opt/crisprme/.git"
 cp "${CONDA_PREFIX}/opt/crisprme/crisprme.py" "${CONDA_PREFIX}/bin/crisprme.py"
 chmod +x "${CONDA_PREFIX}/bin/crisprme.py"
-# unzip the CRISTA scoring model (ships zipped in git; also auto-unzips on first
-# use, but do it now so the first search is not slowed down)
-if [ -f "${CONDA_PREFIX}/opt/crisprme/PostProcess/CRISTA_predictors.zip" ]; then
-    ( cd "${CONDA_PREFIX}/opt/crisprme/PostProcess" \
-        && unzip -o CRISTA_predictors.zip && rm -f CRISTA_predictors.zip )
+# CRISTA was retired in favor of CRISPR-Bulge; there is no 276 MB model to unzip here
+# anymore. CFD's tiny score pickles ship as plain files; the CRISPR-Bulge model is
+# provisioned into its own conda env below.
+
+# ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
+# Built in its OWN env so its TensorFlow/numpy pins never touch the main crisprme
+# stack (this is what lets the main env stay modern). CPU by default; the GPU
+# variant is opt-in later: 'crisprme.py scorer-env create --gpu'. Non-fatal +
+# skippable (CRISPRME_SKIP_SCORER_ENV=1); (re)create/repair anytime with
+# 'crisprme.py scorer-env create' / 'crisprme.py scorer-env doctor'.
+if [ "${CRISPRME_SKIP_SCORER_ENV:-0}" != "1" ]; then
+    echo ">> Creating the CRISPR-Bulge scorer env (set CRISPRME_SKIP_SCORER_ENV=1 to skip)"
+    if crisprme.py scorer-env create; then
+        echo "   scorer env ready."
+    else
+        echo "   WARNING: scorer env not created now; create later with 'crisprme.py scorer-env create'." >&2
+    fi
 fi
 
 echo ">> Installed:"

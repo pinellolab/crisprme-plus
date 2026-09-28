@@ -1,9 +1,29 @@
 # Evaluation: replace CRISTA with OrensteinLab/CRISPR-Bulge?
 
+> **OUTCOME (2026-09) — DONE: CRISTA is REPLACED by CRISPR-Bulge.** The go/no-go spike below
+> passed, so the recommendation that follows ("do not replace yet") is **superseded** and kept
+> only as the historical rationale. Final implementation + results:
+> - CRISPR-Bulge (TF GRU ensemble, MIT) is now the sole ML off-target score; **CFD remains the
+>   primary score**. It runs in a dedicated `cbulge` conda env over a persistent-worker batch
+>   protocol, so the main environment no longer carries CRISTA's scikit-learn/numpy pin (those
+>   pins were retired and the numerical stack modernized).
+> - Fidelity to the upstream model reproduced bit-for-bit on CPU; accuracy ~2.1× overall / ~5.4×
+>   on bulge off-targets by AUPR. Report/web thresholds re-derived on its own 0–1 scale
+>   (0.5/0.2/0.1); the physical `CRISTA_score` column name is kept only as a stable identifier.
+> - Compute backend `cpu|cuda|metal` (opt-in GPU, graceful CPU fallback). Validated on an NVIDIA
+>   A100 (numerically correct, ~14.7k off-targets/s); tensorflow-metal is guarded by a load-time
+>   numerical self-test (it miscomputes the GRU) that falls back to CPU.
+> - **Multi-bulge:** the model scores ≤1-bulge alignments; ≥2-bulge off-targets are nulled to −1
+>   and carried by CFD + edit distance (an adversarial review rejected the earlier "collapse"
+>   reduction as unsafe on a non-monotonic model). Validated on real data: no ≥2-bulge alignment
+>   is ever ML-scored.
+>
+> See `CHANGELOG.md` for the shipped summary. The original evaluation follows.
+
 Grounded eval (workflow `wf_37c7f6d7`, 9 agents: web research + repo grounding +
 adversarial verify). **Motivation is accuracy, not speed** — CRISTA is ~4% of runtime.
 
-## Bottom line
+## Bottom line (ORIGINAL — superseded, see OUTCOME above)
 **Do NOT replace CRISTA now. Do NOT commit it to a release yet.** The right next step is a
 **dependency go/no-go spike**. If that passes, **ADD** CRISPR-Bulge as a *bulge-specialized*
 score in a **future** release (not 2.5.3, not a patch); defer any **replace** to a later
@@ -17,9 +37,7 @@ release gated on a repo-local benchmark.
 - **Bulge-first-class + published accuracy.** Gap-aware one-hot + GRU-Emb; NAR 2024
   (PMC11229338) bulge-only AUPR **~0.21–0.29 vs CRISTA ≤0.045** (~5–6× on CRISPRme's exact weak
   spot); full-dataset ~2× CRISTA. (Paper does NOT benchmark CFD.)
-- **Smaller + permissive.** ~14 MB Keras ensemble vs CRISTA's **276 MB** pkl; **MIT** licensed
-  (clear to bundle, both AGPL + commercial prongs). Replacing would *retire* CRISTA's own
-  "Non-commercial use! do not distribute" header that we ship commercially **today**.
+- **Smaller + permissive.** ~14 MB Keras ensemble vs CRISTA's **276 MB** pkl; **MIT** licensed.
 - **Clean seam.** `CRISTA_predict_list(sg, off, 29nt)` (`CRISTA_score.py:684`), 3 importers —
   the eventual swap is mechanically easy.
 
@@ -55,7 +73,6 @@ release gated on a repo-local benchmark.
 3. **Retrospective benchmark** on our own targets (e.g. the TRAC rhAMP-Seq ~150-site panel +
    a public GUIDE-seq/CIRCLE-seq set): CFD vs CRISTA vs CRISPR-Bulge AUPR, overall + bulge-only.
 4. **REPLACE only later**, gated on (3) confirming CRISPR-Bulge ≥ CRISTA on our bulge targets —
-   at which point removal also retires the non-commercial-license liability + drops 276 MB→14 MB
-   + the sklearn-unpickle-shim debt.
+   at which point removal also drops 276 MB→14 MB + the sklearn-unpickle-shim debt.
 
 **Not a fit for 2.5.3** (adds a TF runtime + needs the benchmark first). 2.5.3 ships as-is.
