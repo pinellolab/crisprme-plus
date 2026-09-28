@@ -10,10 +10,16 @@
 # v2.8.3 carries the add-variants .tbi/.csi enricher fix + the MGBOA relicense. crisprme
 # is installed from this build context. The dependency
 # pins mirror the from-scratch Python-3.11 validation on ml007 (see PR #131):
-#   - azimuth/CRISTA scoring stack: scikit-learn 1.1.3 / numpy 1.24.4 /
-#     pandas 2.0.3 / scipy 1.10.1 (the vendored models only unpickle on this combo)
-#   - matplotlib-base < 3.9  (matplotlib >= 3.9 runtime-requires numpy >= 1.25,
-#     which conflicts with the pinned numpy 1.24.4)
+#   - numerical stack: MODERNIZED now that CRISTA is retired. It was once hard-pinned to
+#     scikit-learn 1.1.3 / numpy 1.24.4 / pandas 2.0.3 / scipy 1.10.1 SOLELY because the
+#     vendored CRISTA + azimuth pickles needed that combo. CRISTA runs in its own conda env
+#     (CRISPR-Bulge) and azimuth is gone, so: scikit-learn is DROPPED (nothing in the main
+#     env imports it), and numpy/scipy/pandas/matplotlib move to current maintained lines.
+#     CFD uses version-agnostic lookup pickles, so scoring is unaffected. numpy is capped
+#     < 2 on purpose: pysam/CRISPRitz C-extensions here are built against the numpy 1.x
+#     C-ABI; a numpy-2 ABI mismatch could silently corrupt results. numpy 2.x is a
+#     separately-validated fast-follow.
+#   - matplotlib-base ceiling dropped (was < 3.9); numpy >= 1.26 satisfies mpl >= 3.9.
 #   - Dash 2.x web stack (dash >= 2.14 bundles the old dash-core/html/renderer/
 #     table sub-packages, so those are intentionally dropped)
 FROM mambaorg/micromamba
@@ -46,8 +52,8 @@ ARG CONDA_CHANNEL_BASE=https://conda.anaconda.org
 RUN micromamba install -y -n base \
         -c ${CONDA_CHANNEL_BASE}/conda-forge -c ${CONDA_CHANNEL_BASE}/bioconda \
         python=3.11 \
-        scikit-learn=1.1.3 numpy=1.24.4 scipy=1.10.1 pandas=2.0.3 \
-        "matplotlib-base<3.9" \
+        "numpy>=1.26,<2" "scipy>=1.11" "pandas>=2.1,<3" \
+        "matplotlib-base>=3.8" \
         biopython more-itertools statsmodels intervaltree \
         ijson yajl cffi \
         pysam bcftools bedtools bedops samtools htslib axel gdown zip gsl pigz \
@@ -103,12 +109,31 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
     # dbc.Tabs don't render under 2.x). Defensive: some dbc builds dropped a stray
     # site-packages/pyproject.toml that made Biopython emit a BiopythonWarning at import;
     # remove it if present (no-op otherwise) so startup is clean.
-    && rm -f ${PREFIX}/lib/python3.11/site-packages/pyproject.toml \
-    # unzip the CRISTA model at build time (the 276 MB pickle ships zipped in git)
-    && if [ -f ${PREFIX}/opt/crisprme/PostProcess/CRISTA_predictors.zip ]; then \
-         cd ${PREFIX}/opt/crisprme/PostProcess \
-         && unzip -o CRISTA_predictors.zip && rm -f CRISTA_predictors.zip; \
-       fi
+    && rm -f ${PREFIX}/lib/python3.11/site-packages/pyproject.toml
+# CRISTA was retired in favor of CRISPR-Bulge (the 276 MB CRISTA model + its unzip step are
+# gone). The CRISPR-Bulge model is provisioned into its own conda env by scorer_env
+# (build_scorer_envs, below); CFD's tiny score pickles ship as plain files in PostProcess/.
+
+# ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
+# Built in its OWN micromamba env so its TensorFlow/numpy pins never touch the
+# main scoring stack. Uses the single-source spec in scorer_env.py so the package
+# set never drifts from the CLI/health-check.
+#   scorer_backend=cpu (default): installs tensorflow-cpu (small, runs anywhere).
+#   scorer_backend=gpu: installs the conda-forge CUDA TensorFlow build (tensorflow=2.13=cuda*)
+#     -- validated correct + fast on an NVIDIA A100; the image then runs the scorer on the GPU
+#     when launched with the NVIDIA container runtime ('docker run --gpus all ... --compute-backend cuda').
+#     It also still runs on CPU if no GPU is visible. GPU images are larger (pulls cudatoolkit/cudnn).
+# Set build_scorer_envs=0 for a lean image (create later with 'crisprme.py scorer-env create').
+# Failure is non-fatal to the image build.
+ARG build_scorer_envs=1
+ARG scorer_backend=cpu
+RUN if [ "$build_scorer_envs" = "1" ]; then \
+      ( python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
+import scorer_env; ok, msg = scorer_env.create_env('cbulge', gpu=('${scorer_backend}'=='gpu'), stream=True); \
+print('[scorer-env]', msg); sys.exit(0 if ok else 1)" \
+        && micromamba clean --all --yes ) \
+      || echo 'WARN: scorer env not built; create at runtime with crisprme.py scorer-env create' ; \
+    fi
 
 WORKDIR /root
 CMD ["crisprme.py"]

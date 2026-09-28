@@ -6,20 +6,31 @@
 #   mamba activate crisprme
 #   bash install_from_source.sh          # builds crispritz 2.8.2 + installs both
 #
-# The scoring stack pins (scikit-learn/numpy/scipy/pandas) are required: the
-# vendored azimuth/CRISTA models only unpickle on this exact combination.
+# NOTE: the scikit-learn/numpy/scipy/pandas versions were once hard-pinned to
+# scikit-learn=1.1.3 / numpy=1.24.4 / scipy=1.10.1 / pandas=2.0.3 ONLY because the
+# vendored CRISTA + azimuth pickles required that exact combination. CRISTA is RETIRED
+# (CRISPR-Bulge replaces it, in its own conda env) and azimuth is gone, so:
+#   * scikit-learn is REMOVED -- nothing in the main env imports it anymore (the only
+#     remaining use is the dev-only bench_cbulge.py, which runs in the cbulge env).
+#   * numpy / scipy / pandas / matplotlib are MODERNIZED (2-year jump, current maintained
+#     lines). CFD uses tiny version-agnostic lookup pickles, so the scoring is unaffected.
+# numpy is capped < 2 as a deliberate guard: the pysam / CRISPRitz C-extensions in this
+# env are built against the numpy 1.x C-ABI, and a numpy-2 ABI mismatch could silently
+# corrupt results in a clinical tool. numpy 2.x is a validated fast-follow, not this pass.
 name: crisprme
 channels:
   - conda-forge
   - bioconda
 dependencies:
   - python=3.11
-  # --- azimuth / CRISTA scoring stack (do not bump: pickles are version-locked)
-  - scikit-learn=1.1.3
-  - numpy=1.24.4
-  - scipy=1.10.1
-  - pandas=2.0.3
-  - matplotlib-base<3.9        # >=3.9 needs numpy>=1.25, conflicts with the pin
+  # --- numerical stack (modernized; CRISTA's hard pins retired -- see note above)
+  - numpy>=1.26,<2      # was 1.24.4 (CRISTA pin); <2 guards the pysam/CRISPRitz C-ABI
+  - scipy>=1.11         # was 1.10.1; used by the radar-chart distance calc
+  - pandas>=2.1,<3      # was 2.0.3; <3 caps out pandas 3.0's copy-on-write semantic
+                        # change until the real pipeline (heavy in-place DataFrame
+                        # mutation) is e2e-validated on it -- 3.0 is a fast-follow.
+                        # NB: the full 724-test unit suite already passes on pandas 3.0.6.
+  - matplotlib-base>=3.8   # ceiling dropped (was <3.9); numpy>=1.26 satisfies mpl>=3.9
   # --- pipeline / analysis
   - biopython
   - more-itertools

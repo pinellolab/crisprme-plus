@@ -846,6 +846,37 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(len(panel2), gr.PANEL_CAP + 1)
         self.assertEqual(list(panel2[cols2["chrom"]])[0], "chrON")
 
+    def test_pure_bulge_site_hard_included(self):
+        """A pure-bulge off-target (0 mismatches, >=1 bulge) with mm+b>2, low CFD, and an
+        N/A (-1) ML score must be HARD-INCLUDED in the panel -- >=2-bulge sites are out of
+        the ML model's domain, so a clean bulged site can't be dropped for lack of a score."""
+        import generate_report as gr
+        import pandas as pd, os
+        header = list(_HEADER)
+
+        def _row(chrom, mm, b, cfd, crista, notref):
+            return ["G", chrom, "1", "+", "AAA", "AAA", "GGG", str(mm), str(b),
+                    str(mm + b), notref and "alt" or "ref", "NA",
+                    f"{cfd}", f"{cfd}", f"{cfd}", "NA", "NA", "NA", "NA",
+                    f"{crista}", f"{crista}", f"{crista}", "NA", "NA", "NA",
+                    "y" if notref else "NA", "NA", "GENE", "1.0", "NA", "NA"]
+
+        rows = [
+            _row("chrPUREBULGE", 0, 3, 0.05, -1, False),  # 0 mm, 3 bulges, mm+b=3>2, low CFD, ML N/A
+            _row("chrLOW", 6, 0, 0.05, 0.05, False),      # low by every metric (filler)
+        ]
+        tsv = os.path.join(self.tmp, "wc_pb.tsv")
+        with open(tsv, "w") as h:
+            h.write("\t".join(header) + "\n")
+            for r in rows:
+                h.write("\t".join(r) + "\n")
+        df = pd.read_csv(tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        panel = gr.select_worstcase_panel(df, cols, cap=gr.PANEL_CAP)
+        chroms = list(panel[cols["chrom"]])
+        # the pure-bulge site is hard-included (would NOT qualify by mm+b<=2 or CFD>=0.5)
+        self.assertIn("chrPUREBULGE", chroms)
+
     def test_perfect_match_flag_and_banner(self):
         """0-mm/0-bulge sites are flagged and drive the warning banner."""
         mmb_col = {"mmb": "Mismatches+bulges_(highest_CFD)"}

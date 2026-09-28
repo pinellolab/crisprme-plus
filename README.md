@@ -181,18 +181,19 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.p
   --vcf list_vcf.txt --samplesID list_samplesID.txt \
   --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
   --gene_annotation Annotations/gencode.protein_coding.bed.gz \
-  --mm 6 --bDNA 2 --bRNA 2 --output my_search --thread 8
-# ^ runs the POPULATION-LEVEL analysis by default (worst-possible representatives; removes the
+  --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 8
+# ^ the recommended default search: up to 4 mismatches + 1 DNA and 1 RNA bulge (a 6-edit
+#   budget, matching the default --max-total-edits 6, so nothing is pruned). This sits in the
+#   CRISPR-Bulge scorer's validated single-bulge domain. Raise the caps for a deeper search,
+#   but also raise --max-total-edits to their sum or alignments over the budget are PRUNED
+#   (e.g. --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget → add --max-total-edits 10 to keep all).
+#   Runs the POPULATION-LEVEL analysis by default (worst-possible representatives; removes the
 #   per-haplotype enumeration wall that makes dense/aggregate panels intractable).
 #   Add --per-sample to resolve per-sample genotypes — CONFIRMED cis phasing + named carrier
 #   samples + exact joint allele frequency — recommended for genotyped panels / clinical
 #   validation. This is a genotype-resolution mode, not a speed mode: for a single guide the
 #   runtimes are comparable, but it can be intractable on dense/aggregate panels; on a
 #   sites-only index (mega) it cannot resolve carriers (no genotypes) and is inert.
-# NOTE: --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget but the default --max-total-edits is 4,
-#   so alignments over 4 combined edits (including many SNP+indel co-occurrences, where the
-#   indel consumes a bulge slot) are PRUNED. Add --max-total-edits 6 (or the full budget) to
-#   keep them — slower.
 
 # build the self-contained, shareable HTML report (report.html + a data/ folder)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 crisprme.py generate-report \
@@ -524,7 +525,7 @@ crisprme.py --version
 command -v crispritz.py
 ```
 
-The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then copies `crisprme.py`/`crispritz.py` into `$CONDA_PREFIX/bin` and their support trees into `$CONDA_PREFIX/opt/…`, and unzips the CRISTA scoring model. Override the CRISPRitz tag with `CRISPRITZ_REF=<tag> bash install_from_source.sh` if needed.
+The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then copies `crisprme.py`/`crispritz.py` into `$CONDA_PREFIX/bin` and their support trees into `$CONDA_PREFIX/opt/…`, and creates the dedicated `cbulge` conda env for the CRISPR-Bulge off-target scorer (set `CRISPRME_SKIP_SCORER_ENV=1` to defer it — create it later with `crisprme.py scorer-env create`). Override the CRISPRitz tag with `CRISPRITZ_REF=<tag> bash install_from_source.sh` if needed.
 
 **Smoke-test the install** (downloads a small chr22 dataset, runs the full pipeline, and compares against the committed ground truth):
 
@@ -607,7 +608,7 @@ outputs. The following is a summary of CRISPRme's key features:
 - [**Complete Search**](#221-complete-search) (`complete-search`)
   <br>Executes a genome-wide off-targets
   search across both reference and variant datasets (if specified), conducts 
-  Cutting Frequency Determination (CFD) and CRISTA analyses (if applicable), and 
+  Cutting Frequency Determination (CFD) and CRISPR-Bulge analyses (if applicable), and 
   identifies candidate targets.
 
 - [**Generate Report**](#229-generate-report) (`generate-report`)
@@ -675,9 +676,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.5.5 \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed.gz \
     --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
-# NOTE: --mm 4 --bDNA 1 --bRNA 1 is a 6-edit budget but the default --max-total-edits is 4,
-#   so alignments over 4 combined edits (including SNP+indel co-occurrences, where the indel
-#   consumes a bulge slot) are PRUNED. Add --max-total-edits 6 to keep them — slower.
+# ^ the recommended default: 4 mismatches + 1 DNA + 1 RNA bulge = a 6-edit budget, matching
+#   the default --max-total-edits 6, so nothing (incl. SNP+indel co-occurrences) is pruned.
+#   Raise the per-type caps for a deeper search, but raise --max-total-edits to their sum too.
 # shareable report: crisprme.py generate-report --result-dir Results/my_search
 ```
 
@@ -793,17 +794,18 @@ its purpose and usage:
 - `--mm` (*Required*)
   <br>Maximum number of mismatches allowed during off-target identification.
 
-- `--bDNA` (*Optional*, default derived from `--max-total-edits`)
-  <br>Maximum allowable DNA bulge size. If omitted (together with `--bRNA`), it is
-  derived from `--max-total-edits`, capped by the bulge depth the installed index
-  supports — so `--max-total-edits` acts as a single "max edits" knob. Pass it explicitly
-  to override. If no bulge-capable index is installed the search stays bulge-free.
+- `--bDNA` (*Optional*, default `1`)
+  <br>Maximum allowable DNA bulge size. If omitted (together with `--bRNA`), it defaults to
+  **1** (one DNA bulge), bounded by the bulge depth the installed index supports — the
+  recommended single-bulge default (the CRISPR-Bulge ML scorer's validated domain). Pass it
+  explicitly for a deeper search. If no bulge-capable index is installed the search stays
+  bulge-free.
 
-- `--bRNA` (*Optional*, default derived from `--max-total-edits`)
-  <br>Maximum allowable RNA bulge size. See `--bDNA` — the two are derived together from
-  `--max-total-edits` when neither is given.
+- `--bRNA` (*Optional*, default `1`)
+  <br>Maximum allowable RNA bulge size. See `--bDNA` — defaults to one RNA bulge when neither
+  is given.
 
-- `--max-total-edits` (*Optional*, default `4`)
+- `--max-total-edits` (*Optional*, default `6`)
   <br>Cap on the combined number of edits (mismatches + DNA/RNA bulges) considered
   per candidate off-target, and — when `--bDNA/--bRNA` are omitted — the budget the
   per-type bulge caps are derived from. Lower values speed up dense-variant searches;
@@ -837,17 +839,17 @@ its purpose and usage:
 - `--merge` (*Optional - Default: 3*)
   <br>Defines the window size (in base pairs) used to merge closely spaced 
   off-targets. Pivot targets are selected based on the highest score (e.g., 
-  CFD, CRISTA) or criteria defined by the `--sorting-criteria`. 
+  CFD, CRISPR-Bulge) or criteria defined by the `--sorting-criteria`. 
 
 - `--sorting-criteria-scoring` (*Optional - Default: `mm+bulges`*)
-  <br>Specifies sorting criteria for merging when using CFD/CRISTA scores. 
+  <br>Specifies sorting criteria for merging when using CFD/CRISPR-Bulge scores. 
   Options include:
     - mm: Number of mismatches.
     - bulges: Total bulge size.
     - mm+bulges: Combined mismatches and bulges. 
 
 - `--sorting-criteria` (*Optional - Default: `mm+bulges,mm`*)
-  <br>Sorting criteria used when CFD/CRISTA scores are unavailable. Options are 
+  <br>Sorting criteria used when CFD/CRISPR-Bulge scores are unavailable. Options are 
   similar to `--sorting-criteria-scoring` but tailored for simpler analyses. 
 
 **Note 1**: Ensure compatibility between input files and genome builds (e.g., 
@@ -932,8 +934,11 @@ different sorting criteria.
     off-targets prioritized by CFD score.
     
 4. `*.summary_by_guide.<guide-sequence>_CRISTA.txt`
+   *(the `_CRISTA` suffix and the `CRISTA_score` column are retained for backward
+   compatibility; the score they hold is now the **CRISPR-Bulge** ML score — CRISTA
+   has been retired.)*
 
-    - **Contents**: Summarizes off-target counts per guide using the CRISTA score
+    - **Contents**: Summarizes off-target counts per guide using the CRISPR-Bulge score
     as the primary sorting criterion (data derived from 
     `*.integrated_results.tsv`). Includes counts of:
         - Targets by bulge type (DNA, RNA).
@@ -942,7 +947,7 @@ different sorting criteria.
         PAM creation due to variants.
 
     - **Purpose**: Provides insight into the distribution and characteristics of 
-    off-targets prioritized by CRISTA score.
+    off-targets prioritized by CRISPR-Bulge score.
 
 5. `*.summary_by_guide.<guide-sequence>_fewest.txt`
 
@@ -970,8 +975,8 @@ populations.
 
 7. `*.summary_by_samples.<guide-sequence>_CRISTA.txt`
     
-    - **Contents**: Similar to the CFD-based sample summary but uses CRISTA 
-    score for sorting.
+    - **Contents**: Similar to the CFD-based sample summary but uses the CRISPR-Bulge 
+    score for sorting (the `_CRISTA` filename suffix is kept for backward compatibility).
 
 8. `*.summary_by_samples.<guide-sequence>_fewest.txt`
     - **Contents**: Summarizes private off-targets using the fewest mismatches 
@@ -982,7 +987,7 @@ populations.
 9. `imgs` directory 
 
     - **Contents**: Contains visual representations of the top 1000 targets 
-      based on CFD score, CRISTA score, and Fewest mismatches and bulges. Images 
+      based on CFD score, CRISPR-Bulge score, and Fewest mismatches and bulges. Images 
       include:
         - Bar plots showing the distribution of targets across populations and 
         bulge types.
@@ -1210,7 +1215,7 @@ Integration function, including detailed explanations and default behaviors:
 - `--targets` (*Required*)
   <br>Specifies the file containing targets identified and processed from a 
   CRISPRme search. This file should include predicted off-target data such as 
-  mismatch counts, bulge sizes, and scores (e.g., CFD, CRISTA).
+  mismatch counts, bulge sizes, and scores (e.g., CFD, CRISPR-Bulge).
 
 - `--empirical_data` (*Required*)
   <br>Path to a `BED` file containing empirically validated off-targets. This 
@@ -1463,7 +1468,7 @@ ensuring precise and personalized reporting.
 - `imgs` directory
   <br>The function generates plots illustrating the effect of private genetic 
   variants on the sample-specific targets. Displays changes in the CFD and  
-  CRISTA scores, and number of Mismatches and Bulges highlighting off-target 
+  CRISPR-Bulge scores, and number of Mismatches and Bulges highlighting off-target 
   risk influenced by genetic variants.
 
 #### 2.2.7 Setup Legacy Database
@@ -1581,7 +1586,7 @@ ease.
 
 The interface provides an intuitive way to explore the output files generated by 
 CRISPRme. Users can filter targets by criteria such as mismatch count, bulge 
-size, or scores (e.g., CFD or CRISTA). The interface includes dynamic plots and 
+size, or scores (e.g., CFD or CRISPR-Bulge). The interface includes dynamic plots and 
 charts. Results are presented in a structured, easy-to-navigate format, linking 
 data to relevant genomic annotations. The web interface runs as a local server, 
 ensuring data privacy and fast response times. Users can access it via their 
@@ -1669,7 +1674,7 @@ is under `data/`). Reading top to bottom:
   on-target, so every perfect-match site is listed, flagged `Perfect_match = Yes`,
   and forced to the top of the validation panel. (One perfect match = a normal
   amber "presumed on-target" note instead.)
-- **4. Recommended validation panel** — CFD / CRISTA / edit-distance threshold
+- **4. Recommended validation panel** — CFD / CRISPR-Bulge / edit-distance threshold
   tables plus a **hybrid worst-case ~100-site panel** (`data/panel_top100.tsv`) to
   seed a targeted-NGS / rhAMP-Seq confirmation assay. Among equally-severe
   candidates the panel **prioritizes sites observed in ≥1 real individual** (see the

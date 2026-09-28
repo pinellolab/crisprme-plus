@@ -1180,17 +1180,19 @@ def change_url(
     # bulges
     dna = int(dna)
     rna = int(rna)
-    # Simple mode (Advanced panel closed): the "Max edits" slider is the sole knob, so
-    # derive the per-type bulge caps from it -- bounded by the bulge depth the installed
-    # index(es) actually support -- instead of the hidden per-type dropdown values. This
-    # makes a max-edits=N search look for up to N bulges of each type (capped by the
-    # index) with no per-type input, mirroring the CLI --max-total-edits behavior. If no
-    # bulge-capable index is installed the cap is 0 -> a fast 0-bulge search.
+    # Simple mode (Advanced panel closed): the "Max edits" slider is the sole knob. It is
+    # the TOTAL-edit budget (--max-total-edits); the per-type bulge cap is fixed at ONE
+    # DNA + ONE RNA bulge (bounded by the installed index depth). We deliberately keep the
+    # default path in the scorer's validated SINGLE-bulge domain (CRISPR-Bulge is a 1-bulge
+    # model; >=2-bulge sites are out of domain -- see the scores legend). A user who needs
+    # deeper bulge searches opens the Advanced panel and sets the per-type caps explicitly.
+    # If no bulge-capable index is installed the cap is 0 -> a fast 0-bulge search.
+    _SIMPLE_BULGE_CAP = 1
     if not advanced_open:
-        _mx = int(max_edits_val) if max_edits_val is not None else 4
+        _mx = int(max_edits_val) if max_edits_val is not None else 6
         # REFERENCE term is buildable-aware (raw genome shipped -> reference index
-        # buildable on demand), so a dict-less install can still derive up to 2 bulges
-        # from the slider instead of being forced to 0. See reference_bulge_capacity.
+        # buildable on demand), so a dict-less install can still derive a bulge from the
+        # slider instead of being forced to 0. See reference_bulge_capacity.
         _cap = reference_bulge_capacity(genome_selected, pam)
         _sel = (
             []
@@ -1200,7 +1202,7 @@ def change_url(
         # VARIANT term stays strictly installed-index-based (never buildable dict-less).
         for _v in _sel:  # a variant bulge search also needs the variant index
             _cap = min(_cap, index_max_bulges(genome_selected, pam, _v))
-        dna = rna = max(0, min(_mx, _cap))
+        dna = rna = max(0, min(_mx, _cap, _SIMPLE_BULGE_CAP))
     # Index name budget: mirror the validated CLI (crisprme.py complete-search) EXACTLY.
     # There, bMax = max(bDNA, bRNA) and the TST index is named/built as
     # "<pam>_<bMax+1>_<genome>" (the +1 is for alignments starting with a gap). So the
@@ -2237,9 +2239,24 @@ def change_variant_dataset_options(genome_value: str) -> List:
 )
 def update_search_mode_availability(dataset_value, genome_value, current_mode):
     has_gt = variant_dataset_has_genotypes(genome_value, dataset_value)
-    ps_label = " Per-sample — resolve genotypes: carriers & CONFIRMED cis"
+    # tailor the label to what per-sample actually BUYS on THIS panel: a phased panel
+    # yields CONFIRMED cis + named carriers; an unphased panel can name carriers but the
+    # cis co-occurrence is only PUTATIVE; a hybrid panel is CONFIRMED where phased.
     if not has_gt:
-        ps_label += " (needs a genotyped panel)"
+        ps_label = (" Per-sample — resolve genotypes: named carriers & CONFIRMED cis "
+                    "(needs a genotyped panel)")
+    else:
+        _dt = variant_dataset_data_type(genome_value, dataset_value)
+        if _dt == "genotyped-phased":
+            ps_label = " Per-sample — named carriers & CONFIRMED cis phasing (phased panel)"
+        elif _dt == "genotyped-unphased":
+            ps_label = (" Per-sample — named carriers; cis is PUTATIVE only "
+                        "(panel is unphased)")
+        elif _dt == "hybrid":
+            ps_label = (" Per-sample — named carriers; CONFIRMED cis where phased, "
+                        "PUTATIVE where not (hybrid panel)")
+        else:
+            ps_label = " Per-sample — resolve genotypes: named carriers & CONFIRMED cis"
     options = [
         {"label": " Population-level (default) — worst-possible screen",
          "value": "population-level"},
@@ -2727,15 +2744,15 @@ def index_page() -> html.Div:
                         # Max = mismatch ceiling (MAX_MMS - 1 = 6) + bulge ceiling
                         # (MAX_BULGES - 1 = 2) = 8 -- the largest total-edit budget the app
                         # supports (e.g. 6 mismatches + 2 bulges), computed rather than a magic
-                        # number. In simple mode the per-type caps are DERIVED from this value:
-                        # mismatches come from the hidden Advanced dropdown default (6) and
-                        # bulges are capped by the installed index's depth (<=2), so a
-                        # max-edits=8 search resolves to 6 mismatches + up to 2 bulges. The
-                        # default value stays 4 (matching the CLI); the Advanced per-type caps
-                        # stay 6 / 2 / 2.
+                        # number. In simple mode this slider is the TOTAL-edit budget:
+                        # mismatches come from the Advanced dropdown default (4) and bulges are
+                        # fixed at 1 DNA + 1 RNA (bounded by index depth), keeping the default
+                        # path in the scorer's validated single-bulge domain. So the default
+                        # (budget 6) resolves to up to 4 mismatches + 1 DNA + 1 RNA bulge; open
+                        # Advanced for deeper per-type caps. Default 6 matches the CLI.
                         max=(MAX_MMS - 1) + 2 * (MAX_BULGES - 1),
                         step=1,
-                        value=4,
+                        value=6,
                         marks={
                             i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
                             for i in range(1, (MAX_MMS - 1) + 2 * (MAX_BULGES - 1) + 1)
@@ -2744,9 +2761,10 @@ def index_page() -> html.Div:
                     ),
                     html.P(
                         "Total number of differences (mismatches + DNA/RNA bulges) "
-                        "allowed between a guide and an off-target. The default is 4 (matching the "
-                        "command line); lower it for a faster, narrower search. "
-                        "The on-target (0 edits) is always reported at any setting.",
+                        "allowed between a guide and an off-target. The default is 6 (matching the "
+                        "command line): up to 4 mismatches plus one DNA and one RNA bulge. "
+                        "Lower it for a faster, narrower search; open Advanced for deeper per-type "
+                        "caps. The on-target (0 edits) is always reported at any setting.",
                         style={"font-size": "1.25rem", "color": "#555"},
                     ),
                     html.P(
@@ -2821,7 +2839,7 @@ def index_page() -> html.Div:
                                 html.P("Mismatches"),
                                 dcc.Dropdown(
                                     options=AV_MISMATCHES,
-                                    value=6,
+                                    value=4,
                                     clearable=False,
                                     id="mms",
                                     style={"width": "60px"},
@@ -2834,7 +2852,7 @@ def index_page() -> html.Div:
                                 html.P(["DNA", html.Br(), "Bulges"]),
                                 dcc.Dropdown(
                                     options=AV_BULGES,
-                                    value=2,
+                                    value=1,
                                     clearable=False,
                                     id="dna",
                                     style={"width": "60px"},
@@ -2847,7 +2865,7 @@ def index_page() -> html.Div:
                                 html.P(["RNA", html.Br(), "Bulges"]),
                                 dcc.Dropdown(
                                     options=AV_BULGES,
-                                    value=2,
+                                    value=1,
                                     clearable=False,
                                     id="rna",
                                     style={"width": "60px"},
