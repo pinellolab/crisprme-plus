@@ -3,13 +3,16 @@ name: Docker Multi-Arch Build
 # Build the CRISPRme Docker image natively for both linux/amd64 and
 # linux/arm64 (Apple Silicon). crispritz is COMPILED FROM C++ SOURCE and crisprme
 # is installed from the build context (see Dockerfile), and the CRISPR-Bulge
-# scorer's dedicated conda env (cbulge, TensorFlow 2.13.1) is built at image-build
-# time (build_scorer_envs=1) on BOTH arches: conda tensorflow-cpu=2.13 on x86-64,
-# and the same TF 2.13.1 from the PyPI aarch64 wheel on arm64 (conda-forge ships
-# tensorflow-cpu=2.13 only for x86-64) -- scorer_env.py picks the per-arch source
-# automatically, and the two produce numerically identical scores (validated:
-# max|Δ|=3.6e-7, zero band flips). buildx produces a true multi-arch image; the
-# linux/arm64 build exercises the arm64 C++ compile AND the aarch64 scorer env.
+# scorer's dedicated conda env (cbulge, TensorFlow 2.13) is built at image-build
+# time (build_scorer_envs=1) on BOTH arches, backend chosen by scorer_backend=auto
+# (Dockerfile default, keyed on TARGETARCH): the amd64 layer gets the conda-forge CUDA
+# TensorFlow (tensorflow=2.13=cuda*) so the shipped image is GPU-CAPABLE -- it runs the
+# scorer on an NVIDIA GPU under 'docker run --gpus all ...' and falls back to CPU
+# transparently when no GPU is present; the arm64 layer gets the CPU TF 2.13.1 PyPI
+# aarch64 wheel (CUDA has no ARM build) so Apple Silicon stays CPU. CPU and GPU produce
+# numerically identical scores (validated on A100; CPU cross-arch max|Δ|=3.6e-7, zero band
+# flips). buildx produces a true multi-arch image; the amd64 layer is larger (cudatoolkit/
+# cudnn). Build with --build-arg scorer_backend=cpu for a lean CPU-only image.
 #
 # On pull_request / workflow_dispatch we only BUILD both arches (push: false)
 # to validate that both platforms build successfully. Publishing to Docker Hub
@@ -33,6 +36,12 @@ jobs:
     name: Build multi-arch image (no push)
     runs-on: ubuntu-latest
     steps:
+      - name: Free up runner disk (amd64 CUDA scorer env is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -63,6 +72,12 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - name: Free up runner disk (amd64 CUDA scorer env is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h
+
       - name: Checkout repository
         uses: actions/checkout@v4
 

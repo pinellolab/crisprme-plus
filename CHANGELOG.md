@@ -12,6 +12,16 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
+- **The default image is now GPU-capable — one image, both modes.** `pinellolab/crisprme:latest`
+  (and `:<tag>`) builds its **amd64** layer with the conda-forge CUDA TensorFlow
+  (`tensorflow=2.13=cuda*`, validated correct + fast on an NVIDIA A100), so the CRISPR-Bulge scorer
+  runs on the GPU under `docker run --gpus all …` and **falls back to CPU transparently** when no
+  GPU is visible (the compute-backend device guard; byte-identical results) — no flag needed for
+  CPU. The **arm64** layer stays CPU (CUDA has no ARM build), so Apple Silicon is unaffected. A
+  single `docker pull pinellolab/crisprme:latest` therefore works everywhere and uses the GPU when
+  present; the only cost is a larger amd64 image (bundles cudatoolkit/cudnn). Build the Dockerfile
+  with `--build-arg scorer_backend=cpu` for a lean CPU-only image if size matters. Selection is via
+  the Dockerfile `scorer_backend=auto` default keyed on `TARGETARCH`.
 - **`Gene_region` column — exon/intron/UTR granularity for the gene annotation, on every
   report surface.** States in one word where an off-target sits relative to the nearest
   protein-coding gene: `CDS` (coding exon), `5'UTR`, `3'UTR`, `exon` (non-coding-transcript

@@ -118,22 +118,32 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
 # Built in its OWN micromamba env so its TensorFlow/numpy pins never touch the
 # main scoring stack. Uses the single-source spec in scorer_env.py so the package
 # set never drifts from the CLI/health-check.
-#   scorer_backend=cpu (default): installs tensorflow-cpu (small, runs anywhere).
-#   scorer_backend=gpu: installs the conda-forge CUDA TensorFlow build (tensorflow=2.13=cuda*)
-#     -- validated correct + fast on an NVIDIA A100; the image then runs the scorer on the GPU
-#     when launched with the NVIDIA container runtime ('docker run --gpus all ... --compute-backend cuda').
-#     It also still runs on CPU if no GPU is visible. GPU images are larger (pulls cudatoolkit/cudnn).
+#   scorer_backend=auto (DEFAULT): ONE image, both modes. On linux/amd64 it builds the
+#     conda-forge CUDA TensorFlow (tensorflow=2.13=cuda*, validated correct + fast on an NVIDIA
+#     A100) so the scorer runs on the GPU under the NVIDIA runtime ('docker run --gpus all ...')
+#     AND falls back to CPU transparently when no GPU is visible (the compute-backend device
+#     guard) -- no flag needed for CPU. On linux/arm64 it builds the CPU TensorFlow (CUDA has NO
+#     ARM build), so Apple Silicon stays CPU. The amd64 image is larger (pulls cudatoolkit/cudnn).
+#   scorer_backend=cpu: force a lean CPU-only build on any arch.
+#   scorer_backend=gpu: force the CUDA build on any arch (amd64 only in practice).
 # Set build_scorer_envs=0 for a lean image (create later with 'crisprme.py scorer-env create').
 # Failure is non-fatal to the image build.
 ARG build_scorer_envs=1
-ARG scorer_backend=cpu
+ARG scorer_backend=auto
+# TARGETARCH is auto-populated by buildx (amd64 / arm64); used to pick GPU vs CPU under 'auto'.
+ARG TARGETARCH
 # Re-assert CONDA_CHANNEL_BASE into scope so the scorer-env solve uses the same mirror as the
 # main env (networks that block conda.anaconda.org set e.g. --build-arg CONDA_CHANNEL_BASE=
 # https://prefix.dev); scorer_env._channel_args() reads it. Defaults to conda.anaconda.org.
 ARG CONDA_CHANNEL_BASE=https://conda.anaconda.org
 RUN if [ "$build_scorer_envs" = "1" ]; then \
+      BACKEND="${scorer_backend}"; \
+      if [ "$BACKEND" = "auto" ]; then \
+        if [ "${TARGETARCH}" = "amd64" ]; then BACKEND=gpu; else BACKEND=cpu; fi; \
+      fi; \
+      echo "[scorer-env] building cbulge (backend=${BACKEND}, arch=${TARGETARCH})"; \
       ( CONDA_CHANNEL_BASE="${CONDA_CHANNEL_BASE}" python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
-import scorer_env; ok, msg = scorer_env.create_env('cbulge', gpu=('${scorer_backend}'=='gpu'), stream=True); \
+import scorer_env; ok, msg = scorer_env.create_env('cbulge', gpu=('${BACKEND}'=='gpu'), stream=True); \
 print('[scorer-env]', msg); sys.exit(0 if ok else 1)" \
         && micromamba clean --all --yes ) \
       || echo 'WARN: scorer env not built; create at runtime with crisprme.py scorer-env create' ; \
