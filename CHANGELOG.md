@@ -51,7 +51,18 @@ and the `release-crisprme` skill.
   `numpy` 1.24→≥1.26, `scipy` 1.10→≥1.11, `pandas` 2.0→≥2.1, and the `matplotlib-base` ceiling
   is dropped. `numpy` is capped `<2` and `pandas` `<3` as deliberate guards (the pysam /
   CRISPRitz C-ABI, and pandas 3.0 copy-on-write) — both are validated fast-follows. The
-  full unit suite (724 tests) passes on the rebuilt, un-pinned environment.
+  full unit suite (779 tests) passes on the rebuilt, un-pinned environment.
+- **The CRISPR-Bulge scorer env is architecture-aware, with identical scores on x86-64 and
+  arm64.** conda-forge ships `tensorflow-cpu=2.13` only for x86-64 (aarch64 has just 2.18/2.19),
+  so the `cbulge` env is now built per-arch behind the same name: conda `tensorflow-cpu=2.13` on
+  x86-64, the conda CUDA build on GPU hosts, and — new — the **same TensorFlow 2.13.1** from the
+  official PyPI aarch64 wheel on Linux ARM (base deps from conda, TF from pip, mirroring the
+  Apple-Silicon Metal path). Same version + weights → validated **identical**: on a 254-pair panel
+  (150 with bulges) x86-64 vs aarch64 scores agree to max |Δ| = 3.6e-7 with **zero** differences at
+  display precision and **zero** threshold-band flips. The multi-arch Docker image therefore ships
+  the full scorer on both arches (previously arm64 would have degraded to CFD-only). The scorer-env
+  solve also honors the same `CONDA_CHANNEL_BASE` mirror as the main env (e.g. `https://prefix.dev`),
+  so `scorer-env create` works on networks that block `conda.anaconda.org`.
 - **Alternative-alignments output is now mode-driven (off by default in the
   population-level analysis).** The `..._all_results_with_alternative_alignments.tsv`
   dump — the *non-best* alignments per locus — grows combinatorially with the edit

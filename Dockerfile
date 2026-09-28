@@ -127,8 +127,12 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
 # Failure is non-fatal to the image build.
 ARG build_scorer_envs=1
 ARG scorer_backend=cpu
+# Re-assert CONDA_CHANNEL_BASE into scope so the scorer-env solve uses the same mirror as the
+# main env (networks that block conda.anaconda.org set e.g. --build-arg CONDA_CHANNEL_BASE=
+# https://prefix.dev); scorer_env._channel_args() reads it. Defaults to conda.anaconda.org.
+ARG CONDA_CHANNEL_BASE=https://conda.anaconda.org
 RUN if [ "$build_scorer_envs" = "1" ]; then \
-      ( python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
+      ( CONDA_CHANNEL_BASE="${CONDA_CHANNEL_BASE}" python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
 import scorer_env; ok, msg = scorer_env.create_env('cbulge', gpu=('${scorer_backend}'=='gpu'), stream=True); \
 print('[scorer-env]', msg); sys.exit(0 if ok else 1)" \
         && micromamba clean --all --yes ) \

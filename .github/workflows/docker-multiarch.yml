@@ -3,12 +3,13 @@ name: Docker Multi-Arch Build
 # Build the CRISPRme Docker image natively for both linux/amd64 and
 # linux/arm64 (Apple Silicon). crispritz is COMPILED FROM C++ SOURCE and crisprme
 # is installed from the build context (see Dockerfile), and the CRISPR-Bulge
-# scorer's dedicated conda env (cbulge, TensorFlow) is built at image-build time
-# (build_scorer_envs=1). buildx produces a true multi-arch image; the linux/arm64
-# build therefore exercises the arm64 C++ compile AND the conda-forge
-# linux-aarch64 tensorflow-cpu availability. If arm64 cannot resolve
-# tensorflow-cpu, set build_scorer_envs=0 for arm64 (create the scorer env at
-# runtime) or ship arm64 as CPU-scorer-deferred.
+# scorer's dedicated conda env (cbulge, TensorFlow 2.13.1) is built at image-build
+# time (build_scorer_envs=1) on BOTH arches: conda tensorflow-cpu=2.13 on x86-64,
+# and the same TF 2.13.1 from the PyPI aarch64 wheel on arm64 (conda-forge ships
+# tensorflow-cpu=2.13 only for x86-64) -- scorer_env.py picks the per-arch source
+# automatically, and the two produce numerically identical scores (validated:
+# max|Δ|=3.6e-7, zero band flips). buildx produces a true multi-arch image; the
+# linux/arm64 build exercises the arm64 C++ compile AND the aarch64 scorer env.
 #
 # On pull_request / workflow_dispatch we only BUILD both arches (push: false)
 # to validate that both platforms build successfully. Publishing to Docker Hub
