@@ -11,6 +11,18 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **`Gene_region` report column — exon/intron/UTR granularity for the gene annotation.**
+  The report's curated table and every download TSV now carry a `Gene_region` column that
+  states, in one word, where an off-target sits relative to the nearest protein-coding gene:
+  `CDS` (coding exon), `5'UTR`, `3'UTR`, `exon` (non-coding-transcript exon), `intron`
+  (inside a gene body but not an exon), or `intergenic`. It is derived from the existing
+  `Annotation_GENCODE` feature-set (no new pipeline pass) and kept coherent with the
+  `Gene` / `Gene_distance_kb` columns — `intergenic` is defined by `Gene_distance_kb > 0`, so
+  the region never contradicts the distance. The raw `GENCODE` column still keeps the full
+  overlapping feature-set. Documented in the report's annotation legend. Works retroactively
+  on existing `integrated_results.tsv` files (report-curation-only derivation).
+
 ## [2.6.0] - 2026-09-28
 
 ### Changed

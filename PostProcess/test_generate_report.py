@@ -281,7 +281,7 @@ class TestGenerateReport(unittest.TestCase):
                 "Mismatches+bulges", "Perfect_match", "CFD", "CRISPR-Bulge",
                 "REF/ALT_origin",
                 "PAM_creation", "Variant", "Observed", "MAF", "Gene", "Gene_distance_kb",
-                "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
+                "Gene_region", "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
                 "IntOGen_cancer_driver",
                 "High_complexity_region",
             ],
@@ -293,6 +293,51 @@ class TestGenerateReport(unittest.TestCase):
             [c for c in gr.curated_headers(has_crispr_bulge=True) if c != "CRISPR-Bulge"],
             no_crispr_bulge,
         )
+
+    def test_gene_region_class_collapses_gencode_featureset(self):
+        # Gene_region collapses the verbose GENCODE feature-set to ONE most-severe
+        # class (CDS > 5'UTR > 3'UTR > exon > intron > intergenic).
+        cases = [
+            ("CDS,exon,gene,transcript(-)", "CDS"),
+            ("exon,five_prime_UTR,gene,transcript(+)", "5'UTR"),
+            ("exon,gene,three_prime_UTR,transcript(-)", "3'UTR"),
+            ("exon,gene,transcript(+)", "exon"),          # exon w/o CDS/UTR
+            ("gene,transcript(+)", "intron"),             # in gene body, no exon
+            ("transcript(+),transcript(-)", "intron"),
+            ("intergenic", "intergenic"),
+            ("start_codon,CDS,exon,gene,transcript(+)", "CDS"),
+            ("stop_codon_redefined_as_selenocysteine,CDS,gene", "CDS"),
+            ("NA", gr.CURATED_MISSING),
+            ("", gr.CURATED_MISSING),
+        ]
+        for gencode, expected in cases:
+            self.assertEqual(gr._gene_region_class(gencode), expected, gencode)
+
+    def test_gene_region_intergenic_pinned_to_distance(self):
+        # intergenic is defined by Gene_distance_kb > 0 so Gene_region never
+        # contradicts the Gene_distance_kb column, even when the (comprehensive)
+        # GENCODE set shows a non-coding transcript overlap far from a coding gene.
+        self.assertEqual(gr._gene_region_class("gene,transcript(+)", gene_dist="2.3"),
+                         "intergenic")
+        # dist == 0 -> sub-region read from GENCODE
+        self.assertEqual(gr._gene_region_class("CDS,exon,gene", gene_dist="0.0"), "CDS")
+        self.assertEqual(gr._gene_region_class("gene,transcript(-)", gene_dist="0.0"),
+                         "intron")
+        # no distance available -> fall back to pure GENCODE derivation
+        self.assertEqual(gr._gene_region_class("CDS,exon,gene"), "CDS")
+
+    def test_gene_region_curated_cell_reads_gencode_source(self):
+        # the 'gene_region' curated cell derives from GENCODE + distance columns
+        cols = {"gene_region": "Annotation_GENCODE",
+                "gene_dist": "Annotation_closest_gene_distance_(kb)"}
+        row_in = {"Annotation_GENCODE": "CDS,exon,gene",
+                  "Annotation_closest_gene_distance_(kb)": "0.0"}
+        self.assertEqual(gr._curated_cell("gene_region", row_in, cols), "CDS")
+        row_far = {"Annotation_GENCODE": "gene,transcript(-)",
+                   "Annotation_closest_gene_distance_(kb)": "2.3"}
+        self.assertEqual(gr._curated_cell("gene_region", row_far, cols), "intergenic")
+        # missing GENCODE source -> "-"
+        self.assertEqual(gr._curated_cell("gene_region", {}, {}), gr.CURATED_MISSING)
 
     def test_high_complexity_region_flag_projection(self):
         # the curated cell renders the integrated_results note as "N in window"

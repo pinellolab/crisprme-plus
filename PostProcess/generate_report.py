@@ -211,6 +211,7 @@ CURATED_COLUMNS = (
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
+    ("Gene_region", "gene_region"),  # CDS / 5'UTR / 3'UTR / exon / intron / intergenic (collapsed from GENCODE)
     ("GENCODE", "gencode"),
     ("ENCODE", "encode"),
     ("DHS", "dhs"),
@@ -235,7 +236,7 @@ _DROP_MAF = False
 # that falsely implies the screen was performed. None => keep all (backward-compat);
 # build_report sets it to {kind : kind present in cols} for the run.
 _ANNOTATION_KINDS = frozenset(
-    {"gencode", "encode", "dhs", "cosmic", "intogen", "gene_name", "gene_dist"}
+    {"gencode", "gene_region", "encode", "dhs", "cosmic", "intogen", "gene_name", "gene_dist"}
 )
 _PRESENT_ANN_KINDS = None
 
@@ -298,6 +299,7 @@ _COLS = {
     "gene_name": ["Annotation_closest_gene_name"],
     "gene_dist": ["Annotation_closest_gene_distance_(kb)"],
     "gencode": ["Annotation_GENCODE"],
+    "gene_region": ["Annotation_GENCODE"],  # derived class; sources the same GENCODE feature-set
     "encode": ["Annotation_ENCODE"],
     "dhs": ["Annotation_DHS"],
     "cosmic": ["Annotation_COSMIC"],
@@ -569,6 +571,46 @@ def crispr_bulge_computed(df, cols):
 # --------------------------------------------------------------------------- #
 # Curated column projection (ONE set shared by the table + every download file)
 # --------------------------------------------------------------------------- #
+def _gene_region_class(gencode_value, gene_dist=None):
+    """Collapse the site's gene context into ONE readable region class, so a
+    reviewer can tell at a glance whether an off-target sits in a coding exon, a
+    UTR, an intron, or intergenic space -- without parsing a set like
+    ``"CDS,exon,gene,transcript(-)"``.
+
+    Kept COHERENT with the ``Gene`` / ``Gene_distance_kb`` columns (both anchored to
+    the nearest *protein-coding* gene): a non-zero ``gene_dist`` means the site is
+    outside every protein-coding gene body -> ``intergenic`` (so the region and the
+    distance never contradict each other). When the site IS inside a gene
+    (``gene_dist == 0``, or no distance available), the sub-region is read from the
+    ``Annotation_GENCODE`` feature-set the functional annotation carries for the
+    target -- ``gene``/``transcript`` span the whole gene BODY (introns included),
+    ``exon`` the spliced transcript, ``CDS`` the coding sequence,
+    ``five_prime_UTR``/``three_prime_UTR`` the UTRs, ``start_codon``/``stop_codon``
+    (coding). Precedence = most functionally significant first:
+    CDS > 5'UTR > 3'UTR > exon > intron > intergenic; a site inside a gene body but
+    overlapping no exon is an ``intron``.
+    """
+    d = pd.to_numeric(gene_dist, errors="coerce") if gene_dist is not None else None
+    if d is not None and pd.notna(d) and d != 0:
+        return "intergenic"  # outside every protein-coding gene (matches Gene_distance_kb)
+    if _is_na(gencode_value):
+        return CURATED_MISSING
+    s = str(gencode_value).lower()
+    if "cds" in s or "codon" in s:          # CDS / start_codon / stop_codon / selenocysteine
+        return "CDS"
+    if "five_prime_utr" in s:
+        return "5'UTR"
+    if "three_prime_utr" in s:
+        return "3'UTR"
+    if "exon" in s:                          # exon w/o CDS/UTR = noncoding-transcript exon
+        return "exon"
+    if "gene" in s or "transcript" in s:     # inside gene body, no exon overlap
+        return "intron"
+    if "intergenic" in s:
+        return "intergenic"
+    return CURATED_MISSING
+
+
 def _curated_cell(kind, row, cols):
     """Compute the display value for one curated column of one row.
 
@@ -624,6 +666,10 @@ def _curated_cell(kind, row, cols):
         v = _get("gene_name")
     elif kind == "gene_dist":
         v = _get("gene_dist")
+    elif kind == "gene_region":
+        # derived single-class region: intergenic pinned to the protein-coding
+        # Gene_distance_kb (coherent with the Gene columns), sub-region from GENCODE
+        return _gene_region_class(_get("gene_region"), _get("gene_dist"))
     elif kind == "gencode":
         v = _get("gencode")
     elif kind == "encode":
@@ -3072,6 +3118,16 @@ _ANNOTATION_LEGEND = [
      "is then a genic feature, not <code>intergenic</code>); a non-zero value&rsquo;s "
      "magnitude is the distance to the nearest gene boundary and its sign indicates "
      "the side (upstream vs downstream of the gene)."),
+    ("gene_region", "Gene_region", "The single, most functionally significant gene "
+     "region of the off-target, for readability: <code>CDS</code> (protein-coding "
+     "exon), <code>5'UTR</code> / <code>3'UTR</code>, <code>exon</code> "
+     "(non-coding-transcript exon), <code>intron</code> (inside a gene body but not in "
+     "an exon), or <code>intergenic</code> (outside protein-coding genes). "
+     "<code>intergenic</code> is defined by <code>Gene_distance_kb &gt; 0</code> so it "
+     "always agrees with the <code>Gene</code>/<code>Gene_distance_kb</code> columns; "
+     "the sub-region is then read from the GENCODE feature-set (precedence "
+     "CDS &gt; 5'UTR &gt; 3'UTR &gt; exon &gt; intron). The raw <code>GENCODE</code> "
+     "column keeps the full overlapping feature-set."),
     ("gencode", "GENCODE", "Gene-model context of the site as labeled by the "
      "supplied GENCODE annotation: commonly <code>exon</code>, <code>CDS</code> "
      "(protein-coding sequence), <code>UTR</code>, <code>transcript</code>, "
