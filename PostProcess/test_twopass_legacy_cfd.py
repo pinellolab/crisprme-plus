@@ -12,7 +12,7 @@ This test drives the REAL legacy ``iupac_decomposition`` both ways (slow enumera
 with REAL CFD matrices injected, on a fixture ADAPTIVELY chosen so the min-mm allele is NOT
 the max-CFD allele, and asserts fast's worst-case CFD >= slow's (== the true worst case).
 Without the fix this fails (fast would carry only the lower-CFD lex allele). STDLIB +
-the harness's numpy/pandas/CRISTA stubs + the real mismatch_score/PAM_scores pickles.
+the harness's numpy/pandas/CRISPR-Bulge stubs + the real mismatch_score/PAM_scores pickles.
 
 Run: cd PostProcess && python3 -m unittest test_twopass_legacy_cfd -v
 """

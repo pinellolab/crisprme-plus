@@ -169,6 +169,8 @@ crisprme.py complete-search \
 
 Results will be written to `Results/$OUTPUT_NAME/`.
 
+The example above uses `--mm 4 --bDNA 1 --bRNA 1`; the default `--max-total-edits` is **6**, so those 4 mismatches + 1 DNA + 1 RNA bulge fit within the overall budget without raising it.
+
 > Whole-genome searches take several hours. Run inside `tmux` or `screen` so the job continues if your connection drops.
 
 To search against only one dataset (1000G or HGDP), create a single-line config file and pass it instead:
@@ -307,6 +309,10 @@ crisprme.py download --what index --index-name NRG_3_hg38 --path "$CRISPRME_DIR"
 ```
 
 Then run the search with `--index-path "$CRISPRME_DIR/genome_library"` (or simply from `$CRISPRME_DIR`) and it reuses the downloaded index. The index folder name encodes the PAM, bulge count and genome, so an index is only valid for a matching `--genome`/`--pam`/`--bDNA`/`--bRNA`.
+
+### Scoring backend (CPU / GPU)
+
+Every off-target is scored with **CFD** plus the **CRISPR-Bulge** machine-learning model (Yaish & Orenstein, *NAR* 2024). Pass `--compute-backend {cpu,cuda,metal}` to `complete-search` to select where CRISPR-Bulge runs (`cpu` is the default; `cuda` uses an NVIDIA GPU, `metal` an Apple-Silicon GPU; `gpu`/`auto` are accepted as aliases). CRISPR-Bulge runs in a dedicated **`cbulge` conda environment** that is provisioned automatically on first use; manage it explicitly with `crisprme.py scorer-env` (e.g. `crisprme.py scorer-env create` / `--health` / `--update`).
 
 ---
 

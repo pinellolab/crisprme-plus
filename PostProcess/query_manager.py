@@ -59,16 +59,16 @@ def shold(
     elif target == "fewest":
         radio_order = str(radio_order) + "_(fewest_mm+b)"
         orderdrop = str(orderdrop) + "_(fewest_mm+b)"
-    elif target == "CRISTA":
+    elif target == "CRISPR-Bulge":
         if "CFD" in radio_order:
-            radio_order = str(radio_order).replace("CFD", "CRISTA")
+            radio_order = str(radio_order).replace("CFD", "CRISPR_BULGE")
         try:
             if "CFD" in orderdrop:
-                orderdrop = str(orderdrop).replace("CFD", "CRISTA")
+                orderdrop = str(orderdrop).replace("CFD", "CRISPR_BULGE")
         except:
             pass
-        radio_order = str(radio_order) + "_(highest_CRISTA)"
-        orderdrop = str(orderdrop) + "_(highest_CRISTA)"
+        radio_order = str(radio_order) + "_(highest_CRISPR_BULGE)"
+        orderdrop = str(orderdrop) + "_(highest_CRISPR_BULGE)"
 
     # print(radio_order, orderdrop)
 
@@ -147,16 +147,16 @@ def noshold(
     elif target == "fewest":
         radio_order = str(radio_order) + "_(fewest_mm+b)"
         orderdrop = str(orderdrop) + "_(fewest_mm+b)"
-    elif target == "CRISTA":
+    elif target == "CRISPR-Bulge":
         if "CFD" in radio_order:
-            radio_order = str(radio_order).replace("CFD", "CRISTA")
+            radio_order = str(radio_order).replace("CFD", "CRISPR_BULGE")
         try:
             if "CFD" in orderdrop:
-                orderdrop = str(orderdrop).replace("CFD", "CRISTA")
+                orderdrop = str(orderdrop).replace("CFD", "CRISPR_BULGE")
         except:
             pass
-        radio_order = str(radio_order) + "_(highest_CRISTA)"
-        orderdrop = str(orderdrop) + "_(highest_CRISTA)"
+        radio_order = str(radio_order) + "_(highest_CRISPR_BULGE)"
+        orderdrop = str(orderdrop) + "_(highest_CRISPR_BULGE)"
 
     # print(radio_order, orderdrop)
 

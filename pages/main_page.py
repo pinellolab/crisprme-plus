@@ -2777,7 +2777,7 @@ def index_page() -> html.Div:
                         [
                             html.B("Population-level"),
                             " reports one worst-possible off-target per variant window "
-                            "(exact worst-case CFD; CRISTA is a best-effort screen). It stays "
+                            "(exact worst-case CFD; CRISPR-Bulge is a best-effort screen). It stays "
                             "tractable on any panel and is lossless for detection, but does NOT "
                             "compute per-sample carriers, CONFIRMED cis phasing or exact joint "
                             "allele frequency. ",

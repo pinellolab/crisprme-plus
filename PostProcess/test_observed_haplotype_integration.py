@@ -12,10 +12,10 @@ tokens, which the dict decode provides.
 We assert the finalized rows carry the right Samples column, mismatch count, SNP
 folding, and (critically) that the Reference / ref-score sentinel tail is intact at the
 expected NEGATIVE indices (target[-3]==33, target[-2]==tmp_pos_mms, target[-4]==
-refSeq) so CFD/CRISTA scoring is NOT corrupted by the new path. We also assert the
+refSeq) so CFD/CRISPR-Bulge scoring is NOT corrupted by the new path. We also assert the
 phase-confirmation accumulator captures CONFIRMED vs PUTATIVE correctly.
 
-STDLIB ONLY (+ the AST harness's numpy/pandas/CRISTA stubs). No genome / dict / arg
+STDLIB ONLY (+ the AST harness's numpy/pandas/CRISPR-Bulge stubs). No genome / dict / arg
 files.
 
 Run with:
@@ -170,7 +170,7 @@ class ObservedBranchSelected(unittest.TestCase):
 
 
 class ScoringSentinelsIntact(unittest.TestCase):
-    """The new path must NOT append the phase flag to final_line: the CFD/CRISTA
+    """The new path must NOT append the phase flag to final_line: the CFD/CRISPR-Bulge
     scorers read the Reference / ref-score / tmp_pos tail by NEGATIVE index."""
 
     def test_negative_index_tail_shape(self):

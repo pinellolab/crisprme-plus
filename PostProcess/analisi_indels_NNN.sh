@@ -91,10 +91,10 @@ rm "$jobid.total.cluster.txt"  # remove unnecessary files
 # sort and adjust processed targets 
 echo 'Sorting and adjusting results'
 ./adjust_cols.py "$jobid.bestCFD_INDEL.txt" 
-./adjust_cols.py "$jobid.bestCRISTA_INDEL.txt" 
+./adjust_cols.py "$jobid.bestCRISPR_BULGE_INDEL.txt" 
 ./adjust_cols.py "$jobid.bestmmblg_INDEL.txt" 
 
 # polish targets found on indels 
 ./remove_bad_indel_targets.py "$jobid.bestCFD_INDEL.txt" 
-./remove_bad_indel_targets.py "$jobid.bestCRISTA_INDEL.txt" 
+./remove_bad_indel_targets.py "$jobid.bestCRISPR_BULGE_INDEL.txt" 
 ./remove_bad_indel_targets.py "$jobid.bestmmblg_INDEL.txt" 

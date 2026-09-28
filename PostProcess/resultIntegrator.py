@@ -259,31 +259,31 @@ saveDict = {
     "Variant_MAF_(fewest_mm+b)": "NA",
     "Variant_rsID_(fewest_mm+b)": "NA",
     "Variant_samples_(fewest_mm+b)": "NA",
-    "Start_coordinate_(highest_CRISTA)": "NA",
-    "Strand_(highest_CRISTA)": "NA",
-    "Aligned_spacer+PAM_(highest_CRISTA)": "NA",
-    "Aligned_protospacer+PAM_REF_(highest_CRISTA)": "NA",
-    "Aligned_protospacer+PAM_ALT_(highest_CRISTA)": "NA",
-    "PAM_(highest_CRISTA)": "NA",
-    "Mismatches_(highest_CRISTA)": "NA",
-    "Bulges_(highest_CRISTA)": "NA",
-    "Mismatches+bulges_(highest_CRISTA)": "NA",
-    "Seed_mismatches+bulges_REF_(highest_CRISTA)": "NA",
-    "Non_seed_mismatches+bulges_REF_(highest_CRISTA)": "NA",
-    "Seed_mismatches+bulges_ALT_(highest_CRISTA)": "NA",
-    "Non_seed_mismatches+bulges_ALT_(highest_CRISTA)": "NA",
-    "Bulge_type_(highest_CRISTA)": "NA",
-    "REF/ALT_origin_(highest_CRISTA)": "NA",
-    "PAM_creation_(highest_CRISTA)": "NA",
-    "CRISTA_score_(highest_CRISTA)": "NA",
-    "CRISTA_score_REF_(highest_CRISTA)": "NA",
-    "CRISTA_score_ALT_(highest_CRISTA)": "NA",
-    "CRISTA_risk_score_(highest_CRISTA)": "NA",
-    "Variant_info_spacer+PAM_(highest_CRISTA)": "NA",
-    "Variant_info_genome_(highest_CRISTA)": "NA",
-    "Variant_MAF_(highest_CRISTA)": "NA",
-    "Variant_rsID_(highest_CRISTA)": "NA",
-    "Variant_samples_(highest_CRISTA)": "NA",
+    "Start_coordinate_(highest_CRISPR_BULGE)": "NA",
+    "Strand_(highest_CRISPR_BULGE)": "NA",
+    "Aligned_spacer+PAM_(highest_CRISPR_BULGE)": "NA",
+    "Aligned_protospacer+PAM_REF_(highest_CRISPR_BULGE)": "NA",
+    "Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)": "NA",
+    "PAM_(highest_CRISPR_BULGE)": "NA",
+    "Mismatches_(highest_CRISPR_BULGE)": "NA",
+    "Bulges_(highest_CRISPR_BULGE)": "NA",
+    "Mismatches+bulges_(highest_CRISPR_BULGE)": "NA",
+    "Seed_mismatches+bulges_REF_(highest_CRISPR_BULGE)": "NA",
+    "Non_seed_mismatches+bulges_REF_(highest_CRISPR_BULGE)": "NA",
+    "Seed_mismatches+bulges_ALT_(highest_CRISPR_BULGE)": "NA",
+    "Non_seed_mismatches+bulges_ALT_(highest_CRISPR_BULGE)": "NA",
+    "Bulge_type_(highest_CRISPR_BULGE)": "NA",
+    "REF/ALT_origin_(highest_CRISPR_BULGE)": "NA",
+    "PAM_creation_(highest_CRISPR_BULGE)": "NA",
+    "CRISPR_BULGE_score_(highest_CRISPR_BULGE)": "NA",
+    "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)": "NA",
+    "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)": "NA",
+    "CRISPR_BULGE_risk_score_(highest_CRISPR_BULGE)": "NA",
+    "Variant_info_spacer+PAM_(highest_CRISPR_BULGE)": "NA",
+    "Variant_info_genome_(highest_CRISPR_BULGE)": "NA",
+    "Variant_MAF_(highest_CRISPR_BULGE)": "NA",
+    "Variant_rsID_(highest_CRISPR_BULGE)": "NA",
+    "Variant_samples_(highest_CRISPR_BULGE)": "NA",
     "Annotation_GENCODE": "NA",
     "Annotation_closest_gene_name": "NA",
     "Annotation_closest_gene_ID": "NA",
@@ -540,7 +540,7 @@ for nline, line in enumerate(inCrispritzResults):
     variantList_fewest_mm_b = variantList
 
     variantList = ["NA"]
-    if str(target[66]) != "NA":  # check if target has variants reported (CRISTA)
+    if str(target[66]) != "NA":  # check if target has variants reported (CRISPR-Bulge)
         variantList = str(target[66]).strip().split(",")
         var_pos = []
         # generate variant position corrected to be in the positive strand
@@ -582,7 +582,7 @@ for nline, line in enumerate(inCrispritzResults):
                     + ">"
                     + "".join(reversed(secondcomp))
                 )
-    variantList_highest_crista = variantList
+    variantList_highest_crispr_bulge = variantList
 
     saveDict["Spacer+PAM"] = str(target[15])
     saveDict["Strand_(highest_CFD)"] = str(target[7])
@@ -620,7 +620,7 @@ for nline, line in enumerate(inCrispritzResults):
     # Normalize the per-variant MAF list. A blank "" AF value (CRISPRitz PR #36:
     # AF-not-found/out-of-range now degrades to "" instead of crashing) must be
     # treated the same as the existing "NA" case here and at the two mirrored blocks
-    # below (fewest_mm+b, highest_CRISTA) -- bare float("") raises ValueError, unlike
+    # below (fewest_mm+b, highest_CRISPR_BULGE) -- bare float("") raises ValueError, unlike
     # pandas' pd.to_numeric("") which the final CRISPRme_plots.py consumer relies on.
     maf_list = list()
     for elem in target[17].strip().split(","):
@@ -692,37 +692,37 @@ for nline, line in enumerate(inCrispritzResults):
         "NA" if str(target[40]) == "." else str(target[40])
     )
     saveDict["Variant_samples_(fewest_mm+b)"] = str(target[37])
-    # savedict for highestCRISTA
-    saveDict["Strand_(highest_CRISTA)"] = str(target[55])
-    saveDict["Start_coordinate_(highest_CRISTA)"] = str(target[53])
-    saveDict["Aligned_spacer+PAM_(highest_CRISTA)"] = str(target[49])
-    saveDict["Aligned_protospacer+PAM_REF_(highest_CRISTA)"] = str(target[51])
-    saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISTA)"] = str(target[50])
-    saveDict["PAM_(highest_CRISTA)"] = "NA"
-    saveDict["Mismatches_(highest_CRISTA)"] = str(target[56])
-    saveDict["Bulges_(highest_CRISTA)"] = str(target[57])
-    saveDict["Mismatches+bulges_(highest_CRISTA)"] = str(target[58])
-    saveDict["Bulge_type_(highest_CRISTA)"] = str(target[48])
-    saveDict["REF/ALT_origin_(highest_CRISTA)"] = (
+    # savedict for highestCRISPR_BULGE
+    saveDict["Strand_(highest_CRISPR_BULGE)"] = str(target[55])
+    saveDict["Start_coordinate_(highest_CRISPR_BULGE)"] = str(target[53])
+    saveDict["Aligned_spacer+PAM_(highest_CRISPR_BULGE)"] = str(target[49])
+    saveDict["Aligned_protospacer+PAM_REF_(highest_CRISPR_BULGE)"] = str(target[51])
+    saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)"] = str(target[50])
+    saveDict["PAM_(highest_CRISPR_BULGE)"] = "NA"
+    saveDict["Mismatches_(highest_CRISPR_BULGE)"] = str(target[56])
+    saveDict["Bulges_(highest_CRISPR_BULGE)"] = str(target[57])
+    saveDict["Mismatches+bulges_(highest_CRISPR_BULGE)"] = str(target[58])
+    saveDict["Bulge_type_(highest_CRISPR_BULGE)"] = str(target[48])
+    saveDict["REF/ALT_origin_(highest_CRISPR_BULGE)"] = (
         "ref" if str(target[61]) == "NA" else "alt"
     )
 
     # switch ref with alt alignment if target is ref
-    if saveDict["REF/ALT_origin_(highest_CRISTA)"] == "ref":
-        saveDict["Aligned_protospacer+PAM_REF_(highest_CRISTA)"] = str(target[50])
-        saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISTA)"] = "NA"
+    if saveDict["REF/ALT_origin_(highest_CRISPR_BULGE)"] == "ref":
+        saveDict["Aligned_protospacer+PAM_REF_(highest_CRISPR_BULGE)"] = str(target[50])
+        saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)"] = "NA"
 
-    saveDict["PAM_creation_(highest_CRISTA)"] = str(target[59])
-    saveDict["CRISTA_score_(highest_CRISTA)"] = (
+    saveDict["PAM_creation_(highest_CRISPR_BULGE)"] = str(target[59])
+    saveDict["CRISPR_BULGE_score_(highest_CRISPR_BULGE)"] = (
         str(target[68]) if float(target[68]) > float(target[69]) else str(target[69])
     )
-    saveDict["CRISTA_score_REF_(highest_CRISTA)"] = str(target[69])
-    saveDict["CRISTA_score_ALT_(highest_CRISTA)"] = str(target[68])
-    saveDict["CRISTA_risk_score_(highest_CRISTA)"] = str(target[70])
-    saveDict["Variant_info_spacer+PAM_(highest_CRISTA)"] = ",".join(
-        variantList_highest_crista
+    saveDict["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"] = str(target[69])
+    saveDict["CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)"] = str(target[68])
+    saveDict["CRISPR_BULGE_risk_score_(highest_CRISPR_BULGE)"] = str(target[70])
+    saveDict["Variant_info_spacer+PAM_(highest_CRISPR_BULGE)"] = ",".join(
+        variantList_highest_crispr_bulge
     )
-    saveDict["Variant_info_genome_(highest_CRISTA)"] = str(target[66])
+    saveDict["Variant_info_genome_(highest_CRISPR_BULGE)"] = str(target[66])
 
     maf_list = list()
     for elem in target[65].strip().split(","):
@@ -736,20 +736,20 @@ for nline, line in enumerate(inCrispritzResults):
         else:
             maf_list.append("NA")
 
-    saveDict["Variant_MAF_(highest_CRISTA)"] = ",".join(maf_list)
+    saveDict["Variant_MAF_(highest_CRISPR_BULGE)"] = ",".join(maf_list)
 
-    saveDict["Variant_rsID_(highest_CRISTA)"] = (
+    saveDict["Variant_rsID_(highest_CRISPR_BULGE)"] = (
         "NA" if str(target[64]) == "." else str(target[64])
     )
-    saveDict["Variant_samples_(highest_CRISTA)"] = str(target[61])
+    saveDict["Variant_samples_(highest_CRISPR_BULGE)"] = str(target[61])
 
     # change_alt_ref_highest_cfd = False
     # if saveDict['Not_found_in_REF'] == 'NA' and saveDict['REF/ALT_origin_(highest_CFD)'] == 'alt' and saveDict['CFD_score_REF_(highest_CFD)'] != '-1.0' and saveDict['CFD_score_REF_(highest_CFD)'] == saveDict['CFD_score_ALT_(highest_CFD)']:
     #     change_alt_ref_highest_cfd = True
 
-    # change_alt_ref_highest_crista = False
-    # if saveDict['Not_found_in_REF'] == 'NA' and saveDict['REF/ALT_origin_(highest_CRISTA)'] == 'alt' and saveDict['CRISTA_score_REF_(highest_CRISTA)'] != '-1.0' and saveDict['CRISTA_score_REF_(highest_CRISTA)'] == saveDict['CRISTA_score_ALT_(highest_CRISTA)']:
-    #     change_alt_ref_highest_crista = True
+    # change_alt_ref_highest_crispr_bulge = False
+    # if saveDict['Not_found_in_REF'] == 'NA' and saveDict['REF/ALT_origin_(highest_CRISPR_BULGE)'] == 'alt' and saveDict['CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)'] != '-1.0' and saveDict['CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)'] == saveDict['CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)']:
+    #     change_alt_ref_highest_crispr_bulge = True
 
     # if change_alt_ref_highest_cfd:
     #     saveDict['Aligned_protospacer+PAM_ALT_(highest_CFD)'] = 'NA'
@@ -761,15 +761,15 @@ for nline, line in enumerate(inCrispritzResults):
     #     saveDict['Variant_samples_(highest_CFD)'] = 'NA'
     #     saveDict['PAM_creation_(highest_CFD)'] = 'NA'
 
-    # if change_alt_ref_highest_crista:
-    #     saveDict['Aligned_protospacer+PAM_ALT_(highest_CRISTA)'] = 'NA'
-    #     saveDict['REF/ALT_origin_(highest_CRISTA)'] = 'ref'
-    #     saveDict['Variant_info_spacer+PAM_(highest_CRISTA)'] = 'NA'
-    #     saveDict['Variant_info_genome_(highest_CRISTA)'] = 'NA'
-    #     saveDict['Variant_MAF_(highest_CRISTA)'] = 'NA'
-    #     saveDict['Variant_rsID_(highest_CRISTA)'] = 'NA'
-    #     saveDict['Variant_samples_(highest_CRISTA)'] = 'NA'
-    #     saveDict['PAM_creation_(highest_CRISTA)'] = 'NA'
+    # if change_alt_ref_highest_crispr_bulge:
+    #     saveDict['Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)'] = 'NA'
+    #     saveDict['REF/ALT_origin_(highest_CRISPR_BULGE)'] = 'ref'
+    #     saveDict['Variant_info_spacer+PAM_(highest_CRISPR_BULGE)'] = 'NA'
+    #     saveDict['Variant_info_genome_(highest_CRISPR_BULGE)'] = 'NA'
+    #     saveDict['Variant_MAF_(highest_CRISPR_BULGE)'] = 'NA'
+    #     saveDict['Variant_rsID_(highest_CRISPR_BULGE)'] = 'NA'
+    #     saveDict['Variant_samples_(highest_CRISPR_BULGE)'] = 'NA'
+    #     saveDict['PAM_creation_(highest_CRISPR_BULGE)'] = 'NA'
 
     # check how long is the pam counting Ns in the guide
     count_N_in_guide = str(target[15]).count("N")
@@ -905,18 +905,18 @@ for nline, line in enumerate(inCrispritzResults):
     saveDict["Non_seed_mismatches+bulges_REF_(fewest_mm+b)"] = str(seed_list[2])
     saveDict["Non_seed_mismatches+bulges_ALT_(fewest_mm+b)"] = str(seed_list[3])
 
-    # count seed and non-seed for highest_CRISTA
+    # count seed and non-seed for highest_CRISPR_BULGE
     if pam_at_start:
-        real_target_ref = saveDict["Aligned_protospacer+PAM_REF_(highest_CRISTA)"][
+        real_target_ref = saveDict["Aligned_protospacer+PAM_REF_(highest_CRISPR_BULGE)"][
             count_N_in_guide:
         ]
-        real_target_alt = saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISTA)"][
+        real_target_alt = saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)"][
             count_N_in_guide:
         ]
         dna_bulge_count_seed = 0
         dna_bulge_count_non_seed = 0
-        if "DNA" in saveDict["Bulge_type_(highest_CRISTA)"]:
-            dna_seq = saveDict["Aligned_spacer+PAM_(highest_CRISTA)"][count_N_in_guide:]
+        if "DNA" in saveDict["Bulge_type_(highest_CRISPR_BULGE)"]:
+            dna_seq = saveDict["Aligned_spacer+PAM_(highest_CRISPR_BULGE)"][count_N_in_guide:]
             for pos, nt in enumerate(dna_seq):
                 if nt == "-" and pos < int(len(real_target_ref) / 2):
                     dna_bulge_count_seed += 1
@@ -927,19 +927,19 @@ for nline, line in enumerate(inCrispritzResults):
         non_seed_ref = real_target_ref[int(len(real_target_ref) / 2) :]
         non_seed_alt = real_target_alt[int(len(real_target_alt) / 2) :]
     else:
-        real_target_ref = saveDict["Aligned_protospacer+PAM_REF_(highest_CRISTA)"][
-            : len(saveDict["Aligned_protospacer+PAM_REF_(highest_CRISTA)"])
+        real_target_ref = saveDict["Aligned_protospacer+PAM_REF_(highest_CRISPR_BULGE)"][
+            : len(saveDict["Aligned_protospacer+PAM_REF_(highest_CRISPR_BULGE)"])
             - count_N_in_guide
         ]
-        real_target_alt = saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISTA)"][
-            : len(saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISTA)"])
+        real_target_alt = saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)"][
+            : len(saveDict["Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)"])
             - count_N_in_guide
         ]
         dna_bulge_count_seed = 0
         dna_bulge_count_non_seed = 0
-        if "DNA" in saveDict["Bulge_type_(highest_CRISTA)"]:
-            dna_seq = saveDict["Aligned_spacer+PAM_(highest_CRISTA)"][
-                : len(saveDict["Aligned_protospacer+PAM_REF_(highest_CRISTA)"])
+        if "DNA" in saveDict["Bulge_type_(highest_CRISPR_BULGE)"]:
+            dna_seq = saveDict["Aligned_spacer+PAM_(highest_CRISPR_BULGE)"][
+                : len(saveDict["Aligned_protospacer+PAM_REF_(highest_CRISPR_BULGE)"])
                 - count_N_in_guide
             ]
             for pos, nt in enumerate(dna_seq):
@@ -952,23 +952,23 @@ for nline, line in enumerate(inCrispritzResults):
         non_seed_ref = real_target_ref[: int(len(real_target_ref) / 2)]
         non_seed_alt = real_target_alt[: int(len(real_target_alt) / 2)]
 
-    if saveDict["REF/ALT_origin_(highest_CRISTA)"] == "ref":
+    if saveDict["REF/ALT_origin_(highest_CRISPR_BULGE)"] == "ref":
         seed_alt == "NA"
         non_seed_alt == "NA"
 
     # count_seed_ref, count_seed_alt, count_non_seed_ref, count_non_seed_alt
     seed_list = seed_processing(seed_ref, seed_alt, non_seed_ref, non_seed_alt)
 
-    saveDict["Seed_mismatches+bulges_REF_(highest_CRISTA)"] = str(
+    saveDict["Seed_mismatches+bulges_REF_(highest_CRISPR_BULGE)"] = str(
         int(seed_list[0]) + dna_bulge_count_seed
     )
-    saveDict["Seed_mismatches+bulges_ALT_(highest_CRISTA)"] = str(
+    saveDict["Seed_mismatches+bulges_ALT_(highest_CRISPR_BULGE)"] = str(
         int(seed_list[1]) + dna_bulge_count_seed
     )
-    saveDict["Non_seed_mismatches+bulges_REF_(highest_CRISTA)"] = str(
+    saveDict["Non_seed_mismatches+bulges_REF_(highest_CRISPR_BULGE)"] = str(
         int(seed_list[2]) + dna_bulge_count_non_seed
     )
-    saveDict["Non_seed_mismatches+bulges_ALT_(highest_CRISTA)"] = str(
+    saveDict["Non_seed_mismatches+bulges_ALT_(highest_CRISPR_BULGE)"] = str(
         int(seed_list[3]) + dna_bulge_count_non_seed
     )
 
@@ -981,9 +981,9 @@ for nline, line in enumerate(inCrispritzResults):
         saveDict["Seed_mismatches+bulges_ALT_(fewest_mm+b)"] = "0"
         saveDict["Non_seed_mismatches+bulges_ALT_(fewest_mm+b)"] = "0"
 
-    if saveDict["REF/ALT_origin_(highest_CRISTA)"] == "ref":
-        saveDict["Seed_mismatches+bulges_ALT_(highest_CRISTA)"] = "0"
-        saveDict["Non_seed_mismatches+bulges_ALT_(highest_CRISTA)"] = "0"
+    if saveDict["REF/ALT_origin_(highest_CRISPR_BULGE)"] == "ref":
+        saveDict["Seed_mismatches+bulges_ALT_(highest_CRISPR_BULGE)"] = "0"
+        saveDict["Non_seed_mismatches+bulges_ALT_(highest_CRISPR_BULGE)"] = "0"
 
     # extract PAM sequence
     # highestCFD
@@ -1026,24 +1026,24 @@ for nline, line in enumerate(inCrispritzResults):
                 "Aligned_protospacer+PAM_ALT_(fewest_mm+b)"
             ][-count_N_in_guide:]
 
-    # highest_CRISTA
-    if saveDict["REF/ALT_origin_(highest_CRISTA)"] == "ref":
+    # highest_CRISPR_BULGE
+    if saveDict["REF/ALT_origin_(highest_CRISPR_BULGE)"] == "ref":
         if pam_at_start:  # save pam sequence extracting directly from the ref sequence
-            saveDict["PAM_(highest_CRISTA)"] = saveDict[
-                "Aligned_protospacer+PAM_REF_(highest_CRISTA)"
+            saveDict["PAM_(highest_CRISPR_BULGE)"] = saveDict[
+                "Aligned_protospacer+PAM_REF_(highest_CRISPR_BULGE)"
             ][:count_N_in_guide]
         else:
-            saveDict["PAM_(highest_CRISTA)"] = saveDict[
-                "Aligned_protospacer+PAM_REF_(highest_CRISTA)"
+            saveDict["PAM_(highest_CRISPR_BULGE)"] = saveDict[
+                "Aligned_protospacer+PAM_REF_(highest_CRISPR_BULGE)"
             ][-count_N_in_guide:]
     else:
         if pam_at_start:  # save pam sequence extracting directly from the var sequence
-            saveDict["PAM_(highest_CRISTA)"] = saveDict[
-                "Aligned_protospacer+PAM_ALT_(highest_CRISTA)"
+            saveDict["PAM_(highest_CRISPR_BULGE)"] = saveDict[
+                "Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)"
             ][:count_N_in_guide]
         else:
-            saveDict["PAM_(highest_CRISTA)"] = saveDict[
-                "Aligned_protospacer+PAM_ALT_(highest_CRISTA)"
+            saveDict["PAM_(highest_CRISPR_BULGE)"] = saveDict[
+                "Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)"
             ][-count_N_in_guide:]
 
     # annotate with empirical and convert _personal and _gencode annotation to better visualization

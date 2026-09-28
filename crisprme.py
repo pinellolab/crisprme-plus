@@ -12,7 +12,7 @@ import os
 import re
 
 
-version = "2.5.5"  # CRISPRme version
+version = "2.6.0"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -1702,8 +1702,9 @@ def complete_search() -> None:
     os.environ["CRISPRME_EMIT_ALT_ALIGNMENTS"] = "1" if emit_alt else "0"
 
     # ML off-target scorer for the SECOND score column beside CFD (CFD stays the primary
-    # score). As of the CRISTA retirement this is ALWAYS CRISPR-Bulge -- the more accurate,
-    # MIT-licensed model that runs in the dedicated cbulge conda env via the scorer-runner.
+    # score). This is ALWAYS CRISPR-Bulge -- the accurate, MIT-licensed model that was
+    # trained on bulge-containing off-targets and runs in the dedicated cbulge conda env
+    # via the scorer-runner.
     # CRISPRME_SCORER_SELECT is retained as the internal signal (report/web read it from
     # .Params.txt to label the column) but is no longer user-selectable. --compute-backend
     # selects the scorer device (GPU optional; ALWAYS a graceful CPU fallback):
@@ -1949,8 +1950,8 @@ def complete_search() -> None:
         p.write("Nuclease\t" + str(nuclease) + "\n")
         # p.write('Gecko\t' + str(gecko_comp) + '\n')
         p.write("Ref_comp\t" + str(ref_comparison) + "\n")
-        # which ML off-target scorer produced the second score column ('crista' |
-        # 'crispr-bulge') + compute backend. generate-report + the web run as separate
+        # the ML off-target scorer that produced the second score column (CRISPR-Bulge)
+        # + compute backend. generate-report + the web run as separate
         # invocations (env vars gone), so they read the active scorer from here to label
         # + threshold that column correctly.
         p.write("Scorer\t" + str(scorer) + "\n")
@@ -2089,7 +2090,7 @@ def complete_search() -> None:
                 "NRG_3_hg38+hg38_1000G2021_HGDP for broader coverage)\n\n"
                 "  or build it locally (source VCFs required):\n"
                 "    crisprme.py build-index-only --genome %s --vcf %s --samplesID "
-                "<samplesID> --pam %s --bMax <N>\n\n"
+                "<samplesID> --pam %s --bDNA <N> --bRNA <N>\n\n"
                 "then:\n"
                 "    crisprme.py complete-search ... --index-path genome_library\n\n"
                 "(advanced: set CRISPRME_ALLOW_ONDEMAND_BUILD=1 to force the legacy "
@@ -2129,9 +2130,9 @@ def complete_search() -> None:
             "reports one WORST-POSSIBLE off-target per variant window (no 2^k haplotype "
             "enumeration; rows are worst-possible / PUTATIVE, not per-sample phased). CFD is the "
             "EXACT worst case -- a safe actionable gate (genome-wide validation: 0 CFD>=0.2 loci "
-            "lost or demoted vs the per-sample path). CRISTA is a best-effort SCREEN: genome-wide, "
-            "a small fraction (~5%) of CRISTA>=0.2 loci can drop below 0.2 (largest observed gap "
-            "~0.12). **Per-sample carriers, CONFIRMED cis phasing and exact joint AF are NOT "
+            "lost or demoted vs the per-sample path). CRISPR-Bulge is a best-effort SCREEN "
+            "(worst case over the emitted representatives, not an exhaustive per-haplotype search). "
+            "**Per-sample carriers, CONFIRMED cis phasing and exact joint AF are NOT "
             "computed** -- re-run with --per-sample for that per-sample resolution on a genotyped "
             "panel (recommended for clinical validation). SNP+indel co-occurrence is UNCHANGED "
             "(the indel cis-phasing pass is unaffected). See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
@@ -2223,10 +2224,12 @@ def print_help_build_index() -> None:
         "\t--bRNA, number of RNA bulges the index must support [OPTIONAL, "
         "default 0]\n"
         "\t--thread, set number of threads to use [default: 8]\n"
-        "\t--vcf, a VCF dataset directory (e.g. VCFs/1000G). When given, also "
-        "pre-builds the variant-aware index: enriches the genome with the VCF "
-        "and indexes the enriched (SNP) and indels genomes, so the first "
-        "variant-aware search does not pay the enrichment/indexing cost "
+        "\t--vcf, a VCF dataset directory (e.g. VCFs/1000G) OR a config file "
+        "listing one VCF folder name under VCFs/ (the same --vcf form "
+        "complete-search accepts; the listing must name exactly one dataset). "
+        "When given, also pre-builds the variant-aware index: enriches the genome "
+        "with the VCF and indexes the enriched (SNP) and indels genomes, so the "
+        "first variant-aware search does not pay the enrichment/indexing cost "
         "[OPTIONAL]\n"
         "\t--samplesID, a listing file (one samplesID filename per line, under "
         "samplesIDs/; a combined panel lists both 1000G and HGDP). When given "
@@ -2541,9 +2544,34 @@ def build_index_only() -> None:
     import gzip
     from glob import glob as _glob
 
-    vcfdir = os.path.abspath(args[args.index("--vcf") + 1])
-    if not os.path.isdir(vcfdir):
-        error(f"The VCF dataset directory {vcfdir} does not exist")
+    # --vcf accepts EITHER a VCF dataset directory (build-index-only's original form)
+    # OR a config file listing VCF folder names under VCFs/ (the SAME form
+    # complete-search uses), so the two subcommands take --vcf consistently. A
+    # directory is used as-is; a listing file must name exactly ONE dataset folder
+    # (build-index-only builds a single dataset's index -- combined panels are made
+    # by merging the source VCFs first, then building the merged folder).
+    _vcf_arg = os.path.abspath(args[args.index("--vcf") + 1])
+    if os.path.isdir(_vcf_arg):
+        vcfdir = _vcf_arg
+    elif os.path.isfile(_vcf_arg):
+        with open(_vcf_arg) as _vf:
+            _folders = [ln.strip() for ln in _vf if ln.strip() and not ln.startswith("#")]
+        if not _folders:
+            error(f"The --vcf config file {_vcf_arg} is empty (expected one VCF folder name)")
+        if len(_folders) > 1:
+            error(
+                "build-index-only builds ONE dataset's index, but the --vcf config file "
+                f"lists {len(_folders)} folders ({', '.join(_folders)}). Build each "
+                "separately, or merge the source VCFs into one folder first for a combined panel."
+            )
+        vcfdir = os.path.abspath(os.path.join(workdir, "VCFs", _folders[0]))
+        if not os.path.isdir(vcfdir):
+            error(f"VCF folder '{_folders[0]}' from {_vcf_arg} not found under {workdir}/VCFs/")
+    else:
+        error(
+            f"--vcf must be a VCF dataset directory or a config file listing VCF folder "
+            f"names under VCFs/ (got {_vcf_arg}, which is neither)"
+        )
     vcf_name = os.path.basename(vcfdir.rstrip("/"))
     # OPTIONAL --samplesID: a listing file (one samplesID filename per line under
     # samplesIDs/, the same format complete-search uses; combined panels list both
@@ -4186,7 +4214,7 @@ def crisprme_help() -> None:
         "Functionalities:\n\n"
         "crisprme.py complete-search\n"
         "\tPerforms genome-wide off-targets search (reference and variant, if "
-        "specified), including CFD and CRISTA analysis, and target selection\n\n"
+        "specified), including CFD and CRISPR-Bulge analysis, and target selection\n\n"
         "crisprme.py complete-test\n"
         "\tTest the complete CRISPRme pipeline on single chromosomes or complete "
         "genomes\n\n"

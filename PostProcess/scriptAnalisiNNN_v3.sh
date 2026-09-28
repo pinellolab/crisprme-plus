@@ -89,7 +89,7 @@ rm $jobid.total.txt
 ./new_simple_analysis.py "$referencegenome" "$dictionaries" "$jobid.total.cluster.txt" "${pam_file}" "$jobid" "$mismatch"
 # cp $jobid.bestCFD.txt $jobid.bestCFD.txt.check_analysis
 # cp $jobid.bestmmblg.txt $jobid.bestmmblg.txt.check_analysis
-# cp $jobid.bestCRISTA.txt $jobid.bestCRISTA.txt.check_analysis
+# cp $jobid.bestCRISPR_BULGE.txt $jobid.bestCRISPR_BULGE.txt.check_analysis
 
 # OUTPUT    $jobid.bestCFD.txt
 #           $jobid.CFDGraph.txt     (per fare l'area graph dei CFD REF vs ENR)
@@ -112,21 +112,21 @@ echo 'Sorting and adjusting results'
 # # cp $jobid.bestmmblg.txt $jobid.bestmmblg.txt.after_sort
 
 # #copy header in tmp file
-# head -1 $jobid.bestCRISTA.txt >$jobid.tmp
+# head -1 $jobid.bestCRISPR_BULGE.txt >$jobid.tmp
 # #tail file w/o header and sort for realguide,chr,cluster_pos,score,total(mm+bul)
-# tail -n +2 $jobid.bestCRISTA.txt | LC_ALL=C sort -k15,15 -k4,4 -k6,6n -k21,21rg -k10,10n -T ./ >>$jobid.tmp && mv $jobid.tmp $jobid.bestCRISTA.txt
-# cp $jobid.bestCRISTA.txt $jobid.bestCRISTA.txt.after_sort
+# tail -n +2 $jobid.bestCRISPR_BULGE.txt | LC_ALL=C sort -k15,15 -k4,4 -k6,6n -k21,21rg -k10,10n -T ./ >>$jobid.tmp && mv $jobid.tmp $jobid.bestCRISPR_BULGE.txt
+# cp $jobid.bestCRISPR_BULGE.txt $jobid.bestCRISPR_BULGE.txt.after_sort
 
 #adjustin columns to have the correct order and remove uncessary ones
 ./adjust_cols.py $jobid.bestCFD.txt
 ./adjust_cols.py $jobid.bestmmblg.txt
-./adjust_cols.py $jobid.bestCRISTA.txt
+./adjust_cols.py $jobid.bestCRISPR_BULGE.txt
 # ./adjust_cols.py $jobid.altmmblg.txt
 
-# sed -i 1i"#Bulge_type\tcrRNA\tDNA\tReference\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\t#Seq_in_cluster\tCFD\tCFD_ref\t_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref\tCRISTA_#Bulge_type\tCRISTA_crRNA\tCRISTA_DNA\tCRISTA_Reference\tCRISTA_Chromosome\tCRISTA_Position\tCRISTA_Cluster_Position\tCRISTA_Direction\tCRISTA_Mismatches\tCRISTA_Bulge_Size\tCRISTA_Total\tCRISTA_PAM_gen\tCRISTA_Var_uniq\tCRISTA_Samples\tCRISTA_Annotation_Type\tCRISTA_Real_Guide\tCRISTA_rsID\tCRISTA_AF\tCRISTA_SNP\tCRISTA_#Seq_in_cluster\tCRISTA_CFD\tCRISTA_CFD_ref" "$final_res"
+# sed -i 1i"#Bulge_type\tcrRNA\tDNA\tReference\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\t#Seq_in_cluster\tCFD\tCFD_ref\t_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref\tCRISPR_BULGE_#Bulge_type\tCRISPR_BULGE_crRNA\tCRISPR_BULGE_DNA\tCRISPR_BULGE_Reference\tCRISPR_BULGE_Chromosome\tCRISPR_BULGE_Position\tCRISPR_BULGE_Cluster_Position\tCRISPR_BULGE_Direction\tCRISPR_BULGE_Mismatches\tCRISPR_BULGE_Bulge_Size\tCRISPR_BULGE_Total\tCRISPR_BULGE_PAM_gen\tCRISPR_BULGE_Var_uniq\tCRISPR_BULGE_Samples\tCRISPR_BULGE_Annotation_Type\tCRISPR_BULGE_Real_Guide\tCRISPR_BULGE_rsID\tCRISPR_BULGE_AF\tCRISPR_BULGE_SNP\tCRISPR_BULGE_#Seq_in_cluster\tCRISPR_BULGE_CFD\tCRISPR_BULGE_CFD_ref" "$final_res"
 # sed -i 1i"_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/" $jobid.bestCFD.txt
 # sed -i 1i"_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/" $jobid.bestmmblg.txt
-# sed -i 1i"_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/" $jobid.bestCRISTA.txt
+# sed -i 1i"_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/" $jobid.bestCRISPR_BULGE.txt
 
 # sed -i '1s/.*/_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/' $jobid.bestmmblg.txt
 # sed -i '1s/.*/_#Bulge_type\t_crRNA\t_DNA\t_Reference\t_Chromosome\t_Position\t_Cluster_Position\t_Direction\t_Mismatches\t_Bulge_Size\t_Total\t_PAM_gen\t_Var_uniq\t_Samples\t_Annotation_Type\t_Real_Guide\t_rsID\t_AF\t_SNP\t_#Seq_in_cluster\t_CFD\t_CFD_ref/' $jobid.altmmblg.txt
@@ -161,11 +161,11 @@ echo 'Sorting and adjusting results'
 # mv $jobid.bestmmblg.txt.trimmed.discarded_samples $jobid.bestmmblg.txt.alt
 
 # #merge targets in same chr when they are at distance 3 from each other (inclusive)
-# ./merge_close_targets_cfd.sh $jobid.bestCRISTA.txt $jobid.bestCRISTA.txt.trimmed 3 'score'
-# # cp $jobid.bestCRISTA.txt.trimmed $jobid.bestCRISTA.txt.check_merge
-# # cp $jobid.bestCRISTA.txt.trimmed.discarded_samples $jobid.bestCRISTA.txt.trimmed.discarded_samples.check_merge
-# mv $jobid.bestCRISTA.txt.trimmed $jobid.bestCRISTA.txt
-# mv $jobid.bestCRISTA.txt.trimmed.discarded_samples $jobid.bestCRISTA.txt.alt
+# ./merge_close_targets_cfd.sh $jobid.bestCRISPR_BULGE.txt $jobid.bestCRISPR_BULGE.txt.trimmed 3 'score'
+# # cp $jobid.bestCRISPR_BULGE.txt.trimmed $jobid.bestCRISPR_BULGE.txt.check_merge
+# # cp $jobid.bestCRISPR_BULGE.txt.trimmed.discarded_samples $jobid.bestCRISPR_BULGE.txt.trimmed.discarded_samples.check_merge
+# mv $jobid.bestCRISPR_BULGE.txt.trimmed $jobid.bestCRISPR_BULGE.txt
+# mv $jobid.bestCRISPR_BULGE.txt.trimmed.discarded_samples $jobid.bestCRISPR_BULGE.txt.alt
 
 # echo -e 'Annotating results\tStart\t'$(date) >>$log
 #annotate bestCFD
@@ -178,17 +178,17 @@ echo 'Sorting and adjusting results'
 # ./annotate_final_results.py $jobid.bestmmblg.txt.alt $annotationfile $jobid.bestmmblg.txt.alt.annotated
 # mv $jobid.bestmmblg.txt.annotated $jobid.bestmmblg.txt
 # mv $jobid.bestmmblg.txt.alt.annotated $jobid.bestmmblg.txt.alt
-# #annotate bestCRISTA
-# ./annotate_final_results.py $jobid.bestCRISTA.txt $annotationfile $jobid.bestCRISTA.txt.annotated
-# ./annotate_final_results.py $jobid.bestCRISTA.txt.alt $annotationfile $jobid.bestCRISTA.txt.alt.annotated
-# mv $jobid.bestCRISTA.txt.annotated $jobid.bestCRISTA.txt
-# mv $jobid.bestCRISTA.txt.alt.annotated $jobid.bestCRISTA.txt.alt
+# #annotate bestCRISPR_BULGE
+# ./annotate_final_results.py $jobid.bestCRISPR_BULGE.txt $annotationfile $jobid.bestCRISPR_BULGE.txt.annotated
+# ./annotate_final_results.py $jobid.bestCRISPR_BULGE.txt.alt $annotationfile $jobid.bestCRISPR_BULGE.txt.alt.annotated
+# mv $jobid.bestCRISPR_BULGE.txt.annotated $jobid.bestCRISPR_BULGE.txt
+# mv $jobid.bestCRISPR_BULGE.txt.alt.annotated $jobid.bestCRISPR_BULGE.txt.alt
 # #correct files names
 # #bestCFD
 
 # #bestmmblg
 
-# #bestCRISTA
+# #bestCRISPR_BULGE
 
 # # echo -e 'Annotating results\tEnd\t'$(date) >>$log
 
@@ -203,18 +203,18 @@ echo 'Sorting and adjusting results'
 # ./add_risk_score.py $jobid.bestmmblg.txt.alt $jobid.bestmmblg.txt.alt.risk "False" #"True" change to True if ID_CLUSTER is inserted during merge_phase
 # mv $jobid.bestmmblg.txt.risk $jobid.bestmmblg.txt
 # mv $jobid.bestmmblg.txt.alt.risk $jobid.bestmmblg.txt.alt
-# #scoring bestCRISTA
-# ./add_risk_score.py $jobid.bestCRISTA.txt $jobid.bestCRISTA.txt.risk "False"
-# ./add_risk_score.py $jobid.bestCRISTA.txt.alt $jobid.bestCRISTA.txt.alt.risk "False" #"True" change to True if ID_CLUSTER is inserted during merge_phase
-# mv $jobid.bestCRISTA.txt.risk $jobid.bestCRISTA.txt
-# mv $jobid.bestCRISTA.txt.alt.risk $jobid.bestCRISTA.txt.alt
+# #scoring bestCRISPR_BULGE
+# ./add_risk_score.py $jobid.bestCRISPR_BULGE.txt $jobid.bestCRISPR_BULGE.txt.risk "False"
+# ./add_risk_score.py $jobid.bestCRISPR_BULGE.txt.alt $jobid.bestCRISPR_BULGE.txt.alt.risk "False" #"True" change to True if ID_CLUSTER is inserted during merge_phase
+# mv $jobid.bestCRISPR_BULGE.txt.risk $jobid.bestCRISPR_BULGE.txt
+# mv $jobid.bestCRISPR_BULGE.txt.alt.risk $jobid.bestCRISPR_BULGE.txt.alt
 # # echo -e "Risk score added"
 
 # #remove N's and dots from rsID from best
 # ./remove_n_and_dots.py $jobid.bestCFD.txt
 # ./remove_n_and_dots.py $jobid.bestmmblg.txt
-# ./remove_n_and_dots.py $jobid.bestCRISTA.txt
+# ./remove_n_and_dots.py $jobid.bestCRISPR_BULGE.txt
 # #remove N's and dots from rsID from alt
 # ./remove_n_and_dots.py $jobid.bestCFD.txt.alt
 # ./remove_n_and_dots.py $jobid.bestmmblg.txt.alt
-# ./remove_n_and_dots.py $jobid.bestCRISTA.txt.alt
+# ./remove_n_and_dots.py $jobid.bestCRISPR_BULGE.txt.alt

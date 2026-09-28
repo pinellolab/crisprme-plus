@@ -84,7 +84,7 @@ def _load_crisprme():
     # CI; a module that is actually present is imported for real (we stub only absents).
     from unittest.mock import MagicMock
     for _m in ("pandas", "scipy", "sklearn", "matplotlib", "seaborn",
-               "statsmodels", "intervaltree", "CRISTA_score"):
+               "statsmodels", "intervaltree", "CRISPR_BULGE_score"):
         if _m in sys.modules:
             continue
         try:

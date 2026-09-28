@@ -255,7 +255,8 @@ def homepage_thresholds_() -> html.Li:
             (
                 "By default CRISPRme+ uses a single \"Maximum edits\" slider — the "
                 "total number of differences (mismatches + DNA/RNA bulges) allowed "
-                "between a guide and an off-target (default 3, raise for a deeper, "
+                "between a guide and an off-target (default 6, which resolves to 4 "
+                "mismatches + 1 DNA + 1 RNA bulge; raise for a deeper, "
                 "slower search). The precomputed indexes support up to 2 bulges of "
                 "each type. Open \"Advanced options\" to set the per-type mismatch / "
                 "DNA-bulge / RNA-bulge caps individually instead. Use the single "

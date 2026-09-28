@@ -245,7 +245,7 @@ carriers). CRISPRme treats the two differently, by design:
   disruption *removes* a potential off-target (the site becomes non-targetable
   in carriers), which *lowers* predicted risk rather than raising it. Reporting
   it correctly would also require sample-specific “this off-target is absent in
-  these carriers” semantics with non-applicable scoring (no PAM → no CFD/CRISTA),
+  these carriers” semantics with non-applicable scoring (no PAM → no CFD/CRISPR-Bulge),
   adding output complexity and potential confusion for limited safety benefit.
   If your analysis specifically needs to know which variants *eliminate*
   off-targets (and in which samples), please open an issue describing the use

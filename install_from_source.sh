@@ -75,7 +75,7 @@ cp -R "${REPO}/." "${CONDA_PREFIX}/opt/crisprme/"
 rm -rf "${CONDA_PREFIX}/opt/crisprme/.git"
 cp "${CONDA_PREFIX}/opt/crisprme/crisprme.py" "${CONDA_PREFIX}/bin/crisprme.py"
 chmod +x "${CONDA_PREFIX}/bin/crisprme.py"
-# CRISTA was retired in favor of CRISPR-Bulge; there is no 276 MB model to unzip here
+# the legacy RandomForest scorer was retired in favor of CRISPR-Bulge; there is no 276 MB model to unzip here
 # anymore. CFD's tiny score pickles ship as plain files; the CRISPR-Bulge model is
 # provisioned into its own conda env below.
 

@@ -15,7 +15,7 @@ print('start processing')
 
 if len(sys.argv[:]) < 4:
     print('some input is missing, please provide input')
-    print('integrated.tsv out_dir sort_criteria(CFD/CRISTA/fewest)')
+    print('integrated.tsv out_dir sort_criteria(CFD/CRISPR-Bulge/fewest)')
     exit(1)
 
 # df with targets
@@ -27,8 +27,8 @@ writer = pd.ExcelWriter(sys.argv[2]+str(sys.argv[2].strip().split('/')[1])+'_gui
 sort_criteria = sys.argv[3]
 if sort_criteria == 'CFD':
     sort_criteria = 'highest_CFD'
-elif sort_criteria == 'CRISTA':
-    sort_criteria = 'highest_CRISTA'
+elif sort_criteria == 'CRISPR-Bulge':
+    sort_criteria = 'highest_CRISPR_BULGE'
 elif sort_criteria == 'fewest':
     sort_criteria = 'fewest_mm+b'
 
@@ -42,9 +42,9 @@ for guide in sorted(original_df['Spacer+PAM'].unique().tolist()):
         guide_df.sort_values('CFD_score_(highest_CFD)',
                              ascending=False, inplace=True)
         drop_criteria.append('fewest_mm+b')
-        drop_criteria.append('highest_CRISTA')
-    elif 'CRISTA' in sort_criteria:
-        guide_df.sort_values('CRISTA_score_(highest_CRISTA)',
+        drop_criteria.append('highest_CRISPR_BULGE')
+    elif 'CRISPR-Bulge' in sort_criteria:
+        guide_df.sort_values('CRISPR_BULGE_score_(highest_CRISPR_BULGE)',
                              ascending=False, inplace=True)
         drop_criteria.append('fewest_mm+b')
         drop_criteria.append('highest_CFD')
@@ -52,7 +52,7 @@ for guide in sorted(original_df['Spacer+PAM'].unique().tolist()):
         guide_df.sort_values('Mismatches+bulges_(fewest_mm+b)',
                              ascending=True, inplace=True)
         drop_criteria.append('highest_CFD')
-        drop_criteria.append('highest_CRISTA')
+        drop_criteria.append('highest_CRISPR_BULGE')
 
     columns_to_drop = list()
     for column in list(guide_df.columns):

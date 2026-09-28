@@ -30,7 +30,7 @@ Option (2) is the more robust long-term fix and is what this module enables.
 """
 
 # Canonical per-sub-record column names (one block per scoring system: the
-# per-target row concatenates the highest-CFD, fewest-mm+bulges, and CRISTA
+# per-target row concatenates the highest-CFD, fewest-mm+bulges, and CRISPR-Bulge
 # blocks). Names mirror new_simple_analysis.py's header vocabulary.
 CANONICAL_COLUMNS = [
     "Bulge_type", "crRNA", "DNA", "Chromosome", "Position", "Cluster_Position",

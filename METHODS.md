@@ -5,7 +5,9 @@ line), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
-CRISPRitz and the CFD / CRISTA scoring are unchanged unless stated otherwise.
+CRISPRitz and the primary CFD scoring are unchanged unless stated otherwise. The
+machine-learning off-target score is **CRISPR-Bulge** (Yaish & Orenstein,
+*Nucleic Acids Res.* 2024); see §8.
 
 Sections:
 1. [Variant-aware, dictionary-less data model](#1-variant-aware-dictionary-less-data-model)
@@ -380,11 +382,12 @@ low-complexity region coincides with a permissive search (many mismatches/bulges
 minimal PAM constraint, unphased genotypes). CRISPRme+ bounds this with three
 complementary controls:
 
-- **`--max-total-edits` (default 4).** An independent cap on the combined number of
+- **`--max-total-edits` (default 6).** An independent cap on the combined number of
   edits (mismatches + DNA/RNA bulges) per alignment, pruned inside the TST search. It
-  defaults to **4 regardless of the requested `--mm`/`--bDNA`/`--bRNA`**, so a
+  defaults to **6** — matching the default search depth of **4 mismatches + 1 DNA
+  bulge + 1 RNA bulge** — regardless of the requested `--mm`/`--bDNA`/`--bRNA`, so a
   permissive request (e.g. `--mm 6 --bDNA 2 --bRNA 2`, budget 10) still drops any
-  alignment needing more than 4 combined edits unless raised. `complete-search` prints
+  alignment needing more than 6 combined edits unless raised. `complete-search` prints
   a WARNING when the cap is below the requested budget; set `--max-total-edits` to
   `mm+bDNA+bRNA` (or `-1`) to keep all requested-depth off-targets. It bounds the
   variant-density combinatorial explosion. (`assembly-search` instead defaults it to
@@ -517,7 +520,7 @@ guarantees hold end-to-end:
 
 **Scope of the analysis mode.** The mode toggles only the **SNP** post-analysis (`--per-sample`
 re-enables the 2^k IUPAC haplotype lattice / observed-haplotype enumeration that the default
-collapses). The **indel** post-analysis is single-threaded and CRISTA-scoring-bound, and is
+collapses). The **indel** post-analysis is single-threaded and ML-scoring-bound (CRISPR-Bulge), and is
 **unaffected by the mode** — a dense indel search pays the full indel cost regardless
 (parallelizing that path is a follow-up). Correspondingly, the `indel_snp_cooc.tsv` companion is
 **byte-identical** in both modes (§8).
@@ -584,11 +587,11 @@ collaborator) with no software beyond a web browser: plots are inlined as base64
 PNGs, the table and styles are inline, and there are no external references.
 
 It contains: a run summary and a mismatch × bulge count matrix; a graphical
-report of reference vs. variant off-target scores (CFD and CRISTA, under
+report of reference vs. variant off-target scores (CFD and CRISPR-Bulge, under
 multiple rankings); a reference-vs-population origin breakdown; a **recommended
 validation panel** (a hybrid worst-case top-N shortlist selected by combining
-CFD, CRISTA, and edit-distance floors, with the selection logic stated
-explicitly); per-threshold **downloads** sharing one curated, spreadsheet-ready
+CFD, CRISPR-Bulge, edit-distance, and pure-bulge floors, with the selection logic
+stated explicitly); per-threshold **downloads** sharing one curated, spreadsheet-ready
 column schema; a scrollable **top-1000** table with the functional annotations;
 and the annotation legend of Section 6. Allele frequencies can be omitted
 (`--no-maf`) for runs where they are not yet finalized, so the site set and
@@ -653,21 +656,58 @@ table.
 **Scoring models.** Candidate off-targets are scored with two independent,
 previously published models, used **unchanged** from their original definitions:
 **CFD** (Cutting Frequency Determination; Doench *et al.*, *Nat. Biotechnol.*
-2016) and **CRISTA** (Abadi *et al.*, *PLoS Comput. Biol.* 2017). Both return a
-value in [0, 1]; higher means more likely to be cut. They are reported
+2016), the **primary** score, and **CRISPR-Bulge** (Yaish & Orenstein, *Nucleic
+Acids Res.* 2024, doi:10.1093/nar/gkae428), a deep-learning score built for gapped
+off-targets: a TensorFlow GRU-embedding five-model ensemble (MIT-licensed) that
+was **trained explicitly on bulge-containing off-targets**. On the authors'
+Refined-TrueOT benchmark it reaches full-set AUPR **0.498** and, on the case that
+matters most here, **bulge-only AUPR 0.245**, while scoring ≈ 14.5k
+off-targets/s at 16 CPU threads (a ~7.8 min genome-wide pass). Both scores return
+a value in [0, 1]; higher means more likely to be cut. They are reported
 side-by-side because they can disagree, and the recommended validation panel is
 deliberately model-agnostic (a site worst by *any* metric is included), so no
 single model gates the shortlist. CRISPRme+ does not re-train or modify either
-model; it applies them to the aligned protospacer+PAM of each candidate.
+model; CFD is applied as its published lookup tables and CRISPR-Bulge as its
+published, pinned weights, to the aligned protospacer+PAM of each candidate.
 
 **Domain-of-validity caveat (important).** CFD was trained on **single-nucleotide
-mismatches** and was not designed to score DNA/RNA bulges (insertions/deletions).
-CRISPRme+ nonetheless reports a CFD value for bulge-containing alignments, which
-is an **extrapolation beyond the model's training domain**; for gapped/bulge
-sites, CRISTA (which models indels) is the more appropriate score, and both
-should be read as relative risk indicators rather than calibrated probabilities.
-The CFD/CRISTA threshold tiers in the report are **model-relative** (CRISTA's
-cut points differ from CFD's because the two scores are on different scales).
+mismatches**, but it does *not* ignore gaps: the CRISPRitz-lineage
+`mismatch_score.pkl` extends Doench's mismatch table with **152 position-specific
+gap entries** (DNA-bulge `r-:dX` and RNA-bulge `rX:d-` at protospacer positions
+2–20), so a bulge is penalized by a per-position factor and **two bulges
+multiply** — a PAM-distal bulge is near-neutral while a seed-proximal one is
+strongly penalizing. This is a principled *extension* of the mismatch model, not
+a calibrated indel probability, so a CFD value on a gapped alignment is a relative
+risk indicator. **CRISPR-Bulge is the model built for gaps.** It natively scores a
+mismatched protospacer carrying **exactly one 1-bp DNA or RNA bulge**; its trained
+weights bake in a fixed input width, so an alignment carrying **≥ 2 bulges is
+outside its domain** and is deliberately **nulled** — reported as N/A (sentinel
+`-1`, never sorted or thresholded) rather than fabricated from an out-of-domain
+extrapolation. Nulled ≥ 2-bulge sites are **not dropped**: they remain scored by
+CFD's position-specific bulge penalty, ranked by edit distance, and are covered by
+an unconditional **pure-bulge** rule in the validation panel (a 0-mismatch site
+with ≥ 1 bulge is always included). Attempting a 2-bulge prediction would be
+unsupported regardless of code: the model's training corpus of ~4.6M measured
+off-targets contains **zero ≥ 2-bulge examples**, so any 2-bulge output would be
+pure extrapolation — the honest choice is N/A plus the model-agnostic safety nets.
+The threshold tiers in the report are **model-relative** (CRISPR-Bulge's cut
+points differ from CFD's because the two scores are on different scales).
+
+**Compute backend and modular environment.** CFD is pure-Python and always runs
+in-process on the CPU. CRISPR-Bulge (TensorFlow) runs in a **dedicated per-scorer
+conda environment** (`cbulge`) driven by a persistent worker subprocess, so its
+heavy, version-pinned dependency stack is fully isolated from the main CRISPRme+
+environment (whose legacy scikit-learn / numpy pins have been dropped and
+modernized accordingly). The scorer honors `--compute-backend {cpu,cuda,metal}`
+(`gpu` and `auto` are accepted aliases: `auto` picks cuda→metal→cpu): **cpu** is
+the default and the numerical oracle; **cuda** (conda-forge `tensorflow=2.13`
+CUDA build) is validated bit-close to CPU on NVIDIA A100 (~1e-5 agreement) for
+Linux/Docker/GPU runs; **metal** (Apple Silicon) is guarded by a **load-time
+numerical self-test** — `tensorflow-metal` silently miscomputes this GRU kernel
+(collapsing every prediction to 1.0), so on detecting the miscompute the scorer
+transparently falls back to a CPU device context, producing **bit-identical**
+results. Missing env or weights degrade cleanly to a **CFD-only** run rather than
+failing the search.
 
 **Worst-case scoring in the population-level analysis.** In the default population-level
 analysis (§5), each window is represented by worst-possible rows rather than every haplotype,
@@ -682,21 +722,15 @@ path, catching cases where the fewest-mismatch allele scores materially *lower* 
 another carried allele, up to a threshold-crossing 0.14). A whole-index comparison of the two
 modes on the released 1000G-2021 + HGDP panel reproduces this end-to-end: across all **3,079
 shared off-target loci, the population-level CFD ≥ the per-sample CFD with zero violations** (it
-is strictly higher only where it assumes worst-possible co-occurrence). **CRISTA is
-best-effort.** CRISTA is a non-factorizable RandomForest, so its worst case is taken as the
-maximum over the emitted representatives rather than an exhaustive per-haplotype search.
-Measured against the exact path (chr22 1000G-2021+HGDP), this approximation is tight exactly
-where decisions are made: **every off-target with CRISTA ≥ 0.2 is reported at full or greater
-strength** (the population-level analysis even surfaces *more* actionable sites than per-sample
-enumeration), and under-reporting is **bounded to ≤ 0.04 and confined to the sub-0.19 weak
-tail** (median gap 0.006, no threshold crossings) — structurally, because high-CRISTA
-off-targets are low-edit and the min-edit + max-CFD representatives already span the low-edit
-shell. **At genome-wide scale the CRISTA tail is heavier than the chr22 slice:** across the full
-genome ~5 % of CRISTA ≥ 0.2 loci can drop below 0.2 in the default analysis (largest observed
-gap ~0.12), whereas **CFD had zero ≥ 0.2 losses**. So by default CFD is a safe actionable gate
-but **CRISTA is a screen**, not an action gate. A **guaranteed per-haplotype CRISTA worst case**
-is available by running `--per-sample`; this is the screening-vs-confirmatory two-tier split of
-Section 5.
+is strictly higher only where it assumes worst-possible co-occurrence). **The ML score is
+best-effort.** CRISPR-Bulge is a non-factorizable neural ensemble, so its worst case is taken as
+the maximum over the emitted representatives rather than an exhaustive per-haplotype search. This is tight exactly where decisions are made: high-ML-score
+off-targets are low-edit, and the min-edit + max-CFD representatives already span the low-edit
+shell, so strong sites are surfaced at full or greater strength and any under-report is confined
+to the weak tail. So by default **CFD is the safe actionable gate** (exact worst case, zero
+under-reports on the measured 3,079-locus comparison above) and the **ML score is a screen**, not
+an action gate. A **guaranteed per-haplotype ML worst case** is available by running
+`--per-sample`; this is the screening-vs-confirmatory two-tier split of Section 5.
 
 **SNP+indel co-occurrence is unaffected by the analysis mode.** The default analysis collapses
 only the *SNP* worst-possible representative emission in `integrated_results.tsv` (Section 5);
@@ -779,14 +813,14 @@ validate-test`. This is a one-time correctness check, not a per-search step:
   *stronger* worst case). Its exact worst-case-CFD maximizer is additionally cross-checked on
   4,000 random windows against an independent factorized CFD oracle (agreement to the raw
   double, including the joint-PAM case), and on the legacy dict / aggregate-panel path against a
-  real CFD-scored multiallelic fixture; the CRISTA best-effort bound is the measurement
-  reported under *Worst-case scoring in the population-level analysis* above.
+  real CFD-scored multiallelic fixture; the ML score's (CRISPR-Bulge) best-effort bound is
+  described under *Worst-case scoring in the population-level analysis* above.
 
 This establishes that the engine **does not miss** off-targets relative to
 exhaustive search. It does **not** validate the *scoring* models' predictive
 accuracy against experimental cleavage — a regulatory-grade package should add a
-retrospective comparison of CFD/CRISTA ranking to experimental off-target assays
-(e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
+retrospective comparison of CFD/CRISPR-Bulge ranking to experimental off-target
+assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 
 ---
 

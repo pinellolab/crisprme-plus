@@ -10,10 +10,10 @@
 # v2.8.3 carries the add-variants .tbi/.csi enricher fix + the MGBOA relicense. crisprme
 # is installed from this build context. The dependency
 # pins mirror the from-scratch Python-3.11 validation on ml007 (see PR #131):
-#   - numerical stack: MODERNIZED now that CRISTA is retired. It was once hard-pinned to
-#     scikit-learn 1.1.3 / numpy 1.24.4 / pandas 2.0.3 / scipy 1.10.1 SOLELY because the
-#     vendored CRISTA + azimuth pickles needed that combo. CRISTA runs in its own conda env
-#     (CRISPR-Bulge) and azimuth is gone, so: scikit-learn is DROPPED (nothing in the main
+#   - numerical stack: MODERNIZED now that the legacy RandomForest scorer is retired.
+#     It was once hard-pinned to scikit-learn 1.1.3 / numpy 1.24.4 / pandas 2.0.3 / scipy 1.10.1
+#     SOLELY because the vendored legacy-scorer + azimuth pickles needed that combo. CRISPR-Bulge (the
+#     replacement) runs in its own conda env (cbulge) and azimuth is gone, so: scikit-learn is DROPPED (nothing in the main
 #     env imports it), and numpy/scipy/pandas/matplotlib move to current maintained lines.
 #     CFD uses version-agnostic lookup pickles, so scoring is unaffected. numpy is capped
 #     < 2 on purpose: pysam/CRISPRitz C-extensions here are built against the numpy 1.x
@@ -110,7 +110,7 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
     # site-packages/pyproject.toml that made Biopython emit a BiopythonWarning at import;
     # remove it if present (no-op otherwise) so startup is clean.
     && rm -f ${PREFIX}/lib/python3.11/site-packages/pyproject.toml
-# CRISTA was retired in favor of CRISPR-Bulge (the 276 MB CRISTA model + its unzip step are
+# The legacy RandomForest scorer was retired in favor of CRISPR-Bulge (its 276 MB model + its unzip step are
 # gone). The CRISPR-Bulge model is provisioned into its own conda env by scorer_env
 # (build_scorer_envs, below); CFD's tiny score pickles ship as plain files in PostProcess/.
 

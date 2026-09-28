@@ -1,9 +1,14 @@
 name: Docker Multi-Arch Build
 
 # Build the CRISPRme Docker image natively for both linux/amd64 and
-# linux/arm64 (Apple Silicon). Both crispritz (native linux-aarch64 bioconda
-# build) and crisprme (noarch) install per-architecture with no source
-# compilation, so buildx can produce a true multi-arch image.
+# linux/arm64 (Apple Silicon). crispritz is COMPILED FROM C++ SOURCE and crisprme
+# is installed from the build context (see Dockerfile), and the CRISPR-Bulge
+# scorer's dedicated conda env (cbulge, TensorFlow) is built at image-build time
+# (build_scorer_envs=1). buildx produces a true multi-arch image; the linux/arm64
+# build therefore exercises the arm64 C++ compile AND the conda-forge
+# linux-aarch64 tensorflow-cpu availability. If arm64 cannot resolve
+# tensorflow-cpu, set build_scorer_envs=0 for arm64 (create the scorer env at
+# runtime) or ship arm64 as CPU-scorer-deferred.
 #
 # On pull_request / workflow_dispatch we only BUILD both arches (push: false)
 # to validate that both platforms build successfully. Publishing to Docker Hub

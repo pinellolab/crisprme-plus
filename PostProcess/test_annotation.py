@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PostProcess import annotation as an  # noqa: E402
 
 
-# 22-column header used by the primary bestCFD/bestmmblg/bestCRISTA
+# 22-column header used by the primary bestCFD/bestmmblg/bestCRISPR_BULGE
 # intermediates (submit_job_automated_new_multiple_vcfs.sh).
 HEADER = (
     "#Bulge_type\tcrRNA\tDNA\tReference\tChromosome\tPosition\tCluster_Position\t"
