@@ -193,6 +193,12 @@ and the `release-crisprme` skill.
   the six explicit paths for scripted use.
 
 ### Fixed
+- **Web interface now boots on the modernized environment.** The Dash cache was configured
+  with the Flask-Caching **1.x** short-name `CACHE_TYPE: "filesystem"`; Flask-Caching **2.x**
+  (pulled in by the un-pinned, modernized web stack) removed the short-name aliases and expects
+  the backend class name, so `filesystem` raised `ImportStringError` at import time and the whole
+  web app failed to start (`crisprme.py web-interface` and the served site). `CACHE_TYPE` is now
+  `"FileSystemCache"`, which resolves on Flask-Caching 2.x (and remains valid on 1.10+).
 - **Web results page no longer crashes (or silently drops a plot) when the CRISPR-Bulge
   filter is selected.** The filter dropdown value is the hyphen form `CRISPR-Bulge`, but the
   cached top-1000 / personal / private lolliplot files are written with the underscore token

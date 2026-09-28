@@ -370,7 +370,11 @@ def print_help_complete_search() -> None:
         "non-best alignments per locus). Default follows the mode: OFF for the default "
         "population-level analysis (the report is built from the best alignment per locus, "
         "so this only adds a large, slow-to-build companion file), ON under --per-sample. "
-        "Use --alt-alignments to force it, --no-alt-alignments to suppress it [OPTIONAL]\n")
+        "Use --alt-alignments to force it, --no-alt-alignments to suppress it [OPTIONAL]\n"
+        "\t--compute-backend, ML-scorer (CRISPR-Bulge) compute device: cpu (default) | "
+        "cuda (NVIDIA/Linux GPU) | metal (Apple Silicon, self-tests and falls back to CPU) "
+        "| auto (pick cuda->metal->cpu). CFD is always CPU; if the cbulge scorer env is "
+        "absent the run completes on CFD only [OPTIONAL]\n")
     sys.exit(1)
 
 
