@@ -36,6 +36,17 @@ and the `release-crisprme` skill.
   Report curation also derives it on the fly, so it renders on pre-existing
   `integrated_results.tsv` files too.
 
+### Fixed
+- **GPU image now actually builds its CUDA scorer env (and a broken scorer env can no longer
+  ship silently).** The `cbulge` CUDA solve failed on GPU-less builders (e.g. GitHub CI) with
+  `__cuda missing`, because the micromamba base activation exports `CONDA_OVERRIDE_CUDA=""` and
+  `scorer_env` used `setdefault` (which will not replace an existing empty value). Now the
+  override is force-set to `11.8` when empty/absent, so the CUDA TensorFlow build resolves on any
+  builder (the image still falls back to CPU at runtime when no GPU is present). Additionally, the
+  Dockerfile scorer-env build step is now **FATAL** — a failed or incomplete `cbulge` env fails
+  the image build (verified by importing TensorFlow) instead of being swallowed by a warning and
+  shipping an image with no scorer.
+
 ## [2.6.0] - 2026-09-28
 
 ### Changed
