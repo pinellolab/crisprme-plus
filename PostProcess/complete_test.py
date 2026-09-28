@@ -88,6 +88,37 @@ TESTDATAURL = os.environ.get(
 COMPLETETESTRESDIR = "crisprme-test-out"
 
 
+def require_prebuilt_index() -> str:
+    """complete-test runs a variant search, which needs a prebuilt index.
+
+    CRISPRme does NOT build an index automatically -- the user decides to DOWNLOAD one
+    (or build it). If no usable index (a genome_library/<name>/ dir with .bin shards) is
+    present in the working directory, print how to obtain one and stop cleanly (exit 0);
+    do not download test data or build anything.
+
+    Returns:
+        The name of the first usable prebuilt index directory found.
+    """
+    lib = os.path.join(os.getcwd(), "genome_library")
+    present = []
+    if os.path.isdir(lib):
+        for name in sorted(os.listdir(lib)):
+            d = os.path.join(lib, name)
+            if os.path.isdir(d) and any(f.endswith(".bin") for f in os.listdir(d)):
+                present.append(name)
+    if not present:
+        sys.stderr.write(
+            f"\nNo prebuilt index found for the complete-test (looked in {lib}).\n"
+            "CRISPRme does not build one automatically.\n\n"
+            "Download an index first, e.g.:\n"
+            "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021\n"
+            "  (or --index-name NRG_3_hg38 for a reference-only scan)\n\n"
+            "then re-run:  crisprme.py complete-test --chrom chr22\n"
+        )
+        sys.exit(0)
+    return present[0]
+
+
 def check_output() -> None:
     """
     Check whether complete-test results already exist and prevent rerunning tests
@@ -622,6 +653,11 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
 
     check_crisprme_directory_tree(os.getcwd())  # check crisprme directory tree
     check_output()  # check complete-test output folder
+    # v2.6.0: CRISPRme does not build an index automatically. complete-test runs a
+    # variant search, which requires an index the user has DOWNLOADED (or built). If
+    # none is present, print how to get one and stop cleanly -- before downloading any
+    # test data. The user decides which index(es) to download (see the web/CLI docs).
+    require_prebuilt_index()
     genome_dir = download_genome_data(chrom, CRISPRME_DIRS[0])  # download genome data
     download_vcf_data(chrom, CRISPRME_DIRS[3], dataset)  # download vcf data
     vcf = write_vcf_config(dataset)  # write test vcf list
@@ -668,6 +704,8 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
             f"({bench.get('nuclease', '')}) mm={th['mm']} bDNA={th['bDNA']} "
             f"bRNA={th['bRNA']} max-total-edits={max_total_edits} -> {output_dir}\n"
         )
+        # Use the prebuilt index the user downloaded/built (verified present by
+        # require_prebuilt_index above). complete-search will NOT build one on demand.
         crisprme_cmd = (
             f"crisprme.py complete-search --genome {genome_dir} "
             f"--bmax {bmax} --mm {th['mm']} --bDNA {th['bDNA']} --bRNA {th['bRNA']} "
@@ -675,6 +713,7 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
             f"--merge 3 --pam {pam} --guide {guide} --vcf {vcf} "
             f"--samplesID {samplesids} --annotation {encode} "
             f"--gene_annotation {gencode} --output {output_dir} "
+            f"--index-path genome_library "
             f"--thread {threads} {debug_arg} --ci-cd-test"
         )
         returncode = subprocess.call(crisprme_cmd, shell=True)

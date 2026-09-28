@@ -205,6 +205,14 @@ and the `release-crisprme` skill.
   the six explicit paths for scripted use.
 
 ### Fixed
+- **`complete-test` no longer relies on on-demand index building.** The smoke test ran a
+  variant `complete-search` that expected an index to be built on demand — a path that was
+  gated off (it produced incomplete dict-less tiers), so `complete-test` failed. CRISPRme does
+  **not** build an index automatically: `complete-test` now checks for a prebuilt index and, if
+  none is present, prints clear guidance to **download** one (`crisprme.py download --what index
+  --index-name …`) and exits cleanly without downloading test data or building anything — the
+  user decides which index(es) to fetch (as the web instructions already recommend). When an
+  index is present it is used via `--index-path`.
 - **Web interface now boots on the modernized environment.** The Dash cache was configured
   with the Flask-Caching **1.x** short-name `CACHE_TYPE: "filesystem"`; Flask-Caching **2.x**
   (pulled in by the un-pinned, modernized web stack) removed the short-name aliases and expects
