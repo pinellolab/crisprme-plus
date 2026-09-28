@@ -14,7 +14,7 @@ observed-haplotype integration test uses (exec only the pre-``inFasta`` prologue
 inject runtime globals), but with ``myreg`` = a REAL compiled registry, ``mygt`` =
 None, ``mydict`` = {} -- i.e. mode 3.
 
-STDLIB ONLY (+ the AST harness's numpy/pandas/CRISTA stubs) + tier0_registry.
+STDLIB ONLY (+ the AST harness's numpy/pandas/CRISPR-Bulge stubs) + tier0_registry.
 
 Run with:
     cd PostProcess && python3 -m unittest test_registry_only_emit -v

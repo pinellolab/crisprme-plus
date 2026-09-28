@@ -128,8 +128,11 @@ MAINTAINER_MODE = bool(
 app.server.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB
 # configure caching
 CACHE_CONFIG = {
-    # try 'filesystem' if you don't want to setup redis
-    "CACHE_TYPE": "filesystem",
+    # "FileSystemCache" (a Flask-Caching backend class name) if you don't want to
+    # set up redis. NB: use the class name, not the legacy lowercase "filesystem"
+    # short-name -- Flask-Caching >=2.0 dropped the old short-name aliases, so
+    # "filesystem" raises ImportStringError on the modernized web stack.
+    "CACHE_TYPE": "FileSystemCache",
     "CACHE_DIR": ("Cache"),  # os.environ.get('REDIS_URL', 'localhost:6379')
 }
 cache = Cache()  # initialize cache

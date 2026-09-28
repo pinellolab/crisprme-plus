@@ -1,9 +1,18 @@
 name: Docker Multi-Arch Build
 
 # Build the CRISPRme Docker image natively for both linux/amd64 and
-# linux/arm64 (Apple Silicon). Both crispritz (native linux-aarch64 bioconda
-# build) and crisprme (noarch) install per-architecture with no source
-# compilation, so buildx can produce a true multi-arch image.
+# linux/arm64 (Apple Silicon). crispritz is COMPILED FROM C++ SOURCE and crisprme
+# is installed from the build context (see Dockerfile), and the CRISPR-Bulge
+# scorer's dedicated conda env (cbulge, TensorFlow 2.13) is built at image-build
+# time (build_scorer_envs=1) on BOTH arches, backend chosen by scorer_backend=auto
+# (Dockerfile default, keyed on TARGETARCH): the amd64 layer gets the conda-forge CUDA
+# TensorFlow (tensorflow=2.13=cuda*) so the shipped image is GPU-CAPABLE -- it runs the
+# scorer on an NVIDIA GPU under 'docker run --gpus all ...' and falls back to CPU
+# transparently when no GPU is present; the arm64 layer gets the CPU TF 2.13.1 PyPI
+# aarch64 wheel (CUDA has no ARM build) so Apple Silicon stays CPU. CPU and GPU produce
+# numerically identical scores (validated on A100; CPU cross-arch max|Δ|=3.6e-7, zero band
+# flips). buildx produces a true multi-arch image; the amd64 layer is larger (cudatoolkit/
+# cudnn). Build with --build-arg scorer_backend=cpu for a lean CPU-only image.
 #
 # On pull_request / workflow_dispatch we only BUILD both arches (push: false)
 # to validate that both platforms build successfully. Publishing to Docker Hub
@@ -27,6 +36,12 @@ jobs:
     name: Build multi-arch image (no push)
     runs-on: ubuntu-latest
     steps:
+      - name: Free up runner disk (amd64 CUDA scorer env is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -57,6 +72,12 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - name: Free up runner disk (amd64 CUDA scorer env is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -72,6 +93,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Compute image tags
+        id: tags
+        # Always publish the exact version tag. Only move :latest for FINAL releases
+        # (a tag with no '-' suffix). Pre-release tags like v2.6.1-rc1 / v2.6.0-gpu-rc1
+        # publish only their own tag, so an RC never clobbers the default :latest.
+        run: |
+          REF="${{ github.ref_name }}"
+          TAGS="pinellolab/crisprme:${REF}"
+          case "$REF" in
+            *-*) echo "pre-release '$REF': NOT updating :latest" ;;
+            *)   TAGS="${TAGS}"$'\n'"pinellolab/crisprme:latest" ;;
+          esac
+          {
+            echo "list<<__EOF__"
+            echo "$TAGS"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v6
         with:
@@ -79,6 +118,4 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            pinellolab/crisprme:latest
-            pinellolab/crisprme:${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs.list }}

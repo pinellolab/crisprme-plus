@@ -305,7 +305,7 @@ with open(sys.argv[5]) as pam:
         pam_begin = len_pam * (-1)
         pam_end = None
 
-# Second (ML) score column = CRISPR-Bulge (CRISTA retired); env var kept only so the
+# Second (ML) score column = CRISPR-Bulge (the legacy RandomForest scorer was retired); env var kept only so the
 # report/web can label the column.
 _SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crispr-bulge").lower()
 
@@ -567,9 +567,9 @@ def preprocess_CFD_score(target):
 
 
 def preprocess_CRISPR_BULGE_score(cluster_targets):
-    """CRISPR-Bulge analogue of preprocess_CRISTA_score (indel path).
+    """CRISPR-Bulge scoring (analogue of the retired legacy-scorer preprocessing path, indel path).
 
-    Identical output contract + alt/ref two-pass + null semantics as the CRISTA path,
+    Identical output contract + alt/ref two-pass + null semantics as the CRISPR-Bulge path,
     but scores the aligned (sgRNA, off-target) pair only (NO 29-nt genomic window) via
     the scorer-runner (dedicated cbulge env; graceful -1.0 if absent). Unscoreable rows
     (N in aligned DNA, or length mismatch) get an equal-length dummy then are nulled by
@@ -645,7 +645,7 @@ def calculate_scores(cluster_to_save):
     # input is target line splitted in list format
     # list of functions to calculate specific score (to add a score, simply add your function to this call and update the clusters list in return)
     cluster_with_CFD_score = list()
-    cluster_with_CRISTA_score = list()
+    cluster_with_CRISPR_BULGE_score = list()
 
     # time_start = time.time()
     # print('CALCULATING CFD SCORE')
@@ -654,9 +654,9 @@ def calculate_scores(cluster_to_save):
         target_CFD = target.copy()
         cluster_with_CFD_score.append(preprocess_CFD_score(target_CFD))
 
-    # second (ML) score column = CRISPR-Bulge (CRISTA retired); same .bestCRISTA.txt /
-    # CRISTA_score column names kept as stable identifiers (report/web label it CRISPR-Bulge).
-    cluster_with_CRISTA_score = preprocess_CRISPR_BULGE_score(cluster_to_save)
+    # second (ML) score column = CRISPR-Bulge (the legacy RandomForest scorer was retired); same .bestCRISPR_BULGE.txt /
+    # CRISPR_BULGE_score column names kept as stable identifiers (report/web label it CRISPR-Bulge).
+    cluster_with_CRISPR_BULGE_score = preprocess_CRISPR_BULGE_score(cluster_to_save)
 
     # REMOVED TO CHECK IF FILE IS RETURN WITH IDENTICAL ROWS COUNT
 
@@ -684,29 +684,29 @@ def calculate_scores(cluster_to_save):
     # df_CFD = pd.concat(frames)
     # cluster_with_CFD_score = df_CFD.values.tolist()
 
-    # df_CRISTA = pd.DataFrame(cluster_with_CRISTA_score, columns=['Bulge_type', 'crRNA', 'DNA', 'Chromosome',
+    # df_CRISPR_BULGE = pd.DataFrame(cluster_with_CRISPR_BULGE_score, columns=['Bulge_type', 'crRNA', 'DNA', 'Chromosome',
     #                                                              'Position', 'Cluster_Position', 'Direction', 'Mismatches',
     #                                                              'Bulge_Size', 'Total', 'PAM_gen', 'Var_uniq', 'Samples', 'Annotation_Type',
     #                                                              'Real_Guide', 'rsID', 'AF', 'SNP', 'Reference_target', 'CFD',
     #                                                              'Seq_in_cluster', 'CFD_ref'])
     # # select lowest count of mm+bul
-    # idx_fewest_mm_bul = df_CRISTA.groupby(['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples'])[
-    #     'Total'].transform(min) == df_CRISTA['Total']
-    # df_CRISTA_fewest = df_CRISTA[idx_fewest_mm_bul]
-    # df_CRISTA_fewest.drop_duplicates(
+    # idx_fewest_mm_bul = df_CRISPR_BULGE.groupby(['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples'])[
+    #     'Total'].transform(min) == df_CRISPR_BULGE['Total']
+    # df_CRISPR_BULGE_fewest = df_CRISPR_BULGE[idx_fewest_mm_bul]
+    # df_CRISPR_BULGE_fewest.drop_duplicates(
     #     ['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples', 'Mismatches', 'Bulge_Size'], inplace=True)
     # # select highest score
-    # idx_max_score = df_CRISTA.groupby(['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples'])[
-    #     'CFD'].transform(max) == df_CRISTA['CFD']
-    # df_CRISTA_best_score = df_CRISTA[idx_max_score]
+    # idx_max_score = df_CRISPR_BULGE.groupby(['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples'])[
+    #     'CFD'].transform(max) == df_CRISPR_BULGE['CFD']
+    # df_CRISPR_BULGE_best_score = df_CRISPR_BULGE[idx_max_score]
     # # remove duplicate rows (possible due to haplotypes and variants)
-    # df_CRISTA_best_score.drop_duplicates(['Real_Guide', 'Chromosome',
+    # df_CRISPR_BULGE_best_score.drop_duplicates(['Real_Guide', 'Chromosome',
     #                                       'Cluster_Position', 'SNP', 'Samples', 'CFD'], inplace=True)
-    # frames = [df_CRISTA_fewest, df_CRISTA_best_score]
-    # df_CRISTA = pd.concat(frames)
-    # cluster_with_CRISTA_score = df_CRISTA.values.tolist()
+    # frames = [df_CRISPR_BULGE_fewest, df_CRISPR_BULGE_best_score]
+    # df_CRISPR_BULGE = pd.concat(frames)
+    # cluster_with_CRISPR_BULGE_score = df_CRISPR_BULGE.values.tolist()
 
-    return [cluster_with_CFD_score, cluster_with_CRISTA_score]
+    return [cluster_with_CFD_score, cluster_with_CRISPR_BULGE_score]
 
 
 iupac_code = {
@@ -739,7 +739,7 @@ def _resolve_overlaid_iupac(seq, guide_aligned=None):
 
     IUPAC codes reach the indel post-analysis only from the SNP-overlaid fake-
     indel genome (CRISPRME_INDEL_SNP). Every ACGT-only consumer trips on them:
-    CRISTA's ``agct2numerals`` (bare dict lookup -> KeyError, aborts scoring) and
+    CRISPR-Bulge's ``agct2numerals`` (bare dict lookup -> KeyError, aborts scoring) and
     the radar/motif dict generator, ref-alignment, etc. (CFD alone tolerates them
     via a try/except). When a position-aligned guide is supplied, pick the allele
     the guide matches -- reconstructing the variant-carrier allele that actually
@@ -807,7 +807,7 @@ genomeStr = "".join(genomeStr).upper()
 genomeStr = genomeStr.replace("\n", "")
 # [indel-snp] The SNP-overlaid fake-indel genome (CRISPRME_INDEL_SNP) carries IUPAC
 # ambiguity bases; collapse them to a concrete allele once here so every genome-
-# derived output column (ref alignment, CRISTA context, motif/radar counts) is pure
+# derived output column (ref alignment, CRISPR-Bulge context, motif/radar counts) is pure
 # A/C/G/T. Strict no-op on the classic plain fake genome (no IUPAC), so classic
 # output is byte-identical; 'N' is preserved for the existing N-guards.
 genomeStr = genomeStr.translate(_IUPAC_FIRST_ALLELE_TAB)
@@ -822,8 +822,8 @@ current_guide_chr_pos_direction = "no"
 cfd_best = open(outputFile + ".bestCFD_INDEL.txt", "w")
 cfd_best.write(header + "\tCFD\n")  # Write header
 
-crista_best = open(outputFile + ".bestCRISTA_INDEL.txt", "w")
-crista_best.write(header + "\tCFD\n")
+crispr_bulge_best = open(outputFile + ".bestCRISPR_BULGE_INDEL.txt", "w")
+crispr_bulge_best.write(header + "\tCFD\n")
 
 mmblg_best = open(outputFile + ".bestmmblg_INDEL.txt", "w")
 mmblg_best.write(header + "\tCFD\n")  # Write header
@@ -1171,11 +1171,11 @@ for line in inResult:
                     cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
                     # save mm-bul targets
                     mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-                if count == 1:  # CRISTA target
+                if count == 1:  # CRISPR-Bulge target
                     # remove count of tmp_mms
                     target.pop(-2)
-                    # save CRISTA targets
-                    crista_best.write("\t".join(target) + "\t" + str(0) + "\n")
+                    # save CRISPR-Bulge targets
+                    crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
         cluster_to_save = list()
 
 if len(cluster_to_save):
@@ -1185,7 +1185,7 @@ else:
     # close open files
     cfd_best.close()
     mmblg_best.close()
-    crista_best.close()
+    crispr_bulge_best.close()
     if _cooc_out is not None:
         _cooc_out.close()
     if _indel_af_out is not None:
@@ -1199,7 +1199,7 @@ else:
     os.system(
         "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
         + outputFile
-        + ".bestCRISTA_INDEL.txt"
+        + ".bestCRISPR_BULGE_INDEL.txt"
     )
     os.system(
         "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
@@ -1225,16 +1225,16 @@ for count, cluster in enumerate(clusters_with_scores):
             cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
             # save mm-bul targets
             mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-        if count == 1:  # CRISTA target
+        if count == 1:  # CRISPR-Bulge target
             # remove count of tmp_mms
             target.pop(-2)
-            # print('CRISTA', target)
-            # save CRISTA targets
-            crista_best.write("\t".join(target) + "\t" + str(0) + "\n")
+            # print('CRISPR-Bulge', target)
+            # save CRISPR-Bulge targets
+            crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
 
 cfd_best.close()
 mmblg_best.close()
-crista_best.close()
+crispr_bulge_best.close()
 if _cooc_out is not None:
     _cooc_out.close()
 if _indel_af_out is not None:
@@ -1248,7 +1248,7 @@ os.system(
 os.system(
     "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
     + outputFile
-    + ".bestCRISTA_INDEL.txt"
+    + ".bestCRISPR_BULGE_INDEL.txt"
 )
 os.system(
     "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "

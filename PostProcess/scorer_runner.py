@@ -7,7 +7,7 @@ conda env and streams batches to it over a newline-JSON protocol:
     request : {"pairs": [[sg_aligned, off_aligned], ...]}\\n
     response: {"scores": [float, ...]}\\n      (order preserved; invalid row -> -1.0)
 
-Contract (uniform, mirrors the CRISTA/CFD list API):
+Contract (uniform, mirrors the CRISPR-Bulge/CFD list API):
 
     with ScorerRunner("cbulge", device="cpu") as r:
         scores = r.predict(sg_list, off_list)      # list[float], len == len(sg_list)
@@ -18,7 +18,7 @@ Design points (Phase-0 findings baked in):
   * ONE worker per run/chromosome amortizes the ~4.5 s model spawn+load.
   * GRACEFUL DEGRADATION: if the env/worker is missing or dies, the runner disables
     itself, warns ONCE, and returns -1.0 sentinels — a scoring run is never killed by
-    a missing optional scorer (the caller can fall back to CRISTA/CFD).
+    a missing optional scorer (the caller can fall back to CRISPR-Bulge/CFD).
 
 Depends only on the stdlib + ``scorer_env`` (also stdlib-only).
 """
@@ -275,7 +275,7 @@ def get_runner(scorer=scorer_env.DEFAULT_ENV, device=None):
 
 
 def CRISPR_BULGE_predict_list(sg_list, off_list, device=None):
-    """Drop-in batch scorer mirroring CRISTA_predict_list's shape (no 29-nt ctx),
+    """Drop-in batch scorer mirroring CRISPR_BULGE_predict_list's shape (no 29-nt ctx),
     routed through the persistent env-worker singleton. Graceful -1.0 on failure."""
     return get_runner("cbulge", device=device).predict(sg_list, off_list)
 

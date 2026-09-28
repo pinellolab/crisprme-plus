@@ -67,7 +67,7 @@ def _load_crisprme():
         sys.modules["Bio.Seq"] = _bio_seq
     from unittest.mock import MagicMock
     for _m in ("pandas", "scipy", "sklearn", "matplotlib", "seaborn",
-               "statsmodels", "intervaltree", "CRISTA_score"):
+               "statsmodels", "intervaltree", "CRISPR_BULGE_score"):
         if _m in sys.modules:
             continue
         try:

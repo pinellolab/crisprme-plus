@@ -10,7 +10,7 @@ score factorizes:
                concrete haplotype can achieve; a lower bound on the true edit).
   * CFD      : EXACT worst-case via factorization (twopass_cfd_exact.cfd_worst_case),
                O(guide) per window, bit-identical to calc_cfd, NO enumeration.
-  * CRISTA   : a RandomForest -> NOT factorizable. Best-effort: evaluate on a bounded
+  * CRISPR-Bulge   : a RandomForest -> NOT factorizable. Best-effort: evaluate on a bounded
                candidate SET of low-edit concrete haplotypes and FLAG it approximate
                when the set is truncated. Never claimed exhaustive (see the report).
 
@@ -29,9 +29,9 @@ sys.path.insert(0, _HERE)
 import twopass_cfd_exact as _cfd  # noqa: E402
 import twopass_find as _find  # noqa: E402
 
-# Bound on how many concrete haplotypes CRISTA is evaluated over before the result
+# Bound on how many concrete haplotypes CRISPR-Bulge is evaluated over before the result
 # is flagged approximate (the factorization does not apply to a RandomForest).
-CRISTA_CANDIDATE_CAP = 256
+CRISPR_BULGE_CANDIDATE_CAP = 256
 
 
 def _iter_low_edit_haplotypes(guide, allele_sets, cap):
@@ -39,7 +39,7 @@ def _iter_low_edit_haplotypes(guide, allele_sets, cap):
     ordered so the LOWEST-edit (closest-to-guide) ones come first: at each position
     prefer the guide's own base when it is in the set. Deterministic. Returns
     (haplotypes, truncated) where ``truncated`` is True if the full product exceeded
-    ``cap`` (=> CRISTA is approximate over the shortlist, not exhaustive)."""
+    ``cap`` (=> CRISPR-Bulge is approximate over the shortlist, not exhaustive)."""
     ordered = []
     total = 1
     for i, s in enumerate(allele_sets):
@@ -59,7 +59,7 @@ def _iter_low_edit_haplotypes(guide, allele_sets, cap):
 
 
 def score_window(guide, allele_sets, pam_set, mm_scores, pam_scores,
-                 crista_fn=None, crista_cap=CRISTA_CANDIDATE_CAP,
+                 crispr_bulge_fn=None, crispr_bulge_cap=CRISPR_BULGE_CANDIDATE_CAP,
                  max_bdna=2, max_brna=2):
     """Worst-possible scores for ONE Pass-1 candidate window.
 
@@ -69,31 +69,31 @@ def score_window(guide, allele_sets, pam_set, mm_scores, pam_scores,
         enriched-IUPAC window; length ~G).
       pam_set: iterable of possible PAM strings at the window.
       mm_scores/pam_scores: the shipped CFD pickles (twopass_cfd_exact.load_scores()).
-      crista_fn: optional callable(list_of_(guide,dna,pam)) -> list_of_scores. When
-        None, CRISTA is skipped (min-edit + CFD still returned).
+      crispr_bulge_fn: optional callable(list_of_(guide,dna,pam)) -> list_of_scores. When
+        None, CRISPR-Bulge is skipped (min-edit + CFD still returned).
 
     Returns a dict:
       min_edit         : (D, mm, dna_bulges, rna_bulges) from Pass-1, or None.
       cfd_worst        : exact worst-case CFD over the allele sets x pam_set.
-      crista_worst     : max CRISTA over the evaluated shortlist (None if no crista_fn).
-      crista_approx    : True if the shortlist was truncated (CRISTA not exhaustive).
-      crista_n_evaluated: shortlist size actually scored.
+      crispr_bulge_worst     : max CRISPR-Bulge over the evaluated shortlist (None if no crispr_bulge_fn).
+      crispr_bulge_approx    : True if the shortlist was truncated (CRISPR-Bulge not exhaustive).
+      crispr_bulge_n_evaluated: shortlist size actually scored.
     """
     sets = [frozenset(s) for s in allele_sets]
     out = {
         "min_edit": _find.collapsed_min_edit(guide, sets, max_bdna, max_brna),
         "cfd_worst": _cfd.cfd_worst_case(guide, sets, list(pam_set),
                                          mm_scores, pam_scores),
-        "crista_worst": None,
-        "crista_approx": False,
-        "crista_n_evaluated": 0,
+        "crispr_bulge_worst": None,
+        "crispr_bulge_approx": False,
+        "crispr_bulge_n_evaluated": 0,
     }
-    if crista_fn is not None:
-        haps, truncated = _iter_low_edit_haplotypes(guide, sets, crista_cap)
+    if crispr_bulge_fn is not None:
+        haps, truncated = _iter_low_edit_haplotypes(guide, sets, crispr_bulge_cap)
         pams = list(pam_set)
         triples = [(guide, h, p) for h in haps for p in pams]
-        scores = crista_fn(triples) if triples else []
-        out["crista_worst"] = max(scores) if scores else None
-        out["crista_approx"] = truncated
-        out["crista_n_evaluated"] = len(triples)
+        scores = crispr_bulge_fn(triples) if triples else []
+        out["crispr_bulge_worst"] = max(scores) if scores else None
+        out["crispr_bulge_approx"] = truncated
+        out["crispr_bulge_n_evaluated"] = len(triples)
     return out

@@ -53,7 +53,7 @@ from __future__ import annotations
 # JOIN DIRECTION: join FROM bestMerge (left) INTO the companion by (Chromosome,
 # Position, Direction, crRNA, DNA[, SNP]). The companion captures EVERY finalized
 # variant off-target (deduped by that identity key), whereas bestMerge/bestCFD/
-# bestCRISTA keep only the best-scoring representative per cluster -- so the companion
+# bestCRISPR_BULGE keep only the best-scoring representative per cluster -- so the companion
 # is a SUPERSET: every bestMerge variant row has a matching companion row, but the
 # companion may contain extra rows for off-targets that did not win best-scoring.
 # A naive inner/right join or a row-count equality check against bestMerge would be

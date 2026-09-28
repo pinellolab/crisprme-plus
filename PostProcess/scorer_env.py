@@ -56,6 +56,14 @@ SCORER_ENVS: Dict[str, dict] = {
         # (tensorflow-macos + the tensorflow-metal PluggableDevice). hdf5 for h5py.
         "metal_packages": ["hdf5"] + _COMMON,
         "metal_pip": ["tensorflow-macos==2.13.0", "tensorflow-metal==1.0.1"],
+        # Linux aarch64 variant: conda-forge ships no tensorflow-cpu=2.13 for aarch64
+        # (only 2.18/2.19), but PyPI publishes the official manylinux2014_aarch64 wheel of
+        # the full tensorflow==2.13.1. So the base deps come from conda (NO tensorflow) and
+        # the SAME TF version used on x86-64 (2.13.1) is pip-installed -- keeping the model
+        # numerically identical across arches. The full 'tensorflow' package runs CPU-only on
+        # a GPU-less ARM host (benign "no CUDA" warnings); there is no CUDA/Metal on aarch64.
+        "linux_aarch64_packages": ["hdf5"] + _COMMON,
+        "linux_aarch64_pip": ["tensorflow==2.13.1"],
         # import probe run INSIDE the env to confirm the scorer can load
         "probe_imports": [
             "tensorflow", "numpy", "pandas", "sklearn", "xgboost", "catboost", "pkg_resources",
@@ -233,17 +241,49 @@ def env_exists(name: str) -> bool:
 
 def _variant(gpu: bool) -> str:
     """The TF variant to build: 'metal' on Apple-Silicon Macs (the only GPU stack there),
-    else 'cuda' when gpu is requested, else 'cpu'. On a Mac the ONE metal env serves both
-    CPU and GPU runs -- the compute backend picks the device at runtime."""
-    if platform.system() == "Darwin" and platform.machine() == "arm64":
+    'linux_aarch64' on Linux ARM (conda-forge has no tensorflow-cpu=2.13 there, so the same
+    TF 2.13.1 comes from the PyPI aarch64 wheel), else 'cuda' when gpu is requested, else 'cpu'.
+    On a Mac the ONE metal env serves both CPU and GPU runs -- the compute backend picks the
+    device at runtime. aarch64 is always CPU (no CUDA/Metal there)."""
+    sysname, machine = platform.system(), platform.machine()
+    if sysname == "Darwin" and machine == "arm64":
         return "metal"
+    if sysname == "Linux" and machine in ("aarch64", "arm64"):
+        return "linux_aarch64"
     return "cuda" if gpu else "cpu"
 
 
 def _conda_packages(spec: dict, variant: str) -> List[str]:
-    return {"metal": spec.get("metal_packages"), "cuda": spec.get("gpu_packages")}.get(
-        variant, spec["cpu_packages"]
-    )
+    return {
+        "metal": spec.get("metal_packages"),
+        "cuda": spec.get("gpu_packages"),
+        "linux_aarch64": spec.get("linux_aarch64_packages"),
+    }.get(variant, spec["cpu_packages"])
+
+
+def _pip_packages(spec: dict, variant: str) -> Optional[List[str]]:
+    """Packages a variant installs via pip AFTER the conda env (TensorFlow builds that
+    conda-forge doesn't provide): the Metal TF on Apple Silicon, the PyPI aarch64 TF wheel
+    on Linux ARM. None for the conda-only variants (cpu/cuda)."""
+    return {
+        "metal": spec.get("metal_pip"),
+        "linux_aarch64": spec.get("linux_aarch64_pip"),
+    }.get(variant)
+
+
+def _channel_args(spec: dict) -> List[str]:
+    """``-c`` args for the env's channels, honoring a mirror base so sites whose network
+    blocks conda.anaconda.org can build the scorer env. If ``CRISPRME_CONDA_CHANNEL_BASE``
+    or ``CONDA_CHANNEL_BASE`` is set (e.g. ``https://prefix.dev``), a bare channel name like
+    ``conda-forge`` is rewritten to ``<base>/conda-forge`` -- the SAME convention the
+    Dockerfile uses. Full-URL channels are passed through untouched; with no base set the
+    plain name is used (which still honors any global condarc ``channel_alias``)."""
+    base = (os.environ.get("CRISPRME_CONDA_CHANNEL_BASE")
+            or os.environ.get("CONDA_CHANNEL_BASE") or "").rstrip("/")
+    args: List[str] = []
+    for ch in spec["channels"]:
+        args += ["-c", f"{base}/{ch}" if (base and "://" not in ch) else ch]
+    return args
 
 
 def build_create_command(name: str, gpu: bool = False, variant: Optional[str] = None) -> Optional[List[str]]:
@@ -254,12 +294,9 @@ def build_create_command(name: str, gpu: bool = False, variant: Optional[str] = 
         return None
     exe, _ = mgr
     variant = variant or _variant(gpu)
-    channels = []
-    for ch in spec["channels"]:
-        channels += ["-c", ch]
     return (
         [exe, "create", "-y", "-n", name, "python=" + spec["python"]]
-        + channels
+        + _channel_args(spec)
         + _conda_packages(spec, variant)
     )
 
@@ -284,15 +321,17 @@ def _create_conda_env(name, gpu, force, stream, variant) -> Tuple[bool, str]:
     if proc.returncode != 0:
         detail = "" if stream else (proc.stdout + proc.stderr)[-2000:]
         return False, f"env create failed (exit {proc.returncode}) {detail}"
-    # Metal: install the Apple Metal TensorFlow into the fresh env via its pip
+    # Variants whose TensorFlow isn't on conda-forge (Metal on Apple Silicon; the aarch64
+    # wheel on Linux ARM) pip-install it into the fresh env after the conda step.
     spec = SCORER_ENVS[name]
-    if variant == "metal" and spec.get("metal_pip"):
+    pip_pkgs = _pip_packages(spec, variant)
+    if pip_pkgs:
         exe = cmd[0]
-        pip_cmd = [exe, "run", "-n", name, "pip", "install"] + spec["metal_pip"]
-        sys.stderr.write(f"[scorer-env] installing Metal TensorFlow: {' '.join(spec['metal_pip'])}\n")
+        pip_cmd = [exe, "run", "-n", name, "pip", "install"] + pip_pkgs
+        sys.stderr.write(f"[scorer-env] pip-installing TensorFlow ({variant}): {' '.join(pip_pkgs)}\n")
         pp = subprocess.run(pip_cmd) if stream else _run(pip_cmd)
         if pp.returncode != 0:
-            return False, f"env created but Metal TensorFlow pip install failed (exit {pp.returncode})"
+            return False, f"env created but TensorFlow pip install failed (exit {pp.returncode})"
     return True, f"env created ({variant})"
 
 
@@ -323,11 +362,8 @@ def update_env(name: str = DEFAULT_ENV, gpu: bool = False) -> Tuple[bool, str]:
     if not mgr:
         return False, "no conda env manager found"
     exe, _ = mgr
-    channels = []
-    for ch in spec["channels"]:
-        channels += ["-c", ch]
     variant = _variant(gpu)
-    cmd = [exe, "install", "-y", "-n", name] + channels + _conda_packages(spec, variant)
+    cmd = [exe, "install", "-y", "-n", name] + _channel_args(spec) + _conda_packages(spec, variant)
     env = dict(os.environ)
     if variant == "cuda":
         env.setdefault("CONDA_OVERRIDE_CUDA", "12.0")
@@ -335,10 +371,11 @@ def update_env(name: str = DEFAULT_ENV, gpu: bool = False) -> Tuple[bool, str]:
     proc = subprocess.run(cmd, env=env)
     if proc.returncode != 0:
         return False, f"update failed (exit {proc.returncode})"
-    if variant == "metal" and spec.get("metal_pip"):
-        pp = subprocess.run([exe, "run", "-n", name, "pip", "install", "-U"] + spec["metal_pip"])
+    pip_pkgs = _pip_packages(spec, variant)
+    if pip_pkgs:
+        pp = subprocess.run([exe, "run", "-n", name, "pip", "install", "-U"] + pip_pkgs)
         if pp.returncode != 0:
-            return False, f"conda update ok but Metal TF pip update failed (exit {pp.returncode})"
+            return False, f"conda update ok but TF pip update failed (exit {pp.returncode})"
     return True, f"updated ({variant})"
 
 

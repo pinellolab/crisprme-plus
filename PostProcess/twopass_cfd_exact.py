@@ -13,7 +13,7 @@ is bit-identical to `new_simple_analysis.calc_cfd(..., do_scores=True)` (the pan
 verified 0 ULP over 30K + ~945K cases). This is a fast-mode CONSTRUCT — validated
 against `calc_cfd` (see test_twopass_cfd_exact.py), not yet an authoritative
 replacement. A future C++ port must pass the same differential/oracle/shadow gates
-(design §7) before being trusted. CRISTA is NOT factorizable → out of scope here.
+(design §7) before being trusted. CRISPR-Bulge is NOT factorizable → out of scope here.
 
 Caveats replicated from `calc_cfd` exactly: T→U on guide AND target before compare
 and key; match → 1.0; mismatch → mm_scores["r{guide}:d{revcom(dna)},{pos}"] with a

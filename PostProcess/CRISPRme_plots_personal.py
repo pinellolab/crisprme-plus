@@ -211,11 +211,11 @@ def plot_with_MMvBUL(df, out_folder, guide):
     plt.clf()
 
 
-def plot_with_CRISTA_score(df, out_folder, guide):
+def plot_with_CRISPR_BULGE_score(df, out_folder, guide):
     # Remove targets with mm+bul<=1 since they are probably on-target introduced by variants
-    df = df.loc[df["Mismatches+bulges_(highest_CRISTA)"] > 1]
+    df = df.loc[df["Mismatches+bulges_(highest_CRISPR_BULGE)"] > 1]
     # sort values to have highest scored target on top
-    df.sort_values("CRISTA_score_(highest_CRISTA)", ascending=False, inplace=True)
+    df.sort_values("CRISPR_BULGE_score_(highest_CRISPR_BULGE)", ascending=False, inplace=True)
     # keep top1000 targets
     df = df.head(100)
     # Make index column that numbers the OTs starting from 1
@@ -227,14 +227,14 @@ def plot_with_CRISTA_score(df, out_folder, guide):
 
     # If prim_AF = 'n', then it's a ref-nominated site, so we enter a fake numerical AF
     # This will cause a warning of invalid sqrt later on, but that's fine to ignore
-    df["Variant_MAF_(highest_CRISTA)"] = df["Variant_MAF_(highest_CRISTA)"].fillna(-1)
+    df["Variant_MAF_(highest_CRISPR_BULGE)"] = df["Variant_MAF_(highest_CRISPR_BULGE)"].fillna(-1)
 
     # If multiple AFs (haplotype with multiple SNPs), take min AF
     # Approximation until we have haplotype frequencies
-    df["AF"] = df["Variant_MAF_(highest_CRISTA)"].astype(str).str.split(",")
+    df["AF"] = df["Variant_MAF_(highest_CRISPR_BULGE)"].astype(str).str.split(",")
     df["AF"] = df["AF"].apply(lambda x: min(x))
     df["AF"] = pd.to_numeric(df["AF"])
-    _samp = df["Variant_samples_(highest_CRISTA)"].astype(str)
+    _samp = df["Variant_samples_(highest_CRISPR_BULGE)"].astype(str)
     df["_has_variant"] = _samp.str.len().gt(1) & ~_samp.isin(["nan", "NA", "n", "."])
 
     # Adjustments for plotting purposes.
@@ -302,15 +302,15 @@ def plot_with_CRISTA_score(df, out_folder, guide):
     # Plot data CFD SCORE
     ax = df.plot.scatter(
         x="index",
-        y="CRISTA_score_REF_(highest_CRISTA)",
+        y="CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)",
         s="ref_AF",
         c=transparent_red,
         zorder=1,
     )
-    # ax = df.plot.scatter(x="index", y="highest_CRISTA_score(ref)", s="ref_AF", c=transparent_red, zorder=1, ax=ax)
+    # ax = df.plot.scatter(x="index", y="highest_CRISPR_BULGE_score(ref)", s="ref_AF", c=transparent_red, zorder=1, ax=ax)
     df.plot.scatter(
         x="index",
-        y="CRISTA_score_ALT_(highest_CRISTA)",
+        y="CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)",
         s="plot_AF",
         c=transparent_blue,
         zorder=2,
@@ -321,7 +321,7 @@ def plot_with_CRISTA_score(df, out_folder, guide):
     ax.set_xscale("log")
 
     plt.xlabel("Candidate off-target site")
-    plt.ylabel("CRISTA score")
+    plt.ylabel("CRISPR-Bulge score")
 
     # Boundaries
     plt.xlim(xmin=0.9, xmax=100)
@@ -330,9 +330,9 @@ def plot_with_CRISTA_score(df, out_folder, guide):
     # Arrows
     for x, y, z in zip(
         df["index"],
-        df["CRISTA_score_REF_(highest_CRISTA)"],
-        df["CRISTA_score_ALT_(highest_CRISTA)"]
-        - df["CRISTA_score_REF_(highest_CRISTA)"],
+        df["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"],
+        df["CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)"]
+        - df["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"],
     ):
         plt.arrow(
             x,
@@ -360,7 +360,7 @@ def plot_with_CRISTA_score(df, out_folder, guide):
 
     # Save
     plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_CRISTA_top_1000_log_for_main_text_{guide}.png")
+    plt.savefig(out_folder + f"CRISPRme_CRISPR_BULGE_top_1000_log_for_main_text_{guide}.png")
     plt.clf()
 
 
@@ -531,5 +531,5 @@ guide = sys.argv[3]
 # df_guide = df.loc[df["Spacer+PAM"] == guide]
 # takes df in input and produces the correlated plot, guide is used to save with correct name
 plot_with_CFD_score(df_guide, out_folder, guide)
-plot_with_CRISTA_score(df_guide, out_folder, guide)
+plot_with_CRISPR_BULGE_score(df_guide, out_folder, guide)
 plot_with_MMvBUL(df_guide, out_folder, guide)

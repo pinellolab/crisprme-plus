@@ -66,7 +66,7 @@ def about_div() -> html.Div:
                         "CRISPRme+ runs locally: it is both this point-and-click web "
                         "app (which you are using now, served at http://127.0.0.1:8080) "
                         "and a standalone command-line package. To run a search, "
-                        "provide: gRNA spacer(s), Cas protein, PAM sequence, genome "
+                        "provide: gRNA spacer(s), PAM sequence, genome "
                         "build (with or without genetic variants from 1000G, HGDP, "
                         "and/or personal datasets), and the maximum number of edits "
                         "(mismatches + bulges) to allow."
@@ -187,15 +187,16 @@ def homepage_step1() -> html.Li:
     """Create the step 1 description section for the homepage.
 
     This function creates an HTML list item containing a description of the first
-    step in using CRISPRme, which involves selecting the spacer, Cas protein,
-    and PAM sequence.  It combines the spacer, sequence, and PAM descriptions.
+    step in using CRISPRme, which involves selecting the spacer and PAM
+    sequence (the nuclease is derived from the PAM). It combines the spacer,
+    sequence, and PAM descriptions.
 
     Returns:
         An HTML Li element containing the step 1 description.
     """
     return html.Li(
         [
-            html.Strong("STEP 1: Spacer, Cas Protein and PAM selection"),
+            html.Strong("STEP 1: Spacer and PAM selection"),
             html.Ul(
                 [
                     homepage_spacer_(),  # spacer description
@@ -255,7 +256,8 @@ def homepage_thresholds_() -> html.Li:
             (
                 "By default CRISPRme+ uses a single \"Maximum edits\" slider — the "
                 "total number of differences (mismatches + DNA/RNA bulges) allowed "
-                "between a guide and an off-target (default 3, raise for a deeper, "
+                "between a guide and an off-target (default 6, which resolves to 4 "
+                "mismatches + 1 DNA + 1 RNA bulge; raise for a deeper, "
                 "slower search). The precomputed indexes support up to 2 bulges of "
                 "each type. Open \"Advanced options\" to set the per-type mismatch / "
                 "DNA-bulge / RNA-bulge caps individually instead. Use the single "
@@ -285,7 +287,8 @@ def homepage_baseediting_() -> html.Li:
         [
             html.Strong("Base editing thresholds (optional): "),
             (
-                "When a base editor is selected as the Cas protein, CRISPRme "
+                "When base editing is enabled (a Yes/No option, independent of the "
+                "PAM/nuclease), CRISPRme "
                 "allows users to define a window for base editing susceptibility. "
                 "The “Window start” and “Window stop” dropdowns, constrained by "
                 "the length of the input guide, specify the region where the "
@@ -564,6 +567,14 @@ def resultspage_table_() -> html.P:
                             "Score quantifies a guide RNA's affinity for off-target "
                             "sites, indicating the likelihood of unintended cleavage "
                             "events.",
+                        ]
+                    ),
+                    html.Li(
+                        [
+                            html.Strong("CRISPR-Bulge: "),
+                            "A deep-learning, bulge-aware off-target activity score "
+                            "(Yaish & Orenstein, NAR 2024) reported alongside CFD. "
+                            "Off-targets with 2 or more bulges are shown as \"-\" (N/A).",
                         ]
                     ),
                     html.Li(

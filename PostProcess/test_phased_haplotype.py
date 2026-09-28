@@ -77,14 +77,14 @@ def _load_pure_functions(global_overrides):
             break  # first side-effecting statement of the module body -> stop
         keep.append(node)
     module = ast.Module(body=keep, type_ignores=[])
-    # The kept prologue imports numpy / pandas / CRISTA_score at module top, but
+    # The kept prologue imports numpy / pandas / CRISPR_BULGE_score at module top, but
     # iupac_decomposition uses NONE of them at runtime. The light unit-tests CI env
     # has no numpy/pandas/scientific stack (the other PostProcess tests are
     # stdlib-only by design), so exec would die on `import numpy`. Inject harmless
     # stubs ONLY when the real package is unavailable — a full local env keeps using
     # the real ones. (This is exactly why the suite passed locally but failed in CI.)
     for _name, _attrs in (("numpy", ()), ("pandas", ()),
-                          ("CRISTA_score", ("CRISTA_predict_list",))):
+                          ("CRISPR_BULGE_score", ("CRISPR_BULGE_predict_list",))):
         try:
             __import__(_name)
         except Exception:

@@ -100,7 +100,7 @@ def risk_score() -> None:
     """
     report_fname, report_outfname, alternative = sys.argv[1:4]  # read input args
     alternative = alternative == "True"  # are primary or alternative targets?
-    # compute risk score on CFD/CRISTA
+    # compute risk score on CFD/CRISPR-Bulge
     compute_risk_score(report_fname, report_outfname, alternative)
 
 

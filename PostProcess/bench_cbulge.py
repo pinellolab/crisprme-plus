@@ -8,7 +8,7 @@ Answers the gate questions for REPLACE / ALONGSIDE / NO-GO:
     at batch sizes {1k, 10k, 100k, 1M} on CPU (thread sweep) and GPU
   * accuracy: reproduce the ensemble AUPR on Refined_TrueOT (validates that the
     vendored weights + our encoding path are wired correctly) + a CFD anchor on
-    the same set, split out on the bulge-containing subset (where CRISTA/CFD are
+    the same set, split out on the bulge-containing subset (where CRISPR-Bulge/CFD are
     known-weak and CRISPR-Bulge is claimed to win).
 
 Run from the CRISPR-Bulge repo root inside the cbulge env:

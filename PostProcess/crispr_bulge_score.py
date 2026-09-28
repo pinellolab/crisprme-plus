@@ -2,9 +2,9 @@
 """
 CRISPR-Bulge off-target scorer — standalone prototype (Phase 1).
 
-Mirrors the CRISTA batch contract (`CRISTA_score.CRISTA_predict_list`) so it can
+Mirrors the CRISPR-Bulge batch contract (`CRISPR_BULGE_score.CRISPR_BULGE_predict_list`) so it can
 drop into `calculate_scores` behind the scorer-runner, EXCEPT it needs no 29-nt
-genomic context (CRISTA computes DNAshape over flanks; CRISPR-Bulge scores the
+genomic context (CRISPR-Bulge computes DNAshape over flanks; CRISPR-Bulge scores the
 aligned pair alone):
 
     CRISPR_BULGE_predict_list(sgseq_aligned_list, offseq_aligned_list) -> list[float]

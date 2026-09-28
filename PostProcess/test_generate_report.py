@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unit test for the shareable-report generator (PostProcess/generate_report.py).
 
-Builds a tiny integrated_results fixture (dict-based schema with CRISTA + PAM
+Builds a tiny integrated_results fixture (dict-based schema with CRISPR-Bulge + PAM
 creation + annotation columns GENCODE/gene/distance/ENCODE/DHS, header names only
 for the columns the report reads) and asserts that build_report produces a ZIP
 that flat-decompresses to report.html + the RAW integrated_results.tsv.gz + the
@@ -15,8 +15,8 @@ HTML is a self-contained IND-briefing-book digest (report v2.4):
   * the canonical partition invariant holds:
     variant-created + reference + on-target == total EXACTLY,
   * SECTION 2: exactly FOUR ref/alt scatter panels are embedded as inline base64
-    SVGs when CRISTA is computed (by CFD, by CFD delta, by CRISTA, by CRISTA
-    delta); 2 panels when CRISTA is absent,
+    SVGs when CRISPR-Bulge is computed (by CFD, by CFD delta, by CRISPR-Bulge, by CRISPR-Bulge
+    delta); 2 panels when CRISPR-Bulge is absent,
   * CURATED COLUMNS (report v2.4): ONE curated column set is shared by BOTH the
     in-report top-1000 table AND every download file (top1000.tsv,
     panel_top100.tsv, per-tier tsvs). The table shows the annotation columns
@@ -70,8 +70,8 @@ except Exception as exc:  # noqa: BLE001 - any import failure => skip, not fail
 # reference off-targets and three variant-created ones (one multi-SNP haplotype
 # with comma-joined rsID/MAF/samples), plus one on-target (mm+b == 0) that must
 # be excluded from the top-N by the mm+b > 1 filter. The schema includes the
-# highest_CFD projection (with CFD REF/ALT + PAM creation) and the highest_CRISTA
-# projection (non-empty), so the report emits the CRISTA scatter + CRISTA column.
+# highest_CFD projection (with CFD REF/ALT + PAM creation) and the highest_CRISPR_BULGE
+# projection (non-empty), so the report emits the CRISPR-Bulge scatter + CRISPR-Bulge column.
 _HEADER = [
     "Spacer+PAM",
     "Chromosome",
@@ -92,12 +92,12 @@ _HEADER = [
     "Variant_MAF_(highest_CFD)",
     "Variant_rsID_(highest_CFD)",
     "Variant_samples_(highest_CFD)",
-    "CRISTA_score_(highest_CRISTA)",
-    "CRISTA_score_REF_(highest_CRISTA)",
-    "CRISTA_score_ALT_(highest_CRISTA)",
-    "Variant_MAF_(highest_CRISTA)",
-    "Variant_rsID_(highest_CRISTA)",
-    "Variant_samples_(highest_CRISTA)",
+    "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+    "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)",
+    "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)",
+    "Variant_MAF_(highest_CRISPR_BULGE)",
+    "Variant_rsID_(highest_CRISPR_BULGE)",
+    "Variant_samples_(highest_CRISPR_BULGE)",
     "Not_found_in_REF",
     "Annotation_GENCODE",
     "Annotation_closest_gene_name",
@@ -111,8 +111,8 @@ _GUIDE = "CTCTCAGCTGGTACACGGCANNN"
 
 # columns: guide, chrom, pos, strand, aln_ref, aln_alt, pam, mm, bul, mmb,
 #          origin, pam_creation, cfd, cfd_ref, cfd_alt, var_genome, maf, rsid,
-#          samples, crista, crista_ref, crista_alt, crista_maf, crista_rsid,
-#          crista_samples, not_in_ref, GENCODE, gene, dist, ENCODE, DHS, COSMIC
+#          samples, crispr_bulge, crispr_bulge_ref, crispr_bulge_alt, crispr_bulge_maf, crispr_bulge_rsid,
+#          crispr_bulge_samples, not_in_ref, GENCODE, gene, dist, ENCODE, DHS, COSMIC
 _ROWS = [
     # on-target (mm+b == 0) -> excluded from top-N; counted as 1 on-target
     [_GUIDE, "chr2", "100", "+", "CTCTCAGCTGGTACACGGCATGG", "NA", "TGG",
@@ -217,7 +217,7 @@ class TestGenerateReport(unittest.TestCase):
         # ONLY report.html at the top level; every other bundled file under data/.
         # For this fixture (5 off-targets):
         #   CFD>= 0.5/0.2/0.05  -> all non-empty (0.1 tier removed)
-        #   CRISTA>= 0.6/0.4/0.2 -> all non-empty (fixture has CRISTA)
+        #   CRISPR-Bulge>= 0.5/0.2/0.1 -> all non-empty (fixture has CRISPR-Bulge)
         #   mm+b<= 1/2/3/4      -> 0/2/4/5 (mmb_le_1 is EMPTY -> not bundled)
         #   variant_created     -> 3
         self.assertEqual(
@@ -227,14 +227,14 @@ class TestGenerateReport(unittest.TestCase):
                 "data/integrated_results.tsv.gz",
                 "data/run_manifest.json",  # IND traceability manifest
                 "data/top1000.tsv",
-                "data/top1000_crista.tsv",  # CRISTA-ranked companion
+                "data/top1000_crispr_bulge.tsv",  # CRISPR-Bulge-ranked companion
                 "data/panel_top100.tsv",
                 "data/cfd_ge_0.50.tsv",
                 "data/cfd_ge_0.20.tsv",
                 "data/cfd_ge_0.05.tsv",
-                "data/crista_ge_0.60.tsv",  # CRISTA-appropriate tiers (not CFD's)
-                "data/crista_ge_0.40.tsv",
-                "data/crista_ge_0.20.tsv",
+                "data/crispr_bulge_ge_0.50.tsv",  # CRISPR-Bulge-appropriate tiers (not CFD's)
+                "data/crispr_bulge_ge_0.20.tsv",
+                "data/crispr_bulge_ge_0.10.tsv",
                 "data/mmb_le_2.tsv",
                 "data/mmb_le_3.tsv",
                 "data/mmb_le_4.tsv",
@@ -250,7 +250,7 @@ class TestGenerateReport(unittest.TestCase):
     def test_pertier_downloads_are_curated_and_linked(self):
         _, names, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
-        expected_curated = gr.curated_headers(has_crista=True)
+        expected_curated = gr.curated_headers(has_crispr_bulge=True)
         # every bundled per-tier / panel / top1000 TSV uses the SAME curated header
         for fname in (
             "top1000.tsv", "panel_top100.tsv",
@@ -272,27 +272,72 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIn(ann, expected_curated)
 
     def test_curated_column_list_is_the_shared_set(self):
-        # the ONE curated set, with CRISTA when computed
+        # the ONE curated set, with CRISPR-Bulge when computed
         self.assertEqual(
-            gr.curated_headers(has_crista=True),
+            gr.curated_headers(has_crispr_bulge=True),
             [
                 "rank", "Chromosome", "Position", "Strand",
                 "Aligned_protospacer+PAM", "Mismatches", "Bulges",
-                "Mismatches+bulges", "Perfect_match", "CFD", "CRISTA",
+                "Mismatches+bulges", "Perfect_match", "CFD", "CRISPR-Bulge",
                 "REF/ALT_origin",
                 "PAM_creation", "Variant", "Observed", "MAF", "Gene", "Gene_distance_kb",
-                "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
+                "Gene_region", "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
                 "IntOGen_cancer_driver",
                 "High_complexity_region",
             ],
         )
-        # CRISTA is dropped when not computed (else identical)
-        no_crista = gr.curated_headers(has_crista=False)
-        self.assertNotIn("CRISTA", no_crista)
+        # CRISPR-Bulge is dropped when not computed (else identical)
+        no_crispr_bulge = gr.curated_headers(has_crispr_bulge=False)
+        self.assertNotIn("CRISPR-Bulge", no_crispr_bulge)
         self.assertEqual(
-            [c for c in gr.curated_headers(has_crista=True) if c != "CRISTA"],
-            no_crista,
+            [c for c in gr.curated_headers(has_crispr_bulge=True) if c != "CRISPR-Bulge"],
+            no_crispr_bulge,
         )
+
+    def test_gene_region_class_collapses_gencode_featureset(self):
+        # Gene_region collapses the verbose GENCODE feature-set to ONE most-severe
+        # class (CDS > 5'UTR > 3'UTR > exon > intron > intergenic).
+        cases = [
+            ("CDS,exon,gene,transcript(-)", "CDS"),
+            ("exon,five_prime_UTR,gene,transcript(+)", "5'UTR"),
+            ("exon,gene,three_prime_UTR,transcript(-)", "3'UTR"),
+            ("exon,gene,transcript(+)", "exon"),          # exon w/o CDS/UTR
+            ("gene,transcript(+)", "intron"),             # in gene body, no exon
+            ("transcript(+),transcript(-)", "intron"),
+            ("intergenic", "intergenic"),
+            ("start_codon,CDS,exon,gene,transcript(+)", "CDS"),
+            ("stop_codon_redefined_as_selenocysteine,CDS,gene", "CDS"),
+            ("NA", gr.CURATED_MISSING),
+            ("", gr.CURATED_MISSING),
+        ]
+        for gencode, expected in cases:
+            self.assertEqual(gr._gene_region_class(gencode), expected, gencode)
+
+    def test_gene_region_intergenic_pinned_to_distance(self):
+        # intergenic is defined by Gene_distance_kb > 0 so Gene_region never
+        # contradicts the Gene_distance_kb column, even when the (comprehensive)
+        # GENCODE set shows a non-coding transcript overlap far from a coding gene.
+        self.assertEqual(gr._gene_region_class("gene,transcript(+)", gene_dist="2.3"),
+                         "intergenic")
+        # dist == 0 -> sub-region read from GENCODE
+        self.assertEqual(gr._gene_region_class("CDS,exon,gene", gene_dist="0.0"), "CDS")
+        self.assertEqual(gr._gene_region_class("gene,transcript(-)", gene_dist="0.0"),
+                         "intron")
+        # no distance available -> fall back to pure GENCODE derivation
+        self.assertEqual(gr._gene_region_class("CDS,exon,gene"), "CDS")
+
+    def test_gene_region_curated_cell_reads_gencode_source(self):
+        # the 'gene_region' curated cell derives from GENCODE + distance columns
+        cols = {"gene_region": "Annotation_GENCODE",
+                "gene_dist": "Annotation_closest_gene_distance_(kb)"}
+        row_in = {"Annotation_GENCODE": "CDS,exon,gene",
+                  "Annotation_closest_gene_distance_(kb)": "0.0"}
+        self.assertEqual(gr._curated_cell("gene_region", row_in, cols), "CDS")
+        row_far = {"Annotation_GENCODE": "gene,transcript(-)",
+                   "Annotation_closest_gene_distance_(kb)": "2.3"}
+        self.assertEqual(gr._curated_cell("gene_region", row_far, cols), "intergenic")
+        # missing GENCODE source -> "-"
+        self.assertEqual(gr._curated_cell("gene_region", {}, {}), gr.CURATED_MISSING)
 
     def test_high_complexity_region_flag_projection(self):
         # the curated cell renders the integrated_results note as "N in window"
@@ -556,7 +601,7 @@ class TestGenerateReport(unittest.TestCase):
             lines = handle.read().strip().splitlines()
         # header is now the CURATED set (rank first), NOT the raw Spacer+PAM dump
         header = lines[0].split("\t")
-        self.assertEqual(header, gr.curated_headers(has_crista=True))
+        self.assertEqual(header, gr.curated_headers(has_crispr_bulge=True))
         self.assertEqual(header[0], "rank")
         self.assertNotIn("Spacer+PAM", lines[0])
         # header + the 5 off-targets (on-target mm+b==0 filtered out)
@@ -683,7 +728,7 @@ class TestGenerateReport(unittest.TestCase):
         )
         self.assertEqual(pm_cell, int(ontarget.sum()))
 
-    def test_section2_four_scatter_panels_when_crista_present(self):
+    def test_section2_four_scatter_panels_when_crispr_bulge_present(self):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
         # strip the branding logo <img> so we count only PLOT images
@@ -696,30 +741,30 @@ class TestGenerateReport(unittest.TestCase):
         for encoded in imgs:
             raw = base64.b64decode(encoded)
             self.assertTrue(raw[:5] == b"<?xml" or b"<svg" in raw[:256])
-        # exactly the FOUR panel titles are present because CRISTA is computed
+        # exactly the FOUR panel titles are present because CRISPR-Bulge is computed
         self.assertIn("By CFD score", html)
         self.assertIn("By variant effect (CFD ALT - REF delta)", html)
-        self.assertIn("By CRISTA score", html)
-        self.assertIn("By variant effect (CRISTA)", html)
+        self.assertIn("By CRISPR-Bulge score", html)
+        self.assertIn("By variant effect (CRISPR-Bulge)", html)
 
-        # and the count is driven by crista_computed(): count scatter <h3> panels
+        # and the count is driven by crispr_bulge_computed(): count scatter <h3> panels
         import pandas as pd
 
         df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
         cols = gr._resolve(df.columns, list(gr._COLS.keys()))
-        self.assertTrue(gr.crista_computed(df, cols))
-        panels = gr.plot_scatter_panels(df, cols, n=1000, include_crista=True)
+        self.assertTrue(gr.crispr_bulge_computed(df, cols))
+        panels = gr.plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=True)
         self.assertEqual(len(panels), 4)
 
-    def test_section2_two_scatter_panels_when_crista_absent(self):
-        # blank out every CRISTA score -> crista_computed() False -> 2 panels
+    def test_section2_two_scatter_panels_when_crispr_bulge_absent(self):
+        # blank out every CRISPR-Bulge score -> crispr_bulge_computed() False -> 2 panels
         import pandas as pd
 
         df = pd.read_csv(self.tsv, sep="\t", dtype=str, na_filter=False)
         cols = gr._resolve(df.columns, list(gr._COLS.keys()))
-        df[cols["crista"]] = ""
-        self.assertFalse(gr.crista_computed(df, cols))
-        panels = gr.plot_scatter_panels(df, cols, n=1000, include_crista=False)
+        df[cols["crispr_bulge"]] = ""
+        self.assertFalse(gr.crispr_bulge_computed(df, cols))
+        panels = gr.plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False)
         self.assertEqual(len(panels), 2)
         titles = [p[0] for p in panels]
         self.assertEqual(
@@ -768,7 +813,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(gr.PANEL_FLOOR_CFD, 0.5)
         self.assertEqual(
             gr.PANEL_WORSTCASE_METRICS,
-            (("cfd", "desc"), ("crista", "desc"), ("mmb", "asc")),
+            (("cfd", "desc"), ("crispr_bulge", "desc"), ("mmb", "asc")),
         )
 
     def test_section4_hybrid_selection_and_cap(self):
@@ -777,11 +822,11 @@ class TestGenerateReport(unittest.TestCase):
 
         header = list(_HEADER)
 
-        def _row(chrom, mm, b, cfd, crista, notref):
+        def _row(chrom, mm, b, cfd, crispr_bulge, notref):
             r = ["G", chrom, "1", "+", "AAA", "AAA", "GGG", str(mm), str(b),
                  str(mm + b), notref and "alt" or "ref", "NA",
                  f"{cfd}", f"{cfd}", f"{cfd}", "NA", "NA", "NA", "NA",
-                 f"{crista}", f"{crista}", f"{crista}", "NA", "NA", "NA",
+                 f"{crispr_bulge}", f"{crispr_bulge}", f"{crispr_bulge}", "NA", "NA", "NA",
                  "y" if notref else "NA", "NA", "GENE", "1.0", "NA", "NA"]
             return r
 
@@ -789,7 +834,7 @@ class TestGenerateReport(unittest.TestCase):
             _row("chrON", 0, 0, 1.0, 1.0, False),    # perfect match -> forced to top
             _row("chrCFD", 3, 2, 0.99, 0.10, True),  # HARD (CFD>=0.5)
             _row("chrMMB", 2, 0, 0.10, 0.10, False), # HARD (mm+b<=2)
-            _row("chrCRI", 4, 3, 0.10, 0.99, True),  # not hard; worst by CRISTA
+            _row("chrCRI", 4, 3, 0.10, 0.99, True),  # not hard; worst by CRISPR-Bulge
             _row("chrLOW", 6, 4, 0.05, 0.05, False), # low by every metric
         ]
         tsv = os.path.join(self.tmp, "wc.tsv")
@@ -804,7 +849,7 @@ class TestGenerateReport(unittest.TestCase):
         chroms = list(panel[cols["chrom"]])
         # perfect match (mm+b==0) is FORCED to the top of the panel (candidate cut site)
         self.assertEqual(chroms[0], "chrON")
-        # hard-includes always present; CRISTA-only site enters via the fill ranks
+        # hard-includes always present; CRISPR-Bulge-only site enters via the fill ranks
         self.assertIn("chrCFD", chroms)
         self.assertIn("chrMMB", chroms)
         self.assertIn("chrCRI", chroms)
@@ -854,11 +899,11 @@ class TestGenerateReport(unittest.TestCase):
         import pandas as pd, os
         header = list(_HEADER)
 
-        def _row(chrom, mm, b, cfd, crista, notref):
+        def _row(chrom, mm, b, cfd, crispr_bulge, notref):
             return ["G", chrom, "1", "+", "AAA", "AAA", "GGG", str(mm), str(b),
                     str(mm + b), notref and "alt" or "ref", "NA",
                     f"{cfd}", f"{cfd}", f"{cfd}", "NA", "NA", "NA", "NA",
-                    f"{crista}", f"{crista}", f"{crista}", "NA", "NA", "NA",
+                    f"{crispr_bulge}", f"{crispr_bulge}", f"{crispr_bulge}", "NA", "NA", "NA",
                     "y" if notref else "NA", "NA", "GENE", "1.0", "NA", "NA"]
 
         rows = [
@@ -975,13 +1020,13 @@ class TestGenerateReport(unittest.TestCase):
         html = self._read(os.path.join(extract, "report.html"))
         self.assertIn('class="ottable"', html)
         # the table now renders the CURATED headers (shared with downloads),
-        # including PAM_creation + CRISTA (computed) AND the ANNOTATION columns
-        for hdr in gr.curated_headers(has_crista=True):
+        # including PAM_creation + CRISPR-Bulge (computed) AND the ANNOTATION columns
+        for hdr in gr.curated_headers(has_crispr_bulge=True):
             self.assertIn(f"<th>{hdr}</th>", html)
         for ann in ("Gene", "Gene_distance_kb", "GENCODE", "ENCODE", "DHS"):
             self.assertIn(f"<th>{ann}</th>", html)
         self.assertIn("<th>PAM_creation</th>", html)
-        self.assertIn("<th>CRISTA</th>", html)
+        self.assertIn("<th>CRISPR-Bulge</th>", html)
         # the annotation VALUES from the fixture render in the table body
         tbody = html.split('class="ottable"')[-1].split("<tbody>")[-1].split("</tbody>")[0]
         for val in ("promoter", "enhancer", "DHS_3", "DHS_5", "exon", "lincRNA"):
@@ -998,7 +1043,7 @@ class TestGenerateReport(unittest.TestCase):
         """The in-report table AND every download expose the SAME curated set."""
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
-        curated = gr.curated_headers(has_crista=True)
+        curated = gr.curated_headers(has_crispr_bulge=True)
         # table header order == curated order
         thead = html.split('class="ottable"')[-1].split("<thead>")[-1].split("</thead>")[0]
         table_headers = re.findall(r"<th>([^<]+)</th>", thead)
@@ -1108,7 +1153,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertNotIn("Finest allele-frequency resolution", html)
         # the MAF footnote now explains the 1e-05 DISPLAY floor
         self.assertIn("display floor of 1&times;10<sup>&minus;5</sup>", html)
-        # captions no longer use the "paper-style" jargon; CRISTA panel references CFD
+        # captions no longer use the "paper-style" jargon; CRISPR-Bulge panel references CFD
         self.assertNotIn("paper-style", html)
         self.assertIn("the same ref/alt scatter as for the cfd score", html.lower())
 
@@ -1179,7 +1224,10 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIn(k, m)
         self.assertIn("max_total_edits", m["search"])
         self.assertIn("off_targets", m["counts"])
-        self.assertIn("v2.8.2", m["crispritz_note"])  # engine version recorded
+        self.assertIn("v2.8.3", m["crispritz_note"])  # engine version recorded
+        # report_generator tracks the crisprme version (not a stale hard-coded string)
+        self.assertTrue(m.get("report_generator", "").startswith("v"))
+        self.assertNotIn("2.4", m["crispritz_note"])  # no stale v2.4.0-image reference
 
     def test_pipeline_no_readonly_or_bare_relative_writes(self):
         """Regression guard for the read-only-container bug: the search pipeline must
@@ -1195,7 +1243,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn('[ -w "$6" ]', src)
 
     def test_persona_audit_report_additions(self):
-        """Scores/columns legend (CFD/CRISTA + citations + alignment notation),
+        """Scores/columns legend (CFD/CRISPR-Bulge + citations + alignment notation),
         'What to do next' box, per-guide max-edits caveat, and the perfect-match
         banner's REF/ALT origin tag."""
         _, _, extract = self._build_and_extract()
@@ -1204,7 +1252,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("scores, columns", html.lower())          # section 7 retitle
         self.assertIn("Cutting Frequency Determination", html)   # CFD defined
         self.assertIn("Doench", html)                            # CFD citation
-        self.assertIn("Abadi", html)                             # CRISTA citation
+        self.assertIn("Orenstein", html)                         # CRISPR-Bulge citation
         self.assertIn("extrapolation beyond the model", html)    # bulge caveat
         self.assertIn("lowercase</b> = a mismatch", html)        # alignment notation
         # "What to do next" box
