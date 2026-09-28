@@ -93,6 +93,24 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Compute image tags
+        id: tags
+        # Always publish the exact version tag. Only move :latest for FINAL releases
+        # (a tag with no '-' suffix). Pre-release tags like v2.6.1-rc1 / v2.6.0-gpu-rc1
+        # publish only their own tag, so an RC never clobbers the default :latest.
+        run: |
+          REF="${{ github.ref_name }}"
+          TAGS="pinellolab/crisprme:${REF}"
+          case "$REF" in
+            *-*) echo "pre-release '$REF': NOT updating :latest" ;;
+            *)   TAGS="${TAGS}"$'\n'"pinellolab/crisprme:latest" ;;
+          esac
+          {
+            echo "list<<__EOF__"
+            echo "$TAGS"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v6
         with:
@@ -100,6 +118,4 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            pinellolab/crisprme:latest
-            pinellolab/crisprme:${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs.list }}
