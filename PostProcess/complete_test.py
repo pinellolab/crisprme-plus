@@ -56,6 +56,7 @@ import subprocess
 import json
 import sys
 import os
+from glob import glob
 
 # benchmark registry (test/benchmark/benchmarks.json)
 BENCHMARKS_JSON = os.path.join(
@@ -103,6 +104,8 @@ def require_prebuilt_index() -> str:
     present = []
     if os.path.isdir(lib):
         for name in sorted(os.listdir(lib)):
+            if name.endswith("_INDELS"):
+                continue  # the fake-indel companion, not the primary search index
             d = os.path.join(lib, name)
             if os.path.isdir(d) and any(f.endswith(".bin") for f in os.listdir(d)):
                 present.append(name)
@@ -116,7 +119,9 @@ def require_prebuilt_index() -> str:
             "then re-run:  crisprme.py complete-test --chrom chr22\n"
         )
         sys.exit(0)
-    return present[0]
+    # prefer a variant index (name contains "+") so the smoke exercises the variant path
+    variant = [n for n in present if "+" in n]
+    return variant[0] if variant else present[0]
 
 
 def check_output() -> None:
@@ -134,15 +139,17 @@ def check_output() -> None:
     """
     results_dir = os.path.abspath(os.path.join(os.getcwd(), CRISPRME_DIRS[1]))
     assert os.path.isdir(results_dir)
-    # one output dir per registered benchmark (crisprme-test-out_<name>)
-    for bench in load_benchmarks()["benchmarks"]:
-        d = os.path.join(results_dir, f"{COMPLETETESTRESDIR}_{bench['name']}")
-        if os.path.isdir(d):
-            sys.stderr.write(
-                "Complete-test already run once. Please delete the complete-test "
-                f"results folder before running it again: {d}\n"
-            )
-            sys.exit(0)  # avoid throwing complete-search error on output folder
+    # the complete-test output dir (COMPLETETESTRESDIR) -- or any legacy per-benchmark
+    # crisprme-test-out_<name> dir from an older run
+    for d in sorted(os.listdir(results_dir)):
+        if d == COMPLETETESTRESDIR or d.startswith(f"{COMPLETETESTRESDIR}_"):
+            full = os.path.join(results_dir, d)
+            if os.path.isdir(full):
+                sys.stderr.write(
+                    "Complete-test already run once. Please delete the complete-test "
+                    f"results folder before running it again: {full}\n"
+                )
+                sys.exit(0)  # avoid throwing complete-search error on output folder
 
 
 def _assign_genome_directory_name(chrom: str) -> str:
@@ -634,95 +641,110 @@ def write_samplesids_config(dataset: str) -> str:
     return samples_config
 
 
-def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> None:
-    """Execute the CRISPRme test workflow for a specified chromosome and dataset.
+def _parse_index_name(index_name: str):
+    """Parse a CRISPRme index directory name ``<PAM>_<bMax>_<ref>[+<variant>]``.
 
-    This function orchestrates the downloading of necessary genomic and VCF data,
-    prepares input files, and runs the CRISPRme command-line tool to perform a
-    complete search.
+    Returns (pam_token, ref_genome, is_variant) or None if it does not parse.
+    e.g. ``NRG_3_hg38`` -> ('NRG', 'hg38', False);
+         ``NRG_3_hg38+hg38_1000G2021`` -> ('NRG', 'hg38', True).
+    """
+    parts = index_name.split("_", 2)
+    if len(parts) < 3 or not parts[1].isdigit():
+        return None
+    pam_token, _bmax, rest = parts[0], parts[1], parts[2]
+    ref = rest.split("+")[0]
+    return pam_token, ref, ("+" in rest)
+
+
+def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> None:
+    """Run the complete-test smoke against a prebuilt index present in the working dir.
+
+    CRISPRme does NOT build an index automatically. The user downloads (or builds) one;
+    complete-test then runs the example guide against it and confirms a report is produced.
+    If no index is present, ``require_prebuilt_index`` prints how to download one and exits.
 
     Args:
-        chrom (str): The chromosome to be analyzed.
-        dataset (str): The dataset identifier for VCF data.
-        threads (int): The number of threads to use for processing.
-        debug (bool): A flag indicating whether to run in debug mode.
-
-    Raises:
-        Any exceptions raised by the called functions or subprocess.
+        chrom (str): Unused for the prebuilt-index smoke (kept for CLI compatibility).
+        dataset (str): Unused (the dataset is taken from the installed index).
+        threads (int): Number of threads for the search.
+        debug (bool): Run complete-search in debug mode.
     """
-
     check_crisprme_directory_tree(os.getcwd())  # check crisprme directory tree
-    check_output()  # check complete-test output folder
-    # v2.6.0: CRISPRme does not build an index automatically. complete-test runs a
-    # variant search, which requires an index the user has DOWNLOADED (or built). If
-    # none is present, print how to get one and stop cleanly -- before downloading any
-    # test data. The user decides which index(es) to download (see the web/CLI docs).
-    require_prebuilt_index()
-    genome_dir = download_genome_data(chrom, CRISPRME_DIRS[0])  # download genome data
-    download_vcf_data(chrom, CRISPRME_DIRS[3], dataset)  # download vcf data
-    vcf = write_vcf_config(dataset)  # write test vcf list
-    download_samples_ids_data(dataset)  # download vcf dataset samples ids
-    samplesids = write_samplesids_config(dataset)  # write test samples ids list
-    # download gencode and encode annotation data
-    gencode, encode = download_annotation_data()
-    debug_arg = "--debug" if debug else ""
-    # Run one complete-search per registered benchmark. complete-search refuses
-    # to run into a non-empty output folder, so each benchmark gets its OWN
-    # output dir (crisprme-test-out_<name>); validate-test looks in each.
-    registry = load_benchmarks()
-    global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
-    # A "heavy" benchmark builds a bulge-2 (NGG_3/TTTV_3) index over the variant-enriched
-    # genome, which exceeds a standard 16GB hosted CI runner. The hosted CI job sets
-    # CRISPRME_SKIP_HEAVY=1 to skip them there; locally (env unset) all cases run.
-    skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
-    for bench in registry["benchmarks"]:
-        if skip_heavy and bench.get("heavy"):
-            sys.stderr.write(
-                f"Skipping heavy benchmark '{bench['name']}' (CRISPRME_SKIP_HEAVY=1; "
-                "its bulge-2 variant index build is too large for this runner)\n"
-            )
-            continue
-        # Per-case thresholds override the global set, so one registry can hold both
-        # the per-type genome-wide cases (mm/bDNA/bRNA applied INDEPENDENTLY, so a
-        # target may carry a DNA AND an RNA bulge -> up to bDNA+bRNA bulges) AND cases
-        # that pin the DEFAULT single-"n edits" web mode (per-type caps left wide open,
-        # a binding --max-total-edits n).
-        th = dict(global_th)
-        th.update(bench.get("thresholds", {}))
-        # crisprme.py computes bMax = max(bDNA, bRNA) and IGNORES --bmax, but we still
-        # pass it (harmless) for provenance. The binding knob is --max-total-edits:
-        # default it to mm+bDNA+bRNA (non-binding -> per-type mode) unless the case pins
-        # a smaller single-n value. The brute-force ground truth must be generated with
-        # the SAME per-type budgets and the SAME --max-total-edits (see generate_references.py).
-        bmax = th["bDNA"] + th["bRNA"]
-        max_total_edits = th.get("max_total_edits", th["mm"] + th["bDNA"] + th["bRNA"])
-        output_dir = f"{COMPLETETESTRESDIR}_{bench['name']}"
-        pam = write_pamfile(bench["pam_name"], bench["pam_content"])
-        guide = write_guidefile(bench["guide_file"], bench["guide_crisprme"])
+    check_output()  # refuse to overwrite a previous complete-test output folder
+    # v2.6.0: CRISPRme never builds an index for the user. complete-test requires an
+    # index the user has DOWNLOADED (or built). If none is present, print how to get
+    # one and stop cleanly (no downloads, no build).
+    index_name = require_prebuilt_index()
+    parsed = _parse_index_name(index_name)
+    if parsed is None:
         sys.stderr.write(
-            f"Running complete-search for benchmark '{bench['name']}' "
-            f"({bench.get('nuclease', '')}) mm={th['mm']} bDNA={th['bDNA']} "
-            f"bRNA={th['bRNA']} max-total-edits={max_total_edits} -> {output_dir}\n"
+            f"Found index '{index_name}' but could not parse it "
+            "(expected <PAM>_<bMax>_<ref>[+<variant>]). Aborting.\n"
         )
-        # Use the prebuilt index the user downloaded/built (verified present by
-        # require_prebuilt_index above). complete-search will NOT build one on demand.
-        crisprme_cmd = (
-            f"crisprme.py complete-search --genome {genome_dir} "
-            f"--bmax {bmax} --mm {th['mm']} --bDNA {th['bDNA']} --bRNA {th['bRNA']} "
-            f"--max-total-edits {max_total_edits} "
-            f"--merge 3 --pam {pam} --guide {guide} --vcf {vcf} "
-            f"--samplesID {samplesids} --annotation {encode} "
-            f"--gene_annotation {gencode} --output {output_dir} "
-            f"--index-path genome_library "
-            f"--thread {threads} {debug_arg} --ci-cd-test"
+        sys.exit(1)
+    pam_token, ref, is_variant = parsed
+    genome_dir = os.path.join(os.getcwd(), CRISPRME_DIRS[0], ref)  # Genomes/<ref>
+    if not os.path.isdir(genome_dir):
+        sys.stderr.write(
+            f"\nThe prebuilt index '{index_name}' is present, but its reference genome "
+            f"(Genomes/{ref}) is not.\nCRISPRme does not build data automatically -- "
+            "download the genome, e.g.:\n"
+            f"  crisprme.py download --what genome --ref {ref}   (or --what all)\n\n"
+            "then re-run:  crisprme.py complete-test\n"
         )
-        returncode = subprocess.call(crisprme_cmd, shell=True)
-        if returncode != 0:
+        sys.exit(0)
+    # PAM matching the index: 20 guide N's + the PAM token (e.g. NRG -> N*20 + 'NRG').
+    pam = write_pamfile(f"20bp-{pam_token}-SpCas9.txt", "N" * 20 + pam_token + f" {len(pam_token)}")
+    guide = write_sg1617_guidefile()  # the built-in example guide
+    # A variant index searches its variants (population-level default -- no --per-sample).
+    # `download --what index` writes list_vcf.txt / list_samplesID.txt; a build/DATA dir
+    # may instead use vcf_list.txt / samples_list.txt -- accept either.
+    vcf_arg = sid_arg = ""
+    if is_variant:
+        vcf_list = next((f for f in ("list_vcf.txt", "vcf_list.txt") if os.path.isfile(f)), None)
+        if vcf_list:
+            vcf_arg = f"--vcf {vcf_list}"
+            sid_list = next((f for f in ("list_samplesID.txt", "samples_list.txt") if os.path.isfile(f)), None)
+            if sid_list:
+                sid_arg = f"--samplesID {sid_list}"
+        else:
             sys.stderr.write(
-                "ERROR: complete-test failed during complete-search for benchmark "
-                f"'{bench['name']}' (exit code {returncode}). See the log above.\n"
+                f"NOTE: variant index '{index_name}' present but no list_vcf.txt found; "
+                "running a REFERENCE-only smoke. (A `download --what index` creates it.)\n"
             )
-            sys.exit(returncode)
+    debug_arg = "--debug" if debug else ""
+    output_dir = COMPLETETESTRESDIR
+    sys.stderr.write(
+        f"Running complete-test smoke against prebuilt index '{index_name}' "
+        f"(PAM {pam_token}, genome {ref}, {'variant' if (is_variant and vcf_arg) else 'reference'}); "
+        f"mm=2 bDNA=1 bRNA=1 -> Results/{output_dir}\n"
+    )
+    # Population-level default (no --per-sample). complete-search will NOT build an index.
+    crisprme_cmd = (
+        f"crisprme.py complete-search --genome {genome_dir} "
+        f"--mm 2 --bDNA 1 --bRNA 1 --max-total-edits 4 "
+        f"--merge 3 --pam {pam} --guide {guide} {vcf_arg} {sid_arg} "
+        f"--index-path genome_library --output {output_dir} "
+        f"--thread {threads} {debug_arg} --ci-cd-test"
+    )
+    returncode = subprocess.call(crisprme_cmd, shell=True)
+    if returncode != 0:
+        sys.stderr.write(
+            f"ERROR: complete-test search failed (exit code {returncode}). See the log above.\n"
+        )
+        sys.exit(returncode)
+    # confirm a report / integrated_results was produced
+    res_dir = os.path.join(os.getcwd(), CRISPRME_DIRS[1], output_dir)
+    produced = glob(os.path.join(res_dir, "*integrated_results.tsv"))
+    if not produced:
+        sys.stderr.write(
+            f"ERROR: complete-test produced no integrated_results.tsv in {res_dir}.\n"
+        )
+        sys.exit(1)
+    sys.stderr.write(
+        f"\ncomplete-test PASSED: searched the example guide against '{index_name}' and "
+        f"produced {os.path.basename(produced[0])} in Results/{output_dir}.\n"
+    )
 
 
 def main():

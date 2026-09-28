@@ -1179,7 +1179,10 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIn(k, m)
         self.assertIn("max_total_edits", m["search"])
         self.assertIn("off_targets", m["counts"])
-        self.assertIn("v2.8.2", m["crispritz_note"])  # engine version recorded
+        self.assertIn("v2.8.3", m["crispritz_note"])  # engine version recorded
+        # report_generator tracks the crisprme version (not a stale hard-coded string)
+        self.assertTrue(m.get("report_generator", "").startswith("v"))
+        self.assertNotIn("2.4", m["crispritz_note"])  # no stale v2.4.0-image reference
 
     def test_pipeline_no_readonly_or_bare_relative_writes(self):
         """Regression guard for the read-only-container bug: the search pipeline must
