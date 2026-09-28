@@ -4550,6 +4550,7 @@ def update_table_general_profile(
         # labels/placement from len(data_general_count), NOT Max_bulges (= max(bDNA,bRNA)).
         # The old code hardcoded max_bulges in {0,1,2} and silently dropped the 3-/4-bulge
         # rows of e.g. a 2/2 search from this summary table.
+        data_general_count = _drop_empty_variant_block(data_general_count, genome_type)
         nb = len(data_general_count)
         per_origin = (nb // 2) if genome_type == "both" else nb
         if genome_type == "both":
@@ -6038,6 +6039,27 @@ def generate_sample_card(
 # main page layout
 
 
+def _drop_empty_variant_block(counts: pd.DataFrame, genome_type: str) -> pd.DataFrame:
+    """Drops the all-zero VARIANT half of a reference-only job's count table.
+
+    The per-guide count file (``.<job>.general_target_count.*``) is written with two
+    stacked blocks of ``bDNA+bRNA+1`` bulge rows -- reference, then variant -- for
+    every job. For a reference-only job the variant block is all zeros, but the
+    Result Summary labels rows by the job's genome type: it splits two blocks only
+    for a job with variants, so a reference-only job's rows were all labelled as ONE
+    block, i.e. bulges 0..5 for a 1 DNA + 1 RNA search that only reaches 2. Keep just
+    the reference block. Only done when the second half is truly all zeros, so real
+    data is never discarded.
+    """
+    if genome_type != "ref" or len(counts) < 2 or len(counts) % 2:
+        return counts
+    half = len(counts) // 2
+    tail = counts.iloc[half:].apply(pd.to_numeric, errors="coerce")
+    if tail.fillna(0).eq(0).all().all():
+        return counts.iloc[:half].reset_index(drop=True)
+    return counts
+
+
 # update the main content table
 @app.callback(
     Output("div-tab-content", "children"),
@@ -6606,9 +6628,13 @@ def update_content_tab(
                 " Risk Score",
             ],
         }  # , ' Absolute Risk Score'
-        label = [{"label": lab} for lab in all_options.keys()]
-        value = [{"value": val} for val in all_value.keys()]
-        target_opt = [label, value]
+        # dcc.RadioItems wants ONE list of {label, value} dicts (this used to pass
+        # [labels, values], which Dash's dev-mode prop check rejects). The radio is
+        # hidden and only its `value` is read, so the options only need to be valid.
+        target_opt = [
+            {"label": lab, "value": val}
+            for lab, val in zip(all_options.keys(), all_value.keys())
+        ]
         query_tab_content = html.Div(
             [
                 # row with the first and second group by and thresholds
@@ -6763,9 +6789,6 @@ def update_content_tab(
                                     dash_table.DataTable(
                                         css=[
                                             {
-                                                "word-break": "break-all",
-                                                "line-break": "anywhere",
-                                                "overflow-wrap": "break-word",
                                                 "selector": ".row",
                                                 "rule": "margin: 0; overflow: inherit; word-break: break-all; overflow-wrap: break-word; line-break: anywhere;",
                                             }

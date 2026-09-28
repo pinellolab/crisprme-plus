@@ -190,6 +190,31 @@ and the `release-crisprme` skill.
   the six explicit paths for scripted use.
 
 ### Fixed
+- **A genome delivered as one multi-sequence FASTA file no longer silently produces an
+  EMPTY result.** CRISPRme identifies chromosomes by FASTA *file name*, one sequence per
+  file (as the README requires), but CRISPRitz happily indexes and searches a single
+  multi-sequence file -- so a UCSC assembly with no per-chromosome archive (e.g. the pig
+  `susScr11`, `bigZips/susScr11.fa.gz`) ran to completion and then reported "No
+  off-targets found" even with tens of thousands of raw hits, because the whole genome
+  was treated as one "chromosome" named after the file. Now: `download` /
+  the Data Manager split such a download into one `<sequence>.fa` per sequence; the
+  input validator and the pipeline itself refuse a multi-sequence genome folder up front
+  with the exact fix (`python PostProcess/genome_layout.py --split <genome_dir>`, which
+  also repairs an existing folder -- rebuild any index made from the old layout); and the
+  pipeline no longer reports success when the search found raw hits but none survived
+  post-analysis (it fails with an explanatory error instead). New
+  `PostProcess/genome_layout.py` (+ `test_genome_layout.py`); the layout check reads one
+  header line per file, so it adds no measurable time to a search.
+- **A search that genuinely finds nothing now says so on the job status page** (green
+  "Finished: no off-targets were found ...", later steps marked "Not needed") instead of
+  leaving "Merging Targets" and the rest as "To do" indefinitely.
+- **The Result Summary matrix no longer shows bulge rows `0..5` for a reference-only
+  search that only reaches 2 bulges.** The per-guide count file always carries a
+  reference block and an all-zero variant block; the page only split the two blocks for
+  searches with variants. A reference-only job now shows just its reference block.
+- Removed two Dash dev-mode prop-type warnings on the results page (invalid extra keys in
+  a `DataTable` `css` entry; a hidden radio's options passed as `[labels, values]`
+  instead of one list of `{label, value}`). No visible change.
 - **`assembly-search` no longer crashes when a haplotype has zero off-targets.** A
   haplotype whose search finds no hits on the assembly is a legitimate result, not an
   error; reconciliation now treats it as an empty set — every locus on the other haplotype
