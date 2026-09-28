@@ -870,8 +870,8 @@ to its corresponding CLI flag for cross-reference.
 | Variant dataset(s) | `--vcf` | Optional |
 | Samples ID config | `--samplesID` | Required if `--vcf` provided |
 | Mismatches | `--mm` | Yes |
-| DNA bulges | `--bDNA` | Optional (default 0) |
-| RNA bulges | `--bRNA` | Optional (default 0) |
+| DNA bulges | `--bDNA` | Optional (web default 1) |
+| RNA bulges | `--bRNA` | Optional (web default 1) |
 | Base editing window | `--be-window` | Optional |
 | Base editor nucleotide | `--be-base` | Optional (required if window set) |
 | Functional annotation | `--annotation` | Optional |

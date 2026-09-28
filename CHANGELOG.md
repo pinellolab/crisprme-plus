@@ -51,7 +51,8 @@ and the `release-crisprme` skill.
   `numpy` 1.24→≥1.26, `scipy` 1.10→≥1.11, `pandas` 2.0→≥2.1, and the `matplotlib-base` ceiling
   is dropped. `numpy` is capped `<2` and `pandas` `<3` as deliberate guards (the pysam /
   CRISPRitz C-ABI, and pandas 3.0 copy-on-write) — both are validated fast-follows. The
-  full unit suite (779 tests) passes on the rebuilt, un-pinned environment.
+  full unit suite passes on the rebuilt, un-pinned environment (783 tests on the
+  fresh-from-`environment.yml` source install).
 - **The CRISPR-Bulge scorer env is architecture-aware, with identical scores on x86-64 and
   arm64.** conda-forge ships `tensorflow-cpu=2.13` only for x86-64 (aarch64 has just 2.18/2.19),
   so the `cbulge` env is now built per-arch behind the same name: conda `tensorflow-cpu=2.13` on

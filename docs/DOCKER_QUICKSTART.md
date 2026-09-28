@@ -71,7 +71,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
 ## 4. Download a prebuilt index (one time, minutes — skips a long build)
 
 Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
-minutes of CPU; instead, download the ready-made SpCas9 (NGG) index:
+minutes of CPU; instead, download the ready-made SpCas9 NRG (NGG+NAG) index:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \

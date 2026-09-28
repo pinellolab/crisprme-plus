@@ -71,7 +71,7 @@ RUN micromamba install -y -n base \
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
-# ---- Build crispritz 2.8.2 from source and install into the env ------------
+# ---- Build crispritz 2.8.3 from source and install into the env ------------
 RUN git clone --depth 1 --branch ${crispritz_ref} \
         https://github.com/pinellolab/CRISPRitz.git /opt/crispritz-src \
     && cd /opt/crispritz-src \

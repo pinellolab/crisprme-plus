@@ -1,6 +1,6 @@
 # CRISPRme+ — Methods
 
-This document describes the methods introduced in **CRISPRme+** (the 2.3–2.5
+This document describes the methods introduced in **CRISPRme+** (the 2.3–2.6
 line), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
@@ -709,6 +709,19 @@ transparently falls back to a CPU device context, producing **bit-identical**
 results. Missing env or weights degrade cleanly to a **CFD-only** run rather than
 failing the search.
 
+The scorer environment is **architecture-aware** and yields **numerically
+identical** CRISPR-Bulge scores across CPU architectures: it installs the same
+TensorFlow 2.13.1 per-arch — the conda-forge `tensorflow-cpu`/CUDA builds on
+x86-64, `tensorflow-macos` on Apple Silicon, and the PyPI `tensorflow==2.13.1`
+aarch64 wheel on Linux ARM (conda-forge ships `tensorflow-cpu=2.13` only for
+x86-64). A cross-architecture check on a 254-off-target panel (150 with bulges)
+found x86-64 vs aarch64 scores agree to a maximum absolute difference of
+3.6 × 10⁻⁷ with zero threshold-band changes, so the multi-architecture
+(amd64 + arm64) Docker image scores identically on both. On networks that block
+`conda.anaconda.org`, the environment is built from a mirror (e.g. prefix.dev) via
+`CONDA_CHANNEL_BASE` / `CRISPRME_CONDA_CHANNEL_BASE` (the Docker build exposes a
+`CONDA_CHANNEL_BASE` build argument).
+
 **Worst-case scoring in the population-level analysis.** In the default population-level
 analysis (§5), each window is represented by worst-possible rows rather than every haplotype,
 so the *scores* attached to those rows are defined as worst cases over the window's allele
@@ -825,6 +838,7 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.5.x line (default SNP+indel co-occurrence, two-pass population-level
-analysis with opt-in `--per-sample` genotype resolution); see the CHANGELOG and the referenced
-source files for implementation detail.*
+methods as of the 2.6.x line (default SNP+indel co-occurrence, two-pass population-level
+analysis with opt-in `--per-sample` genotype resolution, and the CRISPR-Bulge ML off-target
+scorer in a dedicated conda environment with a `cpu|cuda|metal` compute backend); see the
+CHANGELOG and the referenced source files for implementation detail.*

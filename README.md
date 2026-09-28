@@ -331,7 +331,7 @@ By completing these steps, your system will be fully prepared for installing CRI
 ---
 
 > **CRISPRme+ (2.6.0) runs on Python 3.11 and installs from source** — the build
-> compiles CRISPRitz 2.8.1 and installs both tools into a conda environment. A native
+> compiles CRISPRitz 2.8.3 and installs both tools into a conda environment. A native
 > Bioconda `crisprme=2.6.0` package is **in preparation**; until it lands, the Bioconda
 > `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** this
 > 2.6.0 line.
@@ -504,7 +504,7 @@ You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run an unreleased line (e.g. **2.6.0**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run an unreleased line (e.g. **2.6.0**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.3 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
@@ -517,7 +517,7 @@ cd crisprme-plus
 mamba env create -f environment.yml
 mamba activate crisprme
 
-# 3. build CRISPRitz 2.8.1 from source and install both tools into the env
+# 3. build CRISPRitz 2.8.3 from source and install both tools into the env
 bash install_from_source.sh
 
 # 4. verify (both tools are now on your PATH)
@@ -1759,6 +1759,8 @@ crisprme.py publish-index --index genome_library/NRG_3_hg38+hg38_1000G2021_HGDP 
 crisprme.py scorer-env create
 crisprme.py scorer-env doctor
 ```
+
+The ML off-target scorer is **CRISPR-Bulge** (Yaish & Orenstein, *NAR* 2024) — a TensorFlow 2.13.1 GRU ensemble — running isolated in the `cbulge` env so its heavy pins never touch the main environment. **CFD remains the primary score**; if the `cbulge` env is absent the run completes **CFD-only** (the ML column reads `-1`/N/A). The env is **architecture-aware and scores identically across CPUs**: it installs the same TensorFlow 2.13.1 per-arch — conda `tensorflow-cpu`/CUDA on x86-64, `tensorflow-macos` on Apple Silicon, and the PyPI `tensorflow==2.13.1` aarch64 wheel on Linux ARM (validated x86-64 vs aarch64 agreement to max |Δ| = 3.6e-7, zero threshold-band changes), so the multi-arch Docker image scores identically on both. On networks that block `conda.anaconda.org`, point the env solve at a mirror with `CONDA_CHANNEL_BASE=https://prefix.dev` (or `CRISPRME_CONDA_CHANNEL_BASE`; the Docker build accepts `--build-arg CONDA_CHANNEL_BASE=…`).
 
 See the companion data-setup guide (`docs/crisprme_data_setup_051826.md`, Sections 2d and 3.5) for the end-to-end workflow.
 

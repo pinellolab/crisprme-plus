@@ -4328,8 +4328,8 @@ def build_report(
         # the ZIP is self-sufficient for re-execution. Never break the report on it.
         try:
             _manifest = {
-                "crisprme_version": meta.get("version") or "2.4.0",
-                "report_generator": "v2.4",
+                "crisprme_version": meta.get("version") or "2.6.0",
+                "report_generator": "v" + (meta.get("version") or "2.6.0"),
                 "generated_date": meta.get("date"),
                 "guides": meta.get("guides"),
                 "nuclease": meta.get("nuclease"),
@@ -4356,9 +4356,8 @@ def build_report(
                 "database": _reg_vc,  # {n_records SNPs, n_indels, databases} or None
                 "source_integrated_results": os.path.basename(integrated_tsv),
                 "crispritz_note": (
-                    "search-engine (CRISPRitz) version is recorded in the build; the "
-                    "pinellolab/crisprme:v2.4.0 image builds CRISPRitz v2.8.2. See "
-                    "Params.txt for the exact run parameters."
+                    "search-engine (CRISPRitz v2.8.3) version is recorded in the build. "
+                    "See Params.txt for the exact run parameters."
                 ),
             }
             _man_path = os.path.join(staging, "run_manifest.json")

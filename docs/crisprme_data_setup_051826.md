@@ -21,7 +21,7 @@ mamba config --set channel_priority strict
 ### Create and activate the environment
 
 ```bash
-# CRISPRme+ (2.4.0) is a Python 3.11 source build (Bioconda serves stable 2.1.x, py3.8):
+# CRISPRme+ (2.6.0) is a Python 3.11 source build (Bioconda serves stable 2.1.x, py3.8):
 git clone https://github.com/pinellolab/crisprme-plus.git && cd crisprme-plus
 mamba env create -f environment.yml   # env 'crisprme' (Python 3.11)
 mamba activate crisprme
@@ -110,7 +110,7 @@ The default repository is `lucapinello/crisprme-data`; override it with `--hf-re
 *This is the everyday workflow. Everything from here is fast and lightweight.*
 
 > **Before running any search**, ensure the CRISPRme environment is active: `mamba activate crisprme`
-> (the 2.4.0 source build creates env `crisprme`; Docker users skip activation).
+> (the 2.6.0 source build creates env `crisprme`; Docker users skip activation).
 
 ### 3a. Choose a PAM file
 
@@ -312,7 +312,7 @@ Then run the search with `--index-path "$CRISPRME_DIR/genome_library"` (or simpl
 
 ### Scoring backend (CPU / GPU)
 
-Every off-target is scored with **CFD** plus the **CRISPR-Bulge** machine-learning model (Yaish & Orenstein, *NAR* 2024). Pass `--compute-backend {cpu,cuda,metal}` to `complete-search` to select where CRISPR-Bulge runs (`cpu` is the default; `cuda` uses an NVIDIA GPU, `metal` an Apple-Silicon GPU; `gpu`/`auto` are accepted as aliases). CRISPR-Bulge runs in a dedicated **`cbulge` conda environment** that is provisioned automatically on first use; manage it explicitly with `crisprme.py scorer-env` (e.g. `crisprme.py scorer-env create` / `--health` / `--update`).
+Every off-target is scored with **CFD** plus the **CRISPR-Bulge** machine-learning model (Yaish & Orenstein, *NAR* 2024). Pass `--compute-backend {cpu,cuda,metal}` to `complete-search` to select where CRISPR-Bulge runs (`cpu` is the default; `cuda` uses an NVIDIA GPU, `metal` an Apple-Silicon GPU; `gpu`/`auto` are accepted as aliases). CRISPR-Bulge runs in a dedicated **`cbulge` conda environment** that is provisioned automatically on first use; manage it explicitly with `crisprme.py scorer-env` (e.g. `crisprme.py scorer-env create`, `crisprme.py scorer-env check`, `crisprme.py scorer-env doctor`).
 
 ---
 

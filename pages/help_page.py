@@ -187,15 +187,16 @@ def homepage_step1() -> html.Li:
     """Create the step 1 description section for the homepage.
 
     This function creates an HTML list item containing a description of the first
-    step in using CRISPRme, which involves selecting the spacer, Cas protein,
-    and PAM sequence.  It combines the spacer, sequence, and PAM descriptions.
+    step in using CRISPRme, which involves selecting the spacer and PAM
+    sequence (the nuclease is derived from the PAM). It combines the spacer,
+    sequence, and PAM descriptions.
 
     Returns:
         An HTML Li element containing the step 1 description.
     """
     return html.Li(
         [
-            html.Strong("STEP 1: Spacer, Cas Protein and PAM selection"),
+            html.Strong("STEP 1: Spacer and PAM selection"),
             html.Ul(
                 [
                     homepage_spacer_(),  # spacer description
@@ -286,7 +287,8 @@ def homepage_baseediting_() -> html.Li:
         [
             html.Strong("Base editing thresholds (optional): "),
             (
-                "When a base editor is selected as the Cas protein, CRISPRme "
+                "When base editing is enabled (a Yes/No option, independent of the "
+                "PAM/nuclease), CRISPRme "
                 "allows users to define a window for base editing susceptibility. "
                 "The “Window start” and “Window stop” dropdowns, constrained by "
                 "the length of the input guide, specify the region where the "
