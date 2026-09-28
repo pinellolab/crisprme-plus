@@ -64,7 +64,7 @@ version is here.
 ### 2a. Get the data (one time)
 
 Make a folder for your data and results, then fast-download the reference data and
-a prebuilt SpCas9 (NGG) index from the CRISPRme mirror (minutes, not the multi-hour
+a prebuilt SpCas9 NRG (NGG+NAG) index from the CRISPRme mirror (minutes, not the multi-hour
 legacy setup):
 
 ```bash
@@ -74,18 +74,18 @@ mkdir -p ~/crisprme && cd ~/crisprme
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
   crisprme.py download --what all --path /DATA
 
-# a ready-made SpCas9 (NGG) reference index (skips a long index build)
+# a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
-# the variant-aware index used by the default web search (1000G + HGDP)
+# the recommended default variant-aware index (1000G-2021, single-source, fully phased)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
 ```
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRG_3_hg38+hg38_1000G2021_HGDP` index already makes the default web
+pre-downloaded `NRG_3_hg38+hg38_1000G2021` index already makes the default web
 search variant-aware — you do **not** need the raw VCFs for that. **Optional
 (advanced):** the raw 1000 Genomes VCFs (~16 GB) are only needed for CLI
 sample-level analyses / personal risk cards:
@@ -297,7 +297,7 @@ The web interface uses only precomputed indexes and will **not** build one on th
 fly — if you request a PAM/bulge/genome combination with no installed index it
 blocks and asks you to install one first (see the Docker Quickstart, "Installing
 more indexes"). The variant selector is a dropdown pre-set to the variant-aware
-**1000G+HGDP** index, with a **Reference only** option if you want a reference-genome
+**1000G-2021** index, with a **Reference only** option if you want a reference-genome
 search.
 
 > **Performance note:** Enabling bulge searching substantially increases runtime.
@@ -734,10 +734,10 @@ variants.
 
 1. **Thresholds too strict** — raise **Maximum edits**; if you opened Advanced
    options, check the DNA and RNA bulges are not both `0`.
-2. **Reference-only selected** — keep the **1000G+HGDP** option (pre-selected by
+2. **Reference-only selected** — keep the **1000G-2021** option (pre-selected by
    default) to get variant off-targets.
 3. **Variant index not installed** — re-run
-   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA`.
+   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA`.
 4. **Confirm success** — `Results/<name>/log_error.txt` is empty and
    `*.integrated_results.tsv` is non-empty.
 

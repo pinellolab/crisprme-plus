@@ -818,7 +818,7 @@ its purpose and usage:
   <br>Resolve per-sample genotypes into observed haplotypes for the SNP post-analysis,
   instead of the default population-level analysis. Reports each observed haplotype with
   CONFIRMED cis phasing, named carrier samples, and exact joint allele frequency.
-  **Requires a genotyped index** (1000G-2021+HGDP or HPRC); on a sites-only index
+  **Requires a genotyped index** (1000G-2021, 1000G-2021+HGDP, or HPRC); on a sites-only index
   (`mega`) it cannot resolve carriers (no genotypes) and `complete-search` warns. Can be
   slow / intractable on dense or aggregate panels. By default (no flag) CRISPRme+ runs a
   **population-level** analysis: one worst-possible representative per variant window
@@ -1002,24 +1002,19 @@ populations.
 #### 2.2.2 Complete Test
 ---
 
-The **Complete Test** module provides an automated pipeline for verifying the 
-correct installation and functionality of CRISPRme. This feature is designed to 
-simplify the validation process by automatically setting up the required 
-directory structure, downloading essential files, and offering flexible testing 
-options tailored to different user needs.
+The **Complete Test** module verifies the correct installation and functionality 
+of CRISPRme by running the built-in example guide against a **prebuilt index that 
+you have already downloaded** (or built). It does **not** build an index or 
+auto-download all the data for you: CRISPRme never auto-builds an index, so if no 
+prebuilt index is present, `complete-test` prints guidance to download one (e.g. 
+`crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021`) and 
+exits cleanly.
 
-This function automatically creates the CRISPRme directory structure required 
-for the tool to function properly. Furthermore, it downloads and prepares all 
-necessary files for testing, ensuring that users do not need to manually manage 
-dependencies. Complete Test module allows users to perform a test limited to a 
-specific chromosome (e.g., chromosome 22), significantly reducing runtime and 
-resource usage. However, is also available the option to test on the entire 
-genome, ensuring all components of CRISPRme work correctly across large-scale 
-datasets. This function supports testing with 1000 Genomes Phase 3 dataset and 
-Human Genome Diversity Project (HGDP) dataset. Testing parameters, such as the 
-genome dataset and test type, can be customized via command-line arguments, 
-allowing users to tailor the testing process to their system capabilities and 
-goals.
+Once an index is available, `complete-test` runs the example search end-to-end 
+and produces the same set of outputs as Complete Search, confirming that the 
+installed tool works as expected. You can limit the test to a specific chromosome 
+(e.g., chromosome 22) with `--chrom`, significantly reducing runtime and resource 
+usage, or omit `--chrom` to run across the entire genome.
 
 This module is suited for:
 
@@ -1033,11 +1028,11 @@ different system configurations (e.g., varying thread counts, datasets).
 - **Dataset Evaluation**: Test specific datasets (1000 Genomes Phase 3 or HGDP) 
 to confirm their suitability for the user’s research needs.
 
-Usage Example for the Complete Test function:
+Usage Example for the Complete Test function (run after downloading a prebuilt
+index, e.g. `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021`):
   ```bash
   crisprme.py complete-test \
-    --chrom chr22 \
-    --vcf_dataset 1000G
+    --chrom chr22
   ```
 
 ##### Input Arguments
@@ -1068,15 +1063,10 @@ function, including detailed explanations and default behaviors:
   faster execution for targeted validation. *Default behavior*: Run the test 
   across the entire genome.
 
-- `--vcf_dataset`
-  <br>Defines the variant dataset to be utilized for testing CRISPRme. 
-  Available options include:
-    
-    - `1000G`: Uses the 1000 Genomes Phase 3 dataset.
-    
-    - `HGDP`: Uses the Human Genome Diversity Project dataset.
-  
-  *Default behavior*: Use 1000 Genomes variant data.
+> **Note:** `complete-test` requires a prebuilt index to already be present.
+> CRISPRme never auto-builds an index; download one first with
+> `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021`.
+> If no index is found, `complete-test` prints this guidance and exits cleanly.
 
 ##### Output Data Overview
 ---
@@ -1834,15 +1824,14 @@ test across the entire genome:
 
 - **Single Chromosome Test**
   <br>This test runs a search for potential off-targets on a single chromosome, 
-  such as chromosome 22, enriched with variants from the 1000 Genomes or Human 
-  Genome Diversity Project (HGDP) datasets. This provides a fast way to check 
-  CRISPRme's ability to process variant data and identify off-targets for a 
-  specific chromosome.
+  such as chromosome 22, using a prebuilt variant-aware index you have already 
+  downloaded. This provides a fast way to check CRISPRme's ability to process 
+  variant data and identify off-targets for a specific chromosome.
 
 - **Full Genome Test**
   <br>This test checks CRISPRme's ability to search for potential off-targets 
-  across the entire human genome. It runs a search using the sg1617 guide RNA 
-  with an NGG PAM site, incorporating both Gencode and ENCODE annotations to 
+  across the entire human genome using a prebuilt index. It runs a search using 
+  the example guide RNA, incorporating both Gencode and ENCODE annotations to 
   ensure comprehensive results.
 
 Upon successful completion of the Complete Test, users may optionally
@@ -1869,13 +1858,14 @@ to handle large datasets and complex genetic analysis tasks.
 #### 3.2.1 Single Chromosome Test
 ---
 
-To run the quicker test on chromosome 22 using the 1000 Genomes dataset, 
+To run the quicker test on chromosome 22 against a prebuilt index you have
+already downloaded (e.g.
+`crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021`),
 execute the following commands:
 
   ```bash
   crisprme.py complete-test \
-    --chrom chr22 \
-    --vcf_dataset 1000G
+    --chrom chr22
   ```
 
 After completion, off-target sites generated by this test can be validated using:
@@ -1886,12 +1876,11 @@ crisprme.py validate-test --chrom chr22
 #### 3.2.2 Full Genome Test
 ---
 
-To run the detailed test across the entire genome using the 1000 Genomes 
-variants, execute the following commands:
+To run the detailed test across the entire genome against a prebuilt index you
+have already downloaded, execute the following commands:
 
   ```bash
-  crisprme.py complete-test \
-    --vcf_dataset 1000G
+  crisprme.py complete-test
   ```
 
 Once the full genome test has completed, validation can be performed across all

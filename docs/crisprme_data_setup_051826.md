@@ -114,19 +114,19 @@ The default repository is `lucapinello/crisprme-data`; override it with `--hf-re
 
 ### 3a. Choose a PAM file
 
-The setup command pre-creates PAM files for 17 common nucleases in `PAMs/`. The examples in this guide use the standard SpCas9 file:
+The setup command pre-creates PAM files for 17 common nucleases in `PAMs/`. The examples in this guide use the default SpCas9 file (matching the default NRG index):
 
 ```
-PAMs/20bp-NGG-SpCas9.txt
+PAMs/20bp-NRG-SpCas9.txt
 ```
 
 Contents:
 
 ```
-NNNNNNNNNNNNNNNNNNNNNGG 3
+NNNNNNNNNNNNNNNNNNNNNRG 3
 ```
 
-The 20 leading `N`s define the spacer length; `NGG` is the PAM sequence; `3` is the PAM length in bp. To see all available files, run `ls PAMs/`. For a nuclease not covered, see Section 5 to create a custom PAM file.
+The 20 leading `N`s define the spacer length; `NRG` is the PAM sequence (SpCas9 NGG+NAG); `3` is the PAM length in bp. To see all available files, run `ls PAMs/`. For a nuclease not covered, see Section 5 to create a custom PAM file.
 
 ### 3b. Write a guide file
 
@@ -153,7 +153,7 @@ OUTPUT_NAME="sg1617_search_1"
 
 crisprme.py complete-search \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NGG-SpCas9.txt \
+  --pam PAMs/20bp-NRG-SpCas9.txt \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.txt \
   --samplesID samplesIDs.config.txt \
@@ -197,7 +197,7 @@ printf '%s\n' "$GUIDE_SEQ" > "$GUIDE_FILE"
 # Rerun — no re-download, no re-index
 crisprme.py complete-search \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NGG-SpCas9.txt \
+  --pam PAMs/20bp-NRG-SpCas9.txt \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.txt \
   --samplesID samplesIDs.config.txt \
@@ -265,7 +265,7 @@ Bulge-enabled searches need a CRISPRitz **index** of the reference genome. By de
 ```bash
 crisprme.py build-index-only \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NGG-SpCas9.txt \
+  --pam PAMs/20bp-NRG-SpCas9.txt \
   --bDNA 1 --bRNA 1 \
   --thread 16 \
   --path "$CRISPRME_DIR"
@@ -373,7 +373,7 @@ The value in `samplesIDs.config` must exactly match the filename under `samplesI
 ```bash
 crisprme.py complete-search \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NGG-SpCas9.txt \
+  --pam PAMs/20bp-NRG-SpCas9.txt \
   --guide sg1617_guide.txt \
   --vcf vcf.config.MyCohort.txt \
   --samplesID samplesIDs.config.MyCohort.txt \
@@ -472,7 +472,7 @@ OUTPUT_NAME="sg1617_1KG2021_search_1"
 
 crisprme.py complete-search \
   --genome Genomes/hg38 \
-  --pam PAMs/20bp-NGG-SpCas9.txt \
+  --pam PAMs/20bp-NRG-SpCas9.txt \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.1KG2021.txt \
   --samplesID samplesIDs.config.1KG2021.txt \
@@ -515,20 +515,29 @@ printf 'NNNNNNNNNNNNNNNNNNNNNGG 3\n' > PAMs/20bp-NGG-SpCas9.txt
 
 The 20 leading `N`s define the spacer length; `NGG` is the PAM; `3` is the PAM length in bp. For 5' PAM nucleases (e.g. Cas12a), the PAM bases come first and the position index is negative (e.g. `TTTV` + 20 `N`s with index `-4`). See `docs/INPUT_FORMATS.md` for the full PAM-file specification, including the filename convention (`<length>-<motif>-<Cas>.txt`) and the one-motif-per-file rule.
 
-> **Note (bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`) combined with bulges can trigger a crash in older CRISPRitz engines. CRISPRme prints a non-fatal warning in this case; even-length degenerate motifs such as `TTTV` (Cas12a) are unaffected. The underlying issue is fixed in CRISPRitz ≥ 2.7.1 (bundled with current CRISPRme), so it is a caution rather than a blocker — but if you hit an odd-length degenerate PAM with bulges on an older stack, either add one base to make the motif even-length or reduce bulges to 0.
+> **Note (bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`) combined with bulges can trigger a crash in older CRISPRitz engines. CRISPRme prints a non-fatal warning in this case; even-length degenerate motifs such as `TTTV` (Cas12a) are unaffected. The underlying issue is fixed in CRISPRitz ≥ 2.8.3 (bundled with current CRISPRme), so it is a caution rather than a blocker — but if you hit an odd-length degenerate PAM with bulges on an older stack, either add one base to make the motif even-length or reduce bulges to 0.
 
-Once the reference index for a new PAM does not yet exist, the **command-line** search builds one automatically on first use (see Section 3.5); you can also pre-build it with `crisprme.py build-index-only`. (The **web interface** does not build on the fly — it asks you to install a matching index first.)
+If a **reference** index for a new PAM does not yet exist, the command-line search builds it on demand from the shipped genome. A **variant-aware** index (a search with `--vcf`) is **never** built on the fly — build it once with `crisprme.py build-index-only` (see Section 3.5) and pass it via `--index-path`, or download a prebuilt one; otherwise the variant search stops with guidance to do so. (The **web interface** likewise asks you to install a matching index first.)
 
 ### 5b. Run the search
 
-No manual reindexing is needed — CRISPRme detects the new PAM at runtime and builds a fresh index automatically. The first search with a new PAM takes as long as a full run from scratch; subsequent searches with the same PAM reuse the index. See Appendix A1 for details on what gets cached and when.
+Build the variant-aware index for your new PAM **once** (a variant index is never built on the fly), then search against it with `--index-path`. Building takes as long as a full run from scratch; later searches with the same index reuse it. See Appendix A1 for what gets cached and when.
 
 ```bash
 # EDIT THESE
-PAM_FILE="PAMs/20bp-NGG-SpCas9.txt"   # replace with your new PAM file
+PAM_FILE="PAMs/20bp-NRG-SpCas9.txt"   # replace with your new PAM file
 GUIDE_FILE="my_guide.txt"
 OUTPUT_NAME="my_search_1"
 
+# 1) build the variant-aware index for this PAM (once)
+crisprme.py build-index-only \
+  --genome Genomes/hg38 \
+  --pam "$PAM_FILE" \
+  --vcf vcf.config.txt \
+  --samplesID samplesIDs.config.txt \
+  --bDNA 1 --bRNA 1 --thread 16
+
+# 2) run the search against the prebuilt index
 crisprme.py complete-search \
   --genome Genomes/hg38 \
   --pam "$PAM_FILE" \
@@ -541,6 +550,7 @@ crisprme.py complete-search \
   --bDNA 1 \
   --bRNA 1 \
   --merge 3 \
+  --index-path genome_library \
   --output "$OUTPUT_NAME" \
   --thread 16
 ```

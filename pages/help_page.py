@@ -66,7 +66,7 @@ def about_div() -> html.Div:
                         "CRISPRme+ runs locally: it is both this point-and-click web "
                         "app (which you are using now, served at http://127.0.0.1:8080) "
                         "and a standalone command-line package. To run a search, "
-                        "provide: gRNA spacer(s), Cas protein, PAM sequence, genome "
+                        "provide: gRNA spacer(s), PAM sequence, genome "
                         "build (with or without genetic variants from 1000G, HGDP, "
                         "and/or personal datasets), and the maximum number of edits "
                         "(mismatches + bulges) to allow."
@@ -567,6 +567,14 @@ def resultspage_table_() -> html.P:
                             "Score quantifies a guide RNA's affinity for off-target "
                             "sites, indicating the likelihood of unintended cleavage "
                             "events.",
+                        ]
+                    ),
+                    html.Li(
+                        [
+                            html.Strong("CRISPR-Bulge: "),
+                            "A deep-learning, bulge-aware off-target activity score "
+                            "(Yaish & Orenstein, NAR 2024) reported alongside CFD. "
+                            "Off-targets with 2 or more bulges are shown as \"-\" (N/A).",
                         ]
                     ),
                     html.Li(

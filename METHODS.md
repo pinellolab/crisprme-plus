@@ -17,6 +17,7 @@ Sections:
 5. [Search-space control for high-variant-density regions](#5-search-space-control-for-high-variant-density-regions)
 6. [Functional annotation of off-targets](#6-functional-annotation-of-off-targets)
 7. [Shareable off-target assessment report](#7-shareable-off-target-assessment-report)
+8. [Off-target scoring, assumptions and limitations](#8-off-target-scoring-assumptions-and-limitations)
 
 Throughout, "protospacer window" means the genomic interval spanned by a
 candidate off-target's protospacer plus PAM (and any bulges), i.e. the interval
@@ -40,7 +41,7 @@ off-target site.
 
 **Analysis-mode decision rule.** The **default** (no flag) is a **population-level**
 worst-possible screen and works on **any** index. Add **`--per-sample`** only on a
-**genotyped** index (`1000G2021_HGDP` or `HPRC`) when you need named carriers /
+**genotyped** index (`1000G2021`, `1000G2021_HGDP`, or `HPRC`) when you need named carriers /
 CONFIRMED cis / exact joint AF — it is inert on a sites-only index (`mega`). See
 [§5, Analysis modes](#population-level-analysis-default-and---per-sample-genotype-resolution).
 
