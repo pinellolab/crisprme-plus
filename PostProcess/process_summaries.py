@@ -19,7 +19,7 @@ bulge = int(sys.argv[5]) + int(sys.argv[6])
 path_output = sys.argv[7]
 name_job = os.path.basename(path_output)
 genome_type = sys.argv[8]
-# criteria to generate the plots (CFD,CRISTA,FEWEST)
+# criteria to generate the plots (CFD,CRISPR-Bulge,FEWEST)
 filter_criterion = sys.argv[9]
 
 

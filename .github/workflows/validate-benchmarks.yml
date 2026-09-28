@@ -10,7 +10,8 @@ name: validate-test benchmarks (chr22)
 # and COPY this branch's code over the installed package to exercise the PR's
 # changes (crisprme.py, the whole PostProcess/ pipeline, and the benchmark data).
 # We copy (merge) rather than bind-mount the directory so install-generated data
-# not in the repo is preserved (e.g. CRISTA_predictors.pkl, unzipped at install).
+# not in the repo is preserved. The CRISPR-Bulge model is not vendored here: it is
+# provided via the cbulge conda env (git-cloned by scorer_env), no pkl/zip.
 
 on:
   pull_request:
@@ -51,10 +52,10 @@ jobs:
           # Mount the whole branch repo read-only at /branch; each container step
           # then COPIES the branch's crisprme.py + PostProcess/ + test/ over the
           # installed package. Copying MERGES (PR files overwrite their installed
-          # twins) while preserving install-generated data absent from the repo,
-          # e.g. CRISTA_predictors.pkl (unzipped from CRISTA_predictors.zip at
-          # install). Bind-mounting PostProcess/ over the dir hid that .pkl and
-          # broke CRISTA scoring. The copy also brings in PR-added modules
+          # twins) while preserving install-generated data absent from the repo.
+          # The CRISPR-Bulge model is not vendored in PostProcess/: it is provided
+          # via the cbulge conda env (git-cloned by scorer_env), no pkl/zip. The
+          # copy also brings in PR-added modules
           # (validate_inputs.py, assembly_reconcile.py) so they import + run.
           echo "BRANCH_MOUNT=-v ${GITHUB_WORKSPACE}:/branch:ro" >> "$GITHUB_ENV"
 

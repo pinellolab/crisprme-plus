@@ -9,7 +9,7 @@ column, so a downstream/web join is a straight key match.
 
 WHY A COMPANION FILE (not a new bestMerge column): the finalized ``final_line``
 addresses its Reference / ref-score-sentinel / tmp_pos_mms tail by NEGATIVE index in
-the CFD (target[-3]/target[-4]) and CRISTA (target[-2]/target[-3]) scorers, so
+the CFD (target[-3]/target[-4]) and CRISPR-Bulge (target[-2]/target[-3]) scorers, so
 appending a trailing column silently corrupts EVERY variant row's score. And the
 downstream positional consumers -- ``adjust_cols.py`` (positional slice) and
 ``change_headers_bestMerge.py`` (``chunk[new_order]``, a fixed NAME list that SILENTLY
@@ -55,7 +55,7 @@ def write_companion(out_path, rows):
     with open(out_path, "w") as fh:
         fh.write(
             "# CRISPRme+ dict-less phase-confirmation companion. One row per variant\n"
-            "# off-target (deduped by identity). Join FROM bestMerge/bestCFD/bestCRISTA\n"
+            "# off-target (deduped by identity). Join FROM bestMerge/bestCFD/bestCRISPR_BULGE\n"
             "# by (Chromosome, Position, Direction, crRNA, DNA[, SNP]).\n"
             "#   CONFIRMED = real phased same-phase-set cis haplotype.\n"
             "#   PUTATIVE  = >=1 carrier unphased / cross-phase-set / PS-absent single-\n"

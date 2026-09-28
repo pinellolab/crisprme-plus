@@ -80,7 +80,7 @@ except Exception:  # module absent -> population-level path unavailable, legacy 
     _twopass_emit = None
 _FAST_MODE = bool(int(os.environ.get("CRISPRME_FAST_MODE", "0") or "0")) and \
     _twopass_emit is not None
-# The second (ML) score column is CRISPR-Bulge (CRISTA was retired). CRISPRME_SCORER_SELECT
+# The second (ML) score column is CRISPR-Bulge (the legacy RandomForest scorer was retired). CRISPRME_SCORER_SELECT
 # is kept only so the report/web can label the column; scoring always uses CRISPR-Bulge.
 _SCORER_SELECT = os.environ.get("CRISPRME_SCORER_SELECT", "crispr-bulge").lower()
 # 2.5.2 LOSSLESS-DENSE (CRISPRME_LOSSLESS_DENSE). In a CAPPED dense window the min-mismatch
@@ -277,7 +277,7 @@ def _collect_variant_off_target(final_line):
     Guarded: any malformed line (short list, non-string SNP) is silently skipped so
     this ADDITIVE bookkeeping can never break the finalization loop. Deduped by the
     bestMerge identity key (Chromosome, Position, Direction, crRNA, DNA, SNP) so the
-    per-haplotype / CFD-vs-CRISTA duplicate rows collapse to one companion row.
+    per-haplotype / CFD-vs-CRISPR-Bulge duplicate rows collapse to one companion row.
 
     Gated on the Tier-0 registry (and the companion module) being present: on a
     legacy / dict-only install the companion is never written, so accumulating this
@@ -381,7 +381,7 @@ def _record_phase_confirmation(final_line, phase_state):
     """Record one dict-less variant off-target's identity + CONFIRMED/PUTATIVE flag
     for the ADDITIVE phase-confirmation companion TSV. PURE w.r.t. ``final_line``
     (reads, never mutates). Deduped by the SAME bestMerge identity key the population-
-    summary companion uses, so per-haplotype / CFD-vs-CRISTA duplicates collapse to one
+    summary companion uses, so per-haplotype / CFD-vs-CRISPR-Bulge duplicates collapse to one
     row. GATED on the dict-less branch (mygt present); a no-op collection otherwise."""
     try:
         rec = {name: final_line[idx] for name, idx in _OT_COL.items()}
@@ -455,7 +455,7 @@ def _finalize_observed_entry(split, realTarget, refSeq_prerevert,
     creation, mm-threshold discard, Reference/33/tmp_pos appends and cluster append
     as the legacy finalization block (new_simple_analysis.py's totalDict path), so the
     scored output is byte-for-byte compatible with a dict-based variant row (same
-    negative-index sentinels for CFD/CRISTA). The CONFIRMED/PUTATIVE flag is carried
+    negative-index sentinels for CFD/CRISPR-Bulge). The CONFIRMED/PUTATIVE flag is carried
     OUT OF BAND to the companion TSV -- it is NEVER appended to ``final_line`` (that
     would shift the target[-3]/target[-4] scoring sentinels).
     """
@@ -1513,18 +1513,18 @@ def preprocess_CFD_score(target):
 
 
 def preprocess_CRISPR_BULGE_score(cluster_targets):
-    """CRISPR-Bulge analogue of preprocess_CRISTA_score.
+    """CRISPR-Bulge scoring (analogue of the retired legacy-scorer preprocessing path).
 
     Same output contract (target[-2] marker -> score, plus an appended score), same
     alt/ref two-pass + null semantics, so the write loop + report are unchanged. The
-    ONLY differences vs CRISTA: (1) the model needs just the aligned (sgRNA, off-target)
+    ONLY differences vs CRISPR-Bulge: (1) the model needs just the aligned (sgRNA, off-target)
     pair -- NO 29-nt genomic window -- and (2) scoring runs in the dedicated `cbulge`
     conda env via the scorer-runner (persistent worker). The runner degrades gracefully
     to -1.0 if the env/model is absent, so a run never breaks.
 
     CRISPR-Bulge's encoder requires per-row len(sg)==len(off); for rows we cannot score
     (N in the aligned DNA, or a length mismatch) we substitute an equal-length dummy so
-    the batch stays valid, then null them by index afterwards (mirrors the CRISTA path,
+    the batch stays valid, then null them by index afterwards (mirrors the CRISPR-Bulge path,
     which substitutes 'A'*29).
     """
     import scorer_runner  # lazy: only when CRISPR-Bulge is selected
@@ -1588,7 +1588,7 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
             t[-2] = "{:.3f}".format(s)
             t.append("{:.3f}".format(s))
         else:
-            # mirror the CRISTA marker convention exactly (55 = ref row, 33 = alt row)
+            # mirror the CRISPR-Bulge marker convention exactly (55 = ref row, 33 = alt row)
             if t[-2] == 55:
                 t[-2] = "{:.3f}".format(scores_alt[index])
                 t.append("{:.3f}".format(scores_alt[index]))
@@ -1605,16 +1605,16 @@ def calculate_scores(cluster_to_save):
     # input is target line splitted in list format
     # list of functions to calculate specific score (to add a score, simply add your function to this call and update the clusters list in return)
     cluster_with_CFD_score = list()
-    cluster_with_CRISTA_score = list()
+    cluster_with_CRISPR_BULGE_score = list()
 
     for target in cluster_to_save:  # calculate CFD score for each target
         target_CFD = target.copy()
         cluster_with_CFD_score.append(preprocess_CFD_score(target_CFD))
 
-    # second (ML) score column = CRISPR-Bulge (CRISTA retired). Written to the same
-    # .bestCRISTA.txt / CRISTA_score column names (stable identifiers; the report + web
+    # second (ML) score column = CRISPR-Bulge (the legacy RandomForest scorer was retired). Written to the same
+    # .bestCRISPR_BULGE.txt / CRISPR_BULGE_score column names (stable identifiers; the report + web
     # label the column "CRISPR-Bulge"). The variable name is legacy.
-    cluster_with_CRISTA_score = preprocess_CRISPR_BULGE_score(cluster_to_save)
+    cluster_with_CRISPR_BULGE_score = preprocess_CRISPR_BULGE_score(cluster_to_save)
 
     # REMOVED TO CHECK IF FILE IS RETURN WITH IDENTICAL ROWS COUNT
 
@@ -1642,29 +1642,29 @@ def calculate_scores(cluster_to_save):
     # df_CFD = pd.concat(frames)
     # cluster_with_CFD_score = df_CFD.values.tolist()
 
-    # df_CRISTA = pd.DataFrame(cluster_with_CRISTA_score, columns=['Bulge_type', 'crRNA', 'DNA', 'Chromosome',
+    # df_CRISPR_BULGE = pd.DataFrame(cluster_with_CRISPR_BULGE_score, columns=['Bulge_type', 'crRNA', 'DNA', 'Chromosome',
     #                                                              'Position', 'Cluster_Position', 'Direction', 'Mismatches',
     #                                                              'Bulge_Size', 'Total', 'PAM_gen', 'Var_uniq', 'Samples', 'Annotation_Type',
     #                                                              'Real_Guide', 'rsID', 'AF', 'SNP', 'Reference_target', 'CFD',
     #                                                              'Seq_in_cluster', 'CFD_ref'])
     # # select lowest count of mm+bul
-    # idx_fewest_mm_bul = df_CRISTA.groupby(['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples'])[
-    #     'Total'].transform(min) == df_CRISTA['Total']
-    # df_CRISTA_fewest = df_CRISTA[idx_fewest_mm_bul]
-    # df_CRISTA_fewest.drop_duplicates(
+    # idx_fewest_mm_bul = df_CRISPR_BULGE.groupby(['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples'])[
+    #     'Total'].transform(min) == df_CRISPR_BULGE['Total']
+    # df_CRISPR_BULGE_fewest = df_CRISPR_BULGE[idx_fewest_mm_bul]
+    # df_CRISPR_BULGE_fewest.drop_duplicates(
     #     ['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples', 'Mismatches', 'Bulge_Size'], inplace=True)
     # # select highest score
-    # idx_max_score = df_CRISTA.groupby(['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples'])[
-    #     'CFD'].transform(max) == df_CRISTA['CFD']
-    # df_CRISTA_best_score = df_CRISTA[idx_max_score]
+    # idx_max_score = df_CRISPR_BULGE.groupby(['Real_Guide', 'Chromosome', 'Cluster_Position', 'SNP', 'Samples'])[
+    #     'CFD'].transform(max) == df_CRISPR_BULGE['CFD']
+    # df_CRISPR_BULGE_best_score = df_CRISPR_BULGE[idx_max_score]
     # # remove duplicate rows (possible due to haplotypes and variants)
-    # df_CRISTA_best_score.drop_duplicates(['Real_Guide', 'Chromosome',
+    # df_CRISPR_BULGE_best_score.drop_duplicates(['Real_Guide', 'Chromosome',
     #                                       'Cluster_Position', 'SNP', 'Samples', 'CFD'], inplace=True)
-    # frames = [df_CRISTA_fewest, df_CRISTA_best_score]
-    # df_CRISTA = pd.concat(frames)
-    # cluster_with_CRISTA_score = df_CRISTA.values.tolist()
+    # frames = [df_CRISPR_BULGE_fewest, df_CRISPR_BULGE_best_score]
+    # df_CRISPR_BULGE = pd.concat(frames)
+    # cluster_with_CRISPR_BULGE_score = df_CRISPR_BULGE.values.tolist()
 
-    return [cluster_with_CFD_score, cluster_with_CRISTA_score]
+    return [cluster_with_CFD_score, cluster_with_CRISPR_BULGE_score]
 
 
 def _collect_needed_dict_keys(cluster_path, chrom):
@@ -1966,9 +1966,9 @@ cfd_best.write(header + "\tCFD\n")  # Write header
 mmblg_best = open(outputFile + ".bestmmblg.txt", "w+")
 mmblg_best.write(header + "\tCFD\n")  # Write header
 
-# file with best CRISTA targets
-crista_best = open(outputFile + ".bestCRISTA.txt", "w+")
-crista_best.write(header + "\tCFD\n")  # Write header
+# file with best CRISPR-Bulge targets
+crispr_bulge_best = open(outputFile + ".bestCRISPR_BULGE.txt", "w+")
+crispr_bulge_best.write(header + "\tCFD\n")  # Write header
 
 # High-variant-density cap: a protospacer window overlapping many ambiguity codes
 # (dense/hypervariable regions, e.g. MHC, and unbounded for unphased VCFs) would
@@ -2160,11 +2160,11 @@ for line in inTarget:
                     cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
                     # save mm-bul targets
                     mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-                if count == 1:  # CRISTA target
+                if count == 1:  # CRISPR-Bulge target
                     # remove count of tmp_mms
                     target.pop(-2)
-                    # save CRISTA targets
-                    crista_best.write("\t".join(target) + "\t" + str(0) + "\n")
+                    # save CRISPR-Bulge targets
+                    crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
         cluster_to_save = list()
 
 
@@ -2175,7 +2175,7 @@ else:
     # close all files
     cfd_best.close()
     mmblg_best.close()
-    crista_best.close()
+    crispr_bulge_best.close()
     hvdr_bed.close()
     # rewrite header file
     os.system(
@@ -2191,7 +2191,7 @@ else:
     os.system(
         "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
         + outputFile
-        + ".bestCRISTA.txt"
+        + ".bestCRISPR_BULGE.txt"
     )
     # cfd dataframe write
     cfd_dataframe = pd.DataFrame.from_dict(cfd_for_graph)
@@ -2219,15 +2219,15 @@ for count, cluster in enumerate(clusters_with_scores):
             cfd_best.write("\t".join(target) + "\t" + str(0) + "\n")
             # save mm-bul targets
             mmblg_best.write("\t".join(target) + "\t" + str(0) + "\n")
-        if count == 1:  # CRISTA target
+        if count == 1:  # CRISPR-Bulge target
             # remove count of tmp_mms
             target.pop(-2)
-            # save CRISTA targets
-            crista_best.write("\t".join(target) + "\t" + str(0) + "\n")
+            # save CRISPR-Bulge targets
+            crispr_bulge_best.write("\t".join(target) + "\t" + str(0) + "\n")
 
 cfd_best.close()
 mmblg_best.close()
-crista_best.close()
+crispr_bulge_best.close()
 hvdr_bed.close()
 
 os.system(
@@ -2243,7 +2243,7 @@ os.system(
 os.system(
     "sed -i '1s/.*/#Bulge_type\tcrRNA\tDNA\tChromosome\tPosition\tCluster_Position\tDirection\tMismatches\tBulge_Size\tTotal\tPAM_gen\tVar_uniq\tSamples\tAnnotation_Type\tReal_Guide\trsID\tAF\tSNP\tReference\tCFD_ref\tCFD\t#Seq_in_cluster/' "
     + outputFile
-    + ".bestCRISTA.txt"
+    + ".bestCRISPR_BULGE.txt"
 )
 
 

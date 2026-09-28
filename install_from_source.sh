@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Install CRISPRme+ 2.4.0 FROM SOURCE, without the Bioconda crisprme/crispritz
-# packages. Builds CRISPRitz 2.8.2 from source and installs both CRISPRitz and
+# Install CRISPRme+ 2.6.0 FROM SOURCE, without the Bioconda crisprme/crispritz
+# packages. Builds CRISPRitz 2.8.3 from source and installs both CRISPRitz and
 # CRISPRme into the ACTIVE conda environment ($CONDA_PREFIX), using the same
 # bin/ + opt/ layout the Bioconda/Docker builds use (crisprme.py resolves
 # PostProcess as <dir-of-crisprme.py>[:-3] + opt/crisprme/PostProcess/).
@@ -12,11 +12,11 @@
 #   mamba activate crisprme
 #   bash install_from_source.sh
 #
-# Override the CRISPRitz tag with CRISPRITZ_REF (default v2.8.2).
+# Override the CRISPRitz tag with CRISPRITZ_REF (default v2.8.3).
 set -euo pipefail
 
 : "${CONDA_PREFIX:?Activate the conda env first: 'mamba activate crisprme'}"
-CRISPRITZ_REF="${CRISPRITZ_REF:-v2.8.2}"
+CRISPRITZ_REF="${CRISPRITZ_REF:-v2.8.3}"
 CXX="${CXX:-g++}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this crisprme checkout
 
@@ -75,7 +75,7 @@ cp -R "${REPO}/." "${CONDA_PREFIX}/opt/crisprme/"
 rm -rf "${CONDA_PREFIX}/opt/crisprme/.git"
 cp "${CONDA_PREFIX}/opt/crisprme/crisprme.py" "${CONDA_PREFIX}/bin/crisprme.py"
 chmod +x "${CONDA_PREFIX}/bin/crisprme.py"
-# CRISTA was retired in favor of CRISPR-Bulge; there is no 276 MB model to unzip here
+# the legacy RandomForest scorer was retired in favor of CRISPR-Bulge; there is no 276 MB model to unzip here
 # anymore. CFD's tiny score pickles ship as plain files; the CRISPR-Bulge model is
 # provisioned into its own conda env below.
 

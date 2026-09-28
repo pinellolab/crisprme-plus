@@ -13,7 +13,7 @@ asserts the two load-bearing properties from docs/DESIGN_2.5.1_two_pass_fast_mod
      under-states the worst-case off-target (it is the argmin edit over all allele combos).
 
 Both the dict-less OBSERVED path (mygt present) and the legacy 2^k path (mygt None) are
-exercised. STDLIB only (+ the harness's numpy/pandas/CRISTA stubs).
+exercised. STDLIB only (+ the harness's numpy/pandas/CRISPR-Bulge stubs).
 
 Run: cd PostProcess && python3 -m unittest test_twopass_fast_equivalence -v
 """

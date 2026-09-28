@@ -621,3 +621,54 @@ def compute_md5(fname: str) -> str:
         raise Exception(
             f"Unexpected error encountered while computing md5 on {fname}"
         ) from e
+
+
+# --------------------------------------------------------------------------- #
+# Gene-region classification (shared by resultIntegrator's raw integrated_results
+# column AND the report/web) so every surface reports the SAME class for a site.
+# --------------------------------------------------------------------------- #
+_GENE_REGION_NA_TOKENS = frozenset({"", "na", "nan", "none", "-"})
+
+
+def gene_region_class(gencode_value, gene_dist=None, missing="-"):
+    """Collapse a site's gene context into ONE readable region class:
+    ``CDS`` / ``5'UTR`` / ``3'UTR`` / ``exon`` / ``intron`` / ``intergenic``.
+
+    Single source of truth used by ``resultIntegrator`` (the raw
+    ``Annotation_gene_region`` column), the report curation, and the web so every
+    surface agrees. Kept coherent with the ``Gene`` / ``Gene_distance_kb`` columns
+    (anchored to the nearest *protein-coding* gene): a non-zero ``gene_dist`` means
+    the site is outside every protein-coding gene body -> ``intergenic`` (region and
+    distance never contradict). When inside a gene (``gene_dist == 0`` or no distance
+    given) the sub-region is read from the ``Annotation_GENCODE`` feature-set
+    (``gene``/``transcript`` span the whole body incl. introns; ``exon`` the spliced
+    transcript; ``CDS`` the coding sequence; ``five_prime_UTR``/``three_prime_UTR``
+    the UTRs; ``start_codon``/``stop_codon`` coding). Precedence, most functionally
+    significant first: CDS > 5'UTR > 3'UTR > exon > intron; a site inside a gene body
+    but overlapping no exon is an ``intron``. ``missing`` is returned when nothing is
+    known (default ``"-"`` for the report; pass ``"NA"`` for the raw TSV).
+    """
+    if gene_dist is not None:
+        try:
+            if float(gene_dist) != 0:
+                return "intergenic"
+        except (TypeError, ValueError):
+            pass
+    if gencode_value is None:
+        return missing
+    s = str(gencode_value).strip().lower()
+    if s in _GENE_REGION_NA_TOKENS:
+        return missing
+    if "cds" in s or "codon" in s:          # CDS / start_codon / stop_codon / selenocysteine
+        return "CDS"
+    if "five_prime_utr" in s:
+        return "5'UTR"
+    if "three_prime_utr" in s:
+        return "3'UTR"
+    if "exon" in s:                          # exon w/o CDS/UTR = noncoding-transcript exon
+        return "exon"
+    if "gene" in s or "transcript" in s:     # inside a gene body, no exon overlap
+        return "intron"
+    if "intergenic" in s:
+        return "intergenic"
+    return missing

@@ -11,6 +11,33 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **The default image is now GPU-capable — one image, both modes.** `pinellolab/crisprme:latest`
+  (and `:<tag>`) builds its **amd64** layer with the conda-forge CUDA TensorFlow
+  (`tensorflow=2.13=cuda*`, validated correct + fast on an NVIDIA A100), so the CRISPR-Bulge scorer
+  runs on the GPU under `docker run --gpus all …` and **falls back to CPU transparently** when no
+  GPU is visible (the compute-backend device guard; byte-identical results) — no flag needed for
+  CPU. The **arm64** layer stays CPU (CUDA has no ARM build), so Apple Silicon is unaffected. A
+  single `docker pull pinellolab/crisprme:latest` therefore works everywhere and uses the GPU when
+  present; the only cost is a larger amd64 image (bundles cudatoolkit/cudnn). Build the Dockerfile
+  with `--build-arg scorer_backend=cpu` for a lean CPU-only image if size matters. Selection is via
+  the Dockerfile `scorer_backend=auto` default keyed on `TARGETARCH`.
+- **`Gene_region` column — exon/intron/UTR granularity for the gene annotation, on every
+  report surface.** States in one word where an off-target sits relative to the nearest
+  protein-coding gene: `CDS` (coding exon), `5'UTR`, `3'UTR`, `exon` (non-coding-transcript
+  exon), `intron` (inside a gene body but not an exon), or `intergenic`. Computed from the
+  existing `Annotation_GENCODE` feature-set (no new pipeline pass) and kept coherent with the
+  `Gene` / `Gene_distance_kb` columns — `intergenic` is pinned to `Gene_distance_kb > 0`, so
+  the region never contradicts the distance. Surfaced **consistently everywhere** from ONE
+  shared helper (`utils.gene_region_class`): the raw `integrated_results.tsv`
+  (`Annotation_gene_region`, written by the integrator), the in-report curated table, and
+  every download TSV (all tiers, panel, top1000, variant_created); documented in the report's
+  annotation legend. The raw `GENCODE` column still keeps the full overlapping feature-set.
+  Report curation also derives it on the fly, so it renders on pre-existing
+  `integrated_results.tsv` files too.
+
+## [2.6.0] - 2026-09-28
+
 ### Changed
 - **New default search: 4 mismatches + 1 DNA + 1 RNA bulge (6-edit budget).** The web form
   and CLI now default to `--mm 4 --bDNA 1 --bRNA 1` with `--max-total-edits 6` (was a 6/2/2
@@ -25,8 +52,8 @@ and the `release-crisprme` skill.
   `mega`), and its label now states what it buys on the chosen index: **CONFIRMED cis + named
   carriers on a phased panel**, **carriers with PUTATIVE cis on an unphased panel**, or the
   hybrid mix.
-- **CRISPR-Bulge replaces CRISTA as the machine-learning off-target scorer.**
-  The vendored CRISTA RandomForest (scikit-learn) is retired in favor of CRISPR-Bulge
+- **CRISPR-Bulge is the machine-learning off-target scorer.**
+  The legacy vendored RandomForest (scikit-learn) ML scorer is retired in favor of CRISPR-Bulge
   (Yaish & Orenstein, *NAR* 2024; TensorFlow GRU ensemble; MIT), which is more accurate
   — ~2.1× overall and ~5.4× on bulge-containing off-targets by AUPR on Refined-TrueOT —
   and faster per off-target on CPU. **CFD remains the primary score** (fast, in-process,
@@ -35,7 +62,7 @@ and the `release-crisprme` skill.
   invoked over a persistent-worker batch protocol; if that env is absent the run completes
   on CFD with a single warning (the ML column is `-1`). Reports and the web UI now label
   the column/plots/legend "CRISPR-Bulge" and calibrate on its own [0,1] scale
-  (0.5 / 0.2 / 0.1 bands); the physical `CRISTA_score_*` column name and `.bestCRISTA`
+  (0.5 / 0.2 / 0.1 bands); the physical `CRISPR_BULGE_score_*` column name and `.bestCRISPR_BULGE`
   file are retained as stable internal identifiers so older reports still render.
   The ensemble is a single-bulge model, so off-targets whose alignment needs ≥2 bulges (or a
   ≥2-bp bulge) are NOT ML-scored — they are nulled to `-1` and carried by CFD (the primary
@@ -43,12 +70,25 @@ and the `release-crisprme` skill.
   an adversarial review showed that reduction could corrupt the alignment and, on a non-monotonic
   model, was not provably conservative, so it was removed in favor of the honest null. Each
   off-target locus is still ML-scored on its best ≤1-bulge alignment when one exists.)
-- **Modernized the main environment now that CRISTA's hard pins are gone.**
-  `scikit-learn` is removed entirely (nothing in the main env imported it after CRISTA);
-  `numpy` 1.24→1.26, `scipy` 1.10→1.17, `pandas` 2.0→2.3, and the `matplotlib-base` ceiling
+- **Modernized the main environment now that the legacy ML scorer's hard pins are gone.**
+  `scikit-learn` is removed entirely (nothing in the main env imported it after the legacy
+  RandomForest scorer was retired);
+  `numpy` 1.24→≥1.26, `scipy` 1.10→≥1.11, `pandas` 2.0→≥2.1, and the `matplotlib-base` ceiling
   is dropped. `numpy` is capped `<2` and `pandas` `<3` as deliberate guards (the pysam /
   CRISPRitz C-ABI, and pandas 3.0 copy-on-write) — both are validated fast-follows. The
-  full unit suite (724 tests) passes on the rebuilt, un-pinned environment.
+  full unit suite passes on the rebuilt, un-pinned environment (783 tests on the
+  fresh-from-`environment.yml` source install).
+- **The CRISPR-Bulge scorer env is architecture-aware, with identical scores on x86-64 and
+  arm64.** conda-forge ships `tensorflow-cpu=2.13` only for x86-64 (aarch64 has just 2.18/2.19),
+  so the `cbulge` env is now built per-arch behind the same name: conda `tensorflow-cpu=2.13` on
+  x86-64, the conda CUDA build on GPU hosts, and — new — the **same TensorFlow 2.13.1** from the
+  official PyPI aarch64 wheel on Linux ARM (base deps from conda, TF from pip, mirroring the
+  Apple-Silicon Metal path). Same version + weights → validated **identical**: on a 254-pair panel
+  (150 with bulges) x86-64 vs aarch64 scores agree to max |Δ| = 3.6e-7 with **zero** differences at
+  display precision and **zero** threshold-band flips. The multi-arch Docker image therefore ships
+  the full scorer on both arches (previously arm64 would have degraded to CFD-only). The scorer-env
+  solve also honors the same `CONDA_CHANNEL_BASE` mirror as the main env (e.g. `https://prefix.dev`),
+  so `scorer-env create` works on networks that block `conda.anaconda.org`.
 - **Alternative-alignments output is now mode-driven (off by default in the
   population-level analysis).** The `..._all_results_with_alternative_alignments.tsv`
   dump — the *non-best* alignments per locus — grows combinatorially with the edit
@@ -175,13 +215,13 @@ and the `release-crisprme` skill.
   have it); reference-only / single-chromosome / region searches fit ~16 GB.
 
 ### Removed
-- **CRISTA and azimuth are removed.** The 276 MB vendored CRISTA RandomForest model
-  (`CRISTA_predictors.zip`, `dnaShape.pkl`, `CRISTA_score.py`), the whole `PostProcess/azimuth/`
-  tree (already inert / never invoked), and their now-unneeded scikit-learn 1.1.3 / numpy 1.24
-  pin are deleted. CRISPR-Bulge replaces CRISTA (see *Changed*); CFD's small lookup pickles
-  (`mismatch_score.pkl`, `PAM_scores.pkl`) are version-agnostic and unaffected. `--scorer` is
-  gone (the scorer is always CRISPR-Bulge); the internal `CRISTA_*` column names are kept for
-  back-compat only.
+- **The legacy vendored RandomForest ML scorer and azimuth are removed.** The 276 MB vendored
+  RandomForest model (predictors archive, `dnaShape.pkl`, and its scorer module), the whole
+  `PostProcess/azimuth/` tree (already inert / never invoked), and their now-unneeded
+  scikit-learn 1.1.3 / numpy 1.24 pin are deleted. CRISPR-Bulge is now the ML scorer (see
+  *Changed*); CFD's small lookup pickles (`mismatch_score.pkl`, `PAM_scores.pkl`) are
+  version-agnostic and unaffected. `--scorer` is gone (the scorer is always CRISPR-Bulge); the
+  internal `CRISPR_BULGE_*` column names are kept for back-compat only.
 - **Legacy per-file personal-assembly upload in Settings.** The old "Add a personal
   assembly" card that took the six individual files (two genomes, two chains, two
   chromAlias) one at a time is gone; personal assemblies are now added as a single
@@ -215,6 +255,53 @@ and the `release-crisprme` skill.
 - Removed two Dash dev-mode prop-type warnings on the results page (invalid extra keys in
   a `DataTable` `css` entry; a hidden radio's options passed as `[labels, values]`
   instead of one list of `{label, value}`). No visible change.
+- **`complete-test` no longer relies on on-demand index building.** The smoke test ran a
+  variant `complete-search` that expected an index to be built on demand — a path that was
+  gated off (it produced incomplete dict-less tiers), so `complete-test` failed. CRISPRme does
+  **not** build an index automatically: `complete-test` now checks for a prebuilt index and, if
+  none is present, prints clear guidance to **download** one (`crisprme.py download --what index
+  --index-name …`) and exits cleanly without downloading test data or building anything — the
+  user decides which index(es) to fetch (as the web instructions already recommend). When an
+  index is present it is used via `--index-path`.
+- **Web interface now boots on the modernized environment.** The Dash cache was configured
+  with the Flask-Caching **1.x** short-name `CACHE_TYPE: "filesystem"`; Flask-Caching **2.x**
+  (pulled in by the un-pinned, modernized web stack) removed the short-name aliases and expects
+  the backend class name, so `filesystem` raised `ImportStringError` at import time and the whole
+  web app failed to start (`crisprme.py web-interface` and the served site). `CACHE_TYPE` is now
+  `"FileSystemCache"`, which resolves on Flask-Caching 2.x (and remains valid on 1.10+).
+- **Web results page no longer crashes (or silently drops a plot) when the CRISPR-Bulge
+  filter is selected.** The filter dropdown value is the hyphen form `CRISPR-Bulge`, but the
+  cached top-1000 / personal / private lolliplot files are written with the underscore token
+  `CRISPR_BULGE`; the results page interpolated the hyphen value straight into the filename, so
+  the personal-card page raised `ValueError('Personal and Private Lolliplots not found')` and
+  the per-guide top-1000 plot vanished. The filename token is now normalized
+  (`CRISPR-Bulge`→`CRISPR_BULGE`); `CFD`/`fewest` are unaffected.
+- **The report now states, as a live count, how many off-targets are ≥2-bulge (N/A for
+  CRISPR-Bulge).** The recommended-panel note reads "N of M off-targets are ≥2-bulge and
+  therefore show `-` (N/A) in the CRISPR-Bulge column — ranked by CFD and edit distance
+  instead, not dropped," so a mostly-empty ML column on a bulge-heavy run reads as expected
+  behavior rather than missing data.
+- **Variant search no longer aborts during report generation** (population-distribution
+  step). `process_summaries.py` writes the per-criterion sidecars using the filter-criterion
+  token (`..._CRISPR-Bulge.txt`, hyphen), but `submit_job` read the population-distribution
+  input — and error-path cleanup globs — with the underscore identifier form
+  (`..._CRISPR_BULGE.txt`); the mismatch raised `FileNotFoundError`, wrote to stderr, and the
+  `[ -s $logerror ]` guard aborted the whole run with "population distribution plots creation
+  failed" on **every** search. The consumers now use the hyphen form that `process_summaries`
+  actually emits.
+- **`build-index-only --vcf` now accepts the same config-file form as `complete-search`.**
+  `complete-search --vcf` takes a file listing VCF folder names (under `VCFs/`), but
+  `build-index-only --vcf` accepted only a bare directory path — so the same flag meant two
+  different things. `build-index-only` now accepts **either** a VCF directory (unchanged) **or**
+  a one-line config file naming a folder under `VCFs/`, with a clear error if the listing names
+  more than one dataset (build each separately / merge first). Help text + README updated.
+- **`complete-search`'s "build the index first" hint now shows the correct flags.** The error
+  told users to run `build-index-only ... --bMax <N>`, but that command reads `--bDNA`/`--bRNA`
+  (and ignores `--bMax`), so following the hint verbatim silently built nothing. The message now
+  says `--bDNA <N> --bRNA <N>`.
+- **Report ≥2-bulge N/A wording is precise.** The scores legend said such off-targets are
+  "shown as -1"; the report tables actually show `–` (only the raw `integrated_results.tsv`
+  records `-1`). The legend now states both.
 - **`assembly-search` no longer crashes when a haplotype has zero off-targets.** A
   haplotype whose search finds no hits on the assembly is a legitimate result, not an
   error; reconciliation now treats it as an empty set — every locus on the other haplotype
@@ -382,8 +469,8 @@ and the `release-crisprme` skill.
   blocks (~22 MB), chr1 (largest) = 1,868 blocks (~122 MB) — so **4096 holds every genotyped
   contig fully**, extending the speedup genome-wide (not just small chromosomes), and the cap
   bounds a pathological panel at ~256 MB/reader. The **mega sites-only index is uncompressed
-  (`codec=RAW`) → unaffected** (harmless no-op). Also corrects the earlier "CRISTA is the
-  tail" assumption — CRISTA is ~4% of the run; the registry decompression was the real tail.
+  (`codec=RAW`) → unaffected** (harmless no-op). Also corrects the earlier "the ML scorer is the
+  tail" assumption — the ML scorer is ~4% of the run; the registry decompression was the real tail.
 - **O(1) registry block-cache LRU (`OrderedDict`).** Profiling the *indel* post-analysis with
   the enlarged cache exposed a second tail the small cache had hidden: the LRU was a plain
   list, so every cache hit did an O(cache-size) `list.remove()` — **43 s / 26 %** of a dense
@@ -397,7 +484,7 @@ and the `release-crisprme` skill.
 ### Changed
 - **Fast mode is now the DEFAULT search behavior; `--full` opts into exact enumeration.**
   The SNP variant post-analysis now reports one worst-possible representative per variant
-  window by default (exact worst-case CFD; CRISTA is a best-effort screen), instead of
+  window by default (exact worst-case CFD; the ML scorer is a best-effort screen), instead of
   enumerating every observed haplotype — so a search stays tractable on dense / aggregate
   panels out of the box (the full enumeration was measured 49 h+ without completing on a
   4×-density panel). **Trade-off: per-sample carriers, CONFIRMED cis phasing and exact joint
@@ -413,19 +500,19 @@ and the `release-crisprme` skill.
   tests and the byte-identical guarantee for the enumeration path are unaffected.
 
 ### Added
-- **Parallel CRISTA scoring (`CRISPRME_CRISTA_PARALLEL`, opt-in, default OFF)** — prototype
-  that removes the per-contig CRISTA-scoring tail (one large chromosome's worker running
+- **Parallel ML scoring (opt-in, default OFF)** — prototype
+  that removes the per-contig ML-scoring tail (one large chromosome's worker running
   serially long after the others finish). The per-contig post-analysis pool is unchanged; this
   parallelizes the CPU-bound per-target **feature build** (`get_features`) — the genuinely
-  serial part — at the finest seam (`CRISTA_predict_list`) across a small bounded **fork** pool.
-  The 276 MB model stays in the parent (children only build features). **Bit-identical feature
+  serial part — at the finest seam across a small bounded **fork** pool.
+  The model stays in the parent (children only build features). **Bit-identical feature
   matrix by construction** (a feature row is a pure per-target function; contiguous,
   order-preserving chunks) and default OFF ⇒ output + process count unchanged. Fork (not spawn)
   because the post-analysis entry points run their main at module top level. Measured
-  feature-build speedup ≈ 3.8× at 8 workers; test `test_crista_parallel_equivalence`. The RF
+  feature-build speedup ≈ 3.8× at 8 workers. The model's
   `predict` is left untouched — the pickled predictors already carry `n_jobs=-1` (all cores), so
   it is already parallel (and, as a result, non-deterministic at the raw-float level: two serial
-  runs differ ~5e-17, identical to the emitted 3 decimals — CRISTA output has always been
+  runs differ ~5e-17, identical to the emitted 3 decimals — the ML scorer's output has always been
   reproducible only to the emitted precision, which this preserves).
 
 ### Fixed
@@ -451,7 +538,7 @@ and the `release-crisprme` skill.
   1000G-2021+HGDP slice (0 CFD under-reports; surfaces *stronger* worst cases at 182 loci),
   and **confirmed genome-wide** (V2 non-`--fast` vs V3 `--fast` on the 2021 panel: V3 is a
   locus-level superset, **0 of V2's 1,458 CFD≥0.2 loci lost or demoted**, CFD exact-or-
-  conservative, CRISTA screen-grade only near the 0.2 line). The default (non-`--fast`) path
+  conservative, the ML scorer screen-grade only near the 0.2 line). The default (non-`--fast`) path
   is **byte-identical**. See `docs/DESIGN_2.5.1_two_pass_fast_mode.md` and METHODS §5/§8.
 - **All-source "mega" sites-only index (5 datasets).** A new merged panel — 1000 Genomes
   2021, HGDP, gnomAD v4.1, TOPMed, All-of-Us — built directly from each source's aggregate
@@ -498,7 +585,7 @@ and the `release-crisprme` skill.
   phantom trans-as-cis haplotypes.
 
 ### Performance
-- **CRISTA scoring: load the model once + skip eager per-pentamer work.** The 276 MB CRISTA
+- **ML scoring: load the model once + skip eager per-pentamer work.** The 276 MB
   RandomForest ensemble was re-`pickle.load()`ed on every scoring batch (both the SNP and
   INDEL post-analysis); it is now cached at module scope and loaded once per process.
   Separately, `get_features` no longer runs an eager per-pentamer `re.sub` + `random.choice`
@@ -506,7 +593,7 @@ and the `release-crisprme` skill.
   nondeterminism from the hot path. Both are **byte-identical** at the reported score
   precision (validated against the shipped model); `get_features` micro-benchmarks ~1.6×
   faster. The dense-panel INDEL post-analysis remains dominated by single-threaded per-target
-  CRISTA compute (profiled scoring-bound, not enumeration-bound); parallelizing it is tracked
+  ML-scorer compute (profiled scoring-bound, not enumeration-bound); parallelizing it is tracked
   separately.
 
 ### Fixed
@@ -543,13 +630,13 @@ and the `release-crisprme` skill.
   real CFD-scored multiallelic fixture.
 
 ### Notes
-- In fast mode, **CFD is the exact worst case; CRISTA is best-effort** (a non-factorizable
-  RandomForest). On a chr22 1000G-2021+HGDP slice every CRISTA ≥ 0.2 off-target was reported
-  at full strength (under-reporting ≤ 0.04, sub-0.19 tail). **Genome-wide the CRISTA tail is
-  heavier:** ~5 % of CRISTA ≥ 0.2 loci can drop below 0.2 under `--fast` (largest gap ~0.12),
+- In fast mode, **CFD is the exact worst case; the ML scorer is best-effort** (a non-factorizable
+  RandomForest). On a chr22 1000G-2021+HGDP slice every ML-scorer ≥ 0.2 off-target was reported
+  at full strength (under-reporting ≤ 0.04, sub-0.19 tail). **Genome-wide the ML-scorer tail is
+  heavier:** ~5 % of ML-scorer ≥ 0.2 loci can drop below 0.2 under `--fast` (largest gap ~0.12),
   while **CFD had zero ≥ 0.2 losses** (V2-vs-V3 GW matrix). So `--fast` CFD is a safe
-  actionable gate but **CRISTA is a screen** — run **without** `--fast` for a guaranteed
-  per-haplotype CRISTA worst case / a CRISTA action gate.
+  actionable gate but **the ML scorer is a screen** — run **without** `--fast` for a guaranteed
+  per-haplotype ML-scorer worst case / an ML-scorer action gate.
 - **`--fast` scope + index/version compatibility.** `--fast` accelerates only the SNP
   post-analysis; the indel post-analysis is single-threaded and **unaffected** by it (and the
   `indel_snp_cooc.tsv` companion is byte-identical with/without `--fast`). The feature-on 2021
@@ -1066,7 +1153,7 @@ below for the full history); the entries here are the changes since `alpha.30`.
 
 ### Added
 - **Graphical Reports: a "top 1000 by variant effect" plot.** Alongside the existing
-  score-ranked top-1000 scatter, the CFD and CRISTA reports now also show a companion
+  score-ranked top-1000 scatter, the CFD and ML-scorer reports now also show a companion
   plot ranked by the size of the variant-induced score change (`|ALT - REF|`), so the
   variants that actually change the off-target score are foregrounded instead of being
   buried among the many that leave it unchanged. The score-ranked plot is unchanged; the
@@ -1078,12 +1165,12 @@ below for the full history); the entries here are the changes since `alpha.30`.
 - **Graphical Reports: the top-1000 scatter now shows the variant (ALT) points.** The blue
   ALT markers were drawn ~10x smaller than the red REF markers at the same x, so they were
   swallowed and the plot looked "all red." They now have a floored size + a black edge (and
-  stay hidden for reference-only sites), so a variant that changes the CFD/CRISTA score is
+  stay hidden for reference-only sites), so a variant that changes the CFD / ML-scorer score is
   visible at the tip of its arrow. (`CRISPRme_plots.py`, `CRISPRme_plots_personal.py`.)
-- **Graphical Reports: the CRISTA and fewest-mm+b top-1000 plots are generated again.** The
-  plot generator sorted the CRISTA plot on a non-existent column
-  (`CFD_score_(highest_CRISTA)`) and crashed with a silently-swallowed `KeyError` right after
-  the CFD image, so only the CFD plot appeared. Fixed to `CRISTA_score_(highest_CRISTA)`.
+- **Graphical Reports: the ML-scorer and fewest-mm+b top-1000 plots are generated again.** The
+  plot generator sorted the ML-scorer plot on a non-existent column
+  (`CFD_score_(highest_CRISPR_BULGE)`) and crashed with a silently-swallowed `KeyError` right after
+  the CFD image, so only the CFD plot appeared. Fixed to `CRISPR_BULGE_score_(highest_CRISPR_BULGE)`.
 - **Reference-only searches no longer break the Graphical Reports tab.** The population-barplot
   callback `Output` targeted a container the layout omitted for reference-only searches, which
   could fail the whole callback (radar chart included). The container is now always present
@@ -1100,10 +1187,10 @@ below for the full history); the entries here are the changes since `alpha.30`.
 
 ### Fixed
 - **INDEL post-analysis: forward-ported the boundary/dense-variant crash guards.** The
-  alpha.17 CRISTA window guard was only in the SNP path (`new_simple_analysis.py`); the
+  alpha.17 ML-scorer window guard was only in the SNP path (`new_simple_analysis.py`); the
   parallel INDEL path (`analisi_indels_NNN.py`) still assumed a full 29 nt window, so an
   out-of-range indel coordinate could crash post-analysis. The `!= 29` null-guard is now
-  mirrored in both INDEL CRISTA blocks.
+  mirrored in both INDEL ML-scorer blocks.
 - **INDEL CFD scoring no longer KeyErrors on an unexpected PAM.** `analisi_indels_NNN.py`
   used a raw `pam_scores[pam]` where the SNP path uses the guarded `pam_scores.get(pam,
   0.0)`; now matched (issue-#94 class).
@@ -1122,13 +1209,13 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Fixed
 - **Post-analysis no longer crashes on variant-dense / chromosome-boundary targets.**
   On the combined 1000G+HGDP index the example search (and any dense-variant search)
-  could abort in post-analysis with a `ZeroDivisionError` (CRISTA scoring divided by the
+  could abort in post-analysis with a `ZeroDivisionError` (ML scoring divided by the
   length of a 29 nt window that had been stripped empty of IUPAC codes) or an
   `IndexError` in `iupac_decomposition` (a reference window truncated at a chromosome
   boundary was shorter than the target). Both came from assuming a genome slice is always
-  full length. Now an un-scoreable CRISTA window is nulled (score −1, as for windows with
+  full length. Now an un-scoreable ML-scorer window is nulled (score −1, as for windows with
   `N`) and IUPAC positions past a truncated reference are skipped, with belt-and-suspenders
-  divide-by-zero guards in `CRISTA_score.py`. Verified end-to-end on the batteries
+  divide-by-zero guards in the ML scorer module. Verified end-to-end on the batteries
   1000G+HGDP data: the example completes and its Personal Risk Card renders.
 
 ### Changed
@@ -1559,7 +1646,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.5.5...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.0
 [2.5.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.5
 [2.5.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.4
 [2.5.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.3

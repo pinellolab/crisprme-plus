@@ -156,11 +156,11 @@ def plot_with_MMvBUL(df, out_folder, guide):
     plt.clf()
 
 
-def plot_with_CRISTA_score(df, out_folder, guide):
+def plot_with_CRISPR_BULGE_score(df, out_folder, guide):
     # Remove targets with mm+bul<=1 since they are probably on-target introduced by variants
-    df = df.loc[df["Mismatches+bulges_(highest_CRISTA)"] > 1]
+    df = df.loc[df["Mismatches+bulges_(highest_CRISPR_BULGE)"] > 1]
     # sort values to have highest scored target on top
-    df.sort_values('CRISTA_score_(highest_CRISTA)',
+    df.sort_values('CRISPR_BULGE_score_(highest_CRISPR_BULGE)',
                    ascending=False, inplace=True)
     # keep top1000 targets
     df = df.head(1000)
@@ -173,11 +173,11 @@ def plot_with_CRISTA_score(df, out_folder, guide):
 
     # If prim_AF = 'n', then it's a ref-nominated site, so we enter a fake numerical AF
     # This will cause a warning of invalid sqrt later on, but that's fine to ignore
-    df["Variant_MAF_(highest_CRISTA)"] = df["Variant_MAF_(highest_CRISTA)"].fillna(-1)
+    df["Variant_MAF_(highest_CRISPR_BULGE)"] = df["Variant_MAF_(highest_CRISPR_BULGE)"].fillna(-1)
 
     # If multiple AFs (haplotype with multiple SNPs), take min AF
     # Approximation until we have haplotype frequencies
-    df["AF"] = df["Variant_MAF_(highest_CRISTA)"].astype(str).str.split(',')
+    df["AF"] = df["Variant_MAF_(highest_CRISPR_BULGE)"].astype(str).str.split(',')
     df["AF"] = df["AF"].apply(lambda x: min(x))
     df["AF"] = pd.to_numeric(df["AF"])
 
@@ -217,22 +217,22 @@ def plot_with_CRISTA_score(df, out_folder, guide):
     plt.rcParams['ps.fonttype'] = 42
 
     # Plot data CFD SCORE
-    ax = df.plot.scatter(x="index", y="CRISTA_score_REF_(highest_CRISTA)",
+    ax = df.plot.scatter(x="index", y="CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)",
                          s="ref_AF", c=transparent_red, zorder=1)
-    # ax = df.plot.scatter(x="index", y="highest_CRISTA_score(ref)", s="ref_AF", c=transparent_red, zorder=1, ax=ax)
-    df.plot.scatter(x="index", y="CRISTA_score_ALT_(highest_CRISTA)",
+    # ax = df.plot.scatter(x="index", y="highest_CRISPR_BULGE_score(ref)", s="ref_AF", c=transparent_red, zorder=1, ax=ax)
+    df.plot.scatter(x="index", y="CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)",
                     s="plot_AF", c=transparent_blue, zorder=2, ax=ax)
     ax.set_xscale("log")
 
     plt.xlabel("Candidate off-target site")
-    plt.ylabel("CRISTA score")
+    plt.ylabel("CRISPR-Bulge score")
 
     # Boundaries
     plt.xlim(xmin=0.9, xmax=1000)
     plt.ylim(ymin=0, ymax=1)
 
     # Arrows
-    for x, y, z in zip(df["index"], df["CRISTA_score_REF_(highest_CRISTA)"], df["CRISTA_score_ALT_(highest_CRISTA)"]-df["CRISTA_score_REF_(highest_CRISTA)"]):
+    for x, y, z in zip(df["index"], df["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"], df["CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)"]-df["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"]):
         plt.arrow(x, y+0.02, 0, z-0.04, color='gray', head_width=(x*(10**0.005-10**(-0.005))),
                   head_length=0.02, length_includes_head=True, zorder=0, alpha=0.5)
         # +/- to avoid overlap of arrow w/ points, head_width calculated to remain constant despite log scale of x-axis
@@ -249,7 +249,7 @@ def plot_with_CRISTA_score(df, out_folder, guide):
     # Save
     plt.tight_layout()
     plt.savefig(
-        out_folder+f"CRISPRme_CRISTA_top_1000_log_for_main_text_{guide}.pdf")
+        out_folder+f"CRISPRme_CRISPR_BULGE_top_1000_log_for_main_text_{guide}.pdf")
     plt.clf()
 
 
@@ -365,5 +365,5 @@ for guide in df['Spacer+PAM'].unique():
     # reset df temp after every process to avoid memory problems
     df_guide = df.loc[df["Spacer+PAM"] == guide]
     plot_with_CFD_score(df_guide, out_folder, guide)
-    plot_with_CRISTA_score(df_guide, out_folder, guide)
+    plot_with_CRISPR_BULGE_score(df_guide, out_folder, guide)
     plot_with_MMvBUL(df_guide, out_folder, guide)

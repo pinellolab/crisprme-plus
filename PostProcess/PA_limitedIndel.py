@@ -2,7 +2,7 @@
 #########################################################################
 ##                                                                     ##
 ##                                                                     ##
-##                              CRISTA                                 ##
+##                              CRISPR-Bulge                                 ##
 ##                                                                     ##
 ##                                                                     ##
 ##                 A tool for CRISPR Targets Assessment                ##
@@ -13,9 +13,9 @@
 #########################################################################
 #########################################################################
 ## Needleman-Wunch global alignemnt implementation with limited gaps.  ##
-## This code is a part of CRISTA:  www.crista.tau.ac.il                ##
+## This code is a part of CRISPR-Bulge:  www.crispr_bulge.tau.ac.il                ##
 ##                                                                     ##
-## For academic use only, please cite crista.tau.ac.il.                ##
+## For academic use only, please cite crispr_bulge.tau.ac.il.                ##
 ## Non-commercial use                                                  ##
 ##                                                                     ##
 ## Please do not change and distribute.                                ##

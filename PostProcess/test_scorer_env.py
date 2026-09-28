@@ -82,6 +82,44 @@ class TestCreateCommand(unittest.TestCase):
             self.assertEqual(se._variant(False), "cpu")
             self.assertEqual(se._variant(True), "cuda")
 
+    def test_variant_is_linux_aarch64_on_arm(self):
+        # Linux ARM has no conda-forge tensorflow-cpu=2.13; the scorer env is built there
+        # from the PyPI aarch64 wheel. aarch64 is CPU-only, so gpu=True stays on the same
+        # variant (there is no CUDA/Metal on aarch64).
+        for machine in ("aarch64", "arm64"):
+            with mock.patch("platform.system", return_value="Linux"), \
+                 mock.patch("platform.machine", return_value=machine):
+                self.assertEqual(se._variant(False), "linux_aarch64")
+                self.assertEqual(se._variant(True), "linux_aarch64")
+
+    def test_aarch64_has_no_tf_in_conda_and_same_tf_version_via_pip(self):
+        # The conda create must NOT include tensorflow (it comes from pip on aarch64) and the
+        # pip TF must be the SAME 2.13.1 version used on x86-64, so scores match across arches.
+        with mock.patch.object(se, "detect_env_manager", return_value=("/m/mamba", "mamba")):
+            cmd = se.build_create_command("cbulge", variant="linux_aarch64")
+        self.assertIn("numpy=1.23.5", cmd)
+        self.assertIn("hdf5", cmd)
+        self.assertFalse(any("tensorflow" in c for c in cmd))
+        pip = se.SCORER_ENVS["cbulge"]["linux_aarch64_pip"]
+        self.assertEqual(pip, ["tensorflow==2.13.1"])
+        # same MAJOR.MINOR.PATCH as the x86-64 conda pin (tensorflow-cpu=2.13 -> 2.13.x)
+        cpu_tf = [p for p in se.SCORER_ENVS["cbulge"]["cpu_packages"] if "tensorflow" in p][0]
+        self.assertTrue(cpu_tf.endswith("2.13"))
+        self.assertTrue(pip[0].split("==")[1].startswith("2.13"))
+
+    def test_channel_args_honor_mirror_base(self):
+        # networks that block conda.anaconda.org point the scorer-env solve at a mirror via
+        # CONDA_CHANNEL_BASE / CRISPRME_CONDA_CHANNEL_BASE (e.g. https://prefix.dev).
+        spec = se.SCORER_ENVS["cbulge"]
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(se._channel_args(spec), ["-c", "conda-forge"])
+        with mock.patch.dict(os.environ, {"CONDA_CHANNEL_BASE": "https://prefix.dev"}, clear=True):
+            self.assertEqual(se._channel_args(spec), ["-c", "https://prefix.dev/conda-forge"])
+        # trailing slash tolerated; CRISPRME_-prefixed var wins
+        with mock.patch.dict(os.environ, {"CRISPRME_CONDA_CHANNEL_BASE": "https://prefix.dev/",
+                                          "CONDA_CHANNEL_BASE": "https://conda.anaconda.org"}, clear=True):
+            self.assertEqual(se._channel_args(spec), ["-c", "https://prefix.dev/conda-forge"])
+
     def test_no_manager_returns_none(self):
         with mock.patch.object(se, "detect_env_manager", return_value=None):
             self.assertIsNone(se.build_create_command("cbulge"))

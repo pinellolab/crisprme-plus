@@ -195,21 +195,21 @@ def plot_with_MMvBUL(df, out_folder, guide, tag="top_1000_log_for_main_text"):
     plt.close()
 
 
-def plot_with_CRISTA_score(df, out_folder, guide, tag="top_1000_log_for_main_text"):
+def plot_with_CRISPR_BULGE_score(df, out_folder, guide, tag="top_1000_log_for_main_text"):
     # Make index column that numbers the OTs starting from 1
     df.reset_index(inplace=True)
     for index_count, index in enumerate(df.index, start=1):
         df.loc[index, "index"] = index_count
     # If prim_AF = 'n', then it's a ref-nominated site, so we enter a fake numerical AF
     # This will cause a warning of invalid sqrt later on, but that's fine to ignore
-    df["Variant_MAF_(highest_CRISTA)"] = df["Variant_MAF_(highest_CRISTA)"].fillna(-1)
+    df["Variant_MAF_(highest_CRISPR_BULGE)"] = df["Variant_MAF_(highest_CRISPR_BULGE)"].fillna(-1)
 
     # If multiple AFs (haplotype with multiple SNPs), take min AF
     # Approximation until we have haplotype frequencies
-    df["AF"] = df["Variant_MAF_(highest_CRISTA)"].astype(str).str.split(",")
+    df["AF"] = df["Variant_MAF_(highest_CRISPR_BULGE)"].astype(str).str.split(",")
     df["AF"] = df["AF"].apply(lambda x: min(x))
     df["AF"] = pd.to_numeric(df["AF"])
-    _samp = df["Variant_samples_(highest_CRISTA)"].astype(str)
+    _samp = df["Variant_samples_(highest_CRISPR_BULGE)"].astype(str)
     df["_has_variant"] = _samp.str.len().gt(1) & ~_samp.isin(["nan", "NA", "n", "."])
 
     # Adjustments for plotting purposes.
@@ -277,15 +277,15 @@ def plot_with_CRISTA_score(df, out_folder, guide, tag="top_1000_log_for_main_tex
     # Plot data CFD SCORE
     ax = df.plot.scatter(
         x="index",
-        y="CRISTA_score_REF_(highest_CRISTA)",
+        y="CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)",
         s="ref_AF",
         c=transparent_red,
         zorder=1,
     )
-    # ax = df.plot.scatter(x="index", y="highest_CRISTA_score(ref)", s="ref_AF", c=transparent_red, zorder=1, ax=ax)
+    # ax = df.plot.scatter(x="index", y="highest_CRISPR_BULGE_score(ref)", s="ref_AF", c=transparent_red, zorder=1, ax=ax)
     df.plot.scatter(
         x="index",
-        y="CRISTA_score_ALT_(highest_CRISTA)",
+        y="CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)",
         s="plot_AF",
         c=transparent_blue,
         zorder=2,
@@ -299,7 +299,7 @@ def plot_with_CRISTA_score(df, out_folder, guide, tag="top_1000_log_for_main_tex
         "Candidate off-target site"
         + (" (ranked by variant effect |ALT-REF|)" if "variant_effect" in tag else "")
     )
-    plt.ylabel("CRISTA score")
+    plt.ylabel("CRISPR-Bulge score")
 
     # Boundaries
     plt.xlim(xmin=0.9, xmax=1000)
@@ -308,9 +308,9 @@ def plot_with_CRISTA_score(df, out_folder, guide, tag="top_1000_log_for_main_tex
     # Arrows
     for x, y, z in zip(
         df["index"],
-        df["CRISTA_score_REF_(highest_CRISTA)"],
-        df["CRISTA_score_ALT_(highest_CRISTA)"]
-        - df["CRISTA_score_REF_(highest_CRISTA)"],
+        df["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"],
+        df["CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)"]
+        - df["CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)"],
     ):
         plt.arrow(
             x,
@@ -338,8 +338,8 @@ def plot_with_CRISTA_score(df, out_folder, guide, tag="top_1000_log_for_main_tex
 
     # Save
     plt.tight_layout()
-    plt.savefig(out_folder + f"CRISPRme_CRISTA_{tag}_{guide}.png")
-    plt.savefig(out_folder + f"CRISPRme_CRISTA_{tag}_{guide}.pdf")
+    plt.savefig(out_folder + f"CRISPRme_CRISPR_BULGE_{tag}_{guide}.png")
+    plt.savefig(out_folder + f"CRISPRme_CRISPR_BULGE_{tag}_{guide}.pdf")
     plt.clf()
     plt.close()
 
@@ -507,11 +507,11 @@ out_folder = sys.argv[2]
 def filter_table(df, plot_term, sort_by="score"):
     score_mapping = {
         "cfd": ("Mismatches+bulges_(highest_CFD)", "CFD_score_(highest_CFD)"),
-        # NB: sort the CRISTA plot on the CRISTA score, not a non-existent
-        # "CFD_score_(highest_CRISTA)" column -- that KeyError aborted the plot loop
-        # after the CFD image, so the CRISTA and fewest-mm+b top-1000 plots were never
+        # NB: sort the CRISPR-Bulge plot on the CRISPR-Bulge score, not a non-existent
+        # "CFD_score_(highest_CRISPR_BULGE)" column -- that KeyError aborted the plot loop
+        # after the CFD image, so the CRISPR-Bulge and fewest-mm+b top-1000 plots were never
         # produced (they appeared only when CFD was selected).
-        "crista": ("Mismatches+bulges_(highest_CRISTA)", "CRISTA_score_(highest_CRISTA)"),
+        "crispr_bulge": ("Mismatches+bulges_(highest_CRISPR_BULGE)", "CRISPR_BULGE_score_(highest_CRISPR_BULGE)"),
         "mm+b": ("Mismatches+bulges_(fewest_mm+b)", "Mismatches+bulges_(fewest_mm+b)"),
     }
     # per-plot-term (REF, ALT) score columns, used to rank by the variant-induced change
@@ -519,9 +519,9 @@ def filter_table(df, plot_term, sort_by="score"):
     # exist in the results); the fewest-mm+b plot derives its REF/ALT columns internally.
     delta_mapping = {
         "cfd": ("CFD_score_REF_(highest_CFD)", "CFD_score_ALT_(highest_CFD)"),
-        "crista": (
-            "CRISTA_score_REF_(highest_CRISTA)",
-            "CRISTA_score_ALT_(highest_CRISTA)",
+        "crispr_bulge": (
+            "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)",
+            "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)",
         ),
     }
     # Remove targets with mm+bul<=1 since they are probably on-target introduced
@@ -553,9 +553,9 @@ for guide in df["Spacer+PAM"].unique():
     # reset df temp after every process to avoid memory problems
     df_guide = df.loc[df["Spacer+PAM"] == guide]
     plot_with_CFD_score(filter_table(df_guide, "cfd"), out_folder, guide)
-    plot_with_CRISTA_score(filter_table(df_guide, "crista"), out_folder, guide)
+    plot_with_CRISPR_BULGE_score(filter_table(df_guide, "crispr_bulge"), out_folder, guide)
     plot_with_MMvBUL(filter_table(df_guide, "mm+b"), out_folder, guide)
-    # Variant-effect-sorted companions for the SCORE plots (CFD, CRISTA): rank the
+    # Variant-effect-sorted companions for the SCORE plots (CFD, CRISPR-Bulge): rank the
     # top-1000 by |ALT-REF| so the variants that actually change the score (buried among
     # many zero-effect ones in the score-sorted plot) are foregrounded. The fewest-mm+b
     # plot is score-only (its REF/ALT mm+b columns are derived inside the plot function,
@@ -564,6 +564,6 @@ for guide in df["Spacer+PAM"].unique():
     plot_with_CFD_score(
         filter_table(df_guide, "cfd", sort_by="delta"), out_folder, guide, tag=_tag
     )
-    plot_with_CRISTA_score(
-        filter_table(df_guide, "crista", sort_by="delta"), out_folder, guide, tag=_tag
+    plot_with_CRISPR_BULGE_score(
+        filter_table(df_guide, "crispr_bulge", sort_by="delta"), out_folder, guide, tag=_tag
     )

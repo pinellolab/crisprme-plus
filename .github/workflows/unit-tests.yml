@@ -39,7 +39,7 @@ jobs:
       - name: Install light deps
         # requests: utils.py imports it at module load. numpy: test_phased_haplotype
         # exercises the real iupac_decomposition, which uses np.array (the only
-        # scientific-stack dep on that hot path; pandas/CRISTA_score are stubbed in
+        # scientific-stack dep on that hot path; pandas/CRISPR-Bulge scoring are stubbed in
         # the test since that path uses neither). pandas: test_reference_row_downstream
         # runs the REAL remove_n_and_dots.py (pandas) to reproduce the NaN round-trip
         # that crashed resultIntegrator. pandas + matplotlib: the shareable-report
@@ -184,7 +184,7 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_generate_report -v
 
-      - name: "Scorer-aware report column (CRISTA|CRISPR-Bulge label + thresholds from .Params.txt)"
+      - name: "Scorer-aware report column (CRISPR-Bulge|CRISPR-Bulge label + thresholds from .Params.txt)"
         working-directory: PostProcess
         run: python -m unittest test_report_scorer_label -v
 

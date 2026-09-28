@@ -123,7 +123,7 @@ Also look at the bundled TSVs under the zip's `data/` folder (and in the `Result
    that source"; a number is that source's frequency. This is the **provenance** — which of the
    5 databases actually see each variant.
 5. **`integrated_results.tsv`** — the main off-target table (aligned protospacer, mismatches/bulges,
-   CFD + CRISTA scores, annotations, and the creating variant's rsID/AF/samples).
+   CFD + CRISPR-Bulge scores, annotations, and the creating variant's rsID/AF/samples).
 
 ---
 

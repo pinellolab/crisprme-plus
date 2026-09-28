@@ -303,30 +303,30 @@ TOTAL_FEWEST_COLUMN = "Mismatches+bulges_(fewest_mm+b)"
 BLG_T_COLUMN = "Bulge_type_(highest_CFD)"
 # CFD score column name
 CFD_COLUMN = "CFD_score_(highest_CFD)"
-# CRISTA score column name
-CRISTA_COLUMN = "CRISTA_score_(highest_CRISTA)"
+# CRISPR-Bulge score column name
+CRISPR_BULGE_COLUMN = "CRISPR_BULGE_score_(highest_CRISPR_BULGE)"
 # CFD risk score column name
 RISK_COLUMN = "CFD_risk_score_(highest_CFD)"
 # variant samples column name
 SAMPLES_COLUMN = "Variant_samples_(highest_CFD)"
-# variant CRISTA samples column name
-SAMPLES_CRISTA_COLUMN = "Variant_samples_(highest_CRISTA)"
+# variant CRISPR-Bulge samples column name
+SAMPLES_CRISPR_BULGE_COLUMN = "Variant_samples_(highest_CRISPR_BULGE)"
 # variant fewest mm+b samples column name
 SAMPLES_FEWEST_COLUMN = "Variant_samples_(fewest_mm+b)"
-# variant genome CRISTA column name
-VARIANTS_CRISTA = "Variant_info_genome_(highest_CRISTA)"
+# variant genome CRISPR-Bulge column name
+VARIANTS_CRISPR_BULGE = "Variant_info_genome_(highest_CRISPR_BULGE)"
 # variant genome CFD columns name
 VARIANTS_CFD = "Variant_info_genome_(highest_CFD)"
 # variant genome mm+b column name
 VARIANTS_FEWEST = "Variant_info_genome_(fewest_mm+b)"
 # results filtering criteria
-FILTERING_CRITERIA = ["fewest", "CFD", "CRISTA"]
+FILTERING_CRITERIA = ["fewest", "CFD", "CRISPR-Bulge"]
 # filter mms + bulges
 MMBULGES_FILTER = "fewest_mm+b"
 # filter CFD
 CFD_FILTER = "highest_CFD"
-# filter CRISTA
-CRISTA_FILTER = "highest_CRISTA"
+# filter CRISPR-Bulge
+CRISPR_BULGE_FILTER = "highest_CRISPR_BULGE"
 # CRISPRme mail subject
 MAIL_SUBJECT = "CRISPRme - Job completed"
 # CRISPRme mail sender
@@ -382,15 +382,15 @@ def drop_columns(table: pd.DataFrame, filter_criterion: str) -> List[str]:
         drops = [
             col
             for col in table.columns.tolist()
-            if (CFD_FILTER in col or CRISTA_FILTER in col)
+            if (CFD_FILTER in col or CRISPR_BULGE_FILTER in col)
         ]
     elif filter_criterion == FILTERING_CRITERIA[1]:  # CFD
         drops = [
             col
             for col in table.columns.tolist()
-            if (MMBULGES_FILTER in col or CRISTA_FILTER in col)
+            if (MMBULGES_FILTER in col or CRISPR_BULGE_FILTER in col)
         ]
-    elif filter_criterion == FILTERING_CRITERIA[2]:  # CRISTA
+    elif filter_criterion == FILTERING_CRITERIA[2]:  # CRISPR-Bulge
         drops = [
             col
             for col in table.columns.tolist()
@@ -507,11 +507,11 @@ def get_query_column(filter_criterion: str) -> Dict[str, str]:
             query_columns[key] = "_".join([query_columns[key], f"({CFD_FILTER})"])
             query_columns["sort"] = CFD_COLUMN
             query_columns["samples"] = SAMPLES_COLUMN
-    elif filter_criterion == FILTERING_CRITERIA[2]:  # crista
+    elif filter_criterion == FILTERING_CRITERIA[2]:  # crispr_bulge
         for key in query_columns:
-            query_columns[key] = "_".join([query_columns[key], f"({CRISTA_FILTER})"])
-            query_columns["sort"] = CRISTA_COLUMN
-            query_columns["samples"] = SAMPLES_CRISTA_COLUMN
+            query_columns[key] = "_".join([query_columns[key], f"({CRISPR_BULGE_FILTER})"])
+            query_columns["sort"] = CRISPR_BULGE_COLUMN
+            query_columns["samples"] = SAMPLES_CRISPR_BULGE_COLUMN
     else:
         raise ValueError
     return query_columns

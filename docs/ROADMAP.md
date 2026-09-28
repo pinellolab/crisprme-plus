@@ -53,11 +53,12 @@ Both tools are currently pinned to Python 3.8 (EOL). Assessed difficulty: **MEDI
   The off-target (CFD) pipeline already runs on 3.11 (tested).
 - **CRISPRme → 2.2.0:** pipeline fixes — `DataFrame.append`→`pd.concat`
   (`process_summaries.py`), `seaborn-poster`→`seaborn-v0_8-poster` (4 sites),
-  bare `python`→`sys.executable` (`generate_sample_card.py`, `crisprme.py`); a
-  **CRISTA pickle forward-compat shim** (`sklearn.ensemble.forest`→`_forest`,
-  `sklearn.tree.tree`→`_classes`) + pin `numpy<2`; repin to the crispritz-py3.11
-  build. Groundwork: PR `py311-core`. **Prerequisite:** a crispritz **Python-3.11
-  Bioconda build** (compiled; linux-64 + linux-aarch64) must exist first.
+  bare `python`→`sys.executable` (`generate_sample_card.py`, `crisprme.py`); pin
+  `numpy<2`; repin to the crispritz-py3.11 build. The ML off-target scorer is now
+  **CRISPR-Bulge** (TensorFlow, no sklearn pickle), so no sklearn forward-compat shim
+  is needed on the CRISPRme side. Groundwork: PR `py311-core`. **Prerequisite:** a
+  crispritz **Python-3.11 Bioconda build** (compiled; linux-64 + linux-aarch64) must
+  exist first.
 
 ### B. Dash web-app modernization (the long pole)
 The web app is written for **Dash 1.x** (`dash 1.10`, `flask 1.1`, `werkzeug 1.0`,
@@ -80,10 +81,11 @@ click-through (as in the original audit).
   resolves it) and the multi-motif / additional-PAM improvements.
 
 ### D. Pickled-model modernization (cross-cutting)
-Both tools ship models pickled under sklearn ~0.21 (paths removed in 0.22): CRISTA
-(CRISPRme) and azimuth (CRISPRitz). Fix via a `sys.modules` alias shim and/or
+This now applies only to **azimuth (CRISPRitz)**, which ships a model pickled under
+sklearn ~0.21 (paths removed in 0.22). Fix via a `sys.modules` alias shim and/or
 re-export, and **validate scores numerically** against the benchmark ground truth
-(a clean unpickle is not sufficient).
+(a clean unpickle is not sufficient). On the CRISPRme side the ML off-target scorer
+is now **CRISPR-Bulge** (TensorFlow, no sklearn pickle), so no such shim is needed.
 
 ---
 
@@ -99,7 +101,7 @@ re-export, and **validate scores numerically** against the benchmark ground trut
 
 ## Validation gates
 - `validate-benchmarks` (byte-identical Cas9 + Cas12a off-targets, incl. CFD **and**
-  CRISTA) gates every CRISPRme change.
+  CRISPR-Bulge) gates every CRISPRme change.
 - CRISPRitz CI (build + AddressSanitizer #105-regression + native arm64).
 - Playwright click-through for the Dash web app.
 - Multi-arch Docker build (linux/amd64 + linux/arm64) for both images.
