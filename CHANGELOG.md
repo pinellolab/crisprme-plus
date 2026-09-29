@@ -11,6 +11,18 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **Restored the brute-force benchmark CI gate (`validate-benchmarks`).** The v2.6.0
+  `complete-test` rewrite made `run_crisprme_test` always require a prebuilt index and run a
+  single example-guide smoke, which silently dropped the CI's download + per-benchmark
+  on-demand-build flow — so `validate-test` had no predictions to compare against the committed
+  brute-force ground truth and the gate failed. `run_crisprme_test` now branches: the default
+  (user) path keeps the no-auto-build prebuilt-index smoke, while the CI path (when
+  `CRISPRME_ALLOW_ONDEMAND_BUILD` is set, as the workflow does) downloads the test data and runs
+  every registered benchmark with on-demand index build, producing the per-benchmark output dirs
+  `validate-test` needs. The brute-force comparison against CRISPRme's predicted off-targets is
+  exercised again.
+
 ## [2.6.1] - 2026-09-28
 
 ### Added
