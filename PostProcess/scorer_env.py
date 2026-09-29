@@ -314,8 +314,13 @@ def _create_conda_env(name, gpu, force, stream, variant) -> Tuple[bool, str]:
     if force and env_exists(name):
         _run([cmd[0], "env", "remove", "-y", "-n", name])
     env = dict(os.environ)
-    if variant == "cuda":
-        env.setdefault("CONDA_OVERRIDE_CUDA", "12.0")
+    if variant == "cuda" and not env.get("CONDA_OVERRIDE_CUDA"):
+        # Force-set (NOT setdefault): the micromamba base-env activation exports
+        # CONDA_OVERRIDE_CUDA="" (empty), which setdefault() would keep -> the conda CUDA
+        # TensorFlow build then fails to solve on a GPU-less builder ("__cuda missing"),
+        # e.g. GitHub CI. Treat empty as unset. 11.8 = TF 2.13's CUDA; the built image
+        # still runs on CPU when no GPU is visible (compute-backend device guard).
+        env["CONDA_OVERRIDE_CUDA"] = "11.8"
     sys.stderr.write(f"[scorer-env] creating '{name}' ({variant}): {' '.join(cmd)}\n")
     proc = subprocess.run(cmd, env=env) if stream else _run(cmd, env=env)
     if proc.returncode != 0:
@@ -365,8 +370,13 @@ def update_env(name: str = DEFAULT_ENV, gpu: bool = False) -> Tuple[bool, str]:
     variant = _variant(gpu)
     cmd = [exe, "install", "-y", "-n", name] + _channel_args(spec) + _conda_packages(spec, variant)
     env = dict(os.environ)
-    if variant == "cuda":
-        env.setdefault("CONDA_OVERRIDE_CUDA", "12.0")
+    if variant == "cuda" and not env.get("CONDA_OVERRIDE_CUDA"):
+        # Force-set (NOT setdefault): the micromamba base-env activation exports
+        # CONDA_OVERRIDE_CUDA="" (empty), which setdefault() would keep -> the conda CUDA
+        # TensorFlow build then fails to solve on a GPU-less builder ("__cuda missing"),
+        # e.g. GitHub CI. Treat empty as unset. 11.8 = TF 2.13's CUDA; the built image
+        # still runs on CPU when no GPU is visible (compute-backend device guard).
+        env["CONDA_OVERRIDE_CUDA"] = "11.8"
     sys.stderr.write(f"[scorer-env] updating '{name}' ({variant}): {' '.join(cmd)}\n")
     proc = subprocess.run(cmd, env=env)
     if proc.returncode != 0:

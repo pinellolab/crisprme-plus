@@ -22,6 +22,18 @@ on:
       - "test/data/**"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
+  # ALSO run on direct pushes to main that touch the pipeline. Releases here fast-forward
+  # dev -> main (NOT via PRs), so the pull_request trigger above would MISS them — exactly
+  # how the complete-test rewrite silently broke this brute-force gate until the weekly cron
+  # caught it. This makes the gate fire on every pipeline change that reaches main.
+  push:
+    branches: [ "main" ]
+    paths:
+      - "PostProcess/**"
+      - "test/benchmark/**"
+      - "test/data/**"
+      - "crisprme.py"
+      - ".github/workflows/validate-benchmarks.yml"
   # Weekly run so the benchmark gate also catches DATA-side drift (e.g. a change to
   # the HuggingFace reference data the complete-test downloads) that the code-path
   # PR filter above cannot see — this is how the sample-ID fast-path regression went

@@ -656,24 +656,15 @@ def _parse_index_name(index_name: str):
     return pam_token, ref, ("+" in rest)
 
 
-def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> None:
-    """Run the complete-test smoke against a prebuilt index present in the working dir.
-
-    CRISPRme does NOT build an index automatically. The user downloads (or builds) one;
-    complete-test then runs the example guide against it and confirms a report is produced.
-    If no index is present, ``require_prebuilt_index`` prints how to download one and exits.
+def _run_prebuilt_index_smoke(threads: int, debug: bool) -> None:
+    """Default (user) complete-test: run the built-in example guide against an index the
+    user has DOWNLOADED (or built). CRISPRme never builds an index automatically here; if
+    none is present, ``require_prebuilt_index`` prints how to download one and exits.
 
     Args:
-        chrom (str): Unused for the prebuilt-index smoke (kept for CLI compatibility).
-        dataset (str): Unused (the dataset is taken from the installed index).
         threads (int): Number of threads for the search.
         debug (bool): Run complete-search in debug mode.
     """
-    check_crisprme_directory_tree(os.getcwd())  # check crisprme directory tree
-    check_output()  # refuse to overwrite a previous complete-test output folder
-    # v2.6.0: CRISPRme never builds an index for the user. complete-test requires an
-    # index the user has DOWNLOADED (or built). If none is present, print how to get
-    # one and stop cleanly (no downloads, no build).
     index_name = require_prebuilt_index()
     parsed = _parse_index_name(index_name)
     if parsed is None:
@@ -745,6 +736,91 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
         f"\ncomplete-test PASSED: searched the example guide against '{index_name}' and "
         f"produced {os.path.basename(produced[0])} in Results/{output_dir}.\n"
     )
+
+
+def _run_benchmarks_ondemand(chrom: str, dataset: str, threads: int, debug: bool) -> None:
+    """CI / brute-force-gate path (enabled by CRISPRME_ALLOW_ONDEMAND_BUILD): download the
+    test genome + VCF + samples + annotation for ``chrom``/``dataset``, then run EVERY
+    registered benchmark via complete-search, building each benchmark's index on demand
+    (permitted only because the caller set CRISPRME_ALLOW_ONDEMAND_BUILD). Produces the
+    per-benchmark output dirs (``crisprme-test-out_<name>``) that ``validate-test`` compares
+    against the committed brute-force ground truth. This is NOT the default user path -- users
+    get ``_run_prebuilt_index_smoke`` (never auto-builds).
+    """
+    genome_dir = download_genome_data(chrom, CRISPRME_DIRS[0])  # download genome data
+    download_vcf_data(chrom, CRISPRME_DIRS[3], dataset)  # download vcf data
+    vcf = write_vcf_config(dataset)  # write test vcf list
+    download_samples_ids_data(dataset)  # download vcf dataset samples ids
+    samplesids = write_samplesids_config(dataset)  # write test samples ids list
+    gencode, encode = download_annotation_data()  # gencode + encode annotation
+    debug_arg = "--debug" if debug else ""
+    # Run one complete-search per registered benchmark. complete-search refuses to run into
+    # a non-empty output folder, so each benchmark gets its OWN output dir; validate-test
+    # looks in each.
+    registry = load_benchmarks()
+    global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
+    # "heavy" benchmarks build a bulge-2 variant index that OOMs a 16GB hosted runner; the
+    # hosted CI sets CRISPRME_SKIP_HEAVY=1 to skip them (locally, unset -> all run).
+    skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
+    for bench in registry["benchmarks"]:
+        if skip_heavy and bench.get("heavy"):
+            sys.stderr.write(
+                f"Skipping heavy benchmark '{bench['name']}' (CRISPRME_SKIP_HEAVY=1; "
+                "its bulge-2 variant index build is too large for this runner)\n"
+            )
+            continue
+        th = dict(global_th)
+        th.update(bench.get("thresholds", {}))
+        # bMax = bDNA+bRNA (provenance; crisprme.py recomputes it). The binding knob is
+        # --max-total-edits: default mm+bDNA+bRNA (non-binding -> per-type mode) unless the
+        # case pins a smaller single-n value. The brute-force ground truth must be generated
+        # with the SAME per-type budgets AND --max-total-edits (see generate_references.py).
+        bmax = th["bDNA"] + th["bRNA"]
+        max_total_edits = th.get("max_total_edits", th["mm"] + th["bDNA"] + th["bRNA"])
+        output_dir = f"{COMPLETETESTRESDIR}_{bench['name']}"
+        pam = write_pamfile(bench["pam_name"], bench["pam_content"])
+        guide = write_guidefile(bench["guide_file"], bench["guide_crisprme"])
+        sys.stderr.write(
+            f"Running complete-search for benchmark '{bench['name']}' "
+            f"({bench.get('nuclease', '')}) mm={th['mm']} bDNA={th['bDNA']} "
+            f"bRNA={th['bRNA']} max-total-edits={max_total_edits} -> {output_dir}\n"
+        )
+        # NO --index-path: complete-search builds this benchmark's index on demand (allowed
+        # because run_crisprme_test gated this branch on CRISPRME_ALLOW_ONDEMAND_BUILD).
+        crisprme_cmd = (
+            f"crisprme.py complete-search --genome {genome_dir} "
+            f"--bmax {bmax} --mm {th['mm']} --bDNA {th['bDNA']} --bRNA {th['bRNA']} "
+            f"--max-total-edits {max_total_edits} "
+            f"--merge 3 --pam {pam} --guide {guide} --vcf {vcf} "
+            f"--samplesID {samplesids} --annotation {encode} "
+            f"--gene_annotation {gencode} --output {output_dir} "
+            f"--thread {threads} {debug_arg} --ci-cd-test"
+        )
+        returncode = subprocess.call(crisprme_cmd, shell=True)
+        if returncode != 0:
+            sys.stderr.write(
+                "ERROR: complete-test failed during complete-search for benchmark "
+                f"'{bench['name']}' (exit code {returncode}). See the log above.\n"
+            )
+            sys.exit(returncode)
+
+
+def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> None:
+    """complete-test entry point, with two modes:
+
+    * DEFAULT (user): run the built-in example guide against an index the user DOWNLOADED
+      (or built). CRISPRme never builds an index automatically here.
+    * CI / brute-force gate (env ``CRISPRME_ALLOW_ONDEMAND_BUILD`` set): download the test
+      data for ``chrom``/``dataset`` and run every registered benchmark with on-demand index
+      build, so ``validate-test`` can compare predictions to the committed brute-force ground
+      truth. The ``validate-benchmarks`` CI sets this flag.
+    """
+    check_crisprme_directory_tree(os.getcwd())  # check crisprme directory tree
+    check_output()  # refuse to overwrite a previous complete-test output folder
+    if os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
+        _run_benchmarks_ondemand(chrom, dataset, threads, debug)
+    else:
+        _run_prebuilt_index_smoke(threads, debug)
 
 
 def main():

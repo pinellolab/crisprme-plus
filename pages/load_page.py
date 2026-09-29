@@ -264,6 +264,30 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
                             ),
                             False,
                         )
+                    # A search that genuinely found nothing stops after post-analysis
+                    # (the pipeline logs "No off-targets found" and ends without
+                    # building any results): say so, instead of leaving the later
+                    # steps as "To do" forever with no way to tell it from a hang.
+                    if "No off-targets found" in current_log:
+                        not_needed = html.P("Not needed", style={"color": "gray"})
+                        return (
+                            {"visibility": "hidden"},
+                            index_status,
+                            search_status,
+                            post_process_status,
+                            not_needed,
+                            not_needed,
+                            not_needed,
+                            not_needed,
+                            "",  # no results to link to
+                            dbc.Alert(
+                                "Finished: no off-targets were found for the provided "
+                                "guide(s) with these parameters, so there are no "
+                                "results to view.",
+                                color="info",
+                            ),
+                            True,
+                        )
                     # Show VIEW RESULTS as soon as the pipeline's last stage is
                     # done. Keying only on done==7 / "Job\tDone" was fragile: the
                     # search step didn't count (marker mismatch, fixed above) and
