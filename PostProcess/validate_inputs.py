@@ -23,6 +23,19 @@ import gzip
 import os
 import sys
 
+try:  # PostProcess/ on sys.path (crisprme.py, the pipeline) ...
+    from genome_layout import (
+        describe_problem,
+        find_multi_record_fastas,
+        find_name_mismatched_fastas,
+    )
+except ImportError:  # ... or imported as PostProcess.validate_inputs (tests)
+    from PostProcess.genome_layout import (
+        describe_problem,
+        find_multi_record_fastas,
+        find_name_mismatched_fastas,
+    )
+
 ERROR = "ERROR"
 WARN = "WARN"
 
@@ -287,6 +300,29 @@ def check_genome_fasta(genomedir: str) -> Tuple[List[Issue], List[str]]:
                     f"{fname}: does not start with '>' — not a valid FASTA file",
                 )
             )
+    # One sequence per file: CRISPRme keys its chromosome list (and so the whole
+    # post-analysis) by file name, so a multi-sequence file makes the search run
+    # and then silently drop every result. Fast check (first header vs file name;
+    # see genome_layout.find_multi_record_fastas) so it is cheap on every search.
+    try:
+        multi = find_multi_record_fastas(genomedir)
+        mismatched = find_name_mismatched_fastas(genomedir)
+    except OSError as e:
+        issues.append(Issue(WARN, f"could not check the genome file layout ({e})"))
+        multi, mismatched = {}, {}
+    for fname, ids in multi.items():
+        issues.append(Issue(ERROR, describe_problem(genomedir, fname, ids)))
+    for fname, rid in mismatched.items():
+        if fname in multi:
+            continue  # already reported, with the fix
+        issues.append(
+            Issue(
+                WARN,
+                f"{fname}: holds sequence '{rid}', not '{fname.rsplit('.', 1)[0]}'. "
+                "CRISPRme matches results to chromosomes by file name, so name each "
+                f"file after its sequence (e.g. {rid}.fa) or results may be dropped.",
+            )
+        )
     return issues, chrom_names
 
 

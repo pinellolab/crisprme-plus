@@ -87,6 +87,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_validate_inputs -v
 
+      - name: Genome layout (one FASTA per sequence; multi-sequence genomes split or refused)
+        working-directory: PostProcess
+        run: python -m unittest test_genome_layout -v
+
       - name: "samplesID over-listing guard (#46: phantom samples inflate AN / deflate AF)"
         working-directory: PostProcess
         run: python test_samplesid_overlisting.py
