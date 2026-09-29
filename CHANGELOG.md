@@ -167,6 +167,14 @@ and the `release-crisprme` skill.
   `PostProcess/personal_assembly.py` (+ `test_personal_assembly.py`).
 
 ### Added
+- **`assembly-search` annotates reconciled sites against hg38.** New optional
+  `--annotation` flag (same file format, COSMIC licence gate and IntOGen handling as
+  `complete-search`'s) adds an `Annotation` column to `combined_hg38.tsv` for every site
+  with an hg38 coordinate (found on both haplotypes, or on one and mappable); sites with
+  no hg38 equivalent get none. The web form applies the annotations enabled in
+  Settings -> Annotations, like `complete-search`. In the results table the column is
+  filterable and sortable like every other one. The annotation describes the *lifted*
+  hg38 locus, not the haplotype's own sequence.
 - **`scorer-env` command group + modular scorer environment.** `crisprme.py scorer-env
   {create,check,update,list,doctor}` manages the dedicated `cbulge` conda env (detects
   micromamba/mamba/conda, provisions the pinned CRISPR-Bulge source+weights, health-checks
