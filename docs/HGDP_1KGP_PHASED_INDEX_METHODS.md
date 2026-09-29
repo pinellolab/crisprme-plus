@@ -176,6 +176,53 @@ because a singleton is carried on exactly one haplotype in one individual. Impli
   as a **distinct lower-confidence tier** rather than silently CONFIRMED. This gives complete coverage
   without over-trusting ~35%-reliable phase.
 
+## 4c. Adversarial verification verdict + strategic options
+
+An independent adversarial panel (6 agents, ~1.3 B genotypes re-scanned) **confirmed all five
+findings** by re-deriving them different ways: singleton MAC≥2 removal (min AC=2 raw, +fill-tags,
+GT-derived, both allele sides), multiallelic retention (0 dropped alleles; a 74-allele STR at
+chr22:47316738 preserved), uniform phasing (100% `|`, 0 missing across the whole chr22), and the
+provenance mismatch. It also:
+
+- **Source-documented the MAC≥2 mechanism** (resolving the earlier hedge): `atgu/hgdp_tgp
+  phasing/remove_singletons.py` runs `bcftools view -i'MAC>=2'` on `*.full.shapeit5_rare.bcf` → the
+  released file. Deliberate, named filter — not incidental monomorphic drop.
+- **Corrected provenance:** header-derived cohort split is **925 HGDP + 3,166 1kGP = 4,091** (HGDP IDs
+  = 808 `HGDP#####` + 108 `LP…-DNA_` + 9 `SS…` Sanger → a `^HGDP` grep undercounts HGDP by 117; derive
+  samplesID from the BCF header, never a prefix grep). Autosomal AN = 8,182. The `phased_haplotypes_v2/README.md`
+  is a **stale changelog for the UNPHASED hgdp_1kg→v2 sample transition** and does NOT describe the
+  phased artifact (which predates CHARR removal → still carries HGDP01371 + LP6005441-DNA_A09).
+- **Reproducibility gotcha:** `apptainer exec` does not auto-bind `/srv/local`; add `--bind /srv/local`
+  or bcftools silently errors "No such file" (easy to mistake for empty output).
+
+**Strategic argument (drives the decision):** the two hard requirements — "use ALL variants, no filter"
+and "CONFIRMED-cis phasing" — are **mutually exclusive on any *public* artifact**: the only public
+*phased* HGDP+1kGP callset is MAC≥2; the only public callset *with singletons* is *unphased*. And the
+dropped singletons (AC=1 = one haplotype in one of 4,091 people, joint AF ~1.2e-4) are, by construction,
+**population-irrelevant for off-target nomination** — never recurrent, and if recovered they'd carry the
+weakest (~35% SER) phase in the panel. Genome-wide singletons are ~46% of variants (53% among unrelated).
+
+**Options:**
+- **A+ (panel recommendation) — ship the MAC≥2 phased release as the new default, no re-phasing.**
+  Reframe "no filter" honestly: CRISPRme imposes **no filter of its own**; MAC≥2 is an inherent,
+  **disclosed** property of the upstream gnomAD SHAPEIT5 source, stamped in the manifest
+  (`singleton_filter=MAC>=2 (gnomAD)`, `data_type=genotyped-phased`, `sample_count=4091`, `AN=8182`).
+  LOW effort; the already-verified public BCFs. Loses population-irrelevant singletons.
+- **B — build on the dense UNPHASED callset (all variants incl. singletons).** Truly lossless, but
+  **no phasing → no CONFIRMED-cis** (forfeits the other hard requirement) + re-introduces the dense
+  IUPAC search blow-up. Cannot satisfy the goal alone.
+- **C — re-phase the dense callset ourselves (SHAPEIT5, keep singletons + phasing).** The only path that
+  satisfies BOTH literally. But: the singleton-inclusive intermediate is in a **private** bucket →
+  full genome-wide re-phase (days, HIGH risk), recovering population-irrelevant singletons at the
+  weakest phase tier. Effort HIGH.
+- **Dual-index — A+ default PLUS the unphased dense callset as an opt-in PUTATIVE-lossless fallback**
+  (mirrors the existing `mega` worst-case pattern). Honest way to offer both without pretending one
+  artifact does both.
+
+**DECISION PENDING (Luca).** The chr22 re-phase smoke (§6) is proceeding to give empirical
+singleton-recovery + switch-error numbers, but the *value* question (are 1-person singletons worth a
+multi-day re-phase for a population index?) is now the crux. Panel leans A+; final call is Luca's.
+
 ## 7. Final validated build recipe (→ METHODS / manuscript)  *(PENDING)*
 
 The finalized, reproduced-and-validated pipeline (re-phasing + CRISPRme index build
