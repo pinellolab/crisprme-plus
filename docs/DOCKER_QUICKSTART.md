@@ -1,6 +1,6 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ℹ️ **CRISPRme+ (v2.6.1)** is the current release of the next-generation line
+> ℹ️ **CRISPRme+ (v2.6.2)** is the current release of the next-generation line
 > (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, population-level
 > analysis by default with opt-in `--per-sample` genotype resolution). For a frozen
 > production/clinical baseline you can instead use the stable line
@@ -42,7 +42,7 @@ docker pull pinellolab/crisprme:latest
 ```
 
 > **Reproducibility:** `:latest` auto-updates to the newest release (and is the
-> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.6.1`
+> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.6.2`
 > everywhere below in place of `:latest`.
 
 > **Already have an older image?** Docker does **not** re-download a tag you already

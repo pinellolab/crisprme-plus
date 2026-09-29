@@ -11,7 +11,20 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-09-28
+
+### Added
+- **`assembly-search`: direct haplotype-vs-haplotype reconciliation (impg / minimap2).** The two
+  personal haplotypes are now reconciled directly against each other (cached, threaded pairwise
+  alignments), independent of `liftOver` — more accurate two-haplotype off-target reconciliation.
+  `minimap2` / `impg` are checked at run start (`check_impg_available()`). (#53)
+- **`assembly-search`: hg38 annotation of reconciled sites (`--annotation`).** Reconciled
+  off-target sites can be annotated against the hg38 functional / gene tracks; a failed or missing
+  annotation degrades gracefully and never discards an otherwise-finished two-haplotype search. (#55)
+
 ### Fixed
+- **Non-human genome robustness.** Genome-layout detection and empty-result handling fixes
+  surfaced while running CRISPRme on a non-human (pig) genome. (#56)
 - **Restored the brute-force benchmark CI gate (`validate-benchmarks`).** The v2.6.0
   `complete-test` rewrite made `run_crisprme_test` always require a prebuilt index and run a
   single example-guide smoke, which silently dropped the CI's download + per-benchmark
@@ -1704,7 +1717,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.1...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.2...HEAD
+[2.6.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.2
 [2.6.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.1
 [2.6.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.0
 [2.5.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.5
