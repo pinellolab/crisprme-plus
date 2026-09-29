@@ -82,20 +82,99 @@ with the latest SHAPEIT5** (`odelaneau/shapeit`) — whose headline capability i
 and singletons (`phase_rare` on a `phase_common` scaffold) — then **benchmark** the result against the
 gnomAD MAC≥2 release. This yields "all variants **and** phased" (CONFIRMED-cis capable).
 
-## 5. Re-phasing recipe (SHAPEIT5)  *(PENDING — being finalized)*
+## 5. Re-phasing recipe (SHAPEIT5) — reproduce the published pipeline, minus the singleton drop
 
-To be filled from: (a) the exact published commands used to produce `phased_haplotypes_v2`
-(from the `atgu/hgdp_tgp` phasing code + paper Methods/supplement — including the specific parameter
-that dropped singletons), and (b) the official SHAPEIT5 tutorials. Will include: dense-callset
-acquisition, normalization (keep singletons), `phase_common` scaffold, `phase_rare` (singletons),
-`ligate`, GRCh38 genetic map, trio/pedigree usage, chunking, and compute/RAM/time.
+**Key provenance finding (source: `atgu/hgdp_tgp` `phasing/`, commit `bf8ef3b`; SHAPEIT5 v5.1.1 image
+`lindonkambule/shapeit5_2023-05-05_d6ce1e2:v5.1.1`; paper Methods; SHAPEIT5 paper Hofmeister/Delaneau
+Nat Genet 2023):** SHAPEIT5 does **not** drop singletons — `phase_rare` phases them (coalescent Viterbi
+model; SER <5% at 1/100k). The atgu `phase_rare` output `hgdp1kgp_chr{i}.full.shapeit5_rare.bcf`
+**still contains singletons**. The public `phased_haplotypes_v2/` release is that file after a
+**separate post-phasing** `bcftools view -i'MAC>=2'` (`phasing/remove_singletons.py:56`; chrX
+`phasing/chrX/filter_phased.py:83,92`). The paper Methods do **not** mention this MAC≥2 step. Therefore
+the singleton-inclusive panel is obtained by running the identical pipeline and **skipping
+`remove_singletons.py`** (use the `*.full.shapeit5_rare.bcf` directly).
 
-## 6. Validation / comparison protocol  *(PENDING)*
+> The atgu team's own unfiltered `.full.` BCFs live at `gs://hgdp-1kg/phasing/shapeit5/phase_rare/`
+> but that bucket is **private** (HTTP 403/401 anonymous). Options: (1) request read access from the
+> Broad/atgu team (Lindo Nkambule) → zero re-phasing compute; (2) reproduce the pipeline below.
 
-To be filled: singleton-recovery confirmation (min AC=1 + count recovered), switch-error rate vs
-1000G trios (`SHAPEIT5 switch`), common-variant haplotype concordance vs `phased_haplotypes_v2`,
-per-chrom variant counts, cross-check vs Zenodo 18156285, and internal source-GT ground-truth for a
-handful of CONFIRMED-cis HGDP carriers. Acceptance criteria gate the genome-wide run + index build.
+**Published pipeline (autosomes chr1–22), verbatim structure:**
+
+- **Step 0** `prepare_data_phasing.py` — from the public dense MT
+  `gs://gcp-public-data--gnomad/release/3.1.2/mt/genomes/gnomad.genomes.v3.1.2.hgdp_1kg_subset_dense.mt`,
+  apply gnomAD sample/variant/genotype QC (`filter_to_adj`), export one VCF per chromosome. *(Requires Hail.)*
+- **Step 1** `filter_and_convert_to_bcf.py` — remove 29 samples (5 duplicates + 24 PCA outliers) → **4,091**:
+  `bcftools view --samples-file ^{samples_to_filter} {vcf} -Ob -o {bcf}`
+- **Step 2** pre-phasing QC (`qc.py:55`) — **no MAC/MAF filter**:
+  `bcftools +fill-tags {bcf} -Ou -- -t all | bcftools view -i'HWE>=1e-30 && F_MISSING<=0.1 && ExcHet>=0.5 && ExcHet<=1.5' -o {qced.bcf}`
+- **Step 3A** `phase_common` per 20 cM chunk — scaffold of common variants:
+  `phase_common --input {qced.bcf} --map chr{i}.b38.gmap.gz --output {common.chunk.bcf} --filter-maf 0.001 --region {col3-of-20cM-chunk} --pedigree hgdp1kg_pedigree.fam --thread T`
+  *(`--filter-maf 0.001` only bounds the SCAFFOLD; it does NOT lose singletons — they are re-read from the full `--input` in phase_rare. Confirmed in `phase_common .../phaser_parameters.cpp:69`.)*
+- **Step 3B** `ligate` common chunks → per-chrom scaffold:
+  `ligate --input {common_chunks_list} --pedigree hgdp1kg_pedigree.fam --output {scaffold.bcf} --thread T --index`
+- **Step 3C** `phase_rare` per 4 cM chunk — phases rare + **singletons** onto the scaffold, **no MAF/MAC filter**:
+  `phase_rare --input {qced.bcf} --input-region {col4-of-4cM-chunk} --scaffold {scaffold.bcf} --scaffold-region {col3-of-4cM-chunk} --map chr{i}.b38.gmap.gz --pedigree hgdp1kg_pedigree.fam --output {rare.chunk.bcf} --thread T`
+- **Step 3D** concatenate rare chunks → final per-chrom phased BCF (**keep everything**):
+  `bcftools concat -n -f {rare_chunks_list} -o hgdp1kgp_chr{i}.full.shapeit5_rare.bcf && bcftools index …`
+- **⟶ STOP. Do NOT run `bcftools view -i'MAC>=2'`** (that is the singleton-dropping step).
+- **chrX** analogous (`phasing/chrX/phase_chrX.py`) + a fix removing 7,667 spurious male non-PAR hets;
+  same MAC≥2 drop to skip.
+
+**Resources (verified present in `github.com/odelaneau/shapeit`, HEAD `c34d4db` — the original
+`odelaneau/shapeit5` repo was disabled by GitHub ToS):** GRCh38 maps `resources/maps/b38/chr{1..22,X}.b38.gmap.gz`;
+chunk coords `resources/chunks/b38/{20cM,4cM}/chunks_chr{N}.txt` (col 3 = with buffers, col 4 = without);
+pedigree = `hgdp1kg_pedigree.fam` (599 families = 593 trios + 6 duos over 4,091 samples; build per atgu
+README §2 from PC-Relate/IBD cross-checked vs `1kGP.3202_samples.pedigree_info.txt`). LICENSE MIT.
+Pin the exact SHAPEIT5 version used. Optional: `phase_rare --score-singletons` (experimental singleton
+phase-confidence 0.5–1.0). chrX chunk resources referenced a now-dead `UKB_WGS_200k` path — re-point to
+`odelaneau/shapeit`.
+
+**Compute/effort:** re-phasing needs (a) a Hail/Spark export from the dense MT, (b) a genome-wide
+SHAPEIT5 run for 4,091 samples (the atgu team ran this on Hail Batch; per-chrom, chunked). chr22 SMOKE
+first to measure wall-time/RAM before GW. *(Exact numbers PENDING the chr22 smoke.)*
+
+## 6. Validation / comparison protocol
+
+**Dense input source (public, no auth):** chr22 smoke =
+`gs://gcp-public-data--gnomad/release/3.1.2/vcf/genomes/gnomad.genomes.v3.1.2.hgdp_tgp.chr22.vcf.bgz`
+(~55 GB full FORMAT) or Hail-export GT-only from the dense MT
+`gnomad.genomes.v3.1.2.hgdp_1kg_subset_dense.mt` (genome-wide, avoids multi-TB egress). GRCh38 GLIMPSE
+b38 maps from `odelaneau/shapeit`; chunk coords via the GLIMPSE chunker (do not hand-roll); pedigree
+`.fam` rebuilt from public 1000G `.ped` + gnomAD relatedness (or requested from atgu).
+
+**chr22 SMOKE gates (all four must be green before any genome-wide run):**
+- **VAL-1 Singleton recovery** — our chr22 phased BCF has `min AC==1`, singleton_count in the tens of
+  thousands, 100% `|`-phased + non-missing; the released MAC≥2 BCF has ~0. (Proves the feature.)
+- **VAL-2 / VAL-3 Accuracy (anti-self-deception)** — `SHAPEIT5 switch` SER against **1000G trios
+  (offspring re-phased with PARENTS HELD OUT** — leaving parents in fakes ~0 SER, the #1 self-deception)
+  and against the **HGSVC2 34-genome assembly truth**. ACCEPT common+rare SNP SER ≲ published 0.00184
+  (+1sd ~0.0033) and ≤ our own re-run of `switch` on gnomAD's release with the same trios; indel SER
+  ≲ 0.00899. Singleton SER ~30–40% is EXPECTED, not a failure (see §4 tiering).
+- **VAL-4 Backbone concordance** — `bcftools isec` shared common sites vs `phased_haplotypes_v2`;
+  `switch` phase-consistency near-identical (SER ~1e-3) → our scaffold didn't regress.
+- **VAL-5 Structural sanity** — samples==4,091; AN==2N (8,182) autosomal (sex-aware chrX); 0 missing;
+  100% `|`; multiallelics split+left-aligned+sorted; per-chrom record count **≥** the release (we add,
+  never lose).
+- **VAL-6 Common-SNP recall** — every common SNP (Zenodo 18156285 subset) present + phase-concordant.
+- **VAL-7 (post-index) CRISPRme cis audit** — run a known guide `--per-sample` on the new index vs the
+  current 1000G2021_HGDP; the EXTRA cis calls that hinge on a recovered singleton are flagged as the
+  lower-confidence tier (§4), not silently promoted to CONFIRMED.
+
+## 4b. Singleton accuracy — the scientific caveat (drives a product decision)
+
+SHAPEIT5 phases singletons non-randomly but at **~35% switch error** (vs ~50% random; SHAPEIT5 paper),
+because a singleton is carried on exactly one haplotype in one individual. Implications for CRISPRme:
+- **Detection is lossless + unambiguous** — a singleton variant that creates an off-target is real and
+  worth nominating; it is simply carried by exactly one individual. Keeping singletons is a clear win
+  for coverage.
+- **Only the cis-PHASE of a singleton with another nearby variant is ~65% reliable.** So a *multi-variant*
+  CONFIRMED-cis co-occurrence that HINGES on a singleton's phase must NOT be treated as equal to a
+  MAC≥2 CONFIRMED call. gnomAD dropped singletons from its public release precisely to avoid shipping
+  this lower-reliability phase.
+- **Recommended handling (honest + a manuscript point):** KEEP singletons (satisfies "use all of it";
+  single-variant singleton off-targets are fully valid), but mark singleton-hinged multi-variant cis
+  as a **distinct lower-confidence tier** rather than silently CONFIRMED. This gives complete coverage
+  without over-trusting ~35%-reliable phase.
 
 ## 7. Final validated build recipe (→ METHODS / manuscript)  *(PENDING)*
 
@@ -109,3 +188,12 @@ The finalized, reproduced-and-validated pipeline (re-phasing + CRISPRme index bu
   open. Decision to re-phase with SHAPEIT5. Three background analyses in flight: adversarial
   re-verification, SHAPEIT5 re-phase plan, and extraction of the original published phasing commands.
   Nothing built GW / pushed to HF. Held for Luca.
+- 2026-09-29 (cont.) — Original-commands extraction (§5) + SHAPEIT5 re-phase plan (§5/§6) landed.
+  KEY: singleton drop is a standalone post-phasing `bcftools view -i'MAC>=2'` (`remove_singletons.py`),
+  NOT a SHAPEIT5 behavior; `phase_rare` keeps singletons. Recipe = reproduce atgu pipeline, skip that
+  step. atgu `.full.` singleton-inclusive BCFs exist but in a PRIVATE bucket (gs://hgdp-1kg, 403) →
+  either request access or re-phase (public dense chr22 VCF direct-downloadable for the smoke). Added
+  §4b: recovered singletons are ~35% switch-error → keep for detection but TIER singleton-hinged cis
+  (don't silently CONFIRM). Full VAL-1..7 protocol in §6 (incl. trio-parents-held-out anti-self-
+  deception gate). PENDING Luca decision on singleton handling (drives whether we do the GW run) +
+  index naming/replace-vs-alongside. §7 final recipe still pending the chr22 smoke.
