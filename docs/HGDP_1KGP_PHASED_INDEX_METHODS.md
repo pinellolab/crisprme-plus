@@ -244,3 +244,59 @@ The finalized, reproduced-and-validated pipeline (re-phasing + CRISPRme index bu
   (don't silently CONFIRM). Full VAL-1..7 protocol in §6 (incl. trio-parents-held-out anti-self-
   deception gate). PENDING Luca decision on singleton handling (drives whether we do the GW run) +
   index naming/replace-vs-alongside. §7 final recipe still pending the chr22 smoke.
+- 2026-09-29 (cont.) — DECISION (Luca): **INCLUDE singletons** (prioritize completeness /
+  "never miss a true haplotype" over avoiding low-confidence phase) → **re-phase path** (SHAPEIT5,
+  keep singletons). No special "singleton" report flag needed — the `Samples`/"N carrier(s)" +
+  MAF columns already make a one-individual variant self-evident; phase-confidence rides on the
+  existing CONFIRMED/PUTATIVE label. chr22 re-phase smoke restarted. Also: investigated the ≥4
+  multi-variant bug (§9) — it is FIXED + tested; added ≥4 regression tests to the indel+SNP path.
+
+## 9. Multi-variant haplotype handling — the ≥4 fix, the dense-window approximation, and the flags
+
+This governs how co-occurring variants inside one protospacer window become off-targets, and
+matters more for the new panel (denser + singleton-inclusive → more multi-variant windows).
+
+### 9a. The ≥4-variant "starvation" bug and its fix (SNP path)
+For a window with several co-located variants, the genotyped/phased path builds a **combination
+lattice**: level-0 = individual variants (seeds w/ carrier sets); level *n+1* = cross level *n*
+against the level-0 seeds, intersecting carriers (a combo's carriers = samples carrying ALL its
+alts → cis proof). **Original bug:** a de-dup subtraction ran *inside* the growth loop, emptying the
+level-0 seeds as soon as a 2-variant combo formed; since deeper levels grow only by crossing against
+those seeds, a sample carrying k≥4 cis alts got "used up" into disjoint pairs and its **maximal
+k-variant combo never formed** → the true, lowest-mismatch (often 0-mm perfect) cis haplotype was
+silently dropped (N=4→under-reported as ≥2 mm, N=6→≥4 mm, …). **Fix** (`new_simple_analysis.py:1296–1331`):
+grow the FULL lattice mutation-free, then a single **deferred "peel"** attributes each sample to its
+maximal cis combo and subtracts it from strict allelic-subset ancestors (matched on `(pos,elem)` →
+multiallelic-safe). Tested across **N=3/4/6/8/12** + trans + unphased (`test_phased_haplotype.py`).
+
+### 9b. Indel + SNP co-occurrence is structurally immune (verified)
+The SNP+indel cis join (`indel_snp_cis.cis_cooccurrence`) is **not** a lattice: it takes the indel +
+ALL SNP alts the aligned target uses (fixed by the alignment) and does a **direct per-sample
+same-slot check** (`some haplotype slot carries the indel AND every SNP alt`) that scales to any
+multiplicity with nothing to starve. Added ≥4 regression tests (`test_indel_snp_cis.py`: indel + 4
+SNPs cis→CONFIRMED, one-trans→excluded, homozygous→2 copies, population cis/trans/unphased mix).
+
+### 9c. The dense-window APPROXIMATION (the greedy cap) + FLAGS + DEFAULT behaviour
+Enumerating the lattice is 2^k in the number of co-located variants, so extreme-density windows are
+**capped**: `capped = _FAST_MODE OR (CRISPRME_IUPAC_CAP ≥ 0 AND #variants > CRISPRME_IUPAC_CAP)`.
+
+- **DEFAULT = population-level** (`CRISPRME_FAST_MODE=1`, the default search): **every** multi-variant
+  window emits ONE **worst-possible representative** off-target (greedy min-mismatch / max-CFD),
+  tagged **PUTATIVE**, phasing-independent. No 2^k enumeration; **no MISS** (the worst case covers the
+  window); bounded compute.
+- **`--per-sample`** (`CRISPRME_FAST_MODE=0`): builds the full lattice + deferred peel → **CONFIRMED**
+  cis for verified combos, PUTATIVE otherwise — *except* windows with more co-located variants than
+  `CRISPRME_IUPAC_CAP`, which fall back to the same single worst-case PUTATIVE rep.
+- Every capped window is logged to **`<out>.high_variant_density_regions.bed`** so approximated
+  regions are visible, never silent.
+
+**The approximation is conservative for the "never miss" goal:** a capped window still emits its
+worst-case off-target (so the region is never dropped); what it trades away is *per-combination cis
+enumeration* (many individual CONFIRMED rows collapse to one worst-case PUTATIVE row). Detection is
+preserved; only the per-haplotype CONFIRMED breakdown is coarsened in the densest windows.
+
+**Implication for the new HGDP+1kGP index (denser + singletons kept):** more windows will be
+multi-variant. Under the default population-level mode nothing changes (already worst-case rep). Under
+`--per-sample`, moderate-density windows are handled losslessly by the ≥4-fixed lattice; only the
+densest windows hit the cap → collapse to the worst-case PUTATIVE rep + HVDR-bed log. Net: no missed
+regions; the CONFIRMED/PUTATIVE label + carrier count remain the reader's confidence signal.
