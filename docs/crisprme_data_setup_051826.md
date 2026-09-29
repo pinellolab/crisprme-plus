@@ -157,7 +157,7 @@ crisprme.py complete-search \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.txt \
   --samplesID samplesIDs.config.txt \
-  --annotation Annotations/dhs+encode+gencode.hg38.bed.gz \
+  --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
   --gene_annotation Annotations/gencode.protein_coding.bed.gz \
   --mm 4 \
   --bDNA 1 \
@@ -201,7 +201,7 @@ crisprme.py complete-search \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.txt \
   --samplesID samplesIDs.config.txt \
-  --annotation Annotations/dhs+encode+gencode.hg38.bed.gz \
+  --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
   --gene_annotation Annotations/gencode.protein_coding.bed.gz \
   --mm 4 \
   --bDNA 1 \
@@ -218,7 +218,7 @@ This is exactly what you should see on disk after running both example searches 
 ```
 my_crisprme_run/
 ├── Annotations/
-│   ├── dhs+encode+gencode.hg38.bed.gz
+│   ├── dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz
 │   └── gencode.protein_coding.bed.gz
 ├── Dictionaries/                            # populated after first search, reused after
 ├── Genomes/                                 # populated further on first search
@@ -377,7 +377,7 @@ crisprme.py complete-search \
   --guide sg1617_guide.txt \
   --vcf vcf.config.MyCohort.txt \
   --samplesID samplesIDs.config.MyCohort.txt \
-  --annotation Annotations/dhs+encode+gencode.hg38.bed.gz \
+  --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
   --gene_annotation Annotations/gencode.protein_coding.bed.gz \
   --mm 4 \
   --bDNA 1 \
@@ -476,7 +476,7 @@ crisprme.py complete-search \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.1KG2021.txt \
   --samplesID samplesIDs.config.1KG2021.txt \
-  --annotation Annotations/dhs+encode+gencode.hg38.bed.gz \
+  --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
   --gene_annotation Annotations/gencode.protein_coding.bed.gz \
   --mm 4 \
   --bDNA 1 \
@@ -544,7 +544,7 @@ crisprme.py complete-search \
   --guide "$GUIDE_FILE" \
   --vcf vcf.config.txt \
   --samplesID samplesIDs.config.txt \
-  --annotation Annotations/dhs+encode+gencode.hg38.bed.gz \
+  --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
   --gene_annotation Annotations/gencode.protein_coding.bed.gz \
   --mm 4 \
   --bDNA 1 \
@@ -639,7 +639,7 @@ Downloads pre-built sample metadata files (sample ID → population → superpop
 Downloads two annotation archives from the CRISPRme GitHub repository, extracts them, and bgzip-compresses the result:
 
 - `Annotations/gencode.protein_coding.bed.gz` — GENCODE protein-coding gene annotations
-- `Annotations/dhs+encode+gencode.hg38.bed.gz` — DHS + ENCODE + GENCODE functional annotation
+- `Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz` — DHS + ENCODE + GENCODE functional annotation
 
 Each file is checked with MD5 before downloading; if it already exists and passes, the download is skipped.
 
