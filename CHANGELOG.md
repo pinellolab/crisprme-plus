@@ -22,6 +22,14 @@ and the `release-crisprme` skill.
   every registered benchmark with on-demand index build, producing the per-benchmark output dirs
   `validate-test` needs. The brute-force comparison against CRISPRme's predicted off-targets is
   exercised again.
+- **Guardrails so this class of regression can't recur silently.** Added `test_complete_test.py`
+  — a fast, hermetic dispatch test (in the push-to-main unit suite) that pins the two-mode
+  contract: CI mode (`CRISPRME_ALLOW_ONDEMAND_BUILD` set) downloads + builds each registered
+  benchmark on demand with no `--index-path`, and user mode requires a prebuilt index and never
+  downloads/builds. It fails against the broken rewrite. Also made `validate-benchmarks` (the
+  brute-force gate) run on **direct pushes to `main`** touching the pipeline — not just PRs +
+  the weekly cron — so a fast-forward release can no longer bypass it (the gap that let the
+  breakage sit unnoticed since mid-September).
 
 ## [2.6.1] - 2026-09-28
 
