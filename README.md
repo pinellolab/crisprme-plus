@@ -187,27 +187,31 @@ Prefer the CLI? After the download steps above (1 & 2), run the variant-aware
 example search and generate the shareable report — no web UI needed:
 
 ```bash
-# a genome-wide SpCas9 (NRG) search over hg38 + 1000G + HGDP, up to 4 mismatches
-# + 1 DNA / 1 RNA bulge (a 6-edit budget), with combined allele frequencies, rsIDs and annotations
+# a genome-wide SpCas9 (NRG) search over the hg38 + 1000G-2021 + HGDP genotyped index, up to 4
+# mismatches + 1 DNA / 1 RNA bulge (a 6-edit budget), with --per-sample genotype resolution
+# (named carriers + CONFIRMED cis / PUTATIVE co-carrier + exact joint allele frequency), plus rsIDs
+# and functional annotations. (Downloaded the +hg38_1000G2021_HGDP index in step 2 above.)
 echo "CTAACAGTTGCTTTTATCACNNN" > guide.txt
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py complete-search \
   --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --guide guide.txt \
   --vcf list_vcf.txt --samplesID list_samplesID.txt \
   --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
   --gene_annotation Annotations/gencode.protein_coding.bed.gz \
-  --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 8
+  --mm 4 --bDNA 1 --bRNA 1 --per-sample --output my_search --thread 8
 # ^ the recommended default search: up to 4 mismatches + 1 DNA and 1 RNA bulge (a 6-edit
 #   budget, matching the default --max-total-edits 6, so nothing is pruned). This sits in the
 #   CRISPR-Bulge scorer's validated single-bulge domain. Raise the caps for a deeper search,
 #   but also raise --max-total-edits to their sum or alignments over the budget are PRUNED
 #   (e.g. --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget → add --max-total-edits 10 to keep all).
-#   Runs the POPULATION-LEVEL analysis by default (worst-possible representatives; removes the
-#   per-haplotype enumeration wall that makes dense/aggregate panels intractable).
-#   Add --per-sample to resolve per-sample genotypes — CONFIRMED cis phasing + named carrier
-#   samples + exact joint allele frequency — recommended for genotyped panels / clinical
-#   validation. This is a genotype-resolution mode, not a speed mode: for a single guide the
-#   runtimes are comparable, but it can be intractable on dense/aggregate panels; on a
-#   sites-only index (mega) it cannot resolve carriers (no genotypes) and is inert.
+#   Uses --per-sample here to resolve per-sample genotypes — CONFIRMED cis phasing (+ PUTATIVE
+#   co-carrier on the unphased HGDP portion) + named carrier samples + exact joint allele
+#   frequency — recommended for genotyped panels / clinical validation. OMIT --per-sample for the
+#   POPULATION-LEVEL default (worst-possible representatives; removes the per-haplotype enumeration
+#   wall that makes dense/aggregate panels intractable). --per-sample is a genotype-resolution mode,
+#   not a speed mode: for a single guide the runtimes are comparable, but it can be intractable on
+#   dense/aggregate panels; on a sites-only index (mega) it cannot resolve carriers and is inert.
+#   COSMIC cancer annotations ship in the bundle but are OFF by default (licence-gated) — enable
+#   with `crisprme.py cosmic-license enable`; IntOGen cancer-driver flags are on by default.
 
 # build the self-contained, shareable HTML report (report.html + a data/ folder)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py generate-report \
@@ -1715,6 +1719,20 @@ is under `data/`). Reading top to bottom:
 - **MAF column** — a value of **`1e-05` is a display floor** meaning "present but
   frequency effectively 0" (used so a zero-frequency allele still renders on the
   log-scale plots), **not** a measured frequency.
+- **Key off-target table columns** — in the per-site table (and every download TSV):
+  - **Chromosome / Position / Direction (`+`/`-`)** — where the off-target is and on which strand.
+  - **crRNA vs DNA (aligned)** — the guide and the genomic sequence aligned; `-` marks a bulge.
+  - **Mismatches**, **Bulge_type** (`DNA` / `RNA` / `-`) and **Bulge_Size** — the alignment's edit make-up.
+  - **Variant / rsID** — the variant(s) that create a *variant* off-target (`chrom;pos;ref;alt`,
+    plus rsID when known); empty for reference off-targets.
+  - **Samples** — the named carrier individuals (populated under `--per-sample` on a genotyped index).
+  - **CFD** — the primary specificity score. Designed for ≤3–4 mismatches; it **declines
+    non-linearly** as mismatches grow, so do **not** compare CFD across searches that used
+    different thresholds or variant datasets.
+  - **CRISPR-Bulge score** — a complementary deep-learning activity score (Yaish & Orenstein,
+    *NAR* 2024) on its **own** scale (bands **0.5 / 0.2 / 0.1**). It was trained on off-targets
+    with at most one bulge, so any site that needs **≥ 2 bulges is out-of-domain and shows `-`**
+    (N/A) — read CFD for those sites (a `-` means "not scored", not "no risk").
 
 ##### Input Arguments
 ---

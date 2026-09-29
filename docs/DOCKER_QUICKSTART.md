@@ -210,15 +210,22 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
     --vcf list_vcf.txt --samplesID list_samplesID.txt \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed.gz \
-    --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
+    --mm 4 --bDNA 1 --bRNA 1 --per-sample --output my_search --thread 4
 ```
 
 - `--mm` is mismatches; `--bDNA` / `--bRNA` are DNA / RNA bulges. For a wider
   search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 9` (the same as
   **Maximum edits = 9** in the web form; `--max-total-edits` caps the total
   mismatches + bulges, so it must be at least `--mm + --bDNA + --bRNA`).
-- Because the index bundles 1000&nbsp;Genomes + HGDP variants, the search is
-  variant-aware with combined allele frequencies and COSMIC annotation.
+- `--per-sample` resolves per-individual genotypes: it names the **carrier samples**
+  and marks co-occurring variants **CONFIRMED cis** (phased) / **PUTATIVE co-carrier**
+  (unphased) with the exact joint allele frequency. It needs a genotyped index
+  (1000G-2021, 1000G-2021 + HGDP, or HPRC); omit it for the faster population-level
+  default, and note it is inert on the sites-only *mega* index. Either way the search
+  is variant-aware with allele frequencies and rsIDs.
+- COSMIC cancer rows ship in the annotation bundle but are **off by default**
+  (licence-gated) — enable with `crisprme.py cosmic-license enable`; IntOGen
+  cancer-driver flags are on by default.
 - Results land in `~/crisprme/Results/my_search/`.
 
 Build the same shareable one-file report the web **Download report** button
