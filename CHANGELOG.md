@@ -11,6 +11,28 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **Restored the brute-force benchmark CI gate (`validate-benchmarks`).** The v2.6.0
+  `complete-test` rewrite made `run_crisprme_test` always require a prebuilt index and run a
+  single example-guide smoke, which silently dropped the CI's download + per-benchmark
+  on-demand-build flow — so `validate-test` had no predictions to compare against the committed
+  brute-force ground truth and the gate failed. `run_crisprme_test` now branches: the default
+  (user) path keeps the no-auto-build prebuilt-index smoke, while the CI path (when
+  `CRISPRME_ALLOW_ONDEMAND_BUILD` is set, as the workflow does) downloads the test data and runs
+  every registered benchmark with on-demand index build, producing the per-benchmark output dirs
+  `validate-test` needs. The brute-force comparison against CRISPRme's predicted off-targets is
+  exercised again.
+- **Guardrails so this class of regression can't recur silently.** Added `test_complete_test.py`
+  — a fast, hermetic dispatch test (in the push-to-main unit suite) that pins the two-mode
+  contract: CI mode (`CRISPRME_ALLOW_ONDEMAND_BUILD` set) downloads + builds each registered
+  benchmark on demand with no `--index-path`, and user mode requires a prebuilt index and never
+  downloads/builds. It fails against the broken rewrite. Also made `validate-benchmarks` (the
+  brute-force gate) run on **direct pushes to `main`** touching the pipeline — not just PRs +
+  the weekly cron — so a fast-forward release can no longer bypass it (the gap that let the
+  breakage sit unnoticed since mid-September).
+
+## [2.6.1] - 2026-09-28
+
 ### Added
 - **The default image is now GPU-capable — one image, both modes.** `pinellolab/crisprme:latest`
   (and `:<tag>`) builds its **amd64** layer with the conda-forge CUDA TensorFlow
@@ -35,6 +57,17 @@ and the `release-crisprme` skill.
   annotation legend. The raw `GENCODE` column still keeps the full overlapping feature-set.
   Report curation also derives it on the fly, so it renders on pre-existing
   `integrated_results.tsv` files too.
+
+### Fixed
+- **GPU image now actually builds its CUDA scorer env (and a broken scorer env can no longer
+  ship silently).** The `cbulge` CUDA solve failed on GPU-less builders (e.g. GitHub CI) with
+  `__cuda missing`, because the micromamba base activation exports `CONDA_OVERRIDE_CUDA=""` and
+  `scorer_env` used `setdefault` (which will not replace an existing empty value). Now the
+  override is force-set to `11.8` when empty/absent, so the CUDA TensorFlow build resolves on any
+  builder (the image still falls back to CPU at runtime when no GPU is present). Additionally, the
+  Dockerfile scorer-env build step is now **FATAL** — a failed or incomplete `cbulge` env fails
+  the image build (verified by importing TensorFlow) instead of being swallowed by a warning and
+  shipping an image with no scorer.
 
 ## [2.6.0] - 2026-09-28
 
@@ -1646,7 +1679,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.1...HEAD
+[2.6.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.1
 [2.6.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.0
 [2.5.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.5
 [2.5.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.4

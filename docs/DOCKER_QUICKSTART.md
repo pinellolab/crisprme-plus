@@ -1,6 +1,6 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ℹ️ **CRISPRme+ (v2.6.0)** is the current release of the next-generation line
+> ℹ️ **CRISPRme+ (v2.6.1)** is the current release of the next-generation line
 > (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, population-level
 > analysis by default with opt-in `--per-sample` genotype resolution). For a frozen
 > production/clinical baseline you can instead use the stable line
@@ -38,11 +38,15 @@ Check Docker works, then pull the CRISPRme+ image:
 docker run --rm hello-world
 
 # Pull the current CRISPRme+ release (multi-arch: Apple Silicon + Intel/Linux).
-docker pull pinellolab/crisprme:v2.6.0
+docker pull pinellolab/crisprme:latest
 ```
 
+> **Reproducibility:** `:latest` auto-updates to the newest release (and is the
+> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.6.1`
+> everywhere below in place of `:latest`.
+
 > **Already have an older image?** Docker does **not** re-download a tag you already
-> have — run `docker pull pinellolab/crisprme:v2.6.0` again to update. Skipping this makes an
+> have — run `docker pull pinellolab/crisprme:latest` again to update. Skipping this makes an
 > old image error with `download is not an allowed command`.
 
 ## 2. Make a folder to hold your data and results
@@ -64,7 +68,7 @@ This pulls the human genome, annotations, PAM files and sample lists from the
 CRISPRme HuggingFace mirror (a fast CDN). It replaces the old multi-hour `setup`:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what all --path /DATA
 ```
 
@@ -74,7 +78,7 @@ Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
 minutes of CPU; instead, download the ready-made SpCas9 NRG (NGG+NAG) index:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 ```
 
@@ -85,17 +89,17 @@ fully phased **1000G-2021** panel:
 ```bash
 # Recommended default — 1000 Genomes 2021 (3,202 samples), genotyped and fully phased.
 # CONFIRMED cis haplotypes with named per-sample carriers + exact joint AF (use --per-sample).
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
 
 # Broader-coverage genotyped panel — 1000 Genomes 2021 + HGDP (adds 929 individuals).
 # Observed / CONFIRMED haplotypes with per-sample carriers + joint AF (use --per-sample).
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
 
 # Sites-only "mega" panel — five sources (1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + AoU),
 # per-dataset AF + cross-source AF_max. PUTATIVE haplotypes with a conservative min-AF bound.
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
 ```
 
@@ -123,7 +127,7 @@ Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level
 analyses / personal risk cards:
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what vcf --dataset 1000G --path /DATA
 ```
 
@@ -131,7 +135,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.6.0 crisprme.py web-interface
+  pinellolab/crisprme:latest crisprme.py web-interface
 ```
 
 `-p 8080:8080` connects the app inside the container to your browser. Leave this
@@ -167,6 +171,11 @@ automatically — the built-in bundle is enabled by default, so there is nothing
 pick on the search form. To add your own annotation BEDs or turn tracks on/off, use
 **Settings → Data Manager → Manage annotations** (local mode only).
 
+`Gene_region` — where the off-target sits relative to the nearest protein-coding
+gene: `CDS`, `5'UTR`, `3'UTR`, `exon`, `intron`, or `intergenic`, coherent with
+`Gene_distance_kb` (`intergenic` iff distance > 0). Present in the curated report
+table, all download TSVs, and the raw `integrated_results.tsv`.
+
 > **Cancer-gene annotations: IntOGen on by default, COSMIC by licence.** Off-targets are
 > flagged as cancer-driver genes by default using **IntOGen** (an `Annotation_INTOGEN`
 > column) — its data is **CC0** (public domain), so it is free for academic and commercial
@@ -194,7 +203,7 @@ the `list_vcf.txt` / `list_samplesID.txt` the search reads, so from `~/crisprme`
 ```bash
 printf '%s\n' CTAACAGTTGCTTTTATCAC > my_guide.txt
 
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-search \
     --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
     --guide my_guide.txt \
@@ -216,13 +225,37 @@ Build the same shareable one-file report the web **Download report** button
 produces (a self-contained `report.html` inside a ZIP):
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py generate-report --result-dir Results/my_search
 # -> Results/my_search/<jobid>_report.zip
 ```
 
 On Singularity/Apptainer the commands are identical, wrapped as
 `apptainer exec --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif crisprme.py ...`.
+
+### Run on a GPU (optional)
+
+The default image `pinellolab/crisprme:latest` is **GPU-capable**. On an NVIDIA host,
+add `--gpus all` to `docker run` and pass `--compute-backend cuda` to run the
+**CRISPR-Bulge** machine-learning scorer on the GPU; it **falls back to CPU
+automatically** when no GPU is present, so the same command is safe everywhere. The
+amd64 image bundles CUDA; arm64 (Apple Silicon) and Docker-on-Mac are always CPU.
+The clickable installers auto-add `--gpus all` when Docker exposes a GPU.
+
+GPU pays off on **large / dense searches**; a tiny single-guide run is often faster
+on CPU because of GPU initialization overhead.
+
+```bash
+docker run --gpus all --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py complete-search \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --guide my_guide.txt \
+    --vcf list_vcf.txt --samplesID list_samplesID.txt \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+    --gene_annotation Annotations/gencode.protein_coding.bed.gz \
+    --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4 \
+    --compute-backend cuda
+```
 
 ---
 
@@ -234,7 +267,7 @@ is `apptainer`, or `singularity` on older systems — they are interchangeable).
 
 ```bash
 # 1. build the image once (a ~2 GB .sif file; no root needed)
-apptainer pull crisprme.sif docker://pinellolab/crisprme:v2.6.0
+apptainer pull crisprme.sif docker://pinellolab/crisprme:latest
 
 # 2. download data + a prebuilt index into a working folder
 mkdir -p ~/crisprme && cd ~/crisprme
@@ -277,7 +310,7 @@ need by its **exact published name** — for example the five-source sites-only
 **mega** index (a useful complement to the default genotyped 1000G-2021 index):
 
 ```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
 ```
 
 To see which indexes are published, browse the dataset repository

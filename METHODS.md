@@ -539,7 +539,11 @@ default and a licence-gated **COSMIC** Cancer Gene Census column:
 
 - **GENCODE** — gene-model context (`exon`, `CDS`, `UTR`, `transcript`,
   `start_codon`/`stop_codon`; `intergenic` otherwise), plus nearest-gene name
-  and distance.
+  and distance. The `Gene_region` column records where the off-target sits
+  relative to the nearest protein-coding gene — `CDS`, `5'UTR`, `3'UTR`,
+  `exon`, `intron`, or `intergenic` — coherent with `Gene_distance_kb`
+  (`intergenic` iff the distance is > 0). `Gene_region` is present in the
+  curated report table, all download TSVs, and the raw `integrated_results.tsv`.
 - **DHS** — DNase I hypersensitive (open-chromatin) sites, labeled by tissue /
   organ system.
 - **ENCODE SCREEN v4 cCREs** — candidate cis-regulatory elements: promoter-like
@@ -708,7 +712,10 @@ numerical self-test** — `tensorflow-metal` silently miscomputes this GRU kerne
 (collapsing every prediction to 1.0), so on detecting the miscompute the scorer
 transparently falls back to a CPU device context, producing **bit-identical**
 results. Missing env or weights degrade cleanly to a **CFD-only** run rather than
-failing the search.
+failing the search. The released **amd64** Docker image bundles the CUDA
+TensorFlow build, so `docker run --gpus all ... --compute-backend cuda` runs
+CRISPR-Bulge on an NVIDIA GPU with transparent CPU fallback; the **arm64** image
+stays CPU.
 
 The scorer environment is **architecture-aware** and yields **numerically
 identical** CRISPR-Bulge scores across CPU architectures: it installs the same
