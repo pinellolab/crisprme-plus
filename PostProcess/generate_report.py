@@ -4362,8 +4362,8 @@ def build_report(
         # the ZIP is self-sufficient for re-execution. Never break the report on it.
         try:
             _manifest = {
-                "crisprme_version": meta.get("version") or "2.6.0",
-                "report_generator": "v" + (meta.get("version") or "2.6.0"),
+                "crisprme_version": meta.get("version") or "2.6.1",
+                "report_generator": "v" + (meta.get("version") or "2.6.1"),
                 "generated_date": meta.get("date"),
                 "guides": meta.get("guides"),
                 "nuclease": meta.get("nuclease"),

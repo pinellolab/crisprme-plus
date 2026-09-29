@@ -128,7 +128,9 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
 #   scorer_backend=cpu: force a lean CPU-only build on any arch.
 #   scorer_backend=gpu: force the CUDA build on any arch (amd64 only in practice).
 # Set build_scorer_envs=0 for a lean image (create later with 'crisprme.py scorer-env create').
-# Failure is non-fatal to the image build.
+# Failure is FATAL: a scorer-env build/solve error fails the image build (and the env is
+# verified by importing TensorFlow) rather than silently shipping an image with no scorer.
+# To intentionally ship without the env, set build_scorer_envs=0.
 ARG build_scorer_envs=1
 ARG scorer_backend=auto
 # TARGETARCH is auto-populated by buildx (amd64 / arm64); used to pick GPU vs CPU under 'auto'.
@@ -142,12 +144,13 @@ RUN if [ "$build_scorer_envs" = "1" ]; then \
       if [ "$BACKEND" = "auto" ]; then \
         if [ "${TARGETARCH}" = "amd64" ]; then BACKEND=gpu; else BACKEND=cpu; fi; \
       fi; \
-      echo "[scorer-env] building cbulge (backend=${BACKEND}, arch=${TARGETARCH})"; \
-      ( CONDA_CHANNEL_BASE="${CONDA_CHANNEL_BASE}" python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
+      echo "[scorer-env] building cbulge (backend=${BACKEND}, arch=${TARGETARCH})" \
+      && CONDA_CHANNEL_BASE="${CONDA_CHANNEL_BASE}" python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
 import scorer_env; ok, msg = scorer_env.create_env('cbulge', gpu=('${BACKEND}'=='gpu'), stream=True); \
 print('[scorer-env]', msg); sys.exit(0 if ok else 1)" \
-        && micromamba clean --all --yes ) \
-      || echo 'WARN: scorer env not built; create at runtime with crisprme.py scorer-env create' ; \
+      && echo "[scorer-env] verifying TensorFlow imports in cbulge" \
+      && micromamba run -n cbulge python -c "import tensorflow as tf; print('[scorer-env] cbulge OK: tensorflow', tf.__version__)" \
+      && micromamba clean --all --yes ; \
     fi
 
 WORKDIR /root

@@ -114,6 +114,16 @@ if [ $6 != "_" ] && [ -w "$6" ]; then
 	echo >>$6
 fi
 
+# Genome layout guard: CRISPRme keys its chromosome list (and so all post-analysis)
+# by FASTA FILE NAME, one sequence per file. A genome delivered as one multi-sequence
+# file (e.g. UCSC's susScr11.fa) indexes and searches fine but then silently yields an
+# EMPTY result, so refuse it up front, with the fix (see genome_layout.py). Fast: one
+# header line per file. Covers the web-launched path, which does not run the validator.
+if ! python "$starting_dir/genome_layout.py" "$ref_folder" >&2; then
+	printf "ERROR: reference genome folder %s is not one FASTA file per sequence\n" "$ref_folder" >&2
+	exit 1
+fi
+
 # iterate over each variant dataset to compute the enriched genomes, index each
 # enriched genome, search off-targets, reconstruct haplotypes (if input VCFs are
 # phased), and score off-targets
@@ -888,7 +898,18 @@ fi
 # integration steps each assume at least one data row and would fail in turn.
 # Finish successfully with an empty-but-valid result instead of aborting.
 if [ -z "$(tail -n +2 "$final_res.bestCFD.txt" 2>/dev/null | head -c 1)" ]; then
+	# Safety net: an empty result is only genuine if the search itself found nothing.
+	# If the reference search produced raw targets (after the PAM / max-edits filters
+	# above) but none survived post-analysis, something upstream dropped them -- e.g. a
+	# genome that is not one FASTA file per sequence -- so fail loudly instead of
+	# reporting a clean, empty "success".
+	raw_ref_targets="$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
+	if [ -s "$raw_ref_targets" ]; then
+		printf "ERROR: the search found %s raw off-target(s) but none survived post-analysis, so the result would be silently empty. Check that the genome folder %s has one FASTA file per sequence (python PostProcess/genome_layout.py %s).\n" "$(wc -l <"$raw_ref_targets")" "$ref_folder" "$ref_folder" >&2
+		exit 1
+	fi
 	echo "No off-targets found for the provided guide(s) with the given parameters."
+	echo -e "No off-targets found" >>"$log"  # marker the web status page keys on
 	echo "The search completed successfully; the result set is empty."
 	# leave the header-only best/alt files in place as the (empty) result
 	echo -e 'Job\tEnd\t'"$(date)" >>"$log"

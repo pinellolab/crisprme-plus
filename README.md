@@ -7,7 +7,7 @@
   <img src="assets/readme/crisprme-logo.png" alt="CRISPRme" width="700"/>
 </p>
 
-# CRISPRme+ (2.6.0)
+# CRISPRme+ (2.6.1)
 
 ### 📦 Repository, releases & issues → **https://github.com/pinellolab/crisprme-plus**
 
@@ -102,6 +102,15 @@ single-chromosome / target-region variant** searches fit **~16 GB**, so any lapt
 handles those.)
 Details: [`install/`](install/).
 
+> **GPU acceleration (optional).** The default image `pinellolab/crisprme:latest` is
+> **GPU-capable**: on an NVIDIA host, add `--gpus all` to `docker run` and pass
+> `--compute-backend cuda` to run the CRISPR-Bulge scorer on the GPU; it **falls back to
+> CPU automatically** when no GPU is present. The **amd64** image bundles CUDA; **arm64**
+> (Apple Silicon) and Docker-on-Mac are always CPU. The clickable installers auto-add
+> `--gpus all` when Docker exposes a GPU. GPU pays off on large/dense searches; a tiny
+> single-guide run is often faster on CPU due to init overhead. (See the
+> [`--compute-backend {cpu,cuda,metal}`](#input-arguments) flag.)
+
 ---
 
 ### Or run the Docker commands yourself
@@ -119,25 +128,30 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 mkdir -p ~/crisprme && cd ~/crisprme
 # 1) fast-download the reference data + reference index (minutes, HuggingFace CDN)
 #    (this does NOT include the variant index — that is step 2)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.py download --what all --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what all --path /DATA
 # 2) grab the prebuilt SpCas9 (NRG = NAG+NGG) indexes so no long index build is needed:
 #    the reference index, and the compact dict-less variant-aware hg38 + 1000G-2021
 #    index (the recommended default; single-source, fully phased → CONFIRMED cis +
 #    named per-sample carriers; a clean, simple default of real observed haplotypes)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
 #    ...or the broader-coverage hg38 + 1000G-2021 + HGDP index (adds HGDP's 929
 #    individuals for more population diversity; hybrid CONFIRMED/PUTATIVE co-occurrence):
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
 #    ...or the HPRC pangenome index (232 phased assembly-derived genomes incl. CHM13,
 #    CONFIRMED cis + named carriers, pangenome-specific variation, searchable indels):
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.py download --what index --index-name NRG_3_hg38+hg38_HPRC --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HPRC --path /DATA
 #    ...or the all-source sites-only "mega" index (5 datasets, per-dataset AF + AF_max,
 #    searchable indels, SNP+SNP & SNP+indel PUTATIVE co-occurrence):
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
 # 3) launch the web interface, then open http://127.0.0.1:8080
-docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:v2.6.0 crisprme.py web-interface
+#    (on an NVIDIA host add `--gpus all` here to run the CRISPR-Bulge scorer on the GPU)
+docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:latest crisprme.py web-interface
 ```
+
+> **`:latest` vs a pinned tag.** These commands use `pinellolab/crisprme:latest` — the
+> auto-updating, GPU-capable default image. For a fully reproducible run, pin the exact
+> release instead, e.g. `pinellolab/crisprme:v2.6.1`.
 
 **The four prebuilt SpCas9 (NRG = NAG+NGG) variant indexes.** All four carry searchable
 indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever you need with
@@ -176,7 +190,7 @@ example search and generate the shareable report — no web UI needed:
 # a genome-wide SpCas9 (NRG) search over hg38 + 1000G + HGDP, up to 4 mismatches
 # + 1 DNA / 1 RNA bulge (a 6-edit budget), with combined allele frequencies, rsIDs and annotations
 echo "CTAACAGTTGCTTTTATCACNNN" > guide.txt
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.py complete-search \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py complete-search \
   --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --guide guide.txt \
   --vcf list_vcf.txt --samplesID list_samplesID.txt \
   --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
@@ -196,7 +210,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.p
 #   sites-only index (mega) it cannot resolve carriers (no genotypes) and is inert.
 
 # build the self-contained, shareable HTML report (report.html + a data/ folder)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 crisprme.py generate-report \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py generate-report \
   --result-dir Results/my_search
 # -> open Results/my_search/<jobid>_report.zip, then report.html
 ```
@@ -255,16 +269,16 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
-> **Which version do I get?** For **CRISPRme+ (2.6.0, this release)** use **Docker**
+> **Which version do I get?** For **CRISPRme+ (2.6.1, this release)** use **Docker**
 > (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above, or
 > §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
-> 2.6.0 line** — use it only if you specifically want the stable release. If in doubt,
+> 2.6.1 line** — use it only if you specifically want the stable release. If in doubt,
 > use Docker.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.6.0)](#12-install-crisprme-via-docker)
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.6.1)](#12-install-crisprme-via-docker)
 
 - [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
@@ -275,7 +289,7 @@ respective sections below.
 ### 1.1 Install CRISPRme via Conda/Mamba
 ---
 
-> **Note:** Conda/Bioconda installs the **stable 2.1.x** line — for CRISPRme+ 2.6.0
+> **Note:** Conda/Bioconda installs the **stable 2.1.x** line — for CRISPRme+ 2.6.1
 > use [Docker](#12-install-crisprme-via-docker) or [source (§1.3)](#13-install-crisprme-from-source-without-bioconda).
 
 This section is organized into three subsections to guide you through the installation 
@@ -330,11 +344,11 @@ By completing these steps, your system will be fully prepared for installing CRI
 #### 1.1.2 Installing CRISPRme
 ---
 
-> **CRISPRme+ (2.6.0) runs on Python 3.11 and installs from source** — the build
+> **CRISPRme+ (2.6.1) runs on Python 3.11 and installs from source** — the build
 > compiles CRISPRitz 2.8.3 and installs both tools into a conda environment. A native
-> Bioconda `crisprme=2.6.0` package is **in preparation**; until it lands, the Bioconda
+> Bioconda `crisprme=2.6.1` package is **in preparation**; until it lands, the Bioconda
 > `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** this
-> 2.6.0 line.
+> 2.6.1 line.
 
 To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
 (`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
@@ -369,7 +383,7 @@ This updates within the **stable 2.1.x** Bioconda line (latest is `crisprme=2.1.
 ```bash
 mamba install crisprme=2.1.14
 ```
-For **2.6.0 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.6.0 package yet.
+For **2.6.1 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.6.1 package yet.
 If you're using `Conda`, replace `mamba` with `conda` in the commands above.
 
 **Step 3: Verify the Update**
@@ -480,12 +494,14 @@ For more examples and ideas, visit:
 After installing Docker, you can download and build the CRISPRme Docker image by 
 running the following command in a terminal:
 ```bash
-docker pull pinellolab/crisprme:v2.6.0
+docker pull pinellolab/crisprme:latest
 ```
 
 This command retrieves the latest pre-built CRISPRme image from Docker Hub and sets 
 it up on your system, ensuring all required dependencies and configurations are 
-included.
+included. `:latest` is the auto-updating, GPU-capable default image; for a fully
+reproducible setup pin the exact release instead, e.g.
+`docker pull pinellolab/crisprme:v2.6.1`.
 
 Once the download is complete, the CRISPRme Docker image will be ready for use. 
 To confirm the image is successfully installed, you can list all available Docker 
@@ -497,19 +513,19 @@ docker images
 Look for an entry similar to the following:
 ```
 REPOSITORY          TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme   v2.6.0    <image_id>     <timestamp>    ~818MB
+pinellolab/crisprme   latest    <image_id>     <timestamp>    ~818MB
 ```
 
 You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run an unreleased line (e.g. **2.6.0**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.3 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run an unreleased line (e.g. **2.6.1**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.3 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
 ```bash
-# 1. clone the repository (2.6.0 development lives on the main branch)
+# 1. clone the repository (2.6.1 development lives on the main branch)
 git clone https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
@@ -597,9 +613,11 @@ The directory organization required by CRISPRme is illustrated below:
 
 > **Running the examples.** Each example below is the bare `crisprme.py <command> …`.
 > To run it in **Docker**, prefix it with
-> `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:v2.6.0`
-> (add `-p 8080:8080` for `web-interface`). From a **source / Conda** install, run
-> it as-is inside the activated `crisprme` environment.
+> `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:latest`
+> (add `-p 8080:8080` for `web-interface`; on an NVIDIA host add `--gpus all` to run the
+> CRISPR-Bulge scorer on the GPU). Pin `:v2.6.1` instead of `:latest` for reproducibility.
+> From a **source / Conda** install, run it as-is inside the activated `crisprme`
+> environment.
 
 This section provides a comprehensive overview of CRISPRme's core functions, 
 detailing each feature, the required input data and formats, and the resulting 
@@ -669,7 +687,7 @@ single command — `download --what index` already wrote the `list_vcf.txt` /
 
 ```bash
 printf '%s\n' ACTGAAATCTGTAAGCAGGCNNN > my_guide.txt   # 20-nt spacer + NNN for the PAM positions
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-search \
     --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
     --guide my_guide.txt --vcf list_vcf.txt --samplesID list_samplesID.txt \
@@ -829,7 +847,10 @@ its purpose and usage:
 - `--compute-backend {cpu,cuda,metal}` (*Optional*)
   <br>ML-scorer compute device: `cpu` (default) | `cuda` (NVIDIA/Linux GPU) | `metal`
   (Apple Silicon, self-tests and falls back to CPU); degrades to CFD-only if the cbulge
-  scorer env is absent.
+  scorer env is absent. In Docker, the default `pinellolab/crisprme:latest` image is
+  GPU-capable — add `--gpus all` to `docker run` on an NVIDIA host and pass
+  `--compute-backend cuda`; it falls back to CPU when no GPU is present. See
+  [GPU acceleration](#2210-reference-index-and-data-distribution-commands) for details.
 
 - `--alt-alignments` / `--no-alt-alignments` (*Optional*)
   <br>Emit (or skip) the exhaustive alternative-alignments file
@@ -877,7 +898,10 @@ results and understanding the impact of genetic diversity on CRISPR off-target.
     
     - **Contents**: A detailed file containing the top targets (`*.bestMerge.txt`) 
     enriched with annotations from the input files. Includes:
-        - Gene proximity of off-targets
+        - Gene proximity of off-targets — `Gene_distance_kb` plus a `Gene_region`
+        column locating each off-target relative to the nearest protein-coding gene
+        (`CDS`, `5'UTR`, `3'UTR`, `exon`, `intron`, or `intergenic`; `intergenic`
+        iff `Gene_distance_kb > 0`)
         - Overlaps with regulatory elements
     
     - **Purpose**: Integrates functional genomic context into the prioritization 
@@ -1683,6 +1707,11 @@ is under `data/`). Reading top to bottom:
   sites-only panel (e.g. `mega`) there is no carrier roster, so `N carrier(s)` never
   appears and the panel tie-break is inert, but the column is still shown (values
   `observed` / `putative`); it is dropped only for a reference-only run.
+- **`Gene_region` column** — where the off-target sits relative to the nearest
+  protein-coding gene: `CDS`, `5'UTR`, `3'UTR`, `exon`, `intron`, or `intergenic`.
+  It is coherent with `Gene_distance_kb` — `intergenic` iff the distance is `> 0`.
+  Present in the curated report table, all download TSVs, and the raw
+  `integrated_results.tsv`.
 - **MAF column** — a value of **`1e-05` is a display floor** meaning "present but
   frequency effectively 0" (used so a zero-frequency allele still renders on the
   log-scale plots), **not** a measured frequency.
@@ -1750,7 +1779,7 @@ crisprme.py scorer-env create
 crisprme.py scorer-env doctor
 ```
 
-The ML off-target scorer is **CRISPR-Bulge** (Yaish & Orenstein, *NAR* 2024) — a TensorFlow 2.13.1 GRU ensemble — running isolated in the `cbulge` env so its heavy pins never touch the main environment. **CFD remains the primary score**; if the `cbulge` env is absent the run completes **CFD-only** (the ML column reads `-1`/N/A). The env is **architecture-aware and scores identically across CPUs**: it installs the same TensorFlow 2.13.1 per-arch — conda `tensorflow-cpu`/CUDA on x86-64, `tensorflow-macos` on Apple Silicon, and the PyPI `tensorflow==2.13.1` aarch64 wheel on Linux ARM (validated x86-64 vs aarch64 agreement to max |Δ| = 3.6e-7, zero threshold-band changes), so the multi-arch Docker image scores identically on both. On networks that block `conda.anaconda.org`, point the env solve at a mirror with `CONDA_CHANNEL_BASE=https://prefix.dev` (or `CRISPRME_CONDA_CHANNEL_BASE`; the Docker build accepts `--build-arg CONDA_CHANNEL_BASE=…`).
+The ML off-target scorer is **CRISPR-Bulge** (Yaish & Orenstein, *NAR* 2024) — a TensorFlow 2.13.1 GRU ensemble — running isolated in the `cbulge` env so its heavy pins never touch the main environment. **CFD remains the primary score**; if the `cbulge` env is absent the run completes **CFD-only** (the ML column reads `-1`/N/A). **GPU acceleration:** the default image `pinellolab/crisprme:latest` is GPU-capable — on an NVIDIA host add `--gpus all` to `docker run` and pass [`--compute-backend cuda`](#input-arguments) to run the CRISPR-Bulge scorer on the GPU; it falls back to CPU automatically when no GPU is present. The amd64 image bundles CUDA; arm64 (Apple Silicon) and Docker-on-Mac are always CPU. The clickable installers auto-add `--gpus all` when Docker exposes a GPU. GPU pays off on large/dense searches; a tiny single-guide run is often faster on CPU due to init overhead. The env is **architecture-aware and scores identically across CPUs**: it installs the same TensorFlow 2.13.1 per-arch — conda `tensorflow-cpu`/CUDA on x86-64, `tensorflow-macos` on Apple Silicon, and the PyPI `tensorflow==2.13.1` aarch64 wheel on Linux ARM (validated x86-64 vs aarch64 agreement to max |Δ| = 3.6e-7, zero threshold-band changes), so the multi-arch Docker image scores identically on both. On networks that block `conda.anaconda.org`, point the env solve at a mirror with `CONDA_CHANNEL_BASE=https://prefix.dev` (or `CRISPRME_CONDA_CHANNEL_BASE`; the Docker build accepts `--build-arg CONDA_CHANNEL_BASE=…`).
 
 See the companion data-setup guide (`docs/crisprme_data_setup_051826.md`, Sections 2d and 3.5) for the end-to-end workflow.
 
@@ -1786,7 +1815,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.6.0`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.6.1`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**

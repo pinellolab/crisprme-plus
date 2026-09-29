@@ -11,6 +11,28 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **Restored the brute-force benchmark CI gate (`validate-benchmarks`).** The v2.6.0
+  `complete-test` rewrite made `run_crisprme_test` always require a prebuilt index and run a
+  single example-guide smoke, which silently dropped the CI's download + per-benchmark
+  on-demand-build flow — so `validate-test` had no predictions to compare against the committed
+  brute-force ground truth and the gate failed. `run_crisprme_test` now branches: the default
+  (user) path keeps the no-auto-build prebuilt-index smoke, while the CI path (when
+  `CRISPRME_ALLOW_ONDEMAND_BUILD` is set, as the workflow does) downloads the test data and runs
+  every registered benchmark with on-demand index build, producing the per-benchmark output dirs
+  `validate-test` needs. The brute-force comparison against CRISPRme's predicted off-targets is
+  exercised again.
+- **Guardrails so this class of regression can't recur silently.** Added `test_complete_test.py`
+  — a fast, hermetic dispatch test (in the push-to-main unit suite) that pins the two-mode
+  contract: CI mode (`CRISPRME_ALLOW_ONDEMAND_BUILD` set) downloads + builds each registered
+  benchmark on demand with no `--index-path`, and user mode requires a prebuilt index and never
+  downloads/builds. It fails against the broken rewrite. Also made `validate-benchmarks` (the
+  brute-force gate) run on **direct pushes to `main`** touching the pipeline — not just PRs +
+  the weekly cron — so a fast-forward release can no longer bypass it (the gap that let the
+  breakage sit unnoticed since mid-September).
+
+## [2.6.1] - 2026-09-28
+
 ### Added
 - **The default image is now GPU-capable — one image, both modes.** `pinellolab/crisprme:latest`
   (and `:<tag>`) builds its **amd64** layer with the conda-forge CUDA TensorFlow
@@ -35,6 +57,17 @@ and the `release-crisprme` skill.
   annotation legend. The raw `GENCODE` column still keeps the full overlapping feature-set.
   Report curation also derives it on the fly, so it renders on pre-existing
   `integrated_results.tsv` files too.
+
+### Fixed
+- **GPU image now actually builds its CUDA scorer env (and a broken scorer env can no longer
+  ship silently).** The `cbulge` CUDA solve failed on GPU-less builders (e.g. GitHub CI) with
+  `__cuda missing`, because the micromamba base activation exports `CONDA_OVERRIDE_CUDA=""` and
+  `scorer_env` used `setdefault` (which will not replace an existing empty value). Now the
+  override is force-set to `11.8` when empty/absent, so the CUDA TensorFlow build resolves on any
+  builder (the image still falls back to CPU at runtime when no GPU is present). Additionally, the
+  Dockerfile scorer-env build step is now **FATAL** — a failed or incomplete `cbulge` env fails
+  the image build (verified by importing TensorFlow) instead of being swallowed by a warning and
+  shipping an image with no scorer.
 
 ## [2.6.0] - 2026-09-28
 
@@ -134,6 +167,14 @@ and the `release-crisprme` skill.
   `PostProcess/personal_assembly.py` (+ `test_personal_assembly.py`).
 
 ### Added
+- **`assembly-search` annotates reconciled sites against hg38.** New optional
+  `--annotation` flag (same file format, COSMIC licence gate and IntOGen handling as
+  `complete-search`'s) adds an `Annotation` column to `combined_hg38.tsv` for every site
+  with an hg38 coordinate (found on both haplotypes, or on one and mappable); sites with
+  no hg38 equivalent get none. The web form applies the annotations enabled in
+  Settings -> Annotations, like `complete-search`. In the results table the column is
+  filterable and sortable like every other one. The annotation describes the *lifted*
+  hg38 locus, not the haplotype's own sequence.
 - **`scorer-env` command group + modular scorer environment.** `crisprme.py scorer-env
   {create,check,update,list,doctor}` manages the dedicated `cbulge` conda env (detects
   micromamba/mamba/conda, provisions the pinned CRISPR-Bulge source+weights, health-checks
@@ -247,6 +288,31 @@ and the `release-crisprme` skill.
   the six explicit paths for scripted use.
 
 ### Fixed
+- **A genome delivered as one multi-sequence FASTA file no longer silently produces an
+  EMPTY result.** CRISPRme identifies chromosomes by FASTA *file name*, one sequence per
+  file (as the README requires), but CRISPRitz happily indexes and searches a single
+  multi-sequence file -- so a UCSC assembly with no per-chromosome archive (e.g. the pig
+  `susScr11`, `bigZips/susScr11.fa.gz`) ran to completion and then reported "No
+  off-targets found" even with tens of thousands of raw hits, because the whole genome
+  was treated as one "chromosome" named after the file. Now: `download` /
+  the Data Manager split such a download into one `<sequence>.fa` per sequence; the
+  input validator and the pipeline itself refuse a multi-sequence genome folder up front
+  with the exact fix (`python PostProcess/genome_layout.py --split <genome_dir>`, which
+  also repairs an existing folder -- rebuild any index made from the old layout); and the
+  pipeline no longer reports success when the search found raw hits but none survived
+  post-analysis (it fails with an explanatory error instead). New
+  `PostProcess/genome_layout.py` (+ `test_genome_layout.py`); the layout check reads one
+  header line per file, so it adds no measurable time to a search.
+- **A search that genuinely finds nothing now says so on the job status page** (green
+  "Finished: no off-targets were found ...", later steps marked "Not needed") instead of
+  leaving "Merging Targets" and the rest as "To do" indefinitely.
+- **The Result Summary matrix no longer shows bulge rows `0..5` for a reference-only
+  search that only reaches 2 bulges.** The per-guide count file always carries a
+  reference block and an all-zero variant block; the page only split the two blocks for
+  searches with variants. A reference-only job now shows just its reference block.
+- Removed two Dash dev-mode prop-type warnings on the results page (invalid extra keys in
+  a `DataTable` `css` entry; a hidden radio's options passed as `[labels, values]`
+  instead of one list of `{label, value}`). No visible change.
 - **`complete-test` no longer relies on on-demand index building.** The smoke test ran a
   variant `complete-search` that expected an index to be built on demand — a path that was
   gated off (it produced incomplete dict-less tiers), so `complete-test` failed. CRISPRme does
@@ -1638,7 +1704,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.1...HEAD
+[2.6.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.1
 [2.6.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.0
 [2.5.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.5
 [2.5.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.5.4

@@ -352,7 +352,7 @@ def _new_assembly_job_id() -> str:
     return job_id
 
 
-def _run_assembly_search_job(cmd: str, combined_dir: str) -> None:
+def _run_assembly_search_job(cmd: str, combined_dir: str, note: str = "") -> None:
     """Runs `crisprme.py assembly-search` in the background.
 
     Module-level (picklable) so it can be submitted to the
@@ -364,7 +364,9 @@ def _run_assembly_search_job(cmd: str, combined_dir: str) -> None:
     subprocess actually starts, mirroring
     `submit_job_automated_new_multiple_vcfs.sh`'s own "no longer queued"
     convention (that script removes it at the same point, before running the
-    real command).
+    real command). `note`, if given, is written to `log.txt` first -- at job
+    start rather than at submit time, so the load page still shows "Queued"
+    (it reads `log.txt`'s existence as "started").
     """
     queue_file = os.path.join(combined_dir, QUEUE_FILE)
     log_path = os.path.join(combined_dir, LOG_FILE)
@@ -380,6 +382,9 @@ def _run_assembly_search_job(cmd: str, combined_dir: str) -> None:
         env_bin = os.path.dirname(sys.executable)
         env["PATH"] = env_bin + os.pathsep + env.get("PATH", "")
         with open(log_path, "a") as log_out:
+            if note:
+                log_out.write(f"{note}\n")
+                log_out.flush()
             proc = subprocess.Popen(
                 cmd, shell=True, stdout=log_out, stderr=subprocess.STDOUT, env=env
             )
@@ -621,6 +626,24 @@ def submit_assembly_search_job(
     # elsewhere in this codebase (crisprme.py, generate_sample_card.py) for
     # the identical bare-`python`-on-PATH problem.
     crisprme_script = os.path.join(app_directory, "crisprme.py")
+    # hg38 functional annotation of the reconciled sites: the same set of
+    # annotations enabled in Settings -> Annotations that complete-search
+    # applies (built-in bundle on by default, COSMIC stripped unless
+    # licensed). Assembly-search always reconciles to hg38, so the hg38 set.
+    # Omitted, not an error, when none is enabled/installed.
+    annotation_name, _ = build_active_annotation("hg38")
+    annotation_path = os.path.join(current_working_directory, ANNOTATIONS_DIR, annotation_name)
+    annotation_args = (
+        ["--annotation", shlex.quote(annotation_path)]
+        if annotation_name != "vuoto.txt" and os.path.isfile(annotation_path)
+        else []
+    )
+    annotation_note = (
+        ""
+        if annotation_args
+        else "[web] No hg38 annotation is enabled or installed (Settings -> Annotations), "
+        "so this job's results will have no Annotation column."
+    )
     cmd = " ".join(
         [
             shlex.quote(sys.executable),
@@ -660,11 +683,12 @@ def submit_assembly_search_job(
             shlex.quote(job_id),
             "--thread",
             "4",
+            *annotation_args,
             "--debug",
         ]
     )
     print(f"Submitted ASSEMBLY-SEARCH job {job_id}. Output > {LOG_FILE}")
-    pool_executor.submit(_run_assembly_search_job, cmd, combined_dir)
+    pool_executor.submit(_run_assembly_search_job, cmd, combined_dir, annotation_note)
     return "/load", f"?job={job_id}_combined", False, no_update
 
 

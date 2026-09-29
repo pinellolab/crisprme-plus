@@ -839,6 +839,21 @@ _SITE_SET_OPTIONS = [
     {"label": "Both haplotypes (non-mappable to hg38)", "value": "both_haplotype_private"},
 ]
 
+
+def _assembly_table_columns(display_cols: List[str]) -> List[Dict[str, object]]:
+    """DataTable column definitions for the Custom Ranking table.
+
+    Every column gets the table's native filter box and click-to-sort header.
+    `Annotation` (hg38 feature list, comma-separated -- e.g.
+    "exon_gencode,pELS_encode") is declared as text so a filter like
+    `exon` does a substring match on the list instead of an exact-value match.
+    """
+    return [
+        {"name": c, "id": c, "hideable": True, **({"type": "text"} if c == "Annotation" else {})}
+        for c in display_cols
+    ]
+
+
 # Sort-by options per site set -- "mappable" offers both haplotypes' own
 # score/mismatch columns plus hg38 position (matches the columns display_cols
 # actually shows); an unmappable site set only has ITS OWN haplotype's native
@@ -2100,7 +2115,7 @@ def result_page_assembly(job_id: str) -> html.Div:
         ),
         dash_table.DataTable(
             id="assembly-results-table",
-            columns=[{"name": c, "id": c, "hideable": True} for c in display_cols],
+            columns=_assembly_table_columns(display_cols),
             data=df.to_dict("records"),
             page_size=25,
             sort_action="native",
@@ -2560,7 +2575,7 @@ def update_assembly_results_table(
         if region_filter.get("end") is not None:
             mask &= starts <= region_filter["end"]
         df = df[mask]
-    columns = [{"name": c, "id": c, "hideable": True} for c in display_cols]
+    columns = _assembly_table_columns(display_cols)
     sort_by = [{"column_id": sort_col, "direction": sort_order}] if sort_col in display_cols else []
     return columns, df.to_dict("records"), sort_by
 
@@ -4753,6 +4768,7 @@ def update_table_general_profile(
         # labels/placement from len(data_general_count), NOT Max_bulges (= max(bDNA,bRNA)).
         # The old code hardcoded max_bulges in {0,1,2} and silently dropped the 3-/4-bulge
         # rows of e.g. a 2/2 search from this summary table.
+        data_general_count = _drop_empty_variant_block(data_general_count, genome_type)
         nb = len(data_general_count)
         per_origin = (nb // 2) if genome_type == "both" else nb
         if genome_type == "both":
@@ -6241,6 +6257,27 @@ def generate_sample_card(
 # main page layout
 
 
+def _drop_empty_variant_block(counts: pd.DataFrame, genome_type: str) -> pd.DataFrame:
+    """Drops the all-zero VARIANT half of a reference-only job's count table.
+
+    The per-guide count file (``.<job>.general_target_count.*``) is written with two
+    stacked blocks of ``bDNA+bRNA+1`` bulge rows -- reference, then variant -- for
+    every job. For a reference-only job the variant block is all zeros, but the
+    Result Summary labels rows by the job's genome type: it splits two blocks only
+    for a job with variants, so a reference-only job's rows were all labelled as ONE
+    block, i.e. bulges 0..5 for a 1 DNA + 1 RNA search that only reaches 2. Keep just
+    the reference block. Only done when the second half is truly all zeros, so real
+    data is never discarded.
+    """
+    if genome_type != "ref" or len(counts) < 2 or len(counts) % 2:
+        return counts
+    half = len(counts) // 2
+    tail = counts.iloc[half:].apply(pd.to_numeric, errors="coerce")
+    if tail.fillna(0).eq(0).all().all():
+        return counts.iloc[:half].reset_index(drop=True)
+    return counts
+
+
 # update the main content table
 @app.callback(
     Output("div-tab-content", "children"),
@@ -6809,9 +6846,13 @@ def update_content_tab(
                 " Risk Score",
             ],
         }  # , ' Absolute Risk Score'
-        label = [{"label": lab} for lab in all_options.keys()]
-        value = [{"value": val} for val in all_value.keys()]
-        target_opt = [label, value]
+        # dcc.RadioItems wants ONE list of {label, value} dicts (this used to pass
+        # [labels, values], which Dash's dev-mode prop check rejects). The radio is
+        # hidden and only its `value` is read, so the options only need to be valid.
+        target_opt = [
+            {"label": lab, "value": val}
+            for lab, val in zip(all_options.keys(), all_value.keys())
+        ]
         query_tab_content = html.Div(
             [
                 # row with the first and second group by and thresholds
@@ -6966,9 +7007,6 @@ def update_content_tab(
                                     dash_table.DataTable(
                                         css=[
                                             {
-                                                "word-break": "break-all",
-                                                "line-break": "anywhere",
-                                                "overflow-wrap": "break-word",
                                                 "selector": ".row",
                                                 "rule": "margin: 0; overflow: inherit; word-break: break-all; overflow-wrap: break-word; line-break: anywhere;",
                                             }
