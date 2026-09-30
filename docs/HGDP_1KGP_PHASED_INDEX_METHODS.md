@@ -244,6 +244,18 @@ The finalized, reproduced-and-validated pipeline (re-phasing + CRISPRme index bu
   (don't silently CONFIRM). Full VAL-1..7 protocol in §6 (incl. trio-parents-held-out anti-self-
   deception gate). PENDING Luca decision on singleton handling (drives whether we do the GW run) +
   index naming/replace-vs-alongside. §7 final recipe still pending the chr22 smoke.
+- 2026-09-30 — **chr22 SMOKE PROVED singleton recovery** (partial: 3 of 8 4cM chunks =
+  chr22:1–~28 Mb, ligated + validated). Our re-phased region: **326,537 AC=1 singletons recovered
+  (all `|`-phased)** vs **0** in the gnomAD MAC≥2 release over the same region; **916,299 records vs
+  403,312 (2.27×)** — i.e. re-phasing recovers the ~53% the release drops AND keeps it phased →
+  CONFIRMED-cis capable; 4,091 samples; 122.7M genotypes scanned 100% `|`, zero missing. **Two recipe
+  corrections the smoke surfaced (now mandatory in §5/§7):** (1) `phase_rare` needs explicit
+  `chr:start-end` regions (chunk-file col3=scaffold / col4=input), NOT a bare chromosome name;
+  (2) the atgu **pre-phasing QC is MANDATORY** — `bcftools +fill-tags -t all | view -i 'HWE>=1e-30 &&
+  F_MISSING<=0.1 && ExcHet>=0.5 && ExcHet<=1.5'` PLUS dropping AC=0 monomorphic-in-subset sites;
+  without it SHAPEIT5 `phase_rare` NaN-aborts (`Assertion !isnan(...prob)`), which is what killed
+  chunks 4–8 in the smoke. Also: single-region `phase_common` = ~3.5 h/chr22 → GW must chunk (20cM).
+  VERDICT: approach validated; GW re-phase is GO once the QC + chunking are wired (HELD for Luca).
 - 2026-09-29 (cont.) — DECISION (Luca): **INCLUDE singletons** (prioritize completeness /
   "never miss a true haplotype" over avoiding low-confidence phase) → **re-phase path** (SHAPEIT5,
   keep singletons). No special "singleton" report flag needed — the `Samples`/"N carrier(s)" +
