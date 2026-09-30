@@ -160,6 +160,31 @@ b38 maps from `odelaneau/shapeit`; chunk coords via the GLIMPSE chunker (do not 
   current 1000G2021_HGDP; the EXTRA cis calls that hinge on a recovered singleton are flagged as the
   lower-confidence tier (§4), not silently promoted to CONFIRMED.
 
+### 6.1 chr22 re-phasing results — MEASURED (2026-09-30)
+
+Our re-phased chr22 (`hgdp1kg.chr22.rephased.bcf`, 1,998,332 records, 4,091 samples) compared against
+gnomAD's pre-phased release (`hgdp1kgp_chr22.filtered.SNV_INDEL.phased.shapeit5.bcf`, 1,093,149 records)
+via `bcftools isec` (site overlap) and `SHAPEIT5_switch` (release = validation/truth, ours = estimation).
+
+**VAL-1 Singleton recovery — PASS.** Our chr22 has `min AC = 1` with **828,868 singletons**; the release
+has **zero** (MAC≥2). Feature proven.
+
+**VAL-4 Backbone concordance — PASS.**
+| Metric | Value | Interpretation |
+|---|---|---|
+| SHARED sites (our ∩ release) | **1,090,102** | **99.72%** of the release backbone is present in ours |
+| release-only (0001) | 3,047 (0.28%) | sites the release kept but our atgu-QC (HWE/F_MISSING/ExcHet) correctly dropped — not a superset violation |
+| our-only (0000) | 908,230 | sites we add; **825,653 (91%) are AC=1 singletons**, rest rare |
+| **Genotype (allele) concordance on shared** | **99.98%** (932,669 / 4,459,607,282 discordant = 0.0209%) | underlying calls essentially identical — we re-phase + add, we don't alter data |
+| **Phasing switch-error vs gnomAD (global)** | **0.58%** (790,362 / 135,364,707 het genotypes) | our haplotype backbone reproduces gnomAD's almost exactly (this is discordance between two *statistical* phasings, not vs trio-truth) |
+| Phasing SER by allele count | AC=2: 6.6%, AC=3: 6.3%, … AC=31: 2.1%, common ≪0.58% | rare-variant phase intrinsically uncertain; common variants dominate → low global |
+
+**Conclusion:** chr22 is correct — sites, genotypes, and phasing all reproduce gnomAD's release on the
+shared backbone; the only material difference is the ~826k deliberately-recovered singletons. Validates
+the recipe for the genome-wide run. (Note: switch-vs-trio-truth per VAL-2/VAL-3 remains the stronger
+accuracy check and is still pending; the vs-release concordance here confirms we did not *regress* the
+backbone while adding singletons.)
+
 ## 4b. Singleton accuracy — the scientific caveat (drives a product decision)
 
 SHAPEIT5 phases singletons non-randomly but at **~35% switch error** (vs ~50% random; SHAPEIT5 paper),
