@@ -256,6 +256,17 @@ The finalized, reproduced-and-validated pipeline (re-phasing + CRISPRme index bu
   without it SHAPEIT5 `phase_rare` NaN-aborts (`Assertion !isnan(...prob)`), which is what killed
   chunks 4–8 in the smoke. Also: single-region `phase_common` = ~3.5 h/chr22 → GW must chunk (20cM).
   VERDICT: approach validated; GW re-phase is GO once the QC + chunking are wired (HELD for Luca).
+- 2026-09-30 (cont.) — **Corrected-recipe chr22 GATE PASSED end-to-end (full chromosome, no crash).**
+  With the mandatory atgu QC in place: qced = **1,998,332** records (the QC dropped ~310k pathological
+  sites — exactly what was NaN-crashing `phase_rare`); chunked `phase_common` → 473,471-variant
+  scaffold (~1.5 h, faster than the 3.5 h single-region); **`phase_rare` completed ALL 8 chunks in
+  ~7 min, no crash**; ligate → **4,091 samples, min AC=1, 828,868 phased singletons** recovered.
+  Timings (per chrom, excl. download): QC ~50 min, phase_common ~90 min (long pole), phase_rare ~7 min.
+  **GW fan-out LAUNCHED** (`drive_gw.sh`): chr1–21 via `rephase_one_chrom.sh`, K=3 concurrent chroms
+  (each chunk-parallel, RP_THREADS=6 → ~200 cores), small→big, all on the /srv/local SSD, raw dense
+  VCF deleted after QC (disk-bounded), resumable. chrX handled separately after (PAR/haploid). Then
+  CRISPRme index build (`NRG_3_hg38+hg38_HGDP1kGP`) + full validation. Publish + default-wiring HELD
+  for Luca.
 - 2026-09-29 (cont.) — DECISION (Luca): **INCLUDE singletons** (prioritize completeness /
   "never miss a true haplotype" over avoiding low-confidence phase) → **re-phase path** (SHAPEIT5,
   keep singletons). No special "singleton" report flag needed — the `Samples`/"N carrier(s)" +
