@@ -185,6 +185,54 @@ the recipe for the genome-wide run. (Note: switch-vs-trio-truth per VAL-2/VAL-3 
 accuracy check and is still pending; the vs-release concordance here confirms we did not *regress* the
 backbone while adding singletons.)
 
+### 6.2 Genome-wide autosome re-phasing results — all 22, MEASURED (2026-10-03)
+
+The complete chr1–22 re-phase (4,091 samples, SHAPEIT5 phase_common+phase_rare, atgu pre-phasing QC,
+singletons kept) was validated against gnomAD's public release
+(`gs://gcp-public-data--gnomad/resources/hgdp_1kg/phased_haplotypes_v2/hgdp1kgp_<chr>.filtered.SNV_INDEL.phased.shapeit5.bcf`).
+Per chromosome: full BGZF read-integrity (`bcftools view`), structural checks, `bcftools isec` site overlap,
+and `SHAPEIT5_switch` (release = validation/truth, ours = estimation) for genotype concordance + switch error.
+
+**Result: 22/22 chromosomes CLEAN** — every one read-OK (no corruption), exactly 4,091 samples, **0 unphased
+genotypes** (100% `|`), concordant with the public backbone, and adding singletons.
+
+| chr | our records | singletons recovered | GT concord % | switch-err % | rel-only |
+|---|---|---|---|---|---|
+| chr1 | 11,101,151 | 4,760,285 | 99.9880 | 0.412 | 4,523 |
+| chr2 | 12,104,482 | 5,247,203 | 99.9896 | 0.395 | 3,469 |
+| chr3 | 9,995,561 | 4,330,916 | 99.9902 | 0.363 | 2,366 |
+| chr4 | 9,880,794 | 4,304,346 | 99.9898 | 0.341 | 2,892 |
+| chr5 | 9,096,534 | 3,948,220 | 99.9906 | 0.358 | 1,781 |
+| chr6 | 8,563,279 | 3,648,933 | 99.9899 | 0.331 | 1,901 |
+| chr7 | 8,131,512 | 3,486,837 | 99.9890 | 0.381 | 2,395 |
+| chr8 | 7,806,477 | 3,384,020 | 99.9905 | 0.365 | 2,427 |
+| chr9 | 6,208,694 | 2,662,354 | 99.9879 | 0.432 | 3,723 |
+| chr10 | 6,860,458 | 2,922,656 | 99.9886 | 0.383 | 2,691 |
+| chr11 | 6,848,667 | 2,956,338 | 99.9899 | 0.361 | 1,783 |
+| chr12 | 6,601,225 | 2,829,776 | 99.9892 | 0.394 | 1,535 |
+| chr13 | 4,933,644 | 2,149,831 | 99.9897 | 0.369 | 1,131 |
+| chr14 | 4,533,362 | 1,938,982 | 99.9878 | 0.418 | 1,761 |
+| chr15 | 4,117,280 | 1,753,105 | 99.9868 | 0.477 | 3,097 |
+| chr16 | 4,626,002 | 1,992,922 | 99.9883 | 0.465 | 1,772 |
+| chr17 | 4,032,356 | 1,706,922 | 99.9864 | 0.509 | 1,641 |
+| chr18 | 3,865,839 | 1,661,595 | 99.9899 | 0.390 | 968 |
+| chr19 | 3,154,021 | 1,304,591 | 99.9845 | 0.485 | 1,722 |
+| chr20 | 3,119,135 | 1,327,087 | 99.9887 | 0.439 | 1,273 |
+| chr21 | 1,925,238 | 797,826 | 99.9779 | 0.510 | 5,728 |
+| chr22 | 1,998,332 | 825,653 | 99.9791 | 0.584 | 3,047 |
+| **TOTAL** | **139.5 M** | **59.9 M** | **≥99.978** | **≤0.584** | **53,626** |
+
+**Interpretation.** Across 139.5 M total autosomal records the re-phased panel reproduces gnomAD's public
+MAC≥2 backbone at **≥99.978% genotype concordance** and **≤0.584% switch-error** (discordance between two
+independent statistical phasings, not vs trio-truth — low = faithful reproduction), with **zero** read
+failures or unphased genotypes. The material difference is the **59.9 M recovered singletons** (absent from
+the MAC≥2 release) — the intended feature. `rel-only` (sites the release kept but our atgu-QC dropped) is
+53,626 total = **0.04%** of records, i.e. we are effectively a strict superset of the public backbone plus
+singletons. **Autosomes are correct, uncorrupted, and ready for the CRISPRme index build.** chrX (special
+PAR/haploid handling) is validated separately before the full-genome build. (VAL-2/VAL-3 switch-vs-trio-truth
+remains the stronger absolute-accuracy check and is still pending; this vs-release concordance confirms no
+backbone regression.)
+
 ## 4b. Singleton accuracy — the scientific caveat (drives a product decision)
 
 SHAPEIT5 phases singletons non-randomly but at **~35% switch error** (vs ~50% random; SHAPEIT5 paper),
