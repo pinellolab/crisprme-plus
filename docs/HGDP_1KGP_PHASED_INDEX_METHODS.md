@@ -233,6 +233,51 @@ PAR/haploid handling) is validated separately before the full-genome build. (VAL
 remains the stronger absolute-accuracy check and is still pending; this vs-release concordance confirms no
 backbone regression.)
 
+### 6.3 chrX re-phasing — recipe + the `--haploids` ploidy fix, MEASURED (2026-10-04)
+
+chrX follows the atgu/hgdp_tgp chrX recipe (`phasing/chrX/`), which is a port of the SHAPEIT5 UKB-200k
+chrX workflow: **split into 3 regions on GRCh38 PAR boundaries and phase each separately to avoid mixing
+ploidy** — PAR1 `chrX:10001-2781479`, non-PAR `chrX:2781480-155701382`, PAR2 `chrX:155701383-156030895`.
+- **PAR1/PAR2**: `phase_common --filter-maf 0.0` single-block, region-specific maps (`chrX_par1/par2.b38.gmap.gz`),
+  diploid for everyone (no `--haploids`).
+- **non-PAR**: sex-aware QC — HWE/ExcHet computed **in females only** (`+fill-tags` on a female subset →
+  annotate back; thresholds identical to autosomes), F_MISSING/AC over all; singletons kept. Then
+  `phase_common --filter-maf 0.001 --haploids <males>` per 20cM chunk → ligate scaffold → `phase_rare
+  --haploids <males>` per 4cM chunk → ligate. Sex derived from the released non-PAR het-rate (clean 350×
+  bimodal gap): **2195 males / 1896 females**.
+- Concat the 3 regions → `hgdp1kg.chrX.rephased.bcf` (single `chrX` contig).
+
+**KEY FIX (manuscript-relevant), the `phase_rare` NaN:** running `phase_rare --haploids` on non-PAR crashed
+on 3/23 chunks with `Assertion !isnan(GRvar_genotypes[vr][tidx].prob)` (`genotype_set_phasing.cpp:66`).
+Root cause (confirmed by direct test + SHAPEIT5 source + the atgu recipe): **a male-ploidy ENCODING mismatch**
+— the dense input encodes non-PAR males as single-allele **haploid** (`0`), but `phase_common --haploids`
+writes the scaffold with males as **diploid-homozygous** (`0|0`), and so does the gnomAD release. `phase_rare`
+conditions the haploid input against the diploid-hom scaffold → the Li-&-Stephens HMM mass collapses to
+`0/0 = NaN` on rare-dense chunks. **Fix (SHAPEIT5's documented `--haploids` convention, NOT a hack):**
+ploidy-normalize the non-PAR input to diploid-hom before phasing — `bcftools +fixploidy -f 2` (males `0`→`0|0`).
+With input and scaffold ploidy consistent, all 23 chunks phase; males emit as hemizygous-diploid `x|x`,
+AN≡8182, exactly matching the release. (`--haploids` is kept; chunks are not dropped; the assertion is a real
+degenerate-state guard, not disabled. No `--pedigree` — consistent with the autosomes, which validated at
+≥99.978% without it. Also: the post-phase het-male cleanup is a no-op here because the fix yields 0 male hets.)
+
+**chrX validation vs release — PASS** (`hgdp1kg.chrX.rephased.bcf`, 5,354,767 records, 4,091 samples):
+
+| Metric | Value |
+|---|---|
+| Unphased genotypes | **0** (100% `\|`) |
+| AN (constant) | **8182** = 4091×2 (males hemizygous-diploid `x\|x`) |
+| Male non-PAR hets / PAR1 hets | **0 / 4261** (hemizygous non-PAR, diploid PAR — correct) |
+| Singletons recovered (AC=1) | **1,597,916** (release = 0, MAC≥2) |
+| Shared with release backbone | **3,495,756 (99.84%)** |
+| our-only (singletons+rare added) | 1,859,011 |
+| release-only (our QC dropped) | 5,459 (0.16%) |
+| **Genotype concordance** | **99.9957%** |
+| **Phasing switch-error vs release** | **0.397%** (589,624 / 148.4 M) |
+
+chrX reproduces the public backbone (99.84% shared, 99.996% GT concordance, 0.40% switch-error) while adding
+1.60 M singletons, with biologically-correct male hemizygosity. **The full chr1–22 + chrX panel is complete,
+correct, and ready for the CRISPRme NRG index build.**
+
 ## 4b. Singleton accuracy — the scientific caveat (drives a product decision)
 
 SHAPEIT5 phases singletons non-randomly but at **~35% switch error** (vs ~50% random; SHAPEIT5 paper),
