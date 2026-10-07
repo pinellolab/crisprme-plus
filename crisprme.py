@@ -12,7 +12,7 @@ import os
 import re
 
 
-version = "2.7.0"  # CRISPRme version
+version = "2.7.1"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -3966,6 +3966,9 @@ def print_help_generate_report() -> None:
         "omitted [OPTIONAL]\n"
         "\t--output, output ZIP path [default: "
         "<result-dir>/<jobid>_report.zip]\n"
+        "\t--no-maf, drop the MAF column entirely from the report and all "
+        "exported tables (use when a run's allele frequencies are not yet "
+        "finalized and a MAF column would mislead) [OPTIONAL]\n"
     )
     sys.exit(1)
 
@@ -3995,6 +3998,10 @@ def generate_report() -> None:
     integrated_results = _opt("--integrated-results")
     samplesid_dir = _opt("--samplesID-dir")
     output = _opt("--output", "--out")
+    # boolean flag: drop the MAF column entirely (use when a run's allele
+    # frequencies are not finalized). Parsed here because _opt only handles
+    # value-flags; without this the documented CLI silently ignored --no-maf.
+    drop_maf = "--no-maf" in args
 
     if not result_dir and not integrated_results:
         sys.stderr.write(
@@ -4012,6 +4019,7 @@ def generate_report() -> None:
         integrated_tsv=integrated_results,
         out_zip=output,
         samplesid_dir=samplesid_dir,
+        drop_maf=drop_maf,
     )
     sys.stdout.write(f"Report written: {out}\n")
 

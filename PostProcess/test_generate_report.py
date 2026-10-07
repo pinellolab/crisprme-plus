@@ -213,6 +213,18 @@ class TestGenerateReport(unittest.TestCase):
             return os.path.join(extract, name)
         return os.path.join(extract, "data", name)
 
+    def test_build_report_drop_maf_removes_maf_column(self):
+        # Regression (crisprme.py generate-report --no-maf): the top-level CLI
+        # silently ignored --no-maf, and the module-level MAF-drop path was itself
+        # untested. Assert the drop actually removes the MAF column from a curated
+        # export, and that the default keeps it.
+        _, _, extract = self._build_and_extract()
+        default_hdr = self._read(self._dpath(extract, "top1000.tsv")).splitlines()[0].split("\t")
+        self.assertIn("MAF", default_hdr)  # default: MAF present
+        _, _, extract2 = self._build_and_extract(drop_maf=True)
+        drop_hdr = self._read(self._dpath(extract2, "top1000.tsv")).splitlines()[0].split("\t")
+        self.assertNotIn("MAF", drop_hdr)  # --no-maf: MAF gone everywhere
+
     def test_zip_layout_report_at_root_rest_under_data(self):
         _, names, _ = self._build_and_extract()
         # ONLY report.html at the top level; every other bundled file under data/.

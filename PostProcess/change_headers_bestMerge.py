@@ -134,6 +134,16 @@ new_names = [
 header = True
 for chunk in chunks:
 
+    # The fixed `new_order` below predates the CRISPR-Bulge scorer; selecting it
+    # would SILENTLY DROP the CRISPR_BULGE_* representative-alignment block that the
+    # submit_job 3-way bestMerge join now appends -- the per-cluster web download
+    # lost every CRISPR-Bulge column with no error (pandas column selection, not a
+    # KeyError, because all new_order names are present). Preserve that block
+    # (row-aligned) and re-attach it after the CFD/MMBLG display transform. No-op on
+    # a CFD-only input (older runs) -> byte-identical output there.
+    _cb_cols = [c for c in chunk.columns if str(c).startswith("CRISPR_BULGE")]
+    _cb_block = chunk[_cb_cols].reset_index(drop=True) if _cb_cols else None
+
     chunk = chunk[new_order]
     chunk = chunk.drop(to_remove, axis=1)
     chunk.columns = new_names
@@ -180,6 +190,12 @@ for chunk in chunks:
     chunk.drop(
         "Aligned_protospacer+PAM_REF_corrected_(fewest_mm+b)", axis=1, inplace=True
     )
+
+    # re-attach the preserved CRISPR-Bulge block so it survives into the written
+    # per-cluster file (and thus the cluster download). The display DataTable uses a
+    # fixed curated column spec, so these added columns only enrich the download.
+    if _cb_block is not None:
+        chunk = pd.concat([chunk.reset_index(drop=True), _cb_block], axis=1)
 
     chunk.to_csv(out_path, header=header, mode="w", sep="\t", index=False, na_rep="NA")
 

@@ -7941,7 +7941,7 @@ def maxdrop(thresh_drop: str, order: str) -> List:
         Output("order", "value"),
         Output("multiorder", "value"),
         Output("maxdrop", "value"),
-        Output("thresh_drop", "value "),
+        Output("thresh_drop", "value"),
         Output("Radio-asc-1", "value"),
     ],
     [Input("reset-val", "n_clicks")],

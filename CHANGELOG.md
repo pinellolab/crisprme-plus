@@ -11,6 +11,37 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-10-07
+
+### Fixed
+- **Report: `IntOGen_cancer_driver` column rendered `-` in every row.** `_curated_cell()` had no
+  `intogen` branch, so the value fell through to the trailing `else: v = None` and displayed as `-`
+  for every off-target. Added the missing `elif kind == "intogen"` branch (regenerating the curated
+  top-1000 goes from 0/1000 to 45/1000 populated IntOGen cells; spot-checked on BRCA2 / EPHA3 /
+  PTPRK coding-region off-targets). Added a guard that every `kind` declared in `CURATED_COLUMNS` is
+  matched by a branch in `_curated_cell`. (#58, @anncir1)
+- **CLI: `generate-report --no-maf` was silently ignored.** The documented top-level
+  `crisprme.py generate-report` wrapper hand-parsed only its four value-flags, so the boolean
+  `--no-maf` was dropped with no error and the MAF column was still emitted. It is now parsed
+  (`"--no-maf" in args`) and threaded into `build_report(drop_maf=...)`, listed in the help, and
+  covered by a test asserting the MAF column is actually removed.
+- **Web: per-cluster view/download silently dropped all 24 CRISPR-Bulge columns.**
+  `change_headers_bestMerge.py` reordered the 3-scorer `.bestMerge.txt` through a fixed `new_order`
+  list that predates CRISPR-Bulge and contains no `CRISPR_BULGE_*` names, so the pandas column
+  selection silently discarded the entire CRISPR-Bulge block (no crash — all listed names were
+  present) from the genomic-region cluster download. The block is now preserved (no-op on a
+  CFD-only input); new `test_change_headers_bestmerge.py` locks it in.
+- **Web: the Reset button never cleared the threshold dropdown.** The reset callback's Output
+  targeted the prop `"value "` (trailing space) instead of `"value"`, so Dash silently never wrote
+  it. Fixed, plus `test_dash_output_props.py` guards every `pages/` Output/Input/State prop against
+  stray-whitespace / empty names (the same silent-inert class as the IntOGen column).
+
+### Added
+- Coverage tests for the "declared-but-dead" bug class (an output field/flag that is declared but
+  has no populating/wiring code, silently rendering a placeholder/no-op in every case): the
+  CURATED_COLUMNS↔`_curated_cell` guard (#58), the `--no-maf` drop assertion, the CRISPR-Bulge
+  per-cluster preservation test, and the Dash callback-prop whitespace guard.
+
 ## [2.7.0] - 2026-10-07
 
 ### Added
