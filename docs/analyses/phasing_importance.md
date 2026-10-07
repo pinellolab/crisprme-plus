@@ -84,10 +84,11 @@ site or whether co-occurring variants are in cis**. Its top-1000 is a useful bro
 but is **not actionable at the individual/population level**. The phased index gives named carriers +
 confirmed cis for the majority of its top sites.
 
-> **Edit-budget note.** Comparison 1 (re-phasing) was run at **6,1,1**; comparison 2 (mega) at
-> **4,1,1**. If a single budget is preferred for the paper, the mega comparison can be re-run at
-> **6,1,1** to match (the phased 6,1,1 search already exists). Mega is tractable at 6,1,1 (1-bulge);
-> only the dense 2+2-bulge worst case is heavy.
+> **Edit-budget note.** The two comparisons use different budgets by design — comparison 1
+> (re-phasing) at **6,1,1** and comparison 2 (mega) **scoped to 4,1,1** — because they answer
+> different questions and each conclusion is budget-independent: phasing's CONFIRMED-cis flip
+> (comparison 1) and mega's absence of carrier resolution (comparison 2, intrinsic to a sites-only
+> panel) both hold at any edit budget.
 
 ---
 
