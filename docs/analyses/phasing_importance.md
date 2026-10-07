@@ -5,110 +5,120 @@ Paper narrative / internal notes.
 **Guide** `ACTGAAATCTGTAAGCAGGC` · SpCas9 (NRG PAM) · hg38 · CFD + CRISPR-Bulge scores · all
 functional/cancer annotations.
 
-## 1. Background & motivation
+> Cohort note: the diversity cohort is **HGDP** (Human Genome Diversity Project), jointly called
+> with the 1000 Genomes Project (1kGP) in the gnomAD HGDP+1kGP callset.
 
-The previously shipped default (`NRG_3_hg38+hg38_1000G2021_HGDP`) is a **hybrid**: the 1000
-Genomes portion is phased, but the **HGDP portion is unphased**. CRISPRme reports a co-occurring
-off-target — two nearby variants that must sit together on one chromosome copy (**in cis**) for the
-off-target to form — as **CONFIRMED** only when it can prove the variants are in cis in a real
-individual, which **requires phased genotypes**. On the hybrid index, every HGDP-involving
-co-occurrence therefore collapses to **PUTATIVE** ("possible, but cis unproven"), with no named HGDP
-carrier. We re-phased the gnomAD HGDP+1kGP callset end-to-end with SHAPEIT5 so **both** cohorts are
-phased, rebuilt the index (`NRG_3_hg38+hg38_HGDP1kGP`, 4,091 samples), and re-ran the identical search.
+This document makes **two points**, each from a dedicated search:
 
-**There are two distinct comparisons:**
-
-1. **The re-phasing comparison** — phased vs unphased (same cohorts; phasing is the variable).
-2. **Mega vs the latest phased index** — broad sites-only vs focused phased.
-
-> **Why mega is only in comparison 2:** mega is **sites-only** (aggregate allele frequencies, *no
-> sample genotypes at all*), so there is nothing to phase or unphase — it cannot participate in the
-> phased-vs-unphased comparison.
+- **Point 1 (search 6,1,1) — re-phasing was necessary, two ways.** (a) The old default mixed a phased
+  1kGP with an *unphased* HGDP, forcing HGDP co-occurrences to PUTATIVE; re-phasing both together
+  fixes that. (b) We could **not** simply use the *published* SHAPEIT5-phased release, because it drops
+  singletons (MAC ≥ 2) — so we re-phased ourselves and **kept the singletons**, which matter for
+  off-targets.
+- **Point 2 (search 4,1,1) — mega over-calls putative off-targets.** A broad sites-only panel (mega)
+  cannot confirm cis, so its top-ranked sites are inflated with putative (cis-unconfirmed) calls — a
+  false-positive–prone ranking that the phased index cleans up.
 
 ---
 
-## 2. Comparison 1 — the re-phasing comparison (phased vs unphased) — **6,1,1**
+## POINT 1 — Re-phasing was necessary (search 6,1,1)
 
-Phased HGDP+1kGP vs the unphased hybrid, identical search: **mm6 + 1 DNA + 1 RNA bulge**, `--per-sample`.
+Phased HGDP+1kGP vs the old hybrid, identical search: **mm6 + 1 DNA + 1 RNA bulge**, `--per-sample`.
 
-### 2a. Headline — phasing's real value is CONFIRMED cis
+### 1a. Phasing the unphased HGDP: PUTATIVE → CONFIRMED
+
+The previously shipped default (`NRG_3_hg38+hg38_1000G2021_HGDP`) is a **hybrid**: 1kGP phased, **HGDP
+unphased**. A co-occurring off-target (two nearby variants that must sit on the *same* chromosome copy,
+**in cis**) is reported **CONFIRMED** only when cis can be proven in a real individual — which
+**requires phased genotypes**. On the hybrid, every HGDP-involving co-occurrence collapses to
+**PUTATIVE** with no named carrier.
 
 | phase_confirmation | CONFIRMED | PUTATIVE | % CONFIRMED |
 |---|---|---|---|
-| Hybrid (old) | 8,393,667 | 22,515,383 | 27.2% |
-| **Phased (new)** | **36,319,150** | **971,014** | **97.4%** |
+| Hybrid (old, HGDP unphased) | 8,393,667 | 22,515,383 | 27.2% |
+| **Re-phased (new)** | **36,319,150** | **971,014** | **97.4%** |
 
-PUTATIVE collapses **23×**, CONFIRMED rises **4.3×**. The residual ~0.97M PUTATIVE is *correct* —
-genuinely unobserved cis combinations. Autosomes ~99.6–99.9% CONFIRMED; chrX improves 5× (106k → 526k).
+PUTATIVE collapses **23×**, CONFIRMED rises **4.3×**. Ground-truthed: off-target `chr13:100001388(−)`
+(SNPs `chr13_100001399_A_T` + `chr13_100001406_G_A`, joint AF 9/8182) — HGDP sample
+`LP6005443-DNA_E02` is phased **`0|1`/`0|1`** = both ALTs on one haplotype (cis), confirmed in the VCF;
+PUTATIVE-only on the hybrid.
 
-### 2b. Do the top off-targets change? Mostly no — the switch is safe
+### 1b. Keeping singletons: why we re-phased instead of using the published phased release
 
-Top-1000 single-site off-targets (by CFD): **793/1000 identical**; of the 793 shared, **767 (96.7%)
-have identical CFD** (max Δ 0.22). The highest-risk, actionable predictions do **not** move.
+A natural shortcut would be to use gnomAD's **already-phased** HGDP+1kGP release
+(`phased_haplotypes_v2`). We could **not**: that release applies a post-phasing **MAC ≥ 2 filter**
+(`remove_singletons.py`) that **removes every singleton** (AC = 1 — variants private to a single
+haplotype). Its allele-count spectrum has **zero AC = 1**. SHAPEIT5 itself does *not* drop singletons
+(`phase_rare` phases them); the drop is a separate release step the gnomAD paper's methods do not
+mention. We reproduced the SHAPEIT5 pipeline **skipping that step**, recovering:
 
-### 2c. What *are* the 207 differences?
+- **59.9 M** autosomal singletons + **1,597,916** chrX singletons (public release: **0**),
+  at ≥99.978% genotype concordance and ≤0.58% switch error vs the public backbone.
 
-| | # | What they are |
-|---|---|---|
-| **Phased-only** top-1000 | 207 | **All variant-driven, all with named carriers** (CFD 0.42–0.75) — the richer QC'd gnomAD panel surfaces more real variant-driven off-targets, with their carriers, into the top ranks |
-| **Hybrid-only** top-1000 | 207 | **75 reference** + **132 old-panel variant** (CFD 0.41–0.68). The 75 reference sites are **not lost** — detected identically in both, just re-ranked below #1000 by the phased index's extra high-scoring variant sites. The 132 variant sites are alleles specific to the raw 1000G+HGDP panel, not in gnomAD's QC'd callset |
+**Why that matters for off-targets — measured in this very search:** of the 5,996,092 off-targets,
+**1,090,787 (18.2%) are driven by a recovered singleton**, including **13,684 at CFD ≥ 0.1** and
+**2,972 at CFD ≥ 0.2**. Every one of these would be **invisible** with the published singleton-dropped
+release. Singletons create off-targets *private to one individual* — exactly the private risk a
+per-sample / clinical off-target screen exists to catch. Using the "phased release from the original
+paper" would silently discard ~1.09 M off-targets (thousands of them scoring in an actionable range).
 
-So the differences are **panel-composition** effects (which variants each callset contains), **not
-phasing** effects. Phasing does not add/remove sites or change CFD — it changes the *cis interpretation*.
-
-### 2d. Ground truth — cis confirmed in the VCF
-
-Off-target `chr13:100001388(−)` uses co-occurring SNPs `chr13_100001399_A_T` + `chr13_100001406_G_A`
-(joint AF 9/8182 = 0.0011). HGDP sample `LP6005443-DNA_E02` is phased **`0|1` / `0|1`** — both ALT
-alleles on the **same haplotype (cis)**, confirmed directly in the re-phased VCF. On the unphased
-hybrid, PUTATIVE only.
-
----
-
-## 3. Comparison 2 — mega vs the latest phased index — **4,1,1**
-
-Mega (5 sources: 1000G + HGDP + gnomAD v4.1 + TOPMed + All-of-Us; **sites-only**) vs phased HGDP+1kGP,
-identical search: **mm4 + 1 DNA + 1 RNA bulge**.
-
-- **Detection breadth:** mega 184,449 vs phased 213,545 off-targets.
-- **Top-1000 overlap:** 558/1000 sites shared.
-- **Carrier resolution — the decisive difference:**
-
-| top-1000 | named carriers | breakdown |
-|---|---|---|
-| **Phased** | **578** | 578 named-carrier + 422 reference (0 unresolved) |
-| **Mega** | **0** | 399 reference + 328 observed (AF only) + 273 putative |
-
-Mega is sites-only: it gives a worst-case allele-frequency bound but **cannot tell you who carries a
-site or whether co-occurring variants are in cis**. Its top-1000 is a useful broad detection screen
-but is **not actionable at the individual/population level**. The phased index gives named carriers +
-confirmed cis for the majority of its top sites.
-
-> **Edit-budget note.** The two comparisons use different budgets by design — comparison 1
-> (re-phasing) at **6,1,1** and comparison 2 (mega) **scoped to 4,1,1** — because they answer
-> different questions and each conclusion is budget-independent: phasing's CONFIRMED-cis flip
-> (comparison 1) and mega's absence of carrier resolution (comparison 2, intrinsic to a sites-only
-> panel) both hold at any edit budget.
+**Net of Point 1:** re-phasing is not cosmetic. (a) It unlocks CONFIRMED-cis + named carriers across
+HGDP (27% → 97% confirmed); (b) doing it *ourselves, singleton-inclusive* avoids losing ~18% of all
+off-targets that the ready-made phased release would have dropped.
 
 ---
 
-## 4. Take-home for the paper
+## POINT 2 — Mega over-calls putative off-targets (search 4,1,1)
 
-- Re-phasing's value is the **completeness/correctness of co-occurrence interpretation** (22.5M →
-  0.97M PUTATIVE; named HGDP carriers; confirmed cis) — **not** a reshuffling of the top off-targets.
-- The top off-targets are **stable** across the phased/unphased switch → making the phased index the
-  default is **safe**.
-- Phased ≫ sites-only mega for carrier-level prioritization; mega is a broad worst-case detection
-  screen only.
+Mega (5 sources: 1kGP + HGDP + gnomAD v4.1 + TOPMed + All-of-Us; **sites-only** — aggregate allele
+frequencies, **no genotypes**) vs the phased HGDP+1kGP, identical search: **mm4 + 1 DNA + 1 RNA bulge**.
 
-## 5. Methods / reproducibility
+> Mega can appear **only** in this comparison, not in Point 1: with no sample genotypes there is
+> nothing to phase or unphase.
 
-- **Re-phasing:** gnomAD HGDP+1kGP callset, SHAPEIT5 (phase_common scaffold + phase_rare for
-  singletons), chrX PAR/non-PAR correct ploidy. Validation: ≥99.978% GT concordance, switch error
-  ≤0.58% vs the public backbone, 59.9M singletons recovered.
-- **Index:** `NRG_3_hg38+hg38_HGDP1kGP`, 4,091 samples (929 HGDP + 3,162 1000 Genomes), 125.2M SNPs +
-  17.2M indels. Published on HuggingFace `lucapinello/crisprme-data`; shipped as the default in
-  CRISPRme+ **v2.7.0**.
+Because mega aggregates a very large, multi-source variant set but **cannot resolve cis**, it "matches"
+a guide against many *possible* variant combinations — far more than co-occur in any real haplotype.
+Those surface as **PUTATIVE** calls, a fraction of which are genuine false positives (combinations no
+individual carries). The phased, genotyped index confirms which combinations are actually real, giving
+a higher-precision ranking.
+
+Top-1000 ranked sites (by CFD):
+
+| top-1000 | CONFIRMED/named-carrier | reference | PUTATIVE (cis-unconfirmed) |
+|---|---|---|---|
+| **Phased HGDP+1kGP** | **578** (named carriers) | 422 | **0** |
+| **Mega (sites-only)** | 0 (cannot resolve) | 399 | **273** + 328 AF-only "observed" |
+
+- **27.3% of mega's top-1000 are PUTATIVE** (cis-unconfirmed, false-positive–prone), vs **0%** for the
+  phased index — every phased top site is either reference or a confirmed named-carrier off-target.
+- Detection breadth: mega 184,449 vs phased 213,545 off-targets; top-1000 overlap 558/1000.
+
+**Net of Point 2:** mega's breadth is useful as a worst-case detection screen, but its top ranks are
+inflated with putative combinations it cannot verify. The phased index removes that putative
+false-positive load from the top of the list, so the sites you act on first are real, carrier-backed
+hits — a cleaner, more precise ranking.
+
+---
+
+## Take-home for the paper
+
+1. **Re-phasing was necessary and had to be done in-house, singleton-inclusive.** It converts 22.5 M
+   PUTATIVE → CONFIRMED cis with named HGDP carriers (27% → 97%), *and* recovers ~61.5 M singletons that
+   drive 18.2% of all off-targets (thousands actionable) — all lost by the ready-made phased release.
+2. **A sites-only mega panel over-calls putative off-targets** (27% of its top-1000 are cis-unconfirmed
+   vs 0% for the phased index); the phased index gives a higher-precision, carrier-backed ranking.
+3. The top single-site hits themselves are **stable** phased-vs-hybrid (793/1000 shared, 767 identical
+   CFD), so making the phased index the default is safe.
+
+## Methods / reproducibility
+
+- **Re-phasing:** gnomAD HGDP+1kGP dense callset, SHAPEIT5 (`phase_common` scaffold + `phase_rare`,
+  skipping the release's `remove_singletons.py` MAC≥2 step), chrX PAR/non-PAR correct ploidy.
+- **Index:** `NRG_3_hg38+hg38_HGDP1kGP`, 4,091 samples (929 HGDP + 3,162 1kGP), 125.2M SNPs + 17.2M
+  indels. HuggingFace `lucapinello/crisprme-data`; default in CRISPRme+ **v2.7.0**
+  (`pinellolab/crisprme:v2.7.0`).
+- **Searches:** Point 1 = 6,1,1 `--per-sample` (phased vs hybrid); Point 2 = 4,1,1 (phased vs mega).
+  Different budgets by design — each conclusion is budget-independent.
 - **Artifacts:** cluster `/srv/local/lp698_PAPER_phasing_importance/` (both full reports, top-1000
   tables, phase tally); build recipe `seq_script/merge_panels/hgdp1kgp_build.sh`; methods
   `docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`.
