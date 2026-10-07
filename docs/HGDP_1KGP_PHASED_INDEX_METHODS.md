@@ -341,10 +341,85 @@ weakest (~35% SER) phase in the panel. Genome-wide singletons are ~46% of varian
 singleton-recovery + switch-error numbers, but the *value* question (are 1-person singletons worth a
 multi-day re-phase for a population index?) is now the crux. Panel leans A+; final call is Luca's.
 
-## 7. Final validated build recipe (→ METHODS / manuscript)  *(PENDING)*
+## 7. Final validated build recipe (→ METHODS / manuscript)
 
-The finalized, reproduced-and-validated pipeline (re-phasing + CRISPRme index build
-`NRG_3_hg38+hg38_HGDP1kGP`) goes here and is copied into `METHODS.md` + the manuscript Methods.
+Recipe script: `seq_script/merge_panels/hgdp1kgp_build.sh` (single-source, resumable). Input =
+the 23 re-phased, validated BCFs `hgdp1kg.chr{1..22,X}.rephased.bcf` (§5–§6). Three stages:
+(7.1) VCF-prep, (7.2) samplesID, (7.3) index build; chrX ploidy (7.4) is the one subtlety and is
+handled in both the data and the registry.
+
+### 7.1 Per-chromosome VCF preparation
+Each re-phased BCF → a build-ready, biallelic, reference-checked, sorted, bgzipped+tabixed VCF:
+```
+bcftools view <bcf> \
+  | [chrX only] bcftools +fixploidy -p <ploidy> -s <sex> \   # non-PAR males x|x -> x; see 7.4
+  | bcftools annotate -x FORMAT/PP        \   # drop the mis-declared phase-confidence field
+  | bcftools norm -m -any -f <chrN.fa>    \   # split multiallelics + left-align against hg38
+  | bcftools +fill-tags -t AN,AC,AF       \   # recompute AN/AC/AF from the genotypes
+  | bcftools sort -T <ondisk> -Oz -o <out.vcf.gz> ; tabix -p vcf <out.vcf.gz>
+```
+MEASURED (all 23, 2026-10-05): **lossless** — input records == output records on every chromosome,
+**144,858,810 total**; `norm` reported **0 reference mismatches genome-wide** (every REF matches
+hg38) and **0 records skipped**; already biallelic (0 splits; the re-phase had normalized), only a
+handful of indel left-alignments; 4,091 samples, sample order identical to source; singletons
+retained (e.g. chr21 AC=1 → AF=1/8182 exact).
+
+### 7.2 samplesID (prescribed metadata, VCF-header order)
+The 4-column CRISPRme samplesID (`#SAMPLE_ID  POPULATION_ID  SUPERPOPULATION_ID  SEX`) is derived
+ONLY from the atgu/gnomAD-prescribed metadata file — the exact file the HGDP+1kGP tutorial
+notebooks (nb1–nb5) load:
+`release/3.1/secondary_analyses/hgdp_1kg_v2/metadata_and_qc/gnomad_meta_updated.tsv`, joined onto
+the 4,091 VCF-header samples in order:
+- POPULATION_ID = `hgdp_tgp_meta.Population` (78 populations; 1kGP as 3-letter codes, HGDP as names)
+- SUPERPOPULATION_ID = `hgdp_tgp_meta.Genetic.region` (the 7 regions AFR/AMR/CSA/EAS/EUR/MID/OCE)
+- SEX = `sex_imputation.is_female` → `male`/`female` (lowercase; the token
+  `tier0_registry.make_chr_ploidy` matches)
+
+The bare convenience columns `population`/`sex` are deliberately NOT used (`sex` is `NA` for all
+1kGP samples; `population` relabels 98 samples). Result: **4,091 rows, 0 unknowns**, 2,192 male /
+1,899 female; region counts AFR 986 / AMR 549 / CSA 782 / EAS 816 / EUR 771 / MID 157 / OCE 30.
+
+### 7.3 Index build
+```
+export CRISPRME_REGISTRY_COMPRESS=0 CRISPRME_INDEL_SNP=1
+crisprme.py build-index-only --genome <hg38/> --pam 20bp-NRG-SpCas9.txt \
+  --bDNA 2 --bRNA 2 --thread <N> --vcf <VCFs/hg38_HGDP1kGP> --samplesID <config> --path <B>
+```
+NRG (NAG+NGG) SpCas9 PAM; 2 DNA + 2 RNA bulges; RAW (uncompressed) registry and SNP+indel
+co-occurrence ON — consistent with the other production indexes (bulges are a build parameter;
+mismatches are a search-time parameter, run at `--mm 6`). Output
+`genome_library/NRG_3_hg38+hg38_HGDP1kGP` (+ `_INDELS`) + `Dictionaries/{registry,genotypes,
+indel_genotypes,log_indels}_hg38_HGDP1kGP` + `variant_count.json` (**125,180,264 SNPs +
+17,192,381 indels**; `phased:true`); every `reg_<chrom>.idx` carries `data_type=genotyped-phased`.
+
+### 7.4 chrX pseudoautosomal (PAR) ploidy — a correctness requirement
+chrX is hemizygous in males ONLY outside the pseudoautosomal regions. On GRCh38: PAR1
+chrX:10,001–2,781,479, PAR2 chrX:155,701,383–156,030,895, non-PAR core chrX:2,781,480–155,701,382.
+Males carry **2** copies in PAR (the homologous Y-PAR) and **1** in non-PAR, so the AF denominator
+(AN) must switch BY POSITION. For the 4,091-sample panel (2,192 M / 1,899 F): **PAR AN = 8,182**
+(all diploid), **non-PAR AN = 5,990** (2,192×1 + 1,899×2). Two places implement this:
+
+(a) **DATA.** SHAPEIT5 `--haploids` writes non-PAR males HOM-DIPLOID (`x|x`); for the index we
+convert them to true haploid with `bcftools +fixploidy` (ploidy file: chrX:2,781,480–155,701,382
+M→1; PAR + females fall through to 2). Verified every gnomAD-male is hom on non-PAR (0 hets) so the
+collapse is unambiguous; `fill-tags` then yields non-PAR AN=5,990 and PAR AN=8,182.
+
+(b) **REGISTRY + SEARCH.** CRISPRme's chrX ploidy model previously applied the haploid-male model
+UNIFORMLY across chrX (a documented TODO), over-counting PAR males as haploid and inflating PAR
+allele frequencies ~1.37×. We made it POSITION-aware: the SNP-registry build
+(`tier0_compile.compile_from_dict` → `tier0_registry.compile_registry_panel`, new `regime_for_pos`)
+routes each record through a PAR (all-diploid) or non-PAR (haploid-male) panel by coordinate
+(`tier0_registry.chrx_in_par`); the search-time k≥2 co-occurrence path
+(`population_summary.summarize` via `tier0_compile.chrx_par_panels`) selects the same regime by
+position. Single-variant (k=1) AF reads the now-PAR-correct stored registry AN. The indel path
+inherits correctness: carriers encode ploidy in the GT string (PAR-correct VCF), the SNP+indel
+joint denominator is the registry AN, and the marginal indel MAF is the VCF `INFO/AF`. **Autosomes,
+chrY, and the sites-only mega index are byte-identical to before** (guarded by unit tests).
+Empirically confirmed on the chrX build: a PAR indel (chrX:13,413) MAF = 6/8,182 and a non-PAR
+indel (chrX:2,781,857) MAF = 1,613/5,990, matching their VCFs exactly; 8 new unit tests
+(`TestChrXParPloidy`, `TestChrXParCoOccurrence`) assert PAR→diploid / non-PAR→haploid-male AN
+(114 tier0/popsummary/registry tests green). The build binds the fix as a 4-file PostProcess
+overlay on the v2.6.2 image (pending a CRISPRme+ release that bakes it into the codebase).
 
 ## 8. Status log
 
@@ -391,6 +466,20 @@ The finalized, reproduced-and-validated pipeline (re-phasing + CRISPRme index bu
   MAF columns already make a one-individual variant self-evident; phase-confidence rides on the
   existing CONFIRMED/PUTATIVE label. chr22 re-phase smoke restarted. Also: investigated the ≥4
   multi-variant bug (§9) — it is FIXED + tested; added ≥4 regression tests to the indel+SNP path.
+- 2026-10-03/04 — **All 22 autosomes + chrX re-phased + validated** (§6.2, §6.3); genome-wide
+  unphased census = **0 unphased** across all 23 (full-file scan). 4,091 samples, singletons kept.
+- 2026-10-05 — **VCF-prep + samplesID done; GW index build in flight (done PROPERLY with the PAR
+  fix baked in).** Metadata switched to the tutorial-prescribed `gnomad_meta_updated.tsv` (v2);
+  samplesID built (§7.2 — 4,091 rows, 0 unknowns, 2,192 M / 1,899 F). VCF-prep of all 23 validated
+  lossless (§7.1 — 144,858,810 records, 0 REF mismatch, singletons kept). chrX smoke build passed
+  (non-PAR AN=5,990, `data_type=genotyped-phased`). **Found + fixed the chrX PAR ploidy issue**
+  (§7.4): PAR males were counted haploid (AF inflated ~1.37×) — now position-aware in both the
+  registry build and the search-time k≥2 co-occurrence path; 8 new unit tests, 114 tier0/popsummary
+  tests green, autosomes/chrY/mega byte-identical; indel path PAR-correct by inheritance (empirically
+  verified). The stale (pre-fix) GW build was killed and **re-run as a single clean `build-index-only`
+  with the PAR-aware overlay** (no post-hoc patch), thread 128, RAW + INDEL_SNP. REMAINING: validate
+  the finished index + VAL-7 cis audit + new-vs-old comparison → THEN HF publish (Luca GO'd publish
+  if the comparison looks good; default-flip staged separately). Publish held pending validation.
 
 ## 9. Multi-variant haplotype handling — the ≥4 fix, the dense-window approximation, and the flags
 
