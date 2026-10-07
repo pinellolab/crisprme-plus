@@ -85,9 +85,10 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRG_3_hg38+hg38_1000G2021` index already makes the default web
+pre-downloaded `NRG_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
+4,091 samples — the recommended default) already makes the default web
 search variant-aware — you do **not** need the raw VCFs for that. **Optional
-(advanced):** the raw 1000 Genomes VCFs (~16 GB) are only needed for CLI
+(advanced):** the raw VCFs are only needed for CLI
 sample-level analyses / personal risk cards:
 `… crisprme.py download --what vcf --dataset 1000G --path /DATA`.
 
