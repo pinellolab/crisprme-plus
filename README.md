@@ -37,22 +37,27 @@ through an interactive web-based interface.
 
 ### What changed vs stock CRISPRme (migration guide)
 
-Coming from the original CRISPRme? Here are the behavior deltas that matter most:
+Coming from the original CRISPRme? The baseline below is **CRISPRme 2.1.14** — the last
+stable release of the original [`pinellolab/CRISPRme`](https://github.com/pinellolab/CRISPRme)
+before CRISPRme+ (installable with `mamba install crisprme`). Here are the behavior deltas
+that matter most:
 
-| Topic | Before (stock / 2.5.3) | Now | What to do |
+| Topic | CRISPRme 2.1.14 (last stable before CRISPRme+) | CRISPRme+ (now) | What to do |
 |---|---|---|---|
-| Analysis-mode flags | `--fast` / `--full` | **removed** (no aliases); default is **population-level**, opt in with **`--per-sample`** (genotyped panels only) | Use `--per-sample`; the CLI now **warns** if you pass the retired `--fast`/`--full` ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution)) |
-| SNP+indel co-occurrence | experimental / opt-in | **on by default** | Nothing; opt out with `CRISPRME_INDEL_SNP=0` ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration)) |
+| Off-target ML score | CFD + **CRISTA** | CFD + **CRISPR-Bulge** (OrensteinLab, *NAR* 2024; MIT — more accurate, esp. on bulges), run in a dedicated `cbulge` env | Nothing: `install_from_source.sh` / the Docker image provision it; or create it later with `crisprme.py scorer-env create` |
+| Analysis mode | single search, **always** per-sample genotype-resolved (named carriers; no mode flag) | **population-level** by default (lossless for detection, faster) + opt-in **`--per-sample`** (genotyped panels) for CONFIRMED cis + named carriers + exact joint AF | Add `--per-sample` to reproduce the old per-sample output ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution)) |
+| SNP+SNP / SNP+indel co-occurrence | not detected | **detected + reported** — **CONFIRMED** (phasing proves cis) / **PUTATIVE**, with joint AF; on by default | Opt out with `CRISPRME_INDEL_SNP=0` ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration)) |
 | Alternative-alignments TSV | always written | **off by default, on under `--per-sample`** (both CLI and web) | Force either way on the CLI with `--alt-alignments` / `--no-alt-alignments` ([methods](METHODS.md#7-shareable-off-target-assessment-report)) |
-| Default variant index | `NRG_3_hg38-dictless+hg38_1000G_HGDP` | `NRG_3_hg38+hg38_HGDP1kGP` (phased HGDP + 1000 Genomes, 4,091 samples — the recommended default; `NRG_3_hg38+hg38_1000G2021` is the 1000G-only alternative. Supersedes the hybrid `NRG_3_hg38+hg38_1000G2021_HGDP`. The old `-dictless` name is superseded; `-dictless` is now a publish flag, not part of the name) | Download it explicitly (Quickstart step 2) ([details](docs/PRECOMPUTED_INDEXES.md)) |
+| Variant datasets / default index | build-your-own from `--vcf` configs (e.g. 1000G + HGDP) | **precomputed, downloadable** indexes on HuggingFace; recommended default **`NRG_3_hg38+hg38_HGDP1kGP`** (phased HGDP + 1000 Genomes, 4,091 samples → CONFIRMED cis + named carriers), with `1000G2021` / `HPRC` / sites-only `mega` alternatives | `crisprme.py download --what index --index-name …` (Quickstart step 2) ([details](docs/PRECOMPUTED_INDEXES.md)) |
 | License | AGPL-3.0 | **MGB Open Access License 1.0** (non-commercial academic; commercial use requires a license) | See [§6 License](#6-license) |
-| Report | — | new **`Observed`** column (`reference` / `N carrier(s)` / `observed` / `putative`) | Read it in the report; details in [methods](METHODS.md#7-shareable-off-target-assessment-report) |
+| Report | CFD / CRISTA summaries | adds an **`Observed`** column (`reference` / `N carrier(s)` / `observed` / `putative`), CRISPR-Bulge panels, and a shareable HTML report | Read it in the report ([methods](METHODS.md#7-shareable-off-target-assessment-report)) |
 
-> **Note on the retired flags.** `--fast` and `--full` were removed in 2.5.4 and are
-> **not** aliases. `--per-sample` is the replacement for `--full`. `complete-search` now
-> prints a **WARNING** if a saved script passes the retired `--fast`/`--full`, so a
-> pre-2.5.4 command no longer silently runs the population-level default with no
-> per-sample output.
+> **Note on the retired flags (CRISPRme+ 2.5.x users only).** `--fast` / `--full` existed
+> only in the intermediate CRISPRme+ 2.5.x line — never in stock CRISPRme 2.1.14 — and were
+> removed in 2.5.4 (they are **not** aliases). `--per-sample` is the replacement for `--full`.
+> `complete-search` now prints a **WARNING** if a saved script passes the retired
+> `--fast`/`--full`, so a pre-2.5.4 command no longer silently runs the population-level
+> default with no per-sample output.
 
 ### Which analysis mode + which index should I use?
 
