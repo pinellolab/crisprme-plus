@@ -34,6 +34,7 @@ from .pages_utils import (
     get_variant_dataset_options,
     variant_dataset_has_genotypes,
     variant_dataset_data_type,
+    variant_dataset_sample_count,
     build_active_annotation,
     get_pam_options,
     get_custom_VCF,
@@ -2197,8 +2198,15 @@ def _preferred_variant(option_values: List[str], genome: str = None) -> str:
         except Exception:
             preferred = variants
 
-    # within the preferred tier: most-covering (combined) first, ties by listed order
-    return max(preferred, key=lambda v: (_covers(v), -variants.index(v)))
+    # within the preferred tier: most-covering (combined) first; then the RICHEST panel
+    # by genotyped sample count (name-free "biggest phased panel is the default" — e.g.
+    # the 4,091-sample HGDP+1kGP over the 3,202-sample 1000G-2021 or 232-sample HPRC);
+    # final tie broken by listed order. Sample count reads the registry manifest, so no
+    # index name is hardcoded and a future larger phased panel wins automatically.
+    def _samples(v: str) -> int:
+        return variant_dataset_sample_count(genome, v) if genome else 0
+
+    return max(preferred, key=lambda v: (_covers(v), _samples(v), -variants.index(v)))
 
 
 # change variants options

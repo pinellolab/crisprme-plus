@@ -1882,6 +1882,33 @@ def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
     return "genotyped" if variant_dataset_has_genotypes(genome, dataset_value) else "sites-only"
 
 
+def variant_dataset_sample_count(genome: str, dataset_value: str) -> int:
+    """Total number of genotyped samples in a variant index, read from the registry
+    manifest (``Dictionaries/registry_<...>/reg_<chrom>.idx``): the sum of the
+    per-database ``sample_count`` (one panel may merge several databases). Used as a
+    NAME-FREE tie-break when picking the default variant dataset (richest panel wins),
+    so no index name is ever hardcoded. Returns 0 when the manifest is absent or
+    predates the field (the caller then falls back to listed order)."""
+    if not dataset_value or dataset_value in ("ref", "reference", "none"):
+        return 0
+    genome_norm = (genome or "").replace(" ", "_")
+    dnorm = dataset_value.replace(" ", "_")
+    dic = os.path.join(current_working_directory, "Dictionaries")
+    for name in (f"registry_{genome_norm}_{dnorm}", f"registry_{dnorm}"):
+        regdir = os.path.join(dic, name)
+        if not os.path.isdir(regdir):
+            continue
+        try:
+            for f in sorted(os.listdir(regdir)):
+                if f.startswith("reg_") and f.endswith(".idx"):
+                    with open(os.path.join(regdir, f)) as fh:
+                        dbs = json.load(fh).get("databases") or {}
+                    return sum(int(d.get("sample_count", 0) or 0) for d in dbs.values())
+        except (OSError, ValueError, AttributeError):
+            pass
+    return 0
+
+
 def get_annotation_options(genome: str) -> List:
     """Annotation dropdown options for a selected genome.
 

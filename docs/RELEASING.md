@@ -211,6 +211,30 @@ Optionally rebuild the Docker image to confirm the full chain:
 docker build -t crisprme:X.Y.Z . && docker run --rm crisprme:X.Y.Z crisprme.py --version
 ```
 
+### 7. Verify the shipped image is functionally complete (scorers + BOTH scores)
+
+A published image must carry the modular scorer env(s) **and actually compute with them** — an
+image (or a SIF derived from it) that *imports* TensorFlow but can't score silently degrades every
+search to **CFD-only**. The image build already gates this (`scorer_env.build_all` COMPUTE-self-tests
+every env in the `SCORER_ENVS` registry and **fails the build** on a broken/miscomputing scorer), but
+re-verify the *published* artifact — and the apptainer **SIF** derived from it, since a lean or
+mis-converted SIF is exactly how a scorer env goes missing:
+
+```bash
+# Docker: every registered scorer env present + COMPUTES (not just imports)
+docker run --rm pinellolab/crisprme:vX.Y.Z crisprme.py scorer-env list
+docker run --rm pinellolab/crisprme:vX.Y.Z crisprme.py scorer-env check   # runs the compute self-test
+
+# SIF (apptainer): pull from the SAME image and re-check — do NOT ship a SIF that skips this
+apptainer pull crisprme_vX.Y.Z.sif docker://pinellolab/crisprme:vX.Y.Z
+apptainer exec crisprme_vX.Y.Z.sif crisprme.py scorer-env check
+```
+
+`scorer-env check` must report `OK` **and** `compute self-test: OK` for every env. As a final
+end-to-end gate, run a tiny `complete-search` and confirm BOTH the CFD and CRISPR-Bulge score
+columns are populated (not `-1`) in the output — a `-1` CRISPR-Bulge column means the scorer env
+is missing/broken in the shipped artifact.
+
 ## Rollback / troubleshooting
 
 - **Bad in-repo bump:** `git checkout crisprme.py Dockerfile CHANGELOG.md`.

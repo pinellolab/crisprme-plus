@@ -70,8 +70,22 @@ class ScorerRunner:
         self.disabled = True
         self._reason = reason
         if not self._warned:
-            sys.stderr.write(f"[scorer-runner] {self.scorer} disabled: {reason}. "
-                             f"Falling back (scores = -1).\n")
+            # LOUD + un-missable: a missing/broken scorer env silently degrading a
+            # search to CFD-only is exactly the bug this guards against. Emit a banner
+            # to BOTH stdout (shows in the console + the main run log) and stderr, not
+            # just a one-liner buried in log_error.
+            banner = (
+                "\n" + "!" * 78 + "\n"
+                f"!! ML SCORER '{self.scorer}' UNAVAILABLE -> {self.scorer.upper()} SCORES WILL BE -1 (CFD only).\n"
+                f"!! reason: {reason}\n"
+                "!! Fix: crisprme.py scorer-env create   (the official Docker image ships it pre-built).\n"
+                + "!" * 78 + "\n"
+            )
+            sys.stderr.write(banner)
+            try:
+                print(banner, flush=True)
+            except Exception:  # noqa: BLE001
+                pass
             self._warned = True
 
     def _ensure_worker(self):

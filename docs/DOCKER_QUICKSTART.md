@@ -83,19 +83,20 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 ```
 
 For a variant-aware search (what the default web search uses), download one of the
-complementary production indexes — the recommended default is the single-source,
-fully phased **1000G-2021** panel:
+complementary production indexes — the recommended default is the fully phased
+**HGDP + 1000 Genomes** panel:
 
 ```bash
-# Recommended default — 1000 Genomes 2021 (3,202 samples), genotyped and fully phased.
+# Recommended default — HGDP + 1000 Genomes (4,091 samples = 929 HGDP + 3,162 1000 Genomes),
+# jointly SHAPEIT5-re-phased. CONFIRMED cis haplotypes with named per-sample carriers + exact
+# joint AF throughout, including HGDP's seven genetic regions (use --per-sample).
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
+
+# 1000-Genomes-only alternative — 1000 Genomes 2021 (3,202 samples), genotyped and fully phased.
 # CONFIRMED cis haplotypes with named per-sample carriers + exact joint AF (use --per-sample).
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
-
-# Broader-coverage genotyped panel — 1000 Genomes 2021 + HGDP (adds 929 individuals).
-# Observed / CONFIRMED haplotypes with per-sample carriers + joint AF (use --per-sample).
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
 
 # Sites-only "mega" panel — five sources (1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + AoU),
 # per-dataset AF + cross-source AF_max. PUTATIVE haplotypes with a conservative min-AF bound.
@@ -120,7 +121,7 @@ The web interface picks these up automatically — a search that uses the defaul
 ## 5. (Optional, advanced) Add the raw 1000 Genomes VCFs
 
 CRISPRme's superpower is finding off-targets created by genetic variants — and the
-`NRG_3_hg38+hg38_1000G2021` index you downloaded in step 4 **already** makes the
+`NRG_3_hg38+hg38_HGDP1kGP` index you downloaded in step 4 **already** makes the
 default web search variant-aware. You do **not** need the raw VCFs for that.
 
 Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level

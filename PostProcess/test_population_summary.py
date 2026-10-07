@@ -29,6 +29,7 @@ import unittest
 
 import population_summary as ps
 import tier0_registry as t0
+import tier0_compile as tc
 import tier1_genotypes as t1
 
 
@@ -720,6 +721,47 @@ class TestParsingHelpers(unittest.TestCase):
         self.assertEqual(ps._unphased_carrier_lower_bound([8, 3], 8), 3)
         # Single pair -> the set itself is the lower bound (k-1=0).
         self.assertEqual(ps._unphased_carrier_lower_bound([4], 8), 4)
+
+
+# --------------------------------------------------------------------------- #
+# chrX PAR-aware k>=2 co-occurrence: the search-time counterpart of the build-time
+# PAR fix. A callable ``panel`` selector routes each off-target's JOINT denominator
+# to the PAR (all-diploid) or non-PAR (haploid-male) panel by position. PANEL has
+# 4 males + 4 females -> diploid GLOBAL AN = 16, haploid-male GLOBAL AN = 4*1+4*2 = 12.
+# --------------------------------------------------------------------------- #
+class TestChrXParCoOccurrence(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.axis = make_axis()
+        # One male carries BOTH variants cis -> a combination carrier so the GLOBAL
+        # group is emitted and we can read its full-panel AN denominator.
+        self.carriers = carriers_from({"S_EUR_M1": "1|0"})
+
+    def _global_an(self, p1, p2):
+        gt_recs = [(p1, "A", self.carriers, "G"), (p2, "A", self.carriers, "G")]
+        t1r = _write_gt(self.d, gt_recs, self.axis, name="gt%d" % p1)
+        recs = [(p1, "G", "A", "rsP", self.carriers),
+                (p2, "G", "A", "rsP", self.carriers)]
+        t0r = _write_registry(self.d, recs, PANEL,
+                              t0.make_chr_ploidy(haploid_male=True), name="reg%d" % p1)
+        sel = tc.chrx_par_panels(self.axis, ps.Panel)  # PAR-aware selector
+        summary = ps.summarize([(p1, "A"), (p2, "A")], t0r, t1r, self.axis,
+                               tc.ploidy_of_for_chrom("chrX"), phased=True, panel=sel)
+        t0r.close()
+        t1r.close()
+        return summary.groups[t0.GLOBAL_GROUP_ID].allele_number
+
+    def test_par1_cooccurrence_is_diploid(self):
+        # both in PAR1 (10001-2781479) -> all-diploid -> GLOBAL AN = 16.
+        self.assertEqual(self._global_an(1000000, 1000030), 16)
+
+    def test_par2_cooccurrence_is_diploid(self):
+        # both in PAR2 (155701383-156030895) -> all-diploid -> GLOBAL AN = 16.
+        self.assertEqual(self._global_an(155800000, 155800030), 16)
+
+    def test_nonpar_cooccurrence_is_haploid_male(self):
+        # both non-PAR -> haploid-male -> GLOBAL AN = 4*1 + 4*2 = 12.
+        self.assertEqual(self._global_an(5000000, 5000030), 12)
 
 
 if __name__ == "__main__":

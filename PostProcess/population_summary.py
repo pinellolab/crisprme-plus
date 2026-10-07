@@ -505,6 +505,11 @@ def summarize(pos_alts, tier0_reader, gt_reader, axis, ploidy_of, phased,
 
     if panel is None:
         panel = Panel(axis, ploidy_of)
+    elif callable(panel):
+        # PAR-aware selector (chrX): route to the PAR (all-diploid) or non-PAR
+        # (haploid-male) panel by position. Every pos_alt in one off-target shares a
+        # guide window -> same regime, so selecting on the first position is exact.
+        panel = panel(pos_alts[0][0])
 
     k = len(pos_alts)
 

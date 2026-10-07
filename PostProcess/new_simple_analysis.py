@@ -1840,6 +1840,19 @@ def _write_population_summary_companion():
         ploidy_of = _t0c.ploidy_of_for_chrom(current_chr)
         out_path = outputFile + ".population_summary.tsv"
 
+        # chrX pseudoautosomal (PAR) correctness for k>=2 co-occurrence AF: PAR is
+        # diploid for BOTH sexes while non-PAR males are haploid. Pass a POSITION
+        # selector so summarize() routes each off-target's joint denominator to the
+        # right regime. Other chromosomes keep the single panel (panel stays None ->
+        # write_companion builds it once). Never fatal: fall back to None on error.
+        _par_panel = None
+        if axis is not None and current_chr.lower() in ("chrx", "x") \
+                and getattr(_popsum, "Panel", None) is not None:
+            try:
+                _par_panel = _t0c.chrx_par_panels(axis, _popsum.Panel)
+            except Exception:
+                _par_panel = None
+
         # Aggregate per-row companion errors into ONE summary line per chromosome
         # instead of one print per skipped off-target (a dense registry-only run
         # produced ~7,355 near-identical lines). Keep the first message as an
@@ -1860,6 +1873,7 @@ def _write_population_summary_companion():
             ploidy_of,
             _popsum,
             panel_cls=getattr(_popsum, "Panel", None),
+            panel=_par_panel,  # chrX: PAR-aware position selector (None elsewhere)
             # dataset-wide phasing already sniffed from the dict scan; the writer
             # still resolves manifest/detect when this is False-by-default and a gt
             # tier is present.
