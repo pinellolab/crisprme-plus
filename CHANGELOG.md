@@ -11,6 +11,22 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **Scorer-env build is registry-driven + compute-verified (robust release).** The Docker image
+  now provisions **and COMPUTE-self-tests every env in the `scorer_env.SCORER_ENVS` registry**
+  (via `scorer_env.build_all`) instead of hardcoding `cbulge` — the modular scorer registry is the
+  single source of truth, so adding a scorer env automatically builds it into the image. The build
+  runs a real compute self-test (`scorer_env.selftest`: scores a perfect-match vs a mismatched
+  target and asserts real, in-`[0,1]`, non-degenerate scores) rather than an import-only check, so
+  a broken / miscomputing / weight-less scorer **fails the image build** instead of silently
+  shipping (catches the tensorflow-metal GRU-miscompute class). `crisprme.py scorer-env
+  check`/`doctor` now run the same compute self-test.
+
+### Changed
+- **A missing/broken ML scorer env is now LOUD.** A search that degrades to CFD-only because the
+  CRISPR-Bulge env is absent/broken prints an un-missable banner to **stdout + stderr** (was a
+  one-line stderr note buried in `log_error`) — so a CFD-only run is never silent.
+
 ## [2.6.2] - 2026-09-28
 
 ### Added

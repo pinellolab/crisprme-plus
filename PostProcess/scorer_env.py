@@ -479,6 +479,82 @@ def health_check(name: str = DEFAULT_ENV) -> dict:
     return rec
 
 
+def selftest(name: str = DEFAULT_ENV) -> tuple:
+    """COMPUTE-based self-test: actually score known (sgRNA, off-target) pairs inside
+    the env and assert the result is real and non-degenerate. Returns (ok, msg).
+
+    This catches failure modes that an import-only probe (``health_check``) MISSES:
+      * missing/corrupt model weights or a bad CBULGE_REPO -> all scores -1 (disabled);
+      * a silently-miscomputing backend (e.g. the tensorflow-metal GRU bug that
+        returned all 1.0) -> degenerate, all-identical scores.
+    A perfect-match and a mismatched target MUST produce distinct, in-[0,1] scores.
+    Build/CI/`scorer-env check` run this so a broken scorer env can never ship or
+    silently degrade a search to CFD-only.
+    """
+    py = env_python(name)
+    if not py:
+        return False, ("env '%s' does not exist (create with: "
+                       "crisprme.py scorer-env create)" % name)
+    here = os.path.dirname(os.path.abspath(__file__))
+    # perfect match vs a multi-mismatch off-target (23 nt incl. PAM). A correct scorer
+    # gives a high score for the match and a clearly lower one for the mismatch.
+    code = (
+        "import json,sys\n"
+        "sys.path.insert(0, " + repr(here) + ")\n"
+        "import crispr_bulge_score as s\n"
+        "sg =['GTAACGGCAGACTTCTCCACAGG','GTAACGGCAGACTTCTCCACAGG']\n"
+        "off=['GTAACGGCAGACTTCTCCACAGG','GTCACGGCTGACTACTCCACAGG']\n"
+        "print(json.dumps(s.CRISPR_BULGE_predict_list(sg, off)))\n"
+    )
+    try:
+        cp = _run([py, "-c", code])
+        r = json.loads(cp.stdout.strip().splitlines()[-1]) if cp.stdout.strip() else None
+    except Exception as e:  # noqa: BLE001
+        return False, "self-test failed to run: %s" % e
+    if not r or any(x is None for x in r):
+        return False, "self-test returned no scores: %r" % (r,)
+    if all(x == -1 for x in r):
+        return False, ("scorer is DISABLED/broken (all scores -1) -- missing env, "
+                       "weights, or a bad CBULGE_REPO: %r" % (r,))
+    if any((x < 0.0 or x > 1.0) for x in r):
+        return False, "scores out of [0,1] (bad model/output): %r" % (r,)
+    if len({round(x, 4) for x in r}) == 1:
+        return False, ("degenerate all-identical scores -> suspect a miscomputing "
+                       "backend (cf. the tensorflow-metal GRU bug): %r" % (r,))
+    return True, "scorer computes real, distinct scores: %r" % (r,)
+
+
+def build_all(gpu: bool = False, selftest_each: bool = True, stream: bool = True) -> tuple:
+    """Provision (and COMPUTE-self-test) EVERY scorer env in the ``SCORER_ENVS``
+    registry. The registry is the SINGLE SOURCE OF TRUTH for the modular scorer
+    setup, so adding an env there automatically provisions it in the Docker image /
+    any install -- the build never drifts from the registry. Returns (ok, report).
+
+    ``selftest_each`` runs the compute self-test (not just an import probe) on each
+    env so a broken/miscomputing scorer FAILS the build instead of silently shipping.
+    """
+    report = []
+    names = list(SCORER_ENVS)
+    report.append("building %d registered scorer env(s): %s"
+                  % (len(names), ", ".join(names) or "(none)"))
+    failed = []
+    for n in names:
+        ok, msg = create_env(n, gpu=gpu, stream=stream)
+        report.append("%s create: %s" % (n, msg))
+        if not ok:
+            failed.append(n)
+            continue
+        if selftest_each:
+            ok, msg = selftest(n)
+            report.append("%s self-test: %s" % (n, msg))
+            if not ok:
+                failed.append(n)
+    ok_all = not failed
+    report.append("ALL scorer envs OK" if ok_all
+                  else ("FAILED scorer env(s): " + ", ".join(failed)))
+    return ok_all, report
+
+
 # ---------------------------------------------------------------------------
 # Persisted state  (mirrors cosmic_license.py)
 # ---------------------------------------------------------------------------

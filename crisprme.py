@@ -999,6 +999,15 @@ def scorer_env_cmd() -> None:
     # check / doctor / status -> probe + persist
     rec = _se.health_check(name)
     print(_se.render_health(rec))
+    # COMPUTE self-test (not just an import probe): confirms the scorer returns real,
+    # distinct scores -- catches a miscomputing backend / missing weights that the
+    # import-only health_check cannot. Escalates status to ERROR on failure.
+    if rec.get("status") != _se.ERROR:
+        st_ok, st_msg = _se.selftest(name)
+        print(f"  compute self-test: {'OK' if st_ok else 'FAIL'} — {st_msg}")
+        if not st_ok:
+            rec["status"] = _se.ERROR
+            rec.setdefault("issues", []).append((_se.ERROR, "compute self-test failed: " + st_msg))
     _se.set_scorer_env_state(ann_dir, rec)
     if action == "doctor" and rec["status"] != _se.OK:
         print("\nSuggested fix:")
