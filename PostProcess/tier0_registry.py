@@ -778,7 +778,7 @@ def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx
     recs = list(records)
     recs.sort(key=lambda r: (int(r[0]), r[2]))
 
-    def agg(alt_genotypes, ai):
+    def agg(alt_genotypes, ai, _pos=None):
         return aggregate_record(alt_genotypes, sample_meta, ploidy_of, ai)
 
     return _write_registry(recs, agg, sample_meta, taxonomy, out_bin, out_idx,
@@ -788,7 +788,8 @@ def compile_registry(records, sample_meta, taxonomy, ploidy_of, out_bin, out_idx
 
 def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
                            out_idx, alt_index="1", panel_index=None,
-                           compress=False, block_records=DEFAULT_BLOCK_RECORDS):
+                           compress=False, block_records=DEFAULT_BLOCK_RECORDS,
+                           regime_for_pos=None):
     """Compile records with FULL-PANEL AN (``aggregate_record_panel``).
 
     Identical binary format + manifest to ``compile_registry``, but every emitted
@@ -804,12 +805,22 @@ def compile_registry_panel(records, sample_meta, taxonomy, ploidy_of, out_bin,
     recs = list(records)
     recs.sort(key=lambda r: (int(r[0]), r[2]))
 
-    if panel_index is None:
-        panel_index = PanelIndex(sample_meta, ploidy_of)
+    # Position-routed ploidy regimes. chrX is pseudoautosomal at its tips: PAR
+    # records are diploid for BOTH sexes (AN baseline over all samples) while the
+    # non-PAR core is haploid in males -- a single panel AN is wrong in one regime.
+    # ``regime_for_pos(pos) -> (PanelIndex, ploidy_of)`` lets the caller route per
+    # record. When not supplied (autosomes, chrY, mega), a single constant regime is
+    # used: BYTE-IDENTICAL to the pre-PAR behaviour.
+    if regime_for_pos is None:
+        if panel_index is None:
+            panel_index = PanelIndex(sample_meta, ploidy_of)
+        _single = (panel_index, ploidy_of)
+        regime_for_pos = lambda _pos: _single
 
-    def agg(carrier_genotypes, ai):
-        return aggregate_record_panel(carrier_genotypes, panel_index, sample_meta,
-                                      ploidy_of, ai)
+    def agg(carrier_genotypes, ai, pos=None):
+        pidx, pof = regime_for_pos(pos)
+        return aggregate_record_panel(carrier_genotypes, pidx, sample_meta,
+                                      pof, ai)
 
     return _write_registry(recs, agg, sample_meta, taxonomy, out_bin, out_idx,
                            alt_index=alt_index, aggregation="panel",
@@ -893,8 +904,8 @@ def compile_registry_from_info_af(records, dataset_meta, out_bin, out_idx,
         n_of[ds] = n
         an_of[ds] = int(meta.get("an_nominal", 2 * n))
 
-    def _af_groups(af_by_dataset, _alt_index):
-        # aggregate_fn contract: (payload, alt_index) -> {group_id: Counts}. Here
+    def _af_groups(af_by_dataset, _alt_index, _pos=None):
+        # aggregate_fn contract: (payload, alt_index, pos) -> {group_id: Counts}. Here
         # the payload IS the per-dataset AF dict (no genotypes to aggregate).
         result = {}
         best_af, gN, gAN = 0.0, 0, 0
@@ -1046,7 +1057,7 @@ def _write_registry(recs, aggregate_fn, sample_meta, taxonomy, out_bin, out_idx,
         return code
 
     for (pos, ref, alt, rsid, alt_genotypes) in recs:
-        groups = aggregate_fn(alt_genotypes, alt_index)
+        groups = aggregate_fn(alt_genotypes, alt_index, pos)
         # Stable, deterministic group ordering (sorted); ordering does not affect
         # lookup semantics but keeps builds reproducible.
         entries = []
@@ -1858,6 +1869,23 @@ class RegistryReader(object):
 def autosomal_ploidy(sample_id, sex):
     """Every sample is diploid on an autosome/PAR."""
     return 2
+
+
+# GRCh38 chrX pseudoautosomal regions (PAR1, PAR2). WITHIN PAR, both sexes are
+# diploid -- males carry the homologous copy on chrY -- so the AF denominator (AN)
+# counts 2 alleles per sample. OUTSIDE PAR ("non-PAR"), males are hemizygous
+# (1 allele). The ploidy model must therefore switch BY POSITION on chrX: callers
+# route PAR records through an all-diploid ``make_chr_ploidy(haploid_male=False)``
+# and non-PAR records through ``make_chr_ploidy(haploid_male=True)``.
+CHRX_PAR1_GRCH38 = (10001, 2781479)
+CHRX_PAR2_GRCH38 = (155701383, 156030895)
+
+
+def chrx_in_par(pos):
+    """True if a chrX coordinate lies in PAR1 or PAR2 (GRCh38) -> diploid for all."""
+    p = int(pos)
+    return (CHRX_PAR1_GRCH38[0] <= p <= CHRX_PAR1_GRCH38[1]
+            or CHRX_PAR2_GRCH38[0] <= p <= CHRX_PAR2_GRCH38[1])
 
 
 def make_chr_ploidy(haploid_male=True, haploid_female=False, absent_female=False):

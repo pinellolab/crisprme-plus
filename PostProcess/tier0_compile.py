@@ -156,8 +156,27 @@ def ploidy_of_for_chrom(chrom):
         # chrY: haploid males; females carry NO chrY -> ABSENT (ploidy 0), so their
         # samplesID rows add no phantom alleles to the chrY AN denominator.
         return t0.make_chr_ploidy(haploid_male=True, absent_female=True)
-    # Autosomes (and, TODO, PAR): diploid everyone.
+    # Autosomes: diploid everyone. (chrX PAR is diploid too, but PAR is handled by
+    # POSITION routing -- see chrx_par_panels + the chrX regime in compile_from_dict
+    # -- not here, since ploidy_of has no position argument.)
     return t0.autosomal_ploidy
+
+
+def chrx_par_panels(axis, panel_cls):
+    """Position-routed PAR-aware panel selector for chrX co-occurrence (k>=2) AF.
+
+    chrX PAR1/PAR2 are diploid for BOTH sexes; the non-PAR core is haploid in males.
+    A single panel AN is wrong in one regime, so build both panels and return a
+    selector ``select(pos) -> Panel`` that picks the all-diploid PAR panel inside
+    PAR and the haploid-male panel elsewhere. ``panel_cls`` = population_summary.Panel.
+    """
+    nonpar = panel_cls(axis, ploidy_of_for_chrom("chrX"))          # haploid-male
+    par = panel_cls(axis, t0.make_chr_ploidy(haploid_male=False))  # all-diploid
+
+    def select(pos):
+        return par if t0.chrx_in_par(pos) else nonpar
+
+    return select
 
 
 # --------------------------------------------------------------------------- #
@@ -277,8 +296,22 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
                                               genotyped_samples=genotyped_samples)
     ploidy_of = ploidy_of_for_chrom(chrom)
 
-    # Build the PanelIndex ONCE (per-group hom-ref baselines) and reuse it.
-    panel_index = t0.PanelIndex(sample_meta, ploidy_of)
+    # chrX is pseudoautosomal at its tips: PAR1/PAR2 are diploid for BOTH sexes
+    # while the non-PAR core is haploid in males. A single panel AN would be wrong
+    # in one regime (PAR AF inflated ~1.37x if PAR were counted haploid-male), so
+    # route per record: PAR positions -> all-diploid panel, non-PAR -> haploid-male.
+    # Every other chromosome keeps the single-panel path (byte-identical).
+    if chrom.lower() in ("chrx", "x"):
+        nonpar_ploidy = ploidy_of                            # haploid-male (as before)
+        par_ploidy = t0.make_chr_ploidy(haploid_male=False)  # all-diploid in PAR
+        _nonpar = (t0.PanelIndex(sample_meta, nonpar_ploidy), nonpar_ploidy)
+        _par = (t0.PanelIndex(sample_meta, par_ploidy), par_ploidy)
+        regime_for_pos = lambda pos: _par if t0.chrx_in_par(pos) else _nonpar
+        panel_index = None
+    else:
+        # Build the PanelIndex ONCE (per-group hom-ref baselines) and reuse it.
+        panel_index = t0.PanelIndex(sample_meta, ploidy_of)
+        regime_for_pos = None
 
     stats = {
         "n_written": 0,
@@ -308,6 +341,7 @@ def compile_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
     manifest = t0.compile_registry_panel(
         record_stream(), sample_meta, None, ploidy_of, out_bin, out_idx,
         alt_index=alt_index, panel_index=panel_index, compress=compress,
+        regime_for_pos=regime_for_pos,
     )
 
     stats["n_positions"] = len(seen_positions)
