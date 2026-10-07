@@ -56,6 +56,51 @@ def test_multi_snp_one_trans_breaks_cis():
     assert cis == set() and ac == 0
 
 
+# --- HIGH-MULTIPLICITY (>=4-variant) cis: the indel-path analog of the SNP path's
+# test_N4/test_trans_N4 (test_phased_haplotype.py). The SNP lattice once dropped the
+# maximal k>=4 cis haplotype (in-loop-subtraction STARVATION, fixed by the deferred
+# peel). This path is structurally immune -- cis_cooccurrence does a DIRECT per-sample
+# same-slot check over the indel + ALL used SNP alts (no incremental lattice, nothing
+# to starve) -- these tests pin that it scales past 4 variants with no under-report. ---
+
+def test_hi_mult_indel_plus_4_snps_all_cis_confirmed():
+    # indel + 4 SNPs (5 variants) all on slot 0 -> CONFIRMED cis, 1 copy. The maximal
+    # combo is recovered directly; no k>=4 starvation under-report.
+    indel = {"S": "1|0"}
+    snps = [{"S": "1|0"}] * 4
+    cis, phase, ac = isc.cis_cooccurrence(indel, snps)
+    assert cis == {"S"} and phase == isc.CONFIRMED and ac == 1
+
+
+def test_hi_mult_one_of_four_snps_trans_breaks_cis():
+    # indel + 4 SNPs, the 3rd on the other slot -> no single slot carries all -> excluded.
+    indel = {"S": "1|0"}
+    snps = [{"S": "1|0"}, {"S": "1|0"}, {"S": "0|1"}, {"S": "1|0"}]
+    cis, phase, ac = isc.cis_cooccurrence(indel, snps)
+    assert cis == set() and ac == 0
+
+
+def test_hi_mult_homozygous_two_cis_copies():
+    # indel + 4 SNPs all 1|1 -> both slots carry the full set -> 2 cis copies.
+    indel = {"S": "1|1"}
+    snps = [{"S": "1|1"}] * 4
+    cis, phase, ac = isc.cis_cooccurrence(indel, snps)
+    assert cis == {"S"} and phase == isc.CONFIRMED and ac == 2
+
+
+def test_hi_mult_population_mix_cis_trans_unphased():
+    # 3 samples x (indel + 3 SNPs = 4 variants):
+    #   A: all slot-0 phased          -> CONFIRMED cis (1 copy)
+    #   B: one SNP on the other slot  -> not all-cis -> excluded
+    #   C: carries all but unphased   -> PUTATIVE cis (1 copy), forces overall PUTATIVE
+    indel = {"A": "1|0", "B": "1|0", "C": "0/1"}
+    s1 = {"A": "1|0", "B": "1|0", "C": "0/1"}
+    s2 = {"A": "1|0", "B": "1|0", "C": "0/1"}
+    s3 = {"A": "1|0", "B": "0|1", "C": "0/1"}
+    cis, phase, ac = isc.cis_cooccurrence(indel, [s1, s2, s3])
+    assert cis == {"A", "C"} and phase == isc.PUTATIVE and ac == 2
+
+
 def test_no_snps_indel_only_trivially_cis():
     cis, phase, ac = isc.cis_cooccurrence({"S": "1|0", "T": "1|1"}, [])
     assert cis == {"S", "T"} and phase == isc.CONFIRMED and ac == 3  # S:1 + T:2

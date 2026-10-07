@@ -83,19 +83,20 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 ```
 
 For a variant-aware search (what the default web search uses), download one of the
-complementary production indexes — the recommended default is the single-source,
-fully phased **1000G-2021** panel:
+complementary production indexes — the recommended default is the fully phased
+**HGDP + 1000 Genomes** panel:
 
 ```bash
-# Recommended default — 1000 Genomes 2021 (3,202 samples), genotyped and fully phased.
+# Recommended default — HGDP + 1000 Genomes (4,091 samples = 929 HGDP + 3,162 1000 Genomes),
+# jointly SHAPEIT5-re-phased. CONFIRMED cis haplotypes with named per-sample carriers + exact
+# joint AF throughout, including HGDP's seven genetic regions (use --per-sample).
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
+
+# 1000-Genomes-only alternative — 1000 Genomes 2021 (3,202 samples), genotyped and fully phased.
 # CONFIRMED cis haplotypes with named per-sample carriers + exact joint AF (use --per-sample).
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
-
-# Broader-coverage genotyped panel — 1000 Genomes 2021 + HGDP (adds 929 individuals).
-# Observed / CONFIRMED haplotypes with per-sample carriers + joint AF (use --per-sample).
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path /DATA
 
 # Sites-only "mega" panel — five sources (1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + AoU),
 # per-dataset AF + cross-source AF_max. PUTATIVE haplotypes with a conservative min-AF bound.
@@ -120,7 +121,7 @@ The web interface picks these up automatically — a search that uses the defaul
 ## 5. (Optional, advanced) Add the raw 1000 Genomes VCFs
 
 CRISPRme's superpower is finding off-targets created by genetic variants — and the
-`NRG_3_hg38+hg38_1000G2021` index you downloaded in step 4 **already** makes the
+`NRG_3_hg38+hg38_HGDP1kGP` index you downloaded in step 4 **already** makes the
 default web search variant-aware. You do **not** need the raw VCFs for that.
 
 Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level
@@ -210,15 +211,22 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
     --vcf list_vcf.txt --samplesID list_samplesID.txt \
     --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
     --gene_annotation Annotations/gencode.protein_coding.bed.gz \
-    --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
+    --mm 4 --bDNA 1 --bRNA 1 --per-sample --output my_search --thread 4
 ```
 
 - `--mm` is mismatches; `--bDNA` / `--bRNA` are DNA / RNA bulges. For a wider
   search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 9` (the same as
   **Maximum edits = 9** in the web form; `--max-total-edits` caps the total
   mismatches + bulges, so it must be at least `--mm + --bDNA + --bRNA`).
-- Because the index bundles 1000&nbsp;Genomes + HGDP variants, the search is
-  variant-aware with combined allele frequencies and COSMIC annotation.
+- `--per-sample` resolves per-individual genotypes: it names the **carrier samples**
+  and marks co-occurring variants **CONFIRMED cis** (phased) / **PUTATIVE co-carrier**
+  (unphased) with the exact joint allele frequency. It needs a genotyped index
+  (1000G-2021, 1000G-2021 + HGDP, or HPRC); omit it for the faster population-level
+  default, and note it is inert on the sites-only *mega* index. Either way the search
+  is variant-aware with allele frequencies and rsIDs.
+- COSMIC cancer rows ship in the annotation bundle but are **off by default**
+  (licence-gated) — enable with `crisprme.py cosmic-license enable`; IntOGen
+  cancer-driver flags are on by default.
 - Results land in `~/crisprme/Results/my_search/`.
 
 Build the same shareable one-file report the web **Download report** button

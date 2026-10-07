@@ -272,17 +272,18 @@ class TestChrXPloidy(_CompileFixture):
     CHROM = "chrX"
 
     def test_hemizygous_male_and_panel_an(self):
-        # A hemizygous male carrier (S_EUR_M1) on chrX. Panel: 10 individuals.
+        # A hemizygous male carrier (S_EUR_M1) on chrX NON-PAR (pos 5,000,000 lies
+        # between PAR1 and PAR2, so males are haploid). Panel: 10 individuals.
         # Males (S_EUR_M1, S_EUR_M2, S_AFR_M1, H_EAS_M1) are haploid (AN 1 each);
         # females diploid (AN 2 each). Panel AN = 4*1 (males) + 6*2 (females) = 16.
         # Male carrier gives AC 1 / (its own AN) 1, and IS hom (fully-called all-alt
         # at ploidy 1).
         carrier_gts = {"S_EUR_M1": "1"}
-        mapping = {"chrX,500": "S_EUR_M1:1;A,T;rsX;0.02"}
+        mapping = {"chrX,5000000": "S_EUR_M1:1;A,T;rsX;0.02"}
         binp, idxp, stats = self._compile(mapping)
         reader = RegistryReader(binp, idxp)
         try:
-            got = self._assert_all_groups(reader, 500, "T", carrier_gts)
+            got = self._assert_all_groups(reader, 5000000, "T", carrier_gts)
             g = got[GLOBAL_GROUP_ID]
             self.assertEqual(g.AC, 1)
             self.assertEqual(g.AN, 16)     # 4 males*1 + 6 females*2
@@ -298,19 +299,77 @@ class TestChrXPloidy(_CompileFixture):
             reader.close()
 
     def test_diploid_style_male_gt_not_double_counted(self):
-        # Even if the dict wrote the male GT diploid-style "1|1", ploidy 1 means
-        # AC 1 / AN 1, NOT AC 2 / AN 2 (anti-double-count invariant).
+        # chrX NON-PAR (pos 5,000,100): even if the dict wrote the male GT diploid-
+        # style "1|1", ploidy 1 means AC 1 / AN 1, NOT AC 2 / AN 2 (anti-double-count).
         carrier_gts = {"S_EUR_M1": "1|1"}
-        mapping = {"chrX,600": "S_EUR_M1:1|1;A,T;rsX2;0.02"}
+        mapping = {"chrX,5000100": "S_EUR_M1:1|1;A,T;rsX2;0.02"}
         binp, idxp, stats = self._compile(mapping)
         reader = RegistryReader(binp, idxp)
         try:
-            got = self._assert_all_groups(reader, 600, "T", carrier_gts)
+            got = self._assert_all_groups(reader, 5000100, "T", carrier_gts)
             g = got[GLOBAL_GROUP_ID]
             self.assertEqual(g.AC, 1)   # NOT 2
             self.assertEqual(g.AN, 16)  # panel unchanged; male still ploidy 1
         finally:
             reader.close()
+
+
+# --------------------------------------------------------------------------- #
+# (2a') chrX PAR: PAR1/PAR2 are pseudoautosomal -> diploid for BOTH sexes (males
+#       carry the homologous copy on chrY). The AN denominator must switch BY
+#       POSITION on chrX: PAR -> all-diploid (AN 20 for the 10-sample panel),
+#       non-PAR -> haploid-male (AN 16). Regression guard for the PAR-aware fix.
+# --------------------------------------------------------------------------- #
+class TestChrXParPloidy(_CompileFixture):
+    CHROM = "chrX"
+
+    def _global(self, pos, alt, entry):
+        binp, idxp, _ = self._compile({"chrX,%d" % pos: entry})
+        reader = RegistryReader(binp, idxp)
+        try:
+            got = reader.lookup(pos, alt)
+            self.assertIsNotNone(got, "record (chrX,%d) missing" % pos)
+            return got[GLOBAL_GROUP_ID], got
+        finally:
+            reader.close()
+
+    def test_par1_male_is_diploid(self):
+        # pos 1,000,000 in PAR1 (10001-2781479): ALL 10 samples diploid -> AN 20
+        # (NOT the non-PAR 16). A het male contributes AC 1 of his 2 PAR alleles.
+        g, got = self._global(1000000, "T", "S_EUR_M1:0|1;A,T;rsP1;0.02")
+        self.assertEqual(g.AN, 20)              # 10 samples * 2 (all diploid in PAR)
+        self.assertEqual(g.AC, 1)
+        self.assertEqual(g.n_called_indiv, 10)
+        self.assertAlmostEqual(g.allele_freq(), 1.0 / 20.0)
+        eur = got[db_subpop_group_id("1000G", "EUR")]
+        self.assertEqual(eur.AN, 8)             # M1,M2,F1,F2 all diploid (not 6)
+
+    def test_par1_hom_male_counts_two(self):
+        # In PAR a male is diploid, so a hom-alt male "1|1" contributes AC 2 (unlike
+        # non-PAR, where ploidy 1 caps him at AC 1).
+        g, _ = self._global(2000000, "T", "S_EUR_M1:1|1;A,T;rsP1b;0.02")
+        self.assertEqual(g.AN, 20)
+        self.assertEqual(g.AC, 2)               # diploid hom male -> 2 alt alleles
+        self.assertEqual(g.n_hom_indiv, 1)
+
+    def test_par2_is_diploid(self):
+        # pos 155,800,000 in PAR2 (155701383-156030895): diploid for all -> AN 20.
+        g, _ = self._global(155800000, "T", "S_AFR_M1:0|1;A,T;rsP2;0.02")
+        self.assertEqual(g.AN, 20)
+        self.assertEqual(g.AC, 1)
+
+    def test_nonpar_contrast_is_haploid_male(self):
+        # Same panel, a non-PAR position (5,000,000): males haploid -> AN 16.
+        g, _ = self._global(5000000, "T", "S_EUR_M1:1;A,T;rsNP;0.02")
+        self.assertEqual(g.AN, 16)              # 4 males*1 + 6 females*2
+
+    def test_chrx_in_par_boundaries(self):
+        self.assertTrue(t0.chrx_in_par(10001))        # PAR1 start
+        self.assertTrue(t0.chrx_in_par(2781479))      # PAR1 end
+        self.assertFalse(t0.chrx_in_par(2781480))     # first non-PAR
+        self.assertFalse(t0.chrx_in_par(155701382))   # last non-PAR
+        self.assertTrue(t0.chrx_in_par(155701383))    # PAR2 start
+        self.assertTrue(t0.chrx_in_par(156030895))    # PAR2 end
 
 
 # --------------------------------------------------------------------------- #

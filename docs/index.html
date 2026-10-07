@@ -21,6 +21,25 @@
   </header>
 
   <main>
+    <section class="intro">
+      <p>
+        <strong>CRISPRme</strong> predicts and prioritizes potential CRISPR off-target
+        sites and &mdash; uniquely &mdash; accounts for individual and population
+        <strong>genetic variants</strong> (SNVs and indels), flagging off-targets that
+        exist only on certain haplotypes. It suits both population-wide and personal-genome
+        analyses. ("Off-target nomination" just means producing a ranked, annotated list of
+        candidate off-targets to validate.)
+      </p>
+      <p>
+        To search, you download a prebuilt <strong>index</strong> &mdash; a ready-made search
+        database for a genome + PAM (no building required). Use the <strong>reference</strong>
+        index for a basic scan, and a <strong>variant-aware</strong> index (e.g.
+        1000&nbsp;Genomes-2021, or&nbsp;+&nbsp;HGDP) to catch off-targets created by human
+        genetic variants &mdash; CRISPRme's main feature. The quickstart below downloads one
+        for you.
+      </p>
+    </section>
+
     <section class="notice" aria-labelledby="notice-heading">
       <h2 id="notice-heading">Run CRISPRme on your own machine</h2>
       <p>
@@ -80,11 +99,12 @@
         </p>
         <pre><code>docker run --rm hello-world
 
-# Pull CRISPRme+ v2.6.0 (multi-arch: Apple Silicon + Intel/Linux).
-docker pull pinellolab/crisprme:v2.6.0</code></pre>
+# Pull CRISPRme+ (multi-arch: Apple Silicon + Intel/Linux).
+# ':latest' always tracks the newest release (currently v2.6.2); pin ':v2.6.2' for reproducibility.
+docker pull pinellolab/crisprme:latest</code></pre>
         <p class="note">
           <strong>Already have an older image?</strong> Docker won't refresh a tag you
-          already have &mdash; run <code>docker pull pinellolab/crisprme:v2.6.0</code> again to
+          already have &mdash; run <code>docker pull pinellolab/crisprme:latest</code> again to
           update, or an old image will error with <code>download is not an allowed command</code>.
         </p>
 
@@ -92,20 +112,20 @@ docker pull pinellolab/crisprme:v2.6.0</code></pre>
         <pre><code>mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (1000G-2021, single-source, fully phased)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA</code></pre>
 
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.6.0 crisprme.py web-interface</code></pre>
+  pinellolab/crisprme:latest crisprme.py web-interface</code></pre>
         <p>Leave it running and open <strong>http://127.0.0.1:8080</strong>. Stop with <strong>Ctrl+C</strong>.</p>
       </div>
 
@@ -116,7 +136,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
           Most clusters already have Apptainer/Singularity. Convert the CRISPRme image
           to a <code>.sif</code> file (no root needed):
         </p>
-        <pre><code>apptainer pull crisprme.sif docker://pinellolab/crisprme:v2.6.0</code></pre>
+        <pre><code>apptainer pull crisprme.sif docker://pinellolab/crisprme:latest</code></pre>
         <p class="note">On older systems the command is <code>singularity</code> instead of <code>apptainer</code>; they are interchangeable.</p>
 
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
@@ -181,8 +201,8 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 
         <h3>Install with Conda / Mamba</h3>
         <p style="color:#b00;margin:0 0 .5rem;"><strong>Note:</strong> Bioconda installs the last
-        <em>stable</em> CRISPRme release (pre-2.2.0), <strong>not</strong> CRISPRme+ v2.6.0.
-        Use the Docker quickstart above for CRISPRme+ v2.6.0.</p>
+        <em>stable</em> CRISPRme release (pre-2.2.0), <strong>not</strong> CRISPRme+ (the 2.6.x line).
+        Use the Docker quickstart above for CRISPRme+ (currently v2.6.2).</p>
         <pre><code># Configure Bioconda channels (one-time)
 mamba config --add channels bioconda
 mamba config --add channels conda-forge
@@ -207,11 +227,11 @@ crisprme.py --version</code></pre>
           recommended for most users.
         </p>
         <pre><code># Docker
-docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.6.0 \
+docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:latest \
   crisprme.py setup --path /DATA
 
 # ...or test on a single chromosome first
-docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:v2.6.0 \
+docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:latest \
   crisprme.py setup --chrom chr22 --path /DATA</code></pre>
         <p class="note">
           The web interface must be started from a working directory that contains the

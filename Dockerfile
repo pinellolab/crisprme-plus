@@ -144,12 +144,10 @@ RUN if [ "$build_scorer_envs" = "1" ]; then \
       if [ "$BACKEND" = "auto" ]; then \
         if [ "${TARGETARCH}" = "amd64" ]; then BACKEND=gpu; else BACKEND=cpu; fi; \
       fi; \
-      echo "[scorer-env] building cbulge (backend=${BACKEND}, arch=${TARGETARCH})" \
+      echo "[scorer-env] building + COMPUTE-self-testing ALL registered scorer envs (backend=${BACKEND}, arch=${TARGETARCH})" \
       && CONDA_CHANNEL_BASE="${CONDA_CHANNEL_BASE}" python -c "import sys; sys.path.insert(0, '${PREFIX}/opt/crisprme/PostProcess'); \
-import scorer_env; ok, msg = scorer_env.create_env('cbulge', gpu=('${BACKEND}'=='gpu'), stream=True); \
-print('[scorer-env]', msg); sys.exit(0 if ok else 1)" \
-      && echo "[scorer-env] verifying TensorFlow imports in cbulge" \
-      && micromamba run -n cbulge python -c "import tensorflow as tf; print('[scorer-env] cbulge OK: tensorflow', tf.__version__)" \
+import scorer_env; ok, rep = scorer_env.build_all(gpu=('${BACKEND}'=='gpu')); \
+[print('[scorer-env]', line) for line in rep]; sys.exit(0 if ok else 1)" \
       && micromamba clean --all --yes ; \
     fi
 

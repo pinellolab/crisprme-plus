@@ -85,9 +85,10 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
-pre-downloaded `NRG_3_hg38+hg38_1000G2021` index already makes the default web
+pre-downloaded `NRG_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
+4,091 samples — the recommended default) already makes the default web
 search variant-aware — you do **not** need the raw VCFs for that. **Optional
-(advanced):** the raw 1000 Genomes VCFs (~16 GB) are only needed for CLI
+(advanced):** the raw VCFs are only needed for CLI
 sample-level analyses / personal risk cards:
 `… crisprme.py download --what vcf --dataset 1000G --path /DATA`.
 
@@ -304,6 +305,27 @@ search.
 > For a whole-genome search across both 1000G and HGDP, expect runtimes of several
 > hours even on well-resourced systems. Start with bulges set to `0` if you need
 > a rapid preliminary result.
+
+**Analysis mode (Population-level vs Per-sample)**
+
+When you select a variant-aware index, the form shows an **Analysis mode** choice that
+controls how genetic variants are resolved in the results:
+
+- **Population-level (default)** — reports each off-target once, using a worst-possible
+  representative of the variants in its window. This is the fast, robust default: it never
+  misses a candidate off-target and works on any index (including the sites-only *mega*
+  index). It does **not** tell you which individuals carry a site.
+- **Per-sample** — resolves the actual per-individual genotypes into observed haplotypes, so
+  the report **names the carrier samples**, marks co-occurring variants as **CONFIRMED cis**
+  (phased) or **PUTATIVE co-carrier** (unphased), and gives the **exact joint allele
+  frequency**. Choose this for genotyped panels and clinical / validation work — it is the
+  headline capability of the variant-aware pipeline.
+
+Per-sample is a **genotype-resolution** dial, **not** a speed dial: for a single guide the
+runtimes are comparable. It **requires a genotyped index** (1000G-2021, 1000G-2021 + HGDP, or
+HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
+greyed out and the search falls back to population-level. (See "Understanding CONFIRMED vs
+PUTATIVE and carriers" in the results section for how these labels appear in the report.)
 
 **Base editing thresholds (optional)**
 

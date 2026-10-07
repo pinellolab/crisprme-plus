@@ -41,7 +41,7 @@ off-target site.
 
 **Analysis-mode decision rule.** The **default** (no flag) is a **population-level**
 worst-possible screen and works on **any** index. Add **`--per-sample`** only on a
-**genotyped** index (`1000G2021`, `1000G2021_HGDP`, or `HPRC`) when you need named carriers /
+**genotyped** index (`HGDP1kGP` — the recommended default — `1000G2021`, `1000G2021_HGDP`, or `HPRC`) when you need named carriers /
 CONFIRMED cis / exact joint AF — it is inert on a sites-only index (`mega`). See
 [§5, Analysis modes](#population-level-analysis-default-and---per-sample-genotype-resolution).
 

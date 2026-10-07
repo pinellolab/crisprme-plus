@@ -12,7 +12,7 @@ import os
 import re
 
 
-version = "2.6.2"  # CRISPRme version
+version = "2.7.0"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -999,6 +999,15 @@ def scorer_env_cmd() -> None:
     # check / doctor / status -> probe + persist
     rec = _se.health_check(name)
     print(_se.render_health(rec))
+    # COMPUTE self-test (not just an import probe): confirms the scorer returns real,
+    # distinct scores -- catches a miscomputing backend / missing weights that the
+    # import-only health_check cannot. Escalates status to ERROR on failure.
+    if rec.get("status") != _se.ERROR:
+        st_ok, st_msg = _se.selftest(name)
+        print(f"  compute self-test: {'OK' if st_ok else 'FAIL'} — {st_msg}")
+        if not st_ok:
+            rec["status"] = _se.ERROR
+            rec.setdefault("issues", []).append((_se.ERROR, "compute self-test failed: " + st_msg))
     _se.set_scorer_env_state(ann_dir, rec)
     if action == "doctor" and rec["status"] != _se.OK:
         print("\nSuggested fix:")
@@ -2090,9 +2099,9 @@ def complete_search() -> None:
                 "index. Build or download the index FIRST, then re-run complete-search:\n\n"
                 "  download a prebuilt index (recommended):\n"
                 "    crisprme.py download --what index --index-name "
-                "NRG_3_hg38+hg38_1000G2021 --path .\n"
-                "    (single-source, phased default; or "
-                "NRG_3_hg38+hg38_1000G2021_HGDP for broader coverage)\n\n"
+                "NRG_3_hg38+hg38_HGDP1kGP --path .\n"
+                "    (recommended default: phased HGDP + 1000 Genomes, 4,091 samples, "
+                "CONFIRMED carriers; or NRG_3_hg38+hg38_1000G2021 for 1000G-only)\n\n"
                 "  or build it locally (source VCFs required):\n"
                 "    crisprme.py build-index-only --genome %s --vcf %s --samplesID "
                 "<samplesID> --pam %s --bDNA <N> --bRNA <N>\n\n"
@@ -3027,7 +3036,8 @@ def print_help_download() -> None:
         "[REQUIRED for --what vcf]\n"
         "\t--index-name, precomputed index directory name for --what index "
         "(e.g. the reference index NRG_3_hg38, the recommended variant-aware default "
-        "NRG_3_hg38+hg38_1000G2021, or the broader-coverage NRG_3_hg38+hg38_1000G2021_HGDP) "
+        "NRG_3_hg38+hg38_HGDP1kGP (phased HGDP + 1000 Genomes, 4,091 samples), or "
+        "NRG_3_hg38+hg38_1000G2021 / NRG_3_hg38+hg38_mega) "
         "[REQUIRED for --what index]\n"
         "\t--hf-repo, HuggingFace dataset repo id to fetch from [OPTIONAL]\n"
         "\t--source, for --what genome: hf (HuggingFace, default) | ucsc "
