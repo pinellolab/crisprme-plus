@@ -656,6 +656,8 @@ def _curated_cell(kind, row, cols):
         v = _get("dhs")
     elif kind == "cosmic":
         v = _get("cosmic")
+    elif kind == "intogen":
+        v = _get("intogen")
     elif kind == "complex_region":
         # TOTAL variants in the surrounding protospacer window (NOT this row's
         # variant) -- rendered "N in window" so it can't be misread as the

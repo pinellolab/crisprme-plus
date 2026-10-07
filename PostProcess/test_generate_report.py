@@ -44,6 +44,7 @@ the real pipeline env (and locally), which is where the artifact is produced.
 import base64
 import glob
 import gzip
+import inspect
 import os
 import re
 import sys
@@ -212,6 +213,18 @@ class TestGenerateReport(unittest.TestCase):
             return os.path.join(extract, name)
         return os.path.join(extract, "data", name)
 
+    def test_build_report_drop_maf_removes_maf_column(self):
+        # Regression (crisprme.py generate-report --no-maf): the top-level CLI
+        # silently ignored --no-maf, and the module-level MAF-drop path was itself
+        # untested. Assert the drop actually removes the MAF column from a curated
+        # export, and that the default keeps it.
+        _, _, extract = self._build_and_extract()
+        default_hdr = self._read(self._dpath(extract, "top1000.tsv")).splitlines()[0].split("\t")
+        self.assertIn("MAF", default_hdr)  # default: MAF present
+        _, _, extract2 = self._build_and_extract(drop_maf=True)
+        drop_hdr = self._read(self._dpath(extract2, "top1000.tsv")).splitlines()[0].split("\t")
+        self.assertNotIn("MAF", drop_hdr)  # --no-maf: MAF gone everywhere
+
     def test_zip_layout_report_at_root_rest_under_data(self):
         _, names, _ = self._build_and_extract()
         # ONLY report.html at the top level; every other bundled file under data/.
@@ -338,6 +351,45 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(gr._curated_cell("gene_region", row_far, cols), "intergenic")
         # missing GENCODE source -> "-"
         self.assertEqual(gr._curated_cell("gene_region", {}, {}), gr.CURATED_MISSING)
+
+    def test_intogen_curated_cell_reads_annotation_source(self):
+        # the IntOGen_cancer_driver column must render the driver gene name from
+        # Annotation_INTOGEN. Regression: the 'intogen' kind had no branch in
+        # _curated_cell, so every cell fell through to "-" even when the source
+        # column held a gene (e.g. BRCA2) -- the column was dead in every report
+        # and every exported TSV since IntOGen became the default cancer-driver set.
+        cols = {"intogen": "Annotation_INTOGEN"}
+        self.assertEqual(
+            gr._curated_cell("intogen", {"Annotation_INTOGEN": "BRCA2"}, cols), "BRCA2"
+        )
+        # no driver at this site -> "-" (same convention as COSMIC)
+        for blank in ("NA", "", None):
+            self.assertEqual(
+                gr._curated_cell("intogen", {"Annotation_INTOGEN": blank}, cols),
+                gr.CURATED_MISSING,
+                blank,
+            )
+        # source column absent entirely -> "-"
+        self.assertEqual(gr._curated_cell("intogen", {}, {}), gr.CURATED_MISSING)
+
+    def test_every_curated_kind_is_handled_in_curated_cell(self):
+        # Guard against the bug class above: a kind declared in CURATED_COLUMNS but
+        # never matched by a branch in _curated_cell falls through to the trailing
+        # `else: v = None` and silently renders "-" in EVERY row of every report and
+        # every exported TSV. No other test catches that, because the column is
+        # present and correctly named -- only its value is dead. "rank" and
+        # "crispr_bulge" are resolved by the caller (rank is positional; CRISPR-Bulge
+        # is dropped when not computed), so they legitimately have no branch here.
+        caller_handled = {"rank", "crispr_bulge"}
+        body = inspect.getsource(gr._curated_cell)
+        handled = set(re.findall(r'kind == "([a-z_]+)"', body))
+        declared = {kind for _header, kind in gr.CURATED_COLUMNS} - caller_handled
+        missing = sorted(declared - handled)
+        self.assertEqual(
+            missing, [],
+            f"declared in CURATED_COLUMNS but unreachable in _curated_cell "
+            f"(these columns would render '{gr.CURATED_MISSING}' in every row): {missing}",
+        )
 
     def test_high_complexity_region_flag_projection(self):
         # the curated cell renders the integrated_results note as "N in window"
