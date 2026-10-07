@@ -21,11 +21,25 @@ and the `release-crisprme` skill.
   a broken / miscomputing / weight-less scorer **fails the image build** instead of silently
   shipping (catches the tensorflow-metal GRU-miscompute class). `crisprme.py scorer-env
   check`/`doctor` now run the same compute self-test.
+- **New recommended default variant index: `NRG_3_hg38+hg38_HGDP1kGP`** — the gnomAD HGDP + 1000
+  Genomes callset (4,091 samples = 929 HGDP + 3,162 1000 Genomes), jointly **SHAPEIT5-re-phased** so
+  **both** cohorts are phased: HGDP off-targets now get **CONFIRMED cis** + named per-sample carriers
+  (not PUTATIVE-from-phasing), covering HGDP's seven genetic regions. Published to HuggingFace
+  (`indexes/NRG_3_hg38+hg38_HGDP1kGP.tar.gz` + `genotypes_hg38_HGDP1kGP.tar.gz`); SNP+indel
+  searchable; supersedes the hybrid `NRG_3_hg38+hg38_1000G2021_HGDP`.
+- **PAR-aware chrX ploidy.** chrX allele frequencies now use the correct ploidy per region — diploid
+  in the pseudoautosomal regions (PAR1/PAR2, AN=8182 for a 4,091-sample panel) and haploid-male in
+  the non-PAR region (AN=5990) — in both the registry build and the search-time k≥2 co-occurrence
+  denominators. Fixes a ~1.37× PAR allele-frequency inflation; autosomes/chrY unchanged.
 
 ### Changed
 - **A missing/broken ML scorer env is now LOUD.** A search that degrades to CFD-only because the
   CRISPR-Bulge env is absent/broken prints an un-missable banner to **stdout + stderr** (was a
   one-line stderr note buried in `log_error`) — so a CFD-only run is never silent.
+- **Default variant index flipped to `NRG_3_hg38+hg38_HGDP1kGP`** (was `NRG_3_hg38+hg38_1000G2021`).
+  The web UI picks it automatically (richest genotyped-phased panel, by sample count — no hardcoded
+  name); CLI help + docs recommend it first. `1000G2021` remains the 1000-Genomes-only alternative;
+  `1000G2021_HGDP`, `HPRC`, and `mega` remain available.
 
 ## [2.6.2] - 2026-09-28
 

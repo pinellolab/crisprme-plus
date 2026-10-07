@@ -1,8 +1,9 @@
 # Precomputed CRISPRme indexes on HuggingFace
 
-> **Reproducing the four shipped production indexes.** The end-to-end recipes for the
-> released variant indexes — the single-source phased default **`NRG_3_hg38+hg38_1000G2021`**,
-> the genotyped **`NRG_3_hg38+hg38_1000G2021_HGDP`**, the HPRC pangenome
+> **Reproducing the shipped production indexes.** The end-to-end recipes for the
+> released variant indexes — the phased default **`NRG_3_hg38+hg38_HGDP1kGP`** (HGDP +
+> 1000 Genomes), the single-source phased **`NRG_3_hg38+hg38_1000G2021`**, the superseded
+> hybrid **`NRG_3_hg38+hg38_1000G2021_HGDP`**, the HPRC pangenome
 > **`NRG_3_hg38+hg38_HPRC`**, and sites-only **`NRG_3_hg38+hg38_mega`** (5 sources) —
 > live in [`seq_script/merge_panels/README.md`](../seq_script/merge_panels/README.md) (Mode 1,
 > the HPRC section with `hprc_build.sh`, and Mode 2, with the as-run `mega_gw_merge.sh` +
@@ -35,26 +36,29 @@ Section 3.5 of the data-setup guide (`docs/crisprme_data_setup_051826.md`).
 
 ## The four production indexes (2.5.5)
 
-Four SpCas9 **NRG** (NAG+NGG) variant indexes ship prebuilt on HuggingFace — pick
-by whether you want a clean single-source phased default, broader population coverage,
+SpCas9 **NRG** (NAG+NGG) variant indexes ship prebuilt on HuggingFace — pick
+by whether you want the broad fully-phased default, a clean single-source panel,
 pangenome coverage, or the widest allele-frequency provenance. They are
 **complementary**, not alternatives:
 
 | Index name | Sources | Data model | Co-occurrence confidence |
 |---|---|---|---|
-| `NRG_3_hg38+hg38_1000G2021` *(recommended default)* | 1000 Genomes 2021 (3,202 samples) | **sample-level genotypes, fully phased** | **CONFIRMED** phased cis throughout with **named carrier samples** + exact joint AF (all genotyped-phased, no PUTATIVE-from-phasing) — a clean, simple default of real observed haplotypes |
-| `NRG_3_hg38+hg38_1000G2021_HGDP` *(broader coverage)* | 1000 Genomes 2021 + HGDP (adds 929 individuals) | **sample-level genotypes** (hybrid: 1000G phased, HGDP unphased) | 1000G → **CONFIRMED** (phased cis); HGDP → **PUTATIVE** co-carrier (unphased), both with **named carrier samples** + joint AF |
+| `NRG_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP + 1000 Genomes (4,091 samples = 929 HGDP + 3,162 1000 Genomes), jointly SHAPEIT5-re-phased | **sample-level genotypes, fully phased** | **CONFIRMED** phased cis throughout with **named carrier samples** + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) — the broadest fully-phased panel of real observed haplotypes |
+| `NRG_3_hg38+hg38_1000G2021` | 1000 Genomes 2021 (3,202 samples) | **sample-level genotypes, fully phased** | **CONFIRMED** phased cis throughout with **named carrier samples** + exact joint AF (all genotyped-phased, no PUTATIVE-from-phasing) — a clean single-source panel of real observed haplotypes |
+| `NRG_3_hg38+hg38_1000G2021_HGDP` *(superseded / legacy)* | 1000 Genomes 2021 + HGDP (adds 929 individuals) | **sample-level genotypes** (hybrid: 1000G phased, HGDP unphased) | 1000G → **CONFIRMED** (phased cis); HGDP → **PUTATIVE** co-carrier (unphased), both with **named carrier samples** + joint AF. Superseded by the fully-phased `HGDP1kGP` (CONFIRMED cis across the whole HGDP portion); kept for continuity |
 | `NRG_3_hg38+hg38_HPRC` | HPRC Release 2 pangenome `hprc-v2.0-mc-grch38` (232 assembly-derived genomes incl. CHM13) | **sample-level genotypes, phased** (graph-derived) | **CONFIRMED** phased cis with **named carrier samples** + exact joint AF; captures **pangenome-specific** variation absent from short-read panels |
 | `NRG_3_hg38+hg38_mega` | 5 sources — 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us | **sites-only** (allele frequencies, no shared samples) | **PUTATIVE** with a conservative **min-AF** joint bound + **per-dataset AF provenance** (`AF_1000G2021 … AF_AoU` + `AF_max`); a co-occurring haplotype here **may or may not exist in any real individual** — no carriers |
 
 **Choosing an index.** You only need **one**. For most use cases pick the **recommended
-default `NRG_3_hg38+hg38_1000G2021`** — single-source 1000 Genomes 2021, fully **phased**,
-so every reported co-occurrence is **CONFIRMED** cis with **named per-sample carriers** and
-exact joint AF (all genotyped-phased, no PUTATIVE-from-phasing): a clean, simple default of
-real observed haplotypes. Pick **`NRG_3_hg38+hg38_1000G2021_HGDP`** when you want the extra
-HGDP diversity (adds HGDP's 929 individuals for broader population coverage; hybrid
-confidence — CONFIRMED on the phased 1000G portion, PUTATIVE co-carrier on the unphased HGDP
-portion). Pick **HPRC** for assembly-derived / pangenome variation (phased → CONFIRMED cis +
+default `NRG_3_hg38+hg38_HGDP1kGP`** — HGDP + 1000 Genomes (4,091 samples), jointly
+SHAPEIT5-re-phased, so every reported co-occurrence is **CONFIRMED** cis with **named
+per-sample carriers** and exact joint AF throughout, including HGDP's seven genetic regions
+and with correct chrX PAR allele frequencies: the broadest fully-phased panel of real
+observed haplotypes. Pick **`NRG_3_hg38+hg38_1000G2021`** when you want a clean single-source
+1000 Genomes 2021 panel (3,202 samples, fully phased → CONFIRMED cis + named carriers). (The
+earlier hybrid **`NRG_3_hg38+hg38_1000G2021_HGDP`** — CONFIRMED on the phased 1000G portion,
+PUTATIVE co-carrier on the unphased HGDP portion — is **superseded** by the fully-phased
+`HGDP1kGP`; it is kept available for continuity.) Pick **HPRC** for assembly-derived / pangenome variation (phased → CONFIRMED cis +
 carriers). **Escalate to `mega`** only for a widest-provenance worst-case screen when you
 must not miss a rare allele from any of five databases: it is **sites-only** (union of allele
 frequencies, no genotypes), so every multi-variant / co-occurring off-target is **PUTATIVE**
@@ -66,8 +70,9 @@ co-occurring off-targets. Download the reference data once, then any index:
 
 ```bash
 crisprme.py download --what all  --path .                                                 # reference genome + annotations (once)
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021      --path .     # recommended default (single-source, phased; carriers)
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path .     # broader coverage (adds HGDP; hybrid confidence)
+crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP       --path .     # recommended default (phased HGDP + 1000 Genomes, 4,091 samples; carriers)
+crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021      --path .     # 1000-Genomes-only alternative (single-source, phased; carriers)
+crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path .     # superseded hybrid (1000G phased + HGDP unphased; kept for continuity)
 crisprme.py download --what index --index-name NRG_3_hg38+hg38_HPRC           --path .     # HPRC pangenome (phased assemblies, carriers)
 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega          --path .      # mega (sites-only, per-dataset AF provenance)
 ```
@@ -85,9 +90,11 @@ Indexes live under `indexes/` in the CRISPRme dataset repo (default
 ```
 indexes/
   NRG_3_hg38.tar.gz                              # SpCas9 (NRG = NAG+NGG) reference index of hg38, up-to-2-bulge (DEFAULT reference index)
-  NRG_3_hg38+hg38_1000G2021.tar.gz          # SpCas9 (NRG) dict-less variant-aware index (1000G-2021, phased), up-to-2-bulge (recommended default)
+  NRG_3_hg38+hg38_HGDP1kGP.tar.gz           # SpCas9 (NRG) dict-less variant-aware index (HGDP + 1000 Genomes, 4,091 samples, phased), up-to-2-bulge (recommended default)
+  genotypes_hg38_HGDP1kGP.tar.gz                     # SEPARATE Tier-1 genotype store companion for the HGDP1kGP index (rides along on download)
+  NRG_3_hg38+hg38_1000G2021.tar.gz          # SpCas9 (NRG) dict-less variant-aware index (1000G-2021, phased), up-to-2-bulge (1000-Genomes-only alternative)
   genotypes_hg38_1000G2021.tar.gz                    # SEPARATE Tier-1 genotype store companion for the 1000G2021 index (rides along on download)
-  NRG_3_hg38+hg38_1000G2021_HGDP.tar.gz     # SpCas9 (NRG) dict-less variant-aware index (1000G + HGDP), up-to-2-bulge (broader coverage)
+  NRG_3_hg38+hg38_1000G2021_HGDP.tar.gz     # SpCas9 (NRG) dict-less variant-aware index (1000G + HGDP), up-to-2-bulge (superseded hybrid; kept for continuity)
   genotypes_hg38_1000G2021_HGDP.tar.gz               # SEPARATE Tier-1 genotype store companion for the 1000G2021+HGDP index (rides along on download)
   NRG_3_hg38+hg38_HPRC.tar.gz                    # SpCas9 (NRG) HPRC pangenome variant index (232 phased assembly-derived genomes)
   genotypes_hg38_HPRC.tar.gz                          # SEPARATE Tier-1 genotype store companion for the HPRC index
