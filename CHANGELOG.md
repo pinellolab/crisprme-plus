@@ -11,6 +11,8 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-10-07
+
 ### Added
 - **Scorer-env build is registry-driven + compute-verified (robust release).** The Docker image
   now provisions **and COMPUTE-self-tests every env in the `scorer_env.SCORER_ENVS` registry**
@@ -1747,7 +1749,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.6.2...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.0
 [2.6.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.2
 [2.6.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.1
 [2.6.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.0
