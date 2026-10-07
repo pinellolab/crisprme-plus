@@ -93,10 +93,49 @@ Top-1000 ranked sites (by CFD):
   phased index — every phased top site is either reference or a confirmed named-carrier off-target.
 - Detection breadth: mega 184,449 vs phased 213,545 off-targets; top-1000 overlap 558/1000.
 
-**Net of Point 2:** mega's breadth is useful as a worst-case detection screen, but its top ranks are
-inflated with putative combinations it cannot verify. The phased index removes that putative
-false-positive load from the top of the list, so the sites you act on first are real, carrier-backed
-hits — a cleaner, more precise ranking.
+### Cross-match: how many of mega's top putatives are real? (an estimate)
+
+The mega putative top sites are **CFD = 1.0 perfect-match off-targets fabricated by stacking many
+rare ALT alleles into one 23 bp window** — a median of **14 variants** per site, up to **33** (min 2).
+We looked each one up in the phased, genotyped panel (6,1,1 per-sample oracle, 3.62 M CONFIRMED-cis
+loci over 4,091 individuals) to ask: does any real person actually carry this combination in cis?
+
+Of mega's **228 distinct** putative top-1000 loci:
+
+| outcome in the 4,091 phased individuals | loci | median variants/site |
+|---|---|---|
+| **CONFIRMED real** (a real carrier exists) — *mega recovers a true site* | **38 (17%)** | **2** |
+| **Not confirmable** (189 absent from panel + 1 present-but-never-cis) | **190 (83%)** | **15** |
+
+**Estimated false-positive rate ≈ 83%** of mega's top-ranked putatives. The split is the whole story:
+the sites that are real are **simple** co-occurrences (median **2** variants); the ones that cannot be
+confirmed are **implausible stacks** (median **15**, up to 33 variants in cis) that no haplotype
+realistically carries.
+
+> **This is an estimate, stated explicitly.** "Not confirmable" means *not observed in cis in our
+> 4,091-sample phased panel* — 189 of the 190 involve variants absent from HGDP+1kGP (they come from
+> mega's much larger aggregate sources: gnomAD v4.1, TOPMed, All-of-Us), so "absent here" is not
+> *proof* of falsehood. But a 15-variant (up to 33) cis stack in 23 bp is combinatorially implausible
+> at **any** cohort size, so the overwhelming majority are genuine false positives, not merely
+> unobserved. The point: **mega recovers the real sites** (the 38 simple ones) **but pays for its
+> breadth with an ~83% putative-false-positive load at the top of the ranking**, which the phased
+> index does not.
+
+### The flip side — real rare single-SNP sites the phased index confirms
+
+The phased index's value is not only pruning mega's stacks; it also **surfaces real off-targets created
+by a single rare SNP and names the carrier** — hits a reference-only search misses entirely and a
+sites-only panel can only guess at. In the phased 6,1,1 search: **2,374,162** single-SNP
+carrier-backed off-targets, of which **1,870,135 are rare** (MAF ≤ 0.001), **5,085 actionable**
+(CFD ≥ 0.2), and **1,062,519 driven by a singleton** (invisible to the singleton-dropped release,
+cf. Point 1b). These are unambiguously real (one variant — no cis question) and tied to a named
+individual.
+
+**Net of Point 2:** mega's breadth is a useful worst-case detection screen and it *does* recover the
+real sites — but ~83% of its top-ranked putatives are combinatorial stacks no individual carries, so
+its ranking is dominated by false positives at the top. The phased index removes that load (0% putative
+in its top-1000) **and** adds ~1.87 M real, carrier-backed single-rare-SNP off-targets — a cleaner,
+higher-precision, individually-actionable ranking.
 
 ---
 
@@ -105,8 +144,12 @@ hits — a cleaner, more precise ranking.
 1. **Re-phasing was necessary and had to be done in-house, singleton-inclusive.** It converts 22.5 M
    PUTATIVE → CONFIRMED cis with named HGDP carriers (27% → 97%), *and* recovers ~61.5 M singletons that
    drive 18.2% of all off-targets (thousands actionable) — all lost by the ready-made phased release.
-2. **A sites-only mega panel over-calls putative off-targets** (27% of its top-1000 are cis-unconfirmed
-   vs 0% for the phased index); the phased index gives a higher-precision, carrier-backed ranking.
+2. **A sites-only mega panel over-calls putative off-targets.** 27% of mega's top-1000 are
+   cis-unconfirmed (vs 0% for the phased index); cross-matched against real genotypes, **~83% of its
+   top putatives cannot be confirmed in 4,091 individuals** — they are implausible stacks (median 15
+   variants). Mega *does* recover the real sites (the simple, median-2-variant ones), but its ranking
+   is top-loaded with false positives; the phased index gives a higher-precision, carrier-backed
+   ranking and additionally confirms ~1.87 M real single-rare-SNP off-targets with named carriers.
 3. The top single-site hits themselves are **stable** phased-vs-hybrid (793/1000 shared, 767 identical
    CFD), so making the phased index the default is safe.
 
