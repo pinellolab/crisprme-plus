@@ -21,6 +21,57 @@ This document makes **two points**, each from a dedicated search:
 
 ---
 
+## Numbers at a glance (reported + top-1000, by CFD and by CRISPR-Bulge)
+
+For each comparison, two views: **how many off-targets are reported in total** (and how many reach each
+score tier under each scorer), and **the top-1000** (overlap between the two indices + the Observed
+breakdown), ranked **by CFD** and **by CRISPR-Bulge**.
+
+### Comparison 1 (6,1,1) — phased HGDP+1kGP vs unphased hybrid
+
+**1A · Reported off-targets (all), by score tier**
+
+| index | total reported | CFD ≥0.5 | CFD ≥0.2 | CFD ≥0.1 | CRISPR-Bulge ≥0.5 | ≥0.2 | ≥0.1 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| **phased (new)** | 5,996,092 | 417 | 13,857 | 63,178 | 4 | 8 | 15 |
+| hybrid (old) | 5,540,022 | 347 | 12,275 | 56,169 | 4 | 7 | 14 |
+
+**1B · Top-1000 (overlap between the two indices + Observed), by scorer**
+
+| ranked by | overlap | phased: carrier / ref / putative | hybrid: carrier / ref / putative |
+|---|--:|---|---|
+| **CFD** | **793 / 1000** | 478 / 522 / 0 | 388 / 612 / 0 |
+| **CRISPR-Bulge** \* | 100 / 1000 | 453 / 547 / 0 | 527 / 473 / 0 |
+
+### Comparison 2 (4,1,1) — phased HGDP+1kGP vs mega (sites-only)
+
+**2A · Reported off-targets (all), by score tier**
+
+| index | total reported | CFD ≥0.5 | CFD ≥0.2 | CFD ≥0.1 | CRISPR-Bulge ≥0.5 | ≥0.2 | ≥0.1 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| **phased** | 213,545 | 159 | 2,116 | 6,476 | 5 | 9 | 15 |
+| mega (sites-only) | 184,449 | 220 | 2,061 | 5,785 | **33** | **53** | **73** |
+
+**2B · Top-1000 (overlap + Observed), by scorer**
+
+| ranked by | overlap | phased: carrier / ref / putative | mega: carrier / ref / putative / obs-AF |
+|---|--:|---|---|
+| **CFD** | 558 / 1000 | 578 / 422 / **0** | 0 / 399 / **273** / 328 |
+| **CRISPR-Bulge** \* | 81 / 1000 | 521 / 479 / **0** | 0 / 369 / **186** / 445 |
+
+> Mega's **high-CRISPR-Bulge counts are inflated** (33/53/73 at ≥0.5/≥0.2/≥0.1 vs the phased index's
+> 5/9/15) for the same reason as its CFD=1.0 top putatives: the combinatorial variant stacks score high
+> under *both* scorers. The mega-over-call story therefore holds under CFD **and** CRISPR-Bulge — 273
+> (CFD) / 186 (CB) putative in its top-1000, vs **0** for the phased index either way.
+>
+> \* **CRISPR-Bulge top-1000 caveat.** CRISPR-Bulge produces very few high-scoring sites (only ~15 at
+> CB ≥ 0.1 genome-wide), so its "top-1000" is dominated by a large near-zero tie region where rank
+> order is near-arbitrary — the low CB overlap (100, 81) is tie-break noise, **not** index
+> disagreement. CFD (which spreads scores) is the meaningful stability metric; the CB view is included
+> for completeness and for the putative-load contrast, which *is* meaningful.
+
+---
+
 ## POINT 1 — Re-phasing was necessary (search 6,1,1)
 
 Phased HGDP+1kGP vs the old hybrid, identical search: **mm6 + 1 DNA + 1 RNA bulge**, `--per-sample`.
