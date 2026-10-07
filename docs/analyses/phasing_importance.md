@@ -148,8 +148,19 @@ Top-1000 ranked sites (by CFD):
 
 The mega putative top sites are **CFD = 1.0 perfect-match off-targets fabricated by stacking many
 rare ALT alleles into one 23 bp window** — a median of **14 variants** per site, up to **33** (min 2).
-We looked each one up in the phased, genotyped panel (6,1,1 per-sample oracle, 3.62 M CONFIRMED-cis
-loci over 4,091 individuals) to ask: does any real person actually carry this combination in cis?
+
+> **Concrete example (a phantom perfect match).** Mega ranks `chr11:90271152(+)` at **CFD = 1.0** by
+> assuming **13** ALT alleles all occur together in cis:
+> `chr11:90271153 A>G, 90271154 G>C, 90271155 G>T, 90271158 G>A, 90271159 G>A, 90271160 G>C,
+> 90271161 A>C, 90271162 G>T, 90271163 G>A, 90271164 G>T, 90271166 G>A, 90271168 G>A, 90271172 G>C`.
+> Each is individually rare; the odds that one haplotype carries **all 13** in a 23 bp stretch are
+> effectively nil — and indeed **no individual in the 4,091-sample phased panel carries this
+> combination**. A sites-only panel cannot know that, so it reports a perfect-match off-target that
+> does not exist. (`chr14:105864180` is the same story with 14 variants; the worst reaches 33.)
+
+We looked each mega putative up in the phased, genotyped panel (6,1,1 per-sample oracle, 3.62 M
+CONFIRMED-cis loci over 4,091 individuals) to ask: does any real person actually carry this
+combination in cis?
 
 Of mega's **228 distinct** putative top-1000 loci:
 
