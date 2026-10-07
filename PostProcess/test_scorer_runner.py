@@ -1,5 +1,7 @@
 """Unit tests for scorer_runner — exercises the real subprocess protocol against a
 FAKE worker (stdlib only, no TensorFlow), plus graceful-degradation paths."""
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -136,6 +138,24 @@ class TestRunnerProtocol(unittest.TestCase):
         scores = r.predict(["AA", "GG"], ["AA", "CC"])
         self.assertEqual(scores, [-1.0, -1.0])
         self.assertTrue(r.disabled)
+
+    def test_disable_banner_never_touches_stderr(self):
+        """The scorer-unavailable banner must not reach stderr.
+
+        The pipeline redirects stderr to log_error.txt and
+        submit_job_automated_new_multiple_vcfs.sh aborts after every stage on
+        `[ -s $logerror ]`, so a single byte there turns the documented
+        degrade-to-CFD-only fallback into a failed run. The banner still has to
+        be loud -- it just has to be loud on stdout.
+        """
+        r = self._runner(_GOOD_WORKER, env_python=None)
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            scores = r.predict(["AA"], ["AA"])
+        self.assertEqual(scores, [-1.0])
+        self.assertTrue(r.disabled)
+        self.assertEqual(err.getvalue(), "", "scorer fallback wrote to stderr -> pipeline would abort")
+        self.assertIn("UNAVAILABLE", out.getvalue())
 
     def test_bad_count_degrades(self):
         r = self._runner(_BADCOUNT_WORKER)

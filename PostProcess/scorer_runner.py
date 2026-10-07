@@ -71,9 +71,18 @@ class ScorerRunner:
         self._reason = reason
         if not self._warned:
             # LOUD + un-missable: a missing/broken scorer env silently degrading a
-            # search to CFD-only is exactly the bug this guards against. Emit a banner
-            # to BOTH stdout (shows in the console + the main run log) and stderr, not
-            # just a one-liner buried in log_error.
+            # search to CFD-only is exactly the bug this guards against. The banner
+            # goes to STDOUT, which the pipeline redirects to log_verbose.txt -- so it
+            # lands in the console AND the main run log.
+            #
+            # Deliberately NOT stderr. The pipeline redirects stderr to log_error.txt
+            # and submit_job_automated_new_multiple_vcfs.sh aborts the whole run after
+            # each stage on `[ -s $logerror ]` -- ANY stderr byte is treated as fatal.
+            # Post-analysis instantiates one runner per worker process, so a banner on
+            # stderr turned this graceful CFD-only fallback into "ERROR: off-targets
+            # post-analysis failed" + exit 1 for every source install without the
+            # scorer env. Degrading to CFD-only is documented, supported behaviour; it
+            # must not kill the run.
             banner = (
                 "\n" + "!" * 78 + "\n"
                 f"!! ML SCORER '{self.scorer}' UNAVAILABLE -> {self.scorer.upper()} SCORES WILL BE -1 (CFD only).\n"
@@ -81,7 +90,6 @@ class ScorerRunner:
                 "!! Fix: crisprme.py scorer-env create   (the official Docker image ships it pre-built).\n"
                 + "!" * 78 + "\n"
             )
-            sys.stderr.write(banner)
             try:
                 print(banner, flush=True)
             except Exception:  # noqa: BLE001
