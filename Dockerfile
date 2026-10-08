@@ -26,7 +26,7 @@ FROM mambaorg/micromamba
 
 LABEL org.opencontainers.image.authors="ManuelTgn, lucapinello"
 
-ARG crispritz_ref=v2.8.4
+ARG crispritz_ref=v2.9.0
 ENV SHELL=bash
 ENV PREFIX=/opt/conda
 # Quiet the noisy-but-harmless startup warnings so a clean copy-paste run shows no
@@ -72,7 +72,7 @@ RUN micromamba install -y -n base \
 
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
 
-# ---- Build crispritz 2.8.4 from source and install into the env ------------
+# ---- Build crispritz 2.9.0 from source and install into the env ------------
 RUN git clone --depth 1 --branch ${crispritz_ref} \
         https://github.com/pinellolab/CRISPRitz.git /opt/crispritz-src \
     && cd /opt/crispritz-src \
