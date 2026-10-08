@@ -1515,3 +1515,131 @@ class TestAssemblyCuratedColumns(unittest.TestCase):
         # not carried -> deliberately unmapped, so its curated column drops
         self.assertNotIn("cosmic", cols)
         self.assertNotIn("intogen", cols)
+
+
+@unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
+class TestAssemblyExtraColumns(unittest.TestCase):
+    """The assembly-only columns appended after the shared curated set."""
+
+    def test_they_are_not_in_the_shared_curated_set(self):
+        """CURATED_COLUMNS/_COLS are shared with complete-search: an entry there
+        would put these columns in a complete-search report as all-"-", which is
+        the bug this branch exists to remove."""
+        shared = {k for _h, k in gr.CURATED_COLUMNS}
+        for header, _pooled in gr._ASSEMBLY_EXTRA_COLS:
+            self.assertNotIn(header, {h for h, _k in gr.CURATED_COLUMNS})
+        self.assertNotIn("hap_origin", shared)
+        self.assertNotIn("Haplotype_origin", gr._COLS)
+
+    def test_haplotype_origin_is_not_the_vcf_origin_kind(self):
+        """partition_masks() reads the curated `origin` kind as REF/ALT
+        (`origin == "alt"`). The combined table's own "origin" means
+        both/paternal_only/maternal_only, so the two must stay separate."""
+        headers = {h for h, _p in gr._ASSEMBLY_EXTRA_COLS}
+        self.assertIn("Haplotype_origin", headers)
+        self.assertEqual(gr._COLS["origin"], ["REF/ALT_origin_(highest_CFD)", "REF/ALT_origin"])
+        self.assertIn("origin", gr._NO_VARIANT_KINDS)  # dropped for assembly runs
+
+    def test_orientation_collapse_agree_disagree_and_single_sided(self):
+        c = gr._collapse_haplotype_value
+        self.assertEqual(c("forward", "forward"), "forward")
+        self.assertEqual(c("reverse", "reverse"), "reverse")
+        # a real disagreement is REPORTED, not silently resolved to one side
+        self.assertEqual(c("forward", "reverse"), "forward/reverse")
+        # a one-sided site uses the side it has
+        self.assertEqual(c("reverse", None), "reverse")
+        self.assertEqual(c("", "forward"), "forward")
+        self.assertEqual(c(None, None), gr.CURATED_MISSING)
+
+    def test_orientation_is_words_not_plus_minus(self):
+        """"-" is CURATED_MISSING, so a reverse orientation reported as "-" is
+        indistinguishable from a row that has no orientation at all."""
+        self.assertEqual(gr._ORIENTATION_WORDS, {"+": "forward", "-": "reverse"})
+        self.assertNotEqual(gr._ORIENTATION_WORDS["-"], gr.CURATED_MISSING)
+
+    def test_lift_confidence_collapse_keeps_the_weaker_claim(self):
+        c = gr._collapse_lift_confidence
+        self.assertEqual(c("both_ends", "both_ends"), "both_ends")
+        # either side extrapolated => the row's coordinate is extrapolated
+        self.assertEqual(c("both_ends", "one_end"), "one_end")
+        self.assertEqual(c("one_end", "both_ends"), "one_end")
+        self.assertEqual(c("one_end", None), "one_end")
+        self.assertEqual(c(None, None), gr.CURATED_MISSING)
+
+    def _pooled(self, **overrides):
+        base = {
+            "hg38_chr": ["chr1", "chr2"],
+            "hg38_start": [100, 200],
+            "Spacer+PAM_paternal": ["ACGT" * 5 + "NGG"] * 2,
+            "Chromosome_paternal": ["ctgA", "ctgB"],
+            "Start_coordinate_(fewest_mm+b)_paternal": [10, 20],
+            "Strand_(fewest_mm+b)": ["+", "-"],
+            "Mismatches_(fewest_mm+b)_paternal": [1, 2],
+            "Bulges_(fewest_mm+b)_paternal": [0, 0],
+            "CFD_score_(fewest_mm+b)_paternal": [0.5, 0.2],
+            "Spacer+PAM_maternal": ["ACGT" * 5 + "NGG"] * 2,
+            "Chromosome_maternal": ["ctgA", "ctgB"],
+            "Start_coordinate_(fewest_mm+b)_maternal": [10, 20],
+            "Mismatches_(fewest_mm+b)_maternal": [1, 2],
+            "Bulges_(fewest_mm+b)_maternal": [0, 0],
+            "CFD_score_(fewest_mm+b)_maternal": [0.4, 0.9],
+            "origin": ["both", "both"],
+            "hg38_end_paternal": [123, 223],
+            "hg38_end_maternal": [124, 224],
+            "hg38_orientation_paternal": ["+", "+"],
+            "hg38_orientation_maternal": ["+", "-"],
+            "hg38_lift_confidence_paternal": ["both_ends", "both_ends"],
+            "hg38_lift_confidence_maternal": ["both_ends", "one_end"],
+            # float64, as pandas reads it from a real combined table (the column
+            # holds NaN for non-mappable rows, so the dtype is never integer)
+            "n_copies_paternal": [1.0, 2.0],
+            "n_copies_maternal": [1.0, 1.0],
+            "copy_loci_paternal": ["", "ctgA:10;ctgA:900"],
+            "copy_loci_maternal": ["", ""],
+        }
+        base.update(overrides)
+        return gr._pooled_validation_frame(pandas.DataFrame(base), {}, None)
+
+    def _curated(self, **overrides):
+        pooled, cols = self._pooled(**overrides)
+        return gr._curated_frame_with_category(
+            pooled, cols, False, pooled["_pv_category"], pooled_df=pooled
+        )
+
+    def test_haplotype_origin_reaches_the_curated_frame_verbatim(self):
+        frame = self._curated()
+        self.assertEqual(frame["Haplotype_origin"].tolist(), ["both", "both"])
+
+    def test_disagreeing_orientation_is_visible_in_the_curated_frame(self):
+        frame = self._curated()
+        self.assertEqual(frame["hg38_orientation"].tolist(), ["forward", "forward/reverse"])
+
+    def test_one_end_on_either_side_shows_in_the_curated_frame(self):
+        frame = self._curated()
+        self.assertEqual(frame["hg38_lift_confidence"].tolist(), ["both_ends", "one_end"])
+
+    def test_hg38_end_follows_the_haplotype_that_supplied_the_cfd(self):
+        """CFD is max(pat, mat), so the end must come from that same haplotype or
+        Position/hg38_end/CFD describe a mix of the two."""
+        frame = self._curated()
+        # row 0: paternal CFD 0.5 > maternal 0.4 -> paternal end 123
+        # row 1: maternal CFD 0.9 > paternal 0.2 -> maternal end 224
+        self.assertEqual(frame["hg38_end"].tolist(), ["123", "224"])
+
+    def test_n_copies_is_rendered_as_a_count_not_a_float(self):
+        """The source column is float64 (it holds NaN for non-mappable rows), so
+        without an explicit cast a copy count renders as "1.0"."""
+        frame = self._curated()
+        self.assertEqual(frame["n_copies_paternal"].tolist(), ["1", "2"])
+
+    def test_copy_loci_blank_where_single_copy_and_kept_where_multiple(self):
+        frame = self._curated()
+        self.assertEqual(frame["copy_loci_paternal"].tolist(),
+                         [gr.CURATED_MISSING, "ctgA:10;ctgA:900"])
+
+    def test_an_all_blank_extra_column_is_not_appended(self):
+        """copy_loci_maternal is empty on every row here; appending it would
+        reintroduce the all-"-" column this branch removes elsewhere."""
+        frame = self._curated()
+        self.assertNotIn("copy_loci_maternal", frame.columns)
+        self.assertIn("copy_loci_paternal", frame.columns)  # this one has a value
