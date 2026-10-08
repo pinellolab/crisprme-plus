@@ -148,9 +148,10 @@ def cluster_collapse(
     return df.drop(columns=["_cluster_id"]).reset_index(drop=True)
 
 
-# Two native loci of ONE haplotype closer than this are treated as one locus
-# seen twice (the 1-3bp bulge-registration drift documented in
-# `cluster_collapse`), not as two copies. Measured on HG01255: every real
+# Two native loci of ONE haplotype this far apart or closer are treated as one
+# locus seen twice (the 1-3bp bulge-registration drift documented in
+# `cluster_collapse`), not as two copies -- the comparison is `<=`, so exactly
+# 100bp apart is ONE locus and 101bp apart is two. Measured on HG01255: every real
 # same-hg38-locus collision was either on a different native contig or more
 # than 100bp away, so this threshold separates the two cases cleanly.
 DISTINCT_COPY_BP = 100
