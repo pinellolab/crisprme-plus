@@ -790,9 +790,20 @@ def resolve_lifted_endpoints(
         (lifted_df[hg38_chr, hg38_start, hg38_end, off_target_id,
         hg38_orientation, hg38_lift_confidence], non_mappable_ids, counts).
     """
-    raw = pd.read_csv(mapped_path, sep="\t", header=None,
-                      names=["hg38_chr", "s", "e", "name", "score", "strand"], dtype={"name": str})
-    raw[["off_target_id", "end"]] = raw["name"].str.rsplit("|", n=1, expand=True)
+    cols = ["hg38_chr", "s", "e", "name", "score", "strand"]
+    try:
+        raw = pd.read_csv(mapped_path, sep="\t", header=None, names=cols, dtype={"name": str})
+    except pd.errors.EmptyDataError:
+        raw = pd.DataFrame(columns=cols)
+    # a haplotype where liftOver mapped NOTHING leaves an empty file; the
+    # str.rsplit(expand=True) below yields no columns at all for it, so every
+    # site has to be routed down the "neither end lifted" branch instead --
+    # otherwise this raises before check_liftover_failure_rate gets to report
+    # the actual problem
+    if raw.empty:
+        raw = pd.DataFrame(columns=cols + ["off_target_id", "end"])
+    else:
+        raw[["off_target_id", "end"]] = raw["name"].str.rsplit("|", n=1, expand=True)
     first = raw[raw["end"] == "first"].set_index("off_target_id")
     last = raw[raw["end"] == "last"].set_index("off_target_id")
     p = preds.assign(off_target_id=preds["off_target_id"].astype(str)).set_index("off_target_id")

@@ -27,6 +27,7 @@ flipping, which is what ``resolve_lifted_endpoints`` reads orientation from.
 """
 
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -1997,3 +1998,770 @@ class TestReconcileHaplotypesWithDirectAlignment(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestResolveLiftedEndpoints(unittest.TestCase):
+    """Turning a site's two lifted end bases into one hg38 locus, orientation
+    and confidence flag.
+
+    This is where the three coordinate bugs were: a single lifted point had no
+    orientation (so a reverse-oriented site reported its hg38 END, with the
+    haplotype's strand rather than hg38's) and no way to tell that a site
+    straddled a rearrangement.
+    """
+
+    L = 23
+
+    def _preds(self, ids, chrom="chr1", start=1000):
+        return pd.DataFrame([
+            {"off_target_id": i, "Chromosome": chrom,
+             "Start_coordinate_(fewest_mm+b)": start,
+             "Aligned_protospacer+PAM_REF_(fewest_mm+b)": "A" * self.L}
+            for i in ids
+        ])
+
+    def _resolve(self, ends, preds=None, alias=None):
+        """ends: list of (off_target_id, which, chrom, start, strand) BED6 rows
+        as liftOver would have written them."""
+        preds = self._preds(["0"]) if preds is None else preds
+        alias = {"chr1": "CM000001.1"} if alias is None else alias
+        with tempfile.TemporaryDirectory() as d:
+            mapped = os.path.join(d, "lifted.bed")
+            with open(mapped, "w") as f:
+                for oid, which, chrom, start, strand in ends:
+                    f.write(f"{chrom}\t{start}\t{start + 1}\t{oid}|{which}\t0\t{strand}\n")
+            return ar.resolve_lifted_endpoints(mapped, preds, alias, "unused.chain", d, "paternal")
+
+    def test_forward_block_keeps_strand_and_spans_both_ends(self):
+        lifted, nonmap, counts = self._resolve([
+            ("0", "first", "chr1", 50000, "+"),
+            ("0", "last", "chr1", 50022, "+"),
+        ])
+        self.assertEqual(nonmap, set())
+        self.assertEqual(counts["forward"], 1)
+        row = lifted.iloc[0]
+        self.assertEqual(row["hg38_start"], 50000)
+        # hg38_end is the real end of the site, not hg38_start + 1
+        self.assertEqual(row["hg38_end"], 50023)
+        self.assertEqual(row["hg38_end"] - row["hg38_start"], self.L)
+        self.assertEqual(row["hg38_orientation"], "+")
+        self.assertEqual(row["hg38_lift_confidence"], ar.LIFT_BOTH_ENDS)
+
+    def test_reverse_block_anchors_on_the_last_base_and_flips_orientation(self):
+        # the site's FIRST native base lands on its HIGHEST hg38 base here, so
+        # a one-point lift at the first base reported the site's hg38 END --
+        # 22bp away, with the wrong strand
+        lifted, nonmap, counts = self._resolve([
+            ("0", "first", "chr1", 50022, "-"),
+            ("0", "last", "chr1", 50000, "-"),
+        ])
+        self.assertEqual(nonmap, set())
+        self.assertEqual(counts["reverse"], 1)
+        row = lifted.iloc[0]
+        self.assertEqual(row["hg38_start"], 50000)
+        self.assertEqual(row["hg38_end"], 50023)
+        self.assertEqual(row["hg38_orientation"], "-")
+        self.assertEqual(row["hg38_lift_confidence"], ar.LIFT_BOTH_ENDS)
+
+    def test_ends_in_differently_oriented_blocks_are_non_mappable(self):
+        # a site straddling an inversion breakpoint. Its two ends are close
+        # together on the same chromosome, so a distance-only rule would have
+        # accepted it and placed it as an ordinary forward site.
+        lifted, nonmap, counts = self._resolve([
+            ("0", "first", "chr1", 50000, "+"),
+            ("0", "last", "chr1", 51000, "-"),
+        ])
+        self.assertEqual(nonmap, {"0"})
+        self.assertEqual(counts["ends_inconsistent"], 1)
+        self.assertTrue(lifted.empty)
+
+    def test_ends_on_different_chromosomes_are_non_mappable(self):
+        lifted, nonmap, counts = self._resolve([
+            ("0", "first", "chr1", 50000, "+"),
+            ("0", "last", "chr7", 50022, "+"),
+        ])
+        self.assertEqual(nonmap, {"0"})
+        self.assertEqual(counts["ends_inconsistent"], 1)
+
+    def test_ends_in_inconsistent_order_for_their_orientation_are_non_mappable(self):
+        # forward block, but the last base lifted BELOW the first: the two ends
+        # cannot both belong to one forward-oriented copy of this site
+        lifted, nonmap, counts = self._resolve([
+            ("0", "first", "chr1", 50022, "+"),
+            ("0", "last", "chr1", 50000, "+"),
+        ])
+        self.assertEqual(nonmap, {"0"})
+        self.assertEqual(counts["ends_inconsistent"], 1)
+
+    def test_ends_further_apart_than_the_backstop_are_non_mappable(self):
+        lifted, nonmap, counts = self._resolve([
+            ("0", "first", "chr1", 50000, "+"),
+            ("0", "last", "chr1", 50000 + ar.MAX_LIFTED_SPAN_BP + 1, "+"),
+        ])
+        self.assertEqual(nonmap, {"0"})
+        self.assertEqual(counts["ends_inconsistent"], 1)
+
+    def test_span_within_the_backstop_is_kept(self):
+        # a site spanning a deletion legitimately covers more hg38 bases than
+        # its own length (largest real case measured: 325bp), so the backstop
+        # must not filter those out
+        lifted, nonmap, counts = self._resolve([
+            ("0", "first", "chr1", 50000, "+"),
+            ("0", "last", "chr1", 50325, "+"),
+        ])
+        self.assertEqual(nonmap, set())
+        self.assertEqual(lifted.iloc[0]["hg38_end"], 50326)
+
+    def test_only_first_end_lifted_forward_anchors_at_that_end(self):
+        lifted, nonmap, counts = self._resolve([("0", "first", "chr1", 50000, "+")])
+        self.assertEqual(nonmap, set())
+        self.assertEqual(counts["one_end"], 1)
+        row = lifted.iloc[0]
+        self.assertEqual((row["hg38_start"], row["hg38_end"]), (50000, 50023))
+        self.assertEqual(row["hg38_orientation"], "+")
+        # flagged in its OWN column -- hg38_orientation stays a bare strand so
+        # downstream code can compare it without parsing a marker out of it
+        self.assertEqual(row["hg38_lift_confidence"], ar.LIFT_ONE_END)
+
+    def test_only_last_end_lifted_forward_extends_backwards(self):
+        lifted, _, counts = self._resolve([("0", "last", "chr1", 50022, "+")])
+        self.assertEqual(counts["one_end"], 1)
+        row = lifted.iloc[0]
+        self.assertEqual((row["hg38_start"], row["hg38_end"]), (50000, 50023))
+        self.assertEqual(row["hg38_orientation"], "+")
+
+    def test_only_first_end_lifted_reverse_extends_backwards(self):
+        # in a reversed block the site's first native base is its highest hg38
+        # base, so the span runs DOWN from the lifted point
+        lifted, _, counts = self._resolve([("0", "first", "chr1", 50022, "-")])
+        self.assertEqual(counts["one_end"], 1)
+        row = lifted.iloc[0]
+        self.assertEqual((row["hg38_start"], row["hg38_end"]), (50000, 50023))
+        self.assertEqual(row["hg38_orientation"], "-")
+
+    def test_only_last_end_lifted_reverse_anchors_at_that_end(self):
+        lifted, _, counts = self._resolve([("0", "last", "chr1", 50000, "-")])
+        self.assertEqual(counts["one_end"], 1)
+        row = lifted.iloc[0]
+        self.assertEqual((row["hg38_start"], row["hg38_end"]), (50000, 50023))
+        self.assertEqual(row["hg38_orientation"], "-")
+
+    def test_neither_end_lifted_is_non_mappable(self):
+        lifted, nonmap, counts = self._resolve([])
+        self.assertEqual(nonmap, {"0"})
+        self.assertEqual(counts["neither"], 1)
+
+    def test_site_without_a_chrom_alias_entry_is_not_double_counted(self):
+        # these are already accounted for by build_offtarget_bed's dropped_ids;
+        # counting them again here would inflate the non-mappable total
+        preds = self._preds(["0"], chrom="chrUn_unknown")
+        lifted, nonmap, counts = self._resolve([], preds=preds)
+        self.assertEqual(nonmap, set())
+        self.assertEqual(counts["neither"], 0)
+        self.assertTrue(lifted.empty)
+
+
+class TestWriteSiteLevelNotLifted(unittest.TestCase):
+    def test_one_row_per_non_mappable_site(self):
+        # liftOver's own reject file now holds up to TWO rows per site (one per
+        # end) and mixes partly-lifted sites in with wholly-unmappable ones.
+        # pages/results_page.py:load_unlifted_ids and the assembly panel figure
+        # both count rows as sites, so this file has to stay one row per site.
+        preds = pd.DataFrame([
+            {"off_target_id": i, "Chromosome": "chr1",
+             "Start_coordinate_(fewest_mm+b)": pos,
+             "Aligned_protospacer+PAM_REF_(fewest_mm+b)": "A" * 23}
+            for i, pos in (("0", 1000), ("1", 2000), ("2", 3000))
+        ])
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "not_lifted.bed")
+            ar.write_site_level_not_lifted(path, preds, {"chr1": "CM000001.1"}, {"0", "2"})
+            with open(path) as f:
+                text = f.read()
+            self.assertEqual(ar.load_unlifted_ids(path), {"0", "2"})
+        bed_rows = [l for l in text.splitlines() if not l.startswith("#")]
+        self.assertEqual(len(bed_rows), 2)
+        self.assertEqual(bed_rows[0].split("\t")[:2], ["CM000001.1", "1000"])
+
+
+class TestCollisionTieBreak(unittest.TestCase):
+    """Several native loci of ONE haplotype can map to a single hg38 site -- a
+    duplication that individual carries in more copies than hg38 has. The
+    report keeps one row per hg38 site, so which copy survives has to be
+    decided, not left to incoming row order.
+    """
+
+    def _rows(self, specs):
+        """specs: list of (native_start, mmb, cfd)."""
+        return pd.DataFrame([
+            {"hg38_chr": "chr1", "hg38_start": 50000, "Strand_(fewest_mm+b)": "+",
+             "Chromosome": "chr1", "Start_coordinate_(fewest_mm+b)": s,
+             "_mmb": m, "_cfd": c}
+            for s, m, c in specs
+        ])
+
+    def _collapse(self, df):
+        return ar.cluster_collapse(
+            df, "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start", "_mmb", 3,
+            ascending=True,
+            tiebreak_cols=[("_cfd", False), ("Chromosome", True),
+                           ("Start_coordinate_(fewest_mm+b)", True)],
+        )
+
+    def test_fewest_mismatches_and_bulges_still_wins_first(self):
+        out = self._collapse(self._rows([(1000, 6, 0.9), (2000, 4, 0.1)]))
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out.iloc[0]["Start_coordinate_(fewest_mm+b)"], 2000)
+
+    def test_highest_cfd_breaks_an_mmb_tie(self):
+        # the pre-existing collapse took whichever row the position sort left
+        # first, which could silently drop the higher-scoring copy
+        for specs in ([(1000, 5, 0.1), (2000, 5, 0.9)], [(1000, 5, 0.9), (2000, 5, 0.1)]):
+            out = self._collapse(self._rows(specs))
+            self.assertEqual(len(out), 1)
+            self.assertAlmostEqual(out.iloc[0]["_cfd"], 0.9)
+
+    def test_all_scores_tied_resolves_deterministically_regardless_of_row_order(self):
+        # the measured common case: 90 of 95 real collisions had copies with an
+        # identical protospacer+PAM, so every score ties and nothing biological
+        # can choose. The pick must still be the same every run.
+        specs = [(1000, 5, 0.25), (2000, 5, 0.25), (3000, 5, 0.25)]
+        picks = set()
+        for order in (specs, list(reversed(specs)), [specs[1], specs[2], specs[0]]):
+            out = self._collapse(self._rows(order))
+            self.assertEqual(len(out), 1)
+            picks.add(int(out.iloc[0]["Start_coordinate_(fewest_mm+b)"]))
+        self.assertEqual(picks, {1000})
+
+    def test_tiebreak_is_opt_in_and_does_not_change_other_call_sites(self):
+        df = pd.DataFrame({
+            "chrom": ["chr1", "chr1"], "strand": ["+", "+"],
+            "pos": [100, 101], "score": [0.5, 0.9],
+        })
+        out = ar.cluster_collapse(df, "chrom", "strand", "pos", "score", merge_bp=3)
+        self.assertEqual(len(out), 1)
+        self.assertAlmostEqual(out.iloc[0]["score"], 0.9)
+
+
+class TestAddCopyAnnotations(unittest.TestCase):
+    def _rows(self, specs):
+        """specs: list of (hg38_start, native_chrom, native_start)."""
+        return pd.DataFrame([
+            {"hg38_chr": "chr1", "hg38_start": h, "Strand_(fewest_mm+b)": "+",
+             "Chromosome": c, "Start_coordinate_(fewest_mm+b)": s}
+            for h, c, s in specs
+        ])
+
+    def test_single_locus_reports_one_copy_and_no_locus_list(self):
+        out = ar.add_copy_annotations(
+            self._rows([(50000, "chr1", 1000)]),
+            "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start", 3,
+        )
+        self.assertEqual(out.iloc[0]["n_copies"], 1)
+        # blank, not "." or "1": the native coordinate columns already name
+        # that single locus, so repeating it in every row adds nothing
+        self.assertEqual(out.iloc[0]["copy_loci"], "")
+
+    def test_two_native_loci_on_one_hg38_site_are_both_listed(self):
+        out = ar.add_copy_annotations(
+            self._rows([(50000, "chr1", 1000), (50000, "chr1", 9000)]),
+            "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start", 3,
+        )
+        self.assertEqual(set(out["n_copies"]), {2})
+        self.assertEqual(set(out["copy_loci"]), {"chr1:1000;chr1:9000"})
+
+    def test_copies_on_different_native_contigs_are_counted(self):
+        out = ar.add_copy_annotations(
+            self._rows([(50000, "chr1", 1000), (50000, "chr1_random", 1000)]),
+            "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start", 3,
+        )
+        self.assertEqual(set(out["n_copies"]), {2})
+
+    def test_near_duplicate_native_rows_are_one_locus_not_two_copies(self):
+        # the 1-3bp bulge-registration drift documented on cluster_collapse is
+        # one locus counted twice, not a duplication
+        out = ar.add_copy_annotations(
+            self._rows([(50000, "chr1", 1000), (50000, "chr1", 1002)]),
+            "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start", 3,
+        )
+        self.assertEqual(set(out["n_copies"]), {1})
+        self.assertEqual(set(out["copy_loci"]), {""})
+
+    def test_separate_hg38_sites_do_not_pool_their_copies(self):
+        out = ar.add_copy_annotations(
+            self._rows([(50000, "chr1", 1000), (90000, "chr1", 9000)]),
+            "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start", 3,
+        )
+        self.assertEqual(sorted(out["n_copies"]), [1, 1])
+
+    def test_empty_frame_keeps_the_columns(self):
+        empty = self._rows([]).iloc[0:0]
+        out = ar.add_copy_annotations(
+            empty, "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start", 3,
+        )
+        self.assertIn("n_copies", out.columns)
+        self.assertIn("copy_loci", out.columns)
+
+
+def _revcomp(s):
+    return s[::-1].translate(str.maketrans("ACGT", "TGCA"))
+
+
+_FLIP = {"+": "-", "-": "+"}
+
+
+@unittest.skipUnless(shutil.which("liftOver"), "liftOver not on PATH")
+class TestLiftOverAgainstConstructedTruth(unittest.TestCase):
+    """End-to-end against the REAL liftOver binary and a chain file generated
+    from a toy genome rearrangement, so the right answer for every site is
+    known by construction rather than taken from any other tool's output.
+
+    Reference R (3,000bp random); haplotype H built from it as:
+        H[0:1000)     = R[0:1000)                forward
+        H[1000:2000)  = revcomp(R[1000:2000))    1kb INVERSION
+        H[2000:2200)  = R[2000:2200)             forward
+        (R[2200:2205) deleted in H)              5bp DELETION
+        H[2200:2700)  = R[2205:2705)             forward
+        H[2700:2730)  = 30 random bases          haplotype-only INSERTION
+        H[2730:3025)  = R[2705:3000)             forward
+    """
+
+    L = 23
+
+    @classmethod
+    def setUpClass(cls):
+        import random
+        rng = random.Random(42)
+        cls.R = "".join(rng.choice("ACGT") for _ in range(3000))
+        bases, cls.M = [], []  # H sequence, and per-base (R position or None, orientation)
+
+        def add_fwd(a, b):
+            for k in range(a, b):
+                bases.append(cls.R[k]); cls.M.append((k, "+"))
+
+        def add_rev(a, b):
+            for k in range(b - 1, a - 1, -1):
+                bases.append(_revcomp(cls.R[k])); cls.M.append((k, "-"))
+
+        add_fwd(0, 1000); add_rev(1000, 2000); add_fwd(2000, 2200); add_fwd(2205, 2705)
+        for _ in range(30):
+            bases.append(rng.choice("ACGT")); cls.M.append((None, None))
+        add_fwd(2705, 3000)
+        cls.H = "".join(bases)
+        assert len(cls.H) == 3025
+
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        cls.chain = os.path.join(cls._tmpdir.name, "toy.chain")
+        with open(cls.chain, "w") as f:
+            f.write(cls._chain_text("+", 1) + cls._chain_text("-", 2))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmpdir.cleanup()
+
+    @classmethod
+    def _blocks(cls, orient):
+        out, cur = [], None
+        for t, (q, o) in enumerate(cls.M):
+            if o != orient:
+                cur = None
+                continue
+            # a '-' chain expresses q coordinates on the reverse strand
+            qq = q if orient == "+" else (3000 - 1 - q)
+            if cur and t == cur[1] and qq == cur[3]:
+                cur[1] += 1; cur[3] += 1
+            else:
+                cur = [t, t + 1, qq, qq + 1]; out.append(cur)
+        return out
+
+    @classmethod
+    def _chain_text(cls, orient, cid):
+        b = cls._blocks(orient)
+        lines = [f"chain 1000 HAP1 {len(cls.H)} + {b[0][0]} {b[-1][1]} "
+                 f"refchr 3000 {orient} {b[0][2]} {b[-1][3]} {cid}"]
+        for i, (t0, t1, q0, q1) in enumerate(b):
+            if i + 1 < len(b):
+                lines.append(f"{t1 - t0}\t{b[i + 1][0] - t1}\t{b[i + 1][2] - q1}")
+            else:
+                lines.append(f"{t1 - t0}")
+        return "\n".join(lines) + "\n\n"
+
+    # name, H start, strand, expectation
+    SITES = [
+        ("forward region, + strand", 300, "+", "exact"),
+        ("forward region, - strand", 500, "-", "exact"),
+        ("inside the inversion, + strand", 1400, "+", "exact"),
+        ("inside the inversion, - strand", 1450, "-", "exact"),
+        ("ends exactly at the inversion start", 977, "+", "exact"),
+        ("starts exactly at the inversion start", 1000, "+", "exact"),
+        ("straddles the inversion start", 990, "+", "unmappable"),
+        ("straddles the inversion end", 1990, "-", "unmappable"),
+        ("spans the 5bp deletion", 2190, "+", "exact"),
+        ("straddles the insertion start", 2690, "+", "one_end"),
+    ]
+
+    def _truth(self, S, strand):
+        """The hg38 answer implied by the construction: (start, strand), or
+        'UNMAPPABLE' for a site whose bases are not all one orientation, or
+        None for a site partly inside the haplotype-only insertion."""
+        spans = [self.M[k] for k in range(S, S + self.L)]
+        if any(q is None for q, _ in spans):
+            return None
+        orients = {o for _, o in spans}
+        if len(orients) > 1:
+            return "UNMAPPABLE"
+        return (min(q for q, _ in spans), strand if orients == {"+"} else _FLIP[strand])
+
+    def _resolve_all(self):
+        preds = pd.DataFrame({
+            "Chromosome": "hap1",
+            "Start_coordinate_(fewest_mm+b)": [s for _, s, _, _ in self.SITES],
+            "Strand_(fewest_mm+b)": [st for _, _, st, _ in self.SITES],
+            "Aligned_protospacer+PAM_REF_(fewest_mm+b)": [
+                self.H[s:s + self.L] if st == "+" else _revcomp(self.H[s:s + self.L])
+                for _, s, st, _ in self.SITES
+            ],
+            "off_target_id": [str(i) for i in range(len(self.SITES))],
+        })
+        alias = {"hap1": "HAP1"}
+        with tempfile.TemporaryDirectory() as d:
+            bed = os.path.join(d, "ends.bed")
+            ar.build_offtarget_bed(preds, alias, bed)
+            mapped, unmapped = os.path.join(d, "m.bed"), os.path.join(d, "u.bed")
+            ar.run_liftover(bed, self.chain, mapped, unmapped)
+            lifted, nonmap, counts = ar.resolve_lifted_endpoints(
+                mapped, preds, alias, self.chain, d, "toy",
+            )
+        return preds, lifted.set_index("off_target_id"), nonmap, counts
+
+    def test_every_constructed_site_resolves_as_the_construction_implies(self):
+        _, lifted, nonmap, _ = self._resolve_all()
+        for i, (name, S, strand, expectation) in enumerate(self.SITES):
+            oid = str(i)
+            with self.subTest(site=name):
+                if expectation == "unmappable":
+                    self.assertIn(oid, nonmap)
+                    self.assertNotIn(oid, lifted.index)
+                    continue
+                self.assertIn(oid, lifted.index)
+                row = lifted.loc[oid]
+                if expectation == "one_end":
+                    # partly inside the haplotype-only insertion: kept, but
+                    # explicitly marked rather than passed off as a full lift
+                    self.assertEqual(row["hg38_lift_confidence"], ar.LIFT_ONE_END)
+                    continue
+                truth_start, truth_strand = self._truth(S, strand)
+                self.assertEqual(int(row["hg38_start"]), truth_start)
+                reported = (_FLIP[strand] if row["hg38_orientation"] == "-" else strand)
+                self.assertEqual(reported, truth_strand)
+                self.assertEqual(row["hg38_lift_confidence"], ar.LIFT_BOTH_ENDS)
+
+    def test_reported_hg38_sequence_is_the_haplotype_site(self):
+        # the check the real dry run made on every mapped site: read hg38 at
+        # the reported start and strand and compare to the haplotype's own
+        # site. The 1bp offset alone made this fail for essentially every site.
+        _, lifted, _, _ = self._resolve_all()
+        checked = 0
+        for i, (name, S, strand, expectation) in enumerate(self.SITES):
+            if expectation != "exact" or "deletion" in name:
+                continue  # a site spanning a deletion covers more hg38 bases than its own length
+            row = lifted.loc[str(i)]
+            start = int(row["hg38_start"])
+            window = self.R[start:start + self.L]
+            site = self.H[S:S + self.L]
+            expected = site if row["hg38_orientation"] == "+" else _revcomp(site)
+            with self.subTest(site=name):
+                self.assertEqual(window, expected)
+            checked += 1
+        self.assertGreaterEqual(checked, 5)
+
+    def test_both_inversion_breakpoint_sites_are_refused(self):
+        # the specific failure a distance-only span rule would have let
+        # through: ends ~1kb apart on the same chromosome look like an
+        # ordinary forward site unless their orientations are compared
+        _, lifted, nonmap, counts = self._resolve_all()
+        self.assertEqual(counts["ends_inconsistent"], 2)
+
+    def test_inversion_sites_are_reported_as_reverse_oriented(self):
+        _, lifted, _, counts = self._resolve_all()
+        self.assertEqual(counts["reverse"], 3)  # the two interior sites + the one starting at the breakpoint
+
+
+@unittest.skipUnless(shutil.which("minimap2") and shutil.which("impg"),
+                     "minimap2/impg not on PATH")
+class TestImpgPairingAgainstConstructedTruth(unittest.TestCase):
+    """End-to-end against REAL minimap2 and impg on toy haplotypes, built
+    through the pipeline's own alignment function, with truth by construction.
+
+    Hap A (paternal, chr1): 40kb random.
+    Hap B (maternal, chr1) built from A:
+        B[0:10000)      = A[0:10000)                forward
+        B[10000:15000)  = revcomp(A[10000:15000))   5kb INVERSION
+        B[15000:40000)  = A[15000:40000)            forward
+    plus ~1% scattered SNPs kept >=60bp away from every test site, so the two
+    haplotypes are realistically different rather than identical.
+    """
+
+    L = 23
+
+    @classmethod
+    def setUpClass(cls):
+        import random
+        rng = random.Random(7)
+        cls.A = "".join(rng.choice("ACGT") for _ in range(40000))
+        bases, cls.M = [], []
+
+        def fwd(a, b):
+            for k in range(a, b):
+                bases.append(cls.A[k]); cls.M.append((k, "+"))
+
+        def rev(a, b):
+            for k in range(b - 1, a - 1, -1):
+                bases.append(_revcomp(cls.A[k])); cls.M.append((k, "-"))
+
+        fwd(0, 10000); rev(10000, 15000); fwd(15000, 40000)
+
+        cls.CASES = []
+        for name, s, st, exp in [
+            ("forward region, + strand", 3000, "+", "pair"),
+            ("forward region, - strand", 30500, "-", "pair"),
+            ("inside the inversion, + strand", 12000, "+", "pair"),
+            ("inside the inversion, - strand", 13500, "-", "pair"),
+            ("near the contig start", 10, "+", "pair"),
+            ("near the contig end", 39970, "+", "pair"),
+        ]:
+            cls.CASES.append((name, s, st, cls._b_site(cls, s, st), exp))
+        # a decoy at the position a midpoint-centred query would land on, on
+        # the strand a reversed block rules out, with the true partner absent
+        for name, s, st in [("wrong-strand decoy inside the inversion", 14000, "+")]:
+            naive = [i for i, (p, _) in enumerate(cls.M) if p == s - 1][0]
+            cls.CASES.append((name, s, st, [(naive, st)], "no_pair"))
+
+        protect = set()
+        for _, s, _, bsites, _ in cls.CASES:
+            for k in range(s - 60, s + cls.L + 60):
+                protect.update(i for i, (p, _) in enumerate(cls.M) if p == k)
+            for b0, _ in bsites:
+                protect.update(range(b0 - 60, b0 + cls.L + 60))
+        for i in range(len(bases)):
+            if i not in protect and rng.random() < 0.01:
+                bases[i] = rng.choice([x for x in "ACGT" if x != bases[i]])
+        cls.B = "".join(bases)
+
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        tmp = cls._tmpdir.name
+        gdir = {}
+        for hap, seq in (("paternal", cls.A), ("maternal", cls.B)):
+            gdir[hap] = os.path.join(tmp, hap)
+            os.makedirs(gdir[hap])
+            with open(os.path.join(gdir[hap], "chr1.fa"), "w") as f:
+                f.write(">chr1\n" + "\n".join(seq[i:i + 60] for i in range(0, len(seq), 60)) + "\n")
+        cls.paf_pat, cls.paf_mat = ar.build_or_reuse_haplotype_alignments_both_orientations(
+            gdir["paternal"], gdir["maternal"], "paternal", "maternal",
+            os.path.join(tmp, "haplotype_alignments"), threads=2,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmpdir.cleanup()
+
+    def _b_site(cls, a_start, a_strand):
+        """B coordinates (and strand) of the SAME site as A[a_start]."""
+        first = [i for i, (p, _) in enumerate(cls.M) if p == a_start]
+        last = [i for i, (p, _) in enumerate(cls.M) if p == a_start + cls.L - 1]
+        out = []
+        for x, y in zip(first, last):
+            orient = cls.M[x][1]
+            out.append((min(x, y), a_strand if orient == "+" else _FLIP[a_strand]))
+        return out
+
+    def _frame(self, rows):
+        return pd.DataFrame({
+            "Spacer+PAM": "GAAACAGTCGATTTTATCACNNN", "Chromosome": "chr1",
+            "Start_coordinate_(fewest_mm+b)": [r[1] for r in rows],
+            "Strand_(fewest_mm+b)": [r[2] for r in rows],
+            "Aligned_spacer+PAM_(fewest_mm+b)": "GAAACAGTCGATTTTATCACNNN",
+            "Aligned_protospacer+PAM_REF_(fewest_mm+b)": [r[3] for r in rows],
+            "Aligned_protospacer+PAM_ALT_(fewest_mm+b)": "",
+            "Mismatches_(fewest_mm+b)": 4, "Bulges_(fewest_mm+b)": 0,
+            "CFD_score_(fewest_mm+b)": 0.1,
+            "off_target_id": [r[0] for r in rows],
+        })
+
+    def _run(self):
+        def seq_of(seq, s, st):
+            return seq[s:s + self.L] if st == "+" else _revcomp(seq[s:s + self.L])
+        rows = {"paternal": [], "maternal": []}
+        expected_pairs, no_pair_ids = set(), set()
+        for ci, (name, s, st, bsites, exp) in enumerate(self.CASES):
+            aid = f"A{ci}"
+            rows["paternal"].append((aid, s, st, seq_of(self.A, s, st)))
+            if exp == "no_pair":
+                no_pair_ids.add(aid)
+            for k, (b0, bst) in enumerate(bsites):
+                bid = f"B{ci}_{k}"
+                rows["maternal"].append((bid, b0, bst, seq_of(self.B, b0, bst)))
+                if exp == "pair":
+                    expected_pairs.add((aid, bid))
+        preds = {h: self._frame(rows[h]) for h in rows}
+        unlifted = {h: set(preds[h]["off_target_id"]) for h in preds}
+        resolved, _ = ar.resolve_haplotype_private_bidirectional(
+            unlifted, preds, self.paf_pat, self.paf_mat, ["paternal", "maternal"], 3,
+        )
+        got = (set(zip(resolved["off_target_id_paternal"], resolved["off_target_id_maternal"]))
+               if len(resolved) else set())
+        return got, expected_pairs, no_pair_ids
+
+    def test_minimap2_emits_the_inversion_as_a_reverse_record(self):
+        # the premise of the whole orientation fix: the aligner really does
+        # report an inverted segment as a '-' record, with no tuning
+        strands = set()
+        for paf in (self.paf_pat, self.paf_mat):
+            with open(paf) as f:
+                for line in f:
+                    strands.add(line.split("\t")[4])
+        self.assertIn("-", strands)
+
+    def test_every_constructed_pair_is_found_including_the_inverted_ones(self):
+        got, expected, _ = self._run()
+        self.assertEqual(expected - got, set(),
+                         "constructed pairs the reconciliation failed to find")
+
+    def test_wrong_strand_decoy_is_not_paired(self):
+        got, _, no_pair_ids = self._run()
+        paired_a = {a for a, _ in got}
+        self.assertEqual(paired_a & no_pair_ids, set(),
+                         "paired a candidate the block's orientation rules out")
+
+    def test_sites_at_both_contig_edges_do_not_abort_the_run(self):
+        # a private site within ~50bp of either contig edge used to raise
+        # RuntimeError("impg query failed") and take the whole reconciliation
+        # down with it: at the start the padded window was under impg's 101bp
+        # minimum, at the end it ran past the sequence
+        got, expected, _ = self._run()  # would raise, not fail, if unguarded
+        edge_pairs = {p for p in expected if p[0] in {f"A{ci}" for ci, c in enumerate(self.CASES)
+                                                     if "contig" in c[0]}}
+        self.assertTrue(edge_pairs)
+        self.assertEqual(edge_pairs - got, set())
+
+
+class TestReconcileOutputColumns(unittest.TestCase):
+    """reconcile_haplotypes end-to-end: the columns the report and the web
+    tables read, and the one case a single-point lift could never get right."""
+
+    L = 23
+
+    def _results(self, tmpdir, name, rows):
+        results_dir = os.path.join(tmpdir, f"{name}_results")
+        os.makedirs(results_dir, exist_ok=True)
+        pd.DataFrame(rows, columns=ar.PRED_COLS).to_csv(
+            os.path.join(results_dir, f"guide_PAM_{name}_mm4_bMax2_integrated_results.tsv"),
+            sep="\t", index=False,
+        )
+        return results_dir
+
+    def _alias(self, tmpdir, name):
+        path = os.path.join(tmpdir, f"{name}.chromAlias.txt")
+        with open(path, "w") as f:
+            f.write("# assembly\tucsc\tgenbank\nchr1_asm\tchr1\tCM000001.1\n")
+        return path
+
+    def _row(self, pos, cfd=0.5, strand="+", mm=0):
+        return {
+            "Spacer+PAM": "A" * self.L, "Chromosome": "chr1",
+            "Start_coordinate_(fewest_mm+b)": pos, "Strand_(fewest_mm+b)": strand,
+            "Aligned_spacer+PAM_(fewest_mm+b)": "A" * self.L,
+            "Aligned_protospacer+PAM_REF_(fewest_mm+b)": "A" * self.L,
+            "Aligned_protospacer+PAM_ALT_(fewest_mm+b)": "A" * self.L,
+            "Mismatches_(fewest_mm+b)": mm, "Bulges_(fewest_mm+b)": 0,
+            "CFD_score_(fewest_mm+b)": cfd,
+        }
+
+    def _haplotypes(self, tmpdir, pat_rows, mat_rows):
+        return {
+            "paternal": {"chrom_alias_file": self._alias(tmpdir, "paternal"),
+                         "chain_file": "unused.chain",
+                         "results_dir": self._results(tmpdir, "paternal", pat_rows)},
+            "maternal": {"chrom_alias_file": self._alias(tmpdir, "maternal"),
+                         "chain_file": "unused.chain",
+                         "results_dir": self._results(tmpdir, "maternal", mat_rows)},
+        }
+
+    def test_one_reversed_and_one_forward_copy_of_a_site_become_one_both_row(self):
+        # The regression a single-point lift cannot pass. The same physical
+        # locus reads on opposite strands in the two haplotypes' own
+        # coordinates because one haplotype aligns to hg38 reversed there.
+        # Unless the reversed side's placement and strand are both corrected,
+        # the two never match and one real shared site is reported twice, as
+        # paternal_only plus maternal_only.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            haplotypes = self._haplotypes(
+                tmpdir,
+                [self._row(1000, strand="+"), self._row(5000), self._row(9000)],
+                [self._row(1000, strand="-"), self._row(5000), self._row(9000)],
+            )
+            lift_map = {1000: 50000, 5000: 60000, 9000: 70000}
+
+            def fake_run_liftover(bed_path, chain_file, mapped_path, unmapped_path, env="liftover_env"):
+                # only maternal's locus at 1000 sits in a reversed chain block
+                reverse = (1000,) if "maternal" in bed_path else ()
+                return _fake_liftover(lift_map, reverse=reverse)(
+                    bed_path, chain_file, mapped_path, unmapped_path, env,
+                )
+
+            with patch.object(ar, "run_liftover", side_effect=fake_run_liftover):
+                combined, summary = ar.reconcile_haplotypes(haplotypes, workdir=tmpdir, merge_bp=3)
+
+            self.assertEqual(summary["both"], 3)
+            self.assertEqual(summary["paternal_only"], 0)
+            self.assertEqual(summary["maternal_only"], 0)
+            shared = combined[combined["hg38_start"] == 50000].iloc[0]
+            self.assertEqual(shared["origin"], "both")
+            self.assertEqual(shared["hg38_orientation_paternal"], "+")
+            self.assertEqual(shared["hg38_orientation_maternal"], "-")
+            # the reversed side's strand is reported in hg38 terms, matching
+            # the forward side's rather than its own haplotype's
+            self.assertEqual(shared["Strand_(fewest_mm+b)"], "+")
+
+    def test_hg38_end_is_the_real_site_end_per_haplotype(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            haplotypes = self._haplotypes(
+                tmpdir,
+                [self._row(1000), self._row(5000), self._row(9000)],
+                [self._row(1000), self._row(5000), self._row(9000)],
+            )
+            fake = _fake_liftover({1000: 50000, 5000: 60000, 9000: 70000})
+            with patch.object(ar, "run_liftover", side_effect=fake):
+                combined, _ = ar.reconcile_haplotypes(haplotypes, workdir=tmpdir, merge_bp=3)
+            row = combined[combined["hg38_start"] == 50000].iloc[0]
+            for col in ("hg38_end_paternal", "hg38_end_maternal"):
+                # was always hg38_start + 1, which made the column meaningless
+                self.assertEqual(row[col] - row["hg38_start"], self.L, col)
+            self.assertIn("hg38_lift_confidence_paternal", combined.columns)
+            self.assertEqual(set(combined["hg38_lift_confidence_paternal"]), {ar.LIFT_BOTH_ENDS})
+
+    def test_duplicated_native_loci_are_reported_as_copies_not_silently_dropped(self):
+        # two paternal loci far apart natively, landing on one hg38 site. The
+        # table keeps one row per hg38 site, so without these columns there is
+        # no sign in the combined output that a second copy existed at all.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            haplotypes = self._haplotypes(
+                tmpdir,
+                [self._row(1000, cfd=0.1), self._row(3000, cfd=0.9),
+                 self._row(5000), self._row(9000)],
+                [self._row(5000), self._row(9000)],
+            )
+            # 1000 and 3000 both lift onto the same hg38 locus
+            fake = _fake_liftover({1000: 50000, 3000: 50000, 5000: 60000, 9000: 70000})
+            with patch.object(ar, "run_liftover", side_effect=fake):
+                combined, summary = ar.reconcile_haplotypes(haplotypes, workdir=tmpdir, merge_bp=3)
+            row = combined[combined["hg38_start"] == 50000].iloc[0]
+            self.assertEqual(row["n_copies_paternal"], 2)
+            self.assertEqual(row["copy_loci_paternal"], "chr1:1000;chr1:3000")
+            # and the surviving copy is the higher-CFD one, not whichever the
+            # position sort happened to put first
+            self.assertAlmostEqual(row["CFD_score_(fewest_mm+b)_paternal"], 0.9)
+            # un-duplicated sites say so plainly
+            other = combined[combined["hg38_start"] == 60000].iloc[0]
+            self.assertEqual(other["n_copies_paternal"], 1)
+            self.assertEqual(other["copy_loci_paternal"], "")
