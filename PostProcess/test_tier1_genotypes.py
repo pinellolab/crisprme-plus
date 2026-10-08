@@ -333,6 +333,34 @@ class TestCompileFromDict(unittest.TestCase):
         finally:
             r.close()
 
+    def test_genotyped_samples_filter_drops_phantom_from_axis(self):
+        # #46 (co-occurrence path): an over-listing samplesID -- a sample NOT
+        # actually VCF-genotyped -- must not inflate the Tier-1 sample axis / AN
+        # denominator. Unfiltered, the phantom inflates the axis (the bug);
+        # passing genotyped_samples (exactly as build_dictless_tiers does for the
+        # Tier-0 registry) drops it, matching the registry axis.
+        over_sid = os.path.join(self.d, "hg38_1000G.over.samplesID.txt")
+        write_samplesid(over_sid, G1000_ROWS + [("PHANTOM1", "GBR", "EUR", "male")])
+        db = {"1000G": over_sid, "HGDP": self.hgdp_sid}
+        dpath = os.path.join(self.d, "my_dict_%s.json" % self.CHROM)
+        write_dict(dpath, self.mapping)
+        binp = os.path.join(self.d, "gt2.bin")
+        idxp = os.path.join(self.d, "gt2.idx.json")
+        # unfiltered -> phantom inflates the axis to 7 (the #46 bug)
+        s_bug = t1.compile_genotypes_from_dict(dpath, db, self.CHROM, binp, idxp)
+        self.assertEqual(s_bug["n_samples"], 7)
+        # filtered to the real genotyped set -> phantom dropped, axis back to 6
+        real = [r[0] for r in G1000_ROWS] + [r[0] for r in HGDP_ROWS]
+        s_fix = t1.compile_genotypes_from_dict(
+            dpath, db, self.CHROM, binp, idxp, genotyped_samples=real)
+        self.assertEqual(s_fix["n_samples"], 6)
+        # real carriers are untouched by the filter (still reconstruct)
+        r = t1.GenotypeReader(binp, idxp)
+        try:
+            self.assertEqual(r.alts_at(100), ["G"])
+        finally:
+            r.close()
+
     def test_dict_stats(self):
         binp, idxp, stats = self._compile()
         # 3 SNP records written (100/G, 300/C, 300/T).

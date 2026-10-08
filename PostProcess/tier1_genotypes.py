@@ -391,7 +391,8 @@ def compile_genotypes(records, sample_axis, out_bin, out_idx):
 
 
 def compile_genotypes_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_idx,
-                                *, subpop_field="superpopulation"):
+                                *, subpop_field="superpopulation",
+                                genotyped_samples=None):
     """Compile a legacy SNP dict into a Tier-1 genotype store.
 
     Builds the global sample axis via ``tier0_compile.build_sample_meta`` (reading
@@ -407,8 +408,14 @@ def compile_genotypes_from_dict(dict_path, db_to_samplesid, chrom, out_bin, out_
       {"manifest", "n_written", "n_skipped_indel", "n_skipped_empty",
        "n_positions", "overlaps", "n_samples"}.
     """
+    # #46: filter the sample axis to VCF-genotyped samples, EXACTLY as the Tier-0
+    # registry path does (build_dictless_tiers passes the same `genotyped_samples`).
+    # Without this, an over-listing samplesID inflated the Tier-1 axis length and
+    # deflated the per-sample co-occurrence (CONFIRMED-cis) joint-AF denominator.
+    # None (batteries install / source VCF absent) -> strict no-op, as before.
     sample_meta, overlaps = t0c.build_sample_meta(
-        db_to_samplesid, subpop_field=subpop_field)
+        db_to_samplesid, subpop_field=subpop_field,
+        genotyped_samples=genotyped_samples)
     sample_axis = build_sample_axis(sample_meta)
 
     stats = {
