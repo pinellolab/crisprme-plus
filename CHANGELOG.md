@@ -11,6 +11,33 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.3] - 2026-10-08
+
+### Changed
+- **Pinned CRISPRitz to v2.8.4** (`Dockerfile` + `install_from_source.sh`), which carries the
+  CRISPRitz #44 enricher fix: on **multiallelic** records the `add-variants` enricher previously
+  matched a sample to an ALT allele by substring-searching the raw genotype text and stopping at
+  the first hit, so (1) a record with ≥10 ALTs could bind a sample to an allele it does not carry
+  (`0|12` matched allele `1`) and (2) a sample carrying two different ALTs (`2|1`) had its second
+  allele dropped. The genotype is now parsed into integer alleles and the sample is recorded under
+  every ALT it carries. CRISPRme+'s shipped indices are `bcftools norm -m -any` pre-split to
+  biallelic (unaffected); this corrects per-sample carrier assignment for **user-supplied
+  multiallelic VCFs**. The biallelic path and the enriched FASTA are unchanged.
+- **The CRISPR-Bulge scorer is now a guaranteed part of a source install, not best-effort.**
+  `install_from_source.sh` builds the `cbulge` env **and compute-self-tests it** (`scorer-env
+  create && scorer-env check`), and **aborts the install** if either fails — mirroring the Docker
+  image (`build_scorer_envs=1`, failure fatal). Opt out deliberately with
+  `CRISPRME_SKIP_SCORER_ENV=1`.
+
+### Fixed
+- **A missing/broken CRISPR-Bulge scorer env no longer silently degrades a search to CFD-only.**
+  `complete-search` now **fails fast up front** (before the long search) with the one command that
+  fixes it when the scorer env is not ready, instead of discovering it per-chromosome in
+  post-analysis. A deliberate CFD-only run is still possible with `CRISPRME_SKIP_SCORER_ENV=1`,
+  which proceeds with a single loud notice. The scorer-unavailable banner is written to **stdout,
+  not stderr** (the post-analysis pipeline treats any stderr byte as fatal, so the old banner
+  turned a deliberate CFD-only run into a failed run — supersedes #59). +1 regression test.
+
 ## [2.7.2] - 2026-10-08
 
 ### Fixed
@@ -1793,7 +1820,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.2...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.3...HEAD
+[2.7.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.3
 [2.7.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.2
 [2.7.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.1
 [2.7.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.0

@@ -12,7 +12,7 @@ import os
 import re
 
 
-version = "2.7.2"  # CRISPRme version
+version = "2.7.3"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -1741,23 +1741,44 @@ def complete_search() -> None:
             error("--compute-backend must be one of: cpu | gpu | auto | cuda | metal")
     os.environ["CRISPRME_COMPUTE_BACKEND"] = compute_backend
 
-    # nudge the user if the CRISPR-Bulge env isn't healthy (the scorer-runner degrades
-    # gracefully to -1.0, but a heads-up avoids silent gaps in the ML score column)
+    # The CRISPR-Bulge ML scorer produces the SECOND score column beside CFD and is a
+    # first-class part of the pipeline -- we own its conda env. A missing/broken scorer
+    # env must NOT silently degrade a search to CFD-only: check it HERE, before the
+    # (long) search starts, and FAIL FAST with the one command that fixes it, instead of
+    # discovering it per-chromosome in post-analysis after hours of searching. A user who
+    # deliberately wants CFD-only on a box where the env can't be built opts in explicitly
+    # with CRISPRME_SKIP_SCORER_ENV=1 (the same switch the installer honors) -- then the
+    # run proceeds CFD-only with a single loud notice.
+    _scorer_optout = os.environ.get("CRISPRME_SKIP_SCORER_ENV", "0") == "1"
+    _scorer_name, _scorer_ready, _scorer_issues = "crispr-bulge", False, "unknown reason"
     try:
         sys.path.insert(0, corrected_origin_path)
         import scorer_env as _se
         _scorer_name = _se.DEFAULT_ENV   # honors CRISPRME_SCORER_ENV; the runtime scorer uses the same
         _hc = _se.health_check(_scorer_name)
-        if _hc.get("status") == "error":
+        _scorer_ready = _hc.get("status") == _se.OK
+        _scorer_issues = "; ".join(m for _, m in _hc.get("issues", [])) or "unknown reason"
+    except Exception as _e:   # scorer_env itself unimportable -> treat as not-ready
+        _scorer_ready, _scorer_issues = False, f"scorer_env unavailable: {_e}"
+
+    if not _scorer_ready:
+        if _scorer_optout:
+            # Deliberate CFD-only run. ONE loud notice on stdout -- never stderr, which the
+            # post-analysis pipeline treats as fatal. The CRISPR-Bulge column will be -1.
             print(
-                f"WARNING [complete-search]: the '{_scorer_name}' scorer env is not ready (" +
-                "; ".join(m for _, m in _hc.get("issues", [])) +
-                "). CRISPR-Bulge off-target scores will be -1 until you run: "
-                "crisprme.py scorer-env create",
+                f"NOTICE [complete-search]: CRISPRME_SKIP_SCORER_ENV=1 -> running CFD-only; the "
+                f"'{_scorer_name}' CRISPR-Bulge ML scorer is disabled and its score column will be -1. "
+                f"(reason: {_scorer_issues})",
                 flush=True,
             )
-    except Exception:
-        pass
+        else:
+            error(
+                f"the '{_scorer_name}' CRISPR-Bulge scorer env is not ready (reason: {_scorer_issues}). "
+                f"CRISPRme+ scores every off-target with CFD AND CRISPR-Bulge, so starting the search "
+                f"now would silently drop the ML score column. Fix it with:  crisprme.py scorer-env "
+                f"create  (diagnose with 'crisprme.py scorer-env doctor'; the official Docker image "
+                f"ships it pre-built). To intentionally run CFD-only anyway, set CRISPRME_SKIP_SCORER_ENV=1."
+            )
 
     # optional prebuilt/staged reference-index library (--index-path). When
     # given, the reference index is looked up here (e.g. an index made with
