@@ -240,6 +240,21 @@ _ANNOTATION_KINDS = frozenset(
     {"gencode", "gene_region", "encode", "dhs", "cosmic", "intogen", "gene_name", "gene_dist"}
 )
 _PRESENT_ANN_KINDS = None
+# Annotation kinds an assembly-search combined report can carry, and the columns
+# they are read from. Assembly-search has no closest-gene file, so `gene_name` /
+# `gene_dist` are deliberately absent and their curated columns drop out.
+_POOLED_ANNOTATION_KINDS = ("gencode", "gene_region", "encode", "dhs", "cosmic", "intogen")
+_POOLED_ANNOTATION_COLS = (
+    "Annotation_GENCODE", "Annotation_ENCODE", "Annotation_DHS",
+    "Annotation_COSMIC", "Annotation_INTOGEN",
+)
+# Curated columns an assembly-search run can never populate: each describes a
+# REF-vs-ALT or allele-frequency property, and assembly-search never runs with a
+# --vcf (each haplotype IS the genome). Dropped rather than shown as all-"-".
+# NOT including perfect_match: "mm+b == 0" is perfectly meaningful here, it just
+# happens to be empty for a guide with no exact match anywhere.
+_NO_VARIANT_KINDS = ("origin", "pam_creation", "variant", "maf", "complex_region")
+_DROP_KINDS = None
 
 # The "Observed" column is meaningful whenever a run has VARIANT off-targets: it
 # marks each as present-in->=1-individual (reference = universal; a single variant =
@@ -264,6 +279,9 @@ def _active_columns():
     # drop the Observed column on a reference-only run (no variant off-targets)
     if _HAS_VARIANTS is False:
         cols = tuple(c for c in cols if c[1] != "observed")
+    # explicit per-run drop set (assembly-search's variant-only columns)
+    if _DROP_KINDS:
+        cols = tuple(c for c in cols if c[1] not in _DROP_KINDS)
     return cols
 
 # --------------------------------------------------------------------------- #
@@ -3841,6 +3859,12 @@ def build_report(
     """
     global _DROP_MAF
     _DROP_MAF = bool(drop_maf)
+    # reset the assembly-only drop set: it is a module global that
+    # build_combined_report() assigns, and this process may have rendered an
+    # assembly report first. Restores the default, so complete-search output
+    # cannot depend on what ran before it.
+    global _DROP_KINDS
+    _DROP_KINDS = None
     if integrated_tsv is None:
         if not result_dir:
             raise ValueError("Provide result_dir or integrated_tsv")
@@ -5005,6 +5029,13 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             "CFD_score": recon_df["_recon_cfd"],
             "CRISPR_BULGE_score": np.nan,
             "_pv_category": "Reconciled (hg38)",
+            # Per-kind annotation columns, so the curated view can read them (see
+            # _ANNOTATION_KINDS / _COLS). ONLY the reconciled rows can carry an
+            # annotation: the per-haplotype private rows below have no hg38
+            # coordinate, so nothing was looked up for them and they are left
+            # blank, which _is_na() renders as "-" -- a different statement from
+            # "the screen ran and found nothing".
+            **{c: recon_df[c] for c in _POOLED_ANNOTATION_COLS if c in recon_df.columns},
         }))
 
     for hap, chr_col, start_col, label in (
@@ -5029,6 +5060,7 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             "CFD_score": pd.to_numeric(priv_df.get("CFD_score_(fewest_mm+b)"), errors="coerce"),
             "CRISPR_BULGE_score": pd.to_numeric(priv_df.get("CRISPR_BULGE_score_(highest_CRISPR_BULGE)"), errors="coerce"),
             "_pv_category": label,
+            **{c: "" for c in _POOLED_ANNOTATION_COLS if c in combined_df.columns},
         }))
 
     if not parts:
@@ -5042,6 +5074,15 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
     if "Aligned_protospacer+PAM_REF" in pooled.columns:
         cols["aln_ref"] = "Aligned_protospacer+PAM_REF"
         cols["aln_alt"] = "Aligned_protospacer+PAM_ALT"
+    # An annotation kind is mapped only when its source column actually came
+    # through. assembly_annotate already omits a kind that has no values anywhere,
+    # so a mapped kind is a populated kind -- and an UNmapped kind is what makes
+    # _active_columns() drop its curated column instead of rendering a column of
+    # "-" that implies a screen nobody performed.
+    for _kind in _POOLED_ANNOTATION_KINDS:
+        _src = _COLS[_kind][0]
+        if _src in pooled.columns:
+            cols[_kind] = _src
     return pooled, cols
 
 
@@ -5724,11 +5765,25 @@ def build_combined_report(
     # see _combined_curated_top_df()'s docstring).
     top1000_html = "<p>No off-targets to show.</p>"
     top1000_crispr_bulge_html = ""
+    # Every module-level curation flag is set EXPLICITLY here, never inherited.
+    # These are module globals that build_report() assigns per run, and the web
+    # server is one long-lived process serving both run types -- so without this,
+    # an assembly report rendered after a complete-search report silently reused
+    # that run's _DROP_MAF / _PRESENT_ANN_KINDS / _HAS_VARIANTS (e.g. a --no-maf
+    # complete-search would drop MAF from the next assembly report too).
+    global _DROP_MAF, _HAS_VARIANTS, _DROP_KINDS, _PRESENT_ANN_KINDS
+    _DROP_MAF = False
+    _HAS_VARIANTS = None          # keep Observed, as this path always has
+    _DROP_KINDS = _NO_VARIANT_KINDS
+    _PRESENT_ANN_KINDS = set()    # nothing until the pooled frame proves otherwise
     _top1000_curated_for_tsv = None
     if pooled_vp is not None:
         _pooled_df, _pooled_cols = _pooled_validation_frame(
             combined_df, hap_dirs, guides[0] if guides else None
         )
+        # which annotation screens this run actually carries (see
+        # _pooled_validation_frame's own note on why an unmapped kind is dropped)
+        _PRESENT_ANN_KINDS = {k for k in _ANNOTATION_KINDS if k in _pooled_cols}
         _has_crispr_bulge = pooled_vp.get("has_crispr_bulge", False)
         _category = _pooled_df["_pv_category"]
         top_df = select_top(_pooled_df, _pooled_cols, n=top_n)
