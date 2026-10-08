@@ -1187,14 +1187,16 @@ def build_or_reuse_haplotype_alignments_both_orientations(
 
 def query_haplotype_alignment(
     paf_path: str, from_name: str, chrom: str, start: int, end: int,
-) -> List[Tuple[str, int, int]]:
+) -> List[Tuple[str, int, int, str]]:
     """Queries a built alignment (see `build_or_reuse_haplotype_alignment`)
     for the coordinate(s) on the *other* haplotype corresponding to a native
     `(chrom, start, end)` locus on the `from_name` haplotype.
 
     Returns:
-        A list of `(chrom, start, end)` hits on the other haplotype, with
-        the haplotype-name prefix stripped back off. Empty if no hit.
+        A list of `(chrom, start, end, orientation)` hits on the other
+        haplotype, with the haplotype-name prefix stripped back off, where
+        orientation is '+' or '-' for the alignment block's orientation
+        relative to the query (bedpe column 9). Empty if no hit.
         Zero, one, or more than one hit is meaningful to the caller: more
         than one is the signature of a repeat-family region (see this
         section's module-level note) -- deliberately returned as-is
@@ -1204,12 +1206,11 @@ def query_haplotype_alignment(
     # impg 0.5.0 rejects query ranges below 101bp ("below minimum ... Lower
     # --min-transitive-len or use a longer range") even for a plain,
     # non-transitive `-r` query -- confirmed directly against a real index.
-    # Off-target windows here are ~1bp; pad symmetrically around the
-    # midpoint to clear the minimum rather than pass a fragile CLI override.
-    # The projected hit's own midpoint (what callers actually use) is
-    # unaffected as long as the padded window stays inside one contiguous
-    # alignment block, true at this scale for anything but a query sitting
-    # exactly on a block boundary.
+    # `resolve_haplotype_private` now passes a window that already clears
+    # this and whose offset from the site is known, so this padding is a
+    # fallback for any shorter range another caller passes. Note that a
+    # padded window loses the exact offset, so the position of the site
+    # inside the returned block can only be approximated from its midpoint.
     MIN_QUERY_LEN = 101
     midpoint = (start + end) // 2
     if end - start < MIN_QUERY_LEN:
