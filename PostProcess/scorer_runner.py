@@ -71,9 +71,16 @@ class ScorerRunner:
         self._reason = reason
         if not self._warned:
             # LOUD + un-missable: a missing/broken scorer env silently degrading a
-            # search to CFD-only is exactly the bug this guards against. Emit a banner
-            # to BOTH stdout (shows in the console + the main run log) and stderr, not
-            # just a one-liner buried in log_error.
+            # search to CFD-only is exactly the bug this guards against. The banner goes
+            # to STDOUT (console + the main run log via log_verbose.txt).
+            #
+            # Deliberately NOT stderr: the pipeline redirects stderr to log_error.txt and
+            # submit_job_automated_new_multiple_vcfs.sh aborts the whole run after each
+            # stage on `[ -s $logerror ]` -- ANY stderr byte is fatal. Post-analysis opens
+            # one runner per worker process, so a banner on stderr would fire per
+            # chromosome and turn a (deliberate, CRISPRME_SKIP_SCORER_ENV=1) CFD-only run
+            # into a failed run. The normal path never reaches here: complete-search
+            # fails fast up front if the scorer env is not ready (see crisprme.py).
             banner = (
                 "\n" + "!" * 78 + "\n"
                 f"!! ML SCORER '{self.scorer}' UNAVAILABLE -> {self.scorer.upper()} SCORES WILL BE -1 (CFD only).\n"
@@ -81,7 +88,6 @@ class ScorerRunner:
                 "!! Fix: crisprme.py scorer-env create   (the official Docker image ships it pre-built).\n"
                 + "!" * 78 + "\n"
             )
-            sys.stderr.write(banner)
             try:
                 print(banner, flush=True)
             except Exception:  # noqa: BLE001

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install CRISPRme+ 2.6.0 FROM SOURCE, without the Bioconda crisprme/crispritz
-# packages. Builds CRISPRitz 2.8.3 from source and installs both CRISPRitz and
+# packages. Builds CRISPRitz 2.8.4 from source and installs both CRISPRitz and
 # CRISPRme into the ACTIVE conda environment ($CONDA_PREFIX), using the same
 # bin/ + opt/ layout the Bioconda/Docker builds use (crisprme.py resolves
 # PostProcess as <dir-of-crisprme.py>[:-3] + opt/crisprme/PostProcess/).
@@ -12,11 +12,11 @@
 #   mamba activate crisprme
 #   bash install_from_source.sh
 #
-# Override the CRISPRitz tag with CRISPRITZ_REF (default v2.8.3).
+# Override the CRISPRitz tag with CRISPRITZ_REF (default v2.8.4).
 set -euo pipefail
 
 : "${CONDA_PREFIX:?Activate the conda env first: 'mamba activate crisprme'}"
-CRISPRITZ_REF="${CRISPRITZ_REF:-v2.8.3}"
+CRISPRITZ_REF="${CRISPRITZ_REF:-v2.8.4}"
 CXX="${CXX:-g++}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this crisprme checkout
 
@@ -82,15 +82,31 @@ chmod +x "${CONDA_PREFIX}/bin/crisprme.py"
 # ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
 # Built in its OWN env so its TensorFlow/numpy pins never touch the main crisprme
 # stack (this is what lets the main env stay modern). CPU by default; the GPU
-# variant is opt-in later: 'crisprme.py scorer-env create --gpu'. Non-fatal +
-# skippable (CRISPRME_SKIP_SCORER_ENV=1); (re)create/repair anytime with
-# 'crisprme.py scorer-env create' / 'crisprme.py scorer-env doctor'.
+# variant is opt-in later: 'crisprme.py scorer-env create --gpu'.
+#
+# CRISPRme+ scores EVERY off-target with CFD AND CRISPR-Bulge, and we own this env
+# + pipeline -- so a source install must END UP WITH A WORKING SCORER, never silently
+# degrade to CFD-only. Mirroring the Docker image (build_scorer_envs=1, failure FATAL):
+# create the env, then COMPUTE-self-test it ('scorer-env check' actually scores a match
+# vs a mismatch -- catching a missing/degenerate/miscomputing env that a bare create
+# would miss), and ABORT the install if either step fails. Opt out deliberately with
+# CRISPRME_SKIP_SCORER_ENV=1 (CFD-only); repair later with 'crisprme.py scorer-env
+# create' / 'crisprme.py scorer-env doctor'.
 if [ "${CRISPRME_SKIP_SCORER_ENV:-0}" != "1" ]; then
-    echo ">> Creating the CRISPR-Bulge scorer env (set CRISPRME_SKIP_SCORER_ENV=1 to skip)"
-    if crisprme.py scorer-env create; then
-        echo "   scorer env ready."
+    echo ">> Creating + compute-self-testing the CRISPR-Bulge scorer env (set CRISPRME_SKIP_SCORER_ENV=1 to skip)"
+    if crisprme.py scorer-env create && crisprme.py scorer-env check; then
+        echo "   scorer env ready (compute self-test passed)."
     else
-        echo "   WARNING: scorer env not created now; create later with 'crisprme.py scorer-env create'." >&2
+        {
+            echo ""
+            echo "ERROR: the CRISPR-Bulge scorer env could not be built/verified."
+            echo "CRISPRme+ scores every off-target with CFD AND CRISPR-Bulge; installing without a"
+            echo "working scorer would silently drop the ML score column, so the install stops here."
+            echo "  - diagnose/retry:  crisprme.py scorer-env doctor   then   crisprme.py scorer-env create"
+            echo "  - or install WITHOUT the ML scorer (CFD-only) on purpose:"
+            echo "        CRISPRME_SKIP_SCORER_ENV=1 bash install_from_source.sh"
+        } >&2
+        exit 1
     fi
 fi
 

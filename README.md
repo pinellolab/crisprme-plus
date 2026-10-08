@@ -360,7 +360,7 @@ By completing these steps, your system will be fully prepared for installing CRI
 ---
 
 > **CRISPRme+ (2.6.2) runs on Python 3.11 and installs from source** — the build
-> compiles CRISPRitz 2.8.3 and installs both tools into a conda environment. A native
+> compiles CRISPRitz 2.8.4 and installs both tools into a conda environment. A native
 > Bioconda `crisprme=2.6.2` package is **in preparation**; until it lands, the Bioconda
 > `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** this
 > 2.6.2 line.
@@ -535,7 +535,7 @@ You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run an unreleased line (e.g. **2.6.2**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.3 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run an unreleased line (e.g. **2.6.2**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.8.4 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
@@ -548,7 +548,7 @@ cd crisprme-plus
 mamba env create -f environment.yml
 mamba activate crisprme
 
-# 3. build CRISPRitz 2.8.3 from source and install both tools into the env
+# 3. build CRISPRitz 2.8.4 from source and install both tools into the env
 bash install_from_source.sh
 
 # 4. verify (both tools are now on your PATH)
