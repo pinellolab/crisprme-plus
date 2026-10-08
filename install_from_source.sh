@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install CRISPRme+ 2.6.0 FROM SOURCE, without the Bioconda crisprme/crispritz
-# packages. Builds CRISPRitz 2.8.4 from source and installs both CRISPRitz and
+# packages. Builds CRISPRitz 2.9.0 from source and installs both CRISPRitz and
 # CRISPRme into the ACTIVE conda environment ($CONDA_PREFIX), using the same
 # bin/ + opt/ layout the Bioconda/Docker builds use (crisprme.py resolves
 # PostProcess as <dir-of-crisprme.py>[:-3] + opt/crisprme/PostProcess/).
@@ -12,11 +12,11 @@
 #   mamba activate crisprme
 #   bash install_from_source.sh
 #
-# Override the CRISPRitz tag with CRISPRITZ_REF (default v2.8.4).
+# Override the CRISPRitz tag with CRISPRITZ_REF (default v2.9.0).
 set -euo pipefail
 
 : "${CONDA_PREFIX:?Activate the conda env first: 'mamba activate crisprme'}"
-CRISPRITZ_REF="${CRISPRITZ_REF:-v2.8.4}"
+CRISPRITZ_REF="${CRISPRITZ_REF:-v2.9.0}"
 CXX="${CXX:-g++}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this crisprme checkout
 

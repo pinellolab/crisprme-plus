@@ -11,6 +11,18 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.4] - 2026-10-08
+
+### Changed
+- **Pinned CRISPRitz to v2.9.0** (`Dockerfile` + `install_from_source.sh`). CRISPRitz
+  v2.9.0 is now a **pure enumeration engine** — all scoring, annotation and reporting
+  were removed from CRISPRitz (they live in CRISPRme+), which drops its azimuth
+  `scikit-learn==1.1.3 / numpy==1.24.4 / pandas==2.0.3 / scipy==1.10.1` pins. This has
+  **no functional effect on CRISPRme+** (which only uses CRISPRitz's `index-genome` /
+  `search` / `add-variants` engine — verified byte-identical, golden-search regression
+  on x86_64 + arm64) and unblocks publishing CRISPRme+ on **Bioconda** (the `crisprme`
+  package can now depend on `crispritz` without the old, unsolvable ML version pins).
+
 ## [2.7.3] - 2026-10-08
 
 ### Changed
@@ -1820,7 +1832,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.3...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.4...HEAD
+[2.7.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.4
 [2.7.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.3
 [2.7.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.2
 [2.7.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.1
