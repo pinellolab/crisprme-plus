@@ -7,10 +7,7 @@
   <img src="assets/readme/crisprme-logo.png" alt="CRISPRme" width="700"/>
 </p>
 
-# CRISPRme+ (2.6.2)
-
-### 📦 Repository, releases & issues → **https://github.com/pinellolab/crisprme-plus**
-
+# CRISPRme+ 
 CRISPRme is a comprehensive tool designed for thorough off-target assessment in 
 CRISPR-Cas systems. It is available as a command-line interface and an offline tool
 with a locally deployable web interface. CRISPRme integrates human genetic variant 
