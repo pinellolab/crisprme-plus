@@ -11,6 +11,19 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-10-08
+
+### Fixed
+- **#46 (co-occurrence path): Tier-1 genotype axis was not filtered to VCF-genotyped samples.**
+  The phantom-sample filter (`genotyped_samples`) was wired on the Tier-0 registry
+  (`compile_from_dict`) but not on the Tier-1 genotype store (`compile_genotypes_from_dict`), so an
+  over-listing samplesID inflated the Tier-1 sample axis / AN and **deflated the per-sample
+  CONFIRMED-cis joint-AF denominator**. The same `genotyped_samples` set is now threaded through to
+  `tier0_compile.build_sample_meta` (already filter-capable); no-op when `None` (batteries install /
+  source VCF absent). Build-path only — correctly-built shipped indices are unaffected (e.g.
+  HGDP1kGP's header-derived 4,091-sample panel has no phantoms). Added
+  `test_genotyped_samples_filter_drops_phantom_from_axis`.
+
 ## [2.7.1] - 2026-10-07
 
 ### Fixed
@@ -1780,7 +1793,9 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.2...HEAD
+[2.7.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.2
+[2.7.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.1
 [2.7.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.0
 [2.6.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.2
 [2.6.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.6.1

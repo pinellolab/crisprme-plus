@@ -236,7 +236,7 @@ def emit_dictless_tiers(dict_path, db_to_samplesid, chrom, dictionaries_dir=None
     )
     gt_stats = t1g.compile_genotypes_from_dict(
         resolved_dict, db_to_samplesid, chrom, gt_bin, gt_idx,
-        subpop_field=subpop_field,
+        subpop_field=subpop_field, genotyped_samples=genotyped,
     )
 
     return {
