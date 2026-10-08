@@ -2139,6 +2139,17 @@ class TestResolveLiftedEndpoints(unittest.TestCase):
         self.assertEqual((row["hg38_start"], row["hg38_end"]), (50000, 50023))
         self.assertEqual(row["hg38_orientation"], "-")
 
+    def test_one_end_extrapolation_never_goes_negative(self):
+        # a lifted base closer to the chromosome start than the site is long
+        # would extrapolate to a negative coordinate; anchor at 0 instead,
+        # because no consumer can use a negative BED start
+        lifted, _, counts = self._resolve([("0", "first", "chr1", 5, "-")])
+        self.assertEqual(counts["one_end"], 1)
+        row = lifted.iloc[0]
+        self.assertEqual(row["hg38_start"], 0)
+        self.assertGreaterEqual(row["hg38_start"], 0)
+        self.assertGreater(row["hg38_end"], row["hg38_start"])
+
     def test_only_last_end_lifted_reverse_anchors_at_that_end(self):
         lifted, _, counts = self._resolve([("0", "last", "chr1", 50000, "-")])
         self.assertEqual(counts["one_end"], 1)

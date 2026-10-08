@@ -832,6 +832,16 @@ def resolve_lifted_endpoints(
                 s0 = x              # lifted base is the site's lowest hg38 base
             else:
                 s0 = x - n + 1      # lifted base is the site's highest hg38 base
+            # Extrapolating backwards from a lifted base closer than L to the
+            # chromosome start would put the site at a negative coordinate --
+            # not a position any consumer can use (a negative BED start is
+            # rejected outright by samtools/bedtools and renders as nonsense in
+            # the report). Anchor at 0 instead: the span is then shorter than
+            # the site by however far it overran, which is a visible, in-range
+            # approximation on a row already marked `one_end`, rather than an
+            # invalid coordinate. Cannot arise in the both-ends branch, whose
+            # two coordinates both come from liftOver itself.
+            s0 = max(0, s0)
             rows.append((c, s0, s0 + n, i, o, LIFT_ONE_END)); counts["one_end"] += 1
         else:
             nonmap.add(i); counts["neither"] += 1
