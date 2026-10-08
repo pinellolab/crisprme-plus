@@ -254,6 +254,9 @@ _POOLED_ANNOTATION_COLS = (
 # NOT including perfect_match: "mm+b == 0" is perfectly meaningful here, it just
 # happens to be empty for a guide with no exact match anywhere.
 _NO_VARIANT_KINDS = ("origin", "pam_creation", "variant", "maf", "complex_region")
+# assembly_reconcile.LIFT_ONE_END's value, duplicated rather than imported so this
+# module stays importable without assembly_reconcile (a light-CI concern)
+LIFT_ONE_END_LABEL = "one_end"
 _DROP_KINDS = None
 
 # The "Observed" column is meaningful whenever a run has VARIANT off-targets: it
@@ -4975,6 +4978,152 @@ def _haplotype_private_frame(hap_dir, combined_df, chr_col, start_col, guide=Non
     return df[is_private], cols
 
 
+# Assembly-only curated columns, APPENDED after the shared curated set rather
+# than added to CURATED_COLUMNS -- exactly how `Site_category` is already handled
+# (see _curated_frame_with_category). CURATED_COLUMNS/_COLS are shared with
+# complete-search, so an entry there would put these columns in a complete-search
+# report too, rendering "-" and recreating the very bug this module now avoids.
+#
+# `Haplotype_origin` is deliberately NOT the curated "origin" kind: that kind is
+# the VCF REF/ALT_origin column, partition_masks() reads `origin == "alt"` as its
+# variant-mask fallback, and the combined table's own "origin" means something
+# else entirely (both/paternal_only/maternal_only). Mapping one onto the other
+# would silently corrupt the variant/reference split.
+_ASSEMBLY_EXTRA_COLS = (
+    ("Haplotype_origin", "_pv_hap_origin"),
+    ("hg38_end", "_pv_hg38_end"),
+    ("hg38_orientation", "_pv_hg38_orientation"),
+    ("hg38_lift_confidence", "_pv_hg38_lift_conf"),
+    ("n_copies_paternal", "_pv_n_copies_pat"),
+    ("n_copies_maternal", "_pv_n_copies_mat"),
+    ("copy_loci_paternal", "_pv_copy_loci_pat"),
+    ("copy_loci_maternal", "_pv_copy_loci_mat"),
+)
+
+
+def _blank_to_missing(value):
+    """CURATED_MISSING for anything the report counts as absent, else the value."""
+    return CURATED_MISSING if _is_na(value) else str(value)
+
+
+# "-" is CURATED_MISSING, so a reverse orientation reported as "-" would be
+# indistinguishable from "this row has no hg38 orientation at all" (every
+# non-mappable row). Report the orientation in words instead; the combined TSV
+# keeps the +/- form.
+_ORIENTATION_WORDS = {"+": "forward", "-": "reverse"}
+
+
+def _collapse_haplotype_value(pat, mat):
+    """Collapses a per-haplotype value into one column.
+
+    The two haplotypes agree on orientation for all but a handful of sites
+    (135 paternal / 195 maternal reverse-oriented out of ~33k), so two columns
+    would be near-duplicates. The collapse rule:
+
+    * both present and equal -> that value;
+    * both present and DIFFERENT -> ``"<paternal>/<maternal>"``, so a genuine
+      disagreement is visible instead of one side being silently picked;
+    * only one present (a ``paternal_only``/``maternal_only`` site) -> that one;
+    * neither -> ``CURATED_MISSING``.
+    """
+    p, m = _blank_to_missing(pat), _blank_to_missing(mat)
+    if p == CURATED_MISSING:
+        return m
+    if m == CURATED_MISSING:
+        return p
+    return p if p == m else f"{p}/{m}"
+
+
+def _collapse_lift_confidence(pat, mat):
+    """Like `_collapse_haplotype_value`, but `one_end` always wins.
+
+    `one_end` means that side's coordinate is partly EXTRAPOLATED rather than
+    lifted. A row whose two haplotypes disagree is still a row with a partly
+    extrapolated coordinate, so collapsing to the more confident of the two
+    would hide exactly the caveat the column exists to carry.
+    """
+    p, m = _blank_to_missing(pat), _blank_to_missing(mat)
+    present = [v for v in (p, m) if v != CURATED_MISSING]
+    if not present:
+        return CURATED_MISSING
+    return LIFT_ONE_END_LABEL if LIFT_ONE_END_LABEL in present else present[0]
+
+
+def _assembly_extra_values(recon_df):
+    """The assembly-only column values for the reconciled rows.
+
+    `hg38_end` is the end of whichever haplotype supplied the reported `CFD`.
+    The curated `CFD` is max(paternal, maternal), so pairing `Position` with the
+    OTHER haplotype's end would describe a span no single reported score belongs
+    to. Caveat worth knowing: `hg38_start` is the reconciliation's merge key and
+    equals the paternal site's own start, so a maternal end paired with it can be
+    1-2bp out on the few sites where the two haplotypes' lifted starts differ
+    within the 3bp merge tolerance (13 of 30,053 on HG01255). Paternal spans are
+    exact.
+    """
+    cfd_p = pd.to_numeric(recon_df.get("CFD_score_(fewest_mm+b)_paternal"), errors="coerce")
+    cfd_m = pd.to_numeric(recon_df.get("CFD_score_(fewest_mm+b)_maternal"), errors="coerce")
+    end_p = recon_df.get("hg38_end_paternal")
+    end_m = recon_df.get("hg38_end_maternal")
+
+    def _end(idx):
+        p = None if end_p is None else end_p.get(idx)
+        m = None if end_m is None else end_m.get(idx)
+        if _is_na(p):
+            return _blank_to_missing(m)
+        if _is_na(m):
+            return _blank_to_missing(p)
+        vp, vm = cfd_p.get(idx), cfd_m.get(idx)
+        # >= so a tie keeps the paternal end, which pairs exactly with hg38_start
+        take_p = not (pd.notna(vm) and (pd.isna(vp) or vm > vp))
+        return _blank_to_missing(p if take_p else m)
+
+    def _col(name):
+        return recon_df.get(name)
+
+    def _pick(series, idx):
+        return None if series is None else series.get(idx)
+
+    orient_p, orient_m = _col("hg38_orientation_paternal"), _col("hg38_orientation_maternal")
+    lift_p, lift_m = _col("hg38_lift_confidence_paternal"), _col("hg38_lift_confidence_maternal")
+    origin = _col("origin")
+    out = {
+        "_pv_hap_origin": [_blank_to_missing(_pick(origin, i)) for i in recon_df.index],
+        "_pv_hg38_end": [_end(i) for i in recon_df.index],
+        "_pv_hg38_orientation": [
+            _collapse_haplotype_value(
+                _ORIENTATION_WORDS.get(_pick(orient_p, i), _pick(orient_p, i)),
+                _ORIENTATION_WORDS.get(_pick(orient_m, i), _pick(orient_m, i)),
+            )
+            for i in recon_df.index
+        ],
+        "_pv_hg38_lift_conf": [
+            _collapse_lift_confidence(_pick(lift_p, i), _pick(lift_m, i))
+            for i in recon_df.index
+        ],
+    }
+    for pooled_col, src in (
+        ("_pv_n_copies_pat", "n_copies_paternal"),
+        ("_pv_n_copies_mat", "n_copies_maternal"),
+        ("_pv_copy_loci_pat", "copy_loci_paternal"),
+        ("_pv_copy_loci_mat", "copy_loci_maternal"),
+    ):
+        series = _col(src)
+        is_count = pooled_col.startswith("_pv_n_copies")
+        vals = []
+        for i in recon_df.index:
+            v = _blank_to_missing(_pick(series, i))
+            if is_count and v != CURATED_MISSING:
+                # a count, not a measurement: "1", never "1.0"
+                try:
+                    v = str(int(float(v)))
+                except (TypeError, ValueError):
+                    pass
+            vals.append(v)
+        out[pooled_col] = vals
+    return out
+
+
 def _pooled_validation_frame(combined_df, hap_dirs, guide):
     """ONE frame pooling all three disjoint site categories (reconciled/
     paternal-private/maternal-private) into a single, consistently-scored
@@ -5036,6 +5185,7 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             # blank, which _is_na() renders as "-" -- a different statement from
             # "the screen ran and found nothing".
             **{c: recon_df[c] for c in _POOLED_ANNOTATION_COLS if c in recon_df.columns},
+            **_assembly_extra_values(recon_df),
         }))
 
     for hap, chr_col, start_col, label in (
@@ -5044,6 +5194,7 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
         ("maternal", "Chromosome_maternal", "Start_coordinate_(fewest_mm+b)_maternal",
          "Maternal-private (non-mappable)"),
     ):
+        hap_origin_label = f"{hap}_only"
         priv_df, _pc = _haplotype_private_frame(hap_dirs.get(hap), combined_df, chr_col, start_col, guide)
         if priv_df is None or priv_df.empty:
             continue
@@ -5061,6 +5212,11 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             "CRISPR_BULGE_score": pd.to_numeric(priv_df.get("CRISPR_BULGE_score_(highest_CRISPR_BULGE)"), errors="coerce"),
             "_pv_category": label,
             **{c: "" for c in _POOLED_ANNOTATION_COLS if c in combined_df.columns},
+            # a private row has no hg38 coordinate, so none of the hg38-side
+            # columns apply to it; Haplotype_origin is the one that does
+            **{pooled_col: (hap_origin_label if pooled_col == "_pv_hap_origin"
+                            else CURATED_MISSING)
+               for _h, pooled_col in _ASSEMBLY_EXTRA_COLS},
         }))
 
     if not parts:
@@ -5086,13 +5242,33 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
     return pooled, cols
 
 
-def _curated_frame_with_category(sub_df, cols, has_crispr_bulge, category_series, start_rank=1):
-    """`build_curated_frame()`'s real curated columns plus one more,
-    `Site_category` -- looked up by ORIGINAL index from `category_series`
-    (the pooled frame's `_pv_category`), so it survives `select_worstcase_panel()`'s/
-    `select_top()`'s sort/filter/head() (all index-preserving)."""
+def _curated_frame_with_category(
+    sub_df, cols, has_crispr_bulge, category_series, start_rank=1, pooled_df=None
+):
+    """`build_curated_frame()`'s real curated columns plus the assembly-only ones.
+
+    `Site_category` and everything in `_ASSEMBLY_EXTRA_COLS` are looked up by
+    ORIGINAL index (from `category_series` / `pooled_df`, i.e. the pooled frame's
+    own `_pv_*` columns), so they survive `select_worstcase_panel()`'s and
+    `select_top()`'s sort/filter/head() -- all index-preserving.
+
+    Appending here, rather than adding entries to `CURATED_COLUMNS`, is what keeps
+    these columns off a complete-search report: that tuple is shared, and
+    `build_report()` never calls this function.
+    """
     frame = build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=start_rank)
     frame["Site_category"] = [category_series.get(idx, CURATED_MISSING) for idx in sub_df.index]
+    if pooled_df is not None:
+        for header, pooled_col in _ASSEMBLY_EXTRA_COLS:
+            if pooled_col not in pooled_df.columns:
+                continue
+            series = pooled_df[pooled_col]
+            values = [series.get(idx, CURATED_MISSING) for idx in sub_df.index]
+            # a column with nothing in it anywhere is exactly what this module
+            # works to avoid elsewhere; don't introduce one here either.
+            # CURATED_MISSING ("-") is NOT in _NA_TOKENS, so test it explicitly.
+            if any(v != CURATED_MISSING and not _is_na(v) for v in values):
+                frame[header] = values
     return frame
 
 
@@ -5168,9 +5344,10 @@ def _combined_validation_panel_html(combined_df, hap_dirs, guide, staging_dir):
     def _stage(sub_df, base_name):
         path = os.path.join(staging_dir, base_name)
         try:
-            _curated_frame_with_category(sub_df, cols, has_crispr_bulge, category, start_rank=1).to_csv(
-                path, sep="\t", index=False
-            )
+            _curated_frame_with_category(
+                sub_df, cols, has_crispr_bulge, category, start_rank=1,
+                pooled_df=pooled_df,
+            ).to_csv(path, sep="\t", index=False)
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: {base_name} unavailable: {exc}\n")
             return None
@@ -5789,7 +5966,8 @@ def build_combined_report(
         top_df = select_top(_pooled_df, _pooled_cols, n=top_n)
         if len(top_df):
             _top1000_curated_for_tsv = _curated_frame_with_category(
-                top_df, _pooled_cols, _has_crispr_bulge, _category, start_rank=1
+                top_df, _pooled_cols, _has_crispr_bulge, _category, start_rank=1,
+                pooled_df=_pooled_df,
             )
             top1000_html = _render_curated_table_html(_top1000_curated_for_tsv)
         if _has_crispr_bulge:
@@ -5799,7 +5977,8 @@ def build_combined_report(
                     f'<h3 style="margin:1.2em 0 0.3em 0">Ranked by {scorer_label()} score</h3>'
                     + _render_curated_table_html(
                         _curated_frame_with_category(
-                            top_crispr_bulge_df, _pooled_cols, _has_crispr_bulge, _category, start_rank=1
+                            top_crispr_bulge_df, _pooled_cols, _has_crispr_bulge, _category,
+                            start_rank=1, pooled_df=_pooled_df,
                         )
                     )
                 )
