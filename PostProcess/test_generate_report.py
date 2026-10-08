@@ -1421,3 +1421,97 @@ class TestGenerateReport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+@unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
+class TestAssemblyCuratedColumns(unittest.TestCase):
+    """Curated-column handling on the assembly-search combined-report path."""
+
+    def setUp(self):
+        self._saved = (
+            gr._DROP_MAF, gr._PRESENT_ANN_KINDS, gr._HAS_VARIANTS, gr._DROP_KINDS,
+        )
+
+    def tearDown(self):
+        gr._DROP_MAF, gr._PRESENT_ANN_KINDS, gr._HAS_VARIANTS, gr._DROP_KINDS = self._saved
+
+    def test_drop_kinds_removes_the_variant_only_columns(self):
+        gr._DROP_MAF = False
+        gr._PRESENT_ANN_KINDS = None
+        gr._HAS_VARIANTS = None
+        gr._DROP_KINDS = gr._NO_VARIANT_KINDS
+        kinds = {k for _h, k in gr._active_columns()}
+        for gone in ("origin", "pam_creation", "variant", "maf", "complex_region"):
+            self.assertNotIn(gone, kinds, f"{gone} should be dropped on an assembly run")
+
+    def test_perfect_match_is_never_dropped(self):
+        """"mm+b == 0" is meaningful for an assembly run; it is merely empty for
+        a guide that has no exact match anywhere, which is not the same thing as
+        a column that can never apply."""
+        self.assertNotIn("perfect_match", gr._NO_VARIANT_KINDS)
+        gr._DROP_KINDS = gr._NO_VARIANT_KINDS
+        self.assertIn("perfect_match", {k for _h, k in gr._active_columns()})
+
+    def test_annotation_kinds_present_are_kept_absent_are_dropped(self):
+        gr._DROP_MAF = False
+        gr._HAS_VARIANTS = None
+        gr._DROP_KINDS = None
+        gr._PRESENT_ANN_KINDS = {"gencode", "gene_region", "dhs"}
+        kinds = {k for _h, k in gr._active_columns()}
+        for kept in ("gencode", "gene_region", "dhs"):
+            self.assertIn(kept, kinds)
+        for dropped in ("cosmic", "intogen", "encode", "gene_name", "gene_dist"):
+            self.assertNotIn(dropped, kinds, f"{dropped} has no source, should drop")
+
+    def test_build_report_resets_the_assembly_only_drop_set(self):
+        """_DROP_KINDS is a module global the assembly path assigns, and the web
+        server is one long-lived process serving both run types -- so a
+        complete-search report rendered after an assembly report must not
+        inherit it and silently lose five columns."""
+        src = inspect.getsource(gr.build_report)
+        self.assertIn("global _DROP_KINDS", src)
+        self.assertIn("_DROP_KINDS = None", src)
+
+    def test_combined_report_sets_every_curation_flag_explicitly(self):
+        """The mirror of the above: build_combined_report must assign all four
+        flags rather than inheriting whatever a previous complete-search left."""
+        src = inspect.getsource(gr.build_combined_report)
+        for assigned in (
+            "_DROP_MAF = False",
+            "_HAS_VARIANTS = None",
+            "_DROP_KINDS = _NO_VARIANT_KINDS",
+            "_PRESENT_ANN_KINDS",
+        ):
+            self.assertIn(assigned, src, f"build_combined_report must set {assigned}")
+
+    def test_pooled_frame_maps_annotation_kinds_it_carries(self):
+        """The curated view reads annotation by kind, so a carried column has to
+        land in `cols` or the cell renders "-" even though the screen ran."""
+        combined = pandas.DataFrame({
+            "hg38_chr": ["chr1", "chr2"],
+            "hg38_start": [100, 200],
+            "Spacer+PAM_paternal": ["ACGT" * 5 + "NGG"] * 2,
+            "Chromosome_paternal": ["ctgA", "ctgB"],
+            "Start_coordinate_(fewest_mm+b)_paternal": [10, 20],
+            "Strand_(fewest_mm+b)": ["+", "-"],
+            "Mismatches_(fewest_mm+b)_paternal": [1, 2],
+            "Bulges_(fewest_mm+b)_paternal": [0, 0],
+            "CFD_score_(fewest_mm+b)_paternal": [0.5, 0.2],
+            # both haplotypes: a real reconciled table always carries both sides,
+            # and _reconciled_panel_frame() takes the worst case across them
+            "Spacer+PAM_maternal": ["ACGT" * 5 + "NGG"] * 2,
+            "Chromosome_maternal": ["ctgA", "ctgB"],
+            "Start_coordinate_(fewest_mm+b)_maternal": [10, 20],
+            "Mismatches_(fewest_mm+b)_maternal": [1, 2],
+            "Bulges_(fewest_mm+b)_maternal": [0, 0],
+            "CFD_score_(fewest_mm+b)_maternal": [0.4, 0.3],
+            "Annotation_GENCODE": ["gene", "gene"],
+            "Annotation_DHS": ["Neural", ""],
+            "origin": ["both", "both"],
+        })
+        _pooled, cols = gr._pooled_validation_frame(combined, {}, None)
+        self.assertEqual(cols.get("gencode"), "Annotation_GENCODE")
+        self.assertEqual(cols.get("dhs"), "Annotation_DHS")
+        # not carried -> deliberately unmapped, so its curated column drops
+        self.assertNotIn("cosmic", cols)
+        self.assertNotIn("intogen", cols)

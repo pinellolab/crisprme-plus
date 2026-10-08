@@ -142,3 +142,125 @@ class TestAnnotationLogNote(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAnnotationSplit(unittest.TestCase):
+    """The per-kind `Annotation_*` columns assembly-search now emits.
+
+    The report's curated view reads those columns by name (`_COLS`), so emitting
+    only the combined `Annotation` string made six annotation cells render "-"
+    even when --annotation had run.
+    """
+
+    def _oracle(self, annotation_str):
+        """resultIntegrator.py's own classification, transcribed.
+
+        Pinned here on purpose: if that block is ever changed, these tests fail
+        and whoever changes it has to change both, instead of the two surfaces
+        silently describing the same bundle differently.
+        """
+        personal = set(); encode = set(); gencode = set()
+        dhs = set(); cosmic = set(); intogen = set()
+        for elem in annotation_str.split(","):
+            if "_personal" in elem:
+                personal.add(elem.replace("_personal", ""))
+            elif "_gencode" in elem:
+                gencode.add(elem.replace("_gencode", ""))
+            elif "_DHS" in elem:
+                dhs.add(elem.replace("_DHS", ""))
+            elif "_COSMIC" in elem:
+                cosmic.add(elem.replace("_COSMIC", ""))
+            elif "_INTOGEN" in elem:
+                intogen.add(elem.replace("_INTOGEN", ""))
+            else:
+                encode.add(elem)
+        return {
+            "Annotation_personal": ",".join(sorted(personal)),
+            "Annotation_GENCODE": ",".join(sorted(gencode)),
+            "Annotation_DHS": ",".join(sorted(dhs)),
+            "Annotation_COSMIC": ",".join(sorted(cosmic)),
+            "Annotation_INTOGEN": ",".join(sorted(intogen)),
+            "Annotation_ENCODE": ",".join(sorted(encode)),
+        }
+
+    def test_classification_matches_complete_searchs_own(self):
+        from annotation import split_annotation_labels
+        for case in (
+            "dELS,gene_gencode,transcript(+)_gencode",
+            "CA-CTCF,Lymphoid_DHS,gene_gencode,transcript(-)_gencode",
+            "Tier1_TSG_COSMIC,Stromal_B_DHS,dELS,gene_gencode",
+            "SDHA_INTOGEN,gene_gencode,transcript(+)_gencode",
+            "exon_gencode,CDS_gencode,gene_gencode,UTR_gencode",
+            "Neural_DHS,Primitive_/_embryonic_DHS",
+            "PLS,pELS",
+        ):
+            got, want = split_annotation_labels(case), self._oracle(case)
+            for col, value in want.items():
+                self.assertEqual(got[col], value, f"{case} -> {col}")
+
+    def test_cosmic_and_intogen_are_not_swallowed_by_the_encode_catchall(self):
+        # ENCODE is the else-branch, so these two MUST be tested before it
+        from annotation import split_annotation_labels
+        got = split_annotation_labels("Tier1_TSG_COSMIC,SDHA_INTOGEN,dELS")
+        self.assertEqual(got["Annotation_COSMIC"], "Tier1_TSG")
+        self.assertEqual(got["Annotation_INTOGEN"], "SDHA")
+        self.assertEqual(got["Annotation_ENCODE"], "dELS")
+
+    def test_unknown_label_is_reported_not_dropped(self):
+        # a user-supplied bundle may use labels this split has never seen; they
+        # land in the ENCODE catch-all rather than vanishing
+        from annotation import split_annotation_labels
+        got = split_annotation_labels("SomeCustomLabel,AnotherOne")
+        self.assertEqual(got["Annotation_ENCODE"], "AnotherOne,SomeCustomLabel")
+
+    def test_nothing_overlaps_markers_give_every_kind_blank(self):
+        from annotation import ANNOTATION_SPLIT_COLS, split_annotation_labels
+        for marker in ("n", "", "NA", "nan", None):
+            got = split_annotation_labels(marker)
+            self.assertTrue(
+                all(got[c] == "" for c in ANNOTATION_SPLIT_COLS), f"marker {marker!r}"
+            )
+
+    def test_only_kinds_with_a_value_get_a_column(self):
+        """An all-blank column would reintroduce the very bug this split fixes,
+        and leaving the kind unmapped is what makes the report drop its curated
+        column instead of rendering a column of "-"."""
+        values = pd.Series(["dELS,gene_gencode", "Neural_DHS", "n"])
+        frame = aa.split_annotation_frame(values)
+        self.assertIn("Annotation_GENCODE", frame.columns)
+        self.assertIn("Annotation_ENCODE", frame.columns)
+        self.assertIn("Annotation_DHS", frame.columns)
+        # no COSMIC/IntOGen/personal label anywhere -> no such column
+        self.assertNotIn("Annotation_COSMIC", frame.columns)
+        self.assertNotIn("Annotation_INTOGEN", frame.columns)
+        self.assertNotIn("Annotation_personal", frame.columns)
+
+    def test_row_without_an_hg38_coordinate_stays_blank(self):
+        # NaN means "not in hg38 space, nothing was looked up" -- distinct from
+        # "looked and found nothing", and must not be reported as a feature
+        values = pd.Series(["gene_gencode", float("nan")])
+        frame = aa.split_annotation_frame(values)
+        self.assertEqual(frame["Annotation_GENCODE"].tolist(), ["gene", ""])
+
+    def test_gene_region_is_derived_with_the_shared_helper(self):
+        values = pd.Series(["CDS_gencode,gene_gencode", "gene_gencode", "n"])
+        frame = aa.split_annotation_frame(values)
+        self.assertEqual(
+            frame[aa.GENE_REGION_COL].tolist(), ["CDS", "intron", "NA"]
+        )
+
+    def test_combined_annotation_column_is_kept_alongside_the_split(self):
+        tmp = tempfile.mkdtemp()
+        bed = _make_bed(tmp)
+        combined = pd.DataFrame({
+            "hg38_chr": ["chr1"], "hg38_start": [100],
+            "hg38_end_maternal": [123],
+            REF_COL + "_paternal": ["A" * 23],
+        })
+        out = aa.add_annotation_column(combined, bed)
+        self.assertIn(aa.ANNOTATION_COL, out.columns)
+        # and the split columns sit immediately after it
+        cols = list(out.columns)
+        self.assertEqual(cols.index(aa.ANNOTATION_COL) + 1,
+                         min(cols.index(c) for c in cols
+                             if c.startswith("Annotation_")))
