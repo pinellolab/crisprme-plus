@@ -945,6 +945,14 @@ def _assembly_mappable_frame(job_directory: str) -> Tuple[pd.DataFrame, List[str
         # per-haplotype starts are the real ones and stay visible.
         "Start_coordinate_paternal",
         "Start_coordinate_maternal",
+        # The combined comma-joined feature list, superseded on screen by the
+        # per-kind Annotation_GENCODE/_ENCODE/_DHS/_COSMIC/_INTOGEN columns that
+        # assembly_annotate now also emits (the same ones complete-search writes).
+        # Hidden here, NOT dropped from the TSV: it is the only record of the
+        # ORIGINAL label text, which matters because an unrecognised label is
+        # bucketed into Annotation_ENCODE (annotation.ANNOTATION_CATCHALL_COL),
+        # and it has shipped since v2.6.2 so downstream readers still find it.
+        "Annotation",
     }
     display_cols = ["Spacer+PAM"] if "Spacer+PAM" in df.columns else []
     display_cols += [
@@ -1319,6 +1327,14 @@ def result_page_assembly(job_id: str) -> html.Div:
         # per-haplotype starts are the real ones and stay visible.
         "Start_coordinate_paternal",
         "Start_coordinate_maternal",
+        # The combined comma-joined feature list, superseded on screen by the
+        # per-kind Annotation_GENCODE/_ENCODE/_DHS/_COSMIC/_INTOGEN columns that
+        # assembly_annotate now also emits (the same ones complete-search writes).
+        # Hidden here, NOT dropped from the TSV: it is the only record of the
+        # ORIGINAL label text, which matters because an unrecognised label is
+        # bucketed into Annotation_ENCODE (annotation.ANNOTATION_CATCHALL_COL),
+        # and it has shipped since v2.6.2 so downstream readers still find it.
+        "Annotation",
     }
     display_cols = ["Spacer+PAM"] if "Spacer+PAM" in df.columns else []
     display_cols += [
