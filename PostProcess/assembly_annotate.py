@@ -20,11 +20,20 @@ reference locus, not the haplotype's own sequence.
 Reuses `annotation.load_annotation_bed()` / `annotation.annotate_target()`
 (the exact lookup `complete-search` uses) rather than reimplementing the
 tabix query.
+
+Closest-gene annotation (`--gene_annotation`) is a separate, OPTIONAL step
+handled by `add_closest_gene_columns()`. It is a nearest-feature query rather
+than an overlap query, so it uses BEDOPS `closest-features` exactly as
+`complete-search` does in `post_process.sh`, against the same per-transcript
+GENCODE BED whose attributes column carries `gene_id=`/`gene_name=`.
 """
 
 import os
+import shutil
+import subprocess
 import sys
-from typing import Optional
+import tempfile
+from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -54,6 +63,22 @@ _SPLIT_COL_ORDER = (
     "Annotation_INTOGEN",
     "Annotation_personal",
 )
+
+# Closest-gene columns, named exactly as complete-search's own
+# `resultIntegrator.py` names them, so `generate_report._COLS` resolves them
+# with no report-side change (`gene_name` -> Gene, `gene_dist` -> Gene_distance_kb).
+CLOSEST_GENE_NAME_COL = "Annotation_closest_gene_name"
+CLOSEST_GENE_ID_COL = "Annotation_closest_gene_ID"
+CLOSEST_GENE_DIST_COL = "Annotation_closest_gene_distance_(kb)"
+CLOSEST_GENE_COLS = (CLOSEST_GENE_NAME_COL, CLOSEST_GENE_ID_COL, CLOSEST_GENE_DIST_COL)
+
+# complete-search's fallback: when a site overlaps NO gencode feature but a
+# closest gene exists at a non-zero distance, its GENCODE cell reads
+# "intergenic" (resultIntegrator.py sets it in the closest-gene block, then
+# overwrites it from the overlap labels only `if len(gencode_annotations)` --
+# so it is a fallback, never a clobber). Mirrored here with the same precedence.
+GENCODE_SPLIT_COL = "Annotation_GENCODE"
+INTERGENIC = "intergenic"
 
 # Genomic-side aligned target (gaps = RNA bulges shorter than the guide,
 # DNA bulges add bases) -- its ungapped length is the span the site really
@@ -163,4 +188,167 @@ def add_annotation_column(
     combined.insert(pos, ANNOTATION_COL, values)
     for offset, col in enumerate(split.columns, start=1):
         combined.insert(pos + offset, col, split[col])
+    return combined
+
+
+def _require_bedops() -> None:
+    """Fails with a clear message if BEDOPS isn't installed.
+
+    `closest-features`/`sort-bed` are the same binaries complete-search's
+    `post_process.sh` already depends on, so a working install has them; this
+    only turns a cryptic FileNotFoundError into an actionable one.
+    """
+    missing = [t for t in ("sort-bed", "closest-features") if shutil.which(t) is None]
+    if missing:
+        raise RuntimeError(
+            f"{' and '.join(missing)} not found on PATH -- required for "
+            "--gene_annotation (BEDOPS). Install with `mamba install -c bioconda bedops`."
+        )
+
+
+def _parse_gene_attributes(attrs: str) -> Tuple[str, str]:
+    """`(gene_name, gene_id)` from a GFF attributes field, or `("", "")`.
+
+    Same parse complete-search uses (`resultIntegrator.py`): split the
+    attribute string on ';' and read the `gene_name=`/`gene_id=` entries. The
+    GENCODE BED's records are per-transcript features (exon, five_prime_UTR,
+    ...), so these attributes are what turns "nearest feature" into "nearest
+    gene".
+    """
+    name = gid = ""
+    for field in attrs.split(";"):
+        field = field.strip()
+        if field.startswith("gene_name="):
+            name = field.split("=", 1)[1]
+        elif field.startswith("gene_id="):
+            gid = field.split("=", 1)[1]
+    return name, gid
+
+
+def _sorted_plain_bed(path: str, tmpdir: str) -> str:
+    """Decompresses (if needed) and `sort-bed`s an annotation file.
+
+    Sorted unconditionally, as `post_process.sh` does: `closest-features`
+    requires BEDOPS sort order and silently misbehaves without it, and the
+    caller may hand us either a plain .bed or a .bed.gz.
+    """
+    plain = path
+    if path.endswith(".gz"):
+        plain = os.path.join(tmpdir, "gene_annotation.bed")
+        with open(plain, "wb") as dst:
+            if subprocess.call(["gunzip", "-c", path], stdout=dst) != 0:
+                raise RuntimeError(f"failed decompressing {path}")
+    out = os.path.join(tmpdir, "gene_annotation.sorted.bed")
+    with open(out, "wb") as dst:
+        if subprocess.call(["sort-bed", plain], stdout=dst) != 0:
+            raise RuntimeError(f"sort-bed failed on {plain}")
+    return out
+
+
+def closest_gene_frame(combined: pd.DataFrame, gene_annotation_path: str) -> pd.DataFrame:
+    """Closest-gene name/ID/distance for every row with an hg38 coordinate.
+
+    Rows with no hg38 coordinate (one-sided non-mappable and
+    `both_haplotype_private`) are not queried and come back NaN: they are not
+    in hg38 space, so "nearest hg38 gene" is not a statement we can make.
+
+    The queried span is `hg38_start` to `hg38_start + ungapped target length`,
+    the same span `annotate_combined()` uses and the same one complete-search
+    builds (`$7 + length($3)` in `post_process.sh`).
+    """
+    _require_bedops()
+    out = pd.DataFrame(
+        {c: pd.Series(index=combined.index, dtype=object) for c in CLOSEST_GENE_COLS}
+    )
+    has_hg38 = combined["hg38_chr"].notna() & combined["hg38_start"].notna()
+    if not has_hg38.any():
+        return out
+    tmpdir = tempfile.mkdtemp(prefix="crisprme_closest_gene_")
+    try:
+        # 4-column BED keyed by POSITION in the index, not by the index label:
+        # the key round-trips through closest-features as text, and a positional
+        # integer is unambiguous where an arbitrary index label need not be.
+        keys = list(combined.index[has_hg38])
+        targets = os.path.join(tmpdir, "targets.bed")
+        with open(targets, "w") as fh:
+            for key_pos, idx in enumerate(keys):
+                row = combined.loc[idx]
+                start = int(row["hg38_start"])
+                fh.write(
+                    f"{row['hg38_chr']}\t{start}\t{start + _target_length(row)}\t{key_pos}\n"
+                )
+        targets_sorted = os.path.join(tmpdir, "targets.sorted.bed")
+        with open(targets_sorted, "wb") as dst:
+            if subprocess.call(["sort-bed", targets], stdout=dst) != 0:
+                raise RuntimeError("sort-bed failed on the target BED")
+        genes_sorted = _sorted_plain_bed(gene_annotation_path, tmpdir)
+        found = os.path.join(tmpdir, "found.bed")
+        with open(found, "wb") as dst:
+            code = subprocess.call(
+                ["closest-features", "--closest", "--delim", "\t", "--dist",
+                 targets_sorted, genes_sorted],
+                stdout=dst,
+            )
+        if code != 0:
+            raise RuntimeError("closest-features failed")
+        with open(found) as fh:
+            for line in fh:
+                fields = line.rstrip("\n").split("\t")
+                if len(fields) < 5:
+                    continue
+                try:
+                    idx = keys[int(fields[3])]
+                except (ValueError, IndexError):
+                    continue
+                # Guard the distance parse the same way resultIntegrator does:
+                # a "NA" (no closest feature) or an empty trailing field once
+                # crashed the whole integration through float('').
+                try:
+                    dist = float(fields[-1].strip())
+                except ValueError:
+                    continue
+                attrs = next((f for f in fields if "gene_id=" in f), "")
+                name, gid = _parse_gene_attributes(attrs)
+                if not (name or gid):
+                    continue
+                out.at[idx, CLOSEST_GENE_NAME_COL] = name
+                out.at[idx, CLOSEST_GENE_ID_COL] = gid
+                out.at[idx, CLOSEST_GENE_DIST_COL] = str(dist / 1000)
+        return out
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def add_closest_gene_columns(
+    combined: pd.DataFrame, gene_annotation_path: Optional[str]
+) -> pd.DataFrame:
+    """Returns `combined` with the three closest-gene columns added.
+
+    Unchanged when no gene annotation is given -- the columns are then simply
+    absent, and the report's existing `_PRESENT_ANN_KINDS` filter keeps
+    dropping Gene/Gene_distance_kb exactly as it does today.
+
+    Also applies complete-search's `intergenic` fallback, but only where a
+    split `Annotation_GENCODE` column exists AND is empty for that row, so it
+    can never overwrite a real overlap label. That column is produced by the
+    per-kind annotation split; where it is absent (no --annotation, or a build
+    without the split) this is a no-op. "intergenic" is deliberately NOT added
+    to the combined `Annotation` string: that string is a list of OVERLAPPING
+    features, and a suffix-less token there would be mis-bucketed by the
+    per-kind splitter.
+    """
+    if not gene_annotation_path:
+        return combined
+    combined = combined.copy()
+    frame = closest_gene_frame(combined, gene_annotation_path)
+    for col in CLOSEST_GENE_COLS:
+        if col in combined.columns:
+            combined = combined.drop(columns=[col])
+    for col in CLOSEST_GENE_COLS:
+        combined[col] = frame[col]
+    if GENCODE_SPLIT_COL in combined.columns:
+        gencode = combined[GENCODE_SPLIT_COL]
+        blank = gencode.isna() | (gencode.astype(str).str.strip() == "")
+        dist = pd.to_numeric(combined[CLOSEST_GENE_DIST_COL], errors="coerce")
+        combined.loc[blank & dist.notna() & (dist != 0), GENCODE_SPLIT_COL] = INTERGENIC
     return combined
