@@ -206,6 +206,18 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_scorer_env test_scorer_runner -v
 
+      - name: "CFD SNP/INDEL twin parity + cosmic-license + info-af registry + synth-sites + change-headers + dash-output-props + complete-test wiring"
+        # These stdlib-only suites previously ran in NO CI job. test_calc_cfd_twins_agree
+        # is the guard for the #63 CFD fix -- it pins the two calc_cfd copies
+        # (new_simple_analysis / analisi_indels_NNN) byte-for-byte so the INDEL path can't
+        # silently drift from the canonical SNP path again. All use only stdlib + the deps
+        # installed above (numpy/pandas/matplotlib/pysam); none need dash/flask/TensorFlow.
+        working-directory: PostProcess
+        run: >
+          python -m unittest test_calc_cfd_twins_agree test_cosmic_license
+          test_registry_from_info_af test_synth_sites_gt test_change_headers_bestmerge
+          test_dash_output_props test_complete_test -v
+
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import
         # env, array_module (numpy vs cupy), and configure_tf device placement via a fake
