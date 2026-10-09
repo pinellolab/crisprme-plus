@@ -27,6 +27,16 @@ to the search engine, default index, or Docker/Bioconda toolchain.
   (built with correct panels) and index-path searches are unaffected — this only
   guards fresh `--genome --vcf --samplesID` builds with a mis-listed panel.
 
+### Fixed
+- **Default 1000G samplesID over-listed its VCF panel.** The shipped
+  `samplesIDs.1000G.txt` listed 3500 samples while the complete-test 1000G VCF
+  (`ALL.chr22.shapeit2_integrated_snvindels_v2a_27022019`) genotypes only 2548 —
+  the 952 phantom samples were counted as hom-ref, deflating every reported AF
+  ~1.37× (#46), and (with the hard ERROR above) blocked the default 1000G
+  `complete-test`. The panel is now filtered to exactly the 2548 VCF-genotyped
+  samples (HuggingFace data repo + in-repo fallback + `MD5SAMPLES` pin updated).
+  HGDP was verified already correct (929 ↔ 929).
+
 ## [2.7.5] - 2026-10-09
 
 Stability release: off-target scoring correctness (CFD audit), assembly-search
