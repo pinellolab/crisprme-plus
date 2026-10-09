@@ -107,7 +107,7 @@ MD5ANNOTATION = {
     "gencode.protein_coding.bed.tar.gz": "c6747bf2610ff144daafc8b02cef251d",
 }
 MD5SAMPLES = {
-    "samplesIDs.1000G.txt": "720af666c9a938de74a2808033aa4509",
+    "samplesIDs.1000G.txt": "96dd5fa8337fe7b5eac0cd482ce8c4b6",
     "samplesIDs.HGDP.txt": "f92e14e5317221486f20597560ca3a31",
 }
 BFTARGETSMD5 = "2c1721f6c4586698bfd70b6ddbe34b8b"
