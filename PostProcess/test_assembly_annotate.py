@@ -116,6 +116,122 @@ class TestAnnotateCombined(unittest.TestCase):
             self.assertNotIn("Annotation", df.columns)
 
 
+def _gene_bed(tmpdir):
+    """A per-transcript GENCODE-shaped BED: the gene identity lives in the
+    attributes column, exactly as the shipped gencode.protein_coding.bed.gz does."""
+    bed = os.path.join(tmpdir, "genes.bed")
+    attrs = ("ID=UTR5:ENST1;Parent=ENST1;gene_id={gid};transcript_id=ENST1;"
+             "gene_type=protein_coding;gene_name={name};level=2")
+    with open(bed, "w") as f:
+        # feature the chr1:100-200 query sits INSIDE -> distance 0
+        f.write("chr1\t100\t200\tUTR5:ENST1\t.\t+\tHAVANA\tfive_prime_UTR\t.\t"
+                + attrs.format(gid="ENSG0001.1", name="AAA") + "\n")
+        # feature 1kb downstream of a chr2:1000 query -> non-zero distance
+        f.write("chr2\t5000\t5100\texon:ENST2\t.\t-\tHAVANA\texon\t.\t"
+                + attrs.format(gid="ENSG0002.2", name="BBB") + "\n")
+    return bed
+
+
+class TestClosestGene(unittest.TestCase):
+    """`--gene_annotation`: a NEAREST-feature query, unlike the overlap query above."""
+
+    def test_mappable_row_gets_name_id_and_distance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            df = pd.DataFrame([_row("both", "chr1", 100, pat_target="A" * 23)])
+            out = aa.add_closest_gene_columns(df, _gene_bed(tmp))
+            self.assertEqual(out.at[0, aa.CLOSEST_GENE_NAME_COL], "AAA")
+            self.assertEqual(out.at[0, aa.CLOSEST_GENE_ID_COL], "ENSG0001.1")
+            # inside the feature -> zero distance
+            self.assertEqual(float(out.at[0, aa.CLOSEST_GENE_DIST_COL]), 0.0)
+
+    def test_distance_is_reported_in_kb(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            df = pd.DataFrame([_row("both", "chr2", 1000, pat_target="A" * 23)])
+            out = aa.add_closest_gene_columns(df, _gene_bed(tmp))
+            self.assertEqual(out.at[0, aa.CLOSEST_GENE_NAME_COL], "BBB")
+            # ~3977bp away; the column is kb, so well under 10 and not raw bp
+            self.assertLess(abs(float(out.at[0, aa.CLOSEST_GENE_DIST_COL])), 10)
+
+    def test_row_without_hg38_coordinate_stays_blank(self):
+        """A haplotype-private site has no hg38 equivalent, so "nearest hg38
+        gene" is not a statement that can be made about it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            df = pd.DataFrame([
+                _row("both", "chr1", 100, pat_target="A" * 23),
+                _row("both_haplotype_private", None, None, pat_target="A" * 23),
+            ])
+            out = aa.add_closest_gene_columns(df, _gene_bed(tmp))
+            self.assertEqual(out.at[0, aa.CLOSEST_GENE_NAME_COL], "AAA")
+            for col in aa.CLOSEST_GENE_COLS:
+                self.assertTrue(pd.isna(out.at[1, col]), f"{col} must stay blank")
+
+    def test_no_gene_annotation_leaves_frame_unchanged(self):
+        df = pd.DataFrame([_row("both", "chr1", 100, pat_target="A" * 23)])
+        out = aa.add_closest_gene_columns(df, None)
+        self.assertEqual(list(out.columns), list(df.columns))
+        for col in aa.CLOSEST_GENE_COLS:
+            self.assertNotIn(col, out.columns)
+
+    def test_input_frame_not_mutated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            df = pd.DataFrame([_row("both", "chr1", 100, pat_target="A" * 23)])
+            before = list(df.columns)
+            aa.add_closest_gene_columns(df, _gene_bed(tmp))
+            self.assertEqual(list(df.columns), before)
+
+    def test_malformed_distance_is_treated_as_no_annotation(self):
+        """`float('')` once crashed a whole integration in the complete-search
+        path; a non-numeric trailing field must simply yield no annotation."""
+        with tempfile.TemporaryDirectory() as tmp:
+            df = pd.DataFrame([_row("both", "chr1", 100, pat_target="A" * 23)])
+            empty = os.path.join(tmp, "empty.bed")
+            open(empty, "w").close()  # no features at all -> "NA" distance
+            out = aa.add_closest_gene_columns(df, empty)
+            for col in aa.CLOSEST_GENE_COLS:
+                self.assertTrue(pd.isna(out.at[0, col]), f"{col} should be blank")
+
+    def test_attributes_parse_pulls_gene_not_transcript(self):
+        name, gid = aa._parse_gene_attributes(
+            "ID=UTR5:ENST00000642843.2;Parent=ENST00000642843.2;"
+            "gene_id=ENSG00000281518.7;transcript_id=ENST00000642843.2;"
+            "gene_type=protein_coding;gene_name=FOXO6"
+        )
+        self.assertEqual((name, gid), ("FOXO6", "ENSG00000281518.7"))
+
+    def test_intergenic_fills_a_blank_gencode_cell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            row = _row("both", "chr2", 1000, pat_target="A" * 23)
+            row[aa.GENCODE_SPLIT_COL] = ""  # looked, nothing overlapped
+            out = aa.add_closest_gene_columns(pd.DataFrame([row]), _gene_bed(tmp))
+            self.assertEqual(out.at[0, aa.GENCODE_SPLIT_COL], aa.INTERGENIC)
+
+    def test_intergenic_never_overwrites_a_real_gencode_label(self):
+        """complete-search's ordering makes "intergenic" a FALLBACK (it sets it,
+        then overwrites from the overlap labels only when there are any). Same
+        precedence here: a populated cell is left alone."""
+        with tempfile.TemporaryDirectory() as tmp:
+            row = _row("both", "chr2", 1000, pat_target="A" * 23)
+            row[aa.GENCODE_SPLIT_COL] = "exon,gene"
+            out = aa.add_closest_gene_columns(pd.DataFrame([row]), _gene_bed(tmp))
+            self.assertEqual(out.at[0, aa.GENCODE_SPLIT_COL], "exon,gene")
+
+    def test_intergenic_not_applied_at_zero_distance(self):
+        """Distance 0 means the site is INSIDE the gene -- not intergenic."""
+        with tempfile.TemporaryDirectory() as tmp:
+            row = _row("both", "chr1", 100, pat_target="A" * 23)
+            row[aa.GENCODE_SPLIT_COL] = ""
+            out = aa.add_closest_gene_columns(pd.DataFrame([row]), _gene_bed(tmp))
+            self.assertEqual(out.at[0, aa.GENCODE_SPLIT_COL], "")
+
+    def test_closest_gene_columns_match_complete_searchs_names(self):
+        """generate_report._COLS resolves Gene/Gene_distance_kb by these exact
+        names, so a rename here silently empties those curated columns."""
+        self.assertEqual(aa.CLOSEST_GENE_NAME_COL, "Annotation_closest_gene_name")
+        self.assertEqual(aa.CLOSEST_GENE_ID_COL, "Annotation_closest_gene_ID")
+        self.assertEqual(aa.CLOSEST_GENE_DIST_COL,
+                         "Annotation_closest_gene_distance_(kb)")
+
+
 class TestAnnotationLogNote(unittest.TestCase):
     """The web job runner writes its "no annotation" note to log.txt at job
     start (not submit time), before the subprocess's own output."""
