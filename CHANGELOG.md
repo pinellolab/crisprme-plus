@@ -11,6 +11,32 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.6] - 2026-10-09
+
+Stability release candidate. One correctness hardening on top of v2.7.5; no change
+to the search engine, default index, or Docker/Bioconda toolchain.
+
+### Changed
+- **`--samplesID` over-listing is now a hard ERROR (was a warning).** A `--samplesID`
+  that lists samples genotyped in *none* of the provided VCFs silently inflates the
+  panel AN (phantom samples are counted as hom-ref) and deflates every reported
+  allele frequency (Samples / AF / MAF) — no crash, just wrong numbers (#46). Since
+  there is no legitimate reason to list a sample absent from every VCF, pre-flight
+  validation now refuses to run and points to the fix (a VCF-filtered samplesID, or
+  the `registry_fix_an` / genotyped-panel transform). The shipped default indices
+  (built with correct panels) and index-path searches are unaffected — this only
+  guards fresh `--genome --vcf --samplesID` builds with a mis-listed panel.
+
+### Fixed
+- **Default 1000G samplesID over-listed its VCF panel.** The shipped
+  `samplesIDs.1000G.txt` listed 3500 samples while the complete-test 1000G VCF
+  (`ALL.chr22.shapeit2_integrated_snvindels_v2a_27022019`) genotypes only 2548 —
+  the 952 phantom samples were counted as hom-ref, deflating every reported AF
+  ~1.37× (#46), and (with the hard ERROR above) blocked the default 1000G
+  `complete-test`. The panel is now filtered to exactly the 2548 VCF-genotyped
+  samples (HuggingFace data repo + in-repo fallback + `MD5SAMPLES` pin updated).
+  HGDP was verified already correct (929 ↔ 929).
+
 ## [2.7.5] - 2026-10-09
 
 Stability release: off-target scoring correctness (CFD audit), assembly-search
@@ -1872,7 +1898,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.5...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.6...HEAD
+[2.7.6]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.6
 [2.7.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.5
 [2.7.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.4
 [2.7.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.3
