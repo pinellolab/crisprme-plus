@@ -69,9 +69,43 @@ CHROM_ALIAS_MISMATCH_ERROR_RATIO = 0.5
 LIFTOVER_FAILURE_ERROR_RATIO = 0.5
 
 
+def assign_cluster_ids(
+    df: pd.DataFrame, chrom_col: str, strand_col: str, pos_col: str, merge_bp: int,
+) -> pd.DataFrame:
+    """Labels each proximity cluster with a `_cluster_id`, without collapsing.
+
+    Split out of `cluster_collapse` so that a caller which needs to know what
+    ELSE landed in a row's cluster (see `add_copy_annotations`) uses exactly the
+    same clustering as the collapse that follows it, rather than a second,
+    possibly-drifting copy of the algorithm.
+
+    Args:
+        df: Rows to cluster.
+        chrom_col: Column name holding the chromosome.
+        strand_col: Column name holding the strand.
+        pos_col: Column name holding the position to cluster on.
+        merge_bp: Maximum gap (bp) between consecutive points to stay in the
+            same cluster. Clusters chain -- this is not a fixed window.
+
+    Returns:
+        `df` sorted by (chrom, strand, pos) with an added `_cluster_id` column.
+    """
+    df = df.sort_values([chrom_col, strand_col, pos_col]).reset_index(drop=True)
+    cluster_ids: List[int] = []
+    cluster_id = 0
+    prev_chrom = prev_strand = prev_pos = None
+    for chrom, strand, pos in zip(df[chrom_col], df[strand_col], df[pos_col]):
+        if chrom != prev_chrom or strand != prev_strand or (pos - prev_pos) > merge_bp:
+            cluster_id += 1
+        cluster_ids.append(cluster_id)
+        prev_chrom, prev_strand, prev_pos = chrom, strand, pos
+    return df.assign(_cluster_id=cluster_ids)
+
+
 def cluster_collapse(
     df: pd.DataFrame, chrom_col: str, strand_col: str, pos_col: str,
     score_col: str, merge_bp: int, ascending: bool = False,
+    tiebreak_cols: Optional[List[Tuple[str, bool]]] = None,
 ) -> pd.DataFrame:
     """Collapses rows to one per proximity cluster.
 
@@ -94,23 +128,91 @@ def cluster_collapse(
             mismatches+bulges -- fewer is better, matching
             `merge_contiguous_targets.py`'s own `_(fewest_mm+b)` criterion).
             Either way NaN sorts last, never picked over a real value.
+        tiebreak_cols: Further (column, ascending) keys applied, in order,
+            only where `score_col` ties. Without them the winner among tied
+            rows is whichever the position sort happened to put first, which
+            is incidental rather than meaningful. The sort is stable, so the
+            position order remains the final, reproducible fallback.
 
     Returns:
         One row per cluster, the best-`score_col` row in each.
     """
-    df = df.sort_values([chrom_col, strand_col, pos_col]).reset_index(drop=True)
-    cluster_ids: List[int] = []
-    cluster_id = 0
-    prev_chrom = prev_strand = prev_pos = None
-    for chrom, strand, pos in zip(df[chrom_col], df[strand_col], df[pos_col]):
-        if chrom != prev_chrom or strand != prev_strand or (pos - prev_pos) > merge_bp:
-            cluster_id += 1
-        cluster_ids.append(cluster_id)
-        prev_chrom, prev_strand, prev_pos = chrom, strand, pos
-    df = df.assign(_cluster_id=cluster_ids)
-    df = df.sort_values(score_col, ascending=ascending, na_position="last")
+    df = assign_cluster_ids(df, chrom_col, strand_col, pos_col, merge_bp)
+    sort_cols = [score_col] + [c for c, _ in (tiebreak_cols or [])]
+    sort_asc = [ascending] + [a for _, a in (tiebreak_cols or [])]
+    # mergesort = pandas' stable sort: rows tied on every key above keep the
+    # (chrom, strand, pos) order assign_cluster_ids just put them in, so the
+    # pick never depends on the caller's incoming row order.
+    df = df.sort_values(sort_cols, ascending=sort_asc, na_position="last", kind="mergesort")
     df = df.drop_duplicates(subset=["_cluster_id"], keep="first")
     return df.drop(columns=["_cluster_id"]).reset_index(drop=True)
+
+
+# Two native loci of ONE haplotype this far apart or closer are treated as one
+# locus seen twice (the 1-3bp bulge-registration drift documented in
+# `cluster_collapse`), not as two copies -- the comparison is `<=`, so exactly
+# 100bp apart is ONE locus and 101bp apart is two. Measured on HG01255: every real
+# same-hg38-locus collision was either on a different native contig or more
+# than 100bp away, so this threshold separates the two cases cleanly.
+DISTINCT_COPY_BP = 100
+
+
+def add_copy_annotations(
+    df: pd.DataFrame, chrom_col: str, strand_col: str, pos_col: str, merge_bp: int,
+    native_chrom_col: str = "Chromosome",
+    native_pos_col: str = "Start_coordinate_(fewest_mm+b)",
+) -> pd.DataFrame:
+    """Records, per row, how many distinct native loci of this haplotype map to
+    the row's hg38 site, and where they are.
+
+    One hg38 locus can legitimately correspond to several loci in an assembled
+    haplotype: a segmental duplication present in more copies in that individual
+    than in the reference. The combined report keeps one row per hg38 site, so
+    the other copies' rows are dropped by the collapse that follows this. They
+    are not errors and they are not absent from the full output -- every copy
+    is still its own row in the per-haplotype results -- but without these two
+    columns the combined table gives no sign that the collapse happened.
+
+    Measured on HG01255/farnaz: 95 hg38 sites had more than one native locus of
+    the same haplotype, and in 90 of them every copy had an IDENTICAL
+    protospacer+PAM and therefore identical mismatches, bulges, CFD and
+    CRISPR-Bulge scores -- so no score can say which copy to report, and the
+    count is the only place the duplication is visible at all.
+
+    Args:
+        df: Rows for one haplotype, in hg38 coordinates, before collapsing.
+        chrom_col: hg38 chromosome column.
+        strand_col: Strand column.
+        pos_col: hg38 position column clustered on.
+        merge_bp: Same tolerance the following `cluster_collapse` uses.
+        native_chrom_col: Column holding the haplotype's own contig name.
+        native_pos_col: Column holding the haplotype's own 0-based start.
+
+    Returns:
+        `df` with `n_copies` (>=1) and `copy_loci` columns added. `copy_loci`
+        lists every contributing native locus as `contig:start`, separated by
+        `;`, and is empty where `n_copies` is 1 -- the native coordinate
+        columns already report that single locus.
+    """
+    if df.empty:
+        return df.assign(n_copies=pd.Series(dtype="int64"), copy_loci=pd.Series(dtype="object"))
+    work = assign_cluster_ids(df, chrom_col, strand_col, pos_col, merge_bp)
+    native_pos = pd.to_numeric(work[native_pos_col], errors="coerce")
+    n_copies, copy_loci = {}, {}
+    for cid, idx in work.groupby("_cluster_id").groups.items():
+        loci = sorted({(work.at[i, native_chrom_col], int(native_pos[i]))
+                       for i in idx if pd.notna(native_pos[i])})
+        distinct = []
+        for contig, pos in loci:
+            if distinct and distinct[-1][0] == contig and pos - distinct[-1][1] <= DISTINCT_COPY_BP:
+                continue  # same locus counted twice (bulge-registration drift)
+            distinct.append((contig, pos))
+        n_copies[cid] = max(1, len(distinct))
+        copy_loci[cid] = "" if len(distinct) < 2 else ";".join(f"{c}:{p}" for c, p in distinct)
+    return work.assign(
+        n_copies=work["_cluster_id"].map(n_copies).astype("int64"),
+        copy_loci=work["_cluster_id"].map(copy_loci),
+    ).drop(columns=["_cluster_id"])
 
 
 def find_results_prefix(results_dir: str) -> str:
@@ -598,15 +700,182 @@ def build_offtarget_bed(
         fold them into the same non-mappable accounting as
         `load_unlifted_ids`, not just discard them.
     """
+    # CRISPRme's Start_coordinate is the 0-based leftmost (+ strand) base of
+    # the site (protospacer+PAM, length L = ungapped
+    # Aligned_protospacer+PAM_REF). Lift the site's true FIRST and LAST base as
+    # two 1bp BED records so orientation can be recovered (see
+    # resolve_lifted_endpoints). This previously lifted one point [S-1, S) --
+    # the base immediately LEFT of the site, because it treated the 0-based
+    # Start as 1-based -- which put every reported hg38_start 1bp early.
     bed = preds[["Chromosome", "Start_coordinate_(fewest_mm+b)", "off_target_id"]].copy()
-    bed = bed.rename(columns={"Start_coordinate_(fewest_mm+b)": "chromEnd"})
-    bed["chromStart"] = bed["chromEnd"] - 1
+    bed["S"] = pd.to_numeric(bed["Start_coordinate_(fewest_mm+b)"]).astype(int)
+    bed["L"] = site_lengths(preds).values
     bed["chrom"] = bed["Chromosome"].map(ucsc_to_genbank)
     dropped_ids = set(bed.loc[bed["chrom"].isna(), "off_target_id"])
     bed = bed.dropna(subset=["chrom"])
-    bed = bed[["chrom", "chromStart", "chromEnd", "off_target_id"]]
-    bed.to_csv(bed_path, sep="\t", header=False, index=False)
+    # BED6 with a '+' strand: liftOver flips the strand of each end base that
+    # lies in a reverse-oriented chain block, which gives per-end orientation.
+    first = pd.DataFrame({"chrom": bed["chrom"], "chromStart": bed["S"], "chromEnd": bed["S"] + 1,
+                          "name": bed["off_target_id"].astype(str) + "|first", "score": 0, "strand": "+"})
+    last = pd.DataFrame({"chrom": bed["chrom"], "chromStart": bed["S"] + bed["L"] - 1,
+                         "chromEnd": bed["S"] + bed["L"], "name": bed["off_target_id"].astype(str) + "|last",
+                         "score": 0, "strand": "+"})
+    pd.concat([first, last]).to_csv(bed_path, sep="\t", header=False, index=False)
     return bed_path, dropped_ids
+
+
+def site_lengths(preds: pd.DataFrame) -> pd.Series:
+    """Genomic span of each site on its own haplotype: ungapped
+    Aligned_protospacer+PAM_REF (22 with an RNA bulge, 24 with a DNA bulge)."""
+    return preds["Aligned_protospacer+PAM_REF_(fewest_mm+b)"].astype(str).str.replace("-", "", regex=False).str.len()
+
+
+# Two lifted ends farther apart than this (or on different hg38 chromosomes)
+# can't be one site: treated as spanning a rearrangement -> non-mappable.
+# Measured on HG01255: the largest span difference of a site that genuinely
+# does correspond to one hg38 locus was 325bp (a site spanning a deletion), so
+# this is a loose backstop against nonsense placements, not a filter.
+MAX_LIFTED_SPAN_BP = 10_000
+# `hg38_lift_confidence` values. Both of a site's end bases lifting, and
+# agreeing, is what pins down its hg38 span and orientation; when only one end
+# lifts the placement is anchored on that end and extrapolated, so it is still
+# reported but marked, in its own column rather than by decorating
+# `hg38_orientation` with a '?' (an orientation column should hold only a
+# strand, so that downstream code can compare it without parsing).
+LIFT_BOTH_ENDS = "both_ends"
+LIFT_ONE_END = "one_end"
+
+
+def resolve_lifted_endpoints(
+    mapped_path: str, preds: pd.DataFrame, ucsc_to_genbank: Dict[str, str],
+    chain_file: str, workdir: str, name: str,
+) -> Tuple[pd.DataFrame, set, Dict[str, int]]:
+    """Turns the two lifted end bases of every site into one hg38 locus,
+    orientation and lift-confidence flag.
+
+    Each end was lifted as a stranded ('+') BED6 record (see
+    `build_offtarget_bed`), so liftOver's output strand says whether THAT end
+    lies in a forward ('+') or reverse-oriented ('-') chain block. Reading the
+    two ends together is what makes a reverse-oriented placement recoverable at
+    all: a single lifted point carries no orientation, which is why the earlier
+    one-point lift silently reported the site's hg38 END (and the un-flipped
+    haplotype strand) wherever her haplotype aligns to hg38 in reverse.
+
+    both ends lifted, same chrom, same block orientation, consistent order,
+    |span| <= MAX_LIFTED_SPAN_BP:
+        forward ('+', last >= first): hg38 [first, last+1), strand kept
+        reverse ('-', last <  first): hg38 [last, first+1), strand flipped
+        confidence `both_ends`
+    both ends lifted but different chrom / different block orientation (site
+        straddles an inversion breakpoint) / order inconsistent with orientation
+        / too far apart: non-mappable
+    one end lifted: orientation taken from that end's block; the site is
+        anchored at the lifted end and extended by L in the implied direction;
+        confidence `one_end` (kept, not dropped -- on HG01255 these are 0.04%
+        of sites and most of them clearly do correspond to a real hg38 locus,
+        so dropping them would lose more than it protects; the flag lets a
+        caller filter them out deliberately)
+    neither end lifted: non-mappable
+
+    Args:
+        mapped_path: liftOver's mapped BED6 output for this haplotype.
+        preds: This haplotype's predictions (`off_target_id` + `Chromosome` +
+            the aligned-protospacer column `site_lengths` reads).
+        ucsc_to_genbank: This haplotype's chromAlias mapping.
+        chain_file: Unused; kept so callers need not special-case this
+            signature against the older one-point loader.
+        workdir: Unused; see `chain_file`.
+        name: Haplotype name, for callers' logging.
+
+    Returns:
+        (lifted_df[hg38_chr, hg38_start, hg38_end, off_target_id,
+        hg38_orientation, hg38_lift_confidence], non_mappable_ids, counts).
+    """
+    cols = ["hg38_chr", "s", "e", "name", "score", "strand"]
+    try:
+        raw = pd.read_csv(mapped_path, sep="\t", header=None, names=cols, dtype={"name": str})
+    except pd.errors.EmptyDataError:
+        raw = pd.DataFrame(columns=cols)
+    # a haplotype where liftOver mapped NOTHING leaves an empty file; the
+    # str.rsplit(expand=True) below yields no columns at all for it, so every
+    # site has to be routed down the "neither end lifted" branch instead --
+    # otherwise this raises before check_liftover_failure_rate gets to report
+    # the actual problem
+    if raw.empty:
+        raw = pd.DataFrame(columns=cols + ["off_target_id", "end"])
+    else:
+        raw[["off_target_id", "end"]] = raw["name"].str.rsplit("|", n=1, expand=True)
+    first = raw[raw["end"] == "first"].set_index("off_target_id")
+    last = raw[raw["end"] == "last"].set_index("off_target_id")
+    p = preds.assign(off_target_id=preds["off_target_id"].astype(str)).set_index("off_target_id")
+    L = site_lengths(p)
+    rows, nonmap = [], set()
+    counts = {"forward": 0, "reverse": 0, "ends_inconsistent": 0, "one_end": 0, "neither": 0}
+    for i in p.index:
+        if pd.isna(p.at[i, "Chromosome"]) or p.at[i, "Chromosome"] not in ucsc_to_genbank:
+            continue  # no chromAlias: accounted for by build_offtarget_bed's dropped_ids
+        f, l, n = (i in first.index), (i in last.index), int(L[i])
+        if f and l:
+            fc, fs, fo = first.at[i, "hg38_chr"], int(first.at[i, "s"]), first.at[i, "strand"]
+            lc, ls, lo = last.at[i, "hg38_chr"], int(last.at[i, "s"]), last.at[i, "strand"]
+            if fc != lc or fo != lo or abs(ls - fs) > MAX_LIFTED_SPAN_BP \
+                    or (fo == "+" and ls < fs) or (fo == "-" and ls > fs):
+                nonmap.add(i); counts["ends_inconsistent"] += 1
+            elif fo == "+":
+                rows.append((fc, fs, ls + 1, i, "+", LIFT_BOTH_ENDS)); counts["forward"] += 1
+            else:
+                rows.append((fc, ls, fs + 1, i, "-", LIFT_BOTH_ENDS)); counts["reverse"] += 1
+        elif f or l:
+            src = first if f else last
+            c, x, o = src.at[i, "hg38_chr"], int(src.at[i, "s"]), src.at[i, "strand"]
+            # the lifted end is the site's first (f) or last (l) haplotype base
+            if (f and o == "+") or (l and o == "-"):
+                s0 = x              # lifted base is the site's lowest hg38 base
+            else:
+                s0 = x - n + 1      # lifted base is the site's highest hg38 base
+            # Extrapolating backwards from a lifted base closer than L to the
+            # chromosome start would put the site at a negative coordinate --
+            # not a position any consumer can use (a negative BED start is
+            # rejected outright by samtools/bedtools and renders as nonsense in
+            # the report). Anchor at 0 instead: the span is then shorter than
+            # the site by however far it overran, which is a visible, in-range
+            # approximation on a row already marked `one_end`, rather than an
+            # invalid coordinate. Cannot arise in the both-ends branch, whose
+            # two coordinates both come from liftOver itself.
+            s0 = max(0, s0)
+            rows.append((c, s0, s0 + n, i, o, LIFT_ONE_END)); counts["one_end"] += 1
+        else:
+            nonmap.add(i); counts["neither"] += 1
+    lifted = pd.DataFrame(rows, columns=["hg38_chr", "hg38_start", "hg38_end", "off_target_id",
+                                         "hg38_orientation", "hg38_lift_confidence"])
+    return lifted, nonmap, counts
+
+
+def write_site_level_not_lifted(path: str, preds: pd.DataFrame, ucsc_to_genbank: Dict[str, str], ids: set) -> None:
+    """Keeps `<name>_offtargets_not_lifted.bed` ONE ROW PER non-mappable SITE,
+    in liftOver's own reject format ('#reason' line + BED4).
+
+    Now that each site is lifted as two separate end records, liftOver's raw
+    reject file holds up to two rows per site and mixes partially-lifted sites
+    in with wholly-unmappable ones. Its consumers
+    (`pages/results_page.py:load_unlifted_ids` and the assembly panel figure)
+    count rows as sites, so the raw file is written to
+    `<name>_offtargets_not_lifted.endpoints.bed` and this site-level file keeps
+    the original name and the original one-row-per-site meaning.
+
+    Args:
+        path: Output path for the site-level reject file.
+        preds: This haplotype's predictions.
+        ucsc_to_genbank: This haplotype's chromAlias mapping.
+        ids: `off_target_id`s judged non-mappable by `resolve_lifted_endpoints`.
+    """
+    p = preds.assign(off_target_id=preds["off_target_id"].astype(str)).set_index("off_target_id")
+    with open(path, "w") as fh:
+        for i in sorted(ids):
+            if i not in p.index or p.at[i, "Chromosome"] not in ucsc_to_genbank:
+                continue
+            S = int(p.at[i, "Start_coordinate_(fewest_mm+b)"])
+            fh.write(f"#Site not mappable to hg38\n{ucsc_to_genbank[p.at[i, 'Chromosome']]}\t{S}\t{S + 1}\t{i}\n")
 
 
 def check_liftover_available() -> None:
@@ -940,14 +1209,16 @@ def build_or_reuse_haplotype_alignments_both_orientations(
 
 def query_haplotype_alignment(
     paf_path: str, from_name: str, chrom: str, start: int, end: int,
-) -> List[Tuple[str, int, int]]:
+) -> List[Tuple[str, int, int, str]]:
     """Queries a built alignment (see `build_or_reuse_haplotype_alignment`)
     for the coordinate(s) on the *other* haplotype corresponding to a native
     `(chrom, start, end)` locus on the `from_name` haplotype.
 
     Returns:
-        A list of `(chrom, start, end)` hits on the other haplotype, with
-        the haplotype-name prefix stripped back off. Empty if no hit.
+        A list of `(chrom, start, end, orientation)` hits on the other
+        haplotype, with the haplotype-name prefix stripped back off, where
+        orientation is '+' or '-' for the alignment block's orientation
+        relative to the query (bedpe column 9). Empty if no hit.
         Zero, one, or more than one hit is meaningful to the caller: more
         than one is the signature of a repeat-family region (see this
         section's module-level note) -- deliberately returned as-is
@@ -957,12 +1228,11 @@ def query_haplotype_alignment(
     # impg 0.5.0 rejects query ranges below 101bp ("below minimum ... Lower
     # --min-transitive-len or use a longer range") even for a plain,
     # non-transitive `-r` query -- confirmed directly against a real index.
-    # Off-target windows here are ~1bp; pad symmetrically around the
-    # midpoint to clear the minimum rather than pass a fragile CLI override.
-    # The projected hit's own midpoint (what callers actually use) is
-    # unaffected as long as the padded window stays inside one contiguous
-    # alignment block, true at this scale for anything but a query sitting
-    # exactly on a block boundary.
+    # `resolve_haplotype_private` now passes a window that already clears
+    # this and whose offset from the site is known, so this padding is a
+    # fallback for any shorter range another caller passes. Note that a
+    # padded window loses the exact offset, so the position of the site
+    # inside the returned block can only be approximated from its midpoint.
     MIN_QUERY_LEN = 101
     midpoint = (start + end) // 2
     if end - start < MIN_QUERY_LEN:
@@ -1005,7 +1275,12 @@ def query_haplotype_alignment(
         idx = stripped_chrom.find("_")
         if idx != -1:
             stripped_chrom = stripped_chrom[idx + 1:]
-        hits.append((stripped_chrom, target_start, target_end))
+        # bedpe column 9 = orientation of the hit relative to the query
+        # ('-' = reverse-oriented block; verified on real HG01255 PAF blocks,
+        # where column 10 is always '+'). impg coordinates are 0-based
+        # half-open on both sides.
+        orientation = fields[8] if len(fields) > 8 and fields[8] in ("+", "-") else "+"
+        hits.append((stripped_chrom, target_start, target_end, orientation))
     return hits
 
 
@@ -1063,8 +1338,16 @@ def resolve_haplotype_private(
     b_private_by_chrom: Dict[str, List[Tuple[int, str]]] = {}
     for b_id, row in b_private.iterrows():
         b_private_by_chrom.setdefault(row["Chromosome"], []).append(
-            (row["Start_coordinate_(fewest_mm+b)"], b_id)
+            (int(row["Start_coordinate_(fewest_mm+b)"]), b_id, row["Strand_(fewest_mm+b)"])
         )
+    a_len = site_lengths(preds_by_id[a])
+    # contig lengths come from the PAF itself (query = col 1/2, target = col 6/7)
+    contig_len = {}
+    with open(paf_path) as fh:
+        for line in fh:
+            f = line.split("\t")
+            if len(f) >= 7:
+                contig_len[f[0]] = int(f[1]); contig_len[f[5]] = int(f[6])
 
     rows = []
     absorbed = {a: set(), b: set()}
@@ -1072,15 +1355,42 @@ def resolve_haplotype_private(
         a_row = preds_by_id[a].loc[a_id]
         a_chrom = a_row["Chromosome"]
         a_pos = int(a_row["Start_coordinate_(fewest_mm+b)"])
+        a_strand = a_row["Strand_(fewest_mm+b)"]
+        L = int(a_len[a_id])
 
-        hits = query_haplotype_alignment(paf_path, a, a_chrom, a_pos - 1, a_pos)
+        # Query a 101bp window whose position relative to the site's true
+        # first base (0-based a_pos) is known exactly, instead of a
+        # midpoint-padded 1bp query at a_pos-1 (the base left of the site):
+        # a midpoint carries no information about where in the returned block
+        # the site actually sits, which is what made reverse-oriented pairing
+        # impossible. Clamp the window inside the contig at BOTH ends -- impg
+        # rejects a window under 101bp and a window running past the sequence
+        # end, and either used to abort the whole reconciliation for any
+        # private site within ~50bp of a contig edge.
+        q_start = max(0, a_pos - 40)
+        clen = contig_len.get(f"{a}_{a_chrom}")
+        if clen is not None:
+            q_start = max(0, min(q_start, clen - 101))
+        q_end = q_start + 101 if clen is None else min(clen, q_start + 101)
+        if q_end - q_start < 101:
+            continue  # contig shorter than impg's minimum query: leave unresolved
+        hits = query_haplotype_alignment(paf_path, a, a_chrom, q_start, q_end)
         if len(hits) != 1:
             continue  # zero hits (no counterpart) or multiple (ambiguous/repeat-family): leave unresolved
 
-        hit_chrom, hit_start, hit_end = hits[0]
-        hit_mid = (hit_start + hit_end) // 2
+        hit_chrom, hit_start, hit_end, orientation = hits[0]
+        off = a_pos - q_start
+        # expected 0-based start of the SAME site on B, and its strand on B:
+        #   forward block: offset preserved from the hit start
+        #   reverse block: A's first base maps to B's LAST site base
+        if orientation == "-":
+            hit_mid = hit_end - off - L
+            want_strand = {"+": "-", "-": "+"}[a_strand]
+        else:
+            hit_mid = hit_start + off
+            want_strand = a_strand
+        candidates = [(pos, bid) for pos, bid, st in b_private_by_chrom.get(hit_chrom, []) if st == want_strand]
 
-        candidates = b_private_by_chrom.get(hit_chrom, [])
         # pick the NEAREST candidate within merge_bp, not the first one found in
         # iteration order -- iteration order is incidental (whatever order
         # b_private.iterrows() produced), not meaningful, so breaking on the
@@ -1454,7 +1764,8 @@ def reconcile_haplotypes(
                 log(f"{name}: no off-targets found -- treating as an empty result")
                 predictions[name] = pd.DataFrame(columns=PRED_COLS + ["off_target_id"])
                 lifted[name] = pd.DataFrame(
-                    columns=["hg38_chr", "hg38_start", "hg38_end", "off_target_id"]
+                    columns=["hg38_chr", "hg38_start", "hg38_end", "off_target_id",
+                             "hg38_orientation", "hg38_lift_confidence"]
                 )
                 unlifted_ids[name] = set()
                 continue
@@ -1467,13 +1778,22 @@ def reconcile_haplotypes(
             bed_path = os.path.join(workdir, f"{name}_offtargets.bed")
             _, no_chrom_alias_ids = build_offtarget_bed(predictions[name], ucsc_to_genbank, bed_path)
 
-            log(f"Lifting {name} predictions to hg38...")
+            log(f"Lifting {name} predictions to hg38 (both end bases per site)...")
             mapped_path = os.path.join(workdir, f"{name}_offtargets_lifted.bed")
-            unmapped_path = os.path.join(workdir, f"{name}_offtargets_not_lifted.bed")
-            run_liftover(bed_path, cfg["chain_file"], mapped_path, unmapped_path)
+            raw_unmapped_path = os.path.join(workdir, f"{name}_offtargets_not_lifted.endpoints.bed")
+            run_liftover(bed_path, cfg["chain_file"], mapped_path, raw_unmapped_path)
 
-            lifted[name] = load_lifted_bed(mapped_path)
-            liftover_rejected_ids = load_unlifted_ids(unmapped_path)
+            # resolve the two lifted ends per site into one hg38 locus +
+            # orientation; the site-level non-mappable set replaces liftOver's
+            # raw per-endpoint reject file (consumers expect one row per site)
+            lifted[name], liftover_rejected_ids, endpoint_counts = resolve_lifted_endpoints(
+                mapped_path, predictions[name], ucsc_to_genbank, cfg["chain_file"], workdir, name,
+            )
+            log(f"{name}: endpoint resolution {endpoint_counts}")
+            write_site_level_not_lifted(
+                os.path.join(workdir, f"{name}_offtargets_not_lifted.bed"),
+                predictions[name], ucsc_to_genbank, liftover_rejected_ids,
+            )
             check_liftover_failure_rate(
                 len(predictions[name]) - len(no_chrom_alias_ids),
                 len(liftover_rejected_ids),
@@ -1506,6 +1826,12 @@ def reconcile_haplotypes(
             preds = predictions[name].copy()
             preds["off_target_id"] = preds["off_target_id"].astype(str)
             merged = preds.merge(lifted[name], on="off_target_id", how="inner")
+            # In a reverse-oriented chain block the site reads on the opposite
+            # hg38 strand -- flip before any strand-keyed clustering/matching,
+            # both of which key on Strand_(fewest_mm+b).
+            if "hg38_orientation" in merged.columns:
+                rev = merged["hg38_orientation"].astype(str) == "-"
+                merged.loc[rev, "Strand_(fewest_mm+b)"] = merged.loc[rev, "Strand_(fewest_mm+b)"].map({"+": "-", "-": "+"})
             # Same fewest-mm+b criterion as load_crisprme_predictions()'s own
             # cluster_collapse() call, applied here post-liftover: two
             # native-coordinate loci can land on the same (or adjacent) hg38
@@ -1518,10 +1844,29 @@ def reconcile_haplotypes(
                 pd.to_numeric(merged["Mismatches_(fewest_mm+b)"], errors="coerce")
                 + pd.to_numeric(merged["Bulges_(fewest_mm+b)"], errors="coerce")
             )
+            cfd = pd.to_numeric(merged["CFD_score_(fewest_mm+b)"], errors="coerce")
+            # record the duplication BEFORE collapsing it away (same clustering)
+            merged = add_copy_annotations(
+                merged.assign(_mmb=mmb, _cfd=cfd),
+                "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start", merge_bp,
+            )
+            # Tie-break, in order: fewest mm+b, then highest CFD (the more
+            # concerning copy), then the lowest native coordinate. The third key
+            # is deliberately NOT biological: measured on HG01255, 90 of the 95
+            # colliding hg38 sites had copies with an identical protospacer+PAM
+            # and therefore identical mm+b, CFD and CRISPR-Bulge, so no score
+            # can prefer one -- the copies are indistinguishable and the only
+            # thing left to choose is a reproducible one. What IS biologically
+            # informative about these sites is that there are several copies,
+            # and that is reported in n_copies/copy_loci rather than decided
+            # here. (mm+b decided 1 of the 95, CFD 4; the rest tied on every
+            # score the search produces.)
             merged = cluster_collapse(
-                merged.assign(_mmb=mmb), "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start",
+                merged, "hg38_chr", "Strand_(fewest_mm+b)", "hg38_start",
                 "_mmb", merge_bp, ascending=True,
-            ).drop(columns=["_mmb"])
+                tiebreak_cols=[("_cfd", False), ("Chromosome", True),
+                               ("Start_coordinate_(fewest_mm+b)", True)],
+            ).drop(columns=["_mmb", "_cfd"])
             hg38_predictions[name] = merged
 
         log("Combining lifted predictions across haplotypes...")

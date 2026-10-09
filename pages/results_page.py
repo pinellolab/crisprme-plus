@@ -1208,9 +1208,19 @@ def _assembly_site_set_note(job_directory: str, site_set: str) -> str:
         return (
             "hg38_chr/hg38_start (and strand) are the coordinates the two "
             "haplotypes were matched on, so they're shared between them by "
-            "construction. hg38_end is lifted independently per haplotype "
-            "and can differ by a few bp when an indel private to one "
-            "haplotype shifts where its alignment ends in hg38 space."
+            "construction. hg38_end is that haplotype's own lifted site end: "
+            "both end bases of every site are lifted, so the span is real, and "
+            "the two haplotypes can differ by a few bp when an indel private "
+            "to one of them changes how far the site reaches in hg38 space. "
+            "hg38_orientation says whether that haplotype aligns to hg38 "
+            "forward (+) or reversed (-) at this site; where it is '-', the "
+            "strand shown is the hg38 strand, already flipped from the "
+            "haplotype's own. hg38_lift_confidence is 'both_ends' when both "
+            "end bases lifted and agreed, or 'one_end' when only one lifted "
+            "and the rest of the span was extrapolated from it. n_copies "
+            "above 1 means several distinct loci of that haplotype map to this "
+            "one hg38 site (a duplication it carries in more copies than hg38 "
+            "has); the row reports one of them and copy_loci lists them all."
         )
     frame, _ = _assembly_site_set_frame(job_directory, site_set)
     if site_set == "both_haplotype_private":
