@@ -240,6 +240,29 @@ _ANNOTATION_KINDS = frozenset(
     {"gencode", "gene_region", "encode", "dhs", "cosmic", "intogen", "gene_name", "gene_dist"}
 )
 _PRESENT_ANN_KINDS = None
+# Annotation kinds an assembly-search combined report can carry, and the columns
+# they are read from. Assembly-search has no closest-gene file, so `gene_name` /
+# `gene_dist` are deliberately absent and their curated columns drop out.
+_POOLED_ANNOTATION_KINDS = ("gencode", "gene_region", "encode", "dhs", "cosmic", "intogen")
+_POOLED_ANNOTATION_COLS = (
+    "Annotation_GENCODE", "Annotation_ENCODE", "Annotation_DHS",
+    "Annotation_COSMIC", "Annotation_INTOGEN",
+)
+# Curated columns an assembly-search run can never populate: each describes a
+# REF-vs-ALT or allele-frequency property, and assembly-search never runs with a
+# --vcf (each haplotype IS the genome). Dropped rather than shown as all-"-".
+# NOT including perfect_match: "mm+b == 0" is perfectly meaningful here, it just
+# happens to be empty for a guide with no exact match anywhere.
+_NO_VARIANT_KINDS = ("origin", "pam_creation", "variant", "maf", "complex_region")
+# assembly_reconcile.LIFT_ONE_END's value, duplicated rather than imported so this
+# module stays importable without assembly_reconcile (a light-CI concern)
+LIFT_ONE_END_LABEL = "one_end"
+_DROP_KINDS = None
+# The assembly-only columns THIS RUN has, decided once from the full pooled frame
+# and then used by every export. Deciding it per exported table instead would make
+# the schema depend on which rows a threshold happened to select -- e.g. a
+# copy_loci column present in one export and absent from another.
+_ASSEMBLY_EXTRA_ACTIVE = None
 
 # The "Observed" column is meaningful whenever a run has VARIANT off-targets: it
 # marks each as present-in->=1-individual (reference = universal; a single variant =
@@ -264,6 +287,9 @@ def _active_columns():
     # drop the Observed column on a reference-only run (no variant off-targets)
     if _HAS_VARIANTS is False:
         cols = tuple(c for c in cols if c[1] != "observed")
+    # explicit per-run drop set (assembly-search's variant-only columns)
+    if _DROP_KINDS:
+        cols = tuple(c for c in cols if c[1] not in _DROP_KINDS)
     return cols
 
 # --------------------------------------------------------------------------- #
@@ -3841,6 +3867,12 @@ def build_report(
     """
     global _DROP_MAF
     _DROP_MAF = bool(drop_maf)
+    # reset the assembly-only drop set: it is a module global that
+    # build_combined_report() assigns, and this process may have rendered an
+    # assembly report first. Restores the default, so complete-search output
+    # cannot depend on what ran before it.
+    global _DROP_KINDS
+    _DROP_KINDS = None
     if integrated_tsv is None:
         if not result_dir:
             raise ValueError("Provide result_dir or integrated_tsv")
@@ -4951,6 +4983,170 @@ def _haplotype_private_frame(hap_dir, combined_df, chr_col, start_col, guide=Non
     return df[is_private], cols
 
 
+# Assembly-only curated columns, APPENDED after the shared curated set rather
+# than added to CURATED_COLUMNS -- exactly how `Site_category` is already handled
+# (see _curated_frame_with_category). CURATED_COLUMNS/_COLS are shared with
+# complete-search, so an entry there would put these columns in a complete-search
+# report too, rendering "-" and recreating the very bug this module now avoids.
+#
+# `Haplotype_origin` is deliberately NOT the curated "origin" kind: that kind is
+# the VCF REF/ALT_origin column, partition_masks() reads `origin == "alt"` as its
+# variant-mask fallback, and the combined table's own "origin" means something
+# else entirely (both/paternal_only/maternal_only). Mapping one onto the other
+# would silently corrupt the variant/reference split.
+_ASSEMBLY_EXTRA_COLS = (
+    ("Haplotype_origin", "_pv_hap_origin"),
+    ("hg38_end", "_pv_hg38_end"),
+    ("hg38_orientation", "_pv_hg38_orientation"),
+    ("hg38_lift_confidence", "_pv_hg38_lift_conf"),
+    ("n_copies_paternal", "_pv_n_copies_pat"),
+    ("n_copies_maternal", "_pv_n_copies_mat"),
+    ("copy_loci_paternal", "_pv_copy_loci_pat"),
+    ("copy_loci_maternal", "_pv_copy_loci_mat"),
+)
+
+
+def _blank_to_missing(value):
+    """CURATED_MISSING for anything the report counts as absent, else the value."""
+    return CURATED_MISSING if _is_na(value) else str(value)
+
+
+# "-" is CURATED_MISSING, so a reverse orientation reported as "-" would be
+# indistinguishable from "this row has no hg38 orientation at all" (every
+# non-mappable row). Report the orientation in words instead; the combined TSV
+# keeps the +/- form.
+_ORIENTATION_WORDS = {"+": "forward", "-": "reverse"}
+
+
+def _collapse_haplotype_value(pat, mat):
+    """Collapses a per-haplotype value into one column.
+
+    The two haplotypes agree on orientation for all but a handful of sites
+    (135 paternal / 195 maternal reverse-oriented out of ~33k), so two columns
+    would be near-duplicates. The collapse rule:
+
+    * both present and equal -> that value;
+    * both present and DIFFERENT -> ``"<paternal>/<maternal>"``, so a genuine
+      disagreement is visible instead of one side being silently picked;
+    * only one present (a ``paternal_only``/``maternal_only`` site) -> that one;
+    * neither -> ``CURATED_MISSING``.
+    """
+    p, m = _blank_to_missing(pat), _blank_to_missing(mat)
+    if p == CURATED_MISSING:
+        return m
+    if m == CURATED_MISSING:
+        return p
+    return p if p == m else f"{p}/{m}"
+
+
+def _collapse_lift_confidence(pat, mat):
+    """Like `_collapse_haplotype_value`, but `one_end` always wins.
+
+    `one_end` means that side's coordinate is partly EXTRAPOLATED rather than
+    lifted. A row whose two haplotypes disagree is still a row with a partly
+    extrapolated coordinate, so collapsing to the more confident of the two
+    would hide exactly the caveat the column exists to carry.
+    """
+    p, m = _blank_to_missing(pat), _blank_to_missing(mat)
+    present = [v for v in (p, m) if v != CURATED_MISSING]
+    if not present:
+        return CURATED_MISSING
+    return LIFT_ONE_END_LABEL if LIFT_ONE_END_LABEL in present else present[0]
+
+
+def _decide_assembly_extra_columns(pooled_df):
+    """Which assembly-only columns to emit, decided ONCE for the whole run.
+
+    Returns the `_ASSEMBLY_EXTRA_COLS` headers that have at least one real value
+    anywhere in the full pooled frame. Every exported table then gets that same
+    column set, so a reader can diff two downloads from one report. Deciding it
+    per table would couple the schema to the filter: a column with values only in
+    low-CFD rows would vanish from `cfd_ge_0.50.tsv` and stay in `cfd_ge_0.05.tsv`.
+    """
+    active = []
+    for header, pooled_col in _ASSEMBLY_EXTRA_COLS:
+        if pooled_df is None or pooled_col not in pooled_df.columns:
+            continue
+        if any(v != CURATED_MISSING and not _is_na(v) for v in pooled_df[pooled_col]):
+            active.append(header)
+    return active
+
+
+def _assembly_extra_values(recon_df):
+    """The assembly-only column values for the reconciled rows.
+
+    `hg38_end` is the end of whichever haplotype supplied the reported `CFD`.
+    The curated `CFD` is max(paternal, maternal), so pairing `Position` with the
+    OTHER haplotype's end would describe a span no single reported score belongs
+    to. Caveat worth knowing: `hg38_start` is the reconciliation's merge key and
+    equals the paternal site's own start, so a maternal end paired with it can be
+    1-2bp out on the few sites where the two haplotypes' lifted starts differ
+    within the 3bp merge tolerance (13 of 30,053 on HG01255). Paternal spans are
+    exact.
+    """
+    cfd_p = pd.to_numeric(recon_df.get("CFD_score_(fewest_mm+b)_paternal"), errors="coerce")
+    cfd_m = pd.to_numeric(recon_df.get("CFD_score_(fewest_mm+b)_maternal"), errors="coerce")
+    end_p = recon_df.get("hg38_end_paternal")
+    end_m = recon_df.get("hg38_end_maternal")
+
+    def _end(idx):
+        p = None if end_p is None else end_p.get(idx)
+        m = None if end_m is None else end_m.get(idx)
+        if _is_na(p):
+            return _blank_to_missing(m)
+        if _is_na(m):
+            return _blank_to_missing(p)
+        vp, vm = cfd_p.get(idx), cfd_m.get(idx)
+        # >= so a tie keeps the paternal end, which pairs exactly with hg38_start
+        take_p = not (pd.notna(vm) and (pd.isna(vp) or vm > vp))
+        return _blank_to_missing(p if take_p else m)
+
+    def _col(name):
+        return recon_df.get(name)
+
+    def _pick(series, idx):
+        return None if series is None else series.get(idx)
+
+    orient_p, orient_m = _col("hg38_orientation_paternal"), _col("hg38_orientation_maternal")
+    lift_p, lift_m = _col("hg38_lift_confidence_paternal"), _col("hg38_lift_confidence_maternal")
+    origin = _col("origin")
+    out = {
+        "_pv_hap_origin": [_blank_to_missing(_pick(origin, i)) for i in recon_df.index],
+        "_pv_hg38_end": [_end(i) for i in recon_df.index],
+        "_pv_hg38_orientation": [
+            _collapse_haplotype_value(
+                _ORIENTATION_WORDS.get(_pick(orient_p, i), _pick(orient_p, i)),
+                _ORIENTATION_WORDS.get(_pick(orient_m, i), _pick(orient_m, i)),
+            )
+            for i in recon_df.index
+        ],
+        "_pv_hg38_lift_conf": [
+            _collapse_lift_confidence(_pick(lift_p, i), _pick(lift_m, i))
+            for i in recon_df.index
+        ],
+    }
+    for pooled_col, src in (
+        ("_pv_n_copies_pat", "n_copies_paternal"),
+        ("_pv_n_copies_mat", "n_copies_maternal"),
+        ("_pv_copy_loci_pat", "copy_loci_paternal"),
+        ("_pv_copy_loci_mat", "copy_loci_maternal"),
+    ):
+        series = _col(src)
+        is_count = pooled_col.startswith("_pv_n_copies")
+        vals = []
+        for i in recon_df.index:
+            v = _blank_to_missing(_pick(series, i))
+            if is_count and v != CURATED_MISSING:
+                # a count, not a measurement: "1", never "1.0"
+                try:
+                    v = str(int(float(v)))
+                except (TypeError, ValueError):
+                    pass
+            vals.append(v)
+        out[pooled_col] = vals
+    return out
+
+
 def _pooled_validation_frame(combined_df, hap_dirs, guide):
     """ONE frame pooling all three disjoint site categories (reconciled/
     paternal-private/maternal-private) into a single, consistently-scored
@@ -5005,6 +5201,14 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             "CFD_score": recon_df["_recon_cfd"],
             "CRISPR_BULGE_score": np.nan,
             "_pv_category": "Reconciled (hg38)",
+            # Per-kind annotation columns, so the curated view can read them (see
+            # _ANNOTATION_KINDS / _COLS). ONLY the reconciled rows can carry an
+            # annotation: the per-haplotype private rows below have no hg38
+            # coordinate, so nothing was looked up for them and they are left
+            # blank, which _is_na() renders as "-" -- a different statement from
+            # "the screen ran and found nothing".
+            **{c: recon_df[c] for c in _POOLED_ANNOTATION_COLS if c in recon_df.columns},
+            **_assembly_extra_values(recon_df),
         }))
 
     for hap, chr_col, start_col, label in (
@@ -5013,6 +5217,7 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
         ("maternal", "Chromosome_maternal", "Start_coordinate_(fewest_mm+b)_maternal",
          "Maternal-private (non-mappable)"),
     ):
+        hap_origin_label = f"{hap}_only"
         priv_df, _pc = _haplotype_private_frame(hap_dirs.get(hap), combined_df, chr_col, start_col, guide)
         if priv_df is None or priv_df.empty:
             continue
@@ -5029,6 +5234,12 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             "CFD_score": pd.to_numeric(priv_df.get("CFD_score_(fewest_mm+b)"), errors="coerce"),
             "CRISPR_BULGE_score": pd.to_numeric(priv_df.get("CRISPR_BULGE_score_(highest_CRISPR_BULGE)"), errors="coerce"),
             "_pv_category": label,
+            **{c: "" for c in _POOLED_ANNOTATION_COLS if c in combined_df.columns},
+            # a private row has no hg38 coordinate, so none of the hg38-side
+            # columns apply to it; Haplotype_origin is the one that does
+            **{pooled_col: (hap_origin_label if pooled_col == "_pv_hap_origin"
+                            else CURATED_MISSING)
+               for _h, pooled_col in _ASSEMBLY_EXTRA_COLS},
         }))
 
     if not parts:
@@ -5042,16 +5253,61 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
     if "Aligned_protospacer+PAM_REF" in pooled.columns:
         cols["aln_ref"] = "Aligned_protospacer+PAM_REF"
         cols["aln_alt"] = "Aligned_protospacer+PAM_ALT"
+    # An annotation kind is mapped only when its source column actually came
+    # through. assembly_annotate already omits a kind that has no values anywhere,
+    # so a mapped kind is a populated kind -- and an UNmapped kind is what makes
+    # _active_columns() drop its curated column instead of rendering a column of
+    # "-" that implies a screen nobody performed.
+    for _kind in _POOLED_ANNOTATION_KINDS:
+        _src = _COLS[_kind][0]
+        if _src in pooled.columns:
+            cols[_kind] = _src
     return pooled, cols
 
 
-def _curated_frame_with_category(sub_df, cols, has_crispr_bulge, category_series, start_rank=1):
-    """`build_curated_frame()`'s real curated columns plus one more,
-    `Site_category` -- looked up by ORIGINAL index from `category_series`
-    (the pooled frame's `_pv_category`), so it survives `select_worstcase_panel()`'s/
-    `select_top()`'s sort/filter/head() (all index-preserving)."""
+def _curated_frame_with_category(
+    sub_df, cols, has_crispr_bulge, category_series, start_rank=1, pooled_df=None
+):
+    """`build_curated_frame()`'s real curated columns plus the assembly-only ones.
+
+    `Site_category` and everything in `_ASSEMBLY_EXTRA_COLS` are looked up by
+    ORIGINAL index (from `category_series` / `pooled_df`, i.e. the pooled frame's
+    own `_pv_*` columns), so they survive `select_worstcase_panel()`'s and
+    `select_top()`'s sort/filter/head() -- all index-preserving.
+
+    Appending here, rather than adding entries to `CURATED_COLUMNS`, is what keeps
+    these columns off a complete-search report: that tuple is shared, and
+    `build_report()` never calls this function.
+    """
     frame = build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=start_rank)
     frame["Site_category"] = [category_series.get(idx, CURATED_MISSING) for idx in sub_df.index]
+    if pooled_df is not None:
+        # The run-wide schema when one has been decided (_decide_assembly_extra_
+        # columns, from the FULL pooled frame); otherwise fall back to deciding
+        # from this frame alone. Using the run-wide set is what makes every
+        # exported table share one column set instead of each reflecting whatever
+        # its own filter happened to keep.
+        active = _ASSEMBLY_EXTRA_ACTIVE
+        for header, pooled_col in _ASSEMBLY_EXTRA_COLS:
+            if active is not None and header not in active:
+                continue
+            if pooled_col not in pooled_df.columns:
+                # in the run-wide schema but missing from this frame: emit it
+                # blank rather than silently narrowing this table's schema
+                if active is not None:
+                    frame[header] = CURATED_MISSING
+                continue
+            series = pooled_df[pooled_col]
+            values = [series.get(idx, CURATED_MISSING) for idx in sub_df.index]
+            if active is not None:
+                frame[header] = values
+                continue
+            # no run-wide schema (a direct call, e.g. from a test): a column with
+            # nothing in it anywhere is what this module avoids elsewhere, so
+            # don't introduce one here either. CURATED_MISSING ("-") is NOT in
+            # _NA_TOKENS, so test it explicitly.
+            if any(v != CURATED_MISSING and not _is_na(v) for v in values):
+                frame[header] = values
     return frame
 
 
@@ -5127,9 +5383,10 @@ def _combined_validation_panel_html(combined_df, hap_dirs, guide, staging_dir):
     def _stage(sub_df, base_name):
         path = os.path.join(staging_dir, base_name)
         try:
-            _curated_frame_with_category(sub_df, cols, has_crispr_bulge, category, start_rank=1).to_csv(
-                path, sep="\t", index=False
-            )
+            _curated_frame_with_category(
+                sub_df, cols, has_crispr_bulge, category, start_rank=1,
+                pooled_df=pooled_df,
+            ).to_csv(path, sep="\t", index=False)
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: {base_name} unavailable: {exc}\n")
             return None
@@ -5671,6 +5928,37 @@ def build_combined_report(
     # block once the zip is written. `pooled_vp` is reused for the pooled
     # Top-1000 table (Section 5) so the panel and the ranked table are built
     # from the exact same pooled/scored frame, not recomputed twice.
+    # Curation set up BEFORE anything is exported. Two reasons it belongs here
+    # rather than after the panel below:
+    #
+    #  * these are module globals that build_report() assigns per run, and the web
+    #    server is one long-lived process serving both run types -- so an assembly
+    #    report rendered after a complete-search report would otherwise reuse that
+    #    run's flags (a --no-maf complete-search dropping MAF from the next
+    #    assembly report, say);
+    #  * the validation panel below STAGES most of the zip's exported TSVs.
+    #    Setting these after it ran left those exports curated by whatever flags
+    #    happened to be lying around: they kept the variant-only columns this run
+    #    cannot populate while top1000.tsv correctly dropped them, so one zip
+    #    carried four different schemas.
+    global _DROP_MAF, _HAS_VARIANTS, _DROP_KINDS, _PRESENT_ANN_KINDS
+    global _ASSEMBLY_EXTRA_ACTIVE
+    _DROP_MAF = False
+    _HAS_VARIANTS = None          # keep Observed, as this path always has
+    _DROP_KINDS = _NO_VARIANT_KINDS
+    _PRESENT_ANN_KINDS = set()    # nothing until the pooled frame proves otherwise
+    _ASSEMBLY_EXTRA_ACTIVE = []
+    # Built once, here, and reused by the panel's exports AND the Top-1000 table
+    # below, so every table in the zip is curated from one schema.
+    _pooled_df, _pooled_cols = _pooled_validation_frame(
+        combined_df, hap_dirs, guides[0] if guides else None
+    )
+    if len(_pooled_df):
+        # which annotation screens this run actually carries (see
+        # _pooled_validation_frame's own note on why an unmapped kind is dropped)
+        _PRESENT_ANN_KINDS = {k for k in _ANNOTATION_KINDS if k in _pooled_cols}
+        _ASSEMBLY_EXTRA_ACTIVE = _decide_assembly_extra_columns(_pooled_df)
+
     _panel_staging_dir = tempfile.mkdtemp(prefix="crisprme_combined_panel_")
     try:
         validation_html, next_steps_html, _staged_panel_files, pooled_vp = _combined_validation_panel_html(
@@ -5726,15 +6014,13 @@ def build_combined_report(
     top1000_crispr_bulge_html = ""
     _top1000_curated_for_tsv = None
     if pooled_vp is not None:
-        _pooled_df, _pooled_cols = _pooled_validation_frame(
-            combined_df, hap_dirs, guides[0] if guides else None
-        )
         _has_crispr_bulge = pooled_vp.get("has_crispr_bulge", False)
         _category = _pooled_df["_pv_category"]
         top_df = select_top(_pooled_df, _pooled_cols, n=top_n)
         if len(top_df):
             _top1000_curated_for_tsv = _curated_frame_with_category(
-                top_df, _pooled_cols, _has_crispr_bulge, _category, start_rank=1
+                top_df, _pooled_cols, _has_crispr_bulge, _category, start_rank=1,
+                pooled_df=_pooled_df,
             )
             top1000_html = _render_curated_table_html(_top1000_curated_for_tsv)
         if _has_crispr_bulge:
@@ -5744,7 +6030,8 @@ def build_combined_report(
                     f'<h3 style="margin:1.2em 0 0.3em 0">Ranked by {scorer_label()} score</h3>'
                     + _render_curated_table_html(
                         _curated_frame_with_category(
-                            top_crispr_bulge_df, _pooled_cols, _has_crispr_bulge, _category, start_rank=1
+                            top_crispr_bulge_df, _pooled_cols, _has_crispr_bulge, _category,
+                            start_rank=1, pooled_df=_pooled_df,
                         )
                     )
                 )

@@ -2,7 +2,7 @@
 
 from pysam import TabixFile
 from pysam.utils import SamtoolsError
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 from time import time
 
 import fcntl
@@ -168,6 +168,66 @@ def annotate_target(chrom: str, start: int, stop: int, annotation: TabixFile) ->
         for feature in annotation.fetch(chrom, start, stop)
     }  # retrieve annotations for current target
     return ",".join(sorted(target_anns))  # report as comma-separated list
+
+
+# Annotation-label buckets, and the column each bucket is written to.
+#
+# Deliberately identical to the classification resultIntegrator.py already
+# performs on its own raw annotation field, so that a complete-search report and
+# an assembly-search report describe the same annotation bundle with the same
+# column names and the same values. Two properties of that classification are
+# load-bearing and must not be "tidied":
+#   * the suffixed kinds are tested BEFORE the ENCODE catch-all -- a COSMIC or
+#     IntOGen label would otherwise be bucketed as ENCODE and silently mislabelled;
+#   * the suffix is matched as a SUBSTRING and stripped with str.replace, which is
+#     what turns "gene_gencode" into the "gene" that complete-search reports.
+# ENCODE is the catch-all, so an unrecognised label from a user-supplied bundle is
+# never dropped -- it is reported there rather than lost.
+ANNOTATION_SUFFIX_COLS = (
+    ("_personal", "Annotation_personal"),
+    ("_gencode", "Annotation_GENCODE"),
+    ("_DHS", "Annotation_DHS"),
+    ("_COSMIC", "Annotation_COSMIC"),
+    ("_INTOGEN", "Annotation_INTOGEN"),
+)
+ANNOTATION_CATCHALL_COL = "Annotation_ENCODE"
+ANNOTATION_SPLIT_COLS = tuple(col for _, col in ANNOTATION_SUFFIX_COLS) + (
+    ANNOTATION_CATCHALL_COL,
+)
+# "nothing overlaps here" markers: annotate_target()'s own "n", plus the usual
+# blank spellings. A kind with no labels is reported blank, matching
+# complete-search (whose per-kind columns are "NA"/empty when the kind is absent).
+_NO_ANNOTATION_TOKENS = frozenset({"", "n", "na", "nan", "none", "."})
+
+
+def split_annotation_labels(annotation: Optional[str]) -> Dict[str, str]:
+    """Buckets one comma-separated annotation feature list into per-kind columns.
+
+    Args:
+        annotation: A feature list as `annotate_target` returns it (e.g.
+            "dELS,gene_gencode,Neural_DHS"), or a blank/"n" marker.
+
+    Returns:
+        `{column_name: comma-joined sorted value}` for every column in
+        `ANNOTATION_SPLIT_COLS`; a kind with no labels maps to "".
+    """
+    buckets: Dict[str, set] = {col: set() for col in ANNOTATION_SPLIT_COLS}
+    text = "" if annotation is None else str(annotation).strip()
+    if text.lower() in _NO_ANNOTATION_TOKENS:
+        return {col: "" for col in ANNOTATION_SPLIT_COLS}
+    for elem in text.split(","):
+        elem = elem.strip()
+        if not elem:
+            continue
+        for suffix, col in ANNOTATION_SUFFIX_COLS:
+            if suffix in elem:
+                buckets[col].add(elem.replace(suffix, ""))
+                break
+        else:
+            buckets[ANNOTATION_CATCHALL_COL].add(elem)
+    # sorted() so column order is deterministic across processes (bare set
+    # iteration is PYTHONHASHSEED-dependent) -- same reason resultIntegrator sorts
+    return {col: ",".join(sorted(vals)) for col, vals in buckets.items()}
 
 
 def annotate_offtargets(
