@@ -258,6 +258,11 @@ _NO_VARIANT_KINDS = ("origin", "pam_creation", "variant", "maf", "complex_region
 # module stays importable without assembly_reconcile (a light-CI concern)
 LIFT_ONE_END_LABEL = "one_end"
 _DROP_KINDS = None
+# The assembly-only columns THIS RUN has, decided once from the full pooled frame
+# and then used by every export. Deciding it per exported table instead would make
+# the schema depend on which rows a threshold happened to select -- e.g. a
+# copy_loci column present in one export and absent from another.
+_ASSEMBLY_EXTRA_ACTIVE = None
 
 # The "Observed" column is meaningful whenever a run has VARIANT off-targets: it
 # marks each as present-in->=1-individual (reference = universal; a single variant =
@@ -5049,6 +5054,24 @@ def _collapse_lift_confidence(pat, mat):
     return LIFT_ONE_END_LABEL if LIFT_ONE_END_LABEL in present else present[0]
 
 
+def _decide_assembly_extra_columns(pooled_df):
+    """Which assembly-only columns to emit, decided ONCE for the whole run.
+
+    Returns the `_ASSEMBLY_EXTRA_COLS` headers that have at least one real value
+    anywhere in the full pooled frame. Every exported table then gets that same
+    column set, so a reader can diff two downloads from one report. Deciding it
+    per table would couple the schema to the filter: a column with values only in
+    low-CFD rows would vanish from `cfd_ge_0.50.tsv` and stay in `cfd_ge_0.05.tsv`.
+    """
+    active = []
+    for header, pooled_col in _ASSEMBLY_EXTRA_COLS:
+        if pooled_df is None or pooled_col not in pooled_df.columns:
+            continue
+        if any(v != CURATED_MISSING and not _is_na(v) for v in pooled_df[pooled_col]):
+            active.append(header)
+    return active
+
+
 def _assembly_extra_values(recon_df):
     """The assembly-only column values for the reconciled rows.
 
@@ -5259,14 +5282,30 @@ def _curated_frame_with_category(
     frame = build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=start_rank)
     frame["Site_category"] = [category_series.get(idx, CURATED_MISSING) for idx in sub_df.index]
     if pooled_df is not None:
+        # The run-wide schema when one has been decided (_decide_assembly_extra_
+        # columns, from the FULL pooled frame); otherwise fall back to deciding
+        # from this frame alone. Using the run-wide set is what makes every
+        # exported table share one column set instead of each reflecting whatever
+        # its own filter happened to keep.
+        active = _ASSEMBLY_EXTRA_ACTIVE
         for header, pooled_col in _ASSEMBLY_EXTRA_COLS:
+            if active is not None and header not in active:
+                continue
             if pooled_col not in pooled_df.columns:
+                # in the run-wide schema but missing from this frame: emit it
+                # blank rather than silently narrowing this table's schema
+                if active is not None:
+                    frame[header] = CURATED_MISSING
                 continue
             series = pooled_df[pooled_col]
             values = [series.get(idx, CURATED_MISSING) for idx in sub_df.index]
-            # a column with nothing in it anywhere is exactly what this module
-            # works to avoid elsewhere; don't introduce one here either.
-            # CURATED_MISSING ("-") is NOT in _NA_TOKENS, so test it explicitly.
+            if active is not None:
+                frame[header] = values
+                continue
+            # no run-wide schema (a direct call, e.g. from a test): a column with
+            # nothing in it anywhere is what this module avoids elsewhere, so
+            # don't introduce one here either. CURATED_MISSING ("-") is NOT in
+            # _NA_TOKENS, so test it explicitly.
             if any(v != CURATED_MISSING and not _is_na(v) for v in values):
                 frame[header] = values
     return frame
@@ -5889,6 +5928,37 @@ def build_combined_report(
     # block once the zip is written. `pooled_vp` is reused for the pooled
     # Top-1000 table (Section 5) so the panel and the ranked table are built
     # from the exact same pooled/scored frame, not recomputed twice.
+    # Curation set up BEFORE anything is exported. Two reasons it belongs here
+    # rather than after the panel below:
+    #
+    #  * these are module globals that build_report() assigns per run, and the web
+    #    server is one long-lived process serving both run types -- so an assembly
+    #    report rendered after a complete-search report would otherwise reuse that
+    #    run's flags (a --no-maf complete-search dropping MAF from the next
+    #    assembly report, say);
+    #  * the validation panel below STAGES most of the zip's exported TSVs.
+    #    Setting these after it ran left those exports curated by whatever flags
+    #    happened to be lying around: they kept the variant-only columns this run
+    #    cannot populate while top1000.tsv correctly dropped them, so one zip
+    #    carried four different schemas.
+    global _DROP_MAF, _HAS_VARIANTS, _DROP_KINDS, _PRESENT_ANN_KINDS
+    global _ASSEMBLY_EXTRA_ACTIVE
+    _DROP_MAF = False
+    _HAS_VARIANTS = None          # keep Observed, as this path always has
+    _DROP_KINDS = _NO_VARIANT_KINDS
+    _PRESENT_ANN_KINDS = set()    # nothing until the pooled frame proves otherwise
+    _ASSEMBLY_EXTRA_ACTIVE = []
+    # Built once, here, and reused by the panel's exports AND the Top-1000 table
+    # below, so every table in the zip is curated from one schema.
+    _pooled_df, _pooled_cols = _pooled_validation_frame(
+        combined_df, hap_dirs, guides[0] if guides else None
+    )
+    if len(_pooled_df):
+        # which annotation screens this run actually carries (see
+        # _pooled_validation_frame's own note on why an unmapped kind is dropped)
+        _PRESENT_ANN_KINDS = {k for k in _ANNOTATION_KINDS if k in _pooled_cols}
+        _ASSEMBLY_EXTRA_ACTIVE = _decide_assembly_extra_columns(_pooled_df)
+
     _panel_staging_dir = tempfile.mkdtemp(prefix="crisprme_combined_panel_")
     try:
         validation_html, next_steps_html, _staged_panel_files, pooled_vp = _combined_validation_panel_html(
@@ -5942,25 +6012,8 @@ def build_combined_report(
     # see _combined_curated_top_df()'s docstring).
     top1000_html = "<p>No off-targets to show.</p>"
     top1000_crispr_bulge_html = ""
-    # Every module-level curation flag is set EXPLICITLY here, never inherited.
-    # These are module globals that build_report() assigns per run, and the web
-    # server is one long-lived process serving both run types -- so without this,
-    # an assembly report rendered after a complete-search report silently reused
-    # that run's _DROP_MAF / _PRESENT_ANN_KINDS / _HAS_VARIANTS (e.g. a --no-maf
-    # complete-search would drop MAF from the next assembly report too).
-    global _DROP_MAF, _HAS_VARIANTS, _DROP_KINDS, _PRESENT_ANN_KINDS
-    _DROP_MAF = False
-    _HAS_VARIANTS = None          # keep Observed, as this path always has
-    _DROP_KINDS = _NO_VARIANT_KINDS
-    _PRESENT_ANN_KINDS = set()    # nothing until the pooled frame proves otherwise
     _top1000_curated_for_tsv = None
     if pooled_vp is not None:
-        _pooled_df, _pooled_cols = _pooled_validation_frame(
-            combined_df, hap_dirs, guides[0] if guides else None
-        )
-        # which annotation screens this run actually carries (see
-        # _pooled_validation_frame's own note on why an unmapped kind is dropped)
-        _PRESENT_ANN_KINDS = {k for k in _ANNOTATION_KINDS if k in _pooled_cols}
         _has_crispr_bulge = pooled_vp.get("has_crispr_bulge", False)
         _category = _pooled_df["_pv_category"]
         top_df = select_top(_pooled_df, _pooled_cols, n=top_n)

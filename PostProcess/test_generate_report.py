@@ -1643,3 +1643,110 @@ class TestAssemblyExtraColumns(unittest.TestCase):
         frame = self._curated()
         self.assertNotIn("copy_loci_maternal", frame.columns)
         self.assertIn("copy_loci_paternal", frame.columns)  # this one has a value
+
+
+@unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
+class TestAssemblyExportSchemaIsUniform(unittest.TestCase):
+    """Every exported table in one zip must share ONE column set.
+
+    The zip ships ~12 curated TSVs (top1000, panel_top100, the cfd_*/mmb_*/
+    crispr_bulge_* threshold tables). They are built from different row subsets,
+    so anything that decides the schema per table couples it to the filter: a
+    column with values only in low-CFD rows would appear in `cfd_ge_0.05.tsv`
+    and vanish from `cfd_ge_0.50.tsv`, and two downloads from one report could
+    not be diffed. Deciding once from the full pooled frame is what prevents it.
+    """
+
+    def setUp(self):
+        self._saved = (
+            gr._DROP_MAF, gr._PRESENT_ANN_KINDS, gr._HAS_VARIANTS,
+            gr._DROP_KINDS, gr._ASSEMBLY_EXTRA_ACTIVE,
+        )
+        gr._DROP_MAF = False
+        gr._HAS_VARIANTS = None
+        gr._DROP_KINDS = gr._NO_VARIANT_KINDS
+        gr._PRESENT_ANN_KINDS = set()
+
+    def tearDown(self):
+        (gr._DROP_MAF, gr._PRESENT_ANN_KINDS, gr._HAS_VARIANTS,
+         gr._DROP_KINDS, gr._ASSEMBLY_EXTRA_ACTIVE) = self._saved
+
+    def _pooled(self):
+        # row 1 is the ONLY row with a second paternal copy, so any schema
+        # decided per-subset will disagree between subsets that include it and
+        # subsets that don't
+        frame = pandas.DataFrame({
+            "hg38_chr": ["chr1", "chr2", "chr3"],
+            "hg38_start": [100, 200, 300],
+            "Spacer+PAM_paternal": ["ACGT" * 5 + "NGG"] * 3,
+            "Chromosome_paternal": ["ctgA", "ctgB", "ctgC"],
+            "Start_coordinate_(fewest_mm+b)_paternal": [10, 20, 30],
+            "Strand_(fewest_mm+b)": ["+", "-", "+"],
+            "Mismatches_(fewest_mm+b)_paternal": [1, 2, 3],
+            "Bulges_(fewest_mm+b)_paternal": [0, 0, 0],
+            "CFD_score_(fewest_mm+b)_paternal": [0.9, 0.5, 0.01],
+            "Spacer+PAM_maternal": ["ACGT" * 5 + "NGG"] * 3,
+            "Chromosome_maternal": ["ctgA", "ctgB", "ctgC"],
+            "Start_coordinate_(fewest_mm+b)_maternal": [10, 20, 30],
+            "Mismatches_(fewest_mm+b)_maternal": [1, 2, 3],
+            "Bulges_(fewest_mm+b)_maternal": [0, 0, 0],
+            "CFD_score_(fewest_mm+b)_maternal": [0.8, 0.4, 0.02],
+            "origin": ["both", "both", "both"],
+            "hg38_end_paternal": [123, 223, 323],
+            "hg38_end_maternal": [123, 223, 323],
+            "hg38_orientation_paternal": ["+", "+", "+"],
+            "hg38_orientation_maternal": ["+", "+", "+"],
+            "hg38_lift_confidence_paternal": ["both_ends"] * 3,
+            "hg38_lift_confidence_maternal": ["both_ends"] * 3,
+            "n_copies_paternal": [1.0, 2.0, 1.0],
+            "n_copies_maternal": [1.0, 1.0, 1.0],
+            "copy_loci_paternal": ["", "ctgB:20;ctgB:9000", ""],
+            "copy_loci_maternal": ["", "", ""],
+        })
+        return gr._pooled_validation_frame(frame, {}, None)
+
+    def _curate(self, pooled, cols, rows):
+        return gr._curated_frame_with_category(
+            pooled.loc[rows], cols, False, pooled["_pv_category"], pooled_df=pooled
+        )
+
+    def test_same_schema_for_every_row_subset(self):
+        pooled, cols = self._pooled()
+        gr._ASSEMBLY_EXTRA_ACTIVE = gr._decide_assembly_extra_columns(pooled)
+        schemas = {
+            tuple(self._curate(pooled, cols, rows).columns)
+            for rows in ([0, 1, 2], [0], [2], [0, 2], [1])
+        }
+        self.assertEqual(
+            len(schemas), 1,
+            "every exported table must share one column set, whatever rows it kept",
+        )
+
+    def test_schema_comes_from_the_full_frame_not_the_subset(self):
+        """`copy_loci_paternal` has a value on ONE row. A table that filtered
+        that row out must still carry the column, or the two downloads cannot be
+        compared."""
+        pooled, cols = self._pooled()
+        gr._ASSEMBLY_EXTRA_ACTIVE = gr._decide_assembly_extra_columns(pooled)
+        self.assertIn("copy_loci_paternal", gr._ASSEMBLY_EXTRA_ACTIVE)
+        without = self._curate(pooled, cols, [0, 2])  # excludes the only copy row
+        self.assertIn("copy_loci_paternal", without.columns)
+        self.assertEqual(set(without["copy_loci_paternal"]), {gr.CURATED_MISSING})
+
+    def test_a_kind_absent_from_the_whole_run_is_not_in_the_schema(self):
+        pooled, cols = self._pooled()
+        gr._ASSEMBLY_EXTRA_ACTIVE = gr._decide_assembly_extra_columns(pooled)
+        # no maternal site has a second copy anywhere in this run
+        self.assertNotIn("copy_loci_maternal", gr._ASSEMBLY_EXTRA_ACTIVE)
+        self.assertNotIn("copy_loci_maternal", self._curate(pooled, cols, [0, 1, 2]).columns)
+
+    def test_curation_flags_are_set_before_the_exports_are_staged(self):
+        """The regression this guards: the validation panel STAGES most of the
+        zip's TSVs, so flags assigned after it ran left those exports curated by
+        whatever was lying around -- one zip with four different schemas."""
+        src = inspect.getsource(gr.build_combined_report)
+        set_at = src.index("_DROP_KINDS = _NO_VARIANT_KINDS")
+        schema_at = src.index("_ASSEMBLY_EXTRA_ACTIVE = _decide_assembly_extra_columns")
+        staged_at = src.index("_combined_validation_panel_html(")
+        self.assertLess(set_at, staged_at, "drop set must be set before exports are staged")
+        self.assertLess(schema_at, staged_at, "schema must be decided before exports are staged")
