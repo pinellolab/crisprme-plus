@@ -1463,6 +1463,40 @@ class TestAssemblyCuratedColumns(unittest.TestCase):
         for dropped in ("cosmic", "intogen", "encode", "gene_name", "gene_dist"):
             self.assertNotIn(dropped, kinds, f"{dropped} has no source, should drop")
 
+    def test_closest_gene_kinds_reach_the_pooled_frame(self):
+        """`--gene_annotation` is wired end to end only if BOTH pooled lists carry
+        the closest-gene columns: `_POOLED_ANNOTATION_COLS` is what copies a source
+        column into the pooled frame, and `_POOLED_ANNOTATION_KINDS` is what then
+        maps it to a curated kind. Miss either and the data is computed but the
+        Gene / Gene_distance_kb columns stay dropped -- i.e. invisible."""
+        for kind in ("gene_name", "gene_dist"):
+            self.assertIn(kind, gr._POOLED_ANNOTATION_KINDS)
+            self.assertIn(
+                gr._COLS[kind][0], gr._POOLED_ANNOTATION_COLS,
+                f"{kind}'s source column must be pooled or the kind can never resolve",
+            )
+
+    def test_gene_columns_kept_when_closest_gene_data_is_present(self):
+        gr._DROP_MAF = False
+        gr._HAS_VARIANTS = None
+        gr._DROP_KINDS = gr._NO_VARIANT_KINDS
+        gr._PRESENT_ANN_KINDS = {"gencode", "gene_name", "gene_dist"}
+        headers = {h for h, _k in gr._active_columns()}
+        self.assertIn("Gene", headers)
+        self.assertIn("Gene_distance_kb", headers)
+
+    def test_gene_columns_dropped_without_gene_annotation(self):
+        """No --gene_annotation means no closest-gene columns, so neither kind
+        resolves and both curated columns must drop -- unchanged from before this
+        feature existed."""
+        gr._DROP_MAF = False
+        gr._HAS_VARIANTS = None
+        gr._DROP_KINDS = gr._NO_VARIANT_KINDS
+        gr._PRESENT_ANN_KINDS = {"gencode", "gene_region", "dhs", "encode", "intogen"}
+        headers = {h for h, _k in gr._active_columns()}
+        self.assertNotIn("Gene", headers)
+        self.assertNotIn("Gene_distance_kb", headers)
+
     def test_build_report_resets_the_assembly_only_drop_set(self):
         """_DROP_KINDS is a module global the assembly path assigns, and the web
         server is one long-lived process serving both run types -- so a
