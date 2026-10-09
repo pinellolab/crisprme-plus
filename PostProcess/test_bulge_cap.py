@@ -58,13 +58,23 @@ def _load_crisprme():
     mod = types.ModuleType("crisprme_under_test_bulge")
     mod.__file__ = crisprme_py
     code = compile(defs_only, crisprme_py, "exec")
+    # Stubs exist ONLY so crisprme.py's top-level imports resolve while we exec its
+    # definitions; we remove them again in the finally. They are inserted at THIS module's
+    # import time (pytest collection), so a stub left in sys.modules would shadow the real
+    # module for any later-collected test and make that test's outcome depend on collection
+    # order. The exec'd `mod` keeps its own bindings, so removing the sys.modules entries
+    # afterward is safe.
+    _inserted = []
     if "Bio.Seq" not in sys.modules:
         _bio = types.ModuleType("Bio")
         _bio_seq = types.ModuleType("Bio.Seq")
         _bio_seq.Seq = object
         _bio.Seq = _bio_seq
-        sys.modules.setdefault("Bio", _bio)
+        if "Bio" not in sys.modules:
+            sys.modules["Bio"] = _bio
+            _inserted.append("Bio")
         sys.modules["Bio.Seq"] = _bio_seq
+        _inserted.append("Bio.Seq")
     from unittest.mock import MagicMock
     for _m in ("pandas", "scipy", "sklearn", "matplotlib", "seaborn",
                "statsmodels", "intervaltree", "CRISPR_BULGE_score"):
@@ -74,7 +84,12 @@ def _load_crisprme():
             __import__(_m)
         except Exception:
             sys.modules[_m] = MagicMock()
-    exec(code, mod.__dict__)
+            _inserted.append(_m)
+    try:
+        exec(code, mod.__dict__)
+    finally:
+        for _m in _inserted:
+            sys.modules.pop(_m, None)
     return mod
 
 
@@ -83,30 +98,44 @@ def _load_crisprme():
 # --------------------------------------------------------------------------- #
 def _load_pages_utils():
     from unittest.mock import MagicMock
+    # Stubs below exist ONLY so pages_utils's web-only top-level imports resolve; we remove
+    # them again in the finally. They are inserted at THIS module's import time (pytest
+    # collection), so an incomplete `app`/`dash` stub left in sys.modules would shadow the
+    # real module for any later-collected test (e.g. pages.main_page's `from app import URL`)
+    # and make that test's outcome depend on collection order. pages_utils binds the names
+    # it needs during import, so removing the stubs afterward is safe.
+    _inserted = []
     # `from app import operators, current_working_directory`
     if "app" not in sys.modules:
         _app = types.ModuleType("app")
         _app.operators = {}
         _app.current_working_directory = os.getcwd() + "/"
         sys.modules["app"] = _app
+        _inserted.append("app")
     # `from dash import html`
     if "dash" not in sys.modules:
         _dash = types.ModuleType("dash")
         _dash.html = MagicMock()
         sys.modules["dash"] = _dash
+        _inserted.append("dash")
     # `import pandas as pd` -- present on CI (installed for numpy tests) but stub if absent
     if "pandas" not in sys.modules:
         try:
             __import__("pandas")
         except Exception:
             sys.modules["pandas"] = MagicMock()
+            _inserted.append("pandas")
     here = os.path.dirname(os.path.abspath(__file__))
     repo = os.path.dirname(here)
     if repo not in sys.path:
         sys.path.insert(0, repo)
     # import the module object so we can set its module-level current_working_directory
     import importlib
-    pu = importlib.import_module("pages.pages_utils")
+    try:
+        pu = importlib.import_module("pages.pages_utils")
+    finally:
+        for _m in _inserted:
+            sys.modules.pop(_m, None)
     return pu
 
 
