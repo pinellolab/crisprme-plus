@@ -102,6 +102,19 @@ def revcom(s):
 
 
 def calc_cfd(guide_seq, sg, pam, mm_scores, pam_scores, do_scores):
+    # Kept byte-for-byte consistent with the canonical SNP-path implementation
+    # new_simple_analysis.calc_cfd (the test test_calc_cfd_twins_agree asserts the
+    # two stay identical). Two historical INDEL-only divergences were removed, both
+    # reconciled to the SNP rule:
+    #   * an `if "N" == sl` branch in the mismatch loop: dead code. revcom("N")
+    #     returns None, so the key build above raises TypeError and `score` is
+    #     zeroed+broken before the branch could run -> both paths already returned
+    #     0 for an N off-target base.
+    #   * an `if "N" in pam` branch that kept the mismatch-only score for an N in
+    #     the scored 2bp PAM. The SNP path (and the issue-#94 guard) instead zeroes
+    #     a non-canonical PAM via pam_scores.get(pam, 0.0). An N base is an unknown
+    #     genomic base, so zeroing is both consistent with the SNP path and the
+    #     conservative choice (we do not know the real PAM).
     score = 1
     sg = sg.replace("T", "U")
     guide_seq = guide_seq.replace("T", "U")
@@ -114,27 +127,20 @@ def calc_cfd(guide_seq, sg, pam, mm_scores, pam_scores, do_scores):
         else:
             try:  # Catch exception if IUPAC character
                 key = "r" + guide_seq_list[i] + ":d" + revcom(sl) + "," + str(i + 1)
-                # print(key)
             except Exception as e:
                 score = 0
                 break
             try:
-                if "N" == sl:
-                    score *= 1
-                else:
-                    score *= mm_scores[key]
+                score *= mm_scores[key]
             except (
                 Exception
             ) as e:  # If '-' is in first position, i do not have the score for that position
                 pass
-    # print(pam)
-    if "N" in pam:
-        score *= 1
-    else:
-        # Mirror the SNP path (new_simple_analysis.calc_cfd uses .get): an unexpected
-        # PAM not present in pam_scores must not KeyError-crash INDEL post-analysis
-        # (issue-#94 class). Fall back to 0.0 like the reference implementation.
-        score *= pam_scores.get(pam, 0.0)
+
+    # Guard against non-ATCG PAM bases (e.g. from real NIST/NCBI hg38):
+    # a non-canonical PAM contributes 0 to the CFD product instead of raising
+    # KeyError (issue #94). Canonical PAM bases (A/C/G/T) are unaffected.
+    score *= pam_scores.get(pam, 0.0)
     return score
 
 
