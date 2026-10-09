@@ -11,6 +11,46 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.5] - 2026-10-09
+
+Stability release: off-target scoring correctness (CFD audit), assembly-search
+coordinate + report fixes, and test-suite hardening. No change to the search
+engine, the default index, or the Docker/Bioconda toolchain.
+
+### Fixed
+- **CFD scorer — INDEL-path N-in-PAM divergence.** `analisi_indels_NNN.calc_cfd`
+  had drifted from the canonical SNP-path `new_simple_analysis.calc_cfd`: an `N`
+  in the scored 2 bp PAM kept a non-zero CFD on the INDEL path, whereas the SNP
+  path zeroes a non-canonical PAM (`pam_scores.get(pam, 0.0)`, issue-#94 guard);
+  it also carried a dead `if "N" == sl` branch. The INDEL twin is now byte-for-byte
+  equivalent to the SNP path (an `N` genomic base is unknown → zeroing is
+  consistent and conservative), pinned by a new regression test
+  (`test_calc_cfd_twins_agree.py`). A full CFD correctness audit confirming the
+  core is bit-identical to the Doench-2016/CRISPOR reference is documented in
+  `docs/analyses/cfd_correctness_audit.md`. (#63)
+- **assembly-search — hg38 off-target coordinates were off by one and lost
+  strand.** Off-targets are now lifted via both end bases as stranded records,
+  with orientation resolved and non-mappable sites refused rather than
+  mis-placed; two edge-case crashes (contig-edge `impg`, empty lift) fixed. (#62)
+- **assembly-search report — stale curated-output flags + inconsistent zip
+  schema.** The module-level curation flags (`_DROP_MAF`, `_PRESENT_ANN_KINDS`,
+  `_HAS_VARIANTS`, `_DROP_KINDS`) are now set on entry to *both* report builders,
+  so an assembly report rendered after a complete-search can no longer inherit
+  stale flags; and every table in an export zip now shares one schema (decided
+  once from the pooled frame). Complete-search report output is unchanged
+  (verified byte-identical). (#64)
+- **Test suite — collection-order-dependent failures.** `test_bulge_cap.py` no
+  longer leaks its import-time `app`/`dash`/library stubs into `sys.modules`, so a
+  later-collected test's `from app import …` resolves the real module regardless
+  of collection order (fixes two order-dependent `TestAnnotationLogNote` failures).
+
+### Changed
+- **assembly-search report columns.** The combined annotation column is split
+  into per-annotation columns matching the complete-search report, and the new
+  haplotype-context columns (`Haplotype_origin`, `hg38_orientation`,
+  `hg38_lift_confidence`, `n_copies`/`copy_loci`, `hg38_end`) are surfaced;
+  assembly-irrelevant (e.g. VCF-specific) columns are dropped. (#64)
+
 ## [2.7.4] - 2026-10-08
 
 ### Changed
@@ -1832,7 +1872,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.4...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.5...HEAD
+[2.7.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.5
 [2.7.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.4
 [2.7.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.3
 [2.7.2]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.2
