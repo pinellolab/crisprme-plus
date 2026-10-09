@@ -11,6 +11,22 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.6] - 2026-10-09
+
+Stability release candidate. One correctness hardening on top of v2.7.5; no change
+to the search engine, default index, or Docker/Bioconda toolchain.
+
+### Changed
+- **`--samplesID` over-listing is now a hard ERROR (was a warning).** A `--samplesID`
+  that lists samples genotyped in *none* of the provided VCFs silently inflates the
+  panel AN (phantom samples are counted as hom-ref) and deflates every reported
+  allele frequency (Samples / AF / MAF) — no crash, just wrong numbers (#46). Since
+  there is no legitimate reason to list a sample absent from every VCF, pre-flight
+  validation now refuses to run and points to the fix (a VCF-filtered samplesID, or
+  the `registry_fix_an` / genotyped-panel transform). The shipped default indices
+  (built with correct panels) and index-path searches are unaffected — this only
+  guards fresh `--genome --vcf --samplesID` builds with a mis-listed panel.
+
 ## [2.7.5] - 2026-10-09
 
 Stability release: off-target scoring correctness (CFD audit), assembly-search
@@ -1872,7 +1888,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.5...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.6...HEAD
+[2.7.6]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.6
 [2.7.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.5
 [2.7.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.4
 [2.7.3]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.3

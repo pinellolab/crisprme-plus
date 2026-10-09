@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Guard: --samplesID over-listing the VCF-genotyped panel is WARNed (#46).
+"""Guard: --samplesID over-listing the VCF-genotyped panel is rejected with an ERROR (#46).
 
 Phantom samplesID entries (listed but genotyped in no VCF) are counted as hom-ref
 when the Tier-0 panel AN is built, inflating AN and silently DEFLATING every
@@ -26,11 +26,11 @@ def _mkvcf(d, name, samples):
     return p
 
 
-def test_overlisting_warns_and_quantifies():
+def test_overlisting_errors_and_quantifies():
     d = tempfile.mkdtemp()
     v = _mkvcf(d, "chr1.vcf.gz", ["S1", "S2", "S3"])
     iss = vi.check_samplesid_overlisting([v], ["S1", "S2", "S3", "PH1", "PH2"])
-    assert len(iss) == 1 and iss[0].severity == vi.WARN, iss
+    assert len(iss) == 1 and iss[0].severity == vi.ERROR, iss
     assert "2 sample" in iss[0].message and "registry_fix_an" in iss[0].message
 
 

@@ -965,16 +965,18 @@ def check_samples_in_vcf_header(vcf_path: str, sample_ids: List[str]) -> List[Is
 def check_samplesid_overlisting(
     vcf_files: List[str], sample_ids: List[str]
 ) -> List[Issue]:
-    """Warn when --samplesID lists samples genotyped in NONE of the VCFs (#46).
+    """Reject (ERROR) when --samplesID lists samples genotyped in NONE of the VCFs (#46).
 
     Such phantom samples are counted as hom-ref when the Tier-0 panel AN is built
     from the samplesID file (tier0_registry.PanelIndex), inflating the AN
     denominator by ~ploidy per phantom and silently DEFLATING every reported
-    allele frequency (Samples / AF / MAF) -- no crash, just wrong numbers. The fix
-    is a VCF-filtered samplesID (genotyped samples only) or the registry_fix_an
-    transform. Comparing against the UNION of every VCF's #CHROM header keeps this
-    correct for multi-dataset runs: a legitimately genotyped sample appears in
-    some dataset's VCF, so only truly-absent samples are flagged.
+    allele frequency (Samples / AF / MAF) -- no crash, just wrong numbers. There is
+    no legitimate reason to list a sample absent from EVERY provided VCF, so this is
+    a hard ERROR (not a warning): the fix is a VCF-filtered samplesID (genotyped
+    samples only) or the registry_fix_an transform. Comparing against the UNION of
+    every VCF's #CHROM header keeps this correct for multi-dataset runs: a
+    legitimately genotyped sample appears in some dataset's VCF, so only
+    truly-absent samples are flagged.
     """
     if not sample_ids or not vcf_files:
         return []
@@ -999,13 +1001,14 @@ def check_samplesid_overlisting(
     shown = ", ".join(phantom[:5]) + (", ..." if len(phantom) > 5 else "")
     return [
         Issue(
-            WARN,
+            ERROR,
             f"--samplesID lists {len(phantom)} sample(s) genotyped in no VCF "
-            f"({shown}). Phantom samples are counted as hom-ref, inflating the "
-            f"panel AN by ~{2 * len(phantom)} alleles (listed {n_panel} vs "
-            f"genotyped {n_gt}) and DEFLATING every reported allele frequency by "
-            f"~{factor:.2f}x. Provide a VCF-filtered samplesID (genotyped samples "
-            f"only) or apply the registry_fix_an transform (issue #46).",
+            f"({shown}): refusing to run. Phantom samples are counted as hom-ref, "
+            f"inflating the panel AN by ~{2 * len(phantom)} alleles (listed "
+            f"{n_panel} vs genotyped {n_gt}) and silently DEFLATING every reported "
+            f"allele frequency by ~{factor:.2f}x. Provide a VCF-filtered samplesID "
+            f"(genotyped samples only) or apply the registry_fix_an transform "
+            f"(issue #46).",
         )
     ]
 
