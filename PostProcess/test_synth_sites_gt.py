@@ -23,6 +23,14 @@ class TestSynthSitesGT(unittest.TestCase):
                 w.write("chr22\t10510355\t.\tAT\tA\t.\tPASS\tAF_max=0.012\n")
             n = synth(inp, out, "TEST")
             self.assertEqual(n, 2)
+            # the .vcf.gz MUST be BGZF (blocked gzip) so the enricher recipe can
+            # tabix-index it -- a plain gzip.open() stream is rejected by tabix
+            # ("not BGZF"). BGZF sets the gzip FEXTRA flag (byte 3 == 0x04) and
+            # carries a "BC" subfield; plain gzip has byte 3 == 0x00.
+            with open(out, "rb") as fh:
+                head = fh.read(18)
+            self.assertEqual(head[:4], b"\x1f\x8b\x08\x04", "output is not BGZF")
+            self.assertIn(b"BC", head, "BGZF 'BC' subfield missing")
             body = gzip.open(out, "rt").read()
             self.assertIn("##FORMAT=<ID=GT", body)          # FORMAT header injected
             self.assertIn("\tFORMAT\tTEST", body)            # one synthetic sample col

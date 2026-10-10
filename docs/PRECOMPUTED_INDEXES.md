@@ -34,7 +34,7 @@ separate samples download**:
 This document covers the download → build → publish workflow. It complements
 Section 3.5 of the data-setup guide (`docs/crisprme_data_setup_051826.md`).
 
-## The four production indexes (2.5.5)
+## The four production indexes
 
 SpCas9 **NRG** (NAG+NGG) variant indexes ship prebuilt on HuggingFace — pick
 by whether you want the broad fully-phased default, a clean single-source panel,
@@ -272,6 +272,173 @@ crisprme.py complete-search \
 
 The search finds the prebuilt index (and its tiers + samplesIDs) and skips the
 build/enrichment entirely.
+
+## Building a new-PAM index for a published dataset (HGDP+1kGP, mega)
+
+The prebuilt indexes above are all **SpCas9 NRG**. To screen a **different nuclease / PAM**
+(SpCas9 **NGG**, SaCas9 **NNGRRT**, Cas12a **TTTN**, or any IUPAC motif) against the same
+re-phased **HGDP+1kGP** or sites-only **mega** variant data, you build that one index once and
+reuse it for every later search — you do **not** re-derive the variant data.
+
+### What's reusable vs. what you rebuild
+
+Only the genome index itself is PAM-specific; everything derived from the variants is not:
+
+| Artifact | PAM-specific? | For a new PAM |
+|---|---|---|
+| `genome_library/<PAM>_<N>_hg38+hg38_<ds>/` (+ `_INDELS`) | **yes** | **rebuilt** |
+| Enriched genome `Genomes/hg38+hg38_<ds>/` (+ `_INDELS`) | no | reuse (skip enrichment) |
+| `Dictionaries/` (registry, genotypes, indel-GT, logs) | no | reuse (from the normal index download) |
+| `samplesIDs/` | no | reuse |
+
+> **Why you need an extra file.** The HuggingFace **index** tarball ships the *NRG* index + its
+> `Dictionaries/` + `samplesIDs/` — it does **not** contain the enriched genome, so it alone can't
+> build a different PAM. The PAM-independent **enriched-genome kit** is published separately under
+> **`build-inputs/<dataset>/`** in the same repo (`lucapinello/crisprme-data`). Download it and you
+> skip straight to indexing the new PAM. If instead you want to **reproduce the kit** (or build one
+> for a **different VCF**), the full source-to-kit workflow is documented below.
+
+### Prerequisites
+
+- CRISPRme+ installed; the **hg38 reference** (`crisprme.py download --what all --path .`).
+- `huggingface-cli` (ships with `huggingface_hub`), `bcftools`/`htslib`.
+- Disk/RAM: the **fast path** needs a few GB + the index output. The **full path** re-runs
+  enrichment — a genome-wide genotyped build writes **>100 GB of temp** and needs ample RAM
+  (see the "Scratch space" note in [`seq_script/merge_panels/README.md`](../seq_script/merge_panels/README.md)).
+
+### Step 1 — choose or author the PAM file
+
+A PAM file is one line, two whitespace-separated columns — `<IUPAC_motif> <signed_position>` —
+where a **positive** position means a **3′** PAM (the last *N* characters of the motif) and a
+**negative** one a **5′** PAM (the first *N*). Full spec: [`docs/INPUT_FORMATS.md`](INPUT_FORMATS.md) §1.
+Ready-made files already ship in `PAMs/`:
+
+| Nuclease | `PAMs/` file | Contents |
+|---|---|---|
+| SpCas9 (NGG) | `20bp-NGG-SpCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNGG 3` |
+| SpCas9 (NRG = NAG+NGG) | `20bp-NRG-SpCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNRG 3` |
+| SaCas9 (NNGRRT) | `21bp-NNGRRT-SaCas9.txt` | `NNNNNNNNNNNNNNNNNNNNNNNGRRT 6` |
+| Cas12a (TTTN, 5′) | `23bp-TTTN-Cas12a.txt` | `TTTNNNNNNNNNNNNNNNNNNNNNNNN -4` |
+
+For any **other** nuclease, write one line yourself — e.g. a hypothetical 20 nt-spacer 3′ `NGA`:
+
+```bash
+printf 'NNNNNNNNNNNNNNNNNNNNNGA 3\n' > PAMs/20bp-NGA-custom.txt
+```
+
+### Step 2 — download the enriched-genome kit
+
+```bash
+# ~3–5 GB/dataset: the SNP-enriched genome + its fake-indel companion, as one tarball.
+hf download lucapinello/crisprme-data build-inputs/hg38_HGDP1kGP.tar.gz \
+  --repo-type dataset --local-dir .
+tar xzf build-inputs/hg38_HGDP1kGP.tar.gz
+#  -> Genomes/hg38+hg38_HGDP1kGP/         (SNP-enriched, hg38 + IUPAC overlay)
+#  -> Genomes/hg38+hg38_HGDP1kGP_INDELS/  (fake-indel genome)
+```
+
+Check the tarball against the `SHA256SUMS` shipped alongside it under `build-inputs/`. (For
+**mega**, substitute `hg38_mega`.) The PAM-independent `Dictionaries/` + `samplesIDs/` you need at
+**search** time come from the normal index download (`download --what index --index-name
+NRG_3_hg38+hg38_<ds>`).
+
+### Step 3 — build the new-PAM index (reuse the enriched genome, skip enrichment)
+
+Point `crispritz index-genome` at the downloaded enriched genome with your new PAM. This builds the
+PAM-specific index directly from the IUPAC-enriched FASTA — **no re-enrichment** (verified: a new
+NGG index off the HGDP+1kGP enriched genome builds in seconds per chromosome):
+
+```bash
+# SNP index -> genome_library/<PAM>_<N+1>_hg38+hg38_<ds>/
+crispritz.py index-genome hg38+hg38_<ds> Genomes/hg38+hg38_<ds>/ PAMs/<NEW_PAM>.txt \
+  -bMax 3 -th <T>          # -bMax = max(bDNA,bRNA)+1  (2 bulges -> 3)
+# indel index -> genome_library/<PAM>_<N+1>_hg38+hg38_<ds>_INDELS/
+python PostProcess/pool_index_indels.py \
+  Genomes/hg38+hg38_<ds>_INDELS/ PAMs/<NEW_PAM>.txt <PAM_MOTIF> hg38 hg38_<ds> 3 <T>
+```
+
+> **One-command alternative.** With the enriched genome already in place, `crisprme.py
+> build-index-only --genome Genomes/hg38 --pam PAMs/<NEW_PAM>.txt --bDNA 2 --bRNA 2 --vcf
+> VCFs/hg38_<ds> …` detects it (prints `Enriched genome already present`) and skips straight to the
+> same two indexes. Use it if you also have the dataset's `Dictionaries/`/`VCFs/` staged; otherwise
+> the two `crispritz`/`pool_index_indels` calls above need only the enriched kit.
+
+### Step 4 — search with the new-PAM index
+
+```bash
+crisprme.py complete-search \
+  --genome Genomes/hg38 --pam PAMs/<NEW_PAM>.txt \
+  --guide my_guide.txt --mm 4 --bDNA 2 --bRNA 2 \
+  --vcf list_vcf.txt --samplesID list_samplesID.txt \
+  --index-path "$CRISPRME_DIR/genome_library" --output my_search
+```
+
+`complete-search` resolves the new index by its `<PAM>_<N>_hg38+hg38_<ds>` name and reuses the
+sibling `Dictionaries/` + `samplesIDs/` (from the normal index download) — no rebuild.
+
+## Reproducing the enriched-genome kit from source (or building one for a new VCF)
+
+The published kit is produced **once** from the source variants; reproduce it (or make a kit for
+your **own** VCF) with the full workflow below. Each dataset's authoritative, validated recipe lives
+in its own document — summarized here with the key provenance and filters, and linked for the
+complete protocol.
+
+### HGDP + 1000 Genomes (re-phased, genotyped)
+
+1. **Data source.** The gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38),
+   **4,091 samples** (929 HGDP + 3,162 1000 Genomes, post-QC) from the gnomAD public release.
+2. **Re-phasing (why our kit differs from the public release).** We re-phase with **SHAPEIT5**
+   (`phase_common` scaffold + `phase_rare`) to **keep singletons** — the public
+   `phased_haplotypes_v2` release drops variants at MAC≥2 — so rare alleles survive for detection.
+   chr1–22 + chrX; chrX uses a 3-way PAR split with non-PAR **males haploid** (`+fixploidy`;
+   non-PAR AN=5990, PAR AN=8182). Full protocol + validation:
+   [`docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`](HGDP_1KGP_PHASED_INDEX_METHODS.md) §5–§7.
+3. **samplesID** is derived from the gnomAD-prescribed `gnomad_meta_updated.tsv` in VCF-header
+   order (POP = Population, SUPERPOP = the 7 Genetic regions, SEX = is_female).
+4. **VCF-prep (per chrom).** `bcftools +fixploidy` (chrX) → `annotate -x FORMAT/PP` →
+   `norm -m -any -f <chr>.fa` (split + left-align) → `+fill-tags -t AN,AC,AF` (recompute AF) →
+   `sort` → `bgzip`+`tabix`.
+5. **Enrich + index** (produces the kit):
+   ```bash
+   export CRISPRME_REGISTRY_COMPRESS=0 CRISPRME_INDEL_SNP=1
+   crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+     --bDNA 2 --bRNA 2 --thread <N> \
+     --vcf VCFs/hg38_HGDP1kGP --samplesID hgdp1kgp.samplesID.config.txt --path .
+   # the Genomes/hg38+hg38_HGDP1kGP/ (+ _INDELS/) it writes IS the enriched kit
+   ```
+   As-run script: `seq_script/merge_panels/hgdp1kgp_build.sh`.
+
+### mega (5-source, sites-only)
+
+1. **Sources (GRCh38).** 1000G-2021 (3,202, phased), HGDP (929, unphased), gnomAD v4.1 (sites-only
+   AF), TOPMed (sites-only, `AN=0`), All-of-Us (single pseudo-sample). TOPMed/AoU are
+   controlled-access — only their **per-source AF** survives into the sites-only index, never
+   individual data. Provenance table: [`seq_script/merge_panels/README.md`](../seq_script/merge_panels/README.md).
+2. **Merge strategy + filters (per source, per chrom).** `bcftools norm -m -any -f <chr>.fa`
+   (split + left-align so the same indel from two sources merges) → **MAF filter**
+   `-e 'AF<=0.001 || AF>=0.999'` (keep 0.001 < AF < 0.999) → `view -G` (strip genotypes) →
+   `annotate -x '^INFO/AF'` (keep **only** AF) → rename `INFO/AF → AF_<src>`. Then
+   `bcftools merge -m none` the sources and add **`AF_max`** (max over present `AF_<src>`). There is
+   **no pooled AF** (ΣAC/ΣAN isn't meaningful across these sources). Driver:
+   `seq_script/merge_panels/mega_gw_merge.sh`.
+3. **Registry (sites-only).** `PostProcess/build_mega_registry.py` →
+   `tier0_registry.compile_registry_from_info_af`: each source becomes a db group with
+   `AC=round(AF·AN_nom)`, `AN_nom=2×cohort-N`; the GLOBAL group carries `AF_max`. SNP-only; indels
+   (~24%) are routed to the fake-indel path.
+4. **Searchable indels.** `seq_script/merge_panels/mega_build_indels.sh` adds a synthetic `MEGA`
+   pseudo-sample so the enricher materializes fake contigs, builds the `_INDELS` genome, then strips
+   the pseudo-sample back out.
+5. **Enrich + index** (produces the kit): `build-index-only` **without** `--samplesID` (sites-only
+   has no genotypes to count); drop in the registry afterward. Design rationale:
+   [`docs/DESIGN_mega_index.md`](DESIGN_mega_index.md).
+
+Once you have an enriched genome (`Genomes/hg38+hg38_<ds>/` + `_INDELS/`) — downloaded or
+rebuilt — **any** PAM reuses it via Step 3.
+
+> **Time & space.** Downloading the kit + indexing a new PAM is minutes–~1 h (PAM/bulges/threads).
+> Rebuilding the kit from source re-runs the full enrichment (and, for HGDP+1kGP, the SHAPEIT5
+> re-phase) — budget hours–days + >100 GB scratch (see the "Scratch space" note in the merge
+> README). We publish the enriched kit precisely so the common case skips that.
 
 ## Reference-only index (no variants)
 

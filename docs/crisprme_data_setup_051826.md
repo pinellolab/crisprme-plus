@@ -1,5 +1,12 @@
 # CRISPRme: Setup and Usage Guide
 
+> **Prefer the modern download flow for first-time setup.** For a fresh install, the fastest path
+> is the Docker quickstart + `crisprme.py download` (fetches the reference data and a prebuilt
+> index on demand) — see [`DOCKER_QUICKSTART.md`](DOCKER_QUICKSTART.md) and
+> [`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md). This guide's full from-scratch data setup
+> (Section 2) is kept for reference and advanced/offline builds; Sections 4 (new VCF) and 5 (new
+> PAM / nuclease) remain the canonical how-tos for those tasks.
+
 Installation (Section 1) and setup of the default data (Section 2) need to be completed only
 once. After that, running a new search on this data simply involves editing a single guide file
 and re-running one search command (Section 3). Information on how to include a new VCF dataset (Section 4) and a new PAM (Section 5) are also detailed.
@@ -518,6 +525,8 @@ The 20 leading `N`s define the spacer length; `NGG` is the PAM; `3` is the PAM l
 > **Note (bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`) combined with bulges can trigger a crash in older CRISPRitz engines. CRISPRme prints a non-fatal warning in this case; even-length degenerate motifs such as `TTTV` (Cas12a) are unaffected. The underlying issue is fixed in CRISPRitz ≥ 2.8.3 (bundled with current CRISPRme), so it is a caution rather than a blocker — but if you hit an odd-length degenerate PAM with bulges on an older stack, either add one base to make the motif even-length or reduce bulges to 0.
 
 If a **reference** index for a new PAM does not yet exist, the command-line search builds it on demand from the shipped genome. A **variant-aware** index (a search with `--vcf`) is **never** built on the fly — build it once with `crisprme.py build-index-only` (see Section 3.5) and pass it via `--index-path`, or download a prebuilt one; otherwise the variant search stops with guidance to do so. (The **web interface** likewise asks you to install a matching index first.)
+
+> **New PAM on a shipped variant dataset?** To build a different PAM against the released re-phased **HGDP+1kGP** or sites-only **mega** data without re-deriving the variants, use the published build inputs (a fast enriched-genome kit, or the source VCFs) — see [`docs/PRECOMPUTED_INDEXES.md` → *Building a new-PAM index for a published dataset*](PRECOMPUTED_INDEXES.md#building-a-new-pam-index-for-a-published-dataset-hgdp1kgp-mega).
 
 ### 5b. Run the search
 

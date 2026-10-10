@@ -13,7 +13,11 @@ Every record in the mega merge is *observed* (it survived a MAF threshold), so a
 blanket presence genotype ``0/1`` on a single synthetic sample is correct and
 lets the enricher build the fake-indel genome. REF/ALT/INFO (all the per-dataset
 AF / AF_max fields) are preserved verbatim, so the downstream AF annotation is
-unchanged. stdlib only.
+unchanged.
+
+A ``.vcf.gz`` output is written as **BGZF** (blocked gzip) via pysam, not plain
+``gzip`` -- the enricher recipe `tabix`-indexes this file, and tabix REJECTS a
+plain-gzip stream ("not BGZF"). (A non-``.gz`` output path is written uncompressed.)
 
 Usage:  synth_sites_gt.py IN.vcf[.gz] OUT.vcf.gz [SAMPLE_NAME]
 """
@@ -25,29 +29,52 @@ def _open_read(path):
     return gzip.open(path, "rt") if path.endswith(".gz") else open(path, "rt")
 
 
+def _open_write(path):
+    """Return (writer, is_bgzf). A ``.gz`` path -> pysam BGZFile (tabix-indexable);
+    otherwise a plain text file."""
+    if path.endswith(".gz"):
+        try:
+            from pysam import BGZFile
+        except ImportError:  # pragma: no cover
+            sys.exit(
+                "synth_sites_gt: writing a BGZF .vcf.gz needs pysam "
+                "(install pysam, or give a plain .vcf output path)"
+            )
+        return BGZFile(path, "wb"), True
+    return open(path, "w"), False
+
+
 def synth(inp, out, sample="MEGA"):
     n_records = 0
-    with _open_read(inp) as fh, gzip.open(out, "wt") as w:
-        for line in fh:
-            if line.startswith("##"):
-                w.write(line)
-                continue
-            if line.startswith("#CHROM"):
-                w.write(
-                    '##FORMAT=<ID=GT,Number=1,Type=String,'
-                    'Description="Synthesized presence genotype for a sites-only '
-                    'aggregate panel (every record is observed by MAF threshold)">\n'
-                )
-                cols = line.rstrip("\n").split("\t")
-                # sites-only has 8 fixed columns (no FORMAT/sample); add both.
-                w.write("\t".join(cols[:8] + ["FORMAT", sample]) + "\n")
-                continue
-            if not line.strip():
-                continue
-            row = line.rstrip("\n").split("\t")
-            # keep the 8 fixed columns verbatim; append FORMAT=GT + presence 0/1
-            w.write("\t".join(row[:8] + ["GT", "0/1"]) + "\n")
-            n_records += 1
+    w, is_bgzf = _open_write(out)
+
+    def emit(s):
+        w.write(s.encode() if is_bgzf else s)
+
+    try:
+        with _open_read(inp) as fh:
+            for line in fh:
+                if line.startswith("##"):
+                    emit(line)
+                    continue
+                if line.startswith("#CHROM"):
+                    emit(
+                        '##FORMAT=<ID=GT,Number=1,Type=String,'
+                        'Description="Synthesized presence genotype for a sites-only '
+                        'aggregate panel (every record is observed by MAF threshold)">\n'
+                    )
+                    cols = line.rstrip("\n").split("\t")
+                    # sites-only has 8 fixed columns (no FORMAT/sample); add both.
+                    emit("\t".join(cols[:8] + ["FORMAT", sample]) + "\n")
+                    continue
+                if not line.strip():
+                    continue
+                row = line.rstrip("\n").split("\t")
+                # keep the 8 fixed columns verbatim; append FORMAT=GT + presence 0/1
+                emit("\t".join(row[:8] + ["GT", "0/1"]) + "\n")
+                n_records += 1
+    finally:
+        w.close()
     return n_records
 
 

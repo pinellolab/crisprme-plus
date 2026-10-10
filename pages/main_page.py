@@ -397,12 +397,12 @@ def _run_assembly_search_job(cmd: str, combined_dir: str, note: str = "") -> Non
 
 @app.callback(
     [
-        Output("genome-paternal", "value"),
-        Output("genome-maternal", "value"),
-        Output("chain-paternal", "value"),
-        Output("chain-maternal", "value"),
-        Output("chromalias-paternal", "value"),
-        Output("chromalias-maternal", "value"),
+        Output("genome-paternal", "data"),
+        Output("genome-maternal", "data"),
+        Output("chain-paternal", "data"),
+        Output("chain-maternal", "data"),
+        Output("chromalias-paternal", "data"),
+        Output("chromalias-maternal", "data"),
     ],
     [Input("assembly-individual", "value")],
     prevent_initial_call=True,
@@ -453,12 +453,12 @@ def populate_assembly_fields_from_individual(individual: str) -> Tuple:
     ],
     [Input("submit-assembly-job", "n_clicks")],
     [
-        State("genome-paternal", "value"),
-        State("genome-maternal", "value"),
-        State("chain-paternal", "value"),
-        State("chain-maternal", "value"),
-        State("chromalias-paternal", "value"),
-        State("chromalias-maternal", "value"),
+        State("genome-paternal", "data"),
+        State("genome-maternal", "data"),
+        State("chain-paternal", "data"),
+        State("chain-maternal", "data"),
+        State("chromalias-paternal", "data"),
+        State("chromalias-maternal", "data"),
         State("available-pam", "value"),
         State("text-guides", "value"),
         State("mms", "value"),
@@ -632,7 +632,7 @@ def submit_assembly_search_job(
     # applies (built-in bundle on by default, COSMIC stripped unless
     # licensed). Assembly-search always reconciles to hg38, so the hg38 set.
     # Omitted, not an error, when none is enabled/installed.
-    annotation_name, _ = build_active_annotation("hg38")
+    annotation_name, gencode_name = build_active_annotation("hg38")
     annotation_path = os.path.join(current_working_directory, ANNOTATIONS_DIR, annotation_name)
     annotation_args = (
         ["--annotation", shlex.quote(annotation_path)]
@@ -645,6 +645,17 @@ def submit_assembly_search_job(
         else "[web] No hg38 annotation is enabled or installed (Settings -> Annotations), "
         "so this job's results will have no Annotation column."
     )
+    # Closest-gene annotation (#66): pass the SAME bundled gencode companion
+    # complete-search uses (build_active_annotation's 2nd return) as --gene_annotation,
+    # so a web-submitted assembly-search gets the Annotation_closest_gene_* columns.
+    # Auto-applied with the built-in bundle (gencode_name == "vuoto.txt" when it is off).
+    # assembly_annotate parses either a plain .bed or .bed.gz; prefer whichever is on disk.
+    gene_annotation_args = []
+    if gencode_name and gencode_name != "vuoto.txt":
+        _gc = os.path.join(current_working_directory, ANNOTATIONS_DIR, gencode_name)
+        _gc = _gc if os.path.isfile(_gc) else (f"{_gc}.gz" if os.path.isfile(f"{_gc}.gz") else None)
+        if _gc:
+            gene_annotation_args = ["--gene_annotation", shlex.quote(_gc)]
     cmd = " ".join(
         [
             shlex.quote(sys.executable),
@@ -685,6 +696,7 @@ def submit_assembly_search_job(
             "--thread",
             "4",
             *annotation_args,
+            *gene_annotation_args,
             "--debug",
         ]
     )
@@ -2677,36 +2689,20 @@ def index_page() -> html.Div:
                                 # SOURCE changed, not the submit callback itself.
                                 html.Div(
                                     [
-                                        dcc.Dropdown(
-                                            options=get_available_genomes(),
-                                            value=None,
-                                            id="genome-paternal",
-                                        ),
-                                        dcc.Dropdown(
-                                            options=get_available_genomes(),
-                                            value=None,
-                                            id="genome-maternal",
-                                        ),
-                                        dcc.Dropdown(
-                                            options=get_available_liftover_files("chain"),
-                                            value=None,
-                                            id="chain-paternal",
-                                        ),
-                                        dcc.Dropdown(
-                                            options=get_available_liftover_files("chain"),
-                                            value=None,
-                                            id="chain-maternal",
-                                        ),
-                                        dcc.Dropdown(
-                                            options=get_available_liftover_files("chromalias"),
-                                            value=None,
-                                            id="chromalias-paternal",
-                                        ),
-                                        dcc.Dropdown(
-                                            options=get_available_liftover_files("chromalias"),
-                                            value=None,
-                                            id="chromalias-maternal",
-                                        ),
+                                        # Hidden holders auto-populated from the Individual picker
+                                        # (populate_assembly_fields_from_individual). These are
+                                        # dcc.Store (NOT dcc.Dropdown): they carry cwd-relative
+                                        # PATHS, which are not among any dropdown's options, and a
+                                        # dcc.Dropdown silently DROPS an out-of-options value -- so
+                                        # submit_assembly_search_job read None for all six and no
+                                        # job could ever be launched from the web form. A Store holds
+                                        # arbitrary strings; submit reads them via State(..., "data").
+                                        dcc.Store(id="genome-paternal"),
+                                        dcc.Store(id="genome-maternal"),
+                                        dcc.Store(id="chain-paternal"),
+                                        dcc.Store(id="chain-maternal"),
+                                        dcc.Store(id="chromalias-paternal"),
+                                        dcc.Store(id="chromalias-maternal"),
                                     ],
                                     id="assembly-manual-fields",
                                     style={"display": "none"},
