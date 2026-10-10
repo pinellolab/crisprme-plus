@@ -241,12 +241,23 @@ _ANNOTATION_KINDS = frozenset(
 )
 _PRESENT_ANN_KINDS = None
 # Annotation kinds an assembly-search combined report can carry, and the columns
-# they are read from. Assembly-search has no closest-gene file, so `gene_name` /
-# `gene_dist` are deliberately absent and their curated columns drop out.
-_POOLED_ANNOTATION_KINDS = ("gencode", "gene_region", "encode", "dhs", "cosmic", "intogen")
+# they are read from. `gene_name`/`gene_dist` are included since assembly-search
+# gained its own `--gene_annotation` (assembly_annotate.add_closest_gene_columns):
+# both lists are filtered against the frame's real columns at every use site, so
+# a run WITHOUT that flag has no closest-gene columns, nothing enters the pooled
+# frame, neither kind resolves, and `_active_columns()` drops Gene /
+# Gene_distance_kb exactly as before -- the entry here is inert, not a promise.
+_POOLED_ANNOTATION_KINDS = (
+    "gencode", "gene_region", "encode", "dhs", "cosmic", "intogen",
+    "gene_name", "gene_dist",
+)
 _POOLED_ANNOTATION_COLS = (
     "Annotation_GENCODE", "Annotation_ENCODE", "Annotation_DHS",
     "Annotation_COSMIC", "Annotation_INTOGEN",
+    # Only the two the curated kinds above read. Annotation_closest_gene_ID is
+    # deliberately not pooled: no curated column resolves to it, and it is
+    # already in the full combined table for anyone who wants it.
+    "Annotation_closest_gene_name", "Annotation_closest_gene_distance_(kb)",
 )
 # Curated columns an assembly-search run can never populate: each describes a
 # REF-vs-ALT or allele-frequency property, and assembly-search never runs with a

@@ -66,7 +66,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
 from utils import download_reference_genome  # noqa: E402
 from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
-from assembly_annotate import add_annotation_column  # noqa: E402
+from assembly_annotate import add_annotation_column, add_closest_gene_columns  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
 
 cicd_test = False
@@ -3263,6 +3263,15 @@ def print_help_assembly_search() -> None:
         "coordinate (found on both haplotypes, or only one, and mappable); sites "
         "with no hg38 equivalent get none. Same file format, COSMIC licence gate "
         "and IntOGen handling as complete-search's --annotation.\n"
+        "\t--gene_annotation, an hg38 BED gene annotation file (e.g. "
+        "Annotations/gencode.protein_coding.bed.gz) for a NEAREST-feature "
+        "lookup rather than an overlap one [OPTIONAL]. Adds "
+        "Annotation_closest_gene_name, Annotation_closest_gene_ID and "
+        "Annotation_closest_gene_distance_(kb) for every site with an hg38 "
+        "coordinate; sites with no hg38 equivalent get none. Independent of "
+        "--annotation -- either may be given alone. Needs BEDOPS "
+        "(closest-features/sort-bed), the same dependency complete-search's "
+        "own gene annotation already uses.\n"
         "\t--output, base output name; each haplotype's results are saved in "
         "Results/<name>_paternal and Results/<name>_maternal, and the "
         "reconciled combined report in Results/<name>_combined [REQUIRED]\n"
@@ -3443,6 +3452,14 @@ def assembly_search() -> None:
     # --annotation; not passed to the per-haplotype searches, whose
     # coordinates are in each haplotype's own assembly, not hg38.
     annotationfile = _check_annotation(args, "--annotation" in args) if "--annotation" in args else None
+    # Optional closest-gene annotation, also applied once after reconciliation.
+    # Separate from --annotation: that is an OVERLAP query (which features is
+    # this site inside?), this is a NEAREST-feature query (which gene is it
+    # closest to, and how far?). Different files, either may be given alone.
+    # Same flag name, validation and sorting as complete-search's.
+    geneannotationfile = (
+        _check_gene_annotation(args, True) if "--gene_annotation" in args else None
+    )
     # --max-total-edits: same flag `complete-search` accepts, but a different
     # default when omitted. `complete-search`'s own bare default (4) was
     # measured to silently drop the vast majority of real off-targets here --
@@ -3575,6 +3592,15 @@ def assembly_search() -> None:
             combined = add_annotation_column(combined, annotationfile)
         except Exception as e:
             print(f"Warning: hg38 annotation failed ({e}) -- results are written without an Annotation column.")
+    if geneannotationfile:
+        # AFTER the overlap annotation, so the "intergenic" fallback can see
+        # whether this site overlapped a gencode feature. Same
+        # a-finished-search-is-still-valuable guard as above.
+        print("Annotating closest gene (hg38)...")
+        try:
+            combined = add_closest_gene_columns(combined, geneannotationfile)
+        except Exception as e:
+            print(f"Warning: closest-gene annotation failed ({e}) -- results are written without the closest-gene columns.")
     combined.to_csv(combined_tsv, sep="\t", index=False)
 
     print(f"Reconciliation complete. Wrote {combined_tsv}")
