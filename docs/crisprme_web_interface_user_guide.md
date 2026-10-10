@@ -457,7 +457,11 @@ coverage plot, a reconciled hg38 off-target table (with a **Custom Ranking** tab
 site-set picker for mappable vs per-haplotype-unmappable sites, region filter, sort — and
 a **Summary by Mismatches/Bulges** tab), CFD-distribution and per-position plots, and a
 **combined `report.zip`** download that bundles the reconciled report plus each
-haplotype's own complete-search report.
+haplotype's own complete-search report. If a **gene annotation** (`--gene_annotation`,
+e.g. GENCODE protein-coding) is supplied, every hg38-mapped site also gets its nearest
+gene and signed distance — shown as the `Gene` and `Gene_distance_kb` columns in the
+reconciled table (full TSV: `Annotation_closest_gene_name` / `_ID` / `_distance_(kb)`);
+haplotype-non-mappable sites have no hg38 coordinate and so get no closest gene.
 
 > **CLI equivalent.** Simplest, using a registered bundle:
 > `crisprme.py assembly-search --assembly-individual HG01255 --guide … --pam … --mm …

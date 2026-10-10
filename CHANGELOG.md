@@ -11,6 +11,25 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.7] - 2026-10-10
+
+### Added
+- **Closest-gene annotation for `assembly-search`** (`--gene_annotation`, #66). A
+  nearest-feature (BEDOPS `closest-features`) lookup adds the closest gene + signed
+  distance to every hg38-mapped off-target of a personal diploid assembly — `Gene` +
+  `Gene_distance_kb` in the curated report tables / web result page, and
+  `Annotation_closest_gene_name` / `_ID` / `_distance_(kb)` in the full TSV
+  (distance `0.0` = overlapping, negative = the other side; haplotype-non-mappable
+  sites have no hg38 coordinate and so get no closest gene). Validated end-to-end on a
+  real diploid assembly (HG01255 chr19 → 952/960 sites annotated) and in the web UI.
+- **Variant-dataset retrieval recipes** under `paper/reproducibility/variant-datasets/`
+  for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us (paper reproducibility,
+  docs-only; #45).
+
+### Changed
+- Docs: README (`--gene_annotation` nearest-feature columns + assembly-search support +
+  variant-datasets pointer) and the web-interface user guide (assembly result columns).
+
 ## [2.7.6] - 2026-10-09
 
 Stability release candidate. One correctness hardening on top of v2.7.5; no change
@@ -1898,7 +1917,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.6...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.7...HEAD
+[2.7.7]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.7
 [2.7.6]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.6
 [2.7.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.5
 [2.7.4]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.4
