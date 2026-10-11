@@ -1204,8 +1204,12 @@ fi
 echo -e 'Integrating results\tEnd\t'$(date) >>$log
 truncate -s -1 $guide_file
 truncate -s -1 $vcf_list
-if [ $6 != "_" ]; then
-	truncate -s -1 $6
+# Strip the trailing newline from the empirical/sample file ONLY when it is a real,
+# non-empty, WRITABLE file. The "no empirical data" case passes the shipped read-only
+# placeholder (PostProcess/vuoto.txt); truncating it fails on a read-only install
+# (e.g. an Apptainer/Singularity SIF) and aborted assembly-search there (issue #143).
+if [ "$6" != "_" ] && [ -s "$6" ] && [ -w "$6" ]; then
+	truncate -s -1 "$6"
 fi
 # END STEP 8 - results integration
 

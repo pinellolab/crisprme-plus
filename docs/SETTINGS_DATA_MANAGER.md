@@ -4,6 +4,8 @@ CRISPRme's web interface has a **Settings / Data Manager** page where you add
 everything a search needs — reference genomes, indexes, variant (VCF) datasets,
 annotations and PAMs — without touching the command line. Whatever you add lands
 in your local data folder and shows up in the search form automatically.
+(For exactly where everything is stored — the shared inputs reused by every search
+vs. where each run's results go — see [`DATA_LAYOUT.md`](DATA_LAYOUT.md).)
 
 Open it from the **"Settings / Data Manager"** button on the home page, or go to
 `/settings` directly (e.g. `http://localhost:8080/settings`).

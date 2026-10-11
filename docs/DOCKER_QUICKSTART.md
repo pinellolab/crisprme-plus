@@ -60,7 +60,10 @@ mkdir -p ~/crisprme && cd ~/crisprme
 
 > In every command below, `-v "${PWD}:/DATA"` shares *this* folder with the
 > container as `/DATA`. That is how your downloads and results are saved to your
-> computer instead of disappearing when the container stops.
+> computer instead of disappearing when the container stops. Everything — the
+> shared inputs (genomes, indexes, VCFs, annotations) **and** your per-search
+> `Results/` — lives under this one folder; see [`DATA_LAYOUT.md`](DATA_LAYOUT.md)
+> for exactly what goes where.
 
 ## 3. Download the reference data (one time, minutes — not hours)
 
