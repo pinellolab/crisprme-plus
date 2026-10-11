@@ -71,16 +71,16 @@ legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.7.8 \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.7.8 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
-# the recommended default variant-aware index (1000G-2021, single-source, fully phased)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.6.0 \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
+# the recommended default variant-aware index (HGDP + 1000 Genomes, 4,091 samples, re-phased)
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.7.8 \
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 ```
 
 This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
@@ -100,7 +100,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.6.0 crisprme.py web-interface
+  pinellolab/crisprme:v2.7.8 crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -297,9 +297,9 @@ max-total-edits budget. Bulges can be consecutive (e.g., `NN--NN`) or interleave
 The web interface uses only precomputed indexes and will **not** build one on the
 fly — if you request a PAM/bulge/genome combination with no installed index it
 blocks and asks you to install one first (see the Docker Quickstart, "Installing
-more indexes"). The variant selector is a dropdown pre-set to the variant-aware
-**1000G-2021** index, with a **Reference only** option if you want a reference-genome
-search.
+more indexes"). The variant selector is a dropdown pre-set to the recommended
+installed phased variant index (the **HGDP + 1000 Genomes** default if you downloaded it),
+with a **Reference only** option if you want a reference-genome search.
 
 > **Performance note:** Enabling bulge searching substantially increases runtime.
 > For a whole-genome search across both 1000G and HGDP, expect runtimes of several
@@ -322,8 +322,8 @@ controls how genetic variants are resolved in the results:
   headline capability of the variant-aware pipeline.
 
 Per-sample is a **genotype-resolution** dial, **not** a speed dial: for a single guide the
-runtimes are comparable. It **requires a genotyped index** (1000G-2021, 1000G-2021 + HGDP, or
-HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
+runtimes are comparable. It **requires a genotyped index** (HGDP + 1000 Genomes [the default],
+1000G-2021, 1000G-2021 + HGDP, or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
 greyed out and the search falls back to population-level. (See "Understanding CONFIRMED vs
 PUTATIVE and carriers" in the results section for how these labels appear in the report.)
 
@@ -397,7 +397,7 @@ interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.6.0 crisprme.py web-interface
+>   pinellolab/crisprme:v2.7.8 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme && crisprme.py web-interface)
 > ```
@@ -715,6 +715,43 @@ This tab is the in-interface equivalent of the `generate-personal-card` CLI
 functionality. For batch generation of personal cards across many samples, refer to
 Section 2.2.6 of the *CRISPRme README*.
 
+### 5h. Understanding your results (scores, co-occurrence, carriers, key columns)
+
+A quick reference for the terms and columns in the **Custom Ranking** tab and the
+**Show Targets** detail pages:
+
+**Scores**
+- **CFD** (0–1) — Doench-2016 Cutting-Frequency Determination; higher = more likely cut. The
+  primary score for the mismatch-only, low-edit regime.
+- **CRISPR-Bulge** (0–1) — a deep-learning score (Yaish & Orenstein, NAR 2024) calibrated for
+  bulge-containing off-targets; use it to triage high-CFD bulge sites.
+
+**Variant co-occurrence labels** (for off-targets that require a nearby variant)
+- **CONFIRMED** — the variants that create the off-target are proven to sit **in cis on one
+  haplotype** (phased genotypes), so a real carrier exists; carrier samples + exact joint allele
+  frequency are reported.
+- **PUTATIVE** — the variants co-occur in the panel but phasing cannot prove they are on the same
+  haplotype (unphased genotypes, or a sites-only panel like *mega*); treated as a worst case that
+  may not exist in any one individual — reported with a conservative min-AF bound, and no named
+  carriers on a sites-only panel.
+- **Carriers / Samples** — named individuals carrying the haplotype (genotyped indices only);
+  **NA** on the sites-only *mega* index.
+
+**Key columns**
+- **REF/ALT_origin** — REF = present on the reference genome; ALT = created by a variant allele.
+- **Variant** — the variant(s) as `chrom;pos;ref;alt`.
+- **Observed (≥1 carrier)** — the haplotype is seen in ≥1 genotyped sample (vs a worst-case
+  reconstruction).
+- **MAF** — minor/alternate allele frequency over the genotyped panel (on *mega*, the merged
+  global AF).
+- **Perfect_match** — a 0-mismatch / 0-bulge hit (a candidate on-target); if a guide has more than
+  one, none is an unambiguous on-target.
+- **Annotation_closest_gene_name / _ID / _distance_(kb)** — nearest gene to the off-target
+  (closest-gene / assembly-search).
+- **Aligned_protospacer+PAM** — uppercase = match, lowercase = mismatch, `-` = a bulge gap.
+
+For the full scoring assumptions and limitations, see **METHODS §8**.
+
 ---
 
 ## Section 6. Troubleshooting
@@ -760,8 +797,8 @@ variants.
 
 1. **Thresholds too strict** — raise **Maximum edits**; if you opened Advanced
    options, check the DNA and RNA bulges are not both `0`.
-2. **Reference-only selected** — keep the **1000G-2021** option (pre-selected by
-   default) to get variant off-targets.
+2. **Reference-only selected** — keep the pre-selected **variant** index (not **Reference
+   only**) to get variant off-targets.
 3. **Variant index not installed** — re-run
    `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA`.
 4. **Confirm success** — `Results/<name>/log_error.txt` is empty and

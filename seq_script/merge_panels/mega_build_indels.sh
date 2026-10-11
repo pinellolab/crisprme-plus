@@ -30,7 +30,11 @@ strip_and_place() {  # $1=chr  $2=build_root
   local L; L=$(find "$W/Dictionaries/log_indels_hg38_mega" -name "log${c}.txt.gz" 2>/dev/null | head -1)
   [ -z "$L" ] && { echo "  [$c] NO log_indels in build -> SKIP"; return 1; }
   zcat "$L" | awk -F'\t' 'NR==1{print;next}{$2="";print}' OFS='\t' | gzip > "$MC/Dictionaries/log_indels_hg38_mega/log${c}.txt.gz"
-  cp -f "$W"/Genomes/hg38+hg38_mega_INDELS/*fakechr${c#chr}* "$MC/Genomes/hg38+hg38_mega_INDELS/" 2>/dev/null
+  # The enricher names the per-chrom fake-indel genome dir "fake_<vcf>_<chr>" (e.g.
+  # fake_hg38_mega_chr2), NOT "*fakechr<N>*" -- copy that dir (recursively) so the
+  # PAM-independent fake-indel GENOME actually lands in the index (needed to rebuild a
+  # different-PAM _INDELS index; the search itself only needs the index bins below).
+  cp -rf "$W"/Genomes/hg38+hg38_mega_INDELS/fake_hg38_mega_${c} "$MC/Genomes/hg38+hg38_mega_INDELS/" 2>/dev/null
   cp -rf "$W"/genome_library/NRG_3_hg38+hg38_mega_INDELS/*fakechr${c#chr}* "$MC/genome_library/NRG_3_hg38+hg38_mega_INDELS/" 2>/dev/null
   local nb; nb=$(find "$MC/genome_library/NRG_3_hg38+hg38_mega_INDELS" -path "*fakechr${c#chr}*" -name "*.bin" 2>/dev/null | wc -l)
   echo "  [$c] placed: $(zcat "$MC/Dictionaries/log_indels_hg38_mega/log${c}.txt.gz"|wc -l) log recs (MEGA stripped), $nb INDELS bin(s)"

@@ -8,12 +8,12 @@ the web interface. After the install command, no terminal is ever needed again.
 
 **macOS / Linux** (Terminal, once):
 ```bash
-curl -fsSL https://pinellolab.github.io/CRISPRme/install.sh | bash
+curl -fsSL https://pinellolab.github.io/crisprme-plus/install.sh | bash
 ```
 
 **Windows** (PowerShell, once):
 ```powershell
-irm https://pinellolab.github.io/CRISPRme/install.ps1 | iex
+irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex
 ```
 
 Then open **CRISPRme** from Applications (macOS) or the Desktop / Start Menu
@@ -35,21 +35,23 @@ guides you if it is missing).
 
 ## Maintainers — canonical source
 
-**There is a single canonical copy of the installer, and it is NOT in this repo.**
-The two scripts are **served from GitHub Pages** and their source of truth is:
+**The installer is served from this repo's GitHub Pages.** The two scripts are:
 
-- `docs/install.sh` and `docs/install.ps1` in the **`pinellolab/CRISPRme`** repository
-  (served at `https://pinellolab.github.io/CRISPRme/install.{sh,ps1}` — the exact URLs
-  the one-liners above fetch).
+- `docs/install.sh` and `docs/install.ps1` in **this** (`pinellolab/crisprme-plus`) repository,
+  served at `https://pinellolab.github.io/crisprme-plus/install.{sh,ps1}` — the exact URLs the
+  one-liners above fetch. They previously lived in the legacy `pinellolab/CRISPRme` repo and were
+  **moved here in v2.7.8**, so the release that ships the engine also owns (and version-controls)
+  its installer.
 
-This directory previously kept a **duplicate** of those two scripts, which silently
-drifted out of sync (it lagged to an old image tag). To prevent that, the duplicate has
-been removed — edit the installer only in the `pinellolab/CRISPRme` repo.
-
-- The apps are thin managers that shell out to `docker compose`/`docker run` and open the
-  browser; the engine is the published `pinellolab/crisprme` image. **Bump the image tag in
-  those two scripts at every release** — or, better, point them at the floating
-  `pinellolab/crisprme:latest` tag (the release CI already pushes `:latest`), so the
-  installer never goes stale and the **Update** button always fetches the current release.
+- The apps are thin managers that shell out to `docker run` and open the browser; the engine is
+  the published `pinellolab/crisprme` image, which the scripts pull as **`:latest`** (the release
+  CI pushes `:latest`), so the installer tracks the current release automatically and the
+  **Update** button always re-pulls it — no per-release tag bump needed.
+- The first-run download (reference data + the default **HGDP + 1000 Genomes** variant index) is
+  **~45 GB** — keep that figure in sync with `README.md` and `docs/index.html`.
 - MVP is unsigned (the installer strips the macOS quarantine flag since a user-run script
   placed the app); a later phase can ship a signed/notarized Tauri build.
+
+> **Legacy URL.** The old `https://pinellolab.github.io/CRISPRme/install.{sh,ps1}` (in
+> `pinellolab/CRISPRme`) should be left as a thin **redirect/notice** to the crisprme-plus URL so
+> existing bookmarks and citations keep working.

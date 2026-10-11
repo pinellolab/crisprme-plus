@@ -41,7 +41,7 @@ off-target site.
 
 **Analysis-mode decision rule.** The **default** (no flag) is a **population-level**
 worst-possible screen and works on **any** index. Add **`--per-sample`** only on a
-**genotyped** index (`HGDP1kGP` — the recommended default — `1000G2021`, `1000G2021_HGDP`, or `HPRC`) when you need named carriers /
+**genotyped** index (`HGDP1kGP` — the recommended default — `1000G2021`, or `HPRC`) when you need named carriers /
 CONFIRMED cis / exact joint AF — it is inert on a sites-only index (`mega`). See
 [§5, Analysis modes](#population-level-analysis-default-and---per-sample-genotype-resolution).
 
@@ -176,6 +176,19 @@ The merge above is the **genotyped, cis-capable** mode (`merge_vcf_panels.sh` /
 feeds the genotype-counting Tier-0 registry. It is correct only when *every* merged
 source is genotyped, and it is what enables indel+SNP cis reconstruction.
 
+The **default** shipped index, **`NRG_3_hg38+hg38_HGDP1kGP`**, is built in this genotyped mode
+from the gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38; 4,091 samples = 929 HGDP +
+3,162 1000 Genomes), which CRISPRme+ **re-phases with SHAPEIT5** (`phase_common` scaffold +
+`phase_rare`). Re-phasing deliberately **keeps singletons** — the public `phased_haplotypes_v2`
+release drops variants at MAC ≥ 2, discarding exactly the rare alleles most relevant to a
+conservative off-target screen. Because *both* cohorts are co-phased, the whole panel is
+**genotyped-phased**, so HGDP off-targets report CONFIRMED cis with named carriers (the earlier
+`1000G2021_HGDP` hybrid, which mixed phased 1000G with *unphased* HGDP, could only call the HGDP
+portion PUTATIVE). chrX uses a 3-way PAR split with non-PAR **males treated as haploid**
+(`bcftools +fixploidy`), giving the correct allele-number denominator (non-PAR AN = 5,990, PAR
+AN = 8,182). The full re-phasing protocol, chrX ploidy handling, and validation are documented in
+`docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`.
+
 CRISPRme+ also ships an **HPRC pangenome panel** (`hprc_build.sh`) in this same
 genotyped, cis-capable mode. It is a *single* source rather than a merge: the HPRC
 Minigraph-Cactus pangenome — the **HPRC Release 2 graph `hprc-v2.0-mc-grch38`** (GRCh38) —
@@ -239,8 +252,22 @@ Each registry manifest (`reg_<chrom>.idx`) records the index's **`data_type`** �
 This lets tooling (e.g. the web variant-dataset selector) identify an index's type
 and phasing without scanning the multi-GB per-sample dictionary; a missing flag on
 an older index falls back to genotype-store presence. The shipped indexes are
-`1000G2021_HGDP` = **hybrid** (phased 1000G-2021 + unphased HGDP), `HPRC` =
-**genotyped-phased**, and `mega` = **sites-only**.
+`HGDP1kGP` = **genotyped-phased** (the re-phased default, above), `1000G2021` =
+**genotyped-phased**, `HPRC` = **genotyped-phased**, and `mega` = **sites-only**;
+`hybrid` is the fourth possible value, for a merged panel mixing phased and unphased
+sources.
+
+### Re-indexing for a different PAM
+
+An enriched reference genome is **PAM-independent**: the per-position IUPAC overlay and the
+Dictionaries/registry encode the *variants*, not the nuclease. Only the CRISPRitz search index
+(`genome_library/<PAM>_<N>_<ref>+<vcf>`) is PAM-specific. CRISPRme+ therefore publishes the
+PAM-independent **enriched-genome kit** for the flagship datasets (under `build-inputs/<dataset>/`
+on the HuggingFace data repo), so a user targeting a different nuclease (NGG, NNGRRT, TTTN, …)
+rebuilds *only* the index off the published enriched genome rather than re-deriving the variants.
+The complete workflow — downloading the kit, indexing a new PAM, and reproducing the kit from
+source (including the re-phasing above and the mega merge/filters) — is in
+`docs/PRECOMPUTED_INDEXES.md`.
 
 ---
 

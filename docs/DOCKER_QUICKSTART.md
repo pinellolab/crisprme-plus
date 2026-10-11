@@ -1,6 +1,6 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ℹ️ **CRISPRme+ (v2.6.2)** is the current release of the next-generation line
+> ℹ️ **CRISPRme+ (v2.7.8)** is the current release of the next-generation line
 > (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, population-level
 > analysis by default with opt-in `--per-sample` genotype resolution). For a frozen
 > production/clinical baseline you can instead use the stable line
@@ -42,7 +42,7 @@ docker pull pinellolab/crisprme:latest
 ```
 
 > **Reproducibility:** `:latest` auto-updates to the newest release (and is the
-> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.6.2`
+> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.7.8`
 > everywhere below in place of `:latest`.
 
 > **Already have an older image?** Docker does **not** re-download a tag you already
@@ -155,9 +155,9 @@ running, and open:
 3. Leave the default **Maximum edits** slider (6) for a quick search — it caps the
    total mismatches + DNA/RNA bulges (the default resolves to 4 mismatches + 1 DNA
    + 1 RNA bulge) — or open **Advanced options** to set
-   mismatches / DNA bulges / RNA bulges individually (e.g. 4 / 1 / 1). The default
-   **1000G-2021** variant index is pre-selected, so the search is variant-aware out
-   of the box.
+   mismatches / DNA bulges / RNA bulges individually (e.g. 4 / 1 / 1). The recommended
+   default variant index (**HGDP + 1000 Genomes**, `NRG_3_hg38+hg38_HGDP1kGP` — the one you
+   downloaded in step 4) is pre-selected, so the search is variant-aware out of the box.
 4. Give the job a name and click **Submit**. (Optionally tick **Notify me by
    email** to be sent a results link when the job finishes — set your SMTP details
    once under **Settings → Email notifications**.)
@@ -197,12 +197,13 @@ To stop the web server, press **Ctrl+C** in the terminal.
 
 The same batteries install runs a search directly from the command line — handy
 for scripting or a headless server, with results identical to the web interface.
-Put your 20 nt spacer(s) in a file (one per line; CRISPRme auto-pads them to the
-PAM), then run `complete-search`. The `download --what index` step already wrote
-the `list_vcf.txt` / `list_samplesID.txt` the search reads, so from `~/crisprme`:
+Put your 20 nt spacer(s) in a file, one per line, **with the PAM positions written as `N`**
+(a 20 nt spacer for a 3 nt PAM gets `NNN` appended), then run `complete-search`. The
+`download --what index` step already wrote the `list_vcf.txt` / `list_samplesID.txt` the
+search reads, so from `~/crisprme`:
 
 ```bash
-printf '%s\n' CTAACAGTTGCTTTTATCAC > my_guide.txt
+printf '%s\n' CTAACAGTTGCTTTTATCACNNN > my_guide.txt   # 20-nt spacer + NNN for the 3 PAM positions
 
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-search \
@@ -315,7 +316,7 @@ the Docker instructions above.
 
 An index is specific to a **PAM + bulge count + genome**. Download whichever you
 need by its **exact published name** — for example the five-source sites-only
-**mega** index (a useful complement to the default genotyped 1000G-2021 index):
+**mega** index (a useful complement to the default genotyped HGDP + 1000 Genomes index):
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega --path /DATA
@@ -364,8 +365,8 @@ and deleting data you no longer need. See
   off-targets)** →
   1. Thresholds too strict — raise **Maximum edits**, and if you opened Advanced
      options check the DNA and RNA bulges are not both `0`.
-  2. Reference-only selected — keep the **1000G-2021** option (pre-selected by
-     default) to get variant off-targets.
+  2. Reference-only selected — keep the pre-selected **variant** index (not **Reference
+     only**) to get variant off-targets.
   3. Variant index not installed — re-run
      `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA`.
   4. Confirm success: `Results/<name>/log_error.txt` is empty and

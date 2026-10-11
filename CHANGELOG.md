@@ -11,6 +11,74 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.8] - 2026-10-11
+
+### Added
+- **Build a new-PAM index for a published dataset.** The PAM-independent enriched-genome "kits"
+  for the re-phased `NRG_3_hg38+hg38_HGDP1kGP` and sites-only `NRG_3_hg38+hg38_mega` datasets are
+  now published on HuggingFace (`build-inputs/hg38_HGDP1kGP.tar.gz`, `build-inputs/hg38_mega.tar.gz`,
+  each with `SHA256SUMS`). A new `docs/PRECOMPUTED_INDEXES.md` section documents downloading a kit
+  and indexing **any** nuclease/PAM (NGG, NNGRRT, TTTN, …) off it, plus the full source-to-kit
+  reproduction (SHAPEIT5 re-phasing + data provenance for HGDP+1kGP; the five-source merge + MAF
+  filters for mega). `METHODS.md` gains a re-phasing-provenance note and a "Re-indexing for a
+  different PAM" subsection; `README.md` and the data-setup guide cross-link the new section.
+
+### Fixed
+- **Web `assembly-search` could not be submitted.** The hidden genome/chain/chromAlias holders
+  auto-populated from the Individual picker were `dcc.Dropdown`s, which silently drop a value that
+  is not one of their options; the picker stores cwd-relative *paths*, so the submit handler read
+  `None` for all six and always reported "missing fields". They are now `dcc.Store` components
+  (hold arbitrary strings), so a web-submitted assembly-search launches correctly.
+- **Web `assembly-search` did not add closest-gene columns.** The submit handler discarded the
+  gencode companion returned by `build_active_annotation`; it now passes `--gene_annotation`
+  (the bundled `gencode.protein_coding.bed`) when the built-in annotation bundle is enabled, so a
+  web-submitted job gets the `Annotation_closest_gene_*` columns (parity with complete-search).
+- **`synth_sites_gt.py` wrote plain gzip instead of BGZF**, so `tabix` rejected the output
+  ("not BGZF") and the documented sites-only (mega) fake-indel reproduction recipe failed. It now
+  writes BGZF via pysam (with a BGZF-magic-byte test assertion).
+- **`seq_script/merge_panels/mega_build_indels.sh` never placed the fake-indel genome** into the
+  index directory — its `strip_and_place` glob (`*fakechr<N>*`) did not match the enricher's
+  `fake_hg38_mega_<chr>` directory name. Search was unaffected (it uses the index bins), but the
+  PAM-independent rebuild genome was missing; the glob is fixed.
+- **Migration-guide license row was misleading.** The "What changed vs stock CRISPRme" table framed
+  CRISPRme 2.1.14 as merely "AGPL-3.0 (copyleft)", implying AGPL alone permitted commercial use.
+  Stock CRISPRme was dual-licensed — AGPL for academic/non-commercial use **plus** a separate
+  commercial license for commercial use. The row now states that both CRISPRme and CRISPRme+ require
+  a separate commercial license for commercial use; only the academic-use license changed
+  (AGPL-3.0 → MGBOA 1.0).
+
+### Changed
+- **Documentation + website consistency sweep.** Version strings were unified to `2.7.8` across
+  `README.md`, the website (`docs/index.html`), `docs/DOCKER_QUICKSTART.md`, the web-interface
+  user guide, `docs/PRECOMPUTED_INDEXES.md`, and `install_from_source.sh` (several surfaces had
+  drifted to `2.6.x` / `2.7.1` / `2.5.5`). The legacy data-setup guide now points to the modern
+  `crisprme.py download` flow for first-time setup.
+- **Fresh-user consistency pass.** A full install→run→build→interpret walkthrough surfaced and
+  fixed: the **default index** is now consistently **HGDP + 1000 Genomes** across README, the
+  website, the Docker quickstart, and the web-interface guide (several spots still named the old
+  1000G-2021 default); the website RAM figure is corrected to **64 GB** for a genome-wide
+  variant-aware search and now surfaces the **one-line installer**; a CLI-guide example that
+  dropped the PAM `N`-padding (and would prune all off-targets) is fixed; the web guide gains an
+  **"Understanding your results"** reference (CONFIRMED vs PUTATIVE, carriers, key columns); and
+  a `docs/FUTURE_WORK.md` captures deferred enhancements.
+- **One-click installer moved into this repo.** `install.sh` / `install.ps1` (previously served
+  from the legacy `pinellolab/CRISPRme` repo) now live in `docs/` here and are served at
+  `https://pinellolab.github.io/crisprme-plus/install.{sh,ps1}`, so the release owns its own
+  installer. Their default first-run download is switched from the old `1000G-2021` index to the
+  recommended **HGDP + 1000 Genomes** default, and the stated size corrected to **~45 GB** (the old
+  "~75 GB" was wrong). The one-liner URLs in the README, website, and `install/README.md` are
+  updated to match. (The old URL should be left as a redirect for existing bookmarks.)
+
+### Removed
+- **Retired ~71 GB of stale/superseded precomputed indexes from HuggingFace.** Deleted the
+  superseded hybrid `NRG_3_hg38+hg38_1000G2021_HGDP` (+ its genotype companion), which is replaced
+  by the fully re-phased `HGDP1kGP` default; the orphaned v2.3.0 dict-less lineage
+  (`NRG_3_hg38-dictless+hg38_1000G_HGDP`, `NGG_3_hg38-dictless+hg38_1000G_HGDP`,
+  `genotypes_hg38_1000G_HGDP`); and the unused reference-only `NGG_3_hg38`. The hosted catalog is
+  now the four production indexes (`HGDP1kGP` default, `1000G2021`, `HPRC`, `mega`) plus
+  reference-only `NRG_3_hg38`; all user-facing docs were scrubbed to match (catalog entries,
+  download commands, and every worked example repointed to a hosted index).
+
 ## [2.7.7] - 2026-10-10
 
 ### Added
@@ -1917,7 +1985,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.7...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.8...HEAD
+[2.7.8]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.8
 [2.7.7]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.7
 [2.7.6]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.6
 [2.7.5]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.5
