@@ -323,7 +323,7 @@ controls how genetic variants are resolved in the results:
 
 Per-sample is a **genotype-resolution** dial, **not** a speed dial: for a single guide the
 runtimes are comparable. It **requires a genotyped index** (HGDP + 1000 Genomes [the default],
-1000G-2021, 1000G-2021 + HGDP, or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
+1000G-2021, or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
 greyed out and the search falls back to population-level. (See "Understanding CONFIRMED vs
 PUTATIVE and carriers" in the results section for how these labels appear in the report.)
 

@@ -1697,7 +1697,7 @@ def _publish_index_section() -> List:
 # ---------------------------------------------------------------------------
 def _start(job_id: str):
     """Standard 3-tuple for a launched job: (store, interval-enabled, feedback)."""
-    return job_id, False, ""
+    return job_id, False, "Started — progress is shown in the Activity panel on the right. ↗"
 
 
 def _fb_refresh(msg, refresh: bool = False):
@@ -1766,6 +1766,16 @@ def add_index_hf(n, name):
         return no_update, no_update, "Pick an index from the HuggingFace list."
     if any(c in name for c in ("/", "\\", " ", "..")):
         return no_update, no_update, "Invalid index name."
+    if os.path.isdir(
+        os.path.join(current_working_directory, "genome_library", name.strip())
+    ):
+        # already installed — don't re-fetch many GB and block the single-slot
+        # job queue (the dropdown labels installed indexes "— installed").
+        return (
+            no_update,
+            no_update,
+            f"Index '{name.strip()}' is already installed — nothing to download.",
+        )
     derr = _preflight_disk(_catalog_size("index", name.strip()))
     if derr:
         return no_update, no_update, derr

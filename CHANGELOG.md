@@ -11,6 +11,30 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **Build a variant-aware index from a single user-provided VCF.** `build-index-only --vcf` (and the
+  web **Settings → Add a VCF dataset → Build index**) now **auto-splits** a single multi-chromosome
+  VCF into the per-chromosome files the enricher (`crispritz add-variants`) requires — so a normal
+  user VCF "just works". Previously a single multi-chromosome VCF failed with a cryptic
+  empty-chromosome error (`Genomes/<g>/.fa`). (No-op for datasets already named per-chromosome, e.g.
+  the shipped indexes.)
+- **SNP-only custom VCFs now build a complete index.** A variant dataset with no indels previously
+  aborted the whole build at the indel-indexing step (`Indels indexing failed`, empty fake-indel
+  contigs); the indels index is now **skipped gracefully** and the SNP variant index is produced
+  (SNP+indel co-occurrence simply does not apply to an indel-free dataset).
+
+### Fixed
+- **Web Settings / Data-Manager (3 fresh-user-QA findings):**
+  - Clicking **Download index** on an already-installed index re-downloaded all its GB and blocked
+    the single-slot job queue; it now short-circuits with *"Index '…' is already installed — nothing
+    to download."*
+  - An in-progress download's `.stage_<genome>` staging dir was listed as an **installed genome** (and
+    offered in the build / search / delete dropdowns); dot-dirs (staging + assembly markers) are now
+    excluded from the installed-genome listing.
+  - Launching a **Download / Build** left the inline feedback blank (job status appeared only in the
+    Activity panel); every job launch now confirms *"Started — progress is shown in the Activity
+    panel."*
+
 ## [2.7.8] - 2026-10-11
 
 ### Added

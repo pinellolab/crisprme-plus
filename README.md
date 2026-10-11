@@ -158,6 +158,13 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 > auto-updating, GPU-capable default image. For a fully reproducible run, pin the exact
 > release instead, e.g. `pinellolab/crisprme:v2.7.8`.
 
+> **On HPC with Apptainer/Singularity.** Use **`apptainer run`**, which invokes the image
+> entrypoint so `crisprme.py` is on `PATH`, binding your data dir to `/DATA` — e.g.
+> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.7.8 crisprme.py --version`
+> (add `crisprme.py web-interface` / `complete-search …` the same way). Note that
+> `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
+> `PATH` — prefer `apptainer run` (or prefix `bash -lc`).
+
 **The prebuilt SpCas9 (NRG = NAG+NGG) variant indexes.** All carry searchable
 indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever you need with
 `--what index --index-name <name>` (or grab more later from the web **Settings**):
@@ -523,7 +530,7 @@ docker images
 Look for an entry similar to the following:
 ```
 REPOSITORY          TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme   latest    <image_id>     <timestamp>    ~818MB
+pinellolab/crisprme   latest    <image_id>     <timestamp>    ~5 GB (amd64; ~1.8 GB on Apple Silicon)
 ```
 
 You are now ready to run CRISPRme using Docker.

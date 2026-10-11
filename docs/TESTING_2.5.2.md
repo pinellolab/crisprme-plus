@@ -1,5 +1,7 @@
 # Testing CRISPRme+ 2.5.2 — guide for Ann & Manuel
 
+> **Historical — CRISPRme+ 2.5.2-era test log, kept for provenance.** The `NRG_3_hg38+hg38_1000G2021_HGDP` index referenced below was retired in v2.7.8 and is no longer on HuggingFace; use the re-phased `NRG_3_hg38+hg38_HGDP1kGP` instead.
+
 Thanks for helping test the new release! This walks you through installing CRISPRme+ 2.5.2,
 downloading the two new variant indices, running a couple of searches, and checking that the
 new co-occurrence outputs look right. It should take ~30–60 min of hands-on time (plus

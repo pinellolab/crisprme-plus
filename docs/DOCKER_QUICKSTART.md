@@ -21,7 +21,7 @@ Everything runs inside Docker, so the only thing you install is Docker itself.
 
 Then, in Docker Desktop → **Settings → Resources**, give Docker enough memory:
 **16 GB** is fine for a first run / reference-only searches, but the default
-genome-wide 1000G-2021 variant search is memory-intensive — give it **64 GB**
+genome-wide HGDP + 1000 Genomes (HGDP1kGP) variant search is memory-intensive — give it **64 GB**
 (32 GB can run out of memory on a genome-wide variant search).
 
 > **Disk:** give Docker **≈ 100 GB free** for the batteries-included (variant-aware)
@@ -29,7 +29,7 @@ genome-wide 1000G-2021 variant search is memory-intensive — give it **64 GB**
 > (no per-sample dictionaries): the reference + variant genome indexes are ~40 GB, the
 > compact allele-frequency registry a few GB (shipped uncompressed for fast lookups),
 > and an optional per-genotype store (for per-sample carrier annotation) ~26 GB. The
-> genotyped **1000G-2021 + HGDP** index is a ~29 GB download; the sites-only **mega**
+> genotyped **HGDP + 1000 Genomes** (HGDP1kGP) index is a ~28 GB download; the sites-only **mega**
 > (five-source) index ~15 GB. A reference-only setup is far smaller (~25 GB).
 
 Check Docker works, then pull the CRISPRme+ image:
@@ -222,7 +222,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 - `--per-sample` resolves per-individual genotypes: it names the **carrier samples**
   and marks co-occurring variants **CONFIRMED cis** (phased) / **PUTATIVE co-carrier**
   (unphased) with the exact joint allele frequency. It needs a genotyped index
-  (1000G-2021, 1000G-2021 + HGDP, or HPRC); omit it for the faster population-level
+  (HGDP + 1000 Genomes [the default], 1000G-2021, or HPRC); omit it for the faster population-level
   default, and note it is inert on the sites-only *mega* index. Either way the search
   is variant-aware with allele frequencies and rsIDs.
 - COSMIC cancer rows ship in the annotation bundle but are **off by default**
@@ -275,7 +275,7 @@ same image with no root and no daemon. Most clusters already have it (the comman
 is `apptainer`, or `singularity` on older systems — they are interchangeable).
 
 ```bash
-# 1. build the image once (a ~2 GB .sif file; no root needed)
+# 1. build the image once (a ~4–5 GB .sif file (amd64; ~1.8 GB on Apple Silicon); no root needed)
 apptainer pull crisprme.sif docker://pinellolab/crisprme:latest
 
 # 2. download data + a prebuilt index into a working folder

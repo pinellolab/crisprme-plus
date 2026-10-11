@@ -45,7 +45,10 @@ Bulge-enabled searches need a genome **index**.
 ### Add a VCF dataset
 Variant datasets are large, so they are **fetched server-side** rather than
 uploaded from the browser: from HuggingFace, an existing server folder already on
-the machine (registered in place), or a chunked upload for a local file.
+the machine (registered in place), or a chunked upload for a local file. Your VCF
+does **not** need special preparation — a single multi-chromosome `.vcf.gz` is
+**auto-split per chromosome** when you build an index from it, and a SNP-only VCF
+(no indels) builds a complete SNP variant index.
 
 ### Add an annotation
 Upload a `.bed` file (annotations are small).

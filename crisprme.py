@@ -2483,6 +2483,64 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
         sys.stderr.write(f"Warning: could not write index PAM provenance: {exc}\n")
 
 
+def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
+    """Make a variant dataset usable by ``crispritz add-variants``, which requires
+    the VCF folder to hold **per-chromosome** files and derives each chromosome from
+    a ``.chr<N>.`` token in the filename. A user who registers a single multi-
+    chromosome VCF (the natural input) would otherwise hit a cryptic empty-chromosome
+    enrichment crash (``Genomes/<g>/.fa``). So, in place, transparently split any VCF
+    that isn't already named per-chromosome into ``<base>.<chrom>.vcf.gz`` (bgzip +
+    tabix). A no-op when the folder is already per-chromosome (the shipped datasets),
+    so it is safe to call on every variant build.
+    """
+    import tempfile
+
+    if not os.path.isdir(vcfdir):
+        return
+    vcfs = [f for f in os.listdir(vcfdir) if f.endswith(".vcf.gz")]
+    if not vcfs:
+        return  # nothing to normalize (dicts-only / empty dataset)
+    # Already per-chromosome? crispritz needs a '.chr<N>.' token in EVERY filename.
+    if all(any("chr" in tok for tok in f.split(".")) for f in vcfs):
+        return
+    bcftools = shutil.which("bcftools")
+    tabix = shutil.which("tabix")
+    if not bcftools or not tabix:
+        error(
+            "The VCF dataset is a single multi-chromosome file and must be split "
+            "per chromosome for enrichment, but bcftools/tabix were not found to do "
+            "it automatically. Provide per-chromosome '<name>.chr<N>.vcf.gz' files."
+        )
+    realdir = os.path.realpath(vcfdir)
+    tmp = tempfile.mkdtemp(prefix=".vcfsplit_", dir=os.path.dirname(os.path.abspath(vcfdir)))
+    try:
+        for f in vcfs:
+            src = os.path.join(realdir, f)
+            base = f[: -len(".vcf.gz")]
+            chroms = subprocess.check_output([tabix, "-l", src]).decode().split()
+            for chrom in chroms:
+                dst = os.path.join(tmp, f"{base}.{chrom}.vcf.gz")
+                subprocess.check_call(
+                    [bcftools, "view", "-r", chrom, src, "-Oz", "-o", dst]
+                )
+                subprocess.check_call([tabix, "-p", "vcf", dst])
+    except Exception as exc:  # noqa: BLE001
+        shutil.rmtree(tmp, ignore_errors=True)
+        error(f"Auto-splitting the VCF dataset into per-chromosome files failed: {exc}")
+    # Replace the registered folder (a symlink to the user's data, or a real dir)
+    # with the normalized per-chromosome dir, atomically. The user's original files
+    # are untouched (we only ever read them).
+    if os.path.islink(vcfdir):
+        os.unlink(vcfdir)
+    elif os.path.isdir(vcfdir):
+        shutil.rmtree(vcfdir)
+    os.rename(tmp, vcfdir)
+    print(
+        "Auto-split the VCF dataset into per-chromosome files for enrichment.",
+        flush=True,
+    )
+
+
 def build_index_only() -> None:
     """Pre-builds the CRISPRitz reference index for a genome+PAM+bulge combo.
 
@@ -2608,6 +2666,10 @@ def build_index_only() -> None:
             f"names under VCFs/ (got {_vcf_arg}, which is neither)"
         )
     vcf_name = os.path.basename(vcfdir.rstrip("/"))
+    # crispritz add-variants needs per-chromosome VCF files; transparently split a
+    # single multi-chromosome VCF so a user-provided dataset "just works" (no-op when
+    # the folder is already per-chromosome, e.g. the shipped datasets).
+    _ensure_per_chromosome_vcfs(vcfdir)
     # OPTIONAL --samplesID: a listing file (one samplesID filename per line under
     # samplesIDs/, the same format complete-search uses; combined panels list both
     # 1000G and HGDP). When given, the build ALSO emits the ADDITIVE dictless tiers
@@ -2978,44 +3040,68 @@ def build_index_only() -> None:
         print(f"Variant index already present: {snp_idx}", flush=True)
     # STEP 3: index the indels genome (pool_index_indels.py, as the pipeline does)
     if not os.path.isdir(indels_idx):
-        print(f"Building indels index {os.path.basename(indels_idx)}...", flush=True)
-        # [indel-snp] Overlay SNP IUPAC codes onto the fake-indel flanks BEFORE
-        # indexing so this _INDELS index also finds SNP+indel co-occurring
-        # off-targets (searchTST matches IUPAC codes for free -- no -var needed).
-        # Enabled by default (opt-out): set CRISPRME_INDEL_SNP=0 to disable. GUARDED
-        # (stdout warning, never abort -- stderr is fatal here), mirroring the tiers above.
-        if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+        # A variant dataset with NO indels (e.g. a SNP-only VCF) yields empty
+        # fake-indel contigs that pool_index_indels cannot index. Detect zero indels
+        # and SKIP the indels index gracefully -- the SNP variant index is complete
+        # on its own (SNP+indel co-occurrence simply does not apply to an indel-free
+        # dataset) -- rather than aborting the whole build with "Indels indexing failed".
+        _indel_bases = 0
+        for _fk in _glob(os.path.join(indels_out, "fake_*", "*.fa")):
             try:
-                import overlay_indel_snps as _ois
-                _n = _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict])
-                print(
-                    f"[indel-snp] SNP-overlaid the fake-indel genome "
-                    f"({_n} flank bases IUPAC-coded).",
-                    flush=True,
-                )
-            except Exception as _ois_err:
-                print(
-                    f"WARNING [indel-snp]: fake-indel SNP overlay failed "
-                    f"({_ois_err}); this _INDELS index will be SNP-blind.",
-                    flush=True,
-                )
-        pool = os.path.join(script_path, "pool_index_indels.py")
-        code = subprocess.call(
-            [
-                sys.executable,
-                pool,
-                f"{indels_out}/",
-                pamfile,
-                pam_char,
-                genome_ref,
-                vcf_name,
-                str(bMax + 1),
-                str(thread),
-            ],
-            cwd=workdir,
-        )
-        if code != 0 or not os.path.isdir(indels_idx):
-            error(f"Indels indexing failed (expected {indels_idx})")
+                with open(_fk) as _fh:
+                    for _ln in _fh:
+                        if not _ln.startswith(">"):
+                            _indel_bases += len(_ln.strip())
+                if _indel_bases:
+                    break
+            except OSError:
+                pass
+        if _indel_bases == 0:
+            print(
+                f"No indels in {vcf_name} -> skipping the indels index; the SNP "
+                f"variant index is complete (SNP+indel co-occurrence N/A for an "
+                f"indel-free dataset).",
+                flush=True,
+            )
+        else:
+            print(f"Building indels index {os.path.basename(indels_idx)}...", flush=True)
+            # [indel-snp] Overlay SNP IUPAC codes onto the fake-indel flanks BEFORE
+            # indexing so this _INDELS index also finds SNP+indel co-occurring
+            # off-targets (searchTST matches IUPAC codes for free -- no -var needed).
+            # Enabled by default (opt-out): set CRISPRME_INDEL_SNP=0 to disable. GUARDED
+            # (stdout warning, never abort -- stderr is fatal here), mirroring the tiers above.
+            if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+                try:
+                    import overlay_indel_snps as _ois
+                    _n = _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict])
+                    print(
+                        f"[indel-snp] SNP-overlaid the fake-indel genome "
+                        f"({_n} flank bases IUPAC-coded).",
+                        flush=True,
+                    )
+                except Exception as _ois_err:
+                    print(
+                        f"WARNING [indel-snp]: fake-indel SNP overlay failed "
+                        f"({_ois_err}); this _INDELS index will be SNP-blind.",
+                        flush=True,
+                    )
+            pool = os.path.join(script_path, "pool_index_indels.py")
+            code = subprocess.call(
+                [
+                    sys.executable,
+                    pool,
+                    f"{indels_out}/",
+                    pamfile,
+                    pam_char,
+                    genome_ref,
+                    vcf_name,
+                    str(bMax + 1),
+                    str(thread),
+                ],
+                cwd=workdir,
+            )
+            if code != 0 or not os.path.isdir(indels_idx):
+                error(f"Indels indexing failed (expected {indels_idx})")
     else:
         print(f"Indels index already present: {indels_idx}", flush=True)
     _write_pam_build(snp_idx, pamfile)

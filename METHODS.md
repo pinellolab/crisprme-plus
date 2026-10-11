@@ -1,6 +1,6 @@
 # CRISPRme+ — Methods
 
-This document describes the methods introduced in **CRISPRme+** (the 2.3–2.6
+This document describes the methods introduced in **CRISPRme+** (the 2.3–2.7
 line), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
@@ -167,7 +167,9 @@ roster lists 3,500 samples but only 2,548 are genotyped). Counting the un-
 genotyped "phantom" samples as called reference inflates AN and biases every
 allele frequency low. CRISPRme+ therefore defines the panel from the samples
 **actually present in the VCF** (VCF-filtered `samplesID`), giving the correct
-AN (here 2×(2,548 + 929) = 6,954 for combined 1000G+HGDP autosomes).
+AN (here 2×(2,548 + 929) = 6,954 for combined 1000G+HGDP autosomes). (This
+illustrative example uses the earlier 1000 Genomes 2019 + HGDP merge; the shipped
+default is the re-phased HGDP1kGP, 4,091 samples.)
 
 ### Two panel modes (genotyped vs sites-only)
 The merge above is the **genotyped, cis-capable** mode (`merge_vcf_panels.sh` /
@@ -195,7 +197,7 @@ Minigraph-Cactus pangenome — the **HPRC Release 2 graph `hprc-v2.0-mc-grch38`*
 decomposed to a per-chromosome VCF (`vg deconstruct` → `vcfbub` → `vcfwave`), 232
 assembly-derived genomes (231 individuals + the CHM13 graph backbone). Because the genotypes are **phased** (each sample is two assembled
 haplotypes), it supports CONFIRMED cis co-occurrence and named per-sample carriers
-like the 1000G-2021 + HGDP panel, while capturing pangenome-specific variation
+like a short-read 1000 Genomes + HGDP panel, while capturing pangenome-specific variation
 absent from short-read call sets. The graph-coverage half-missingness (`1|.`) is
 handled by recomputing `AF/AC/AN` from the genotypes (`bcftools +fill-tags`), so the
 allele-number denominator excludes unassembled alleles.
@@ -262,7 +264,7 @@ sources.
 An enriched reference genome is **PAM-independent**: the per-position IUPAC overlay and the
 Dictionaries/registry encode the *variants*, not the nuclease. Only the CRISPRitz search index
 (`genome_library/<PAM>_<N>_<ref>+<vcf>`) is PAM-specific. CRISPRme+ therefore publishes the
-PAM-independent **enriched-genome kit** for the flagship datasets (under `build-inputs/<dataset>/`
+PAM-independent **enriched-genome kit** for the flagship datasets (under `build-inputs/<dataset>.tar.gz`
 on the HuggingFace data repo), so a user targeting a different nuclease (NGG, NNGRRT, TTTN, …)
 rebuilds *only* the index off the published enriched genome rather than re-deriving the variants.
 The complete workflow — downloading the kit, indexing a new PAM, and reproducing the kit from
@@ -513,7 +515,7 @@ without delivering carrier resolution), `complete-search` **warns** and the web 
 the per-sample option when a sites-only index is selected.
 
 **Measured population-level vs `--per-sample` behavior (adversarially verified).** Running both
-modes on the released 1000G-2021 + HGDP genotyped index for one guide (identical
+modes on the then-released 1000 Genomes 2021 + HGDP genotyped index for one guide (identical
 guide/PAM/thresholds; only `--per-sample` differs) makes the trade concrete and confirms the
 guarantees hold end-to-end:
 
@@ -671,8 +673,8 @@ The report ZIP places `report.html` at the top level with all data files under a
 size and the number of SNPs and indels searched. These database counts are read
 from a build-time `Dictionaries/registry_<vcf>/variant_count.json` sidecar
 (`n_records` SNPs + `n_indels`) written when the dict-less index is built, so the
-report needs no VCF access at report time (for the shipped combined 1000G+HGDP
-panel: 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyped
+report needs no VCF access at report time (e.g. the earlier 1000 Genomes + HGDP
+merge recorded 106,664,924 SNPs). Reported allele frequencies are AC/AN over the genotyped
 panel; a variant present in the panel but whose source allele frequency is exactly
 0 (e.g. a secondary allele of a multiallelic site) is shown at a **display floor of
 1×10⁻⁵** so it still renders on the log-scale plots — this is a plotting floor,
@@ -768,7 +770,7 @@ an independent factorized oracle and against the exact per-sample enumeration pa
 under-reports** on a real chr22 1000G+HGDP slice (and, on the legacy dict / aggregate-panel
 path, catching cases where the fewest-mismatch allele scores materially *lower* CFD than
 another carried allele, up to a threshold-crossing 0.14). A whole-index comparison of the two
-modes on the released 1000G-2021 + HGDP panel reproduces this end-to-end: across all **3,079
+modes on the then-released 1000 Genomes 2021 + HGDP genotyped index reproduces this end-to-end: across all **3,079
 shared off-target loci, the population-level CFD ≥ the per-sample CFD with zero violations** (it
 is strictly higher only where it assumes worst-possible co-occurrence). **The ML score is
 best-effort.** CRISPR-Bulge is a non-factorizable neural ensemble, so its worst case is taken as
@@ -873,7 +875,7 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.6.x line (default SNP+indel co-occurrence, two-pass population-level
+methods as of the 2.7.x line (CRISPRme+ 2.7.8) (default SNP+indel co-occurrence, two-pass population-level
 analysis with opt-in `--per-sample` genotype resolution, and the CRISPR-Bulge ML off-target
 scorer in a dedicated conda environment with a `cpu|cuda|metal` compute backend); see the
 CHANGELOG and the referenced source files for implementation detail.*

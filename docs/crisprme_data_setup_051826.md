@@ -47,6 +47,8 @@ crisprme.py --version
 
 *Estimated disk usage: ~410 GB total (~16 GB 1000G + ~390 GB HGDP + ~4 GB genome). Download time depends heavily on FTP server speed and your network; expect several hours.*
 
+Note that this from-scratch `crisprme.py setup` path builds the **legacy** 1000 Genomes Phase 3 (2,548) + HGDP (929) panel (~410 GB), which **differs** from the shipped re-phased HGDP1kGP (4,091-sample) default; for the default, use `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP` instead.
+
 This section downloads the standard legacy bundle — hg38 genome, 1000 Genomes Phase 3 (~16 GB), and HGDP (~390 GB) — and builds all config and PAM files automatically via the built-in `setup` command. You run this once per machine, then skip straight to Section 3 for every search.
 
 ### 2a. Choose your working directory

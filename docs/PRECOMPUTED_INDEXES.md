@@ -156,6 +156,13 @@ list, and the `variant_count.json` manifest (`n_records` SNPs + `n_indels`, whic
 feeds the report's *Variants included* line). Nothing else has to be assembled by
 hand, so `publish-index` (below) ships a self-complete index.
 
+> **Your own VCF.** `--vcf` accepts a folder of `.vcf.gz`. It need not be pre-split: a **single
+> multi-chromosome VCF is auto-split per chromosome** before enrichment (the enricher requires
+> per-chromosome files), so a user-provided VCF — including one registered through the web
+> **Settings → Add a VCF dataset** card and built with **Build index** — works without manual
+> preparation. A **SNP-only VCF** (no indels) builds a complete SNP variant index; the indels index
+> is simply skipped (SNP+indel co-occurrence does not apply to an indel-free dataset).
+
 `--samplesID` is a listing file (one samplesID filename per line, resolved under
 `samplesIDs/`); a combined panel lists **both** the 1000G and HGDP files, e.g.:
 
@@ -289,7 +296,7 @@ Only the genome index itself is PAM-specific; everything derived from the varian
 > **Why you need an extra file.** The HuggingFace **index** tarball ships the *NRG* index + its
 > `Dictionaries/` + `samplesIDs/` — it does **not** contain the enriched genome, so it alone can't
 > build a different PAM. The PAM-independent **enriched-genome kit** is published separately under
-> **`build-inputs/<dataset>/`** in the same repo (`lucapinello/crisprme-data`). Download it and you
+> **`build-inputs/<dataset>.tar.gz`** in the same repo (`lucapinello/crisprme-data`). Download it and you
 > skip straight to indexing the new PAM. If instead you want to **reproduce the kit** (or build one
 > for a **different VCF**), the full source-to-kit workflow is documented below.
 
@@ -324,7 +331,7 @@ printf 'NNNNNNNNNNNNNNNNNNNNNGA 3\n' > PAMs/20bp-NGA-custom.txt
 ### Step 2 — download the enriched-genome kit
 
 ```bash
-# ~3–5 GB/dataset: the SNP-enriched genome + its fake-indel companion, as one tarball.
+# ~1 GB/dataset download (a few GB once extracted): the SNP-enriched genome + its fake-indel companion, as one tarball.
 hf download lucapinello/crisprme-data build-inputs/hg38_HGDP1kGP.tar.gz \
   --repo-type dataset --local-dir .
 tar xzf build-inputs/hg38_HGDP1kGP.tar.gz
@@ -344,17 +351,17 @@ PAM-specific index directly from the IUPAC-enriched FASTA — **no re-enrichment
 NGG index off the HGDP+1kGP enriched genome builds in seconds per chromosome):
 
 ```bash
-# SNP index -> genome_library/<PAM>_<N+1>_hg38+hg38_<ds>/
+# SNP index -> genome_library/<PAM>_<N>_hg38+hg38_<ds>/
 crispritz.py index-genome hg38+hg38_<ds> Genomes/hg38+hg38_<ds>/ PAMs/<NEW_PAM>.txt \
-  -bMax 3 -th <T>          # -bMax = max(bDNA,bRNA)+1  (2 bulges -> 3)
-# indel index -> genome_library/<PAM>_<N+1>_hg38+hg38_<ds>_INDELS/
+  -bMax 3 -th <T>          # -bMax = N = max(bDNA,bRNA)+1 = 3 (the same N as in the index name, e.g. NRG_3)
+# indel index -> genome_library/<PAM>_<N>_hg38+hg38_<ds>_INDELS/
 python PostProcess/pool_index_indels.py \
   Genomes/hg38+hg38_<ds>_INDELS/ PAMs/<NEW_PAM>.txt <PAM_MOTIF> hg38 hg38_<ds> 3 <T>
 ```
 
 Here `<PAM_MOTIF>` is the PAM region token itself — the IUPAC motif without the spacer `N`s
 (e.g. `NGG`, `NRG`, `NNGRRT`, `TTTN`) — the same prefix the index name uses
-(`<PAM_MOTIF>_<N+1>_hg38+hg38_<ds>`).
+(`<PAM_MOTIF>_<N>_hg38+hg38_<ds>`).
 
 > **One-command alternative.** With the enriched genome already in place, `crisprme.py
 > build-index-only --genome Genomes/hg38 --pam PAMs/<NEW_PAM>.txt --bDNA 2 --bRNA 2 --vcf
