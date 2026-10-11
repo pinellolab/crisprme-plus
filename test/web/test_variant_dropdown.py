@@ -5,9 +5,15 @@ combined variant search must have the inputs it needs.
 Guards the alpha bug where, after the batteries download (index only, no raw VCFs/),
 the variant dropdown showed only "Reference only" -- get_variant_dataset_options read
 only VCFs/ + a built-in marker that did not match the combined enriched index name, so
-the shipped NRG_3_hg38+hg38_1000G_HGDP index was never offered. Also covers the VCF-folder
-resolver and the combined-samplesID synthesis (the combined search dies at the sample-ID
-step without the combined list, which the batteries download does not ship).
+a two-source combined index was never offered. Also covers the VCF-folder resolver and
+the combined-samplesID synthesis (the combined search dies at the sample-ID step without
+the combined list, which the batteries download does not ship).
+
+The fixture uses a two-source `NRG_3_hg38+hg38_1000G_HGDP`-style name as a representative
+combined (`<ref>+hg38_<A>_<B>`) panel to exercise the A_B token parsing + the union of two
+per-dataset sample lists. That specific index has since been RETIRED from HF (superseded by
+the SHAPEIT5 re-phased single-token `NRG_3_hg38+hg38_HGDP1kGP`, the current default); it is
+kept here only as a generic two-source mechanism fixture, not as a claim that it is shipped.
 
 Standalone (no pytest); builds its own mock install and exits non-zero on failure, so it
 can run directly in CI inside the full image env:

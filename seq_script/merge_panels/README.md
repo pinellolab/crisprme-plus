@@ -13,17 +13,26 @@ sources are all genotyped and whether you need cross-variant cis:
 | indel+SNP cis | CONFIRMED (1000G phased) / PUTATIVE (HGDP) | **N/A** (aggregate, no phase) |
 | MAF filter | none | **> 0.001** (uniform) |
 
-**Status (shipped in v2.5.4):** both production indexes are **built, published, and
-clean-room-validated** — genotyped `NRG_3_hg38+hg38_1000G2021_HGDP` and sites-only
-`NRG_3_hg38+hg38_mega` (both on HF `lucapinello/crisprme-data`). Mode 2: genome-wide
-5-source merge (66.9M sites, 51.2M SNPs) + INFO-AF registry + searchable indels.
+> **Retirement note (v2.7.x).** The original genotyped hybrid `NRG_3_hg38+hg38_1000G2021_HGDP`
+> (1000G-2021 + HGDP, mixed phased/unphased) has been **retired and removed from HF** — it was
+> superseded by the SHAPEIT5 re-phased **`NRG_3_hg38+hg38_HGDP1kGP`** (4,091 samples = 925 HGDP +
+> 3,166 1000 Genomes), which is the current **recommended variant default**. This Mode-1 recipe is
+> kept for reproducibility of the merge mechanism; it no longer names a published index.
+
+**Status:** the sites-only `NRG_3_hg38+hg38_mega` index is **built, published, and
+clean-room-validated** on HF `lucapinello/crisprme-data`: genome-wide 5-source merge
+(66.9M sites, 51.2M SNPs) + INFO-AF registry + searchable indels. The genotyped production
+default is the re-phased `NRG_3_hg38+hg38_HGDP1kGP` (built by a separate re-phasing pipeline,
+not this Mode-1 2019/2021 recipe).
 
 > **Mode-1 SOURCES caveat.** The `merge_vcf_panels.sh` `SOURCES` + `build_combined_panel.sh`
 > defaults committed here target the **2019** 1000G Phase-3 callset (`hg38_1000G`, glob
-> `ALL.{C}.*.vcf.gz`, 2548 samples) and produce panel `hg38_1000G_HGDP`. The **shipped**
-> genotyped index used the **2021** high-coverage callset (`hg38_1000G_2021`, 3202 samples)
-> → panel `hg38_1000G2021_HGDP`. To reproduce the shipped index, repoint `SOURCES` at the
-> 2021 genotyped VCFs and regenerate the 3202-sample samplesID before running.
+> `ALL.{C}.*.vcf.gz`, 2548 samples) and produce panel `hg38_1000G_HGDP`. The original
+> (now-retired) genotyped hybrid used the **2021** high-coverage callset (`hg38_1000G_2021`,
+> 3202 samples) → panel `hg38_1000G2021_HGDP`. To reproduce that historical hybrid, repoint
+> `SOURCES` at the 2021 genotyped VCFs and regenerate the 3202-sample samplesID before running.
+> The current shipped default (`NRG_3_hg38+hg38_HGDP1kGP`) is instead SHAPEIT5 re-phased and is
+> not produced by this recipe.
 
 **Whole-genome mega build scripts (as-run, in this folder):**
 `mega_gw_merge.sh` (the GW 24-contig 5-source merge driver around `merge_mega_sites.sh`)

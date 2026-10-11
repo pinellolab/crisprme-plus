@@ -756,7 +756,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
     # selects a dataset that isn't installed -- e.g. when only the combined 1000G+HGDP
     # panel is present, not a standalone 1000G. Falls back to reference-only.
     example_variant = _preferred_variant(
-        [o["value"] for o in get_variant_dataset_options("hg38")]
+        [o["value"] for o in get_variant_dataset_options("hg38")], "hg38"
     )
     # Pick the installed default PAM dynamically (prefer NRG SpCas9) so the
     # example never selects a PAM that isn't installed -- e.g. an NGG-only
@@ -2184,9 +2184,9 @@ def _preferred_variant(option_values: List[str], genome: str = None) -> str:
     dataset (e.g. a pig susScr11 + a custom VCF). Prefer a variant-aware search over
     reference-only. Among installed panels, prefer a genotyped-PHASED panel — real
     observed haplotypes with CONFIRMED cis co-occurrence + named carriers, the clean
-    default (e.g. the single-source phased 1000G-2021 over the hybrid 1000G+HGDP or the
-    sites-only mega). Phasing is read from each index's `data_type` manifest (still no
-    hardcoded names). Within the preferred tier, pick the 'richest' panel (dataset tokens
+    default (e.g. the SHAPEIT5 re-phased HGDP+1000G `HGDP1kGP` panel over the sites-only
+    mega). Phasing is read from each index's `data_type` manifest (still no hardcoded
+    names). Within the preferred tier, pick the 'richest' panel (dataset tokens
     a superset of the most others), ties broken by listed order. Falls back to 'ref' when
     no variant panel is installed."""
     variants = [v for v in option_values if v and v != "ref"]
@@ -2449,7 +2449,7 @@ def index_page() -> html.Div:
     # Default variant selection, chosen dynamically (mirrors change_variant_dataset_options
     # so the seed and the genome-change callback agree; no hardcoded dataset names).
     _def_variants = _preferred_variant(
-        [o["value"] for o in get_variant_dataset_options(_def_genome)]
+        [o["value"] for o in get_variant_dataset_options(_def_genome)], _def_genome
     )
     # seed the PAM dropdown options for the default nuclease so the default PAM
     # value is valid on first render (an empty options list makes Dash drop the
