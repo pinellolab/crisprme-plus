@@ -21,9 +21,23 @@ origin_path = os.path.dirname(os.path.abspath(__file__))
 # origin_path = os.path.dirname(os.path.realpath(__file__))
 # conda path
 conda_path = "opt/crisprme/PostProcess/"
-# path corrected to use with conda
-corrected_origin_path = script_path[:-3] + conda_path
-corrected_web_path = f"{origin_path[:-3]}/opt/crisprme/"
+# path corrected to use with conda.
+# crisprme.py ships as a COPY in <prefix>/bin AND under <prefix>/opt/crisprme (and
+# a source checkout keeps it at the repo root). The bin copy reaches the PostProcess
+# modules via <prefix>/opt/crisprme/PostProcess (strip the "bin" suffix); the opt
+# copy and a source checkout have PostProcess as a DIRECT sibling. The old
+# `script_path[:-3]` hard-stripped 3 chars assuming "bin", so when crisprme.py was
+# invoked from its opt/ copy (e.g. the web assembly-search job, which runs
+# `<python> <prefix>/opt/crisprme/crisprme.py assembly-search ...`) it stripped "rme"
+# and produced a garbage path -> `from validate_inputs import ...` at import time
+# raised ModuleNotFoundError and every web-submitted assembly-search failed. Detect
+# the layout so the import works from either copy.
+if os.path.isdir(os.path.join(origin_path, "PostProcess")):
+    corrected_origin_path = os.path.join(origin_path, "PostProcess") + os.sep
+    corrected_web_path = origin_path + os.sep
+else:
+    corrected_origin_path = origin_path[:-3] + conda_path
+    corrected_web_path = f"{origin_path[:-3]}/opt/crisprme/"
 # corrected_web_path = os.getcwd()
 
 script_path = corrected_origin_path
@@ -34,8 +48,15 @@ input_args = sys.argv
 
 if "--debug" in input_args:
     print("DEBUG MODE")
-    script_path = current_working_directory + "PostProcess/"
-    corrected_web_path = current_working_directory
+    # Switch to cwd-relative PostProcess ONLY when running from a source checkout
+    # (cwd actually has PostProcess/). Otherwise keep the __file__-based path
+    # resolved above, so --debug does not break the import when cwd is unrelated to
+    # the install -- e.g. the web assembly-search job runs with cwd set to the
+    # Results output dir, which has no PostProcess/ (ModuleNotFoundError otherwise).
+    _dbg_pp = current_working_directory + "PostProcess/"
+    if os.path.isdir(_dbg_pp):
+        script_path = _dbg_pp
+        corrected_web_path = current_working_directory
 
 # Load the non-fatal low-memory warning from the PostProcess directory by
 # explicit file path: crisprme.py is installed in bin/, so PostProcess is not
