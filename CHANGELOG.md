@@ -34,6 +34,15 @@ and the `release-crisprme` skill.
   - Launching a **Download / Build** left the inline feedback blank (job status appeared only in the
     Activity panel); every job launch now confirms *"Started — progress is shown in the Activity
     panel."*
+- **Web-submitted `assembly-search` was broken** (`ModuleNotFoundError: No module named
+  'validate_inputs'` at startup, so every personal-assembly search failed immediately). Two causes,
+  both fixed: (1) crisprme.py's install-path correction hard-stripped a 3-char `"bin"` suffix, so when
+  the web spawned its `opt/` copy (`<prefix>/opt/crisprme/crisprme.py`) the PostProcess path was
+  garbled — it now detects whether PostProcess is a direct sibling (opt/ copy or source checkout) or
+  reached via `opt/` (bin copy); (2) the job was launched with `--debug`, whose cwd-relative
+  PostProcess path also missed (the job's cwd is the Results output dir) — `--debug` now only switches
+  to that path when it exists, and the web assembly-search command no longer passes `--debug`. Verified
+  live on a real HPRC individual (both haplotypes search + `--gene_annotation` closest-gene wired).
 
 ## [2.7.8] - 2026-10-11
 

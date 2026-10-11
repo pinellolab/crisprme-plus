@@ -697,7 +697,6 @@ def submit_assembly_search_job(
             "4",
             *annotation_args,
             *gene_annotation_args,
-            "--debug",
         ]
     )
     print(f"Submitted ASSEMBLY-SEARCH job {job_id}. Output > {LOG_FILE}")
