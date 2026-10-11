@@ -156,6 +156,13 @@ list, and the `variant_count.json` manifest (`n_records` SNPs + `n_indels`, whic
 feeds the report's *Variants included* line). Nothing else has to be assembled by
 hand, so `publish-index` (below) ships a self-complete index.
 
+> **Your own VCF.** `--vcf` accepts a folder of `.vcf.gz`. It need not be pre-split: a **single
+> multi-chromosome VCF is auto-split per chromosome** before enrichment (the enricher requires
+> per-chromosome files), so a user-provided VCF — including one registered through the web
+> **Settings → Add a VCF dataset** card and built with **Build index** — works without manual
+> preparation. A **SNP-only VCF** (no indels) builds a complete SNP variant index; the indels index
+> is simply skipped (SNP+indel co-occurrence does not apply to an indel-free dataset).
+
 `--samplesID` is a listing file (one samplesID filename per line, resolved under
 `samplesIDs/`); a combined panel lists **both** the 1000G and HGDP files, e.g.:
 
