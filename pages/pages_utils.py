@@ -1248,6 +1248,10 @@ def get_available_genomes() -> List:
         d
         for d in os.listdir(os.path.join(current_working_directory, GENOMES_DIR))
         if os.path.isdir(os.path.join(current_working_directory, GENOMES_DIR, d))
+        # skip dot-dirs: in-progress download staging (".stage_<genome>") and
+        # assembly-pairing markers are not installed genomes and must not leak
+        # into the installed list / build + search dropdowns / delete menu.
+        and not d.startswith(".")
     ]
     genomes = [g.replace("_", " ") for g in genomes]
     genomes_dirs = [
