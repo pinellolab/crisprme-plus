@@ -12,6 +12,9 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
+- **`docs/RELEASE_CHECKLIST.md`** — a living release gate: the pre-tag consistency + functional +
+  mechanics checks, plus a "regression traps" table that pairs every bug we've shipped (or nearly
+  shipped) with the check that catches it. Appended to whenever a release pass finds a new problem.
 - **`download --what assembly --sample <id>`** — fetch an HPRC individual (both haplotypes' genome +
   chain + chromAlias into `Assemblies/<id>/`) from the command line — the CLI equivalent of the web
   Data Manager's *Fetch from HPRC*. Closes the last CLI↔web gap; `docs/SETTINGS_DATA_MANAGER.md` now
