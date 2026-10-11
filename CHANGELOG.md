@@ -59,6 +59,12 @@ and the `release-crisprme` skill.
   stripped a trailing newline from the "no empirical data" placeholder, which is the shipped read-only
   `PostProcess/vuoto.txt`. It now only truncates a real, non-empty, writable file. (Docker's writable
   layer masked this; it affected HPC SIF runs.)
+- **Web-submitted `assembly-search` crashed in the combine step** with `shutil.SameFileError`: the web
+  writes the guide straight into `Results/<job>_combined/.guides.txt`, then `write_combined_guides_file`
+  copied the guide onto that same path. It is now a no-op when source and destination are the same
+  file. With this, a web assembly-search runs **end-to-end** — both haplotype searches → hg38
+  reconciliation → the combined report with per-haplotype CFD + closest-gene columns (verified live on
+  HPRC HG01255: 60,745 off-targets, `Annotation_closest_gene_*` present).
 
 ## [2.7.8] - 2026-10-11
 
