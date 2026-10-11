@@ -73,6 +73,12 @@ and the `release-crisprme` skill.
   (→ v2.9.0), the README `download --what` narrative (added `assembly`), the DESIGN_mega "two
   predefined indexes" framing (now the published set), the TensorFlow "2.13.1" → "2.13.x per-arch"
   wording (Apple-Silicon is 2.13.0), and drift-prone code-line citations in INPUT_FORMATS.
+- **`complete-test` / `setup` help clarified.** `complete-test`'s "no prebuilt index" pointer now
+  recommends the default `NRG_3_hg38+hg38_HGDP1kGP` (was `1000G2021`); the `--vcf_dataset`
+  (1000G | HGDP | 1000G+HGDP) help now states it is the **legacy build-from-raw-VCF test panel**
+  (1000 Genomes 2019 + HGDP 2019), explicitly **not** the shipped re-phased HGDP1kGP default and
+  **not** the retired `NRG_3_hg38+hg38_1000G2021_HGDP` index. `setup --help` now points to the
+  faster modern `download --what all` path (setup is the legacy from-scratch FTP download).
 
 ## [2.7.8] - 2026-10-11
 
