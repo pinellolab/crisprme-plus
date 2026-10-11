@@ -54,8 +54,14 @@ and the `release-crisprme` skill.
   variant-aware search and now surfaces the **one-line installer**; a CLI-guide example that
   dropped the PAM `N`-padding (and would prune all off-targets) is fixed; the web guide gains an
   **"Understanding your results"** reference (CONFIRMED vs PUTATIVE, carriers, key columns); and
-  a `docs/FUTURE_WORK.md` captures deferred enhancements. (The one-click installer's own default
-  index is switched to HGDP1kGP in the `pinellolab/CRISPRme` installer repo.)
+  a `docs/FUTURE_WORK.md` captures deferred enhancements.
+- **One-click installer moved into this repo.** `install.sh` / `install.ps1` (previously served
+  from the legacy `pinellolab/CRISPRme` repo) now live in `docs/` here and are served at
+  `https://pinellolab.github.io/crisprme-plus/install.{sh,ps1}`, so the release owns its own
+  installer. Their default first-run download is switched from the old `1000G-2021` index to the
+  recommended **HGDP + 1000 Genomes** default, and the stated size corrected to **~45 GB** (the old
+  "~75 GB" was wrong). The one-liner URLs in the README, website, and `install/README.md` are
+  updated to match. (The old URL should be left as a redirect for existing bookmarks.)
 
 ## [2.7.7] - 2026-10-10
 

@@ -88,11 +88,11 @@ clickable **CRISPRme** app (into Applications / Start Menu) that manages everyth
 
 **macOS / Linux** (Terminal):
 ```bash
-curl -fsSL https://pinellolab.github.io/CRISPRme/install.sh | bash
+curl -fsSL https://pinellolab.github.io/crisprme-plus/install.sh | bash
 ```
 **Windows** (PowerShell):
 ```powershell
-irm https://pinellolab.github.io/CRISPRme/install.ps1 | iex
+irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex
 ```
 Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) — a
 small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
