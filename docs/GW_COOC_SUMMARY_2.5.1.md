@@ -1,5 +1,7 @@
 # Genome-wide SNP + indel co-occurrence summary (2.5.1)
 
+> **Historical — CRISPRme+ 2.5.1 summary.** Uses the `NRG_3_hg38+hg38_1000G2021_HGDP` index, retired in v2.7.8 (superseded by `NRG_3_hg38+hg38_HGDP1kGP`).
+
 Summary of the SNP+indel *cis* co-occurrence output of the CRISPRme+ 2.5.x indel+SNP
 feature, from the complete genome-wide feature-on run (`v2_dev_cooc`). This is the
 canonical GW 2.5.1 cooc reference; it supersedes the interim `gw_cooc_25` recovery sweep

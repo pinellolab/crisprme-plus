@@ -2,7 +2,7 @@
 # ^ false positive: HF_HUB_DISABLE_IMPLICIT_TOKEN is a boolean flag (=1), not a
 #   secret — buildkit's lint only pattern-matches the substring "TOKEN" in the
 #   name. Skipping it keeps the build output clean.
-# CRISPRme+ 2.4.0 — Python 3.11 image, built FROM SOURCE.
+# CRISPRme+ 2.7.8 — Python 3.11 image, built FROM SOURCE.
 #
 # crispritz is compiled from source at a pinned GitHub tag (crispritz_ref) so the image
 # gets the exact, reproducible build we want -- including the latest fixes -- without

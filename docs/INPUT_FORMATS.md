@@ -345,12 +345,17 @@ The most expensive failures are the ones you discover **after** a multi-hour
 search — a missing `INFO/AF`, a non-`PASS` `FILTER`, an absent `FORMAT/GT`, a
 sample-ID mismatch, or a chromosome-naming mismatch.
 
-> **Note (current `main`):** a dedicated input validator
-> (`PostProcess/validate_inputs.py`, and a `--full_input_validate` option) is
-> **not yet present** in this repository — it is referenced as a forthcoming,
-> PR-added module in `.github/workflows/validate-benchmarks.yml` (line 47) but
-> has not been merged. Until it lands, validate inputs manually before a long
-> run:
+> **Pre-flight input check (automatic).** CRISPRme+ runs a **lightweight
+> pre-flight input check automatically before every `complete-search`**
+> (`run_lightweight` in `PostProcess/validate_inputs.py`; imported in
+> `crisprme.py:58` and invoked at `crisprme.py:2065`), so you do **not** need to
+> validate inputs by hand before a long run. For a deeper scan, pass
+> `--full_input_validate` (`crisprme.py:353` help text, launched at
+> `crisprme.py:1658`) to run a full per-VCF-record check — chromosome coverage,
+> `AF`/`FILTER` consistency, `POS` bounds, and a multiallelic/breakend/duplicate/
+> phasing survey — before the search starts (slower, so it is opt-in).
+>
+> Optional extra checks you can run yourself if you want to eyeball a VCF:
 >
 > - `bcftools view -h your.vcf.gz` — confirm `FILTER`, `INFO/AF`, and
 >   `FORMAT/GT` are declared in the header.
@@ -358,9 +363,10 @@ sample-ID mismatch, or a chromosome-naming mismatch.
 >   chromosome names (see §6).
 > - Cross-check that your sample IDs in the VCF match your samplesIDs file.
 >
-> (Do **not** confuse this with `PostProcess/validate.py` / the `validate-test`
-> subcommand, which checks *off-target predictions* against brute-force
-> benchmarks — it is a correctness regression test, not an input validator.)
+> (Do **not** confuse this input validation with `PostProcess/validate.py` / the
+> `validate-test` subcommand, which checks *off-target predictions* against
+> brute-force benchmarks — it is a correctness regression test, not an input
+> validator.)
 
 ---
 

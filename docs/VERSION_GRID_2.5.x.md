@@ -1,5 +1,7 @@
 # CRISPRme+ 2.5.x version grid
 
+> **Historical — CRISPRme+ 2.5.x feature matrix.** The `NRG_3_hg38+hg38_1000G2021_HGDP` index listed here was retired in v2.7.8 (superseded by the re-phased `NRG_3_hg38+hg38_HGDP1kGP`).
+
 How the 2.5.x line evolved. **2.5.1 was a development-only line** (never tagged); its features
 ship in the **2.5.2** release alongside the new sites-only co-occurrence work. So a user goes
 from **2.5.0** (tagged) directly to **2.5.2** (tagged); the 2.5.1 column shows where each piece

@@ -523,7 +523,7 @@ docker images
 Look for an entry similar to the following:
 ```
 REPOSITORY          TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme   latest    <image_id>     <timestamp>    ~818MB
+pinellolab/crisprme   latest    <image_id>     <timestamp>    ~5 GB (amd64; ~1.8 GB on Apple Silicon)
 ```
 
 You are now ready to run CRISPRme using Docker.
