@@ -65,6 +65,14 @@ and the `release-crisprme` skill.
   file. With this, a web assembly-search runs **end-to-end** — both haplotype searches → hg38
   reconciliation → the combined report with per-haplotype CFD + closest-gene columns (verified live on
   HPRC HG01255: 60,745 off-targets, `Annotation_closest_gene_*` present).
+- **Docs/consistency precision pass (full release-gate QA, 161 PASS / 14 WARN / 2 FAIL).** Corrected
+  the HGDP+1kGP cohort split to **925 HGDP + 3,166 1000 Genomes** (the shipped BCF header-derived
+  split; still 4,091) across README / METHODS / DOCKER_QUICKSTART / PRECOMPUTED_INDEXES;
+  `gnomAD-converter --help` now lists **v3.1, v4.0, and v4.1 (incl. joint VCFs)** (it already
+  supported v4.1); documented the `scorer-env list` action; fixed the Dockerfile CRISPRitz comment
+  (→ v2.9.0), the README `download --what` narrative (added `assembly`), the DESIGN_mega "two
+  predefined indexes" framing (now the published set), the TensorFlow "2.13.1" → "2.13.x per-arch"
+  wording (Apple-Silicon is 2.13.0), and drift-prone code-line citations in INPUT_FORMATS.
 
 ## [2.7.8] - 2026-10-11
 

@@ -42,7 +42,7 @@ pangenome coverage, or the widest allele-frequency provenance. They are
 
 | Index name | Sources | Data model | Co-occurrence confidence |
 |---|---|---|---|
-| `NRG_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP + 1000 Genomes (4,091 samples = 929 HGDP + 3,162 1000 Genomes), jointly SHAPEIT5-re-phased | **sample-level genotypes, fully phased** | **CONFIRMED** phased cis throughout with **named carrier samples** + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) — the broadest fully-phased panel of real observed haplotypes |
+| `NRG_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000 Genomes), jointly SHAPEIT5-re-phased | **sample-level genotypes, fully phased** | **CONFIRMED** phased cis throughout with **named carrier samples** + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) — the broadest fully-phased panel of real observed haplotypes |
 | `NRG_3_hg38+hg38_1000G2021` | 1000 Genomes 2021 (3,202 samples) | **sample-level genotypes, fully phased** | **CONFIRMED** phased cis throughout with **named carrier samples** + exact joint AF (all genotyped-phased, no PUTATIVE-from-phasing) — a clean single-source panel of real observed haplotypes |
 | `NRG_3_hg38+hg38_HPRC` | HPRC Release 2 pangenome `hprc-v2.0-mc-grch38` (232 assembly-derived genomes incl. CHM13) | **sample-level genotypes, phased** (graph-derived) | **CONFIRMED** phased cis with **named carrier samples** + exact joint AF; captures **pangenome-specific** variation absent from short-read panels |
 | `NRG_3_hg38+hg38_mega` | 5 sources — 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us | **sites-only** (allele frequencies, no shared samples) | **PUTATIVE** with a conservative **min-AF** joint bound + **per-dataset AF provenance** (`AF_1000G2021 … AF_AoU` + `AF_max`); a co-occurring haplotype here **may or may not exist in any real individual** — no carriers |
@@ -392,7 +392,7 @@ complete protocol.
 ### HGDP + 1000 Genomes (re-phased, genotyped)
 
 1. **Data source.** The gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38),
-   **4,091 samples** (929 HGDP + 3,162 1000 Genomes, post-QC) from the gnomAD public release.
+   **4,091 samples** (925 HGDP + 3,166 1000 Genomes, post-QC) from the gnomAD public release.
 2. **Re-phasing (why our kit differs from the public release).** We re-phase with **SHAPEIT5**
    (`phase_common` scaffold + `phase_rare`) to **keep singletons** — the public
    `phased_haplotypes_v2` release drops variants at MAC≥2 — so rare alleles survive for detection.

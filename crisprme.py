@@ -3891,7 +3891,7 @@ def print_help_gnomad_converter():
     # functionality description
     sys.stderr.write(
         "The gnomAD converter functionality simplifies the conversion process "
-        "of gnomAD VCFs (versions 3.1 and 4.0) into VCFs supported by CRISPRme. "
+        "of gnomAD VCFs (v3.1, v4.0, and v4.1 (incl. joint VCFs)) into VCFs supported by CRISPRme. "
         "It ensures a seamless transition while maintaining compatibility with "
         "CRISPRme's requirements, focusing on the structure and content of "
         "precomputed sample IDs file \n\n"
@@ -4475,7 +4475,7 @@ def crisprme_help() -> None:
         "panel\n\n"
         "crisprme.py gnomAD-converter\n"
         "\tConverts gnomAD VCF files into CRISPRme compatible VCFs (supports "
-        "gnomAD >= v3.1)\n\n"
+        "gnomAD v3.1, v4.0, and v4.1 (incl. joint VCFs))\n\n"
         "crisprme.py generate-personal-card\n"
         "\tGenerates a personal card for specific samples by extracting all "
         "private targets\n\n"

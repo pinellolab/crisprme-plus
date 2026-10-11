@@ -41,9 +41,10 @@ A PAM file is a **single line** with two whitespace-separated fields:
   value means the PAM is on the **5′** side (like Cas12a/Cpf1).
 
 The sign of the length is what tells CRISPRme where the PAM sits, and its
-absolute value is the PAM length. This is parsed in `crisprme.py` (~lines
-1198–1211): if the length is `< 0`, the PAM is taken from the **start** of the
-motif (`pam_begin = True`); otherwise it is taken from the **end**.
+absolute value is the PAM length. This is parsed in `crisprme.py`'s PAM-file
+parsing (the `complete_search` PAM setup): if the length is `< 0`, the PAM is
+taken from the **start** of the motif (`pam_begin = True`); otherwise it is taken
+from the **end**.
 
 ### 3′ PAM — SpCas9 (NGG)
 
@@ -129,7 +130,7 @@ CRISPRme parses a **nuclease label** out of the PAM *filename* with:
 nuclease = os.path.basename(pamfile).split(".")[0].split("-")[2]
 ```
 
-(`crisprme.py`, line 1215.) It strips the extension, splits the basename on `-`,
+(`crisprme.py`, in the `complete_search` PAM setup.) It strips the extension, splits the basename on `-`,
 and takes the **third** field (index 2). So the filename needs at least three
 `-`-separated fields:
 
@@ -156,7 +157,7 @@ CRISPRme reads **only the first line** of the PAM file:
 pam_char = pam_file.readline()
 ```
 
-(`crisprme.py`, line 1199.) A PAM file with multiple lines will **silently** use
+(`crisprme.py`, in the `complete_search` PAM setup — a single `readline`.) A PAM file with multiple lines will **silently** use
 only line 1 — the rest is ignored, with no warning.
 
 To search **more than one PAM motif at once**, do not stack multiple lines.
@@ -274,7 +275,7 @@ with `chr`. So the chromosome must be its own dot-separated segment, e.g.
 `MyCohort.chr1.vcf.gz` or `ALL.chr1.filtered.vcf.gz`. A name like
 `MyCohort_chr1.vcf.gz` (chromosome buried in an underscore-delimited prefix)
 will **not** be recognized. See `docs/crisprme_data_setup_051826.md`
-("File naming requirement", ~line 234).
+("File naming requirement").
 
 **Trailing blank lines are fine.** Config and sample `.txt` files may have
 trailing blank lines; empty lines are ignored during parsing.
@@ -347,11 +348,11 @@ sample-ID mismatch, or a chromosome-naming mismatch.
 
 > **Pre-flight input check (automatic).** CRISPRme+ runs a **lightweight
 > pre-flight input check automatically before every `complete-search`**
-> (`run_lightweight` in `PostProcess/validate_inputs.py`; imported in
-> `crisprme.py:58` and invoked at `crisprme.py:2065`), so you do **not** need to
+> (`run_lightweight` in `PostProcess/validate_inputs.py`; imported and invoked
+> before every `complete-search` in `crisprme.py`), so you do **not** need to
 > validate inputs by hand before a long run. For a deeper scan, pass
-> `--full_input_validate` (`crisprme.py:353` help text, launched at
-> `crisprme.py:1658`) to run a full per-VCF-record check — chromosome coverage,
+> `--full_input_validate` (the `--full_input_validate` flag in `crisprme.py`) to
+> run a full per-VCF-record check — chromosome coverage,
 > `AF`/`FILTER` consistency, `POS` bounds, and a multiallelic/breakend/duplicate/
 > phasing survey — before the search starts (slower, so it is opt-in).
 >

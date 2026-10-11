@@ -90,7 +90,7 @@ complementary production indexes — the recommended default is the fully phased
 **HGDP + 1000 Genomes** panel:
 
 ```bash
-# Recommended default — HGDP + 1000 Genomes (4,091 samples = 929 HGDP + 3,162 1000 Genomes),
+# Recommended default — HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000 Genomes),
 # jointly SHAPEIT5-re-phased. CONFIRMED cis haplotypes with named per-sample carriers + exact
 # joint AF throughout, including HGDP's seven genetic regions (use --per-sample).
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
