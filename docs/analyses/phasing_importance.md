@@ -78,7 +78,8 @@ Phased HGDP+1kGP vs the old hybrid, identical search: **mm6 + 1 DNA + 1 RNA bulg
 
 ### 1a. Phasing the unphased HGDP: PUTATIVE → CONFIRMED
 
-The previously shipped default (`NRG_3_hg38+hg38_1000G2021_HGDP`) is a **hybrid**: 1kGP phased, **HGDP
+The previously shipped default (`NRG_3_hg38+hg38_1000G2021_HGDP`, now retired from HuggingFace and
+superseded by the re-phased `NRG_3_hg38+hg38_HGDP1kGP`) is a **hybrid**: 1kGP phased, **HGDP
 unphased**. A co-occurring off-target (two nearby variants that must sit on the *same* chromosome copy,
 **in cis**) is reported **CONFIRMED** only when cis can be proven in a real individual — which
 **requires phased genotypes**. On the hybrid, every HGDP-involving co-occurrence collapses to

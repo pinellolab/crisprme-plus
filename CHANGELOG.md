@@ -35,6 +35,19 @@ and the `release-crisprme` skill.
   guide.
 
 ### Fixed
+- **Web default variant panel now honours the re-phased default.** The first-paint variant-dataset
+  seed (`_preferred_variant`) was called without the genome, so its genotyped-**phased** preference +
+  sample-count tiebreak were skipped — with two or more phased panels installed it could seed a
+  non-default panel. Both call sites now pass the genome, so the default page consistently proposes
+  the SHAPEIT5 re-phased `NRG_3_hg38+hg38_HGDP1kGP` as the recommended variant default (still fully
+  name-free: the preference is read from each index's `data_type` manifest).
+- **No surface advertises a retired index.** Swept the repo for indexes removed from HuggingFace in
+  v2.7.8 and repointed the few remaining references at the live catalog: the `seq_script/merge_panels/`
+  README (retirement banner + repoint to `HGDP1kGP`), the `onekg2021_build.sh` header (reworded from
+  "the default index" to an *alternative* single-source panel), a `pages_utils` docstring example, and
+  the `test_variant_dropdown` docstring (clarifies the two-source `1000G_HGDP` fixture is a generic
+  discovery-mechanism stand-in, not a shipped index). Archived 2.5.x docs already carry retirement
+  banners and are unlinked from the live site.
 - **Web Settings / Data-Manager (3 fresh-user-QA findings):**
   - Clicking **Download index** on an already-installed index re-downloaded all its GB and blocked
     the single-slot job queue; it now short-circuits with *"Index '…' is already installed — nothing
