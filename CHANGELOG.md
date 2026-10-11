@@ -12,6 +12,11 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
+- **`download --what assembly --sample <id>`** — fetch an HPRC individual (both haplotypes' genome +
+  chain + chromAlias into `Assemblies/<id>/`) from the command line — the CLI equivalent of the web
+  Data Manager's *Fetch from HPRC*. Closes the last CLI↔web gap; `docs/SETTINGS_DATA_MANAGER.md` now
+  carries a full **CLI ↔ web parity** table (every web action maps to a `crisprme.py` command, so a
+  CLI-built and a web-built install are interchangeable).
 - **Build a variant-aware index from a single user-provided VCF.** `build-index-only --vcf` (and the
   web **Settings → Add a VCF dataset → Build index**) now **auto-splits** a single multi-chromosome
   VCF into the per-chromosome files the enricher (`crispritz add-variants`) requires — so a normal
@@ -22,6 +27,12 @@ and the `release-crisprme` skill.
   aborted the whole build at the indel-indexing step (`Indels indexing failed`, empty fake-indel
   contigs); the indels index is now **skipped gracefully** and the SNP variant index is produced
   (SNP+indel co-occurrence simply does not apply to an indel-free dataset).
+- **`docs/DATA_LAYOUT.md`** — a clear reference for *where your data lives*: the single user-owned
+  data folder (CLI `--path`, Docker `-v …:/DATA`, Apptainer `--bind …:/DATA`), the **shared inputs**
+  reused by every search (`Genomes/`, `genome_library/`, `VCFs/`, `Dictionaries/`, `samplesIDs/`,
+  `Annotations/`, `PAMs/`, `Assemblies/`, `LiftoverFiles/`) vs. **where each run's outputs go**
+  (`Results/<job>/`). Linked from the README quickstart, the Docker quickstart, and the Data-Manager
+  guide.
 
 ### Fixed
 - **Web Settings / Data-Manager (3 fresh-user-QA findings):**
@@ -43,6 +54,11 @@ and the `release-crisprme` skill.
   PostProcess path also missed (the job's cwd is the Results output dir) — `--debug` now only switches
   to that path when it exists, and the web assembly-search command no longer passes `--debug`. Verified
   live on a real HPRC individual (both haplotypes search + `--gene_annotation` closest-gene wired).
+- **`assembly-search` (and `complete-search`) aborted on a read-only install** (Apptainer/Singularity
+  SIF) with `truncate: … vuoto.txt: Read-only file system` (issue #143): the results-integration step
+  stripped a trailing newline from the "no empirical data" placeholder, which is the shipped read-only
+  `PostProcess/vuoto.txt`. It now only truncates a real, non-empty, writable file. (Docker's writable
+  layer masked this; it affected HPC SIF runs.)
 
 ## [2.7.8] - 2026-10-11
 

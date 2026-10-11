@@ -3156,8 +3156,8 @@ def print_help_download() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--what, component to fetch: genome | annotations | pams | samples | "
-        "vcf | index | all (all = genome+annotations+pams+samples, plus the "
-        "default hg38 reference index so a reference scan works out of the box) "
+        "vcf | index | assembly | all (all = genome+annotations+pams+samples, plus "
+        "the default hg38 reference index so a reference scan works out of the box) "
         "[REQUIRED]\n"
         "\t--ref, reference genome name for --what genome/index [default: hg38]\n"
         "\t--dataset, variant dataset name for --what vcf (e.g. 1000G, HGDP) "
@@ -3167,6 +3167,10 @@ def print_help_download() -> None:
         "NRG_3_hg38+hg38_HGDP1kGP (phased HGDP + 1000 Genomes, 4,091 samples), or "
         "NRG_3_hg38+hg38_1000G2021 / NRG_3_hg38+hg38_mega) "
         "[REQUIRED for --what index]\n"
+        "\t--sample, HPRC individual id for --what assembly (e.g. HG01255) -- fetches "
+        "both haplotypes' genome + chain + chromAlias into Assemblies/<sample>/, the "
+        "CLI equivalent of the web Data Manager's 'Fetch from HPRC' "
+        "[REQUIRED for --what assembly]\n"
         "\t--hf-repo, HuggingFace dataset repo id to fetch from [OPTIONAL]\n"
         "\t--source, for --what genome: hf (HuggingFace, default) | ucsc "
         "(UCSC goldenPath by assembly name, e.g. --ref susScr11) | url "
@@ -3215,6 +3219,30 @@ def download_data() -> None:
         workdir = os.path.abspath(args[args.index("--path") + 1])
         if not os.path.isdir(workdir):
             error(f"The working directory {workdir} does not exist")
+    # HPRC personal-assembly fetch -- the CLI equivalent of the web Data Manager's
+    # "Fetch an individual from HPRC". Downloads both haplotypes' genome + chain +
+    # chromAlias into Assemblies/<sample>/ via the same download_hprc_assembly.py the
+    # web uses. (Not a HuggingFace component, so handled before the HF-component loop.)
+    if what == "assembly":
+        if "--sample" not in args:
+            error("--what assembly requires --sample <HPRC id>, e.g. --sample HG01255")
+        sample = args[args.index("--sample") + 1]
+        hprc_script = os.path.join(corrected_web_path, "download_hprc_assembly.py")
+        if not os.path.isfile(hprc_script):
+            hprc_script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "download_hprc_assembly.py"
+            )
+        code = subprocess.call(
+            [sys.executable, hprc_script, sample, "--data-dir", workdir]
+        )
+        if code != 0:
+            error(f"HPRC assembly fetch failed for {sample}")
+        print(
+            f"Fetched HPRC individual {sample} -> "
+            f"{os.path.join(workdir, 'Assemblies', sample)}",
+            flush=True,
+        )
+        return
     # "all" fetches the always-needed reference bundle (variant VCFs are dataset
     # specific, so they are requested explicitly). On hg38 it ALSO fetches the
     # default-PAM REFERENCE index (below) so a simple reference-genome scan works

@@ -128,7 +128,7 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 > container uses host memory directly.) See [System Requirements](#0-system-requirements).
 
 ```bash
-mkdir -p ~/crisprme && cd ~/crisprme
+mkdir -p ~/crisprme && cd ~/crisprme    # your data folder — ALL shared inputs + per-search Results live here (see docs/DATA_LAYOUT.md)
 # 1) fast-download the reference data + reference index (minutes, HuggingFace CDN)
 #    (this does NOT include the variant index — that is step 2)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what all --path /DATA
