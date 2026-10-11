@@ -40,6 +40,12 @@ and the `release-crisprme` skill.
   index directory — its `strip_and_place` glob (`*fakechr<N>*`) did not match the enricher's
   `fake_hg38_mega_<chr>` directory name. Search was unaffected (it uses the index bins), but the
   PAM-independent rebuild genome was missing; the glob is fixed.
+- **Migration-guide license row was misleading.** The "What changed vs stock CRISPRme" table framed
+  CRISPRme 2.1.14 as merely "AGPL-3.0 (copyleft)", implying AGPL alone permitted commercial use.
+  Stock CRISPRme was dual-licensed — AGPL for academic/non-commercial use **plus** a separate
+  commercial license for commercial use. The row now states that both CRISPRme and CRISPRme+ require
+  a separate commercial license for commercial use; only the academic-use license changed
+  (AGPL-3.0 → MGBOA 1.0).
 
 ### Changed
 - **Documentation + website consistency sweep.** Version strings were unified to `2.7.8` across
@@ -62,6 +68,16 @@ and the `release-crisprme` skill.
   recommended **HGDP + 1000 Genomes** default, and the stated size corrected to **~45 GB** (the old
   "~75 GB" was wrong). The one-liner URLs in the README, website, and `install/README.md` are
   updated to match. (The old URL should be left as a redirect for existing bookmarks.)
+
+### Removed
+- **Retired ~71 GB of stale/superseded precomputed indexes from HuggingFace.** Deleted the
+  superseded hybrid `NRG_3_hg38+hg38_1000G2021_HGDP` (+ its genotype companion), which is replaced
+  by the fully re-phased `HGDP1kGP` default; the orphaned v2.3.0 dict-less lineage
+  (`NRG_3_hg38-dictless+hg38_1000G_HGDP`, `NGG_3_hg38-dictless+hg38_1000G_HGDP`,
+  `genotypes_hg38_1000G_HGDP`); and the unused reference-only `NGG_3_hg38`. The hosted catalog is
+  now the four production indexes (`HGDP1kGP` default, `1000G2021`, `HPRC`, `mega`) plus
+  reference-only `NRG_3_hg38`; all user-facing docs were scrubbed to match (catalog entries,
+  download commands, and every worked example repointed to a hosted index).
 
 ## [2.7.7] - 2026-10-10
 
