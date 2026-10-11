@@ -137,7 +137,7 @@ docker pull pinellolab/crisprme:latest</code></pre>
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
         <pre><code>mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
 
-# reference genome, annotations, PAMs and sample lists
+# reference genome, annotations, PAMs, sample lists (and the default hg38 reference index)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what all --path /DATA
 
@@ -168,7 +168,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
         <pre><code>mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
 
-# reference genome, annotations, PAMs and sample lists
+# reference genome, annotations, PAMs, sample lists (and the default hg38 reference index)
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what all --path /DATA
 

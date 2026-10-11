@@ -7,7 +7,7 @@
 # crispritz is compiled from source at a pinned GitHub tag (crispritz_ref) so the image
 # gets the exact, reproducible build we want -- including the latest fixes -- without
 # waiting on the Bioconda autobump lag. (Bioconda crispritz is for `conda install` users.)
-# v2.8.3 carries the add-variants .tbi/.csi enricher fix + the MGBOA relicense. crisprme
+# v2.9.0 carries the add-variants .tbi/.csi enricher fix + the MGBOA relicense. crisprme
 # is installed from this build context. The dependency
 # pins mirror the from-scratch Python-3.11 validation on ml007 (see PR #131):
 #   - numerical stack: MODERNIZED now that the legacy RandomForest scorer is retired.

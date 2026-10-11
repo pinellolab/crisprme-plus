@@ -179,8 +179,8 @@ feeds the genotype-counting Tier-0 registry. It is correct only when *every* mer
 source is genotyped, and it is what enables indel+SNP cis reconstruction.
 
 The **default** shipped index, **`NRG_3_hg38+hg38_HGDP1kGP`**, is built in this genotyped mode
-from the gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38; 4,091 samples = 929 HGDP +
-3,162 1000 Genomes), which CRISPRme+ **re-phases with SHAPEIT5** (`phase_common` scaffold +
+from the gnomAD **v3.1.2 HGDP+1kGP** jointly-called callset (GRCh38; 4,091 samples = 925 HGDP +
+3,166 1000 Genomes), which CRISPRme+ **re-phases with SHAPEIT5** (`phase_common` scaffold +
 `phase_rare`). Re-phasing deliberately **keeps singletons** — the public `phased_haplotypes_v2`
 release drops variants at MAC ≥ 2, discarding exactly the rare alleles most relevant to a
 conservative off-target screen. Because *both* cohorts are co-phased, the whole panel is
@@ -748,7 +748,8 @@ stays CPU.
 
 The scorer environment is **architecture-aware** and yields **numerically
 identical** CRISPR-Bulge scores across CPU architectures: it installs the same
-TensorFlow 2.13.1 per-arch — the conda-forge `tensorflow-cpu`/CUDA builds on
+TensorFlow 2.13.x per-arch (2.13.1 on x86-64/aarch64; 2.13.0 via tensorflow-macos
+on Apple Silicon) — the conda-forge `tensorflow-cpu`/CUDA builds on
 x86-64, `tensorflow-macos` on Apple Silicon, and the PyPI `tensorflow==2.13.1`
 aarch64 wheel on Linux ARM (conda-forge ships `tensorflow-cpu=2.13` only for
 x86-64). A cross-architecture check on a 254-off-target panel (150 with bulges)

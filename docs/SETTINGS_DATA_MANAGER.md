@@ -91,7 +91,7 @@ CLI-built install and a web-built install are interchangeable.
 | **Add an annotation** (BED) | place the `.bed` under `Annotations/` and pass `--annotation Annotations/<file>.bed` to a search |
 | **Define a nuclease / PAM** | write the one-line PAM file under `PAMs/<name>.txt` (`<IUPAC_motif> <signed_position>`; see `docs/INPUT_FORMATS.md`) and pass `--pam PAMs/<name>.txt` |
 | **COSMIC licence** enable/disable | `crisprme.py cosmic-license {enable|disable|status}` |
-| CRISPR-Bulge **scorer environment** | `crisprme.py scorer-env {create|check|update|doctor}` |
+| CRISPR-Bulge **scorer environment** | `crisprme.py scorer-env {create|check|update|list|doctor}` |
 | **Publish an index** to HuggingFace | `crisprme.py publish-index --index genome_library/<name> [--dictless]` |
 | **Remove installed data** | delete the folder/file (e.g. `rm -r genome_library/<name>` · `Genomes/<name>` · `Assemblies/<name>`) |
 | Shareable **report** | produced by each search; regenerate with `crisprme.py generate-report …` |

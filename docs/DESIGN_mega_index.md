@@ -1,8 +1,9 @@
 # CRISPRme+ "mega" all-source merged index — design + build status
 
-**Index 2 of the two predefined CRISPRme+ indices.** This document describes the
-mega index (Index 2). Index 1 — the 1000G-2021 + HGDP genotyped/cis hybrid — was
-superseded by the re-phased HGDP1kGP default and retired in v2.7.8. The mega merges **all five** variant sources into
+**The sites-only, widest-provenance fallback among the published CRISPRme+ indexes
+(alongside the HGDP+1kGP default, 1000G-2021, HPRC, and the reference-only index).**
+This document describes the mega index. An earlier 1000G-2021 + HGDP genotyped/cis
+hybrid was superseded by the re-phased HGDP1kGP default and retired in v2.7.8. The mega merges **all five** variant sources into
 one **sites-only** index so a user can scan once against the union of common
 variation across cohorts, with **per-dataset allele frequencies** + a **global
 `AF_max`**. Individual-level (genotype) data is intentionally discarded (user

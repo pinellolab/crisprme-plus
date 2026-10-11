@@ -114,8 +114,9 @@ def require_prebuilt_index() -> str:
             f"\nNo prebuilt index found for the complete-test (looked in {lib}).\n"
             "CRISPRme does not build one automatically.\n\n"
             "Download an index first, e.g.:\n"
-            "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021\n"
-            "  (or --index-name NRG_3_hg38 for a reference-only scan)\n\n"
+            "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP\n"
+            "  (the recommended default: phased HGDP + 1000 Genomes, 4,091 samples;\n"
+            "   or --index-name NRG_3_hg38 for a reference-only scan)\n\n"
             "then re-run:  crisprme.py complete-test --chrom chr22\n"
         )
         sys.exit(0)
