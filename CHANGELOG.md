@@ -12,6 +12,11 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
+- **`download --what assembly --sample <id>`** — fetch an HPRC individual (both haplotypes' genome +
+  chain + chromAlias into `Assemblies/<id>/`) from the command line — the CLI equivalent of the web
+  Data Manager's *Fetch from HPRC*. Closes the last CLI↔web gap; `docs/SETTINGS_DATA_MANAGER.md` now
+  carries a full **CLI ↔ web parity** table (every web action maps to a `crisprme.py` command, so a
+  CLI-built and a web-built install are interchangeable).
 - **Build a variant-aware index from a single user-provided VCF.** `build-index-only --vcf` (and the
   web **Settings → Add a VCF dataset → Build index**) now **auto-splits** a single multi-chromosome
   VCF into the per-chromosome files the enricher (`crispritz add-variants`) requires — so a normal

@@ -68,6 +68,34 @@ The **Remove installed data** card lets you delete any downloaded genome, index,
 VCF dataset or annotation to free space — with a confirmation prompt. Anything you
 delete can be downloaded again later.
 
+## Command-line equivalents (everything the web does)
+
+The web app is a GUI over the same `crisprme.py` commands — **anything you can do in
+the browser you can do on the command line.** The data all lands in the same layout
+(`Genomes/`, `genome_library/`, `VCFs/`, `Annotations/`, `PAMs/`, `Assemblies/`), so a
+CLI-built install and a web-built install are interchangeable.
+
+| In the web | On the command line |
+|---|---|
+| Run an off-target **search** | `crisprme.py complete-search --genome Genomes/<g> --pam PAMs/<p>.txt --guide guides.txt --mm <n> --bDNA <n> --bRNA <n> [--vcf list_vcf.txt --samplesID list_samplesID.txt] --annotation <bed> --output <name>` |
+| **Personal-assembly search** | `crisprme.py assembly-search --genome-paternal … --genome-maternal … --chain-paternal … --chain-maternal … --chrom-alias-paternal … --chrom-alias-maternal … --guide guides.txt --pam PAMs/<p>.txt --mm <n> --bDNA <n> --bRNA <n> --output <name>` |
+| **Download a reference genome** (UCSC) | `crisprme.py download --what genome --ref <assembly> --source ucsc` |
+| **Download a precomputed index** | `crisprme.py download --what index --index-name <name>` |
+| **Download a VCF dataset** (HuggingFace) | `crisprme.py download --what vcf --dataset <name>` |
+| **Fetch an individual from HPRC** | `crisprme.py download --what assembly --sample <id>`  *(e.g. `HG01255`)* |
+| First-run **reference data + annotations** | `crisprme.py download --what all` |
+| **Create (build) an index** — reference or variant | `crisprme.py build-index-only --genome Genomes/<g> --pam PAMs/<p>.txt --bDNA <n> --bRNA <n> [--vcf VCFs/<dataset>]` |
+| **Add a VCF dataset** (register a folder) | place the `.vcf.gz` folder under `VCFs/<name>/` and pass `--vcf VCFs/<name>` (a single multi-chromosome VCF is auto-split; SNP-only is fine) |
+| **Add an annotation** (BED) | place the `.bed` under `Annotations/` and pass `--annotation Annotations/<file>.bed` to a search |
+| **Define a nuclease / PAM** | write the one-line PAM file under `PAMs/<name>.txt` (`<IUPAC_motif> <signed_position>`; see `docs/INPUT_FORMATS.md`) and pass `--pam PAMs/<name>.txt` |
+| **COSMIC licence** enable/disable | `crisprme.py cosmic-license {enable|disable|status}` |
+| CRISPR-Bulge **scorer environment** | `crisprme.py scorer-env {create|check|update|doctor}` |
+| **Publish an index** to HuggingFace | `crisprme.py publish-index --index genome_library/<name> [--dictless]` |
+| **Remove installed data** | delete the folder/file (e.g. `rm -r genome_library/<name>` · `Genomes/<name>` · `Assemblies/<name>`) |
+| Shareable **report** | produced by each search; regenerate with `crisprme.py generate-report …` |
+
+Run any subcommand with `--help` for its full option list.
+
 ## How long operations behave
 Downloads and index builds run in the background on a dedicated slot (so they
 never slow down searches) and report **live progress** in the Activity panel.
