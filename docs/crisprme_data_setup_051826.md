@@ -287,7 +287,7 @@ crisprme.py build-index-only \
   --genome Genomes/hg38 \
   --pam PAMs/20bp-NRG-SpCas9.txt \
   --bDNA 2 --bRNA 2 \
-  --vcf VCFs/hg38_1000G2021_HGDP \
+  --vcf VCFs/hg38_HGDP1kGP \
   --samplesID samplesIDs.config.txt \
   --thread 16 \
   --path "$CRISPRME_DIR"

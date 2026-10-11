@@ -41,7 +41,7 @@ off-target site.
 
 **Analysis-mode decision rule.** The **default** (no flag) is a **population-level**
 worst-possible screen and works on **any** index. Add **`--per-sample`** only on a
-**genotyped** index (`HGDP1kGP` — the recommended default — `1000G2021`, `1000G2021_HGDP`, or `HPRC`) when you need named carriers /
+**genotyped** index (`HGDP1kGP` — the recommended default — `1000G2021`, or `HPRC`) when you need named carriers /
 CONFIRMED cis / exact joint AF — it is inert on a sites-only index (`mega`). See
 [§5, Analysis modes](#population-level-analysis-default-and---per-sample-genotype-resolution).
 
@@ -253,8 +253,9 @@ This lets tooling (e.g. the web variant-dataset selector) identify an index's ty
 and phasing without scanning the multi-GB per-sample dictionary; a missing flag on
 an older index falls back to genotype-store presence. The shipped indexes are
 `HGDP1kGP` = **genotyped-phased** (the re-phased default, above), `1000G2021` =
-**genotyped-phased**, `HPRC` = **genotyped-phased**, `1000G2021_HGDP` = **hybrid**
-(superseded), and `mega` = **sites-only**.
+**genotyped-phased**, `HPRC` = **genotyped-phased**, and `mega` = **sites-only**;
+`hybrid` is the fourth possible value, for a merged panel mixing phased and unphased
+sources.
 
 ### Re-indexing for a different PAM
 

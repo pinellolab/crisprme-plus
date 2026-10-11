@@ -12,9 +12,10 @@
 
 ## 1. Rationale
 
-The current shipped genotyped index `NRG_3_hg38+hg38_1000G2021_HGDP` is a **hybrid**: 1000 Genomes-2021
-is phased (→ CONFIRMED cis co-occurrence + named carriers) but HGDP is genotyped-**unphased**
-(→ PUTATIVE co-carrier only). The gnomAD HGDP+1kGP callset is a **single, jointly-called, uniformly
+The earlier shipped genotyped index `NRG_3_hg38+hg38_1000G2021_HGDP` was a **hybrid**: 1000 Genomes-2021
+was phased (→ CONFIRMED cis co-occurrence + named carriers) but HGDP was genotyped-**unphased**
+(→ PUTATIVE co-carrier only). It has since been superseded (and removed) in favor of this fully
+re-phased HGDP1kGP index. The gnomAD HGDP+1kGP callset is a **single, jointly-called, uniformly
 QC'd, SHAPEIT5-co-phased** resource in which **both** cohorts are phased. Building the index from it
 would:
 
@@ -23,7 +24,7 @@ would:
 - be genuinely single-source (structurally not "hybrid"); clean AN denominator;
 - carry an open, redistributable license (gnomAD no-restriction; paper CC BY 4.0; atgu code MIT).
 
-**Goal:** make this the new **default** index and retire the old mixed 1000G2021_HGDP.
+**Goal (since achieved):** make this the new **default** index and retire the old mixed 1000G2021_HGDP hybrid (now superseded and no longer shipped).
 
 ## 2. Source data + provenance
 
@@ -157,7 +158,7 @@ b38 maps from `odelaneau/shapeit`; chunk coords via the GLIMPSE chunker (do not 
   never lose).
 - **VAL-6 Common-SNP recall** — every common SNP (Zenodo 18156285 subset) present + phase-concordant.
 - **VAL-7 (post-index) CRISPRme cis audit** — run a known guide `--per-sample` on the new index vs the
-  current 1000G2021_HGDP; the EXTRA cis calls that hinge on a recovered singleton are flagged as the
+  then-current 1000G2021_HGDP hybrid; the EXTRA cis calls that hinge on a recovered singleton are flagged as the
   lower-confidence tier (§4), not silently promoted to CONFIRMED.
 
 ### 6.1 chr22 re-phasing results — MEASURED (2026-09-30)
