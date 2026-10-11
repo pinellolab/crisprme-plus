@@ -47,6 +47,15 @@ and the `release-crisprme` skill.
   user guide, `docs/PRECOMPUTED_INDEXES.md`, and `install_from_source.sh` (several surfaces had
   drifted to `2.6.x` / `2.7.1` / `2.5.5`). The legacy data-setup guide now points to the modern
   `crisprme.py download` flow for first-time setup.
+- **Fresh-user consistency pass.** A full install→run→build→interpret walkthrough surfaced and
+  fixed: the **default index** is now consistently **HGDP + 1000 Genomes** across README, the
+  website, the Docker quickstart, and the web-interface guide (several spots still named the old
+  1000G-2021 default); the website RAM figure is corrected to **64 GB** for a genome-wide
+  variant-aware search and now surfaces the **one-line installer**; a CLI-guide example that
+  dropped the PAM `N`-padding (and would prune all off-targets) is fixed; the web guide gains an
+  **"Understanding your results"** reference (CONFIRMED vs PUTATIVE, carriers, key columns); and
+  a `docs/FUTURE_WORK.md` captures deferred enhancements. (The one-click installer's own default
+  index is switched to HGDP1kGP in the `pinellolab/CRISPRme` installer repo.)
 
 ## [2.7.7] - 2026-10-10
 

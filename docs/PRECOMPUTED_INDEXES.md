@@ -79,7 +79,7 @@ crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega          --p
 
 A first-time unauthenticated download of these many-small-file indexes can hit
 HuggingFace's HTTP-429 rate limit; the downloader retries with backoff, and
-authenticating (`huggingface-cli login`) avoids it entirely. See METHODS §2 for
+authenticating (`hf auth login`) avoids it entirely. See METHODS §2 for
 the genotyped-vs-sites-only distinction and §4 for how each is scanned.
 
 ## Layout on HuggingFace
@@ -301,7 +301,7 @@ Only the genome index itself is PAM-specific; everything derived from the varian
 ### Prerequisites
 
 - CRISPRme+ installed; the **hg38 reference** (`crisprme.py download --what all --path .`).
-- `huggingface-cli` (ships with `huggingface_hub`), `bcftools`/`htslib`.
+- `hf` (the HuggingFace CLI, ships with `huggingface_hub`), `bcftools`/`htslib`.
 - Disk/RAM: the **fast path** needs a few GB + the index output. The **full path** re-runs
   enrichment — a genome-wide genotyped build writes **>100 GB of temp** and needs ample RAM
   (see the "Scratch space" note in [`seq_script/merge_panels/README.md`](../seq_script/merge_panels/README.md)).
@@ -356,6 +356,10 @@ crispritz.py index-genome hg38+hg38_<ds> Genomes/hg38+hg38_<ds>/ PAMs/<NEW_PAM>.
 python PostProcess/pool_index_indels.py \
   Genomes/hg38+hg38_<ds>_INDELS/ PAMs/<NEW_PAM>.txt <PAM_MOTIF> hg38 hg38_<ds> 3 <T>
 ```
+
+Here `<PAM_MOTIF>` is the PAM region token itself — the IUPAC motif without the spacer `N`s
+(e.g. `NGG`, `NRG`, `NNGRRT`, `TTTN`) — the same prefix the index name uses
+(`<PAM_MOTIF>_<N+1>_hg38+hg38_<ds>`).
 
 > **One-command alternative.** With the enriched genome already in place, `crisprme.py
 > build-index-only --genome Genomes/hg38 --pam PAMs/<NEW_PAM>.txt --bDNA 2 --bRNA 2 --vcf

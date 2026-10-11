@@ -60,7 +60,7 @@ that matter most:
 
 - **Analysis mode.** The **default (no flag) = population-level** worst-possible screen;
   it works on **any** index and is lossless for detection. Add **`--per-sample`** **only
-  on a genotyped index** (`1000G2021`, `1000G2021_HGDP`, or `HPRC`) when you need named
+  on a genotyped index** (`HGDP1kGP` (the default), `1000G2021`, `1000G2021_HGDP`, or `HPRC`) when you need named
   carriers / CONFIRMED cis / exact joint AF. It is a genotype-resolution dial, not a
   speed dial.
 - **Index.** `HGDP1kGP` (recommended default, most cases — phased HGDP + 1000 Genomes,
@@ -195,10 +195,10 @@ Prefer the CLI? After the download steps above (1 & 2), run the variant-aware
 example search and generate the shareable report — no web UI needed:
 
 ```bash
-# a genome-wide SpCas9 (NRG) search over the hg38 + 1000G-2021 + HGDP genotyped index, up to 4
+# a genome-wide SpCas9 (NRG) search over the hg38 + HGDP + 1000 Genomes jointly re-phased index, up to 4
 # mismatches + 1 DNA / 1 RNA bulge (a 6-edit budget), with --per-sample genotype resolution
-# (named carriers + CONFIRMED cis / PUTATIVE co-carrier + exact joint allele frequency), plus rsIDs
-# and functional annotations. (Downloaded the +hg38_1000G2021_HGDP index in step 2 above.)
+# (named carriers + CONFIRMED cis + exact joint allele frequency), plus rsIDs
+# and functional annotations. (Downloaded the +hg38_HGDP1kGP index in step 2 above.)
 echo "CTAACAGTTGCTTTTATCACNNN" > guide.txt
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py complete-search \
   --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --guide guide.txt \
@@ -211,9 +211,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 #   CRISPR-Bulge scorer's validated single-bulge domain. Raise the caps for a deeper search,
 #   but also raise --max-total-edits to their sum or alignments over the budget are PRUNED
 #   (e.g. --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget → add --max-total-edits 10 to keep all).
-#   Uses --per-sample here to resolve per-sample genotypes — CONFIRMED cis phasing (+ PUTATIVE
-#   co-carrier on the unphased HGDP portion) + named carrier samples + exact joint allele
-#   frequency — recommended for genotyped panels / clinical validation. OMIT --per-sample for the
+#   Uses --per-sample here to resolve per-sample genotypes — CONFIRMED cis phasing throughout
+#   (the whole HGDP + 1000 Genomes panel is jointly re-phased) + named carrier samples + exact joint
+#   allele frequency — recommended for genotyped panels / clinical validation. OMIT --per-sample for the
 #   POPULATION-LEVEL default (worst-possible representatives; removes the per-haplotype enumeration
 #   wall that makes dense/aggregate panels intractable). --per-sample is a genotype-resolution mode,
 #   not a speed mode: for a single guide the runtimes are comparable, but it can be intractable on
@@ -854,7 +854,7 @@ its purpose and usage:
   <br>Resolve per-sample genotypes into observed haplotypes for the SNP post-analysis,
   instead of the default population-level analysis. Reports each observed haplotype with
   CONFIRMED cis phasing, named carrier samples, and exact joint allele frequency.
-  **Requires a genotyped index** (1000G-2021, 1000G-2021+HGDP, or HPRC); on a sites-only index
+  **Requires a genotyped index** (HGDP + 1000 Genomes (the default), 1000G-2021, 1000G-2021+HGDP, or HPRC); on a sites-only index
   (`mega`) it cannot resolve carriers (no genotypes) and `complete-search` warns. Can be
   slow / intractable on dense or aggregate panels. By default (no flag) CRISPRme+ runs a
   **population-level** analysis: one worst-possible representative per variant window

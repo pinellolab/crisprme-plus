@@ -52,10 +52,17 @@
       </p>
       <p>
         The easiest way to get the same point-and-click experience is the
-        <strong>Docker quickstart below</strong> &mdash; a few commands to a web
-        interface running in your browser, with all the functionality of the
-        previous hosted version. Prefer the command line for scripted or batch
-        analyses? That works too.
+        <strong>one-line installer</strong>, which sets up a clickable <strong>CRISPRme</strong>
+        app (Start / Update / Stop &mdash; no terminal needed after this). On
+        <strong>macOS / Linux</strong> run
+        <code>curl -fsSL https://pinellolab.github.io/CRISPRme/install.sh | bash</code>;
+        on <strong>Windows</strong> (PowerShell)
+        <code>irm https://pinellolab.github.io/CRISPRme/install.ps1 | iex</code>.
+        It needs <a href="https://www.docker.com/products/docker-desktop/">Docker Desktop</a>
+        (the installer guides you if it is missing) and downloads the reference + default
+        variant data (~45&nbsp;GB) on first launch. Prefer the terminal, or want to script /
+        batch analyses? The <strong>Docker quickstart below</strong> and the command line both
+        work too.
       </p>
       <p class="cta-row">
         <a class="button" href="#run-heading">Get started &darr;</a>
@@ -89,8 +96,8 @@
           or <a href="https://docs.docker.com/engine/install/">Linux</a>, and give it
           enough memory (Docker Desktop &rarr; Settings &rarr; Resources):
           <strong>16&nbsp;GB</strong> for a first / reference-only run, but
-          <strong>32&nbsp;GB (64&nbsp;GB recommended)</strong> for a genome-wide
-          variant-aware search. You also need <strong>&asymp;&nbsp;100&nbsp;GB free
+          <strong>64&nbsp;GB</strong> for a genome-wide variant-aware search
+          (16&nbsp;GB or 32&nbsp;GB will run out of memory on that workload). You also need <strong>&asymp;&nbsp;100&nbsp;GB free
           disk</strong> for the variant-aware setup (far less &mdash; ~20&nbsp;GB &mdash;
           for a reference-only setup). Then check it works
           and pull the CRISPRme+ image:
