@@ -514,7 +514,12 @@ def write_combined_guides_file(combined_dir: str, guide_file: str) -> None:
         combined_dir: The `{output_base}_combined` output directory.
         guide_file: The `--guide` file path the run was invoked with.
     """
-    shutil.copyfile(guide_file, os.path.join(combined_dir, GUIDES_FILE))
+    dst = os.path.join(combined_dir, GUIDES_FILE)
+    # The web submit handler writes the guide straight into combined_dir, so
+    # guide_file can already BE dst -- copying a file onto itself raises
+    # shutil.SameFileError. Only copy when the source is a different file.
+    if os.path.abspath(guide_file) != os.path.abspath(dst):
+        shutil.copyfile(guide_file, dst)
 
 
 def load_chrom_alias(chrom_alias_file: str) -> Tuple[Dict[str, str], Dict[str, str]]:
