@@ -98,7 +98,8 @@ irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex
 ```
 Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) — a
 small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
-first time it downloads the reference + variant data automatically (~45 GB, once), then
+first time it downloads the reference + variant data automatically (~45 GB download, once;
+~85 GB on disk once installed — keep ~100 GB free; a reference-only setup is far smaller, ~25 GB), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
 (Memory: the **whole-genome *variant-aware* search** needs **~64 GB of RAM** — set that
 under Docker Desktop → Settings → Resources → Memory. Many current laptops ship with
@@ -735,7 +736,7 @@ single command — `download --what index` already wrote the `list_vcf.txt` /
 `list_samplesID.txt` the search reads, and the guide is auto-padded to the PAM:
 
 ```bash
-printf '%s\n' ACTGAAATCTGTAAGCAGGCNNN > my_guide.txt   # 20-nt spacer + NNN for the PAM positions
+printf '%s\n' CTAACAGTTGCTTTTATCACNNN > my_guide.txt   # 20-nt spacer + NNN for the PAM positions
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-search \
     --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \

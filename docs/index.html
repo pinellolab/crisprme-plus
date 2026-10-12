@@ -84,8 +84,8 @@
         <code>irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex</code>.
         It needs <a href="https://www.docker.com/products/docker-desktop/">Docker Desktop</a>
         (the installer guides you if it is missing) and downloads the reference + default
-        variant data (~45&nbsp;GB download; budget &asymp;&nbsp;100&nbsp;GB disk for the full
-        variant-aware setup, far less for reference-only) on first launch. Prefer the terminal, or want to script /
+        variant data (~45&nbsp;GB download &rarr; ~85&nbsp;GB on disk; keep &asymp;&nbsp;100&nbsp;GB free for the full
+        variant-aware setup, far less &mdash; ~25&nbsp;GB &mdash; for reference-only) on first launch. Prefer the terminal, or want to script /
         batch analyses? The <strong>Docker quickstart below</strong> and the command line both
         work too.
       </p>
@@ -201,6 +201,11 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
           Use <code>apptainer run</code> (not <code>exec</code>): <code>run</code>
           activates the environment inside the image, so <code>crisprme.py</code> is on
           the path.
+        </p>
+        <p class="note">
+          On a headless compute node, forward the port to your laptop &mdash; from your
+          laptop run <code>ssh -L 8080:&lt;compute-node&gt;:8080 &lt;cluster-login&gt;</code>,
+          then open <strong>http://127.0.0.1:8080</strong> locally.
         </p>
       </div>
 
