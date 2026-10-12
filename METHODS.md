@@ -93,39 +93,43 @@ distributions) are **first-class** and computed at build time, so they are
 available without touching Tier-1; per-individual queries remain lazy.
 
 ### Compact on-disk encoding of the Tier-0 registry
-Physically, the registry is three contiguous sections: a fixed-width **record
-array** (16 bytes per record — position, reference base, alternate base, the
-record's group count, and offsets into the two following sections), a **group
-blob** (the per-group AC / AN / carrier / homozygote / called-allele counts), and
-a deduplicated **string pool** (rsIDs). The group blob dominates the file
-(~75–80 %), and within it the allele-number and called-allele columns are
-near-constant across the millions of records on a chromosome — the genotyped
-panel is essentially the same size everywhere — so the raw layout is highly
-redundant.
+Physically, the registry is three contiguous sections:
 
-CRISPRme+ therefore ships the registry **uncompressed (raw)** by default: the three
-sections are memory-mapped and read by direct `O(log n)` bisection on genomic
-position, with **no per-lookup decompression**. This is the fastest option — a dense
-variant search does millions of registry lookups (one per candidate off-target window,
-scattered across a chromosome), and measurement showed raw lookups are **~2× faster**
-than the compressed path even with a warm cache. All shipped indexes (the genotyped
-1000 Genomes + HGDP and the sites-only mega) use this raw format, for consistency and
-lookup speed ("speed over space").
+- a fixed-width **record array** — 16 bytes per record (position, reference base,
+  alternate base, the record's group count, and offsets into the two following sections);
+- a **group blob** — the per-group AC / AN / carrier / homozygote / called-allele counts;
+- a deduplicated **string pool** — rsIDs.
 
-An optional **`zlib` block-compressed** format is available for space-constrained
-storage (opt in with `CRISPRME_REGISTRY_COMPRESS=1` at build time, or re-encode an
-existing raw registry losslessly with `transcode_registry` — no VCF re-parse): each
-section is partitioned into 4,096-record blocks, individually compressed (~3.5× smaller
-on disk), with a sparse block index in the manifest. The reader is fully
-backward-compatible and reads either format byte-for-byte identically. When a
-compressed registry is used, a decompressed-block **LRU cache** (default 4,096 blocks,
-`CRISPRME_REGISTRY_CACHE_BLOCKS`; each block ~64 KB, filling only to the blocks a search
-touches) amortizes decompression to one pass per block: profiling had shown block
-`zlib` decompression reaching **~71 %** of a dense post-analysis with a tiny cache, and
-the right-sized cache plus an O(1) LRU cut a dense chr22 SNP post-analysis **326 s → ~89 s
-(~3.66×)** (measured for the 8→512-block cache step; the speedup is cache-dependent, and the
-default 4,096-block cache extends it to the largest contigs) — but the raw default avoids
-that cost entirely, which is why the registry has shipped raw since 2.5.3 (still raw as of 2.7.9).
+The group blob dominates the file (~75–80 %), and within it the allele-number and
+called-allele columns are near-constant across the millions of records on a chromosome
+(the genotyped panel is essentially the same size everywhere), so the raw layout is
+highly redundant.
+
+**Raw layout (default).** CRISPRme+ ships the registry **uncompressed (raw)**: the three
+sections are memory-mapped and read by direct `O(log n)` bisection on genomic position,
+with **no per-lookup decompression**. This is the fastest option — a dense variant search
+does millions of registry lookups (one per candidate off-target window, scattered across a
+chromosome), and measurement showed raw lookups are **~2× faster** than the compressed path
+even with a warm cache. All shipped indexes (the genotyped 1000 Genomes + HGDP and the
+sites-only mega) use this raw format, for consistency and lookup speed ("speed over space").
+The registry has shipped raw since 2.5.3 (still raw as of 2.7.9).
+
+**Optional `zlib` compression.** A block-compressed format is available for
+space-constrained storage. Each section is partitioned into 4,096-record blocks,
+individually compressed (~3.5× smaller on disk), with a sparse block index in the manifest.
+The reader is fully backward-compatible and reads either format byte-for-byte identically.
+When a compressed registry is used, a decompressed-block **LRU cache** amortizes
+decompression to one pass per block: profiling had shown block `zlib` decompression reaching
+**~71 %** of a dense post-analysis with a tiny cache, and the right-sized cache plus an O(1)
+LRU cut a dense chr22 SNP post-analysis **326 s → ~89 s (~3.66×)** (measured for the
+8→512-block cache step; the speedup is cache-dependent, and the default 4,096-block cache
+extends it to the largest contigs) — but the raw default avoids that cost entirely.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `CRISPRME_REGISTRY_COMPRESS` | `0` (raw) | set `=1` at build time to write the `zlib` block-compressed format |
+| `transcode_registry` | — | re-encode an existing raw registry losslessly to compressed (or back), no VCF re-parse |
+| `CRISPRME_REGISTRY_CACHE_BLOCKS` | `4096` | decompressed-block LRU cache size (each block ~64 KB; fills only to the blocks a search touches) |
 
 ### Out-of-the-box variant search
 Because Tier-0/Tier-1 are small, they are shipped **with the pre-built index**
@@ -504,9 +508,9 @@ both are emitted so the reported worst case is never understated. The population
 analysis is validated to be **lossless for locus detection and non-understating for the
 worst-case score** against the exact per-sample enumeration path on a real chr22
 1000G-2021+HGDP slice (0 CFD under-reports; it in fact surfaces *stronger* worst cases at
-182 loci that per-sample enumeration misses), and it collapses ~1.9× fewer rows on that 1×
-slice, growing with density — turning the otherwise-intractable 4× panel into a tractable
-run. **The trade-off is that per-sample carriers, CONFIRMED cis phasing and exact joint
+182 loci that per-sample enumeration misses), and it emits ~1.9× fewer rows on that 1×
+slice, a factor that grows with density — turning the otherwise-intractable 4× panel into a
+tractable run. **The trade-off is that per-sample carriers, CONFIRMED cis phasing and exact joint
 allele frequency are not computed in the default mode** (rows are PUTATIVE worst cases); the
 launch-time message, the web **Analysis mode** control and the report's **Search mode** row
 all state this explicitly, so it is never silent. This yields a **two-tier workflow**: the
@@ -559,6 +563,25 @@ guarantees hold end-to-end:
   modes differ in genotype resolution, not intrinsic speed; the default's advantage materializes
   only on the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
 
+The measured numbers above, side by side (same guide/PAM/thresholds; only `--per-sample` differs):
+
+| Metric | Population-level (default) | `--per-sample` |
+|---|---|---|
+| **Genotyped index (1000G 2021 + HGDP), one guide** | | |
+| Off-target loci reported | 3,287 (superset; 3,079 shared) | 3,103 |
+| Worst-case CFD on the 3,079 shared loci | ≥ per-sample, **0** violations | baseline |
+| Distinct carrier samples named | 1,642 (PUTATIVE union, over-includes non-cis) | 1,447 (exact cis carriers) |
+| SNP+SNP co-occurrence CONFIRMED rows | 0 (all PUTATIVE) | **106** (phased cis, exact joint AF + named carrier) |
+| Single-guide wall time | ~13–14 min | ~13–14 min |
+| **Sites-only mega index** | | |
+| Integrated rows | **3,224** (more complete screen) | 3,065 (registry-only fallback) |
+| SNP+SNP co-occurrence PUTATIVE rows | **22** | 4 |
+| CONFIRMED rows / cis carriers | 0 / none (no genotype store) | 0 / none (no genotype store) |
+
+(On the sites-only mega, `--per-sample` cannot resolve carriers and emits *fewer* rows than the
+default, so the default is the more complete screen — which is why `complete-search` warns and the
+web form disables per-sample for a sites-only index.)
+
 **Scope of the analysis mode.** The mode toggles only the **SNP** post-analysis (`--per-sample`
 re-enables the 2^k IUPAC haplotype lattice / observed-haplotype enumeration that the default
 collapses). The **indel** post-analysis is single-threaded and ML-scoring-bound (CRISPR-Bulge), and is
@@ -603,19 +626,19 @@ default and a licence-gated **COSMIC** Cancer Gene Census column:
   relevant for therapeutic and pre-IND assessment, where an off-target in a
   known cancer gene warrants scrutiny. Unlike IntOGen it is **licence-gated** (below).
 
-**Cancer-gene annotations: IntOGen by default, COSMIC by licence.** For cancer-gene
-context CRISPRme+ ships **IntOGen (CC0)** enabled by default (`intogen_drivers.hg38.bed.gz`,
-built by `seq_script/build_intogen_annotation.py` mapping the CC0 driver symbols to
-GENCODE gene spans) — legally clean for academic and commercial use. **COSMIC** (Genome Research Ltd /
-Wellcome Sanger) is free for academic / non-commercial research but its
-**commercial use requires a licence** ([terms](https://www.cosmickb.org/terms/)).
-Because the built-in bundle bakes COSMIC into a single BED, CRISPRme+ **strips the
-COSMIC rows from the active annotation by default**, so no `Annotation_COSMIC`
-values appear in the output. The user opts in **once** — a Settings checkbox on the
-web (with a link to the terms) or `crisprme.py cosmic-license enable` on the CLI
-(both persist to `Annotations/.cosmic_license.json`); the CLI `enable` requires an
-explicit confirmation. Toggling it changes the active-annotation cache signature, so
-the next search rebuilds the annotation with or without COSMIC accordingly.
+**Cancer-gene annotations: IntOGen by default, COSMIC by licence.** CRISPRme+ ships two
+cancer-gene flags with different licences and defaults:
+
+| Flag | Source / licence | Default | Report column |
+|---|---|---|---|
+| **IntOGen** | Integrative OncoGenomics driver compendium; **CC0** (public domain), legally clean for academic and commercial use | **default-ON** (`intogen_drivers.hg38.bed.gz`, built by `seq_script/build_intogen_annotation.py` mapping the CC0 driver symbols to GENCODE gene spans) | `Annotation_INTOGEN` |
+| **COSMIC** | Cancer Gene Census (Genome Research Ltd / Wellcome Sanger); free for academic / non-commercial research, **commercial use requires a licence** ([terms](https://www.cosmickb.org/terms/)) | **default-stripped** — the built-in bundle bakes COSMIC into a single BED, so CRISPRme+ strips its rows from the active annotation and no values appear in the output | `Annotation_COSMIC` |
+
+**Opt-in mechanic.** The user enables COSMIC **once** — a Settings checkbox on the web
+(with a link to the terms) or `crisprme.py cosmic-license enable` on the CLI (both persist to
+`Annotations/.cosmic_license.json`; the CLI `enable` requires an explicit confirmation).
+Toggling it changes the active-annotation cache signature, so the next search rebuilds the
+annotation with or without COSMIC accordingly.
 
 Annotations are managed as an enable/disable set and applied automatically to
 every search; the shareable report includes a plain-language legend for every
@@ -661,14 +684,21 @@ there are several, listing the sites; amber "presumed on-target" when there is
 exactly one) — in both the report and the interactive web results page.
 
 An **`Observed`** column records whether each off-target is supported by at least
-one real individual: `reference` (present in the reference genome → carried by
-essentially every individual), `N carrier(s)` (named carriers in a genotyped
-panel), `observed` (a single AF>0 variant, carried by ≥1 individual even where the
-carriers can't be named), or `putative` (a multi-variant combination whose cis
-co-occurrence can't be confirmed). On a genotyped index the carrier roster is
+one real individual:
+
+| Value | Meaning | When shown |
+|---|---|---|
+| `reference` | present in the reference genome | always → carried by essentially every individual |
+| `N carrier(s)` | named carriers | genotyped panel only |
+| `observed` | a single AF>0 variant, carried by ≥1 individual even where the carriers can't be named | any panel |
+| `putative` | a multi-variant combination whose cis co-occurrence can't be confirmed | any panel |
+
+On a genotyped index the carrier roster is
 populated in both analysis modes; under `--per-sample` it is pruned to the **exact
 cis carriers**, so `putative` cleanly marks reconstructions that no one actually
-carries — separating genuine haplotypes from worst-case combinations. The
+carries — separating genuine haplotypes from worst-case combinations.
+
+The
 recommended validation panel uses this to **prioritize observed sites** among
 equally-severe candidates: `Observed` enters the ordering only as the first
 tie-break *after* worst-case severity, so a strictly-worse (higher-severity)
@@ -715,28 +745,34 @@ single model gates the shortlist. CRISPRme+ does not re-train or modify either
 model; CFD is applied as its published lookup tables and CRISPR-Bulge as its
 published, pinned weights, to the aligned protospacer+PAM of each candidate.
 
-**Domain-of-validity caveat (important).** CFD was trained on **single-nucleotide
-mismatches**, but it does *not* ignore gaps: the CRISPRitz-lineage
-`mismatch_score.pkl` extends Doench's mismatch table with **152 position-specific
-gap entries** (DNA-bulge `r-:dX` and RNA-bulge `rX:d-` at protospacer positions
-2–20), so a bulge is penalized by a per-position factor and **two bulges
-multiply** — a PAM-distal bulge is near-neutral while a seed-proximal one is
-strongly penalizing. This is a principled *extension* of the mismatch model, not
-a calibrated indel probability, so a CFD value on a gapped alignment is a relative
-risk indicator. **CRISPR-Bulge is the model built for gaps.** It natively scores a
-mismatched protospacer carrying **exactly one 1-bp DNA or RNA bulge**; its trained
-weights bake in a fixed input width, so an alignment carrying **≥ 2 bulges is
-outside its domain** and is deliberately **nulled** — reported as N/A (sentinel
-`-1`, never sorted or thresholded) rather than fabricated from an out-of-domain
-extrapolation. Nulled ≥ 2-bulge sites are **not dropped**: they remain scored by
-CFD's position-specific bulge penalty, ranked by edit distance, and are covered by
-an unconditional **pure-bulge** rule in the validation panel (a 0-mismatch site
-with ≥ 1 bulge is always included). Attempting a 2-bulge prediction would be
-unsupported regardless of code: the model's training corpus of ~4.6M measured
-off-targets contains **zero ≥ 2-bulge examples**, so any 2-bulge output would be
-pure extrapolation — the honest choice is N/A plus the model-agnostic safety nets.
-The threshold tiers in the report are **model-relative** (CRISPR-Bulge's cut
-points differ from CFD's because the two scores are on different scales).
+**Domain-of-validity caveat (important).** Each score has a domain where it is
+trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
+
+- **CFD on gaps is a relative risk indicator, not a calibrated indel probability.**
+  CFD was trained on **single-nucleotide mismatches**, but it does *not* ignore gaps:
+  the CRISPRitz-lineage `mismatch_score.pkl` extends Doench's mismatch table with **152
+  position-specific gap entries** (DNA-bulge `r-:dX` and RNA-bulge `rX:d-` at protospacer
+  positions 2–20), so a bulge is penalized by a per-position factor and **two bulges
+  multiply** — a PAM-distal bulge is near-neutral while a seed-proximal one is strongly
+  penalizing. This is a principled *extension* of the mismatch model, so a CFD value on a
+  gapped alignment is a relative risk indicator.
+- **CRISPR-Bulge is the model built for gaps — for exactly one bulge.** It natively scores
+  a mismatched protospacer carrying **exactly one 1-bp DNA or RNA bulge**; its trained
+  weights bake in a fixed input width.
+- **≥ 2 bulges are out of domain and nulled to N/A.** An alignment carrying **≥ 2 bulges is
+  outside CRISPR-Bulge's domain** and is deliberately reported as N/A (sentinel `-1`, never
+  sorted or thresholded) rather than fabricated from an out-of-domain extrapolation. The
+  model's training corpus of ~4.6M measured off-targets contains **zero ≥ 2-bulge examples**,
+  so any 2-bulge output would be pure extrapolation — the honest choice is N/A plus the
+  model-agnostic safety nets.
+- **Nulled ≥ 2-bulge sites are *not dropped*.** They remain scored by CFD's position-specific
+  bulge penalty, ranked by edit distance, and are covered by an unconditional **pure-bulge**
+  rule in the validation panel (a 0-mismatch site with ≥ 1 bulge is always included).
+
+The N/A sentinel is uniform across the report: a `-` means *not scored*, not *no risk* — it is
+never sorted or thresholded as if it were a low score. The threshold tiers in the report are
+**model-relative** (CRISPR-Bulge's cut points differ from CFD's because the two scores are on
+different scales).
 
 **Compute backend and modular environment.** CFD is pure-Python and always runs
 in-process on the CPU. CRISPR-Bulge (TensorFlow) runs in a **dedicated per-scorer
@@ -774,25 +810,30 @@ found x86-64 vs aarch64 scores agree to a maximum absolute difference of
 **Worst-case scoring in the population-level analysis.** In the default population-level
 analysis (§5), each window is represented by worst-possible rows rather than every haplotype,
 so the *scores* attached to those rows are defined as worst cases over the window's allele
-combinations. **CFD is the exact worst case.** CFD factorizes as a product of per-position
-maxima times a **joint two-base PAM factor**, so the maximum over all combinations is found by
-a per-position argmax plus a bounded brute-force over the PAM region (the joint factor is why a
-naïve per-column greedy is insufficient). This exact maximizer is validated bit-for-bit against
-an independent factorized oracle and against the exact per-sample enumeration path — **zero CFD
-under-reports** on a real chr22 1000G+HGDP slice (and, on the legacy dict / aggregate-panel
-path, catching cases where the fewest-mismatch allele scores materially *lower* CFD than
-another carried allele, up to a threshold-crossing 0.14). A whole-index comparison of the two
-modes on the then-released 1000 Genomes 2021 + HGDP genotyped index reproduces this end-to-end: across all **3,079
-shared off-target loci, the population-level CFD ≥ the per-sample CFD with zero violations** (it
-is strictly higher only where it assumes worst-possible co-occurrence). **The ML score is
-best-effort.** CRISPR-Bulge is a non-factorizable neural ensemble, so its worst case is taken as
-the maximum over the emitted representatives rather than an exhaustive per-haplotype search. This is tight exactly where decisions are made: high-ML-score
-off-targets are low-edit, and the min-edit + max-CFD representatives already span the low-edit
-shell, so strong sites are surfaced at full or greater strength and any under-report is confined
-to the weak tail. So by default **CFD is the safe actionable gate** (exact worst case, zero
-under-reports on the measured 3,079-locus comparison above) and the **ML score is a screen**, not
-an action gate. A **guaranteed per-haplotype ML worst case** is available by running
-`--per-sample`; this is the screening-vs-confirmatory two-tier split of Section 5.
+combinations. The two scores earn different trust:
+
+- **CFD is the exact worst case — the safe actionable gate.** CFD factorizes as a product of
+  per-position maxima times a **joint two-base PAM factor**, so the maximum over all
+  combinations is found by a per-position argmax plus a bounded brute-force over the PAM region
+  (the joint factor is why a naïve per-column greedy is insufficient). This exact maximizer is
+  validated bit-for-bit against an independent factorized oracle and against the exact
+  per-sample enumeration path: **zero CFD under-reports** on a real chr22 1000G+HGDP slice
+  (and, on the legacy dict / aggregate-panel path, catching cases where the fewest-mismatch
+  allele scores materially *lower* CFD than another carried allele, up to a threshold-crossing
+  0.14). A whole-index comparison reproduces this end-to-end — across all shared loci the
+  population-level CFD ≥ the per-sample CFD with **zero** violations, strictly higher only where
+  it assumes worst-possible co-occurrence (the per-index numbers are in the measured comparison
+  in §5).
+- **The CRISPR-Bulge ML score is best-effort — a screen, not an action gate.** It is a
+  non-factorizable neural ensemble, so its worst case is taken as the maximum over the emitted
+  representatives rather than an exhaustive per-haplotype search. This is tight exactly where
+  decisions are made: high-ML-score off-targets are low-edit, and the min-edit + max-CFD
+  representatives already span the low-edit shell, so strong sites are surfaced at full or
+  greater strength and any under-report is confined to the weak tail.
+
+So by default **CFD is the safe actionable gate** (exact worst case) and the **ML score is a
+screen**. A **guaranteed per-haplotype ML worst case** is available by running `--per-sample`;
+this is the screening-vs-confirmatory two-tier split of Section 5.
 
 **SNP+indel co-occurrence is unaffected by the analysis mode.** The default analysis collapses
 only the *SNP* worst-possible representative emission in `integrated_results.tsv` (Section 5);

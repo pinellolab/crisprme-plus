@@ -119,10 +119,12 @@ def memory_status(required_gb=VARIANT_WGS_MIN_GB):
             status["message"] = (
                 "This machine exposes only ~{:.0f} GB of RAM, below the "
                 "~{:.0f} GB a genome-wide variant-aware search needs — it may run "
-                "out of memory and fail. For a result here, use the reference-only "
-                "index, or restrict the search to a single chromosome/region, or "
-                "raise Docker Desktop memory (Settings -> Resources -> Memory) and "
-                "restart.".format(total_gb, status["required_gb"])
+                "out of memory and fail. For a result here, either switch 'Genome' "
+                "above to the reference-only index (needs ~16 GB), or raise Docker "
+                "Desktop memory (Settings -> Resources -> Memory) to at least "
+                "~{:.0f} GB and restart.".format(
+                    total_gb, status["required_gb"], status["required_gb"]
+                )
             )
     except Exception:
         return {"total_gb": None, "required_gb": float(required_gb), "low": False, "message": ""}

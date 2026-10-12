@@ -24,8 +24,8 @@ Then, in Docker Desktop → **Settings → Resources**, give Docker enough memor
 genome-wide HGDP + 1000 Genomes (HGDP1kGP) variant search is memory-intensive — give it **64 GB**
 (32 GB can run out of memory on a genome-wide variant search).
 
-> **Disk:** give Docker **≈ 100 GB free** for the batteries-included (variant-aware)
-> setup — it uses **~85 GB** on disk. CRISPRme+ ships a **dict-less** variant index
+> **Disk:** the batteries-included (variant-aware) setup is a **~45 GB download → ~85 GB
+> on disk**; give Docker **≈ 100 GB free**. CRISPRme+ ships a **dict-less** variant index
 > (no per-sample dictionaries): the reference + variant genome indexes are ~40 GB, the
 > compact allele-frequency registry a few GB (shipped uncompressed for fast lookups),
 > and an optional per-genotype store (for per-sample carrier annotation) ~26 GB. The

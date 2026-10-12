@@ -48,6 +48,15 @@ and the `release-crisprme` skill.
   guide.
 
 ### Changed
+- **Final docs polish.** Reworded the web low-memory banner to actionable, web-achievable advice
+  (switch to the reference-only index, or raise Docker memory — dropped the CLI-only "single
+  chromosome" suggestion that has no web control). Restructured the densest METHODS sections into
+  bullets/tables (§1 raw-vs-compressed encoding, §5 population-level comparison, §6 cancer
+  annotations, §7 `Observed` column, §8 domain-of-validity + worst-case scoring). Reconciled the disk
+  figures to one framing everywhere (~45 GB download → ~85 GB on disk → ~100 GB free; reference-only
+  ~25 GB). Standardized the example guide on the full `CTAACAGTTGCTTTTATCAC` (what the web *Load
+  Example* button loads). Added an SSH port-forward note to the website Singularity/Apptainer tab for
+  reaching the web UI on a headless compute node.
 - **CI + test hygiene.** Removed the redundant `docker-image.yml` workflow (single-arch, no-push,
   `checkout@v3` EOL — superseded by `docker-multiarch.yml`); wired the two Dash results-page unit
   tests (`test_results_page_assembly`, `test_results_summary_and_status`) into `web-e2e`; updated the
