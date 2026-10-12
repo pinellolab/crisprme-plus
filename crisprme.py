@@ -1823,8 +1823,9 @@ def complete_search() -> None:
     # search (pruned before generation, --max-edits) with a post-search awk drop
     # as a backstop for the -r/brute-force path. Default 6, sized for the recommended
     # default search (4 mismatches + 1 DNA + 1 RNA bulge = 6) so a bulged off-target at the
-    # full mismatch budget is NOT silently pruned; it stays lowerable as a perf backstop and
-    # -1 disables it. (A real off-target rarely stacks many mismatches AND several bulges.)
+    # full mismatch budget is NOT silently pruned; it stays lowerable as a perf backstop.
+    # Must be a non-negative integer (validated below); set it to mm+bDNA+bRNA to keep every
+    # requested-depth alignment. (A real off-target rarely stacks many mismatches AND several bulges.)
     max_total_edits = 6
     if "--max-total-edits" in args:
         try:

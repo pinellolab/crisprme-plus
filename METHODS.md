@@ -240,9 +240,10 @@ source AF exactly, to within `0.5/AN`, and the reported AN is the source's true
 cohort size), and the GLOBAL group carries `AF_max`. Per-individual carrier and
 homozygote counts do not exist for aggregate data, so they are reported as
 Hardy–Weinberg expectations from the allele frequency (the frequency itself is exact;
-carrier/hom are flagged as estimates). The registry stores SNPs only (single-base
+carrier/hom are flagged as estimates). The Tier-0 registry stores SNPs only (single-base
 ref/alt); indels (~24 % of merged sites) are surfaced as off-targets through the
-fake-indel genome but are not yet frequency-annotated in this mode.
+fake-indel genome and **are** per-dataset frequency-annotated via a separate `indel_af`
+sidecar (per-dataset `AF_<dataset>` + `AF_max`), which the report reads for the mega panel.
 
 The two modes are therefore complementary: the genotyped panel gives phased,
 cis-capable frequencies over a curated sample set; the mega gives one-scan,
@@ -419,7 +420,8 @@ complementary controls:
   permissive request (e.g. `--mm 6 --bDNA 2 --bRNA 2`, budget 10) still drops any
   alignment needing more than 6 combined edits unless raised. `complete-search` prints
   a WARNING when the cap is below the requested budget; set `--max-total-edits` to
-  `mm+bDNA+bRNA` (or `-1`) to keep all requested-depth off-targets. It bounds the
+  `mm+bDNA+bRNA` (the sum of the requested per-type caps) to keep all requested-depth
+  off-targets. It bounds the
   variant-density combinatorial explosion. (`assembly-search` instead defaults it to
   the full `mm+bDNA+bRNA` budget — a resolved diploid genome has no IUPAC-variant
   lattice, so it needs no variant-density cap.)
