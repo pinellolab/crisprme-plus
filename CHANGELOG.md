@@ -11,6 +11,15 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **Web low-memory banner no longer nags a correctly-provisioned host.** A host set to the
+  recommended ~64 GB reports a few GB less inside a container (GiB-vs-GB + VM reservation), so the
+  banner fired even when Docker was set to 64 GB. Added a detection margin (`_DETECT_MARGIN_GB`), so
+  the warning only fires for a clearly under-provisioned host; +1 unit test.
+- **Removed the stale "download the offline version" note** from the web form footer. It was a
+  hosted-web-service-era leftover — now that the service is retired, a user running the local web
+  interface already *is* the full/offline version, so the note only caused confusion.
+
 ## [2.7.9] - 2026-10-11
 
 ### Added
