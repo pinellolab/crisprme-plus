@@ -38,6 +38,19 @@ and the `release-crisprme` skill.
   guide.
 
 ### Fixed
+- **Docs/website review pass (multi-agent section-by-section review, 3 blockers closed):**
+  - README default-index per-source split said `HGDP (929) + 1000 Genomes (3162)` — contradicted the
+    correct `925 HGDP + 3,166 1000 Genomes = 4,091` elsewhere in the same file; corrected.
+  - README report-Summary example cited `3,477 individuals for 1000G+HGDP` (the retired-hybrid
+    panel size) — corrected to `4,091` for `NRG_3_hg38+hg38_HGDP1kGP`.
+  - Website Conda/Mamba path told pre-2.2.0 stock-Bioconda users to run CRISPRme+-only subcommands
+    (`download`, `web-interface`) the stock package lacks — now routes them to the legacy `setup`
+    and points the fast download/web path at the CRISPRme+ Docker/source install.
+  - Also: §2.1 directory list was missing `genome_library` / `Dictionaries` / `Assemblies` and the
+    one-working-folder framing (added, links DATA_LAYOUT.md); `sampleIDs` → `samplesIDs`; website
+    hero now names the shipped default; the first-launch `~45 GB` figure is reconciled with the
+    `~100 GB` disk budget; version-specific "unreleased 2.7.8 / in preparation" prose made
+    version-agnostic; "dict-less" download jargon relabelled "variant-aware".
 - **Web default variant panel now honours the re-phased default.** The first-paint variant-dataset
   seed (`_preferred_variant`) was called without the genome, so its genotyped-**phased** preference +
   sample-count tiebreak were skipped — with two or more phased panels installed it could seed a

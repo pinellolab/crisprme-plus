@@ -133,7 +133,7 @@ mkdir -p ~/crisprme && cd ~/crisprme    # your data folder — ALL shared inputs
 #    (this does NOT include the variant index — that is step 2)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what all --path /DATA
 # 2) grab the prebuilt SpCas9 (NRG = NAG+NGG) indexes so no long index build is needed:
-#    the reference index, and the compact dict-less variant-aware hg38 + HGDP + 1000
+#    the reference index, and the compact variant-aware hg38 + HGDP + 1000
 #    Genomes index (the recommended default; phased HGDP + 1000 Genomes, 4,091 samples
 #    jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout,
 #    including HGDP's seven genetic regions; the broadest fully-phased panel of real
@@ -171,7 +171,7 @@ indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever yo
 
 | Index (`--index-name`) | Variant sources | Resolution | Best for |
 |---|---|---|---|
-| **HGDP + 1000 Genomes** — `NRG_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP (929) + 1000 Genomes (3162), genotyped, **jointly SHAPEIT5-re-phased** — 4,091 samples | **CONFIRMED cis** throughout; named per-sample carriers + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) | most use cases; the broadest fully-phased panel of real observed haplotypes |
+| **HGDP + 1000 Genomes** — `NRG_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP (925) + 1000 Genomes (3,166), genotyped, **jointly SHAPEIT5-re-phased** — 4,091 samples | **CONFIRMED cis** throughout; named per-sample carriers + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) | most use cases; the broadest fully-phased panel of real observed haplotypes |
 | **1000G-2021** — `NRG_3_hg38+hg38_1000G2021` | 1000 Genomes 2021 (3202), genotyped, **fully phased** | **CONFIRMED cis** throughout; named per-sample carriers + exact joint AF (all genotyped-phased, no PUTATIVE-from-phasing) | a 1000-Genomes-only alternative — a clean single-source panel of real observed haplotypes |
 | **HPRC pangenome** — `NRG_3_hg38+hg38_HPRC` | HPRC Release 2 Minigraph-Cactus (`hprc-v2.0-mc-grch38`) — 232 assembly-derived genomes incl. CHM13, phased | CONFIRMED cis + named carriers; captures **pangenome-specific** variation | assembly-derived / pangenome variation |
 | **mega (sites-only)** — `NRG_3_hg38+hg38_mega` | 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us (aggregate) | **sites-only** — union of allele frequencies, no genotypes; every multi-variant/co-occurring off-target is **PUTATIVE** with a min-AF bound and **no named carriers** | a conservative worst-case screen when you must not miss a rare allele from ANY of five databases (escalate here after a genotyped-index run) |
@@ -361,11 +361,11 @@ By completing these steps, your system will be fully prepared for installing CRI
 #### 1.1.2 Installing CRISPRme
 ---
 
-> **CRISPRme+ (2.7.8) runs on Python 3.11 and installs from source** — the build
+> **CRISPRme+ runs on Python 3.11 and installs from source** — the build
 > compiles CRISPRitz 2.9.0 and installs both tools into a conda environment. A native
-> Bioconda `crisprme=2.7.8` package is **in preparation**; until it lands, the Bioconda
-> `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** this
-> 2.7.8 line.
+> Bioconda package for the CRISPRme+ line is **in preparation**; until it lands, the Bioconda
+> `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** the
+> CRISPRme+ (2.7.x) line.
 
 To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
 (`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
@@ -537,12 +537,12 @@ You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run an unreleased line (e.g. **2.7.8**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.0 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from source — the recommended path until it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.0 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
 ```bash
-# 1. clone the repository (2.7.8 development lives on the main branch)
+# 1. clone the repository (the CRISPRme+ development line lives on the main branch)
 git clone https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
@@ -589,8 +589,12 @@ its usage.
 ---
 
 CRISPRme operates within a specific directory structure to manage input data and 
-outputs efficiently. To ensure proper functionality, your working directory must 
-include the following main subdirectories:
+outputs efficiently. Everything lives inside **one user-owned working folder** (the CLI
+`--path`, Docker `-v $PWD:/DATA`, or Apptainer `--bind $PWD:/DATA --pwd /DATA`). The
+subdirectories below are **shared inputs** reused by every search; each run writes its
+own outputs under `Results/<job>/`. Most of these are created for you by `download` /
+first launch. See [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md) for the full reads-vs-writes
+map. The main subdirectories:
 
 - **Genomes** 
     - **Purpose**: Stores reference genomes.
@@ -605,7 +609,7 @@ include the following main subdirectories:
     - **Requirements**: Files must be compressed using `bgzip` (with a `.gz`
     extension).
 
-- **sampleIDs** 
+- **samplesIDs** 
     - **Purpose**: Lists the sample identifiers corresponding to the VCF 
     datasets.
     - **Structure**: Tab-separated files, one for each VCF dataset, specifying 
@@ -619,6 +623,19 @@ include the following main subdirectories:
     - **Purpose**: Specifies the Protospacer Adjacent Motif (PAM) sequences for 
     off-target search.
     - **Format**: Text files containing PAM sequences.
+
+- **genome_library** 
+    - **Purpose**: Holds the built/downloaded **search indexes** (`NRG_3_hg38`,
+    `NRG_3_hg38+hg38_HGDP1kGP`, …) — the largest, most load-bearing directory, where
+    `download --what index` / `build-index-only` place their output.
+
+- **Dictionaries** 
+    - **Purpose**: The variant **registry / genotype / `log_indels` tiers** that
+    variant- and indel-aware post-analysis depends on (fetched alongside a variant index).
+
+- **Assemblies** 
+    - **Purpose**: Per-individual personal assemblies used by `assembly-search`
+    (one folder per individual; `download --what assembly` populates it).
 
 The directory organization required by CRISPRme is illustrated below:
 <p align="center">
@@ -1706,8 +1723,8 @@ is under `data/`). Reading top to bottom:
 
 - **1. Summary** — run parameters and an off-target-by-mismatch/bulge matrix. The
   **Analysis inputs & criteria** box's *Variants included* line states the
-  genotyped panel size (e.g. **3,477 individuals** for 1000G+HGDP) and the number
-  of **SNPs** and **indels** searched.
+  genotyped panel size (e.g. **4,091 individuals** for HGDP + 1000 Genomes,
+  `NRG_3_hg38+hg38_HGDP1kGP`) and the number of **SNPs** and **indels** searched.
 - **⚠ Red banner ("no unambiguous on-target")** — appears when a guide has **more
   than one perfect (0-mismatch / 0-bulge) match**: there is then no *a-priori*
   on-target, so every perfect-match site is listed, flagged `Perfect_match = Yes`,
