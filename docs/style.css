@@ -31,7 +31,16 @@ body {
   font-size: 16px;
   line-height: 1.6;
   color: var(--fg);
-  background: var(--bg);
+  /* Tiled texture behind the white content cards (matches the web app). Two
+     layers: a translucent white veil (listed first == on top) fades the tile
+     toward white so text stays readable; the tile repeats, scaled down. */
+  background-color: #ffffff;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.80), rgba(255, 255, 255, 0.80)),
+    url("crisprme_bg_tile.png");
+  background-repeat: repeat, repeat;
+  background-size: auto, 600px;
+  background-attachment: fixed, fixed;
 }
 
 header, main, footer {
