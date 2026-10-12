@@ -12,6 +12,14 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
+- **Web low-memory pre-flight guard.** A new-user review found the clickable-Mac path dead-ends: the
+  default first Submit is a genome-wide variant-aware search (peaks ~64 GB) that silently OOM-kills
+  (exit 137) a typical 16-36 GB laptop. The web form now shows a **pre-Submit warning banner** when the
+  host's detectable RAM is below the variant-aware whole-genome threshold (`memory_check.memory_status`,
+  threshold `VARIANT_WGS_MIN_GB=64`, honoring `CRISPRME_MIN_GB`/`CRISPRME_SKIP_MEM_CHECK`), pointing to
+  the escape hatches (reference-only index, single-chromosome/region, or raise Docker memory). Silent
+  when RAM is undetectable; +7 unit tests. (A dedicated exit-137 message on the load page is a planned
+  fast-follow; the search log already carries the `warn_low_memory` warning.)
 - **`docs/RELEASE_CHECKLIST.md`** — a living release gate: the pre-tag consistency + functional +
   mechanics checks, plus a "regression traps" table that pairs every bug we've shipped (or nearly
   shipped) with the check that catches it. Appended to whenever a release pass finds a new problem.
