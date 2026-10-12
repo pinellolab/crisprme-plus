@@ -62,6 +62,15 @@ jobs:
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_email_config.py
 
+      # Results-page web unit tests (need a real Dash app import, so they run here, not in
+      # the hermetic unit-tests job). Run via -m unittest from the baked-in PostProcess dir
+      # (the Dockerfile COPYs the whole tree into opt/crisprme/) so each test's
+      # __file__-relative sys.path resolves `pages` and unittest handles argv correctly.
+      - name: Results-page web unit tests
+        run: |
+          docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
+            python -m unittest test_results_page_assembly test_results_summary_and_status -v
+
       - name: Start the web interface
         run: |
           docker run -d --name web -p 8090:8080 crisprme:web crisprme.py web-interface

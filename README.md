@@ -144,7 +144,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 #    ...or the 1000-Genomes-only alternative hg38 + 1000G-2021 index (3,202 samples,
 #    fully phased → CONFIRMED cis + named carriers):
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 #    ...or the HPRC pangenome index (232 phased assembly-derived genomes incl. CHM13,
 #    CONFIRMED cis + named carriers, pangenome-specific variation, searchable indels):
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HPRC --path /DATA
@@ -1085,7 +1085,7 @@ of CRISPRme by running the built-in example guide against a **prebuilt index tha
 you have already downloaded** (or built). It does **not** build an index or 
 auto-download all the data for you: CRISPRme never auto-builds an index, so if no 
 prebuilt index is present, `complete-test` prints guidance to download one (e.g. 
-`crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021`) and 
+`crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`) and 
 exits cleanly.
 
 Once an index is available, `complete-test` runs the example search end-to-end 
@@ -1103,11 +1103,11 @@ analyses.
 - **System Configuration Testing**: Validate the compatibility of CRISPRme with 
 different system configurations (e.g., varying thread counts, datasets).
 
-- **Dataset Evaluation**: Test specific datasets (1000 Genomes Phase 3 or HGDP) 
-to confirm their suitability for the user’s research needs.
+- **Dataset Evaluation**: Confirm that the variant-aware index you downloaded
+(e.g. the default `NRG_3_hg38+hg38_HGDP1kGP`) searches correctly end-to-end.
 
 Usage Example for the Complete Test function (run after downloading a prebuilt
-index, e.g. `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021`):
+index, e.g. `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`):
   ```bash
   crisprme.py complete-test \
     --chrom chr22
@@ -1143,8 +1143,15 @@ function, including detailed explanations and default behaviors:
 
 > **Note:** `complete-test` requires a prebuilt index to already be present.
 > CRISPRme never auto-builds an index; download one first with
-> `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021`.
+> `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`.
 > If no index is found, `complete-test` prints this guidance and exits cleanly.
+
+> **Two modes.** With no `--vcf_dataset`, `complete-test` runs the **modern smoke** above —
+> the example guide against whichever prebuilt index you downloaded (recommended: the default
+> `NRG_3_hg38+hg38_HGDP1kGP`). There is also a **legacy build-from-raw** mode,
+> `complete-test --vcf_dataset {1000G|HGDP|1000G+HGDP}`, which downloads raw VCFs and builds a
+> small test index on the fly; it exists mainly to feed the brute-force `validate-test` gate
+> (see [§2.2.3](#223-validate-test)), which is supported only for a **1000 Genomes** run.
 
 ##### Output Data Overview
 ---
@@ -1827,7 +1834,7 @@ crisprme.py download --what all --path /data/crisprme
 crisprme.py download --what vcf --dataset 1000G --path /data/crisprme
 crisprme.py download --what index --index-name NRG_3_hg38 --path /data/crisprme
 crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /data/crisprme           # recommended default (phased HGDP + 1000 Genomes, 4,091 samples)
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /data/crisprme          # 1000-Genomes-only alternative (single-source, phased)
+crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /data/crisprme          # 1000-Genomes-only alternative (single-source, phased)
 ```
 
 **`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete:
@@ -1954,7 +1961,7 @@ to handle large datasets and complex genetic analysis tasks.
 
 To run the quicker test on chromosome 22 against a prebuilt index you have
 already downloaded (e.g.
-`crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021`),
+`crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`),
 execute the following commands:
 
   ```bash
