@@ -242,7 +242,23 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 ```
 
 On Singularity/Apptainer the commands are identical, wrapped as
-`apptainer exec --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif crisprme.py ...`.
+`apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif crisprme.py ...`
+(use `apptainer run`, not `apptainer exec` — `exec` bypasses the image entrypoint,
+so `crisprme.py` is not found on `PATH`). The same complete-search, end to end:
+
+```bash
+apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
+  crisprme.py complete-search \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --guide my_guide.txt \
+    --vcf list_vcf.txt --samplesID list_samplesID.txt \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+    --gene_annotation Annotations/gencode.protein_coding.bed.gz \
+    --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
+# then build the shareable one-file report:
+apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
+  crisprme.py generate-report --result-dir Results/my_search
+```
 
 ### Run on a GPU (optional)
 
@@ -309,6 +325,37 @@ Two Singularity-specific notes:
 
 Everything else (the web form, results, downloading more indexes) is identical to
 the Docker instructions above.
+
+### Submitting to a scheduler (SLURM)
+
+A genome-wide variant-aware search is a batch job, not a login-node job. Map the
+CRISPRme flags onto your `#SBATCH` directives:
+
+- `--thread N` → `#SBATCH --cpus-per-task N` (match the two; e.g. `--thread 8`
+  with `#SBATCH --cpus-per-task 8`).
+- Memory → `#SBATCH --mem`. A genome-wide variant-aware search peaks at roughly
+  **64–80 GB**, so request e.g. `#SBATCH --mem=80G`.
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=crisprme
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=80G
+#SBATCH --time=24:00:00
+
+apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
+  crisprme.py complete-search \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --guide my_guide.txt \
+    --vcf list_vcf.txt --samplesID list_samplesID.txt \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+    --gene_annotation Annotations/gencode.protein_coding.bed.gz \
+    --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 8
+```
+
+> **Do NOT run the ~75 GB genome-wide variant search on a login node.** It will
+> exhaust shared login-node memory and be killed (and disrupts other users).
+> Submit it with `sbatch`, or use an interactive compute-node session.
 
 ---
 

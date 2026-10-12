@@ -9,6 +9,11 @@ CRISPRitz and the primary CFD scoring are unchanged unless stated otherwise. The
 machine-learning off-target score is **CRISPR-Bulge** (Yaish & Orenstein,
 *Nucleic Acids Res.* 2024); see §8.
 
+**Licence.** CRISPRme+ is released under the **MGB Open Access License 1.0** — free
+for non-commercial, non-revenue-generating academic use; commercial use requires a
+separate commercial licence (for **both** CRISPRme+ and stock CRISPRme). See
+[README §6 License](README.md#6-license).
+
 Sections:
 1. [Variant-aware, dictionary-less data model](#1-variant-aware-dictionary-less-data-model)
 2. [Homogenization and merging of population VCFs](#2-homogenization-and-merging-of-population-vcfs)

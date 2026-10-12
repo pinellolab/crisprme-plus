@@ -89,6 +89,11 @@
         batch analyses? The <strong>Docker quickstart below</strong> and the command line both
         work too.
       </p>
+      <p>
+        <strong>Hardware:</strong> variant-aware whole-genome search needs
+        <strong>~64&nbsp;GB RAM</strong>; reference-only and single-chromosome runs fit
+        <strong>~16&nbsp;GB</strong> and run on any laptop.
+      </p>
       <p class="cta-row">
         <a class="button" href="#run-heading">Get started &darr;</a>
         <a class="secondary" href="https://github.com/pinellolab/crisprme-plus">View on GitHub &rarr;</a>
@@ -311,6 +316,22 @@ docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:latest \
         <p>
           <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/crisprme_data_setup_051826.md">
             Open CLI Guide
+          </a>
+        </p>
+      </div>
+
+      <div class="resource-card">
+        <h3>Methods &amp; Validation</h3>
+        <p>
+          The self-contained technical reference: the variant-aware
+          dictionary-less data model, VCF homogenization and merging,
+          allele-frequency estimation, haplotype scanning, worst-case scoring,
+          functional annotation, the shareable report, and scoring assumptions
+          &amp; limitations.
+        </p>
+        <p>
+          <a href="https://github.com/pinellolab/crisprme-plus/blob/main/METHODS.md">
+            Open Methods
           </a>
         </p>
       </div>

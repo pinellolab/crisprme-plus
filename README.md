@@ -144,7 +144,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 #    ...or the 1000-Genomes-only alternative hg38 + 1000G-2021 index (3,202 samples,
 #    fully phased → CONFIRMED cis + named carriers):
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
 #    ...or the HPRC pangenome index (232 phased assembly-derived genomes incl. CHM13,
 #    CONFIRMED cis + named carriers, pangenome-specific variation, searchable indels):
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HPRC --path /DATA
@@ -270,6 +270,7 @@ so the search above works out of the box on a fresh install.
 <br>4 [Citation](#4-citation)
 <br>5 [Contacts](#5-contacts)
 <br>6 [License](#6-license)
+<br>• [Methods &amp; validation](METHODS.md) — the self-contained technical reference (variant-aware data model, haplotype scanning, worst-case scoring, annotation, report, scoring assumptions &amp; limitations)
 
 ## 0 System Requirements
 
@@ -881,7 +882,11 @@ its purpose and usage:
   <br>Cap on the combined number of edits (mismatches + DNA/RNA bulges) considered
   per candidate off-target, and — when `--bDNA/--bRNA` are omitted — the budget the
   per-type bulge caps are derived from. Lower values speed up dense-variant searches;
-  raise it to recover targets with many simultaneous edits. `-1` disables the cap.
+  raise it to recover targets with many simultaneous edits. A **positive** value is
+  required: set it to `mm + bDNA + bRNA` (the sum of the per-type caps) to keep every
+  requested-depth alignment; **negative values are rejected**. (This is a different
+  knob from the `CRISPRME_IUPAC_CAP` environment variable, where `-1` disables the
+  per-window greedy IUPAC cap — see the high-variant-density section below.)
   <br>NOTE: for a **variant-created** off-target you must also pass `--vcf` (or use a
   precomputed variant index); a reference-only search will not surface it regardless of
   this value.

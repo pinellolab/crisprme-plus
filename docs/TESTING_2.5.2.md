@@ -55,7 +55,7 @@ crisprme.py --version           # expect 2.5.2
 ```bash
 mkdir crisprme_test && cd crisprme_test
 crisprme.py download --what all --path .                                              # reference genome + annotations
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021_HGDP --path .  # genotyped index
+crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path .  # genotyped index
 crisprme.py download --what index --index-name NRG_3_hg38+hg38_mega            --path .  # mega sites-only index
 ```
 > **Docker users:** prefix each command with
