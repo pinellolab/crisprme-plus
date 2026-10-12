@@ -32,7 +32,8 @@
       </p>
       <p>
         To search, you download a prebuilt <strong>index</strong> &mdash; a ready-made search
-        database for a genome + PAM (no building required). Use the <strong>reference</strong>
+        database for a genome + PAM (the short motif a nuclease needs next to its target,
+        e.g. <code>NGG</code> for SpCas9; no building required). Use the <strong>reference</strong>
         index for a basic scan, and a <strong>variant-aware</strong> index (the recommended
         default is the phased HGDP&nbsp;+&nbsp;1000&nbsp;Genomes panel,
         <code>NRG_3_hg38+hg38_HGDP1kGP</code>, 4,091&nbsp;samples) to catch off-targets created by
@@ -53,10 +54,11 @@
           on bulges.</li>
         <li><strong>Cancer-gene flags</strong> &mdash; off-targets in cancer-driver genes are flagged
           via <strong>IntOGen</strong> (on by default); <strong>COSMIC</strong> is licence-gated and
-          opt-in &mdash; alongside ENCODE SCREEN, GENCODE and DHS annotations.</li>
-        <li><strong>Personal-genome search</strong> &mdash; scan an individual's own diploid
-          <strong>assembly</strong>, with a <strong>closest-gene</strong> annotation on every
+          opt-in &mdash; alongside ENCODE SCREEN, GENCODE and DHS annotations and a
+          <strong>closest-gene</strong> annotation (nearest gene + signed distance) on every
           off-target.</li>
+        <li><strong>Personal-genome search</strong> &mdash; scan an individual's own diploid
+          <strong>assembly</strong> directly for off-targets.</li>
         <li><strong>A shareable HTML report</strong> &mdash; ranked, annotated off-target tables you
           can hand to collaborators.</li>
       </ul>
@@ -359,7 +361,8 @@ docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:latest \
       CRISPRme+ is licensed under the
       <a href="https://github.com/pinellolab/crisprme-plus/blob/main/LICENSE">MGB Open Access License 1.0</a>
       for non-commercial, non-revenue-generating academic use.
-      Commercial or for-profit use requires a separate license; please contact
+      Commercial or for-profit use requires a separate license for
+      <strong>both CRISPRme+ and stock CRISPRme</strong>; please contact
       <a href="mailto:lpinello@mgh.harvard.edu">Luca Pinello</a>.
     </p>
   </footer>

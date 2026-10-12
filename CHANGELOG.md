@@ -37,6 +37,18 @@ and the `release-crisprme` skill.
   (`Results/<job>/`). Linked from the README quickstart, the Docker quickstart, and the Data-Manager
   guide.
 
+### Changed
+- **README/website readability pass (new-user experience).** Applied the docs-review nice-to-haves
+  as surgical edits: Quickstart density trimmed (deduplicated the 3× RAM/default-index repeats, index
+  pitch collapsed to the comparison table); Highlights five-index run-on → concise lead + table
+  pointer; the mode/index decision bullet → a tight 2-column table; the report's `Observed`-column
+  cascade and the §6 commercial-licence scenarios → tables; gnomAD-converter "pseudo-individuals"
+  de-duplicated; `assembly-search` added to the function list; §1.1 reframed as the stable-2.1.x
+  path with the CRISPRme+ update guidance first; Docker GPU wording qualified (CPU is the default,
+  GPU optionally accelerates CRISPR-Bulge); `CRISPRITZ_REF` default (v2.9.0) + `http://localhost:8080`
+  documented; a few internal-consistency nits (NGG→NRG example label, "three"→"four" commands,
+  report list renumbered). No facts/commands/versions changed.
+
 ### Fixed
 - **Docs/website review pass (multi-agent section-by-section review, 3 blockers closed):**
   - README default-index per-source split said `HGDP (929) + 1000 Genomes (3162)` — contradicted the
