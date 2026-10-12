@@ -789,7 +789,10 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         "N",  # base editing OFF by default -- the example runs a standard search
         be_window_options,  # be-window-start options (set atomically with the value)
         be_window_options,  # be-window-stop options
-        4,  # Max edits (mismatches + bulges): the binding total-edits cap (== the default)
+        6,  # Max edits (mismatches + bulges): 4 mm + 1 DNA + 1 RNA = 6 -- the recommended
+            # default (matches the slider's own default + the CLI); keeps every bulged site
+            # at the full mismatch budget (nothing pruned). Was 4, which wrongly capped the
+            # example to 4 total edits and pruned 4-mismatch + bulge off-targets.
     ]
 
 
@@ -1282,7 +1285,7 @@ def change_url(
     if advanced_open:
         max_total_edits = int(mms) + int(dna) + int(rna)
     else:
-        max_total_edits = int(max_edits_val) if max_edits_val is not None else 5
+        max_total_edits = int(max_edits_val) if max_edits_val is not None else 6
     max_total_edits = max(1, max_total_edits)
     # Create .Params.txt file
     try:
@@ -3337,7 +3340,7 @@ def sync_max_edits_bound(mms, dna, rna, cur_val) -> Tuple:
         i: {"label": str(i), "style": {"fontSize": "1.25rem"}}
         for i in range(1, new_max + 1)
     }
-    val = min(_as_int(cur_val, 4), new_max)
+    val = min(_as_int(cur_val, 6), new_max)
     return new_max, marks, val
 
 
