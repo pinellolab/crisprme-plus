@@ -26,6 +26,14 @@ DEFAULT_MIN_GB = 32
 # runs fit ~16 GB. See docs/DOCKER_QUICKSTART System Requirements.
 VARIANT_WGS_MIN_GB = 64
 
+# Container/VM memory accounting is lossy: a host provisioned to the recommended
+# amount (e.g. Docker Desktop set to 64 GB) reports a few GB LESS inside the
+# container — GiB-vs-GB plus RAM the VM/kernel reserves — so /proc/meminfo shows
+# ~61-62 GiB for a 64 GB allocation. Compare with this margin so someone who set
+# the recommended amount isn't nagged; the warning still fires for a clearly
+# under-provisioned host.
+_DETECT_MARGIN_GB = 4
+
 
 def _total_memory_bytes():
     """Return total physical RAM in bytes, or None if it cannot be detected.
@@ -114,7 +122,7 @@ def memory_status(required_gb=VARIANT_WGS_MIN_GB):
             return status  # undetectable -> stay silent
         total_gb = total_bytes / (1024 ** 3)
         status["total_gb"] = total_gb
-        if total_gb < status["required_gb"]:
+        if total_gb < status["required_gb"] - _DETECT_MARGIN_GB:
             status["low"] = True
             status["message"] = (
                 "This machine exposes only ~{:.0f} GB of RAM, below the "

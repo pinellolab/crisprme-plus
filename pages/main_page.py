@@ -3168,19 +3168,9 @@ def index_page() -> html.Div:
             id="steps-background",
         )
     )
-    final_list.append(html.Br())
-    final_list.append(
-        html.P(
-            str(
-                "*The offline version of CRISPRme can be downloaded from GitHub "
-                "and offers additional functionalities, including the option to "
-                "input personal data (such as genetic variants, annotations, "
-                "and/or empirical off-target results) as well as custom PAMs and "
-                "genomes. There is no limit on the length or number of spacers, "
-                "mismatches, and/or bulges used in the offline search."
-            )
-        )
-    )
+    # (Removed the legacy "download the offline version for more features" note:
+    # the hosted web service is retired, so a user running this local web interface
+    # already IS the full/offline version — the note only confused local users.)
     # Low-memory pre-flight banner (B-3): a genome-wide variant-aware search (the
     # default) peaks ~64 GB; warn BEFORE Submit on a host that can't provide it so the
     # user isn't silently OOM-killed (exit 137), and point to the escape hatches. Shown

@@ -52,6 +52,22 @@ class TestMemoryStatus(unittest.TestCase):
         s = mc.memory_status()
         self.assertFalse(s["low"])
 
+    def test_detection_margin_tolerates_near_threshold(self):
+        # A host provisioned to the recommended amount reports a few GB less inside
+        # a container; the _DETECT_MARGIN_GB tolerance must not nag it. Set the
+        # threshold just above the detected total (within the margin) -> not low;
+        # well above (beyond the margin) -> low.
+        base = mc.memory_status()
+        if base["total_gb"] is None:
+            self.skipTest("total memory undetectable on this host")
+        total = base["total_gb"]
+        os.environ["CRISPRME_MIN_GB"] = str(total + (mc._DETECT_MARGIN_GB - 1))
+        self.assertFalse(mc.memory_status()["low"],
+                         "a threshold within the detection margin must NOT warn")
+        os.environ["CRISPRME_MIN_GB"] = str(total + mc._DETECT_MARGIN_GB + 6)
+        self.assertTrue(mc.memory_status()["low"],
+                        "a threshold well beyond the margin must warn")
+
     def test_undetectable_memory_stays_silent(self):
         orig = mc._total_memory_bytes
         mc._total_memory_bytes = lambda: None
