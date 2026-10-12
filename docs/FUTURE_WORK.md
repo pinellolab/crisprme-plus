@@ -36,7 +36,7 @@ values, and matching the indel companion's shape); genotyped indices unchanged.
 ## 2. Dense-panel search: per-chromosome parallelism + benchmark
 **Why.** Dense / pamless variant panels are the slowest searches. The combinatorial blow-up itself is
 already tamed (the `--max-edits` bound + the high-variant-density greedy cap `CRISPRME_IUPAC_CAP` +
-the Tier-0 registry cache / O(1) LRU that shipped in 2.5.3 and remains in place as of 2.7.8). What's left is raw throughput: the
+the Tier-0 registry cache / O(1) LRU that shipped in 2.5.3 and remains in place as of 2.7.9). What's left is raw throughput: the
 search still processes contigs largely serially.
 
 **What to build.** Run the dense-panel search **per chromosome in parallel** and **measure** the
