@@ -11,6 +11,8 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.9] - 2026-10-11
+
 ### Added
 - **Web low-memory pre-flight guard.** A new-user review found the clickable-Mac path dead-ends: the
   default first Submit is a genome-wide variant-aware search (peaks ~64 GB) that silently OOM-kills
@@ -2131,7 +2133,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.8...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.9...HEAD
+[2.7.9]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.9
 [2.7.8]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.8
 [2.7.7]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.7
 [2.7.6]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.6
