@@ -63,11 +63,11 @@ class DispatchContract(unittest.TestCase):
              mock.patch.object(ct, "write_pamfile", side_effect=lambda name, *_a, **_k: name), \
              mock.patch.object(ct, "write_guidefile", side_effect=lambda name, *_a, **_k: name), \
              mock.patch.object(ct, "write_sg1617_guidefile", return_value="sg1617.guide.txt"), \
-             mock.patch.object(ct, "_parse_index_name", return_value=("NRG", "hg38_1000G2021", True)), \
+             mock.patch.object(ct, "_parse_index_name", return_value=("NRG", "hg38_HGDP1kGP", True)), \
              mock.patch.object(ct, "glob", return_value=["x.integrated_results.tsv"]), \
              mock.patch("os.path.isdir", return_value=True), \
              mock.patch("os.path.isfile", return_value=True):
-            mreq.return_value = "NRG_3_hg38+hg38_1000G2021"
+            mreq.return_value = "NRG_3_hg38+hg38_HGDP1kGP"
             msub.call.side_effect = lambda cmd, **_k: calls.append(cmd) or 0
             ct.run_crisprme_test("chr22", "1000G", 4, False)
         return calls, mreq.called, mdl.called

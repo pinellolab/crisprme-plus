@@ -38,6 +38,15 @@ and the `release-crisprme` skill.
   guide.
 
 ### Changed
+- **CI + test hygiene.** Removed the redundant `docker-image.yml` workflow (single-arch, no-push,
+  `checkout@v3` EOL — superseded by `docker-multiarch.yml`); wired the two Dash results-page unit
+  tests (`test_results_page_assembly`, `test_results_summary_and_status`) into `web-e2e`; updated the
+  `test_complete_test` mock index from `1000G2021` to the shipped default `HGDP1kGP`. The brute-force
+  `validate-test` gate (exact set-equality vs an exhaustive aligner, fails the build on any mismatch)
+  was audited and confirmed enforced on every PR + push + weekly cron.
+- **complete-test docs (§2.2.2).** Download examples now use the default `NRG_3_hg38+hg38_HGDP1kGP`;
+  added a note distinguishing the modern no-arg smoke (runs against whichever index you downloaded)
+  from the legacy `--vcf_dataset` build-from-raw mode that feeds the `validate-test` gate (1000G only).
 - **README/website readability pass (new-user experience).** Applied the docs-review nice-to-haves
   as surgical edits: Quickstart density trimmed (deduplicated the 3× RAM/default-index repeats, index
   pitch collapsed to the comparison table); Highlights five-index run-on → concise lead + table
