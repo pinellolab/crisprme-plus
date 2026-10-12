@@ -21,6 +21,11 @@ import sys
 # Recommended minimum total RAM (in GB) for CRISPRme's heavy pipelines.
 DEFAULT_MIN_GB = 32
 
+# Measured peak for a genome-wide VARIANT-AWARE search (the web default). A host
+# below this will likely OOM on that workload; reference-only / single-chromosome
+# runs fit ~16 GB. See docs/DOCKER_QUICKSTART System Requirements.
+VARIANT_WGS_MIN_GB = 64
+
 
 def _total_memory_bytes():
     """Return total physical RAM in bytes, or None if it cannot be detected.
@@ -83,3 +88,42 @@ def warn_low_memory(min_gb=DEFAULT_MIN_GB):
     except Exception:
         # Absolutely never let a memory check break the pipeline.
         return
+
+
+def memory_status(required_gb=VARIANT_WGS_MIN_GB):
+    """Return a non-fatal memory-status dict for the UI (never raises).
+
+    ``{"total_gb": float|None, "required_gb": float, "low": bool, "message": str}``.
+    ``low`` is True only when total RAM is reliably detected AND below ``required_gb``
+    (undetectable memory -> low=False, empty message, so the UI stays silent rather
+    than scaring users on hosts we can't measure). Honors CRISPRME_SKIP_MEM_CHECK
+    and CRISPRME_MIN_GB (same overrides as warn_low_memory).
+    """
+    status = {"total_gb": None, "required_gb": float(required_gb), "low": False, "message": ""}
+    try:
+        if os.environ.get("CRISPRME_SKIP_MEM_CHECK") == "1":
+            return status
+        override = os.environ.get("CRISPRME_MIN_GB")
+        if override:
+            try:
+                status["required_gb"] = float(override)
+            except ValueError:
+                pass
+        total_bytes = _total_memory_bytes()
+        if total_bytes is None:
+            return status  # undetectable -> stay silent
+        total_gb = total_bytes / (1024 ** 3)
+        status["total_gb"] = total_gb
+        if total_gb < status["required_gb"]:
+            status["low"] = True
+            status["message"] = (
+                "This machine exposes only ~{:.0f} GB of RAM, below the "
+                "~{:.0f} GB a genome-wide variant-aware search needs — it may run "
+                "out of memory and fail. For a result here, use the reference-only "
+                "index, or restrict the search to a single chromosome/region, or "
+                "raise Docker Desktop memory (Settings -> Resources -> Memory) and "
+                "restart.".format(total_gb, status["required_gb"])
+            )
+    except Exception:
+        return {"total_gb": None, "required_gb": float(required_gb), "low": False, "message": ""}
+    return status

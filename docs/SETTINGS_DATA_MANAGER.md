@@ -83,7 +83,7 @@ CLI-built install and a web-built install are interchangeable.
 | **Personal-assembly search** | `crisprme.py assembly-search --genome-paternal … --genome-maternal … --chain-paternal … --chain-maternal … --chrom-alias-paternal … --chrom-alias-maternal … --guide guides.txt --pam PAMs/<p>.txt --mm <n> --bDNA <n> --bRNA <n> --output <name>` |
 | **Download a reference genome** (UCSC) | `crisprme.py download --what genome --ref <assembly> --source ucsc` |
 | **Download a precomputed index** | `crisprme.py download --what index --index-name <name>` |
-| **Download a VCF dataset** (HuggingFace) | `crisprme.py download --what vcf --dataset <name>` |
+| **Download a VCF dataset** (HuggingFace) | `crisprme.py download --what vcf --dataset <name>` — raw VCFs, only if the repo hosts a `vcfs/<dataset>/` folder; the default repo ships the standard panels as prebuilt **indexes** (use *Download a precomputed index*) |
 | **Fetch an individual from HPRC** | `crisprme.py download --what assembly --sample <id>`  *(e.g. `HG01255`)* |
 | First-run **reference data + annotations** | `crisprme.py download --what all` |
 | **Create (build) an index** — reference or variant | `crisprme.py build-index-only --genome Genomes/<g> --pam PAMs/<p>.txt --bDNA <n> --bRNA <n> [--vcf VCFs/<dataset>]` |

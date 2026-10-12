@@ -227,7 +227,7 @@ docker run --rm pinellolab/crisprme:vX.Y.Z crisprme.py scorer-env check   # runs
 
 # SIF (apptainer): pull from the SAME image and re-check — do NOT ship a SIF that skips this
 apptainer pull crisprme_vX.Y.Z.sif docker://pinellolab/crisprme:vX.Y.Z
-apptainer exec crisprme_vX.Y.Z.sif crisprme.py scorer-env check
+apptainer run crisprme_vX.Y.Z.sif crisprme.py scorer-env check
 ```
 
 `scorer-env check` must report `OK` **and** `compute self-test: OK` for every env. As a final

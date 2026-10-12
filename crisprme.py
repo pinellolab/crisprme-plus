@@ -1823,8 +1823,9 @@ def complete_search() -> None:
     # search (pruned before generation, --max-edits) with a post-search awk drop
     # as a backstop for the -r/brute-force path. Default 6, sized for the recommended
     # default search (4 mismatches + 1 DNA + 1 RNA bulge = 6) so a bulged off-target at the
-    # full mismatch budget is NOT silently pruned; it stays lowerable as a perf backstop and
-    # -1 disables it. (A real off-target rarely stacks many mismatches AND several bulges.)
+    # full mismatch budget is NOT silently pruned; it stays lowerable as a perf backstop.
+    # Must be a non-negative integer (validated below); set it to mm+bDNA+bRNA to keep every
+    # requested-depth alignment. (A real off-target rarely stacks many mismatches AND several bulges.)
     max_total_edits = 6
     if "--max-total-edits" in args:
         try:
@@ -3160,12 +3161,14 @@ def print_help_download() -> None:
         "the default hg38 reference index so a reference scan works out of the box) "
         "[REQUIRED]\n"
         "\t--ref, reference genome name for --what genome/index [default: hg38]\n"
-        "\t--dataset, variant dataset name for --what vcf (e.g. 1000G, HGDP) "
+        "\t--dataset, variant dataset name for --what vcf (e.g. 1000G, HGDP; "
+        "custom --hf-repo only -- the default repo does NOT host these raw VCFs, "
+        "it ships them as prebuilt --what index indexes instead) "
         "[REQUIRED for --what vcf]\n"
         "\t--index-name, precomputed index directory name for --what index "
         "(e.g. the reference index NRG_3_hg38, the recommended variant-aware default "
         "NRG_3_hg38+hg38_HGDP1kGP (phased HGDP + 1000 Genomes, 4,091 samples), or "
-        "NRG_3_hg38+hg38_1000G2021 / NRG_3_hg38+hg38_mega) "
+        "NRG_3_hg38+hg38_1000G2021 / NRG_3_hg38+hg38_HPRC / NRG_3_hg38+hg38_mega) "
         "[REQUIRED for --what index]\n"
         "\t--sample, HPRC individual id for --what assembly (e.g. HG01255) -- fetches "
         "both haplotypes' genome + chain + chromAlias into Assemblies/<sample>/, the "

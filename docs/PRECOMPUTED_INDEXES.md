@@ -30,6 +30,12 @@ separate samples download**:
   combined `<vcf>.samplesID.txt` plus the per-db `<ref>_<db>.samplesID.txt`
   lists), so a downloaded variant index is self-complete.
 
+Throughout this page `<vcf>` is the variant-dataset token resolved from the index name's
+`+<vcf>` segment — for the recommended default `NRG_3_hg38+hg38_HGDP1kGP` it is
+**`hg38_HGDP1kGP`**, so the folders are literally `registry_hg38_HGDP1kGP/`,
+`genotypes_hg38_HGDP1kGP/`, and `hg38_HGDP1kGP.samplesID.txt`. Substitute your own dataset's
+token where you see `<vcf>`, and note that the resolver expects these exact names.
+
 This document covers the download → build → publish workflow. It complements
 Section 3.5 of the data-setup guide (`docs/crisprme_data_setup_051826.md`).
 
@@ -124,8 +130,9 @@ dictionaries, keeping the compact Tier-0/Tier-1 stores), but it does **not** dec
 the index name. A variant index is published and installed under the plain convention
 `<pam>_<N>_<ref>+<vcf>` — e.g. `NRG_3_hg38+hg38_HGDP1kGP`, extracting to
 `genome_library/NRG_3_hg38+hg38_HGDP1kGP/`. The search resolves an index by that
-same convention (the `<ref>` segment == the genome-folder basename; the `+<vcf>` segment
-is shared verbatim with the `genotypes_<vcf>` companion). A reference-only index (no `+`)
+same convention (the `<ref>` segment == the genome-folder basename; the `<vcf>` token after
+the `+` — e.g. `hg38_HGDP1kGP` — is shared verbatim with the Tier-1 `genotypes_<vcf>`
+companion, i.e. `genotypes_hg38_HGDP1kGP`). A reference-only index (no `+`)
 unpacks to a single `genome_library/<name>/` directory plus `manifest.json` and is used
 with no extra steps.
 

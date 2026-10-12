@@ -1,13 +1,18 @@
 # CRISPRme+ — Methods
 
-This document describes the methods introduced in **CRISPRme+** (the 2.3–2.7
-line), intended as a self-contained technical reference and as source material
+This document describes the methods introduced in **CRISPRme+** (the 2.3 through
+2.7.x line; current shipped release 2.7.8), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
 CRISPRitz and the primary CFD scoring are unchanged unless stated otherwise. The
 machine-learning off-target score is **CRISPR-Bulge** (Yaish & Orenstein,
 *Nucleic Acids Res.* 2024); see §8.
+
+**Licence.** CRISPRme+ is released under the **MGB Open Access License 1.0** — free
+for non-commercial, non-revenue-generating academic use; commercial use requires a
+separate commercial licence (for **both** CRISPRme+ and stock CRISPRme). See
+[README §6 License](README.md#6-license).
 
 Sections:
 1. [Variant-aware, dictionary-less data model](#1-variant-aware-dictionary-less-data-model)
@@ -41,9 +46,11 @@ off-target site.
 
 **Analysis-mode decision rule.** The **default** (no flag) is a **population-level**
 worst-possible screen and works on **any** index. Add **`--per-sample`** only on a
-**genotyped** index (`HGDP1kGP` — the recommended default — `1000G2021`, or `HPRC`) when you need named carriers /
+**genotyped** index (`HGDP1kGP` — the recommended default, catalog name
+`NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples, jointly
+SHAPEIT5 re-phased — `1000G2021`, or `HPRC`) when you need named carriers /
 CONFIRMED cis / exact joint AF — it is inert on a sites-only index (`mega`). See
-[§5, Analysis modes](#population-level-analysis-default-and---per-sample-genotype-resolution).
+[§5, Search-space control for high-variant-density regions](#population-level-analysis-default-and---per-sample-genotype-resolution).
 
 ---
 
@@ -115,8 +122,10 @@ compressed registry is used, a decompressed-block **LRU cache** (default 4,096 b
 `CRISPRME_REGISTRY_CACHE_BLOCKS`; each block ~64 KB, filling only to the blocks a search
 touches) amortizes decompression to one pass per block: profiling had shown block
 `zlib` decompression reaching **~71 %** of a dense post-analysis with a tiny cache, and
-the right-sized cache plus an O(1) LRU cut a dense chr22 SNP post-analysis **326 s → 43 s
-(~7.6×)** — but the raw default avoids that cost entirely, which is why 2.5.3 ships raw.
+the right-sized cache plus an O(1) LRU cut a dense chr22 SNP post-analysis **326 s → ~89 s
+(~3.66×)** (measured for the 8→512-block cache step; the speedup is cache-dependent, and the
+default 4,096-block cache extends it to the largest contigs) — but the raw default avoids
+that cost entirely, which is why the registry has shipped raw since 2.5.3 (still raw as of 2.7.8).
 
 ### Out-of-the-box variant search
 Because Tier-0/Tier-1 are small, they are shipped **with the pre-built index**
@@ -240,9 +249,10 @@ source AF exactly, to within `0.5/AN`, and the reported AN is the source's true
 cohort size), and the GLOBAL group carries `AF_max`. Per-individual carrier and
 homozygote counts do not exist for aggregate data, so they are reported as
 Hardy–Weinberg expectations from the allele frequency (the frequency itself is exact;
-carrier/hom are flagged as estimates). The registry stores SNPs only (single-base
+carrier/hom are flagged as estimates). The Tier-0 registry stores SNPs only (single-base
 ref/alt); indels (~24 % of merged sites) are surfaced as off-targets through the
-fake-indel genome but are not yet frequency-annotated in this mode.
+fake-indel genome and **are** per-dataset frequency-annotated via a separate `indel_af`
+sidecar (per-dataset `AF_<dataset>` + `AF_max`), which the report reads for the mega panel.
 
 The two modes are therefore complementary: the genotyped panel gives phased,
 cis-capable frequencies over a curated sample set; the mega gives one-scan,
@@ -348,7 +358,7 @@ input genotypes:
   scoring/PAM/mismatch-budget gates prune subsets that are not in-budget PAM-valid
   targets, and identical subsets carried by different individuals are deduplicated.
   This is the sensitivity-first choice — we never omit a haplotype a real
-  individual could plausibly carry — bounded by `CRISPRME_IUPAC_CAP`: an individual
+  individual could plausibly carry — bounded by `CRISPRME_IUPAC_CAP` (default **10**): an individual
   carrying more variants than the cap in a single window falls back to the union
   (the combinatorial blow-up is confined to that individual, and the dense window
   is surfaced in the high-variant-density BED).
@@ -419,7 +429,8 @@ complementary controls:
   permissive request (e.g. `--mm 6 --bDNA 2 --bRNA 2`, budget 10) still drops any
   alignment needing more than 6 combined edits unless raised. `complete-search` prints
   a WARNING when the cap is below the requested budget; set `--max-total-edits` to
-  `mm+bDNA+bRNA` (or `-1`) to keep all requested-depth off-targets. It bounds the
+  `mm+bDNA+bRNA` (the sum of the requested per-type caps) to keep all requested-depth
+  off-targets. It bounds the
   variant-density combinatorial explosion. (`assembly-search` instead defaults it to
   the full `mm+bDNA+bRNA` budget — a resolved diploid genome has no IUPAC-variant
   lattice, so it needs no variant-density cap.)

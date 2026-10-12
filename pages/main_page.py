@@ -78,6 +78,14 @@ import sys
 import string
 import os
 
+# memory_check lives in PostProcess/, put on sys.path by pages_utils (imported above).
+# Defensive fallback so the web form never fails to render if it is unavailable.
+try:
+    from memory_check import memory_status
+except Exception:
+    def memory_status(*_a, **_k):
+        return {"total_gb": None, "required_gb": 64.0, "low": False, "message": ""}
+
 
 def _sanitize_job_name(job_name: str) -> str:
     """Make a user-supplied job name safe to use as a results directory component.
@@ -3173,6 +3181,32 @@ def index_page() -> html.Div:
             )
         )
     )
+    # Low-memory pre-flight banner (B-3): a genome-wide variant-aware search (the
+    # default) peaks ~64 GB; warn BEFORE Submit on a host that can't provide it so the
+    # user isn't silently OOM-killed (exit 137), and point to the escape hatches. Shown
+    # only when total RAM is reliably detected AND below the variant-WGS threshold —
+    # undetectable -> silent. Computed at layout build, so it reflects the running host.
+    _mem = memory_status()
+    if _mem.get("low"):
+        final_list.insert(
+            0,
+            html.Div(
+                [
+                    html.Span("⚠ Low memory — ", style={"fontWeight": "bold"}),
+                    html.Span(_mem.get("message", "")),
+                ],
+                style={
+                    "backgroundColor": "#fff3cd",
+                    "border": "1px solid #ffeeba",
+                    "color": "#856404",
+                    "borderRadius": "6px",
+                    "padding": "10px 14px",
+                    "margin": "0 0 16px 0",
+                    "fontSize": "1.05rem",
+                    "lineHeight": "1.4",
+                },
+            ),
+        )
     # constrain the whole page to the same centered width as the step-cards so the
     # intro text and footer line up with the submitting form
     index_page = html.Div(

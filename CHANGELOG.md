@@ -12,6 +12,14 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
+- **Web low-memory pre-flight guard.** A new-user review found the clickable-Mac path dead-ends: the
+  default first Submit is a genome-wide variant-aware search (peaks ~64 GB) that silently OOM-kills
+  (exit 137) a typical 16-36 GB laptop. The web form now shows a **pre-Submit warning banner** when the
+  host's detectable RAM is below the variant-aware whole-genome threshold (`memory_check.memory_status`,
+  threshold `VARIANT_WGS_MIN_GB=64`, honoring `CRISPRME_MIN_GB`/`CRISPRME_SKIP_MEM_CHECK`), pointing to
+  the escape hatches (reference-only index, single-chromosome/region, or raise Docker memory). Silent
+  when RAM is undetectable; +7 unit tests. (A dedicated exit-137 message on the load page is a planned
+  fast-follow; the search log already carries the `warn_low_memory` warning.)
 - **`docs/RELEASE_CHECKLIST.md`** — a living release gate: the pre-tag consistency + functional +
   mechanics checks, plus a "regression traps" table that pairs every bug we've shipped (or nearly
   shipped) with the check that catches it. Appended to whenever a release pass finds a new problem.
@@ -59,6 +67,25 @@ and the `release-crisprme` skill.
   report list renumbered). No facts/commands/versions changed.
 
 ### Fixed
+- **Final METHODS + linked-docs review pass (multi-agent, 2 blockers + consistency fixes):**
+  - **`--max-total-edits -1`** — METHODS told users to pass `-1` to keep all off-targets, but the
+    shipped validator rejects negatives (the search aborts). Dropped the `-1` option and fixed the
+    stale in-code comment so doc + comment + validator agree (set it to `mm+bDNA+bRNA`).
+  - **Mega-indel allele frequency** — METHODS said mega indels were "not yet frequency-annotated";
+    they ARE (per-dataset `AF_<dataset>` + `AF_max` via the `indel_af` sidecar, read by the report).
+    Scoped the "SNPs only" statement to the Tier-0 registry.
+  - **`download --what vcf` deprecated in docs** — the raw per-dataset VCFs (`vcfs/1000G/`, `vcfs/HGDP/`)
+    were never hosted on HF, so the command errored. Removed the misleading examples across README,
+    DOCKER_QUICKSTART, the website, the web guide, DATA_LAYOUT and the legacy setup doc; clarified that
+    the standard panels ship as prebuilt **indexes** (whose bundled genotype store covers sample-level
+    analysis — raw VCFs are not needed) and that `--what vcf` is for custom/self-hosted repos. The CLI
+    error now points at `--what index` / `build-inputs/` / `VCFs/<dataset>/`.
+  - Consistency/accuracy: METHODS intro names the full default index + composition and the shipped
+    version; stale present-tense "2.5.3 ships raw" / chrX "forthcoming" anchors reframed/resolved; a
+    registry-cache speedup number reconciled to the source code (326→~89 s, 3.66×); the legacy-setup
+    CRISPRitz-version self-contradiction collapsed to `v2.9.0`; three stale `INPUT_FORMATS` code line
+    citations corrected; `PRECOMPUTED_INDEXES` `<vcf>` token defined once; `CRISPRME_IUPAC_CAP` default
+    (10) stated. Also fixed a README download example that repeated `HGDP1kGP` under a "1000G-only" label.
 - **Docs/website review pass (multi-agent section-by-section review, 3 blockers closed):**
   - README default-index per-source split said `HGDP (929) + 1000 Genomes (3162)` — contradicted the
     correct `925 HGDP + 3,166 1000 Genomes = 4,091` elsewhere in the same file; corrected.

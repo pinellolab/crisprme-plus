@@ -127,13 +127,12 @@ CRISPRme's superpower is finding off-targets created by genetic variants — and
 `NRG_3_hg38+hg38_HGDP1kGP` index you downloaded in step 4 **already** makes the
 default web search variant-aware. You do **not** need the raw VCFs for that.
 
-Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level
-analyses / personal risk cards:
-
-```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what vcf --dataset 1000G --path /DATA
-```
+Sample-level analyses — named carriers, per-sample output, personal risk cards —
+come from the **genotype store that ships with the variant index** (`download --what
+index` fetches it alongside the index unless you pass `--no-genotypes`), not from raw
+VCFs. The default repo does not host raw per-dataset VCFs for the standard panels; the
+prebuilt index (above) already gives you both variant-aware search and sample-level
+resolution.
 
 ## 6. Start the web interface
 
@@ -243,7 +242,23 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 ```
 
 On Singularity/Apptainer the commands are identical, wrapped as
-`apptainer exec --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif crisprme.py ...`.
+`apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif crisprme.py ...`
+(use `apptainer run`, not `apptainer exec` — `exec` bypasses the image entrypoint,
+so `crisprme.py` is not found on `PATH`). The same complete-search, end to end:
+
+```bash
+apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
+  crisprme.py complete-search \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --guide my_guide.txt \
+    --vcf list_vcf.txt --samplesID list_samplesID.txt \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+    --gene_annotation Annotations/gencode.protein_coding.bed.gz \
+    --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 4
+# then build the shareable one-file report:
+apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
+  crisprme.py generate-report --result-dir Results/my_search
+```
 
 ### Run on a GPU (optional)
 
@@ -289,11 +304,9 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
-# optional (advanced): the raw 1000G VCFs (~16 GB) — only for CLI sample-level
-# analyses / personal risk cards; the index above already makes the web search
-# variant-aware
-apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what vcf --dataset 1000G --path /DATA
+# (The index above bundles its genotype store, so sample-level analyses / named
+#  carriers work too — no raw VCFs needed. The default repo does not host raw
+#  per-dataset VCFs; it ships the standard panels as prebuilt indexes.)
 
 # 3. launch the web interface
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
@@ -312,6 +325,37 @@ Two Singularity-specific notes:
 
 Everything else (the web form, results, downloading more indexes) is identical to
 the Docker instructions above.
+
+### Submitting to a scheduler (SLURM)
+
+A genome-wide variant-aware search is a batch job, not a login-node job. Map the
+CRISPRme flags onto your `#SBATCH` directives:
+
+- `--thread N` → `#SBATCH --cpus-per-task N` (match the two; e.g. `--thread 8`
+  with `#SBATCH --cpus-per-task 8`).
+- Memory → `#SBATCH --mem`. A genome-wide variant-aware search peaks at roughly
+  **64–80 GB**, so request e.g. `#SBATCH --mem=80G`.
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=crisprme
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=80G
+#SBATCH --time=24:00:00
+
+apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
+  crisprme.py complete-search \
+    --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
+    --guide my_guide.txt \
+    --vcf list_vcf.txt --samplesID list_samplesID.txt \
+    --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+    --gene_annotation Annotations/gencode.protein_coding.bed.gz \
+    --mm 4 --bDNA 1 --bRNA 1 --output my_search --thread 8
+```
+
+> **Do NOT run the ~75 GB genome-wide variant search on a login node.** It will
+> exhaust shared login-node memory and be killed (and disrupts other users).
+> Submit it with `sbatch`, or use an interactive compute-node session.
 
 ---
 

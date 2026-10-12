@@ -23,7 +23,7 @@ Because it is a normal host directory, you have full read/write access to it at 
 ├─ SHARED INPUTS ── downloaded or built ONCE, reused by EVERY search ──────────────
 │  ├─ Genomes/          reference-genome FASTAs (hg38/, mm39/, …)        download --what genome
 │  ├─ genome_library/   the search INDEXES — reference + variant-aware    download --what index  /  build-index-only
-│  ├─ VCFs/             variant datasets (one folder per dataset)         download --what vcf
+│  ├─ VCFs/             raw variant datasets (one folder per dataset)      your own, or --what vcf (custom repo)
 │  ├─ Dictionaries/     variant registry + per-sample genotype tiers      (companions to the variant indexes)
 │  ├─ samplesIDs/       sample-ID lists for the variant panels
 │  ├─ Annotations/      functional + cancer annotations (DHS, ENCODE SCREEN, GENCODE, IntOGen, COSMIC)

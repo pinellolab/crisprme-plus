@@ -220,7 +220,7 @@ higher-precision, individually-actionable ranking.
 
 - **Re-phasing:** gnomAD HGDP+1kGP dense callset, SHAPEIT5 (`phase_common` scaffold + `phase_rare`,
   skipping the release's `remove_singletons.py` MAC≥2 step), chrX PAR/non-PAR correct ploidy.
-- **Index:** `NRG_3_hg38+hg38_HGDP1kGP`, 4,091 samples (929 HGDP + 3,162 1kGP), 125.2M SNPs + 17.2M
+- **Index:** `NRG_3_hg38+hg38_HGDP1kGP`, 4,091 samples (925 HGDP + 3,166 1kGP), 125.2M SNPs + 17.2M
   indels. HuggingFace `lucapinello/crisprme-data`; default in CRISPRme+ **v2.7.0**
   (`pinellolab/crisprme:v2.7.0`).
 - **Searches:** Point 1 = 6,1,1 `--per-sample` (phased vs hybrid); Point 2 = 4,1,1 (phased vs mega).

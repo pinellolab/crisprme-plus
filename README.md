@@ -144,7 +144,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 #    ...or the 1000-Genomes-only alternative hg38 + 1000G-2021 index (3,202 samples,
 #    fully phased → CONFIRMED cis + named carriers):
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
 #    ...or the HPRC pangenome index (232 phased assembly-derived genomes incl. CHM13,
 #    CONFIRMED cis + named carriers, pangenome-specific variation, searchable indels):
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HPRC --path /DATA
@@ -270,6 +270,7 @@ so the search above works out of the box on a fresh install.
 <br>4 [Citation](#4-citation)
 <br>5 [Contacts](#5-contacts)
 <br>6 [License](#6-license)
+<br>• [Methods &amp; validation](METHODS.md) — the self-contained technical reference (variant-aware data model, haplotype scanning, worst-case scoring, annotation, report, scoring assumptions &amp; limitations)
 
 ## 0 System Requirements
 
@@ -881,7 +882,11 @@ its purpose and usage:
   <br>Cap on the combined number of edits (mismatches + DNA/RNA bulges) considered
   per candidate off-target, and — when `--bDNA/--bRNA` are omitted — the budget the
   per-type bulge caps are derived from. Lower values speed up dense-variant searches;
-  raise it to recover targets with many simultaneous edits. `-1` disables the cap.
+  raise it to recover targets with many simultaneous edits. A **positive** value is
+  required: set it to `mm + bDNA + bRNA` (the sum of the per-type caps) to keep every
+  requested-depth alignment; **negative values are rejected**. (This is a different
+  knob from the `CRISPRME_IUPAC_CAP` environment variable, where `-1` disables the
+  per-window greedy IUPAC cap — see the high-variant-density section below.)
   <br>NOTE: for a **variant-created** off-target you must also pass `--vcf` (or use a
   precomputed variant index); a reference-only search will not surface it regardless of
   this value.
@@ -1827,14 +1832,14 @@ To build a **different PAM** (NGG, NNGRRT, TTTN, …) on the shipped re-phased *
 
 **`complete-search --index-path <dir>`** — reuse a prebuilt/staged index library instead of building one under the working directory. A missing matching index is a hard error (rather than a silent rebuild), which is what you want on a read-only shared mount.
 
-**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `vcf` (with `--dataset`), `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `NRG_3_hg38` reference index so a reference scan works with no on-demand build). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and variant off-target rows require the genotype tier** — omit `--no-genotypes` for full dict-less variant-aware output. Default repo `lucapinello/crisprme-data`, overridable with `--hf-repo` or `CRISPRME_HF_REPO`:
+**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), `vcf` (with `--dataset` — raw per-dataset VCFs, only if the repo hosts a `vcfs/<dataset>/` folder; the default repo ships the standard panels as prebuilt `index`es instead, so this is for custom/self-hosted repos), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `NRG_3_hg38` reference index so a reference scan works with no on-demand build). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and variant off-target rows require the genotype tier** — omit `--no-genotypes` for full dict-less variant-aware output. Default repo `lucapinello/crisprme-data`, overridable with `--hf-repo` or `CRISPRME_HF_REPO`:
 
 ```bash
 crisprme.py download --what all --path /data/crisprme
-crisprme.py download --what vcf --dataset 1000G --path /data/crisprme
 crisprme.py download --what index --index-name NRG_3_hg38 --path /data/crisprme
 crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /data/crisprme           # recommended default (phased HGDP + 1000 Genomes, 4,091 samples)
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /data/crisprme          # 1000-Genomes-only alternative (single-source, phased)
+crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /data/crisprme          # 1000-Genomes-only alternative (single-source, phased)
+crisprme.py download --what assembly --sample HG01255 --path /data/crisprme                            # an HPRC individual's diploid assembly (for assembly-search)
 ```
 
 **`publish-index`** — upload a locally built index to a HuggingFace dataset repository so other machines can skip the build (needs an HF write token via `--token` or `HF_TOKEN`). Add `--dictless` for a variant index to drop the ~152 GB per-sample SNP dicts (the registry + genotype tiers replace them; indel logs kept), upload the genotype store as a separate companion, and bundle the samplesID lists so the index is self-complete:
