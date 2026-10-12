@@ -1,7 +1,7 @@
 # CRISPRme+ — Methods
 
-This document describes the methods introduced in **CRISPRme+** (the 2.3–2.7
-line), intended as a self-contained technical reference and as source material
+This document describes the methods introduced in **CRISPRme+** (the 2.3 through
+2.7.x line; current shipped release 2.7.8), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
@@ -41,9 +41,11 @@ off-target site.
 
 **Analysis-mode decision rule.** The **default** (no flag) is a **population-level**
 worst-possible screen and works on **any** index. Add **`--per-sample`** only on a
-**genotyped** index (`HGDP1kGP` — the recommended default — `1000G2021`, or `HPRC`) when you need named carriers /
+**genotyped** index (`HGDP1kGP` — the recommended default, catalog name
+`NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples, jointly
+SHAPEIT5 re-phased — `1000G2021`, or `HPRC`) when you need named carriers /
 CONFIRMED cis / exact joint AF — it is inert on a sites-only index (`mega`). See
-[§5, Analysis modes](#population-level-analysis-default-and---per-sample-genotype-resolution).
+[§5, Search-space control for high-variant-density regions](#population-level-analysis-default-and---per-sample-genotype-resolution).
 
 ---
 
@@ -115,8 +117,10 @@ compressed registry is used, a decompressed-block **LRU cache** (default 4,096 b
 `CRISPRME_REGISTRY_CACHE_BLOCKS`; each block ~64 KB, filling only to the blocks a search
 touches) amortizes decompression to one pass per block: profiling had shown block
 `zlib` decompression reaching **~71 %** of a dense post-analysis with a tiny cache, and
-the right-sized cache plus an O(1) LRU cut a dense chr22 SNP post-analysis **326 s → 43 s
-(~7.6×)** — but the raw default avoids that cost entirely, which is why 2.5.3 ships raw.
+the right-sized cache plus an O(1) LRU cut a dense chr22 SNP post-analysis **326 s → ~89 s
+(~3.66×)** (measured for the 8→512-block cache step; the speedup is cache-dependent, and the
+default 4,096-block cache extends it to the largest contigs) — but the raw default avoids
+that cost entirely, which is why the registry has shipped raw since 2.5.3 (still raw as of 2.7.8).
 
 ### Out-of-the-box variant search
 Because Tier-0/Tier-1 are small, they are shipped **with the pre-built index**
@@ -349,7 +353,7 @@ input genotypes:
   scoring/PAM/mismatch-budget gates prune subsets that are not in-budget PAM-valid
   targets, and identical subsets carried by different individuals are deduplicated.
   This is the sensitivity-first choice — we never omit a haplotype a real
-  individual could plausibly carry — bounded by `CRISPRME_IUPAC_CAP`: an individual
+  individual could plausibly carry — bounded by `CRISPRME_IUPAC_CAP` (default **10**): an individual
   carrying more variants than the cap in a single window falls back to the union
   (the combinatorial blow-up is confined to that individual, and the dense window
   is surfaced in the high-variant-density BED).

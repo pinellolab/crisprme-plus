@@ -200,9 +200,10 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
       </div>
 
       <p class="note" style="margin-top:1rem">
-        Want variant-aware searches (CRISPRme's speciality)? Also download the
-        1000&nbsp;Genomes variants with <code>&hellip; crisprme.py download --what vcf --dataset 1000G --path /DATA</code>
-        (same <code>docker run</code>/<code>apptainer run</code> wrapper as above). You can skip this for a first run.
+        Want variant-aware searches (CRISPRme's speciality)? The prebuilt variant index
+        downloaded in step&nbsp;2 (<code>NRG_3_hg38+hg38_HGDP1kGP</code>) already enables them —
+        including sample-level named carriers, via the genotype store it bundles. No raw VCFs
+        needed. You can skip the variant index for a reference-only first run.
       </p>
       <p>
         In the browser: enter a guide sequence, pick the PAM and genome, set mismatches

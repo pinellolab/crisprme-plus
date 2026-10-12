@@ -105,12 +105,12 @@ You never have to merge these by hand — that is what "combine everything" mean
 # reference bundle in one shot: genome + annotations + PAMs + sample-ID files
 crisprme.py download --what all --path "$CRISPRME_DIR"
 
-# add a variant dataset (delivered bgzipped, ready to search)
-crisprme.py download --what vcf --dataset 1000G --path "$CRISPRME_DIR"
-crisprme.py download --what vcf --dataset HGDP  --path "$CRISPRME_DIR"
+# variant-aware search: fetch a prebuilt variant index (its bundled genotype store
+# also covers sample-level / named carriers — no raw VCFs needed)
+crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path "$CRISPRME_DIR"
 ```
 
-The default repository is `lucapinello/crisprme-data`; override it with `--hf-repo <org/name>` or the `CRISPRME_HF_REPO` environment variable. FASTA is decompressed automatically after download; VCFs stay bgzipped. You can freely mix sources — e.g. `download` the genome but `setup` the variants, or vice versa.
+The default repository is `lucapinello/crisprme-data`; override it with `--hf-repo <org/name>` or the `CRISPRME_HF_REPO` environment variable. FASTA is decompressed automatically after download. The default repo hosts the reference bundle + prebuilt variant **indexes** (with their genotype stores) + the `build-inputs/` enrichment kits — **not** raw per-dataset VCFs for the standard panels; `download --what vcf --dataset <name>` works only against a repo that hosts a `vcfs/<dataset>/` folder (`--hf-repo`), otherwise build from raw VCFs you place under `VCFs/<dataset>/` yourself (the `setup` path above).
 
 ---
 
@@ -409,20 +409,18 @@ printf 'hg38_1000G.samplesID.txt\nsamplesIDs.MyCohort.txt\n'         > samplesID
 
 The updated 1KG 2021 release (3,202 samples, eagle2/shapeit2-duohmm phased, GRCh38) is a direct upgrade over the legacy 1KG dataset included in the default setup.
 
-> **Known issues in the current CRISPRme release — read before downloading.**
-> The two issues below affect this specific dataset and are fixed in a forthcoming update. Workarounds are provided for each.
+> **Read before downloading — one prep step, one resolved issue.**
 >
-> **Issue 1 — chrX haploid genotypes.**
-> The 2021 release uses eagle2 phasing for chrX, which stores hemizygous male genotypes as bare `0` or `1` (no `|` separator) rather than the diploid `0|0`/`0|1`/`1|1` encoding used for autosomes.
-> **Workaround: download and use chr1–22 only. Do not include the chrX VCF.**
+> **chrX haploid genotypes — RESOLVED in 2.7.8.**
+> The 2021 release uses eagle2 phasing for chrX, which stores hemizygous male genotypes as bare `0` or `1` (no `|` separator) rather than the diploid `0|0`/`0|1`/`1|1` encoding used for autosomes. CRISPRme+ 2.7.8 handles this with PAR-aware ploidy (non-PAR males treated as haploid), so the earlier "chr1–22 only, drop the chrX VCF" workaround is **no longer needed** — you may include the chrX VCF.
 >
-> **Issue 2 — raw FTP filenames do not follow CRISPRme naming conventions.**
+> **Raw FTP filenames do not follow CRISPRme naming conventions.**
 > The FTP files are named `CCDG_14151_B01_GRM_WGS_2020-08-05_chr1.filtered...vcf.gz`. The chromosome is embedded inside the first underscore-delimited segment rather than appearing as its own dot-separated element.
-> **Workaround: rename the files after downloading (Step 2 below).**
+> **Prep: rename the files after downloading (Step 2 below).**
 
-**Step 1 — Download the phased VCFs (chr1–22 only)**
+**Step 1 — Download the phased VCFs (chr1–22 + chrX)**
 
-*Approximate download size: ~20 GB. Run inside `tmux` or `screen`.*
+*Approximate download size: ~20 GB. Run inside `tmux` or `screen`. (chrX is now safe to include — see the resolved-issue note above. Note the chrX file uses the `eagle2-phased.v2` suffix, not the autosomes' `shapeit2-duohmm-phased`, so it is fetched separately below.)*
 
 ```bash
 BASE_URL="https://ftp.1000genomes.ebi.ac.uk/vol1/ftp/data_collections/1000G_2504_high_coverage/working/20201028_3202_phased"
@@ -433,6 +431,10 @@ for chrom in $CHROMS; do
     wget -c "${BASE_URL}/CCDG_14151_B01_GRM_WGS_2020-08-05_${chrom}.filtered.shapeit2-duohmm-phased.vcf.gz" \
          -O "VCFs/hg38_1000G_2021/CCDG_14151_B01_GRM_WGS_2020-08-05_${chrom}.filtered.shapeit2-duohmm-phased.vcf.gz"
 done
+
+# chrX uses a different suffix (eagle2-phased.v2)
+wget -c "${BASE_URL}/CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.v2.vcf.gz" \
+     -O "VCFs/hg38_1000G_2021/CCDG_14151_B01_GRM_WGS_2020-08-05_chrX.filtered.eagle2-phased.v2.vcf.gz"
 ```
 
 **Step 2 — Rename files for CRISPRme compatibility**
@@ -524,7 +526,7 @@ printf 'NNNNNNNNNNNNNNNNNNNNNGG 3\n' > PAMs/20bp-NGG-SpCas9.txt
 
 The 20 leading `N`s define the spacer length; `NGG` is the PAM; `3` is the PAM length in bp. For 5' PAM nucleases (e.g. Cas12a), the PAM bases come first and the position index is negative (e.g. `TTTV` + 20 `N`s with index `-4`). See `docs/INPUT_FORMATS.md` for the full PAM-file specification, including the filename convention (`<length>-<motif>-<Cas>.txt`) and the one-motif-per-file rule.
 
-> **Note (bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`) combined with bulges can trigger a crash in older CRISPRitz engines. CRISPRme prints a non-fatal warning in this case; even-length degenerate motifs such as `TTTV` (Cas12a) are unaffected. The underlying issue is fixed in CRISPRitz ≥ 2.8.3 (bundled with current CRISPRme) (current CRISPRme+ pins CRISPRitz 2.9.0), so it is a caution rather than a blocker — but if you hit an odd-length degenerate PAM with bulges on an older stack, either add one base to make the motif even-length or reduce bulges to 0.
+> **Note (bulges + partially-degenerate odd-length PAMs).** A partially-degenerate IUPAC motif of **odd** length (e.g. `WTN`) combined with bulges can trigger a crash in older CRISPRitz engines. CRISPRme prints a non-fatal warning in this case; even-length degenerate motifs such as `TTTV` (Cas12a) are unaffected. The underlying issue is fixed in CRISPRitz ≥ 2.8.3; CRISPRme+ pins CRISPRitz 2.9.0, so it is a caution rather than a blocker — but if you hit an odd-length degenerate PAM with bulges on an older stack, either add one base to make the motif even-length or reduce bulges to 0.
 
 If a **reference** index for a new PAM does not yet exist, the command-line search builds it on demand from the shipped genome. A **variant-aware** index (a search with `--vcf`) is **never** built on the fly — build it once with `crisprme.py build-index-only` (see Section 3.5) and pass it via `--index-path`, or download a prebuilt one; otherwise the variant search stops with guidance to do so. (The **web interface** likewise asks you to install a matching index first.)
 

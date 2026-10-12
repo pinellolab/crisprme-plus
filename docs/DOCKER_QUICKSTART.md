@@ -127,13 +127,12 @@ CRISPRme's superpower is finding off-targets created by genetic variants — and
 `NRG_3_hg38+hg38_HGDP1kGP` index you downloaded in step 4 **already** makes the
 default web search variant-aware. You do **not** need the raw VCFs for that.
 
-Download the raw 1000 Genomes variant set (~16 GB) only for CLI sample-level
-analyses / personal risk cards:
-
-```bash
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what vcf --dataset 1000G --path /DATA
-```
+Sample-level analyses — named carriers, per-sample output, personal risk cards —
+come from the **genotype store that ships with the variant index** (`download --what
+index` fetches it alongside the index unless you pass `--no-genotypes`), not from raw
+VCFs. The default repo does not host raw per-dataset VCFs for the standard panels; the
+prebuilt index (above) already gives you both variant-aware search and sample-level
+resolution.
 
 ## 6. Start the web interface
 
@@ -289,11 +288,9 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
-# optional (advanced): the raw 1000G VCFs (~16 GB) — only for CLI sample-level
-# analyses / personal risk cards; the index above already makes the web search
-# variant-aware
-apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what vcf --dataset 1000G --path /DATA
+# (The index above bundles its genotype store, so sample-level analyses / named
+#  carriers work too — no raw VCFs needed. The default repo does not host raw
+#  per-dataset VCFs; it ships the standard panels as prebuilt indexes.)
 
 # 3. launch the web interface
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \

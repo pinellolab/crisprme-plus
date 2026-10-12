@@ -87,10 +87,10 @@ This creates the CRISPRme folder structure (`Genomes/`, `PAMs/`, `Annotations/`,
 `VCFs/`, `samplesIDs/`, `genome_library/`, `Results/`) inside `~/crisprme`. The
 pre-downloaded `NRG_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
 4,091 samples — the recommended default) already makes the default web
-search variant-aware — you do **not** need the raw VCFs for that. **Optional
-(advanced):** the raw VCFs are only needed for CLI
-sample-level analyses / personal risk cards:
-`… crisprme.py download --what vcf --dataset 1000G --path /DATA`.
+search variant-aware. Sample-level analyses / named carriers / personal risk cards
+come from the **genotype store bundled with that index** (fetched by `download --what
+index` unless you pass `--no-genotypes`), not from raw VCFs — so a single index
+download covers both. The default repo does not host raw per-dataset VCFs.
 
 ### 2b. Start the local server
 

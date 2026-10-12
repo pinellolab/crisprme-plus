@@ -182,10 +182,10 @@ The PAM is not just a filter — it contributes to the **CFD score**. In
 PAM-dependent factor:
 
 ```python
-score *= pam_scores[pam]
+score *= pam_scores.get(pam, 0.0)
 ```
 
-(`PostProcess/new_simple_analysis.py`, line 123, inside `calc_cfd`.) So an
+(`PostProcess/new_simple_analysis.py`, line 247, inside `calc_cfd` — which begins at line 217.) So an
 otherwise identical off-target can score differently depending on the PAM it
 was found with (e.g. an `NGG` protospacer scores higher than the same site with
 an `NAG` PAM).
@@ -293,8 +293,7 @@ result columns** — they are not interchangeable:
   closest gene / genic context.
 
 Both accept either a plain `.bed` or a bgzipped `.bed.gz` file (the sort helper
-transparently handles both; see `_sort_annotation` in `crisprme.py`, lines
-694–713).
+transparently handles both; see `_sort_annotation` in `crisprme.py`, line 822).
 
 **Sorting.** BEDs must be sorted with BEDOPS/GRCh ordering. As of 2.1.12,
 **both `--annotation` and `--gene_annotation` are auto-sorted for you** — each is
@@ -377,7 +376,7 @@ CRISPRme reports bulges with a **single combined `Bulge_Size` column**
 (DNA + RNA together) plus a **`Bulge_type` column** that indicates which kind of
 bulge it is. There are currently **no separate per-type (DNA vs RNA) bulge
 counts** in the output. See the result header in
-`PostProcess/analisi_indels_NNN.py` (line 404), which lists `Bulge_type` and a
+`PostProcess/analisi_indels_NNN.py` (lines 408–409), which lists `Bulge_type` and a
 single `Bulge_Size` field.
 
 ---

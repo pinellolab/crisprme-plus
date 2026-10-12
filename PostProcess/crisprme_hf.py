@@ -788,9 +788,15 @@ def download_component(
         if not os.path.isdir(src):
             shutil.rmtree(staging, ignore_errors=True)
             raise ValueError(
-                f"No VCF dataset '{dataset}' found in HuggingFace repo '{repo}' "
-                f"(looked for '{remote_prefix}/{dataset}/'). Check --dataset, or "
-                f"the repo may not have this dataset uploaded yet."
+                f"No raw VCF dataset '{dataset}' found in HuggingFace repo '{repo}' "
+                f"(looked for '{remote_prefix}/{dataset}/'). The default repo hosts "
+                f"prebuilt variant-aware INDEXES (with their genotype stores for "
+                f"sample-level analysis), not raw per-dataset VCFs. For variant-aware "
+                f"search use:  crisprme.py download --what index --index-name "
+                f"NRG_3_hg38+hg38_HGDP1kGP  (the genotype store it ships covers carriers "
+                f"and per-sample output). To build your own index from raw VCFs, place "
+                f"them under VCFs/{dataset}/ yourself, or use --hf-repo to point at a "
+                f"repo that hosts '{remote_prefix}/{dataset}/'."
             )
         dest = os.path.join(local_dir, dataset)
         os.makedirs(dest, exist_ok=True)
