@@ -12,6 +12,9 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Added
+- **`docs/RELEASE_CHECKLIST.md`** — a living release gate: the pre-tag consistency + functional +
+  mechanics checks, plus a "regression traps" table that pairs every bug we've shipped (or nearly
+  shipped) with the check that catches it. Appended to whenever a release pass finds a new problem.
 - **`download --what assembly --sample <id>`** — fetch an HPRC individual (both haplotypes' genome +
   chain + chromAlias into `Assemblies/<id>/`) from the command line — the CLI equivalent of the web
   Data Manager's *Fetch from HPRC*. Closes the last CLI↔web gap; `docs/SETTINGS_DATA_MANAGER.md` now
@@ -34,7 +37,32 @@ and the `release-crisprme` skill.
   (`Results/<job>/`). Linked from the README quickstart, the Docker quickstart, and the Data-Manager
   guide.
 
+### Changed
+- **README/website readability pass (new-user experience).** Applied the docs-review nice-to-haves
+  as surgical edits: Quickstart density trimmed (deduplicated the 3× RAM/default-index repeats, index
+  pitch collapsed to the comparison table); Highlights five-index run-on → concise lead + table
+  pointer; the mode/index decision bullet → a tight 2-column table; the report's `Observed`-column
+  cascade and the §6 commercial-licence scenarios → tables; gnomAD-converter "pseudo-individuals"
+  de-duplicated; `assembly-search` added to the function list; §1.1 reframed as the stable-2.1.x
+  path with the CRISPRme+ update guidance first; Docker GPU wording qualified (CPU is the default,
+  GPU optionally accelerates CRISPR-Bulge); `CRISPRITZ_REF` default (v2.9.0) + `http://localhost:8080`
+  documented; a few internal-consistency nits (NGG→NRG example label, "three"→"four" commands,
+  report list renumbered). No facts/commands/versions changed.
+
 ### Fixed
+- **Docs/website review pass (multi-agent section-by-section review, 3 blockers closed):**
+  - README default-index per-source split said `HGDP (929) + 1000 Genomes (3162)` — contradicted the
+    correct `925 HGDP + 3,166 1000 Genomes = 4,091` elsewhere in the same file; corrected.
+  - README report-Summary example cited `3,477 individuals for 1000G+HGDP` (the retired-hybrid
+    panel size) — corrected to `4,091` for `NRG_3_hg38+hg38_HGDP1kGP`.
+  - Website Conda/Mamba path told pre-2.2.0 stock-Bioconda users to run CRISPRme+-only subcommands
+    (`download`, `web-interface`) the stock package lacks — now routes them to the legacy `setup`
+    and points the fast download/web path at the CRISPRme+ Docker/source install.
+  - Also: §2.1 directory list was missing `genome_library` / `Dictionaries` / `Assemblies` and the
+    one-working-folder framing (added, links DATA_LAYOUT.md); `sampleIDs` → `samplesIDs`; website
+    hero now names the shipped default; the first-launch `~45 GB` figure is reconciled with the
+    `~100 GB` disk budget; version-specific "unreleased 2.7.8 / in preparation" prose made
+    version-agnostic; "dict-less" download jargon relabelled "variant-aware".
 - **Web default variant panel now honours the re-phased default.** The first-paint variant-dataset
   seed (`_preferred_variant`) was called without the genome, so its genotyped-**phased** preference +
   sample-count tiebreak were skipped — with two or more phased panels installed it could seed a

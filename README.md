@@ -23,7 +23,7 @@ through an interactive web-based interface.
 
 - **Dictionary-less variant-aware search** — a compact allele-frequency registry + genotype store ship with the index, so variant off-target search (with allele frequencies, rsIDs, and per-dataset provenance) runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
 - **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
-- **Complementary production indexes** — the **recommended default** phased **HGDP + 1000 Genomes** (`NRG_3_hg38+hg38_HGDP1kGP`: 4,091 samples = 925 HGDP + 3,166 1000 Genomes, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout, *including* HGDP's seven genetic regions, with correct chrX PAR allele frequencies — the broadest fully-phased panel of real observed haplotypes), the single-source **1000G-2021** (`NRG_3_hg38+hg38_1000G2021`: 3,202 samples, fully **phased** — a 1000-Genomes-only alternative), the **HPRC pangenome** (`NRG_3_hg38+hg38_HPRC`: 232 phased assembly-derived genomes incl. CHM13 → CONFIRMED cis + named carriers, capturing pangenome-specific variation), and the sites-only five-source **mega** (`NRG_3_hg38+hg38_mega`: + gnomAD v4.1 / TOPMed / All-of-Us, PUTATIVE haplotypes with min-AF bounds, no carriers). All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence. ([details](docs/PRECOMPUTED_INDEXES.md); per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/))
+- **Complementary production indexes** — the **recommended default** is the phased **HGDP + 1000 Genomes** index (`NRG_3_hg38+hg38_HGDP1kGP`: 4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout), with single-source **1000G-2021**, the **HPRC pangenome**, and the sites-only five-source **mega** alternatives. All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence — see the [index comparison table below](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) and [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md). (Per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/).)
 - **Population-level by default; `--per-sample` for genotype resolution** — by default the SNP analysis reports worst-possible representatives per variant window (lossless for detection, tractable on any panel including dense/aggregate ones); add **`--per-sample`** (CLI) or pick **Per-sample** in the web form for CONFIRMED cis phasing + named carriers + exact joint AF on a genotyped panel. This is a **genotype-resolution** dial, not a speed dial — for a single guide the two modes take about the same time; `--per-sample`'s cost shows up only on dense/aggregate panels, and it is inert on a sites-only index. The report states which mode was used. ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution))
 - **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in the default population-level run, **on** under `--per-sample` — on **both the CLI and the web**; override on the CLI with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
@@ -46,7 +46,7 @@ that matter most:
 | SNP+SNP / SNP+indel co-occurrence | not detected | **detected + reported** — **CONFIRMED** (phasing proves cis) / **PUTATIVE**, with joint AF; on by default | Opt out with `CRISPRME_INDEL_SNP=0` ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration)) |
 | Alternative-alignments TSV | always written | **off by default, on under `--per-sample`** (both CLI and web) | Force either way on the CLI with `--alt-alignments` / `--no-alt-alignments` ([methods](METHODS.md#7-shareable-off-target-assessment-report)) |
 | Variant datasets / default index | build-your-own from `--vcf` configs (e.g. 1000G + HGDP) | **precomputed, downloadable** indexes on HuggingFace; recommended default **`NRG_3_hg38+hg38_HGDP1kGP`** (phased HGDP + 1000 Genomes, 4,091 samples → CONFIRMED cis + named carriers), with `1000G2021` / `HPRC` / sites-only `mega` alternatives | `crisprme.py download --what index --index-name …` (Quickstart step 2) ([details](docs/PRECOMPUTED_INDEXES.md)) |
-| License | AGPL-3.0 for academic/non-commercial use **plus a separate commercial license required for commercial use** (dual-licensed — AGPL never covered commercial use) | **MGB Open Access License 1.0** — free for non-commercial / academic use; commercial use **likewise requires a separate commercial license** | See [§6 License](#6-license) |
+| License | AGPL-3.0 for academic/non-commercial use **plus a separate commercial license required for commercial use** (dual-licensed — AGPL never covered commercial use) | **MGB Open Access License 1.0** — free for non-commercial, non-revenue-generating, academic use; commercial use **likewise requires a separate commercial license** | See [§6 License](#6-license) |
 | Report | CFD / CRISTA summaries | adds an **`Observed`** column (`reference` / `N carrier(s)` / `observed` / `putative`), CRISPR-Bulge panels, and a shareable HTML report | Read it in the report ([methods](METHODS.md#7-shareable-off-target-assessment-report)) |
 
 > **Note on the retired flags (CRISPRme+ 2.5.x users only).** `--fast` / `--full` existed
@@ -63,14 +63,16 @@ that matter most:
   on a genotyped index** (`HGDP1kGP` (the default), `1000G2021`, or `HPRC`) when you need named
   carriers / CONFIRMED cis / exact joint AF. It is a genotype-resolution dial, not a
   speed dial.
-- **Index.** `HGDP1kGP` (recommended default, most cases — phased HGDP + 1000 Genomes,
-  4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named carriers throughout,
-  including HGDP's seven genetic regions) → `1000G2021` (1000-Genomes-only alternative:
-  3,202 samples, fully phased → CONFIRMED cis + named carriers) →
-  `HPRC` (assembly / pangenome variation) → **escalate to `mega`** only for a
-  widest-provenance worst-case screen (sites-only, all co-occurrences PUTATIVE, no
-  carriers). See the index table in the
-  [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) below.
+- **Index.** You only need one; pick by what you're after (full detail in the index
+  table in the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build)
+  below):
+
+  | Index | Best for |
+  |---|---|
+  | `HGDP1kGP` *(recommended default)* | most cases — phased HGDP + 1000 Genomes, 4,091 samples → CONFIRMED cis + named carriers throughout |
+  | `1000G2021` | a clean 1000-Genomes-only alternative (3,202 samples, fully phased → CONFIRMED cis + named carriers) |
+  | `HPRC` | assembly / pangenome variation |
+  | `mega` | **escalate here only** for a widest-provenance worst-case screen (sites-only, all co-occurrences PUTATIVE, no carriers) |
 
 > ⚠️ **Note**  
 > The original public CRISPRme web service is no longer available.  
@@ -133,7 +135,7 @@ mkdir -p ~/crisprme && cd ~/crisprme    # your data folder — ALL shared inputs
 #    (this does NOT include the variant index — that is step 2)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what all --path /DATA
 # 2) grab the prebuilt SpCas9 (NRG = NAG+NGG) indexes so no long index build is needed:
-#    the reference index, and the compact dict-less variant-aware hg38 + HGDP + 1000
+#    the reference index, and the compact variant-aware hg38 + HGDP + 1000
 #    Genomes index (the recommended default; phased HGDP + 1000 Genomes, 4,091 samples
 #    jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout,
 #    including HGDP's seven genetic regions; the broadest fully-phased panel of real
@@ -171,7 +173,7 @@ indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever yo
 
 | Index (`--index-name`) | Variant sources | Resolution | Best for |
 |---|---|---|---|
-| **HGDP + 1000 Genomes** — `NRG_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP (929) + 1000 Genomes (3162), genotyped, **jointly SHAPEIT5-re-phased** — 4,091 samples | **CONFIRMED cis** throughout; named per-sample carriers + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) | most use cases; the broadest fully-phased panel of real observed haplotypes |
+| **HGDP + 1000 Genomes** — `NRG_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP (925) + 1000 Genomes (3,166), genotyped, **jointly SHAPEIT5-re-phased** — 4,091 samples | **CONFIRMED cis** throughout; named per-sample carriers + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) | most use cases; the broadest fully-phased panel of real observed haplotypes |
 | **1000G-2021** — `NRG_3_hg38+hg38_1000G2021` | 1000 Genomes 2021 (3202), genotyped, **fully phased** | **CONFIRMED cis** throughout; named per-sample carriers + exact joint AF (all genotyped-phased, no PUTATIVE-from-phasing) | a 1000-Genomes-only alternative — a clean single-source panel of real observed haplotypes |
 | **HPRC pangenome** — `NRG_3_hg38+hg38_HPRC` | HPRC Release 2 Minigraph-Cactus (`hprc-v2.0-mc-grch38`) — 232 assembly-derived genomes incl. CHM13, phased | CONFIRMED cis + named carriers; captures **pangenome-specific** variation | assembly-derived / pangenome variation |
 | **mega (sites-only)** — `NRG_3_hg38+hg38_mega` | 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us (aggregate) | **sites-only** — union of allele frequencies, no genotypes; every multi-variant/co-occurring off-target is **PUTATIVE** with a min-AF bound and **no named carriers** | a conservative worst-case screen when you must not miss a rare allele from ANY of five databases (escalate here after a genotyped-index run) |
@@ -245,7 +247,7 @@ so the search above works out of the box on a fresh install.
 <br>&nbsp;&nbsp;&nbsp;&nbsp;1.1.3 [Updating CRISPRme](#113-updating-crisprme)
 <br>&nbsp;&nbsp;1.2 [Install CRISPRme via Docker](#12-install-crisprme-via-docker)
 <br>&nbsp;&nbsp;&nbsp;&nbsp;1.2.1 [Installing Docker](#121-installing-docker)
-<br>&nbsp;&nbsp;&nbsp;&nbsp;1.2.2 [Building and Pulling CRISPRme Docker Image](#122-building-and-pulling-crisprme-docker-image)
+<br>&nbsp;&nbsp;&nbsp;&nbsp;1.2.2 [Pulling the CRISPRme Docker Image](#122-pulling-the-crisprme-docker-image)
 <br>&nbsp;&nbsp;1.3 [Install CRISPRme from source (without Bioconda)](#13-install-crisprme-from-source-without-bioconda)
 <br>2 [Usage](#2-usage)
 <br>&nbsp;&nbsp;2.1 [Directory Structure](#21-directory-structure)
@@ -276,7 +278,7 @@ Memory scales with the search — pick your tier (measured figures):
 | Search | RAM | Disk |
 |---|---|---|
 | **Reference-only / single-chromosome** (toy or reference-genome runs) | **8–16 GB** | ~22 GB (reference-only install) |
-| **Whole-genome, variant-aware** (e.g. 1000G+HGDP; the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~85 GB (full dict-less install) |
+| **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`NRG_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~85 GB (full variant-aware install) |
 
 The variant-aware genome-wide search is the memory-heavy one: the CRISPRitz search
 process alone peaks around **68–75 GB** loading and traversing the variant index, so
@@ -297,17 +299,17 @@ operating systems. Select the method that best matches your setup:
 
 - [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.7.8)](#12-install-crisprme-via-docker)
 
+- [Install CRISPRme from source (§1.3)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.7.8) line on Python 3.11
+
 - [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
-Each method ensures a streamlined and efficient installation, enabling you to use 
-CRISPRme with minimal effort. Follow the detailed instructions provided in the 
-respective sections below.
-
-### 1.1 Install CRISPRme via Conda/Mamba
+### 1.1 Install CRISPRme via Conda/Mamba (stable 2.1.x line only)
 ---
 
-> **Note:** Conda/Bioconda installs the **stable 2.1.x** line — for CRISPRme+ 2.7.8
-> use [Docker](#12-install-crisprme-via-docker) or [source (§1.3)](#13-install-crisprme-from-source-without-bioconda).
+Conda/Bioconda installs **only the stable 2.1.x line** (Python 3.8) — *not* the
+CRISPRme+ (2.7.x) line. Use this path only if you specifically want the stable
+release; for CRISPRme+ 2.7.8 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
+or [Docker](#12-install-crisprme-via-docker).
 
 This section is organized into three subsections to guide you through the installation 
 and maintenance of CRISPRme:
@@ -361,11 +363,11 @@ By completing these steps, your system will be fully prepared for installing CRI
 #### 1.1.2 Installing CRISPRme
 ---
 
-> **CRISPRme+ (2.7.8) runs on Python 3.11 and installs from source** — the build
+> **CRISPRme+ runs on Python 3.11 and installs from source** — the build
 > compiles CRISPRitz 2.9.0 and installs both tools into a conda environment. A native
-> Bioconda `crisprme=2.7.8` package is **in preparation**; until it lands, the Bioconda
-> `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** this
-> 2.7.8 line.
+> Bioconda package for the CRISPRme+ line is **in preparation**; until it lands, the Bioconda
+> `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** the
+> CRISPRme+ (2.7.x) line.
 
 To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
 (`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
@@ -381,8 +383,13 @@ crisprme.py
 #### 1.1.3 Updating CRISPRme
 ---
 
-To update an existing CRISPRme installation using `Mamba` or `Conda`, follow the 
-steps below:
+> **Updating CRISPRme+ (2.7.8)?** Conda/Bioconda cannot update you to the CRISPRme+
+> line — update via the [source build (§1.3)](#13-install-crisprme-from-source-without-bioconda)
+> or [Docker](#12-install-crisprme-via-docker). The steps below update only the stable
+> 2.1.x Bioconda line.
+
+To update an existing **stable 2.1.x** installation using `Mamba` or `Conda`, follow
+the steps below:
 
 **Step 1: Check the Latest Version**
 
@@ -400,7 +407,6 @@ This updates within the **stable 2.1.x** Bioconda line (latest is `crisprme=2.1.
 ```bash
 mamba install crisprme=2.1.14
 ```
-For **2.7.8 / CRISPRme+**, update via the source build or Docker — there is no Bioconda 2.7.8 package yet.
 If you're using `Conda`, replace `mamba` with `conda` in the commands above.
 
 **Step 3: Verify the Update**
@@ -422,8 +428,8 @@ This section is organized into two subsections to guide you through the setup of
 <br>Provides step-by-step instructions for installing Docker on your system, 
 ensuring compatibility with all operating systems, including Linux, macOS, and Windows.  
 
-- [Building and Pulling CRISPRme Docker Image](#122-building-and-pulling-crisprme-docker-image): 
-  <br>Explains how to create or download the CRISPRme Docker image to set up a 
+- [Pulling the CRISPRme Docker Image](#122-pulling-the-crisprme-docker-image): 
+  <br>Explains how to download the prebuilt CRISPRme Docker image to set up a 
   containerized environment for seamless execution.  
 
 Follow the subsections in order if Docker is not yet installed on your machine. 
@@ -505,10 +511,10 @@ For more examples and ideas, visit:
  https://docs.docker.com/get-started/
 ```
 
-#### 1.2.2 Building and Pulling CRISPRme Docker Image
+#### 1.2.2 Pulling the CRISPRme Docker Image
 ---
 
-After installing Docker, you can download and build the CRISPRme Docker image by 
+After installing Docker, you can download the prebuilt CRISPRme Docker image by 
 running the following command in a terminal:
 ```bash
 docker pull pinellolab/crisprme:latest
@@ -516,8 +522,10 @@ docker pull pinellolab/crisprme:latest
 
 This command retrieves the latest pre-built CRISPRme image from Docker Hub and sets 
 it up on your system, ensuring all required dependencies and configurations are 
-included. `:latest` is the auto-updating, GPU-capable default image; for a fully
-reproducible setup pin the exact release instead, e.g.
+included. `:latest` is the auto-updating default image; it runs on **CPU** out of the
+box (fully supported — this is the default scoring path), and a **GPU can optionally
+accelerate the CRISPR-Bulge scorer** on an NVIDIA host (add `--gpus all` + `--compute-backend
+cuda`). For a fully reproducible setup pin the exact release instead, e.g.
 `docker pull pinellolab/crisprme:v2.7.8`.
 
 Once the download is complete, the CRISPRme Docker image will be ready for use. 
@@ -537,12 +545,12 @@ You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run an unreleased line (e.g. **2.7.8**, Python 3.11 + Dash 2.x) before it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.0 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from source — the recommended path until it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.0 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
 **Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
 
 ```bash
-# 1. clone the repository (2.7.8 development lives on the main branch)
+# 1. clone the repository (the CRISPRme+ development line lives on the main branch)
 git clone https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
@@ -558,7 +566,7 @@ crisprme.py --version
 command -v crispritz.py
 ```
 
-The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then copies `crisprme.py`/`crispritz.py` into `$CONDA_PREFIX/bin` and their support trees into `$CONDA_PREFIX/opt/…`, and creates the dedicated `cbulge` conda env for the CRISPR-Bulge off-target scorer (set `CRISPRME_SKIP_SCORER_ENV=1` to defer it — create it later with `crisprme.py scorer-env create`). Override the CRISPRitz tag with `CRISPRITZ_REF=<tag> bash install_from_source.sh` if needed.
+The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then copies `crisprme.py`/`crispritz.py` into `$CONDA_PREFIX/bin` and their support trees into `$CONDA_PREFIX/opt/…`, and creates the dedicated `cbulge` conda env for the CRISPR-Bulge off-target scorer (set `CRISPRME_SKIP_SCORER_ENV=1` to defer it — create it later with `crisprme.py scorer-env create`). `CRISPRITZ_REF` defaults to the **v2.9.0** tag; override it with `CRISPRITZ_REF=<tag> bash install_from_source.sh` to build a different CRISPRitz revision.
 
 **Smoke-test the install** (downloads a small chr22 dataset, runs the full pipeline, and compares against the committed ground truth):
 
@@ -571,7 +579,7 @@ crisprme.py validate-test --chrom chr22
 Notes:
 - This is exactly the recipe the project `Dockerfile` automates — if you prefer full isolation, build the image instead (Section 1.2).
 - The `assembly-search` subcommand uses the UCSC `liftOver` binary, which is included in `environment.yml` (`ucsc-liftover`).
-- To launch the web interface after installing: `crisprme.py web-interface` (serves on port 8080).
+- To launch the web interface after installing: `crisprme.py web-interface` (serves on port 8080 — open http://localhost:8080).
 
 ## 2 Usage
 
@@ -589,8 +597,12 @@ its usage.
 ---
 
 CRISPRme operates within a specific directory structure to manage input data and 
-outputs efficiently. To ensure proper functionality, your working directory must 
-include the following main subdirectories:
+outputs efficiently. Everything lives inside **one user-owned working folder** (the CLI
+`--path`, Docker `-v $PWD:/DATA`, or Apptainer `--bind $PWD:/DATA --pwd /DATA`). The
+subdirectories below are **shared inputs** reused by every search; each run writes its
+own outputs under `Results/<job>/`. Most of these are created for you by `download` /
+first launch. See [docs/DATA_LAYOUT.md](docs/DATA_LAYOUT.md) for the full reads-vs-writes
+map. The main subdirectories:
 
 - **Genomes** 
     - **Purpose**: Stores reference genomes.
@@ -605,7 +617,7 @@ include the following main subdirectories:
     - **Requirements**: Files must be compressed using `bgzip` (with a `.gz`
     extension).
 
-- **sampleIDs** 
+- **samplesIDs** 
     - **Purpose**: Lists the sample identifiers corresponding to the VCF 
     datasets.
     - **Structure**: Tab-separated files, one for each VCF dataset, specifying 
@@ -619,6 +631,19 @@ include the following main subdirectories:
     - **Purpose**: Specifies the Protospacer Adjacent Motif (PAM) sequences for 
     off-target search.
     - **Format**: Text files containing PAM sequences.
+
+- **genome_library** 
+    - **Purpose**: Holds the built/downloaded **search indexes** (`NRG_3_hg38`,
+    `NRG_3_hg38+hg38_HGDP1kGP`, …) — the largest, most load-bearing directory, where
+    `download --what index` / `build-index-only` place their output.
+
+- **Dictionaries** 
+    - **Purpose**: The variant **registry / genotype / `log_indels` tiers** that
+    variant- and indel-aware post-analysis depends on (fetched alongside a variant index).
+
+- **Assemblies** 
+    - **Purpose**: Per-individual personal assemblies used by `assembly-search`
+    (one folder per individual; `download --what assembly` populates it).
 
 The directory organization required by CRISPRme is illustrated below:
 <p align="center">
@@ -645,6 +670,12 @@ outputs. The following is a summary of CRISPRme's key features:
   search across both reference and variant datasets (if specified), conducts 
   Cutting Frequency Determination (CFD) and CRISPR-Bulge analyses (if applicable), and 
   identifies candidate targets.
+
+- **Assembly Search** (`assembly-search`)
+  <br>Searches a personal / HPRC diploid assembly (paternal + maternal haplotype
+  FASTAs) directly for off-targets, lifting each haplotype to hg38 and reconciling
+  them — no VCF inference. See the
+  [assembly-search web guide](docs/crisprme_web_interface_user_guide.md#searching-a-personal-assembly-genome-assembly-search).
 
 - [**Generate Report**](#229-generate-report) (`generate-report`)
   <br>Builds a self-contained, easily shareable off-target assessment report for a
@@ -739,7 +770,7 @@ Usage Example for the Complete Search function:
     --merge 3 \
     --sorting-criteria-scoring mm+bulges \
     --sorting-criteria mm,bulges \
-    --output sg1617-NGG-1000G-HGDP \
+    --output sg1617-NRG-1000G-HGDP \
     --thread 8
   ```
   (Each argument is documented under **Input Arguments** below.)
@@ -1290,11 +1321,10 @@ The converter currently supports VCF files from the following GNOMAD versions:
 - **v4.0**
 - **v4.1**, including joint VCF files (exomes + genomes).
 
-Since individual sample data are not available in GNOMAD VCFs, the tool relies 
-on population-level groupings. Populations are treated as individual "samples" 
-for the purpose of conversion. This approach supports population-based 
-statistical analyses in CRISPRme, such as identifying population-specific 
-off-targets.
+Since individual sample data are not available in GNOMAD VCFs, the tool treats each
+GNOMAD **population as a pseudo-individual sample**. This supports population-based
+statistical analyses in CRISPRme (such as identifying population-specific off-targets),
+but is not suitable for applications requiring individual-level granularity.
 
 **Note 1**: For studies requiring sample-specific statistics, GNOMAD is not 
 recommended due to its population-level nature.
@@ -1302,11 +1332,6 @@ recommended due to its population-level nature.
 **Note 2**: The GNOMAD Converter function is particularly useful for creating 
 GNOMAD-compatible datasets formatted for CRISPRme's population-aware off-target 
 analysis.
-
-**Note 3**: Since GNOMAD provides population-level data rather than 
-individual-level data, CRISPRme interprets populations as pseudo-individuals. 
-This approach allows meaningful population-level statistics but is not suitable 
-for applications requiring individual-level granularity.
 
 To ensure a smooth conversion process, sample ID files compatible with GNOMAD 
 VCFs must be provided. These files are available for download from the CRISPRme 
@@ -1355,8 +1380,7 @@ Converter function, including detailed explanations and default behaviors:
 
 - `--samplesID` (*Required*)
   <br>Path to a text file containing the sample IDs used during the conversion 
-  process. In this file, GNOMAD populations are treated as pseudo-individual 
-  samples to create population-based VCFs for CRISPRme.
+  process (the per-population sample lists linked above).
 
 - `--joint` (*Optional*)
   <br>Use this flag if GNOMAD VCFs being processed are joint VCFs, such as 
@@ -1396,9 +1420,8 @@ are details about the generated data:
 **Content of the Converted VCFs**
 
 - **Population Representation**
-  <br>Each output VCF treats GNOMAD populations as pseudo-individual samples, 
-  enabling CRISPRme to perform population-based statistical analysis. This 
-  structure is reflected in the sample columns of the output VCFs.
+  <br>The pseudo-individual sample columns (one per GNOMAD population) are written
+  into each output VCF, so CRISPRme can run its population-based statistical analysis.
 
 - **Variant Quality**
   <br>If the `--keep` flag is used, all variants from the input VCF are included,
@@ -1706,30 +1729,33 @@ is under `data/`). Reading top to bottom:
 
 - **1. Summary** — run parameters and an off-target-by-mismatch/bulge matrix. The
   **Analysis inputs & criteria** box's *Variants included* line states the
-  genotyped panel size (e.g. **3,477 individuals** for 1000G+HGDP) and the number
-  of **SNPs** and **indels** searched.
+  genotyped panel size (e.g. **4,091 individuals** for HGDP + 1000 Genomes,
+  `NRG_3_hg38+hg38_HGDP1kGP`) and the number of **SNPs** and **indels** searched.
 - **⚠ Red banner ("no unambiguous on-target")** — appears when a guide has **more
   than one perfect (0-mismatch / 0-bulge) match**: there is then no *a-priori*
   on-target, so every perfect-match site is listed, flagged `Perfect_match = Yes`,
   and forced to the top of the validation panel. (One perfect match = a normal
   amber "presumed on-target" note instead.)
-- **4. Recommended validation panel** — CFD / CRISPR-Bulge / edit-distance threshold
+- **2. Recommended validation panel** — CFD / CRISPR-Bulge / edit-distance threshold
   tables plus a **hybrid worst-case ~100-site panel** (`data/panel_top100.tsv`) to
   seed a targeted-NGS / rhAMP-Seq confirmation assay. Among equally-severe
   candidates the panel **prioritizes sites observed in ≥1 real individual** (see the
   `Observed` column) — real haplotypes are preferred over worst-case reconstructions
   — without ever displacing a strictly-worse site, so worst-case coverage is kept.
 - **`Observed` column** — whether an off-target is supported by **at least one real
-  individual**: `reference` (present in the reference genome — carried by essentially
-  every individual), `N carrier(s)` (a variant site carried by N named individuals in a
-  genotyped panel), `observed` (a single variant with non-zero allele frequency —
-  carried by ≥1 individual by definition, even on a sites-only panel that cannot name
-  the carrier), or `putative` (a multi-variant combination whose cis co-occurrence
-  cannot be confirmed). Under **`--per-sample`** the carrier list is the exact cis
-  carriers, so `putative` cleanly marks reconstructions no one actually carries. On a
-  sites-only panel (e.g. `mega`) there is no carrier roster, so `N carrier(s)` never
-  appears and the panel tie-break is inert, but the column is still shown (values
-  `observed` / `putative`); it is dropped only for a reference-only run.
+  individual**:
+
+  | Value | Meaning | When shown |
+  |---|---|---|
+  | `reference` | Present in the reference genome — carried by essentially every individual | Reference off-targets |
+  | `N carrier(s)` | A variant site carried by N named individuals | Genotyped panel (never on a sites-only panel like `mega`, which has no carrier roster) |
+  | `observed` | A single variant with non-zero allele frequency — carried by ≥1 individual by definition, even where the carrier cannot be named | Any variant-aware run, incl. sites-only panels |
+  | `putative` | A multi-variant combination whose cis co-occurrence cannot be confirmed | Any variant-aware run |
+
+  Under **`--per-sample`** the carrier list is the exact cis carriers, so `putative`
+  cleanly marks reconstructions no one actually carries. On a sites-only panel (e.g.
+  `mega`) the panel tie-break is inert but the column is still shown (values `observed`
+  / `putative`); it is dropped only for a reference-only run.
 - **`Gene_region` column** — where the off-target sits relative to the nearest
   protein-coding gene: `CDS`, `5'UTR`, `3'UTR`, `exon`, `intron`, or `intergenic`.
   It is coherent with `Gene_distance_kb` — `intergenic` iff the distance is `> 0`.
@@ -1774,7 +1800,7 @@ is under `data/`). Reading top to bottom:
 
 #### 2.2.10 Reference-Index and Data-Distribution Commands
 
-Bulge-enabled searches build a CRISPRitz index of the reference genome. `complete-search` does this automatically on the first run and reuses it afterward, but three commands let you control it explicitly — useful for batch jobs, shared clusters, and skipping the build via prebuilt indexes.
+Bulge-enabled searches build a CRISPRitz index of the reference genome. `complete-search` does this automatically on the first run and reuses it afterward, but four commands let you control it explicitly — `build-index-only`, `download`, `publish-index`, and `scorer-env` — useful for batch jobs, shared clusters, and skipping the build via prebuilt indexes.
 
 **`build-index-only`** — build the reusable reference index (into `genome_library/<PAM>_<bulges+1>_<genome>`) without running a search. Pass the same `--genome`/`--pam`/`--bDNA`/`--bRNA` you will search with:
 
@@ -1993,26 +2019,20 @@ non-revenue-generating, academic purposes**.
 > legal advice and is subject to their review.
 
 **Any commercial or for-profit use requires a separate commercial license.** The
-requirement is triggered by the commercial use of **CRISPRme itself or of any
-result, report, or other output it produces** — for example in a clinical trial,
-diagnostic, product, or drug-development program — **regardless of who ran the
-software.** In particular, having an academic or non-profit party run CRISPRme on
-your behalf does **not** confer commercial rights: the free academic license grants
-no commercial rights to the outputs.
+requirement is triggered by the commercial use of CRISPRme itself or of any result,
+report, or other output it produces — for example in a clinical trial, diagnostic,
+product, or drug-development program — **regardless of who ran the software.** In
+particular, having an academic or non-profit party run CRISPRme on your behalf does
+not confer commercial rights: the free academic license grants no commercial rights
+to the outputs.
 
 The model is meant to be fair and to keep CRISPRme widely usable:
 
-- **Academic / non-profit users** use CRISPRme+ freely under MGBOA 1.0 for their own
-  non-commercial, non-revenue-generating research and teaching — no fee, no time limit.
-- **A commercial license covers running CRISPRme and the commercial use of what it
-  produces.** Results generated under a valid commercial license may be used and
-  transferred with the associated program — a downstream party (e.g. after an
-  acquisition or out-licensing) does **not** pay again merely to *use* a result that
-  was generated under a commercial license. A license *is* needed to **run** CRISPRme
-  to produce new results, or to make commercial use of a result that was **not**
-  generated under a commercial license.
-- **Service providers / CROs** that run CRISPRme to produce results for third
-  parties require a commercial (service-provider) license.
+| Scenario | Needs a commercial license? |
+|---|---|
+| Academic / non-profit user, for their own non-commercial, non-revenue-generating research and teaching | No — free under MGBOA 1.0 (no fee, no time limit) |
+| Commercial / for-profit use of CRISPRme or of a result it produces (clinical trial, diagnostic, product, drug-development program) | Yes — covers **running** CRISPRme and the commercial use of what it produces. A result generated under a valid commercial license may then be used and transferred with the associated program (e.g. after an acquisition or out-licensing) with **no** repeat fee merely to *use* it |
+| Service provider / CRO running CRISPRme to produce results for third parties | Yes — a commercial (service-provider) license |
 
 **No warranty.** CRISPRme and its outputs are provided **"AS IS", without warranty
 of any kind**; predictions are computational, may contain false positives and false

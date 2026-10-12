@@ -32,10 +32,12 @@
       </p>
       <p>
         To search, you download a prebuilt <strong>index</strong> &mdash; a ready-made search
-        database for a genome + PAM (no building required). Use the <strong>reference</strong>
-        index for a basic scan, and a <strong>variant-aware</strong> index (e.g.
-        1000&nbsp;Genomes-2021, or&nbsp;+&nbsp;HGDP) to catch off-targets created by human
-        genetic variants &mdash; CRISPRme's main feature. The quickstart below downloads one
+        database for a genome + PAM (the short motif a nuclease needs next to its target,
+        e.g. <code>NGG</code> for SpCas9; no building required). Use the <strong>reference</strong>
+        index for a basic scan, and a <strong>variant-aware</strong> index (the recommended
+        default is the phased HGDP&nbsp;+&nbsp;1000&nbsp;Genomes panel,
+        <code>NRG_3_hg38+hg38_HGDP1kGP</code>, 4,091&nbsp;samples) to catch off-targets created by
+        human genetic variants &mdash; CRISPRme's main feature. The quickstart below downloads one
         for you.
       </p>
     </section>
@@ -52,10 +54,11 @@
           on bulges.</li>
         <li><strong>Cancer-gene flags</strong> &mdash; off-targets in cancer-driver genes are flagged
           via <strong>IntOGen</strong> (on by default); <strong>COSMIC</strong> is licence-gated and
-          opt-in &mdash; alongside ENCODE SCREEN, GENCODE and DHS annotations.</li>
-        <li><strong>Personal-genome search</strong> &mdash; scan an individual's own diploid
-          <strong>assembly</strong>, with a <strong>closest-gene</strong> annotation on every
+          opt-in &mdash; alongside ENCODE SCREEN, GENCODE and DHS annotations and a
+          <strong>closest-gene</strong> annotation (nearest gene + signed distance) on every
           off-target.</li>
+        <li><strong>Personal-genome search</strong> &mdash; scan an individual's own diploid
+          <strong>assembly</strong> directly for off-targets.</li>
         <li><strong>A shareable HTML report</strong> &mdash; ranked, annotated off-target tables you
           can hand to collaborators.</li>
       </ul>
@@ -81,7 +84,8 @@
         <code>irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex</code>.
         It needs <a href="https://www.docker.com/products/docker-desktop/">Docker Desktop</a>
         (the installer guides you if it is missing) and downloads the reference + default
-        variant data (~45&nbsp;GB) on first launch. Prefer the terminal, or want to script /
+        variant data (~45&nbsp;GB download; budget &asymp;&nbsp;100&nbsp;GB disk for the full
+        variant-aware setup, far less for reference-only) on first launch. Prefer the terminal, or want to script /
         batch analyses? The <strong>Docker quickstart below</strong> and the command line both
         work too.
       </p>
@@ -239,9 +243,11 @@ mamba create -n crisprme crisprme -y
 mamba activate crisprme
 crisprme.py --version</code></pre>
         <p>
-          Then fetch data the fast way just like the container path
-          (<code>crisprme.py download --what all --path "$PWD"</code>) and launch the
-          interface with <code>crisprme.py web-interface</code>.
+          This Bioconda package is the pre-2.2.0 stable CRISPRme, so its data setup uses the
+          legacy <code>crisprme.py setup</code> subcommand (it does <em>not</em> have the fast
+          <code>download</code> / <code>web-interface</code> commands). The fast CDN
+          <code>download</code> flow and the web interface shown above are <strong>CRISPRme+</strong>
+          features &mdash; use the Docker quickstart (or the build-from-source path below) for them.
         </p>
 
         <h3>Build the full reference database from the original sources</h3>
@@ -355,7 +361,8 @@ docker run -v ${PWD}:/DATA -w /DATA -i pinellolab/crisprme:latest \
       CRISPRme+ is licensed under the
       <a href="https://github.com/pinellolab/crisprme-plus/blob/main/LICENSE">MGB Open Access License 1.0</a>
       for non-commercial, non-revenue-generating academic use.
-      Commercial or for-profit use requires a separate license; please contact
+      Commercial or for-profit use requires a separate license for
+      <strong>both CRISPRme+ and stock CRISPRme</strong>; please contact
       <a href="mailto:lpinello@mgh.harvard.edu">Luca Pinello</a>.
     </p>
   </footer>
