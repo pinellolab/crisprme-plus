@@ -1862,25 +1862,14 @@ def complete_search() -> None:
             pam_len = end_idx
             pam_begin = False
 
-    # Issue #105: a partially-degenerate PAM motif (IUPAC codes W/R/Y/S/K/M/B/D/H/V)
-    # combined with bulges can crash the underlying CRISPRitz search engine with a
-    # heap-corruption error ("free(): invalid pointer"). The observed trigger is an
-    # odd-length degenerate motif (e.g. WTN); even-length ones such as TTTV (Cas12a)
-    # are stable, so this is a scoped, NON-FATAL warning (never blocks a valid run).
-    # The root cause is fixed in CRISPRitz 2.7.1; CRISPRme will pin to it in a later
-    # release. Until then, surface a clear message instead of a cryptic C++ abort.
-    if (
-        bMax > 0
-        and pam_len % 2 == 1
-        and any(c in "WRYSKMBDHV" for c in pam_char.upper())
-    ):
-        sys.stderr.write(
-            f"WARNING: PAM motif '{pam_char}' is a partially-degenerate, odd-length "
-            "motif used with bulges. This combination can crash the underlying "
-            "search engine (issue #105, fixed in CRISPRitz 2.7.1). If the search "
-            "aborts with a memory error, retry without bulges or use a "
-            "fully-specified PAM.\n"
-        )
+    # Issue #105 (odd-length partially-degenerate PAM + bulges crashing the CRISPRitz
+    # C++ engine with a heap-corruption abort) was fixed in CRISPRitz, and CRISPRme+
+    # hard-pins CRISPRitz 2.9.0 on every install surface (Docker builds crispritz_ref
+    # v2.9.0, install_from_source.sh builds 2.9.0, Bioconda pins crispritz >=2.9.0).
+    # No supported install can therefore run a vulnerable engine, so the old runtime
+    # warning here was removed: it fired on the DEFAULT PAM (NRG is odd-length and
+    # carries the partially-degenerate "R"), crying wolf on essentially every default
+    # search about a crash that cannot occur on the shipped stack.
 
     genome_ref = os.path.basename(genomedir)
     annotation_name = os.path.basename(annotationfile)

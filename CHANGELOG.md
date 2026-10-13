@@ -20,6 +20,14 @@ and the `release-crisprme` skill.
   there. The tab-toggle callback now hides the Analysis-mode block when the Personal-assembly tab is
   active and restores it for the reference-genome tab.
 
+### Removed
+- **Removed the stale "odd-length degenerate PAM + bulges can crash the search engine (issue #105)"
+  runtime warning.** It fired on the *default* PAM (`NRG` is odd-length and carries the
+  partially-degenerate `R`), so it cried wolf on essentially every default search — about a CRISPRitz
+  C++ crash that was fixed upstream. CRISPRme+ hard-pins CRISPRitz 2.9.0 on every install surface
+  (Docker `crispritz_ref=v2.9.0`, `install_from_source.sh`, Bioconda `crispritz >=2.9.0`), so no
+  supported install can run a vulnerable engine. The `docs/` note is reworded to historical.
+
 ### Fixed
 - **Web "Load Example" no longer prunes bulged off-targets.** The Load Example button set the
   "Maximum edits" total-edit cap to 4 while loading 4 mm + 1 DNA + 1 RNA bulge, so `--max-total-edits=4`
