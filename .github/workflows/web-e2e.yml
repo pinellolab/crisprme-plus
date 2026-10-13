@@ -44,6 +44,14 @@ jobs:
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_variant_dropdown.py
 
+      # Max-edits default: the 'Load Example' cap must equal mm+bDNA+bRNA (=6), so a
+      # bulged site at the full mismatch budget is never pruned (regression guard).
+      - name: Max-edits default regression
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            crisprme:web python -u /t/test_max_edits_default.py
+
       # Annotation manager: BED validation, the per-genome enabled-set manifest
       # (incl. the annotations-on-by-default backward-compat behaviour), and
       # active-annotation assembly (bundle-only fast path, empty case, multi-bed

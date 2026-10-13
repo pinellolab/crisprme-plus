@@ -12,6 +12,12 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Fixed
+- **Web "Load Example" no longer prunes bulged off-targets.** The Load Example button set the
+  "Maximum edits" total-edit cap to 4 while loading 4 mm + 1 DNA + 1 RNA bulge, so `--max-total-edits=4`
+  silently dropped every 4-mismatch-plus-bulge site (bulges had no headroom at the full mismatch
+  budget). The cap is now 6 (= mm + bDNA + bRNA, the recommended default; matches the slider's own
+  default and the CLI), and two inconsistent fallback defaults (5, 4) were aligned to 6. +1 regression
+  test (`test/web/test_max_edits_default.py`, wired into web-e2e).
 - **Web low-memory banner no longer nags a correctly-provisioned host.** A host set to the
   recommended ~64 GB reports a few GB less inside a container (GiB-vs-GB + VM reservation), so the
   banner fired even when Docker was set to 64 GB. Added a detection margin (`_DETECT_MARGIN_GB`), so
