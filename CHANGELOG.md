@@ -14,6 +14,11 @@ and the `release-crisprme` skill.
 ### Changed
 - **Web Contacts page:** added Ann Cirincione under the Pinello Lab, and reworded "Please send any
   comments to Luca Pinello only" → "…to Luca Pinello" (dropped "only").
+- **Web form hides the "Analysis mode" selector for a personal-assembly search.** Population-level vs
+  per-sample resolves genotypes across a multi-sample variant *panel*; a personal-assembly search
+  works on one individual's own two haplotypes (no panel to resolve), so the control is irrelevant
+  there. The tab-toggle callback now hides the Analysis-mode block when the Personal-assembly tab is
+  active and restores it for the reference-genome tab.
 
 ### Fixed
 - **Web "Load Example" no longer prunes bulged off-targets.** The Load Example button set the

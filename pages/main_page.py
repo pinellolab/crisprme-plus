@@ -2830,6 +2830,7 @@ def index_page() -> html.Div:
                         style={"font-size": "1.25rem", "color": "#555"},
                     ),
                 ],
+                id="analysis-mode-container",
                 style={"max-width": "420px", "margin-bottom": "12px"},
             ),
             # ADVANCED: per-type mismatch / bulge caps, hidden by default.
@@ -3285,6 +3286,7 @@ def toggle_advanced_thresholds(n_clicks: int, is_open: bool) -> Tuple:
     [
         Output("regular-submit-fields", "style"),
         Output("assembly-submit-fields", "style"),
+        Output("analysis-mode-container", "style"),
     ],
     [Input("genome-mode-tabs", "active_tab")],
     prevent_initial_call=True,
@@ -3298,11 +3300,22 @@ def toggle_assembly_search_panel(active_tab: str) -> Tuple:
     callback only has the submit-button swap left to do, unlike the old
     collapsible-toggle version it replaced, which also had to manually
     show/hide the regular-genome-fields div and the toggle button's own
-    label."""
+    label.
+
+    Also HIDES the Analysis-mode (population-level vs per-sample) block for a
+    personal-assembly search: per-sample resolves genotypes across a multi-sample
+    variant PANEL, which does not apply to a single individual's own diploid
+    assembly (assembly-search always searches that individual's two haplotypes),
+    so the control is irrelevant there and would only confuse."""
     is_assembly = active_tab == "tab-personal-assembly"
     hidden = {"display": "none"}
     shown = {}
-    return (hidden if is_assembly else shown), (shown if is_assembly else hidden)
+    analysis_mode_shown = {"max-width": "420px", "margin-bottom": "12px"}
+    return (
+        hidden if is_assembly else shown,
+        shown if is_assembly else hidden,
+        hidden if is_assembly else analysis_mode_shown,
+    )
 
 
 @app.callback(
