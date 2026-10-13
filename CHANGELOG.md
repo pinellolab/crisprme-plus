@@ -11,6 +11,10 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Changed
+- **Web Contacts page:** added Ann Cirincione under the Pinello Lab, and reworded "Please send any
+  comments to Luca Pinello only" → "…to Luca Pinello" (dropped "only").
+
 ### Fixed
 - **Web "Load Example" no longer prunes bulged off-targets.** The Load Example button set the
   "Maximum edits" total-edit cap to 4 while loading 4 mm + 1 DNA + 1 RNA bulge, so `--max-total-edits=4`
