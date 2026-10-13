@@ -32,7 +32,7 @@ from dash import html
 # NOTE: the following list could be changed during time
 INFOMICS_DEVS = ["Manuel Tognon", "Nicola Bombieri", "Rosalba Giugno"]
 INFOMICS_AFF = "Department of Computer Science, University of Verona, Italy"
-PINELLOLAB_DEVS = ["Luca Pinello"]
+PINELLOLAB_DEVS = ["Luca Pinello", "Ann Cirincione"]
 PINELLOLAB_AFF = (
     "Molecular Pathology Unit and Center for Cancer Research, Massachusetts " 
     "General Hospital, Charlestown, MA, USA; Department of Pathology, Harvard " 
@@ -132,7 +132,7 @@ def contact_page() -> List:
             html.H3("Contacts"),
             html.P("CRISPRme developers:"),
             devs(),
-            html.P("Please send any comments to Luca Pinello only:"),
+            html.P("Please send any comments to Luca Pinello:"),
             emails(),
             html.P("For bugs, please open an issue on GitHub:"),
             html.A(f"{GITHUB_LINK}/issues", href=f"{GITHUB_LINK}/issues", target="_blank")
