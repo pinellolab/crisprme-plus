@@ -32,6 +32,16 @@ and the `release-crisprme` skill.
   there. The tab-toggle callback now hides the Analysis-mode block when the Personal-assembly tab is
   active and restores it for the reference-genome tab.
 
+### Fixed
+- **`targets-scoring` DNA-bulge CFD** now matches CRISPRme's reported CFD convention for in-place
+  (Cas-OFFinder / report-style) alignments. The first cut front-trimmed the first `bulge_size`
+  columns (a crispritz raw-format assumption), which misaligns an in-place gap that isn't at the
+  5' end. It now DELETES the gap column(s) (the looped-out DNA base) from both strands and scores
+  20-vs-20, so CFD's position weights stay guide-indexed. Verified against a real CRISPRme report:
+  mismatch + RNA-bulge rows reproduce the reported CFD exactly; DNA-bulge CFD is the standard
+  bulged-base-excluded value (CRISPRme's internal DNA-bulge gap placement isn't recoverable from an
+  in-place alignment, so it stays a documented caveat). Updated `test_dna_bulge_delete_gap`.
+
 ### Removed
 - **Removed the stale "odd-length degenerate PAM + bulges can crash the search engine (issue #105)"
   runtime warning.** It fired on the *default* PAM (`NRG` is odd-length and carries the
