@@ -31,6 +31,11 @@ and the `release-crisprme` skill.
   works on one individual's own two haplotypes (no panel to resolve), so the control is irrelevant
   there. The tab-toggle callback now hides the Analysis-mode block when the Personal-assembly tab is
   active and restores it for the reference-genome tab.
+- **Web form shows an annotation note.** The per-search annotation selector was removed earlier, which
+  obscured that searches are still annotated by default. The form now carries a short note that results
+  are annotated with the functional regions enabled in Settings → Annotations (DHS, ENCODE SCREEN cCREs,
+  GENCODE, COSMIC by default) plus the closest gene, and that tracks can be toggled — or a custom
+  annotation added — there. (No new control; discoverability only.)
 
 ### Fixed
 - **No more spurious `BiopythonWarning` at CLI startup.** `dash-bootstrap-components`' sdist drops a
