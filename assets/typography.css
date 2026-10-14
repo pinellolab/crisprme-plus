@@ -11,6 +11,19 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 1.25rem;
 }
 
+/* dcc.Dropdown: long option labels (e.g. the variant-index entries) were overflowing
+   their fixed row height and overlapping the next entry after repeated opens. Let the
+   text WRAP within the row and vertically center it; pairs with optionHeight on the
+   wider dropdowns (e.g. variant-dataset) so consecutive entries never collide. */
+.VirtualizedSelectOption,
+.Select-menu-outer .Select-option {
+    white-space: normal;
+    line-height: 1.35;
+    word-break: break-word;
+    display: flex;
+    align-items: center;
+}
+
 .btn-secondary{
     background-color: unset;
     border : none;

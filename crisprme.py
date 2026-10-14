@@ -1,5 +1,16 @@
 #!/usr/bin/env python
 
+# dash-bootstrap-components' sdist drops a pyproject.toml directly into
+# site-packages/, which Biopython's Bio/__init__.py misreads as "importing from a
+# source tree" and warns about at import -- a harmless false positive. The Docker
+# image strips that stray file (see Dockerfile); conda/source installs may still
+# carry it, so silence that one message before importing Bio so a clean
+# `crisprme.py --version` (etc.) doesn't print a spurious BiopythonWarning.
+import warnings as _warnings
+_warnings.filterwarnings(
+    "ignore", message=r".*importing Biopython from inside the source tree.*"
+)
+
 from typing import List, NoReturn, Tuple
 from Bio.Seq import Seq
 

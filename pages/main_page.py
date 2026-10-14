@@ -2618,6 +2618,11 @@ def index_page() -> html.Div:
                                         value=_def_variants,
                                         clearable=False,
                                         id="variant-dataset",
+                                        # variant-index labels are long (index name +
+                                        # data-type description); give each option room
+                                        # for ~2 wrapped lines so entries don't overlap
+                                        # (the .VirtualizedSelectOption CSS lets them wrap).
+                                        optionHeight=56,
                                         style={"width": "300px"},
                                     ),
                                 ),
