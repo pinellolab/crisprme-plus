@@ -31,8 +31,23 @@ and the `release-crisprme` skill.
   works on one individual's own two haplotypes (no panel to resolve), so the control is irrelevant
   there. The tab-toggle callback now hides the Analysis-mode block when the Personal-assembly tab is
   active and restores it for the reference-genome tab.
+- **Web form shows an annotation note.** The per-search annotation selector was removed earlier, which
+  obscured that searches are still annotated by default. The form now carries a short note that results
+  are annotated with the functional regions enabled in Settings → Annotations (DHS, ENCODE SCREEN cCREs,
+  GENCODE, COSMIC by default) plus the closest gene, and that tracks can be toggled — or a custom
+  annotation added — there. (No new control; discoverability only.)
 
 ### Fixed
+- **No more spurious `BiopythonWarning` at CLI startup.** `dash-bootstrap-components`' sdist drops a
+  `pyproject.toml` into `site-packages/`, which Biopython misreads as "importing from a source tree"
+  and warns about on every `crisprme.py` invocation. The Docker image already strips that stray file;
+  conda/source installs did not, so `crisprme.py --version` printed the warning. Now silenced in two
+  places: `crisprme.py` filters that one message before importing Bio (covers any install), and
+  `install_from_source.sh` removes the stray file (matching the Dockerfile).
+- **Web dropdown options no longer overlap for long labels.** The variant-index dropdown's long entries
+  overflowed their fixed row height and collided with the next entry after repeated opens. The
+  `variant-dataset` dropdown now reserves room for wrapped labels (`optionHeight`), and a CSS rule lets
+  option text wrap and centers it within the row.
 - **`targets-scoring` DNA-bulge CFD** now matches CRISPRme's reported CFD convention for in-place
   (Cas-OFFinder / report-style) alignments. The first cut front-trimmed the first `bulge_size`
   columns (a crispritz raw-format assumption), which misaligns an in-place gap that isn't at the

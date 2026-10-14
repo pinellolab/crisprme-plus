@@ -2618,6 +2618,11 @@ def index_page() -> html.Div:
                                         value=_def_variants,
                                         clearable=False,
                                         id="variant-dataset",
+                                        # variant-index labels are long (index name +
+                                        # data-type description); give each option room
+                                        # for ~2 wrapped lines so entries don't overlap
+                                        # (the .VirtualizedSelectOption CSS lets them wrap).
+                                        optionHeight=56,
                                         style={"width": "300px"},
                                     ),
                                 ),
@@ -2973,9 +2978,20 @@ def index_page() -> html.Div:
         ],
         style={"margin-top": "16px", "border-top": "1px solid #eef2f4", "padding-top": "12px"},
     )
-    # annotations dropdown
-    # (annotation selector removed: searches apply the annotations enabled in
-    # Settings -> Annotations; nothing to pick on the form.)
+    # annotation note (no per-search selector: searches apply the annotations enabled
+    # in Settings -> Annotations, on by default). Surface that here for discoverability
+    # and point to Settings to toggle tracks or add a custom annotation.
+    annotation_note_content = dbc.FormText(
+        [
+            "Results are annotated automatically with the functional regions enabled in ",
+            html.A("Settings → Annotations", href=os.path.join(URL, "settings")),
+            " (DHS, ENCODE SCREEN cCREs, GENCODE and COSMIC by default), plus the "
+            "closest gene. You can enable or disable tracks — or add your own custom "
+            "annotation — there.",
+        ],
+        color="secondary",
+        style={"fontSize": "1.25rem"},
+    )
     # mail box
     mail_content = html.Div(
         [
@@ -3157,6 +3173,8 @@ def index_page() -> html.Div:
                         html.Div([thresholds_content, base_editing_content]),
                         html.Div(
                             [
+                                annotation_note_content,
+                                html.Br(),
                                 mail_content,
                                 job_name_content,
                                 html.Br(),

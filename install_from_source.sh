@@ -75,6 +75,13 @@ cp -R "${REPO}/." "${CONDA_PREFIX}/opt/crisprme/"
 rm -rf "${CONDA_PREFIX}/opt/crisprme/.git"
 cp "${CONDA_PREFIX}/opt/crisprme/crisprme.py" "${CONDA_PREFIX}/bin/crisprme.py"
 chmod +x "${CONDA_PREFIX}/bin/crisprme.py"
+
+# dash-bootstrap-components' sdist drops a pyproject.toml directly into site-packages/,
+# which Biopython's Bio/__init__.py misreads as "importing from a source tree" and warns
+# about at import (harmless false positive). Remove it if present (no-op otherwise) so
+# `crisprme.py` starts clean -- mirrors the Dockerfile's cleanup.
+rm -f "${CONDA_PREFIX}"/lib/python*/site-packages/pyproject.toml
+
 # the legacy RandomForest scorer was retired in favor of CRISPR-Bulge; there is no 276 MB model to unzip here
 # anymore. CFD's tiny score pickles ship as plain files; the CRISPR-Bulge model is
 # provisioned into its own conda env below.
