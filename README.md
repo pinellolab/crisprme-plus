@@ -263,6 +263,7 @@ so the search above works out of the box on a fresh install.
 <br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.8 [Local Web Interface](#228-local-web-interface)
 <br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.9 [Generate Report](#229-generate-report)
 <br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.10 [Reference-Index and Data-Distribution Commands](#2210-reference-index-and-data-distribution-commands)
+<br>&nbsp;&nbsp;&nbsp;&nbsp; 2.2.11 [Targets Scoring](#2211-targets-scoring)
 <br>3 [Test](#3-test)
 <br>&nbsp;&nbsp;3.1 [Quick Test](#31-quick-test)
 <br>&nbsp;&nbsp;3.2 [Detailed Test](#32-detailed-test)
@@ -700,6 +701,11 @@ outputs. The following is a summary of CRISPRme's key features:
 - [**Targets Integration**](#224-targets-integration) (`targets-integration`) 
   <br>Combines *in silico* predicted targets with experimental data to create a 
   finalized target panel.
+
+- [**Targets Scoring**](#2211-targets-scoring) (`targets-scoring`) 
+  <br>Scores a supplied list of off-target sites (e.g. Cas-OFFinder output) with the 
+  CRISPRme+ CFD + CRISPR-Bulge calculations and an optional per-site variant carrier 
+  overlay — no genome search.
 
 - [**GNOMAD Converter**](#225-gnomad-converter) (`gnomAD-converter`) 
   <br>Transforms GNOMAD VCFs (`vcf.bgz` format) into a format compatible with 
@@ -1860,6 +1866,65 @@ crisprme.py scorer-env doctor
 The ML off-target scorer is **CRISPR-Bulge** (Yaish & Orenstein, *NAR* 2024) — a TensorFlow 2.13.x GRU ensemble — running isolated in the `cbulge` env so its heavy pins never touch the main environment. **CFD remains the primary score**; if the `cbulge` env is absent the run completes **CFD-only** (the ML column reads `-1`/N/A). **GPU acceleration:** the default image `pinellolab/crisprme:latest` is GPU-capable — on an NVIDIA host add `--gpus all` to `docker run` and pass [`--compute-backend cuda`](#input-arguments) to run the CRISPR-Bulge scorer on the GPU; it falls back to CPU automatically when no GPU is present. The amd64 image bundles CUDA; arm64 (Apple Silicon) and Docker-on-Mac are always CPU. The clickable installers auto-add `--gpus all` when Docker exposes a GPU. GPU pays off on large/dense searches; a tiny single-guide run is often faster on CPU due to init overhead. The env is **architecture-aware and scores identically across CPUs**: it installs the same TensorFlow 2.13.1 per-arch — conda `tensorflow-cpu`/CUDA on x86-64, `tensorflow-macos` on Apple Silicon, and the PyPI `tensorflow==2.13.1` aarch64 wheel on Linux ARM (validated x86-64 vs aarch64 agreement to max |Δ| = 3.6e-7, zero threshold-band changes), so the multi-arch Docker image scores identically on both. On networks that block `conda.anaconda.org`, point the env solve at a mirror with `CONDA_CHANNEL_BASE=https://prefix.dev` (or `CRISPRME_CONDA_CHANNEL_BASE`; the Docker build accepts `--build-arg CONDA_CHANNEL_BASE=…`).
 
 See the companion data-setup guide (`docs/crisprme_data_setup_051826.md`, Sections 2d and 3.5) for the end-to-end workflow.
+
+#### 2.2.11 Targets Scoring
+---
+
+The **Targets Scoring** function scores a user-supplied **list** of candidate
+off-target sites — for example Cas-OFFinder output, or any table of aligned
+guide/off-target pairs — **without running a genome search**. Each site is
+annotated with the same two scores a normal CRISPRme+ report uses: the **CFD**
+score and the **CRISPR-Bulge** ML score (the exact same calculations, so results
+are directly comparable to a full CRISPRme+ analysis). This is useful for scoring
+sites nominated by another tool — e.g. non-canonical-PAM hits — with CRISPRme+'s
+calculations when building a dedicated index is not warranted.
+
+With `--index-path` pointing at an installed variant index, each site also gets a
+**variant carrier overlay**: the variants overlapping its protospacer+PAM window
+and, per population dataset, their allele frequency and carrier count — i.e. in how
+many individuals the site is polymorphic (read from the index's
+`Dictionaries/registry_<vcf>` tier).
+
+Usage example (Cas-OFFinder output, with the carrier overlay):
+
+  ```bash
+  crisprme.py targets-scoring \
+    --targets casoffinder_output.txt \
+    --casoffinder \
+    --index-path /path/to/index_install \
+    --output scored_sites.tsv
+  ```
+
+For a generic TSV instead of Cas-OFFinder output, map the columns explicitly:
+
+  ```bash
+  crisprme.py targets-scoring \
+    --targets sites.tsv \
+    --columns guide=crRNA,dna=DNA,chrom=Chr,pos=Pos,strand=Strand,mm=Mismatches \
+    --output scored_sites.tsv
+  ```
+
+##### Input Arguments
+---
+
+- `--targets` (*Required*) — the input site list (Cas-OFFinder output or a TSV).
+- `--output` (*Required*) — output path (`.tsv`, or `.xlsx` with `--xlsx`).
+- `--casoffinder` — parse the input as Cas-OFFinder output (schema auto-detected);
+  omit and use `--columns` for a generic TSV.
+- `--columns` — generic-TSV column map, e.g.
+  `guide=crRNA,dna=DNA,chrom=Chr,pos=Pos,strand=Strand,mm=Mismatches` (at least
+  `guide` and `dna` are required).
+- `--index-path` — an installed variant index; adds the per-site carrier overlay.
+- `--device` — `cpu` (default) or `gpu` for the CRISPR-Bulge scorer.
+- `--xlsx` — write an `.xlsx` workbook instead of TSV.
+- `--pam-length` — PAM length in bp (default `3`).
+- `--position-base` — `0`- or `1`-based input positions (default `0` for
+  Cas-OFFinder, `1` for a generic TSV).
+
+> **Note:** pure scoring (CFD + CRISPR-Bulge) needs no index; the carrier overlay
+> requires an installed variant index via `--index-path`. Mismatch-only sites are
+> scored exactly; bulge rows must follow CRISPRme's alignment convention (bulge
+> columns as `-`).
 
 ## 3 Test
 

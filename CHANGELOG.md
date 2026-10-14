@@ -11,6 +11,18 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **`crisprme.py targets-scoring` — score a supplied LIST of off-target sites** (no genome search).
+  Takes Cas-OFFinder output (`--casoffinder`, schema auto-detected) or a generic TSV with an explicit
+  column map (`--columns guide=..,dna=..,chrom=..,pos=..`) and annotates each site with the **same**
+  CFD and CRISPR-Bulge calculations a normal CRISPRme+ report uses (`calc_cfd` is pinned byte-identical
+  to the canonical copies by `test_calc_cfd_twins_agree`; CRISPR-Bulge via the `cbulge` env, `-1.0`
+  when absent). With `--index-path` it adds a per-site **variant carrier overlay**: the variants
+  overlapping each site's protospacer+PAM window and, per population dataset, their allele frequency +
+  carrier count (read from the index's `Dictionaries/registry_<vcf>` tier). Enables scoring
+  externally-nominated sites (e.g. non-canonical-PAM hits) without building a new index. New module
+  `PostProcess/targets_scoring.py` + `PostProcess/test_targets_scoring.py` (wired into unit-tests CI).
+
 ### Changed
 - **Web Contacts page:** added Ann Cirincione under the Pinello Lab, and reworded "Please send any
   comments to Luca Pinello only" → "…to Luca Pinello" (dropped "only").

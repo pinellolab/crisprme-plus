@@ -4476,6 +4476,10 @@ def crisprme_help() -> None:
         "crisprme.py targets-integration\n"
         "\tIntegrates in-silico targets with empirical data to generate a usable "
         "panel\n\n"
+        "crisprme.py targets-scoring\n"
+        "\tScores a supplied LIST of off-target sites (e.g. Cas-OFFinder output) with "
+        "the CRISPRme+ CFD + CRISPR-Bulge calculations, with an optional per-site "
+        "variant carrier overlay -- no genome search\n\n"
         "crisprme.py gnomAD-converter\n"
         "\tConverts gnomAD VCF files into CRISPRme compatible VCFs (supports "
         "gnomAD v3.1, v4.0, and v4.1 (incl. joint VCFs))\n\n"
@@ -4510,6 +4514,92 @@ def crisprme_help() -> None:
     sys.exit(1)  # stop execution
 
 
+def targets_scoring_cmd():
+    """``crisprme.py targets-scoring --targets <file> --output <file>
+    (--casoffinder | --columns guide=..,dna=..,chrom=..,pos=..,strand=..,mm=..)
+    [--index-path <dir>] [--xlsx] [--device cpu|gpu] [--pam-length 3]
+    [--position-base 0|1]``
+
+    Score a user-supplied LIST of candidate off-target sites with the same CFD +
+    CRISPR-Bulge calculations a normal CRISPRme+ report uses -- no genome search.
+    Input is Cas-OFFinder output (``--casoffinder``, schema auto-detected) or a
+    generic TSV with an explicit column mapping (``--columns``). With
+    ``--index-path`` it also adds a per-site variant carrier overlay (the variants
+    overlapping each site's window + their allele frequency / carrier count, read
+    from the index's Dictionaries/registry_<vcf> tier).
+    """
+    if "--help" in input_args:
+        print(targets_scoring_cmd.__doc__)
+        print(
+            "\n\t--targets        input site list (Cas-OFFinder output or a TSV)"
+            "\n\t--output         output path (.tsv, or .xlsx with --xlsx)"
+            "\n\t--casoffinder    parse the input as Cas-OFFinder output"
+            "\n\t--columns        generic-TSV column map, e.g. "
+            "guide=crRNA,dna=DNA,chrom=Chr,pos=Pos,strand=Strand,mm=Mismatches"
+            "\n\t--index-path     installed variant index -> add the carrier overlay"
+            "\n\t--device         cpu|gpu for the CRISPR-Bulge scorer (default cpu)"
+            "\n\t--xlsx           write .xlsx instead of TSV"
+            "\n\t--pam-length     PAM length in bp (default 3)"
+            "\n\t--position-base  0- or 1-based input positions "
+            "(default 0 for Cas-OFFinder, 1 for TSV)\n"
+        )
+        exit(0)
+
+    def _val(flag, required=False):
+        if flag not in input_args:
+            if required:
+                error(f"{flag} must be provided (see 'targets-scoring --help')")
+            return None
+        try:
+            return input_args[input_args.index(flag) + 1]
+        except IndexError:
+            error(f"please provide a value for {flag}")
+
+    targets = os.path.abspath(_val("--targets", required=True))
+    if not os.path.isfile(targets):
+        error(f"the file specified for --targets does not exist: {targets}")
+    output = os.path.abspath(_val("--output", required=True))
+
+    casoffinder = "--casoffinder" in input_args
+    index_path = _val("--index-path")
+    if index_path is not None:
+        index_path = os.path.abspath(index_path)
+        if not os.path.isdir(index_path):
+            error(f"the directory specified for --index-path does not exist: {index_path}")
+    device = _val("--device")
+    xlsx = "--xlsx" in input_args
+    pam_len = int(_val("--pam-length")) if "--pam-length" in input_args else 3
+    position_base = int(_val("--position-base")) if "--position-base" in input_args else None
+
+    columns = None
+    if not casoffinder:
+        colspec = _val("--columns")
+        if not colspec:
+            error("provide --casoffinder (Cas-OFFinder output) or --columns "
+                  "guide=..,dna=.. for a generic TSV")
+        columns = {}
+        for kv in colspec.split(","):
+            if "=" not in kv:
+                error(f"bad --columns entry {kv!r}; use key=value pairs")
+            k, v = kv.split("=", 1)
+            columns[k.strip()] = v.strip()
+        if not (columns.get("guide") and columns.get("dna")):
+            error("--columns must map at least guide=<col> and dna=<col>")
+
+    # import lazily (the scorer/registry deps are only needed for this command).
+    # script_path already IS the PostProcess dir (set to corrected_origin_path) and
+    # is on sys.path from module load (line ~78); re-assert it to be robust.
+    sys.path.insert(0, script_path)
+    import targets_scoring as _ts
+
+    n = _ts.run(
+        targets, output, casoffinder=casoffinder, index_path=index_path,
+        device=device, xlsx=xlsx, pam_len=pam_len, position_base=position_base,
+        columns=columns,
+    )
+    print(f"targets-scoring: wrote {n} scored sites to {output}")
+
+
 if len(sys.argv) < 2:
     check_crisprme_dirtree()  # check crisprme directory tree structure
     crisprme_help()  # no arg? print help
@@ -4529,6 +4619,8 @@ elif sys.argv[1] == "validate-test":  # run validate complete-test
     validate_test()
 elif sys.argv[1] == "targets-integration":  # run targets integration
     target_integration()
+elif sys.argv[1] == "targets-scoring":  # score a supplied list of off-target sites
+    targets_scoring_cmd()
 elif sys.argv[1] == "gnomAD-converter":  # run gnomad converter
     gnomAD_converter()
 elif sys.argv[1] == "generate-personal-card":  # run create personal card
