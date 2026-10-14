@@ -139,18 +139,32 @@ class Site(object):
 
 
 def cfd_for_site(site, mm_scores, pam_scores):
-    """CFD for one site, replicating preprocess_CFD_score's slicing exactly.
+    """CFD for one site from its (in-place) aligned crRNA/DNA.
 
-    X0 / RNA bulge: calc_cfd(crRNA, DNA[:-pam], DNA[-2:]).
-    DNA bulge:      calc_cfd(crRNA[bs:], DNA[bs:-pam], DNA[-2:])  (bs = bulge size),
-    i.e. CRISPRme's front-placed-bulge convention. The scored PAM is the last 2 bp.
+    Inputs follow the standard display / Cas-OFFinder convention: gaps are placed
+    IN-PLACE at the bulge position (DNA bulge -> '-' in crRNA, RNA bulge -> '-' in
+    DNA), crRNA and DNA are the same length.
+
+    * mismatch-only / RNA bulge: calc_cfd(crRNA, DNA[:-pam], DNA[-2:]). The RNA-bulge
+      gap sits in DNA, so the 20 guide bases keep CFD positions 1..20 and the bulged
+      guide base (vs DNA '-') contributes factor 1 -- verified to reproduce CRISPRme's
+      reported CFD exactly on mismatch + RNA-bulge rows.
+    * DNA bulge: the extra DNA base has no guide partner, so DELETE the gap column(s)
+      (where crRNA has '-') from BOTH strands, then score the 20-vs-20. CFD is
+      position-WEIGHTED, so keeping the in-place gap would shift positions 1..20 by
+      the bulge width and mis-weight every downstream mismatch; dropping the looped-out
+      base restores the correct positions. (This is the textbook mismatch-only CFD with
+      the bulged base excluded; it does not try to reproduce CRISPRme's internal
+      DNA-bulge gap placement, which is not recoverable from an in-place alignment and
+      can differ -- a DNA-bulge caveat the caller should surface.)
     """
     pam = site.pam_len
     dna = site.dna
     guide = site.crrna
-    if site.bulge_type == "DNA" and site.bulge_size:
-        bs = site.bulge_size
-        return calc_cfd(guide[bs:], dna[bs:-pam], dna[-2:], mm_scores, pam_scores, True)
+    if site.bulge_type == "DNA" and "-" in guide:
+        keep = [i for i, ch in enumerate(guide) if ch != "-"]
+        guide = "".join(guide[i] for i in keep)
+        dna = "".join(dna[i] for i in keep)
     return calc_cfd(guide, dna[:-pam], dna[-2:], mm_scores, pam_scores, True)
 
 
