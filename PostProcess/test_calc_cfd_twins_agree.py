@@ -24,6 +24,7 @@ import os
 import pickle
 import random
 import re
+import sys
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +58,13 @@ def _load_calc_cfd(path):
 _SNP_CFD = _load_calc_cfd(_SNP)
 _INDEL_CFD = _load_calc_cfd(_INDEL)
 
+# targets_scoring.py carries a THIRD copy of calc_cfd (the score-a-list CLI). Unlike
+# the SNP/INDEL modules it does not parse argv at import, so it is imported directly;
+# it must agree byte-for-byte with the canonical copies too.
+sys.path.insert(0, _HERE)
+import targets_scoring as _ts  # noqa: E402
+_TS_CFD = _ts.calc_cfd
+
 MM = pickle.load(open(os.path.join(_HERE, "mismatch_score.pkl"), "rb"))
 PAM = pickle.load(open(os.path.join(_HERE, "PAM_scores.pkl"), "rb"))
 
@@ -71,9 +79,14 @@ class TestCalcCfdTwinsAgree(unittest.TestCase):
     def _assert_equal(self, guide, off, pam):
         a = _SNP_CFD(guide, off, pam, MM, PAM, True)
         b = _INDEL_CFD(guide, off, pam, MM, PAM, True)
-        # raw-double equality, not abs<eps: the two implementations must be identical
+        c = _TS_CFD(guide, off, pam, MM, PAM, True)
+        # raw-double equality, not abs<eps: the three implementations must be identical
         self.assertEqual(
             a, b, f"twin CFD mismatch: SNP={a!r} INDEL={b!r} "
+                  f"(guide={guide!r} off={off!r} pam={pam!r})"
+        )
+        self.assertEqual(
+            a, c, f"twin CFD mismatch: SNP={a!r} targets_scoring={c!r} "
                   f"(guide={guide!r} off={off!r} pam={pam!r})"
         )
 
