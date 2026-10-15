@@ -808,6 +808,26 @@ def download_component(
     if component == "index":
         if not index_name:
             raise ValueError("--index-name is required to download an 'index' component")
+        # Already installed -> NO-OP, mirroring the guard the variant path already
+        # applies to its companion reference-index fetch below. Checked BEFORE the
+        # dict-less probe so an installed index costs no network call at all.
+        # canonical_index_name() is a pure string function and strips a "-dictless"
+        # publish marker, so this resolves to the same folder whichever name the
+        # caller passed. A VARIANT index additionally requires its _INDELS
+        # companion: the two dirs are renamed into place by SEPARATE os.rename
+        # calls, so a main dir without its companion means an interrupted install
+        # and must not be mistaken for a complete one.
+        installed_name = canonical_index_name(index_name)
+        installed_dir = os.path.join(local_dir, installed_name)
+        if os.path.isdir(installed_dir) and (
+            "+" not in installed_name or os.path.isdir(f"{installed_dir}_INDELS")
+        ):
+            print(
+                f"Index {installed_name} is already installed -> {installed_dir} "
+                f"(remove that folder to re-download)",
+                flush=True,
+            )
+            return installed_dir
         # Dict-less is the default in 2.4.0. If the caller asked for a VARIANT
         # index by its bare (legacy dict-based) name but a corrected `-dictless`
         # companion exists on the repo, prefer it: the `-dictless` marker is

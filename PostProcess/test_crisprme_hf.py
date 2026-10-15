@@ -11,6 +11,7 @@ import gzip
 import importlib.util
 import os
 import tarfile
+import tempfile
 import unittest
 from unittest import mock
 
@@ -326,6 +327,70 @@ class TestHfRetry(unittest.TestCase):
                 with self.assertRaises(_HTTPErr):
                     hf._hf_call_with_retry(always429)
         self.assertEqual(calls["n"], 1)  # no retry
+
+
+class TestIndexAlreadyInstalled(unittest.TestCase):
+    """`--what index` must NO-OP when the index is already installed.
+
+    Without this, re-running a documented download command re-fetches and
+    re-extracts the whole tarball (8.86 GB for NRG_3_hg38). The guard runs before
+    any network call, so these tests make one by raising from both network entry
+    points: reaching either means the guard did not short-circuit.
+    """
+
+    class _Reached(Exception):
+        pass
+
+    def _run(self, workdir, name):
+        def boom(*_a, **_k):
+            raise self._Reached()
+
+        with mock.patch.object(hf, "_hf_snapshot", boom), \
+             mock.patch.object(hf, "_require_hf", boom):
+            try:
+                return hf.download_component("index", workdir, index_name=name)
+            except self._Reached:
+                return None  # proceeded to the network
+
+    def _library(self, *names):
+        root = tempfile.mkdtemp()
+        for n in names:
+            os.makedirs(os.path.join(root, "genome_library", n))
+        return root
+
+    def test_reference_only_installed_is_noop(self):
+        wd = self._library("NRG_3_hg38")
+        self.assertEqual(
+            self._run(wd, "NRG_3_hg38"),
+            os.path.join(wd, "genome_library", "NRG_3_hg38"),
+        )
+
+    def test_variant_with_indels_companion_is_noop(self):
+        wd = self._library("NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS")
+        self.assertEqual(
+            self._run(wd, "NRG_3_hg38+hg38_X"),
+            os.path.join(wd, "genome_library", "NRG_3_hg38+hg38_X"),
+        )
+
+    def test_dictless_name_resolves_to_canonical_dir(self):
+        # a "-dictless" publish marker installs to the canonical folder, so a
+        # request by either name must see the same install.
+        wd = self._library("NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS")
+        self.assertEqual(
+            self._run(wd, "NRG_3_hg38-dictless+hg38_X"),
+            os.path.join(wd, "genome_library", "NRG_3_hg38+hg38_X"),
+        )
+
+    def test_variant_missing_indels_companion_still_downloads(self):
+        # the two dirs are renamed into place by SEPARATE os.rename calls, so a
+        # main dir without its companion is an interrupted install, not a
+        # complete one -- it must NOT be skipped.
+        wd = self._library("NRG_3_hg38+hg38_X")
+        self.assertIsNone(self._run(wd, "NRG_3_hg38+hg38_X"))
+
+    def test_absent_index_still_downloads(self):
+        wd = self._library("NRG_3_hg38")
+        self.assertIsNone(self._run(wd, "NRG_3_hg38+hg38_ABSENT"))
 
 
 if __name__ == "__main__":
