@@ -24,6 +24,35 @@ Then, in Docker Desktop → **Settings → Resources**, give Docker enough memor
 genome-wide HGDP + 1000 Genomes (HGDP1kGP) variant search is memory-intensive — give it **64 GB**
 (32 GB can run out of memory on a genome-wide variant search).
 
+> **Windows (WSL 2 backend): there is no memory slider.** Docker Desktop instead reports
+> that *"resource limits are managed by Windows"* — Windows caps the whole WSL 2 VM, and
+> the default is roughly half your RAM, so a 64 GB machine gives Docker only ~32 GB.
+> Create `C:\Users\<YourUsername>\.wslconfig` if it does not exist; **if it already
+> exists, add the `memory` line to its existing `[wsl2]` section** rather than adding a
+> second one:
+>
+> ```ini
+> [wsl2]
+> memory=56GB
+> ```
+>
+> Then run `wsl --shutdown` in PowerShell and restart Docker Desktop. Keep the value a few
+> GB below your total RAM so Windows keeps some. You cannot allocate more than the machine
+> physically has — if total RAM is under 64 GB, run genome-wide variant-aware searches on a
+> workstation or cluster instead.
+
+Confirm how much memory Docker actually got before downloading anything:
+
+```powershell
+# Windows (PowerShell) -- prints GB
+(docker info --format '{{.MemTotal}}') / 1073741824
+```
+
+```bash
+# macOS / Linux
+docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'
+```
+
 > **Disk:** the batteries-included (variant-aware) setup is a **~45 GB download → ~85 GB
 > on disk**; give Docker **≈ 100 GB free**. CRISPRme+ ships a **dict-less** variant index
 > (no per-sample dictionaries): the reference + variant genome indexes are ~40 GB, the
@@ -78,7 +107,12 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 ## 4. Download a prebuilt index (one time, minutes — skips a long build)
 
 Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
-minutes of CPU; instead, download the ready-made SpCas9 NRG (NGG+NAG) index:
+minutes of CPU; instead, download the ready-made SpCas9 NRG (NGG+NAG) index.
+
+> **On hg38 you already have this one** — `--what all` in step 3 downloads
+> `NRG_3_hg38` for you. Run the command below only to add a *different* index:
+> another PAM (e.g. `NGG_2_hg38`, or a Cas12a index), or an index for another
+> reference genome. Variant indexes are always a separate download (see below).
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
@@ -293,28 +327,52 @@ same image with no root and no daemon. Most clusters already have it (the comman
 is `apptainer`, or `singularity` on older systems — they are interchangeable).
 
 ```bash
-# 1. build the image once (a ~4–5 GB .sif file (amd64; ~1.8 GB on Apple Silicon); no root needed)
+# 1. pick a working folder, then build the image INTO it
+#    Needs room for the ~85 GB of data, the ~4-5 GB .sif and your results -- so ~100 GB
+#    free is comfortable. Any location works as long as it has that much space; check
+#    before you start, since home directories are often quota-limited. (On filesystems
+#    that bill allocated blocks rather than file sizes, expect the reported usage to be
+#    noticeably higher than the file sizes suggest.)
+#    Pull from inside this folder: `crisprme.sif` below is a relative path, so every
+#    later command must run from the same place.
+mkdir -p /path/to/crisprme && cd /path/to/crisprme
+# a ~4-5 GB .sif file (amd64; ~1.8 GB on Apple Silicon); no root needed
 apptainer pull crisprme.sif docker://pinellolab/crisprme:latest
 
-# 2. download data + a prebuilt index into a working folder
-mkdir -p ~/crisprme && cd ~/crisprme
+# 2. download data + a prebuilt index (still in that same folder)
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what all --path /DATA
+
+# Recommended default — HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000
+# Genomes), jointly SHAPEIT5-re-phased: CONFIRMED cis haplotypes with named per-sample
+# carriers + exact joint AF (use --per-sample).
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
-apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
+  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 # (The index above bundles its genotype store, so sample-level analyses / named
 #  carriers work too — no raw VCFs needed. The default repo does not host raw
-#  per-dataset VCFs; it ships the standard panels as prebuilt indexes.)
+#  per-dataset VCFs; it ships the standard panels as prebuilt indexes. The
+#  1000-Genomes-only alternative is NRG_3_hg38+hg38_1000G2021; see step 4 above.)
 
 # 3. launch the web interface
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py web-interface
-# then open http://127.0.0.1:8080 (or the node's address on a cluster)
+# then open http://127.0.0.1:8080 on that machine, or tunnel to it (below)
 ```
 
-Two Singularity-specific notes:
+**Opening the interface from your own computer (SSH tunnel).** The server listens on
+port 8080 on whatever machine runs it, so from your laptop:
+
+```bash
+# CRISPRme running on the login node you SSH into:
+ssh -N -L 8080:127.0.0.1:8080 user@cluster-login
+# CRISPRme running in a job on a compute node:
+ssh -N -L 8080:<compute-node>:8080 user@cluster-login
+```
+
+Then open <http://localhost:8080>. A VPN does not change these commands; it only
+affects whether you can reach the cluster at all.
+
+Three Singularity-specific notes:
 - **Use `apptainer run`, not `apptainer exec`.** `run` executes the image's
   entrypoint, which activates the conda environment so `crisprme.py` is on the
   PATH; `exec` skips it and you get `crisprme.py: not found`.
@@ -322,6 +380,13 @@ Two Singularity-specific notes:
   `-p` port mapping — the app is reachable directly at port **8080**, which must be
   free on that node. On a shared login node, run on a compute node / interactive
   session instead.
+- **If the tunnel will not connect.** Some clusters disable SSH port forwarding
+  (`AllowTcpForwarding no`) — ask your administrators. On Windows, local port 8080 can
+  collide with a reserved port: use a high local port instead
+  (`ssh -N -L 45092:127.0.0.1:8080 ...`) and open <http://localhost:45092>. Note the
+  interface binds all interfaces and has no authentication, so while it runs anyone who
+  can reach that node on port 8080 can reach it; most clusters firewall compute nodes,
+  but do not run it on a public-facing host.
 
 Everything else (the web form, results, downloading more indexes) is identical to
 the Docker instructions above.
@@ -415,7 +480,8 @@ and deleting data you no longer need. See
   2. Reference-only selected — keep the pre-selected **variant** index (not **Reference
      only**) to get variant off-targets.
   3. Variant index not installed — re-run
-     `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA`.
+     `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
+     (the recommended default panel).
   4. Confirm success: `Results/<name>/log_error.txt` is empty and
      `*.integrated_results.tsv` is non-empty.
 
