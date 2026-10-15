@@ -1157,7 +1157,41 @@ for line in inResult:
 
     # print('results before calc and ref alignment', final_result)
 
-    final_result.append(alignRefFromVar(final_result))
+    ref_aligned = alignRefFromVar(final_result)
+    # PAM creation on the INDEL path. Mirrors the SNP path's predicate in
+    # new_simple_analysis.py: if ANY reference base in the PAM window is
+    # incompatible with the PAM motif, the reference could not have carried a
+    # usable PAM at this locus, so the variant created it. The stored value is the
+    # ALT PAM string, exactly as the SNP path stores it.
+    #
+    # PAM_gen is index 10, the same slot as on the SNP path. The header that
+    # analisi_indels_NNN.sh seds into the cluster file lists an extra
+    # Chromosome_fake column at 10, which would put PAM_gen at 11 -- but that
+    # header is misaligned with the rows the analyzer actually reads. The rows
+    # here are 18 fields with no Chromosome_fake, which is also what this
+    # function's own assignments assume: [12] samples, [15] rsID, [16] MAF,
+    # [17] indel info all line up with the SNP layout and would each be off by
+    # one against the sed header. Do not re-derive this index from that header.
+    #
+    # pam_begin/pam_end already encode PAM orientation (trailing window for a 3'
+    # PAM, leading for a 5' one) and `pam` is the bare motif aligned with that
+    # window, so this is correct for both. Left as the existing placeholder when
+    # the window holds a character the IUPAC table does not define -- e.g. a '-'
+    # from a bulge falling inside the PAM -- so this can never raise where the
+    # column was previously simply unset.
+    # .upper(): iupac_code_set maps lowercase keys to LOWERCASE sets ("a": {"a"}),
+    # so a lowercase reference base would never intersect an uppercase motif set and
+    # would be scored as a creation event. In practice the PAM window is always
+    # uppercase (the guide carries N there, so those positions always "match" and
+    # alignRefFromVar leaves them uppercase), making this defensive only -- but it
+    # removes the false-positive class outright rather than relying on that.
+    ref_pam = ref_aligned[pam_begin:pam_end].upper()
+    if len(ref_pam) == len(pam) and all(c in iupac_code_set for c in ref_pam):
+        for pos_pam, pam_char in enumerate(ref_pam):
+            if not iupac_code_set[pam[pos_pam]] & iupac_code_set[pam_char]:
+                final_result[10] = final_result[2][pam_begin:pam_end].upper()
+                break
+    final_result.append(ref_aligned)
     # number to activate ref score calculation (active if target is alternative)
     final_result.append(33)
     # position of tmp_mms (removed later after processing)
