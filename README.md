@@ -474,7 +474,9 @@ reference-only runs, but a genome-wide **variant** search needs **64 GB+** (it p
 at ~68–75 GB). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). CRISPRme prints a non-fatal
 `WARNING:` at the start of a `complete-search` / `complete-test` run when it
 detects less than 32 GB of total memory, reminding you to increase this
-allocation. (You can override the threshold with `CRISPRME_MIN_GB` or skip the
+allocation. That threshold sits below the 64 GB a genome-wide variant search needs, so a
+run that starts without a warning may still not have enough memory.
+(You can override the threshold with `CRISPRME_MIN_GB` or skip the
 check entirely with `CRISPRME_SKIP_MEM_CHECK=1`.)
 
 **Linux-Specific Post-Installation Steps**

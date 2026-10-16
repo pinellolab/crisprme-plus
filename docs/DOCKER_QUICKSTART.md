@@ -25,7 +25,9 @@ Everything runs inside Docker, so the only thing you install is Docker itself.
 Then, in Docker Desktop → **Settings → Resources**, give Docker enough memory:
 **16 GB** is fine for a first run / reference-only searches, but the default
 genome-wide HGDP + 1000 Genomes (HGDP1kGP) variant search is memory-intensive — give it **64 GB**
-(32 GB can run out of memory on a genome-wide variant search).
+(32 GB can run out of memory on a genome-wide variant search). This applies to Docker
+Desktop only: on Linux, Docker Engine sets no memory cap, so containers use host memory
+directly and there is nothing to configure.
 
 > **Windows (WSL 2 backend): there is no memory slider.** Docker Desktop instead reports
 > that *"resource limits are managed by Windows"* — Windows caps the whole WSL 2 VM, and
@@ -335,9 +337,9 @@ docker run --gpus all --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest
 ## Running on HPC with Singularity / Apptainer
 
 On a cluster you usually cannot run Docker, but Singularity/Apptainer runs the
-same image without admin rights or a background service. Most clusters already have
-it (the command
-is `apptainer`, or `singularity` on older systems — they are interchangeable).
+same image without admin rights or a background service. Most clusters already have it
+(the command is `apptainer`, or `singularity` on older systems — they are
+interchangeable).
 
 ```bash
 # 1. pick a working folder, then build the image into it
