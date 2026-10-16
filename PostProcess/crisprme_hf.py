@@ -810,18 +810,35 @@ def download_component(
             raise ValueError("--index-name is required to download an 'index' component")
         # Already installed -> NO-OP, mirroring the guard the variant path already
         # applies to its companion reference-index fetch below. Checked BEFORE the
-        # dict-less probe so an installed index costs no network call at all.
+        # dict-less probe so a COMPLETE install costs no network call at all.
         # canonical_index_name() is a pure string function and strips a "-dictless"
         # publish marker, so this resolves to the same folder whichever name the
-        # caller passed. A VARIANT index additionally requires its _INDELS
-        # companion: the two dirs are renamed into place by SEPARATE os.rename
-        # calls, so a main dir without its companion means an interrupted install
-        # and must not be mistaken for a complete one.
+        # caller passed.
+        #
+        # Skip ONLY when the install is COMPLETE, so re-running `download --what
+        # index` still HEALS a partial/interrupted install (the documented recovery
+        # for "no variant off-targets / Samples degraded") rather than no-opping over
+        # it. A reference-only index has no companions. A VARIANT index is complete
+        # only with ALL of: its _INDELS companion (renamed into place by a SEPARATE
+        # os.rename, so a main dir without it is an interrupted install); the shared
+        # reference index (<pam>_<N>_<ref>, which travels once -- not inside each
+        # variant tarball); and, unless --no-genotypes, its Tier-1 genotype store
+        # (Dictionaries/genotypes_<vcf>/). Any missing piece falls through to the
+        # fetch/heal path below, which re-fetches only what is absent.
         installed_name = canonical_index_name(index_name)
         installed_dir = os.path.join(local_dir, installed_name)
-        if os.path.isdir(installed_dir) and (
-            "+" not in installed_name or os.path.isdir(f"{installed_dir}_INDELS")
-        ):
+        _vcf = installed_name.partition("+")[2]
+        _ref_index_dir = os.path.join(local_dir, installed_name.partition("+")[0])
+        _genotype_dir = os.path.join(workdir, "Dictionaries", f"genotypes_{_vcf}")
+        _complete = os.path.isdir(installed_dir) and (
+            not _vcf
+            or (
+                os.path.isdir(f"{installed_dir}_INDELS")
+                and os.path.isdir(_ref_index_dir)
+                and (not genotypes or os.path.isdir(_genotype_dir))
+            )
+        )
+        if _complete:
             print(
                 f"Index {installed_name} is already installed -> {installed_dir} "
                 f"(remove that folder to re-download)",

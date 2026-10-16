@@ -341,14 +341,16 @@ class TestIndexAlreadyInstalled(unittest.TestCase):
     class _Reached(Exception):
         pass
 
-    def _run(self, workdir, name):
+    def _run(self, workdir, name, genotypes=True):
         def boom(*_a, **_k):
             raise self._Reached()
 
         with mock.patch.object(hf, "_hf_snapshot", boom), \
              mock.patch.object(hf, "_require_hf", boom):
             try:
-                return hf.download_component("index", workdir, index_name=name)
+                return hf.download_component(
+                    "index", workdir, index_name=name, genotypes=genotypes
+                )
             except self._Reached:
                 return None  # proceeded to the network
 
@@ -358,6 +360,13 @@ class TestIndexAlreadyInstalled(unittest.TestCase):
             os.makedirs(os.path.join(root, "genome_library", n))
         return root
 
+    def _genotype_store(self, root, vcf):
+        # the Tier-1 genotype store lands under <workdir>/Dictionaries/genotypes_<vcf>/
+        os.makedirs(os.path.join(root, "Dictionaries", f"genotypes_{vcf}"))
+
+    # A COMPLETE variant install = main dir + _INDELS + shared reference index
+    # (NRG_3_hg38) + genotype store (genotypes_hg38_X). Reference-only has none.
+
     def test_reference_only_installed_is_noop(self):
         wd = self._library("NRG_3_hg38")
         self.assertEqual(
@@ -365,8 +374,11 @@ class TestIndexAlreadyInstalled(unittest.TestCase):
             os.path.join(wd, "genome_library", "NRG_3_hg38"),
         )
 
-    def test_variant_with_indels_companion_is_noop(self):
-        wd = self._library("NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS")
+    def test_complete_variant_install_is_noop(self):
+        wd = self._library(
+            "NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS", "NRG_3_hg38"
+        )
+        self._genotype_store(wd, "hg38_X")
         self.assertEqual(
             self._run(wd, "NRG_3_hg38+hg38_X"),
             os.path.join(wd, "genome_library", "NRG_3_hg38+hg38_X"),
@@ -374,8 +386,11 @@ class TestIndexAlreadyInstalled(unittest.TestCase):
 
     def test_dictless_name_resolves_to_canonical_dir(self):
         # a "-dictless" publish marker installs to the canonical folder, so a
-        # request by either name must see the same install.
-        wd = self._library("NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS")
+        # request by either name must see the same (complete) install.
+        wd = self._library(
+            "NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS", "NRG_3_hg38"
+        )
+        self._genotype_store(wd, "hg38_X")
         self.assertEqual(
             self._run(wd, "NRG_3_hg38-dictless+hg38_X"),
             os.path.join(wd, "genome_library", "NRG_3_hg38+hg38_X"),
@@ -385,8 +400,36 @@ class TestIndexAlreadyInstalled(unittest.TestCase):
         # the two dirs are renamed into place by SEPARATE os.rename calls, so a
         # main dir without its companion is an interrupted install, not a
         # complete one -- it must NOT be skipped.
-        wd = self._library("NRG_3_hg38+hg38_X")
+        wd = self._library("NRG_3_hg38+hg38_X", "NRG_3_hg38")
+        self._genotype_store(wd, "hg38_X")
         self.assertIsNone(self._run(wd, "NRG_3_hg38+hg38_X"))
+
+    def test_variant_missing_reference_index_still_downloads(self):
+        # the shared reference index travels separately from the variant tarball;
+        # absent -> re-run must heal it, not no-op.
+        wd = self._library("NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS")
+        self._genotype_store(wd, "hg38_X")
+        self.assertIsNone(self._run(wd, "NRG_3_hg38+hg38_X"))
+
+    def test_variant_missing_genotype_store_still_downloads(self):
+        # genotypes default ON: a complete-but-for-the-store install must re-run to
+        # heal the store (the documented "Samples degraded" recovery), not no-op.
+        # This is the regression the coarse guard introduced.
+        wd = self._library(
+            "NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS", "NRG_3_hg38"
+        )
+        self.assertIsNone(self._run(wd, "NRG_3_hg38+hg38_X"))
+
+    def test_no_genotypes_does_not_require_store(self):
+        # with --no-genotypes the genotype store is not part of a complete install,
+        # so an otherwise-complete install still no-ops.
+        wd = self._library(
+            "NRG_3_hg38+hg38_X", "NRG_3_hg38+hg38_X_INDELS", "NRG_3_hg38"
+        )
+        self.assertEqual(
+            self._run(wd, "NRG_3_hg38+hg38_X", genotypes=False),
+            os.path.join(wd, "genome_library", "NRG_3_hg38+hg38_X"),
+        )
 
     def test_absent_index_still_downloads(self):
         wd = self._library("NRG_3_hg38")
