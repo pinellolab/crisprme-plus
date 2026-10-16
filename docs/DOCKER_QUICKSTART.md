@@ -369,10 +369,12 @@ ssh -N -L 8080:127.0.0.1:8080 user@cluster-login
 ssh -N -L 8080:<compute-node>:8080 user@cluster-login
 ```
 
-Then open <http://localhost:8080>. A VPN does not change these commands; it only
-affects whether you can reach the cluster at all.
+Then open <http://localhost:8080>, and leave that `ssh` command running while you use
+the interface. A VPN does not change these commands; it only affects whether you can
+reach the cluster at all. If it will not connect, see
+[Troubleshooting](#troubleshooting).
 
-Three Singularity-specific notes:
+Two Singularity-specific notes:
 - **Use `apptainer run`, not `apptainer exec`.** `run` executes the image's
   entrypoint, which activates the conda environment so `crisprme.py` is on the
   PATH; `exec` skips it and you get `crisprme.py: not found`.
@@ -380,13 +382,6 @@ Three Singularity-specific notes:
   `-p` port mapping — the app is reachable directly at port **8080**, which must be
   free on that node. On a shared login node, run on a compute node / interactive
   session instead.
-- **If the tunnel will not connect.** Some clusters disable SSH port forwarding
-  (`AllowTcpForwarding no`) — ask your administrators. On Windows, local port 8080 can
-  collide with a reserved port: use a high local port instead
-  (`ssh -N -L 45092:127.0.0.1:8080 ...`) and open <http://localhost:45092>. Note the
-  interface binds all interfaces and has no authentication, so while it runs anyone who
-  can reach that node on port 8080 can reach it; most clusters firewall compute nodes,
-  but do not run it on a public-facing host.
 
 Everything else (the web form, results, downloading more indexes) is identical to
 the Docker instructions above.
@@ -456,8 +451,21 @@ and deleting data you no longer need. See
 
 - **The genome/PAM dropdowns are empty** → you skipped step 3. Run
   `crisprme.py download --what all --path /DATA` (inside Docker, as above).
-- **Browser can't connect to `127.0.0.1:8080`** → make sure the `docker run`
-  in step 6 includes `-p 8080:8080` and is still running.
+- **Browser can't connect to `127.0.0.1:8080`** → with Docker, make sure the
+  `docker run` in step 6 includes `-p 8080:8080` and is still running. If CRISPRme is
+  running on a remote machine or a cluster, `127.0.0.1` is *your own* computer, not
+  that machine: you need the SSH tunnel from the
+  [HPC section](#running-on-hpc-with-singularity--apptainer), and it has to stay
+  running the whole time. If the page spins forever instead of failing outright, a
+  stale tunnel from a dropped connection (VPN, sleep) may still be holding the local
+  port — stop it, re-open the tunnel, then use a new browser tab.
+- **The SSH tunnel itself will not connect** → some clusters disable port forwarding
+  (`AllowTcpForwarding no`); ask your administrators. On Windows, local port 8080 can
+  collide with a reserved port, so use a high local port instead
+  (`ssh -N -L 45092:127.0.0.1:8080 ...`) and open <http://localhost:45092>.
+- **Who can reach the interface while it runs** → it binds all interfaces and has no
+  authentication, so anyone who can reach that machine on port 8080 can use it. Most
+  clusters firewall compute nodes, but do not run it on a public-facing host.
 - **Results disappeared after closing the container** → make sure every command
   includes `-v "${PWD}:/DATA"` so files are written to your folder, not the
   throwaway container.

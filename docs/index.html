@@ -218,9 +218,25 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
         <pre><code>apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py web-interface</code></pre>
         <p>
-          Open <strong>http://127.0.0.1:8080</strong> (or, on a cluster, the node's
-          address). Apptainer shares the host network, so no port mapping is needed,
-          but port <strong>8080 must be free</strong> on the node.
+          The server listens on port <strong>8080 of the machine that runs it</strong>, which
+          must be free there. Apptainer shares the host network, so unlike Docker there is no
+          <code>-p</code> mapping to set. Working directly on that machine, open
+          <strong>http://127.0.0.1:8080</strong>.
+        </p>
+        <p>
+          <strong>On a cluster you have to forward the port first.</strong>
+          <code>http://127.0.0.1:8080</code> typed into your own browser points at
+          <em>your own computer</em>, not at the cluster, so it will not reach CRISPRme
+          until you do. From your laptop:
+        </p>
+        <pre><code># CRISPRme running on the login node you SSH into
+ssh -N -L 8080:127.0.0.1:8080 &lt;user&gt;@&lt;cluster-login&gt;
+
+# CRISPRme running inside a job on a compute node
+ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</code></pre>
+        <p>
+          Then open <strong>http://localhost:8080</strong>, and leave that <code>ssh</code>
+          command running while you use the interface.
         </p>
         <p class="note">
           Use <code>apptainer run</code> (not <code>exec</code>): <code>run</code>
@@ -228,9 +244,15 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
           the path.
         </p>
         <p class="note">
-          On a headless compute node, forward the port to your laptop &mdash; from your
-          laptop run <code>ssh -L 8080:&lt;compute-node&gt;:8080 &lt;cluster-login&gt;</code>,
-          then open <strong>http://127.0.0.1:8080</strong> locally.
+          If your cluster blocks port forwarding, or requires searches to go through the
+          scheduler, you can run the search from the command line instead and still open the
+          results in the browser afterwards &mdash; see
+          <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/DOCKER_QUICKSTART.md#8-run-a-search-from-the-command-line-no-browser">Run a search from
+          the command line</a>.
+        </p>
+        <p class="note">
+          Tunnel won't connect, or the page never loads? See
+          <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/DOCKER_QUICKSTART.md#troubleshooting">Troubleshooting</a>.
         </p>
       </div>
 
