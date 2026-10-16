@@ -107,8 +107,10 @@
       <p>
         The simplest way to run CRISPRme is in a container. Use <strong>Docker</strong>
         on a laptop or desktop, or <strong>Singularity / Apptainer</strong> on an HPC
-        cluster (no root and no daemon needed). Either way it is a few commands: no
-        conda, no compiling, and no giant download. Pick your runtime below.
+        cluster (it needs no admin rights, which is why clusters allow it). Either way it
+        is a few commands, with no conda and no compiling &mdash; and because you download
+        prebuilt indexes rather than building them from raw VCFs, the download is far
+        smaller. Choose Docker or Apptainer below.
       </p>
 
       <div class="tabs" role="tablist" aria-label="Container runtime">
@@ -201,7 +203,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
         <h3>1 &mdash; Build the image (one time)</h3>
         <p>
           Most clusters already have Apptainer/Singularity. Convert the CRISPRme image
-          to a <code>.sif</code> file (no root needed):
+          to a <code>.sif</code> file (no admin rights needed):
         </p>
         <p class="note">
           Pick a working folder with room for the <strong>~85&nbsp;GB of data</strong>, the
@@ -305,7 +307,7 @@ ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</cod
         <h3>Install with Conda / Mamba</h3>
         <p style="color:#b00;margin:0 0 .5rem;"><strong>Note:</strong> Bioconda installs the last
         <em>stable</em> CRISPRme release (pre-2.2.0), <strong>not</strong> CRISPRme+ (the 2.7.x line).
-        Use the Docker quickstart above for CRISPRme+ (currently v2.7.9).</p>
+        Use the Docker quickstart above for CRISPRme+.</p>
         <pre><code># Configure Bioconda channels (one-time)
 mamba config --add channels bioconda
 mamba config --add channels conda-forge

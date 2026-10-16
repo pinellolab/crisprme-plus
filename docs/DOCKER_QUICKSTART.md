@@ -7,8 +7,11 @@
 > **[CRISPRme 2.1.14](https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14)**.
 
 This is the fastest way to get CRISPRme running with its point-and-click **web
-interface**, with **no conda, no compiling, and no 410 GB download**. You copy a
-few commands, open a browser, fill in a short form, and read the results.
+interface**, with **no conda and no compiling**. You also avoid the ~410 GB of raw
+variant data a from-scratch build needs, because you download prebuilt indexes
+instead — and the command line uses those same downloads (sections 3–4), so this is
+not a choice between the browser and the CLI. You copy a few commands, open a browser,
+fill in a short form, and read the results.
 
 Everything runs inside Docker, so the only thing you install is Docker itself.
 
@@ -66,7 +69,7 @@ Check Docker works, then pull the CRISPRme+ image:
 ```bash
 docker run --rm hello-world
 
-# Pull the current CRISPRme+ release (multi-arch: Apple Silicon + Intel/Linux).
+# Pull the current CRISPRme+ release.
 docker pull pinellolab/crisprme:latest
 ```
 
@@ -330,11 +333,12 @@ docker run --gpus all --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest
 ## Running on HPC with Singularity / Apptainer
 
 On a cluster you usually cannot run Docker, but Singularity/Apptainer runs the
-same image with no root and no daemon. Most clusters already have it (the command
+same image without admin rights or a background service. Most clusters already have
+it (the command
 is `apptainer`, or `singularity` on older systems — they are interchangeable).
 
 ```bash
-# 1. pick a working folder, then build the image INTO it
+# 1. pick a working folder, then build the image into it
 #    Needs room for the ~85 GB of data, the ~4-5 GB .sif and your results -- so ~100 GB
 #    free is comfortable. Any location works as long as it has that much space; check
 #    before you start, since home directories are often quota-limited. (On filesystems
@@ -343,7 +347,7 @@ is `apptainer`, or `singularity` on older systems — they are interchangeable).
 #    Pull from inside this folder: `crisprme.sif` below is a relative path, so every
 #    later command must run from the same place.
 mkdir -p /path/to/crisprme && cd /path/to/crisprme
-# a ~4-5 GB .sif file (amd64; ~1.8 GB on Apple Silicon); no root needed
+# a ~4-5 GB .sif file (amd64; ~1.8 GB on Apple Silicon); no admin rights needed
 apptainer pull crisprme.sif docker://pinellolab/crisprme:latest
 
 # 2. download data + a prebuilt index (still in that same folder)
