@@ -252,9 +252,16 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 ```
 
 - `--mm` is mismatches; `--bDNA` / `--bRNA` are DNA / RNA bulges. For a wider
-  search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 9` (the same as
-  **Maximum edits = 9** in the web form; `--max-total-edits` caps the total
-  mismatches + bulges, so it must be at least `--mm + --bDNA + --bRNA`).
+  search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 9`. In the web form the
+  per-type values live under **Advanced options**, while the **Maximum edits** slider
+  is the total budget — the equivalent of `--max-total-edits`.
+- `--max-total-edits` caps the **total** edits (mismatches + bulges) in one alignment,
+  and defaults to 6. Setting it *below* `--mm + --bDNA + --bRNA` is the point of the
+  flag: `--mm 4 --bDNA 1 --bRNA 1 --max-total-edits 4` allows 4 mismatches, or
+  3 mismatches + 1 bulge, but not 4 mismatches + 1 bulge. Setting it at or above the
+  sum disables the cap. (The cap applies to the alignment the search performs, so the
+  REF-based mismatches + bulges reported for a variant site can exceed it; pure
+  reference off-targets never do.)
 - `--per-sample` resolves per-individual genotypes: it names the **carrier samples**
   and marks co-occurring variants **CONFIRMED cis** (phased) / **PUTATIVE co-carrier**
   (unphased) with the exact joint allele frequency. It needs a genotyped index
