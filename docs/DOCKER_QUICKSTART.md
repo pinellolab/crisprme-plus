@@ -288,7 +288,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 On Singularity/Apptainer the commands are identical, wrapped as
 `apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif crisprme.py ...`
 (use `apptainer run`, not `apptainer exec` — `exec` bypasses the image entrypoint,
-so `crisprme.py` is not found on `PATH`). The same complete-search, end to end:
+so `crisprme.py` is not found on `PATH`). Run it from your working folder: both
+`crisprme.sif` and `${PWD}` are resolved relative to where you are. The same
+complete-search, end to end:
 
 ```bash
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \

@@ -136,12 +136,12 @@
           Docker more memory than the machine physically has: under 64&nbsp;GB total, run
           genome-wide variant-aware searches on a workstation or cluster instead.
         </p>
+        <p>To set Docker's memory:</p>
         <ul>
-          <li><strong>macOS:</strong> Docker Desktop &rarr;
-            <strong>Settings &rarr; Resources &rarr; Memory</strong> &mdash; raise it to
-            64&nbsp;GB.</li>
-          <li><strong>Windows:</strong> with the WSL&nbsp;2 backend there is
-            <strong>no memory slider</strong> &mdash; see below.</li>
+          <li><strong>macOS:</strong> Docker Desktop &rarr; Settings &rarr; Resources
+            &rarr; Memory &mdash; raise it to 64&nbsp;GB.</li>
+          <li><strong>Windows:</strong> with the WSL&nbsp;2 backend there is no memory
+            slider &mdash; see below.</li>
           <li><strong>Linux:</strong> nothing to configure. Docker Engine has no Desktop UI
             and sets no memory cap, so containers can use all of the host's RAM.</li>
         </ul>
@@ -161,7 +161,7 @@ memory=56GB</code></pre>
         </p>
         <p>
           Docker Desktop must be running whenever you use the commands below. Check how much
-          memory Docker actually got <strong>before</strong> downloading ~45&nbsp;GB:
+          memory Docker actually got <strong>before</strong> any downloads:
         </p>
         <pre><code># Windows (PowerShell) -- prints GB:
 (docker info --format '{{.MemTotal}}') / 1073741824
@@ -236,7 +236,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
           The server listens on port <strong>8080 of the machine that runs it</strong>, which
           must be free there. Apptainer shares the host network, so unlike Docker there is no
           <code>-p</code> mapping to set. Working directly on that machine, open
-          <strong>http://127.0.0.1:8080</strong>.
+          <strong>http://127.0.0.1:8080</strong> in a browser tab.
         </p>
         <p>
           <strong>On a cluster you have to forward the port first.</strong>
@@ -250,8 +250,8 @@ ssh -N -L 8080:127.0.0.1:8080 &lt;user&gt;@&lt;cluster-login&gt;
 # CRISPRme running inside a job on a compute node
 ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</code></pre>
         <p>
-          Then open <strong>http://localhost:8080</strong>, and leave that <code>ssh</code>
-          command running while you use the interface.
+          Then open <strong>http://localhost:8080</strong> in a browser tab, and leave that
+          <code>ssh</code> command running while you use the interface.
         </p>
         <p class="note">
           Use <code>apptainer run</code> (not <code>exec</code>): <code>run</code>
