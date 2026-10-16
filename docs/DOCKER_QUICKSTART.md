@@ -236,7 +236,7 @@ for scripting or a headless server, with results identical to the web interface.
 Put your 20 nt spacer(s) in a file, one per line, **with the PAM positions written as `N`**
 (a 20 nt spacer for a 3 nt PAM gets `NNN` appended), then run `complete-search`. The
 `download --what index` step already wrote the `list_vcf.txt` / `list_samplesID.txt` the
-search reads, so from `~/crisprme`:
+search reads, so from your working folder:
 
 ```bash
 printf '%s\n' CTAACAGTTGCTTTTATCACNNN > my_guide.txt   # 20-nt spacer + NNN for the 3 PAM positions
@@ -271,7 +271,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 - COSMIC cancer rows ship in the annotation bundle but are **off by default**
   (licence-gated) — enable with `crisprme.py cosmic-license enable`; IntOGen
   cancer-driver flags are on by default.
-- Results land in `~/crisprme/Results/my_search/`.
+- Results land in `Results/my_search/` inside your working folder.
 
 Build the same shareable one-file report the web **Download report** button
 produces (a self-contained `report.html` inside a ZIP):
@@ -466,6 +466,9 @@ and deleting data you no longer need. See
   running the whole time. If the page spins forever instead of failing outright, a
   stale tunnel from a dropped connection (VPN, sleep) may still be holding the local
   port — stop it, re-open the tunnel, then use a new browser tab.
+- **`Cannot connect to the Docker daemon`** → Docker Desktop is not running (Mac /
+  Windows): start it, wait for it to finish starting, then re-run. On Linux, start the
+  service (`sudo systemctl start docker`).
 - **The SSH tunnel itself will not connect** → some clusters disable port forwarding
   (`AllowTcpForwarding no`); ask your administrators. On Windows, local port 8080 can
   collide with a reserved port, so use a high local port instead

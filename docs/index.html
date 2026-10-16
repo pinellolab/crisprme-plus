@@ -125,36 +125,51 @@
           Install Docker for
           <a href="https://docs.docker.com/desktop/install/mac-install/">macOS</a>,
           <a href="https://docs.docker.com/desktop/install/windows-install/">Windows</a>,
-          or <a href="https://docs.docker.com/engine/install/">Linux</a>, and give it
-          enough memory (Docker Desktop &rarr; Settings &rarr; Resources):
-          <strong>16&nbsp;GB</strong> for a first / reference-only run, but
-          <strong>64&nbsp;GB</strong> for a genome-wide variant-aware search
-          (16&nbsp;GB or 32&nbsp;GB will run out of memory on that workload). You also need <strong>&asymp;&nbsp;100&nbsp;GB free
-          disk</strong> for the variant-aware setup (far less &mdash; ~20&nbsp;GB &mdash;
-          for a reference-only setup). Then check it works
-          and pull the CRISPRme+ image:
+          or <a href="https://docs.docker.com/engine/install/">Linux</a>. CRISPRme needs
+          <strong>16&nbsp;GB</strong> of memory for a first / reference-only run, but
+          <strong>64&nbsp;GB</strong> for a genome-wide variant-aware search (16&nbsp;GB or
+          32&nbsp;GB will run out of memory on that workload). You also need
+          <strong>&asymp;&nbsp;100&nbsp;GB free disk</strong> for the variant-aware setup
+          (far less &mdash; ~20&nbsp;GB &mdash; for a reference-only setup). You cannot give
+          Docker more memory than the machine physically has: under 64&nbsp;GB total, run
+          genome-wide variant-aware searches on a workstation or cluster instead.
+        </p>
+        <ul>
+          <li><strong>macOS:</strong> Docker Desktop &rarr;
+            <strong>Settings &rarr; Resources &rarr; Memory</strong> &mdash; raise it to
+            64&nbsp;GB.</li>
+          <li><strong>Windows:</strong> with the WSL&nbsp;2 backend there is
+            <strong>no memory slider</strong> &mdash; see below.</li>
+          <li><strong>Linux:</strong> nothing to configure. Docker Engine has no Desktop UI
+            and sets no memory cap, so containers can use all of the host's RAM.</li>
+        </ul>
+        <p>
+          <strong>Windows (WSL&nbsp;2 backend).</strong> Docker Desktop reports that resource
+          limits are managed by Windows, which caps the whole WSL&nbsp;2 VM at roughly half
+          your RAM &mdash; so a 64&nbsp;GB machine gives Docker only ~32&nbsp;GB. Create
+          <code>C:\Users\&lt;YourUsername&gt;\.wslconfig</code> containing:
+        </p>
+        <pre><code>[wsl2]
+memory=56GB</code></pre>
+        <p>
+          If that file already exists, add the <code>memory</code> line to its existing
+          <code>[wsl2]</code> section rather than adding a second one. Then run
+          <code>wsl --shutdown</code> in PowerShell and restart Docker Desktop. Keep the
+          value a few GB below your total RAM so Windows keeps some.
         </p>
         <p>
-          <strong>Windows (WSL&nbsp;2 backend): there is no memory slider.</strong> Docker
-          Desktop reports that resource limits are managed by Windows, which caps the whole
-          WSL&nbsp;2 VM at roughly half your RAM &mdash; so a 64&nbsp;GB machine gives Docker
-          only ~32&nbsp;GB. Create <code>C:\Users\&lt;YourUsername&gt;\.wslconfig</code> if it
-          does not exist; if it already exists, add the <code>memory</code> line to its
-          existing <code>[wsl2]</code> section rather than adding a second one:
-          <code>[wsl2]</code> then <code>memory=56GB</code>. Run <code>wsl --shutdown</code>
-          in PowerShell and restart Docker Desktop. You cannot allocate more than the machine
-          physically has &mdash; under 64&nbsp;GB total, run genome-wide variant-aware searches
-          on a workstation or cluster instead.
+          Docker Desktop must be running whenever you use the commands below. Check how much
+          memory Docker actually got <strong>before</strong> downloading ~45&nbsp;GB:
         </p>
-        <pre><code># Confirm how much memory Docker actually got, BEFORE downloading ~45 GB.
-# Windows (PowerShell) -- prints GB:
+        <pre><code># Windows (PowerShell) -- prints GB:
 (docker info --format '{{.MemTotal}}') / 1073741824
-# macOS / Linux:
+# macOS / Linux -- prints GB:
 docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'</code></pre>
+        <p>Then check it works and pull the CRISPRme+ image:</p>
         <pre><code>docker run --rm hello-world
 
-# Pull CRISPRme+ (multi-arch: Apple Silicon + Intel/Linux).
-# ':latest' always tracks the newest release (currently v2.7.9); pin ':v2.7.9' for reproducibility.
+# ':latest' always tracks the newest release; pin a specific version tag
+# instead if you need reproducibility.
 docker pull pinellolab/crisprme:latest</code></pre>
         <p class="note">
           <strong>Already have an older image?</strong> Docker won't refresh a tag you
@@ -178,7 +193,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
   pinellolab/crisprme:latest crisprme.py web-interface</code></pre>
-        <p>Leave it running and open <strong>http://127.0.0.1:8080</strong>. Stop with <strong>Ctrl+C</strong>.</p>
+        <p>Leave it running and open <strong>http://127.0.0.1:8080</strong> in a browser tab.</p>
       </div>
 
       <!-- ============ Singularity / Apptainer ============ -->
@@ -195,16 +210,14 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
           that much space &mdash; worth checking before you start, since home directories are
           often quota-limited.
         </p>
-        <pre><code># Create your working folder and pull the image INTO it: `crisprme.sif`
-# is a relative path, so every command below must run from this folder.
+        <pre><code># Create your working folder and pull the image into it. Every command below must
+# run from this folder.
 mkdir -p /path/to/crisprme &amp;&amp; cd /path/to/crisprme
 apptainer pull crisprme.sif docker://pinellolab/crisprme:latest</code></pre>
         <p class="note">On older systems the command is <code>singularity</code> instead of <code>apptainer</code>; they are interchangeable.</p>
 
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
-        <pre><code># you are already in the working folder from step 1
-
-# reference genome, annotations, PAMs, sample lists, AND the default hg38
+        <pre><code># reference genome, annotations, PAMs, sample lists, AND the default hg38
 # reference index (NRG_3_hg38 = SpCas9 NRG, NGG+NAG) -- so a reference-only
 # search works immediately with no further downloads
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
@@ -246,7 +259,8 @@ ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</cod
         <p class="note">
           If your cluster blocks port forwarding, or requires searches to go through the
           scheduler, you can run the search from the command line instead and still open the
-          results in the browser afterwards &mdash; see
+          results in the browser afterwards. Nothing needs re-downloading &mdash; you only
+          create a small guide file. See
           <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/DOCKER_QUICKSTART.md#8-run-a-search-from-the-command-line-no-browser">Run a search from
           the command line</a>.
         </p>
