@@ -132,7 +132,7 @@
           <strong>64&nbsp;GB</strong> for a genome-wide variant-aware search (16&nbsp;GB or
           32&nbsp;GB will run out of memory on that workload). You also need
           <strong>&asymp;&nbsp;100&nbsp;GB free disk</strong> for the variant-aware setup
-          (far less &mdash; ~20&nbsp;GB &mdash; for a reference-only setup). You cannot give
+          (far less &mdash; ~25&nbsp;GB &mdash; for a reference-only setup). You cannot give
           Docker more memory than the machine physically has: under 64&nbsp;GB total, run
           genome-wide variant-aware searches on a workstation or cluster instead.
         </p>
@@ -180,7 +180,8 @@ docker pull pinellolab/crisprme:latest</code></pre>
         </p>
 
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
-        <pre><code>mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
+        <pre><code># your working folder -- anywhere with room for the data and your results
+mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
 
 # reference genome, annotations, PAMs, sample lists, AND the default hg38
 # reference index (NRG_3_hg38 = SpCas9 NRG, NGG+NAG) -- so a reference-only
