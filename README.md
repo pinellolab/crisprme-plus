@@ -102,10 +102,14 @@ first time it downloads the reference + variant data automatically (~45 GB downl
 ~85 GB on disk once installed — keep ~100 GB free; a reference-only setup is far smaller, ~25 GB), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
 (Memory: the **whole-genome *variant-aware* search** needs **~64 GB of RAM** — set that
-under Docker Desktop → Settings → Resources → Memory. Many current laptops ship with
-36–128 GB and can run it; otherwise use a workstation/HPC. **Reference-only or
-single-chromosome / target-region variant** searches fit **~16 GB**, so any laptop
-handles those.)
+under Docker Desktop → Settings → Resources → Memory. **On Windows with the WSL 2 backend
+there is no memory slider**; Windows caps the WSL 2 VM at roughly half your RAM, so set
+`memory=` in `C:\Users\<you>\.wslconfig`, run `wsl --shutdown`, and verify with
+`(docker info --format '{{.MemTotal}}') / 1073741824` — see the
+[Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). Many current
+laptops ship with 36–128 GB and can run it; otherwise use a workstation/HPC.
+**Reference-only or single-chromosome / target-region variant** searches fit **~16 GB**,
+so any laptop handles those.)
 Details: [`install/`](install/).
 
 > **GPU acceleration (optional).** The default image `pinellolab/crisprme:latest` is
@@ -127,7 +131,7 @@ New to CRISPRme? Get the point-and-click web interface running in a few commands
 > **Allocate memory first.** In **Docker Desktop → Settings → Resources → Memory**:
 > **16 GB** is enough for reference-only / single-chromosome runs, but the
 > genome-wide 1000G+HGDP variant search shown here peaks around **68–75 GB**, so
-> give Docker **64 GB+** for it (32 GB will OOM). (On Linux/Docker Engine the
+> give Docker **64 GB+** for it (32 GB will OOM). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). (On Linux/Docker Engine the
 > container uses host memory directly.) See [System Requirements](#0-system-requirements).
 
 ```bash
@@ -468,10 +472,12 @@ memory available to containers, which can cause searches to fail with
 out-of-memory errors. Before running large analyses, raise the limit in
 **Docker Desktop → Settings → Resources → Memory** — **16 GB** is fine for
 reference-only runs, but a genome-wide **variant** search needs **64 GB+** (it peaks
-at ~68–75 GB). CRISPRme prints a non-fatal
+at ~68–75 GB). On **Windows with the WSL 2 backend there is no memory slider** — set `memory=` in `C:\Users\<you>\.wslconfig` instead, then `wsl --shutdown`; see the [Docker Quickstart](docs/DOCKER_QUICKSTART.md#1-install-docker-one-time). CRISPRme prints a non-fatal
 `WARNING:` at the start of a `complete-search` / `complete-test` run when it
 detects less than 32 GB of total memory, reminding you to increase this
-allocation. (You can override the threshold with `CRISPRME_MIN_GB` or skip the
+allocation. That threshold sits below the 64 GB a genome-wide variant search needs, so a
+run that starts without a warning may still not have enough memory.
+(You can override the threshold with `CRISPRME_MIN_GB` or skip the
 check entirely with `CRISPRME_SKIP_MEM_CHECK=1`.)
 
 **Linux-Specific Post-Installation Steps**

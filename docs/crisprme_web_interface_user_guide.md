@@ -800,7 +800,8 @@ variants.
 2. **Reference-only selected** — keep the pre-selected **variant** index (not **Reference
    only**) to get variant off-targets.
 3. **Variant index not installed** — re-run
-   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA`.
+   `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
+   (the recommended default panel).
 4. **Confirm success** — `Results/<name>/log_error.txt` is empty and
    `*.integrated_results.tsv` is non-empty.
 
@@ -814,8 +815,27 @@ code 137). A genome-wide 1000G+HGDP search is the heaviest case; give it enough 
 
 **Steps to resolve:**
 
-1. Raise Docker Desktop memory to **≥32 GB** (64 GB recommended for genome-wide
-   population-variant runs).
+1. Raise Docker Desktop memory to **64 GB** (16 GB or 32 GB will run out of memory on a
+   genome-wide variant-aware search). On **Windows with the WSL 2 backend there is no
+   memory slider** — Docker Desktop reports that limits are managed by Windows. Create
+   `C:\Users\<YourUsername>\.wslconfig` if it does not exist; if it already exists, add
+   the `memory` line to its existing `[wsl2]` section rather than adding a second one:
+
+   ```ini
+   [wsl2]
+   memory=56GB
+   ```
+
+   Then run `wsl --shutdown` in PowerShell and restart Docker Desktop. Keep the value a
+   few GB below your total RAM. You cannot allocate more than the machine physically has —
+   if total RAM is under 64 GB, run genome-wide variant-aware searches on a workstation or
+   cluster instead. Check what Docker actually got:
+
+   ```powershell
+   (docker info --format '{{.MemTotal}}') / 1073741824
+   ```
+
+   (macOS/Linux: `docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'`)
 2. Delete the incomplete `Results/<name>/` folder and resubmit.
 3. Or reduce the cost of the search: select **Reference only** or lower
    **Maximum edits**.

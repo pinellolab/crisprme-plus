@@ -27,7 +27,9 @@ from the web app's own Settings.)
 
 **Memory:** most searches are light, but the **whole-genome variant-aware search**
 (across 1000G + HGDP) needs **~64 GB of RAM** — give Docker Desktop that much under
-Settings → Resources → Memory. Many current laptops ship with 36–128 GB and can run
+Settings → Resources → Memory. On **Windows with the WSL 2 backend there is no memory
+slider**: set `memory=` in `C:\Users\<you>\.wslconfig`, then run `wsl --shutdown` (see
+the [Docker Quickstart](../docs/DOCKER_QUICKSTART.md#1-install-docker-one-time)). Many current laptops ship with 36–128 GB and can run
 it; otherwise use a workstation or HPC. **Reference-only or single-chromosome /
 target-region variant searches fit ~16 GB**, so any laptop can do those. Requires
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) (the installer

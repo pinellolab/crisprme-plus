@@ -107,8 +107,10 @@
       <p>
         The simplest way to run CRISPRme is in a container. Use <strong>Docker</strong>
         on a laptop or desktop, or <strong>Singularity / Apptainer</strong> on an HPC
-        cluster (no root and no daemon needed). Either way it is a few commands: no
-        conda, no compiling, and no giant download. Pick your runtime below.
+        cluster (it needs no admin rights, which is why clusters allow it). Either way it
+        is a few commands, with no conda and no compiling &mdash; and because you download
+        prebuilt indexes rather than building them from raw VCFs, the download is far
+        smaller. Choose Docker or Apptainer below.
       </p>
 
       <div class="tabs" role="tablist" aria-label="Container runtime">
@@ -125,19 +127,51 @@
           Install Docker for
           <a href="https://docs.docker.com/desktop/install/mac-install/">macOS</a>,
           <a href="https://docs.docker.com/desktop/install/windows-install/">Windows</a>,
-          or <a href="https://docs.docker.com/engine/install/">Linux</a>, and give it
-          enough memory (Docker Desktop &rarr; Settings &rarr; Resources):
-          <strong>16&nbsp;GB</strong> for a first / reference-only run, but
-          <strong>64&nbsp;GB</strong> for a genome-wide variant-aware search
-          (16&nbsp;GB or 32&nbsp;GB will run out of memory on that workload). You also need <strong>&asymp;&nbsp;100&nbsp;GB free
-          disk</strong> for the variant-aware setup (far less &mdash; ~20&nbsp;GB &mdash;
-          for a reference-only setup). Then check it works
-          and pull the CRISPRme+ image:
+          or <a href="https://docs.docker.com/engine/install/">Linux</a>. CRISPRme needs
+          <strong>16&nbsp;GB</strong> of memory for a first / reference-only run, but
+          <strong>64&nbsp;GB</strong> for a genome-wide variant-aware search (16&nbsp;GB or
+          32&nbsp;GB will run out of memory on that workload). You also need
+          <strong>&asymp;&nbsp;100&nbsp;GB free disk</strong> for the variant-aware setup
+          (far less &mdash; ~25&nbsp;GB &mdash; for a reference-only setup). You cannot give
+          Docker more memory than the machine physically has: under 64&nbsp;GB total, run
+          genome-wide variant-aware searches on a workstation or cluster instead.
         </p>
+        <p>To set Docker's memory:</p>
+        <ul>
+          <li><strong>macOS:</strong> Docker Desktop &rarr; Settings &rarr; Resources
+            &rarr; Memory &mdash; raise it to 64&nbsp;GB.</li>
+          <li><strong>Windows:</strong> with the WSL&nbsp;2 backend there is no memory
+            slider &mdash; see below.</li>
+          <li><strong>Linux:</strong> nothing to configure. Docker Engine has no Desktop UI
+            and sets no memory cap, so containers can use all of the host's RAM.</li>
+        </ul>
+        <p>
+          <strong>Windows (WSL&nbsp;2 backend).</strong> Docker Desktop reports that resource
+          limits are managed by Windows, which caps the whole WSL&nbsp;2 VM at roughly half
+          your RAM &mdash; so a 64&nbsp;GB machine gives Docker only ~32&nbsp;GB. Create
+          <code>C:\Users\&lt;YourUsername&gt;\.wslconfig</code> containing:
+        </p>
+        <pre><code>[wsl2]
+memory=56GB</code></pre>
+        <p>
+          If that file already exists, add the <code>memory</code> line to its existing
+          <code>[wsl2]</code> section rather than adding a second one. Then run
+          <code>wsl --shutdown</code> in PowerShell and restart Docker Desktop. Keep the
+          value a few GB below your total RAM so Windows keeps some.
+        </p>
+        <p>
+          Docker Desktop must be running whenever you use the commands below. Check how much
+          memory Docker actually got <strong>before</strong> any downloads:
+        </p>
+        <pre><code># Windows (PowerShell) -- prints GB:
+(docker info --format '{{.MemTotal}}') / 1073741824
+# macOS / Linux -- prints GB:
+docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'</code></pre>
+        <p>Then check it works and pull the CRISPRme+ image:</p>
         <pre><code>docker run --rm hello-world
 
-# Pull CRISPRme+ (multi-arch: Apple Silicon + Intel/Linux).
-# ':latest' always tracks the newest release (currently v2.7.9); pin ':v2.7.9' for reproducibility.
+# ':latest' always tracks the newest release; pin a specific version tag
+# instead if you need reproducibility.
 docker pull pinellolab/crisprme:latest</code></pre>
         <p class="note">
           <strong>Already have an older image?</strong> Docker won't refresh a tag you
@@ -146,15 +180,14 @@ docker pull pinellolab/crisprme:latest</code></pre>
         </p>
 
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
-        <pre><code>mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
+        <pre><code># your working folder -- anywhere with room for the data and your results
+mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
 
-# reference genome, annotations, PAMs, sample lists (and the default hg38 reference index)
+# reference genome, annotations, PAMs, sample lists, AND the default hg38
+# reference index (NRG_3_hg38 = SpCas9 NRG, NGG+NAG) -- so a reference-only
+# search works immediately with no further downloads
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what all --path /DATA
-
-# a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (phased HGDP + 1000 Genomes, 4,091 samples)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
@@ -163,7 +196,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
         <h3>3 &mdash; Launch the web interface</h3>
         <pre><code>docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
   pinellolab/crisprme:latest crisprme.py web-interface</code></pre>
-        <p>Leave it running and open <strong>http://127.0.0.1:8080</strong>. Stop with <strong>Ctrl+C</strong>.</p>
+        <p>Leave it running and open <strong>http://127.0.0.1:8080</strong> in a browser tab.</p>
       </div>
 
       <!-- ============ Singularity / Apptainer ============ -->
@@ -171,21 +204,27 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
         <h3>1 &mdash; Build the image (one time)</h3>
         <p>
           Most clusters already have Apptainer/Singularity. Convert the CRISPRme image
-          to a <code>.sif</code> file (no root needed):
+          to a <code>.sif</code> file (no admin rights needed):
         </p>
-        <pre><code>apptainer pull crisprme.sif docker://pinellolab/crisprme:latest</code></pre>
+        <p class="note">
+          Pick a working folder with room for the <strong>~85&nbsp;GB of data</strong>, the
+          <strong>~4&ndash;5&nbsp;GB <code>.sif</code></strong> and your results &mdash; so
+          &asymp;&nbsp;100&nbsp;GB free is comfortable. Any location works as long as it has
+          that much space &mdash; worth checking before you start, since home directories are
+          often quota-limited.
+        </p>
+        <pre><code># Create your working folder and pull the image into it. Every command below must
+# run from this folder.
+mkdir -p /path/to/crisprme &amp;&amp; cd /path/to/crisprme
+apptainer pull crisprme.sif docker://pinellolab/crisprme:latest</code></pre>
         <p class="note">On older systems the command is <code>singularity</code> instead of <code>apptainer</code>; they are interchangeable.</p>
 
         <h3>2 &mdash; Download the data and a ready-made index (minutes, not hours)</h3>
-        <pre><code>mkdir -p ~/crisprme &amp;&amp; cd ~/crisprme
-
-# reference genome, annotations, PAMs, sample lists (and the default hg38 reference index)
+        <pre><code># reference genome, annotations, PAMs, sample lists, AND the default hg38
+# reference index (NRG_3_hg38 = SpCas9 NRG, NGG+NAG) -- so a reference-only
+# search works immediately with no further downloads
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what all --path /DATA
-
-# a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
-apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
-  crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (phased HGDP + 1000 Genomes, 4,091 samples)
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
@@ -195,9 +234,25 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
         <pre><code>apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py web-interface</code></pre>
         <p>
-          Open <strong>http://127.0.0.1:8080</strong> (or, on a cluster, the node's
-          address). Apptainer shares the host network, so no port mapping is needed,
-          but port <strong>8080 must be free</strong> on the node.
+          The server listens on port <strong>8080 of the machine that runs it</strong>, which
+          must be free there. Apptainer shares the host network, so unlike Docker there is no
+          <code>-p</code> mapping to set. Working directly on that machine, open
+          <strong>http://127.0.0.1:8080</strong> in a browser tab.
+        </p>
+        <p>
+          <strong>On a cluster you have to forward the port first.</strong>
+          <code>http://127.0.0.1:8080</code> typed into your own browser points at
+          <em>your own computer</em>, not at the cluster, so it will not reach CRISPRme
+          until you do. From your laptop:
+        </p>
+        <pre><code># CRISPRme running on the login node you SSH into
+ssh -N -L 8080:127.0.0.1:8080 &lt;user&gt;@&lt;cluster-login&gt;
+
+# CRISPRme running inside a job on a compute node
+ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</code></pre>
+        <p>
+          Then open <strong>http://localhost:8080</strong> in a browser tab, and leave that
+          <code>ssh</code> command running while you use the interface.
         </p>
         <p class="note">
           Use <code>apptainer run</code> (not <code>exec</code>): <code>run</code>
@@ -205,9 +260,16 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
           the path.
         </p>
         <p class="note">
-          On a headless compute node, forward the port to your laptop &mdash; from your
-          laptop run <code>ssh -L 8080:&lt;compute-node&gt;:8080 &lt;cluster-login&gt;</code>,
-          then open <strong>http://127.0.0.1:8080</strong> locally.
+          If your cluster blocks port forwarding, or requires searches to go through the
+          scheduler, you can run the search from the command line instead and still open the
+          results in the browser afterwards. Nothing needs re-downloading &mdash; you only
+          create a small guide file. See
+          <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/DOCKER_QUICKSTART.md#8-run-a-search-from-the-command-line-no-browser">Run a search from
+          the command line</a>.
+        </p>
+        <p class="note">
+          Tunnel won't connect, or the page never loads? See
+          <a href="https://github.com/pinellolab/crisprme-plus/blob/main/docs/DOCKER_QUICKSTART.md#troubleshooting">Troubleshooting</a>.
         </p>
       </div>
 
@@ -222,7 +284,8 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
         and bulges, and click <strong>Submit</strong>. Off-targets are scored with
         <strong>CFD</strong> and the <strong>CRISPR-Bulge</strong> machine-learning
         model (Yaish &amp; Orenstein, NAR 2024). Results are saved on your own
-        machine under <code>~/crisprme/Results/</code>.
+        machine, under <code>Results/</code> inside the working folder you chose at
+        the start.
       </p>
       <p class="note">
         <strong>Nothing in the dropdowns?</strong> You skipped step&nbsp;2 &mdash; run the
@@ -245,7 +308,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
         <h3>Install with Conda / Mamba</h3>
         <p style="color:#b00;margin:0 0 .5rem;"><strong>Note:</strong> Bioconda installs the last
         <em>stable</em> CRISPRme release (pre-2.2.0), <strong>not</strong> CRISPRme+ (the 2.7.x line).
-        Use the Docker quickstart above for CRISPRme+ (currently v2.7.9).</p>
+        Use the Docker quickstart above for CRISPRme+.</p>
         <pre><code># Configure Bioconda channels (one-time)
 mamba config --add channels bioconda
 mamba config --add channels conda-forge
