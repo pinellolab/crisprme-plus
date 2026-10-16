@@ -808,6 +808,43 @@ def download_component(
     if component == "index":
         if not index_name:
             raise ValueError("--index-name is required to download an 'index' component")
+        # Already installed -> NO-OP, mirroring the guard the variant path already
+        # applies to its companion reference-index fetch below. Checked BEFORE the
+        # dict-less probe so a COMPLETE install costs no network call at all.
+        # canonical_index_name() is a pure string function and strips a "-dictless"
+        # publish marker, so this resolves to the same folder whichever name the
+        # caller passed.
+        #
+        # Skip ONLY when the install is COMPLETE, so re-running `download --what
+        # index` still HEALS a partial/interrupted install (the documented recovery
+        # for "no variant off-targets / Samples degraded") rather than no-opping over
+        # it. A reference-only index has no companions. A VARIANT index is complete
+        # only with ALL of: its _INDELS companion (renamed into place by a SEPARATE
+        # os.rename, so a main dir without it is an interrupted install); the shared
+        # reference index (<pam>_<N>_<ref>, which travels once -- not inside each
+        # variant tarball); and, unless --no-genotypes, its Tier-1 genotype store
+        # (Dictionaries/genotypes_<vcf>/). Any missing piece falls through to the
+        # fetch/heal path below, which re-fetches only what is absent.
+        installed_name = canonical_index_name(index_name)
+        installed_dir = os.path.join(local_dir, installed_name)
+        _vcf = installed_name.partition("+")[2]
+        _ref_index_dir = os.path.join(local_dir, installed_name.partition("+")[0])
+        _genotype_dir = os.path.join(workdir, "Dictionaries", f"genotypes_{_vcf}")
+        _complete = os.path.isdir(installed_dir) and (
+            not _vcf
+            or (
+                os.path.isdir(f"{installed_dir}_INDELS")
+                and os.path.isdir(_ref_index_dir)
+                and (not genotypes or os.path.isdir(_genotype_dir))
+            )
+        )
+        if _complete:
+            print(
+                f"Index {installed_name} is already installed -> {installed_dir} "
+                f"(remove that folder to re-download)",
+                flush=True,
+            )
+            return installed_dir
         # Dict-less is the default in 2.4.0. If the caller asked for a VARIANT
         # index by its bare (legacy dict-based) name but a corrected `-dictless`
         # companion exists on the repo, prefer it: the `-dictless` marker is
