@@ -36,8 +36,28 @@ and the `release-crisprme` skill.
   are annotated with the functional regions enabled in Settings → Annotations (DHS, ENCODE SCREEN cCREs,
   GENCODE, COSMIC by default) plus the closest gene, and that tracks can be toggled — or a custom
   annotation added — there. (No new control; discoverability only.)
+- **Install-walkthrough corrections (#92, Ann Cirincione).** Cluster SSH port-forwarding guidance
+  (the server binds `0.0.0.0` with no auth; both tunnel forms given inline); per-OS Docker memory
+  (macOS slider / Windows `.wslconfig` / Linux no cap); and a **backwards `--max-total-edits` rule** —
+  the docs said it "must be ≥ mm+bDNA+bRNA," which is actually how you *disable* the cap (default is 6
+  = 4mm+1DNA+1RNA; setting it below the sum prunes bulged sites, by design). Plus reconciled the
+  reference-only disk figure (~25 GB), de-hardcoded a `:v2.7.9` pin, and refreshed stale
+  `1000G2021` → `HGDP1kGP` references.
 
 ### Fixed
+- **Indel-derived off-targets now get a `PAM_creation` value (#94, Ann Cirincione).** The field was
+  only ever filled on the SNP path, so a PAM created by an insertion/deletion surfaced as `NA` even
+  when it was the top-scoring site. The indel analyzer now mirrors the SNP predicate (if any reference
+  base in the PAM window is incompatible with the motif, the variant created the PAM; store the ALT
+  PAM). Writes the existing `PAM_gen` slot in place (no column shift); skipped when the window holds an
+  IUPAC-undefined character (e.g. a bulge `-`). `calc_cfd` untouched.
+- **`download --what index` no-ops on a *complete* install but still heals a partial one (#93, Ann
+  Cirincione).** Re-running the documented download re-fetched the full tarball (~8.86 GB). It now
+  skips the fetch when the install is complete, so a repeat costs no network call — but only when
+  complete: a variant index needs its `_INDELS` companion, the shared reference index, and (unless
+  `--no-genotypes`) its Tier-1 genotype store. Anything missing falls through to re-fetch just the
+  absent piece, preserving the documented "no variant off-targets / Samples degraded → re-run
+  download" recovery (and the `--no-genotypes`-then-add-genotypes workflow).
 - **No more spurious `BiopythonWarning` at CLI startup.** `dash-bootstrap-components`' sdist drops a
   `pyproject.toml` into `site-packages/`, which Biopython misreads as "importing from a source tree"
   and warns about on every `crisprme.py` invocation. The Docker image already strips that stray file;
