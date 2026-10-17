@@ -1315,7 +1315,10 @@ rm $final_res_alt.bestCRISPR_BULGE.txt
 # --report-full` can rebuild those bundles), the per-guide/per-sample summaries,
 # imgs/, and the sqlite .<job>.db (the web results-page index -- removing it would
 # break browsing this job in the web interface).
-if [ "${CRISPRME_KEEP_INTERMEDIATES:-False}" != "True" ]; then
+if [ "${CRISPRME_KEEP_INTERMEDIATES:-False}" != "True" ] && [ "$cicd_test" != "True" ]; then
+	# cicd_test guard mirrors the crispritz_targets removal above: complete-test /
+	# validate-benchmarks keeps every intermediate so the brute-force gate can read
+	# them; only real runs clean up.
 	_job=$(basename "${output_folder}")
 	echo -e "Cleaning intermediate files (set CRISPRME_KEEP_INTERMEDIATES=True to keep them)"
 	rm -f "${output_folder}/${_job}.bestMerge.txt" "${output_folder}/${_job}.altMerge.txt"
