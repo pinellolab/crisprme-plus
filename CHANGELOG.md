@@ -11,6 +11,18 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Changed
+- **The shareable report (`report.zip`) is now SLIM by default.** It bundles the human-facing layer
+  — `report.html`, the curated top-1000 (both scorers), the validation panel, the per-tier CFD/
+  CRISPR-Bulge/mmb subsets, the indel+SNP co-occurrence, and the run manifest/Params — which stays a
+  few MB and easy to share. The bulky full-data files (the complete raw `integrated_results.tsv.gz`,
+  the full `snp_snp_cooc`, `variant_created`, and `high_variant_density_regions`) are now bundled ONLY
+  with the new **`--report-full`** flag (gzipped when bundled — e.g. a ~300 MB `snp_snp_cooc` → ~23 MB);
+  they always remain in the result directory regardless, so nothing is lost. On a real genome-wide
+  5+1+1 `--per-sample` run this took the default report from **274 MB → ~5 MB**; `--report-full`
+  reproduces the complete bundle. The slim report degrades its HTML gracefully (no download links to
+  the excluded files). `crisprme.py generate-report --report-full` opts into the full bundle.
+
 ### Added
 - **`crisprme.py targets-scoring` — score a supplied LIST of off-target sites** (no genome search).
   Takes Cas-OFFinder output (`--casoffinder`, schema auto-detected) or a generic TSV with an explicit
