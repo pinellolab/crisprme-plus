@@ -34,6 +34,37 @@ and the `release-crisprme` skill.
   carrier count (read from the index's `Dictionaries/registry_<vcf>` tier). Enables scoring
   externally-nominated sites (e.g. non-canonical-PAM hits) without building a new index. New module
   `PostProcess/targets_scoring.py` + `PostProcess/test_targets_scoring.py` (wired into unit-tests CI).
+- **`observed_haplotypes.tsv` report companion — every in-budget haplotype per multi-haplotype site.**
+  The per-cluster representative in `integrated_results` necessarily collapses a dense/multi-haplotype
+  site to ONE headline row; this bundled companion lists **each** distinct observed variant haplotype
+  at any site with ≥2 of them — its variant set, rsIDs, mm/bulges, **both** scores (CFD **and**
+  CRISPR-Bulge), origin, AF, and named carriers — so a reviewer sees the full set a site contributes
+  (serving the CFD-ranked **and** the CRISPR-Bulge-ranked views). Report-layer only (built in
+  `generate_report` from the representatives + the alt-alignments file, merged per `(site, variant-set)`
+  across axes); bundled in the SLIM report. New `PostProcess/observed_haplotypes_companion.py`.
+- **Dual Aggregated Specificity Score (CFD + CRISPR-Bulge) in the report top summary.** The summary
+  card now shows TWO 0-100 aggregates — the CFD-based one (as before) and a parallel CRISPR-Bulge-based
+  one — so specificity is reported on both scales. They are separate scales and NOT interchangeable.
+
+### Fixed
+- **`--per-sample` no longer over-states dense-window off-targets (the "chimera" over-call).** In a
+  high-variant-density window (>`CRISPRME_IUPAC_CAP` co-located variants) the per-sample path emitted a
+  synthetic **cross-sample** worst-case representative whose carrier roster was the UNION of different
+  individuals' best-per-column alleles — a haplotype **no single individual carries** — which, being
+  highest-CFD, became the per-cluster headline and over-stated both risk and carrier count (observed in
+  the wild as a 15-SNP, "47-carrier", CFD-0.57 row at chr14:106770868 that nobody actually carries;
+  the real observed haplotypes there are ≤2 variants, CFD ≈ 0). Per the per-sample contract — report an
+  off-target only when ≥1 real individual carries it — that synthetic representative is no longer
+  emitted; the dense region stays visible via the high-variant-density BED + the reference row. **Only**
+  `--per-sample` is affected; the population-level default (which *should* report the conservative
+  worst case) and sites-only panels are byte-identical.
+- **Per-cluster representative tie-break → most carriers.** Among off-targets that tie EXACTLY on
+  score and severity, the representative shown in `integrated_results` now prefers the haplotype carried
+  by the most individuals (applies to the CFD, fewest-mm+b, and CRISPR-Bulge passes); a no-op for the
+  unique-best ~99.7% of clusters.
+- **CRISPR-Bulge aggregate specificity sanitized.** The CRISPR-Bulge `-1.0` out-of-domain sentinel
+  (sites with ≥2 bulges, outside the model's domain) was summed into the aggregate `100/(100+Σ)`,
+  driving the CRISPR-Bulge specificity negative; it is now excluded from the sum (no-op for CFD).
 
 ### Changed
 - **Web Contacts page:** added Ann Cirincione under the Pinello Lab, and reworded "Please send any
