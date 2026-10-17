@@ -21,10 +21,26 @@ def _rep_tiebreak(x):
     as a secondary safety discriminator), never input order. Because it is consulted
     only when all earlier key elements are exactly equal, it CANNOT reorder any cluster
     whose best row is already unique: output stays byte-identical for those (~99.7%);
-    for the exactly-tied clusters it makes both paths converge on the same
-    (lexicographically-smallest aligned-DNA) representative.
+    for the exactly-tied clusters it makes both paths converge on the same representative.
+
+    2.7.10: among rows that tie EXACTLY on CFD/severity/position, prefer the one carried
+    by the MOST individuals ("highest CFD, ties -> most carriers"). This only ever
+    reorders exactly-tied clusters (still a no-op for the unique-best ~99.7%), and makes
+    the per-cluster headline the most prevalent of the equally-severe real haplotypes;
+    the per-site ``observed_haplotypes`` companion lists every one regardless. The carrier
+    count is read from the samples column (``true_guide - 2``); ref rows and empty/sentinel
+    rosters count as 0, so this is inert for them and they fall through to the DNA/pos key.
     """
-    return (str(x[2]), str(x[pos - 1]))
+    try:
+        _samples = str(x[true_guide - 2])
+        _ncarriers = (
+            0 if _samples in ("", ".", "NA", "n")
+            else len([_c for _c in _samples.split(",") if _c and _c not in (".", "NA")])
+        )
+    except Exception:  # never let the tie-break break the sort
+        _ncarriers = 0
+    # -_ncarriers => most carriers first; then the intrinsic deterministic discriminators.
+    return (-_ncarriers, str(x[2]), str(x[pos - 1]))
 
 
 def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):

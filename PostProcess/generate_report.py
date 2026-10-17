@@ -854,24 +854,31 @@ def dedupe_reference_rows(df, cols):
 # --------------------------------------------------------------------------- #
 # Aggregated Specificity Score (.<jobid>.acfd_CFD.txt)
 # --------------------------------------------------------------------------- #
-def read_specificity_score(result_dir, job_id, guides):
-    """Read the aggregated CFD specificity score (0-100) from the acfd sidecar.
+def read_specificity_score(result_dir, job_id, guides, criterion="CFD"):
+    """Read an aggregated specificity score (0-100) from the acfd sidecar.
 
-    File format (process_summaries.py:211-215): ``<guide>\\t<score>\\tNA\\tNA``
-    where <score> = 100/(100+sum_cfds) in [0,1). The web converts it to 0-100 via
-    x*100 (results_page.py:2881-2888) and shows "CFD score not available" when
-    x>=1 (i.e. no scoreable off-targets). Returns a display string.
+    ``criterion`` selects the scorer the aggregate is built from: "CFD" (the primary,
+    default -> ``.<job>.acfd_CFD.txt``) or "CRISPR-Bulge" (the ML scorer ->
+    ``.<job>.acfd_CRISPR-Bulge.txt``). Both sidecars are written by process_summaries
+    with the SAME 100/(100+sum_scores) form; the CRISPR-Bulge sum excludes the -1.0
+    out-of-domain sentinel (process_summaries.py).
+
+    File format (process_summaries.py): ``<guide>\\t<score>\\tNA\\tNA`` where
+    <score> = 100/(100+sum_scores) in [0,1). The report/web convert it to 0-100 via
+    x*100 and show "score not available" when x>=1 (i.e. no scoreable off-targets).
+    Returns a display string.
     """
+    _na = f"{criterion} score not available"  # back-compat: "CFD score not available"
     if not result_dir:
-        return "CFD score not available"
-    acfd_file = os.path.join(result_dir, f".{job_id}.acfd_CFD.txt")
+        return _na
+    acfd_file = os.path.join(result_dir, f".{job_id}.acfd_{criterion}.txt")
     if not os.path.isfile(acfd_file):
-        return "CFD score not available"
+        return _na
     try:
         with open(acfd_file) as handle:
             lines = [ln for ln in handle.read().strip().split("\n") if ln.strip()]
     except OSError:
-        return "CFD score not available"
+        return _na
     # map guide -> score; if a single guide, take the only/first row
     by_guide = {}
     for ln in lines:
@@ -882,12 +889,12 @@ def read_specificity_score(result_dir, job_id, guides):
             except ValueError:
                 continue
     if not by_guide:
-        return "CFD score not available"
+        return _na
 
     def _fmt(x):
         if 0 <= x < 1:
             return f"{x * 100:.3f}"
-        return "CFD score not available"
+        return _na
 
     if len(by_guide) == 1:
         return _fmt(next(iter(by_guide.values())))
@@ -1487,7 +1494,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     )
 
 
-def render_summary_and_matrix(meta, spec_score, matrix):
+def render_summary_and_matrix(meta, spec_score, matrix, spec_score_cb=None):
     """Section 1 HTML: header card (left) + MM/B matrix (right)."""
     bdna = meta["bdna"]
     brna = meta["brna"]
@@ -1558,8 +1565,19 @@ def render_summary_and_matrix(meta, spec_score, matrix):
         ("Mismatches", meta["mm"]),
         ("Bulges (DNA / RNA)", bulge_disp),
         ("Max total edits", _me_display),
-        ("Aggregated Specificity Score (0-100; higher = more specific)", spec_score),
+        ("Aggregated Specificity Score, CFD-based (0-100; higher = more specific)",
+         spec_score),
     ]
+    # Parallel aggregate on the CRISPR-Bulge scale (only when the ML scorer ran). Same
+    # 100/(100+sum_scores) form, computed on the CRISPR-Bulge per-off-target scores with
+    # the -1.0 out-of-domain sentinel excluded upstream (process_summaries). It is a
+    # SEPARATE 0-100 specificity on the CRISPR-Bulge scale -- NOT interchangeable with the
+    # CFD-based value (different per-site score, different domain).
+    if spec_score_cb is not None:
+        left_rows.append(
+            ("Aggregated Specificity Score, CRISPR-Bulge-based "
+             "(0-100; higher = more specific)", spec_score_cb)
+        )
     left_html = "".join(
         f'<tr><td class="k">{_esc(k)}</td><td>{_esc(v)}</td></tr>'
         for k, v in left_rows
@@ -3481,6 +3499,7 @@ def render_html(
     cooc_bundle_name=None, cooc_n_rows=0, cooc_n_cis=0,
     snp_snp_bundle_name=None, snp_snp_n_rows=0, snp_snp_n_confirmed=0,
     indel_af_bundle_name=None, indel_af_n_rows=0,
+    observed_haplotypes_bundle_name=None,
     table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
     next_steps_html="",
 ):
@@ -3609,6 +3628,31 @@ def render_html(
             f"this sidecar; bundled as <code>{_esc(indel_af_bundle_name)}</code>.</p>"
         )
 
+    # observed-haplotypes companion: download link + callout. The per-cluster
+    # representative in integrated_results keeps only the highest-scoring haplotype
+    # per axis; this lists EVERY distinct observed variant haplotype for a site that
+    # carries >=2 of them, with both scores + carriers + AF.
+    observed_haplotypes_download = ""
+    observed_haplotypes_callout = ""
+    if observed_haplotypes_bundle_name:
+        observed_haplotypes_download = (
+            f'\n  <a class="download" href="{_dl_href(observed_haplotypes_bundle_name)}" '
+            f'download>Observed haplotypes at multi-haplotype sites &mdash; TSV</a>'
+        )
+        observed_haplotypes_callout = (
+            f'<p class="caption" style="border-left:4px solid #059669;'
+            f'padding-left:0.7em;background:#ecfdf5">'
+            f"<strong>Observed haplotypes at multi-haplotype sites:</strong> "
+            f"each off-target site is reported in the table above by a single "
+            f"per-cluster representative (the highest-scoring haplotype on each "
+            f"score axis). Where a site is reached by <strong>&ge;2 distinct observed "
+            f"variant haplotypes</strong> &mdash; separate genotype combinations, each "
+            f"a distinct experimental liability &mdash; this sidecar lists them ALL, "
+            f"with BOTH the CFD and {scorer_label()} score, the variant set, rsIDs, "
+            f"carriers, and allele frequency. Bundled as "
+            f"<code>{_esc(observed_haplotypes_bundle_name)}</code>.</p>"
+        )
+
     # per-tier curated downloads (Section 5). ``tier_downloads`` is a list of
     # (label, filename) for every non-empty threshold tier that was bundled.
     tier_download_html = ""
@@ -3698,12 +3742,13 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 
 <h2>5. Downloads</h2>
 <p>{raw_download}
-  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}{cooc_download}{snp_snp_download}{indel_af_download}
+  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}{cooc_download}{snp_snp_download}{indel_af_download}{observed_haplotypes_download}
 </p>{tier_download_html}
 {hvdr_callout}
 {cooc_callout}
 {snp_snp_callout}
 {indel_af_callout}
+{observed_haplotypes_callout}
 <p class="caption">All files are bundled alongside this HTML in the same ZIP;
 the links resolve after unzipping on any machine. The top-1000 TSV, the panel,
 and the per-tier subsets share the SAME curated, readable columns as the table
@@ -3849,6 +3894,307 @@ def _package_version():
 
 
 # --------------------------------------------------------------------------- #
+# Observed-haplotypes companion (report-layer only)
+# --------------------------------------------------------------------------- #
+# Column names in the finalized integrated_results / alt-alignments files. Read by
+# NAME (never by index) so a schema reorder cannot silently shift a value. The
+# two files share the SAME 3-axis header.
+_OH_CFD_ORIGIN = "REF/ALT_origin_(highest_CFD)"
+_OH_CFD_VARSET = "Variant_info_genome_(highest_CFD)"
+_OH_CFD_RSID = "Variant_rsID_(highest_CFD)"
+_OH_CFD_MAF = "Variant_MAF_(highest_CFD)"
+_OH_CFD_SAMPLES = "Variant_samples_(highest_CFD)"
+_OH_CFD_MM = "Mismatches_(highest_CFD)"
+_OH_CFD_BULGES = "Bulges_(highest_CFD)"
+_OH_CFD_BTYPE = "Bulge_type_(highest_CFD)"
+_OH_CFD_SCORE = "CFD_score_(highest_CFD)"
+_OH_CB_ORIGIN = "REF/ALT_origin_(highest_CRISPR_BULGE)"
+_OH_CB_VARSET = "Variant_info_genome_(highest_CRISPR_BULGE)"
+_OH_CB_SAMPLES = "Variant_samples_(highest_CRISPR_BULGE)"
+_OH_CB_MAF = "Variant_MAF_(highest_CRISPR_BULGE)"
+_OH_CB_SCORE = "CRISPR_BULGE_score_(highest_CRISPR_BULGE)"
+_OH_CHROM = "Chromosome"
+_OH_SPACER = "Spacer+PAM"
+_OH_START = "Start_coordinate_(highest_CFD)"
+_OH_STRAND = "Strand_(highest_CFD)"
+
+_OH_NA = {"", "na", "n", ".", "nan", "none", "-1"}
+
+
+def _oh_get(row, key, default="NA"):
+    """Read a column from a pandas row/dict by NAME, tolerating absence/NaN."""
+    try:
+        val = row[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+    if val is None:
+        return default
+    try:
+        if val != val:  # NaN
+            return default
+    except Exception:  # noqa: BLE001
+        pass
+    return val
+
+
+def _oh_norm_varset(raw):
+    """Normalize a variant set so the SAME set matches across axes/rows regardless
+    of order: split on ',', drop blanks, sort, rejoin. Returns "" for a non-set."""
+    s = str(raw).strip()
+    if s.lower() in _OH_NA:
+        return ""
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    if not parts:
+        return ""
+    return ",".join(sorted(parts))
+
+
+def _oh_is_real(raw):
+    """True when ``raw`` is a real variant set (not "", "NA", "." etc.)."""
+    return str(raw).strip().lower() not in _OH_NA
+
+
+def _oh_count_carriers(samples):
+    """Count comma-split non-empty, non-NA/'.' sample tokens (0 if none)."""
+    s = str(samples).strip()
+    if s.lower() in _OH_NA:
+        return 0
+    return sum(
+        1 for tok in s.split(",")
+        if tok.strip() and tok.strip().lower() not in {"na", "."}
+    )
+
+
+def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
+                                        merge_window):
+    """Bundle ``observed_haplotypes.tsv``: one row per DISTINCT observed variant
+    haplotype at any off-target SITE carrying >=2 such haplotypes.
+
+    Combines the per-cluster REPRESENTATIVE rows from ``df`` (the finalized
+    integrated_results frame) with the sibling ``*all_results_with_alternative_
+    alignments.tsv`` (the non-best per-locus alignments), both sharing the same
+    3-axis header. From each row it extracts up to two haplotype observations (the
+    highest-CFD and the highest-CRISPR_BULGE axis), keeping only ``alt`` ones with
+    a real variant set. Observations are grouped into SITES (same chrom/strand/
+    spacer, single-linkage clustered by ``start`` within ``merge_window`` bp),
+    merged by normalized variant set into one record carrying both scores, and a
+    site is emitted only when it has >=2 distinct variant sets.
+
+    Returns the bundled filename ("observed_haplotypes.tsv") when >=1 row is
+    written, else None. Never raises -- any error is logged and swallowed, so the
+    report is never aborted (mirrors the other companion-bundling blocks).
+    """
+    try:
+        import observed_haplotypes_companion as oh_writer
+
+        # ---- 1. combined row source: representatives + alt-alignments -------
+        frames = [df]
+        _alt_dir = result_dir if result_dir else os.path.dirname(integrated_tsv)
+        _alt_files = sorted(
+            glob.glob(os.path.join(_alt_dir, "*all_results_with_alternative_alignments.tsv"))
+        )
+        if _alt_files:
+            try:
+                alt_df = pd.read_csv(
+                    _alt_files[0], sep="\t", dtype=str, na_filter=False, low_memory=False
+                )
+                frames.append(alt_df)
+            except Exception as exc:  # noqa: BLE001 - alt file optional
+                sys.stderr.write(
+                    f"generate-report: observed_haplotypes alt-alignments "
+                    f"unreadable ({exc}); using representatives only\n"
+                )
+
+        # ---- 2. extract haplotype observations (alt-only, real variant set) --
+        observations = []  # list of obs dicts
+        for frame in frames:
+            for _rec in frame.to_dict("records"):
+                chrom = str(_oh_get(_rec, _OH_CHROM, ""))
+                strand = str(_oh_get(_rec, _OH_STRAND, "NA"))
+                spacer = str(_oh_get(_rec, _OH_SPACER, "NA"))
+                try:
+                    start = int(float(str(_oh_get(_rec, _OH_START, "")).strip()))
+                except (TypeError, ValueError):
+                    continue  # no usable coordinate -> cannot site-cluster it
+
+                # highest-CFD axis observation
+                cfd_origin = str(_oh_get(_rec, _OH_CFD_ORIGIN, "")).strip().lower()
+                cfd_varset = _oh_get(_rec, _OH_CFD_VARSET, "")
+                if cfd_origin == "alt" and _oh_is_real(cfd_varset):
+                    observations.append({
+                        "chrom": chrom, "strand": strand, "spacer": spacer,
+                        "start": start,
+                        "varset": _oh_norm_varset(cfd_varset),
+                        "rsids": _oh_get(_rec, _OH_CFD_RSID, "NA"),
+                        "maf": _oh_get(_rec, _OH_CFD_MAF, "NA"),
+                        "samples": _oh_get(_rec, _OH_CFD_SAMPLES, "NA"),
+                        "mm": _oh_get(_rec, _OH_CFD_MM, "NA"),
+                        "bulges": _oh_get(_rec, _OH_CFD_BULGES, "NA"),
+                        "bulge_type": _oh_get(_rec, _OH_CFD_BTYPE, "NA"),
+                        "cfd": _oh_get(_rec, _OH_CFD_SCORE, None),
+                        "crispr_bulge": None,
+                        "axis": "cfd",
+                    })
+
+                # highest-CRISPR_BULGE axis observation
+                cb_origin = str(_oh_get(_rec, _OH_CB_ORIGIN, "")).strip().lower()
+                cb_varset = _oh_get(_rec, _OH_CB_VARSET, "")
+                if cb_origin == "alt" and _oh_is_real(cb_varset):
+                    observations.append({
+                        "chrom": chrom, "strand": strand, "spacer": spacer,
+                        "start": start,
+                        "varset": _oh_norm_varset(cb_varset),
+                        "rsids": "NA",
+                        "maf": _oh_get(_rec, _OH_CB_MAF, "NA"),
+                        "samples": _oh_get(_rec, _OH_CB_SAMPLES, "NA"),
+                        "mm": "NA",
+                        "bulges": "NA",
+                        "bulge_type": "NA",
+                        "cfd": None,
+                        "crispr_bulge": _oh_get(_rec, _OH_CB_SCORE, None),
+                        "axis": "cb",
+                    })
+
+        if not observations:
+            return None
+
+        # ---- 3. group observations into SITES -------------------------------
+        # group by (chrom, strand, spacer), sort by start, single-linkage cluster
+        # consecutive observations within merge_window bp of the running cluster max.
+        try:
+            window = int(merge_window)
+        except (TypeError, ValueError):
+            window = 3
+        groups = {}
+        for obs in observations:
+            groups.setdefault((obs["chrom"], obs["strand"], obs["spacer"]), []).append(obs)
+
+        sites = []  # list of (site_start, [obs, ...])
+        for _key, obs_list in groups.items():
+            obs_list.sort(key=lambda o: o["start"])
+            cluster = []
+            cluster_max = None
+            for obs in obs_list:
+                if cluster and obs["start"] - cluster_max > window:
+                    sites.append(cluster)
+                    cluster = []
+                    cluster_max = None
+                cluster.append(obs)
+                cluster_max = obs["start"] if cluster_max is None else max(cluster_max, obs["start"])
+            if cluster:
+                sites.append(cluster)
+
+        # ---- 4+5. merge by variant set within a site; emit sites with >=2 ---
+        def _score_val(x):
+            """Float score or None; "NA"/sentinel -> None."""
+            if x is None:
+                return None
+            s = str(x).strip()
+            if s.lower() in _OH_NA:
+                return None
+            try:
+                return float(s)
+            except ValueError:
+                return None
+
+        rows = []
+        for cluster in sites:
+            site_start = min(o["start"] for o in cluster)
+            by_varset = {}  # normalized varset -> merged record
+            for obs in cluster:
+                vs = obs["varset"]
+                rec = by_varset.get(vs)
+                if rec is None:
+                    rec = {
+                        "chrom": obs["chrom"], "strand": obs["strand"],
+                        "spacer": obs["spacer"], "varset": vs,
+                        "cfd": None, "crispr_bulge": None,
+                        "rsids": "NA", "maf": "NA", "samples": "NA",
+                        "mm": "NA", "bulges": "NA", "bulge_type": "NA",
+                        "_has_cfd_axis": False,
+                    }
+                    by_varset[vs] = rec
+                # prefer a non-None CFD / CRISPR-Bulge from whichever obs carries it
+                if rec["cfd"] is None and _score_val(obs.get("cfd")) is not None:
+                    rec["cfd"] = obs["cfd"]
+                if rec["crispr_bulge"] is None and _score_val(obs.get("crispr_bulge")) is not None:
+                    rec["crispr_bulge"] = obs["crispr_bulge"]
+                # carriers/maf/rsids/mm/bulges/bulge_type from the CFD-axis obs if
+                # present, else the CB-axis obs (don't let a CB obs clobber CFD data)
+                if obs["axis"] == "cfd" and not rec["_has_cfd_axis"]:
+                    rec["rsids"] = obs["rsids"]
+                    rec["maf"] = obs["maf"]
+                    rec["samples"] = obs["samples"]
+                    rec["mm"] = obs["mm"]
+                    rec["bulges"] = obs["bulges"]
+                    rec["bulge_type"] = obs["bulge_type"]
+                    rec["_has_cfd_axis"] = True
+                elif obs["axis"] == "cb" and not rec["_has_cfd_axis"]:
+                    # fill only what is still unset (so a later CFD obs can override)
+                    if str(rec["maf"]).lower() in _OH_NA:
+                        rec["maf"] = obs["maf"]
+                    if str(rec["samples"]).lower() in _OH_NA:
+                        rec["samples"] = obs["samples"]
+
+            if len(by_varset) < 2:
+                continue  # need >=2 DISTINCT variant haplotypes to be interesting
+
+            emitted = []
+            for rec in by_varset.values():
+                cfd_num = _score_val(rec["cfd"])
+                emitted.append({
+                    "Chromosome": rec["chrom"],
+                    "Site_start": site_start,
+                    "Strand": rec["strand"],
+                    "Spacer+PAM": rec["spacer"],
+                    "Variant_info_genome": rec["varset"],
+                    "rsIDs": rec["rsids"],
+                    "Mismatches": rec["mm"],
+                    "Bulges": rec["bulges"],
+                    "Bulge_type": rec["bulge_type"],
+                    "CFD": rec["cfd"] if cfd_num is not None else "NA",
+                    "CRISPR_Bulge": (
+                        rec["crispr_bulge"]
+                        if _score_val(rec["crispr_bulge"]) is not None else "NA"
+                    ),
+                    "Origin": "alt",
+                    "AF": rec["maf"] if str(rec["maf"]).lower() not in _OH_NA else "NA",
+                    "Phase": "NA",  # integrated_results carries no phase column
+                    "N_carriers": _oh_count_carriers(rec["samples"]),
+                    "Carriers": (
+                        rec["samples"]
+                        if str(rec["samples"]).lower() not in _OH_NA else "NA"
+                    ),
+                    "_cfd_sort": cfd_num,
+                })
+            # sort by CFD desc then N_carriers desc; "NA" (None) sorts last
+            emitted.sort(
+                key=lambda r: (
+                    r["_cfd_sort"] is None,
+                    -(r["_cfd_sort"] or 0.0),
+                    -int(r["N_carriers"]),
+                )
+            )
+            for r in emitted:
+                r.pop("_cfd_sort", None)
+                rows.append(r)
+
+        # ---- 6. write (or remove the empty file) ----------------------------
+        out_path = os.path.join(staging, "observed_haplotypes.tsv")
+        n = oh_writer.write_companion(out_path, rows)
+        if n >= 1:
+            return "observed_haplotypes.tsv"
+        if os.path.isfile(out_path):
+            os.remove(out_path)
+        return None
+    except Exception as exc:  # noqa: BLE001 - never abort the report on this companion
+        sys.stderr.write(
+            f"generate-report: observed_haplotypes bundle unavailable: {exc}\n"
+        )
+        return None
+
+
+# --------------------------------------------------------------------------- #
 # Public entry point
 # --------------------------------------------------------------------------- #
 def build_report(
@@ -3969,7 +4315,13 @@ def build_report(
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 
-    spec_score = read_specificity_score(result_dir, job_id, meta["guides"])
+    spec_score = read_specificity_score(result_dir, job_id, meta["guides"])  # CFD-based
+    # CRISPR-Bulge-based aggregate specificity (only when the ML scorer ran); shown as a
+    # second row in the summary card (process_summaries excludes the -1.0 sentinel).
+    spec_score_cb = (
+        read_specificity_score(result_dir, job_id, meta["guides"], criterion="CRISPR-Bulge")
+        if has_crispr_bulge else None
+    )
 
     fn = _parse_results_filename(integrated_tsv)
     sample_superpop = load_sample_superpop(samplesid_dir, fn.get("datasets", ""))
@@ -3984,7 +4336,7 @@ def build_report(
         sys.stderr.write(f"generate-report: matrix unavailable: {exc}\n")
         matrix = None
     try:
-        summary_matrix_html = render_summary_and_matrix(meta, spec_score, matrix)
+        summary_matrix_html = render_summary_and_matrix(meta, spec_score, matrix, spec_score_cb)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: summary section unavailable: {exc}\n")
         summary_matrix_html = "<p>Summary unavailable.</p>"
@@ -4336,6 +4688,29 @@ def build_report(
         sys.stderr.write(f"generate-report: indel_af bundle unavailable: {exc}\n")
         indel_af_bundle_name = None
 
+    # ---- observed-haplotypes companion (observed_haplotypes.tsv) -------------
+    # The best-merge keeps ONE per-cluster representative per off-target site on
+    # each score axis; a site reached by several distinct observed genotype
+    # combinations (haplotypes) collapses to that single row. This companion lists
+    # EVERY distinct observed variant haplotype for any site carrying >=2 of them,
+    # with BOTH scores, carriers, AF, and phase -- the key per-sample deliverable,
+    # so it is bundled in the SLIM report (NOT gated on report_full). The merge
+    # window (single-linkage site clustering) is the run's Merge param (default 3).
+    _oh_params = {}
+    if result_dir:
+        _oh_params = _read_kv_sidecar(os.path.join(result_dir, ".Params.txt"))
+        if not _oh_params:
+            _oh_params = _read_kv_sidecar(os.path.join(result_dir, "Params.txt"))
+    if params_override:
+        _oh_params = {**_oh_params, **params_override}
+    try:
+        _oh_merge_window = int(_oh_params.get("Merge") or _oh_params.get("merge") or 3)
+    except (TypeError, ValueError):
+        _oh_merge_window = 3
+    observed_haplotypes_bundle_name = build_observed_haplotypes_companion(
+        df, integrated_tsv, result_dir, staging, _oh_merge_window
+    )
+
     # ---- FOOTER (unnumbered; section 7 is the annotation legend, built in
     #      render_html via build_annotation_legend_html) -----------------------
     footer_html = build_footer(meta, version, os.path.basename(integrated_tsv))
@@ -4368,6 +4743,7 @@ def build_report(
         snp_snp_n_confirmed=snp_snp_n_confirmed,
         indel_af_bundle_name=indel_af_bundle_name,
         indel_af_n_rows=indel_af_n_rows,
+        observed_haplotypes_bundle_name=observed_haplotypes_bundle_name,
         perfect_banner=perfect_banner,
         next_steps_html=render_next_steps_box(vp),
         table_crispr_bulge_html=table_crispr_bulge_html,
@@ -4393,6 +4769,8 @@ def build_report(
         _linkable.add(hvdr_bundle_name)
     if cooc_bundle_name:
         _linkable.add(cooc_bundle_name)
+    if observed_haplotypes_bundle_name:
+        _linkable.add(observed_haplotypes_bundle_name)
     if top_crispr_bulge_df is not None and len(top_crispr_bulge_df):
         _linkable.add("top1000_crispr_bulge.tsv")
     _linkable.update(v for v in tier_links.values() if v)
@@ -4450,6 +4828,10 @@ def build_report(
             # pre-existing gap (#184): the indel_af.tsv companion was staged, counted
             # and linked but never added to the ZIP -> a broken download link. Bundle it.
             bundle.append(os.path.join(staging, indel_af_bundle_name))
+        if observed_haplotypes_bundle_name:
+            # the per-sample observed-haplotypes companion is a SLIM-report deliverable
+            # (not gated on report_full) -> always bundled when non-empty.
+            bundle.append(os.path.join(staging, observed_haplotypes_bundle_name))
 
         # machine-readable run manifest (IND traceability) + the raw .Params.txt, so
         # the ZIP is self-sufficient for re-execution. Never break the report on it.

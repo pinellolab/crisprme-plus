@@ -172,7 +172,15 @@ for guide in guides:
                     int(splitted[8]) + int(splitted[9])
                 ][int(splitted[9])] += 1
 
-            sum_cfds += float(splitted[20])
+            # Aggregated specificity denominator = sum of this criterion's per-off-target
+            # score (col 20). SKIP negative values: CRISPR-Bulge emits a -1.0 SENTINEL for
+            # out-of-domain sites (>=2 bulges, outside its single-bulge training domain) --
+            # summing those poisons the CRISPR-Bulge aggregate specificity (100/(100+sum))
+            # into a negative/>1 value. CFD is always in [0,1] so this is a no-op for the
+            # CFD criterion; it only sanitizes the CRISPR-Bulge criterion's sum.
+            _crit_score = float(splitted[20])
+            if _crit_score >= 0:
+                sum_cfds += _crit_score
             if int(splitted[10]) == 0:
                 on_targets.append(line)
 
