@@ -1302,3 +1302,23 @@ rm $final_res.bestCRISPR_BULGE.txt
 rm $final_res_alt.bestCFD.txt
 rm $final_res_alt.bestmmblg.txt
 rm $final_res_alt.bestCRISPR_BULGE.txt
+
+# Intermediate cleanup (CRISPRme+ 2.7.10): the pre-integration merged tables and the
+# per-chromosome working summaries are fully superseded by the finalized
+# *_integrated_results.tsv + the report, so remove them by default to reclaim disk
+# (tens of GB on a genome-wide run). Set CRISPRME_KEEP_INTERMEDIATES=True
+# (crisprme.py complete-search --keep-intermediates) to retain everything.
+#
+# KEPT regardless (never removed here): the *_integrated_results.tsv/.zip, the
+# *_report.zip, the *_all_results_with_alternative_alignments.ZIP, the per-chrom
+# co-occurrence / high-variant-density sidecars (so a later `generate-report
+# --report-full` can rebuild those bundles), the per-guide/per-sample summaries,
+# imgs/, and the sqlite .<job>.db (the web results-page index -- removing it would
+# break browsing this job in the web interface).
+if [ "${CRISPRME_KEEP_INTERMEDIATES:-False}" != "True" ]; then
+	_job=$(basename "${output_folder}")
+	echo -e "Cleaning intermediate files (set CRISPRME_KEEP_INTERMEDIATES=True to keep them)"
+	rm -f "${output_folder}/${_job}.bestMerge.txt" "${output_folder}/${_job}.altMerge.txt"
+	rm -f "${output_folder}"/*_all_results_with_alternative_alignments.tsv  # the .zip is kept
+	rm -f "${output_folder}"/*.population_summary.tsv
+fi
