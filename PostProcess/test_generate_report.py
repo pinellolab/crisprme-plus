@@ -226,18 +226,18 @@ class TestGenerateReport(unittest.TestCase):
         self.assertNotIn("MAF", drop_hdr)  # --no-maf: MAF gone everywhere
 
     def test_zip_layout_report_at_root_rest_under_data(self):
-        _, names, _ = self._build_and_extract()
-        # ONLY report.html at the top level; every other bundled file under data/.
-        # For this fixture (5 off-targets):
+        # DEFAULT is the SLIM report: report.html at the top level, the summary layer
+        # under data/, and the heavy full-data files (integrated_results.tsv.gz,
+        # variant_created, snp_snp_cooc, high_variant_density) EXCLUDED. For this
+        # fixture (5 off-targets):
         #   CFD>= 0.5/0.2/0.05  -> all non-empty (0.1 tier removed)
         #   CRISPR-Bulge>= 0.5/0.2/0.1 -> all non-empty (fixture has CRISPR-Bulge)
         #   mm+b<= 1/2/3/4      -> 0/2/4/5 (mmb_le_1 is EMPTY -> not bundled)
-        #   variant_created     -> 3
+        _, names, _ = self._build_and_extract()
         self.assertEqual(
             sorted(names),
             sorted([
                 "report.html",
-                "data/integrated_results.tsv.gz",
                 "data/run_manifest.json",  # IND traceability manifest
                 "data/top1000.tsv",
                 "data/top1000_crispr_bulge.tsv",  # CRISPR-Bulge-ranked companion
@@ -251,7 +251,6 @@ class TestGenerateReport(unittest.TestCase):
                 "data/mmb_le_2.tsv",
                 "data/mmb_le_3.tsv",
                 "data/mmb_le_4.tsv",
-                "data/variant_created.tsv",
             ]),
         )
         # report.html is the ONLY top-level entry (self-obvious what to open)
@@ -259,9 +258,27 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(top_level, ["report.html"])
         # the empty tier (mm+b <= 1) is NOT bundled
         self.assertNotIn("data/mmb_le_1.tsv", names)
+        # the heavy full-data files are NOT in the slim default
+        self.assertNotIn("data/integrated_results.tsv.gz", names)
+        self.assertNotIn("data/variant_created.tsv", names)
+
+    def test_report_full_bundles_heavy_files(self):
+        # --report-full re-adds the heavy full-data layer: the complete raw
+        # integrated_results.tsv.gz and the variant_created tier (snp_snp_cooc /
+        # high_variant_density are absent for this tiny fixture). Slim excludes them.
+        _, slim_names, _ = self._build_and_extract()
+        _, full_names, _ = self._build_and_extract(report_full=True)
+        self.assertNotIn("data/integrated_results.tsv.gz", slim_names)
+        self.assertIn("data/integrated_results.tsv.gz", full_names)
+        self.assertNotIn("data/variant_created.tsv", slim_names)
+        self.assertIn("data/variant_created.tsv", full_names)
+        # slim is a strict subset of full (full = slim + the heavy layer)
+        self.assertTrue(set(slim_names).issubset(set(full_names)))
 
     def test_pertier_downloads_are_curated_and_linked(self):
-        _, names, extract = self._build_and_extract()
+        # report_full so variant_created (a heavy-layer tier) is present alongside
+        # the always-bundled curated tiers, and all share the curated header.
+        _, names, extract = self._build_and_extract(report_full=True)
         html = self._read(os.path.join(extract, "report.html"))
         expected_curated = gr.curated_headers(has_crispr_bulge=True)
         # every bundled per-tier / panel / top1000 TSV uses the SAME curated header
@@ -445,21 +462,25 @@ class TestGenerateReport(unittest.TestCase):
             result_dir=rd,
             samplesid_dir=self.sid_dir,
             out_zip=os.path.join(self.tmp, "hvdr_report.zip"),
+            report_full=True,  # HVDR is a heavy full-data file -> --report-full only
         )
         extract = os.path.join(self.tmp, "hvdr_extract")
         with zipfile.ZipFile(out_zip) as zf:
             names = zf.namelist()
             zf.extractall(extract)
-        self.assertIn("data/high_variant_density_regions.bed", names)
+        # bundled gzipped in the full report
+        self.assertIn("data/high_variant_density_regions.bed.gz", names)
         # the bundled bed keeps the IUPAC field
-        bed = self._read(self._dpath(extract, "high_variant_density_regions.bed"))
+        import gzip as _gz
+        with _gz.open(self._dpath(extract, "high_variant_density_regions.bed.gz"), "rt") as _f:
+            bed = _f.read()
         self.assertIn("iupac_protospacer", bed)
         self.assertIn("ACGTNNNNACGTACGTACGTNGG", bed)
         # dedup: the 3 identical per-chrom rows collapse to ONE in the bundle
         self.assertEqual(bed.count("chr3\t190\t213\tGUIDE"), 1)
         html = self._read(os.path.join(extract, "report.html"))
         self.assertIn("Highly complex (high-variant-density) regions", html)
-        self.assertIn('href="data/high_variant_density_regions.bed"', html)
+        self.assertIn('href="data/high_variant_density_regions.bed.gz"', html)
         # curated column is part of the shared set (header of top1000)
         top_header = self._read(
             self._dpath(extract, "top1000.tsv")
@@ -550,12 +571,16 @@ class TestGenerateReport(unittest.TestCase):
         out_zip = gr.build_report(
             result_dir=rd, samplesid_dir=self.sid_dir,
             out_zip=os.path.join(self.tmp, "snpsnp_report.zip"),
+            report_full=True,  # snp_snp_cooc is a heavy full-data file -> --report-full only
         )
         extract = os.path.join(self.tmp, "snpsnp_extract")
         with zipfile.ZipFile(out_zip) as zf:
             names = zf.namelist(); zf.extractall(extract)
-        self.assertIn("data/snp_snp_cooc.tsv", names)
-        merged = self._read(self._dpath(extract, "snp_snp_cooc.tsv"))
+        # bundled gzipped in the full report
+        self.assertIn("data/snp_snp_cooc.tsv.gz", names)
+        import gzip as _gz
+        with _gz.open(self._dpath(extract, "snp_snp_cooc.tsv.gz"), "rt") as _f:
+            merged = _f.read()
         lines = [ln for ln in merged.splitlines() if ln.strip()]
         # exactly ONE #Chromosome header across the two files
         self.assertEqual(sum(1 for ln in lines if ln.startswith("#Chromosome")), 1)
@@ -563,7 +588,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(merged.count("chr3\t200\t-"), 1)
         self.assertTrue(any(ln.startswith("chr7\t") for ln in lines))
         html = self._read(os.path.join(extract, "report.html"))
-        self.assertIn('href="data/snp_snp_cooc.tsv"', html)
+        self.assertIn('href="data/snp_snp_cooc.tsv.gz"', html)
         self.assertIn("SNP + SNP co-occurrences", html)
         self.assertIn("1 confirmed", html)  # 1 CONFIRMED (the 2 PUTATIVE excluded)
 
@@ -637,7 +662,8 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(fn2.get("datasets"), "1000G+HGDP")
 
     def test_bundled_tsv_gz_round_trips(self):
-        _, _, extract = self._build_and_extract()
+        # the complete raw dump is the heavy full-data layer -> --report-full only
+        _, _, extract = self._build_and_extract(report_full=True)
         gz = self._dpath(extract, "integrated_results.tsv.gz")
         self.assertTrue(os.path.isfile(gz))
         with gzip.open(gz, "rt") as handle:
@@ -1379,8 +1405,10 @@ class TestGenerateReport(unittest.TestCase):
         )
         self.assertIn("<code>other.tsv</code>", out)         # not bundled -> plain
         self.assertNotIn("<code>other.tsv</code></a>", out)  # not linked
-        # in a real report, the prose mentions are links (single, not double-wrapped)
-        _, _, extract = self._build_and_extract()
+        # in a real report, the prose mentions are links (single, not double-wrapped).
+        # report_full so the heavy-layer files (integrated_results.tsv.gz,
+        # variant_created.tsv) are bundled and therefore linked.
+        _, _, extract = self._build_and_extract(report_full=True)
         html = self._read(os.path.join(extract, "report.html"))
         for name in ("integrated_results.tsv.gz", "panel_top100.tsv",
                      "variant_created.tsv"):
@@ -1390,7 +1418,8 @@ class TestGenerateReport(unittest.TestCase):
             self.assertNotIn(f"<code>{name}</code></a></a>", html)  # no double link
 
     def test_self_contained_offline_and_relative_links(self):
-        _, _, extract = self._build_and_extract()
+        # report_full so the integrated_results.tsv.gz link is present to assert on
+        _, _, extract = self._build_and_extract(report_full=True)
         html = self._read(os.path.join(extract, "report.html"))
         # Fully self-contained: renders offline with NO external RESOURCE loading
         # (no phone-home). Outbound <a href> links (the license contact mailto, the

@@ -3493,6 +3493,21 @@ def render_html(
         )
     scatter_block = "\n".join(scatter_html)
 
+    # The complete raw integrated_results dump is bundled only with --report-full,
+    # in which case tsv_gz_name is its filename; otherwise it is None and we omit
+    # the download link + its caption phrase (no broken link in the slim report).
+    raw_download = ""
+    raw_caption = ""
+    if tsv_gz_name:
+        raw_download = (
+            f'\n  <a class="download" href="{_dl_href(tsv_gz_name)}" download>'
+            f"Complete raw integrated results (all columns, TSV gzip)</a>"
+        )
+        raw_caption = (
+            f" The complete integrated results (all columns) stays as the raw "
+            f"<code>{_esc(tsv_gz_name)}</code>."
+        )
+
     panel_download = ""
     panel_caption = ""
     if panel_top100_name:
@@ -3682,8 +3697,7 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 {next_steps_html}
 
 <h2>5. Downloads</h2>
-<p>
-  <a class="download" href="{_dl_href(tsv_gz_name)}" download>Complete raw integrated results (all columns, TSV gzip)</a>
+<p>{raw_download}
   <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}{cooc_download}{snp_snp_download}{indel_af_download}
 </p>{tier_download_html}
 {hvdr_callout}
@@ -3693,8 +3707,7 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 <p class="caption">All files are bundled alongside this HTML in the same ZIP;
 the links resolve after unzipping on any machine. The top-1000 TSV, the panel,
 and the per-tier subsets share the SAME curated, readable columns as the table
-below; the complete integrated results (all columns) stays as the raw
-<code>{_esc(tsv_gz_name)}</code>.{panel_caption}{tier_caption}</p>
+below.{raw_caption}{panel_caption}{tier_caption}</p>
 
 <p class="caption" style="border-left:4px solid #2b6cb0;padding-left:0.7em;background:#eef6ff">
 <strong>Need more detail?</strong> The interactive CRISPRme+ web interface goes beyond
@@ -3846,9 +3859,22 @@ def build_report(
     params_override=None,
     top_n=1000,
     drop_maf=False,
+    report_full=False,
 ):
     """Build ``<jobid>_report.zip`` (report.html + integrated_results.tsv.gz +
     top1000.tsv).
+
+    ``report_full`` (default False) controls the heavy "full-data" layer. The
+    DEFAULT report is the SLIM, shareable layer -- report.html + the curated
+    top-1000 (both scorers) + the validation panel + the small per-tier/CFD/
+    CRISPR-Bulge subsets + the indel+SNP co-occurrence + manifest/Params. The
+    bulky raw dumps -- the complete ``integrated_results.tsv.gz`` (can be hundreds
+    of MB), the full ``snp_snp_cooc.tsv`` (SNP+SNP pairs; can be ~300 MB), the
+    ``variant_created`` tier, and the ``high_variant_density_regions.bed`` -- are
+    INCLUDED ONLY when ``report_full`` is True, and are gzipped when bundled. They
+    always remain in the result directory regardless, so nothing is lost; the slim
+    default just stays small enough to share/email. (The per-site high-variant-
+    density flag + the full raw columns stay available in the result dir.)
 
     Parameters
     ----------
@@ -4035,6 +4061,11 @@ def build_report(
 
         # per-threshold tiers -- only the non-empty ones
         for tier in vp.get("tiers", []):
+            # variant_created is the bulky full-data tier (every variant-origin
+            # off-target) -> bundle ONLY with report_full; its count still shows in
+            # the panel, just without a download link (stays in the result dir).
+            if tier.get("key") == "variant_created" and not report_full:
+                continue
             sub = tier["df"]
             if sub is None or len(sub) == 0:
                 continue
@@ -4145,8 +4176,13 @@ def build_report(
                         _hvdr_seen.add(_key)
                         _out.write(_ln if _ln.endswith("\n") else _ln + "\n")
                         hvdr_n_regions += 1
-            if hvdr_n_regions:
-                hvdr_bundle_name = "high_variant_density_regions.bed"
+            if hvdr_n_regions and report_full:
+                # bulky full-data layer only: gzip (the raw .bed can be ~10+ MB)
+                _hvdr_gz = _hvdr_path + ".gz"
+                with open(_hvdr_path, "rb") as _s, gzip.open(_hvdr_gz, "wb") as _d:
+                    shutil.copyfileobj(_s, _d, length=1024 * 1024)
+                os.remove(_hvdr_path)
+                hvdr_bundle_name = "high_variant_density_regions.bed.gz"
             else:
                 os.remove(_hvdr_path)
     except Exception as exc:  # noqa: BLE001 - never abort on the sidecar bundle
@@ -4244,8 +4280,13 @@ def build_report(
                             _parts = _key.split("\t")
                             if len(_parts) > 7 and _parts[7].strip().upper() == "CONFIRMED":
                                 snp_snp_n_confirmed += 1
-            if snp_snp_n_rows:
-                snp_snp_bundle_name = "snp_snp_cooc.tsv"
+            if snp_snp_n_rows and report_full:
+                # bulky full-data layer only: gzip (the raw TSV can be ~300 MB)
+                _ss_gz = _ss_path + ".gz"
+                with open(_ss_path, "rb") as _s, gzip.open(_ss_gz, "wb") as _d:
+                    shutil.copyfileobj(_s, _d, length=1024 * 1024)
+                os.remove(_ss_path)
+                snp_snp_bundle_name = "snp_snp_cooc.tsv.gz"
             else:
                 os.remove(_ss_path)
     except Exception as exc:  # noqa: BLE001 - never abort on the sidecar bundle
@@ -4314,7 +4355,7 @@ def build_report(
     )
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
-        table_html, tsv_gz_name, top1000_name, footer_html,
+        table_html, (tsv_gz_name if report_full else None), top1000_name, footer_html,
         panel_top100_name=panel_top100_name,
         tier_downloads=tier_downloads,
         hvdr_bundle_name=hvdr_bundle_name,
@@ -4342,7 +4383,10 @@ def build_report(
     )
 
     # make every inline <code>FILE</code> reference to a bundled download clickable
-    _linkable = {tsv_gz_name, top1000_name}
+    # (only files ACTUALLY bundled -> a slim report never links the full-data files)
+    _linkable = {top1000_name}
+    if report_full:
+        _linkable.add(tsv_gz_name)
     if panel_top100_name:
         _linkable.add(panel_top100_name)
     if hvdr_bundle_name:
@@ -4379,15 +4423,19 @@ def build_report(
             except Exception as exc:  # noqa: BLE001 - never abort on the bundled TSV
                 sys.stderr.write(f"generate-report: top1000_crispr_bulge.tsv unavailable: {exc}\n")
 
-        # the complete RAW results (all 85 columns) stay as the gzip
-        gz_path = os.path.join(staging, tsv_gz_name)
-        if integrated_tsv.endswith(".gz"):
-            shutil.copyfile(integrated_tsv, gz_path)
-        else:
-            with open(integrated_tsv, "rb") as src, gzip.open(gz_path, "wb") as dst:
-                shutil.copyfileobj(src, dst, length=1024 * 1024)
-
-        bundle = [html_path, gz_path, top1000_path]
+        # The complete RAW results (all 85 columns) are the heavy full-data layer
+        # (the gzip can be hundreds of MB) -> bundle ONLY with report_full; the raw
+        # dump always stays in the result dir regardless, so nothing is lost. Also
+        # skips the wasteful re-gzip of a multi-GB dump on the slim default.
+        bundle = [html_path, top1000_path]
+        if report_full:
+            gz_path = os.path.join(staging, tsv_gz_name)
+            if integrated_tsv.endswith(".gz"):
+                shutil.copyfile(integrated_tsv, gz_path)
+            else:
+                with open(integrated_tsv, "rb") as src, gzip.open(gz_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst, length=1024 * 1024)
+            bundle.insert(1, gz_path)
         _crispr_bulge_path = os.path.join(staging, "top1000_crispr_bulge.tsv")
         if os.path.isfile(_crispr_bulge_path):
             bundle.append(_crispr_bulge_path)

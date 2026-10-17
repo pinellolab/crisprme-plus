@@ -4154,6 +4154,11 @@ def print_help_generate_report() -> None:
         "\t--no-maf, drop the MAF column entirely from the report and all "
         "exported tables (use when a run's allele frequencies are not yet "
         "finalized and a MAF column would mislead) [OPTIONAL]\n"
+        "\t--report-full, also bundle the heavy full-data files (the complete raw "
+        "integrated_results.tsv.gz, the full snp_snp_cooc, variant_created, and the "
+        "high-variant-density regions, all gzipped) into the ZIP. Default OFF -> a "
+        "slim, shareable report; the heavy files always remain in the result "
+        "directory regardless [OPTIONAL]\n"
     )
     sys.exit(1)
 
@@ -4187,6 +4192,13 @@ def generate_report() -> None:
     # frequencies are not finalized). Parsed here because _opt only handles
     # value-flags; without this the documented CLI silently ignored --no-maf.
     drop_maf = "--no-maf" in args
+    # boolean flag: bundle the heavy full-data layer (the complete raw
+    # integrated_results.tsv.gz, the full snp_snp_cooc, variant_created, and the
+    # high-variant-density regions) into the report ZIP. Default OFF -> the report
+    # is the slim, shareable layer (report.html + curated top-1000 + validation
+    # panel + small per-tier/co-occurrence subsets); the heavy files always stay in
+    # the result directory regardless, so --report-full just bundles them too.
+    report_full = "--report-full" in args
 
     if not result_dir and not integrated_results:
         sys.stderr.write(
@@ -4205,6 +4217,7 @@ def generate_report() -> None:
         out_zip=output,
         samplesid_dir=samplesid_dir,
         drop_maf=drop_maf,
+        report_full=report_full,
     )
     sys.stdout.write(f"Report written: {out}\n")
 
