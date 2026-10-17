@@ -327,6 +327,27 @@ runtimes are comparable. It **requires a genotyped index** (HGDP + 1000 Genomes 
 greyed out and the search falls back to population-level. (See "Understanding CONFIRMED vs
 PUTATIVE and carriers" in the results section for how these labels appear in the report.)
 
+**Report options (slim vs full report)**
+
+Below Analysis mode, a **Report options** checkbox — **"Include the full report
+(bundle all heavy data files)"** — controls what goes into the downloadable
+`report.zip`:
+
+- **Unticked (default)** — a **slim** report. It bundles the human-facing layer (the
+  top-1000 tables for both scorers, the ~100-site validation panel, the per-tier curated
+  tables, and the SNP+SNP / SNP+indel co-occurrence companions), which keeps the ZIP small
+  (single-digit MB on a typical run) and easy to email or attach.
+- **Ticked** — a **full**, fully self-contained report. In addition to the slim layer it
+  bundles the bulky, redundant data: the complete integrated results (gzipped), the raw
+  SNP+SNP co-occurrence dump, the variant-created table, and the high-variant-density
+  regions.
+
+Either way the omitted data is **never lost** — the complete results stay on the server and
+remain browsable in the interactive results page; the checkbox only affects what the single
+downloadable ZIP contains. This checkbox is available on every search tab (including
+Personal assembly). It mirrors the command line's `generate-report --report-full` /
+`complete-search --report-full`.
+
 **Base editing thresholds (optional)**
 
 When base editing is enabled (a Yes/No option, independent of the PAM/nuclease), an additional sub-section

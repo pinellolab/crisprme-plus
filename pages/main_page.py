@@ -820,6 +820,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
         State("max-edits-slider", "value"),
         State("advanced-thresholds-collapse", "is_open"),
         State("search-mode", "value"),
+        State("full-report", "value"),
     ],
 )
 def change_url(
@@ -843,6 +844,7 @@ def change_url(
     max_edits_val: int,
     advanced_open: bool,
     search_mode: str = "population-level",
+    full_report: Optional[List[str]] = None,
 ) -> Tuple[str, str]:
     """Launch the targets search and generates the input files for
     post-processing operations, and results visualization.
@@ -1693,7 +1695,11 @@ def change_url(
     # file on EVERY web run (including the default), contradicting the documented "off by
     # default" and paying the combinatorial cost the default is meant to avoid.
     alt_env = "1" if fast_env == "0" else "0"
-    cmd = f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
+    # Shareable report bundle: slim by default; the "full report" checkbox (dcc.Checklist,
+    # value is a list of ticked values) sets CRISPRME_REPORT_FULL=True so submit_job runs
+    # generate_report.py --report-full (mirrors `complete-search --report-full`).
+    report_full_env = "True" if (full_report and "full" in full_report) else "False"
+    cmd = f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} CRISPRME_REPORT_FULL={report_full_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
     return ("/load", f"?job={job_id}")
@@ -2836,6 +2842,46 @@ def index_page() -> html.Div:
                     ),
                 ],
                 id="analysis-mode-container",
+                style={"max-width": "420px", "margin-bottom": "12px"},
+            ),
+            # REPORT OPTIONS: slim (default) vs full shareable report bundle. Kept OUTSIDE
+            # analysis-mode-container (which is hidden on the personal-assembly tab) because
+            # every search produces a report, so this control is relevant on every tab.
+            html.Div(
+                [
+                    html.P(
+                        "Report options",
+                        style={"margin-bottom": "2px", "font-weight": "600"},
+                    ),
+                    dcc.Checklist(
+                        id="full-report",
+                        options=[
+                            {
+                                "label": " Include the full report (bundle all heavy data files)",
+                                "value": "full",
+                            },
+                        ],
+                        value=[],
+                        labelStyle={"display": "block", "font-size": "1.3rem"},
+                    ),
+                    html.P(
+                        [
+                            "By default the downloadable ",
+                            html.Code("report.zip"),
+                            " is slim: it bundles the human-facing layer (the top-1000 "
+                            "tables, the ~100-site validation panel, the per-tier curated "
+                            "tables and the co-occurrence companions), keeping it small and "
+                            "easy to share. Tick this to also bundle the heavy, redundant "
+                            "data (the complete integrated results, the raw SNP+SNP "
+                            "co-occurrence dump, the variant-created table and the "
+                            "high-variant-density regions) for a fully self-contained "
+                            "archive. The omitted data always stays in the full results on "
+                            "the server regardless of this setting.",
+                        ],
+                        style={"font-size": "1.25rem", "color": "#555"},
+                    ),
+                ],
+                id="full-report-container",
                 style={"max-width": "420px", "margin-bottom": "12px"},
             ),
             # ADVANCED: per-type mismatch / bulge caps, hidden by default.
