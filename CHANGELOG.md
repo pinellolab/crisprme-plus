@@ -44,6 +44,14 @@ and the `release-crisprme` skill.
   carrier count (read from the index's `Dictionaries/registry_<vcf>` tier). Enables scoring
   externally-nominated sites (e.g. non-canonical-PAM hits) without building a new index. New module
   `PostProcess/targets_scoring.py` + `PostProcess/test_targets_scoring.py` (wired into unit-tests CI).
+- **Full-report opt-in surfaced on every entry point.** The slim report (above) can now be upgraded to
+  the complete self-contained bundle from anywhere: `complete-search --report-full` makes the
+  automatically-generated end-of-search report full (threaded via `CRISPRME_REPORT_FULL` → the shell's
+  `generate_report.py --report-full`), the standalone `generate-report` CLI gained the `--report-full`
+  flag (its `main()` now parses and threads it — previously only the Python `build_report(report_full=…)`
+  API honored it), and the **web submission page** gained a *Report options → "Include the full report"*
+  checkbox (present on every search tab, including Personal assembly) that sets the same env var. New
+  `test_cli_main_report_full_flag_threads_to_bundle` covers the CLI→bundle path.
 
 ### Changed
 - **Web Contacts page:** added Ann Cirincione under the Pinello Lab, and reworded "Please send any

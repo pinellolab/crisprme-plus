@@ -413,7 +413,12 @@ def print_help_complete_search() -> None:
         "\t--compute-backend, ML-scorer (CRISPR-Bulge) compute device: cpu (default) | "
         "cuda (NVIDIA/Linux GPU) | metal (Apple Silicon, self-tests and falls back to CPU) "
         "| auto (pick cuda->metal->cpu). CFD is always CPU; if the cbulge scorer env is "
-        "absent the run completes on CFD only [OPTIONAL]\n")
+        "absent the run completes on CFD only [OPTIONAL]\n"
+        "\t--report-full, build the FULL (non-slim) shareable report: in addition to the "
+        "human-facing layer, bundle the heavy redundant data (complete "
+        "integrated_results.tsv.gz, raw snp_snp_cooc.tsv.gz, the variant_created per-tier "
+        "table, and high_variant_density_regions.bed.gz). Omit for the compact default "
+        "report.zip [OPTIONAL]\n")
     sys.exit(1)
 
 
@@ -1763,6 +1768,16 @@ def complete_search() -> None:
     # are kept either way. Threaded to submit_job via os.environ (inherited).
     os.environ["CRISPRME_KEEP_INTERMEDIATES"] = (
         "True" if "--keep-intermediates" in args else "False"
+    )
+
+    # Shareable report bundle: slim by default (human-facing layer only). --report-full
+    # makes the auto-generated end-of-search report ALSO bundle the heavy redundant data
+    # (complete integrated_results.gz, raw SNP+SNP co-occurrence, variant_created tier,
+    # high-variant-density BED). Threaded to submit_job via CRISPRME_REPORT_FULL, which the
+    # shell turns into `generate_report.py --report-full`; the web "full report" checkbox
+    # sets the same env var. Mirrors the standalone `generate-report --report-full`.
+    os.environ["CRISPRME_REPORT_FULL"] = (
+        "True" if "--report-full" in args else "False"
     )
 
     # ML off-target scorer for the SECOND score column beside CFD (CFD stays the primary

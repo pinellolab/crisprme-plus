@@ -6273,6 +6273,15 @@ def _build_arg_parser():
         help="Omit the MAF column entirely (table + every download) -- use when "
         "allele frequencies are not yet finalized so a MAF column would mislead.",
     )
+    parser.add_argument(
+        "--report-full",
+        dest="report_full",
+        action="store_true",
+        help="Build the full (non-slim) report: in addition to the human-facing "
+        "layer, bundle the heavy redundant data (complete integrated_results.tsv.gz, "
+        "raw snp_snp_cooc.tsv.gz, the variant_created per-tier table, and the "
+        "high_variant_density_regions.bed.gz) for a fully self-contained archive.",
+    )
     return parser
 
 
@@ -6287,6 +6296,7 @@ def main(argv=None):
         out_zip=args.output,
         samplesid_dir=args.samplesid_dir,
         drop_maf=args.no_maf,
+        report_full=args.report_full,
     )
     sys.stdout.write(f"Report written: {out}\n")
     return 0

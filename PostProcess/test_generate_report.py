@@ -275,6 +275,29 @@ class TestGenerateReport(unittest.TestCase):
         # slim is a strict subset of full (full = slim + the heavy layer)
         self.assertTrue(set(slim_names).issubset(set(full_names)))
 
+    def test_cli_main_report_full_flag_threads_to_bundle(self):
+        # The shell (submit_job) and the web "full report" checkbox both reach the
+        # heavy bundle only through generate_report.py's CLI: `--report-full`. Verify
+        # main()'s argparse parses the flag and threads it to build_report -- the
+        # default main() stays slim, and --report-full re-adds the heavy layer.
+        def _names(extra_argv):
+            out_zip = os.path.join(self.tmp, "cli_report.zip")
+            if os.path.exists(out_zip):
+                os.remove(out_zip)
+            rc = gr.main(
+                ["--integrated-results", self.tsv, "--output", out_zip,
+                 "--samplesID-dir", self.sid_dir] + extra_argv
+            )
+            self.assertEqual(rc, 0)
+            with zipfile.ZipFile(out_zip) as zf:
+                return zf.namelist()
+
+        slim = _names([])
+        full = _names(["--report-full"])
+        self.assertNotIn("data/integrated_results.tsv.gz", slim)   # default main(): slim
+        self.assertIn("data/integrated_results.tsv.gz", full)      # --report-full: heavy layer
+        self.assertTrue(set(slim).issubset(set(full)))
+
     def test_pertier_downloads_are_curated_and_linked(self):
         # report_full so variant_created (a heavy-layer tier) is present alongside
         # the always-bundled curated tiers, and all share the curated header.
