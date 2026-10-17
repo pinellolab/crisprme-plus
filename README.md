@@ -688,11 +688,12 @@ outputs. The following is a summary of CRISPRme's key features:
 
 - [**Generate Report**](#229-generate-report) (`generate-report`)
   <br>Builds a self-contained, easily shareable off-target assessment report for a
-  completed run — a single ZIP bundling an offline `report.html` (embedded plots,
-  the top-1000 off-target table, a recommended validation panel), the full
-  `integrated_results.tsv.gz`, and the per-tier curated TSVs. It runs
-  automatically at the end of every `complete-search`, and can be re-run
-  standalone on any `Results/<jobid>` folder.
+  completed run — a single **slim** ZIP bundling an offline `report.html` (embedded
+  plots, the top-1000 off-target table, a recommended validation panel) and the
+  per-tier curated TSVs, kept small and focused for sharing. Add `--report-full` to
+  also bundle the heavy data (complete `integrated_results.tsv.gz`, raw co-occurrence
+  dump, high-variant-density BED). It runs automatically at the end of every
+  `complete-search`, and can be re-run standalone on any `Results/<jobid>` folder.
 
 - [**Complete Test**](#222-complete-test) (`complete-test`)
   <br>Tests CRISPRme pipeline on a small input dataset or the full genome, 
@@ -1727,14 +1728,26 @@ for details).
 The **Generate Report** function (`generate-report`) builds a self-contained,
 easily shareable off-target assessment report for a completed CRISPRme run. It
 produces a single ZIP (`<jobid>_report.zip`) in which **`report.html` is the only
-top-level file — open it** — while every bundled data file (the full
-`integrated_results.tsv.gz`, the top-1000 / top-100 validation-panel tables, the
-non-empty per-tier curated TSVs, and the high-variant-density BED) sits under a
-**`data/`** subfolder. `report.html` is fully offline (plots embedded as base64
-PNGs, the top-1000 table + CSS inline, no external dependencies), and every
-filename it mentions links to its bundled file under `data/`. It is a portable
-digest of the full interactive website result, aimed at sharing off-target
-predictions (for example, to design a targeted-NGS / rhAMP-Seq confirmation panel).
+top-level file — open it** — while every bundled data file sits under a **`data/`**
+subfolder. `report.html` is fully offline (plots embedded as base64 PNGs, the
+top-1000 table + CSS inline, no external dependencies), and every filename it
+mentions links to its bundled file under `data/`. It is a portable digest of the
+full interactive website result, aimed at sharing off-target predictions (for
+example, to design a targeted-NGS / rhAMP-Seq confirmation panel).
+
+**The report is SLIM by default.** It bundles the human-facing layer — the
+top-1000 tables (both scorers), the ~100-site validation panel, the non-empty
+per-tier curated CFD/edit-distance TSVs, and the co-occurrence companion tables —
+which keeps the shareable ZIP small (single-digit MB on a typical run) and focused
+on what a collaborator needs to seed a confirmation panel. The bulky, redundant
+layers — the complete `integrated_results.tsv` (gzipped), the raw SNP+SNP
+co-occurrence dump, the variant-created per-tier table, and the high-variant-density
+BED — are **omitted by default**; pass **`--report-full`** to additionally bundle
+them (gzipped) for a fully self-contained archive. The omitted data is never lost:
+it stays in the result folder (and `complete-search` keeps the per-chromosome
+sidecars so `--report-full` can rebuild those bundles even after an intermediate
+cleanup). On the **web interface**, tick **"Include the full report"** under *Report
+options* on the submission page for the same effect.
 
 This report is generated **automatically at the end of every `complete-search`**
 run, so most users never call it directly. Run it standalone only to
@@ -1822,6 +1835,15 @@ is under `data/`). Reading top to bottom:
 
 - `--output` (*Optional*)
   <br>Output ZIP path. Defaults to `<result-dir>/<jobid>_report.zip`.
+
+- `--report-full` (*Optional*)
+  <br>Build the **full** (non-slim) report. In addition to the default human-facing
+  layer, bundles the bulky redundant data — the complete `integrated_results.tsv.gz`,
+  the raw `snp_snp_cooc.tsv.gz`, the `variant_created` per-tier table, and the
+  `high_variant_density_regions.bed.gz` — so the ZIP is a fully self-contained
+  archive. Omit it for the compact shareable default. `complete-search` accepts the
+  same `--report-full` to make its auto-generated report full; the web submission
+  page exposes it as the *Report options → "Include the full report"* checkbox.
 
 #### 2.2.10 Reference-Index and Data-Distribution Commands
 

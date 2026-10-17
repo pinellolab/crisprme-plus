@@ -1256,7 +1256,13 @@ echo -e "JOB END"
 # gene_proximity!="_" (unlike CRISPRme_plots above) so dict-less runs still get
 # a report; it degrades gracefully when annotation columns are empty.
 echo -e 'Building shareable report\tStart\t'$(date) >>$log
-if python "$starting_dir/generate_report.py" --result-dir "${output_folder}" >>"${output_folder}/report.log" 2>&1; then
+# Slim report by default; CRISPRME_REPORT_FULL=True|1 (set by `complete-search
+# --report-full` or the web "full report" checkbox) also bundles the heavy data.
+_report_full_flag=""
+if [ "${CRISPRME_REPORT_FULL:-False}" = "True" ] || [ "${CRISPRME_REPORT_FULL:-False}" = "1" ]; then
+	_report_full_flag="--report-full"
+fi
+if python "$starting_dir/generate_report.py" --result-dir "${output_folder}" ${_report_full_flag} >>"${output_folder}/report.log" 2>&1; then
 	echo -e 'Building shareable report\tEnd\t'$(date) >>$log
 else
 	printf "WARNING: shareable report generation failed — results are PRESERVED (issue #143). See %s/report.log\n" "${output_folder}" >&2
