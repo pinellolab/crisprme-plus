@@ -404,6 +404,12 @@ def print_help_complete_search() -> None:
         "population-level analysis (the report is built from the best alignment per locus, "
         "so this only adds a large, slow-to-build companion file), ON under --per-sample. "
         "Use --alt-alignments to force it, --no-alt-alignments to suppress it [OPTIONAL]\n"
+        "\t--keep-intermediates, keep the bulky pre-integration working files (the merged "
+        "bestMerge/altMerge tables, the raw all_results_with_alternative_alignments.tsv, and "
+        "the per-chromosome population summaries -- tens of GB on a genome-wide run). By "
+        "default these are removed once the finalized integrated_results + report are "
+        "produced; the canonical outputs (integrated_results.tsv/.zip, the report.zip, the "
+        "alt-alignments .zip, and the web .db index) are kept either way [OPTIONAL]\n"
         "\t--compute-backend, ML-scorer (CRISPR-Bulge) compute device: cpu (default) | "
         "cuda (NVIDIA/Linux GPU) | metal (Apple Silicon, self-tests and falls back to CPU) "
         "| auto (pick cuda->metal->cpu). CFD is always CPU; if the cbulge scorer env is "
@@ -1746,6 +1752,18 @@ def complete_search() -> None:
     else:
         emit_alt = per_sample  # default: ON under --per-sample, OFF for population-level
     os.environ["CRISPRME_EMIT_ALT_ALIGNMENTS"] = "1" if emit_alt else "0"
+
+    # Intermediate-output cleanup: by default the pipeline removes the bulky
+    # pre-integration working files (the merged bestMerge/altMerge tables, the raw
+    # all_results_with_alternative_alignments.tsv, and the per-chromosome population
+    # summaries -- tens of GB on a genome-wide run) once the finalized
+    # integrated_results + report are produced. --keep-intermediates retains them.
+    # The canonical outputs (integrated_results.tsv/.zip, the report.zip, the
+    # alt-alignments .zip, the co-occurrence/HVDR sidecars, and the web .db index)
+    # are kept either way. Threaded to submit_job via os.environ (inherited).
+    os.environ["CRISPRME_KEEP_INTERMEDIATES"] = (
+        "True" if "--keep-intermediates" in args else "False"
+    )
 
     # ML off-target scorer for the SECOND score column beside CFD (CFD stays the primary
     # score). This is ALWAYS CRISPR-Bulge -- the accurate, MIT-licensed model that was

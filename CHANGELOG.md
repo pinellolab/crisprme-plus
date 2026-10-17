@@ -12,6 +12,16 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Changed
+- **`complete-search` now cleans up bulky intermediate files by default** (new `--keep-intermediates`
+  to retain them). Once the finalized `*_integrated_results.tsv` and the report are produced, the
+  pre-integration working files — the merged `bestMerge`/`altMerge` tables, the raw
+  `all_results_with_alternative_alignments.tsv` (the `.zip` is kept), and the per-chromosome
+  population summaries — are removed, reclaiming ~15 GB on a genome-wide run (measured on a 5+1+1
+  `--per-sample` run). **Kept either way:** `integrated_results.tsv`/`.zip`, the `report.zip`, the
+  alt-alignments `.zip`, the per-chromosome co-occurrence / high-variant-density sidecars (so a later
+  `generate-report --report-full` can still rebuild those bundles), the per-guide/per-sample
+  summaries, and the sqlite `.db` web results-page index (removing it would break browsing the job in
+  the web interface). Gated by `CRISPRME_KEEP_INTERMEDIATES`.
 - **The shareable report (`report.zip`) is now SLIM by default.** It bundles the human-facing layer
   — `report.html`, the curated top-1000 (both scorers), the validation panel, the per-tier CFD/
   CRISPR-Bulge/mmb subsets, the indel+SNP co-occurrence, and the run manifest/Params — which stays a
