@@ -720,7 +720,11 @@ class TestGenerateReport(unittest.TestCase):
         # header card
         self.assertIn("gRNA (spacer+PAM)", html)
         self.assertIn(_GUIDE, html)
-        self.assertIn("Aggregated Specificity Score (0-100; higher = more specific)", html)
+        # TWO aggregate specificity scores: CFD-based + CRISPR-Bulge-based (the fixture
+        # has CRISPR-Bulge scores, so the second row is present). No acfd sidecar in the
+        # fixture dir -> both render the criterion-specific "not available" string.
+        self.assertIn("Aggregated Specificity Score, CFD-based (0-100; higher = more specific)", html)
+        self.assertIn("Aggregated Specificity Score, CRISPR-Bulge-based (0-100; higher = more specific)", html)
         self.assertRegex(html, r"Nuclease</td><td>SpCas9<")
         # global MM/B matrix present, grouped REFERENCE vs VARIANT
         self.assertIn("Off-targets by Mismatch (MM) and Bulge (B)", html)
@@ -1446,6 +1450,110 @@ class TestGenerateReport(unittest.TestCase):
         # the MIN maf 0.003 -> "3.00e-03"
         self.assertIn("rs333", html)
         self.assertIn("3.00e-03", html)
+
+    def test_observed_haplotypes_companion_multi_and_single(self):
+        """build_observed_haplotypes_companion lists EVERY distinct observed variant
+        haplotype for a SITE carrying >=2 of them, carrying BOTH scores so it serves
+        the CFD-ranked AND CRISPR-Bulge-ranked views; a single-haplotype site writes
+        nothing. Reads columns by NAME (never index); hermetic (tempfile, no net)."""
+        import pandas as pd
+        import observed_haplotypes_companion as oh
+
+        from generate_report import build_observed_haplotypes_companion
+
+        # Minimal 3-axis header: the identity columns + the two score axes. ONE site
+        # (same chrom/strand/spacer, starts 400 & 402 -> within merge_window=3) with
+        # TWO distinct ALT variant haplotypes on the highest-CFD axis; one of them
+        # (chrX_400_T_A) is ALSO the highest-CRISPR_BULGE rep of its row, so it gets
+        # a real CRISPR_Bulge score. A third, FAR-AWAY site (start 9000) has ONLY a
+        # single haplotype -> must emit NO rows.
+        header = [
+            "Chromosome", "Spacer+PAM",
+            "Start_coordinate_(highest_CFD)", "Strand_(highest_CFD)",
+            "REF/ALT_origin_(highest_CFD)", "Variant_info_genome_(highest_CFD)",
+            "Variant_rsID_(highest_CFD)", "Variant_MAF_(highest_CFD)",
+            "Variant_samples_(highest_CFD)", "Mismatches_(highest_CFD)",
+            "Bulges_(highest_CFD)", "Bulge_type_(highest_CFD)",
+            "CFD_score_(highest_CFD)",
+            "REF/ALT_origin_(highest_CRISPR_BULGE)",
+            "Variant_info_genome_(highest_CRISPR_BULGE)",
+            "Variant_samples_(highest_CRISPR_BULGE)",
+            "Variant_MAF_(highest_CRISPR_BULGE)",
+            "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+        ]
+        rows = [
+            # site 1, haplotype A: CFD rep AND CRISPR-Bulge rep (both scores on this row)
+            ["chrX", _GUIDE, "400", "+",
+             "alt", "chrX_400_T_A", "rs1", "0.01", "HG00096,HG00097", "2", "0", "NA",
+             "0.90",
+             "alt", "chrX_400_T_A", "HG00096,HG00097", "0.01", "0.77"],
+            # site 1, haplotype B: a DIFFERENT variant set, CFD rep only (CB axis = ref)
+            ["chrX", _GUIDE, "402", "+",
+             "alt", "chrX_402_C_G", "rs2", "0.02", "NA18525", "3", "0", "NA",
+             "0.55",
+             "ref", "NA", "NA", "NA", "0.50"],
+            # a FAR-AWAY single-haplotype site (same identity, start 9000): only one
+            # variant set -> contributes NO companion rows
+            ["chrX", _GUIDE, "9000", "+",
+             "alt", "chrX_9000_A_T", "rs9", "0.03", "HGDP00001", "1", "0", "NA",
+             "0.40",
+             "ref", "NA", "NA", "NA", "0.30"],
+        ]
+        df = pd.DataFrame(rows, columns=header)
+        staging = os.path.join(self.tmp, "oh_staging")
+        os.makedirs(staging)
+        itsv = os.path.join(self.tmp, "oh_integrated_results.tsv")  # no alt-align sibling
+        name = build_observed_haplotypes_companion(
+            df, itsv, self.tmp, staging, merge_window=3
+        )
+        # (a) returns the bundle filename
+        self.assertEqual(name, "observed_haplotypes.tsv")
+        out = os.path.join(staging, name)
+        self.assertTrue(os.path.isfile(out))
+        with open(out) as fh:
+            all_lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
+        header_line = [ln for ln in all_lines if ln.startswith("#Chromosome")]
+        self.assertEqual(len(header_line), 1)
+        self.assertEqual(header_line[0], oh.COMPANION_HEADER)
+        data = [ln for ln in all_lines if not ln.startswith("#")]
+        # (b) exactly 2 data rows (the 2 distinct haplotypes of the multi-hap site;
+        #     the single-haplotype far site emits none)
+        self.assertEqual(len(data), 2)
+        cols = oh.COMPANION_HEADER.lstrip("#").split("\t")
+        recs = [dict(zip(cols, ln.split("\t"))) for ln in data]
+        varsets = {r["Variant_info_genome"] for r in recs}
+        self.assertEqual(varsets, {"chrX_400_T_A", "chrX_402_C_G"})
+        # the far single-haplotype site never appears
+        self.assertNotIn("chrX_9000_A_T", {r["Variant_info_genome"] for r in recs})
+        # site-clustered start is the cluster min (400), for BOTH rows
+        self.assertEqual({r["Site_start"] for r in recs}, {"400"})
+        by_vs = {r["Variant_info_genome"]: r for r in recs}
+        # (c) every row carries a real CFD; the A-haplotype ALSO carries a real
+        #     CRISPR_Bulge (it was a CB rep), the B-haplotype's CRISPR_Bulge is NA
+        for r in recs:
+            self.assertNotEqual(r["CFD"], "NA")
+            self.assertEqual(r["Origin"], "alt")
+            self.assertEqual(r["Phase"], "NA")
+        self.assertEqual(by_vs["chrX_400_T_A"]["CRISPR_Bulge"], "0.77")
+        self.assertEqual(by_vs["chrX_402_C_G"]["CRISPR_Bulge"], "NA")
+        # carriers counted from the CFD-axis samples
+        self.assertEqual(by_vs["chrX_400_T_A"]["N_carriers"], "2")
+        self.assertEqual(by_vs["chrX_400_T_A"]["Carriers"], "HG00096,HG00097")
+        self.assertEqual(by_vs["chrX_402_C_G"]["N_carriers"], "1")
+        # rows sorted by CFD desc -> the 0.90 haplotype (A) comes before the 0.55 (B)
+        self.assertEqual(recs[0]["Variant_info_genome"], "chrX_400_T_A")
+
+        # (d) a 1-haplotype-only input yields None (file removed, no bundle)
+        staging2 = os.path.join(self.tmp, "oh_staging_single")
+        os.makedirs(staging2)
+        df_single = pd.DataFrame([rows[2]], columns=header)
+        name2 = build_observed_haplotypes_companion(
+            df_single, itsv, self.tmp, staging2, merge_window=3
+        )
+        self.assertIsNone(name2)
+        self.assertFalse(
+            os.path.isfile(os.path.join(staging2, "observed_haplotypes.tsv"))
+        )
 
 
 if __name__ == "__main__":
