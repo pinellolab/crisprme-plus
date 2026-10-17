@@ -515,19 +515,30 @@ Enumerating the lattice is 2^k in the number of co-located variants, so extreme-
   window emits ONE **worst-possible representative** off-target (greedy min-mismatch / max-CFD),
   tagged **PUTATIVE**, phasing-independent. No 2^k enumeration; **no MISS** (the worst case covers the
   window); bounded compute.
-- **`--per-sample`** (`CRISPRME_FAST_MODE=0`): builds the full lattice + deferred peel → **CONFIRMED**
-  cis for verified combos, PUTATIVE otherwise — *except* windows with more co-located variants than
-  `CRISPRME_IUPAC_CAP`, which fall back to the same single worst-case PUTATIVE rep.
-- Every capped window is logged to **`<out>.high_variant_density_regions.bed`** so approximated
-  regions are visible, never silent.
+- **`--per-sample`** (`CRISPRME_FAST_MODE=0`): enumerates the DISTINCT **observed** haplotypes real
+  individuals carry (bounded by the panel, not 2^k) → **CONFIRMED** cis for verified combos, PUTATIVE
+  otherwise, each with its exact named carriers. **2.7.10 change:** in a capped dense window the
+  per-sample path **no longer emits the cross-sample greedy worst-case representative.** That synthetic
+  rep unioned carriers across *different* individuals' best-per-column alleles — a haplotype **no single
+  individual carries** — and, being highest-score, won the per-cluster headline and over-stated both the
+  risk and the carrier count (seen in the wild as a 15-SNP / "47-carrier" / CFD-0.57 row at
+  chr14:106770868 that nobody actually carries; the real observed haplotypes there are ≤2 variants,
+  CFD ≈ 0). Per the per-sample contract — report an off-target only when ≥1 real individual carries it —
+  the chimera is suppressed; the window surfaces only its real observed haplotypes.
+- Every capped window is still logged to **`<out>.high_variant_density_regions.bed`** so approximated
+  regions are visible, never silent; the reference off-target row keeps the locus in the table.
+- The **`observed_haplotypes.tsv`** report companion lists, for every multi-haplotype site, EACH real
+  observed haplotype with its variant set, both scores (CFD + CRISPR-Bulge), carriers and AF — so the
+  full per-sample set a dense site contributes is visible, not just the per-cluster representative.
 
-**The approximation is conservative for the "never miss" goal:** a capped window still emits its
-worst-case off-target (so the region is never dropped); what it trades away is *per-combination cis
-enumeration* (many individual CONFIRMED rows collapse to one worst-case PUTATIVE row). Detection is
-preserved; only the per-haplotype CONFIRMED breakdown is coarsened in the densest windows.
+**"Never miss" is preserved without fabricating carriers:** the dense region is surfaced by the HVDR
+BED + the reference row + the dense-region flag column; what `--per-sample` trades away is a *synthetic
+worst-case* that no individual carries (correctly — per-sample reports only real-carrier off-targets).
+The **population-level default is unchanged**: it *should* report the conservative worst-case rep, so it
+still does. Only `--per-sample` drops the chimera.
 
-**Implication for the new HGDP+1kGP index (denser + singletons kept):** more windows will be
-multi-variant. Under the default population-level mode nothing changes (already worst-case rep). Under
-`--per-sample`, moderate-density windows are handled losslessly by the ≥4-fixed lattice; only the
-densest windows hit the cap → collapse to the worst-case PUTATIVE rep + HVDR-bed log. Net: no missed
-regions; the CONFIRMED/PUTATIVE label + carrier count remain the reader's confidence signal.
+**Implication for the HGDP+1kGP index (denser + singletons kept):** more windows are multi-variant.
+Population-level: worst-case rep as before. `--per-sample`: moderate-density windows are lossless via
+the ≥4-fixed observed enumeration; the densest windows emit their real observed haplotypes (no chimera)
++ the HVDR-bed log + the observed_haplotypes companion. Net: no missed regions, and no over-stated
+carrier rosters; the CONFIRMED/PUTATIVE label + carrier count remain the reader's confidence signal.
