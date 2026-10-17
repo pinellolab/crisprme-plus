@@ -4086,16 +4086,23 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
 
         # ---- 4+5. merge by variant set within a site; emit sites with >=2 ---
         def _score_val(x):
-            """Float score or None; "NA"/sentinel -> None."""
+            """Float score or None; "NA"/sentinel -> None.
+
+            A NEGATIVE value is the CRISPR-Bulge out-of-domain SENTINEL (-1.0 for a
+            site with >=2 bulges, outside the model's single-bulge domain); it is NOT
+            a real score, so it reads as "not scored" (None -> "NA" in the companion),
+            not a literal -1. CFD is always in [0,1] so this never affects CFD.
+            """
             if x is None:
                 return None
             s = str(x).strip()
             if s.lower() in _OH_NA:
                 return None
             try:
-                return float(s)
+                v = float(s)
             except ValueError:
                 return None
+            return None if v < 0 else v
 
         rows = []
         for cluster in sites:
