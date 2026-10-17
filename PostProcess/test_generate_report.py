@@ -720,7 +720,11 @@ class TestGenerateReport(unittest.TestCase):
         # header card
         self.assertIn("gRNA (spacer+PAM)", html)
         self.assertIn(_GUIDE, html)
-        self.assertIn("Aggregated Specificity Score (0-100; higher = more specific)", html)
+        # TWO aggregate specificity scores: CFD-based + CRISPR-Bulge-based (the fixture
+        # has CRISPR-Bulge scores, so the second row is present). No acfd sidecar in the
+        # fixture dir -> both render the criterion-specific "not available" string.
+        self.assertIn("Aggregated Specificity Score, CFD-based (0-100; higher = more specific)", html)
+        self.assertIn("Aggregated Specificity Score, CRISPR-Bulge-based (0-100; higher = more specific)", html)
         self.assertRegex(html, r"Nuclease</td><td>SpCas9<")
         # global MM/B matrix present, grouped REFERENCE vs VARIANT
         self.assertIn("Off-targets by Mismatch (MM) and Bulge (B)", html)

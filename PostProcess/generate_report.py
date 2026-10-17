@@ -854,24 +854,31 @@ def dedupe_reference_rows(df, cols):
 # --------------------------------------------------------------------------- #
 # Aggregated Specificity Score (.<jobid>.acfd_CFD.txt)
 # --------------------------------------------------------------------------- #
-def read_specificity_score(result_dir, job_id, guides):
-    """Read the aggregated CFD specificity score (0-100) from the acfd sidecar.
+def read_specificity_score(result_dir, job_id, guides, criterion="CFD"):
+    """Read an aggregated specificity score (0-100) from the acfd sidecar.
 
-    File format (process_summaries.py:211-215): ``<guide>\\t<score>\\tNA\\tNA``
-    where <score> = 100/(100+sum_cfds) in [0,1). The web converts it to 0-100 via
-    x*100 (results_page.py:2881-2888) and shows "CFD score not available" when
-    x>=1 (i.e. no scoreable off-targets). Returns a display string.
+    ``criterion`` selects the scorer the aggregate is built from: "CFD" (the primary,
+    default -> ``.<job>.acfd_CFD.txt``) or "CRISPR-Bulge" (the ML scorer ->
+    ``.<job>.acfd_CRISPR-Bulge.txt``). Both sidecars are written by process_summaries
+    with the SAME 100/(100+sum_scores) form; the CRISPR-Bulge sum excludes the -1.0
+    out-of-domain sentinel (process_summaries.py).
+
+    File format (process_summaries.py): ``<guide>\\t<score>\\tNA\\tNA`` where
+    <score> = 100/(100+sum_scores) in [0,1). The report/web convert it to 0-100 via
+    x*100 and show "score not available" when x>=1 (i.e. no scoreable off-targets).
+    Returns a display string.
     """
+    _na = f"{criterion} score not available"  # back-compat: "CFD score not available"
     if not result_dir:
-        return "CFD score not available"
-    acfd_file = os.path.join(result_dir, f".{job_id}.acfd_CFD.txt")
+        return _na
+    acfd_file = os.path.join(result_dir, f".{job_id}.acfd_{criterion}.txt")
     if not os.path.isfile(acfd_file):
-        return "CFD score not available"
+        return _na
     try:
         with open(acfd_file) as handle:
             lines = [ln for ln in handle.read().strip().split("\n") if ln.strip()]
     except OSError:
-        return "CFD score not available"
+        return _na
     # map guide -> score; if a single guide, take the only/first row
     by_guide = {}
     for ln in lines:
@@ -882,12 +889,12 @@ def read_specificity_score(result_dir, job_id, guides):
             except ValueError:
                 continue
     if not by_guide:
-        return "CFD score not available"
+        return _na
 
     def _fmt(x):
         if 0 <= x < 1:
             return f"{x * 100:.3f}"
-        return "CFD score not available"
+        return _na
 
     if len(by_guide) == 1:
         return _fmt(next(iter(by_guide.values())))
@@ -1487,7 +1494,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     )
 
 
-def render_summary_and_matrix(meta, spec_score, matrix):
+def render_summary_and_matrix(meta, spec_score, matrix, spec_score_cb=None):
     """Section 1 HTML: header card (left) + MM/B matrix (right)."""
     bdna = meta["bdna"]
     brna = meta["brna"]
@@ -1558,8 +1565,19 @@ def render_summary_and_matrix(meta, spec_score, matrix):
         ("Mismatches", meta["mm"]),
         ("Bulges (DNA / RNA)", bulge_disp),
         ("Max total edits", _me_display),
-        ("Aggregated Specificity Score (0-100; higher = more specific)", spec_score),
+        ("Aggregated Specificity Score, CFD-based (0-100; higher = more specific)",
+         spec_score),
     ]
+    # Parallel aggregate on the CRISPR-Bulge scale (only when the ML scorer ran). Same
+    # 100/(100+sum_scores) form, computed on the CRISPR-Bulge per-off-target scores with
+    # the -1.0 out-of-domain sentinel excluded upstream (process_summaries). It is a
+    # SEPARATE 0-100 specificity on the CRISPR-Bulge scale -- NOT interchangeable with the
+    # CFD-based value (different per-site score, different domain).
+    if spec_score_cb is not None:
+        left_rows.append(
+            ("Aggregated Specificity Score, CRISPR-Bulge-based "
+             "(0-100; higher = more specific)", spec_score_cb)
+        )
     left_html = "".join(
         f'<tr><td class="k">{_esc(k)}</td><td>{_esc(v)}</td></tr>'
         for k, v in left_rows
@@ -3969,7 +3987,13 @@ def build_report(
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 
-    spec_score = read_specificity_score(result_dir, job_id, meta["guides"])
+    spec_score = read_specificity_score(result_dir, job_id, meta["guides"])  # CFD-based
+    # CRISPR-Bulge-based aggregate specificity (only when the ML scorer ran); shown as a
+    # second row in the summary card (process_summaries excludes the -1.0 sentinel).
+    spec_score_cb = (
+        read_specificity_score(result_dir, job_id, meta["guides"], criterion="CRISPR-Bulge")
+        if has_crispr_bulge else None
+    )
 
     fn = _parse_results_filename(integrated_tsv)
     sample_superpop = load_sample_superpop(samplesid_dir, fn.get("datasets", ""))
@@ -3984,7 +4008,7 @@ def build_report(
         sys.stderr.write(f"generate-report: matrix unavailable: {exc}\n")
         matrix = None
     try:
-        summary_matrix_html = render_summary_and_matrix(meta, spec_score, matrix)
+        summary_matrix_html = render_summary_and_matrix(meta, spec_score, matrix, spec_score_cb)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: summary section unavailable: {exc}\n")
         summary_matrix_html = "<p>Summary unavailable.</p>"
