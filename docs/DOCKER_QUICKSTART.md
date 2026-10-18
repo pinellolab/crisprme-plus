@@ -256,6 +256,15 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
     --mm 4 --bDNA 1 --bRNA 1 --per-sample --output my_search --thread 4
 ```
 
+> **Making this run on any machine.** `--thread 4` is deliberately modest — raise it to
+> match your cores (16–32 is a good max on a big node; higher rarely helps). A
+> genome-wide run needs tens of GB of scratch: if your host's `/tmp` is small (common
+> on HPC / in containers) add `-e CRISPRME_TMPDIR=/DATA/crisprme_tmp` to the
+> `docker run` so temp lands on your mounted data disk instead. `--per-sample` adds the
+> genotype resolution (named carriers) and needs more RAM and time — drop it for a
+> faster population-level scan. No GPU is required (CPU is the default and always
+> works). If anything fails, see [Troubleshooting](TROUBLESHOOTING.md).
+
 - `--mm` is mismatches; `--bDNA` / `--bRNA` are DNA / RNA bulges. For a wider
   search use e.g. `--mm 5 --bDNA 2 --bRNA 2 --max-total-edits 9`. In the web form the
   per-type values live under **Advanced options**, while the **Maximum edits** slider

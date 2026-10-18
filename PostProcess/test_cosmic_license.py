@@ -90,5 +90,43 @@ class TestStripCosmic(unittest.TestCase):
                 self.assertIn("#track cosmic annotations", fh.read())
 
 
+def _concurrent_strip_worker(payload):
+    import cosmic_license as _cl
+    src, out, iters = payload
+    for _ in range(iters):
+        _cl.strip_cosmic(src, out)
+    return True
+
+
+class TestStripCosmicConcurrency(unittest.TestCase):
+    def test_concurrent_strip_same_output_does_not_race(self):
+        """Two+ complete-search jobs stripping the SAME annotation to the SAME out_bed
+        must not race on the temp file. Pre-fix both wrote '<out>.tmp' and os.replace
+        intermittently hit FileNotFoundError; a per-process temp name fixes it (the
+        final os.replace to out_bed is atomic and the content identical, so
+        last-writer-wins)."""
+        import multiprocessing as mp
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "ann.bed.gz")
+            out = os.path.join(d, ".nocosmic.ann.bed.gz")
+            with gzip.open(src, "wt") as fh:
+                fh.writelines(_BED_ROWS * 300)  # enough size that writes overlap
+            ctx = mp.get_context("fork") if "fork" in mp.get_all_start_methods() \
+                else mp.get_context()
+            with ctx.Pool(4) as pool:
+                res = pool.map(_concurrent_strip_worker, [(src, out, 20)] * 4)
+            self.assertTrue(all(res))  # no FileNotFoundError in any worker
+            with gzip.open(out, "rt") as fh:
+                body = fh.read()
+            self.assertNotIn("_COSMIC", body)      # output still valid + cosmic-free
+            self.assertIn("ENCODE_cCRE_1", body)
+
+    def test_tmp_name_is_not_the_racy_fixed_suffix(self):
+        """Guard the fix: the temp must not be the fixed '<out_bed>.tmp' that races."""
+        import inspect
+        src = inspect.getsource(cl.strip_cosmic)
+        self.assertNotIn('out_bed + ".tmp"', src)
+
+
 if __name__ == "__main__":
     unittest.main()

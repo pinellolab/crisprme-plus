@@ -830,6 +830,35 @@ def _writable_tmp_base() -> "Optional[str]":
     return None
 
 
+def _configure_tmpdir() -> None:
+    """Make ``$CRISPRME_TMPDIR`` the single knob for ALL temporary files, so a small
+    or full ``/tmp`` (common on HPC and inside containers, where ``/tmp`` is often a
+    tiny tmpfs) never breaks a run.
+
+    When ``$CRISPRME_TMPDIR`` is set, the directory is created if missing and, when
+    writable, exported as ``$TMPDIR`` -- which is honored by Python's ``tempfile`` AND
+    by the child processes the pipeline spawns (``sort-bed``, ``bcftools``, ``bgzip``,
+    the per-chromosome workers) -- and set as ``tempfile.tempdir``. Unset leaves the
+    standard behavior (``$TMPDIR`` or ``/tmp``). Invalid value -> warn and fall back.
+    """
+    d = os.environ.get("CRISPRME_TMPDIR")
+    if not d:
+        return
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    if os.path.isdir(d) and os.access(d, os.W_OK):
+        os.environ["TMPDIR"] = d
+        import tempfile
+        tempfile.tempdir = d
+    else:
+        sys.stderr.write(
+            f"WARNING: CRISPRME_TMPDIR={d!r} is not a writable directory; "
+            "falling back to the default temp location ($TMPDIR or /tmp)\n"
+        )
+
+
 def _sort_annotation(annotationfile: str) -> str:
     """Sorts, compresses, and replaces a BED annotation file for downstream
     analysis.
@@ -907,8 +936,12 @@ def _apply_cosmic_license(args: List[str], annotationfile: str) -> str:
             with open(sigp, "w") as fh:
                 fh.write(src_sig)
         except OSError:
+            # annotation dir not writable (read-only / shared install): fall back to a
+            # roomy writable base -- $CRISPRME_TMPDIR, else the cwd data disk, else the
+            # tempfile default -- rather than assuming /tmp has room.
             import tempfile
-            stripped = os.path.join(tempfile.gettempdir(), f".nocosmic.{base}")
+            base_dir = _writable_tmp_base() or tempfile.gettempdir()
+            stripped = os.path.join(base_dir, f".nocosmic.{base}")
             _kept, dropped = _c.strip_cosmic(annotationfile, stripped)
         print(
             "[complete-search] COSMIC EXCLUDED from annotation (licence-safe default): "
@@ -4624,6 +4657,7 @@ def targets_scoring_cmd():
     print(f"targets-scoring: wrote {n} scored sites to {output}")
 
 
+_configure_tmpdir()  # honor $CRISPRME_TMPDIR for all temp before any command runs
 if len(sys.argv) < 2:
     check_crisprme_dirtree()  # check crisprme directory tree structure
     crisprme_help()  # no arg? print help

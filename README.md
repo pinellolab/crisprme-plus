@@ -924,6 +924,16 @@ its purpose and usage:
   `--compute-backend cuda`; it falls back to CPU when no GPU is present. See
   [GPU acceleration](#2210-reference-index-and-data-distribution-commands) for details.
 
+> **Scratch space (`$CRISPRME_TMPDIR`).** A genome-wide run needs tens of GB of
+> temporary scratch. On HPC nodes and in containers `/tmp` is often a small
+> RAM-backed `tmpfs`, which can make a run fail with a `No space left` / temp-file
+> error. Set `CRISPRME_TMPDIR` to a roomy, writable directory on your data disk and
+> CRISPRme routes **all** temp there (its own + the `sort-bed`/`bcftools` children):
+> `export CRISPRME_TMPDIR=/big/disk/crisprme_tmp` (or, in Docker,
+> `-e CRISPRME_TMPDIR=/DATA/crisprme_tmp`). It is created if missing. See
+> [Troubleshooting](docs/TROUBLESHOOTING.md) for this and other environment issues
+> (disk, memory, `/tmp`, GPU, degenerate-PAM+bulges).
+
 - `--alt-alignments` / `--no-alt-alignments` (*Optional*)
   <br>Emit (or skip) the exhaustive alternative-alignments file
   (`..._all_results_with_alternative_alignments.tsv` — the non-best alignments at each
