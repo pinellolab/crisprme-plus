@@ -3913,6 +3913,13 @@ _OH_CB_VARSET = "Variant_info_genome_(highest_CRISPR_BULGE)"
 _OH_CB_SAMPLES = "Variant_samples_(highest_CRISPR_BULGE)"
 _OH_CB_MAF = "Variant_MAF_(highest_CRISPR_BULGE)"
 _OH_CB_SCORE = "CRISPR_BULGE_score_(highest_CRISPR_BULGE)"
+_OH_CB_RSID = "Variant_rsID_(highest_CRISPR_BULGE)"
+_OH_CB_MM = "Mismatches_(highest_CRISPR_BULGE)"
+_OH_CB_BULGES = "Bulges_(highest_CRISPR_BULGE)"
+_OH_CB_BTYPE = "Bulge_type_(highest_CRISPR_BULGE)"
+# NOTE: the CB observation deliberately reuses the CFD-axis `start` (_OH_START) so the
+# CFD and CRISPR-Bulge observations of the same physical site co-cluster; a per-axis
+# start can differ by a small anchor shift and would split the site.
 _OH_CHROM = "Chromosome"
 _OH_SPACER = "Spacer+PAM"
 _OH_START = "Start_coordinate_(highest_CFD)"
@@ -4061,12 +4068,12 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "chrom": chrom, "strand": strand, "spacer": spacer,
                         "start": start,
                         "varset": _oh_norm_varset(cb_varset),
-                        "rsids": "NA",
+                        "rsids": _oh_get(_rec, _OH_CB_RSID, "NA"),
                         "maf": _oh_get(_rec, _OH_CB_MAF, "NA"),
                         "samples": _oh_get(_rec, _OH_CB_SAMPLES, "NA"),
-                        "mm": "NA",
-                        "bulges": "NA",
-                        "bulge_type": "NA",
+                        "mm": _oh_get(_rec, _OH_CB_MM, "NA"),
+                        "bulges": _oh_get(_rec, _OH_CB_BULGES, "NA"),
+                        "bulge_type": _oh_get(_rec, _OH_CB_BTYPE, "NA"),
                         "cfd": None,
                         "crispr_bulge": _oh_get(_rec, _OH_CB_SCORE, None),
                         "axis": "cb",
@@ -4154,11 +4161,22 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                     rec["bulge_type"] = obs["bulge_type"]
                     rec["_has_cfd_axis"] = True
                 elif obs["axis"] == "cb" and not rec["_has_cfd_axis"]:
-                    # fill only what is still unset (so a later CFD obs can override)
+                    # fill only what is still unset (so a later CFD obs can override).
+                    # The CB obs carries its own real mm/bulges/bulge_type/rsIDs, so a
+                    # varset that only ever appears on the CRISPR-Bulge axis keeps its
+                    # geometry instead of showing NA.
                     if str(rec["maf"]).lower() in _OH_NA:
                         rec["maf"] = obs["maf"]
                     if str(rec["samples"]).lower() in _OH_NA:
                         rec["samples"] = obs["samples"]
+                    if str(rec["rsids"]).lower() in _OH_NA:
+                        rec["rsids"] = obs["rsids"]
+                    if str(rec["mm"]).lower() in _OH_NA:
+                        rec["mm"] = obs["mm"]
+                    if str(rec["bulges"]).lower() in _OH_NA:
+                        rec["bulges"] = obs["bulges"]
+                    if str(rec["bulge_type"]).lower() in _OH_NA:
+                        rec["bulge_type"] = obs["bulge_type"]
 
             if len(by_varset) < 2:
                 continue  # need >=2 DISTINCT variant haplotypes to be interesting

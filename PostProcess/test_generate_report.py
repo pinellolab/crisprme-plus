@@ -1555,6 +1555,71 @@ class TestGenerateReport(unittest.TestCase):
             os.path.isfile(os.path.join(staging2, "observed_haplotypes.tsv"))
         )
 
+    def test_observed_haplotypes_cb_only_varset_carries_geometry(self):
+        """A variant haplotype surfaced ONLY on the CRISPR-Bulge axis (its row's CFD
+        axis is 'ref') must carry its REAL Mismatches/Bulges/Bulge_type/rsIDs from the
+        (highest_CRISPR_BULGE) columns -- not "NA". Pins the 2.7.10 fix that wired the
+        CB-axis geometry through instead of hardcoding NA for CB-only haplotypes."""
+        import pandas as pd
+        import observed_haplotypes_companion as oh
+
+        from generate_report import build_observed_haplotypes_companion
+
+        header = [
+            "Chromosome", "Spacer+PAM",
+            "Start_coordinate_(highest_CFD)", "Strand_(highest_CFD)",
+            "REF/ALT_origin_(highest_CFD)", "Variant_info_genome_(highest_CFD)",
+            "Variant_rsID_(highest_CFD)", "Variant_MAF_(highest_CFD)",
+            "Variant_samples_(highest_CFD)", "Mismatches_(highest_CFD)",
+            "Bulges_(highest_CFD)", "Bulge_type_(highest_CFD)",
+            "CFD_score_(highest_CFD)",
+            "REF/ALT_origin_(highest_CRISPR_BULGE)",
+            "Variant_info_genome_(highest_CRISPR_BULGE)",
+            "Variant_samples_(highest_CRISPR_BULGE)",
+            "Variant_MAF_(highest_CRISPR_BULGE)",
+            "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+            "Variant_rsID_(highest_CRISPR_BULGE)",
+            "Mismatches_(highest_CRISPR_BULGE)",
+            "Bulges_(highest_CRISPR_BULGE)",
+            "Bulge_type_(highest_CRISPR_BULGE)",
+        ]
+        rows = [
+            # V1: CFD-axis ALT rep (CB axis ref) -> appears only on the CFD axis
+            ["chrX", _GUIDE, "400", "+",
+             "alt", "chrX_400_T_A", "rs1", "0.01", "HG00096", "2", "0", "NA", "0.90",
+             "ref", "NA", "NA", "NA", "0.50", "NA", "NA", "NA", "NA"],
+            # V2: CFD-axis ref, CRISPR-Bulge-axis ALT rep -> appears ONLY on the CB axis,
+            # and its geometry (mm=1, bulge=1, DNA) + rsID live in the CB columns
+            ["chrX", _GUIDE, "401", "+",
+             "ref", "NA", "NA", "NA", "NA", "NA", "NA", "NA", "0.40",
+             "alt", "chrX_401_G_C", "NA18525,HG00097", "0.02", "0.80",
+             "rsCB", "1", "1", "DNA"],
+        ]
+        df = pd.DataFrame(rows, columns=header)
+        staging = os.path.join(self.tmp, "oh_cbonly_staging")
+        os.makedirs(staging)
+        itsv = os.path.join(self.tmp, "oh_cbonly_integrated_results.tsv")
+        name = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
+        self.assertEqual(name, "observed_haplotypes.tsv")
+        with open(os.path.join(staging, name)) as fh:
+            lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
+        cols = oh.COMPANION_HEADER.lstrip("#").split("\t")
+        recs = [dict(zip(cols, ln.split("\t"))) for ln in lines if not ln.startswith("#")]
+        by_vs = {r["Variant_info_genome"]: r for r in recs}
+        self.assertEqual(set(by_vs), {"chrX_400_T_A", "chrX_401_G_C"})
+        cb = by_vs["chrX_401_G_C"]
+        # the CB-only haplotype carries its real geometry, NOT NA
+        self.assertEqual(cb["Mismatches"], "1")
+        self.assertEqual(cb["Bulges"], "1")
+        self.assertEqual(cb["Bulge_type"], "DNA")
+        self.assertEqual(cb["rsIDs"], "rsCB")
+        self.assertEqual(cb["CRISPR_Bulge"], "0.80")
+        self.assertEqual(cb["CFD"], "NA")          # CB-only -> no CFD score
+        self.assertEqual(cb["N_carriers"], "2")    # from the CB-axis samples
+        # the CFD-only haplotype is unaffected
+        self.assertEqual(by_vs["chrX_400_T_A"]["CFD"], "0.90")
+        self.assertEqual(by_vs["chrX_400_T_A"]["Mismatches"], "2")
+
     def test_observed_haplotypes_companion_reads_alt_zip_after_cleanup(self):
         """After a default complete-search cleans up the raw
         *_all_results_with_alternative_alignments.tsv (keeping only the .zip), a later
