@@ -3925,7 +3925,7 @@ _OH_SPACER = "Spacer+PAM"
 _OH_START = "Start_coordinate_(highest_CFD)"
 _OH_STRAND = "Strand_(highest_CFD)"
 
-_OH_NA = {"", "na", "n", ".", "nan", "none", "-1"}
+_OH_NA = {"", "na", "n", ".", "nan", "none", "-1", "no_samples"}
 
 
 def _oh_get(row, key, default="NA"):
@@ -3968,7 +3968,7 @@ def _oh_count_carriers(samples):
         return 0
     return sum(
         1 for tok in s.split(",")
-        if tok.strip() and tok.strip().lower() not in {"na", "."}
+        if tok.strip() and tok.strip().lower() not in {"na", ".", "no_samples"}
     )
 
 
@@ -4200,7 +4200,12 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         if _score_val(rec["crispr_bulge"]) is not None else "NA"
                     ),
                     "Origin": "alt",
-                    "AF": rec["maf"] if str(rec["maf"]).lower() not in _OH_NA else "NA",
+                    # Honour --no-maf: when MAF is dropped from every curated export,
+                    # the companion must not leak real allele frequencies either.
+                    "AF": (
+                        "NA" if _DROP_MAF
+                        else (rec["maf"] if str(rec["maf"]).lower() not in _OH_NA else "NA")
+                    ),
                     "Phase": "NA",  # integrated_results carries no phase column
                     "N_carriers": _oh_count_carriers(rec["samples"]),
                     "Carriers": (
