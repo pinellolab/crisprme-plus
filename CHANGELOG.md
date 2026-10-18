@@ -41,6 +41,13 @@ and the `release-crisprme` skill.
   the excluded files). `crisprme.py generate-report --report-full` opts into the full bundle.
 
 ### Added
+- **Own implementation of the CFD score** (Doench et al., *Nat. Biotechnol.* 2016) in
+  `PostProcess/cfd_score.py`, with the mismatch and PAM penalty tables serialized as reviewable JSON
+  (`cfd_mismatch_scores.json`, 392 keys; `cfd_pam_scores.json`, 16 keys) and a committed generator
+  (`scripts/generate_cfd_tables.py`, with a `--check` round-trip mode). The module reproduces the
+  existing CFD values bit-for-bit (`test_cfd_score` checks raw IEEE-754 equality against the current
+  scorer across the mismatch/PAM/gap/IUPAC and T→U paths); it is not yet wired into the production
+  scoring path, which is unchanged in this release.
 - **`crisprme.py targets-scoring` — score a supplied LIST of off-target sites** (no genome search).
   Takes Cas-OFFinder output (`--casoffinder`, schema auto-detected) or a generic TSV with an explicit
   column map (`--columns guide=..,dna=..,chrom=..,pos=..`) and annotates each site with the **same**
