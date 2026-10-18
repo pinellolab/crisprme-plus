@@ -66,8 +66,10 @@ FOOTER (unnumbered): CRISPRme version + provenance stamp + fixed research-only
 Design goals / robustness posture
 ---------------------------------
 * Pure stdlib + matplotlib + pandas + numpy (the pipeline conda env). No Dash,
-  no Jinja, no network. The HTML has no <script> and no external <link>, so it
-  opens with ``file://`` on any machine.
+  no Jinja, no network. The HTML carries a SINGLE self-contained modal-toggle
+  <script> (no external resources, no network, no eval -- it only show/hides the
+  per-site observed-haplotype modal) and no external <link>, so it opens with
+  ``file://`` on any machine.
 * Columns are selected BY NAME from the header (never fixed indices), because
   the dict-less 85-col schema and the dict-based schema differ in column set /
   order. Missing columns (CRISPR-Bulge, per-dataset, annotation on dict-less) are
@@ -93,6 +95,7 @@ import io
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -2968,8 +2971,128 @@ def maf_footnote(datasets=None):
     )
 
 
-def build_table_html(top_df, cols, has_crispr_bulge, datasets=""):
-    """Scrollable inline top-N table, sorted by CFD desc; no JS (opens offline).
+# Columns shown in the per-site observed-haplotypes modal (in this order). Read from
+# each haplotype row dict by NAME; the Aligned_protospacer+PAM cell is wrapped in
+# <code>. These are the companion-row keys build_observed_haplotypes_companion emits.
+_OH_MODAL_COLS = (
+    "Variant_info_genome", "Aligned_protospacer+PAM", "CFD", "CRISPR_Bulge",
+    "Mismatches", "Bulges", "Bulge_type", "rsIDs", "AF", "N_carriers", "Carriers",
+)
+
+
+def _oh_modal_cfd(hap):
+    """Float CFD of a haplotype row dict for sorting; non-numeric/NA sorts last."""
+    try:
+        return float(hap.get("CFD"))
+    except (TypeError, ValueError):
+        return float("-inf")
+
+
+def _oh_modal_html(mid, haps, download_name):
+    """Build the hidden per-site observed-haplotypes modal HTML.
+
+    ``mid`` is the stable modal element id (also the ``data-oh`` target of the link
+    in the Observed cell), ``haps`` the list of that site's haplotype row dicts (the
+    companion rows), ``download_name`` the bundled companion TSV filename. The modal
+    lists EVERY observed haplotype at the site in a table (sorted by CFD desc) and
+    carries a close button + a download link; the toggle JS lives in render_html.
+    Returns "" when there are no haplotypes.
+    """
+    if not haps:
+        return ""
+    ordered = sorted(haps, key=_oh_modal_cfd, reverse=True)
+    first = ordered[0]
+    chrom = str(first.get("Chromosome", "NA"))
+    start = str(first.get("Site_start", "NA"))
+    strand = str(first.get("Strand", "NA"))
+    th = "".join(
+        f"<th>{_esc(c.replace('_', ' '))}</th>" for c in _OH_MODAL_COLS
+    )
+    trs = []
+    for hap in ordered:
+        tds = []
+        for c in _OH_MODAL_COLS:
+            val = _esc(str(hap.get(c, "NA")))
+            if c == "Aligned_protospacer+PAM":
+                val = f"<code>{val}</code>"
+            tds.append(f"<td>{val}</td>")
+        trs.append("<tr>" + "".join(tds) + "</tr>")
+    download_link = ""
+    if download_name:
+        download_link = (
+            f'<a class="download" href="{_dl_href(download_name)}" download>'
+            f"&#11015; Download all observed haplotypes (TSV)</a>"
+        )
+    return (
+        f'<div class="oh-modal" id="{_esc(mid)}" hidden>'
+        f'<div class="oh-modal-box">'
+        f'<button class="oh-close" aria-label="Close">&times;</button>'
+        f'<div class="oh-modal-head">{_esc(chrom)}:{_esc(start)} ({_esc(strand)}) '
+        f'&mdash; {len(ordered)} observed haplotypes</div>'
+        f'<div class="oh-modal-body"><table class="oh-table"><thead><tr>{th}</tr>'
+        f'</thead><tbody>{"".join(trs)}</tbody></table></div>'
+        f'{download_link}</div></div>'
+    )
+
+
+# The ONLY <script> in report.html: a self-contained modal toggle (no external
+# resources, no network, no eval). Clicking a `a.oh-open` in the Observed cell shows
+# the backdrop + the modal whose id matches the link's data-oh; close on the x, on a
+# backdrop click, and on Escape.
+_OH_MODAL_SCRIPT = """<script>
+(function(){
+  var backdrop=document.getElementById('oh-backdrop');
+  function closeAll(){
+    if(backdrop){backdrop.hidden=true;}
+    var mods=document.querySelectorAll('.oh-modal');
+    for(var i=0;i<mods.length;i++){mods[i].hidden=true;}
+  }
+  document.addEventListener('click',function(e){
+    var open=e.target.closest ? e.target.closest('a.oh-open') : null;
+    if(open){
+      e.preventDefault();
+      var id=open.getAttribute('data-oh');
+      var modal=id?document.getElementById(id):null;
+      if(modal){
+        if(backdrop){backdrop.hidden=false;}
+        modal.hidden=false;
+      }
+      return;
+    }
+    if(e.target.classList && e.target.classList.contains('oh-close')){closeAll();return;}
+    if(e.target===backdrop){closeAll();return;}
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='Escape'||e.key==='Esc'){closeAll();}
+  });
+})();
+</script>"""
+
+
+def build_observed_haplotypes_modals_html(oh_modals):
+    """Assemble the backdrop + every per-site modal + the single toggle script.
+
+    ``oh_modals`` is the site_id -> modal-HTML dict populated as a side effect of the
+    top-1000 table renders (deduped across the CFD + CRISPR-Bulge tables). Returns ""
+    when there are no modals, so a report with no multi-haplotype site adds nothing.
+    """
+    if not oh_modals:
+        return ""
+    return (
+        '<div id="oh-backdrop" class="oh-backdrop" hidden></div>'
+        + "".join(oh_modals.values())
+        + _OH_MODAL_SCRIPT
+    )
+
+
+def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
+                     oh_modals=None, oh_download_name=None):
+    """Scrollable inline top-N table, sorted by CFD desc (opens offline).
+
+    The ONLY interactivity is the per-site observed-haplotype modal: when ``site_map``
+    is given and a row's SITE carries >=2 distinct observed haplotypes, the "Observed"
+    cell gains an ``N other haplotypes`` link that opens a modal (whose HTML is
+    accumulated in ``oh_modals`` and whose single toggle script lives in render_html).
 
     Renders EXACTLY the ONE curated column set (``CURATED_COLUMNS``) that every
     download file uses -- so the table and top1000.tsv / panel_top100.tsv / the
@@ -2983,11 +3106,19 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets=""):
     headers = list(curated.columns)
     head_html = "".join(f"<th>{_esc(h)}</th>" for h in headers)
 
+    # build_curated_frame preserves top_df row order, so a positional reset-index view
+    # lets us key each rendered row back to its raw site identity (chrom + highest-CFD
+    # start) and, via site_map, reach the per-site observed-haplotype modal.
+    raw = top_df.reset_index(drop=True)
+    _raw_chrom = "Chromosome" in raw.columns
+    _raw_start = "Start_coordinate_(highest_CFD)" in raw.columns
+
     aligned_hdr = "Aligned_protospacer+PAM"
+    observed_hdr = "Observed"
     maf_hdr = "MAF"
     maf_missing_seen = False
     body_rows = []
-    for _idx, row in curated.iterrows():
+    for i, (_idx, row) in enumerate(curated.iterrows()):
         cells = []
         for h in headers:
             val = row[h]
@@ -2999,6 +3130,26 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets=""):
                     cells.append("&mdash;")
                 else:
                     cells.append(_esc(val))
+            elif h == observed_hdr:
+                cell = _esc(val)
+                # When this SITE carries >=2 distinct observed haplotypes, surface the
+                # OTHER ones behind a link that opens a per-site modal (built once per
+                # site, deduped across the CFD + CRISPR-Bulge tables via oh_modals).
+                if site_map and _raw_chrom and _raw_start:
+                    _key = (str(raw.at[i, "Chromosome"]),
+                            str(raw.at[i, "Start_coordinate_(highest_CFD)"]))
+                    haps = site_map.get(_key)
+                    if haps and len(haps) >= 2:
+                        n_other = len(haps) - 1
+                        mid = "ohm-" + re.sub(r"[^0-9A-Za-z]+", "-",
+                                              _key[0] + "-" + _key[1])
+                        cell += (
+                            f' &middot; <a class="oh-open" href="#" data-oh="{mid}">'
+                            f'{n_other} other haplotype{"" if n_other == 1 else "s"}</a>'
+                        )
+                        if oh_modals is not None and mid not in oh_modals:
+                            oh_modals[mid] = _oh_modal_html(mid, haps, oh_download_name)
+                cells.append(cell)
             else:
                 cells.append(_esc(val))
         body_rows.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
@@ -3065,18 +3216,19 @@ table.summary-table td.k { background: #f7fafc; font-weight: 600; width: 250px; 
    table fill the card (matching the caption below it) instead of the 520px cap used
    for the narrow flex-column summary-card table. */
 .inputs-card table.summary-table { max-width: none; }
-/* Observed-haplotypes per-site expandable view (native <details>, no JS). */
-details.oh-site { border: 1px solid #d7e3f0; border-radius: 6px; margin: 6px 0;
-                  background: #fbfcff; }
-details.oh-site > summary { cursor: pointer; padding: 8px 12px; font-weight: 600;
-                            color: #2c5282; list-style: revert; }
-details.oh-site[open] > summary { border-bottom: 1px solid #e6edf5; }
-.oh-table-wrap { overflow-x: auto; padding: 4px 12px 10px; }
-table.oh-table { border-collapse: collapse; width: 100%; font-size: 0.86em; }
-table.oh-table th, table.oh-table td { border: 1px solid #e2e8f0; padding: 4px 8px;
-                                       text-align: left; vertical-align: top; }
-table.oh-table th { background: #f7fafc; }
-td.oh-carriers { max-width: 420px; word-break: break-word; color: #4a5568; }
+/* Observed-haplotypes per-site modal (opened from the Observed cell via one JS toggle). */
+.oh-open{cursor:pointer;color:#2c5282;text-decoration:underline;white-space:nowrap}
+.oh-backdrop{position:fixed;inset:0;background:rgba(20,30,50,.45);z-index:50}
+.oh-modal{position:fixed;inset:0;z-index:51;display:flex;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto}
+.oh-modal[hidden]{display:none}
+.oh-backdrop[hidden]{display:none}
+.oh-modal-box{background:#fff;border-radius:10px;max-width:1100px;width:100%;box-shadow:0 8px 40px rgba(20,40,80,.3);padding:16px 20px;position:relative}
+.oh-close{position:absolute;top:8px;right:12px;border:none;background:none;font-size:1.5em;cursor:pointer;color:#4a5568}
+.oh-modal-head{font-weight:600;color:#2c5282;margin:2px 28px 10px 0}
+.oh-modal-body{overflow-x:auto}
+table.oh-table{border-collapse:collapse;width:100%;font-size:.85em}
+table.oh-table th,table.oh-table td{border:1px solid #e2e8f0;padding:4px 8px;text-align:left;vertical-align:top}
+table.oh-table th{background:#f7fafc}
 .matrix-wrap { overflow-x: auto; }
 table.matrix { border-collapse: collapse; font-size: 0.82em; }
 table.matrix th, table.matrix td { border: 1px solid #e2e8f0; padding: 4px 9px;
@@ -3511,79 +3663,6 @@ def render_perfect_match_banner(vp):
     )
 
 
-def render_observed_haplotypes_section(rows, download_name, cap=100):
-    """Inline, NO-JS per-site view of the observed-haplotypes companion.
-
-    The report HTML carries no JavaScript, so interactivity uses native <details>:
-    each off-target SITE reached by >=2 distinct observed haplotypes becomes a
-    click-to-expand block. The <summary> shows the locus + how many haplotypes it
-    carries + the top CFD; expanding lists every observed haplotype (variant set, both
-    scores, mm/bulges, rsIDs, AF, carriers). Capped to the top `cap` sites by CFD to
-    keep report.html small; the FULL set is always one click away via the bundled TSV.
-    Returns "" when there are no multi-haplotype sites.
-    """
-    if not rows or not download_name:
-        return ""
-
-    def _cfd(r):
-        try:
-            return float(r.get("CFD"))
-        except (TypeError, ValueError):
-            return float("-inf")
-
-    sites = {}
-    for r in rows:
-        key = (r.get("Chromosome", ""), r.get("Site_start", ""),
-               r.get("Strand", ""), r.get("Spacer+PAM", ""))
-        sites.setdefault(key, []).append(r)
-    ordered = sorted(
-        sites.items(),
-        key=lambda kv: max((_cfd(r) for r in kv[1]), default=float("-inf")),
-        reverse=True,
-    )
-    n_sites = len(ordered)
-    cols = ["Variant_info_genome", "CFD", "CRISPR_Bulge", "Mismatches", "Bulges",
-            "Bulge_type", "rsIDs", "AF", "N_carriers"]
-    blocks = []
-    for (chrom, start, strand, spacer), hrows in ordered[:cap]:
-        hrows = sorted(hrows, key=_cfd, reverse=True)
-        top_cfd = hrows[0].get("CFD", "NA")
-        thead = "".join(f"<th>{_esc(c.replace('_', ' '))}</th>" for c in cols) + "<th>Carriers</th>"
-        trs = []
-        for r in hrows:
-            tds = "".join(f"<td>{_esc(str(r.get(c, 'NA')))}</td>" for c in cols)
-            carriers = str(r.get("Carriers", "NA"))
-            nc = str(r.get("N_carriers", ""))
-            if carriers not in ("", "NA") and len(carriers) > 160:
-                carriers = carriers[:160].rsplit(",", 1)[0] + f", &hellip; ({nc} total &mdash; see TSV)"
-                trs.append(f"<tr>{tds}<td class='oh-carriers'>{carriers}</td></tr>")
-            else:
-                trs.append(f"<tr>{tds}<td class='oh-carriers'>{_esc(carriers)}</td></tr>")
-        blocks.append(
-            f'<details class="oh-site"><summary>{_esc(str(chrom))}:{_esc(str(start))} '
-            f'({_esc(str(strand))}) &mdash; {len(hrows)} observed haplotypes &middot; '
-            f'top CFD {_esc(str(top_cfd))}</summary>'
-            f'<div class="oh-table-wrap"><table class="oh-table"><thead><tr>{thead}</tr>'
-            f'</thead><tbody>{"".join(trs)}</tbody></table></div></details>'
-        )
-    more = ""
-    if n_sites > cap:
-        more = (f'<p class="caption">Showing the top {cap} of {n_sites:,} multi-haplotype '
-                f'sites by CFD; the full set is in the download above.</p>')
-    dl = (f'<p><a class="download" href="{_dl_href(download_name)}" download>'
-          f'&#11015; Download all observed haplotypes (TSV)</a></p>')
-    return (
-        '<h2>Observed haplotypes at multi-haplotype sites</h2>'
-        + dl
-        + '<p class="caption">The main table reports one representative per site (the '
-          'highest-CFD <em>real observed</em> haplotype; ties broken by most carriers). '
-          'Sites reached by &ge;2 distinct observed variant haplotypes are expandable below '
-          '&mdash; click a site to see every haplotype a real individual carries.</p>'
-        + "".join(blocks)
-        + more
-    )
-
-
 def render_html(
     job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
     table_html, tsv_gz_name, top1000_name, footer_html,
@@ -3592,7 +3671,7 @@ def render_html(
     cooc_bundle_name=None, cooc_n_rows=0, cooc_n_cis=0,
     snp_snp_bundle_name=None, snp_snp_n_rows=0, snp_snp_n_confirmed=0,
     indel_af_bundle_name=None, indel_af_n_rows=0,
-    observed_haplotypes_bundle_name=None, observed_haplotypes_rows=None,
+    observed_haplotypes_bundle_name=None, observed_haplotypes_modals="",
     table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
     next_steps_html="",
 ):
@@ -3745,10 +3824,20 @@ def render_html(
             f"carriers, and allele frequency. Bundled as "
             f"<code>{_esc(observed_haplotypes_bundle_name)}</code>.</p>"
         )
-    # inline, no-JS, click-to-expand per-site view (capped; full set via the download)
-    observed_haplotypes_section = render_observed_haplotypes_section(
-        observed_haplotypes_rows, observed_haplotypes_bundle_name
-    )
+    # Prominent download + explainer shown right by the top-1000 table, where the
+    # per-site "N other haplotypes" links live, so the full set is always one click
+    # away from the table itself (the modal also carries this same link).
+    observed_haplotypes_table_note = ""
+    if observed_haplotypes_bundle_name:
+        observed_haplotypes_table_note = (
+            f'<p class="caption">Each row is the per-site representative (highest-scoring '
+            f'observed haplotype). Sites reached by &ge;2 distinct observed variant '
+            f'haplotypes show a <strong>&ldquo;N other haplotypes&rdquo;</strong> link in '
+            f'the <code>Observed</code> column &mdash; click it to see every haplotype a '
+            f'real individual carries at that site.</p>'
+            f'<p><a class="download" href="{_dl_href(observed_haplotypes_bundle_name)}" '
+            f'download>&#11015; Download all observed haplotypes (TSV)</a></p>'
+        )
 
     # per-tier curated downloads (Section 5). ``tier_downloads`` is a list of
     # (label, filename) for every non-empty threshold tier that was bundled.
@@ -3846,7 +3935,6 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 {snp_snp_callout}
 {indel_af_callout}
 {observed_haplotypes_callout}
-{observed_haplotypes_section}
 <p class="caption">All files are bundled alongside this HTML in the same ZIP;
 the links resolve after unzipping on any machine. The top-1000 TSV, the panel,
 and the per-tier subsets share the SAME curated, readable columns as the table
@@ -3861,6 +3949,7 @@ run analyses against a <strong>custom personal genome assembly</strong>. Launch 
 locally with <code>crisprme.py web-interface</code>.</p>
 
 <h2>6. Top 1000 putative off-targets</h2>
+{observed_haplotypes_table_note}
 <h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>
 {table_html}
 {crispr_bulge_block}
@@ -3870,6 +3959,7 @@ locally with <code>crisprme.py web-interface</code>.</p>
 {footer_html}
 
 </div>
+{observed_haplotypes_modals}
 </body></html>
 """
 
@@ -4006,11 +4096,13 @@ _OH_CFD_MM = "Mismatches_(highest_CFD)"
 _OH_CFD_BULGES = "Bulges_(highest_CFD)"
 _OH_CFD_BTYPE = "Bulge_type_(highest_CFD)"
 _OH_CFD_SCORE = "CFD_score_(highest_CFD)"
+_OH_CFD_ALNALT = "Aligned_protospacer+PAM_ALT_(highest_CFD)"
 _OH_CB_ORIGIN = "REF/ALT_origin_(highest_CRISPR_BULGE)"
 _OH_CB_VARSET = "Variant_info_genome_(highest_CRISPR_BULGE)"
 _OH_CB_SAMPLES = "Variant_samples_(highest_CRISPR_BULGE)"
 _OH_CB_MAF = "Variant_MAF_(highest_CRISPR_BULGE)"
 _OH_CB_SCORE = "CRISPR_BULGE_score_(highest_CRISPR_BULGE)"
+_OH_CB_ALNALT = "Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)"
 _OH_CB_RSID = "Variant_rsID_(highest_CRISPR_BULGE)"
 _OH_CB_MM = "Mismatches_(highest_CRISPR_BULGE)"
 _OH_CB_BULGES = "Bulges_(highest_CRISPR_BULGE)"
@@ -4085,8 +4177,10 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
     merged by normalized variant set into one record carrying both scores, and a
     site is emitted only when it has >=2 distinct variant sets.
 
-    Returns the bundled filename ("observed_haplotypes.tsv") when >=1 row is
-    written, else None. Never raises -- any error is logged and swallowed, so the
+    Returns a 3-tuple ``(name, rows, site_map)``: the bundled filename
+    ("observed_haplotypes.tsv") / emitted row dicts / a ``(chrom, start) -> list of
+    that site's haplotype row dicts`` map when >=1 row is written, else
+    ``(None, [], {})``. Never raises -- any error is logged and swallowed, so the
     report is never aborted (mirrors the other companion-bundling blocks).
     """
     try:
@@ -4153,6 +4247,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "mm": _oh_get(_rec, _OH_CFD_MM, "NA"),
                         "bulges": _oh_get(_rec, _OH_CFD_BULGES, "NA"),
                         "bulge_type": _oh_get(_rec, _OH_CFD_BTYPE, "NA"),
+                        "aligned": _oh_get(_rec, _OH_CFD_ALNALT, "NA"),
                         "cfd": _oh_get(_rec, _OH_CFD_SCORE, None),
                         "crispr_bulge": None,
                         "axis": "cfd",
@@ -4172,6 +4267,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "mm": _oh_get(_rec, _OH_CB_MM, "NA"),
                         "bulges": _oh_get(_rec, _OH_CB_BULGES, "NA"),
                         "bulge_type": _oh_get(_rec, _OH_CB_BTYPE, "NA"),
+                        "aligned": _oh_get(_rec, _OH_CB_ALNALT, "NA"),
                         "cfd": None,
                         "crispr_bulge": _oh_get(_rec, _OH_CB_SCORE, None),
                         "axis": "cb",
@@ -4227,6 +4323,11 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
             return None if v < 0 else v
 
         rows = []
+        # site_map maps any constituent observation's (chrom, start) -> the list of
+        # companion row dicts for that SITE (so a report table row, keyed by its raw
+        # (Chromosome, Start_coordinate_(highest_CFD)), can find every observed
+        # haplotype at its site to populate the per-site modal).
+        site_map = {}
         for cluster in sites:
             site_start = min(o["start"] for o in cluster)
             by_varset = {}  # normalized varset -> merged record
@@ -4240,6 +4341,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         "cfd": None, "crispr_bulge": None,
                         "rsids": "NA", "maf": "NA", "samples": "NA",
                         "mm": "NA", "bulges": "NA", "bulge_type": "NA",
+                        "aligned": "NA",
                         "_has_cfd_axis": False,
                     }
                     by_varset[vs] = rec
@@ -4257,6 +4359,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                     rec["mm"] = obs["mm"]
                     rec["bulges"] = obs["bulges"]
                     rec["bulge_type"] = obs["bulge_type"]
+                    rec["aligned"] = obs["aligned"]
                     rec["_has_cfd_axis"] = True
                 elif obs["axis"] == "cb" and not rec["_has_cfd_axis"]:
                     # fill only what is still unset (so a later CFD obs can override).
@@ -4275,6 +4378,8 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                         rec["bulges"] = obs["bulges"]
                     if str(rec["bulge_type"]).lower() in _OH_NA:
                         rec["bulge_type"] = obs["bulge_type"]
+                    if str(rec["aligned"]).lower() in _OH_NA:
+                        rec["aligned"] = obs["aligned"]
 
             if len(by_varset) < 2:
                 continue  # need >=2 DISTINCT variant haplotypes to be interesting
@@ -4288,6 +4393,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                     "Strand": rec["strand"],
                     "Spacer+PAM": rec["spacer"],
                     "Variant_info_genome": rec["varset"],
+                    "Aligned_protospacer+PAM": rec["aligned"],
                     "rsIDs": rec["rsids"],
                     "Mismatches": rec["mm"],
                     "Bulges": rec["bulges"],
@@ -4323,23 +4429,31 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
             for r in emitted:
                 r.pop("_cfd_sort", None)
                 rows.append(r)
+            # Register this SITE under EVERY constituent observation's (chrom, start)
+            # so a report table row -- keyed by its raw (Chromosome,
+            # Start_coordinate_(highest_CFD)) which is one of those observation starts
+            # -- can look up the full list of observed haplotypes at its site. The
+            # merged `start`/coordinate can differ per axis by a small anchor shift, so
+            # we index by each observation's own start, not just the cluster min.
+            for obs in cluster:
+                site_map[(str(obs["chrom"]), str(obs["start"]))] = list(emitted)
 
         # ---- 6. write (or remove the empty file) ----------------------------
         out_path = os.path.join(staging, "observed_haplotypes.tsv")
         n = oh_writer.write_companion(out_path, rows)
         if n >= 1:
-            # return the filename AND the emitted rows (already sorted CFD desc,
-            # carriers desc) so the HTML report can render an inline, no-JS per-site
-            # view in addition to the bundled TSV.
-            return "observed_haplotypes.tsv", rows
+            # return the filename, the emitted rows (already sorted CFD desc, carriers
+            # desc), AND the (chrom,start) -> site-haplotypes map so the HTML report can
+            # render a per-site modal from the main table's Observed cell.
+            return "observed_haplotypes.tsv", rows, site_map
         if os.path.isfile(out_path):
             os.remove(out_path)
-        return None, []
+        return None, [], {}
     except Exception as exc:  # noqa: BLE001 - never abort the report on this companion
         sys.stderr.write(
             f"generate-report: observed_haplotypes bundle unavailable: {exc}\n"
         )
-        return None, []
+        return None, [], {}
 
 
 # --------------------------------------------------------------------------- #
@@ -4583,9 +4697,43 @@ def build_report(
         sys.stderr.write(f"generate-report: validation panel unavailable: {exc}\n")
         validation_html = "<p>Validation panel unavailable.</p>"
 
+    # ---- observed-haplotypes companion (observed_haplotypes.tsv) -------------
+    # The best-merge keeps ONE per-cluster representative per off-target site on
+    # each score axis; a site reached by several distinct observed genotype
+    # combinations (haplotypes) collapses to that single row. This companion lists
+    # EVERY distinct observed variant haplotype for any site carrying >=2 of them,
+    # with BOTH scores, carriers, AF, and phase -- the key per-sample deliverable,
+    # so it is bundled in the SLIM report (NOT gated on report_full). The merge
+    # window (single-linkage site clustering) is the run's Merge param (default 3).
+    # Built BEFORE the top-1000 tables because each table's "Observed" cell links to
+    # a per-site modal keyed off the returned site_map.
+    _oh_params = {}
+    if result_dir:
+        _oh_params = _read_kv_sidecar(os.path.join(result_dir, ".Params.txt"))
+        if not _oh_params:
+            _oh_params = _read_kv_sidecar(os.path.join(result_dir, "Params.txt"))
+    if params_override:
+        _oh_params = {**_oh_params, **params_override}
+    try:
+        _oh_merge_window = int(_oh_params.get("Merge") or _oh_params.get("merge") or 3)
+    except (TypeError, ValueError):
+        _oh_merge_window = 3
+    observed_haplotypes_bundle_name, observed_haplotypes_rows, observed_haplotypes_site_map = (
+        build_observed_haplotypes_companion(
+            df, integrated_tsv, result_dir, staging, _oh_merge_window
+        )
+    )
+    # Per-site modals accumulate here (side effect of build_table_html), shared across
+    # the CFD + CRISPR-Bulge tables so a site shown in both emits ONE modal.
+    oh_modals = {}
+
     # ---- SECTION 6: top-1000 table (curated columns incl. annotations) ------
     try:
-        table_html = build_table_html(top_df, cols, has_crispr_bulge, datasets=meta.get("datasets", ""))
+        table_html = build_table_html(
+            top_df, cols, has_crispr_bulge, datasets=meta.get("datasets", ""),
+            site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
+            oh_download_name=observed_haplotypes_bundle_name,
+        )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
         table_html = "<p>Top-1000 table unavailable.</p>"
@@ -4598,7 +4746,9 @@ def build_report(
             top_crispr_bulge_df = select_top_crispr_bulge(df, cols, n=top_n)
             if len(top_crispr_bulge_df):
                 table_crispr_bulge_html = build_table_html(
-                    top_crispr_bulge_df, cols, has_crispr_bulge, datasets=meta.get("datasets", "")
+                    top_crispr_bulge_df, cols, has_crispr_bulge, datasets=meta.get("datasets", ""),
+                    site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
+                    oh_download_name=observed_haplotypes_bundle_name,
                 )
                 tier_downloads.append(
                     (f"Top-1000 by {scorer_label()} (curated TSV)", "top1000_crispr_bulge.tsv")
@@ -4836,31 +4986,6 @@ def build_report(
         sys.stderr.write(f"generate-report: indel_af bundle unavailable: {exc}\n")
         indel_af_bundle_name = None
 
-    # ---- observed-haplotypes companion (observed_haplotypes.tsv) -------------
-    # The best-merge keeps ONE per-cluster representative per off-target site on
-    # each score axis; a site reached by several distinct observed genotype
-    # combinations (haplotypes) collapses to that single row. This companion lists
-    # EVERY distinct observed variant haplotype for any site carrying >=2 of them,
-    # with BOTH scores, carriers, AF, and phase -- the key per-sample deliverable,
-    # so it is bundled in the SLIM report (NOT gated on report_full). The merge
-    # window (single-linkage site clustering) is the run's Merge param (default 3).
-    _oh_params = {}
-    if result_dir:
-        _oh_params = _read_kv_sidecar(os.path.join(result_dir, ".Params.txt"))
-        if not _oh_params:
-            _oh_params = _read_kv_sidecar(os.path.join(result_dir, "Params.txt"))
-    if params_override:
-        _oh_params = {**_oh_params, **params_override}
-    try:
-        _oh_merge_window = int(_oh_params.get("Merge") or _oh_params.get("merge") or 3)
-    except (TypeError, ValueError):
-        _oh_merge_window = 3
-    observed_haplotypes_bundle_name, observed_haplotypes_rows = (
-        build_observed_haplotypes_companion(
-            df, integrated_tsv, result_dir, staging, _oh_merge_window
-        )
-    )
-
     # ---- FOOTER (unnumbered; section 7 is the annotation legend, built in
     #      render_html via build_annotation_legend_html) -----------------------
     footer_html = build_footer(meta, version, os.path.basename(integrated_tsv))
@@ -4878,6 +5003,11 @@ def build_report(
         dataset_counts=_ds_counts,
         variant_count=_reg_vc,
     )
+    # Assemble the per-site observed-haplotype modals (built as a side effect of the
+    # top-1000 table renders) into a single backdrop + modal set + one self-contained
+    # toggle script. The script is the ONLY <script> in report.html: no external
+    # resources, no network, no eval -- it just shows/hides divs on click/Escape.
+    observed_haplotypes_modals_html = build_observed_haplotypes_modals_html(oh_modals)
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
         table_html, (tsv_gz_name if report_full else None), top1000_name, footer_html,
@@ -4894,7 +5024,7 @@ def build_report(
         indel_af_bundle_name=indel_af_bundle_name,
         indel_af_n_rows=indel_af_n_rows,
         observed_haplotypes_bundle_name=observed_haplotypes_bundle_name,
-        observed_haplotypes_rows=observed_haplotypes_rows,
+        observed_haplotypes_modals=observed_haplotypes_modals_html,
         perfect_banner=perfect_banner,
         next_steps_html=render_next_steps_box(vp),
         table_crispr_bulge_html=table_crispr_bulge_html,
@@ -6349,10 +6479,10 @@ def build_combined_report(
     they're relative to that haplotype's own ``report.html`` location
     (now ``paternal/report.html`` / ``maternal/report.html``).
 
-    report.html deliberately has no ``<script>``/external ``<link>`` (same
-    constraint as ``build_report()``'s own output) -- navigation between
-    the combined/paternal/maternal views is plain ``<a href>`` links, not
-    JS-driven tabs.
+    report.html carries no external ``<link>`` and only build_report()'s own
+    single self-contained modal-toggle ``<script>`` (same constraint) --
+    navigation between the combined/paternal/maternal views is plain
+    ``<a href>`` links, not JS-driven tabs.
 
     Parameters
     ----------

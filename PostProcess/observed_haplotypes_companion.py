@@ -36,7 +36,8 @@ STDLIB ONLY.
 from __future__ import annotations
 
 COMPANION_HEADER = (
-    "#Chromosome\tSite_start\tStrand\tSpacer+PAM\tVariant_info_genome\trsIDs\t"
+    "#Chromosome\tSite_start\tStrand\tSpacer+PAM\tVariant_info_genome\t"
+    "Aligned_protospacer+PAM\trsIDs\t"
     "Mismatches\tBulges\tBulge_type\tCFD\tCRISPR_Bulge\tOrigin\tAF\tPhase\t"
     "N_carriers\tCarriers"
 )
@@ -48,8 +49,8 @@ def write_companion(out_path, rows):
     Args:
       out_path: destination path (``observed_haplotypes.tsv``).
       rows: list of dicts with keys Chromosome, Site_start, Strand, Spacer+PAM,
-        Variant_info_genome, rsIDs, Mismatches, Bulges, Bulge_type, CFD,
-        CRISPR_Bulge, Origin, AF, Phase, N_carriers, Carriers.
+        Variant_info_genome, Aligned_protospacer+PAM, rsIDs, Mismatches, Bulges,
+        Bulge_type, CFD, CRISPR_Bulge, Origin, AF, Phase, N_carriers, Carriers.
 
     Returns the number of data rows written.
     """
@@ -76,6 +77,7 @@ def write_companion(out_path, rows):
                     str(rec.get("Strand", ".")),
                     str(rec.get("Spacer+PAM", ".")),
                     str(rec.get("Variant_info_genome", ".")),
+                    str(rec.get("Aligned_protospacer+PAM", "NA")),
                     str(rec.get("rsIDs", "NA")),
                     str(rec.get("Mismatches", "NA")),
                     str(rec.get("Bulges", "NA")),
