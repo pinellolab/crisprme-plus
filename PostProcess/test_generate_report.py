@@ -1475,35 +1475,37 @@ class TestGenerateReport(unittest.TestCase):
             "Variant_samples_(highest_CFD)", "Mismatches_(highest_CFD)",
             "Bulges_(highest_CFD)", "Bulge_type_(highest_CFD)",
             "CFD_score_(highest_CFD)",
+            "Aligned_protospacer+PAM_ALT_(highest_CFD)",
             "REF/ALT_origin_(highest_CRISPR_BULGE)",
             "Variant_info_genome_(highest_CRISPR_BULGE)",
             "Variant_samples_(highest_CRISPR_BULGE)",
             "Variant_MAF_(highest_CRISPR_BULGE)",
             "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+            "Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)",
         ]
         rows = [
             # site 1, haplotype A: CFD rep AND CRISPR-Bulge rep (both scores on this row)
             ["chrX", _GUIDE, "400", "+",
              "alt", "chrX_400_T_A", "rs1", "0.01", "HG00096,HG00097", "2", "0", "NA",
-             "0.90",
-             "alt", "chrX_400_T_A", "HG00096,HG00097", "0.01", "0.77"],
+             "0.90", "ACGTACGTACGTACGTAAAGG",
+             "alt", "chrX_400_T_A", "HG00096,HG00097", "0.01", "0.77", "ACGTACGTACGTACGTAAAGG"],
             # site 1, haplotype B: a DIFFERENT variant set, CFD rep only (CB axis = ref)
             ["chrX", _GUIDE, "402", "+",
              "alt", "chrX_402_C_G", "rs2", "0.02", "NA18525", "3", "0", "NA",
-             "0.55",
-             "ref", "NA", "NA", "NA", "0.50"],
+             "0.55", "ACGTACGTACGTACGTGGGGG",
+             "ref", "NA", "NA", "NA", "0.50", "NA"],
             # a FAR-AWAY single-haplotype site (same identity, start 9000): only one
             # variant set -> contributes NO companion rows
             ["chrX", _GUIDE, "9000", "+",
              "alt", "chrX_9000_A_T", "rs9", "0.03", "HGDP00001", "1", "0", "NA",
-             "0.40",
-             "ref", "NA", "NA", "NA", "0.30"],
+             "0.40", "ACGTACGTACGTACGTTTTTT",
+             "ref", "NA", "NA", "NA", "0.30", "NA"],
         ]
         df = pd.DataFrame(rows, columns=header)
         staging = os.path.join(self.tmp, "oh_staging")
         os.makedirs(staging)
         itsv = os.path.join(self.tmp, "oh_integrated_results.tsv")  # no alt-align sibling
-        name, _oh_rows = build_observed_haplotypes_companion(
+        name, _oh_rows, _oh_site_map = build_observed_haplotypes_companion(
             df, itsv, self.tmp, staging, merge_window=3
         )
         # (a) returns the bundle filename
@@ -1542,15 +1544,33 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(by_vs["chrX_402_C_G"]["N_carriers"], "1")
         # rows sorted by CFD desc -> the 0.90 haplotype (A) comes before the 0.55 (B)
         self.assertEqual(recs[0]["Variant_info_genome"], "chrX_400_T_A")
+        # (c2) the new Aligned_protospacer+PAM column is in the header AND carries each
+        #      haplotype's ALT alignment (from the (highest_CFD) axis)
+        self.assertIn("Aligned_protospacer+PAM", cols)
+        self.assertEqual(
+            by_vs["chrX_400_T_A"]["Aligned_protospacer+PAM"], "ACGTACGTACGTACGTAAAGG")
+        self.assertEqual(
+            by_vs["chrX_402_C_G"]["Aligned_protospacer+PAM"], "ACGTACGTACGTACGTGGGGG")
+        # (c3) site_map keys every constituent observation's (chrom, start) to the SAME
+        #      list of this site's 2 haplotype dicts (so a table row at start 400 OR 402
+        #      can reach the modal), and the far single-haplotype site is absent
+        self.assertIsInstance(_oh_site_map, dict)
+        self.assertEqual(len(_oh_site_map[("chrX", "400")]), 2)
+        self.assertEqual(len(_oh_site_map[("chrX", "402")]), 2)
+        self.assertNotIn(("chrX", "9000"), _oh_site_map)
+        self.assertEqual(
+            {h["Variant_info_genome"] for h in _oh_site_map[("chrX", "400")]},
+            {"chrX_400_T_A", "chrX_402_C_G"})
 
         # (d) a 1-haplotype-only input yields None (file removed, no bundle)
         staging2 = os.path.join(self.tmp, "oh_staging_single")
         os.makedirs(staging2)
         df_single = pd.DataFrame([rows[2]], columns=header)
-        name2, _oh_rows2 = build_observed_haplotypes_companion(
+        name2, _oh_rows2, _oh_site_map2 = build_observed_haplotypes_companion(
             df_single, itsv, self.tmp, staging2, merge_window=3
         )
         self.assertIsNone(name2)
+        self.assertEqual(_oh_site_map2, {})  # empty 3-tuple on a single-haplotype run
         self.assertFalse(
             os.path.isfile(os.path.join(staging2, "observed_haplotypes.tsv"))
         )
@@ -1599,7 +1619,7 @@ class TestGenerateReport(unittest.TestCase):
         staging = os.path.join(self.tmp, "oh_cbonly_staging")
         os.makedirs(staging)
         itsv = os.path.join(self.tmp, "oh_cbonly_integrated_results.tsv")
-        name, _oh_rows = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
+        name, _oh_rows, _oh_site_map = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
         self.assertEqual(name, "observed_haplotypes.tsv")
         with open(os.path.join(staging, name)) as fh:
             lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
@@ -1669,7 +1689,7 @@ class TestGenerateReport(unittest.TestCase):
         prev = gr._DROP_MAF
         gr._DROP_MAF = True
         try:
-            name, _oh_rows = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
+            name, _oh_rows, _oh_site_map = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
         finally:
             gr._DROP_MAF = prev
         self.assertEqual(name, "observed_haplotypes.tsv")
@@ -1681,34 +1701,85 @@ class TestGenerateReport(unittest.TestCase):
         for r in recs:
             self.assertEqual(r["AF"], "NA", "--no-maf must blank the companion AF column")
 
-    def test_observed_haplotypes_html_section_expandable_and_downloadable(self):
-        """The inline report section renders each multi-haplotype site as a native
-        <details> (no JavaScript) and links a download of the full companion TSV."""
-        from generate_report import render_observed_haplotypes_section
-        rows = [
-            {"Chromosome": "chrX", "Site_start": "400", "Strand": "+", "Spacer+PAM": _GUIDE,
-             "Variant_info_genome": "chrX_400_T_A", "rsIDs": "rs1", "Mismatches": "2",
-             "Bulges": "0", "Bulge_type": "NA", "CFD": "0.90", "CRISPR_Bulge": "0.77",
-             "Origin": "alt", "AF": "0.01", "Phase": "NA", "N_carriers": "2",
-             "Carriers": "HG00096,HG00097"},
-            {"Chromosome": "chrX", "Site_start": "400", "Strand": "+", "Spacer+PAM": _GUIDE,
-             "Variant_info_genome": "chrX_402_C_G", "rsIDs": "rs2", "Mismatches": "3",
-             "Bulges": "0", "Bulge_type": "NA", "CFD": "0.55", "CRISPR_Bulge": "NA",
-             "Origin": "alt", "AF": "0.02", "Phase": "NA", "N_carriers": "1",
-             "Carriers": "NA18525"},
-        ]
-        html = render_observed_haplotypes_section(rows, "observed_haplotypes.tsv")
-        self.assertIn("<details", html)                    # native click-to-expand
-        self.assertIn("oh-site", html)
-        self.assertIn("chrX:400", html)                    # site summary
-        self.assertIn("chrX_400_T_A", html)                # both haplotypes listed
-        self.assertIn("chrX_402_C_G", html)
-        self.assertIn("download", html)                    # download link ...
-        self.assertIn("observed_haplotypes.tsv", html)     # ... to the full TSV
-        self.assertNotIn("<script", html)                  # report has no JS
-        # degenerate inputs -> no section
-        self.assertEqual(render_observed_haplotypes_section([], "x.tsv"), "")
-        self.assertEqual(render_observed_haplotypes_section(rows, None), "")
+    def test_observed_haplotypes_modal_in_table(self):
+        """The per-site observed-haplotypes modal: build_table_html surfaces an
+        `N other haplotypes` link in the Observed cell of a multi-haplotype site and
+        emits ONE modal into the shared oh_modals dict; the modal (built by the
+        standalone _oh_modal_html helper) lists every haplotype with its
+        Aligned_protospacer+PAM and carries the download link. The dedicated toggle
+        script is assembled separately so the report has exactly one <script>."""
+        import pandas as pd
+        import generate_report as gr
+
+        # three haplotypes at one site (chrX:400), each a companion-row dict
+        hap1 = {"Chromosome": "chrX", "Site_start": "400", "Strand": "+",
+                "Spacer+PAM": _GUIDE, "Variant_info_genome": "chrX_400_T_A",
+                "Aligned_protospacer+PAM": "ACGTACGTACGTACGTAAAGG", "rsIDs": "rs1",
+                "Mismatches": "2", "Bulges": "0", "Bulge_type": "NA", "CFD": "0.90",
+                "CRISPR_Bulge": "0.77", "Origin": "alt", "AF": "0.01", "Phase": "NA",
+                "N_carriers": "155", "Carriers": "HG00096,HG00097"}
+        hap2 = {**hap1, "Variant_info_genome": "chrX_402_C_G",
+                "Aligned_protospacer+PAM": "ACGTACGTACGTACGTGGGGG", "CFD": "0.55",
+                "CRISPR_Bulge": "NA", "N_carriers": "3", "Carriers": "NA18525"}
+        hap3 = {**hap1, "Variant_info_genome": "chrX_404_G_T",
+                "Aligned_protospacer+PAM": "ACGTACGTACGTACGTCCCGG", "CFD": "0.20",
+                "N_carriers": "1", "Carriers": "HGDP00001"}
+        haps = [hap1, hap2, hap3]
+
+        # ---- (1) the standalone modal-HTML helper ----------------------------
+        modal = gr._oh_modal_html("ohm-chrX-400", haps, "observed_haplotypes.tsv")
+        self.assertIn('class="oh-modal"', modal)
+        self.assertIn('id="ohm-chrX-400"', modal)
+        self.assertIn("chrX:400 (+)", modal)                       # locus header
+        self.assertIn("3 observed haplotypes", modal)              # K count
+        for vs in ("chrX_400_T_A", "chrX_402_C_G", "chrX_404_G_T"):
+            self.assertIn(vs, modal)                               # all haplotypes
+        for aln in ("ACGTACGTACGTACGTAAAGG", "ACGTACGTACGTACGTGGGGG",
+                    "ACGTACGTACGTACGTCCCGG"):
+            self.assertIn(aln, modal)                              # aligned protospacers
+        self.assertIn("<code>ACGTACGTACGTACGTAAAGG</code>", modal)  # wrapped in <code>
+        self.assertIn("oh-close", modal)                           # close button
+        self.assertIn("observed_haplotypes.tsv", modal)            # download link
+        self.assertIn("Download all observed haplotypes", modal)
+        # empty haps -> no modal
+        self.assertEqual(gr._oh_modal_html("x", [], "x.tsv"), "")
+
+        # ---- (2) build_table_html surfaces the link + emits the modal --------
+        top_df = pd.DataFrame(
+            [{"Chromosome": "chrX", "Start_coordinate_(highest_CFD)": "400"}]
+        )
+        cols = gr._resolve(top_df.columns, list(gr._COLS.keys()))
+        site_map = {("chrX", "400"): haps}
+        oh_modals = {}
+        html = gr.build_table_html(
+            top_df, cols, has_crispr_bulge=False, site_map=site_map,
+            oh_modals=oh_modals, oh_download_name="observed_haplotypes.tsv",
+        )
+        self.assertIn("oh-open", html)                             # the link class
+        self.assertIn('data-oh="ohm-chrX-400"', html)              # points at the modal
+        self.assertIn("2 other haplotypes", html)                 # N = 3 - 1
+        self.assertIn("&middot;", html)                            # separator
+        # exactly one modal emitted, keyed by the stable id
+        self.assertEqual(list(oh_modals), ["ohm-chrX-400"])
+        self.assertIn('class="oh-modal"', oh_modals["ohm-chrX-400"])
+
+        # ---- (3) a single-haplotype site adds NO link / NO modal -------------
+        oh_modals2 = {}
+        html2 = gr.build_table_html(
+            top_df, cols, has_crispr_bulge=False,
+            site_map={("chrX", "400"): [hap1]},  # only one haplotype
+            oh_modals=oh_modals2, oh_download_name="observed_haplotypes.tsv",
+        )
+        self.assertNotIn("oh-open", html2)
+        self.assertEqual(oh_modals2, {})
+
+        # ---- (4) the assembled modals block is the ONE self-contained script -
+        block = gr.build_observed_haplotypes_modals_html(oh_modals)
+        self.assertIn('id="oh-backdrop"', block)
+        self.assertIn('class="oh-modal"', block)
+        self.assertEqual(block.count("<script"), 1)                # exactly one script
+        self.assertNotIn("eval(", block)                           # no eval
+        self.assertEqual(gr.build_observed_haplotypes_modals_html({}), "")
 
     def test_observed_haplotypes_companion_reads_alt_zip_after_cleanup(self):
         """After a default complete-search cleans up the raw
@@ -1761,7 +1832,7 @@ class TestGenerateReport(unittest.TestCase):
         staging = os.path.join(self.tmp, "oh_cleaned_staging")
         os.makedirs(staging)
         itsv = os.path.join(rdir, "g+NRG_hg38+hg38_X_6+3_integrated_results.tsv")
-        name, _oh_rows = build_observed_haplotypes_companion(df, itsv, rdir, staging, merge_window=3)
+        name, _oh_rows, _oh_site_map = build_observed_haplotypes_companion(df, itsv, rdir, staging, merge_window=3)
         # both haplotypes surface -> the alt frame was recovered from the .zip
         self.assertEqual(name, "observed_haplotypes.tsv")
         with open(os.path.join(staging, name)) as fh:
