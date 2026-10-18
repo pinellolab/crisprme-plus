@@ -3065,6 +3065,18 @@ table.summary-table td.k { background: #f7fafc; font-weight: 600; width: 250px; 
    table fill the card (matching the caption below it) instead of the 520px cap used
    for the narrow flex-column summary-card table. */
 .inputs-card table.summary-table { max-width: none; }
+/* Observed-haplotypes per-site expandable view (native <details>, no JS). */
+details.oh-site { border: 1px solid #d7e3f0; border-radius: 6px; margin: 6px 0;
+                  background: #fbfcff; }
+details.oh-site > summary { cursor: pointer; padding: 8px 12px; font-weight: 600;
+                            color: #2c5282; list-style: revert; }
+details.oh-site[open] > summary { border-bottom: 1px solid #e6edf5; }
+.oh-table-wrap { overflow-x: auto; padding: 4px 12px 10px; }
+table.oh-table { border-collapse: collapse; width: 100%; font-size: 0.86em; }
+table.oh-table th, table.oh-table td { border: 1px solid #e2e8f0; padding: 4px 8px;
+                                       text-align: left; vertical-align: top; }
+table.oh-table th { background: #f7fafc; }
+td.oh-carriers { max-width: 420px; word-break: break-word; color: #4a5568; }
 .matrix-wrap { overflow-x: auto; }
 table.matrix { border-collapse: collapse; font-size: 0.82em; }
 table.matrix th, table.matrix td { border: 1px solid #e2e8f0; padding: 4px 9px;
@@ -3499,6 +3511,79 @@ def render_perfect_match_banner(vp):
     )
 
 
+def render_observed_haplotypes_section(rows, download_name, cap=100):
+    """Inline, NO-JS per-site view of the observed-haplotypes companion.
+
+    The report HTML carries no JavaScript, so interactivity uses native <details>:
+    each off-target SITE reached by >=2 distinct observed haplotypes becomes a
+    click-to-expand block. The <summary> shows the locus + how many haplotypes it
+    carries + the top CFD; expanding lists every observed haplotype (variant set, both
+    scores, mm/bulges, rsIDs, AF, carriers). Capped to the top `cap` sites by CFD to
+    keep report.html small; the FULL set is always one click away via the bundled TSV.
+    Returns "" when there are no multi-haplotype sites.
+    """
+    if not rows or not download_name:
+        return ""
+
+    def _cfd(r):
+        try:
+            return float(r.get("CFD"))
+        except (TypeError, ValueError):
+            return float("-inf")
+
+    sites = {}
+    for r in rows:
+        key = (r.get("Chromosome", ""), r.get("Site_start", ""),
+               r.get("Strand", ""), r.get("Spacer+PAM", ""))
+        sites.setdefault(key, []).append(r)
+    ordered = sorted(
+        sites.items(),
+        key=lambda kv: max((_cfd(r) for r in kv[1]), default=float("-inf")),
+        reverse=True,
+    )
+    n_sites = len(ordered)
+    cols = ["Variant_info_genome", "CFD", "CRISPR_Bulge", "Mismatches", "Bulges",
+            "Bulge_type", "rsIDs", "AF", "N_carriers"]
+    blocks = []
+    for (chrom, start, strand, spacer), hrows in ordered[:cap]:
+        hrows = sorted(hrows, key=_cfd, reverse=True)
+        top_cfd = hrows[0].get("CFD", "NA")
+        thead = "".join(f"<th>{_esc(c.replace('_', ' '))}</th>" for c in cols) + "<th>Carriers</th>"
+        trs = []
+        for r in hrows:
+            tds = "".join(f"<td>{_esc(str(r.get(c, 'NA')))}</td>" for c in cols)
+            carriers = str(r.get("Carriers", "NA"))
+            nc = str(r.get("N_carriers", ""))
+            if carriers not in ("", "NA") and len(carriers) > 160:
+                carriers = carriers[:160].rsplit(",", 1)[0] + f", &hellip; ({nc} total &mdash; see TSV)"
+                trs.append(f"<tr>{tds}<td class='oh-carriers'>{carriers}</td></tr>")
+            else:
+                trs.append(f"<tr>{tds}<td class='oh-carriers'>{_esc(carriers)}</td></tr>")
+        blocks.append(
+            f'<details class="oh-site"><summary>{_esc(str(chrom))}:{_esc(str(start))} '
+            f'({_esc(str(strand))}) &mdash; {len(hrows)} observed haplotypes &middot; '
+            f'top CFD {_esc(str(top_cfd))}</summary>'
+            f'<div class="oh-table-wrap"><table class="oh-table"><thead><tr>{thead}</tr>'
+            f'</thead><tbody>{"".join(trs)}</tbody></table></div></details>'
+        )
+    more = ""
+    if n_sites > cap:
+        more = (f'<p class="caption">Showing the top {cap} of {n_sites:,} multi-haplotype '
+                f'sites by CFD; the full set is in the download above.</p>')
+    dl = (f'<p><a class="download" href="{_dl_href(download_name)}" download>'
+          f'&#11015; Download all observed haplotypes (TSV)</a></p>')
+    return (
+        '<h2>Observed haplotypes at multi-haplotype sites</h2>'
+        + dl
+        + '<p class="caption">The main table reports one representative per site (the '
+          'highest-CFD <em>real observed</em> haplotype; ties broken by most carriers). '
+          'Sites reached by &ge;2 distinct observed variant haplotypes are expandable below '
+          '&mdash; click a site to see every haplotype a real individual carries.</p>'
+        + "".join(blocks)
+        + more
+    )
+
+
 def render_html(
     job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
     table_html, tsv_gz_name, top1000_name, footer_html,
@@ -3507,7 +3592,7 @@ def render_html(
     cooc_bundle_name=None, cooc_n_rows=0, cooc_n_cis=0,
     snp_snp_bundle_name=None, snp_snp_n_rows=0, snp_snp_n_confirmed=0,
     indel_af_bundle_name=None, indel_af_n_rows=0,
-    observed_haplotypes_bundle_name=None,
+    observed_haplotypes_bundle_name=None, observed_haplotypes_rows=None,
     table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
     next_steps_html="",
 ):
@@ -3660,6 +3745,10 @@ def render_html(
             f"carriers, and allele frequency. Bundled as "
             f"<code>{_esc(observed_haplotypes_bundle_name)}</code>.</p>"
         )
+    # inline, no-JS, click-to-expand per-site view (capped; full set via the download)
+    observed_haplotypes_section = render_observed_haplotypes_section(
+        observed_haplotypes_rows, observed_haplotypes_bundle_name
+    )
 
     # per-tier curated downloads (Section 5). ``tier_downloads`` is a list of
     # (label, filename) for every non-empty threshold tier that was bundled.
@@ -3757,6 +3846,7 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 {snp_snp_callout}
 {indel_af_callout}
 {observed_haplotypes_callout}
+{observed_haplotypes_section}
 <p class="caption">All files are bundled alongside this HTML in the same ZIP;
 the links resolve after unzipping on any machine. The top-1000 TSV, the panel,
 and the per-tier subsets share the SAME curated, readable columns as the table
@@ -4238,15 +4328,18 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
         out_path = os.path.join(staging, "observed_haplotypes.tsv")
         n = oh_writer.write_companion(out_path, rows)
         if n >= 1:
-            return "observed_haplotypes.tsv"
+            # return the filename AND the emitted rows (already sorted CFD desc,
+            # carriers desc) so the HTML report can render an inline, no-JS per-site
+            # view in addition to the bundled TSV.
+            return "observed_haplotypes.tsv", rows
         if os.path.isfile(out_path):
             os.remove(out_path)
-        return None
+        return None, []
     except Exception as exc:  # noqa: BLE001 - never abort the report on this companion
         sys.stderr.write(
             f"generate-report: observed_haplotypes bundle unavailable: {exc}\n"
         )
-        return None
+        return None, []
 
 
 # --------------------------------------------------------------------------- #
@@ -4762,8 +4855,10 @@ def build_report(
         _oh_merge_window = int(_oh_params.get("Merge") or _oh_params.get("merge") or 3)
     except (TypeError, ValueError):
         _oh_merge_window = 3
-    observed_haplotypes_bundle_name = build_observed_haplotypes_companion(
-        df, integrated_tsv, result_dir, staging, _oh_merge_window
+    observed_haplotypes_bundle_name, observed_haplotypes_rows = (
+        build_observed_haplotypes_companion(
+            df, integrated_tsv, result_dir, staging, _oh_merge_window
+        )
     )
 
     # ---- FOOTER (unnumbered; section 7 is the annotation legend, built in
@@ -4799,6 +4894,7 @@ def build_report(
         indel_af_bundle_name=indel_af_bundle_name,
         indel_af_n_rows=indel_af_n_rows,
         observed_haplotypes_bundle_name=observed_haplotypes_bundle_name,
+        observed_haplotypes_rows=observed_haplotypes_rows,
         perfect_banner=perfect_banner,
         next_steps_html=render_next_steps_box(vp),
         table_crispr_bulge_html=table_crispr_bulge_html,
