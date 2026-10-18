@@ -745,6 +745,23 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("observed haplotypes", html_ps)
         self.assertNotIn("NOT computed", html_ps)        # no caveat in per-sample mode
 
+    def test_variant_contributed_prose_tracks_whether_file_is_bundled(self):
+        """The 'Variant-contributed sites' row must not claim variant_created.tsv is
+        bundled when it is not (the slim default report skips that tier -> no
+        variant_created_name). When bundled it says 'bundled as <name>'; when not, it
+        points to the result directory + --report-full."""
+        base = {"datasets": "1000G+HGDP", "mm": "6", "bdna": 2, "brna": 2,
+                "max_edits": "4", "search_mode": "population-level"}
+        # slim (not bundled): no false "bundled as" claim
+        html_slim = gr.render_inputs_criteria({**base})
+        self.assertIn("written to <code>variant_created.tsv</code> in the result", html_slim)
+        self.assertIn("--report-full", html_slim)
+        self.assertNotIn("bundled as <code>variant_created.tsv</code>", html_slim)
+        # full (bundled): the "bundled as" claim is correct
+        html_full = gr.render_inputs_criteria({**base}, variant_created_name="variant_created.tsv")
+        self.assertIn("bundled as <code>variant_created.tsv</code>", html_full)
+        self.assertNotIn("re-run with <code>--report-full</code>", html_full)
+
     def test_search_mode_defaults_to_population_level_when_marker_absent(self):
         """A result dir with no .search_mode marker resolves to population-level (the
         default), so older/again-generated reports still carry the correct caveat."""
