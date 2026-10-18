@@ -3988,22 +3988,39 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
         import observed_haplotypes_companion as oh_writer
 
         # ---- 1. combined row source: representatives + alt-alignments -------
+        # The alt-alignments carry the per-site haplotypes the best-merge collapses.
+        # Prefer the raw .tsv; if a default complete-search has since removed it
+        # (intermediate cleanup, --keep-intermediates off), fall back to the kept .zip
+        # (which holds the same .tsv) so a later standalone generate-report still sees the
+        # full per-site haplotype set instead of silently collapsing to representatives.
         frames = [df]
         _alt_dir = result_dir if result_dir else os.path.dirname(integrated_tsv)
-        _alt_files = sorted(
-            glob.glob(os.path.join(_alt_dir, "*all_results_with_alternative_alignments.tsv"))
-        )
-        if _alt_files:
-            try:
-                alt_df = pd.read_csv(
-                    _alt_files[0], sep="\t", dtype=str, na_filter=False, low_memory=False
-                )
-                frames.append(alt_df)
-            except Exception as exc:  # noqa: BLE001 - alt file optional
-                sys.stderr.write(
-                    f"generate-report: observed_haplotypes alt-alignments "
-                    f"unreadable ({exc}); using representatives only\n"
-                )
+        _alt_df = None
+        try:
+            _alt_tsv = sorted(glob.glob(
+                os.path.join(_alt_dir, "*all_results_with_alternative_alignments.tsv")))
+            if _alt_tsv:
+                _alt_df = pd.read_csv(
+                    _alt_tsv[0], sep="\t", dtype=str, na_filter=False, low_memory=False)
+            else:
+                _alt_zip = sorted(glob.glob(
+                    os.path.join(_alt_dir, "*all_results_with_alternative_alignments.zip")))
+                if _alt_zip:
+                    import zipfile
+                    with zipfile.ZipFile(_alt_zip[0]) as _zf:
+                        _member = next(
+                            (n for n in _zf.namelist()
+                             if n.endswith("all_results_with_alternative_alignments.tsv")), None)
+                        if _member is not None:
+                            with _zf.open(_member) as _mh:
+                                _alt_df = pd.read_csv(
+                                    _mh, sep="\t", dtype=str, na_filter=False, low_memory=False)
+        except Exception as exc:  # noqa: BLE001 - alt source optional
+            sys.stderr.write(
+                f"generate-report: observed_haplotypes alt-alignments unreadable "
+                f"({exc}); using representatives only\n")
+        if _alt_df is not None:
+            frames.append(_alt_df)
 
         # ---- 2. extract haplotype observations (alt-only, real variant set) --
         observations = []  # list of obs dicts

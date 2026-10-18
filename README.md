@@ -1829,6 +1829,21 @@ is under `data/`). Reading top to bottom:
     *NAR* 2024) on its **own** scale (bands **0.5 / 0.2 / 0.1**). It was trained on off-targets
     with at most one bulge, so any site that needs **≥ 2 bulges is out-of-domain and shows `-`**
     (N/A) — read CFD for those sites (a `-` means "not scored", not "no risk").
+- **Two Aggregated Specificity Scores (0-100; higher = more specific).** The summary card reports a
+  **CFD-based** aggregate and a parallel **CRISPR-Bulge-based** one, so guide specificity is shown on
+  both scales. They are `100 / (100 + Σ per-off-target score)`; the two scales are **not**
+  interchangeable, and (like CFD) a value is only comparable across runs with the same search envelope.
+- **`data/observed_haplotypes.tsv`** — for every site reached by **two or more distinct observed
+  variant haplotypes**, this companion lists **each** haplotype with its variants, rsIDs, mm/bulges,
+  **both** scores, origin, allele frequency and **named carriers**. The main table shows one
+  representative per site (highest score, ties → most carriers); this companion is where you see the
+  *full* set of real haplotypes a dense/multi-haplotype site contributes (it serves the CFD- and the
+  CRISPR-Bulge-ranked views alike).
+- **`--per-sample` reports only off-targets a real individual carries.** In a high-variant-density
+  window CRISPRme does **not** fabricate a synthetic cross-sample "worst-case" haplotype under
+  `--per-sample`; it reports the real observed haplotypes (exact carriers) and flags the dense region in
+  `high_variant_density_regions.bed`. The population-level default (no `--per-sample`) still reports the
+  conservative worst-case representative, as it should for a screen.
 
 ##### Input Arguments
 ---
