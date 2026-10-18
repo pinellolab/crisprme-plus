@@ -4574,7 +4574,7 @@ def crisprme_help() -> None:
 def targets_scoring_cmd():
     """``crisprme.py targets-scoring --targets <file> --output <file>
     (--casoffinder | --columns guide=..,dna=..,chrom=..,pos=..,strand=..,mm=..)
-    [--index-path <dir>] [--xlsx] [--device cpu|gpu] [--pam-length 3]
+    [--index-path <dir>] [--xlsx] [--device cpu|gpu|auto|cuda|metal] [--pam-length 3]
     [--position-base 0|1]``
 
     Score a user-supplied LIST of candidate off-target sites with the same CFD +
@@ -4594,7 +4594,8 @@ def targets_scoring_cmd():
             "\n\t--columns        generic-TSV column map, e.g. "
             "guide=crRNA,dna=DNA,chrom=Chr,pos=Pos,strand=Strand,mm=Mismatches"
             "\n\t--index-path     installed variant index -> add the carrier overlay"
-            "\n\t--device         cpu|gpu for the CRISPR-Bulge scorer (default cpu)"
+            "\n\t--device         CRISPR-Bulge scorer compute device: "
+            "cpu | gpu | auto | cuda | metal (default cpu)"
             "\n\t--xlsx           write .xlsx instead of TSV"
             "\n\t--pam-length     PAM length in bp (default 3)"
             "\n\t--position-base  0- or 1-based input positions "
@@ -4624,9 +4625,25 @@ def targets_scoring_cmd():
         if not os.path.isdir(index_path):
             error(f"the directory specified for --index-path does not exist: {index_path}")
     device = _val("--device")
+    if device is not None and device.lower() not in ("cpu", "gpu", "auto", "cuda", "metal"):
+        error("--device must be one of: cpu | gpu | auto | cuda | metal")
     xlsx = "--xlsx" in input_args
-    pam_len = int(_val("--pam-length")) if "--pam-length" in input_args else 3
-    position_base = int(_val("--position-base")) if "--position-base" in input_args else None
+    if "--pam-length" in input_args:
+        try:
+            pam_len = int(_val("--pam-length"))
+        except ValueError:
+            error("--pam-length must be an integer")
+    else:
+        pam_len = 3
+    if "--position-base" in input_args:
+        try:
+            position_base = int(_val("--position-base"))
+        except ValueError:
+            error("--position-base must be 0 or 1")
+        if position_base not in (0, 1):
+            error("--position-base must be 0 or 1")
+    else:
+        position_base = None
 
     columns = None
     if not casoffinder:

@@ -545,12 +545,17 @@ def _build_argparser():
                    help="parse the input as Cas-OFFinder output (auto-detect schema)")
     p.add_argument("--index-path", default=None,
                    help="installed variant index (adds the carrier overlay)")
-    p.add_argument("--device", default=None, help="cpu|gpu for CRISPR-Bulge")
+    p.add_argument("--device", default=None,
+                   help="CRISPR-Bulge scorer device: cpu|gpu|auto|cuda|metal (default cpu)")
     p.add_argument("--xlsx", action="store_true", help="write .xlsx instead of TSV")
     p.add_argument("--pam-length", type=int, default=3, help="PAM length in bp (default 3)")
     p.add_argument("--position-base", type=int, choices=(0, 1), default=None,
                    help="0- or 1-based positions (default: 0 for CasOFFinder, 1 for TSV)")
-    # generic TSV column mapping
+    # generic TSV column mapping: the key=val,... form (same syntax as
+    # `crisprme.py targets-scoring --columns`) OR the individual --*-column flags.
+    p.add_argument("--columns", default=None,
+                   help="generic-TSV column map, e.g. "
+                        "guide=crRNA,dna=DNA,chrom=Chr,pos=Pos,strand=Strand,mm=Mismatches")
     p.add_argument("--guide-column")
     p.add_argument("--dna-column")
     p.add_argument("--chrom-column")
@@ -563,21 +568,38 @@ def _build_argparser():
 
 
 def main(argv=None):
-    args = _build_argparser().parse_args(argv)
+    parser = _build_argparser()
+    args = parser.parse_args(argv)
+    if args.device is not None and args.device.lower() not in (
+        "cpu", "gpu", "auto", "cuda", "metal"
+    ):
+        parser.error("--device must be one of: cpu | gpu | auto | cuda | metal")
     columns = None
     if not args.casoffinder:
-        if not (args.guide_column and args.dna_column):
-            sys.stderr.write(
-                "error: for a generic TSV, --guide-column and --dna-column are "
-                "required (or pass --casoffinder for Cas-OFFinder output).\n"
+        # Prefer the --columns key=val,... form (same syntax the crisprme.py wrapper
+        # documents); fall back to the individual --*-column flags.
+        if args.columns:
+            columns = {}
+            for kv in args.columns.split(","):
+                if "=" not in kv:
+                    parser.error("bad --columns entry %r; use key=value pairs" % kv)
+                k, v = kv.split("=", 1)
+                columns[k.strip()] = v.strip()
+            if not (columns.get("guide") and columns.get("dna")):
+                parser.error("--columns must map at least guide=<col> and dna=<col>")
+        elif args.guide_column and args.dna_column:
+            columns = {
+                "guide": args.guide_column, "dna": args.dna_column,
+                "chrom": args.chrom_column, "pos": args.pos_column,
+                "strand": args.strand_column, "mm": args.mismatches_column,
+                "btype": args.bulge_type_column, "bsize": args.bulge_size_column,
+            }
+        else:
+            parser.error(
+                "for a generic TSV, pass --columns guide=..,dna=.. (or the "
+                "--guide-column/--dna-column flags), or --casoffinder for "
+                "Cas-OFFinder output."
             )
-            return 2
-        columns = {
-            "guide": args.guide_column, "dna": args.dna_column,
-            "chrom": args.chrom_column, "pos": args.pos_column,
-            "strand": args.strand_column, "mm": args.mismatches_column,
-            "btype": args.bulge_type_column, "bsize": args.bulge_size_column,
-        }
     n = run(
         args.targets, args.output, casoffinder=args.casoffinder,
         index_path=args.index_path, device=args.device, xlsx=args.xlsx,
