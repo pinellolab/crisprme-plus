@@ -1555,6 +1555,66 @@ class TestGenerateReport(unittest.TestCase):
             os.path.isfile(os.path.join(staging2, "observed_haplotypes.tsv"))
         )
 
+    def test_observed_haplotypes_companion_reads_alt_zip_after_cleanup(self):
+        """After a default complete-search cleans up the raw
+        *_all_results_with_alternative_alignments.tsv (keeping only the .zip), a later
+        standalone generate-report must STILL find the alt-only haplotypes by reading the
+        .zip -- otherwise the companion silently collapses to representatives and emits
+        nothing. Here haplotype A is the integrated_results representative and haplotype B
+        lives ONLY in the zipped alt-alignments (no .tsv on disk)."""
+        import zipfile
+
+        import pandas as pd
+        import observed_haplotypes_companion as oh
+
+        from generate_report import build_observed_haplotypes_companion
+
+        header = [
+            "Chromosome", "Spacer+PAM",
+            "Start_coordinate_(highest_CFD)", "Strand_(highest_CFD)",
+            "REF/ALT_origin_(highest_CFD)", "Variant_info_genome_(highest_CFD)",
+            "Variant_rsID_(highest_CFD)", "Variant_MAF_(highest_CFD)",
+            "Variant_samples_(highest_CFD)", "Mismatches_(highest_CFD)",
+            "Bulges_(highest_CFD)", "Bulge_type_(highest_CFD)",
+            "CFD_score_(highest_CFD)",
+            "REF/ALT_origin_(highest_CRISPR_BULGE)",
+            "Variant_info_genome_(highest_CRISPR_BULGE)",
+            "Variant_samples_(highest_CRISPR_BULGE)",
+            "Variant_MAF_(highest_CRISPR_BULGE)",
+            "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+        ]
+        rep = ["chrX", _GUIDE, "400", "+",
+               "alt", "chrX_400_T_A", "rs1", "0.01", "HG00096", "2", "0", "NA", "0.90",
+               "ref", "NA", "NA", "NA", "0.50"]
+        alt_only = ["chrX", _GUIDE, "402", "+",
+                    "alt", "chrX_402_C_G", "rs2", "0.02", "NA18525", "3", "0", "NA", "0.55",
+                    "ref", "NA", "NA", "NA", "0.50"]
+        df = pd.DataFrame([rep], columns=header)  # representative only
+
+        rdir = os.path.join(self.tmp, "oh_cleaned_rundir")
+        os.makedirs(rdir)
+        # write the alt-alignments .tsv, zip it (member keeps the .tsv basename, `zip -j`
+        # style), then REMOVE the .tsv -- exactly the state after the default cleanup.
+        alt_tsv = os.path.join(rdir, "g+NRG_hg38+hg38_X_6+3_all_results_with_alternative_alignments.tsv")
+        pd.DataFrame([alt_only], columns=header).to_csv(alt_tsv, sep="\t", index=False)
+        alt_zip = alt_tsv[:-4] + ".zip"
+        with zipfile.ZipFile(alt_zip, "w") as zf:
+            zf.write(alt_tsv, arcname=os.path.basename(alt_tsv))
+        os.remove(alt_tsv)
+        self.assertFalse(os.path.isfile(alt_tsv))  # cleaned up; only the .zip remains
+
+        staging = os.path.join(self.tmp, "oh_cleaned_staging")
+        os.makedirs(staging)
+        itsv = os.path.join(rdir, "g+NRG_hg38+hg38_X_6+3_integrated_results.tsv")
+        name = build_observed_haplotypes_companion(df, itsv, rdir, staging, merge_window=3)
+        # both haplotypes surface -> the alt frame was recovered from the .zip
+        self.assertEqual(name, "observed_haplotypes.tsv")
+        with open(os.path.join(staging, name)) as fh:
+            data = [ln.rstrip("\n") for ln in fh if ln.strip() and not ln.startswith("#")]
+        cols = oh.COMPANION_HEADER.lstrip("#").split("\t")
+        varsets = {dict(zip(cols, ln.split("\t")))["Variant_info_genome"] for ln in data}
+        self.assertEqual(varsets, {"chrX_400_T_A", "chrX_402_C_G"})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
