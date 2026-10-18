@@ -335,7 +335,7 @@ Below Analysis mode, a **Report options** checkbox — **"Include the full repor
 
 - **Unticked (default)** — a **slim** report. It bundles the human-facing layer (the
   top-1000 tables for both scorers, the ~100-site validation panel, the per-tier curated
-  tables, and the SNP+SNP / SNP+indel co-occurrence companions), which keeps the ZIP small
+  tables, and the SNP+indel co-occurrence companion), which keeps the ZIP small
   (single-digit MB on a typical run) and easy to email or attach.
 - **Ticked** — a **full**, fully self-contained report. In addition to the slim layer it
   bundles the bulky, redundant data: the complete integrated results (gzipped), the raw
