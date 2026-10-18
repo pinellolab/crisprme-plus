@@ -887,23 +887,21 @@ def check_liftover_available() -> None:
     """Verifies the `liftOver` binary is on PATH before any expensive work
     starts.
 
-    `liftOver` (UCSC tool, bioconda package `ucsc-liftover`) is a required
-    dependency for `assembly-search` -- bundled into the Docker image
-    alongside crispritz/crisprme, but not yet part of CRISPRme's own bioconda
-    recipe for the plain `mamba install crisprme` path (a separate,
-    not-yet-done follow-up). Checking this before launching two multi-hour
-    haplotype searches means a missing dependency fails immediately and
-    clearly instead of only surfacing at the very last reconciliation step.
+    `liftOver` (bioconda package `ucsc-liftover`) is used by `assembly-search`
+    for coordinate lifting. It is not installed by default, so a user who runs
+    `assembly-search` provides it on PATH themselves. Checking this before
+    launching two multi-hour haplotype searches means a missing tool fails
+    immediately and clearly instead of only surfacing at the very last
+    reconciliation step.
 
     Raises:
         RuntimeError: If `liftOver` isn't found on PATH.
     """
     if shutil.which("liftOver") is None:
         raise RuntimeError(
-            "liftOver (UCSC tool) not found on PATH -- required for "
-            "assembly-search. Install it with `mamba install -c bioconda "
-            "ucsc-liftover` (or `conda install`), or use a CRISPRme Docker "
-            "image built after this dependency was added."
+            "liftOver not found on PATH -- required for assembly-search. "
+            "Install it with `mamba install -c bioconda ucsc-liftover` "
+            "(or `conda install -c bioconda ucsc-liftover`)."
         )
 
 
