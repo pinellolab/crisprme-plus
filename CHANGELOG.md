@@ -57,7 +57,13 @@ and the `release-crisprme` skill.
   off-target only when ≥1 real individual carries it — that synthetic representative is no longer
   emitted; the dense region stays visible via the high-variant-density BED + the reference row. **Only**
   `--per-sample` is affected; the population-level default (which *should* report the conservative
-  worst case) and sites-only panels are byte-identical.
+  worst case) and sites-only panels are byte-identical. *Expected when diffing a `--per-sample` run
+  against 2.7.9:* on dense-window variant sites the reported `highest_CFD` representative — and hence its
+  `Start_coordinate` / `CFD_score` / `CFD_ref` and carrier roster — shifts to a **real** carrier
+  haplotype (the chimera is gone), so a handful of such rows differ. This is the intended effect, not a
+  scoring change: `CFD_alt` and all CFD arithmetic are byte-identical to 2.7.9 (validated on a
+  genome-wide run — CFD identical on 189,119/189,132 shared alignments; the differing rows are exactly
+  these double-bulge dense-window sites whose chimera representative was replaced by a real-carrier one).
 - **Per-cluster representative tie-break → most carriers.** Among off-targets that tie EXACTLY on
   score and severity, the representative shown in `integrated_results` now prefers the haplotype carried
   by the most individuals (applies to the CFD, fewest-mm+b, and CRISPR-Bulge passes); a no-op for the
