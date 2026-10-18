@@ -954,15 +954,17 @@ its purpose and usage:
 - `--keep-intermediates` (*Optional*)
   <br>Keep the bulky pre-integration working files. By default, once the finalized
   `*.integrated_results.tsv` and the report are produced, `complete-search` removes the
-  intermediate tables it no longer needs — the merged `*.bestMerge.txt` / `*.altMerge.txt`,
+  intermediate tables it no longer needs — the merged non-best `*.altMerge.txt`,
   the raw `*_all_results_with_alternative_alignments.tsv` (the compressed `.zip` is kept),
   and the per-chromosome `*.population_summary.tsv` — reclaiming on the order of ~15 GB on a
   genome-wide run. **Always kept** (regardless of this flag): `*.integrated_results.tsv` and
-  its `.zip`, the `*_report.zip`, the alternative-alignments `.zip`, the per-chromosome
-  co-occurrence / high-variant-density sidecars (so a later `generate-report --report-full`
-  can rebuild those bundles), the per-guide/per-sample summaries, `imgs/`, and the SQLite
-  `.<job>.db` web results-page index. Pass `--keep-intermediates` to retain everything (e.g.
-  for debugging or custom downstream parsing).
+  its `.zip`, the `*.bestMerge.txt` best-alignments table (the web results page greps it live
+  for the per-position cluster drill-down, so it must persist for the job to stay browsable),
+  the `*_report.zip`, the alternative-alignments `.zip`, the per-chromosome co-occurrence /
+  high-variant-density sidecars (so a later `generate-report --report-full` can rebuild those
+  bundles), the per-guide/per-sample summaries, `imgs/`, and the SQLite `.<job>.db` web
+  results-page index. Pass `--keep-intermediates` to retain everything (e.g. for debugging or
+  custom downstream parsing).
 
 **Note 1**: Ensure compatibility between input files and genome builds (e.g., 
 hg38 or hg19) to avoid alignment issues.
