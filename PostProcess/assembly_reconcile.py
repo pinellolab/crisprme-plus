@@ -884,40 +884,76 @@ def write_site_level_not_lifted(path: str, preds: pd.DataFrame, ucsc_to_genbank:
 
 
 def check_liftover_available() -> None:
-    """Verifies the `liftOver` binary is on PATH before any expensive work
-    starts.
-
-    `liftOver` (UCSC tool, bioconda package `ucsc-liftover`) is a required
-    dependency for `assembly-search` -- bundled into the Docker image
-    alongside crispritz/crisprme, but not yet part of CRISPRme's own bioconda
-    recipe for the plain `mamba install crisprme` path (a separate,
-    not-yet-done follow-up). Checking this before launching two multi-hour
-    haplotype searches means a missing dependency fails immediately and
+    """Verifies the chain-lifting library (``pyliftover``) is importable before
+    any expensive work starts, so a missing dependency fails immediately and
     clearly instead of only surfacing at the very last reconciliation step.
 
+    `pyliftover` is used by `assembly-search` to lift off-target coordinates
+    through the provided chain files.
+
     Raises:
-        RuntimeError: If `liftOver` isn't found on PATH.
+        RuntimeError: If `pyliftover` cannot be imported.
     """
-    if shutil.which("liftOver") is None:
+    try:
+        import pyliftover  # noqa: F401
+    except Exception as exc:
         raise RuntimeError(
-            "liftOver (UCSC tool) not found on PATH -- required for "
-            "assembly-search. Install it with `mamba install -c bioconda "
-            "ucsc-liftover` (or `conda install`), or use a CRISPRme Docker "
-            "image built after this dependency was added."
+            "pyliftover (coordinate lifting for assembly-search) could not be "
+            "imported: %s. Install it with `mamba install -c bioconda "
+            "pyliftover` or `pip install pyliftover`." % exc
         )
 
 
 def run_liftover(bed_path: str, chain_file: str, mapped_path: str, unmapped_path: str) -> Tuple[str, str]:
-    """Runs UCSC `liftOver` on a BED file. Assumes `liftOver` is on PATH --
-    see `check_liftover_available`.
+    """Lift a BED of 1 bp points through ``chain_file`` with the pyliftover
+    library (a pure-Python chain lifter). Reads the input BED that
+    ``build_offtarget_bed`` writes and produces the same two outputs the readers
+    below expect: ``mapped_path`` (each record with its coordinates lifted,
+    ``name``/``score`` preserved, ``strand`` set to the lifted strand) and
+    ``unmapped_path`` (a ``#``-reason line followed by the original record, so
+    ``load_unlifted_ids`` picks up the failed ids). ``resolve_lifted_endpoints``
+    and ``load_unlifted_ids`` are unchanged.
+
+    ``chain_file`` is always an explicit local path (``--chain-paternal`` /
+    ``--chain-maternal``) and is loaded directly (gzip-aware), never fetched.
+
+    Ambiguity policy: a point covered by exactly one chain is lifted to that
+    chain's target coordinate and strand (a reverse-oriented block flips the
+    strand, which is how ``resolve_lifted_endpoints`` recovers per-end
+    orientation). A point covered by more than one chain, or by none, is left
+    unmapped -- matching ``liftOver`` run without ``-multiple``.
 
     Raises:
-        RuntimeError: If `liftOver` exits non-zero.
+        RuntimeError: If the chain file cannot be loaded.
     """
-    cmd = f"liftOver {bed_path} {chain_file} {mapped_path} {unmapped_path}"
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"liftOver failed:\n{result.stderr}")
+    from pyliftover import LiftOver  # lazy: only assembly-search needs it
+
+    try:
+        lifter = LiftOver(chain_file)
+    except Exception as exc:  # unreadable / malformed chain
+        raise RuntimeError(f"could not load chain file {chain_file}: {exc}")
+    with open(bed_path) as src, \
+            open(mapped_path, "w") as mapped, \
+            open(unmapped_path, "w") as unmapped:
+        for raw in src:
+            if not raw.strip():
+                continue
+            fields = raw.rstrip("\n").split("\t")
+            chrom, start = fields[0], int(fields[1])
+            strand = fields[5] if len(fields) > 5 else "+"
+            hits = lifter.convert_coordinate(chrom, start, strand)
+            if not hits:  # None (unknown chromosome) or [] (no mapping)
+                unmapped.write("#Deleted in new\n" + "\t".join(fields) + "\n")
+                continue
+            if len(hits) > 1:  # >1 chain: ambiguous -> reject (liftOver default)
+                unmapped.write("#Duplicated in new\n" + "\t".join(fields) + "\n")
+                continue
+            t_chrom, t_pos, t_strand = hits[0][0], int(hits[0][1]), hits[0][2]
+            out = list(fields)
+            out[0], out[1], out[2] = t_chrom, str(t_pos), str(t_pos + 1)  # 1 bp
+            if len(out) > 5:
+                out[5] = t_strand
+            mapped.write("\t".join(out) + "\n")
     return mapped_path, unmapped_path
 
 

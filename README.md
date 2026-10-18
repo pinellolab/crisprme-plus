@@ -587,7 +587,7 @@ crisprme.py validate-test --chrom chr22
 
 Notes:
 - This is exactly the recipe the project `Dockerfile` automates — if you prefer full isolation, build the image instead (Section 1.2).
-- The `assembly-search` subcommand uses the UCSC `liftOver` binary, which is included in `environment.yml` (`ucsc-liftover`).
+- The `assembly-search` subcommand lifts coordinates through chain files with the `pyliftover` library (included in `environment.yml`); no external liftOver binary is required.
 - To launch the web interface after installing: `crisprme.py web-interface` (serves on port 8080 — open http://localhost:8080).
 
 ## 2 Usage
