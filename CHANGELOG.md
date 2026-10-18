@@ -22,7 +22,6 @@ and the `release-crisprme` skill.
   `generate-report --report-full` can still rebuild those bundles), the per-guide/per-sample
   summaries, and the sqlite `.db` web results-page index (removing it would break browsing the job in
   the web interface). Gated by `CRISPRME_KEEP_INTERMEDIATES`.
-=======
 - **`assembly-search` coordinate lifting now uses the `pyliftover` library** instead of an external
   liftOver binary. `pyliftover` replaces `ucsc-liftover` in `environment.yml`/`Dockerfile`, so the
   image no longer carries that binary and `assembly-search` works out of the box. Point-lifting
