@@ -1309,12 +1309,13 @@ rm $final_res_alt.bestCFD.txt
 rm $final_res_alt.bestmmblg.txt
 rm $final_res_alt.bestCRISPR_BULGE.txt
 
-# Intermediate cleanup (CRISPRme+ 2.7.10): the pre-integration merged tables and the
-# per-chromosome working summaries are fully superseded by the finalized
+# Intermediate cleanup (CRISPRme+ 2.7.10): the raw non-best alignments working table
+# (altMerge) and the per-chromosome working summaries are superseded by the finalized
 # *_integrated_results.tsv + the report, so remove them by default to reclaim disk
-# (tens of GB on a genome-wide run). Set CRISPRME_KEEP_INTERMEDIATES=True
-# (crisprme.py complete-search --keep-intermediates) to retain everything; the
-# cicd_test guard keeps everything for the brute-force gate (complete-test /
-# validate-benchmarks). The exact removal set / kept set are documented in, and
-# exercised by, clean_intermediates.sh + test_clean_intermediates.py.
+# (tens of GB on a genome-wide run). The best-alignments table (<job>.bestMerge.txt) is
+# KEPT -- the web results page reads it live for the per-position cluster drill-down.
+# Set CRISPRME_KEEP_INTERMEDIATES=True (crisprme.py complete-search --keep-intermediates)
+# to retain everything; the cicd_test guard keeps everything for the brute-force gate
+# (complete-test / validate-benchmarks). The exact removal set / kept set are documented
+# in, and exercised by, clean_intermediates.sh + test_clean_intermediates.py.
 bash "${starting_dir}/clean_intermediates.sh" "${output_folder}" "${cicd_test}"

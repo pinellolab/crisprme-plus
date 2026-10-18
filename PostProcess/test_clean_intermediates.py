@@ -27,18 +27,24 @@ SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clean_interme
 JOB = "GUIDEA+NGG_hg38+1000G_6+2"
 STEM = "sgRNA1+NGG_hg38+1000G_6+2"  # the per-guide finalized-output stem
 
-# Files the cleanup MUST remove (the four documented patterns).
+# Files the cleanup MUST remove (the documented patterns).
 REMOVED = [
-    "{job}.bestMerge.txt",
     "{job}.altMerge.txt",
     "{stem}_all_results_with_alternative_alignments.tsv",
     "{stem}.population_summary.tsv",
     "sgRNA2+NGG_hg38+1000G_6+2.population_summary.tsv",  # prove the glob is plural
 ]
 
+# The web per-position cluster drill-down (pages/results_page.py cluster_page) greps
+# <job>.bestMerge.txt LIVE, and a web run cannot opt out of cleanup, so this file must
+# survive -- deleting it leaves the drill-down table header-only. Pinned separately so a
+# regression that re-adds it to the removal set fails loudly.
+WEB_DRILLDOWN_SOURCE = "{job}.bestMerge.txt"
+
 # Files the cleanup MUST keep. Note the adversarial pair: the alt-alignments .zip
 # shares the exact stem of the removed .tsv and must survive the .tsv glob.
 KEPT = [
+    WEB_DRILLDOWN_SOURCE,
     "{stem}_integrated_results.tsv",
     "{stem}_integrated_results.zip",
     "{stem}_report.zip",
@@ -113,6 +119,19 @@ class TestCleanIntermediates(unittest.TestCase):
         # imgs/ and its contents are untouched.
         self.assertTrue(os.path.isfile(os.path.join(self.folder, "imgs", "plot.png")))
 
+    def test_web_cluster_drilldown_source_survives(self):
+        """The file the web per-position drill-down greps live (<job>.bestMerge.txt)
+        must survive a default cleanup -- a web search cannot opt out, so deleting it
+        would leave the cluster table header-only. Guards against re-adding it to the
+        removal set (the 2.7.10 critical regression)."""
+        proc = _run(self.folder)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(
+            _present(self.folder, WEB_DRILLDOWN_SOURCE),
+            f"{WEB_DRILLDOWN_SOURCE} is the web cluster drill-down source and must "
+            "NOT be removed by default cleanup",
+        )
+
     def test_keep_env_short_circuits(self):
         """CRISPRME_KEEP_INTERMEDIATES=True keeps absolutely everything."""
         proc = _run(self.folder, keep_env="True")
@@ -137,7 +156,7 @@ class TestCleanIntermediates(unittest.TestCase):
         """Only the literal 'True' keeps; any other value (e.g. 'False') still cleans."""
         proc = _run(self.folder, keep_env="False")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertFalse(_present(self.folder, "{job}.bestMerge.txt"))
+        self.assertFalse(_present(self.folder, "{job}.altMerge.txt"))
         self.assertTrue(_present(self.folder, "{stem}_integrated_results.tsv"))
 
     def test_empty_folder_is_safe(self):
