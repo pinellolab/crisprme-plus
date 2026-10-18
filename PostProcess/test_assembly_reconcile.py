@@ -2349,9 +2349,9 @@ def _revcomp(s):
 _FLIP = {"+": "-", "-": "+"}
 
 
-@unittest.skipUnless(shutil.which("liftOver"), "liftOver not on PATH")
+@unittest.skipUnless(_HAVE_PYLIFTOVER, "pyliftover not installed")
 class TestLiftOverAgainstConstructedTruth(unittest.TestCase):
-    """End-to-end against the REAL liftOver binary and a chain file generated
+    """End-to-end through run_liftover (pyliftover) against a chain file generated
     from a toy genome rearrangement, so the right answer for every site is
     known by construction rather than taken from any other tool's output.
 
