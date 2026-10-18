@@ -1643,6 +1643,67 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(by_vs["chrX_400_T_A"]["CFD"], "0.90")
         self.assertEqual(by_vs["chrX_400_T_A"]["Mismatches"], "2")
 
+    def test_oh_count_carriers_treats_no_samples_sentinel_as_zero(self):
+        """The companion must count the pipeline's NO_SAMPLES sentinel as zero
+        carriers (matching remove_contiguous_samples / process_summaries), not as one
+        token from a naive comma split."""
+        from generate_report import _oh_count_carriers, _oh_is_real
+        self.assertEqual(_oh_count_carriers("NO_SAMPLES"), 0)
+        self.assertEqual(_oh_count_carriers("HG00096,NO_SAMPLES"), 1)
+        self.assertEqual(_oh_count_carriers("HG00096,HG00097"), 2)
+        self.assertEqual(_oh_count_carriers(""), 0)
+        self.assertFalse(_oh_is_real("NO_SAMPLES"))
+
+    def test_observed_haplotypes_companion_respects_no_maf(self):
+        """Under --no-maf (_DROP_MAF) the companion must not leak real allele
+        frequencies: every emitted AF is blanked to NA."""
+        import pandas as pd
+        import observed_haplotypes_companion as oh
+        import generate_report as gr
+
+        from generate_report import build_observed_haplotypes_companion
+
+        header = [
+            "Chromosome", "Spacer+PAM",
+            "Start_coordinate_(highest_CFD)", "Strand_(highest_CFD)",
+            "REF/ALT_origin_(highest_CFD)", "Variant_info_genome_(highest_CFD)",
+            "Variant_rsID_(highest_CFD)", "Variant_MAF_(highest_CFD)",
+            "Variant_samples_(highest_CFD)", "Mismatches_(highest_CFD)",
+            "Bulges_(highest_CFD)", "Bulge_type_(highest_CFD)",
+            "CFD_score_(highest_CFD)",
+            "REF/ALT_origin_(highest_CRISPR_BULGE)",
+            "Variant_info_genome_(highest_CRISPR_BULGE)",
+            "Variant_samples_(highest_CRISPR_BULGE)",
+            "Variant_MAF_(highest_CRISPR_BULGE)",
+            "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+        ]
+        rows = [
+            ["chrX", _GUIDE, "400", "+",
+             "alt", "chrX_400_T_A", "rs1", "0.01", "HG00096", "2", "0", "NA", "0.90",
+             "ref", "NA", "NA", "NA", "0.50"],
+            ["chrX", _GUIDE, "402", "+",
+             "alt", "chrX_402_C_G", "rs2", "0.02", "NA18525", "3", "0", "NA", "0.55",
+             "ref", "NA", "NA", "NA", "0.50"],
+        ]
+        df = pd.DataFrame(rows, columns=header)
+        staging = os.path.join(self.tmp, "oh_nomaf_staging")
+        os.makedirs(staging)
+        itsv = os.path.join(self.tmp, "oh_nomaf_integrated_results.tsv")
+        prev = gr._DROP_MAF
+        gr._DROP_MAF = True
+        try:
+            name = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
+        finally:
+            gr._DROP_MAF = prev
+        self.assertEqual(name, "observed_haplotypes.tsv")
+        with open(os.path.join(staging, name)) as fh:
+            lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
+        cols = oh.COMPANION_HEADER.lstrip("#").split("\t")
+        recs = [dict(zip(cols, ln.split("\t"))) for ln in lines if not ln.startswith("#")]
+        self.assertEqual(len(recs), 2)
+        for r in recs:
+            self.assertEqual(r["AF"], "NA", "--no-maf must blank the companion AF column")
+
     def test_observed_haplotypes_companion_reads_alt_zip_after_cleanup(self):
         """After a default complete-search cleans up the raw
         *_all_results_with_alternative_alignments.tsv (keeping only the .zip), a later
