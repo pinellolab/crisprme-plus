@@ -1503,7 +1503,7 @@ class TestGenerateReport(unittest.TestCase):
         staging = os.path.join(self.tmp, "oh_staging")
         os.makedirs(staging)
         itsv = os.path.join(self.tmp, "oh_integrated_results.tsv")  # no alt-align sibling
-        name = build_observed_haplotypes_companion(
+        name, _oh_rows = build_observed_haplotypes_companion(
             df, itsv, self.tmp, staging, merge_window=3
         )
         # (a) returns the bundle filename
@@ -1547,7 +1547,7 @@ class TestGenerateReport(unittest.TestCase):
         staging2 = os.path.join(self.tmp, "oh_staging_single")
         os.makedirs(staging2)
         df_single = pd.DataFrame([rows[2]], columns=header)
-        name2 = build_observed_haplotypes_companion(
+        name2, _oh_rows2 = build_observed_haplotypes_companion(
             df_single, itsv, self.tmp, staging2, merge_window=3
         )
         self.assertIsNone(name2)
@@ -1599,7 +1599,7 @@ class TestGenerateReport(unittest.TestCase):
         staging = os.path.join(self.tmp, "oh_cbonly_staging")
         os.makedirs(staging)
         itsv = os.path.join(self.tmp, "oh_cbonly_integrated_results.tsv")
-        name = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
+        name, _oh_rows = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
         self.assertEqual(name, "observed_haplotypes.tsv")
         with open(os.path.join(staging, name)) as fh:
             lines = [ln.rstrip("\n") for ln in fh if ln.strip()]
@@ -1669,7 +1669,7 @@ class TestGenerateReport(unittest.TestCase):
         prev = gr._DROP_MAF
         gr._DROP_MAF = True
         try:
-            name = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
+            name, _oh_rows = build_observed_haplotypes_companion(df, itsv, self.tmp, staging, merge_window=3)
         finally:
             gr._DROP_MAF = prev
         self.assertEqual(name, "observed_haplotypes.tsv")
@@ -1680,6 +1680,35 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(len(recs), 2)
         for r in recs:
             self.assertEqual(r["AF"], "NA", "--no-maf must blank the companion AF column")
+
+    def test_observed_haplotypes_html_section_expandable_and_downloadable(self):
+        """The inline report section renders each multi-haplotype site as a native
+        <details> (no JavaScript) and links a download of the full companion TSV."""
+        from generate_report import render_observed_haplotypes_section
+        rows = [
+            {"Chromosome": "chrX", "Site_start": "400", "Strand": "+", "Spacer+PAM": _GUIDE,
+             "Variant_info_genome": "chrX_400_T_A", "rsIDs": "rs1", "Mismatches": "2",
+             "Bulges": "0", "Bulge_type": "NA", "CFD": "0.90", "CRISPR_Bulge": "0.77",
+             "Origin": "alt", "AF": "0.01", "Phase": "NA", "N_carriers": "2",
+             "Carriers": "HG00096,HG00097"},
+            {"Chromosome": "chrX", "Site_start": "400", "Strand": "+", "Spacer+PAM": _GUIDE,
+             "Variant_info_genome": "chrX_402_C_G", "rsIDs": "rs2", "Mismatches": "3",
+             "Bulges": "0", "Bulge_type": "NA", "CFD": "0.55", "CRISPR_Bulge": "NA",
+             "Origin": "alt", "AF": "0.02", "Phase": "NA", "N_carriers": "1",
+             "Carriers": "NA18525"},
+        ]
+        html = render_observed_haplotypes_section(rows, "observed_haplotypes.tsv")
+        self.assertIn("<details", html)                    # native click-to-expand
+        self.assertIn("oh-site", html)
+        self.assertIn("chrX:400", html)                    # site summary
+        self.assertIn("chrX_400_T_A", html)                # both haplotypes listed
+        self.assertIn("chrX_402_C_G", html)
+        self.assertIn("download", html)                    # download link ...
+        self.assertIn("observed_haplotypes.tsv", html)     # ... to the full TSV
+        self.assertNotIn("<script", html)                  # report has no JS
+        # degenerate inputs -> no section
+        self.assertEqual(render_observed_haplotypes_section([], "x.tsv"), "")
+        self.assertEqual(render_observed_haplotypes_section(rows, None), "")
 
     def test_observed_haplotypes_companion_reads_alt_zip_after_cleanup(self):
         """After a default complete-search cleans up the raw
@@ -1732,7 +1761,7 @@ class TestGenerateReport(unittest.TestCase):
         staging = os.path.join(self.tmp, "oh_cleaned_staging")
         os.makedirs(staging)
         itsv = os.path.join(rdir, "g+NRG_hg38+hg38_X_6+3_integrated_results.tsv")
-        name = build_observed_haplotypes_companion(df, itsv, rdir, staging, merge_window=3)
+        name, _oh_rows = build_observed_haplotypes_companion(df, itsv, rdir, staging, merge_window=3)
         # both haplotypes surface -> the alt frame was recovered from the .zip
         self.assertEqual(name, "observed_haplotypes.tsv")
         with open(os.path.join(staging, name)) as fh:
