@@ -1307,21 +1307,8 @@ rm $final_res_alt.bestCRISPR_BULGE.txt
 # per-chromosome working summaries are fully superseded by the finalized
 # *_integrated_results.tsv + the report, so remove them by default to reclaim disk
 # (tens of GB on a genome-wide run). Set CRISPRME_KEEP_INTERMEDIATES=True
-# (crisprme.py complete-search --keep-intermediates) to retain everything.
-#
-# KEPT regardless (never removed here): the *_integrated_results.tsv/.zip, the
-# *_report.zip, the *_all_results_with_alternative_alignments.ZIP, the per-chrom
-# co-occurrence / high-variant-density sidecars (so a later `generate-report
-# --report-full` can rebuild those bundles), the per-guide/per-sample summaries,
-# imgs/, and the sqlite .<job>.db (the web results-page index -- removing it would
-# break browsing this job in the web interface).
-if [ "${CRISPRME_KEEP_INTERMEDIATES:-False}" != "True" ] && [ "$cicd_test" != "True" ]; then
-	# cicd_test guard mirrors the crispritz_targets removal above: complete-test /
-	# validate-benchmarks keeps every intermediate so the brute-force gate can read
-	# them; only real runs clean up.
-	_job=$(basename "${output_folder}")
-	echo -e "Cleaning intermediate files (set CRISPRME_KEEP_INTERMEDIATES=True to keep them)"
-	rm -f "${output_folder}/${_job}.bestMerge.txt" "${output_folder}/${_job}.altMerge.txt"
-	rm -f "${output_folder}"/*_all_results_with_alternative_alignments.tsv  # the .zip is kept
-	rm -f "${output_folder}"/*.population_summary.tsv
-fi
+# (crisprme.py complete-search --keep-intermediates) to retain everything; the
+# cicd_test guard keeps everything for the brute-force gate (complete-test /
+# validate-benchmarks). The exact removal set / kept set are documented in, and
+# exercised by, clean_intermediates.sh + test_clean_intermediates.py.
+bash "${starting_dir}/clean_intermediates.sh" "${output_folder}" "${cicd_test}"
