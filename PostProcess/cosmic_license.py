@@ -107,7 +107,11 @@ def strip_cosmic(in_bed: str, out_bed: str) -> Tuple[int, int]:
     ``(kept, dropped)``.
     """
     kept = dropped = 0
-    tmp = out_bed + ".tmp"
+    # Per-process temp name: two concurrent complete-search jobs stripping the SAME
+    # annotation would otherwise both write "<out_bed>.tmp" and race on os.replace
+    # (one renames it away, the other hits FileNotFoundError). The final os.replace to
+    # the shared out_bed is atomic and the content is identical, so last-writer-wins.
+    tmp = out_bed + f".{os.getpid()}.tmp"
     # compression of the temp file must match the FINAL name, not the ".tmp" suffix
     dst_open = gzip.open(tmp, "wt") if out_bed.endswith(".gz") else open(tmp, "wt")
     with _open_maybe_gz(in_bed, "rt") as src, dst_open as dst:

@@ -226,6 +226,7 @@ jobs:
         working-directory: PostProcess
         run: >
           python -m unittest test_calc_cfd_twins_agree test_cosmic_license
+          test_configure_tmpdir
           test_registry_from_info_af test_synth_sites_gt test_change_headers_bestmerge
           test_dash_output_props test_complete_test -v
 
