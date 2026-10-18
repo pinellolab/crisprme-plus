@@ -135,6 +135,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_chrom_subset -v
 
+      - name: "Indel-path PAM creation (#94: writes PAM_gen index 10, not Var_uniq 11)"
+        working-directory: PostProcess
+        run: python -m unittest test_indel_pam_creation -v
+
       - name: "Indel+SNP co-occurrence (overlay, phased indel GT, cis join, brute-force oracle vs real chr22 fixture)"
         # feature/indel-snp: SNP+indel co-occurring off-target discovery. Pure stdlib
         # tests (no extra deps) + a ~16KB real-data fixture whose brute-force ORACLE
