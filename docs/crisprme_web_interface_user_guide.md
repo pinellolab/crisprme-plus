@@ -344,9 +344,10 @@ Below Analysis mode, a **Report options** checkbox — **"Include the full repor
 
 Either way the omitted data is **never lost** — the complete results stay on the server and
 remain browsable in the interactive results page; the checkbox only affects what the single
-downloadable ZIP contains. This checkbox is available on every search tab (including
-Personal assembly). It mirrors the command line's `generate-report --report-full` /
-`complete-search --report-full`.
+downloadable ZIP contains. This checkbox applies to the reference-genome and variant search
+tabs (it is hidden on the Personal-assembly tab, which produces its own combined-haplotype
+output rather than a report bundle). It mirrors the command line's
+`generate-report --report-full` / `complete-search --report-full`.
 
 **Base editing thresholds (optional)**
 
