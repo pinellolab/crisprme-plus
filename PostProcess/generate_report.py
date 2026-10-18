@@ -1432,6 +1432,15 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         f"<code>{_esc(variant_created_name)}</code>"
         if variant_created_name else "<code>variant_created.tsv</code>"
     )
+    # variant_created_name is set only when the file is actually bundled (the slim
+    # default report skips the variant_created tier), so key the prose off it: don't
+    # claim the archive contains the file when it does not.
+    vc_note = (
+        f"the full list is bundled as {vc_html}."
+        if variant_created_name else
+        "the full list is written to <code>variant_created.tsv</code> in the result "
+        "directory (re-run with <code>--report-full</code> to bundle it into the archive)."
+    )
     ds = meta.get("datasets", "n/a")
     mm = meta.get("mm", "n/a")
     bdna, brna = meta.get("bdna"), meta.get("brna")
@@ -1478,8 +1487,7 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
          f"genome; individual reported alignments &mdash; especially "
          f"variant-expanded ones &mdash; may show more total edits."),
         ("Variant-contributed sites",
-         "Flagged by REF/ALT origin and <code>PAM_creation</code>; the full list is "
-         f"bundled as {vc_html}."),
+         "Flagged by REF/ALT origin and <code>PAM_creation</code>; " + vc_note),
     ]
     body = "".join(f'<tr><td class="k">{k}</td><td>{v}</td></tr>' for k, v in rows)
     return (
