@@ -75,7 +75,7 @@ GUIDE = "GAGTCCGAGCAGAAGAAGAANNN"
 
 
 def _row(dna, cfd, total=4, cluster_pos=1000, position=1000, snp="n",
-         chrom="chr1", guide=GUIDE):
+         chrom="chr1", guide=GUIDE, samples="n"):
     """Build one 22-col POST-ADJUST reference row (SNP=='n')."""
     r = ["X"] * 22
     r[0] = "X"                       # Bulge_type
@@ -91,7 +91,7 @@ def _row(dna, cfd, total=4, cluster_pos=1000, position=1000, snp="n",
     r[TOTAL_COL] = str(total)        # Total (mm+bulges)
     r[11] = "NGG"                    # PAM_gen
     r[12] = "n"                      # Var_uniq
-    r[13] = "n"                      # Samples (ref)
+    r[13] = samples                  # Samples roster (default "n" == ref)
     r[14] = "NA"                     # Annotation_Type
     r[15] = guide.replace("-", "")   # Real_Guide (true guide)
     r[16] = "n"                      # rsID
@@ -176,6 +176,30 @@ class RepresentativeTiebreak(unittest.TestCase):
                          "best CFD must win over the smaller-DNA tie-break")
         self.assertEqual(rep_ba[DNA_COL], dna_hi,
                          "best CFD must win regardless of input order")
+
+    def test_no_samples_sentinel_counts_as_zero_carriers(self):
+        """A "NO_SAMPLES" roster (the empty-roster sentinel used across PostProcess,
+        e.g. process_summaries.py) must count as ZERO carriers in the 2.7.10
+        most-carriers tie-break -- not as one carrier from a naive comma split. The
+        no-carrier row is given the lexicographically-SMALLER aligned DNA, so if
+        "NO_SAMPLES" were miscounted as 1 carrier the two rows would tie on carriers and
+        the smaller-DNA (no-carrier) row would win. With the sentinel correctly at 0,
+        the genuine single-carrier row wins despite its larger DNA, in both input orders."""
+        dna_nosamp = "AAAATCCGAGCAGAAGAAGAAGG"   # no carriers, SMALLER DNA
+        dna_carrier = "TTTTTCCGAGCAGAAGAAGAAGG"  # one real carrier, LARGER DNA
+        self.assertLess(dna_nosamp, dna_carrier)
+        row_nosamp = _row(dna_nosamp, cfd="0.900", total=4, cluster_pos=1000,
+                          position=1001, samples="NO_SAMPLES")
+        row_carrier = _row(dna_carrier, cfd="0.900", total=4, cluster_pos=1000,
+                           position=1002, samples="HG00001")
+
+        rep_ab = self._representative([row_nosamp, row_carrier])
+        rep_ba = self._representative([row_carrier, row_nosamp])
+
+        self.assertEqual(rep_ab[DNA_COL], dna_carrier,
+                         "the genuine 1-carrier row must win; NO_SAMPLES must count as 0")
+        self.assertEqual(rep_ba[DNA_COL], dna_carrier,
+                         "NO_SAMPLES-as-0 must hold regardless of input order")
 
 
 if __name__ == "__main__":

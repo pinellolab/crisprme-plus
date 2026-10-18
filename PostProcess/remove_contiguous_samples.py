@@ -34,8 +34,8 @@ def _rep_tiebreak(x):
     try:
         _samples = str(x[true_guide - 2])
         _ncarriers = (
-            0 if _samples in ("", ".", "NA", "n")
-            else len([_c for _c in _samples.split(",") if _c and _c not in (".", "NA")])
+            0 if _samples in ("", ".", "NA", "n", "NO_SAMPLES")
+            else len([_c for _c in _samples.split(",") if _c and _c not in (".", "NA", "NO_SAMPLES")])
         )
     except Exception:  # never let the tie-break break the sort
         _ncarriers = 0
