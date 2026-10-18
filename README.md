@@ -1973,7 +1973,10 @@ For a generic TSV instead of Cas-OFFinder output, map the columns explicitly:
   `guide=crRNA,dna=DNA,chrom=Chr,pos=Pos,strand=Strand,mm=Mismatches` (at least
   `guide` and `dna` are required).
 - `--index-path` — an installed variant index; adds the per-site carrier overlay.
-- `--device` — `cpu` (default) or `gpu` for the CRISPR-Bulge scorer.
+- `--device` — CRISPR-Bulge scorer compute device: `cpu` (default) | `gpu`/`auto`
+  (auto-pick `cuda`→`metal`→`cpu`) | `cuda` (NVIDIA/Linux GPU) | `metal` (Apple Silicon);
+  same vocabulary as `complete-search --compute-backend`, and it falls back to CPU when
+  the requested accelerator is unavailable.
 - `--xlsx` — write an `.xlsx` workbook instead of TSV.
 - `--pam-length` — PAM length in bp (default `3`).
 - `--position-base` — `0`- or `1`-based input positions (default `0` for
