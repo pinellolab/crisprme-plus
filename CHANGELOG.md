@@ -12,6 +12,13 @@ and the `release-crisprme` skill.
 ## [Unreleased]
 
 ### Changed
+- **`assembly-search` coordinate lifting now uses the `pyliftover` library** instead of an external
+  liftOver binary. `pyliftover` replaces `ucsc-liftover` in `environment.yml`/`Dockerfile`, so the
+  image no longer carries that binary and `assembly-search` works out of the box. Point-lifting
+  behaviour is unchanged (per-endpoint target coordinate + strand; a point covered by more than one
+  chain, or none, is left unmapped); chain files are still passed explicitly via `--chain-paternal` /
+  `--chain-maternal` (nothing is fetched). Added a `THIRD_PARTY.md` attribution file for bundled
+  components (CRISPR-Bulge, impg, pyliftover — all MIT).
 - **The shareable report (`report.zip`) is now SLIM by default.** It bundles the human-facing layer
   — `report.html`, the curated top-1000 (both scorers), the validation panel, the per-tier CFD/
   CRISPR-Bulge/mmb subsets, the indel+SNP co-occurrence, and the run manifest/Params — which stays a

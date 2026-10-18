@@ -39,6 +39,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import assembly_reconcile as ar  # noqa: E402
 
+try:
+    import pyliftover as _pyliftover_probe  # noqa: F401
+    _HAVE_PYLIFTOVER = True
+except Exception:
+    _HAVE_PYLIFTOVER = False
+
 
 def _fake_liftover(lift_map, unliftable=(), reverse=(), drop_last=(), drop_first=()):
     """Builds a ``run_liftover`` stand-in that honours the real BED6 two-end
@@ -738,28 +744,50 @@ class TestCheckLiftoverFailureRate(unittest.TestCase):
 
 
 class TestCheckLiftoverAvailable(unittest.TestCase):
-    def test_raises_when_not_on_path(self):
-        with patch.object(ar.shutil, "which", return_value=None):
+    def test_raises_when_library_missing(self):
+        # setting the module to None in sys.modules makes `import pyliftover` raise
+        with patch.dict("sys.modules", {"pyliftover": None}):
             with self.assertRaises(RuntimeError) as ctx:
                 ar.check_liftover_available()
-        self.assertIn("liftOver", str(ctx.exception))
+        self.assertIn("pyliftover", str(ctx.exception))
 
-    def test_passes_when_on_path(self):
-        with patch.object(ar.shutil, "which", return_value="/usr/bin/liftOver"):
+    def test_passes_when_importable(self):
+        import types
+        with patch.dict("sys.modules", {"pyliftover": types.ModuleType("pyliftover")}):
             ar.check_liftover_available()  # must not raise
 
 
+@unittest.skipUnless(_HAVE_PYLIFTOVER, "pyliftover not installed")
 class TestRunLiftover(unittest.TestCase):
-    def test_calls_liftover_directly_without_mamba_env_wrapper(self):
-        # regression guard: this used to hardcode `mamba run -n liftover_env`,
-        # an undocumented dependency not part of crisprme's own environment
-        with patch.object(ar.subprocess, "run") as mock_run:
-            mock_run.return_value.returncode = 0
-            ar.run_liftover("in.bed", "chain.file", "mapped.bed", "unmapped.bed")
-        cmd = mock_run.call_args[0][0]
-        self.assertNotIn("mamba", cmd)
-        self.assertNotIn("liftover_env", cmd)
-        self.assertTrue(cmd.startswith("liftOver "))
+    # Two forward blocks over the SAME chrT region (chains 1 & 3) make a point in
+    # [100,200) ambiguous; a reverse-strand block (chain 2) flips the lifted strand.
+    _CHAIN = (
+        "chain 1000 chrT 1000 + 100 200 chrQ 2000 + 500 600 1\n100\n\n"
+        "chain 900 chrT 1000 + 300 400 chrR 2000 - 100 200 2\n100\n\n"
+        "chain 800 chrT 1000 + 100 200 chrD 3000 + 700 800 3\n100\n\n"
+    )
+
+    def test_point_lift_mapped_unmapped_and_strand(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(d, ignore_errors=True))
+        chain = os.path.join(d, "t.chain")
+        with open(chain, "w") as fh:
+            fh.write(self._CHAIN)
+        bed = os.path.join(d, "in.bed")
+        with open(bed, "w") as fh:
+            fh.write("chrT\t350\t351\tptA\t0\t+\n")   # single reverse block -> strand flips to '-'
+            fh.write("chrT\t250\t251\tptB\t0\t+\n")   # between blocks -> no mapping
+            fh.write("chrT\t150\t151\tptC\t0\t+\n")   # covered by 2 chains -> ambiguous
+            fh.write("chrNope\t10\t11\tptD\t0\t+\n")  # unknown chromosome
+        mapped = os.path.join(d, "mapped.bed")
+        unmapped = os.path.join(d, "unmapped.bed")
+        ar.run_liftover(bed, chain, mapped, unmapped)
+        with open(mapped) as mh:
+            mapped_rows = [ln.rstrip("\n").split("\t") for ln in mh if ln.strip()]
+        # exactly the single-chain point lifts; coords + flipped strand preserved
+        self.assertEqual(mapped_rows, [["chrR", "1849", "1850", "ptA", "0", "-"]])
+        # no-coverage, ambiguous and unknown-chromosome points are all unmapped
+        self.assertEqual(ar.load_unlifted_ids(unmapped), {"ptB", "ptC", "ptD"})
 
 
 class TestLoadLiftedBed(unittest.TestCase):
@@ -2321,9 +2349,9 @@ def _revcomp(s):
 _FLIP = {"+": "-", "-": "+"}
 
 
-@unittest.skipUnless(shutil.which("liftOver"), "liftOver not on PATH")
+@unittest.skipUnless(_HAVE_PYLIFTOVER, "pyliftover not installed")
 class TestLiftOverAgainstConstructedTruth(unittest.TestCase):
-    """End-to-end against the REAL liftOver binary and a chain file generated
+    """End-to-end through run_liftover (pyliftover) against a chain file generated
     from a toy genome rearrangement, so the right answer for every site is
     known by construction rather than taken from any other tool's output.
 
