@@ -2844,9 +2844,11 @@ def index_page() -> html.Div:
                 id="analysis-mode-container",
                 style={"max-width": "420px", "margin-bottom": "12px"},
             ),
-            # REPORT OPTIONS: slim (default) vs full shareable report bundle. Kept OUTSIDE
-            # analysis-mode-container (which is hidden on the personal-assembly tab) because
-            # every search produces a report, so this control is relevant on every tab.
+            # REPORT OPTIONS: slim (default) vs full shareable report bundle. Applies to the
+            # reference-genome and variant searches, which produce a report.zip via submit_job
+            # (it reads CRISPRME_REPORT_FULL). The personal-assembly tab is submitted by a
+            # separate handler that produces no such report, so toggle_assembly_search_panel
+            # HIDES this container there (it would otherwise be a silent no-op).
             html.Div(
                 [
                     html.P(
@@ -3351,6 +3353,7 @@ def toggle_advanced_thresholds(n_clicks: int, is_open: bool) -> Tuple:
         Output("regular-submit-fields", "style"),
         Output("assembly-submit-fields", "style"),
         Output("analysis-mode-container", "style"),
+        Output("full-report-container", "style"),
     ],
     [Input("genome-mode-tabs", "active_tab")],
     prevent_initial_call=True,
@@ -3370,15 +3373,21 @@ def toggle_assembly_search_panel(active_tab: str) -> Tuple:
     personal-assembly search: per-sample resolves genotypes across a multi-sample
     variant PANEL, which does not apply to a single individual's own diploid
     assembly (assembly-search always searches that individual's two haplotypes),
-    so the control is irrelevant there and would only confuse."""
+    so the control is irrelevant there and would only confuse.
+
+    Also HIDES the Report-options (slim vs full) block on the personal-assembly tab:
+    assembly-search is submitted by its own handler, which neither threads the
+    full-report value nor produces a report.zip to slim/bundle, so the control is a
+    no-op there and showing it would be misleading."""
     is_assembly = active_tab == "tab-personal-assembly"
     hidden = {"display": "none"}
     shown = {}
-    analysis_mode_shown = {"max-width": "420px", "margin-bottom": "12px"}
+    container_shown = {"max-width": "420px", "margin-bottom": "12px"}
     return (
         hidden if is_assembly else shown,
         shown if is_assembly else hidden,
-        hidden if is_assembly else analysis_mode_shown,
+        hidden if is_assembly else container_shown,
+        hidden if is_assembly else container_shown,
     )
 
 
