@@ -7,6 +7,7 @@ Run with:
 """
 
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,12 @@ import pysam
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import assembly_annotate as aa  # noqa: E402
+
+# The closest-gene query shells out to BEDOPS (sort-bed / closest-features); skip
+# those tests when the tools are absent (matching the guard in
+# test_post_process_tempdir.py) so a BEDOPS-less dev box stays green instead of
+# hard-failing. CI/Docker images that ship BEDOPS still run them.
+_HAVE_BEDOPS = bool(shutil.which("sort-bed") and shutil.which("closest-features"))
 
 REF_COL = "Aligned_protospacer+PAM_REF_(fewest_mm+b)"
 
@@ -132,6 +139,7 @@ def _gene_bed(tmpdir):
     return bed
 
 
+@unittest.skipUnless(_HAVE_BEDOPS, "bedops (sort-bed/closest-features) not on PATH")
 class TestClosestGene(unittest.TestCase):
     """`--gene_annotation`: a NEAREST-feature query, unlike the overlap query above."""
 
