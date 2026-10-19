@@ -185,6 +185,34 @@ PANEL_TOP100_NAME = "panel_top100.tsv"
 # would exceed this size, in which case they are gzipped (.tsv.gz).
 TIER_GZIP_BYTES = 2 * 1024 * 1024  # ~2 MB
 
+# Slim-bundle size gate for the observed-haplotypes companion TSV. On a normal run
+# this file is tiny and ships in the slim report; on an extreme dense per-sample
+# genome-wide search it can reach ~GB, which would bloat the "slim/shareable" report
+# (e.g. a 6+1+1 --per-sample GW report ballooning to ~442 MB). When the companion
+# exceeds this threshold it is treated like the other bulky full-data files --
+# bundled ONLY under --report-full -- while the inline per-site top-1000 modals (both
+# scorers) are UNCHANGED. The full TSV always stays in the result directory either
+# way. Default ~25 MB; override via the CRISPRME_OH_SLIM_MAX_MB env var (float MB).
+OH_SLIM_MAX_BYTES_DEFAULT = 25 * 1024 * 1024  # ~25 MB
+
+
+def _oh_slim_max_bytes():
+    """Resolve the observed-haplotypes slim-bundle size gate (bytes).
+
+    Reads ``CRISPRME_OH_SLIM_MAX_MB`` (float MB) when set and valid; otherwise the
+    ~25 MB default. A non-positive / unparseable value falls back to the default so a
+    typo never silently drops the companion from every slim report.
+    """
+    raw = os.environ.get("CRISPRME_OH_SLIM_MAX_MB")
+    if raw:
+        try:
+            mb = float(raw)
+            if mb > 0:
+                return int(mb * 1024 * 1024)
+        except (TypeError, ValueError):
+            pass
+    return OH_SLIM_MAX_BYTES_DEFAULT
+
 # --------------------------------------------------------------------------- #
 # ONE curated column set, shared by the in-report top-1000 table AND every
 # exported download file (top1000.tsv, panel_top100.tsv, per-tier tsvs).
@@ -2988,7 +3016,7 @@ def _oh_modal_cfd(hap):
         return float("-inf")
 
 
-def _oh_modal_html(mid, haps, download_name):
+def _oh_modal_html(mid, haps, download_name, omitted_note=""):
     """Build the hidden per-site observed-haplotypes modal HTML.
 
     ``mid`` is the stable modal element id (also the ``data-oh`` target of the link
@@ -2997,6 +3025,12 @@ def _oh_modal_html(mid, haps, download_name):
     lists EVERY observed haplotype at the site in a table (sorted by CFD desc) and
     carries a close button + a download link; the toggle JS lives in render_html.
     Returns "" when there are no haplotypes.
+
+    When ``download_name`` is falsy (the full companion TSV was size-gated out of the
+    slim bundle), the download button is omitted and ``omitted_note`` -- a short HTML
+    fragment pointing at ``--report-full`` / the result directory -- is shown in its
+    place. The per-site haplotype table itself is ALWAYS rendered in full, unchanged,
+    whether or not the TSV is bundled.
     """
     if not haps:
         return ""
@@ -3023,6 +3057,10 @@ def _oh_modal_html(mid, haps, download_name):
             f'<a class="download" href="{_dl_href(download_name)}" download>'
             f"&#11015; Download all observed haplotypes (TSV)</a>"
         )
+    elif omitted_note:
+        # The full companion TSV was size-gated out of the slim bundle; the per-site
+        # table above is intact, so just point at where the full file lives.
+        download_link = f'<p class="caption">{omitted_note}</p>'
     return (
         f'<div class="oh-modal" id="{_esc(mid)}" hidden>'
         f'<div class="oh-modal-box">'
@@ -3086,13 +3124,16 @@ def build_observed_haplotypes_modals_html(oh_modals):
 
 
 def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
-                     oh_modals=None, oh_download_name=None):
+                     oh_modals=None, oh_download_name=None, oh_omitted_note=""):
     """Scrollable inline top-N table, sorted by CFD desc (opens offline).
 
     The ONLY interactivity is the per-site observed-haplotype modal: when ``site_map``
     is given and a row's SITE carries >=2 distinct observed haplotypes, the "Observed"
     cell gains an ``N other haplotypes`` link that opens a modal (whose HTML is
     accumulated in ``oh_modals`` and whose single toggle script lives in render_html).
+    The modal always lists every haplotype at the site; ``oh_download_name`` adds a
+    "Download all observed haplotypes (TSV)" button, and when it is None (the companion
+    was size-gated out of the slim bundle) ``oh_omitted_note`` replaces that button.
 
     Renders EXACTLY the ONE curated column set (``CURATED_COLUMNS``) that every
     download file uses -- so the table and top1000.tsv / panel_top100.tsv / the
@@ -3148,7 +3189,8 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
                             f'{n_other} other haplotype{"" if n_other == 1 else "s"}</a>'
                         )
                         if oh_modals is not None and mid not in oh_modals:
-                            oh_modals[mid] = _oh_modal_html(mid, haps, oh_download_name)
+                            oh_modals[mid] = _oh_modal_html(
+                                mid, haps, oh_download_name, oh_omitted_note)
                 cells.append(cell)
             else:
                 cells.append(_esc(val))
@@ -4702,11 +4744,13 @@ def build_report(
     # each score axis; a site reached by several distinct observed genotype
     # combinations (haplotypes) collapses to that single row. This companion lists
     # EVERY distinct observed variant haplotype for any site carrying >=2 of them,
-    # with BOTH scores, carriers, AF, and phase -- the key per-sample deliverable,
-    # so it is bundled in the SLIM report (NOT gated on report_full). The merge
-    # window (single-linkage site clustering) is the run's Merge param (default 3).
-    # Built BEFORE the top-1000 tables because each table's "Observed" cell links to
-    # a per-site modal keyed off the returned site_map.
+    # with BOTH scores, carriers, AF, and phase -- the key per-sample deliverable, so
+    # it is bundled in the SLIM report when small (size-gated below: an extreme dense
+    # per-sample GW run can emit a ~GB companion, which moves to --report-full so the
+    # slim report stays shareable; the full file always stays in the result dir). The
+    # merge window (single-linkage site clustering) is the run's Merge param (default
+    # 3). Built BEFORE the top-1000 tables because each table's "Observed" cell links
+    # to a per-site modal keyed off the returned site_map.
     _oh_params = {}
     if result_dir:
         _oh_params = _read_kv_sidecar(os.path.join(result_dir, ".Params.txt"))
@@ -4718,11 +4762,55 @@ def build_report(
         _oh_merge_window = int(_oh_params.get("Merge") or _oh_params.get("merge") or 3)
     except (TypeError, ValueError):
         _oh_merge_window = 3
-    observed_haplotypes_bundle_name, observed_haplotypes_rows, observed_haplotypes_site_map = (
+    _oh_name, observed_haplotypes_rows, observed_haplotypes_site_map = (
         build_observed_haplotypes_companion(
             df, integrated_tsv, result_dir, staging, _oh_merge_window
         )
     )
+    # The full companion was written to the staging dir. Copy it to the result dir
+    # UNCONDITIONALLY (like the raw integrated_results.tsv it mirrors) so --report-full
+    # and manual access always have the full file, even when the slim bundle drops it.
+    _oh_staged_path = (
+        os.path.join(staging, _oh_name) if _oh_name else None
+    )
+    _oh_result_dir = result_dir if result_dir else os.path.dirname(integrated_tsv)
+    if _oh_staged_path and os.path.isfile(_oh_staged_path) and _oh_result_dir:
+        _oh_result_path = os.path.join(_oh_result_dir, _oh_name)
+        try:
+            if os.path.abspath(_oh_result_path) != os.path.abspath(_oh_staged_path):
+                shutil.copyfile(_oh_staged_path, _oh_result_path)
+        except OSError as exc:  # noqa: BLE001 - never abort the report on this copy
+            sys.stderr.write(
+                f"generate-report: could not persist observed_haplotypes.tsv to "
+                f"the result dir ({exc})\n"
+            )
+    # SIZE GATE for the slim bundle: on a normal run the companion is tiny and ships
+    # in the slim report; on an extreme dense per-sample GW search it can reach ~GB.
+    # Mirror the bulky-file gating -- bundle it in the SLIM report only when its size
+    # is <= the threshold (CRISPRME_OH_SLIM_MAX_MB, default ~25 MB); otherwise bundle
+    # it ONLY under --report-full. The full TSV stays in the result dir regardless.
+    # CRITICAL: the inline per-site modals (top-1000, BOTH scorers) are built the same
+    # way either way -- only the top-level download link / callout / note and the
+    # modal's download button degrade when the companion is NOT in the slim bundle.
+    _oh_size = (
+        os.path.getsize(_oh_staged_path)
+        if (_oh_staged_path and os.path.isfile(_oh_staged_path)) else 0
+    )
+    _oh_in_slim = bool(_oh_name) and (report_full or _oh_size <= _oh_slim_max_bytes())
+    # Name that drives the top-level download link / callout / note AND the modal's
+    # download button -- None when the companion is not in this bundle, so all of those
+    # degrade gracefully (each is guarded by `if observed_haplotypes_bundle_name:`).
+    observed_haplotypes_bundle_name = _oh_name if _oh_in_slim else None
+    # Short note shown IN PLACE of the modal download button when the companion is
+    # gated out of the slim bundle (the per-site haplotype table stays intact).
+    observed_haplotypes_omitted_note = ""
+    if _oh_name and not _oh_in_slim:
+        observed_haplotypes_omitted_note = (
+            "Full observed-haplotypes companion "
+            "(<code>observed_haplotypes.tsv</code>) omitted from this slim report "
+            "(size &gt; limit); re-run with <code>--report-full</code> or read it "
+            "from the result directory."
+        )
     # Per-site modals accumulate here (side effect of build_table_html), shared across
     # the CFD + CRISPR-Bulge tables so a site shown in both emits ONE modal.
     oh_modals = {}
@@ -4733,6 +4821,7 @@ def build_report(
             top_df, cols, has_crispr_bulge, datasets=meta.get("datasets", ""),
             site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
             oh_download_name=observed_haplotypes_bundle_name,
+            oh_omitted_note=observed_haplotypes_omitted_note,
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
@@ -4749,6 +4838,7 @@ def build_report(
                     top_crispr_bulge_df, cols, has_crispr_bulge, datasets=meta.get("datasets", ""),
                     site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
                     oh_download_name=observed_haplotypes_bundle_name,
+                    oh_omitted_note=observed_haplotypes_omitted_note,
                 )
                 tier_downloads.append(
                     (f"Top-1000 by {scorer_label()} (curated TSV)", "top1000_crispr_bulge.tsv")
@@ -5110,8 +5200,11 @@ def build_report(
             # and linked but never added to the ZIP -> a broken download link. Bundle it.
             bundle.append(os.path.join(staging, indel_af_bundle_name))
         if observed_haplotypes_bundle_name:
-            # the per-sample observed-haplotypes companion is a SLIM-report deliverable
-            # (not gated on report_full) -> always bundled when non-empty.
+            # the per-sample observed-haplotypes companion is a SLIM-report deliverable,
+            # bundled when non-empty AND <= the slim size gate (or under --report-full);
+            # the size gate set observed_haplotypes_bundle_name to None otherwise, so an
+            # over-limit companion is NOT bundled here (it stays in the result dir, and
+            # the inline per-site modals render regardless -- see the gate above).
             bundle.append(os.path.join(staging, observed_haplotypes_bundle_name))
 
         # machine-readable run manifest (IND traceability) + the raw .Params.txt, so
