@@ -99,6 +99,62 @@ def cis_cooccurrence(indel_gt_by_sample, snp_gts_by_sample):
     return cis_carriers, phase_state, ac
 
 
+def forward_snp_tokens(reg, chrom, used, global_group_id="global"):
+    """Build FORWARD-STRAND variant tokens / rsIDs / MAFs for the cis SNP(s).
+
+    Used by the INDEL post-analysis CONFIRMED-cis branch to enrich the indel row
+    with the full real-haplotype variant set (indel + co-occurring SNPs) so the
+    report's Variant column + observed_haplotypes companion list ALL the variants
+    the off-target actually uses, not the indel alone.
+
+    Args:
+      reg: a Tier-0 RegistryReader (duck-typed: ``alts_at(pos1)`` -> list[str],
+        ``ref(pos1, alt)`` -> forward-strand ref base, ``rsid(pos1, alt)`` ->
+        rsID or None, ``lookup(pos1, alt)`` -> {group_id: Counts} with
+        ``.allele_freq()``). All reads are FORWARD-strand by construction.
+      chrom: chromosome string for the token prefix.
+      used: the ``used_snps_for_target`` output -- a list of ``(real0, rsid, gt)``
+        tuples where ``real0`` is a 0-based reference position (registry key =
+        real0 + 1).
+      global_group_id: the registry's GLOBAL group id (default "global").
+
+    CRITICAL: the ``rsid``/``gt`` carried in ``used`` came from the caller's
+    ``snp_at`` closure, whose REF/ALT are strand-COMPLEMENTED to the target strand
+    (for the guide-vs-alt test only). We therefore re-read REF/ALT/rsID/AF straight
+    from the registry here so every token is the forward-strand
+    ``chrom_pos1_REF_ALT`` that resultIntegrator expects -- it splits the variant
+    column on ',' and strand-corrects each token itself. The token / rsID / MAF
+    format mirrors the SNP path EXACTLY
+    (simple_analysis_registry.retrieve_5tuple):
+      * token : ``chrom + "_" + str(pos1) + "_" + ref + "_" + alt``
+      * rsID  : ``reg.rsid(pos1, alt)`` or "." when missing
+      * MAF   : ``"%.6g" % global_allele_freq`` (same formatting as the SNP path)
+
+    Returns three POSITION-ALIGNED lists ``(tokens, rsids, mafs)`` so the caller can
+    append them 1:1 to the row's variant / rsID / MAF columns. A SNP whose registry
+    record is absent (defensive -- it was just read in this scope) is skipped from
+    all three lists together, so the 1:1 alignment is never broken.
+    """
+    tokens, rsids, mafs = [], [], []
+    for (real0, _rs, _g) in used:
+        pos1 = real0 + 1
+        alts = reg.alts_at(pos1)
+        if not alts:
+            continue
+        alt = alts[0]  # biallelic SNP position (same choice as the decode's snp_at)
+        ref = reg.ref(pos1, alt) or "N"
+        rsid = reg.rsid(pos1, alt)
+        if rsid is None:
+            rsid = "."
+        groups = reg.lookup(pos1, alt)
+        gcnt = groups.get(global_group_id) if groups else None
+        af = gcnt.allele_freq() if gcnt is not None else 0.0
+        tokens.append(chrom + "_" + str(pos1) + "_" + ref + "_" + alt)
+        rsids.append(rsid)
+        mafs.append("%.6g" % af)
+    return tokens, rsids, mafs
+
+
 def joint_af(ac, an):
     """Joint indel+SNP cis allele frequency (ac / an), or 0.0 if an falsy."""
     return (ac / an) if an else 0.0

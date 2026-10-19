@@ -200,6 +200,129 @@ def test_complement():
     assert isc.complement("M") == "M"  # IUPAC/other unchanged
 
 
+# --- forward_snp_tokens + the CONFIRMED-cis ROW ENRICHMENT (the fix) -------------
+# forward_snp_tokens re-reads REF/ALT/rsID/AF from the registry (forward strand),
+# NOT from the decode's strand-complemented snp_at. These tests pin the token /
+# rsID / MAF format (== the SNP path) and the 1:1 alignment, plus the row-level
+# semantics the analyzer applies in the CONFIRMED branch (indel FIRST, carriers
+# narrowed to the exact cis set) and that the PUTATIVE/indel-only row is untouched.
+
+class _Cnt:
+    def __init__(self, af):
+        self._af = af
+
+    def allele_freq(self):
+        return self._af
+
+
+class _FakeReg:
+    """Minimal duck-typed Tier-0 registry: {pos1: (alt, ref, rsid_or_None, af)}."""
+
+    def __init__(self, table):
+        self._t = table  # pos1 -> (alt, ref, rsid, af)
+
+    def alts_at(self, pos1):
+        rec = self._t.get(pos1)
+        return [rec[0]] if rec else []
+
+    def ref(self, pos1, alt):
+        rec = self._t.get(pos1)
+        return rec[1] if rec else None
+
+    def rsid(self, pos1, alt):
+        rec = self._t.get(pos1)
+        return rec[2] if rec else None
+
+    def lookup(self, pos1, alt):
+        rec = self._t.get(pos1)
+        return {"global": _Cnt(rec[3])} if rec else None
+
+
+def test_forward_snp_tokens_format_and_alignment():
+    # Two cis SNPs at 0-based real positions 199 (pos1=200) and 299 (pos1=300).
+    reg = _FakeReg({200: ("A", "T", "rs9", 0.0123),
+                    300: ("T", "C", None, 0.5)})
+    used = [(199, "x", {}), (299, "y", {})]  # decode's rsid/gt ignored on purpose
+    tok, rs, maf = isc.forward_snp_tokens(reg, "chr18", used)
+    assert tok == ["chr18_200_T_A", "chr18_300_C_T"]   # forward-strand chrom_pos_ref_alt
+    assert rs == ["rs9", "."]                            # missing rsID -> "."
+    assert maf == ["%.6g" % 0.0123, "%.6g" % 0.5]        # SNP-path "%.6g" formatting
+    assert len(tok) == len(rs) == len(maf)               # 1:1 aligned
+
+
+def test_forward_snp_tokens_ignores_target_strand_complement():
+    # The token MUST be the forward-strand ref/alt from the registry, regardless of
+    # the target strand -- i.e. the decode's complemented alleles must NOT leak in.
+    reg = _FakeReg({501: ("G", "C", "rs1", 0.1)})
+    used = [(500, "rsZZZ", {})]  # a wrong rsid in `used` must be overridden by the reg
+    tok, rs, maf = isc.forward_snp_tokens(reg, "chr1", used)
+    assert tok == ["chr1_501_C_G"] and rs == ["rs1"]
+
+
+def test_forward_snp_tokens_absent_record_skipped_keeps_alignment():
+    reg = _FakeReg({200: ("A", "T", "rs9", 0.01)})  # pos1=300 absent
+    used = [(199, "x", {}), (299, "y", {})]
+    tok, rs, maf = isc.forward_snp_tokens(reg, "chr2", used)
+    # the absent SNP drops from ALL three lists together (no misalignment)
+    assert tok == ["chr2_200_T_A"] and rs == ["rs9"] and len(maf) == 1
+
+
+def _enrich_confirmed_row(final_result, indel_data, reg, chrom, used, cis, phase):
+    """Replicate the analyzer's CONFIRMED-cis enrichment (the exact mutation the fix
+    applies) so the row-level contract is testable without driving the full loop.
+    Mirrors analisi_indels_NNN.py: gated on phase == CONFIRMED; indel token FIRST."""
+    if phase != isc.CONFIRMED:
+        return  # PUTATIVE / non-confirmed -> row stays indel-only (sidecar-only)
+    snp_tok, snp_rs, snp_maf = isc.forward_snp_tokens(reg, chrom, used)
+    if snp_tok:
+        final_result[17] = indel_data[4] + "," + ",".join(snp_tok)
+        final_result[15] = ",".join([indel_data[2]] + snp_rs)
+        final_result[16] = ",".join([indel_data[3]] + snp_maf)
+        final_result[12] = ",".join(sorted(cis))
+
+
+def test_confirmed_row_enrichment_full_haplotype():
+    # indel_data = [fakechr, samples, rsID, MAF, INDELinfo, fakestart]
+    indel_data = ["chr18_x", "A,B,C,HGzz", "rs_indel", "0.002",
+                  "chr18_12386282_TTTTC_T", 0]
+    final_result = [""] * 18
+    final_result[12] = indel_data[1]   # indel-all-carriers (to be REPLACED)
+    final_result[15] = indel_data[2]
+    final_result[16] = indel_data[3]
+    final_result[17] = indel_data[4]
+    reg = _FakeReg({12386297: ("A", "T", "rs_snp1", 0.3),
+                    12386300: ("T", "TTTTC", "rs_snp2", 0.1)})
+    used = [(12386296, "x", {}), (12386299, "y", {})]  # 0-based real -> pos1 +1
+    cis = {"B", "A"}  # exact cis carriers (narrower than indel-all-carriers)
+    _enrich_confirmed_row(final_result, indel_data, reg, "chr18", used, cis,
+                          isc.CONFIRMED)
+    # col-17: indel token FIRST, then forward-strand SNP tokens
+    assert final_result[17] == (
+        "chr18_12386282_TTTTC_T,chr18_12386297_T_A,chr18_12386300_TTTTC_T")
+    # carriers narrowed to the exact cis set (sorted), replacing indel-all-carriers
+    assert final_result[12] == "A,B"
+    # rsID + MAF stay 1:1 aligned with col-17 (indel first)
+    assert final_result[15] == "rs_indel,rs_snp1,rs_snp2"
+    assert final_result[16] == "0.002," + ("%.6g" % 0.3) + "," + ("%.6g" % 0.1)
+    assert (len(final_result[17].split(",")) == len(final_result[15].split(","))
+            == len(final_result[16].split(",")))
+
+
+def test_putative_row_stays_indel_only():
+    # a PUTATIVE (unphased / no-genotype) call must NOT mutate the row columns
+    indel_data = ["chr1_x", "A,B", "rs_i", "0.01", "chr1_100_AT_A", 0]
+    final_result = [""] * 18
+    final_result[12], final_result[15] = indel_data[1], indel_data[2]
+    final_result[16], final_result[17] = indel_data[3], indel_data[4]
+    reg = _FakeReg({201: ("C", "A", "rs1", 0.2)})
+    used = [(200, "x", {})]
+    _enrich_confirmed_row(final_result, indel_data, reg, "chr1", used,
+                          {"A", "B"}, isc.PUTATIVE)
+    assert final_result[17] == "chr1_100_AT_A"   # indel-only, unchanged
+    assert final_result[12] == "A,B"             # carriers unchanged
+    assert final_result[15] == "rs_i" and final_result[16] == "0.01"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
