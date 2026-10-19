@@ -853,8 +853,11 @@ while read samples; do
 	if [ -z "$samples" ]; then
 		continue
 	fi
-	# copy samples ids file content to temporary sample ids file (skip header)
-	grep -v '#' "${current_working_directory}/samplesIDs/$samples" >>"$output_folder/.sampleID.txt"
+	# copy samples ids file content to temporary sample ids file (skip header and
+	# blank/whitespace-only lines, e.g. a trailing newline in the samplesID file --
+	# otherwise the empty line flows into the per-sample summary / radar-chart steps
+	# and aborts the run at the "Creating images" stage after the full search)
+	grep -v '#' "${current_working_directory}/samplesIDs/$samples" | sed '/^[[:space:]]*$/d' >>"$output_folder/.sampleID.txt"
 	if [ -s $logerror ]; then
 		printf "ERROR: samples IDs processing failed on dataset %s\n" "$samples" >&2
 		rm $output_folder/.sampleID.txt
