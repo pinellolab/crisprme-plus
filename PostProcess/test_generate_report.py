@@ -42,6 +42,7 @@ the real pipeline env (and locally), which is where the artifact is produced.
 """
 
 import base64
+import contextlib
 import glob
 import gzip
 import inspect
@@ -51,6 +52,20 @@ import sys
 import tempfile
 import unittest
 import zipfile
+
+
+@contextlib.contextmanager
+def _env(key, value):
+    """Temporarily set an environment variable for the duration of a `with`."""
+    prev = os.environ.get(key)
+    os.environ[key] = value
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = prev
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -1880,6 +1895,181 @@ class TestGenerateReport(unittest.TestCase):
         cols = oh.COMPANION_HEADER.lstrip("#").split("\t")
         varsets = {dict(zip(cols, ln.split("\t")))["Variant_info_genome"] for ln in data}
         self.assertEqual(varsets, {"chrX_400_T_A", "chrX_402_C_G"})
+
+    # ------------------------------------------------------------------ #
+    # Slim-bundle SIZE GATE for the observed-haplotypes companion.
+    # On a normal run the companion is tiny and ships in the slim report; on
+    # an extreme dense per-sample GW search it can reach ~GB, which would bloat
+    # the "slim/shareable" report. These exercise the full build_report path:
+    # the companion is (a) bundled when small, (b) dropped when over the gate
+    # yet the inline per-site top-1000 modals (BOTH scorers) stay intact,
+    # (c) always included under --report-full, and (d) always written to the
+    # result dir regardless.
+    # ------------------------------------------------------------------ #
+    def _oh_e2e_result_dir(self):
+        """A result dir whose single off-target row yields a 2-haplotype site
+        shown on BOTH top-1000 axes.
+
+        The row's highest-CFD axis carries alt varset ``chr5_400_T_A`` and its
+        highest-CRISPR_BULGE axis a DIFFERENT alt varset ``chr5_402_C_G`` at the
+        same start -- so build_observed_haplotypes_companion emits a site with two
+        distinct observed haplotypes, and the row (mm+b>0, variant-origin) lands
+        in both the CFD-ranked and CRISPR-Bulge-ranked top-1000 tables. Returns
+        (result_dir, integrated_tsv_path)."""
+        header = list(_HEADER) + [
+            "REF/ALT_origin_(highest_CRISPR_BULGE)",
+            "Variant_info_genome_(highest_CRISPR_BULGE)",
+        ]
+        # a variant-created off-target at chr5:400 (mm+b == 2 -> in the top-N)
+        base = {
+            "Spacer+PAM": _GUIDE, "Chromosome": "chr5",
+            "Start_coordinate_(highest_CFD)": "400", "Strand_(highest_CFD)": "+",
+            "Aligned_protospacer+PAM_REF_(highest_CFD)": "CTCTCAGCTGGTACACGGCAtGG",
+            "Aligned_protospacer+PAM_ALT_(highest_CFD)": "CTCTCAGCTGGTACACGGCAAGG",
+            "PAM_(highest_CFD)": "AGG",
+            "Mismatches_(highest_CFD)": "2", "Bulges_(highest_CFD)": "0",
+            "Mismatches+bulges_(highest_CFD)": "2",
+            "REF/ALT_origin_(highest_CFD)": "alt", "PAM_creation_(highest_CFD)": "NA",
+            "CFD_score_(highest_CFD)": "0.90", "CFD_score_REF_(highest_CFD)": "0.20",
+            "CFD_score_ALT_(highest_CFD)": "0.90",
+            "Variant_info_genome_(highest_CFD)": "chr5_400_T_A",
+            "Variant_MAF_(highest_CFD)": "0.01", "Variant_rsID_(highest_CFD)": "rs111",
+            "Variant_samples_(highest_CFD)": "HG00096,HGDP00001",
+            "CRISPR_BULGE_score_(highest_CRISPR_BULGE)": "0.88",
+            "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)": "0.18",
+            "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)": "0.88",
+            "Variant_MAF_(highest_CRISPR_BULGE)": "0.02",
+            "Variant_rsID_(highest_CRISPR_BULGE)": "rs222",
+            "Variant_samples_(highest_CRISPR_BULGE)": "NA18525",
+            "Not_found_in_REF": "y", "Annotation_GENCODE": "exon",
+            "Annotation_closest_gene_name": "GENE3",
+            "Annotation_closest_gene_distance_(kb)": "0.5",
+            "Annotation_ENCODE": "promoter", "Annotation_DHS": "DHS_3",
+            "Annotation_COSMIC": "oncogene",
+            # CB axis carries a DIFFERENT alt varset at the same site -> 2 haplotypes
+            "REF/ALT_origin_(highest_CRISPR_BULGE)": "alt",
+            "Variant_info_genome_(highest_CRISPR_BULGE)": "chr5_402_C_G",
+        }
+        # an on-target so the partition stays sane
+        ont = {h: "NA" for h in header}
+        ont.update({
+            "Spacer+PAM": _GUIDE, "Chromosome": "chr2",
+            "Start_coordinate_(highest_CFD)": "100", "Strand_(highest_CFD)": "+",
+            "Aligned_protospacer+PAM_REF_(highest_CFD)": "CTCTCAGCTGGTACACGGCATGG",
+            "PAM_(highest_CFD)": "TGG", "Mismatches_(highest_CFD)": "0",
+            "Bulges_(highest_CFD)": "0", "Mismatches+bulges_(highest_CFD)": "0",
+            "REF/ALT_origin_(highest_CFD)": "ref", "CFD_score_(highest_CFD)": "1.0",
+            "CFD_score_REF_(highest_CFD)": "1.0", "CFD_score_ALT_(highest_CFD)": "1.0",
+            "CRISPR_BULGE_score_(highest_CRISPR_BULGE)": "1.0",
+            "CRISPR_BULGE_score_REF_(highest_CRISPR_BULGE)": "1.0",
+            "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)": "1.0",
+            "Not_found_in_REF": "NA",
+            "REF/ALT_origin_(highest_CRISPR_BULGE)": "ref",
+            "Variant_info_genome_(highest_CRISPR_BULGE)": "NA",
+        })
+        rd = tempfile.mkdtemp(prefix="oh_gate_", dir=self.tmp)
+        itsv = os.path.join(
+            rd, f"{_GUIDE}+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv")
+        with open(itsv, "w") as fh:
+            fh.write("\t".join(header) + "\n")
+            for rec in (base, ont):
+                fh.write("\t".join(str(rec.get(h, "NA")) for h in header) + "\n")
+        return rd, itsv
+
+    def _oh_build(self, rd, itsv, **kwargs):
+        out_zip = os.path.join(rd, "oh_gate_report.zip")
+        if os.path.exists(out_zip):
+            os.remove(out_zip)
+        gr.build_report(
+            result_dir=rd, integrated_tsv=itsv, out_zip=out_zip,
+            samplesid_dir=self.sid_dir, **kwargs,
+        )
+        self.assertTrue(os.path.isfile(out_zip))
+        with zipfile.ZipFile(out_zip) as zf:
+            names = zf.namelist()
+            html = zf.read("report.html").decode("utf-8")
+        return names, html
+
+    def _assert_both_axis_modals_intact(self, html):
+        """Both top-1000 tables surface the per-site link + the modal lists BOTH
+        haplotypes with their aligned protospacers -- the feature that must NEVER
+        be gated out, independent of whether the TSV is bundled."""
+        self.assertIn("oh-open", html)                          # the per-site link
+        self.assertIn('id="oh-backdrop"', html)                 # the modal block
+        self.assertIn('class="oh-modal"', html)                 # the modal itself
+        self.assertEqual(html.count("<script"), 1)              # exactly one toggle script
+        # both haplotypes (the CFD-axis + the CRISPR-Bulge-axis varset) render
+        self.assertIn("chr5_400_T_A", html)
+        self.assertIn("chr5_402_C_G", html)
+        self.assertIn("2 observed haplotypes", html)            # site has K=2
+        # the CRISPR-Bulge-ranked table is present (both scorers shown)
+        self.assertIn("top1000_crispr_bulge.tsv", html)
+
+    def test_oh_small_companion_bundled_in_slim(self):
+        """(a) A small companion ships in the slim bundle with a working download
+        link + callout + table note, and the inline per-site modals carry the
+        download button."""
+        rd, itsv = self._oh_e2e_result_dir()
+        names, html = self._oh_build(rd, itsv)  # default slim, default ~25 MB gate
+        self.assertIn("data/observed_haplotypes.tsv", names)      # bundled
+        self._assert_both_axis_modals_intact(html)
+        # top-level link + callout + modal download button all present
+        self.assertIn("Observed haplotypes at multi-haplotype sites", html)
+        self.assertIn("Download all observed haplotypes", html)
+        # no "omitted" degradation note when the companion is bundled
+        self.assertNotIn("omitted from this slim report", html)
+
+    def test_oh_large_companion_gated_out_modals_intact(self):
+        """(b) Over the gate (simulated with a tiny CRISPRME_OH_SLIM_MAX_MB), the
+        companion is NOT in the slim bundle and the top-level link/callout/note +
+        the modal download BUTTON degrade -- BUT the inline per-site modals for the
+        top-1000 of BOTH scorers still render with every haplotype, and the full
+        TSV still lands in the result dir."""
+        rd, itsv = self._oh_e2e_result_dir()
+        # 0.0000001 MB (~0 bytes) forces any non-empty companion over the gate
+        with _env("CRISPRME_OH_SLIM_MAX_MB", "0.0000001"):
+            names, html = self._oh_build(rd, itsv)
+        # NOT in the slim bundle
+        self.assertNotIn("data/observed_haplotypes.tsv", names)
+        # CRITICAL INVARIANT: the inline modals (both axes) are UNCHANGED
+        self._assert_both_axis_modals_intact(html)
+        # the download affordances degrade gracefully (no broken link)
+        self.assertNotIn("Download all observed haplotypes", html)
+        self.assertNotIn(
+            'href="data/observed_haplotypes.tsv"', html)
+        # the modal shows the short degrade note in place of the download button
+        self.assertIn("omitted from this slim report", html)
+        self.assertIn("--report-full", html)
+        # (d) the full companion STILL exists in the result dir
+        self.assertTrue(
+            os.path.isfile(os.path.join(rd, "observed_haplotypes.tsv")))
+
+    def test_oh_report_full_always_bundles_companion(self):
+        """(c) --report-full re-adds the companion even when it is over the slim
+        size gate (same tiny threshold as (b))."""
+        rd, itsv = self._oh_e2e_result_dir()
+        with _env("CRISPRME_OH_SLIM_MAX_MB", "0.0000001"):
+            slim_names, _ = self._oh_build(rd, itsv)
+            full_names, full_html = self._oh_build(rd, itsv, report_full=True)
+        self.assertNotIn("data/observed_haplotypes.tsv", slim_names)   # gated out of slim
+        self.assertIn("data/observed_haplotypes.tsv", full_names)      # back under --report-full
+        # under --report-full the download affordances are present again
+        self.assertIn("Download all observed haplotypes", full_html)
+        self.assertNotIn("omitted from this slim report", full_html)
+        self._assert_both_axis_modals_intact(full_html)
+
+    def test_oh_companion_always_written_to_result_dir(self):
+        """(d) The full observed_haplotypes.tsv is written to the result dir on a
+        plain slim run (small companion) too -- not just when gated out."""
+        rd, itsv = self._oh_e2e_result_dir()
+        self._oh_build(rd, itsv)  # default slim
+        rd_path = os.path.join(rd, "observed_haplotypes.tsv")
+        self.assertTrue(os.path.isfile(rd_path))
+        # the result-dir copy carries both haplotypes (full content, not a stub)
+        with open(rd_path) as fh:
+            body = fh.read()
+        self.assertIn("chr5_400_T_A", body)
+        self.assertIn("chr5_402_C_G", body)
 
 
 if __name__ == "__main__":

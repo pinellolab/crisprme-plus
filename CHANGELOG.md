@@ -39,6 +39,18 @@ and the `release-crisprme` skill.
   5+1+1 `--per-sample` run this took the default report from **274 MB → ~5 MB**; `--report-full`
   reproduces the complete bundle. The slim report degrades its HTML gracefully (no download links to
   the excluded files). `crisprme.py generate-report --report-full` opts into the full bundle.
+- **The slim report now size-gates the observed-haplotypes companion.** The
+  `observed_haplotypes.tsv` sidecar (one row per distinct observed variant haplotype at every
+  multi-haplotype off-target site) is tiny on a normal run and keeps shipping in the slim bundle; on an
+  extreme dense search it can grow to ~GB and would otherwise bloat the slim/shareable report. It is
+  now bundled in the slim report only while it stays under a size threshold (default ~25 MB, overridable
+  via `CRISPRME_OH_SLIM_MAX_MB`); over the threshold it moves to `--report-full`, exactly like the other
+  bulky full-data files. The full file is always written to the result directory regardless, so nothing
+  is lost. On a 6+1+1 `--per-sample` genome-wide run this takes the slim report from ~442 MB to ~20 MB.
+  The clickable per-site top-1000 modals (both scorers, every haplotype for each shown site) are
+  unchanged either way; only the top-level download link/callout/note and the modal's download button
+  degrade (the per-site haplotype table and a short "available via `--report-full` / in the result
+  directory" note remain) when the companion is not in the slim bundle.
 
 ### Added
 - **Own implementation of the CFD score** (Doench et al., *Nat. Biotechnol.* 2016) in
