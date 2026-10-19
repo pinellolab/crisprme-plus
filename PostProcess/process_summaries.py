@@ -44,7 +44,11 @@ def init_summary_by_sample(path_samplesID):
         sid.readline()
         for line in sid:
             splitted = line.strip().split("\t")
-            if not splitted[0]:
+            # Skip blanks, comment/header lines, and short rows: this consumer needs
+            # SAMPLE_ID, POPULATION_ID, SUPERPOPULATION_ID, SEX (4 columns, uses
+            # splitted[3]). A benign trailing newline or a `#` header must not crash
+            # the summary step after the whole search has already run.
+            if not splitted or not splitted[0] or splitted[0].startswith("#") or len(splitted) < 4:
                 continue
             dict_samples[splitted[0]] = [
                 splitted[3],

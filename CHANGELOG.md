@@ -91,7 +91,17 @@ and the `release-crisprme` skill.
   one — so specificity is reported on both scales. They are separate scales and NOT interchangeable.
 
 ### Fixed
-- **Indel off-targets now list their FULL cis-phased real haplotype in the Variant column.** When an
+- **A samplesID file with a trailing blank line (or any blank/comment/short row) no longer aborts the
+  run.** The per-sample summary and specificity-radar steps (`process_summaries.py`,
+  `radar_chart_dict_generator.py`) indexed samplesID columns without guarding against short rows, so an
+  ordinary trailing newline in the `--samplesID` file crashed the job with `IndexError: list index out
+  of range` at the "Creating images" stage — **after** the full multi-hour search had completed. The
+  samplesID consumers now skip blank, `#`-comment, and short rows; `submit_job` strips blank lines when
+  building the working `.sampleID.txt` (central fix for every consumer); and the pre-flight validator
+  now checks the resolved samplesID association files up front and WARNs (never errors) if a *data* row
+  has fewer than the expected 4 columns (`SAMPLE_ID`, `POPULATION_ID`, `SUPERPOPULATION_ID`, `SEX`),
+  naming the file and an example line so a genuinely malformed samplesID is caught before the search
+  rather than hours into it. +4 `test_validate_inputs` cases.
   indel off-target's true haplotype is an indel **plus** one or more co-occurring, cis-phased SNPs, the
   `Variant` column (and the `observed_haplotypes` companion, which reads the same field) previously
   showed the indel **only** — the co-occurring SNP(s) were recorded solely in the per-chromosome

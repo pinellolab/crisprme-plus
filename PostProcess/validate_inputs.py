@@ -907,6 +907,67 @@ def _read_samples_file(
     return sample_ids
 
 
+def check_samplesid_columns(
+    samplesfile: str, current_working_directory: Optional[str] = None
+) -> List[Issue]:
+    """Up-front check that the resolved samplesID association files have the
+    expected 4 columns (SAMPLE_ID, POPULATION_ID, SUPERPOPULATION_ID, SEX).
+
+    The per-sample summary (`process_summaries.py`) and the specificity radar
+    chart (`radar_chart_dict_generator.py`) index up to column 3 (SEX). The
+    pipeline now skips blank/comment/short rows instead of crashing, so a
+    trailing newline is harmless; but a genuinely malformed DATA row (e.g. a
+    sample missing its population/superpopulation/sex) would be silently dropped
+    from those summaries. Surface that here, BEFORE the multi-hour search, as a
+    WARNING naming the file + an example line -- never an error (the pipeline
+    tolerates it), just so a user is not surprised later. Blank and `#` lines are
+    expected and ignored.
+    """
+    issues: List[Issue] = []
+    config_dir = os.path.dirname(os.path.abspath(samplesfile))
+    try:
+        with open(samplesfile, "r") as fin:
+            referenced = [
+                ln.strip() for ln in fin
+                if ln.strip() and not ln.strip().startswith("#")
+            ]
+    except OSError:
+        return issues  # unreadable config is reported elsewhere
+    for name in referenced:
+        candidates = []
+        if current_working_directory:
+            candidates.append(os.path.join(current_working_directory, "samplesIDs", name))
+        candidates.append(os.path.join(config_dir, name))
+        assoc_path = next((c for c in candidates if os.path.isfile(c)), None)
+        if assoc_path is None:
+            continue  # missing file reported separately
+        bad = 0
+        example = ""
+        try:
+            with open(assoc_path, "r") as fin:
+                for lineno, line in enumerate(fin, 1):
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("#"):
+                        continue
+                    if len(stripped.split("\t")) < 4:
+                        bad += 1
+                        if not example:
+                            example = f"line {lineno}: {stripped!r}"
+        except OSError:
+            continue
+        if bad:
+            issues.append(
+                Issue(
+                    WARN,
+                    f"--samplesID {name}: {bad} data row(s) have fewer than 4 "
+                    "tab-separated columns (expected SAMPLE_ID, POPULATION_ID, "
+                    "SUPERPOPULATION_ID, SEX); such rows are skipped in the "
+                    f"per-sample summary and specificity plots ({example})",
+                )
+            )
+    return issues
+
+
 def check_samples_in_vcf_header(vcf_path: str, sample_ids: List[str]) -> List[Issue]:
     """Checks that every VCF sample column exists in the `--samplesID` file.
 
@@ -1071,6 +1132,12 @@ def run_lightweight(
         if has_samplesfile
         else []
     )
+
+    if has_samplesfile:
+        report.add(
+            check_samplesid_columns(samplesfile, current_working_directory),
+            ok_message="--samplesID: association files have the expected columns",
+        )
 
     all_vcf_files: List[str] = []
     for vcf_dir in vcf_dataset_dirs:

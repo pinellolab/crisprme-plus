@@ -1349,5 +1349,54 @@ class TestRunFullEndToEnd(unittest.TestCase):
             self.assertIn("CHROM value other than", rendered)
 
 
+class TestSamplesIDColumns(unittest.TestCase):
+    """check_samplesid_columns: catch a genuinely malformed samplesID row up
+    front (WARN), while tolerating the benign quirks (trailing blank line, `#`
+    header/comments) that must NOT be flagged -- these are the quirks that used
+    to crash the run at the 'Creating images' stage (radar chart) instead."""
+
+    def _setup(self, assoc_body):
+        cwd = tempfile.mkdtemp()
+        os.makedirs(os.path.join(cwd, "samplesIDs"))
+        with open(os.path.join(cwd, "samplesIDs", "assoc.txt"), "w") as fh:
+            fh.write(assoc_body)
+        config = os.path.join(cwd, "samplesIDs.config.txt")
+        with open(config, "w") as fh:
+            fh.write("assoc.txt\n")
+        self.addCleanup(shutil.rmtree, cwd, ignore_errors=True)
+        return config, cwd
+
+    _HEADER = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+
+    def test_trailing_blank_line_is_tolerated(self):
+        # Exactly Manuel's case: a well-formed file with a trailing newline.
+        body = self._HEADER + "HG00096\tGBR\tEUR\tmale\nHG00097\tGBR\tEUR\tfemale\n\n"
+        config, cwd = self._setup(body)
+        issues = vi.check_samplesid_columns(config, cwd)
+        self.assertEqual(issues, [], "a trailing blank line must not be flagged")
+
+    def test_comment_and_blank_lines_tolerated(self):
+        body = self._HEADER + "\nHG00096\tGBR\tEUR\tmale\n# a comment\n\n"
+        config, cwd = self._setup(body)
+        self.assertEqual(vi.check_samplesid_columns(config, cwd), [])
+
+    def test_short_data_row_warns(self):
+        # A real malformation: a sample missing SUPERPOP + SEX.
+        body = self._HEADER + "HG00096\tGBR\tEUR\tmale\nHG00097\tGBR\n"
+        config, cwd = self._setup(body)
+        issues = vi.check_samplesid_columns(config, cwd)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].severity, vi.WARN)  # never blocks the run
+        self.assertIn("fewer than 4", issues[0].message)
+        self.assertIn("HG00097", issues[0].message)
+
+    def test_warning_does_not_error_the_report(self):
+        body = self._HEADER + "HG00097\tGBR\n"
+        config, cwd = self._setup(body)
+        report = vi.ValidationReport("t")
+        report.add(vi.check_samplesid_columns(config, cwd), ok_message="ok")
+        self.assertFalse(report.has_errors())  # WARN only, run proceeds
+
+
 if __name__ == "__main__":
     unittest.main()

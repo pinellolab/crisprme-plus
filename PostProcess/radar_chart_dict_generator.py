@@ -188,9 +188,15 @@ if inAnnotationsFile is not None:
 annotationsSet.add("CTCF-only")
 annotationsSet = sorted(annotationsSet)
 
-# read all the population, superpop and samples
+# read all the population, superpop and samples. Tolerate the ordinary file
+# quirks that a user-supplied samplesID file carries -- a trailing/interspersed
+# blank line, a `#` header/comment, or a short row -- by skipping them instead of
+# crashing on an out-of-range index (otherwise a single trailing newline aborts
+# the whole run at the "Creating images" stage, after hours of search).
 for line in inSamplesIDFile:
     split = line.strip().split("\t")
+    if not split or not split[0] or split[0].startswith("#") or len(split) < 3:
+        continue
     populationDict[split[0]] = [split[2], split[1]]
 
 for guide in inGuideFile:
