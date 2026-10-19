@@ -279,6 +279,44 @@ chrX reproduces the public backbone (99.84% shared, 99.996% GT concordance, 0.40
 1.60 M singletons, with biologically-correct male hemizygosity. **The full chr1–22 + chrX panel is complete,
 correct, and ready for the CRISPRme NRG index build.**
 
+### 6.4 Independent top-1000 off-target audit vs the official release — MEASURED (2026-10-18)
+
+An independent dual-oracle audit re-aligned and re-genotyped the shipped index's top-1000 reported
+off-targets (guide `ACTGAAATCTGTAAGCAGGC`, NRG) **without reusing any CRISPRme code**, checking each
+against hg38 and against the official gnomAD filtered SHAPEIT5 release
+(`hgdp1kgp_<chrom>.filtered.SNV_INDEL.phased.shapeit5.bcf`, the MAC≥2 public artifact):
+
+| Check | Result |
+|---|---|
+| Sequence re-alignment vs hg38 (REF+SNP rows) | 904/904 byte-identical; indel backbones reproduced; **0 real sequence failures** |
+| Mismatch counts | 1000/1000 match |
+| PAM (non-NRG violations) | 0 |
+| Common variants (AC≥2) found, exact REF+ALT | 251/251 |
+| Carriers confirmed non-ref | 34,728/35,032 = **99.13%**; **0 unknown sample IDs** |
+
+**Two expected/benign differences vs the official release, both consequences of the deliberate
+singleton-inclusive re-phase (§4):**
+1. **244 "not-found" variants = our-retained singletons.** All are AC=1 variants that the official
+   MAC≥2 release drops (§3.1, §4) but our index legitimately keeps and reports at the correct
+   1/8182 AF. Not an error — this is the purpose of the re-phase.
+2. **55 over-called carriers (0.157%), confined to 10 STR/homopolymer rare-indel rows** (e.g.
+   chr6:5242074 `C>CT`, chr3:173650924 `AT>A`). Root-caused (evidence-backed) to a genotype/phase
+   disagreement between our SHAPEIT5 `phase_rare` run and the official run at hard-to-phase repeat
+   loci — **NOT a CRISPRme code bug**: both the `log_indels` SAMPLES field and the independent
+   `indel_genotypes` store transcribe the build VCF faithfully and agree exactly, and the build VCF
+   itself carries the extra carriers. The effect is conservative (over-reports, never misses), tiny,
+   and confined to repeat indels — all 10 rows are single-indel, none are CONFIRMED-cis multi-variant,
+   so the §9b cis path is unaffected. Consistent with the rare-variant accuracy caveat of §4b.
+
+**Decision: documented, NOT rebuilt.** Rebuilding the indel stores from the official MAC≥2 release
+would discard exactly the singletons the re-phase was designed to retain (§4), so it is the wrong
+remedy. The STR/homopolymer rare-indel carrier counts are a disclosed, benign limitation of the
+singleton-inclusive re-phase.
+
+**Verdict:** the shipped index's top-1000 off-targets are corroborated — sequences genome-consistent,
+mm/PAM exact, every common variant + its named carriers verified against the official source; the only
+real discrepancy is the small, localised STR/homopolymer indel carrier over-report above.
+
 ## 4b. Singleton accuracy — the scientific caveat (drives a product decision)
 
 SHAPEIT5 phases singletons non-randomly but at **~35% switch error** (vs ~50% random; SHAPEIT5 paper),
@@ -341,6 +379,12 @@ weakest (~35% SER) phase in the panel. Genome-wide singletons are ~46% of varian
 **DECISION PENDING (Luca).** The chr22 re-phase smoke (§6) is proceeding to give empirical
 singleton-recovery + switch-error numbers, but the *value* question (are 1-person singletons worth a
 multi-day re-phase for a population index?) is now the crux. Panel leans A+; final call is Luca's.
+
+**RESOLVED (shipped v2.7.0).** Option **C** was chosen and executed: the dense callset was re-phased
+genome-wide with SHAPEIT5 (singletons retained, chrX PAR fixed) and shipped as the default
+`NRG_3_hg38+hg38_HGDP1kGP` (4,091 samples). The §6.4 independent top-1000 audit validates it against
+the official release; its one caveat (the STR/homopolymer rare-indel carrier over-report) is recorded
+there, and the companion paper note is `docs/analyses/phasing_importance.md`.
 
 ## 7. Final validated build recipe (→ METHODS / manuscript)
 
