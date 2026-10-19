@@ -88,9 +88,12 @@ and the `release-crisprme` skill.
   `resultIntegrator` parses and strand-corrects them identically), with the `rsID` and `MAF` lists kept
   1:1 token-aligned, and narrows the `Samples` column to the **exact cis carriers** (individuals carrying
   the indel AND every required SNP on the same phased slot). **Gated to CONFIRMED genotype-phased
-  co-occurrence only** — a PUTATIVE (unphased / sites-only / mega) call is left sidecar-only and does not
-  touch the row, preserving the anti-chimera contract (never assert a haplotype no individual is
-  confirmed to carry). Verified end-to-end on a genome-wide 4+1+1 `--per-sample` run: 369 indel
+  co-occurrence only** — the gate is the co-occurrence *phase* (derived from the index's on-disk phased
+  genotype stores), **not** the search mode, so the enrichment applies equally to a population-level and
+  a `--per-sample` search on a genotyped-phased index, and cannot fire on a sites-only index (no
+  genotype store → that row is byte-identical to before). A PUTATIVE (unphased / sites-only / mega) call
+  is left sidecar-only and does not touch the row, preserving the anti-chimera contract (never assert a
+  haplotype no individual is confirmed to carry). Verified end-to-end on a genome-wide 4+1+1 `--per-sample` run: 369 indel
   off-targets gained their co-SNP(s) with CFD byte-identical and the carrier roster narrowed to the
   exact cis set (e.g. chr10:105008040, carrier HG03711: `chr10_105008061_ATG_A` →
   `chr10_105008045_G_C,chr10_105008061_ATG_A`); SNP-only rows, PUTATIVE rows, and non-cis co-locations
