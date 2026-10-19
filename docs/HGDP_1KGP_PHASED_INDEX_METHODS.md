@@ -507,6 +507,17 @@ same-slot check** (`some haplotype slot carries the indel AND every SNP alt`) th
 multiplicity with nothing to starve. Added ≥4 regression tests (`test_indel_snp_cis.py`: indel + 4
 SNPs cis→CONFIRMED, one-trans→excluded, homozygous→2 copies, population cis/trans/unphased mix).
 
+**Report surfacing — the complete cis-phased variant set.** For an indel off-target whose CONFIRMED
+cis haplotype is an indel **plus** co-occurring SNP(s), the report's `Variant` column (and the
+`observed_haplotypes` companion, which reads the same field) lists **the full cis-phased variant set**
+— the indel followed by each co-occurring SNP as a forward-strand `chrom_pos_ref_alt` token (same
+format the SNP path emits, so `resultIntegrator` parses and strand-corrects them identically), with the
+`rsID` / `MAF` lists kept 1:1 token-aligned — and the `Samples` column is the **exact cis carriers**
+(individuals carrying the indel AND every required SNP on the same phased slot). This applies **only**
+to CONFIRMED genotype-phased co-occurrence; a PUTATIVE (unphased / sites-only / mega) call is recorded
+in the `*.indel_snp_cooc.tsv` sidecar only and never asserts a cis haplotype on the row (the
+anti-chimera contract of §9c).
+
 ### 9c. The dense-window APPROXIMATION (the greedy cap) + FLAGS + DEFAULT behaviour
 Enumerating the lattice is 2^k in the number of co-located variants, so extreme-density windows are
 **capped**: `capped = _FAST_MODE OR (CRISPRME_IUPAC_CAP ≥ 0 AND #variants > CRISPRME_IUPAC_CAP)`.

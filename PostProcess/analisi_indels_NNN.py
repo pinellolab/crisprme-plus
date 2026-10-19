@@ -1091,6 +1091,41 @@ for line in inResult:
                         + ";".join(u[1] for u in _used) + "\t" + _phase + "\t"
                         + ("%.6g" % _isc.joint_af(_ac, _an)) + "\t" + str(len(_cis))
                         + "\t" + ",".join(sorted(_cis)[:50]) + "\n")
+                    # [indel-snp] CONFIRMED-cis ENRICHMENT: merge the co-occurring
+                    # cis-phased SNP(s) into the row's variant columns so the Variant
+                    # column + observed_haplotypes companion report the FULL real
+                    # haplotype (indel + SNP(s)), not the indel alone. GUARD: only the
+                    # CONFIRMED (genotype-phased, same-slot) call enriches -- a PUTATIVE
+                    # phase (unphased GT, slot alignment unproven) stays sidecar-only so
+                    # we never assert a cis haplotype no individual is confirmed to carry
+                    # (the anti-chimera contract; the PUTATIVE fallback below is likewise
+                    # sidecar-only). Wrapped defensively: any failure leaves the row as
+                    # the plain indel-only row (the sidecar above is already written).
+                    if _phase == _isc.CONFIRMED:
+                        try:
+                            _snp_tok, _snp_rs, _snp_maf = _isc.forward_snp_tokens(
+                                _reg, current_chr, _used)
+                            if _snp_tok:
+                                # [17] Variant_info: indel token FIRST, then the SNP
+                                # tokens (resultIntegrator splits on ',' + strand-
+                                # corrects each token independently -- same as the
+                                # SNP path's comma-joined multi-token field).
+                                final_result[17] = (
+                                    indel_data[4] + "," + ",".join(_snp_tok))
+                                # [15] rsID + [16] MAF stay 1:1 token-aligned with [17]
+                                # (indel first, then SNPs); resultIntegrator/_min_maf
+                                # zip the MAF list against the variant tokens.
+                                final_result[15] = ",".join(
+                                    [indel_data[2]] + _snp_rs)
+                                final_result[16] = ",".join(
+                                    [indel_data[3]] + _snp_maf)
+                                # [12] Samples: narrow to the EXACT cis carriers (carry
+                                # the indel AND every cis SNP on the same phased slot) --
+                                # the real-haplotype carrier semantic; replaces the
+                                # indel-all-carriers value set above.
+                                final_result[12] = ",".join(sorted(_cis))
+                        except Exception:  # noqa: BLE001 - enrichment never breaks the row
+                            pass
                 elif _gt is None or _indelgt is None:
                     # [indel-snp] PUTATIVE fallback (2.5.2): the indel + used SNP alt(s)
                     # co-occur at this locus but we have NO per-sample genotypes to confirm

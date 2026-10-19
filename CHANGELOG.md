@@ -79,6 +79,27 @@ and the `release-crisprme` skill.
   one — so specificity is reported on both scales. They are separate scales and NOT interchangeable.
 
 ### Fixed
+- **Indel off-targets now list their FULL cis-phased real haplotype in the Variant column.** When an
+  indel off-target's true haplotype is an indel **plus** one or more co-occurring, cis-phased SNPs, the
+  `Variant` column (and the `observed_haplotypes` companion, which reads the same field) previously
+  showed the indel **only** — the co-occurring SNP(s) were recorded solely in the per-chromosome
+  `*.indel_snp_cooc.tsv` sidecar, never merged into the off-target row. The INDEL post-analysis now
+  appends the co-SNP forward-strand variant tokens (`chrom_pos_ref_alt`, matching the SNP-path format so
+  `resultIntegrator` parses and strand-corrects them identically), with the `rsID` and `MAF` lists kept
+  1:1 token-aligned, and narrows the `Samples` column to the **exact cis carriers** (individuals carrying
+  the indel AND every required SNP on the same phased slot). **Gated to CONFIRMED genotype-phased
+  co-occurrence only** — a PUTATIVE (unphased / sites-only / mega) call is left sidecar-only and does not
+  touch the row, preserving the anti-chimera contract (never assert a haplotype no individual is
+  confirmed to carry). Verified end-to-end on a genome-wide 4+1+1 `--per-sample` run: 369 indel
+  off-targets gained their co-SNP(s) with CFD byte-identical and the carrier roster narrowed to the
+  exact cis set (e.g. chr10:105008040, carrier HG03711: `chr10_105008061_ATG_A` →
+  `chr10_105008045_G_C,chr10_105008061_ATG_A`); SNP-only rows, PUTATIVE rows, and non-cis co-locations
+  (indel and SNP carried by different individuals — e.g. the top-1000 rank-13 at chr18:12386282, whose
+  worst-case alignment uses a SNP its indel carrier lacks) are left untouched. Because the corrected cis
+  carrier count feeds the most-carriers representative tie-break, at a few dense multi-allele indel/STR
+  loci a different — still real — observed haplotype becomes the cluster representative (no score
+  change; this removes a pre-existing chimeric over-count where a worst-case indel alignment had used a
+  cis SNP that most of its reported carriers do not carry).
 - **`--per-sample` no longer over-states dense-window off-targets (the "chimera" over-call).** In a
   high-variant-density window (>`CRISPRME_IUPAC_CAP` co-located variants) the per-sample path emitted a
   synthetic **cross-sample** worst-case representative whose carrier roster was the UNION of different
