@@ -34,6 +34,15 @@ and the `release-crisprme` skill.
   carrier count (read from the index's `Dictionaries/registry_<vcf>` tier). Enables scoring
   externally-nominated sites (e.g. non-canonical-PAM hits) without building a new index. New module
   `PostProcess/targets_scoring.py` + `PostProcess/test_targets_scoring.py` (wired into unit-tests CI).
+- **`$CRISPRME_TMPDIR` redirects every temporary file, plus a new troubleshooting guide.** One env
+  var points all scratch — `sort`, `bcftools`, annotation staging, and any Python `tempfile` — at a
+  chosen roomy disk: `crisprme.py` creates the directory, exports it as `TMPDIR`, and sets
+  `tempfile.tempdir` before dispatching any sub-command, so every child process inherits it. The
+  default `/tmp` is small on many HPC / container hosts and a genome-wide run can exhaust it; this is
+  the single knob to move the overflow. A new `docs/TROUBLESHOOTING.md` (referenced from the README
+  and the Docker quickstart) documents it alongside disk sizing, per-sample RAM, GPU / scorer
+  fallbacks, download & dict-less recovery, and high-`--thread` guidance. New
+  `PostProcess/test_configure_tmpdir.py`.
 
 ### Changed
 - **Web Contacts page:** added Ann Cirincione under the Pinello Lab, and reworded "Please send any
@@ -88,6 +97,12 @@ and the `release-crisprme` skill.
   mismatch + RNA-bulge rows reproduce the reported CFD exactly; DNA-bulge CFD is the standard
   bulged-base-excluded value (CRISPRme's internal DNA-bulge gap placement isn't recoverable from an
   in-place alignment, so it stays a documented caveat). Updated `test_dna_bulge_delete_gap`.
+- **COSMIC annotation stripping no longer races under concurrent searches that share a `/tmp`.**
+  `strip_cosmic` wrote a fixed `<out_bed>.tmp` then `os.replace`d it into place; two searches
+  annotating at the same time (e.g. several jobs bind-mounting the same host `/tmp`) both wrote that
+  one name and raced on the rename — one renamed it away, the other hit `FileNotFoundError` and the
+  search failed. The temp file is now per-process (`<out_bed>.<pid>.tmp`), so concurrent strips never
+  collide. +`PostProcess/test_cosmic_license.py`.
 
 ### Removed
 - **Removed the stale "odd-length degenerate PAM + bulges can crash the search engine (issue #105)"
