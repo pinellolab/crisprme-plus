@@ -854,7 +854,14 @@ while read samples; do
 		continue
 	fi
 	# copy samples ids file content to temporary sample ids file (skip header)
-	grep -v '#' "${current_working_directory}/samplesIDs/$samples" >>"$output_folder/.sampleID.txt"
+	# `awk 'NF'` also drops blank/whitespace-only lines: `grep -v '#'` strips the
+	# header but KEEPS a trailing newline from the user's samplesID file (invisible,
+	# and entirely plausible in a hand-built panel). That empty line then reached
+	# every consumer of .sampleID.txt and crashed radar_chart_dict_generator.py on
+	# split[2] -- AFTER a full multi-hour search, whose results the error branch then
+	# deleted. Filtering here means no consumer can ever see one. grep's stderr still
+	# flows to $logerror, so the missing/unreadable-file check below is unaffected.
+	grep -v '#' "${current_working_directory}/samplesIDs/$samples" | awk 'NF' >>"$output_folder/.sampleID.txt"
 	if [ -s $logerror ]; then
 		printf "ERROR: samples IDs processing failed on dataset %s\n" "$samples" >&2
 		rm $output_folder/.sampleID.txt
