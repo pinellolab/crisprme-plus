@@ -191,6 +191,16 @@ annotationsSet = sorted(annotationsSet)
 # read all the population, superpop and samples
 for line in inSamplesIDFile:
     split = line.strip().split("\t")
+    # SKIP blank lines. The pipeline builds the run's .sampleID.txt with
+    # `grep -v '#'` (submit_job_automated_new_multiple_vcfs.sh), which drops the
+    # header but KEEPS any empty line the user's samplesID file ended with -- a
+    # trailing newline is invisible and entirely plausible in a hand-built panel.
+    # Such a line splits to [''], so split[2] raised IndexError and took down the
+    # whole variants summary AFTER the full multi-hour search had completed (and
+    # the caller's error branch then deleted the results). process_summaries.py
+    # already guards the same file the same way.
+    if not split[0]:
+        continue
     populationDict[split[0]] = [split[2], split[1]]
 
 for guide in inGuideFile:
