@@ -1,14 +1,19 @@
 # CRISPRme+ Off-target Risk Summary: Methods
 
-*Proposed/designed report component. **The live report still computes the legacy
-`100/(100+Σ)` aggregate specificity; this document specifies the replacement.** If this
-Methods text is attached to an IND whose shipped report output still displays the legacy
-specificity number, that mismatch must be reconciled before submission (the two must not
-be presented together). The replacement has been empirically bench-tested and adversarially
-reviewed. Numbers below are from the real calibration benchmark and a real search; nothing
-is illustrative unless labelled.*
+*This document specifies the OFF-TARGET RISK card **shipped** at the top of the report. It
+**replaced** the legacy `100/(100+Σ)` aggregate specificity score, which is no longer
+computed or displayed in the report (the two are never presented together). The card has
+been empirically bench-tested and adversarially reviewed. Numbers below are from the real
+calibration benchmark and a real search; nothing is illustrative unless labelled.*
 
 *Independent three-way sign-off (2026-10-20): a **statistician**, a **clinician**, and a **genome editor** each reviewed this document and returned **SIGN** after their required fixes were applied (all fixes incorporated below). Reviewers verified the shipped `.npz` artifacts (φ, guide counts, prevalence) match the text.*
+
+*Revised 2026-10-21, after the sign-off above: the deployment prior-shift caveat was made
+**qualitative** — the illustrative ×⅓…×3 multipliers (and `offtarget_calibration.prevalence_scaled`)
+were removed, because an individual deployed guide's own off-target propensity is unknown and a
+specific ratio would imply knowledge we do not have (§5, §6, §7). This revision only tightens an
+already-signed caveat in the honest direction; **re-confirmation from the three reviewers is
+pending before IND submission.***
 
 ---
 

@@ -129,10 +129,6 @@ and the `release-crisprme` skill.
   (serving the CFD-ranked **and** the CRISPR-Bulge-ranked views). Report-layer only (built in
   `generate_report` from the representatives + the alt-alignments file, merged per `(site, variant-set)`
   across axes); bundled in the SLIM report. New `PostProcess/observed_haplotypes_companion.py`.
-- **Dual Aggregated Specificity Score (CFD + CRISPR-Bulge) in the report top summary.** The summary
-  card now shows TWO 0-100 aggregates — the CFD-based one (as before) and a parallel CRISPR-Bulge-based
-  one — so specificity is reported on both scales. They are separate scales and NOT interchangeable.
-
 ### Fixed
 - **A samplesID file with a trailing blank line (or any blank/comment/short row) no longer aborts the
   run.** The per-sample summary and specificity-radar steps (`process_summaries.py`,

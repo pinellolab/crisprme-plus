@@ -1844,7 +1844,8 @@ is under `data/`). Reading top to bottom:
 - **Off-target risk summary (top of the report).** In place of a single specificity score, the top of
   the report shows a per-scorer **risk card**: for CFD and for CRISPR-Bulge separately (never blended),
   the count of ≤1-gap off-target sites in each score band and a **calibrated expected number of true
-  off-targets** with a 90% range, plus a prevalence-sensitivity row. The estimates come from an
+  off-targets** with a 90% range, plus a qualitative note that a deployed guide's own off-target
+  propensity (unknown, not given a specific multiplier) can shift the count further. The estimates come from an
   isotonic calibration fit on 359 experimentally confirmed off-targets (held-out AUPR 0.168 CFD /
   0.613 CRISPR-Bulge). A "How to read this" pop-up explains the two scorers and shows the
   precision-recall curves. See `docs/offtarget_risk_summary_METHODS.md`.
