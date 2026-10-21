@@ -74,6 +74,8 @@ def loadSampleAssociation(id_sample_file):
 
         for line in in_file:
             line = line.strip().split('\t')
+            if not line[0]:     # Skip blank lines (a trailing newline in the samplesID file crashes line[1])
+                continue
             sample_to_pop[line[0]] = line[1]
             pop_to_superpop[line[1]] = line[2]
 
