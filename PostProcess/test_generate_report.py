@@ -23,9 +23,10 @@ HTML is a self-contained IND-briefing-book digest (report v2.4):
     (Gene, Gene_distance_kb, GENCODE, ENCODE, DHS); the downloads use the SAME
     curated columns (header spot-checked on panel_top100.tsv),
   * SECTION 4: the HYBRID panel -- hard-include mm+b <= PANEL_FLOOR_MMB (2) OR
-    CFD >= PANEL_FLOOR_CFD (0.5), fill to PANEL_CAP (100) by worst-case severity
-    (no variant quota); the module-level floors are present, and the in-report
-    methods note is present,
+    CFD >= PANEL_FLOOR_CFD (0.5) AT <=1 BULGE OR a clean 0-mismatch bulge (a
+    >=2-bulge CFD-only site is kept too but DEMOTED to the end), fill to PANEL_CAP
+    (100) by worst-case severity (no variant quota); the module-level floors are
+    present, and the in-report methods note is present,
   * PER-TIER DOWNLOADS: the non-empty CFD/mm+b/variant-created subsets are bundled
     as curated TSVs and linked,
   * MAF FOOTNOTE: the v2.4 blank-MAF explanation is present,
@@ -758,11 +759,12 @@ class TestGenerateReport(unittest.TestCase):
         # header card
         self.assertIn("gRNA (spacer+PAM)", html)
         self.assertIn(_GUIDE, html)
-        # TWO aggregate specificity scores: CFD-based + CRISPR-Bulge-based (the fixture
-        # has CRISPR-Bulge scores, so the second row is present). No acfd sidecar in the
-        # fixture dir -> both render the criterion-specific "not available" string.
-        self.assertIn("Aggregated Specificity Score, CFD-based (0-100; higher = more specific)", html)
-        self.assertIn("Aggregated Specificity Score, CRISPR-Bulge-based (0-100; higher = more specific)", html)
+        # the OFF-TARGET RISK card (calibrated per-scorer expected counts) REPLACES the
+        # legacy aggregated specificity rows, with a CSS-only "How to read this" modal.
+        self.assertIn("OFF-TARGET RISK", html)
+        self.assertIn("How to read this", html)
+        self.assertIn('id="risk-card-modal"', html)
+        self.assertNotIn("Aggregated Specificity Score", html)
         self.assertRegex(html, r"Nuclease</td><td>SpCas9<")
         # global MM/B matrix present, grouped REFERENCE vs VARIANT
         self.assertIn("Off-targets by Mismatch (MM) and Bulge (B)", html)
@@ -918,18 +920,29 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("hybrid", html.lower())
         self.assertIn("worst-case", html.lower())
         self.assertIn("~100 sites", html)
-        # C) EXPLICIT IN-REPORT METHODS NOTE with the REAL constants:
-        #    hard-include (mm+b <= 2 OR CFD >= 0.5), fill to 100 by worst-case
+        # C) EXPLICIT IN-REPORT METHODS NOTE with the REAL constants: the CFD hard-include
+        #    is gated on <=1 bulge (CFD's calibrated domain; >=2-bulge CFD is an over-call)
         self.assertIn("<strong>Methods.</strong>", html)
         self.assertIn("hard-include", html.lower())
-        self.assertIn("mismatches+bulges &le; 2 OR CFD &ge; 0.5", html)
+        self.assertIn("mismatches+bulges &le; 2 OR (CFD &ge; 0.5 at &le;1 bulge", html)
         self.assertIn("fill", html.lower())
         self.assertIn("worst by ANY single", html)
         self.assertIn("NO category quota", html)
-        # the FULL threshold table is kept (CFD>= {0.5,0.2,0.05},
-        # mm+b<= {1,2,3,4})
-        for t in ("0.5", "0.2", "0.05"):
+        # C2) >=2-bulge CFD-only sites are KEPT but DEMOTED (never dropped) -- the note
+        #     must say so explicitly, and must NOT revert to drop/"verify manually" wording
+        self.assertIn("DEMOTED", html)
+        self.assertIn("do NOT drop these sites", html)
+        self.assertNotIn("are NOT hard-included on CFD", html)      # old drop wording gone
+        self.assertNotIn("ranked by edit distance (mismatches+bulges), kept", html)
+        # D) CFD tiers reconcile with the top card: the HEADLINE rows use the card's cut
+        #    points (0.5, 0.2) ONLY; each shows the all-gaps count with the <=1-gap
+        #    calibrated subset in parentheses; the wider 0.05 net is a downloads-only note.
+        for t in ("0.5", "0.2"):
             self.assertIn(f"CFD &ge; {t}", html)
+        self.assertIn("&le;1-gap", html)                 # reconciliation parenthetical
+        self.assertIn("same cut points as the card", html)  # bridge note
+        self.assertIn("CFD &ge; 0.05", html)             # wide net still referenced (download note)
+        self.assertIn("included in the bundled", html)   # 0.05 net is downloads-only
         self.assertNotIn("CFD &ge; 0.1", html)  # 0.1 tier removed
         for t in ("1", "2", "3", "4"):
             self.assertIn(f"mismatches + bulges &le; {t}", html)
@@ -1058,6 +1071,46 @@ class TestGenerateReport(unittest.TestCase):
         chroms = list(panel[cols["chrom"]])
         # the pure-bulge site is hard-included (would NOT qualify by mm+b<=2 or CFD>=0.5)
         self.assertIn("chrPUREBULGE", chroms)
+
+    def test_multibulge_highcfd_demoted_not_dropped_even_when_saturated(self):
+        """SAFETY (adversarial-review fix): a >=2-bulge site high on CFD ALONE, and
+        BEARING mismatches (the empirically-attested shape of a real bulged off-target),
+        must be KEPT in the panel but ranked AFTER every reliable hard-include -- never
+        silently dropped, even in the SATURATED regime (reliable hard-includes already
+        exceed the cap), which is exactly the dense per-sample / genome-wide case that
+        motivated the gate. The earlier 'drop' design removed this site entirely here."""
+        import pandas as pd
+        header = list(_HEADER)
+
+        def _row(chrom, mm, b, cfd, crispr_bulge, notref):
+            return ["G", chrom, "1", "+", "AAA", "AAA", "GGG", str(mm), str(b),
+                    str(mm + b), notref and "alt" or "ref", "NA",
+                    f"{cfd}", f"{cfd}", f"{cfd}", "NA", "NA", "NA", "NA",
+                    f"{crispr_bulge}", f"{crispr_bulge}", f"{crispr_bulge}", "NA", "NA", "NA",
+                    "y" if notref else "NA", "NA", "GENE", "1.0", "NA", "NA"]
+
+        rows = [_row("chrON", 0, 0, 1.0, 1.0, False)]
+        # 10 RELIABLE hard-includes (mm+b=2) -> saturate a cap of 3
+        for i in range(10):
+            rows.append(_row(f"rel{i}", 1, 1, 0.10, 0.10, False))
+        # the DEMOTED site: 1 mismatch + 2 bulges, CFD=0.99 (over-call), ML N/A (-1)
+        rows.append(_row("chrDEMOTE", 1, 2, 0.99, -1, True))
+        tsv = os.path.join(self.tmp, "wc_demote.tsv")
+        with open(tsv, "w") as h:
+            h.write("\t".join(header) + "\n")
+            for r in rows:
+                h.write("\t".join(r) + "\n")
+        df = pd.read_csv(tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        panel = gr.select_worstcase_panel(df, cols, cap=3)
+        chroms = list(panel[cols["chrom"]])
+        # KEPT despite saturation (11 reliable incl. perfect > cap 3): never dropped
+        self.assertIn("chrDEMOTE", chroms)
+        # DEMOTED: ranked LAST, after every reliable hard-include
+        self.assertEqual(chroms[-1], "chrDEMOTE")
+        # and strictly after the reliable sites (all rel* precede it)
+        self.assertTrue(all(chroms.index(f"rel{i}") < chroms.index("chrDEMOTE")
+                            for i in range(10)))
 
     def test_perfect_match_flag_and_banner(self):
         """0-mm/0-bulge sites are flagged and drive the warning banner."""
@@ -1382,6 +1435,21 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("<div class=\"legend-term\">Gene</div>", html)
         # max-total-edits caveat present (cap bounds the search, not per-site edits)
         self.assertIn("individual reported alignments", html)
+
+    def test_cfd_glossary_tooltip_matches_gated_panel_rule(self):
+        """The CFD legend tooltip (Section 7) must agree with the gated hard-include
+        rule: it states the panel hard-includes CFD>=0.5 AT <=1 BULGE (not all gaps),
+        and that >=2-bulge high-CFD sites are kept-but-demoted, never silently dropped.
+        A drift back to the un-gated 'hard-includes CFD>=0.5' wording would mislead an
+        IND reviewer into thinking a demoted (panel-last) site is a top hard-include."""
+        cfd_entry = dict(gr._SCORE_LEGEND)["CFD"]
+        # the qualifier that must never silently disappear
+        self.assertIn("hard-includes CFD&nbsp;&ge;&nbsp;0.5 at &le;1 bulge", cfd_entry)
+        # the un-gated phrasing must NOT reappear
+        self.assertNotIn("hard-includes CFD&nbsp;&ge;&nbsp;0.5).", cfd_entry)
+        # demote (not drop/"verify manually") is the >=2-bulge policy
+        self.assertIn("demoted", cfd_entry.lower())
+        self.assertNotIn("verify manually", cfd_entry.lower())
 
     def test_run_manifest_bundled_and_valid(self):
         """The ZIP carries a machine-readable run_manifest.json (IND traceability)."""

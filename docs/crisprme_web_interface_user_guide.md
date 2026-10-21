@@ -568,9 +568,10 @@ the entire search. For each guide RNA submitted, the table shows:
   specificity score was originally designed for searches with up to 3–4 mismatches;
   as the number of mismatches increases, the score declines non-linearly. Comparisons
   between searches that used different mismatch or bulge thresholds, or different
-  variant datasets, should therefore be made with caution. The downloaded report's
-  summary card reports this aggregate on **two scales** — a CFD-based and a parallel
-  CRISPR-Bulge-based Aggregated Specificity Score (0–100) — which are not interchangeable.
+  variant datasets, should therefore be made with caution. The downloaded report no longer
+  shows a single aggregated specificity score; its top-of-report risk card instead reports,
+  per scorer, the count of ≤1-gap off-target sites per score band and a calibrated expected
+  number of true off-targets with a 90% range (see `docs/offtarget_risk_summary_METHODS.md`).
 - **CRISPR-Bulge score** — a deep-learning off-target activity score (Yaish &
   Orenstein, *NAR* 2024; a TensorFlow GRU model) reported alongside CFD as a
   complementary, bulge-aware prediction. It uses its own interpretation thresholds

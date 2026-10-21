@@ -1841,10 +1841,13 @@ is under `data/`). Reading top to bottom:
     *NAR* 2024) on its **own** scale (bands **0.5 / 0.2 / 0.1**). It was trained on off-targets
     with at most one bulge, so any site that needs **≥ 2 bulges is out-of-domain and shows `-`**
     (N/A) — read CFD for those sites (a `-` means "not scored", not "no risk").
-- **Two Aggregated Specificity Scores (0-100; higher = more specific).** The summary card reports a
-  **CFD-based** aggregate and a parallel **CRISPR-Bulge-based** one, so guide specificity is shown on
-  both scales. They are `100 / (100 + Σ per-off-target score)`; the two scales are **not**
-  interchangeable, and (like CFD) a value is only comparable across runs with the same search envelope.
+- **Off-target risk summary (top of the report).** In place of a single specificity score, the top of
+  the report shows a per-scorer **risk card**: for CFD and for CRISPR-Bulge separately (never blended),
+  the count of ≤1-gap off-target sites in each score band and a **calibrated expected number of true
+  off-targets** with a 90% range, plus a prevalence-sensitivity row. The estimates come from an
+  isotonic calibration fit on 359 experimentally confirmed off-targets (held-out AUPR 0.168 CFD /
+  0.613 CRISPR-Bulge). A "How to read this" pop-up explains the two scorers and shows the
+  precision-recall curves. See `docs/offtarget_risk_summary_METHODS.md`.
 - **`data/observed_haplotypes.tsv`** — for every site reached by **two or more distinct observed
   variant haplotypes**, this companion lists **each** haplotype with its variants, rsIDs, mm/bulges,
   **both** scores, origin, allele frequency and **named carriers**. The main table shows one

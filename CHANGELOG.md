@@ -11,7 +11,48 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **Top-of-report off-target risk summary (replaces the aggregated specificity score).** The report
+  now opens with a per-scorer risk card: for CFD and for CRISPR-Bulge separately (never blended), the
+  count of ≤1-gap off-target sites in each score band and a **calibrated expected number of true
+  off-targets** with a coverage-valid 90% range, plus a prevalence-sensitivity row. Estimates come from
+  an isotonic score-to-probability calibration fit leave-one-guide-out on 359 experimentally confirmed
+  off-targets across 46 guides (Tsai 2015, Refined TrueOT, Chen 2017, Listgarten 2018; Zenodo
+  10.5281/zenodo.10902445); held-out AUPR 0.168 CFD / 0.613 CRISPR-Bulge; the range is a two-level
+  guide-cluster bootstrap with a negative-binomial between-guide overdispersion term, validated
+  per-held-out-guide to about 90% coverage. A CSS-only "How to read this" pop-up (no JavaScript, so the
+  report stays self-contained) explains the two scorers and shows the precision-recall curves. New
+  `PostProcess/offtarget_calibration.py`, `PostProcess/risk_card.py`, and `PostProcess/calibration/`
+  (bundled isotonic maps + bootstrap ensemble + per-band overdispersion). The recommended validation
+  panel reconciles with the card: its CFD tiers use the SAME cut points (≥ 0.5, ≥ 0.2), each showing
+  the all-gaps assay count with the ≤1-gap calibrated subset (the card's domain) in parentheses, plus
+  a bridge note; the wider CFD ≥ 0.05 net stays a bundled download referenced in the note. The MM/B
+  matrix legend moved to a full-width band below the summary grid (flowing in columns) for a more
+  compact page. Full method, provenance, and the statistician/clinician/genome-editor sign-off in
+  `docs/offtarget_risk_summary_METHODS.md`.
+
+### Fixed
+- **Observed-haplotypes companion no longer blows up memory on dense per-sample searches.**
+  The build loaded the entire `all_results_with_alternative_alignments.tsv` (30+ GB on a
+  dense run) and materialized every row, exploding to ~140 GB. It now streams the file in
+  200k-row chunks and, for the slim report, keeps only rows near the top-1000 displayed
+  sites (whose per-site modals are the only consumers of the haplotype map), with a
+  vectorized pre-filter so the giant file is scanned, not materialized. Peak memory drops to
+  tens of GB and the pass is ~2.5x faster; the full all-sites companion is built only under
+  `--report-full`. Output is byte-identical to the unscoped build for the displayed sites.
+
 ### Changed
+- **Recommended validation panel: domain-aware CFD hard-include with ≥2-bulge demotion.** The panel
+  now hard-includes a site on CFD only within CFD's calibrated domain (CFD ≥ 0.5 **at ≤1 bulge**). A
+  site that needs **≥2 bulges** and is high on CFD alone — where CFD is an uncalibrated over-call and
+  CRISPR-Bulge is N/A — is **kept in the panel but *demoted*** (ranked after every reliable
+  hard-include) rather than forced to the top on an untrustworthy score, and it is never dropped: a
+  ≥2-bulge off-target can still be real (the benchmark contains no ≥2-bulge examples, so its risk is
+  *unknown*, not zero) and only the user can decide what to assay. The count of such demoted sites is
+  surfaced in the panel note even on a CFD-only run; the unconditional pure-bulge hard-include
+  (0 mismatches, ≥1 bulge) is unchanged. The Section-7 CFD glossary tooltip and the in-report Methods
+  note were updated to match, with regression tests pinning both the saturated-regime demote behaviour
+  and the glossary wording.
 - **`complete-search` now cleans up bulky intermediate files by default** (new `--keep-intermediates`
   to retain them). Once the finalized `*_integrated_results.tsv` and the report are produced, the
   pre-integration working files — the merged `bestMerge`/`altMerge` tables, the raw

@@ -766,13 +766,42 @@ trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
   so any 2-bulge output would be pure extrapolation — the honest choice is N/A plus the
   model-agnostic safety nets.
 - **Nulled ≥ 2-bulge sites are *not dropped*.** They remain scored by CFD's position-specific
-  bulge penalty, ranked by edit distance, and are covered by an unconditional **pure-bulge**
-  rule in the validation panel (a 0-mismatch site with ≥ 1 bulge is always included).
+  bulge penalty and are covered by two validation-panel safety nets. First, an unconditional
+  **pure-bulge** rule: a 0-mismatch site with ≥ 1 bulge is always hard-included. Second, a
+  ≥ 2-bulge site that is high on **CFD alone** (CFD ≥ 0.5, where CFD is an uncalibrated
+  over-call and CRISPR-Bulge is N/A) is **kept in the recommended panel but *demoted*** — ranked
+  after every reliable hard-include (sites close by sequence, or high CFD at ≤ 1 bulge in its
+  calibrated domain, or a clean bulge). We demote rather than drop because a ≥ 2-bulge
+  off-target can still be real — the benchmark simply contains no ≥ 2-bulge examples, so its
+  risk is *unknown*, not zero — and only the user can decide what to assay. Demoting keeps the
+  trustworthy candidates first without ever silently removing an unknown-risk site, and the
+  count of such demoted sites is surfaced in the panel note even on a CFD-only run.
 
 The N/A sentinel is uniform across the report: a `-` means *not scored*, not *no risk* — it is
 never sorted or thresholded as if it were a low score. The threshold tiers in the report are
 **model-relative** (CRISPR-Bulge's cut points differ from CFD's because the two scores are on
 different scales).
+
+**Top-of-report off-target risk summary (replaces the aggregated specificity score).**
+The legacy single `100/(100+Σ)` specificity score is replaced by a per-scorer risk card. For
+each scorer, shown side by side and never blended, the card reports the count of ≤1-gap
+off-target sites in each score band and a **calibrated expected number of true off-targets**
+with a coverage-valid 90% prediction interval. The calibration is an isotonic
+score-to-probability map fit leave-one-guide-out on an independent benchmark of 359
+experimentally confirmed off-targets across 46 guides (four published external-evaluation sets
+distributed with the CRISPR-Bulge repository: Tsai 2015, Refined TrueOT, Chen 2017, Listgarten
+2018; Zenodo 10.5281/zenodo.10902445). Held-out AUPR on that benchmark is **0.168 (CFD)** and
+**0.613 (CRISPR-Bulge)**, with guide-cluster-bootstrap 90% CIs of 0.13 to 0.24 and 0.56 to
+0.70. The reported range is a two-level guide-cluster bootstrap plus a negative-binomial
+between-guide overdispersion term, validated per-held-out-guide to about 90% coverage. Because
+both scorers are sequence-based, the calibration applies to any ≤1-gap alignment, reference or
+variant allele; ≥2-gap sites and the per-sample carrier-incidence dimension are out of scope,
+and a prevalence-sensitivity row shows how the absolute count scales with a guide's own
+off-target propensity. The card restricts CFD counts to the ≤1-gap calibration domain, whereas
+the recommended validation panel counts candidates over all gaps; a bridge note in the panel
+states this so the two are not read as contradictory. Full method, benchmark provenance,
+precision-recall curves, and the independent statistician, clinician, and genome-editor
+sign-off are in `docs/offtarget_risk_summary_METHODS.md`.
 
 **Compute backend and modular environment.** CFD is pure-Python and always runs
 in-process on the CPU. CRISPR-Bulge (TensorFlow) runs in a **dedicated per-scorer
