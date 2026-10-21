@@ -795,9 +795,10 @@ distributed with the CRISPR-Bulge repository: Tsai 2015, Refined TrueOT, Chen 20
 0.70. The reported range is a two-level guide-cluster bootstrap plus a negative-binomial
 between-guide overdispersion term, validated per-held-out-guide to about 90% coverage. Because
 both scorers are sequence-based, the calibration applies to any ≤1-gap alignment, reference or
-variant allele; ≥2-gap sites and the per-sample carrier-incidence dimension are out of scope,
-and a prevalence-sensitivity row shows how the absolute count scales with a guide's own
-off-target propensity. The card restricts CFD counts to the ≤1-gap calibration domain, whereas
+variant allele; ≥2-gap sites and the per-sample carrier-incidence dimension are out of scope.
+The card also flags, qualitatively, that a deployed guide's own off-target propensity is
+unknown and can shift the absolute count substantially in either direction — usually a larger
+uncertainty than the statistical range, and deliberately not given a specific multiplier. The card restricts CFD counts to the ≤1-gap calibration domain, whereas
 the recommended validation panel counts candidates over all gaps; a bridge note in the panel
 states this so the two are not read as contradictory. Full method, benchmark provenance,
 precision-recall curves, and the independent statistician, clinician, and genome-editor

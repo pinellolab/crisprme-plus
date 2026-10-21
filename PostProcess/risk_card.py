@@ -4,8 +4,9 @@
 Replaces the legacy ``100/(100+Σ)`` aggregate specificity rows. For each scorer
 (CFD, CRISPR-Bulge -- shown side by side, never blended) it reports the count of
 <=1-gap off-target sites per score band and a calibrated EXPECTED number of true
-off-targets with a coverage-valid 90% range, plus a prevalence-sensitivity. The
-numbers come from ``offtarget_calibration`` (isotonic point map + two-level
+off-targets with a coverage-valid 90% range, plus a qualitative note that a
+deployed guide's own prior shift can move the count further. The numbers come
+from ``offtarget_calibration`` (isotonic point map + two-level
 guide-cluster bootstrap + Gamma overdispersion; see METHODS). Degrades
 gracefully to counts-only if the calibration artifact/module is unavailable.
 
@@ -121,8 +122,10 @@ _READ = (
     "assay-detected off-targets and is defined only on ≤1-gap alignments). A low "
     "CRISPR-Bulge count is <b>not</b> clearance. The expected count is an estimate, not a "
     "ceiling or a shortlist: every listed site remains an assay candidate. The expected count "
-    "assumes an average guide; a guide that is more or less off-target-prone than average "
-    "scales it up or down (shown in the row below the table).")
+    "assumes this guide is about as off-target-prone as a typical benchmark guide; a guide "
+    "that is genuinely more or less prone at its own locus can shift the count substantially "
+    "in either direction, and that prior shift is usually a larger uncertainty than the "
+    "statistical range shown (it is not captured by that range).")
 
 
 def render_risk_card(meta: dict, cfd_scores: Sequence[float],
@@ -149,13 +152,11 @@ def render_risk_card(meta: dict, cfd_scores: Sequence[float],
 
     prev = ""
     if cal is not None and cfd_pt is not None:
-        sc = cal.prevalence_scaled(cfd_pt)
-        lo = min(sc.values()); hi = max(sc.values())
-        prev = (f'<div class="rc-prev">The expected count assumes this guide is about as '
-                f'off-target-prone as a typical guide. If it is less or more off-target-prone '
-                f'than that, the count scales down or up: '
-                f'one-third as prone &rarr; ~{lo:.0f}, '
-                f'three times as prone &rarr; ~{hi:.0f}.</div>')
+        prev = ('<div class="rc-prev">The expected count assumes this guide is about as '
+                'off-target-prone as a typical benchmark guide. A guide that is genuinely '
+                'more or less prone at its own locus can shift this count substantially in '
+                'either direction &mdash; often the largest uncertainty, and not something '
+                'the range above captures.</div>')
 
     warn = ""
     if n_perfect and n_perfect >= 2:

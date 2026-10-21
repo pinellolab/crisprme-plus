@@ -22,8 +22,8 @@ Design (locked after an adversarial statistician review + a bake-off):
   * both scorers are sequence-based / variant-agnostic, so the calibration applies to
     any <=1-gap alignment (reference or variant/ALT allele). Only >=2-gap sites and the
     per-sample carrier-incidence dimension are out of scope (see METHODS).
-  * counts are at the benchmark prevalence; callers present a prevalence-sensitivity
-    (``prevalence_scaled``) as a separate deployment axis.
+  * counts are at the benchmark prevalence; a deployed guide's own prior shift is a
+    separate (and typically larger) axis the report flags qualitatively, not numerically.
 
 numpy only at runtime.
 """
@@ -117,13 +117,6 @@ def expected_counts(
         out.append({"band": label, "lo": lo, "hi": hi, "n_sites": int(m.sum()),
                     "point": point, "lo90": float(lo90), "hi90": float(hi90)})
     return out
-
-
-def prevalence_scaled(point: float, factors=(1 / 3.0, 3.0)) -> Dict[str, float]:
-    """Prevalence-sensitivity: the absolute count scales ~linearly with the guide's
-    own off-target propensity relative to the benchmark average (a separate deployment
-    axis, not a coverage interval)."""
-    return {f"x{f:.2g}": point * f for f in factors}
 
 
 def artifact_summary(scorer: str) -> dict:

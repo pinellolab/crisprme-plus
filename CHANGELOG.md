@@ -15,7 +15,9 @@ and the `release-crisprme` skill.
 - **Top-of-report off-target risk summary (replaces the aggregated specificity score).** The report
   now opens with a per-scorer risk card: for CFD and for CRISPR-Bulge separately (never blended), the
   count of ≤1-gap off-target sites in each score band and a **calibrated expected number of true
-  off-targets** with a coverage-valid 90% range, plus a prevalence-sensitivity row. Estimates come from
+  off-targets** with a coverage-valid 90% range, plus a qualitative note that a deployed guide's own
+  off-target propensity (unknown, and not given a specific multiplier) can shift the count further.
+  Estimates come from
   an isotonic score-to-probability calibration fit leave-one-guide-out on 359 experimentally confirmed
   off-targets across 46 guides (Tsai 2015, Refined TrueOT, Chen 2017, Listgarten 2018; Zenodo
   10.5281/zenodo.10902445); held-out AUPR 0.168 CFD / 0.613 CRISPR-Bulge; the range is a two-level

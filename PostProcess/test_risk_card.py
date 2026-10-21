@@ -47,10 +47,15 @@ class TestRiskCard(unittest.TestCase):
         card, _ = risk_card.render_risk_card({"guide_display": "G"}, _scores(), None, n_perfect=1)
         self.assertNotIn("not unique", card)
 
-    def test_prevalence_row_present_with_calibration(self):
+    def test_prevalence_note_qualitative_no_arbitrary_ratios(self):
+        # the prior-shift caveat is present but carries NO arbitrary ratios/counts
+        # (we do not know a deployed guide's own proneness, so we don't assert x1/3/x3)
         card, _ = risk_card.render_risk_card({"guide_display": "G"}, _scores(), None, n_perfect=0)
         self.assertIn("off-target-prone", card.lower())
-        self.assertIn("one-third as prone", card)
+        self.assertIn("shift this count substantially", card)
+        for banned in ("one-third as prone", "three times as prone",
+                       "one-third", "three times", "&rarr; ~"):
+            self.assertNotIn(banned, card)
 
     def test_graceful_degradation_missing_artifact(self):
         oc.set_artifact_dir("/nonexistent/calibration/dir")

@@ -179,9 +179,9 @@ statistical uncertainty only**: calibration-map uncertainty, guide-selection unc
 and between-guide overdispersion, *among guides resembling the 46-guide benchmark
 support*. It **does not** cover, and **cannot be validated to cover, a novel clinical
 guide**, because the per-guide multiplicative prior shift (§6) is outside the bootstrap.
-**The prevalence-sensitivity axis (×⅓…×3 in §6), not this bootstrap interval, is what
-addresses deployment-guide uncertainty, and even that is a plausibility band, not a
-coverage-calibrated interval.**
+**The deployment-guide prior shift (§6), not this bootstrap interval, is what addresses a
+novel guide's uncertainty; the summary flags it qualitatively rather than with a specific
+multiplier, because an individual guide's own off-target propensity is unknown.**
 
 **Overdispersion φ is weakly estimated and must be read as assumption-driven, not
 data-validated, in the decision band.** φ is estimated per band by method of moments. In
@@ -245,11 +245,15 @@ own locus can be systematically more or less off-target-prone; that multiplicati
 shift **can exceed the calibration margin by one–two orders of magnitude and is the
 dominant source of absolute-count uncertainty**, larger than the entire within-population
 prediction interval of §5. The summary therefore does **not** headline a bare count: it
-shows the within-population statistical range (§5) **and**, on a **separate axis**, an
-explicit prevalence-sensitivity (×⅓…×3). **This ×⅓…×3 band is a plausibility band for
-deployment-guide prior shift, not a coverage-calibrated interval**, and it (not the §5
-bootstrap) is the axis that speaks to a novel deployed guide. The summary also flags a
-guide whose score distribution is far from the 46-guide support as out-of-support.
+shows the within-population statistical range (§5) **and** flags, as a **separate axis**,
+that this prior shift can move the count substantially in either direction and is usually
+the larger uncertainty. **We deliberately do not attach a specific multiplier (an earlier
+draft used an illustrative ×⅓…×3): an individual deployed guide's own off-target
+propensity is unknown, so any specific ratio would imply knowledge we do not have.** The
+caveat is therefore qualitative — it tells the reader the estimate is not a ceiling and
+can be off by an order of magnitude for their guide — and it, not the §5 bootstrap, is the
+axis that speaks to a novel deployed guide. The summary also flags a guide whose score
+distribution is far from the 46-guide support as out-of-support.
 
 ## 7. Worked example (real search: ACTGAAATCTGTAAGCAGGC, NRG, HGDP+1kGP, per-sample)
 
@@ -313,9 +317,11 @@ make):**
   **≈23** (~−18% point; φ_≥0.2 0.806 → 0.62); the headline does not hinge on that one
   cluster.
 
-Prevalence sensitivity on the CFD ≥0.2 estimate (deployment prior-shift axis, §6; a
-plausibility band, not a coverage interval): ×⅓ → ~9, ×3 → ~83. The two scorer estimates
-are different views of the same sites and are **not additive**.
+The deployment prior-shift axis (§6) applies on top of the CFD ≥0.2 estimate: this guide's
+own off-target propensity at its locus is unknown and can move the count substantially in
+either direction — usually a larger uncertainty than the statistical range above. The
+summary states this qualitatively and attaches no specific multiplier. The two scorer
+estimates are different views of the same sites and are **not additive**.
 
 ## 8. Limitations (carried into the report)
 
