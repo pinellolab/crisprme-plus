@@ -131,7 +131,8 @@ and the `release-crisprme` skill.
   across axes); bundled in the SLIM report. New `PostProcess/observed_haplotypes_companion.py`.
 ### Fixed
 - **A samplesID file with a trailing blank line (or any blank/comment/short row) no longer aborts the
-  run.** The per-sample summary and specificity-radar steps (`process_summaries.py`,
+  run.** (Reported independently by @ManuelTgn, PR #105, from a real 4091-sample HGDP+1kGP run.)
+  The per-sample summary and specificity-radar steps (`process_summaries.py`,
   `radar_chart_dict_generator.py`) indexed samplesID columns without guarding against short rows, so an
   ordinary trailing newline in the `--samplesID` file crashed the job with `IndexError: list index out
   of range` at the "Creating images" stage — **after** the full multi-hour search had completed. The
