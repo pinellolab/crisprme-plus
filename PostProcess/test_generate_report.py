@@ -1698,6 +1698,70 @@ class TestGenerateReport(unittest.TestCase):
             os.path.isfile(os.path.join(staging2, "observed_haplotypes.tsv"))
         )
 
+    def test_observed_haplotypes_sidecar_byte_identical_to_full_alt(self):
+        """C1 (perf): the companion output is BYTE-IDENTICAL whether it reads the full
+        *_all_results_with_alternative_alignments.tsv or the make_oh_sidecar-derived
+        *_observed_haplotypes_raw.tsv (alt-origin rows only). The sidecar is a pure
+        speed optimization -- the report re-applies its exact filter + clustering."""
+        import pandas as pd
+        import make_oh_sidecar as mk
+        from generate_report import build_observed_haplotypes_companion
+
+        header = [
+            "Chromosome", "Spacer+PAM",
+            "Start_coordinate_(highest_CFD)", "Strand_(highest_CFD)",
+            "REF/ALT_origin_(highest_CFD)", "Variant_info_genome_(highest_CFD)",
+            "Variant_rsID_(highest_CFD)", "Variant_MAF_(highest_CFD)",
+            "Variant_samples_(highest_CFD)", "Mismatches_(highest_CFD)",
+            "Bulges_(highest_CFD)", "Bulge_type_(highest_CFD)",
+            "CFD_score_(highest_CFD)", "Aligned_protospacer+PAM_ALT_(highest_CFD)",
+            "REF/ALT_origin_(highest_CRISPR_BULGE)",
+            "Variant_info_genome_(highest_CRISPR_BULGE)",
+            "Variant_samples_(highest_CRISPR_BULGE)",
+            "Variant_MAF_(highest_CRISPR_BULGE)",
+            "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+            "Aligned_protospacer+PAM_ALT_(highest_CRISPR_BULGE)",
+        ]
+        # rep (in memory): site-1 haplotype A @400
+        df = pd.DataFrame([
+            ["chrX", _GUIDE, "400", "+", "alt", "chrX_400_T_A", "rs1", "0.01",
+             "HG00096", "2", "0", "NA", "0.90", "ACGTACGTACGTACGTAAAGG",
+             "ref", "NA", "NA", "NA", "0.50", "NA"],
+        ], columns=header)
+        # alt file: site-1 haplotype B @402 (alt) + two ref/ref NOISE rows the sidecar drops
+        alt_rows = [
+            ["chrX", _GUIDE, "402", "+", "alt", "chrX_402_C_G", "rs2", "0.02",
+             "NA18525", "3", "0", "NA", "0.55", "ACGTACGTACGTACGTGGGGG",
+             "ref", "NA", "NA", "NA", "0.40", "NA"],
+            ["chr9", _GUIDE, "77", "+", "ref", "NA", "NA", "NA", "NA", "1", "0", "NA",
+             "0.30", "NA", "ref", "NA", "NA", "NA", "0.20", "NA"],
+            ["chr9", _GUIDE, "78", "+", "ref", "NA", "NA", "NA", "NA", "1", "0", "NA",
+             "0.31", "NA", "ref", "NA", "NA", "NA", "0.21", "NA"],
+        ]
+        rd = os.path.join(self.tmp, "rd_side"); os.makedirs(rd)
+        alt_path = os.path.join(rd, "job_all_results_with_alternative_alignments.tsv")
+        pd.DataFrame(alt_rows, columns=header).to_csv(alt_path, sep="\t", index=False)
+        itsv = os.path.join(rd, "job_integrated_results.tsv")
+
+        # (1) full alt-file path
+        st1 = os.path.join(self.tmp, "st_full"); os.makedirs(st1)
+        build_observed_haplotypes_companion(df.copy(), itsv, rd, st1, merge_window=3)
+        full_out = open(os.path.join(st1, "observed_haplotypes.tsv"), "rb").read()
+
+        # (2) sidecar path: derive the sidecar, remove the alt .tsv so only the sidecar remains
+        side_path = os.path.join(rd, "job_observed_haplotypes_raw.tsv")
+        total, kept = mk.write_sidecar(alt_path, side_path)
+        self.assertEqual((total, kept), (3, 1))   # 3 alt rows -> 1 alt-origin kept
+        os.remove(alt_path)
+        st2 = os.path.join(self.tmp, "st_side"); os.makedirs(st2)
+        build_observed_haplotypes_companion(df.copy(), itsv, rd, st2, merge_window=3)
+        side_out = open(os.path.join(st2, "observed_haplotypes.tsv"), "rb").read()
+
+        # the whole point: identical output, and it really emitted the 2-haplotype site
+        self.assertEqual(full_out, side_out)
+        self.assertIn(b"chrX_400_T_A", full_out)
+        self.assertIn(b"chrX_402_C_G", full_out)
+
     def test_observed_haplotypes_cb_only_varset_carries_geometry(self):
         """A variant haplotype surfaced ONLY on the CRISPR-Bulge axis (its row's CFD
         axis is 'ref') must carry its REAL Mismatches/Bulges/Bulge_type/rsIDs from the
