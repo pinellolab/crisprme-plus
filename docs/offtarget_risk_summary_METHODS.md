@@ -11,9 +11,10 @@ calibration benchmark and a real search; nothing is illustrative unless labelled
 *Revised 2026-10-21, after the sign-off above: the deployment prior-shift caveat was made
 **qualitative** — the illustrative ×⅓…×3 multipliers (and `offtarget_calibration.prevalence_scaled`)
 were removed, because an individual deployed guide's own off-target propensity is unknown and a
-specific ratio would imply knowledge we do not have (§5, §6, §7). This revision only tightens an
-already-signed caveat in the honest direction; **re-confirmation from the three reviewers is
-pending before IND submission.***
+specific ratio would imply knowledge we do not have (§5, §6, §7). The three reviewers
+**(statistician, clinician, genome-editor) RE-CONFIRMED their SIGN on this revision (2026-10-21)**
+after a second-round fix (the §6 magnitude reframed as a cross-guide population envelope, distinct
+from a per-guide multiplier; the §7 interval corrected to [2, 81]).*
 
 ---
 
