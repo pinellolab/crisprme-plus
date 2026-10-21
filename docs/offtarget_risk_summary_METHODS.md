@@ -116,7 +116,7 @@ cluster-dependent, so each number carries a wide **guide-cluster-bootstrap 90% C
 value must always be read with it. The **no-skill AUPR baseline equals the prevalence,
 ≈1.22×10⁻⁴**: CFD's 0.168 and CB's 0.613 are to be read against that floor, not against 0.5. **The two AUPRs are not
 comparable across scorers**: they are computed on different support (CFD 359 positives /
-46 guides vs CB 287 / 40), so the 0.169-vs-0.615 gap partly reflects different positive
+46 guides vs CB 287 / 40), so the 0.168-vs-0.613 gap partly reflects different positive
 sets and held-out populations, not purely discrimination.
 
 AUROC (≈0.97/0.98) is reported only as a footnote: it is prevalence-invariant and does
@@ -247,18 +247,19 @@ on the face of the decision-band rows.
 
 All counts are at the benchmark's average off-target prevalence. A deployed guide at its
 own locus can be systematically more or less off-target-prone; that multiplicative prior
-shift **can exceed the calibration margin by one–two orders of magnitude and is the
-dominant source of absolute-count uncertainty**, larger than the entire within-population
-prediction interval of §5. The summary therefore does **not** headline a bare count: it
-shows the within-population statistical range (§5) **and** flags, as a **separate axis**,
-that this prior shift can move the count substantially in either direction and is usually
-the larger uncertainty. **We deliberately do not attach a specific multiplier (an earlier
-draft used an illustrative ×⅓…×3): an individual deployed guide's own off-target
-propensity is unknown, so any specific ratio would imply knowledge we do not have.** The
-caveat is therefore qualitative — it tells the reader the estimate is not a ceiling and
-can be off by an order of magnitude for their guide — and it, not the §5 bootstrap, is the
-axis that speaks to a novel deployed guide. The summary also flags a guide whose score
-distribution is far from the 46-guide support as out-of-support.
+shift is **the dominant source of absolute-count uncertainty**, larger than the entire
+within-population prediction interval of §5. The summary therefore does **not** headline a
+bare count: it shows the within-population statistical range (§5) **and** flags, as a
+**separate axis**, that this prior shift can move the count substantially in either
+direction and is usually the larger uncertainty. As a population-level scale, the plausible
+envelope of that shift across guides spans roughly an order of magnitude or more in either
+direction — but **we do not assign a specific per-guide multiplier** (an earlier draft used
+an illustrative ×⅓…×3): an individual deployed guide's own propensity is unknown, so a point
+ratio would imply per-guide knowledge we lack. The caveat is therefore qualitative — it
+tells the reader the estimate is not a ceiling and the true count for their guide can lie
+well outside the §5 range — and it, not the §5 bootstrap, is the axis that speaks to a novel
+deployed guide. The summary also flags a guide whose score distribution is far from the
+46-guide support as out-of-support.
 
 ## 7. Worked example (real search: ACTGAAATCTGTAAGCAGGC, NRG, HGDP+1kGP, per-sample)
 
@@ -318,7 +319,7 @@ make):**
   alignments, so **real off-targets can sit entirely outside what CRISPR-Bulge counts.** A
   low CB number means CB did not prioritize these sites, not that the locus is clear.
 - **Dominant-guide (22%) sensitivity.** Dropping the single 79-positive benchmark guide
-  (§2, §5) and refitting on the other 45 moves the CFD ≥0.2 row from ≈28 [2, 69] to
+  (§2, §5) and refitting on the other 45 moves the CFD ≥0.2 row from ≈28 [2, 81] to
   **≈23** (~−18% point; φ_≥0.2 0.806 → 0.62); the headline does not hinge on that one
   cluster.
 
@@ -331,7 +332,7 @@ estimates are different views of the same sites and are **not additive**.
 ## 8. Limitations (carried into the report)
 
 1. **Information ceiling**: 359 positives in 46 guides (one holding 22%). No calibrator
-   manufactures information the scores lack; CFD's AUPR 0.169 (baseline prevalence
+   manufactures information the scores lack; CFD's AUPR 0.168 (baseline prevalence
    1.22×10⁻⁴) makes its bands inherently wide. The honest interval width is the
    deliverable, not a defect.
 2. **Top-band resolution**: the decision band rests on **1–3 guides carrying positives**;
@@ -340,8 +341,9 @@ estimates are different views of the same sites and are **not additive**.
 3. **Generalization**: single-guide deployment coverage is validated per-held-out-guide
    (§5; ≥90% in all shipped bands); a chemically/structurally novel clinical guide at a
    different locus nonetheless remains an extrapolation, addressed by the prevalence axis (§6).
-4. **Prevalence transfer** (§6) dominates the absolute count, by one–two orders of
-   magnitude, larger than the §5 interval.
+4. **Prevalence transfer** (§6) dominates the absolute count — across guides the plausible
+   envelope spans roughly an order of magnitude or more — and is larger than the §5 interval;
+   no specific per-guide multiplier is assigned (the guide's own propensity is unknown).
 5. **Support and assay floor**: calibration applies to any ≤1-gap alignment (0–1 bulge,
    any number of in-domain mismatches), **reference or variant/ALT allele**, since the
    scorers are sequence-based (§1); only **≥2-bulge** sites and the **per-sample
