@@ -45,6 +45,22 @@ and the `release-crisprme` skill.
   `1000G2021` → `HGDP1kGP` references.
 
 ### Fixed
+- **A blank line in a `--samplesID` panel no longer crashes the post-analysis.** The pipeline
+  concatenates the panel files referenced by `--samplesID` into the run's `.sampleID.txt` with
+  `grep -v '#'`, which drops the header but KEEPS any empty line a panel ended with -- and a
+  trailing newline is invisible, so a hand-built panel plausibly carries one. The three consumers
+  of that file then disagreed: `process_summaries.py` skipped the blank line (so the summary step
+  passed and the run looked healthy), while `radar_chart_dict_generator.py` split it to `['']` and
+  died on `split[2]` with `IndexError: list index out of range` -- once per selection criterion
+  (CFD / CRISPR-Bulge / fewest) -- and `associateSample.loadSampleAssociation` would have hit the
+  same line later in the web results page. Because that is the *final* post-analysis step, a
+  one-byte formatting artifact failed a search only after the full multi-hour run had completed,
+  and the caller's fatal-error branch then cleared the results (that error handling is unchanged --
+  the blank line simply no longer reaches it). Pre-flight validation never flagged it either:
+  `validate_inputs` deliberately skips blank lines when resolving sample IDs, so it passed a file
+  the pipeline itself could not read. Fixed at both ends -- the concatenation now filters
+  blank/whitespace-only lines (`| awk 'NF'`) so no consumer can see one, and the two unguarded
+  consumers skip them regardless, matching the guard `process_summaries.py` already had.
 - **Indel-derived off-targets now get a `PAM_creation` value (#94, Ann Cirincione).** The field was
   only ever filled on the SNP path, so a PAM created by an insertion/deletion surfaced as `NA` even
   when it was the top-scoring site. The indel analyzer now mirrors the SNP predicate (if any reference
