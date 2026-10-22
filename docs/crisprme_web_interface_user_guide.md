@@ -569,7 +569,7 @@ the entire search. For each guide RNA submitted, the table shows:
   as the number of mismatches increases, the score declines non-linearly. Comparisons
   between searches that used different mismatch or bulge thresholds, or different
   variant datasets, should therefore be made with caution. The downloaded report no longer
-  shows a single aggregated specificity score; its top-of-report risk card instead reports,
+  shows a single aggregated specificity score; its top-of-report **off-target risk summary** (a calibrated risk card at the top of the report, distinct from the per-sample **Personal Risk Cards** tab) instead reports,
   per scorer, the count of ≤1-gap off-target sites per score band and a calibrated expected
   number of true off-targets with a 90% range (see `docs/offtarget_risk_summary_METHODS.md`).
 - **CRISPR-Bulge score** — a deep-learning off-target activity score (Yaish &
@@ -748,8 +748,10 @@ A quick reference for the terms and columns in the **Custom Ranking** tab and th
 **Scores**
 - **CFD** (0–1) — Doench-2016 Cutting-Frequency Determination; higher = more likely cut. The
   primary score for the mismatch-only, low-edit regime.
-- **CRISPR-Bulge** (0–1) — a deep-learning score (Yaish & Orenstein, NAR 2024) calibrated for
-  bulge-containing off-targets; use it to triage high-CFD bulge sites.
+- **CRISPR-Bulge** (0–1) — a deep-learning score (Yaish & Orenstein, NAR 2024) that natively
+  scores **single-bulge (≤1)** off-targets and shows a dash (N/A) at ≥2 bulges; use it to triage
+  high-CFD single-bulge sites. Calibrated expected-true counts are in the top-of-report
+  off-target risk summary.
 
 **Variant co-occurrence labels** (for off-targets that require a nearby variant)
 - **CONFIRMED** — the variants that create the off-target are proven to sit **in cis on one

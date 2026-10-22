@@ -51,12 +51,17 @@
           carriers and joint allele frequencies.</li>
         <li><strong>Two complementary scores</strong> &mdash; CFD and the <strong>CRISPR-Bulge</strong>
           machine-learning model (Yaish &amp; Orenstein, <em>NAR</em> 2024), the latter more accurate
-          on bulges.</li>
+          on <strong>single-bulge</strong> off-targets (it does not score &ge;2-bulge sites).</li>
         <li><strong>Cancer-gene flags</strong> &mdash; off-targets in cancer-driver genes are flagged
           via <strong>IntOGen</strong> (on by default); <strong>COSMIC</strong> is licence-gated and
           opt-in &mdash; alongside ENCODE SCREEN, GENCODE and DHS annotations and a
           <strong>closest-gene</strong> annotation (nearest gene + signed distance) on every
           off-target.</li>
+        <li><strong>A calibrated off-target risk summary</strong> &mdash; the report opens with a
+          per-scorer card giving candidate counts per score band <strong>and</strong> a calibrated
+          <strong>expected number of true off-targets</strong> with a 90% range (isotonic calibration
+          on 359 experimentally confirmed off-targets, held out per guide).
+          <a href="example-report.html">See an example report &rarr;</a></li>
         <li><strong>Personal-genome search</strong> &mdash; scan an individual's own diploid
           <strong>assembly</strong> directly for off-targets.</li>
         <li><strong>A shareable HTML report</strong> &mdash; ranked, annotated off-target tables you
@@ -98,6 +103,7 @@
       </p>
       <p class="cta-row">
         <a class="button" href="#run-heading">Get started &darr;</a>
+        <a class="secondary" href="example-report.html">See an example report &rarr;</a>
         <a class="secondary" href="https://github.com/pinellolab/crisprme-plus">View on GitHub &rarr;</a>
       </p>
     </section>

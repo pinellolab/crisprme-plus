@@ -166,8 +166,12 @@ def render_risk_card(meta: dict, cfd_scores: Sequence[float],
         warn = (f'<div class="rc-warn">⚠ On-target is not unique: {int(n_perfect)} '
                 f'perfect (0-mismatch, 0-gap) matches.</div>')
 
-    note = ('<div class="rc-note">The two scorers are different views of the same sites, '
-            'not additive. '
+    note = ('<div class="rc-note">'
+            '<b>Expected true</b> estimates how many of the listed sites are real off-targets '
+            '&mdash; it is not a shortlist; every listed site stays an assay candidate (see the '
+            'validation panel). Sites needing &ge;2 bulges show &ldquo;&ndash;&rdquo; (not scored, '
+            'not no-risk) and are kept but demoted there. The two scorers are different views of '
+            'the same sites, not additive. '
             f'<a class="rc-open" href="#{MODAL_ID}">How to read this →</a></div>')
 
     card = (
@@ -210,6 +214,12 @@ def _render_modal(cal) -> str:
                 '<table class="rc-tbl"><tr class="rc-hdr"><td>scorer</td>'
                 '<td>held-out AUPR (90% CI)</td><td>≥0.2 single-guide coverage</td></tr>'
                 f'{rows}</table>')
+    aupr_note = (
+        '<p style="font-size:0.85em;color:#64748b">No-skill AUPR baseline = the off-target '
+        'prevalence ≈ 1.22×10⁻⁴; both scorers are far above it. The two AUPRs sit on different '
+        'held-out benchmark sets (CFD 359 sites / 46 guides, CRISPR-Bulge 287 / 40) and are '
+        'not directly comparable across scorers.</p>'
+        if summary_html else "")
     pr = _pr_curve_uri()
     pr_html = (f'<div class="rc-pr"><img alt="Precision-recall of each scorer" src="{pr}" '
                f'style="max-width:100%"></div>') if pr else ""
@@ -220,7 +230,7 @@ def _render_modal(cal) -> str:
         '<div class="rc-modal-head">How to read the off-target risk</div>'
         '<div class="rc-modal-body">'
         f'<p>{_READ}</p>'
-        f'{summary_html}'
+        f'{summary_html}{aupr_note}'
         f'{pr_html}'
         f'<p><b>What “expected true” means.</b> {_ISOTONIC}</p>'
         '<p style="color:#64748b">Full method: METHODS § off-target risk summary.</p>'
