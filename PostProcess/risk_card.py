@@ -26,7 +26,7 @@ MODAL_ID = "risk-card-modal"
 # report bands the card surfaces (label in artifact -> display). Order high->low.
 _CFD_ROWS = [("0.5-1", "CFD ≥ 0.5"), ("0.2-0.5", "CFD 0.2–0.5"), ("ge0.2", "CFD ≥ 0.2")]
 _CB_ROWS = [("0.5-1", "CRISPR-Bulge ≥ 0.5"), ("0.2-0.5", "CRISPR-Bulge 0.2–0.5"),
-            ("ge0.2", "CRISPR-Bulge ≥ 0.2")]
+            ("ge0.2", "CRISPR-Bulge ≥ 0.2"), ("gt0", "CRISPR-Bulge > 0 (sensitive)")]
 _MIN_BAND = 0.2  # lowest score edge the card displays; scores below are pre-filtered out
 
 
@@ -72,6 +72,8 @@ def _scorer_block(cal, scorer, scores, row_spec):
                 n = int((a >= 0.5).sum()) if a.size else 0
             elif label == "0.2-0.5":
                 n = int(((a >= 0.2) & (a < 0.5)).sum()) if a.size else 0
+            elif label == "gt0":
+                n = int((a > 0).sum()) if a.size else 0
             else:
                 n = int((a >= 0.2).sum()) if a.size else 0
             rows.append(f'<tr><td>{_esc(disp)}</td><td>{n:,}</td><td>&mdash;</td></tr>')
@@ -234,6 +236,15 @@ def _render_modal(cal) -> str:
         f'<p>{_READ}</p>'
         f'{summary_html}{aupr_note}'
         f'{pr_html}'
+        '<p><b>Choosing a threshold.</b> The two scores behave differently: CFD is defensible only '
+        'off-bulge (it cannot rank bulge sites), and CRISPR-Bulge &mdash; the stronger ranker &mdash; '
+        'has a hard recall ceiling (about 92%: it scores a minority of real off-targets as exactly 0, '
+        'so no threshold between &ldquo;&gt; 0&rdquo; and the whole genome gains recall). The recommended '
+        'default panel is therefore not one cutoff but a union &mdash; <b>every CRISPR-Bulge-flagged '
+        'site (score &gt; 0, the &ldquo;sensitive&rdquo; row) plus the high-CFD (&ge; 0.2) no-bulge '
+        'sites CRISPR-Bulge misses, plus perfect/near-perfect matches and functional / cancer-gene '
+        'hits</b> &mdash; sized to the assay budget. Sites needing &ge; 2 bulges are kept but demoted '
+        '(uncalibrated for both scores). See the validation panel (Section 4) and METHODS &sect;3.5.</p>'
         f'<p><b>What “expected true” means.</b> {_ISOTONIC}</p>'
         '<p style="color:#64748b">Full method: METHODS § off-target risk summary.</p>'
         '</div></div></div>')

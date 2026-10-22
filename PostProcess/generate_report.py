@@ -2980,7 +2980,14 @@ def render_validation_panel(
         "(&ge; 0.5, &ge; 0.2); each gives the all-gaps count with the &le;1-gap calibrated subset "
         "(the card&rsquo;s domain) in parentheses, so the two sections reconcile at one threshold. "
         f"A wider CFD &ge; {_wide_t} net ({_wide_n:,} sites) is included in the bundled "
-        "downloads.")
+        "downloads. <strong>Recommended default panel:</strong> validate every "
+        "CRISPR-Bulge&ndash;flagged site (score &gt; 0 &mdash; the sensitive operating point; "
+        "CRISPR-Bulge is the stronger ranker but tops out near 92&#37; recall), plus the "
+        "high-CFD (&ge; 0.2) no-bulge sites it misses, plus the perfect/near-perfect and "
+        "functional / cancer-gene hits above &mdash; sized to your assay budget. CFD cannot "
+        "rank bulge sites, so bulge candidates are carried by CRISPR-Bulge, and &ge;2-bulge "
+        "sites stay listed but demoted (uncalibrated for both scores). See the risk card and "
+        "METHODS &sect;3.5.")
     return f"""
 <p class="caption">{_bridge}</p>
 <div class="panel-grid">
