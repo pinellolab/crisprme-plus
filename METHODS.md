@@ -1,7 +1,7 @@
 # CRISPRme+ — Methods
 
 This document describes the methods introduced in **CRISPRme+** (the 2.3 through
-2.7.x line; current shipped release 2.7.9), intended as a self-contained technical reference and as source material
+2.7.x line; current shipped release 2.7.10), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
@@ -112,7 +112,7 @@ does millions of registry lookups (one per candidate off-target window, scattere
 chromosome), and measurement showed raw lookups are **~2× faster** than the compressed path
 even with a warm cache. All shipped indexes (the genotyped 1000 Genomes + HGDP and the
 sites-only mega) use this raw format, for consistency and lookup speed ("speed over space").
-The registry has shipped raw since 2.5.3 (still raw as of 2.7.9).
+The registry has shipped raw since 2.5.3 (still raw as of 2.7.10).
 
 **Optional `zlib` compression.** A block-compressed format is available for
 space-constrained storage. Each section is partitioned into 4,096-record blocks,
@@ -958,7 +958,7 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.7.x line (CRISPRme+ 2.7.9) (default SNP+indel co-occurrence, two-pass population-level
+methods as of the 2.7.x line (CRISPRme+ 2.7.10) (default SNP+indel co-occurrence, two-pass population-level
 analysis with opt-in `--per-sample` genotype resolution, and the CRISPR-Bulge ML off-target
 scorer in a dedicated conda environment with a `cpu|cuda|metal` compute backend); see the
 CHANGELOG and the referenced source files for implementation detail.*

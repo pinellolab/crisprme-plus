@@ -11,6 +11,8 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.10] - 2026-10-22
+
 ### Added
 - **Top-of-report off-target risk summary (replaces the aggregated specificity score).** The report
   now opens with a per-scorer risk card: for CFD and for CRISPR-Bulge separately (never blended), the
@@ -33,15 +35,42 @@ and the `release-crisprme` skill.
   compact page. Full method, provenance, and the statistician/clinician/genome-editor sign-off in
   `docs/offtarget_risk_summary_METHODS.md`.
 
-### Fixed
-- **Observed-haplotypes companion no longer blows up memory on dense per-sample searches.**
-  The build loaded the entire `all_results_with_alternative_alignments.tsv` (30+ GB on a
-  dense run) and materialized every row, exploding to ~140 GB. It now streams the file in
-  200k-row chunks and, for the slim report, keeps only rows near the top-1000 displayed
-  sites (whose per-site modals are the only consumers of the haplotype map), with a
-  vectorized pre-filter so the giant file is scanned, not materialized. Peak memory drops to
-  tens of GB and the pass is ~2.5x faster; the full all-sites companion is built only under
-  `--report-full`. Output is byte-identical to the unscoped build for the displayed sites.
+- **Own implementation of the CFD score** (Doench et al., *Nat. Biotechnol.* 2016) in
+  `PostProcess/cfd_score.py`, with the mismatch and PAM penalty tables serialized as reviewable JSON
+  (`cfd_mismatch_scores.json`, 392 keys; `cfd_pam_scores.json`, 16 keys) and a committed generator
+  (`scripts/generate_cfd_tables.py`, with a `--check` round-trip mode). The module reproduces the
+  existing CFD values bit-for-bit (`test_cfd_score` checks raw IEEE-754 equality against the current
+  scorer across the mismatch/PAM/gap/IUPAC and T→U paths); it is not yet wired into the production
+  scoring path, which is unchanged in this release.
+
+- **`crisprme.py targets-scoring` — score a supplied LIST of off-target sites** (no genome search).
+  Takes Cas-OFFinder output (`--casoffinder`, schema auto-detected) or a generic TSV with an explicit
+  column map (`--columns guide=..,dna=..,chrom=..,pos=..`) and annotates each site with the **same**
+  CFD and CRISPR-Bulge calculations a normal CRISPRme+ report uses (`calc_cfd` is pinned byte-identical
+  to the canonical copies by `test_calc_cfd_twins_agree`; CRISPR-Bulge via the `cbulge` env, `-1.0`
+  when absent). With `--index-path` it adds a per-site **variant carrier overlay**: the variants
+  overlapping each site's protospacer+PAM window and, per population dataset, their allele frequency +
+  carrier count (read from the index's `Dictionaries/registry_<vcf>` tier). Enables scoring
+  externally-nominated sites (e.g. non-canonical-PAM hits) without building a new index. New module
+  `PostProcess/targets_scoring.py` + `PostProcess/test_targets_scoring.py` (wired into unit-tests CI).
+
+- **Full-report opt-in surfaced on every entry point.** The slim report (above) can now be upgraded to
+  the complete self-contained bundle from anywhere: `complete-search --report-full` makes the
+  automatically-generated end-of-search report full (threaded via `CRISPRME_REPORT_FULL` → the shell's
+  `generate_report.py --report-full`), the standalone `generate-report` CLI gained the `--report-full`
+  flag (its `main()` now parses and threads it — previously only the Python `build_report(report_full=…)`
+  API honored it), and the **web submission page** gained a *Report options → "Include the full report"*
+  checkbox (present on every search tab, including Personal assembly) that sets the same env var. New
+  `test_cli_main_report_full_flag_threads_to_bundle` covers the CLI→bundle path.
+
+- **`observed_haplotypes.tsv` report companion — every in-budget haplotype per multi-haplotype site.**
+  The per-cluster representative in `integrated_results` necessarily collapses a dense/multi-haplotype
+  site to ONE headline row; this bundled companion lists **each** distinct observed variant haplotype
+  at any site with ≥2 of them — its variant set, rsIDs, mm/bulges, **both** scores (CFD **and**
+  CRISPR-Bulge), origin, AF, and named carriers — so a reviewer sees the full set a site contributes
+  (serving the CFD-ranked **and** the CRISPR-Bulge-ranked views). Report-layer only (built in
+  `generate_report` from the representatives + the alt-alignments file, merged per `(site, variant-set)`
+  across axes); bundled in the SLIM report. New `PostProcess/observed_haplotypes_companion.py`.
 
 ### Changed
 - **Performance: observed-haplotypes sidecar cuts the per-sample report render ~35%.** The report's
@@ -54,6 +83,7 @@ and the `release-crisprme` skill.
   per-row filter + clustering) with the prioritized top-1000 unchanged. A small zipped sidecar is kept
   after cleanup so standalone `generate-report` re-renders stay fast; older result dirs with no sidecar
   fall back to the full alt scan. New `test_make_oh_sidecar.py` + a byte-identity guard.
+
 - **Recommended validation panel: domain-aware CFD hard-include with ≥2-bulge demotion.** The panel
   now hard-includes a site on CFD only within CFD's calibrated domain (CFD ≥ 0.5 **at ≤1 bulge**). A
   site that needs **≥2 bulges** and is high on CFD alone — where CFD is an uncalibrated over-call and
@@ -65,6 +95,7 @@ and the `release-crisprme` skill.
   (0 mismatches, ≥1 bulge) is unchanged. The Section-7 CFD glossary tooltip and the in-report Methods
   note were updated to match, with regression tests pinning both the saturated-regime demote behaviour
   and the glossary wording.
+
 - **`complete-search` now cleans up bulky intermediate files by default** (new `--keep-intermediates`
   to retain them). Once the finalized `*_integrated_results.tsv` and the report are produced, the
   pre-integration working files — the merged `bestMerge`/`altMerge` tables, the raw
@@ -75,6 +106,7 @@ and the `release-crisprme` skill.
   `generate-report --report-full` can still rebuild those bundles), the per-guide/per-sample
   summaries, and the sqlite `.db` web results-page index (removing it would break browsing the job in
   the web interface). Gated by `CRISPRME_KEEP_INTERMEDIATES`.
+
 - **`assembly-search` coordinate lifting now uses the `pyliftover` library** instead of an external
   liftOver binary. `pyliftover` replaces `ucsc-liftover` in `environment.yml`/`Dockerfile`, so the
   image no longer carries that binary and `assembly-search` works out of the box. Point-lifting
@@ -82,6 +114,7 @@ and the `release-crisprme` skill.
   chain, or none, is left unmapped); chain files are still passed explicitly via `--chain-paternal` /
   `--chain-maternal` (nothing is fetched). Added a `THIRD_PARTY.md` attribution file for bundled
   components (CRISPR-Bulge, impg, pyliftover — all MIT).
+
 - **The shareable report (`report.zip`) is now SLIM by default.** It bundles the human-facing layer
   — `report.html`, the curated top-1000 (both scorers), the validation panel, the per-tier CFD/
   CRISPR-Bulge/mmb subsets, the indel+SNP co-occurrence, and the run manifest/Params — which stays a
@@ -92,6 +125,7 @@ and the `release-crisprme` skill.
   5+1+1 `--per-sample` run this took the default report from **274 MB → ~5 MB**; `--report-full`
   reproduces the complete bundle. The slim report degrades its HTML gracefully (no download links to
   the excluded files). `crisprme.py generate-report --report-full` opts into the full bundle.
+
 - **The slim report now size-gates the observed-haplotypes companion.** The
   `observed_haplotypes.tsv` sidecar (one row per distinct observed variant haplotype at every
   multi-haplotype off-target site) is tiny on a normal run and keeps shipping in the slim bundle; on an
@@ -105,41 +139,47 @@ and the `release-crisprme` skill.
   degrade (the per-site haplotype table and a short "available via `--report-full` / in the result
   directory" note remain) when the companion is not in the slim bundle.
 
-### Added
-- **Own implementation of the CFD score** (Doench et al., *Nat. Biotechnol.* 2016) in
-  `PostProcess/cfd_score.py`, with the mismatch and PAM penalty tables serialized as reviewable JSON
-  (`cfd_mismatch_scores.json`, 392 keys; `cfd_pam_scores.json`, 16 keys) and a committed generator
-  (`scripts/generate_cfd_tables.py`, with a `--check` round-trip mode). The module reproduces the
-  existing CFD values bit-for-bit (`test_cfd_score` checks raw IEEE-754 equality against the current
-  scorer across the mismatch/PAM/gap/IUPAC and T→U paths); it is not yet wired into the production
-  scoring path, which is unchanged in this release.
-- **`crisprme.py targets-scoring` — score a supplied LIST of off-target sites** (no genome search).
-  Takes Cas-OFFinder output (`--casoffinder`, schema auto-detected) or a generic TSV with an explicit
-  column map (`--columns guide=..,dna=..,chrom=..,pos=..`) and annotates each site with the **same**
-  CFD and CRISPR-Bulge calculations a normal CRISPRme+ report uses (`calc_cfd` is pinned byte-identical
-  to the canonical copies by `test_calc_cfd_twins_agree`; CRISPR-Bulge via the `cbulge` env, `-1.0`
-  when absent). With `--index-path` it adds a per-site **variant carrier overlay**: the variants
-  overlapping each site's protospacer+PAM window and, per population dataset, their allele frequency +
-  carrier count (read from the index's `Dictionaries/registry_<vcf>` tier). Enables scoring
-  externally-nominated sites (e.g. non-canonical-PAM hits) without building a new index. New module
-  `PostProcess/targets_scoring.py` + `PostProcess/test_targets_scoring.py` (wired into unit-tests CI).
-- **Full-report opt-in surfaced on every entry point.** The slim report (above) can now be upgraded to
-  the complete self-contained bundle from anywhere: `complete-search --report-full` makes the
-  automatically-generated end-of-search report full (threaded via `CRISPRME_REPORT_FULL` → the shell's
-  `generate_report.py --report-full`), the standalone `generate-report` CLI gained the `--report-full`
-  flag (its `main()` now parses and threads it — previously only the Python `build_report(report_full=…)`
-  API honored it), and the **web submission page** gained a *Report options → "Include the full report"*
-  checkbox (present on every search tab, including Personal assembly) that sets the same env var. New
-  `test_cli_main_report_full_flag_threads_to_bundle` covers the CLI→bundle path.
-- **`observed_haplotypes.tsv` report companion — every in-budget haplotype per multi-haplotype site.**
-  The per-cluster representative in `integrated_results` necessarily collapses a dense/multi-haplotype
-  site to ONE headline row; this bundled companion lists **each** distinct observed variant haplotype
-  at any site with ≥2 of them — its variant set, rsIDs, mm/bulges, **both** scores (CFD **and**
-  CRISPR-Bulge), origin, AF, and named carriers — so a reviewer sees the full set a site contributes
-  (serving the CFD-ranked **and** the CRISPR-Bulge-ranked views). Report-layer only (built in
-  `generate_report` from the representatives + the alt-alignments file, merged per `(site, variant-set)`
-  across axes); bundled in the SLIM report. New `PostProcess/observed_haplotypes_companion.py`.
+- **Web Contacts page:** added Ann Cirincione under the Pinello Lab, and reworded "Please send any
+  comments to Luca Pinello only" → "…to Luca Pinello" (dropped "only").
+
+- **Web form hides the "Analysis mode" selector for a personal-assembly search.** Population-level vs
+  per-sample resolves genotypes across a multi-sample variant *panel*; a personal-assembly search
+  works on one individual's own two haplotypes (no panel to resolve), so the control is irrelevant
+  there. The tab-toggle callback now hides the Analysis-mode block when the Personal-assembly tab is
+  active and restores it for the reference-genome tab.
+
+- **Web form shows an annotation note.** The per-search annotation selector was removed earlier, which
+  obscured that searches are still annotated by default. The form now carries a short note that results
+  are annotated with the functional regions enabled in Settings → Annotations (DHS, ENCODE SCREEN cCREs,
+  GENCODE, COSMIC by default) plus the closest gene, and that tracks can be toggled — or a custom
+  annotation added — there. (No new control; discoverability only.)
+
+- **Install-walkthrough corrections (#92, Ann Cirincione).** Cluster SSH port-forwarding guidance
+  (the server binds `0.0.0.0` with no auth; both tunnel forms given inline); per-OS Docker memory
+  (macOS slider / Windows `.wslconfig` / Linux no cap); and a **backwards `--max-total-edits` rule** —
+  the docs said it "must be ≥ mm+bDNA+bRNA," which is actually how you *disable* the cap (default is 6
+  = 4mm+1DNA+1RNA; setting it below the sum prunes bulged sites, by design). Plus reconciled the
+  reference-only disk figure (~25 GB), de-hardcoded a `:v2.7.9` pin, and refreshed stale
+  `1000G2021` → `HGDP1kGP` references.
+
+### Removed
+- **Removed the stale "odd-length degenerate PAM + bulges can crash the search engine (issue #105)"
+  runtime warning.** It fired on the *default* PAM (`NRG` is odd-length and carries the
+  partially-degenerate `R`), so it cried wolf on essentially every default search — about a CRISPRitz
+  C++ crash that was fixed upstream. CRISPRme+ hard-pins CRISPRitz 2.9.0 on every install surface
+  (Docker `crispritz_ref=v2.9.0`, `install_from_source.sh`, Bioconda `crispritz >=2.9.0`), so no
+  supported install can run a vulnerable engine. The `docs/` note is reworded to historical.
+
 ### Fixed
+- **Observed-haplotypes companion no longer blows up memory on dense per-sample searches.**
+  The build loaded the entire `all_results_with_alternative_alignments.tsv` (30+ GB on a
+  dense run) and materialized every row, exploding to ~140 GB. It now streams the file in
+  200k-row chunks and, for the slim report, keeps only rows near the top-1000 displayed
+  sites (whose per-site modals are the only consumers of the haplotype map), with a
+  vectorized pre-filter so the giant file is scanned, not materialized. Peak memory drops to
+  tens of GB and the pass is ~2.5x faster; the full all-sites companion is built only under
+  `--report-full`. Output is byte-identical to the unscoped build for the displayed sites.
+
 - **A samplesID file with a trailing blank line (or any blank/comment/short row) no longer aborts the
   run.** (Reported independently by @ManuelTgn, PR #105, from a real 4091-sample HGDP+1kGP run.)
   The per-sample summary and specificity-radar steps (`process_summaries.py`,
@@ -177,6 +217,7 @@ and the `release-crisprme` skill.
   loci a different — still real — observed haplotype becomes the cluster representative (no score
   change; this removes a pre-existing chimeric over-count where a worst-case indel alignment had used a
   cis SNP that most of its reported carriers do not carry).
+
 - **`--per-sample` no longer over-states dense-window off-targets (the "chimera" over-call).** In a
   high-variant-density window (>`CRISPRME_IUPAC_CAP` co-located variants) the per-sample path emitted a
   synthetic **cross-sample** worst-case representative whose carrier roster was the UNION of different
@@ -194,42 +235,23 @@ and the `release-crisprme` skill.
   scoring change: `CFD_alt` and all CFD arithmetic are byte-identical to 2.7.9 (validated on a
   genome-wide run — CFD identical on 189,119/189,132 shared alignments; the differing rows are exactly
   these double-bulge dense-window sites whose chimera representative was replaced by a real-carrier one).
+
 - **Per-cluster representative tie-break → most carriers.** Among off-targets that tie EXACTLY on
   score and severity, the representative shown in `integrated_results` now prefers the haplotype carried
   by the most individuals (applies to the CFD, fewest-mm+b, and CRISPR-Bulge passes); a no-op for the
   unique-best ~99.7% of clusters.
+
 - **CRISPR-Bulge aggregate specificity sanitized.** The CRISPR-Bulge `-1.0` out-of-domain sentinel
   (sites with ≥2 bulges, outside the model's domain) was summed into the aggregate `100/(100+Σ)`,
   driving the CRISPR-Bulge specificity negative; it is now excluded from the sum (no-op for CFD).
 
-### Changed
-- **Web Contacts page:** added Ann Cirincione under the Pinello Lab, and reworded "Please send any
-  comments to Luca Pinello only" → "…to Luca Pinello" (dropped "only").
-- **Web form hides the "Analysis mode" selector for a personal-assembly search.** Population-level vs
-  per-sample resolves genotypes across a multi-sample variant *panel*; a personal-assembly search
-  works on one individual's own two haplotypes (no panel to resolve), so the control is irrelevant
-  there. The tab-toggle callback now hides the Analysis-mode block when the Personal-assembly tab is
-  active and restores it for the reference-genome tab.
-- **Web form shows an annotation note.** The per-search annotation selector was removed earlier, which
-  obscured that searches are still annotated by default. The form now carries a short note that results
-  are annotated with the functional regions enabled in Settings → Annotations (DHS, ENCODE SCREEN cCREs,
-  GENCODE, COSMIC by default) plus the closest gene, and that tracks can be toggled — or a custom
-  annotation added — there. (No new control; discoverability only.)
-- **Install-walkthrough corrections (#92, Ann Cirincione).** Cluster SSH port-forwarding guidance
-  (the server binds `0.0.0.0` with no auth; both tunnel forms given inline); per-OS Docker memory
-  (macOS slider / Windows `.wslconfig` / Linux no cap); and a **backwards `--max-total-edits` rule** —
-  the docs said it "must be ≥ mm+bDNA+bRNA," which is actually how you *disable* the cap (default is 6
-  = 4mm+1DNA+1RNA; setting it below the sum prunes bulged sites, by design). Plus reconciled the
-  reference-only disk figure (~25 GB), de-hardcoded a `:v2.7.9` pin, and refreshed stale
-  `1000G2021` → `HGDP1kGP` references.
-
-### Fixed
 - **Indel-derived off-targets now get a `PAM_creation` value (#94, Ann Cirincione).** The field was
   only ever filled on the SNP path, so a PAM created by an insertion/deletion surfaced as `NA` even
   when it was the top-scoring site. The indel analyzer now mirrors the SNP predicate (if any reference
   base in the PAM window is incompatible with the motif, the variant created the PAM; store the ALT
   PAM). Writes the existing `PAM_gen` slot in place (no column shift); skipped when the window holds an
   IUPAC-undefined character (e.g. a bulge `-`). `calc_cfd` untouched.
+
 - **`download --what index` no-ops on a *complete* install but still heals a partial one (#93, Ann
   Cirincione).** Re-running the documented download re-fetched the full tarball (~8.86 GB). It now
   skips the fetch when the install is complete, so a repeat costs no network call — but only when
@@ -237,16 +259,19 @@ and the `release-crisprme` skill.
   `--no-genotypes`) its Tier-1 genotype store. Anything missing falls through to re-fetch just the
   absent piece, preserving the documented "no variant off-targets / Samples degraded → re-run
   download" recovery (and the `--no-genotypes`-then-add-genotypes workflow).
+
 - **No more spurious `BiopythonWarning` at CLI startup.** `dash-bootstrap-components`' sdist drops a
   `pyproject.toml` into `site-packages/`, which Biopython misreads as "importing from a source tree"
   and warns about on every `crisprme.py` invocation. The Docker image already strips that stray file;
   conda/source installs did not, so `crisprme.py --version` printed the warning. Now silenced in two
   places: `crisprme.py` filters that one message before importing Bio (covers any install), and
   `install_from_source.sh` removes the stray file (matching the Dockerfile).
+
 - **Web dropdown options no longer overlap for long labels.** The variant-index dropdown's long entries
   overflowed their fixed row height and collided with the next entry after repeated opens. The
   `variant-dataset` dropdown now reserves room for wrapped labels (`optionHeight`), and a CSS rule lets
   option text wrap and centers it within the row.
+
 - **`targets-scoring` DNA-bulge CFD** now matches CRISPRme's reported CFD convention for in-place
   (Cas-OFFinder / report-style) alignments. The first cut front-trimmed the first `bulge_size`
   columns (a crispritz raw-format assumption), which misaligns an in-place gap that isn't at the
@@ -256,28 +281,22 @@ and the `release-crisprme` skill.
   bulged-base-excluded value (CRISPRme's internal DNA-bulge gap placement isn't recoverable from an
   in-place alignment, so it stays a documented caveat). Updated `test_dna_bulge_delete_gap`.
 
-### Removed
-- **Removed the stale "odd-length degenerate PAM + bulges can crash the search engine (issue #105)"
-  runtime warning.** It fired on the *default* PAM (`NRG` is odd-length and carries the
-  partially-degenerate `R`), so it cried wolf on essentially every default search — about a CRISPRitz
-  C++ crash that was fixed upstream. CRISPRme+ hard-pins CRISPRitz 2.9.0 on every install surface
-  (Docker `crispritz_ref=v2.9.0`, `install_from_source.sh`, Bioconda `crispritz >=2.9.0`), so no
-  supported install can run a vulnerable engine. The `docs/` note is reworded to historical.
-
-### Fixed
 - **Web "Load Example" no longer prunes bulged off-targets.** The Load Example button set the
   "Maximum edits" total-edit cap to 4 while loading 4 mm + 1 DNA + 1 RNA bulge, so `--max-total-edits=4`
   silently dropped every 4-mismatch-plus-bulge site (bulges had no headroom at the full mismatch
   budget). The cap is now 6 (= mm + bDNA + bRNA, the recommended default; matches the slider's own
   default and the CLI), and two inconsistent fallback defaults (5, 4) were aligned to 6. +1 regression
   test (`test/web/test_max_edits_default.py`, wired into web-e2e).
+
 - **Web low-memory banner no longer nags a correctly-provisioned host.** A host set to the
   recommended ~64 GB reports a few GB less inside a container (GiB-vs-GB + VM reservation), so the
   banner fired even when Docker was set to 64 GB. Added a detection margin (`_DETECT_MARGIN_GB`), so
   the warning only fires for a clearly under-provisioned host; +1 unit test.
+
 - **Removed the stale "download the offline version" note** from the web form footer. It was a
   hosted-web-service-era leftover — now that the service is retired, a user running the local web
   interface already *is* the full/offline version, so the note only caused confusion.
+
 
 ## [2.7.9] - 2026-10-11
 
@@ -2410,7 +2429,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.9...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.10...HEAD
+[2.7.10]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.10
 [2.7.9]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.9
 [2.7.8]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.8
 [2.7.7]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.7

@@ -1,4 +1,4 @@
-# CRISPRme+ 2.7.9 runtime environment (Python 3.11), for installing FROM SOURCE
+# CRISPRme+ 2.7.10 runtime environment (Python 3.11), for installing FROM SOURCE
 # without the Bioconda crisprme/crispritz packages. Mirrors the dependency set
 # validated in the project Dockerfile.
 #

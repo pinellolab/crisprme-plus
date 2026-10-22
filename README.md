@@ -163,11 +163,11 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 
 > **`:latest` vs a pinned tag.** These commands use `pinellolab/crisprme:latest` — the
 > auto-updating, GPU-capable default image. For a fully reproducible run, pin the exact
-> release instead, e.g. `pinellolab/crisprme:v2.7.9`.
+> release instead, e.g. `pinellolab/crisprme:v2.7.10`.
 
 > **On HPC with Apptainer/Singularity.** Use **`apptainer run`**, which invokes the image
 > entrypoint so `crisprme.py` is on `PATH`, binding your data dir to `/DATA` — e.g.
-> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.7.9 crisprme.py --version`
+> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.7.10 crisprme.py --version`
 > (add `crisprme.py web-interface` / `complete-search …` the same way). Note that
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
 > `PATH` — prefer `apptainer run` (or prefix `bash -lc`).
@@ -295,18 +295,18 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
-> **Which version do I get?** For **CRISPRme+ (2.7.9, this release)** use **Docker**
+> **Which version do I get?** For **CRISPRme+ (2.7.10, this release)** use **Docker**
 > (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above, or
 > §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
-> 2.7.9 line** — use it only if you specifically want the stable release. If in doubt,
+> 2.7.10 line** — use it only if you specifically want the stable release. If in doubt,
 > use Docker.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.7.9)](#12-install-crisprme-via-docker)
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.7.10)](#12-install-crisprme-via-docker)
 
-- [Install CRISPRme from source (§1.3)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.7.9) line on Python 3.11
+- [Install CRISPRme from source (§1.3)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.7.10) line on Python 3.11
 
 - [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
@@ -315,7 +315,7 @@ operating systems. Select the method that best matches your setup:
 
 Conda/Bioconda installs **only the stable 2.1.x line** (Python 3.8) — *not* the
 CRISPRme+ (2.7.x) line. Use this path only if you specifically want the stable
-release; for CRISPRme+ 2.7.9 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
+release; for CRISPRme+ 2.7.10 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
 or [Docker](#12-install-crisprme-via-docker).
 
 This section is organized into three subsections to guide you through the installation 
@@ -390,7 +390,7 @@ crisprme.py
 #### 1.1.3 Updating CRISPRme
 ---
 
-> **Updating CRISPRme+ (2.7.9)?** Conda/Bioconda cannot update you to the CRISPRme+
+> **Updating CRISPRme+ (2.7.10)?** Conda/Bioconda cannot update you to the CRISPRme+
 > line — update via the [source build (§1.3)](#13-install-crisprme-from-source-without-bioconda)
 > or [Docker](#12-install-crisprme-via-docker). The steps below update only the stable
 > 2.1.x Bioconda line.
@@ -535,7 +535,7 @@ included. `:latest` is the auto-updating default image; it runs on **CPU** out o
 box (fully supported — this is the default scoring path), and a **GPU can optionally
 accelerate the CRISPR-Bulge scorer** on an NVIDIA host (add `--gpus all` + `--compute-backend
 cuda`). For a fully reproducible setup pin the exact release instead, e.g.
-`docker pull pinellolab/crisprme:v2.7.9`.
+`docker pull pinellolab/crisprme:v2.7.10`.
 
 Once the download is complete, the CRISPRme Docker image will be ready for use. 
 To confirm the image is successfully installed, you can list all available Docker 
@@ -666,7 +666,7 @@ The directory organization required by CRISPRme is illustrated below:
 > To run it in **Docker**, prefix it with
 > `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:latest`
 > (add `-p 8080:8080` for `web-interface`; on an NVIDIA host add `--gpus all` to run the
-> CRISPR-Bulge scorer on the GPU). Pin `:v2.7.9` instead of `:latest` for reproducibility.
+> CRISPR-Bulge scorer on the GPU). Pin `:v2.7.10` instead of `:latest` for reproducibility.
 > From a **source / Conda** install, run it as-is inside the activated `crisprme`
 > environment.
 
@@ -2035,7 +2035,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.7.9`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.7.10`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**
