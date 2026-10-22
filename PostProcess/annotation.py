@@ -3,7 +3,7 @@
 from pysam import TabixFile
 from pysam.utils import SamtoolsError
 from typing import Dict, List, Tuple, Optional
-from time import time
+from time import time, sleep
 
 import fcntl
 import pysam
@@ -27,6 +27,21 @@ def _bgzf_eof_ok(path: str) -> bool:
             return fh.read(len(_BGZF_EOF)) == _BGZF_EOF
     except OSError:
         return False
+
+
+# A valid, fully-written bgzipped+tabixed annotation can transiently read as
+# truncated/corrupt on a filesystem with lagging read-after-write consistency
+# (a Docker Desktop bind mount over virtiofs, or a network filesystem): htslib
+# reports "Invalid BGZF header" / a short read, or the BGZF EOF-marker guard
+# misfires. A single immediate retry hits the same stale view, so we retry a few
+# times with a short backoff to let the view settle before concluding the file is
+# really corrupt.
+_ANNOT_LOAD_ATTEMPTS = 4  # tolerate transient FS read-after-write lag (virtiofs/NFS)
+_ANNOT_LOAD_BACKOFF = 0.75  # seconds; grows linearly per attempt (~4.5s worst case)
+
+
+class _TransientAnnotationRead(Exception):
+    """Internal: a (likely transient) failure to see the annotation as complete."""
 
 
 def _reindex(annotation_fname: str) -> None:
@@ -86,46 +101,53 @@ def load_annotation_bed(annotation_fname: str) -> TabixFile:
     Raises:
         SamtoolsError: If the annotation BED file cannot be loaded or indexed.
     """
-    # Guard against a truncated/corrupt annotation download BEFORE htslib does,
-    # so the failure is an actionable message instead of the cryptic
-    # "EOF marker is absent ... could not open index" traceback. A bgzipped BED
-    # (.gz) must end with the BGZF EOF marker; its absence means it is truncated.
-    if annotation_fname.endswith(".gz") and not _bgzf_eof_ok(annotation_fname):
+    # Build the index (if missing/empty/stale) and open the handle, retrying a
+    # few times with a short backoff. A transient read-after-write lag (virtiofs
+    # bind mount / NFS) can briefly present a valid file as truncated -- making the
+    # BGZF EOF guard misfire or htslib error with "Invalid BGZF header" / a short
+    # read -- and an immediate single retry would just hit the same stale view. We
+    # only conclude the file is really corrupt after the view fails to settle.
+    tbi_path = annotation_fname + ".tbi"
+    lock_path = annotation_fname + ".tbi.lock"
+    is_gz = annotation_fname.endswith(".gz")
+    last_err: Optional[Exception] = None
+    for attempt in range(_ANNOT_LOAD_ATTEMPTS):
+        try:
+            # A bgzipped BED (.gz) must end with the BGZF EOF marker; a persistent
+            # absence means it is truncated, but a transient short read can also
+            # drop it -- so treat it as retryable here, actionable only after.
+            if is_gz and not _bgzf_eof_ok(annotation_fname):
+                raise _TransientAnnotationRead(
+                    f"BGZF EOF marker not yet visible for '{annotation_fname}'"
+                )
+            # (re)build the tabix index if missing / empty / stale, under a lock so
+            # parallel annotation processes don't write the .tbi simultaneously.
+            with open(lock_path, "w") as lock_fh:
+                fcntl.flock(lock_fh, fcntl.LOCK_EX)
+                if (not os.path.isfile(tbi_path)
+                        or os.path.getsize(tbi_path) == 0
+                        or os.path.getmtime(tbi_path) < os.path.getmtime(annotation_fname)):
+                    _reindex(annotation_fname)
+            return pysam.TabixFile(annotation_fname)  # tabix handle per annotation bed
+        except Exception as e:  # transient read / stale-or-partial index / mid-write view
+            last_err = e
+            if attempt < _ANNOT_LOAD_ATTEMPTS - 1:
+                sleep(_ANNOT_LOAD_BACKOFF * (attempt + 1))  # let the FS view settle
+    # Genuinely unreadable after several attempts with index rebuilds: now the
+    # failure is actionable. A still-missing EOF marker is a truncated download.
+    if is_gz and not _bgzf_eof_ok(annotation_fname):
         raise SamtoolsError(
             f"Annotation file '{annotation_fname}' is truncated or corrupt "
             "(incomplete download). Re-download it and retry:\n"
             "  crisprme.py download --what annotations --path <DATA_DIR>\n"
             "The download now verifies integrity and re-fetches only bad files. "
             "(Or delete this file and its .tbi, then re-run the download.)"
-        )
-    # check that tabix index is available and up-to-date; use a lock file so that
-    # parallel annotation processes don't write the .tbi simultaneously. A
-    # missing / empty / stale .tbi is rebuilt -- a shipped index whose mtime
-    # predates its .bed.gz, or a half-written one, would otherwise fail the load.
-    tbi_path = annotation_fname + ".tbi"
-    lock_path = annotation_fname + ".tbi.lock"
-    with open(lock_path, "w") as lock_fh:
-        fcntl.flock(lock_fh, fcntl.LOCK_EX)
-        if (not os.path.isfile(tbi_path)
-                or os.path.getsize(tbi_path) == 0
-                or os.path.getmtime(tbi_path) < os.path.getmtime(annotation_fname)):
-            _reindex(annotation_fname)
-    try:  # return tabix indexes for each annotation bed
-        return pysam.TabixFile(annotation_fname)
-    except Exception:
-        # self-heal once: a corrupt .tbi that slipped past the checks above
-        # (e.g. same mtime as the bed) -- rebuild it and retry before giving up.
-        with open(lock_path, "w") as lock_fh:
-            fcntl.flock(lock_fh, fcntl.LOCK_EX)
-            _reindex(annotation_fname)
-        try:
-            return pysam.TabixFile(annotation_fname)
-        except Exception as e:
-            raise SamtoolsError(
-                f"Could not load annotation file '{annotation_fname}' even after "
-                "rebuilding its index -- the file may be corrupt. Re-download it: "
-                "crisprme.py download --what annotations --path <DATA_DIR>"
-            ) from e
+        ) from last_err
+    raise SamtoolsError(
+        f"Could not load annotation file '{annotation_fname}' even after "
+        f"{_ANNOT_LOAD_ATTEMPTS} attempts with index rebuilds -- the file may be "
+        "corrupt. Re-download it: crisprme.py download --what annotations --path <DATA_DIR>"
+    ) from last_err
 
 
 def compute_target_coords(fields: List[str]) -> Tuple[str, int, int]:
