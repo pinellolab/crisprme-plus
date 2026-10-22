@@ -288,7 +288,7 @@ on-target**.
 | CFD ≥0.5 | 217 (109 variant) | ≈6 | [1, 14] |
 | CFD 0.2–0.5 | 5,454 (2,548 variant) | ≈21 | [1, 64] |
 | **CFD ≥0.2** | 5,671 (2,657 variant) | **≈28** | **[2, 81]** |
-| CRISPR-Bulge ≥0.2 | 6 | ≈2 | [0, 5] |
+| CRISPR-Bulge ≥0.2 | 6 | ≈2 | [0, 6] |
 
 (Intervals are the converged 90% prediction interval, bootstrap n=4000, seed-stable; a
 preliminary low-n draw read the ≥0.2 upper bound as ~69; the stable value is ~81, the
@@ -316,7 +316,7 @@ make):**
   sub-band draws *as if independent* would wrongly raise the lower bound to ~5, because a
   guide's promiscuity is correlated across bands (empirical cross-band correlation ≈ +0.66);
   modelling that correlation (pooled band) puts the floor at **2**, where it belongs.
-- **CRISPR-Bulge ≥0.2 | 6 | ≈2 | [0, 5]: a low CB count is NOT clearance.** The lower
+- **CRISPR-Bulge ≥0.2 | 6 | ≈2 | [0, 6]: a low CB count is NOT clearance.** The lower
   bound of 0 on 6 sites must not be read as "nothing here." Per §1–§3, CRISPR-Bulge
   confirms only ~half of assay-detected off-targets and is defined only on ≤1-gap
   alignments, so **real off-targets can sit entirely outside what CRISPR-Bulge counts.** A

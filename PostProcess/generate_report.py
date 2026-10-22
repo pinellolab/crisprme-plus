@@ -4023,6 +4023,9 @@ def render_html(
     if table_crispr_bulge_html:
         crispr_bulge_block = (
             f'<h3 style="margin:1.4em 0 0.3em 0">Ranked by {scorer_label()} score</h3>\n'
+            f'<p style="margin:0 0 0.5em"><a class="download" '
+            f'href="{_dl_href("top1000_crispr_bulge.tsv")}" download>&#11015; Download this '
+            f'table &mdash; top-1000 by {scorer_label()} (curated TSV)</a></p>\n'
             + table_crispr_bulge_html
         )
 
@@ -4070,7 +4073,7 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 
 <h2>5. Downloads</h2>
 <p>{raw_download}
-  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 off-targets (curated TSV)</a>{panel_download}{hvdr_download}{cooc_download}{snp_snp_download}{indel_af_download}{observed_haplotypes_download}
+  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 by CFD (curated TSV)</a>{panel_download}{hvdr_download}{cooc_download}{snp_snp_download}{indel_af_download}{observed_haplotypes_download}
 </p>{tier_download_html}
 {hvdr_callout}
 {cooc_callout}
@@ -4093,6 +4096,7 @@ locally with <code>crisprme.py web-interface</code>.</p>
 <h2>6. Top 1000 putative off-targets</h2>
 {observed_haplotypes_table_note}
 <h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>
+<p style="margin:0 0 0.5em"><a class="download" href="{_dl_href(top1000_name)}" download>&#11015; Download this table &mdash; top-1000 by CFD (curated TSV)</a></p>
 {table_html}
 {crispr_bulge_block}
 
