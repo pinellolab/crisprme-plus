@@ -11,6 +11,41 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.7.11] - 2026-10-22
+
+### Added
+- **Reference-sequence score columns + aligned spacer in the curated tables.** The top-1000 tables and
+  every curated download TSV gain `CFD_ref` and `CRISPR-Bulge_ref` — the score of the REFERENCE sequence
+  at each site, shown beside the ALT/worst-case score so a reviewer sees how much a variant moves each
+  score — and an `Aligned_spacer+PAM` column placed immediately before `Aligned_protospacer+PAM`, so the
+  guide and protospacer read as a pairwise alignment (bulge columns as `-`). `CRISPR-Bulge_ref` is gated
+  like the CRISPR-Bulge column (shown only when CRISPR-Bulge was computed).
+
+### Changed
+- **Documented the recommended default validation panel** (METHODS §3.5 + the risk-card note):
+  `(CRISPR-Bulge > 0) ∪ (CFD ≥ 0.2 on 0-bulge) ∪ must-includes` — CRISPR-Bulge carries the bulge sites
+  (CFD cannot rank bulges: bulge=1 AP ≈ 0.02 vs ≈ 0.25), CFD rescues the high-CFD no-bulge sites it
+  misses, and ≥2-bulge sites are excluded from scoring-driven selection but kept-and-demoted in the
+  report. Framed as a risk/budget optimization, not a recall guarantee (CRISPR-Bulge has a ~92% recall
+  ceiling; ~7%, mostly bulges, sits below both scores and is recovered only by the must-include criteria).
+
+### Fixed
+- **`--per-sample` searches no longer fail at the annotation stage on Docker Desktop for Mac/Windows.**
+  The post-search step annotates three target files in parallel, each building the same tabix index;
+  `flock` is non-functional on VM-backed bind mounts (virtiofs/9p → ENOTTY), so the concurrent builds
+  raced, corrupted the index read, and tripped the stderr-fatal gate — killing the whole search at the
+  final stage with a misleading "file may be corrupt, re-download". Fix: pre-build the tabix index once,
+  serially, before the parallel annotators (they then only read a complete index), and tolerate a
+  `flock` that errors on such filesystems. Linux/cluster (working `flock`) was unaffected.
+- **Transient truncated reads of the annotation no longer abort a search.** `load_annotation_bed` now
+  retries the BGZF-EOF guard + index build + open with a short backoff (filesystem read-after-write lag
+  on virtiofs/NFS), declaring the file corrupt only after the view fails to settle (+ 4 regression tests,
+  now wired into CI).
+
+### Documentation
+- Troubleshooting entries for two CLI first-run messages a newcomer can hit: a guide needing `NNN`
+  PAM-padding (23 nt), and the "output folder not empty" a validation-aborted run leaves behind.
+
 ## [2.7.10] - 2026-10-22
 
 ### Added
@@ -2429,7 +2464,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.10...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.11...HEAD
+[2.7.11]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.11
 [2.7.10]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.10
 [2.7.9]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.9
 [2.7.8]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.8

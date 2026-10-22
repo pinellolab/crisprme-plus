@@ -23,7 +23,7 @@ import os
 import re
 
 
-version = "2.7.10"  # CRISPRme version
+version = "2.7.11"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
