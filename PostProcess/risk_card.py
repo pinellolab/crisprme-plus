@@ -171,7 +171,9 @@ def render_risk_card(meta: dict, cfd_scores: Sequence[float],
             '&mdash; it is not a shortlist; every listed site stays an assay candidate (see the '
             'validation panel). Sites needing &ge;2 bulges show &ldquo;&ndash;&rdquo; (not scored, '
             'not no-risk) and are kept but demoted there. The two scorers are different views of '
-            'the same sites, not additive. '
+            'the same sites, not additive. A practical default panel is every CRISPR-Bulge-flagged '
+            'site (score &gt; 0) plus the high-CFD (&ge;0.2) no-bulge sites it misses, sized to the '
+            'assay budget. '
             f'<a class="rc-open" href="#{MODAL_ID}">How to read this →</a></div>')
 
     card = (

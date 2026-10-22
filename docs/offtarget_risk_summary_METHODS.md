@@ -131,6 +131,34 @@ recall 0.50 / precision 0.72. **These CRISPR-Bulge recalls (0.50–0.60) are rec
 the assay-detected set (§2), not against ground truth, and a low CRISPR-Bulge count is not
 clearance (§7).** These curves are shown in the modal.
 
+## 3.5. Recommended default validation panel
+
+CRISPR-Bulge is a high-precision screen with a **hard recall ceiling**: it scores ~8% of the
+assay-detected off-targets as *exactly* 0, so no single CRISPR-Bulge threshold is both
+high-recall and manageable. A cutoff of `>0` already captures essentially everything the model
+can see (~92% recall against the assay-detected set); chasing higher recall collapses the
+threshold toward 0 and returns the whole genome. The practical default panel is therefore a
+**union, not a cutoff**:
+
+> **Default panel = (CRISPR-Bulge > 0) ∪ (CFD ≥ 0.2 on 0-bulge sites) ∪ must-includes**
+
+where *must-includes* are all perfect / near-perfect matches, any site in a functional element
+or cancer-driver gene, and — on a genotyped/phased panel — observed *cis* haplotypes with named
+carriers.
+
+- **CRISPR-Bulge > 0** carries the bulge sites and the ML-ranked core — CFD cannot rank bulges
+  (bulge=1 AP ≈ 0.02 vs CRISPR-Bulge ≈ 0.25; §3).
+- **CFD ≥ 0.2 on 0-bulge** rescues the high-CFD no-bulge sites CRISPR-Bulge misses (CFD is
+  defensible only off-bulge).
+- **≥2-bulge sites** are excluded from scoring-driven selection (uncalibrated for both scores)
+  but kept-and-demoted in the report, never dropped.
+
+On the benchmark this union reaches **~93% recall** against the assay-detected set; the CFD
+rescue adds only a few sites, and **~7% (dominated by bulge sites) score below both scores** and
+are recovered only by the must-include criteria or by validating deeper. Panel depth is a
+**risk/budget optimization** read off the expected-true counts (§5), **not a recall guarantee** —
+detection is lossless (every site is listed), but score-ranked selection carries this ceiling.
+
 ## 4. Point calibration: isotonic, and why
 
 The raw score is a ranking number, not a probability. We map score → P(true off-target)
