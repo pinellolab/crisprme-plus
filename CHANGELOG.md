@@ -44,6 +44,16 @@ and the `release-crisprme` skill.
   `--report-full`. Output is byte-identical to the unscoped build for the displayed sites.
 
 ### Changed
+- **Performance: observed-haplotypes sidecar cuts the per-sample report render ~35%.** The report's
+  clickable observed-haplotype modals were built by re-scanning the whole (30+ GB) alt-alignments
+  table every render, even though only the alt-origin rows matter. The search now pre-reduces that
+  table once (`make_oh_sidecar.py`, new STEP 8a) into a small `*_observed_haplotypes_raw.tsv` sidecar
+  (alt-origin rows only — a strict superset of what the report keeps), and the report reads the sidecar
+  instead. Measured on a 6,1,1 `--per-sample` run: 51.3M → 2.93M rows (31.5 GB → 8.9 GB), render
+  ~25 → ~17 min, and `observed_haplotypes.tsv` is **byte-identical** (the report re-applies its exact
+  per-row filter + clustering) with the prioritized top-1000 unchanged. A small zipped sidecar is kept
+  after cleanup so standalone `generate-report` re-renders stay fast; older result dirs with no sidecar
+  fall back to the full alt scan. New `test_make_oh_sidecar.py` + a byte-identity guard.
 - **Recommended validation panel: domain-aware CFD hard-include with ≥2-bulge demotion.** The panel
   now hard-includes a site on CFD only within CFD's calibrated domain (CFD ≥ 0.5 **at ≤1 bulge**). A
   site that needs **≥2 bulges** and is high on CFD alone — where CFD is an uncalibrated over-call and

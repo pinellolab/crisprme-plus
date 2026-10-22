@@ -31,6 +31,7 @@ STEM = "sgRNA1+NGG_hg38+1000G_6+2"  # the per-guide finalized-output stem
 REMOVED = [
     "{job}.altMerge.txt",
     "{stem}_all_results_with_alternative_alignments.tsv",
+    "{stem}_observed_haplotypes_raw.tsv",   # bulky observed-haplotypes sidecar (.zip kept)
     "{stem}.population_summary.tsv",
     "sgRNA2+NGG_hg38+1000G_6+2.population_summary.tsv",  # prove the glob is plural
 ]
@@ -49,6 +50,7 @@ KEPT = [
     "{stem}_integrated_results.zip",
     "{stem}_report.zip",
     "{stem}_all_results_with_alternative_alignments.zip",   # same stem as a REMOVED .tsv
+    "{stem}_observed_haplotypes_raw.zip",   # small sidecar for fast re-renders (.tsv removed)
     "{stem}.summary_by_guide.txt",
     "{stem}.summary_by_samples.txt",
     "{stem}.snp_snp_cooc.tsv",

@@ -4392,31 +4392,49 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
             ]
             return _ch[_mask]
 
+        def _read_tsv_chunks(_fh_or_path):
+            for _ch in pd.read_csv(_fh_or_path, sep="\t", dtype=str, na_filter=False,
+                                   low_memory=False, chunksize=200000):
+                yield _filter_chunk(_ch)
+
+        def _read_zip_chunks(_zpath, _suffix):
+            import zipfile
+            with zipfile.ZipFile(_zpath) as _zf:
+                _member = next((n for n in _zf.namelist() if n.endswith(_suffix)), None)
+                if _member is not None:
+                    with _zf.open(_member) as _mh:
+                        for _c in _read_tsv_chunks(_mh):
+                            yield _c
+
         def _frame_source():
             yield _filter_chunk(df)               # representatives (already in memory)
             _alt_dir = result_dir if result_dir else os.path.dirname(integrated_tsv)
+
+            def _first(pat):
+                _hits = sorted(glob.glob(os.path.join(_alt_dir, pat)))
+                return _hits[0] if _hits else None
+
+            # Source priority: the pre-reduced observed-haplotypes SIDECAR
+            # (make_oh_sidecar.py, written at search time) is only the alt-origin rows --
+            # a strict SUPERSET of what we keep here -- so re-applying the exact per-row
+            # filter + clustering below yields a BYTE-IDENTICAL observed_haplotypes.tsv
+            # while reading a fraction of the 30+ GB alt file. Prefer the uncompressed
+            # sidecar, then the small kept sidecar .zip, then the full alt .tsv/.zip
+            # (older result dirs with no sidecar).
             try:
-                _alt_tsv = sorted(glob.glob(
-                    os.path.join(_alt_dir, "*all_results_with_alternative_alignments.tsv")))
-                if _alt_tsv:
-                    for _ch in pd.read_csv(_alt_tsv[0], sep="\t", dtype=str, na_filter=False,
-                                           low_memory=False, chunksize=200000):
-                        yield _filter_chunk(_ch)
-                else:
-                    _alt_zip = sorted(glob.glob(
-                        os.path.join(_alt_dir, "*all_results_with_alternative_alignments.zip")))
-                    if _alt_zip:
-                        import zipfile
-                        with zipfile.ZipFile(_alt_zip[0]) as _zf:
-                            _member = next(
-                                (n for n in _zf.namelist()
-                                 if n.endswith("all_results_with_alternative_alignments.tsv")), None)
-                            if _member is not None:
-                                with _zf.open(_member) as _mh:
-                                    for _ch in pd.read_csv(_mh, sep="\t", dtype=str,
-                                                           na_filter=False, low_memory=False,
-                                                           chunksize=200000):
-                                        yield _filter_chunk(_ch)
+                _sc_tsv = _first("*_observed_haplotypes_raw.tsv")
+                _sc_zip = _first("*_observed_haplotypes_raw.zip")
+                _alt_tsv = _first("*all_results_with_alternative_alignments.tsv")
+                _alt_zip = _first("*all_results_with_alternative_alignments.zip")
+                if _sc_tsv:
+                    yield from _read_tsv_chunks(_sc_tsv)
+                elif _sc_zip:
+                    yield from _read_zip_chunks(_sc_zip, "_observed_haplotypes_raw.tsv")
+                elif _alt_tsv:
+                    yield from _read_tsv_chunks(_alt_tsv)
+                elif _alt_zip:
+                    yield from _read_zip_chunks(
+                        _alt_zip, "all_results_with_alternative_alignments.tsv")
             except Exception as exc:  # noqa: BLE001 - alt source optional
                 sys.stderr.write(
                     f"generate-report: observed_haplotypes alt-alignments unreadable "

@@ -1250,6 +1250,30 @@ else
 fi
 echo -e "JOB END"
 
+# STEP 8a - observed-haplotypes sidecar (additive; BEFORE the report).
+# Pre-reduce the (30+ GB) alt-alignments table into *_observed_haplotypes_raw.tsv --
+# only the alt-origin rows, a strict SUPERSET of what the report's observed-haplotypes
+# companion keeps. generate_report (step 8b) and every later standalone generate-report
+# then read a small file instead of re-scanning the whole alt table, yet produce a
+# BYTE-IDENTICAL observed_haplotypes.tsv (the report re-applies its exact per-row filter
+# + clustering). A small zipped copy is kept after cleanup so re-renders stay fast.
+# Best-effort: a failure must NEVER fail a completed job (issue #143) -- the report then
+# falls back to the full alt .tsv/.zip scan.
+alt_results_tsv=$(ls "${output_folder}"/*_all_results_with_alternative_alignments.tsv 2>/dev/null | head -1)
+if [ -n "${alt_results_tsv}" ]; then
+	oh_sidecar="${alt_results_tsv%_all_results_with_alternative_alignments.tsv}_observed_haplotypes_raw.tsv"
+	echo -e 'Building observed-haplotypes sidecar\tStart\t'$(date) >>$log
+	if python "$starting_dir/make_oh_sidecar.py" "${alt_results_tsv}" "${oh_sidecar}" >>"${output_folder}/report.log" 2>&1; then
+		zip -j "${oh_sidecar%.tsv}.zip" "${oh_sidecar}" >>"${output_folder}/report.log" 2>&1 || true
+		echo -e 'Building observed-haplotypes sidecar\tEnd\t'$(date) >>$log
+	else
+		rm -f "${oh_sidecar}" "${oh_sidecar%.tsv}.zip"  # partial -> report falls back to the alt scan
+		printf "WARNING: observed-haplotypes sidecar failed — report will scan the full alt file\n" >&2
+		echo -e 'Building observed-haplotypes sidecar\tFAILED (non-fatal)\t'$(date) >>$log
+	fi
+fi
+# END STEP 8a
+
 # STEP 8b - shareable self-contained report (additive; every complete-search).
 # Runs AFTER the integrated_results rename/zip above so the glob finds the
 # finalized <guide>+..._integrated_results.tsv (not the pre-rename bestMerge
