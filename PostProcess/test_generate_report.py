@@ -346,8 +346,9 @@ class TestGenerateReport(unittest.TestCase):
             gr.curated_headers(has_crispr_bulge=True),
             [
                 "rank", "Chromosome", "Position", "Strand",
-                "Aligned_protospacer+PAM", "Mismatches", "Bulges",
-                "Mismatches+bulges", "Perfect_match", "CFD", "CRISPR-Bulge",
+                "Aligned_spacer+PAM", "Aligned_protospacer+PAM", "Mismatches", "Bulges",
+                "Mismatches+bulges", "Perfect_match", "CFD", "CFD_ref",
+                "CRISPR-Bulge", "CRISPR-Bulge_ref",
                 "REF/ALT_origin",
                 "PAM_creation", "Variant", "Observed", "MAF", "Gene", "Gene_distance_kb",
                 "Gene_region", "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
@@ -355,11 +356,14 @@ class TestGenerateReport(unittest.TestCase):
                 "High_complexity_region",
             ],
         )
-        # CRISPR-Bulge is dropped when not computed (else identical)
+        # both CRISPR-Bulge columns (score + REF) drop when not computed (else identical)
         no_crispr_bulge = gr.curated_headers(has_crispr_bulge=False)
         self.assertNotIn("CRISPR-Bulge", no_crispr_bulge)
+        self.assertNotIn("CRISPR-Bulge_ref", no_crispr_bulge)
+        self.assertIn("CFD_ref", no_crispr_bulge)  # CFD_ref is NOT gated on CRISPR-Bulge
         self.assertEqual(
-            [c for c in gr.curated_headers(has_crispr_bulge=True) if c != "CRISPR-Bulge"],
+            [c for c in gr.curated_headers(has_crispr_bulge=True)
+             if c not in ("CRISPR-Bulge", "CRISPR-Bulge_ref")],
             no_crispr_bulge,
         )
 
@@ -1259,10 +1263,15 @@ class TestGenerateReport(unittest.TestCase):
         for val in ("promoter", "enhancer", "DHS_3", "DHS_5", "exon", "lincRNA"):
             self.assertIn(val, tbody)
         # rows sorted by CFD desc, on-target excluded => 5 rows
-        n_rows = tbody.count("<tr>")
-        self.assertEqual(n_rows, 5)
-        cfds = re.findall(r"<td>(0\.\d{4})</td>", tbody)
-        self.assertEqual(cfds, sorted(cfds, reverse=True))
+        rows_html = re.findall(r"<tr>(.*?)</tr>", tbody, re.S)
+        self.assertEqual(len(rows_html), 5)
+        # several columns now render 0.XXXX (CFD, CFD_ref, CRISPR-Bulge, CRISPR-Bulge_ref),
+        # so extract the CFD column specifically by its header index and check IT is sorted.
+        hdrs = gr.curated_headers(has_crispr_bulge=True)
+        cfd_idx = hdrs.index("CFD")
+        cfd_col = [re.findall(r"<td[^>]*>(.*?)</td>", r, re.S)[cfd_idx] for r in rows_html]
+        cfd_vals = [c for c in cfd_col if re.fullmatch(r"0\.\d{4}", c)]
+        self.assertEqual(cfd_vals, sorted(cfd_vals, reverse=True))
         # the pam_created value from the fixture appears
         self.assertIn("pam_created", html)
 

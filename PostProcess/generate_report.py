@@ -239,13 +239,16 @@ CURATED_COLUMNS = (
     ("Chromosome", "chrom"),
     ("Position", "pos"),
     ("Strand", "strand"),
+    ("Aligned_spacer+PAM", "aligned_spacer"),  # the guide/spacer side of the alignment (bulge cols as '-'); pairs with the protospacer row below to read like a pairwise alignment
     ("Aligned_protospacer+PAM", "aligned"),  # ALT with REF fallback
     ("Mismatches", "mm"),
     ("Bulges", "bulges"),
     ("Mismatches+bulges", "mmb"),
     ("Perfect_match", "perfect_match"),  # "Yes" when mm+b==0: a perfect genomic match
     ("CFD", "cfd"),
+    ("CFD_ref", "cfd_ref"),  # CFD of the REFERENCE sequence at this site (variant removed)
     ("CRISPR-Bulge", "crispr_bulge"),  # emitted only when crispr_bulge_computed()
+    ("CRISPR-Bulge_ref", "crispr_bulge_ref"),  # REF-sequence CRISPR-Bulge; emitted only when crispr_bulge_computed()
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
     ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
@@ -359,6 +362,7 @@ _COLS = {
     "chrom": ["Chromosome"],
     "pos": [f"Start_coordinate_{_PROJ}", "Start_coordinate"],
     "strand": [f"Strand_{_PROJ}", "Strand"],
+    "aln_spacer": [f"Aligned_spacer+PAM_{_PROJ}", "Aligned_spacer+PAM"],
     "aln_ref": [f"Aligned_protospacer+PAM_REF_{_PROJ}", "Aligned_protospacer+PAM_REF"],
     "aln_alt": [f"Aligned_protospacer+PAM_ALT_{_PROJ}", "Aligned_protospacer+PAM_ALT"],
     "pam": [f"PAM_{_PROJ}", "PAM"],
@@ -684,6 +688,10 @@ def _curated_cell(kind, row, cols):
         v = _get("pos")
     elif kind == "strand":
         v = _get("strand")
+    elif kind == "aligned_spacer":
+        # the aligned guide/spacer (+PAM), bulge columns as '-'; shown next to the
+        # aligned protospacer so the pair reads like a pairwise alignment
+        v = _get("aln_spacer")
     elif kind == "aligned":
         # ALT with REF fallback
         v = row.get(cols["aln_alt"]) if "aln_alt" in cols else None
@@ -698,8 +706,14 @@ def _curated_cell(kind, row, cols):
     elif kind == "cfd":
         num = _scored(pd.to_numeric(_get("cfd"), errors="coerce")) if "cfd" in cols else None
         return f"{num:.4f}" if num is not None else CURATED_MISSING
+    elif kind == "cfd_ref":
+        num = _scored(pd.to_numeric(_get("cfd_ref"), errors="coerce")) if "cfd_ref" in cols else None
+        return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "crispr_bulge":
         num = _scored(pd.to_numeric(_get("crispr_bulge"), errors="coerce")) if "crispr_bulge" in cols else None
+        return f"{num:.4f}" if num is not None else CURATED_MISSING
+    elif kind == "crispr_bulge_ref":
+        num = _scored(pd.to_numeric(_get("crispr_bulge_ref"), errors="coerce")) if "crispr_bulge_ref" in cols else None
         return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "origin":
         v = _get("origin")
@@ -792,8 +806,10 @@ def curated_headers(has_crispr_bulge):
     """The curated display headers, dropping the ML-score column when not computed
     (and MAF when ``_DROP_MAF`` is set). The ML-score header is "CRISPR-Bulge"; the
     internal kind stays "crispr_bulge"."""
-    return [(scorer_label() if kind == "crispr_bulge" else h)
-            for h, kind in _active_columns() if kind != "crispr_bulge" or has_crispr_bulge]
+    return [(scorer_label() if kind == "crispr_bulge"
+             else (scorer_label() + "_ref" if kind == "crispr_bulge_ref" else h))
+            for h, kind in _active_columns()
+            if kind not in ("crispr_bulge", "crispr_bulge_ref") or has_crispr_bulge]
 
 
 def build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=1):
@@ -806,7 +822,8 @@ def build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=1):
     columns, in the same order, resolved by name (missing -> "-").
     """
     headers = curated_headers(has_crispr_bulge)
-    kinds = [kind for _h, kind in _active_columns() if kind != "crispr_bulge" or has_crispr_bulge]
+    kinds = [kind for _h, kind in _active_columns()
+             if kind not in ("crispr_bulge", "crispr_bulge_ref") or has_crispr_bulge]
     data = {h: [] for h in headers}
     for offset, (_idx, row) in enumerate(sub_df.iterrows()):
         for h, kind in zip(headers, kinds):
