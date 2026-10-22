@@ -1,10 +1,12 @@
 # CRISPRme+ Off-target Risk Summary: Methods
 
-*This document specifies the OFF-TARGET RISK card **shipped** at the top of the report. It
-**replaced** the legacy `100/(100+Σ)` aggregate specificity score, which is no longer
-computed or displayed in the report (the two are never presented together). The card has
-been empirically bench-tested and adversarially reviewed. Numbers below are from the real
-calibration benchmark and a real search; nothing is illustrative unless labelled.*
+*This document specifies the OFF-TARGET RISK card **shipped** at the top of the
+variant-search report. It **replaced** the legacy `100/(100+Σ)` aggregate specificity
+score there, which is no longer computed or displayed in that report (the two are never
+presented together). The separate personal-assembly report is a different output path and
+is out of scope here. The card has been empirically bench-tested and adversarially
+reviewed. Numbers below are from the real calibration benchmark and a real search; nothing
+is illustrative unless labelled.*
 
 *Independent three-way sign-off (2026-10-20): a **statistician**, a **clinician**, and a **genome editor** each reviewed this document and returned **SIGN** after their required fixes were applied (all fixes incorporated below). Reviewers verified the shipped `.npz` artifacts (φ, guide counts, prevalence) match the text.*
 
@@ -34,8 +36,8 @@ range. The two scorers answer different questions and are shown side by side:
 **The expected count is an estimate of how many of the enumerated candidates are *true*
 off-targets. It is NOT an upper bound, a ceiling, or a shortlist.** Every enumerated
 in-band site remains an assay candidate regardless of the expected count: a row that reads
-"217 sites | expected true ≈6 | [1, 13]" does **not** mean "assay ~6–13 of the 217"; it
-means that among the 217 enumerated sites an estimated ≈6 (plausibly 1–13) are true
+"217 sites | expected true ≈6 | [1, 14]" does **not** mean "assay ~6–14 of the 217"; it
+means that among the 217 enumerated sites an estimated ≈6 (plausibly 1–14) are true
 off-targets, and all 217 are still candidates to be assayed. The calibrator re-ranks and
 quantifies; it never licenses dropping enumerated sites.
 

@@ -152,6 +152,8 @@ and the `release-crisprme` skill.
   has fewer than the expected 4 columns (`SAMPLE_ID`, `POPULATION_ID`, `SUPERPOPULATION_ID`, `SEX`),
   naming the file and an example line so a genuinely malformed samplesID is caught before the search
   rather than hours into it. +4 `test_validate_inputs` cases.
+
+- **Indel off-targets now carry their cis-phased co-occurring SNP(s) in the `Variant` column.** When an
   indel off-target's true haplotype is an indel **plus** one or more co-occurring, cis-phased SNPs, the
   `Variant` column (and the `observed_haplotypes` companion, which reads the same field) previously
   showed the indel **only** — the co-occurring SNP(s) were recorded solely in the per-chromosome

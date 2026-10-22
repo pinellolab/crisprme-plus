@@ -1251,8 +1251,11 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIn(f"<th>{ann}</th>", html)
         self.assertIn("<th>PAM_creation</th>", html)
         self.assertIn("<th>CRISPR-Bulge</th>", html)
-        # the annotation VALUES from the fixture render in the table body
-        tbody = html.split('class="ottable"')[-1].split("<tbody>")[-1].split("</tbody>")[0]
+        # the annotation VALUES from the fixture render in the table body. Bound the parse
+        # to the last ottable's OWN markup (up to its </table>): observed-haplotype modals
+        # after it emit their own <thead>/<tbody>, which must not be read as the top-1000 table.
+        _ott = html.split('class="ottable"')[-1].split("</table>")[0]
+        tbody = _ott.split("<tbody>")[-1].split("</tbody>")[0]
         for val in ("promoter", "enhancer", "DHS_3", "DHS_5", "exon", "lincRNA"):
             self.assertIn(val, tbody)
         # rows sorted by CFD desc, on-target excluded => 5 rows
@@ -1268,8 +1271,8 @@ class TestGenerateReport(unittest.TestCase):
         _, _, extract = self._build_and_extract()
         html = self._read(os.path.join(extract, "report.html"))
         curated = gr.curated_headers(has_crispr_bulge=True)
-        # table header order == curated order
-        thead = html.split('class="ottable"')[-1].split("<thead>")[-1].split("</thead>")[0]
+        # table header order == curated order (bound to the last ottable's own markup)
+        thead = html.split('class="ottable"')[-1].split("</table>")[0].split("<thead>")[-1].split("</thead>")[0]
         table_headers = re.findall(r"<th>([^<]+)</th>", thead)
         self.assertEqual(table_headers, curated)
         # top1000.tsv + panel_top100.tsv headers == curated order (spot check)

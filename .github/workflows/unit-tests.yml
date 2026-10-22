@@ -191,6 +191,14 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_generate_report -v
 
+      - name: "Off-target risk card + CSS-only modal (self-contained, no-thead parser-safe, graceful degradation, IND quantities)"
+        working-directory: PostProcess
+        run: python -m unittest test_risk_card -v
+
+      - name: "Observed-haplotypes sidecar (make_oh_sidecar: alt-origin superset, byte-identical rows, safe degrade)"
+        working-directory: PostProcess
+        run: python -m unittest test_make_oh_sidecar -v
+
       - name: "Scorer-aware report column (CRISPR-Bulge|CRISPR-Bulge label + thresholds from .Params.txt)"
         working-directory: PostProcess
         run: python -m unittest test_report_scorer_label -v

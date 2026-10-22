@@ -108,9 +108,10 @@ _ISOTONIC = (
     "Isotonic calibration is a simple translation step: it takes a site's raw CFD or "
     "CRISPR-Bulge score, which on its own is only a ranking number, and converts it into an "
     "estimated chance the site is a true off-target, with one rule: a higher score never maps "
-    "to a lower probability. The curve was learned from 359 experimentally confirmed "
-    "off-targets across four published studies, built so no guide ever set its own "
-    "probabilities. The “expected true” count is the sum of these per-site probabilities; "
+    "to a lower probability. Each scorer's curve was learned from experimentally confirmed "
+    "off-targets across four published studies (359 for CFD, 287 for CRISPR-Bulge; see "
+    "METHODS §2), built so no guide ever set its own probabilities. The “expected true” "
+    "count is the sum of these per-site probabilities; "
     "its 90% range is a guide-level bootstrap that reaches ~90% coverage for a single novel "
     "guide. Both scorers are sequence-based, so the calibration applies to any ≤1-gap "
     "alignment (reference or variant allele); ≥2-gap sites and per-sample carrier incidence "
@@ -136,8 +137,10 @@ def render_risk_card(meta: dict, cfd_scores: Sequence[float],
     guide = meta.get("guide_display") or meta.get("guide") or ""
     header = f"{_esc(guide)} &middot; {_esc(meta.get('nuclease',''))} &middot; {_esc(meta.get('pam',''))}"
 
-    # NB: risk-card tables use plain header ROWS (no <thead>/<tbody>/<th>) so they never
-    # interfere with report tests that parse the top-1000 table by last <thead>/<tbody>.
+    # NB: risk-card tables use plain header ROWS (no <thead>/<tbody>/<th>), so the card never
+    # adds a table the report's top-1000 parser could mistake for the ottable. (That parser is
+    # anchored on class="ottable" and bounded at the following </table>; observed-haplotype
+    # modals also emit <thead>/<tbody> tables, so the card deliberately stays out of that markup.)
     _hdr = ('<tr class="rc-hdr"><td>band (≤1-gap)</td><td>sites</td>'
             '<td>expected true (90%)</td></tr>')
     # the card shows only >=0.2 bands; pre-filter so the calibrator does not bootstrap the
@@ -182,23 +185,31 @@ def render_risk_card(meta: dict, cfd_scores: Sequence[float],
 def _render_modal(cal) -> str:
     summary_html = ""
     if cal is not None:
-        try:
-            cfd = cal.artifact_summary("cfd")
-            cb = cal.artifact_summary("crispr_bulge")
-            def _fmt(a):
+        def _fmt(scorer):
+            # per-scorer + None-guarded: a missing/corrupt artifact for ONE scorer must
+            # drop only that row, not both, and a None coverage/CI must not raise.
+            try:
+                a = cal.artifact_summary(scorer)
                 ap = a.get("aupr") or {}
-                cov = (a.get("loo_total_count_coverage_nominal90") or {}).get("ge0.2")
-                ci = ap.get("ci") or [None, None]
                 aupr = ap.get("point")
+                if aupr is None:
+                    return ""
+                ci = ap.get("ci") or [None, None]
+                cov = (a.get("loo_total_count_coverage_nominal90") or {}).get("ge0.2")
+                ci_txt = (f'[{ci[0]:.2f}–{ci[1]:.2f}]'
+                          if ci[0] is not None and ci[1] is not None else "")
+                cov_txt = f"{int(cov * 100)}%" if cov is not None else "—"
                 return (f'<tr><td>{_esc(a.get("scorer"))}</td>'
-                        f'<td>{aupr:.2f} <span style="color:#64748b">[{ci[0]:.2f}–{ci[1]:.2f}]</span></td>'
-                        f'<td>{int(cov*100)}%</td></tr>') if aupr is not None else ""
+                        f'<td>{aupr:.3f} <span style="color:#64748b">{ci_txt}</span></td>'
+                        f'<td>{cov_txt}</td></tr>')
+            except Exception:  # noqa: BLE001 - one scorer's artifact issue must not drop the other
+                return ""
+        rows = _fmt("cfd") + _fmt("crispr_bulge")
+        if rows:
             summary_html = (
                 '<table class="rc-tbl"><tr class="rc-hdr"><td>scorer</td>'
                 '<td>held-out AUPR (90% CI)</td><td>≥0.2 single-guide coverage</td></tr>'
-                f'{_fmt(cfd)}{_fmt(cb)}</table>')
-        except Exception:  # noqa: BLE001
-            summary_html = ""
+                f'{rows}</table>')
     pr = _pr_curve_uri()
     pr_html = (f'<div class="rc-pr"><img alt="Precision-recall of each scorer" src="{pr}" '
                f'style="max-width:100%"></div>') if pr else ""
