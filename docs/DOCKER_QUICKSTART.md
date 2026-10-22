@@ -498,6 +498,17 @@ and deleting data you no longer need. See
   throwaway container.
 - **A search ran out of memory** → raise Docker's memory limit (step 1), or
   start with a smaller search (fewer mismatches/bulges, or one chromosome).
+- **(CLI) `guide '...' is 20 nt but the PAM expects a padded length of 23 nt`** →
+  on the command line each guide in the guide file must be padded to the PAM length
+  with `N`s for the PAM positions. For a 20 bp SpCas9 spacer with a 3 nt PAM, append
+  `NNN` (e.g. `ACTGAAATCTGTAAGCAGGCNNN`). The pre-flight validator catches this before
+  the search starts. (The **web interface** pads automatically — you only type the
+  spacer there.)
+- **(CLI) `Output folder /DATA/Results/<name> not empty!`** → `--output <name>` must
+  name a folder that does not already exist. If a previous run **aborted at the
+  validation step** (e.g. the guide-padding error above), it can leave behind a small
+  setup folder that blocks a re-run with the same name. Delete it
+  (`rm -rf Results/<name>`) or pick a new `--output` name, then re-run.
 - **`download` fails with `Not enough free disk space` (or a small/HPC home
   directory)** → the download first caches files under `~/.cache/huggingface`.
   On systems with a small home (many HPC clusters), point that cache at a roomy
