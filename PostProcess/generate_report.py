@@ -48,10 +48,11 @@ Report structure (top -> bottom)
 3. SIMPLIFIED reference-vs-population plot (v1 single view).
 4. RECOMMENDED VALIDATION PANEL: the full threshold table (candidate counts at
    CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS the
-   HYBRID worst-case top-100 panel: HARD-INCLUDE every site with mm+b<=2 OR
-   CFD>=0.5 at <=1 bulge OR a clean 0-mismatch bulge (a >=2-bulge CFD-only site is
-   kept too but DEMOTED to the end, CFD being an uncalibrated over-call there), then
-   FILL to 100 by worst-case severity across CFD desc / CRISPR-Bulge
+   recommended default panel: HARD-INCLUDE every site with CRISPR-Bulge>0 (the
+   sensitive default, when computed) OR mm+b<=2 OR CFD>=0.2 at 0 bulges OR CFD>=0.5
+   at 1 bulge OR a clean 0-mismatch bulge (a >=2-bulge CFD-only site is kept too but
+   DEMOTED to the end, CFD being an uncalibrated over-call there), then FILL to at
+   least 100 by worst-case severity across CFD desc / CRISPR-Bulge
    desc (if computed) / mm+b asc (no variant quota). An explicit in-report
    methods note (plain-language, real constants) sits under the panel. The panel
    and each non-empty threshold tier are exported (curated columns) and linked.
@@ -160,17 +161,21 @@ PANEL_VARIANT_CFD_MIN = 0.05
 # HYBRID worst-case top-100 panel (section 4).
 # --------------------------------------------------------------------------- #
 # Over the OFF-TARGET set (on-target mm+b==0 excluded), the panel is built in two
-# stages:
-#   1. HARD-INCLUDE every site that is close by sequence OR high-scoring IN CFD'S
-#      CALIBRATED DOMAIN OR a pure bulge, i.e. mm+bulges <= PANEL_FLOOR_MMB  OR
-#      (CFD >= PANEL_FLOOR_CFD AND bulges <= 1)  OR  (0 mismatches AND >=1 bulge).
+# stages and IS the recommended default validation panel:
+#   1. HARD-INCLUDE every site flagged by the sensitive model OR close by sequence OR
+#      a high-CFD site (within CFD's defensible reach) OR a pure bulge, i.e.
+#      CRISPR-Bulge > 0 (the sensitive default, when computed)  OR
+#      mm+bulges <= PANEL_FLOOR_MMB  OR  (CFD >= PANEL_RESCUE_CFD AND bulges == 0)  OR
+#      (CFD >= PANEL_HIGH_CFD AND bulges == 1)  OR  (0 mismatches AND >=1 bulge).
 #      These RELIABLE hard-includes are always in the panel even if they exceed the
 #      cap. A >=2-bulge site high on CFD ALONE is also kept (never dropped -- its risk
 #      is unknown, not zero) but DEMOTED: ranked after every reliable site, because
 #      CFD at >=2 bulges is an uncalibrated over-call and CRISPR-Bulge is N/A there.
-#      The pure-bulge floor matters because >=2-bulge off-targets have no ML score
-#      (out of the CRISPR-Bulge domain), so a clean bulged site must not be dropped by
-#      a missing/low score.
+#      The CFD rescue is sensitive off-bulge (CFD >= 0.2 at 0 bulges) but requires HIGH
+#      CFD (>= 0.5) on single-bulge sites, where CFD is an extrapolation; >=2-bulge CFD
+#      sites are demoted. The pure-bulge floor matters because >=2-bulge off-targets
+#      have no ML score (out of the CRISPR-Bulge domain), so a clean bulged site must
+#      not be dropped by a missing/low score.
 #   2. FILL the remaining slots up to PANEL_CAP by worst-case severity: each site
 #      is ranked independently by CFD (desc), CRISPR-Bulge (desc; only when computed),
 #      and mm+bulges (asc, fewer = closer = worse); a site's SEVERITY is the BEST
@@ -178,9 +183,14 @@ PANEL_VARIANT_CFD_MIN = 0.05
 #      single metric floats up. Ties: CFD desc -> CRISPR-Bulge desc -> mm+b asc.
 # There is NO variant-created quota: variant-created sites enter through the same
 # floors/ranks as reference sites.
-PANEL_CAP = 100
-PANEL_FLOOR_MMB = 2  # hard-include every off-target with mm+bulges <= this
-PANEL_FLOOR_CFD = 0.5  # hard-include (reliable) every off-target with CFD >= this AND bulges <= 1
+PANEL_CAP = 100  # fill up to at least this many by worst-case severity; every hard-include
+                 # below is kept even when the hard-includes already exceed this floor.
+PANEL_FLOOR_MMB = 2  # hard-include every off-target with mm+bulges <= this (near-perfect by sequence)
+PANEL_RESCUE_CFD = 0.2  # CFD rescue on 0-bulge (mismatch-only) sites: hard-include CFD >= this.
+                        # CFD is reliable off-bulge, so the sensitive 0.2 floor applies there.
+PANEL_HIGH_CFD = 0.5    # "high CFD" on BULGED sites, where CFD is an extrapolation: a 1-bulge site
+                        # this high is RESCUED (hard-included); a >=2-bulge site this high is KEPT but
+                        # DEMOTED to the end (uncalibrated, CRISPR-Bulge N/A) -- never silently dropped.
 # metrics contributing to the worst-case severity (logical key, direction).
 # direction "desc" => higher is worse; "asc" => lower is worse (closer sequence).
 PANEL_WORSTCASE_METRICS = (
@@ -2431,14 +2441,18 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     candidate cut site with no a-priori on/off-target distinction, never dropped.
     The OFF-TARGET rows are then selected in two stages (over the off-target set):
 
-    1. HARD-INCLUDE every site that is close by sequence OR high-scoring OR a pure bulge:
-       ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR ``CFD >= PANEL_FLOOR_CFD (0.5)`` OR a
-       PURE-BULGE site (0 mismatches, >=1 bulge). These are always kept; if the
-       hard-includes already exceed ``cap`` we keep them all (a low-edit-distance /
-       high-CFD / clean-bulge site is never dropped). The pure-bulge floor exists because
-       >=2-bulge off-targets have NO ML score (out of the CRISPR-Bulge domain) and only an
-       uncalibrated CFD extrapolation, so a clean bulged site must not be de-prioritized by
-       a missing/low score.
+    1. HARD-INCLUDE every site flagged by the sensitive model OR close by sequence OR
+       a high-CFD site (within CFD's defensible reach) OR a pure bulge: ``CRISPR-Bulge > 0``
+       (the sensitive default, when computed) OR ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR
+       ``CFD >= PANEL_RESCUE_CFD (0.2) at 0 bulges`` OR ``CFD >= PANEL_HIGH_CFD (0.5) at
+       1 bulge`` OR a PURE-BULGE site (0 mismatches, >=1 bulge). These are always kept; if
+       the hard-includes already exceed ``cap`` we keep them all (a flagged / low-edit-
+       distance / high-CFD / clean-bulge site is never dropped). The CFD rescue is sensitive
+       off-bulge (>= 0.2 at 0 bulges) but requires HIGH CFD (>= 0.5) on single-bulge sites,
+       where CFD is an extrapolation; the pure-bulge floor exists because >=2-bulge
+       off-targets have NO ML score (out of the CRISPR-Bulge domain) and only an
+       uncalibrated CFD extrapolation, so a clean bulged site must not be de-prioritized
+       by a missing/low score.
     2. FILL the remaining slots up to ``cap`` by worst-case severity. Each site
        is ranked independently by every available metric in
        ``PANEL_WORSTCASE_METRICS``: CFD (desc), CRISPR-Bulge (desc; only when computed)
@@ -2510,21 +2524,30 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
         severity = pd.Series(1.0, index=offt.index)
 
     # STAGE 1: hard-includes -- always kept, even past the cap. Two tiers:
-    #   RELIABLE: close by sequence (mm+b <= floor) OR high CFD IN ITS CALIBRATED DOMAIN
-    #   (<=1 bulge) OR a clean PURE-BULGE site (0 mismatches, >=1 bulge).
+    #   RELIABLE: flagged by the sensitive model (CRISPR-Bulge > 0, when computed) OR
+    #   close by sequence (mm+b <= floor) OR a high-CFD site within CFD's defensible reach
+    #   (CFD >= rescue at 0 bulges, where CFD is reliable; OR high CFD >= PANEL_HIGH_CFD at
+    #   exactly 1 bulge, where CFD is an extrapolation so only high-confidence calls rescue)
+    #   OR a clean PURE-BULGE site (0 mismatches, >=1 bulge).
     #   DEMOTED: a >=2-bulge site high by CFD ONLY. CFD on a >=2-bulge alignment is an
     #   UNCALIBRATED EXTRAPOLATION that over-calls, and CRISPR-Bulge is N/A there (see METHODS
     #   and the off-target risk card), so we cannot vouch for the score. We DO NOT drop these
     #   -- a >=2-bulge off-target could still be real (the validation benchmark simply has no
     #   >=2-bulge examples, so it is UNKNOWN, and the user must decide what to assay) -- but we
     #   RANK them AFTER every reliable site so the trustworthy candidates come first.
+    cb_flagged = (
+        (crispr_bulge > 0) if has_crispr_bulge
+        else pd.Series(False, index=offt.index)
+    )
     pure_bulge = (mm_cnt == 0) & (bulge_cnt >= 1)
     reliable_hard = (
-        (mmb <= PANEL_FLOOR_MMB)
-        | ((cfd >= PANEL_FLOOR_CFD) & (bulge_cnt <= 1))
+        cb_flagged
+        | (mmb <= PANEL_FLOOR_MMB)
+        | ((cfd >= PANEL_RESCUE_CFD) & (bulge_cnt == 0))
+        | ((cfd >= PANEL_HIGH_CFD) & (bulge_cnt == 1))
         | pure_bulge
     )
-    demoted_hard = (cfd >= PANEL_FLOOR_CFD) & (bulge_cnt >= 2) & ~reliable_hard
+    demoted_hard = (cfd >= PANEL_HIGH_CFD) & (bulge_cnt >= 2) & ~reliable_hard
     hard_mask = reliable_hard | demoted_hard
 
     # OBSERVED priority: a site supported by >=1 real individual (a reference site,
@@ -2665,7 +2688,7 @@ def build_validation_panel(df, cols):
         if "mm" in cols else pd.Series(10 ** 6, index=offt.index)
     )
     n_panel_demoted = int(
-        ((cfd >= PANEL_FLOOR_CFD) & (_bulge_cnt_vp >= 2) & (_mm_cnt_vp >= 1)).sum()
+        ((cfd >= PANEL_HIGH_CFD) & (_bulge_cnt_vp >= 2) & (_mm_cnt_vp >= 1)).sum()
     )
 
     # hybrid worst-case top-100 panel
@@ -2879,12 +2902,16 @@ def render_validation_panel(
     note = (
         f"How the panel was chosen (hybrid, ~{PANEL_CAP} sites &mdash; may be more "
         f"when many sites are hard-included). "
-        f"First, every off-target that is CLOSE by sequence OR HIGH-scoring OR a "
-        f"CLEAN BULGE is hard-included &mdash; specifically every site with "
-        f"mismatches+bulges &le; {PANEL_FLOOR_MMB} OR (CFD &ge; {PANEL_FLOOR_CFD} at "
-        f"&le;1 bulge, its calibrated domain) OR 0 mismatches with &ge;1 bulge. These are always "
-        f"kept (if the hard-included sites already exceed {PANEL_CAP}, they are "
-        f"all kept). The remaining slots up to {PANEL_CAP} are then filled by "
+        f"First, every off-target that is FLAGGED by the sensitive model OR CLOSE by "
+        f"sequence OR a HIGH-CFD site (within CFD&rsquo;s defensible reach) OR a CLEAN "
+        f"BULGE is hard-included &mdash; specifically every site with {scorer_label()} "
+        f"&gt; 0 (the sensitive default, when computed) OR mismatches+bulges &le; "
+        f"{PANEL_FLOOR_MMB} OR CFD &ge; {PANEL_RESCUE_CFD} at 0 bulges (CFD is reliable "
+        f"off-bulge) OR high CFD &ge; {PANEL_HIGH_CFD} at 1 bulge (rescued; CFD is an "
+        f"extrapolation on bulges, so only high-confidence single-bulge calls qualify) "
+        f"OR 0 mismatches with &ge;1 bulge. "
+        f"These are always kept (if the hard-included sites already exceed {PANEL_CAP}, "
+        f"they are all kept). The remaining slots up to {PANEL_CAP} are then filled by "
         f"worst-case severity: each site is ranked independently by "
         f"{metric_list}, and a site is prioritized if it is worst by ANY single "
         f"one of those metrics ({metric_or}) &mdash; so the highest-scoring "
@@ -2898,15 +2925,16 @@ def render_validation_panel(
         f"(the validation benchmark simply contains no &ge;2-bulge examples, so their "
         f"risk is UNKNOWN and only you can decide what to assay). Instead, a &ge;2-bulge "
         f"site that qualifies on CFD alone is KEPT in the panel but DEMOTED &mdash; "
-        f"ranked after every reliable hard-include (close by sequence, high CFD at "
-        f"&le;1 bulge, or a clean 0-mismatch bulge), so the trustworthy candidates come "
-        f"first and the over-called ones sit at the end, flagged lower-confidence. "
+        f"ranked after every reliable hard-include ({scorer_label()} &gt; 0, close by "
+        f"sequence, a high-CFD site within CFD&rsquo;s defensible reach, or a clean "
+        f"0-mismatch bulge), so the trustworthy candidates come first and the "
+        f"over-called ones sit at the end, flagged lower-confidence. "
         + (
             f"<b>In this run, {vp.get('n_panel_demoted', 0):,} CFD &ge; "
-            f"{PANEL_FLOOR_CFD} sites carry &ge;2 bulges alongside mismatches</b> "
+            f"{PANEL_HIGH_CFD} sites carry &ge;2 bulges alongside mismatches</b> "
             f"(an uncalibrated over-call, outside CFD&rsquo;s domain) &mdash; they are "
             f"kept in the panel but demoted to the end, and are also in the full CFD "
-            f"&ge; {PANEL_FLOOR_CFD} threshold download for independent review. "
+            f"&ge; {PANEL_HIGH_CFD} threshold download for independent review. "
             if vp.get("n_panel_demoted") else ""
         ) +
         f"The clean-bulge hard-include above guarantees a 0-mismatch bulged site is "
@@ -2983,10 +3011,12 @@ def render_validation_panel(
         "downloads. <strong>Recommended default panel:</strong> validate every "
         "CRISPR-Bulge&ndash;flagged site (score &gt; 0 &mdash; the sensitive operating point; "
         "CRISPR-Bulge is the stronger ranker but tops out near 92&#37; recall), plus the "
-        "high-CFD (&ge; 0.2) no-bulge sites it misses, plus the perfect/near-perfect and "
-        "functional / cancer-gene hits above &mdash; sized to your assay budget. CFD cannot "
-        "rank bulge sites, so bulge candidates are carried by CRISPR-Bulge, and &ge;2-bulge "
-        "sites stay listed but demoted (uncalibrated for both scores). See the risk card and "
+        "high-CFD sites it misses (CFD &ge; 0.2 on no-bulge sites, where CFD is reliable, and "
+        "high CFD &ge; 0.5 on single-bulge sites, where CFD is an extrapolation so only "
+        "high-confidence calls are rescued), plus the perfect/near-perfect and "
+        "functional / cancer-gene hits above &mdash; sized to your assay budget. On &ge;2-bulge "
+        "sites both scores are out of their validated domain, so those stay listed but demoted "
+        "(CRISPR-Bulge is N/A and CFD is an uncalibrated over-call). See the risk card and "
         "METHODS &sect;3.5.")
     return f"""
 <p class="caption">{_bridge}</p>
@@ -3006,10 +3036,10 @@ def render_validation_panel(
     <tr><td>{_off_label}</td><td class="num">{vp['n_offtarget']:,}</td></tr>
     {_variant_rows}
     <tr class="panel-hi"><td><strong>{_panel_hdr}</strong><br>
-      <span class="caption">hard-include (mm+b &le; {PANEL_FLOOR_MMB} OR CFD &ge;
-      {PANEL_FLOOR_CFD} at &le;1 bulge OR a clean 0-mismatch bulge; a &ge;2-bulge site
-      high on CFD alone is kept too but demoted to the end), then fill up to
-      {PANEL_CAP} by worst-case severity across {metric_list};{_panel_variant_note}</span></td>
+      <span class="caption">hard-include ({scorer_label()} &gt; 0 OR mm+b &le; {PANEL_FLOOR_MMB}
+      OR CFD &ge; {PANEL_RESCUE_CFD} at 0 bulges OR CFD &ge; {PANEL_HIGH_CFD} at 1 bulge OR a clean
+      0-mismatch bulge; a &ge;2-bulge site high on CFD alone is kept too but demoted to the end),
+      then fill up to {PANEL_CAP} by worst-case severity across {metric_list};{_panel_variant_note}</span></td>
       <td class="num"><strong>{_tier_count_link('panel', vp['panel_size'])}</strong></td></tr>
   </tbody>
 </table>
@@ -3569,9 +3599,12 @@ _SCORE_LEGEND = [
      "<b>Cutting Frequency Determination</b> score (Doench <i>et al.</i>, "
      "<i>Nat. Biotechnol.</i> 2016) &mdash; a 0&ndash;1 estimate of how efficiently "
      "SpCas9 cuts a mismatched site relative to a perfect match (1 = as efficient as "
-     "the on-target). Higher = more likely to be cut. <b>Rule of thumb:</b> treat "
-     "CFD&nbsp;&ge;&nbsp;0.2 as worth validating (the recommended panel already "
-     "hard-includes CFD&nbsp;&ge;&nbsp;0.5 at &le;1 bulge, its calibrated domain). "
+     "the on-target). Higher = more likely to be cut. <b>Rule of thumb:</b> on "
+     "0-bulge (mismatch-only) sites treat CFD&nbsp;&ge;&nbsp;0.2 as worth validating; "
+     "on single-bulge sites, where CFD is an extrapolation, rescue only HIGH CFD "
+     "(&ge;&nbsp;0.5). This CFD rescue supplements the panel&rsquo;s primary "
+     "CRISPR-Bulge&nbsp;&gt;&nbsp;0 selection; on &ge;2-bulge sites CFD is an "
+     "uncalibrated over-call and is not used to select (those sites are demoted). "
      "<b>Caveat:</b> CFD was trained on "
      "single-base mismatches; its values for sites containing DNA/RNA bulges "
      "(insertions/deletions) are an extrapolation beyond the model&rsquo;s training "

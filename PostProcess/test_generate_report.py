@@ -22,11 +22,12 @@ HTML is a self-contained IND-briefing-book digest (report v2.4):
     panel_top100.tsv, per-tier tsvs). The table shows the annotation columns
     (Gene, Gene_distance_kb, GENCODE, ENCODE, DHS); the downloads use the SAME
     curated columns (header spot-checked on panel_top100.tsv),
-  * SECTION 4: the HYBRID panel -- hard-include mm+b <= PANEL_FLOOR_MMB (2) OR
-    CFD >= PANEL_FLOOR_CFD (0.5) AT <=1 BULGE OR a clean 0-mismatch bulge (a
-    >=2-bulge CFD-only site is kept too but DEMOTED to the end), fill to PANEL_CAP
-    (100) by worst-case severity (no variant quota); the module-level floors are
-    present, and the in-report methods note is present,
+  * SECTION 4: the recommended default panel -- hard-include CRISPR-Bulge > 0 (the
+    sensitive default) OR mm+b <= PANEL_FLOOR_MMB (2) OR CFD >= PANEL_RESCUE_CFD (0.2)
+    AT 0 BULGES OR CFD >= PANEL_HIGH_CFD (0.5) AT 1 BULGE OR a clean 0-mismatch bulge
+    (a >=2-bulge CFD-only site is kept too but DEMOTED to the end), fill to at least
+    PANEL_CAP (100) by worst-case severity (no variant quota); the module-level floors
+    are present, and the in-report methods note is present,
   * PER-TIER DOWNLOADS: the non-empty CFD/mm+b/variant-created subsets are bundled
     as curated TSVs and linked,
   * MAF FOOTNOTE: the v2.4 blank-MAF explanation is present,
@@ -924,11 +925,14 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("hybrid", html.lower())
         self.assertIn("worst-case", html.lower())
         self.assertIn("~100 sites", html)
-        # C) EXPLICIT IN-REPORT METHODS NOTE with the REAL constants: the CFD hard-include
-        #    is gated on <=1 bulge (CFD's calibrated domain; >=2-bulge CFD is an over-call)
+        # C) EXPLICIT IN-REPORT METHODS NOTE with the REAL constants: the panel's PRIMARY
+        #    selection is CRISPR-Bulge>0 (the sensitive default), the CFD RESCUE is gated to
+        #    0 bulges (CFD over-calls on bulges), and >=2-bulge CFD-only sites are demoted.
         self.assertIn("<strong>Methods.</strong>", html)
         self.assertIn("hard-include", html.lower())
-        self.assertIn("mismatches+bulges &le; 2 OR (CFD &ge; 0.5 at &le;1 bulge", html)
+        self.assertIn("&gt; 0 (the sensitive default", html)  # CRISPR-Bulge>0 primary axis
+        self.assertIn("CFD &ge; 0.2 at 0 bulges", html)       # CFD rescue off-bulge
+        self.assertIn("high CFD &ge; 0.5 at 1 bulge", html)   # high-CFD single-bulge rescue
         self.assertIn("fill", html.lower())
         self.assertIn("worst by ANY single", html)
         self.assertIn("NO category quota", html)
@@ -964,14 +968,16 @@ class TestGenerateReport(unittest.TestCase):
         # HYBRID panel floors + cap + metrics are module-level constants
         self.assertEqual(gr.PANEL_CAP, 100)
         self.assertEqual(gr.PANEL_FLOOR_MMB, 2)
-        self.assertEqual(gr.PANEL_FLOOR_CFD, 0.5)
+        self.assertEqual(gr.PANEL_RESCUE_CFD, 0.2)   # CFD rescue on 0-bulge sites
+        self.assertEqual(gr.PANEL_HIGH_CFD, 0.5)     # high-CFD: rescue 1-bulge / demote >=2-bulge
         self.assertEqual(
             gr.PANEL_WORSTCASE_METRICS,
             (("cfd", "desc"), ("crispr_bulge", "desc"), ("mmb", "asc")),
         )
 
     def test_section4_hybrid_selection_and_cap(self):
-        """Hard-include (mm+b<=2 OR CFD>=0.5), fill by worst-case severity, cap."""
+        """Hard-include (CRISPR-Bulge>0 OR mm+b<=2 OR CFD>=0.2 at 0 bulges OR pure bulge),
+        a >=2-bulge CFD-only site kept-but-demoted, then fill by worst-case severity, cap."""
         import pandas as pd
 
         header = list(_HEADER)
@@ -985,11 +991,13 @@ class TestGenerateReport(unittest.TestCase):
             return r
 
         rows = [
-            _row("chrON", 0, 0, 1.0, 1.0, False),    # perfect match -> forced to top
-            _row("chrCFD", 3, 2, 0.99, 0.10, True),  # HARD (CFD>=0.5)
-            _row("chrMMB", 2, 0, 0.10, 0.10, False), # HARD (mm+b<=2)
-            _row("chrCRI", 4, 3, 0.10, 0.99, True),  # not hard; worst by CRISPR-Bulge
-            _row("chrLOW", 6, 4, 0.05, 0.05, False), # low by every metric
+            _row("chrON",   0, 0, 1.0,  1.0,  False),  # perfect match -> forced to top
+            _row("chrCB",   5, 0, 0.05, 0.40, True),   # HARD via CRISPR-Bulge>0 (sensitive default)
+            _row("chrCFD",  3, 0, 0.60, 0.0,  True),   # HARD via CFD>=0.2 at 0 bulges (rescue)
+            _row("chrB1",   4, 1, 0.70, 0.0,  True),   # HARD via high CFD>=0.5 at 1 bulge (rescue)
+            _row("chrMMB",  2, 0, 0.05, 0.0,  False),  # HARD via mm+b<=2
+            _row("chrDEM",  1, 2, 0.90, -1,   True),   # >=2 bulge, CFD>=0.5, CB N/A -> KEPT but DEMOTED
+            _row("chrFILL", 5, 0, 0.05, 0.0,  False),  # NOT hard (CB=0, CFD<0.2, mm+b>2) -> fill only
         ]
         tsv = os.path.join(self.tmp, "wc.tsv")
         with open(tsv, "w") as h:
@@ -1003,13 +1011,19 @@ class TestGenerateReport(unittest.TestCase):
         chroms = list(panel[cols["chrom"]])
         # perfect match (mm+b==0) is FORCED to the top of the panel (candidate cut site)
         self.assertEqual(chroms[0], "chrON")
-        # hard-includes always present; CRISPR-Bulge-only site enters via the fill ranks
+        # every hard-include present: CRISPR-Bulge>0 (primary), CFD>=0.2 at 0 bulges,
+        # high CFD>=0.5 at 1 bulge (rescue), mm+b<=2
+        self.assertIn("chrCB", chroms)
         self.assertIn("chrCFD", chroms)
+        self.assertIn("chrB1", chroms)   # high-CFD single-bulge site is rescued (reliable)
         self.assertIn("chrMMB", chroms)
-        self.assertIn("chrCRI", chroms)
-        # after the perfect match, hard-includes come first (before the fill); all-low last
-        self.assertEqual({"chrCFD", "chrMMB"}, set(chroms[1:3]))
-        self.assertEqual(chroms[-1], "chrLOW")
+        # a >=2-bulge CFD-only site is KEPT (never dropped) but DEMOTED after every reliable one
+        self.assertIn("chrDEM", chroms)
+        reliable_idx = [chroms.index(c) for c in ("chrCB", "chrCFD", "chrB1", "chrMMB")]
+        self.assertTrue(all(chroms.index("chrDEM") > i for i in reliable_idx))
+        # the non-hard site enters only via the fill (cap=100 has room) and ranks last
+        self.assertIn("chrFILL", chroms)
+        self.assertEqual(chroms[-1], "chrFILL")
 
         # HARD-INCLUDES EXCEED THE CAP -> they are ALL kept (panel > cap allowed).
         # Build many mm+b<=2 hard-include sites, cap at 3.
@@ -1031,8 +1045,9 @@ class TestGenerateReport(unittest.TestCase):
         # cap is honored when hard-includes are few: many mid sites -> exactly cap
         big = [_row("chrON", 0, 0, 1.0, 1.0, False)]
         for i in range(500):
-            # mm+b=4 (>floor) and CFD=0.20 (<floor) -> NOT hard-included
-            big.append(_row(f"c{i}", 3, 1, 0.20, 0.20, i % 2 == 0))
+            # NOT hard: CRISPR-Bulge=0 (not >0), CFD=0.05 (<rescue 0.2), mm+b=4 (>floor),
+            # and a single bulge (not a pure 0-mismatch bulge) -> enters only via fill
+            big.append(_row(f"c{i}", 3, 1, 0.05, 0.0, i % 2 == 0))
         tsv2 = os.path.join(self.tmp, "wc_big.tsv")
         with open(tsv2, "w") as h:
             h.write("\t".join(header) + "\n")
@@ -1449,16 +1464,23 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("individual reported alignments", html)
 
     def test_cfd_glossary_tooltip_matches_gated_panel_rule(self):
-        """The CFD legend tooltip (Section 7) must agree with the gated hard-include
-        rule: it states the panel hard-includes CFD>=0.5 AT <=1 BULGE (not all gaps),
-        and that >=2-bulge high-CFD sites are kept-but-demoted, never silently dropped.
-        A drift back to the un-gated 'hard-includes CFD>=0.5' wording would mislead an
-        IND reviewer into thinking a demoted (panel-last) site is a top hard-include."""
+        """The CFD legend tooltip (Section 7) must agree with the recommended-panel
+        rule: CFD is the RESCUE axis (CFD>=0.2 restricted to 0-bulge / mismatch-only
+        sites) that supplements the panel's PRIMARY CRISPR-Bulge>0 selection, CFD is
+        not used to select bulge sites, and >=2-bulge high-CFD sites are kept-but-
+        demoted (never silently dropped). A drift back to presenting CFD>=0.5 at <=1
+        bulge as the panel key -- or an un-gated CFD>=0.2 cutoff with no 0-bulge
+        restriction -- would misrepresent what the panel actually selects."""
         cfd_entry = dict(gr._SCORE_LEGEND)["CFD"]
-        # the qualifier that must never silently disappear
-        self.assertIn("hard-includes CFD&nbsp;&ge;&nbsp;0.5 at &le;1 bulge", cfd_entry)
-        # the un-gated phrasing must NOT reappear
-        self.assertNotIn("hard-includes CFD&nbsp;&ge;&nbsp;0.5).", cfd_entry)
+        # CFD rescue: sensitive off-bulge (>=0.2 at 0 bulges), HIGH only on single-bulge (>=0.5)
+        self.assertIn("0-bulge (mismatch-only) sites treat CFD&nbsp;&ge;&nbsp;0.2", cfd_entry)
+        self.assertIn("rescue only HIGH CFD (&ge;&nbsp;0.5)", cfd_entry)
+        # it is explicitly subordinate to the primary CRISPR-Bulge>0 selection
+        self.assertIn("CRISPR-Bulge&nbsp;&gt;&nbsp;0 selection", cfd_entry)
+        # >=2-bulge CFD is an over-call and is not used to select
+        self.assertIn("&ge;2-bulge sites CFD is an uncalibrated over-call", cfd_entry)
+        # the superseded "CFD>=0.5 at <=1 bulge is the panel key" wording must NOT reappear
+        self.assertNotIn("hard-includes CFD&nbsp;&ge;&nbsp;0.5 at &le;1 bulge", cfd_entry)
         # demote (not drop/"verify manually") is the >=2-bulge policy
         self.assertIn("demoted", cfd_entry.lower())
         self.assertNotIn("verify manually", cfd_entry.lower())

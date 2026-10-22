@@ -140,7 +140,7 @@ can see (~92% recall against the assay-detected set); chasing higher recall coll
 threshold toward 0 and returns the whole genome. The practical default panel is therefore a
 **union, not a cutoff**:
 
-> **Default panel = (CRISPR-Bulge > 0) ∪ (CFD ≥ 0.2 on 0-bulge sites) ∪ must-includes**
+> **Default panel = (CRISPR-Bulge > 0) ∪ (CFD ≥ 0.2 on 0-bulge sites) ∪ (CFD ≥ 0.5 on single-bulge sites) ∪ must-includes**
 
 where *must-includes* are all perfect / near-perfect matches, any site in a functional element
 or cancer-driver gene, and — on a genotyped/phased panel — observed *cis* haplotypes with named
@@ -149,7 +149,10 @@ carriers.
 - **CRISPR-Bulge > 0** carries the bulge sites and the ML-ranked core — CFD cannot rank bulges
   (bulge=1 AP ≈ 0.02 vs CRISPR-Bulge ≈ 0.25; §3).
 - **CFD ≥ 0.2 on 0-bulge** rescues the high-CFD no-bulge sites CRISPR-Bulge misses (CFD is
-  defensible only off-bulge).
+  reliable off-bulge).
+- **CFD ≥ 0.5 on a single bulge** rescues the *high-CFD* 1-bulge sites: there CFD is an
+  extrapolation, so only high-confidence calls are rescued (CRISPR-Bulge remains the primary
+  bulge ranker; this only *adds* sites it scored low).
 - **≥2-bulge sites** are excluded from scoring-driven selection (uncalibrated for both scores)
   but kept-and-demoted in the report, never dropped.
 

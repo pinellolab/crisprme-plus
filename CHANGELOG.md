@@ -22,12 +22,17 @@ and the `release-crisprme` skill.
   like the CRISPR-Bulge column (shown only when CRISPR-Bulge was computed).
 
 ### Changed
-- **Documented the recommended default validation panel** (METHODS §3.5 + the risk-card note):
-  `(CRISPR-Bulge > 0) ∪ (CFD ≥ 0.2 on 0-bulge) ∪ must-includes` — CRISPR-Bulge carries the bulge sites
-  (CFD cannot rank bulges: bulge=1 AP ≈ 0.02 vs ≈ 0.25), CFD rescues the high-CFD no-bulge sites it
-  misses, and ≥2-bulge sites are excluded from scoring-driven selection but kept-and-demoted in the
-  report. Framed as a risk/budget optimization, not a recall guarantee (CRISPR-Bulge has a ~92% recall
-  ceiling; ~7%, mostly bulges, sits below both scores and is recovered only by the must-include criteria).
+- **The recommended validation panel (report Section 4) now selects on the sensitive operating point.**
+  The panel hard-includes `(CRISPR-Bulge > 0) ∪ (mm+b ≤ 2) ∪ (CFD ≥ 0.2 at 0 bulges) ∪ (CFD ≥ 0.5 at 1
+  bulge) ∪ (clean 0-mismatch bulge) ∪ must-includes` — making the shipped `panel_top100.tsv` *be* the
+  recommended default panel rather than a CFD-centric subset. CRISPR-Bulge > 0 is the primary axis
+  (CFD cannot rank bulges: bulge=1 AP ≈ 0.02 vs ≈ 0.25); the CFD rescue is sensitive off-bulge (≥ 0.2)
+  but requires high confidence (≥ 0.5) on single-bulge sites where CFD is an extrapolation; ≥2-bulge
+  CFD-only sites are kept-and-demoted (uncalibrated for both scores), never dropped. The panel is a
+  strict superset of the previous one (no site removed). One consistent threshold message now runs
+  across the risk card, the "how to read this" modal, the Section-4 methods note, the score glossary,
+  and METHODS §3.5. Framed as a risk/budget optimization, not a recall guarantee (CRISPR-Bulge has a
+  ~92% recall ceiling; ~7%, mostly bulges, sits below both scores and is recovered only by must-includes).
 
 ### Fixed
 - **`--per-sample` searches no longer fail at the annotation stage on Docker Desktop for Mac/Windows.**
