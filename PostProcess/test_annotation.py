@@ -18,6 +18,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -96,6 +97,78 @@ class AnnotateOfftargetsTest(unittest.TestCase):
         out = self._run([_row(af=""), _row(af="0.5")])
         for data in out[1:]:
             self.assertEqual(len(data.split("\t")), 22)
+
+
+class LoadAnnotationBedRetryTest(unittest.TestCase):
+    """load_annotation_bed() must tolerate a *transient* truncated read of a valid
+    annotation (a Docker Desktop virtiofs bind mount / NFS read-after-write lag can
+    briefly present a complete file as short), retrying with backoff before declaring
+    it corrupt -- while still raising an actionable error on a *persistent* failure.
+    """
+
+    def _gz(self, tmp):
+        path = os.path.join(tmp, "annotation.sorted.bed.gz")
+        open(path, "wb").close()  # real file so getmtime()/lock creation work
+        return path
+
+    def test_transient_read_then_success(self):
+        """Two transient open failures then success -> returns the handle, having
+        slept between attempts (no spurious 'corrupt' error)."""
+        sentinel = object()
+        with tempfile.TemporaryDirectory() as tmp:
+            gz = self._gz(tmp)
+            tbx = mock.Mock(side_effect=[OSError("Invalid BGZF header at offset 104282"),
+                                         OSError("could not open index"), sentinel])
+            with mock.patch.object(an, "_bgzf_eof_ok", return_value=True), \
+                 mock.patch.object(an, "_reindex") as reindex, \
+                 mock.patch.object(an.pysam, "TabixFile", tbx), \
+                 mock.patch.object(an, "sleep") as slp:
+                result = an.load_annotation_bed(gz)
+            self.assertIs(result, sentinel)
+            self.assertEqual(tbx.call_count, 3)       # failed twice, succeeded 3rd
+            self.assertEqual(slp.call_count, 2)       # backed off before each retry
+            self.assertTrue(reindex.called)
+
+    def test_success_first_try_never_sleeps(self):
+        """A healthy filesystem path must not pay any retry latency."""
+        sentinel = object()
+        with tempfile.TemporaryDirectory() as tmp:
+            gz = self._gz(tmp)
+            with mock.patch.object(an, "_bgzf_eof_ok", return_value=True), \
+                 mock.patch.object(an, "_reindex"), \
+                 mock.patch.object(an.pysam, "TabixFile", return_value=sentinel), \
+                 mock.patch.object(an, "sleep") as slp:
+                result = an.load_annotation_bed(gz)
+            self.assertIs(result, sentinel)
+            slp.assert_not_called()
+
+    def test_persistent_missing_eof_is_truncated_download(self):
+        """A persistently absent BGZF EOF marker -> actionable 'truncated/incomplete
+        download' message (not a generic corruption error), only after retries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            gz = self._gz(tmp)
+            with mock.patch.object(an, "_bgzf_eof_ok", return_value=False), \
+                 mock.patch.object(an, "sleep") as slp, \
+                 self.assertRaises(an.SamtoolsError) as ctx:
+                an.load_annotation_bed(gz)
+            self.assertIn("truncated or corrupt", str(ctx.exception))
+            self.assertIn("incomplete download", str(ctx.exception))
+            self.assertEqual(slp.call_count, an._ANNOT_LOAD_ATTEMPTS - 1)
+
+    def test_persistent_load_failure_is_corrupt_after_attempts(self):
+        """EOF present but every open fails -> 'corrupt even after N attempts'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            gz = self._gz(tmp)
+            with mock.patch.object(an, "_bgzf_eof_ok", return_value=True), \
+                 mock.patch.object(an, "_reindex"), \
+                 mock.patch.object(an.pysam, "TabixFile",
+                                   side_effect=OSError("Invalid BGZF header")), \
+                 mock.patch.object(an, "sleep") as slp, \
+                 self.assertRaises(an.SamtoolsError) as ctx:
+                an.load_annotation_bed(gz)
+            self.assertIn("even after", str(ctx.exception))
+            self.assertIn(str(an._ANNOT_LOAD_ATTEMPTS), str(ctx.exception))
+            self.assertEqual(slp.call_count, an._ANNOT_LOAD_ATTEMPTS - 1)
 
 
 if __name__ == "__main__":

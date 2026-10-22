@@ -973,7 +973,16 @@ echo -e 'Merging Targets\tEnd\t'$(date) >>$log
 
 # START STEP 6 - targets annotation
 echo -e 'Annotating results\tStart\t'$(date) >>$log
-# annotate primary targets 
+# Pre-build the tabix index ONCE, serially, before the parallel annotators below.
+# Each parallel annotation.py would otherwise try to build the SAME .tbi at the same
+# time; flock-based serialization is unreliable on VM-backed bind mounts (Docker
+# Desktop virtiofs/9p on macOS & Windows), so the concurrent builds race, corrupt the
+# index read, and htslib writes C-level stderr that trips the [ -s $logerror ] gate
+# below even when the Python retry recovers. Building it once up front means the
+# parallel workers only READ an already-complete index (its stderr is swallowed here
+# because load_annotation_bed retries internally and leaves a valid index or fails loud).
+python -c "import annotation,sys; annotation.load_annotation_bed(sys.argv[1])" "$annotation_file" >/dev/null 2>&1 || true
+# annotate primary targets
 python annotation.py $final_res.bestCFD.txt $annotation_file $final_res.bestCFD.txt.annotated &
 python annotation.py $final_res.bestmmblg.txt $annotation_file $final_res.bestmmblg.txt.annotated &
 python annotation.py $final_res.bestCRISPR_BULGE.txt $annotation_file $final_res.bestCRISPR_BULGE.txt.annotated &
