@@ -3981,6 +3981,14 @@ def render_html(
             f'download>&#11015; Download all observed haplotypes (TSV)</a></p>'
         )
 
+    # the CRISPR-Bulge-ranked top-1000 sits next to the CFD top-1000 in the Section-5 row
+    # (two scorers -> two top-1000 downloads together), not buried in the per-tier list below.
+    top1000_cb_download = ""
+    if table_crispr_bulge_html:
+        top1000_cb_download = (
+            f'\n  <a class="download" href="{_dl_href("top1000_crispr_bulge.tsv")}" download>'
+            f'Top-1000 by {scorer_label()} (curated TSV)</a>'
+        )
     # per-tier curated downloads (Section 5). ``tier_downloads`` is a list of
     # (label, filename) for every non-empty threshold tier that was bundled.
     tier_download_html = ""
@@ -4073,7 +4081,7 @@ unavailable). A site is counted once per group with at least one carrier.</p>
 
 <h2>5. Downloads</h2>
 <p>{raw_download}
-  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 by CFD (curated TSV)</a>{panel_download}{hvdr_download}{cooc_download}{snp_snp_download}{indel_af_download}{observed_haplotypes_download}
+  <a class="download" href="{_dl_href(top1000_name)}" download>Top-1000 by CFD (curated TSV)</a>{top1000_cb_download}{panel_download}{hvdr_download}{cooc_download}{snp_snp_download}{indel_af_download}{observed_haplotypes_download}
 </p>{tier_download_html}
 {hvdr_callout}
 {cooc_callout}
@@ -5042,9 +5050,8 @@ def build_report(
                     oh_download_name=observed_haplotypes_bundle_name,
                     oh_omitted_note=observed_haplotypes_omitted_note,
                 )
-                tier_downloads.append(
-                    (f"Top-1000 by {scorer_label()} (curated TSV)", "top1000_crispr_bulge.tsv")
-                )
+                # (the CRISPR-Bulge top-1000 is surfaced in the Section-5 top-1000 row next
+                # to the CFD one by render_html, not appended to the per-tier list here.)
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"generate-report: CRISPR-Bulge table unavailable: {exc}\n")
             table_crispr_bulge_html, top_crispr_bulge_df = "", None
