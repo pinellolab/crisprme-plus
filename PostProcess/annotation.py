@@ -123,7 +123,14 @@ def load_annotation_bed(annotation_fname: str) -> TabixFile:
             # (re)build the tabix index if missing / empty / stale, under a lock so
             # parallel annotation processes don't write the .tbi simultaneously.
             with open(lock_path, "w") as lock_fh:
-                fcntl.flock(lock_fh, fcntl.LOCK_EX)
+                try:
+                    fcntl.flock(lock_fh, fcntl.LOCK_EX)
+                except OSError:
+                    # flock is unsupported on some VM-backed bind mounts (Docker Desktop
+                    # virtiofs/9p on macOS & Windows) and raises e.g. ENOTTY. Proceed
+                    # without it: the pipeline pre-builds this index serially before the
+                    # parallel annotators, so the concurrent-write race it guards is absent.
+                    pass
                 if (not os.path.isfile(tbi_path)
                         or os.path.getsize(tbi_path) == 0
                         or os.path.getmtime(tbi_path) < os.path.getmtime(annotation_fname)):
