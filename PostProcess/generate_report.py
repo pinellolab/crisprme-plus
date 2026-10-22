@@ -1708,16 +1708,15 @@ def render_summary_and_matrix(meta, spec_score, matrix, spec_score_cb=None):
     # instead of stacking in the narrow left column. The run-specific greyed note (if any)
     # spans the full width below the columns.
     _grey_note_html = (
-        f'<div class="ml-grey-note"><span class="ml-sw ml-grey"></span>'
-        f'{_greyed_note.strip()}</div>'
+        f'<div class="ml-grey-note">{_greyed_note.strip()}</div>'
         if _greyed_note else ""
     )
     legend_html = (
         '<div class="matrix-legend">'
         '<div class="ml-title">Reading the matrix</div>'
         '<div class="ml-items">'
-        '<div class="ml-item"><span class="ml-sw ml-perfect"></span>'
-        'The <strong>0&nbsp;MM / 0&nbsp;B</strong> cell holds the guide&rsquo;s '
+        '<div class="ml-item">'
+        'The highlighted <strong>0&nbsp;MM / 0&nbsp;B</strong> cell holds the guide&rsquo;s '
         '<strong>perfect genomic match(es)</strong> &mdash; the candidate on-target(s), '
         'forced to the top of the validation panel below (sequence alone cannot tell the '
         'intended on-target from a perfect-match off-target).</div>'
@@ -3324,16 +3323,16 @@ body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-seri
 .legend-item { display: flex; gap: 16px; align-items: baseline; border: 1px solid #e6edf5;
                border-radius: 6px; padding: 10px 14px; background: #fbfcfe; }
 .legend-term { flex: 0 0 215px; font-weight: 600; color: #2c5282; }
-.legend-def { flex: 1 1 auto; color: #2d3748; font-size: 0.92em; }
+.legend-def { flex: 1 1 auto; color: #2d3748; font-size: 0.85em; }
 .legend-def ul { margin: 0.4em 0 0; padding-left: 1.2em; }
 .legend-def li { margin: 0.15em 0; }
-.legend code { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em;
+.legend code { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85em;
                background: #edf2f7; padding: 0 3px; border-radius: 3px; }
-h1 { font-size: 1.6em; margin-bottom: 0.1em; }
+h1 { font-size: 1.5em; margin-bottom: 0.1em; }
 h2 { font-size: 1.25em; margin-top: 1.8em; border-bottom: 1px solid #e2e8f0;
      padding-bottom: 0.2em; }
 .subtitle { color: #4a5568; margin-top: 0; }
-.caption { color: #718096; font-size: 0.86em; margin: 0.3em 0 1.2em; }
+.caption { color: #718096; font-size: 0.85em; margin: 0.3em 0 1.2em; }
 .summary-grid { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
 .summary-card { flex: 0 1 auto; max-width: 460px; min-width: 0; }
 .summary-card .caption { overflow-wrap: break-word; }
@@ -3351,16 +3350,12 @@ table.summary-table td.k { background: #f7fafc; font-weight: 600; width: 250px; 
 /* Matrix legend: a FULL-WIDTH band below the summary grid. The items flow across the
    page in responsive columns (filling the empty space under the matrix) instead of
    stacking in the narrow left column; the run-specific greyed note spans full width. */
-.matrix-legend { margin: 14px 0 0; font-size: 12px; color: #475569; line-height: 1.5;
+.matrix-legend { margin: 14px 0 0; font-size: 0.85em; color: #475569; line-height: 1.5;
                  border-top: 1px solid #e2e8f0; padding-top: 10px; }
 .matrix-legend .ml-title { font-weight: 600; color: #334155; margin-bottom: 6px; }
 .matrix-legend .ml-items { column-width: 330px; column-gap: 32px; }
 .matrix-legend .ml-item { break-inside: avoid; margin: 0 0 6px; }
 .matrix-legend .ml-grey-note { margin-top: 6px; }
-.matrix-legend .ml-sw { display: inline-block; width: 11px; height: 11px;
-   border-radius: 2px; margin-right: 6px; vertical-align: middle; border: 1px solid #cbd5e0; }
-.matrix-legend .ml-perfect { background: #fef2f2; border-color: #fecaca; }
-.matrix-legend .ml-grey { background: #f1f5f9; border-color: #cbd5e0; }
 /* Observed-haplotypes per-site modal (opened from the Observed cell via one JS toggle). */
 .oh-open{cursor:pointer;color:#2c5282;text-decoration:underline;white-space:nowrap}
 .oh-backdrop{position:fixed;inset:0;background:rgba(20,30,50,.45);z-index:50}
@@ -3371,25 +3366,25 @@ table.summary-table td.k { background: #f7fafc; font-weight: 600; width: 250px; 
 .oh-close{position:absolute;top:8px;right:12px;border:none;background:none;font-size:1.5em;cursor:pointer;color:#4a5568}
 .oh-modal-head{font-weight:600;color:#2c5282;margin:2px 28px 10px 0}
 .oh-modal-body{overflow-x:auto}
-table.oh-table{border-collapse:collapse;width:100%;font-size:.85em}
+table.oh-table{border-collapse:collapse;width:100%;font-size:0.8em}
 table.oh-table th,table.oh-table td{border:1px solid #e2e8f0;padding:4px 8px;text-align:left;vertical-align:top}
 table.oh-table th{background:#f7fafc}
 .matrix-wrap { overflow-x: auto; }
-table.matrix { border-collapse: collapse; font-size: 0.82em; }
+table.matrix { border-collapse: collapse; font-size: 0.8em; }
 table.matrix th, table.matrix td { border: 1px solid #e2e8f0; padding: 4px 9px;
                                    text-align: right; }
 table.matrix th { background: #f7fafc; }
 table.matrix td.grp { background: #edf2f7; font-weight: 600; text-align: center;
                       vertical-align: middle; }
 table.matrix td.tot { font-weight: 600; background: #f7fafc; }
-.grp-total { color: #718096; font-weight: 400; font-size: 0.9em; }
+.grp-total { color: #718096; font-weight: 400; font-size: 0.85em; }
 .plot { margin: 0.6em 0 0.6em; }
 .plot img { max-width: 100%; height: auto; border: 1px solid #edf2f7; border-radius: 4px; }
 a.download { display: inline-block; background: #2b6cb0; color: #fff;
              padding: 8px 16px; border-radius: 4px; text-decoration: none;
              margin: 4px 8px 4px 0; }
 a.download:hover { background: #2c5282; }
-.tier-downloads a.download { background: #4a5568; font-size: 0.86em;
+.tier-downloads a.download { background: #4a5568; font-size: 0.85em;
                              padding: 6px 12px; }
 .tier-downloads a.download:hover { background: #2d3748; }
 .panel-grid { display: flex; flex-wrap: wrap; gap: 24px; }
@@ -3397,7 +3392,7 @@ table.thr-table { border-collapse: collapse; margin: 0.4em 0; }
 table.thr-table th, table.thr-table td { border: 1px solid #e2e8f0; padding: 5px 12px; }
 table.thr-table th { background: #f7fafc; text-align: left; }
 table.thr-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
-a.tier-dl { color: #2b6cb0; text-decoration: none; font-size: 0.9em;
+a.tier-dl { color: #2b6cb0; text-decoration: none; font-size: 0.85em;
             font-variant-numeric: normal; }
 a.tier-dl:hover { text-decoration: underline; }
 tr.panel-hi td { background: #ebf8ff; }
@@ -3409,9 +3404,8 @@ table.ottable th, table.ottable td { padding: 4px 8px; text-align: left;
 table.ottable thead th { position: sticky; top: 0; background: #fff;
                          border-bottom: 2px solid #cbd5e0; z-index: 1; }
 table.ottable tbody tr:nth-child(even) { background: #f6f6f6; }
-table.ottable code { font-family: SFMono-Regular, Menlo, Consolas, monospace;
-                     font-size: 0.95em; }
-footer { margin-top: 2.5em; color: #4a5568; font-size: 0.82em;
+table.ottable code { font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+footer { margin-top: 2.5em; color: #4a5568; font-size: 0.8em;
          border-top: 1px solid #e2e8f0; padding-top: 0.9em; }
 footer .disclaimer { color: #742a2a; background: #fff5f5; border: 1px solid #fed7d7;
                      border-radius: 4px; padding: 10px 14px; margin-top: 0.8em; }
@@ -3779,7 +3773,7 @@ def render_perfect_match_banner(vp):
         return (
             '<div style="border:2px solid #dc2626;background:#fef2f2;'
             'padding:0.9em 1.1em;margin:1em 0;border-radius:6px">'
-            '<p style="margin:0 0 0.4em;color:#991b1b;font-size:1.05em">'
+            '<p style="margin:0 0 0.4em;color:#991b1b;font-size:1.1em">'
             "<strong>&#9888; Multiple perfect matches &mdash; no unambiguous "
             "on-target.</strong></p>"
             f'<p style="margin:0">{lead} <strong>multiple</strong> genomic '
@@ -5854,7 +5848,7 @@ def _combined_perfect_match_banner(combined_df, hap_dirs=None, guide=None):
         return (
             '<div style="border:2px solid #dc2626;background:#fef2f2;'
             'padding:0.9em 1.1em;margin:1em 0;border-radius:6px">'
-            '<p style="margin:0 0 0.4em;color:#991b1b;font-size:1.05em">'
+            '<p style="margin:0 0 0.4em;color:#991b1b;font-size:1.1em">'
             "<strong>&#9888; Multiple perfect matches &mdash; no unambiguous "
             "on-target.</strong></p>"
             f'<p style="margin:0">This guide matches <strong>{n_perfect}</strong> '

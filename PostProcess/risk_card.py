@@ -234,17 +234,17 @@ CARD_CSS = """
 .risk-card .rc-warn{color:#b91c1c;font-weight:600;margin:6px 0}
 .risk-card .rc-scorers{display:flex;gap:24px;flex-wrap:wrap}
 .risk-card .rc-scorer{flex:1;min-width:280px}
-.risk-card table.rc-tbl{border-collapse:collapse;width:100%;font-size:13px}
+.risk-card table.rc-tbl{border-collapse:collapse;width:100%;font-size:0.85em}
 .risk-card table.rc-tbl td{text-align:left;padding:3px 8px;border-bottom:1px solid #f1f5f9}
 table.rc-tbl .rc-hdr td{font-weight:600;color:#334155}
-.risk-card .rc-prev{margin-top:8px;font-size:13px}
-.risk-card .rc-note{margin-top:6px;font-size:13px;color:#475569}
+.risk-card .rc-prev{margin-top:8px;font-size:0.85em}
+.risk-card .rc-note{margin-top:6px;font-size:0.85em;color:#475569}
 .rc-open{cursor:pointer;color:#2c5282;text-decoration:underline}
 .rc-modal{display:none;position:fixed;inset:0;z-index:60;background:rgba(20,30,50,.45);align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto}
 .rc-modal:target{display:flex}
 .rc-modal-box{background:#fff;border-radius:10px;max-width:900px;width:100%;padding:18px 22px;position:relative;box-shadow:0 8px 40px rgba(20,40,80,.3)}
-.rc-modal-close{position:absolute;top:8px;right:14px;font-size:22px;text-decoration:none;color:#64748b}
+.rc-modal-close{position:absolute;top:8px;right:14px;font-size:1.5em;text-decoration:none;color:#64748b}
 .rc-modal-head{font-weight:700;font-size:1.1em;margin-bottom:10px}
-.rc-modal-body p{margin:.6em 0;font-size:14px;line-height:1.5}
+.rc-modal-body p{margin:.6em 0;font-size:0.85em;line-height:1.5}
 .rc-modal-body table.rc-tbl{margin:10px 0}
 """
