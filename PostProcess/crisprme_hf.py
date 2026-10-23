@@ -854,7 +854,8 @@ def download_component(
         # Extract the enriched genome into Genomes/. Robust to the archive's internal
         # layout: unpack to a temp dir, then move every 'hg38+hg38_<ds>...' top dir into
         # Genomes/ (the kit may be rooted at that dir OR nested under Genomes/).
-        import tarfile
+        # (tarfile is imported at module scope; do NOT re-import locally — a function-local
+        # import would shadow it for the whole function and break the index/genome branches.)
         extract = os.path.join(staging, "_x")
         os.makedirs(extract, exist_ok=True)
         with tarfile.open(tgz, "r:gz") as tf:
