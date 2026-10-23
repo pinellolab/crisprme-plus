@@ -105,6 +105,12 @@ and the `release-crisprme` skill.
 - Troubleshooting entries for two CLI first-run messages a newcomer can hit: a guide needing `NNN`
   PAM-padding (23 nt), and the "output folder not empty" a validation-aborted run leaves behind.
 
+### Removed
+- Retired the standalone 1000G-2021 index (`NRG_3_hg38+hg38_1000G2021` + genotype companion) —
+  superseded by the default HGDP1kGP (which includes the jointly re-phased 1000G-2021 samples);
+  deleted from HuggingFace (26 GB reclaimed), rebuildable from the retained `hg38_1000G_2021`
+  source. The `hg38_1000G_2021` source dataset remains (a mega + HGDP1kGP input).
+
 ## [2.7.10] - 2026-10-22
 
 ### Added

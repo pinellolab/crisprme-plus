@@ -136,11 +136,6 @@ complementary production indexes — the recommended default is the fully phased
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 
-# 1000-Genomes-only alternative — 1000 Genomes 2021 (3,202 samples), genotyped and fully phased.
-# CONFIRMED cis haplotypes with named per-sample carriers + exact joint AF (use --per-sample).
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
-
 # Sites-only "mega" panel — five sources (1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + AoU),
 # per-dataset AF + cross-source AF_max. PUTATIVE haplotypes with a conservative min-AF bound.
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
@@ -153,7 +148,7 @@ The web interface picks these up automatically — a search that uses the defaul
 
 > **Analysis mode (context-aware default) — per-sample vs population-level.** The axis is
 > genotype resolution, not speed. By default `complete-search` auto-selects the mode from the
-> index: on a **genotyped+phased** panel (HGDP + 1000 Genomes [the default], 1000G-2021, HPRC)
+> index: on a **genotyped+phased** panel (HGDP + 1000 Genomes [the default], HPRC)
 > it runs **per-sample** — resolving per-sample genotypes into observed haplotypes with named
 > carriers + CONFIRMED cis phasing + exact joint AF; on a **sites-only / unphased** panel (e.g.
 > the mega panel) it runs **population-level** — a small set of worst-possible representatives
@@ -284,7 +279,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 - `--per-sample` resolves per-individual genotypes: it names the **carrier samples**
   and marks co-occurring variants **CONFIRMED cis** (phased) / **PUTATIVE co-carrier**
   (unphased) with the exact joint allele frequency. It needs a genotyped index
-  (HGDP + 1000 Genomes [the default], 1000G-2021, or HPRC); on these phased panels per-sample
+  (HGDP + 1000 Genomes [the default], or HPRC); on these phased panels per-sample
   is already the context-aware default, so use `--population-level` to force the fast
   worst-case screen, and note per-sample is inert on the sites-only *mega* index. Either way
   the search is variant-aware with allele frequencies and rsIDs.
@@ -380,8 +375,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 # (The index above bundles its genotype store, so sample-level analyses / named
 #  carriers work too — no raw VCFs needed. The default repo does not host raw
-#  per-dataset VCFs; it ships the standard panels as prebuilt indexes. The
-#  1000-Genomes-only alternative is NRG_3_hg38+hg38_1000G2021; see step 4 above.)
+#  per-dataset VCFs; it ships the standard panels as prebuilt indexes.)
 
 # 3. launch the web interface
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \

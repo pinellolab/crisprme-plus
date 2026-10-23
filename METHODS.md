@@ -52,7 +52,7 @@ Force the fast population-level mode with **`--population-level`**; force resolu
 with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-only
 index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
 catalog name `NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
-jointly SHAPEIT5 re-phased — `1000G2021`, or `HPRC`. See
+jointly SHAPEIT5 re-phased — or `HPRC`. See
 [§5, Search-space control for high-variant-density regions](#population-level-analysis-default-and---per-sample-genotype-resolution).
 
 ---
@@ -271,8 +271,8 @@ Each registry manifest (`reg_<chrom>.idx`) records the index's **`data_type`** �
 This lets tooling (e.g. the web variant-dataset selector) identify an index's type
 and phasing without scanning the multi-GB per-sample dictionary; a missing flag on
 an older index falls back to genotype-store presence. The shipped indexes are
-`HGDP1kGP` = **genotyped-phased** (the re-phased default, above), `1000G2021` =
-**genotyped-phased**, `HPRC` = **genotyped-phased**, and `mega` = **sites-only**;
+`HGDP1kGP` = **genotyped-phased** (the re-phased default, above), `HPRC` =
+**genotyped-phased**, and `mega` = **sites-only**;
 `hybrid` is the fourth possible value, for a merged panel mixing phased and unphased
 sources.
 

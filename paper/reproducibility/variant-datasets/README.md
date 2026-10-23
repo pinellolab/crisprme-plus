@@ -11,7 +11,6 @@ Every shipped variant index can be **rebuilt from public inputs**. The exact sou
 | Shipped index | `vcfs/<dataset>` | Verified source (provenance) | Samples | Records / indels |
 |---|---|---|---|---|
 | `NRG_3_hg38+hg38_HGDP1kGP` *(default)* | `hg38_HGDP1kGP` | gnomAD HGDP+1kGP, SHAPEIT5 **re-phased** (`hgdp1kgp.chrN.norm.vcf.gz`, chr1–22+X) — see [`docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`](../../../docs/HGDP_1KGP_PHASED_INDEX_METHODS.md) | 4,091 (925 HGDP + 3,166 1kGP), phased | 125.2M / 17.2M |
-| `NRG_3_hg38+hg38_1000G2021` | `hg38_1000G2021` | 1000G high-coverage NYGC `20201028_3202_phased` (→ `hg38_1000G_2021/` below) | 3,202, phased | 63.4M / 9.5M |
 | `NRG_3_hg38+hg38_HPRC` | `hg38_HPRC` | HPRC pangenome `vcfwave` VCFs (incl. CHM13) | 232, phased | 36.3M / 12.1M |
 | `NRG_3_hg38+hg38_mega` | `hg38_mega` | sites-only AF union of the 5 sources below (merged → `mega.<chr>.afmax.vcf.gz`); **public summarized allele frequencies, no individual-level genotypes** | 5 pseudo-samples | 51.2M / 15.7M |
 
