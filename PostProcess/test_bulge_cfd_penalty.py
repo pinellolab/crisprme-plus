@@ -85,6 +85,23 @@ class TestBulgeCfdPenalty(unittest.TestCase):
         c = _c("ACTGAAATCTGTAAGCAGGCNGG", "ACTG-AATCTGTAAGCAGGCAGG")
         self.assertEqual(c, 1.0)
 
+    def test_combined_dna_then_rna_bulge_guide_frame_no_double_count(self):
+        # Regression for the frame-inconsistency bug on combined (DNA+RNA) bulge rows that
+        # crispritz DOES emit under bDNA>=1,bRNA>=1 (e.g. the real chr19/chr13 6,1,1 rows).
+        # DNA bulge at display col2 + RNA bulge at display col21: deleting the DNA-bulge
+        # column shifts the RNA bulge to its TRUE guide position 20 (in-range), which
+        # calc_cfd already scores. The correction must NOT also treat it as terminal (0.0);
+        # it must contribute only the distal DNA-bulge factor.
+        corr = _c("A-CTGAAATCTGTAAGCAGGCNGG", "AACTGAAATCTGTAAGCAGG-AGG")
+        self.assertGreaterEqual(corr, 0.5)   # a distal DNA-bulge factor, NOT 0.0
+        self.assertNotEqual(corr, 0.0)
+
+    def test_combined_chr19_dna_bulge_at_pam_junction_still_zero(self):
+        # chr19 has the DNA bulge at display col21 with NO preceding crRNA gap, so its
+        # guide-frame position is a genuine 21 (PAM junction) -> abolished. The guide-frame
+        # fix must NOT dilute this to position 20.
+        self.assertEqual(_c("ACTGAAATCTGTAAGCAGGC-NNN", "t-TaAAATCTaTAAGaAGGCCAGG"), 0.0)
+
     def test_terminal_rna_bulge_distal_lenient_proximal_abolished(self):
         # RNA bulge free-passed by calc_cfd at the terminal columns: distal (1) lenient,
         # proximal/PAM (21) abolished.

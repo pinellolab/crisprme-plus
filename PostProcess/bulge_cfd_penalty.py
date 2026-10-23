@@ -66,21 +66,28 @@ def bulge_cfd_correction(aligned_crrna, aligned_protospacer, mm_scores, pam_len=
     n = min(len(g), len(d))
     spacer_cols = n - pam_len  # the PAM occupies the last pam_len columns
     corr = 1.0
+    dna_gaps_before = 0  # crRNA '-' columns seen so far; cfd_score_bulge_aware DELETES
+    # them, so every surviving column's Doench position is its display index MINUS this
+    # running count. Using the display index alone mis-places (and double-counts) a bulge
+    # that sits after a DNA bulge on a combined DNA+RNA-bulge alignment.
     for c in range(spacer_cols):
-        pos = c + 1  # 1-based from the 5' end (Doench frame)
         gap_in_crrna = g[c] == "-"
         gap_in_proto = d[c] == "-"
-        if not (gap_in_crrna or gap_in_proto):
-            continue
+        # Doench position in the DNA-bulge-deleted guide frame (matches calc_cfd's frame).
+        pos = (c + 1) - dna_gaps_before
         if gap_in_crrna:
             # DNA bulge: supply the full position factor (base score deleted this column).
+            # It does not consume a guide position, so do NOT advance pos for later columns
+            # beyond the deletion already accounted for below.
             base = _revcom_base(d[c])
             key = "r-:d" + str(base) + "," + str(pos)
             tf = _terminal_factor(pos)
             corr *= tf if tf is not None else mm_scores.get(key, _terminal_factor(SPACER_LEN + 1) or 0.0)
-        else:
-            # RNA bulge: calc_cfd ALREADY applied rX:d-,pos for in-range columns (2..20);
-            # only the undefined terminal columns were free-passed -> correct just those.
+            dna_gaps_before += 1
+        elif gap_in_proto:
+            # RNA bulge: calc_cfd ALREADY applied rX:d-,pos for in-range columns (2..20) at
+            # THIS same guide-frame position; only the undefined terminal columns were
+            # free-passed -> correct just those (no double-count in range).
             tf = _terminal_factor(pos)
             if tf is not None:
                 corr *= tf
