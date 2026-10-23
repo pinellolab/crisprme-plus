@@ -2278,11 +2278,13 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
     # tailor the label to what per-sample actually BUYS on THIS panel: a phased panel
     # yields CONFIRMED cis + named carriers; an unphased panel can name carriers but the
     # cis co-occurrence is only PUTATIVE; a hybrid panel is CONFIRMED where phased.
+    phased = False
     if not has_gt:
         ps_label = (" Per-sample — resolve genotypes: named carriers & CONFIRMED cis "
                     "(needs a genotyped panel)")
     else:
         _dt = variant_dataset_data_type(genome_value, dataset_value)
+        phased = _dt == "genotyped-phased"
         if _dt == "genotyped-phased":
             ps_label = " Per-sample — named carriers & CONFIRMED cis phasing (phased panel)"
         elif _dt == "genotyped-unphased":
@@ -2293,13 +2295,21 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
                         "PUTATIVE where not (hybrid panel)")
         else:
             ps_label = " Per-sample — resolve genotypes: named carriers & CONFIRMED cis"
+    # DEFAULT is context-aware (2.7.11): per-sample on a genotyped + PHASED panel (the
+    # resolution such panels are built for -- CONFIRMED cis + named carriers), population-
+    # level otherwise. The "(default)" marker moves to match, and a user who has not chosen
+    # yet is seeded accordingly.
+    pop_label = " Population-level — worst-possible screen"
+    if phased:
+        ps_label = ps_label + "  [default]"
+    else:
+        pop_label = pop_label + " (default)"
     options = [
-        {"label": " Population-level (default) — worst-possible screen",
-         "value": "population-level"},
+        {"label": pop_label, "value": "population-level"},
         {"label": ps_label, "value": "per-sample", "disabled": not has_gt},
     ]
-    # a sites-only / reference panel cannot resolve genotypes: fall back to the default
-    value = current_mode if current_mode else "population-level"
+    value = current_mode if current_mode else ("per-sample" if phased else "population-level")
+    # a sites-only / reference panel cannot resolve genotypes: never land on per-sample
     if not has_gt and value == "per-sample":
         value = "population-level"
     return options, value

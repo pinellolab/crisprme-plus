@@ -26,6 +26,16 @@ and the `release-crisprme` skill.
   `> 0` subset is bundled as a download — consistent with the risk-card "CRISPR-Bulge > 0" row.
 
 ### Changed
+- **Context-aware default analysis mode: per-sample on a genotyped+phased index.** With no mode flag,
+  `complete-search` now auto-selects **per-sample** (CONFIRMED cis phasing + named carrier samples +
+  exact joint AF) when the variant index is genotyped **and phased** (e.g. the default HGDP+1000G
+  panel), and **population-level** otherwise (sites-only / unphased / hybrid / reference-only). The
+  index `data_type` is read from the Phase-2.1 registry manifest. New **`--population-level`** flag
+  forces the fast worst-case screen (opt out of per-sample on a phased index — recommended on a very
+  dense / high-edit / genome-wide search); `--per-sample` still forces resolution; the two are mutually
+  exclusive. The web Analysis-mode selector mirrors this (defaults to per-sample on a phased panel). A
+  one-line notice prints the auto-selected mode and how to override. Rationale: phased panels are built
+  for exactly this resolution, so the richest, most honest result is the default where it is tractable.
 - **The recommended validation panel (report Section 4) now selects on the sensitive operating point.**
   The panel hard-includes `(CRISPR-Bulge > 0) ∪ (mm+b ≤ 2) ∪ (CFD ≥ 0.2 at 0 bulges) ∪ (CFD ≥ 0.5 at 1
   bulge) ∪ (clean 0-mismatch bulge) ∪ must-includes` — making the shipped `panel_top100.tsv` *be* the
