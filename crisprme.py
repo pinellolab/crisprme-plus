@@ -338,10 +338,16 @@ def _registry_data_type_for_search(args):
                        if "--genome" in args else "")
         regdirs = [d for d in sorted(os.listdir(dic))
                    if d.startswith("registry_") and os.path.isdir(os.path.join(dic, d))]
-        # prefer registries whose name matches this search's dataset/genome; else scan all
-        matched = [d for d in regdirs
-                   if any(h and h in d for h in hints) or (genome_hint and genome_hint in d)]
-        for d in (matched or regdirs):
+        # match the SPECIFIC dataset first (the --vcf dir name); fall back to the genome
+        # only when no dataset matches, and only then to a lone registry -- so that with
+        # several indexes in one data dir (e.g. HGDP1kGP + mega, both registry_hg38_*) a
+        # mega search is not misread as the phased panel.
+        matched = [d for d in regdirs if any(h and h in d for h in hints)]
+        if not matched and genome_hint:
+            matched = [d for d in regdirs if genome_hint in d]
+        if not matched and len(regdirs) == 1:
+            matched = regdirs  # unambiguous single panel
+        for d in matched:
             regdir = os.path.join(dic, d)
             try:
                 for f in sorted(os.listdir(regdir)):
