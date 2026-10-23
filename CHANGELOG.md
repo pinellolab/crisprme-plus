@@ -26,6 +26,30 @@ and the `release-crisprme` skill.
   `> 0` subset is bundled as a download — consistent with the risk-card "CRISPR-Bulge > 0" row.
 
 ### Changed
+- **CFD now penalizes bulges by position (Doench et al., 2016 gap matrix), instead of ignoring them.**
+  CFD's score tables include position-weighted DNA-bulge (`r-:dX`) and RNA-bulge (`rX:d-`) factors, but
+  the DNA-bulge factors were never applied: the scorer realigned a DNA-bulge target by trimming the 5'
+  end, which collapsed the gap to a table position that has no entry, so every DNA bulge — and every
+  bulge at the two undefined terminal columns — contributed a factor of 1.0 (no penalty). A bulge
+  immediately adjacent to the PAM (maximally disruptive) therefore scored the same as no bulge
+  (e.g. a chr19 site scored CFD 0.87 with a PAM-proximal DNA bulge, while CRISPR-Bulge scored it 0).
+  CFD now scores the alignment as displayed — the extra genomic base of a DNA bulge is removed so the
+  20 guide bases keep their true Cas9 positions (this also fixes a mispairing in the old 5'-trim), and
+  the position-weighted gap factor is applied at the bulge's real position, with the two undefined
+  terminal columns extrapolated (lenient at the PAM-distal 5' tip, abolished at the PAM-proximal
+  junction). Mismatch-only sites and in-range RNA bulges are unchanged (bitwise); only previously
+  unpenalized bulges move. The same position-aware scoring is applied across every CFD path (the
+  population and per-sample analyzers, the indel analyzer, the two-pass worst-case screen, the
+  standalone target scorer, and the factorized fast-mode scorer). A ≥2-bp bulge (opt-in `--bDNA`/
+  `--bRNA ≥ 2`, outside the single-bulge calibration domain) applies the position factor per looped-out
+  base; see METHODS §3. The deployment calibration (isotonic P(real), AUPR, precision/recall) was refit
+  on the re-scored 2.94M-site benchmark and the report's PR curves regenerated, including a new
+  bulge-stratified panel embedded in the risk-card modal. Measured effect: a per-site correctness fix,
+  not a bulge-ranking gain — overall AUPR unchanged (0.168; the benchmark is mismatch-dominated) and
+  CFD's bulge-only AP stays at the floor (≈0.01 vs CRISPR-Bulge ≈0.25), but removing the PAM-proximal
+  over-call drops ~9,000 spurious high-CFD bulge calls at CFD≥0.2 (precision 0.006→0.007; at CFD≥0.5
+  0.05→0.085). It reinforces the recommended-panel logic (CRISPR-Bulge ranks bulges; CFD rescues a
+  single-bulge site only at high confidence) rather than changing it.
 - **Context-aware default analysis mode: per-sample on a genotyped+phased index.** With no mode flag,
   `complete-search` now auto-selects **per-sample** (CONFIRMED cis phasing + named carrier samples +
   exact joint AF) when the variant index is genotyped **and phased** (e.g. the default HGDP+1000G

@@ -153,6 +153,11 @@ def cfd_score_bulge_aware(aligned_crrna, aligned_protospacer, mm_scores, pam_sco
     ``calc_cfd_fn`` is injected by the caller (``calc_cfd`` in each module) to avoid a
     circular import.
     """
+    # NOTE: CFD (Doench 2016) is defined only for the canonical SpCas9 20-nt-spacer + 3-nt
+    # NGG regime, so callers pass pam_len=3 and the PAM factor is the trailing 2 bases
+    # (gpr[-2:]). The main pipeline gates CFD off for any other geometry (non-3 PAM,
+    # non-20 guide, PAM-at-5'); do NOT rely on this function for pam_len != 3 without first
+    # reconciling the gpr[-2:] PAM lookup with a generalized spacer/PAM split.
     cr = aligned_crrna
     pr = aligned_protospacer.upper()
     if "-" in cr:  # DNA bulge(s): drop the looped-out genomic base(s) from both strands

@@ -125,11 +125,26 @@ sets and held-out populations, not purely discrimination.
 AUROC (≈0.97/0.98) is reported only as a footnote: it is prevalence-invariant and does
 not reflect operating-point precision at this imbalance.
 
-Operating points (held-out): CFD t≥0.2 → recall 0.74 / precision 0.006; t≥0.5 → recall
-0.29 / precision 0.05. CRISPR-Bulge t≥0.26 → recall 0.60 / precision 0.50; t≥0.5 →
+Operating points (held-out): CFD t≥0.2 → recall 0.72 / precision 0.007; t≥0.5 → recall
+0.28 / precision 0.085. CRISPR-Bulge t≥0.26 → recall 0.60 / precision 0.50; t≥0.5 →
 recall 0.50 / precision 0.72. **These CRISPR-Bulge recalls (0.50–0.60) are recall against
 the assay-detected set (§2), not against ground truth, and a low CRISPR-Bulge count is not
-clearance (§7).** These curves are shown in the modal.
+clearance (§7).** These curves (overall and stratified by bulge count) are shown in the modal.
+
+**CFD position-aware bulge penalty (2.7.11).** CFD now applies Doench's position-weighted
+DNA/RNA-bulge factors at each bulge's true spacer position (previously a DNA bulge was realigned
+by a 5' trim that discarded the gap, so every DNA bulge — and any bulge at the two undefined
+terminal columns — was scored as if absent; a PAM-proximal bulge scored like a perfect match).
+This is a **per-site correctness fix, not a bulge-ranking improvement**: mismatch-only and
+in-range RNA-bulge scores are unchanged (bitwise), overall AUPR is unchanged (0.168; the
+benchmark is mismatch-dominated, 297/359 positives bulge-free), and CFD's bulge discrimination
+stays at the floor (bulge=1 AP ≈ 0.01). What it buys is **precision**: removing the
+PAM-proximal over-call drops ~9,000 spurious high-CFD bulge sites at t≥0.2 (precision
+0.006→0.007) and roughly doubles precision at t≥0.5 (0.05→0.085). It therefore *reinforces*
+the §3.5 panel logic (CRISPR-Bulge is the bulge ranker; CFD rescues a single-bulge site only at
+high confidence) rather than changing it. A ≥2-bp bulge (opt-in, outside the single-bulge
+calibration domain) applies the position factor per looped-out base — conservative (lower CFD),
+and flagged here because it is an extrapolation beyond the published matrix.
 
 ## 3.5. Recommended default validation panel
 
@@ -147,12 +162,14 @@ or cancer-driver gene, and — on a genotyped/phased panel — observed *cis* ha
 carriers.
 
 - **CRISPR-Bulge > 0** carries the bulge sites and the ML-ranked core — CFD cannot rank bulges
-  (bulge=1 AP ≈ 0.02 vs CRISPR-Bulge ≈ 0.25; §3).
+  (bulge=1 AP ≈ 0.01 vs CRISPR-Bulge ≈ 0.25; §3). CFD's 2.7.11 position-aware bulge penalty
+  fixes the *per-site* over-call (a PAM-proximal bulge no longer scores like a perfect match) but
+  does not make CFD a bulge ranker.
 - **CFD ≥ 0.2 on 0-bulge** rescues the high-CFD no-bulge sites CRISPR-Bulge misses (CFD is
   reliable off-bulge).
-- **CFD ≥ 0.5 on a single bulge** rescues the *high-CFD* 1-bulge sites: there CFD is an
-  extrapolation, so only high-confidence calls are rescued (CRISPR-Bulge remains the primary
-  bulge ranker; this only *adds* sites it scored low).
+- **CFD ≥ 0.5 on a single bulge** rescues the *high-CFD* 1-bulge sites: CFD now position-penalizes
+  the bulge but is still not calibrated to rank bulges, so only high-confidence calls are rescued
+  (CRISPR-Bulge remains the primary bulge ranker; this only *adds* sites it scored low).
 - **≥2-bulge sites** are excluded from scoring-driven selection (uncalibrated for both scores)
   but kept-and-demoted in the report, never dropped.
 

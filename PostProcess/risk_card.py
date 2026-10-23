@@ -95,14 +95,19 @@ def _scorer_block(cal, scorer, scores, row_spec):
     return "".join(rows), ge02_point
 
 
-def _pr_curve_uri() -> Optional[str]:
-    """Return a data: URI for the bundled PR-curve PNG, or None if absent."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration", "pr_curves.png")
+def _png_uri(name: str) -> Optional[str]:
+    """Return a data: URI for a bundled calibration PNG, or None if absent."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration", name)
     if not os.path.isfile(path):
         return None
     import base64
     with open(path, "rb") as fh:
         return "data:image/png;base64," + base64.b64encode(fh.read()).decode()
+
+
+def _pr_curve_uri() -> Optional[str]:
+    """Return a data: URI for the bundled overall PR-curve PNG, or None if absent."""
+    return _png_uri("pr_curves.png")
 
 
 # clinician-reviewed modal copy (see METHODS; signed statistician/clinician/genome-editor)
@@ -232,6 +237,18 @@ def _render_modal(cal) -> str:
     pr = _pr_curve_uri()
     pr_html = (f'<div class="rc-pr"><img alt="Precision-recall of each scorer" src="{pr}" '
                f'style="max-width:100%"></div>') if pr else ""
+    prb = _png_uri("pr_bulge_stratified.png")
+    prb_html = (
+        '<p>Stratified by bulge count, the scores separate sharply. CFD discriminates '
+        'mismatch-only off-targets (bulge=0 AP ≈ 0.27) but <b>cannot rank bulges</b> '
+        '(bulge=1 AP ≈ 0.01, essentially the prevalence floor); CRISPR-Bulge carries the '
+        'bulge signal (bulge=1 AP ≈ 0.25). This is why the recommended panel keys bulges on '
+        'CRISPR-Bulge and only rescues a single-bulge site on CFD when CFD is high (≥ 0.5). '
+        'CFD’s position-aware bulge penalty (2.7.11) corrects the per-site score so a '
+        'PAM-proximal bulge is no longer scored like a perfect match, but it does not make CFD '
+        'a bulge ranker.</p>'
+        f'<div class="rc-pr"><img alt="Precision-recall by bulge class" src="{prb}" '
+        f'style="max-width:100%"></div>') if prb else ""
     # CSS-only (:target) modal -- no JavaScript, so the report stays self-contained.
     return (
         f'<div class="rc-modal" id="{MODAL_ID}"><div class="rc-modal-box">'
@@ -241,6 +258,7 @@ def _render_modal(cal) -> str:
         f'<p>{_READ}</p>'
         f'{summary_html}{aupr_note}'
         f'{pr_html}'
+        f'{prb_html}'
         '<p><b>Choosing a threshold.</b> The two scores behave differently: CFD is most reliable '
         'off-bulge and only an extrapolation on bulges, while CRISPR-Bulge &mdash; the stronger ranker '
         '&mdash; has a hard recall ceiling (about 92%: it scores a minority of real off-targets as '

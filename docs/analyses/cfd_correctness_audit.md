@@ -1,5 +1,21 @@
 # CFD correctness audit
 
+> **Update (2.7.11): the bulge-scoring artifact below is now fixed.** This audit diagnosed CFD's
+> bulge handling on the pre-2.7.11 code and judged the DNA-bulge "free pass" minor (mechanism B,
+> framed as PAM-distal column-1 only). Re-analysis for 2.7.11 found it was broader than this note
+> captured: the 5'-trim DNA-bulge realignment not only free-passed the gap at its collapsed terminal
+> column but also **mis-paired every downstream column** (positions shifted by the trim), and the
+> combined DNA+RNA-bulge path free-passed **PAM-proximal** DNA bulges too (e.g. a chr19 site scored
+> CFD 0.87 with a DNA bulge at the PAM junction). 2.7.11 replaces the trim with a gap-delete that
+> keeps the 20 guide bases at their true Cas9 positions and applies Doench's position-weighted gap
+> factor at each bulge's real position (terminal columns extrapolated: lenient 5' tip, abolished at
+> the PAM junction) — i.e. it now faithfully implements the "use the Fig 5c,d values as-is" solution
+> described below. Effect: mismatch-only and in-range RNA-bulge scores unchanged (bitwise), overall
+> AUPR unchanged (mismatch-dominated), but ~9,000 spurious high-CFD bulge calls removed at CFD≥0.2
+> (precision 0.006→0.007; t≥0.5 0.05→0.085). Mechanism (A) below (distal mismatches, not bulges, drive
+> the high 4mm+1bulge scores) is unaffected and still stands. See CHANGELOG 2.7.11 and
+> `offtarget_risk_summary_METHODS.md` §3. The sections below are retained as the pre-fix record.
+
 Internal note / paper-supporting. Audits CRISPRme+'s CFD (Doench 2016) implementation for bugs, and
 explains why heavily-edited off-targets (e.g. **4 mismatches + 1 bulge**) can still score **CFD > 0.5**.
 
