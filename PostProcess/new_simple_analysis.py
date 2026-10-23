@@ -1559,11 +1559,11 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
         else:
             # mirror the CRISPR-Bulge marker convention exactly (55 = ref row, 33 = alt row)
             if t[-2] == 55:
-                t[-2] = "{:.3f}".format(scores_alt[index])
-                t.append("{:.3f}".format(scores_alt[index]))
+                t[-2] = str(scores_alt[index])
+                t.append(str(scores_alt[index]))
             if t[-2] == 33:
-                t[-2] = "{:.3f}".format(scores_ref[index])
-                t.append("{:.3f}".format(scores_alt[index]))
+                t[-2] = str(scores_ref[index])
+                t.append(str(scores_alt[index]))
         cluster_scored.append(t)
 
     return cluster_scored

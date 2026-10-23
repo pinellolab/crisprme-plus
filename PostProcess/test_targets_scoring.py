@@ -232,7 +232,7 @@ class TestEndToEnd(unittest.TestCase):
     def test_run_tsv_output(self):
         import types
         stub = types.ModuleType("scorer_runner")
-        stub.CRISPR_BULGE_predict_list = lambda sg, off, device=None: [0.9] * len(sg)
+        stub.CRISPR_BULGE_predict_list = lambda sg, off, device=None: [1e-25] * len(sg)
         sys.modules["scorer_runner"] = stub
         try:
             p = _co_file([
@@ -250,6 +250,7 @@ class TestEndToEnd(unittest.TestCase):
             # sorted by CFD desc: perfect NGG site first
             first = dict(zip(header, lines[1].split("\t")))
             self.assertEqual(first["PAM"], "GGG")
+            self.assertEqual(float(first["CRISPR_BULGE"]), 1e-25)
             self.assertGreater(float(first["CFD"]), float(
                 dict(zip(header, lines[2].split("\t")))["CFD"]))
             os.unlink(p); os.unlink(out)
