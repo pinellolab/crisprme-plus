@@ -38,9 +38,12 @@ would:
   (chr1–22 only, biallelic-SNP-only, MAF > 0.5%, 'chr'-prefixed, 11.3 GB) derived from the same
   gnomAD SHAPEIT5 haplotypes; usable only as a same-provenance corroborator for sample list +
   common-SNP AF/phasing, **not** a build input.
-- Authoritative sample count/split: paper (Koenig et al., *Genome Research* 34(5):796, 2024;
-  PMC9900804) reports **4,094 post-QC = 929 HGDP + 3,165 1kGP**. The phased BCFs carry **4,091**
-  samples (provenance of the −3 under investigation, see §3).
+- Authoritative sample count/split: the paper (Koenig et al., *Genome Research* 34(5):796, 2024;
+  PMC9900804) reports **4,094** for its dense callset. The shipped phased BCFs carry
+  **4,091 samples = 925 HGDP + 3,166 1kGP** (header-derived; this is the canonical per-cohort split
+  used in the README, Docker quickstart, and `PRECOMPUTED_INDEXES.md`). The −3 vs the paper and the
+  correct split are resolved in §3 — note 925 is the post-QC HGDP count vs a 929 raw source count, and
+  a `^HGDP` prefix grep undercounts HGDP by 117, so always derive the sample list from the BCF header.
 
 ## 3. Verification of the pre-made phased release (chr22)
 
