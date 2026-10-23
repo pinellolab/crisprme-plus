@@ -158,14 +158,23 @@ def cfd_for_site(site, mm_scores, pam_scores):
       DNA-bulge gap placement, which is not recoverable from an in-place alignment and
       can differ -- a DNA-bulge caveat the caller should surface.)
     """
-    pam = site.pam_len
-    dna = site.dna
-    guide = site.crrna
-    if site.bulge_type == "DNA" and "-" in guide:
-        keep = [i for i, ch in enumerate(guide) if ch != "-"]
-        guide = "".join(guide[i] for i in keep)
-        dna = "".join(dna[i] for i in keep)
-    return calc_cfd(guide, dna[:-pam], dna[-2:], mm_scores, pam_scores, True)
+    # Position-aware bulge scoring (2.7.11): delegate DNA-bulge gap-deletion + the
+    # position penalty (incl. the undefined PAM-proximal / 5'-tip columns) to the shared
+    # helper. Mismatch-only + RNA-bulge rows are byte-identical to the previous calc_cfd.
+    try:
+        from bulge_cfd_penalty import cfd_score_bulge_aware
+        return cfd_score_bulge_aware(
+            site.crrna, site.dna, mm_scores, pam_scores, calc_cfd, pam_len=site.pam_len
+        )
+    except Exception:  # pragma: no cover - helper always shipped alongside
+        pam = site.pam_len
+        dna = site.dna
+        guide = site.crrna
+        if site.bulge_type == "DNA" and "-" in guide:
+            keep = [i for i, ch in enumerate(guide) if ch != "-"]
+            guide = "".join(guide[i] for i in keep)
+            dna = "".join(dna[i] for i in keep)
+        return calc_cfd(guide, dna[:-pam], dna[-2:], mm_scores, pam_scores, True)
 
 
 # CRISPR-Bulge null rules -- identical to preprocess_CRISPR_BULGE_score._pair in

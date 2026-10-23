@@ -48,6 +48,12 @@ import gzip
 import sys
 import warnings
 
+# Position-aware CFD bulge penalty (2.7.11); pass-through fallback on a very old deploy.
+try:
+    from bulge_cfd_penalty import cfd_score_bulge_aware as _cfd_bulge_aware
+except Exception:  # pragma: no cover - module always shipped alongside
+    _cfd_bulge_aware = None
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 SIZE_DOENCH = 10000
@@ -516,53 +522,29 @@ def rev_comp(a):
     return "C"
 
 
+def _cfd_from_alignment(aligned_crrna, aligned_proto):
+    """CFD for one in-place display alignment (PAM included, gaps '-' in place) with the
+    position-aware bulge penalty (2.7.11); legacy calc_cfd fallback if the helper is
+    unavailable. Mirrors new_simple_analysis._cfd_from_alignment."""
+    if _cfd_bulge_aware is not None:
+        return _cfd_bulge_aware(
+            aligned_crrna, aligned_proto, mm_scores, pam_scores, calc_cfd, do_scores=do_scores
+        )
+    up = aligned_proto.upper()
+    return calc_cfd(aligned_crrna, up[:-3], up[-2:], mm_scores, pam_scores, do_scores)
+
+
 def preprocess_CFD_score(target):
-    # preprocess target then calculate CFD score
+    # preprocess target then calculate CFD score (unified bulge-aware path -- see
+    # new_simple_analysis.preprocess_CFD_score).
     if do_scores:
-        if target[0] == "DNA":
-            cfd_score = calc_cfd(
-                target[1][int(target[bulge_pos]) :],
-                target[2].upper()[int(target[bulge_pos]) : -3],
-                target[2].upper()[-2:],
-                mm_scores,
-                pam_scores,
-                do_scores,
-            )
-            target.append("{:.3f}".format(cfd_score))
-            if target[-3] == 55:
-                target[-3] = "{:.3f}".format(cfd_score)
-            if target[-3] == 33:
-                cfd_ref_score = calc_cfd(
-                    target[1][int(target[bulge_pos]) :],
-                    target[-4].upper()[int(target[bulge_pos]) : -3],
-                    target[-4].upper()[-2:],
-                    mm_scores,
-                    pam_scores,
-                    do_scores,
-                )
-                target[-3] = "{:.3f}".format(cfd_ref_score)
-        else:
-            cfd_score = calc_cfd(
-                target[1],
-                target[2].upper()[:-3],
-                target[2].upper()[-2:],
-                mm_scores,
-                pam_scores,
-                do_scores,
-            )
-            target.append("{:.3f}".format(cfd_score))
-            if target[-3] == 55:
-                target[-3] = "{:.3f}".format(cfd_score)
-            if target[-3] == 33:
-                cfd_ref_score = calc_cfd(
-                    target[1],
-                    target[-4].upper()[:-3],
-                    target[-4].upper()[-2:],
-                    mm_scores,
-                    pam_scores,
-                    do_scores,
-                )
-                target[-3] = "{:.3f}".format(cfd_ref_score)
+        cfd_score = _cfd_from_alignment(target[1], target[2])
+        target.append("{:.3f}".format(cfd_score))
+        if target[-3] == 55:
+            target[-3] = "{:.3f}".format(cfd_score)
+        if target[-3] == 33:
+            cfd_ref_score = _cfd_from_alignment(target[1], target[-4])
+            target[-3] = "{:.3f}".format(cfd_ref_score)
     else:
         cfd_score = -1
         target.append("{:.3f}".format(cfd_score))

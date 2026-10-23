@@ -120,18 +120,23 @@ class TestCFD(unittest.TestCase):
                              self.mm, self.pam, True)
         self.assertEqual(ts.cfd_for_site(s, self.mm, self.pam), expect)
 
-    def test_dna_bulge_delete_gap(self):
-        # DNA bulge with the gap NOT at the front: cfd_for_site must DELETE the gap
-        # column from both strands (drop the looped-out DNA base) and score 20-vs-20,
-        # so CFD positions 1..20 stay guide-indexed.
-        crrna = G[:5] + "-" + G[5:] + "GGG"   # gap in crRNA at column 5
-        dna = G[:5] + "A" + G[5:] + "AGG"     # extra DNA base at column 5
+    def test_dna_bulge_delete_gap_then_position_penalty(self):
+        # DNA bulge with the gap NOT at the front: cfd_for_site DELETES the gap column from
+        # both strands (drop the looped-out DNA base) so CFD positions 1..20 stay guide-
+        # indexed, THEN applies the position-aware Doench DNA-bulge factor (2.7.11).
+        import bulge_cfd_penalty as bp
+        crrna = G[:5] + "-" + G[5:] + "GGG"   # gap in crRNA at display column 6
+        dna = G[:5] + "A" + G[5:] + "AGG"     # extra DNA base at column 6 (revcom(A)=T)
         s = ts.Site(crrna, dna, bulge_type="DNA", bulge_size=1)
         keep = [i for i, ch in enumerate(crrna) if ch != "-"]
         gd = "".join(crrna[i] for i in keep)
         dd = "".join(dna[i] for i in keep)
-        expect = ts.calc_cfd(gd, dd[:-3], dd[-2:], self.mm, self.pam, True)
-        self.assertEqual(ts.cfd_for_site(s, self.mm, self.pam), expect)
+        base = ts.calc_cfd(gd, dd[:-3], dd[-2:], self.mm, self.pam, True)   # mismatch-only = 1.0
+        corr = bp.bulge_cfd_correction(crrna, dna, self.mm)                  # r-:dT,6
+        self.assertAlmostEqual(corr, self.mm["r-:dT,6"], places=6)
+        self.assertAlmostEqual(ts.cfd_for_site(s, self.mm, self.pam), base * corr, places=9)
+        # the position penalty must actually bite (not the old gap-delete-only 1.0)
+        self.assertLess(ts.cfd_for_site(s, self.mm, self.pam), base)
         # and it must NOT equal the naive front-trim (which would misalign an in-place gap)
         front = ts.calc_cfd(crrna[1:], dna[1:-3], dna[-2:], self.mm, self.pam, True)
         self.assertNotEqual(ts.cfd_for_site(s, self.mm, self.pam), front)

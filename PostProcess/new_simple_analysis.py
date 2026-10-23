@@ -32,6 +32,13 @@ except Exception:  # module absent in an old deploy -> no genotype tier
 # isolation). This module has no hard dependency on tier0_registry, so its import
 # cannot break the legacy path either.
 import simple_analysis_registry as _sar
+# Position-aware CFD bulge penalty (2.7.11). Core dependency; if a very old deploy lacks
+# it, fall back to a trivial pass-through so scoring never breaks (bulges then revert to
+# the previous free-pass behaviour rather than raising).
+try:
+    from bulge_cfd_penalty import cfd_score_bulge_aware as _cfd_bulge_aware
+except Exception:  # pragma: no cover - module always shipped alongside
+    _cfd_bulge_aware = None
 # ADDITIVE combination-aware population summary (Phase 3) + its companion-file writer
 # (Phase 3c). GUARDED / lazy exactly like tier0_registry: an old deploy may not ship
 # these -- in that case they stay None and the companion population-summary TSV is
@@ -785,6 +792,12 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                     if _c == "-":
                         _tl.insert(_p, "-")
                 _t = "".join(_tl).upper()
+                # position-aware bulge scoring (2.7.11): the in-place display alignment is
+                # (split[1] crRNA, _t concrete protospacer+PAM); the DNA/RNA-bulge handling
+                # and the PAM-proximal penalty live in cfd_score_bulge_aware.
+                if _cfd_bulge_aware is not None:
+                    return _cfd_bulge_aware(split[1], _t, mm_scores, pam_scores, calc_cfd,
+                                            do_scores=do_scores)
                 _bs = int(split[bulge_pos])
                 if split[0] == "DNA":
                     return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
@@ -1145,6 +1158,10 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             if _c == "-":
                                 _tl.insert(_p, "-")
                         _t = "".join(_tl).upper()
+                        # position-aware bulge scoring (2.7.11) -- see _cfd_fast above.
+                        if _cfd_bulge_aware is not None:
+                            return _cfd_bulge_aware(split[1], _t, mm_scores, pam_scores,
+                                                    calc_cfd, do_scores=do_scores)
                         _bs = int(split[bulge_pos])
                         if split[0] == "DNA":
                             return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
@@ -1418,59 +1435,34 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             _collect_variant_off_target(final_line)
 
 
+def _cfd_from_alignment(aligned_crrna, aligned_proto):
+    """CFD for one in-place display alignment (crRNA/proto include the PAM, gaps '-' in
+    place). Position-aware bulge scoring via cfd_score_bulge_aware; falls back to the
+    previous DNA front-trim / in-place calc_cfd only if the helper is unavailable."""
+    if _cfd_bulge_aware is not None:
+        return _cfd_bulge_aware(
+            aligned_crrna, aligned_proto, mm_scores, pam_scores, calc_cfd, do_scores=do_scores
+        )
+    # legacy fallback (old deploy without the helper): previous behaviour, unchanged
+    up = aligned_proto.upper()
+    return calc_cfd(aligned_crrna, up[:-3], up[-2:], mm_scores, pam_scores, do_scores)
+
+
 def preprocess_CFD_score(target):
-    # preprocess target then calculate CFD score
+    # preprocess target then calculate CFD score. A single bulge-aware path handles DNA
+    # bulges, RNA bulges, combined bulges, and mismatch-only rows uniformly: the crRNA
+    # (target[1]) carries DNA-bulge gaps, the aligned protospacer (alt=target[2],
+    # ref=target[-4]) carries RNA-bulge gaps; both include the trailing PAM.
     if do_scores:
-        if target[0] == "DNA":
-            cfd_score = calc_cfd(
-                target[1][int(target[bulge_pos]) :],
-                target[2].upper()[int(target[bulge_pos]) : -3],
-                target[2].upper()[-2:],
-                mm_scores,
-                pam_scores,
-                do_scores,
-            )
-            # append to target the CFD score of the aligned sequence (alt or ref)
-            target.append("{:.3f}".format(cfd_score))
-            # -3 position is a placeholder for ref score
-            if (
-                target[-3] == 55
-            ):  # if 55 sequence is ref so no score have to be calculated
-                target[-3] = "{:.3f}".format(cfd_score)
-            if (
-                target[-3] == 33
-            ):  # if 33 sequence is alt so ref score must be calculated
-                cfd_ref_score = calc_cfd(
-                    target[1][int(target[bulge_pos]) :],
-                    target[-4].upper()[int(target[bulge_pos]) : -3],
-                    target[-4].upper()[-2:],
-                    mm_scores,
-                    pam_scores,
-                    do_scores,
-                )
-                target[-3] = "{:.3f}".format(cfd_ref_score)
-        else:
-            cfd_score = calc_cfd(
-                target[1],
-                target[2].upper()[:-3],
-                target[2].upper()[-2:],
-                mm_scores,
-                pam_scores,
-                do_scores,
-            )
-            target.append("{:.3f}".format(cfd_score))
-            if target[-3] == 55:
-                target[-3] = "{:.3f}".format(cfd_score)
-            if target[-3] == 33:
-                cfd_ref_score = calc_cfd(
-                    target[1],
-                    target[-4].upper()[:-3],
-                    target[-4].upper()[-2:],
-                    mm_scores,
-                    pam_scores,
-                    do_scores,
-                )
-                target[-3] = "{:.3f}".format(cfd_ref_score)
+        cfd_score = _cfd_from_alignment(target[1], target[2])
+        # append to target the CFD score of the aligned sequence (alt or ref)
+        target.append("{:.3f}".format(cfd_score))
+        # -3 position is a placeholder for ref score
+        if target[-3] == 55:  # if 55 sequence is ref so no score have to be calculated
+            target[-3] = "{:.3f}".format(cfd_score)
+        if target[-3] == 33:  # if 33 sequence is alt so ref score must be calculated
+            cfd_ref_score = _cfd_from_alignment(target[1], target[-4])
+            target[-3] = "{:.3f}".format(cfd_ref_score)
     else:
         # no score calculated, append -1 in CFD score and in position -3 insert -1 value (-1 means no score calculated)
         cfd_score = -1
