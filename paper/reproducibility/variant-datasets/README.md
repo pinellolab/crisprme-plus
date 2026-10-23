@@ -4,6 +4,23 @@ This directory documents how the population variant datasets used in the **CRISP
 
 ---
 
+## Shipped CRISPRme+ indexes — exact build inputs, hosted on HuggingFace
+
+Every shipped variant index can be **rebuilt from public inputs**. The exact source VCFs that built each shipped index are hosted on the CRISPRme data repo under `vcfs/<dataset>/` and fetched with `crisprme.py download --what vcf --dataset <dataset>`; the samplesID + PAM files are under `samplesIDs/` and `pams/`. Each source was **provenance-verified** to match the shipped index (sample list identical + record/indel counts equal to the index's `variant_count.json`).
+
+| Shipped index | `vcfs/<dataset>` | Verified source (provenance) | Samples | Records / indels |
+|---|---|---|---|---|
+| `NRG_3_hg38+hg38_HGDP1kGP` *(default)* | `hg38_HGDP1kGP` | gnomAD HGDP+1kGP, SHAPEIT5 **re-phased** (`hgdp1kgp.chrN.norm.vcf.gz`, chr1–22+X) — see [`docs/HGDP_1KGP_PHASED_INDEX_METHODS.md`](../../../docs/HGDP_1KGP_PHASED_INDEX_METHODS.md) | 4,091 (925 HGDP + 3,166 1kGP), phased | 125.2M / 17.2M |
+| `NRG_3_hg38+hg38_1000G2021` | `hg38_1000G2021` | 1000G high-coverage NYGC `20201028_3202_phased` (→ `hg38_1000G_2021/` below) | 3,202, phased | 63.4M / 9.5M |
+| `NRG_3_hg38+hg38_HPRC` | `hg38_HPRC` | HPRC pangenome `vcfwave` VCFs (incl. CHM13) | 232, phased | 36.3M / 12.1M |
+| `NRG_3_hg38+hg38_mega` | `hg38_mega` | sites-only AF union of the 5 sources below (merged → `mega.<chr>.afmax.vcf.gz`); **public summarized allele frequencies, no individual-level genotypes** | 5 pseudo-samples | 51.2M / 15.7M |
+
+**To rebuild (or build with a different PAM, e.g. the PAM-less `NNN` index for non-canonical PAMs / SpRY-like enzymes):** see [`docs/RELEASE_CHECKLIST.md` §3 "Building & publishing a new index"](../../../docs/RELEASE_CHECKLIST.md#3-building--publishing-a-new-index-new-dataset-or-a-new-pam-for-an-existing-dataset) — the reuse-vs-rebuild boundary, how to author a PAM file, the exact `download --what vcf` + `build-index-only --pam …` commands, and the CFD/CRISPR-Bulge non-canonical-PAM scoring caveat.
+
+The subfolders below document the **upstream provenance + retrieval/QC** of each *source* dataset (how the inputs above were produced from public releases).
+
+---
+
 ## Datasets at a glance
 
 | Folder | Dataset & release | Data type | Access | Retrieval / build |
