@@ -278,7 +278,7 @@ CURATED_COLUMNS = (
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
     ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
-    ("Observed", "observed"),  # reference / N cis carriers (--per-sample) / N carriers (pop, 1 variant) / "N w/ >=1 of K vars (poss. chimera)" (pop, multi-variant union) / observed / putative
+    ("Observed", "observed"),  # reference / N cis carriers (--per-sample) / N carriers (pop, 1 variant) / "N carriers (>=1 of K vars, poss. chimera)" (pop, multi-variant union) / observed / putative
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
@@ -832,7 +832,7 @@ def _curated_cell(kind, row, cols):
                 # carriers -- the stacked combination may exist on no one haplotype
                 # (possible chimera). --per-sample resolves the true cis carriers.
                 # Plain ASCII: this cell is shared by the HTML table AND the TSV downloads.
-                return f"{n} w/ >=1 of {nvar} vars (poss. chimera)"
+                return f"{n} carrier{'' if n == 1 else 's'} (>=1 of {nvar} vars, poss. chimera)"
             # population-level, single variant: carriers of that one variant
             return f"{n} carrier{'' if n == 1 else 's'}"
         if nvar <= 1:

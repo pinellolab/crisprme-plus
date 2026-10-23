@@ -45,7 +45,7 @@ and the `release-crisprme` skill.
   off-target" — but in the population-level (unphased) default that number is the **union** of
   samples carrying ≥1 of the N variants, and the stacked combination may exist on no single
   haplotype (a possible chimera; the row's own low joint AF gives it away). It now reads
-  `128 w/ >=1 of 12 vars (poss. chimera)`. A single-variant site still reads `N carriers`, and
+  `128 carriers (>=1 of 12 vars, poss. chimera)`. A single-variant site still reads `N carriers`, and
   under `--per-sample` (phased, exact cis set) it reads `N cis carriers`. Applies to the in-report
   table and the download TSVs (one shared cell).
 - **`--per-sample` searches no longer fail at the annotation stage on Docker Desktop for Mac/Windows.**

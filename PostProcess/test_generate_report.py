@@ -1628,7 +1628,7 @@ class TestGenerateReport(unittest.TestCase):
         # population-level (default)
         gr._PER_SAMPLE = False
         self.assertEqual(cell("alt", "S1,S2,S3", "chr1;100;A;T"), "3 carriers")   # 1 variant
-        self.assertEqual(cell("alt", many, multi), "128 w/ >=1 of 12 vars (poss. chimera)")
+        self.assertEqual(cell("alt", many, multi), "128 carriers (>=1 of 12 vars, poss. chimera)")
         self.assertEqual(cell("ref", "", "chr1;1;A;T"), "reference")
         # the misleading plain "128 carriers" must NOT be produced for the chimera case
         self.assertNotEqual(cell("alt", many, multi), "128 carriers")
