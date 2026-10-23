@@ -71,15 +71,15 @@ legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.7.10 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.7.11 \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.7.10 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.7.11 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (HGDP + 1000 Genomes, 4,091 samples, re-phased)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.7.10 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.7.11 \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 ```
 
@@ -100,7 +100,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.7.10 crisprme.py web-interface
+  pinellolab/crisprme:v2.7.11 crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -309,22 +309,27 @@ with a **Reference only** option if you want a reference-genome search.
 **Analysis mode (Population-level vs Per-sample)**
 
 When you select a variant-aware index, the form shows an **Analysis mode** choice that
-controls how genetic variants are resolved in the results:
+controls how genetic variants are resolved in the results. The default is **context-aware** —
+set automatically from the index you picked:
 
-- **Population-level (default)** — reports each off-target once, using a worst-possible
-  representative of the variants in its window. This is the fast, robust default: it never
-  misses a candidate off-target and works on any index (including the sites-only *mega*
-  index). It does **not** tell you which individuals carry a site.
-- **Per-sample** — resolves the actual per-individual genotypes into observed haplotypes, so
-  the report **names the carrier samples**, marks co-occurring variants as **CONFIRMED cis**
-  (phased) or **PUTATIVE co-carrier** (unphased), and gives the **exact joint allele
-  frequency**. Choose this for genotyped panels and clinical / validation work — it is the
-  headline capability of the variant-aware pipeline.
+- **Per-sample (default on genotyped+phased indices)** — resolves the actual per-individual
+  genotypes into observed haplotypes, so the report **names the carrier samples**, marks
+  co-occurring variants as **CONFIRMED cis** (phased) or **PUTATIVE co-carrier** (unphased), and
+  gives the **exact joint allele frequency**. It is the default on a genotyped+phased panel
+  (HGDP + 1000 Genomes [the default], 1000G-2021, or HPRC) and the headline capability of the
+  variant-aware pipeline — the mode to use for clinical / validation work.
+- **Population-level (default on sites-only indices; the `--population-level` / web
+  "Population-level" opt-out)** — reports each off-target once, using a worst-possible
+  representative of the variants in its window. It never misses a candidate off-target and works
+  on any index, so it is the default on the sites-only *mega* index; on a genotyped+phased panel
+  pick it (or pass `--population-level`) to opt out of per-sample for a fast worst-case screen
+  (e.g. a very dense / high-edit / genome-wide search). It does **not** tell you which
+  individuals carry a site.
 
 Per-sample is a **genotype-resolution** dial, **not** a speed dial: for a single guide the
 runtimes are comparable. It **requires a genotyped index** (HGDP + 1000 Genomes [the default],
 1000G-2021, or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
-greyed out and the search falls back to population-level. (See "Understanding CONFIRMED vs
+greyed out and the search automatically uses population-level. (See "Understanding CONFIRMED vs
 PUTATIVE and carriers" in the results section for how these labels appear in the report.)
 
 **Report options (slim vs full report)**
@@ -419,7 +424,7 @@ interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.7.10 crisprme.py web-interface
+>   pinellolab/crisprme:v2.7.11 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme && crisprme.py web-interface)
 > ```

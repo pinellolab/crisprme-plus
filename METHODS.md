@@ -1,7 +1,7 @@
 # CRISPRme+ — Methods
 
 This document describes the methods introduced in **CRISPRme+** (the 2.3 through
-2.7.x line; current shipped release 2.7.10), intended as a self-contained technical reference and as source material
+2.7.x line; current shipped release 2.7.11), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
@@ -44,12 +44,15 @@ off-target site.
   upper-bounds the score/severity of every realizable haplotype in that window, emitted
   by the default population-level analysis instead of enumerating each haplotype (§5).
 
-**Analysis-mode decision rule.** The **default** (no flag) is a **population-level**
-worst-possible screen and works on **any** index. Add **`--per-sample`** only on a
-**genotyped** index (`HGDP1kGP` — the recommended default, catalog name
-`NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples, jointly
-SHAPEIT5 re-phased — `1000G2021`, or `HPRC`) when you need named carriers /
-CONFIRMED cis / exact joint AF — it is inert on a sites-only index (`mega`). See
+**Analysis-mode decision rule.** The **default** (no flag) is **context-aware**:
+per-sample (CONFIRMED cis phasing + named carriers + exact joint AF) on a
+genotyped+PHASED index, or a population-level worst-possible screen (works on any
+index, lossless for detection) otherwise (sites-only/unphased/hybrid/reference-only).
+Force the fast population-level mode with **`--population-level`**; force resolution
+with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-only
+index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
+catalog name `NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
+jointly SHAPEIT5 re-phased — `1000G2021`, or `HPRC`. See
 [§5, Search-space control for high-variant-density regions](#population-level-analysis-default-and---per-sample-genotype-resolution).
 
 ---
@@ -112,7 +115,7 @@ does millions of registry lookups (one per candidate off-target window, scattere
 chromosome), and measurement showed raw lookups are **~2× faster** than the compressed path
 even with a warm cache. All shipped indexes (the genotyped 1000 Genomes + HGDP and the
 sites-only mega) use this raw format, for consistency and lookup speed ("speed over space").
-The registry has shipped raw since 2.5.3 (still raw as of 2.7.10).
+The registry has shipped raw since 2.5.3 (still raw as of 2.7.11).
 
 **Optional `zlib` compression.** A block-compressed format is available for
 space-constrained storage. Each section is partitioned into 4,096-record blocks,
@@ -480,13 +483,17 @@ The controls above bound any *single* window, but a **dense panel** (many merged
 sources) or a **sites-only aggregate panel** can present so many variant-dense windows
 that even the observed-haplotype enumeration of Section 4 becomes intractable — measured
 at **49 h+ without completing** on a 4×-density 1000G+HGDP panel. The two analysis modes
-are therefore not really a *speed* dial but a **genotype-resolution** dial: the default
-reports population-level worst-possible off-targets (works on any panel), while
-`--per-sample` resolves each individual's observed haplotype (only possible, and only
-meaningful, when the panel carries per-sample genotypes). So as of 2.5.4 CRISPRme+ runs a
-**two-pass population-level analysis by default** (propagated to the whole post-analysis via
-the internal `CRISPRME_FAST_MODE` env var); **`--per-sample`** opts into the exact
-observed-haplotype enumeration of Section 4. Instead of enumerating the 2ᵏ IUPAC haplotype
+are therefore not really a *speed* dial but a **genotype-resolution** dial: per-sample
+resolves each individual's observed haplotype (only possible, and only meaningful, when the
+panel carries per-sample genotypes), while the population-level analysis reports
+worst-possible off-targets (works on any panel). As of **2.7.11** the mode is **context-aware
+by default**: on a genotyped+PHASED index CRISPRme+ runs the exact observed-haplotype
+enumeration of Section 4 (per-sample) by default, and on a sites-only / unphased / hybrid /
+reference-only index it runs the two-pass population-level analysis by default (propagated to
+the whole post-analysis via the internal `CRISPRME_FAST_MODE` env var). **`--population-level`**
+forces the worst-possible screen (the opt-out from per-sample on a phased index); **`--per-sample`**
+forces the observed-haplotype enumeration (the two are mutually exclusive). The 2.5.4 two-pass
+population-level machinery is now the opt-out path. Instead of enumerating the 2ᵏ IUPAC haplotype
 lattice per window, the population-level analysis emits a small fixed set of
 **worst-possible representatives** per window:
 
@@ -958,7 +965,8 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.7.x line (CRISPRme+ 2.7.10) (default SNP+indel co-occurrence, two-pass population-level
-analysis with opt-in `--per-sample` genotype resolution, and the CRISPR-Bulge ML off-target
+methods as of the 2.7.x line (CRISPRme+ 2.7.11) (default SNP+indel co-occurrence, context-aware
+analysis mode — per-sample on genotyped+PHASED indexes / population-level otherwise, with opt-out
+`--population-level` / forced `--per-sample`, and the CRISPR-Bulge ML off-target
 scorer in a dedicated conda environment with a `cpu|cuda|metal` compute backend); see the
 CHANGELOG and the referenced source files for implementation detail.*

@@ -1,8 +1,9 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ℹ️ **CRISPRme+ (v2.7.10)** is the current release of the next-generation line
-> (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, population-level
-> analysis by default with opt-in `--per-sample` genotype resolution). For a frozen
+> ℹ️ **CRISPRme+ (v2.7.11)** is the current release of the next-generation line
+> (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, context-aware analysis
+> mode — per-sample by default on genotyped+phased indexes, population-level on sites-only,
+> with opt-out `--population-level`). For a frozen
 > production/clinical baseline you can instead use the stable line
 > **[CRISPRme 2.1.14](https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14)**.
 
@@ -76,7 +77,7 @@ docker pull pinellolab/crisprme:latest
 ```
 
 > **Reproducibility:** `:latest` auto-updates to the newest release (and is the
-> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.7.10`
+> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.7.11`
 > everywhere below in place of `:latest`.
 
 > **Already have an older image?** Docker does **not** re-download a tag you already
@@ -150,15 +151,19 @@ The web interface picks these up automatically — a search that uses the defaul
 (SpCas9, recognizes NGG + NAG) with up to 2 bulges will reuse them instead of rebuilding.
 (Need a different nuclease? See **"Installing more indexes"** at the bottom.)
 
-> **Population-level (default) vs per-sample.** The axis is genotype resolution, not speed.
-> By default searches run a **population-level analysis** — they report a small set of
-> worst-possible representatives per variant window (reference + minimum-edit + maximum-CFD),
-> which removes the per-haplotype enumeration wall on dense/aggregate panels and is lossless
-> for detection. Add **`--per-sample`** (CLI) or pick **Per-sample** in the web form to resolve
-> per-sample genotypes into observed haplotypes with named carriers + CONFIRMED cis phasing +
-> exact joint AF (recommended on the **genotyped** panel for clinical validation). This needs
-> a genotyped panel — it's a no-op on the sites-only mega panel (no genotypes to resolve), and
-> the web form disables it there. The shareable report states which mode was used.
+> **Analysis mode (context-aware default) — per-sample vs population-level.** The axis is
+> genotype resolution, not speed. By default `complete-search` auto-selects the mode from the
+> index: on a **genotyped+phased** panel (HGDP + 1000 Genomes [the default], 1000G-2021, HPRC)
+> it runs **per-sample** — resolving per-sample genotypes into observed haplotypes with named
+> carriers + CONFIRMED cis phasing + exact joint AF; on a **sites-only / unphased** panel (e.g.
+> the mega panel) it runs **population-level** — a small set of worst-possible representatives
+> per variant window (reference + minimum-edit + maximum-CFD), which removes the per-haplotype
+> enumeration wall and is lossless for detection. Add **`--per-sample`** (CLI) or pick
+> **Per-sample** in the web form to force resolution — it's a no-op on the sites-only mega panel
+> (no genotypes to resolve), and the web form disables it there. Add **`--population-level`**
+> (CLI) or pick **Population-level** in the web form to force the fast worst-case screen even on
+> a genotyped+phased panel (e.g. a very dense / high-edit / genome-wide search). The shareable
+> report states which mode ran.
 
 ## 5. (Optional, advanced) Add the raw 1000 Genomes VCFs
 
@@ -279,9 +284,10 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 - `--per-sample` resolves per-individual genotypes: it names the **carrier samples**
   and marks co-occurring variants **CONFIRMED cis** (phased) / **PUTATIVE co-carrier**
   (unphased) with the exact joint allele frequency. It needs a genotyped index
-  (HGDP + 1000 Genomes [the default], 1000G-2021, or HPRC); omit it for the faster population-level
-  default, and note it is inert on the sites-only *mega* index. Either way the search
-  is variant-aware with allele frequencies and rsIDs.
+  (HGDP + 1000 Genomes [the default], 1000G-2021, or HPRC); on these phased panels per-sample
+  is already the context-aware default, so use `--population-level` to force the fast
+  worst-case screen, and note per-sample is inert on the sites-only *mega* index. Either way
+  the search is variant-aware with allele frequencies and rsIDs.
 - COSMIC cancer rows ship in the annotation bundle but are **off by default**
   (licence-gated) — enable with `crisprme.py cosmic-license enable`; IntOGen
   cancer-driver flags are on by default.
