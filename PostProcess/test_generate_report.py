@@ -1637,6 +1637,20 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(cell("alt", "A,B,C,D,E", multi), "5 cis carriers")
         self.assertEqual(cell("alt", "A", "chr1;1;A;T"), "1 cis carrier")
 
+    def test_hap_label_mode_aware(self):
+        """The per-site modal noun is mode-aware: population-level = 'variant
+        combination(s)' (worst-case, unphased reconstructions, not confirmed on any one
+        individual); --per-sample = 'observed haplotype(s)' (genuinely resolved/phased)."""
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
+        gr._PER_SAMPLE = False
+        self.assertEqual(gr._hap_label(2), "variant combinations")
+        self.assertEqual(gr._hap_label(1), "variant combination")
+        self.assertEqual(gr._hap_label(2, head=True), "variant combinations (worst-case)")
+        gr._PER_SAMPLE = True
+        self.assertEqual(gr._hap_label(2), "observed haplotypes")
+        self.assertEqual(gr._hap_label(1), "observed haplotype")
+        self.assertEqual(gr._hap_label(2, head=True), "observed haplotypes")
+
     def test_observed_haplotypes_companion_multi_and_single(self):
         """build_observed_haplotypes_companion lists EVERY distinct observed variant
         haplotype for a SITE carrying >=2 of them, carrying BOTH scores so it serves
@@ -1981,7 +1995,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn('class="oh-modal"', modal)
         self.assertIn('id="ohm-chrX-400"', modal)
         self.assertIn("chrX:400 (+)", modal)                       # locus header
-        self.assertIn("3 observed haplotypes", modal)              # K count
+        self.assertIn("3 variant combinations (worst-case)", modal)              # K count
         for vs in ("chrX_400_T_A", "chrX_402_C_G", "chrX_404_G_T"):
             self.assertIn(vs, modal)                               # all haplotypes
         for aln in ("ACGTACGTACGTACGTAAAGG", "ACGTACGTACGTACGTGGGGG",
@@ -1990,7 +2004,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("<code>ACGTACGTACGTACGTAAAGG</code>", modal)  # wrapped in <code>
         self.assertIn("oh-close", modal)                           # close button
         self.assertIn("observed_haplotypes.tsv", modal)            # download link
-        self.assertIn("Download all observed haplotypes", modal)
+        self.assertIn("Download all variant combinations", modal)
         # empty haps -> no modal
         self.assertEqual(gr._oh_modal_html("x", [], "x.tsv"), "")
 
@@ -2007,7 +2021,7 @@ class TestGenerateReport(unittest.TestCase):
         )
         self.assertIn("oh-open", html)                             # the link class
         self.assertIn('data-oh="ohm-chrX-400"', html)              # points at the modal
-        self.assertIn("2 other haplotypes", html)                 # N = 3 - 1
+        self.assertIn("2 other variant combinations", html)                 # N = 3 - 1
         self.assertIn("&middot;", html)                            # separator
         # exactly one modal emitted, keyed by the stable id
         self.assertEqual(list(oh_modals), ["ohm-chrX-400"])
@@ -2196,7 +2210,7 @@ class TestGenerateReport(unittest.TestCase):
         # both haplotypes (the CFD-axis + the CRISPR-Bulge-axis varset) render
         self.assertIn("chr5_400_T_A", html)
         self.assertIn("chr5_402_C_G", html)
-        self.assertIn("2 observed haplotypes", html)            # site has K=2
+        self.assertIn("2 variant combinations (worst-case)", html)            # site has K=2
         # the CRISPR-Bulge-ranked table is present (both scorers shown)
         self.assertIn("top1000_crispr_bulge.tsv", html)
 
@@ -2210,7 +2224,7 @@ class TestGenerateReport(unittest.TestCase):
         self._assert_both_axis_modals_intact(html)
         # top-level link + callout + modal download button all present
         self.assertIn("Observed haplotypes at multi-haplotype sites", html)
-        self.assertIn("Download all observed haplotypes", html)
+        self.assertIn("Download all variant combinations", html)
         # no "omitted" degradation note when the companion is bundled
         self.assertNotIn("omitted from this slim report", html)
 
@@ -2229,7 +2243,7 @@ class TestGenerateReport(unittest.TestCase):
         # CRITICAL INVARIANT: the inline modals (both axes) are UNCHANGED
         self._assert_both_axis_modals_intact(html)
         # the download affordances degrade gracefully (no broken link)
-        self.assertNotIn("Download all observed haplotypes", html)
+        self.assertNotIn("Download all variant combinations", html)
         self.assertNotIn(
             'href="data/observed_haplotypes.tsv"', html)
         # the modal shows the short degrade note in place of the download button
@@ -2249,7 +2263,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertNotIn("data/observed_haplotypes.tsv", slim_names)   # gated out of slim
         self.assertIn("data/observed_haplotypes.tsv", full_names)      # back under --report-full
         # under --report-full the download affordances are present again
-        self.assertIn("Download all observed haplotypes", full_html)
+        self.assertIn("Download all variant combinations", full_html)
         self.assertNotIn("omitted from this slim report", full_html)
         self._assert_both_axis_modals_intact(full_html)
 

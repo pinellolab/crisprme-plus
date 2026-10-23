@@ -308,6 +308,18 @@ _DROP_MAF = False
 # variants (the stacked combination may exist on no single haplotype), so we flag it.
 _PER_SAMPLE = False
 
+
+def _hap_label(n, head=False):
+    """Noun for the per-site distinct-combination rows (the "Observed"-cell modal).
+    Under --per-sample these are genuinely resolved (phased) OBSERVED haplotypes; in the
+    population-level default they are worst-case VARIANT COMBINATIONS enumerated from the
+    observed variants (not phased, not confirmed on any one individual's haplotype).
+    ``head=True`` adds a worst-case qualifier to the population-level modal heading."""
+    if _PER_SAMPLE:
+        return "observed haplotype" + ("" if n == 1 else "s")
+    base = "variant combination" + ("" if n == 1 else "s")
+    return (base + " (worst-case)") if head else base
+
 # Annotation curated kinds that are dropped when their source column is absent from
 # the run's TSV, so a run without a given annotation (legacy no-COSMIC bundle, a
 # dict-less no-annotation run, a non-human genome) does not show an all-"-" column
@@ -3235,7 +3247,7 @@ def _oh_modal_html(mid, haps, download_name, omitted_note=""):
     if download_name:
         download_link = (
             f'<a class="download" href="{_dl_href(download_name)}" download>'
-            f"&#11015; Download all observed haplotypes (TSV)</a>"
+            f"&#11015; Download all {_hap_label(2)} (TSV)</a>"
         )
     elif omitted_note:
         # The full companion TSV was size-gated out of the slim bundle; the per-site
@@ -3246,7 +3258,7 @@ def _oh_modal_html(mid, haps, download_name, omitted_note=""):
         f'<div class="oh-modal-box">'
         f'<button class="oh-close" aria-label="Close">&times;</button>'
         f'<div class="oh-modal-head">{_esc(chrom)}:{_esc(start)} ({_esc(strand)}) '
-        f'&mdash; {len(ordered)} observed haplotypes</div>'
+        f'&mdash; {len(ordered)} {_hap_label(len(ordered), head=True)}</div>'
         f'<div class="oh-modal-body"><table class="oh-table"><thead><tr>{th}</tr>'
         f'</thead><tbody>{"".join(trs)}</tbody></table></div>'
         f'{download_link}</div></div>'
@@ -3366,7 +3378,7 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
                                               _key[0] + "-" + _key[1])
                         cell += (
                             f' &middot; <a class="oh-open" href="#" data-oh="{mid}">'
-                            f'{n_other} other haplotype{"" if n_other == 1 else "s"}</a>'
+                            f'{n_other} other {_hap_label(n_other)}</a>'
                         )
                         if oh_modals is not None and mid not in oh_modals:
                             oh_modals[mid] = _oh_modal_html(
@@ -4065,14 +4077,29 @@ def render_html(
     # away from the table itself (the modal also carries this same link).
     observed_haplotypes_table_note = ""
     if observed_haplotypes_bundle_name:
+        if _PER_SAMPLE:
+            _oh_expl = (
+                "Each row is the per-site representative (highest-scoring observed "
+                "haplotype). Sites reached by &ge;2 distinct observed haplotypes show a "
+                "<strong>&ldquo;N other observed haplotypes&rdquo;</strong> link in the "
+                "<code>Observed</code> column &mdash; click it to see every haplotype a "
+                "real individual carries at that site."
+            )
+        else:
+            _oh_expl = (
+                "Each row is the per-site representative (highest-scoring variant "
+                "combination). Sites reached by &ge;2 distinct variant combinations show a "
+                "<strong>&ldquo;N other variant combinations&rdquo;</strong> link in the "
+                "<code>Observed</code> column &mdash; click it to see every worst-case "
+                "combination enumerated at that site. These are reconstructed from the "
+                "observed variants and are <strong>unphased</strong> (not confirmed on any "
+                "one individual&rsquo;s haplotype); run <code>--per-sample</code> to resolve "
+                "the true cis haplotypes and carriers."
+            )
         observed_haplotypes_table_note = (
-            f'<p class="caption">Each row is the per-site representative (highest-scoring '
-            f'observed haplotype). Sites reached by &ge;2 distinct observed variant '
-            f'haplotypes show a <strong>&ldquo;N other haplotypes&rdquo;</strong> link in '
-            f'the <code>Observed</code> column &mdash; click it to see every haplotype a '
-            f'real individual carries at that site.</p>'
+            f'<p class="caption">{_oh_expl}</p>'
             f'<p><a class="download" href="{_dl_href(observed_haplotypes_bundle_name)}" '
-            f'download>&#11015; Download all observed haplotypes (TSV)</a></p>'
+            f'download>&#11015; Download all {_hap_label(2)} (TSV)</a></p>'
         )
 
     # the CRISPR-Bulge-ranked top-1000 sits next to the CFD top-1000 in the Section-5 row

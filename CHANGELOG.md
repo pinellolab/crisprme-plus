@@ -48,6 +48,13 @@ and the `release-crisprme` skill.
   `128 carriers (>=1 of 12 vars, poss. chimera)`. A single-variant site still reads `N carriers`, and
   under `--per-sample` (phased, exact cis set) it reads `N cis carriers`. Applies to the in-report
   table and the download TSVs (one shared cell).
+- **The per-site "Observed" modal/caption no longer calls population-level reconstructions
+  "observed haplotypes."** In the population-level (unphased) default a site reached by several
+  variant combinations now reads `N variant combinations (worst-case)` (modal), `N other variant
+  combinations` (link), and the caption spells out that these are reconstructed from the observed
+  variants and are unphased — "run `--per-sample` to resolve the true cis haplotypes and carriers."
+  Under `--per-sample` the wording stays `observed haplotypes` (genuinely resolved/phased). Mirrors
+  the carrier-count fix one level up.
 - **`--per-sample` searches no longer fail at the annotation stage on Docker Desktop for Mac/Windows.**
   The post-search step annotates three target files in parallel, each building the same tabix index;
   `flock` is non-functional on VM-backed bind mounts (virtiofs/9p → ENOTTY), so the concurrent builds
