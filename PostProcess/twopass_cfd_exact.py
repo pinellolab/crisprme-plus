@@ -48,7 +48,7 @@ def _revcom(s):
         return None
 
 
-# Position-aware bulge scoring (2.7.11): the per-column factor + the guide-frame position
+# Position-aware bulge scoring (2.8.0): the per-column factor + the guide-frame position
 # rule live in bulge_cfd_penalty so the matrix scorer and the live scorer
 # (cfd_score_bulge_aware) share ONE definition. Both are STDLIB; a pass-through fallback
 # keeps the module importable if the helper is ever absent (mismatch-only stays exact).
@@ -60,7 +60,7 @@ except Exception:  # pragma: no cover - shipped alongside
 
 def position_factor(guide_u, dna_u, pos1, mm_scores):
     """Per-position CFD factor. For a match/mismatch this replicates calc_cfd's inner loop
-    exactly; for a bulge column ('-') it applies the 2.7.11 position-aware factor via the
+    exactly; for a bulge column ('-') it applies the 2.8.0 position-aware factor via the
     shared primitive. guide_u / dna_u are single bases in T→U space; pos1 is the 1-based
     GUIDE-FRAME position (DNA-bulge columns deleted). Untranslatable base → 0.0."""
     if _column_factor is not None:
@@ -74,7 +74,7 @@ def position_factor(guide_u, dna_u, pos1, mm_scores):
 
 
 def cfd_concrete(guide, dna, pam, mm_scores, pam_scores):
-    """Position-aware bulge-correct CFD for one concrete alignment (2.7.11); bit-identical
+    """Position-aware bulge-correct CFD for one concrete alignment (2.8.0); bit-identical
     to cfd_score_bulge_aware on the same alignment, and to the old calc_cfd for mismatch-only
     rows. ``guide``/``dna`` are the column-aligned spacer (may carry '-' bulges); ``pam`` is
     the 2-base PAM. DNA-bulge columns (guide '-') are deleted from the guide frame so the

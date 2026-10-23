@@ -2,7 +2,7 @@
 
 > Status: **PLANNING ONLY** (no code). Approved concept by Luca 2026-10-22; targeted for 2.8.0.
 > Produced by a 5-agent adversarial exploration (statistics / red-team / implementation / framing →
-> synthesis), grounded in the live codebase. This is the sites-only counterpart to the 2.7.11
+> synthesis), grounded in the live codebase. This is the sites-only counterpart to the 2.8.0
 > context-aware default (per-sample on genotyped indexes).
 
 ## The idea (Luca)
@@ -112,7 +112,7 @@ downloadable tier.
   oracle to enable chimera-aware prioritization") — the report is still correct, just un-tiered
   (today's worst-case PUTATIVE). Ties to the existing registry `data_type=hybrid` manifest stamp.
 - **Gating:** default OFF; `--prioritize-observed` / web checkbox; **sites-only indexes only** (on a
-  genotyped index the 2.7.11 `--per-sample` default already suppresses the chimera at search time).
+  genotyped index the 2.8.0 `--per-sample` default already suppresses the chimera at search time).
 - **Precondition:** assert mega `bcftools norm -m -any` normalization parity with the panel before the
   join.
 

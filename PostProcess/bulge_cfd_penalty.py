@@ -1,4 +1,4 @@
-"""Position-aware CFD bulge penalty (CRISPRme+ 2.7.11).
+"""Position-aware CFD bulge penalty (CRISPRme+ 2.8.0).
 
 Background
 ----------

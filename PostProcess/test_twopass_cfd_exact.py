@@ -23,7 +23,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 import twopass_cfd_exact as tp  # noqa: E402
 import twopass_emit as te  # noqa: E402
-import bulge_cfd_penalty as bp  # noqa: E402  (the live bulge-aware scorer, 2.7.11)
+import bulge_cfd_penalty as bp  # noqa: E402  (the live bulge-aware scorer, 2.8.0)
 
 
 def _extract_defs(src, names):

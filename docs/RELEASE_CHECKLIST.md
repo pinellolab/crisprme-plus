@@ -83,7 +83,13 @@ Every user-facing surface must agree on **version · default index · scorer · 
 | T-32 | The report told **two different threshold stories**: Section 4's recommended-panel PROSE said "validate every CRISPR-Bulge > 0 site + the high-CFD rescue," but the shipped `panel_top100.tsv` was still built CFD-centric (hard-include `CFD≥0.5 at ≤1 bulge`, CRISPR-Bulge only via the fill ranking), and the CRISPR-Bulge tier TABLE bottomed out at an orphan `≥0.1` with **no `>0` row** — so the panel the user downloaded didn't implement the panel the report recommended, and the "sensitive" (CB>0) operating point appeared in the risk card but not the Section-4 table/download. | The panel now hard-includes `(CRISPR-Bulge>0) ∪ (mm+b≤2) ∪ (CFD≥0.2 at 0 bulges) ∪ (CFD≥0.5 at 1 bulge) ∪ clean-0mm-bulge ∪ must-includes` (the shipped panel = the recommended default panel; a strict **superset** of the old one — verify `in OLD not NEW == 0` on real data), and the CB tier table shows `≥0.5 / ≥0.2 / > 0` + a `crispr_bulge_gt_0.tsv` download. ONE threshold message across the risk card, the "how to read this" modal, the Section-4 methods note, the score glossary, and METHODS §3.5. Each release: a threshold-consistency sweep (grep every CFD/CRISPR-Bulge cut point across `generate_report.py` + `risk_card.py` + `docs/` + the collaborator rationale doc — they must agree) + `test_generate_report` assertions (the `> 0` tier ROW renders, panel superset, Option-C floors `PANEL_RESCUE_CFD=0.2`/`PANEL_HIGH_CFD=0.5`). |
 | T-33 | The docs tell Apptainer users `apptainer run crisprme.sif crisprme.py complete-search …` ("use run, not exec" — T-10/T-25), but that only works if the SIF carries a **runscript** (from the Docker `CMD ["crisprme.py"]`) AND `/opt/conda/bin` is on the container `PATH`. A SIF obtained by any route OTHER than `apptainer pull docker://…` (e.g. built from a docker-archive/sandbox, or a locally-baked RC) can DROP the runscript and leak the host `PATH`, so `apptainer run` no-ops ("no runscript defined") and bare `apptainer exec crisprme.py` fails ("command not found") — the documented HPC command then doesn't run. | At Gate C, verify against a **fresh `apptainer pull docker://pinellolab/crisprme:vX.Y.Z`**: `apptainer inspect --runscript` references `crisprme.py`, `apptainer run crisprme.sif crisprme.py --version` prints `vX.Y.Z`, and `$PATH` inside includes `/opt/conda/bin`. When testing a SIF built another way (e.g. a baked RC on an apptainer-only node), invoke with `apptainer exec --env PATH=/opt/conda/bin:/usr/local/bin:/usr/bin:/bin crisprme.py …` and do NOT treat the missing runscript as a code bug — it's a SIF-provenance artifact of how that SIF was created, not the shipped image. |
 
+| T-34 | The mega sites-only INDEL build driver (`seq_script/merge_panels/mega_build_indels.sh`) advertised an overridable `PAM=${PAM:-…}` but then HARDCODED `--pam …/20bp-NRG-SpCas9.txt` (line 57) and the `NRG_3_hg38+hg38_mega_INDELS` destination dir names — so any non-NRG mega indel rebuild aborted (missing NRG file) or silently built the WRONG PAM under the NRG path. The three phased per-dataset scripts threaded `$PAM` correctly; only the mega driver drifted. | A new-PAM build of ANY shipped index must honor `--pam $PAM` end-to-end: `grep -rn "20bp-NRG\|NRG_3_" seq_script/` must find only overridable defaults (`${PAM:-…}` / `${IDXNAME:-NRG_3}`), never a hardcoded literal in a `--pam`/dest path. Driver now parameterizes `IDXNAME` + guards loudly if crispritz produces a dir the name didn't expect. |
+| T-35 | Multiple candidate source-VCF dirs exist per dataset (current + `archive/` + a dated `_20260827` snapshot + a decoy `hg38_combined_five_datasets`); publishing the WRONG one as "exact provenance" would mislabel what built the shipped index. The mega decoy had **1.83× too many records** (122.4M vs the shipped 66.9M) and a different INFO scheme. | Before publishing ANY build input, VERIFY it matches the shipped index: sample list (`bcftools query -l` == samplesID, md5 where possible) + record/indel counts (`bcftools index -n` sum) == the installed index's `Dictionaries/registry_<vcf>/variant_count.json`. A count/sample MISMATCH blocks publication. Canonical matched paths are recorded in `paper/reproducibility/variant-datasets/` + §3 below. |
+| T-36 | CFD's DNA-bulge half of the Doench gap matrix was DEAD: the DNA-bulge caller front-trimmed the alignment, collapsing the gap to a table position with no key → `except: pass` free-pass (factor 1.0), so every DNA bulge (and terminal bulge) scored like no bulge — a PAM-proximal bulge scored as high as a perfect match (chr19 CFD 0.87 vs CRISPR-Bulge 0). | CFD now scores the displayed alignment with the position-weighted gap factor at the bulge's true position (terminal columns extrapolated); mismatch-only + in-range RNA bulges are bitwise-unchanged (`test_bulge_cfd_penalty`, `test_calc_cfd_twins_agree`). The deployment calibration was refit on the re-scored benchmark + PR curves regenerated (incl. a bulge-stratified panel marking the report's own thresholds). Each release that touches scoring: re-verify the chr19-class PAM-proximal bulge is penalized AND mismatch-only CFD is unchanged, and that `PostProcess/calibration/*.npz` + `pr_curves.png` were regenerated from the current scorer. |
+
 **Gate A sub-checks added from this pass** (wire into section A above):
+- Build-input provenance + publication (T-35, §3): the HF `vcfs/<dataset>/` tree hosts EXACTLY the matched build inputs for the 5 shipped indexes, each verified (sample list + record counts) against its shipped `variant_count.json`; every documented `download --what vcf --dataset <X>` resolves (closes T-21). Provenance table lives in `paper/reproducibility/variant-datasets/`.
+- Scoring-change re-verify (T-36): on any scorer change, `test_bulge_cfd_penalty` + `test_calc_cfd_twins_agree` green, calibration npz + PR curves regenerated, and the report's threshold markers match METHODS §3.
 - Sentinel-value multi-surface sweep (T-22): `grep -rn "disables the cap\|-1.*cap"` must find `-1` only on the ENV VAR `CRISPRME_IUPAC_CAP` (accepts it), never on the CLI flag `--max-total-edits` (rejects negatives). The T-22 fix once landed on METHODS/CHANGELOG/comment but missed README:884.
 - Default-index count single-source (T-18): `grep -rnE "929|3,?162|3,?477"` across docs/ must return ONLY raw-source / mega-source-list / retired / 2019-AN-example contexts; any "929 HGDP + 3,162 1kGP" DEFAULT split is the stale pair (correct = 925 + 3,166; 925 = post-QC, 929 = raw source count).
 - No retired-index copy-paste even under a Historical banner: a whole-file banner is not cover for a verbatim dead `download --index-name <retired>` command — replace the inline name with the live equivalent.
@@ -92,3 +98,64 @@ Every user-facing surface must agree on **version · default index · scorer · 
 
 > **How to use T-rows:** every one is a real incident. When a release pass uncovers a new one,
 > add a row here with the symptom and the check, and wire the check into Gate A or B above.
+
+---
+
+## 3. Building & publishing a new index (new dataset, or a new PAM for an existing dataset)
+
+Anyone can reproduce a shipped index or build a new one from the **public build inputs** — the source
+VCFs + samplesID + PAMs are hosted on HuggingFace (`crisprme.py download --what vcf --dataset <name>`)
+and every dataset's exact upstream provenance + retrieval/QC recipe is in
+[`paper/reproducibility/variant-datasets/`](../paper/reproducibility/variant-datasets/). The shipped
+indexes, their matched source VCFs, and the exact build command are the table there; `docs/PRECOMPUTED_INDEXES.md`
+lists the downloadable indexes.
+
+### What a PAM change does and doesn't cost
+A CRISPRitz index is built for ONE PAM (encoded in the name `<MOTIF>_<N>_<genome>+<enriched>`, e.g.
+`NRG_3_…`). To search a different PAM you rebuild ONLY the index, not the data:
+
+- **Reused verbatim (PAM-independent):** the enriched genome (`Genomes/hg38+hg38_<ds>/` + `_INDELS/`),
+  ALL `Dictionaries/` tiers (registry / genotypes / log_indels), `samplesIDs/`, `variant_count.json`.
+- **Rebuilt (PAM-specific):** only `genome_library/<MOTIF>_<N>_hg38+hg38_<ds>{,_INDELS}` and the reference
+  `genome_library/<MOTIF>_<N>_hg38`. The reference index is dataset-independent → build it ONCE per PAM
+  and reuse across every variant index with that PAM.
+
+### Add a new PAM file
+One line: `<20 N's><PAM-motif> <signed-pos>` — `pos > 0` = 3′ PAM (last |pos| chars, e.g. SpCas9);
+`pos < 0` = 5′ PAM (first |pos| chars, e.g. Cas12a). Filename MUST be `<len>-<motif>-<name>.txt` (≥3
+hyphen fields) or the parser errors. Examples in `PAMs/`: `20bp-NRG-SpCas9.txt` (`…NRG 3`),
+`20bp-NNN-NO-PAM.txt` (`…NNN 3`, the PAM-less index that captures non-canonical PAMs / SpRY-like enzymes).
+> **CFD/CRISPR-Bulge caveat for a new PAM:** CFD is computed only for a 20-nt guide + 3-nt 3′ PAM; it
+> down-weights the off-target PAM by Doench's **SpCas9** ladder (NGG 1.0, NAG 0.26, NCG 0.11, … most
+> others 0). A 4-nt/2-nt/5′ PAM builds + searches but returns NO CFD; and for a non-SpCas9 enzyme
+> (SpRY/SpCas9-NG/Cas12a) both scores' PAM terms are SpCas9-specific — the index **finds** the sites,
+> but rank by edit distance + the enzyme's own PAM. See METHODS §3.
+
+### Build (the real user command — no shortcuts)
+```bash
+# 1. get the public inputs (reference bundle + the dataset's source VCFs + samplesID)
+crisprme.py download --what all
+crisprme.py download --what vcf --dataset hg38_HGDP1kGP        # the matched build input from HF
+# 2. build the index for your PAM (enriches the genome, builds the index, builds the Dictionaries)
+crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NNN-NO-PAM.txt \
+    --bDNA 2 --bRNA 2 --thread 16 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs/hg38_HGDP1kGP.samplesID.txt
+# -> genome_library/NNN_3_hg38+hg38_HGDP1kGP{,_INDELS}  (reuses the enriched genome + Dictionaries on a rebuild)
+# 3. search it
+crisprme.py complete-search --pam PAMs/20bp-NNN-NO-PAM.txt --index-path genome_library … --guide guides.txt …
+```
+The mega sites-only indel half uses `seq_script/merge_panels/mega_build_indels.sh` (honors `PAM=`/`IDXNAME=`
+since T-34); the three phased per-dataset scripts (`{hgdp1kgp,onekg2021,hprc}_build.sh`) thread `--pam`
+directly.
+
+### Release checklist for a NEW published index
+- [ ] **Provenance verified (T-35)** — the source VCF matches the shipped/intended index (sample list +
+      record counts vs `variant_count.json`); the canonical matched path recorded in the reproducibility folder.
+- [ ] **Inputs on HF** — `vcfs/<dataset>/` + samplesID + the PAM file uploaded; `download --what vcf --dataset <ds>`
+      resolves (closes T-21); size + SHA256 recorded.
+- [ ] **PAM honored end-to-end (T-34)** — no hardcoded PAM/dest literals in the build path; index named `<MOTIF>_<N>_…`.
+- [ ] **New index documented** — added to `docs/PRECOMPUTED_INDEXES.md` + the reproducibility table (dataset,
+      PAM, upstream, exact command, checksums) + the HF dataset card; `BUILDING_INDEXES`/§3 build command shown.
+- [ ] **Smoke** — a real `complete-search` on the new index renders a report; for a non-NGG PAM confirm the
+      CFD/CRISPR-Bulge caveat is surfaced (NO-SCORES where expected), not silently wrong.
+- [ ] **Surface consistency (Gate A)** — version/default-index/scorer/licence unchanged; the new index is
+      ADDED, not advertised as *the* default unless that's the decision.

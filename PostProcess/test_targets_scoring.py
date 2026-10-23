@@ -123,7 +123,7 @@ class TestCFD(unittest.TestCase):
     def test_dna_bulge_delete_gap_then_position_penalty(self):
         # DNA bulge with the gap NOT at the front: cfd_for_site DELETES the gap column from
         # both strands (drop the looped-out DNA base) so CFD positions 1..20 stay guide-
-        # indexed, THEN applies the position-aware Doench DNA-bulge factor (2.7.11).
+        # indexed, THEN applies the position-aware Doench DNA-bulge factor (2.8.0).
         import bulge_cfd_penalty as bp
         crrna = G[:5] + "-" + G[5:] + "GGG"   # gap in crRNA at display column 6
         dna = G[:5] + "A" + G[5:] + "AGG"     # extra DNA base at column 6 (revcom(A)=T)

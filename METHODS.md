@@ -1,7 +1,7 @@
 # CRISPRme+ — Methods
 
 This document describes the methods introduced in **CRISPRme+** (the 2.3 through
-2.7.x line; current shipped release 2.7.11), intended as a self-contained technical reference and as source material
+2.7.x line; current shipped release 2.8.0), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
@@ -115,7 +115,7 @@ does millions of registry lookups (one per candidate off-target window, scattere
 chromosome), and measurement showed raw lookups are **~2× faster** than the compressed path
 even with a warm cache. All shipped indexes (the genotyped 1000 Genomes + HGDP and the
 sites-only mega) use this raw format, for consistency and lookup speed ("speed over space").
-The registry has shipped raw since 2.5.3 (still raw as of 2.7.11).
+The registry has shipped raw since 2.5.3 (still raw as of 2.8.0).
 
 **Optional `zlib` compression.** A block-compressed format is available for
 space-constrained storage. Each section is partitioned into 4,096-record blocks,
@@ -486,7 +486,7 @@ at **49 h+ without completing** on a 4×-density 1000G+HGDP panel. The two analy
 are therefore not really a *speed* dial but a **genotype-resolution** dial: per-sample
 resolves each individual's observed haplotype (only possible, and only meaningful, when the
 panel carries per-sample genotypes), while the population-level analysis reports
-worst-possible off-targets (works on any panel). As of **2.7.11** the mode is **context-aware
+worst-possible off-targets (works on any panel). As of **2.8.0** the mode is **context-aware
 by default**: on a genotyped+PHASED index CRISPRme+ runs the exact observed-haplotype
 enumeration of Section 4 (per-sample) by default, and on a sites-only / unphased / hybrid /
 reference-only index it runs the two-pass population-level analysis by default (propagated to
@@ -760,11 +760,11 @@ trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
   the `mismatch_score.pkl` table carries **152 position-specific gap entries** (DNA-bulge
   `r-:dX` and RNA-bulge `rX:d-` at protospacer positions 2–20), so a bulge is penalized by a
   per-position factor and **two bulges multiply** — a PAM-distal bulge is near-neutral while a
-  seed-proximal one is strongly penalizing. **As of v2.7.11 these factors are applied at each
+  seed-proximal one is strongly penalizing. **As of v2.8.0 these factors are applied at each
   bulge's true spacer position** (the extra genomic base of a DNA bulge is removed so the 20
   guide bases keep their Cas9 positions, then the gap factor is applied; the two undefined
   terminal columns are extrapolated — lenient at the PAM-distal 5' tip, abolished at the
-  PAM-proximal junction). Before v2.7.11 a DNA-bulge realignment discarded the gap, so DNA
+  PAM-proximal junction). Before v2.8.0 a DNA-bulge realignment discarded the gap, so DNA
   bulges — and any bulge at a terminal column — were scored as if absent (a PAM-proximal bulge
   scored like a perfect match); mismatch-only and in-range RNA-bulge scores are unchanged by the
   fix. Even corrected, a CFD value on a gapped alignment is only a **relative** risk indicator
@@ -973,7 +973,7 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.7.x line (CRISPRme+ 2.7.11) (default SNP+indel co-occurrence, context-aware
+methods as of the 2.7.x line (CRISPRme+ 2.8.0) (default SNP+indel co-occurrence, context-aware
 analysis mode — per-sample on genotyped+PHASED indexes / population-level otherwise, with opt-out
 `--population-level` / forced `--per-sample`, and the CRISPR-Bulge ML off-target
 scorer in a dedicated conda environment with a `cpu|cuda|metal` compute backend); see the

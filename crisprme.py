@@ -23,7 +23,7 @@ import os
 import re
 
 
-version = "2.7.11"  # CRISPRme version
+version = "2.8.0"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -1798,14 +1798,14 @@ def complete_search() -> None:
     # Rows are worst-possible / PUTATIVE with an EXACT worst-case CFD and dataset-level allele
     # frequencies. PER-SAMPLE: resolves genotypes into observed haplotypes (CONFIRMED cis +
     # named carriers + exact joint AF) -- what a genotyped+phased panel is built for.
-    # The DEFAULT is context-aware (2.7.11, resolved just below): per-sample on a phased
+    # The DEFAULT is context-aware (2.8.0, resolved just below): per-sample on a phased
     # genotyped index, population-level otherwise; --per-sample / --population-level override.
     # Propagated to the whole post-analysis subprocess tree via the internal env var
     # CRISPRME_FAST_MODE (submit_job -> pools -> post_analisi_*.sh -> new_simple_analysis.py all
     # inherit os.environ): "1" = population-level, "0" = per-sample. We ALWAYS set it so the
     # resolved mode propagates. (The env var keeps its internal name to avoid resweeping the
     # shell chain; it is not user-facing. The pre-2.5.4 --fast/--full flags are gone.)
-    # Context-aware DEFAULT (2.7.11): on a genotyped + PHASED index the per-sample
+    # Context-aware DEFAULT (2.8.0): on a genotyped + PHASED index the per-sample
     # resolution (CONFIRMED cis + named carriers + exact joint AF) is what the panel is
     # built for, so it is the DEFAULT; population-level otherwise (sites-only / unphased /
     # hybrid / reference / unknown -- where per-sample buys little or nothing and the fast

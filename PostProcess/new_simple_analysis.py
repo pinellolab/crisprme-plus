@@ -32,7 +32,7 @@ except Exception:  # module absent in an old deploy -> no genotype tier
 # isolation). This module has no hard dependency on tier0_registry, so its import
 # cannot break the legacy path either.
 import simple_analysis_registry as _sar
-# Position-aware CFD bulge penalty (2.7.11). Core dependency; if a very old deploy lacks
+# Position-aware CFD bulge penalty (2.8.0). Core dependency; if a very old deploy lacks
 # it, fall back to a trivial pass-through so scoring never breaks (bulges then revert to
 # the previous free-pass behaviour rather than raising).
 try:
@@ -792,7 +792,7 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                     if _c == "-":
                         _tl.insert(_p, "-")
                 _t = "".join(_tl).upper()
-                # position-aware bulge scoring (2.7.11): the in-place display alignment is
+                # position-aware bulge scoring (2.8.0): the in-place display alignment is
                 # (split[1] crRNA, _t concrete protospacer+PAM); the DNA/RNA-bulge handling
                 # and the PAM-proximal penalty live in cfd_score_bulge_aware.
                 if _cfd_bulge_aware is not None:
@@ -1158,7 +1158,7 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             if _c == "-":
                                 _tl.insert(_p, "-")
                         _t = "".join(_tl).upper()
-                        # position-aware bulge scoring (2.7.11) -- see _cfd_fast above.
+                        # position-aware bulge scoring (2.8.0) -- see _cfd_fast above.
                         if _cfd_bulge_aware is not None:
                             return _cfd_bulge_aware(split[1], _t, mm_scores, pam_scores,
                                                     calc_cfd, do_scores=do_scores)

@@ -11,7 +11,7 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
-## [2.7.11] - 2026-10-22
+## [2.8.0] - 2026-10-23
 
 ### Added
 - **Reference-sequence score columns + aligned spacer in the curated tables.** The top-1000 tables and
@@ -2523,8 +2523,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.11...HEAD
-[2.7.11]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.11
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.0
 [2.7.10]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.10
 [2.7.9]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.9
 [2.7.8]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.8

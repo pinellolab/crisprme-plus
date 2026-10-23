@@ -26,7 +26,7 @@ Scope note: mismatch-only sites (the common case, and CasOFFinder's default NNN
 scan) are scored exactly. Bulge rows must follow the in-place display alignment
 convention (crRNA and off-target the SAME length, each bulge column a '-' at the
 bulge position: a DNA bulge is a '-' in the crRNA, an RNA bulge a '-' in the
-off-target, PAM included). As of 2.7.11 CFD scores bulges with Doench's
+off-target, PAM included). As of 2.8.0 CFD scores bulges with Doench's
 position-weighted gap penalty at the bulge's true spacer position (previously a DNA
 bulge was unpenalized) -- byte-identical to the main pipeline (see
 ``bulge_cfd_penalty.cfd_score_bulge_aware`` and METHODS Section 3). CRISPR-Bulge
@@ -162,7 +162,7 @@ def cfd_for_site(site, mm_scores, pam_scores):
       DNA-bulge gap placement, which is not recoverable from an in-place alignment and
       can differ -- a DNA-bulge caveat the caller should surface.)
     """
-    # Position-aware bulge scoring (2.7.11): delegate DNA-bulge gap-deletion + the
+    # Position-aware bulge scoring (2.8.0): delegate DNA-bulge gap-deletion + the
     # position penalty (incl. the undefined PAM-proximal / 5'-tip columns) to the shared
     # helper. Mismatch-only + RNA-bulge rows are byte-identical to the previous calc_cfd.
     try:

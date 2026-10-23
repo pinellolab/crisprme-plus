@@ -131,7 +131,7 @@ recall 0.50 / precision 0.72. **These CRISPR-Bulge recalls (0.50–0.60) are rec
 the assay-detected set (§2), not against ground truth, and a low CRISPR-Bulge count is not
 clearance (§7).** These curves (overall and stratified by bulge count) are shown in the modal.
 
-**CFD position-aware bulge penalty (2.7.11).** CFD now applies Doench's position-weighted
+**CFD position-aware bulge penalty (2.8.0).** CFD now applies Doench's position-weighted
 DNA/RNA-bulge factors at each bulge's true spacer position (previously a DNA bulge was realigned
 by a 5' trim that discarded the gap, so every DNA bulge — and any bulge at the two undefined
 terminal columns — was scored as if absent; a PAM-proximal bulge scored like a perfect match).
@@ -162,7 +162,7 @@ or cancer-driver gene, and — on a genotyped/phased panel — observed *cis* ha
 carriers.
 
 - **CRISPR-Bulge > 0** carries the bulge sites and the ML-ranked core — CFD cannot rank bulges
-  (bulge=1 AP ≈ 0.01 vs CRISPR-Bulge ≈ 0.25; §3). CFD's 2.7.11 position-aware bulge penalty
+  (bulge=1 AP ≈ 0.01 vs CRISPR-Bulge ≈ 0.25; §3). CFD's 2.8.0 position-aware bulge penalty
   fixes the *per-site* over-call (a PAM-proximal bulge no longer scores like a perfect match) but
   does not make CFD a bulge ranker.
 - **CFD ≥ 0.2 on 0-bulge** rescues the high-CFD no-bulge sites CRISPR-Bulge misses (CFD is

@@ -48,7 +48,7 @@ import gzip
 import sys
 import warnings
 
-# Position-aware CFD bulge penalty (2.7.11); pass-through fallback on a very old deploy.
+# Position-aware CFD bulge penalty (2.8.0); pass-through fallback on a very old deploy.
 try:
     from bulge_cfd_penalty import cfd_score_bulge_aware as _cfd_bulge_aware
 except Exception:  # pragma: no cover - module always shipped alongside
@@ -524,7 +524,7 @@ def rev_comp(a):
 
 def _cfd_from_alignment(aligned_crrna, aligned_proto):
     """CFD for one in-place display alignment (PAM included, gaps '-' in place) with the
-    position-aware bulge penalty (2.7.11); legacy calc_cfd fallback if the helper is
+    position-aware bulge penalty (2.8.0); legacy calc_cfd fallback if the helper is
     unavailable. Mirrors new_simple_analysis._cfd_from_alignment."""
     if _cfd_bulge_aware is not None:
         return _cfd_bulge_aware(

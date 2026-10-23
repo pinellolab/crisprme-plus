@@ -2295,7 +2295,7 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
                         "PUTATIVE where not (hybrid panel)")
         else:
             ps_label = " Per-sample — resolve genotypes: named carriers & CONFIRMED cis"
-    # DEFAULT is context-aware (2.7.11): per-sample on a genotyped + PHASED panel (the
+    # DEFAULT is context-aware (2.8.0): per-sample on a genotyped + PHASED panel (the
     # resolution such panels are built for -- CONFIRMED cis + named carriers), population-
     # level otherwise. The "(default)" marker moves to match, and a user who has not chosen
     # yet is seeded accordingly.

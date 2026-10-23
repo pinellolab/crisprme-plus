@@ -244,7 +244,7 @@ def _render_modal(cal) -> str:
         '(bulge=1 AP ≈ 0.01, essentially the prevalence floor); CRISPR-Bulge carries the '
         'bulge signal (bulge=1 AP ≈ 0.25). This is why the recommended panel keys bulges on '
         'CRISPR-Bulge and only rescues a single-bulge site on CFD when CFD is high (≥ 0.5). '
-        'CFD’s position-aware bulge penalty (2.7.11) corrects the per-site score so a '
+        'CFD’s position-aware bulge penalty (2.8.0) corrects the per-site score so a '
         'PAM-proximal bulge is no longer scored like a perfect match, but it does not make CFD '
         'a bulge ranker.</p>'
         f'<div class="rc-pr"><img alt="Precision-recall by bulge class" src="{prb}" '
