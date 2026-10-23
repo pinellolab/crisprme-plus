@@ -757,12 +757,19 @@ trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
 
 - **CFD on gaps is a relative risk indicator, not a calibrated indel probability.**
   CFD was trained on **single-nucleotide mismatches**, but it does *not* ignore gaps:
-  the CRISPRitz-lineage `mismatch_score.pkl` extends Doench's mismatch table with **152
-  position-specific gap entries** (DNA-bulge `r-:dX` and RNA-bulge `rX:d-` at protospacer
-  positions 2–20), so a bulge is penalized by a per-position factor and **two bulges
-  multiply** — a PAM-distal bulge is near-neutral while a seed-proximal one is strongly
-  penalizing. This is a principled *extension* of the mismatch model, so a CFD value on a
-  gapped alignment is a relative risk indicator.
+  the `mismatch_score.pkl` table carries **152 position-specific gap entries** (DNA-bulge
+  `r-:dX` and RNA-bulge `rX:d-` at protospacer positions 2–20), so a bulge is penalized by a
+  per-position factor and **two bulges multiply** — a PAM-distal bulge is near-neutral while a
+  seed-proximal one is strongly penalizing. **As of v2.7.11 these factors are applied at each
+  bulge's true spacer position** (the extra genomic base of a DNA bulge is removed so the 20
+  guide bases keep their Cas9 positions, then the gap factor is applied; the two undefined
+  terminal columns are extrapolated — lenient at the PAM-distal 5' tip, abolished at the
+  PAM-proximal junction). Before v2.7.11 a DNA-bulge realignment discarded the gap, so DNA
+  bulges — and any bulge at a terminal column — were scored as if absent (a PAM-proximal bulge
+  scored like a perfect match); mismatch-only and in-range RNA-bulge scores are unchanged by the
+  fix. Even corrected, a CFD value on a gapped alignment is only a **relative** risk indicator
+  (held-out bulge-only AP ≈ 0.01) — **CRISPR-Bulge is the calibrated bulge ranker**; see
+  `docs/offtarget_risk_summary_METHODS.md` §3.
 - **CRISPR-Bulge is the model built for gaps — for exactly one bulge.** It natively scores
   a mismatched protospacer carrying **exactly one 1-bp DNA or RNA bulge**; its trained
   weights bake in a fixed input width.
@@ -775,8 +782,9 @@ trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
 - **Nulled ≥ 2-bulge sites are *not dropped*.** They remain scored by CFD's position-specific
   bulge penalty and are covered by two validation-panel safety nets. First, an unconditional
   **pure-bulge** rule: a 0-mismatch site with ≥ 1 bulge is always hard-included. Second, a
-  ≥ 2-bulge site that is high on **CFD alone** (CFD ≥ 0.5, where CFD is an uncalibrated
-  over-call and CRISPR-Bulge is N/A) is **kept in the recommended panel but *demoted*** — ranked
+  ≥ 2-bulge site that is high on **CFD alone** (CFD ≥ 0.5, where CFD position-penalizes each
+  bulge but is an uncalibrated extrapolation outside the single-bulge domain, and CRISPR-Bulge is
+  N/A) is **kept in the recommended panel but *demoted*** — ranked
   after every reliable hard-include (sites close by sequence, or high CFD at ≤ 1 bulge in its
   calibrated domain, or a clean bulge). We demote rather than drop because a ≥ 2-bulge
   off-target can still be real — the benchmark simply contains no ≥ 2-bulge examples, so its
