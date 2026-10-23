@@ -248,7 +248,7 @@ class TestGenerateReport(unittest.TestCase):
         # variant_created, snp_snp_cooc, high_variant_density) EXCLUDED. For this
         # fixture (5 off-targets):
         #   CFD>= 0.5/0.2/0.05  -> all non-empty (0.1 tier removed)
-        #   CRISPR-Bulge>= 0.5/0.2/0.1 -> all non-empty (fixture has CRISPR-Bulge)
+        #   CRISPR-Bulge>= 0.5/0.2 + >0 (sensitive) -> all non-empty (fixture has CRISPR-Bulge)
         #   mm+b<= 1/2/3/4      -> 0/2/4/5 (mmb_le_1 is EMPTY -> not bundled)
         _, names, _ = self._build_and_extract()
         self.assertEqual(
@@ -264,7 +264,7 @@ class TestGenerateReport(unittest.TestCase):
                 "data/cfd_ge_0.05.tsv",
                 "data/crispr_bulge_ge_0.50.tsv",  # CRISPR-Bulge-appropriate tiers (not CFD's)
                 "data/crispr_bulge_ge_0.20.tsv",
-                "data/crispr_bulge_ge_0.10.tsv",
+                "data/crispr_bulge_gt_0.tsv",  # the sensitive "> 0" operating-point tier
                 "data/mmb_le_2.tsv",
                 "data/mmb_le_3.tsv",
                 "data/mmb_le_4.tsv",
@@ -949,6 +949,11 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIn(f"CFD &ge; {t}", html)
         self.assertIn("&le;1-gap", html)                 # reconciliation parenthetical
         self.assertIn("same cut points as the card", html)  # bridge note
+        # D2) the CRISPR-Bulge tier table carries the sensitive "> 0" operating-point ROW
+        #     (consistent with the risk-card gt0 row + the panel's CB>0 selection), not an
+        #     orphan >=0.1 tier. Match the table-row shape, not just the modal prose.
+        self.assertIn("<td>CRISPR-Bulge &gt; 0</td>", html)
+        self.assertNotIn("CRISPR-Bulge &ge; 0.1", html)  # orphan 0.1 tier replaced by > 0
         self.assertIn("CFD &ge; 0.05", html)             # wide net still referenced (download note)
         self.assertIn("included in the bundled", html)   # 0.05 net is downloads-only
         self.assertNotIn("CFD &ge; 0.1", html)  # 0.1 tier removed

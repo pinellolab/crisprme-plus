@@ -136,7 +136,11 @@ PANEL_DISPLAY_CFD_THRESHOLDS = (0.5, 0.2)
 # CRISPR-Bulge cut points (0.5/0.2/0.1): calibrated on Refined_TrueOT (positives
 # median 0.36; PR at 0.5=prec .67/rec .40, 0.2=prec .38/rec .55, 0.1=rec .64) --
 # graduated + model-relative on its own [0,1] cleavage-probability scale.
-CRISPR_BULGE_THRESHOLDS = (0.5, 0.2, 0.1)
+# CRISPR-Bulge Section-4 tiers: the >= cut tiers PLUS the sensitive "> 0" operating
+# point added in _crispr_bulge_tier_specs() (consistent with the risk-card
+# "CRISPR-Bulge > 0" row and the panel's CB>0 selection). The orphan >=0.1 tier was
+# replaced by "> 0", the point the recommended panel actually keys on.
+CRISPR_BULGE_THRESHOLDS = (0.5, 0.2)
 
 
 def _set_active_scorer(scorer=None):
@@ -153,6 +157,18 @@ def scorer_label():
 def scorer_thresholds():
     """Tier thresholds for the second (ML) score column (its own [0,1] scale)."""
     return CRISPR_BULGE_THRESHOLDS
+
+
+def _crispr_bulge_tier_specs():
+    """Section-4 CRISPR-Bulge tiers as ``(display_suffix, file_key, predicate)``:
+    the ``>=`` cut tiers followed by the sensitive ``> 0`` operating point (the point
+    the recommended panel keys on; mirrors the risk-card ``CRISPR-Bulge > 0`` row).
+    ``predicate`` maps the CRISPR-Bulge score Series -> boolean mask (NaN -> False for
+    N/A sites in both ``>=`` and ``> 0``)."""
+    specs = [(f"&ge; {t}", f"crispr_bulge_{t:.2f}", (lambda s, t=t: s >= t))
+             for t in CRISPR_BULGE_THRESHOLDS]
+    specs.append(("&gt; 0", "crispr_bulge_gt0", (lambda s: s > 0)))
+    return specs
 MMB_THRESHOLDS = (1, 2, 3, 4)
 # threshold-table variant-created CFD floor (kept for the full threshold table)
 PANEL_VARIANT_CFD_MIN = 0.05
@@ -2658,7 +2674,8 @@ def build_validation_panel(df, cols):
     cfd_wide_net = (0.05, int((cfd >= 0.05).sum()))  # download-only wide net (panel note)
     mmb_counts = [(t, int(((mmb >= 0) & (mmb <= t)).sum())) for t in MMB_THRESHOLDS]
     crispr_bulge_counts = (
-        [(t, int((crispr_bulge >= t).sum())) for t in scorer_thresholds()]
+        [(label, fkey, int(pred(crispr_bulge).sum()))
+         for label, fkey, pred in _crispr_bulge_tier_specs()]
         if "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any() else []
     )
 
@@ -2765,6 +2782,8 @@ def _tier_filename(key):
         return PANEL_TOP100_NAME
     if key.startswith("cfd_"):
         return f"cfd_ge_{key.split('_', 1)[1]}.tsv"
+    if key == "crispr_bulge_gt0":
+        return "crispr_bulge_gt_0.tsv"
     if key.startswith("crispr_bulge_"):
         return f"crispr_bulge_ge_{key[len('crispr_bulge_'):]}.tsv"
     if key.startswith("mmb_"):
@@ -2793,12 +2812,12 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
             "df": sub,
         })
     if crispr_bulge is not None and "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any():
-        for t in scorer_thresholds():
-            sub = offt[(crispr_bulge >= t).values]
+        for label, fkey, pred in _crispr_bulge_tier_specs():
+            sub = offt[pred(crispr_bulge).values]
             tiers.append({
-                "key": f"crispr_bulge_{t:.2f}",  # internal key stays 'crispr_bulge' (filenames stable)
-                "label": f"{scorer_label()} &ge; {t}",
-                "filename": _tier_filename(f"crispr_bulge_{t:.2f}"),
+                "key": fkey,  # internal key ('crispr_bulge_0.50' / 'crispr_bulge_gt0'); filenames stable
+                "label": f"{scorer_label()} {label}",
+                "filename": _tier_filename(fkey),
                 "df": sub,
             })
     for t in MMB_THRESHOLDS:
@@ -2879,9 +2898,9 @@ def render_validation_panel(
     crispr_bulge_table_block = ""
     if vp.get("crispr_bulge_counts"):
         crispr_bulge_rows = "".join(
-            f"<tr><td>{scorer_label()} &ge; {t}</td><td class='num'>"
-            f"{_tier_count_link(f'crispr_bulge_{t:.2f}', c)}</td></tr>"
-            for t, c in vp["crispr_bulge_counts"]
+            f"<tr><td>{scorer_label()} {label}</td><td class='num'>"
+            f"{_tier_count_link(fkey, c)}</td></tr>"
+            for label, fkey, c in vp["crispr_bulge_counts"]
         )
         crispr_bulge_table_block = (
             '<div><table class="thr-table"><thead><tr>'

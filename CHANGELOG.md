@@ -20,6 +20,10 @@ and the `release-crisprme` skill.
   score — and an `Aligned_spacer+PAM` column placed immediately before `Aligned_protospacer+PAM`, so the
   guide and protospacer read as a pairwise alignment (bulge columns as `-`). `CRISPR-Bulge_ref` is gated
   like the CRISPR-Bulge column (shown only when CRISPR-Bulge was computed).
+- **CRISPR-Bulge `> 0` tier in the Section-4 threshold table + a `crispr_bulge_gt_0.tsv` download.**
+  The CRISPR-Bulge candidate-count table now shows `≥ 0.5 / ≥ 0.2 / > 0` (the orphan `≥ 0.1` tier is
+  replaced by the sensitive `> 0` operating point the recommended panel keys on), and the matching
+  `> 0` subset is bundled as a download — consistent with the risk-card "CRISPR-Bulge > 0" row.
 
 ### Changed
 - **The recommended validation panel (report Section 4) now selects on the sensitive operating point.**
