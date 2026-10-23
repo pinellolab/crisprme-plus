@@ -1957,7 +1957,12 @@ annotated with the same two scores a normal CRISPRme+ report uses: the **CFD**
 score and the **CRISPR-Bulge** ML score (the exact same calculations, so results
 are directly comparable to a full CRISPRme+ analysis). This is useful for scoring
 sites nominated by another tool — e.g. non-canonical-PAM hits — with CRISPRme+'s
-calculations when building a dedicated index is not warranted.
+calculations when building a dedicated index is not warranted. Bulge-containing
+sites are scored with CFD's position-aware bulge penalty (as of v2.7.11; a
+PAM-proximal bulge is penalized, not ignored) — supply the aligned pair in the
+in-place convention (crRNA and off-target the same length, each bulge a `-` at its
+position). CFD still cannot *rank* bulges; use the CRISPR-Bulge column for those
+(see `docs/offtarget_risk_summary_METHODS.md` §3).
 
 With `--index-path` pointing at an installed variant index, each site also gets a
 **variant carrier overlay**: the variants overlapping its protospacer+PAM window

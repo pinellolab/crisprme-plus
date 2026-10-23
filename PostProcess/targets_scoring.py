@@ -22,13 +22,17 @@ replaced by the supplied list:
 No index is needed for pure scoring; the carrier overlay reads the index's
 ``Dictionaries/registry_<vcf>/`` tier (the same registry the report uses).
 
-Scope note (v1): mismatch-only sites (the common case, and CasOFFinder's default
-NNN scan) are scored exactly. Bulge rows are supported when the aligned
-guide/off-target follow CRISPRme's alignment convention (bulge columns as '-',
-DNA-bulge offset = bulge size). CRISPR-Bulge natively scores <=1-bulge alignments;
-rows it cannot represent (>1 gap column, N in the off-target, length mismatch,
-length > 24) are nulled to -1.0 and carried by CFD + edit distance -- identical to
-the main pipeline's behavior.
+Scope note: mismatch-only sites (the common case, and CasOFFinder's default NNN
+scan) are scored exactly. Bulge rows must follow the in-place display alignment
+convention (crRNA and off-target the SAME length, each bulge column a '-' at the
+bulge position: a DNA bulge is a '-' in the crRNA, an RNA bulge a '-' in the
+off-target, PAM included). As of 2.7.11 CFD scores bulges with Doench's
+position-weighted gap penalty at the bulge's true spacer position (previously a DNA
+bulge was unpenalized) -- byte-identical to the main pipeline (see
+``bulge_cfd_penalty.cfd_score_bulge_aware`` and METHODS Section 3). CRISPR-Bulge
+natively scores <=1-bulge alignments; rows it cannot represent (>1 gap column, N in
+the off-target, length mismatch, length > 24) are nulled to -1.0 and carried by CFD
++ edit distance -- identical to the main pipeline's behavior.
 """
 
 import argparse
