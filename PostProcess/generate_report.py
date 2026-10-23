@@ -700,7 +700,7 @@ def _curated_cell(kind, row, cols):
         return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "crispr_bulge":
         num = _scored(pd.to_numeric(_get("crispr_bulge"), errors="coerce")) if "crispr_bulge" in cols else None
-        return f"{num:.4f}" if num is not None else CURATED_MISSING
+        return str(num) if num is not None else CURATED_MISSING
     elif kind == "origin":
         v = _get("origin")
         if not _is_na(v):

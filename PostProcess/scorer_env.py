@@ -295,8 +295,9 @@ def build_create_command(name: str, gpu: bool = False, variant: Optional[str] = 
     exe, _ = mgr
     variant = variant or _variant(gpu)
     return (
-        [exe, "create", "-y", "-n", name, "python=" + spec["python"]]
+        [exe, "create", "-y", "-n", name]
         + _channel_args(spec)
+        + ["python=" + spec["python"]]
         + _conda_packages(spec, variant)
     )
 

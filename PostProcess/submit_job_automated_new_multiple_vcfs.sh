@@ -149,7 +149,7 @@ while read vcf_f; do
 	unset real_chroms
 	declare -a real_chroms
 	for file_chr in "$ref_folder"/*.fa; do
-		file_name=$(basename $file_chr)
+		file_name="${file_chr##*/}"
 		# filename=$(basename -- "$fullfile")
 		# extension="${filename##*.}"
 		chr="${file_name%.*}"

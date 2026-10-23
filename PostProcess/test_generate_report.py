@@ -363,6 +363,13 @@ class TestGenerateReport(unittest.TestCase):
             no_crispr_bulge,
         )
 
+    def test_curated_crispr_bulge_preserves_precision(self):
+        scores = [0.0, 1e-25, 0.0004, 0.123456789, 1.0]
+        path = os.path.join(self.tmp, "scores.tsv")
+        gr.write_curated_tsv(
+            gr.pd.DataFrame({"score": scores}), {"crispr_bulge": "score"}, True, path)
+        self.assertEqual(gr.pd.read_csv(path, sep="\t", float_precision="round_trip")["CRISPR-Bulge"].tolist(), scores)
+
     def test_gene_region_class_collapses_gencode_featureset(self):
         # Gene_region collapses the verbose GENCODE feature-set to ONE most-severe
         # class (CDS > 5'UTR > 3'UTR > exon > intron > intergenic).

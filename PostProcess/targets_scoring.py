@@ -463,7 +463,7 @@ def score_sites(sites, index_path=None, device=None):
                 s.crrna, s.dna, s.chrom or "", "" if s.pos is None else str(s.pos),
                 s.strand or "", s.bulge_type, str(s.bulge_size),
                 "" if s.mismatches is None else str(s.mismatches),
-                pam_seq, "%.3f" % cfds[i], "%.3f" % cbs[i],
+                pam_seq, "%.3f" % cfds[i], str(cbs[i]),
             ]
             if overlay is not None:
                 ov = overlay.overlay(s)
