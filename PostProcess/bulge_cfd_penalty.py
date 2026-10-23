@@ -45,6 +45,41 @@ def _revcom_base(b):
     return {"A": "T", "C": "G", "G": "C", "T": "A", "U": "A", "-": "-"}.get(b.upper())
 
 
+def column_factor(guide_u, dna_u, pos, mm_scores):
+    """Bulge-aware per-column CFD factor in the DNA-bulge-deleted guide frame.
+
+    ``guide_u`` / ``dna_u`` are SINGLE bases ALREADY in T->U space (as ``calc_cfd`` compares
+    them); ``pos`` is the 1-based guide-frame position (display column minus the DNA-bulge
+    columns before it). This is the factorizable primitive underneath the matrix scorer
+    (twopass_cfd_exact): the product of ``column_factor`` over all columns (guide-frame
+    positions) times the PAM factor EQUALS ``cfd_score_bulge_aware`` on the same alignment.
+
+      * match                         -> 1.0
+      * mismatch (both bases present) -> mm[r{guide}:d{revcom(dna)},pos]  (missing key -> 1.0)
+      * RNA bulge (dna '-')           -> in-range mm[r{guide}:d-,pos]; terminal -> _terminal_factor
+      * DNA bulge (guide '-')         -> in-range mm[r-:d{revcom(dna)},pos]; terminal -> _terminal_factor
+      * untranslatable IUPAC/N base   -> 0.0 (mirrors calc_cfd zeroing the whole score)
+    """
+    if guide_u == "-":  # DNA bulge: extra genomic base, no guide partner
+        tf = _terminal_factor(pos)
+        if tf is not None:
+            return tf
+        base = _revcom_base(dna_u)
+        return mm_scores.get("r-:d" + str(base) + "," + str(pos),
+                             _terminal_factor(SPACER_LEN + 1) or 0.0)
+    if dna_u == "-":  # RNA bulge: extra guide base, no genomic partner
+        tf = _terminal_factor(pos)
+        if tf is not None:
+            return tf
+        return mm_scores.get("r" + guide_u + ":d-," + str(pos), 1.0)
+    if guide_u == dna_u:
+        return 1.0
+    rc = _revcom_base(dna_u)
+    if rc is None:
+        return 0.0
+    return mm_scores.get("r" + guide_u + ":d" + rc + "," + str(pos), 1.0)
+
+
 def bulge_cfd_correction(aligned_crrna, aligned_protospacer, mm_scores, pam_len=3):
     """Multiplicative CFD correction applied ON TOP of ``cfd_score_bulge_aware``'s base.
 

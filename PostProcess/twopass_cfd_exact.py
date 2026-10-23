@@ -48,13 +48,23 @@ def _revcom(s):
         return None
 
 
-def position_factor(guide_u, dna_u, pos1, mm_scores):
-    """Per-position CFD factor, replicating calc_cfd's inner loop EXACTLY.
+# Position-aware bulge scoring (2.7.11): the per-column factor + the guide-frame position
+# rule live in bulge_cfd_penalty so the matrix scorer and the live scorer
+# (cfd_score_bulge_aware) share ONE definition. Both are STDLIB; a pass-through fallback
+# keeps the module importable if the helper is ever absent (mismatch-only stays exact).
+try:
+    from bulge_cfd_penalty import column_factor as _column_factor
+except Exception:  # pragma: no cover - shipped alongside
+    _column_factor = None
 
-    guide_u / dna_u are single bases ALREADY in T→U space; pos1 is 1-based.
-    match → 1.0; mismatch → mm_scores[r{guide}:d{revcom(dna)},{pos}] (missing key
-    → 1.0, e.g. the position-1 gap); untranslatable base → 0.0.
-    """
+
+def position_factor(guide_u, dna_u, pos1, mm_scores):
+    """Per-position CFD factor. For a match/mismatch this replicates calc_cfd's inner loop
+    exactly; for a bulge column ('-') it applies the 2.7.11 position-aware factor via the
+    shared primitive. guide_u / dna_u are single bases in T→U space; pos1 is the 1-based
+    GUIDE-FRAME position (DNA-bulge columns deleted). Untranslatable base → 0.0."""
+    if _column_factor is not None:
+        return _column_factor(guide_u, dna_u, pos1, mm_scores)
     if guide_u == dna_u:
         return 1.0
     rc = _revcom(dna_u)
@@ -64,13 +74,19 @@ def position_factor(guide_u, dna_u, pos1, mm_scores):
 
 
 def cfd_concrete(guide, dna, pam, mm_scores, pam_scores):
-    """Bit-identical to new_simple_analysis.calc_cfd(guide, dna, pam, ...,
-    do_scores=True). Left-to-right product pos1→pos_n (T→U space) × PAM factor."""
+    """Position-aware bulge-correct CFD for one concrete alignment (2.7.11); bit-identical
+    to cfd_score_bulge_aware on the same alignment, and to the old calc_cfd for mismatch-only
+    rows. ``guide``/``dna`` are the column-aligned spacer (may carry '-' bulges); ``pam`` is
+    the 2-base PAM. DNA-bulge columns (guide '-') are deleted from the guide frame so the
+    remaining columns keep their true Cas9 positions."""
     g = guide.replace("T", "U")
     d = dna.replace("T", "U")
     score = 1.0
+    dna_gaps = 0  # guide '-' columns deleted so far -> shift subsequent guide-frame positions
     for i, (gb, db) in enumerate(zip(g, d)):
-        score *= position_factor(gb, db, i + 1, mm_scores)
+        score *= position_factor(gb, db, (i + 1) - dna_gaps, mm_scores)
+        if gb == "-":
+            dna_gaps += 1
     return score * pam_scores.get(pam, 0.0)
 
 
@@ -81,15 +97,23 @@ def cfd_worst_case(guide, allele_sets, pam_set, mm_scores, pam_scores):
 
     allele_sets[i] is an iterable of DNA bases possible at protospacer position i
     (e.g. the variant-enriched allele set); pam_set is an iterable of possible
-    PAM strings. Empty position set → 0.0 (no allele = no match)."""
+    PAM strings. Empty position set → 0.0 (no allele = no match).
+
+    The factorization still holds with bulges: the DNA-bulge deletion pattern is fixed by
+    the (allele-independent) ``guide``, so every column has a fixed guide-frame position and
+    the worst case is the per-column max of the bulge-aware ``position_factor``."""
     g = guide.replace("T", "U")
     score = 1.0
+    dna_gaps = 0
     for i, gb in enumerate(g):
+        pos = (i + 1) - dna_gaps
         best = 0.0
         for a in allele_sets[i]:
-            f = position_factor(gb, a.replace("T", "U"), i + 1, mm_scores)
+            f = position_factor(gb, a.replace("T", "U"), pos, mm_scores)
             if f > best:
                 best = f
         score *= best
+        if gb == "-":
+            dna_gaps += 1
     best_pam = max((pam_scores.get(p, 0.0) for p in pam_set), default=0.0)
     return score * best_pam

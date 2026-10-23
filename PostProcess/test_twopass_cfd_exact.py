@@ -23,6 +23,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 import twopass_cfd_exact as tp  # noqa: E402
 import twopass_emit as te  # noqa: E402
+import bulge_cfd_penalty as bp  # noqa: E402  (the live bulge-aware scorer, 2.7.11)
 
 
 def _extract_defs(src, names):
@@ -53,33 +54,59 @@ _DNA_POOL = "ACGTACGT-N"          # weighted toward ACGT, incl. a bulge gap + an
 _PAMS = [a + b for a in "ACGTN" for b in "ACGTN"]
 
 
+def _live(guide, dna, pam2):
+    """The live bulge-aware scorer (cfd_score_bulge_aware) on the same alignment, so the
+    matrix cfd_concrete can be pinned to it. Builds the full display alignment: a dummy
+    3-nt PAM whose last 2 bases == the matrix pam, and a dummy guide PAM (ignored)."""
+    return bp.cfd_score_bulge_aware(guide + "NNN", dna + "N" + pam2, MM, PAM, _calc_cfd, pam_len=3)
+
+
 class TestCfdConcreteBitIdentical(unittest.TestCase):
-    def test_random_bit_identical(self):
+    def test_random_matches_live_scorer(self):
+        # cfd_concrete must equal the live bulge-aware scorer (cfd_score_bulge_aware) on EVERY
+        # alignment, and additionally be BIT-identical to the old calc_cfd on the mismatch-only
+        # subset (no gaps anywhere). The DNA pool includes a bulge gap + an N.
         random.seed(1)
         for _ in range(20000):
             guide = "".join(random.choice(_BASES) for _ in range(20))
+            # inject occasional DNA bulges (guide '-') too, not just RNA bulges
+            if random.random() < 0.15:
+                k = random.randrange(20)
+                guide = guide[:k] + "-" + guide[k + 1:]
             dna = "".join(random.choice(_DNA_POOL) for _ in range(20))
             pam = random.choice(_PAMS)
             ours = tp.cfd_concrete(guide, dna, pam, MM, PAM)
-            ref = _calc_cfd(guide, dna, pam, MM, PAM, True)
-            self.assertEqual(ours, ref,
-                             f"guide={guide} dna={dna} pam={pam}: {ours!r} != {ref!r}")
+            self.assertAlmostEqual(ours, _live(guide, dna, pam), places=12,
+                                   msg=f"guide={guide} dna={dna} pam={pam}")
+            if "-" not in guide and "-" not in dna:   # mismatch-only -> raw-double identical
+                self.assertEqual(ours, _calc_cfd(guide, dna, pam, MM, PAM, True),
+                                 f"mm-only {guide}/{dna}/{pam}")
 
     def test_edge_cases(self):
         g = "ACGTACGTACGTACGTACGT"
-        cases = [
+        # mismatch-only / PAM edges -> bit-identical to the old calc_cfd (no behaviour change)
+        mm_only = [
             (g, g, "GG"),                              # all match
-            (g, "-" + g[1:], "GG"),                    # position-1 gap (free)
-            (g, g[:8] + "-" + g[9:], "GG"),            # mid gap
             (g, "N" + g[1:], "GG"),                    # untranslatable base -> 0
             (g, g, "NG"),                              # N in PAM
             (g, g, "ZZ"),                              # non-canonical PAM -> 0
             ("TTTTTTTTTTTTTTTTTTTT", "AAAAAAAAAAAAAAAAAAAA", "GG"),  # T->U, all mm
         ]
-        for guide, dna, pam in cases:
+        for guide, dna, pam in mm_only:
             self.assertEqual(tp.cfd_concrete(guide, dna, pam, MM, PAM),
                              _calc_cfd(guide, dna, pam, MM, PAM, True),
                              f"edge {guide}/{dna}/{pam}")
+        # bulge rows -> position-aware; pinned to the live scorer (NOT the old free-pass)
+        bulge = [
+            (g, "-" + g[1:], "GG"),                    # RNA bulge pos1 (terminal -> 0.9, not free)
+            (g, g[:8] + "-" + g[9:], "GG"),            # RNA bulge mid (in-range)
+            ("-" + g[1:], g, "GG"),                    # DNA bulge pos1 (terminal 5' tip)
+            (g[:19] + "-", g, "GG"),                   # DNA bulge pos20 (seed, heavy)
+        ]
+        for guide, dna, pam in bulge:
+            self.assertAlmostEqual(tp.cfd_concrete(guide, dna, pam, MM, PAM),
+                                   _live(guide, dna, pam), places=12,
+                                   msg=f"bulge edge {guide}/{dna}/{pam}")
 
 
 class TestWorstCaseFactorizationOracle(unittest.TestCase):
