@@ -1613,6 +1613,30 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("rs333", html)
         self.assertIn("3.00e-03", html)
 
+    def test_observed_cell_label_pop_vs_persample(self):
+        """The "Observed" cell must not label a population-level, multi-variant window
+        roster as plain "N carriers" (it is the worst-case UNION of samples carrying >=1
+        of the variants, not cis carriers -- the stacked combination can be a chimera that
+        exists on no one haplotype). It must flag that; a single-variant roster stays
+        "N carriers"; and under --per-sample the roster is the EXACT cis set."""
+        cols = {"origin": "o", "samples": "s", "var_genome": "v"}
+        def cell(origin, samples, variants):
+            return gr._curated_cell("observed", {"o": origin, "s": samples, "v": variants}, cols)
+        many = ",".join(f"S{i}" for i in range(128))
+        multi = ",".join(f"chr14;{105862743 + i};A;T" for i in range(12))
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
+        # population-level (default)
+        gr._PER_SAMPLE = False
+        self.assertEqual(cell("alt", "S1,S2,S3", "chr1;100;A;T"), "3 carriers")   # 1 variant
+        self.assertEqual(cell("alt", many, multi), "128 w/ >=1 of 12 vars (poss. chimera)")
+        self.assertEqual(cell("ref", "", "chr1;1;A;T"), "reference")
+        # the misleading plain "128 carriers" must NOT be produced for the chimera case
+        self.assertNotEqual(cell("alt", many, multi), "128 carriers")
+        # --per-sample: a named roster is the exact cis carrier set (phased)
+        gr._PER_SAMPLE = True
+        self.assertEqual(cell("alt", "A,B,C,D,E", multi), "5 cis carriers")
+        self.assertEqual(cell("alt", "A", "chr1;1;A;T"), "1 cis carrier")
+
     def test_observed_haplotypes_companion_multi_and_single(self):
         """build_observed_haplotypes_companion lists EVERY distinct observed variant
         haplotype for a SITE carrying >=2 of them, carrying BOTH scores so it serves

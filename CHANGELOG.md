@@ -39,6 +39,15 @@ and the `release-crisprme` skill.
   ~92% recall ceiling; ~7%, mostly bulges, sits below both scores and is recovered only by must-includes).
 
 ### Fixed
+- **The "Observed" cell no longer reports a misleading raw carrier count for population-level,
+  multi-variant off-targets.** A dense-window site that stacks N variants into one worst-case
+  protospacer previously showed e.g. `128 carriers`, which reads as "128 people carry this
+  off-target" — but in the population-level (unphased) default that number is the **union** of
+  samples carrying ≥1 of the N variants, and the stacked combination may exist on no single
+  haplotype (a possible chimera; the row's own low joint AF gives it away). It now reads
+  `128 w/ >=1 of 12 vars (poss. chimera)`. A single-variant site still reads `N carriers`, and
+  under `--per-sample` (phased, exact cis set) it reads `N cis carriers`. Applies to the in-report
+  table and the download TSVs (one shared cell).
 - **`--per-sample` searches no longer fail at the annotation stage on Docker Desktop for Mac/Windows.**
   The post-search step annotates three target files in parallel, each building the same tabix index;
   `flock` is non-functional on VM-backed bind mounts (virtiofs/9p → ENOTTY), so the concurrent builds

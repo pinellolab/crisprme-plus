@@ -278,7 +278,7 @@ CURATED_COLUMNS = (
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
     ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
-    ("Observed", "observed"),  # supported by >=1 real individual: reference / N carriers / observed (single variant) / putative (multi-variant, cis unconfirmed)
+    ("Observed", "observed"),  # reference / N cis carriers (--per-sample) / N carriers (pop, 1 variant) / "N w/ >=1 of K vars (poss. chimera)" (pop, multi-variant union) / observed / putative
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
@@ -300,6 +300,13 @@ CURATED_MISSING = "-"
 # a MAF column would be misleading. Nothing else changes; the raw 85-column dump
 # still carries whatever MAF the source TSV had.
 _DROP_MAF = False
+
+# Set True for a --per-sample run (meta.search_mode == "per-sample"). It changes how
+# the "Observed" cell reads a NAMED carrier roster: under --per-sample the roster is the
+# EXACT cis carriers (phased), so we say "N cis carriers"; in the population-level default
+# a multi-variant roster is the worst-case UNION of samples carrying >=1 of the window's
+# variants (the stacked combination may exist on no single haplotype), so we flag it.
+_PER_SAMPLE = False
 
 # Annotation curated kinds that are dropped when their source column is absent from
 # the run's TSV, so a run without a given annotation (legacy no-COSMIC bundle, a
@@ -814,9 +821,20 @@ def _curated_cell(kind, row, cols):
         if o == "ref":
             return "reference"
         n = _count_samples(_get("samples"))
-        if n > 0:
-            return f"{n} carrier{'' if n == 1 else 's'}"
         nvar = _count_variants(_get("var_genome")) if "var_genome" in cols else 0
+        if n > 0:
+            if _PER_SAMPLE:
+                # --per-sample: the roster is the EXACT cis carriers (phased)
+                return f"{n} cis carrier{'' if n == 1 else 's'}"
+            if nvar >= 2:
+                # population-level, multi-variant window: the roster is the worst-case
+                # UNION of samples carrying >=1 of the combination's variants, NOT cis
+                # carriers -- the stacked combination may exist on no one haplotype
+                # (possible chimera). --per-sample resolves the true cis carriers.
+                # Plain ASCII: this cell is shared by the HTML table AND the TSV downloads.
+                return f"{n} w/ >=1 of {nvar} vars (poss. chimera)"
+            # population-level, single variant: carriers of that one variant
+            return f"{n} carrier{'' if n == 1 else 's'}"
         if nvar <= 1:
             return "observed"  # single variant, AF>0 => carried by >=1 individual
         return "putative"      # multi-variant combination, cis co-occurrence unconfirmed
@@ -4877,6 +4895,10 @@ def build_report(
     meta = build_summary_meta(
         result_dir, integrated_tsv, df, cols, params_override=params_override
     )
+    # Under --per-sample a named carrier roster is the EXACT cis set; population-level
+    # multi-variant rosters are a worst-case union (see the "Observed" cell labelling).
+    global _PER_SAMPLE
+    _PER_SAMPLE = meta.get("search_mode") == "per-sample"
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 
@@ -7046,8 +7068,10 @@ def build_combined_report(
     #    cannot populate while top1000.tsv correctly dropped them, so one zip
     #    carried four different schemas.
     global _DROP_MAF, _HAS_VARIANTS, _DROP_KINDS, _PRESENT_ANN_KINDS
-    global _ASSEMBLY_EXTRA_ACTIVE
+    global _ASSEMBLY_EXTRA_ACTIVE, _PER_SAMPLE
     _DROP_MAF = False
+    _PER_SAMPLE = False           # assembly/combined = an individual's own haplotypes,
+                                  # not a variant panel -> population-level cell labels
     _HAS_VARIANTS = None          # keep Observed, as this path always has
     _DROP_KINDS = _NO_VARIANT_KINDS
     _PRESENT_ANN_KINDS = set()    # nothing until the pooled frame proves otherwise
