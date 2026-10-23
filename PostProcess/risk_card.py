@@ -145,13 +145,18 @@ def render_risk_card(meta: dict, cfd_scores: Sequence[float],
     # modals also emit <thead>/<tbody> tables, so the card deliberately stays out of that markup.)
     _hdr = ('<tr class="rc-hdr"><td>band (≤1-gap)</td><td>sites</td>'
             '<td>expected true (90%)</td></tr>')
-    # the card shows only >=0.2 bands; pre-filter so the calibrator does not bootstrap the
-    # huge near-zero mass (performance) -- all displayed bands start at 0.2.
+    # CFD displays only >=0.2 bands, so pre-filter to 0.2 (keeps the calibrator from
+    # bootstrapping the huge near-zero mass -- performance; every displayed CFD band starts at 0.2).
     _cfd = [s for s in (cfd_scores or []) if s is not None and s >= _MIN_BAND]
     cfd_rows, cfd_pt = _scorer_block(cal, "cfd", _cfd, _CFD_ROWS)
     blocks = [f'<div class="rc-scorer"><table class="rc-tbl">{_hdr}{cfd_rows}</table></div>']
     if cb_scores is not None:
-        _cb = [s for s in cb_scores if s is not None and s >= _MIN_BAND]
+        # CRISPR-Bulge has a "> 0 (sensitive)" band, so keep ALL POSITIVE scores (not just
+        # >=0.2): the gt0 band must count every CB>0 site (the sensitive operating point --
+        # it matches the Section-4 "CRISPR-Bulge > 0" tier), while the >=0.2 bands still select
+        # their subset. Only the CB==0 near-zero mass is dropped (by > 0), so the calibrator is
+        # not swamped. (Filtering to >=0.2 here previously made gt0 wrongly equal the >=0.2 count.)
+        _cb = [s for s in cb_scores if s is not None and s > 0]
         cb_rows, _ = _scorer_block(cal, "crispr_bulge", _cb, _CB_ROWS)
         blocks.append(f'<div class="rc-scorer"><table class="rc-tbl">{_hdr}{cb_rows}</table></div>')
 
