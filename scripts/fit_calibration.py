@@ -13,14 +13,22 @@ Adds, beyond the point map + bootstrap ensemble + per-bin phi:
 
 Writes <scorer>_calibration.npz with grid, p_point, p_ens, phi (per-bin, legacy),
 and meta carrying phi_bands / band_counts / aupr / loo_coverage. numpy/scipy only."""
-import csv, json, numpy as np
+import csv, json, os, sys, numpy as np
+# cb_operating_point is the single source of truth for the CRISPR-Bulge sensitive
+# operating point; import it so the generated bands match the runtime threshold exactly.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "PostProcess"))
+import cb_operating_point as cbop
 
 EPS=1e-6; B=2000; NBOOT=1000; NBOOT_AUPR=300; COVER_INNER=400
 CENTER=(np.arange(B)+0.5)/B
 BIN_BAND=np.digitize(CENTER,[0.1,0.2,0.5])             # 0..3 fine bins
 # report bands the card uses: label -> (lo, hi)
 REPORT_BANDS={"0-0.1":(0.0,0.1),"0.1-0.2":(0.1,0.2),"0.2-0.5":(0.2,0.5),
-              "0.5-1":(0.5,1.0),"ge0.2":(0.2,1.0)}
+              "0.5-1":(0.5,1.0),"ge0.2":(0.2,1.0),
+              # CRISPR-Bulge 95%-recall sensitive operating point: the risk card's top CB
+              # band ("gt0") renders expected_counts for it, so the fitted npz must carry it.
+              "gt0":(cbop.sensitive_threshold(),1.0)}
 
 def load():
     g=[];cfd=[];cb=[];lab=[];cbh=[]

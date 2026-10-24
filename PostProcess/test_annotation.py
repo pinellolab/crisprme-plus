@@ -142,6 +142,71 @@ class LoadAnnotationBedRetryTest(unittest.TestCase):
             self.assertIs(result, sentinel)
             slp.assert_not_called()
 
+    def _valid_tbi(self, gz):
+        """A non-empty .tbi, newer than the .gz, so the stale-check treats it as current
+        (content is irrelevant here -- _reindex is mocked)."""
+        tbi = gz + ".tbi"
+        with open(tbi, "wb") as fh:
+            fh.write(b"\x1f\x8b" + b"\0" * 64)
+        os.utime(tbi, None)
+        return tbi
+
+    def test_corrupt_nonstale_index_is_rebuilt(self):
+        """A present, non-empty, not-older .tbi that fails to OPEN is corrupt -> rebuilt on
+        the next attempt. Regression guard: the stale-check alone would never rebuild it
+        (this restores the base self-heal the retry loop dropped)."""
+        sentinel = object()
+        with tempfile.TemporaryDirectory() as tmp:
+            gz = self._gz(tmp)
+            self._valid_tbi(gz)
+            tbx = mock.Mock(side_effect=[OSError("Invalid BGZF header"), sentinel])
+            with mock.patch.object(an, "_bgzf_eof_ok", return_value=True), \
+                 mock.patch.object(an, "_reindex") as reindex, \
+                 mock.patch.object(an.pysam, "TabixFile", tbx), \
+                 mock.patch.object(an, "sleep"):
+                result = an.load_annotation_bed(gz)
+            self.assertIs(result, sentinel)
+            self.assertEqual(tbx.call_count, 2)   # corrupt open, rebuild, success
+            self.assertTrue(reindex.called)       # the corrupt-not-stale index WAS rebuilt
+
+    def test_valid_index_readonly_no_write(self):
+        """A VALID index opens with ZERO writes (read-only-install safe): no reindex, and no
+        .tbi.lock is created."""
+        sentinel = object()
+        with tempfile.TemporaryDirectory() as tmp:
+            gz = self._gz(tmp)
+            self._valid_tbi(gz)
+            with mock.patch.object(an, "_bgzf_eof_ok", return_value=True), \
+                 mock.patch.object(an, "_reindex") as reindex, \
+                 mock.patch.object(an.pysam, "TabixFile", return_value=sentinel), \
+                 mock.patch.object(an, "sleep"):
+                result = an.load_annotation_bed(gz)
+            self.assertIs(result, sentinel)
+            reindex.assert_not_called()
+            self.assertFalse(os.path.exists(gz + ".tbi.lock"))
+
+    def test_readonly_dir_needing_rebuild_reports_permission_not_corruption(self):
+        """Index missing/stale AND the directory not writable -> the error names the
+        read-only directory, not a (false) 'the file may be corrupt. Re-download it'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            gz = self._gz(tmp)  # no .tbi -> a rebuild is required
+            real_open = open
+
+            def fake_open(path, *a, **k):
+                if str(path).endswith(".tbi.lock"):
+                    raise PermissionError(13, "Permission denied")
+                return real_open(path, *a, **k)
+
+            with mock.patch.object(an, "_bgzf_eof_ok", return_value=True), \
+                 mock.patch.object(an, "_reindex"), \
+                 mock.patch("builtins.open", side_effect=fake_open), \
+                 mock.patch.object(an, "sleep"), \
+                 self.assertRaises(an.SamtoolsError) as ctx:
+                an.load_annotation_bed(gz)
+            msg = str(ctx.exception).lower()
+            self.assertIn("not writable", msg)
+            self.assertNotIn("re-download", msg)
+
     def test_persistent_missing_eof_is_truncated_download(self):
         """A persistently absent BGZF EOF marker -> actionable 'truncated/incomplete
         download' message (not a generic corruption error), only after retries."""

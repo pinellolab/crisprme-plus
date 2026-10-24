@@ -360,7 +360,12 @@ _POOLED_ANNOTATION_COLS = (
 # --vcf (each haplotype IS the genome). Dropped rather than shown as all-"-".
 # NOT including perfect_match: "mm+b == 0" is perfectly meaningful here, it just
 # happens to be empty for a guide with no exact match anywhere.
-_NO_VARIANT_KINDS = ("origin", "pam_creation", "variant", "maf", "complex_region")
+_NO_VARIANT_KINDS = ("origin", "pam_creation", "variant", "maf", "complex_region",
+                     # REF-sequence CFD/CRISPR-Bulge only exist on a variant run (they
+                     # resolve from CFD_score_REF_* / CRISPR_BULGE_score_REF_*). On an
+                     # assembly / reference-only export the pooled frame has no such
+                     # columns, so drop them rather than emit two all-"-" columns.
+                     "cfd_ref", "crispr_bulge_ref")
 # assembly_reconcile.LIFT_ONE_END's value, duplicated rather than imported so this
 # module stays importable without assembly_reconcile (a light-CI concern)
 LIFT_ONE_END_LABEL = "one_end"
@@ -6029,6 +6034,13 @@ def _reconciled_cb(recon_df, hap_dirs):
     left blank, never fabricated). CFD stays ``_(fewest_mm+b)``; this adds CB from the best-CB rep,
     the same two-independent-alignments convention the standard report's two score columns use."""
     out = pd.Series(np.nan, index=recon_df.index, dtype=float)
+    # Per-row guide of each reconciled row (the panel carries "_recon_guide"). The LUT is
+    # keyed by (guide, chrom, pos) and matched on this, so on a MULTI-GUIDE assembly search
+    # a reconciled row never takes another guide's CRISPR-Bulge from a locus within +/-1 bp
+    # (the same guide scoping _haplotype_private_frame applies). If either side lacks a guide
+    # column the key degrades to None on both and the single-guide behaviour is unchanged.
+    rg = (recon_df["_recon_guide"].astype(str).str.strip()
+          if "_recon_guide" in recon_df.columns else None)
     for hap, chr_col, start_col in (
         ("paternal", "Chromosome_paternal", "Start_coordinate_(fewest_mm+b)_paternal"),
         ("maternal", "Chromosome_maternal", "Start_coordinate_(fewest_mm+b)_maternal"),
@@ -6050,23 +6062,29 @@ def _reconciled_cb(recon_df, hap_dirs):
         if not (chrom_c and cb_c and chrom_c in hd.columns
                 and cb_c in hd.columns and pos_c in hd.columns):
             continue
-        cbv = pd.to_numeric(hd[cb_c], errors="coerce")
-        lut = {}  # (chrom, pos_str) -> max CB, indexed at pos and pos+/-1 (off-by-one tolerance)
-        for ch, praw, v in zip(hd[chrom_c].astype(str), hd[pos_c], cbv):
+        guide_c = hc.get("guide")
+        gcol = (hd[guide_c].astype(str).str.strip().tolist()
+                if (guide_c and guide_c in hd.columns) else None)
+        cbv = pd.to_numeric(hd[cb_c], errors="coerce").tolist()
+        chroms = hd[chrom_c].astype(str).tolist()
+        poss = list(hd[pos_c])
+        guides = gcol if gcol is not None else [None] * len(chroms)
+        lut = {}  # (guide, chrom, pos_str) -> max CB, indexed at pos and pos+/-1 (off-by-one)
+        for g, ch, praw, v in zip(guides, chroms, poss, cbv):
             if v != v:  # NaN
                 continue
-            p = _canon_pos(praw)
             try:
-                pi = int(p)
+                pi = int(_canon_pos(praw))
             except (TypeError, ValueError):
                 continue
             for pp in (pi - 1, pi, pi + 1):
-                k = (ch, str(pp))
+                k = (g, ch, str(pp))
                 if v > lut.get(k, float("-inf")):
                     lut[k] = v
+        rgl = rg.tolist() if rg is not None else [None] * len(recon_df)
         hap_cb = pd.Series(
-            [lut.get((c, _canon_pos(s)), np.nan)
-             for c, s in zip(recon_df[chr_col].astype(str), recon_df[start_col])],
+            [lut.get((g, c, _canon_pos(s)), np.nan)
+             for g, c, s in zip(rgl, recon_df[chr_col].astype(str), recon_df[start_col])],
             index=recon_df.index, dtype=float)
         out = pd.concat([out, hap_cb], axis=1).max(axis=1)
     return out

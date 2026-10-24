@@ -344,7 +344,14 @@ def _registry_data_type_for_search(args):
         # mega search is not misread as the phased panel.
         matched = [d for d in regdirs if any(h and h in d for h in hints)]
         if not matched and genome_hint:
-            matched = [d for d in regdirs if genome_hint in d]
+            genome_matched = [d for d in regdirs if genome_hint in d]
+            # Only adopt a genome-level match when it is UNAMBIGUOUS. If several panels
+            # share the genome (e.g. registry_hg38_HGDP1kGP + registry_hg38_mega), the
+            # searched panel has no registry of its own, and we must NOT borrow a sibling's
+            # data_type -- leaving `matched` empty returns None -> the safe population-level
+            # default, rather than silently defaulting to per-sample off a foreign panel.
+            if len(genome_matched) == 1:
+                matched = genome_matched
         if not matched and len(regdirs) == 1:
             matched = regdirs  # unambiguous single panel
         for d in matched:

@@ -5,6 +5,7 @@ from pysam.utils import SamtoolsError
 from typing import Dict, List, Tuple, Optional
 from time import time, sleep
 
+import errno
 import fcntl
 import pysam
 import sys
@@ -119,6 +120,11 @@ def load_annotation_bed(annotation_fname: str) -> Optional[TabixFile]:
     lock_path = annotation_fname + ".tbi.lock"
     is_gz = annotation_fname.endswith(".gz")
     last_err: Optional[Exception] = None
+    did_reindex = False
+    # Set when a present index fails to OPEN: it is corrupt even though it is non-empty and
+    # not older than the bed (so the stale-check below would not rebuild it), so force a
+    # rebuild on the next attempt -- restoring the base's self-heal.
+    force_reindex = False
     for attempt in range(_ANNOT_LOAD_ATTEMPTS):
         try:
             # A bgzipped BED (.gz) must end with the BGZF EOF marker; a persistent
@@ -128,28 +134,52 @@ def load_annotation_bed(annotation_fname: str) -> Optional[TabixFile]:
                 raise _TransientAnnotationRead(
                     f"BGZF EOF marker not yet visible for '{annotation_fname}'"
                 )
-            # (re)build the tabix index if missing / empty / stale, under a lock so
-            # parallel annotation processes don't write the .tbi simultaneously.
-            with open(lock_path, "w") as lock_fh:
+            # Rebuild the tabix index ONLY when it is missing / empty / stale, or a prior
+            # open proved it corrupt. A VALID index on a READ-ONLY install (docker ':ro'
+            # mount, Apptainer SIF) then does zero writes and never trips on the lock file.
+            need_reindex = (force_reindex
+                            or not os.path.isfile(tbi_path)
+                            or os.path.getsize(tbi_path) == 0
+                            or os.path.getmtime(tbi_path) < os.path.getmtime(annotation_fname))
+            if need_reindex:
                 try:
-                    fcntl.flock(lock_fh, fcntl.LOCK_EX)
-                except OSError:
-                    # flock is unsupported on some VM-backed bind mounts (Docker Desktop
-                    # virtiofs/9p on macOS & Windows) and raises e.g. ENOTTY. Proceed
-                    # without it: the pipeline pre-builds this index serially before the
-                    # parallel annotators, so the concurrent-write race it guards is absent.
-                    pass
-                if (not os.path.isfile(tbi_path)
-                        or os.path.getsize(tbi_path) == 0
-                        or os.path.getmtime(tbi_path) < os.path.getmtime(annotation_fname)):
-                    _reindex(annotation_fname)
+                    with open(lock_path, "w") as lock_fh:  # lock so parallel annotators don't
+                        try:                                # write the .tbi simultaneously
+                            fcntl.flock(lock_fh, fcntl.LOCK_EX)
+                        except OSError:
+                            # flock is unsupported on some VM-backed bind mounts (Docker
+                            # Desktop virtiofs/9p) and raises e.g. ENOTTY. Proceed without it:
+                            # the pipeline pre-builds this index serially before the parallel
+                            # annotators, so the concurrent-write race it guards is absent.
+                            pass
+                        _reindex(annotation_fname)
+                    did_reindex = True
+                except OSError as we:
+                    # The index must be (re)built but the directory is not writable. This is
+                    # NOT corruption -- surface it as a read-only install (terminal, not a
+                    # retry) so the user is not told to "re-download" intact data.
+                    if we.errno in (errno.EROFS, errno.EACCES, errno.EPERM):
+                        raise SamtoolsError(
+                            f"Annotation directory for '{annotation_fname}' is not writable, so "
+                            "its tabix index (missing or stale) cannot be built. Build the index "
+                            "on a writable copy, or pre-build it before running on a read-only "
+                            "install (e.g. an Apptainer SIF or a ':ro' mount)."
+                        ) from we
+                    raise
             return pysam.TabixFile(annotation_fname)  # tabix handle per annotation bed
-        except Exception as e:  # transient read / stale-or-partial index / mid-write view
+        except SamtoolsError:
+            raise  # read-only (above) is terminal: do not retry, do not mislabel as corrupt
+        except _TransientAnnotationRead as e:  # mid-write / stale FS view -> just retry
             last_err = e
             if attempt < _ANNOT_LOAD_ATTEMPTS - 1:
                 sleep(_ANNOT_LOAD_BACKOFF * (attempt + 1))  # let the FS view settle
-    # Genuinely unreadable after several attempts with index rebuilds: now the
-    # failure is actionable. A still-missing EOF marker is a truncated download.
+        except Exception as e:  # TabixFile open failure / reindex error -> index is corrupt
+            last_err = e
+            force_reindex = True  # rebuild the present-but-unreadable index on the next try
+            if attempt < _ANNOT_LOAD_ATTEMPTS - 1:
+                sleep(_ANNOT_LOAD_BACKOFF * (attempt + 1))  # let the FS view settle
+    # Genuinely unreadable after several attempts: now the failure is actionable. A
+    # still-missing EOF marker is a truncated download.
     if is_gz and not _bgzf_eof_ok(annotation_fname):
         raise SamtoolsError(
             f"Annotation file '{annotation_fname}' is truncated or corrupt "
@@ -160,8 +190,10 @@ def load_annotation_bed(annotation_fname: str) -> Optional[TabixFile]:
         ) from last_err
     raise SamtoolsError(
         f"Could not load annotation file '{annotation_fname}' even after "
-        f"{_ANNOT_LOAD_ATTEMPTS} attempts with index rebuilds -- the file may be "
-        "corrupt. Re-download it: crisprme.py download --what annotations --path <DATA_DIR>"
+        f"{_ANNOT_LOAD_ATTEMPTS} attempts "
+        f"({'the index was rebuilt' if did_reindex else 'the index looked current, not rebuilt'})"
+        " -- the file may be corrupt. Re-download it: "
+        "crisprme.py download --what annotations --path <DATA_DIR>"
     ) from last_err
 
 

@@ -1699,6 +1699,17 @@ def change_url(
     # value is a list of ticked values) sets CRISPRME_REPORT_FULL=True so submit_job runs
     # generate_report.py --report-full (mirrors `complete-search --report-full`).
     report_full_env = "True" if (full_report and "full" in full_report) else "False"
+    # Persist the resolved analysis mode as <result_dir>/.search_mode, mirroring the CLI
+    # (crisprme.py complete-search). The web launches submit_job directly, so without this
+    # generate_report.build_summary_meta falls back to "population-level" and would mislabel
+    # a per-sample web run (CONFIRMED cis carriers shown as pop-level "poss. chimera", and a
+    # spurious "re-run with --per-sample" note). per-sample <=> fast_env == "0".
+    try:
+        os.makedirs(result_dir, exist_ok=True)
+        with open(os.path.join(result_dir, ".search_mode"), "w") as _sm:
+            _sm.write("per-sample" if fast_env == "0" else "population-level")
+    except OSError:
+        pass
     cmd = f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} CRISPRME_REPORT_FULL={report_full_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
@@ -2308,7 +2319,13 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
         {"label": pop_label, "value": "population-level"},
         {"label": ps_label, "value": "per-sample", "disabled": not has_gt},
     ]
-    value = current_mode if current_mode else ("per-sample" if phased else "population-level")
+    # `search-mode` is a State (not an Input) of this callback, so it fires only on a
+    # genome/dataset change or initial load -- re-seed the mode from the chosen panel so the
+    # radio SELECTION tracks the context-aware default and the moved "[default]" label.
+    # (A `current_mode if current_mode else ...` guard was dead: current_mode is never falsy
+    # once the layout seeds "population-level", so per-sample was never auto-selected and the
+    # web silently ran population-level while labelling per-sample the default.)
+    value = "per-sample" if phased else "population-level"
     # a sites-only / reference panel cannot resolve genotypes: never land on per-sample
     if not has_gt and value == "per-sample":
         value = "population-level"

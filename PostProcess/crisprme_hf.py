@@ -858,7 +858,21 @@ def download_component(
         # import would shadow it for the whole function and break the index/genome branches.)
         extract = os.path.join(staging, "_x")
         os.makedirs(extract, exist_ok=True)
+        extract_real = os.path.realpath(extract)
         with tarfile.open(tgz, "r:gz") as tf:
+            # Validate members before extracting: a build-inputs kit can come from a
+            # user-chosen --hf-repo, so reject non-regular/dir entries (symlink/hardlink/
+            # device) and any member that would resolve OUTSIDE the staging dir (path
+            # traversal). Same guard as personal_assembly.py's bundle unpack.
+            for m in tf.getmembers():
+                if not (m.isreg() or m.isdir()):
+                    raise ValueError(
+                        f"build-inputs: refusing unsafe tar entry (not a regular file "
+                        f"or directory): {m.name!r}")
+                dest = os.path.realpath(os.path.join(extract, m.name))
+                if dest != extract_real and not dest.startswith(extract_real + os.sep):
+                    raise ValueError(
+                        f"build-inputs: refusing tar entry outside the staging dir: {m.name!r}")
             tf.extractall(extract)
         os.makedirs(local_dir, exist_ok=True)
         moved = []
