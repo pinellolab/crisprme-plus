@@ -1473,17 +1473,20 @@ class TestGenerateReport(unittest.TestCase):
     def test_cfd_glossary_tooltip_matches_gated_panel_rule(self):
         """The CFD legend tooltip (Section 7) must agree with the recommended-panel
         rule: CFD is the RESCUE axis (CFD>=0.2 restricted to 0-bulge / mismatch-only
-        sites) that supplements the panel's PRIMARY CRISPR-Bulge>0 selection, CFD is
-        not used to select bulge sites, and >=2-bulge high-CFD sites are kept-but-
-        demoted (never silently dropped). A drift back to presenting CFD>=0.5 at <=1
-        bulge as the panel key -- or an un-gated CFD>=0.2 cutoff with no 0-bulge
-        restriction -- would misrepresent what the panel actually selects."""
+        sites) that supplements the panel's PRIMARY CRISPR-Bulge sensitive selection
+        (the 95%-recall operating point, NOT the legacy '> 0'), CFD is not used to
+        select bulge sites, and >=2-bulge high-CFD sites are kept-but-demoted (never
+        silently dropped). A drift back to presenting CFD>=0.5 at <=1 bulge as the
+        panel key -- or an un-gated CFD>=0.2 cutoff with no 0-bulge restriction -- would
+        misrepresent what the panel actually selects."""
         cfd_entry = dict(gr._SCORE_LEGEND)["CFD"]
         # CFD rescue: sensitive off-bulge (>=0.2 at 0 bulges), HIGH only on single-bulge (>=0.5)
         self.assertIn("0-bulge (mismatch-only) sites treat CFD&nbsp;&ge;&nbsp;0.2", cfd_entry)
         self.assertIn("rescue only HIGH CFD (&ge;&nbsp;0.5)", cfd_entry)
-        # it is explicitly subordinate to the primary CRISPR-Bulge>0 selection
-        self.assertIn("CRISPR-Bulge&nbsp;&gt;&nbsp;0 selection", cfd_entry)
+        # it is explicitly subordinate to the primary CRISPR-Bulge SENSITIVE selection
+        # (95%-recall operating point); the legacy "> 0" framing must NOT survive here
+        self.assertIn("CRISPR-Bulge sensitive selection", cfd_entry)
+        self.assertNotIn("CRISPR-Bulge&nbsp;&gt;&nbsp;0", cfd_entry)
         # >=2-bulge CFD is an over-call and is not used to select
         self.assertIn("&ge;2-bulge sites CFD is an uncalibrated over-call", cfd_entry)
         # the superseded "CFD>=0.5 at <=1 bulge is the panel key" wording must NOT reappear

@@ -316,7 +316,7 @@ set automatically from the index you picked:
   genotypes into observed haplotypes, so the report **names the carrier samples**, marks
   co-occurring variants as **CONFIRMED cis** (phased) or **PUTATIVE co-carrier** (unphased), and
   gives the **exact joint allele frequency**. It is the default on a genotyped+phased panel
-  (HGDP + 1000 Genomes [the default], 1000G-2021, or HPRC) and the headline capability of the
+  (HGDP + 1000 Genomes [the default], or HPRC) and the headline capability of the
   variant-aware pipeline — the mode to use for clinical / validation work.
 - **Population-level (default on sites-only indices; the `--population-level` / web
   "Population-level" opt-out)** — reports each off-target once, using a worst-possible
@@ -328,7 +328,7 @@ set automatically from the index you picked:
 
 Per-sample is a **genotype-resolution** dial, **not** a speed dial: for a single guide the
 runtimes are comparable. It **requires a genotyped index** (HGDP + 1000 Genomes [the default],
-1000G-2021, or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
+or HPRC); on the sites-only *mega* index there are no genotypes to resolve, so the option is
 greyed out and the search automatically uses population-level. (See "Understanding CONFIRMED vs
 PUTATIVE and carriers" in the results section for how these labels appear in the report.)
 

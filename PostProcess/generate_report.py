@@ -3662,7 +3662,7 @@ _SCORE_LEGEND = [
      "0-bulge (mismatch-only) sites treat CFD&nbsp;&ge;&nbsp;0.2 as worth validating; "
      "on single-bulge sites, where CFD is an extrapolation, rescue only HIGH CFD "
      "(&ge;&nbsp;0.5). This CFD rescue supplements the panel&rsquo;s primary "
-     "CRISPR-Bulge&nbsp;&gt;&nbsp;0 selection; on &ge;2-bulge sites CFD is an "
+     "CRISPR-Bulge sensitive selection (the 95%-recall operating point); on &ge;2-bulge sites CFD is an "
      "uncalibrated over-call and is not used to select (those sites are demoted). "
      "<b>Caveat:</b> CFD was trained on "
      "single-base mismatches; its values for sites containing DNA/RNA bulges "

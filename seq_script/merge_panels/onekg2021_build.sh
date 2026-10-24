@@ -1,8 +1,8 @@
 #!/bin/bash
 # 1000G-2021 single-source, PHASED variant-index build (as-run, resumable) — the clean
-# "real-haplotypes" single-source panel NRG_3_hg38+hg38_1000G2021 (an ALTERNATIVE published
-# index, NOT the default; the recommended variant default is the SHAPEIT5 re-phased
-# NRG_3_hg38+hg38_HGDP1kGP).
+# "real-haplotypes" single-source panel NRG_3_hg38+hg38_1000G2021 (RETIRED in 2.8.0 / removed from HuggingFace;
+# this recipe rebuilds it from source for reproducibility only. The recommended variant
+# default is the SHAPEIT5 re-phased NRG_3_hg38+hg38_HGDP1kGP).
 #
 # WHAT THIS IS: a standard CRISPRme variant-aware index built by ENRICHING hg38 with the
 # 1000 Genomes 2021 high-coverage (30x) NYGC/IGSR callset (CCDG_14151_B01_GRM_WGS_2020-08-05,
@@ -11,7 +11,7 @@
 # index, as in every 1000G index). Because the genotypes are PHASED, the index supports
 # CONFIRMED cis co-occurrence + named per-sample carriers (like 1000G-2021+HGDP), and unlike
 # the sites-only mega every off-target here corresponds to an OBSERVED haplotype in a real
-# panel. This is a clean single-source alternative to the default re-phased HGDP1kGP panel;
+# panel. This standalone index was RETIRED in 2.8.0 (no longer shipped on HuggingFace); rebuild from source only;
 # the mega remains the worst-case sites-only fallback (a haplotype it lists may or may not
 # exist in any individual).
 #

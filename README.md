@@ -310,7 +310,7 @@ operating systems. Select the method that best matches your setup:
 ---
 
 Conda/Bioconda installs **only the stable 2.1.x line** (Python 3.8) — *not* the
-CRISPRme+ (2.7.x) line. Use this path only if you specifically want the stable
+CRISPRme+ (2.8.x) line. Use this path only if you specifically want the stable
 release; for CRISPRme+ 2.8.0 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
 or [Docker](#12-install-crisprme-via-docker).
 
@@ -370,7 +370,7 @@ By completing these steps, your system will be fully prepared for installing CRI
 > compiles CRISPRitz 2.9.0 and installs both tools into a conda environment. A native
 > Bioconda package for the CRISPRme+ line is **in preparation**; until it lands, the Bioconda
 > `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** the
-> CRISPRme+ (2.7.x) line.
+> CRISPRme+ (2.8.x) line.
 
 To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
 (`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),

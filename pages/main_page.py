@@ -2228,7 +2228,7 @@ def _preferred_variant(option_values: List[str], genome: str = None) -> str:
 
     # within the preferred tier: most-covering (combined) first; then the RICHEST panel
     # by genotyped sample count (name-free "biggest phased panel is the default" — e.g.
-    # the 4,091-sample HGDP+1kGP over the 3,202-sample 1000G-2021 or 232-sample HPRC);
+    # the 4,091-sample HGDP+1kGP over the 232-sample HPRC (the standalone 1000G-2021 panel was retired in 2.8.0));
     # final tie broken by listed order. Sample count reads the registry manifest, so no
     # index name is hardcoded and a future larger phased panel wins automatically.
     def _samples(v: str) -> int:
