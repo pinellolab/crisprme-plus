@@ -242,7 +242,14 @@ def _render_modal(cal) -> str:
         if summary_html else "")
     pr = _pr_curve_uri()
     pr_html = (f'<div class="rc-pr"><img alt="Precision-recall of each scorer" src="{pr}" '
-               f'style="max-width:100%"></div>') if pr else ""
+               f'style="max-width:100%">'
+               f'<div style="font-size:0.8em;color:#64748b;margin-top:4px">'
+               f'Precision-recall on held-out validated off-target sites. Marked points are the '
+               f'report&rsquo;s own operating points: <b>CFD</b> &ge;&nbsp;0.2 and &ge;&nbsp;0.5; '
+               f'<b>CRISPR-Bulge</b> {cbop.sensitive_label_html()} (the sensitive default), '
+               f'&ge;&nbsp;0.2, and &ge;&nbsp;0.5. The CRISPR-Bulge sensitive point is the 95%-recall '
+               f'threshold on the 40-guide benchmark; pushing recall higher moves left-and-down along '
+               f'the curve (steeply more sites per true off-target).</div></div>') if pr else ""
     prb = _png_uri("pr_bulge_stratified.png")
     prb_html = (
         '<p>Stratified by bulge count, the scores separate sharply. CFD discriminates '

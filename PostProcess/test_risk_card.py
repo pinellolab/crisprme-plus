@@ -115,6 +115,20 @@ class TestRiskCard(unittest.TestCase):
         # the bug made the sensitive band == ge0.2; assert they differ when sub-0.2 scores exist
         self.assertGreater(counts[sens], counts["CRISPR-Bulge ≥ 0.2"])
 
+    def test_pr_curve_section_caption_names_operating_points(self):
+        """The 'how to read this' modal embeds the PR-curve image AND captions the marked
+        operating points, so a reader can interpret the curve: CFD >=0.2/>=0.5 and the
+        CRISPR-Bulge SENSITIVE (95%-recall) default via cb_operating_point. Regression for
+        the previously un-captioned PR image (the reader couldn't tell what the markers were)."""
+        import cb_operating_point as cbop
+        _, modal = risk_card.render_risk_card(
+            {"guide_display": "G", "nuclease": "SpCas9", "pam": "NRG"},
+            cfd_scores=[0.6, 0.3], cb_scores=[0.8, 0.3, 0.1], n_perfect=0)
+        self.assertIn("rc-pr", modal)                       # PR image embedded (ships in-repo)
+        self.assertIn("operating points", modal)            # caption present
+        self.assertIn(cbop.sensitive_label_html(), modal)   # names the sensitive default
+        self.assertIn("95%-recall threshold", modal)        # explains what the sensitive point is
+
 
 if __name__ == "__main__":
     unittest.main()
