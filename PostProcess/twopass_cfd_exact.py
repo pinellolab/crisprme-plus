@@ -1,42 +1,38 @@
 #!/usr/bin/env python3
 """Exact factorized worst-case CFD — 2.5.1 two-pass fast mode (Pass-2 scoring).
 
-Design: docs/DESIGN_2.5.1_two_pass_fast_mode.md §7. `calc_cfd`
-(new_simple_analysis.py) is a pure product of per-position factors × one PAM
-factor, each factor in [0,1] and position-independent, so the MAX CFD over a
-per-position allele SET factorizes EXACTLY:
+Design: docs/DESIGN_2.5.1_two_pass_fast_mode.md §7. CFD (Doench et al.,
+Nat. Biotechnol. 2016) is a pure product of per-position factors × one PAM factor,
+each factor in [0,1] and position-independent, so the MAX CFD over a per-position
+allele SET factorizes EXACTLY:
 
     max_CFD = ( ∏_i  max_{a ∈ S_i} f(guide_i, a, i) )  ×  max_{p ∈ PamSet} pam(p)
 
-computed in O(len guide) with NO haplotype enumeration. For a CONCRETE target it
-is bit-identical to `new_simple_analysis.calc_cfd(..., do_scores=True)` (the panel
-verified 0 ULP over 30K + ~945K cases). This is a fast-mode CONSTRUCT — validated
-against `calc_cfd` (see test_twopass_cfd_exact.py), not yet an authoritative
-replacement. A future C++ port must pass the same differential/oracle/shadow gates
-(design §7) before being trusted. CRISPR-Bulge is NOT factorizable → out of scope here.
+computed in O(len guide) with NO haplotype enumeration. For a CONCRETE target it is
+bit-identical to the clean-room scorer cfd_score.cfd / cfd_score_bulge_aware (the panel
+verified 0 ULP over 30K + ~945K cases; see test_twopass_cfd_exact.py). This is a
+fast-mode CONSTRUCT; a future C++ port must pass the same differential/oracle/shadow
+gates (design §7) before being trusted. CRISPR-Bulge is NOT factorizable → out of scope.
 
-Caveats replicated from `calc_cfd` exactly: T→U on guide AND target before compare
-and key; match → 1.0; mismatch → mm_scores["r{guide}:d{revcom(dna)},{pos}"] with a
-missing key → 1.0 (the position-1 gap is free); an untranslatable IUPAC base →
-0.0 (calc_cfd zeroes the whole score). Only meaningful in the canonical SpCas9
-regime (20-nt guide, per-position factors); the caller gates that.
+Scoring rules (per Doench 2016, shared with cfd_score / column_factor): T→U on guide AND
+target before compare and key; match → 1.0; mismatch →
+mm_scores["r{guide}:d{revcom(dna)},{pos}"] with a missing key → 1.0 (the position-1 gap
+is free); an untranslatable IUPAC base → 0.0 (the whole score). The per-column factor +
+the position-aware bulge rule are shared with bulge_cfd_penalty.column_factor (one
+definition). Only meaningful in the canonical SpCas9 regime (20-nt guide); the caller gates that.
 
-STDLIB + the shipped mismatch_score.pkl / PAM_scores.pkl.
+STDLIB; tables from the clean-room JSON (cfd_score.cfd_tables, via load_scores()).
 """
 import os
-import pickle
 
 _HERE = os.path.dirname(os.path.realpath(__file__))
 _BASECOMP = {"A": "T", "C": "G", "G": "C", "T": "A", "U": "A", "-": "-"}
 
 
 def load_scores():
-    """Load the shipped CFD pickles (mismatch_score.pkl, PAM_scores.pkl)."""
-    with open(os.path.join(_HERE, "mismatch_score.pkl"), "rb") as fh:
-        mm = pickle.load(fh)
-    with open(os.path.join(_HERE, "PAM_scores.pkl"), "rb") as fh:
-        pam = pickle.load(fh)
-    return mm, pam
+    """Return the (mismatch, PAM) CFD tables -- the clean-room JSON tables (cfd_score)."""
+    from cfd_score import cfd_tables
+    return cfd_tables()
 
 
 def _revcom(s):
@@ -48,13 +44,23 @@ def _revcom(s):
         return None
 
 
-def position_factor(guide_u, dna_u, pos1, mm_scores):
-    """Per-position CFD factor, replicating calc_cfd's inner loop EXACTLY.
+# Position-aware bulge scoring (2.8.0): the per-column factor + the guide-frame position
+# rule live in bulge_cfd_penalty so the matrix scorer and the live scorer
+# (cfd_score_bulge_aware) share ONE definition. Both are STDLIB; a pass-through fallback
+# keeps the module importable if the helper is ever absent (mismatch-only stays exact).
+try:
+    from bulge_cfd_penalty import column_factor as _column_factor
+except Exception:  # pragma: no cover - shipped alongside
+    _column_factor = None
 
-    guide_u / dna_u are single bases ALREADY in T→U space; pos1 is 1-based.
-    match → 1.0; mismatch → mm_scores[r{guide}:d{revcom(dna)},{pos}] (missing key
-    → 1.0, e.g. the position-1 gap); untranslatable base → 0.0.
-    """
+
+def position_factor(guide_u, dna_u, pos1, mm_scores):
+    """Per-position CFD factor. For a match/mismatch this replicates calc_cfd's inner loop
+    exactly; for a bulge column ('-') it applies the 2.8.0 position-aware factor via the
+    shared primitive. guide_u / dna_u are single bases in T→U space; pos1 is the 1-based
+    GUIDE-FRAME position (DNA-bulge columns deleted). Untranslatable base → 0.0."""
+    if _column_factor is not None:
+        return _column_factor(guide_u, dna_u, pos1, mm_scores)
     if guide_u == dna_u:
         return 1.0
     rc = _revcom(dna_u)
@@ -64,13 +70,19 @@ def position_factor(guide_u, dna_u, pos1, mm_scores):
 
 
 def cfd_concrete(guide, dna, pam, mm_scores, pam_scores):
-    """Bit-identical to new_simple_analysis.calc_cfd(guide, dna, pam, ...,
-    do_scores=True). Left-to-right product pos1→pos_n (T→U space) × PAM factor."""
+    """Position-aware bulge-correct CFD for one concrete alignment (2.8.0); bit-identical
+    to cfd_score_bulge_aware on the same alignment, and to the old calc_cfd for mismatch-only
+    rows. ``guide``/``dna`` are the column-aligned spacer (may carry '-' bulges); ``pam`` is
+    the 2-base PAM. DNA-bulge columns (guide '-') are deleted from the guide frame so the
+    remaining columns keep their true Cas9 positions."""
     g = guide.replace("T", "U")
     d = dna.replace("T", "U")
     score = 1.0
+    dna_gaps = 0  # guide '-' columns deleted so far -> shift subsequent guide-frame positions
     for i, (gb, db) in enumerate(zip(g, d)):
-        score *= position_factor(gb, db, i + 1, mm_scores)
+        score *= position_factor(gb, db, (i + 1) - dna_gaps, mm_scores)
+        if gb == "-":
+            dna_gaps += 1
     return score * pam_scores.get(pam, 0.0)
 
 
@@ -81,15 +93,23 @@ def cfd_worst_case(guide, allele_sets, pam_set, mm_scores, pam_scores):
 
     allele_sets[i] is an iterable of DNA bases possible at protospacer position i
     (e.g. the variant-enriched allele set); pam_set is an iterable of possible
-    PAM strings. Empty position set → 0.0 (no allele = no match)."""
+    PAM strings. Empty position set → 0.0 (no allele = no match).
+
+    The factorization still holds with bulges: the DNA-bulge deletion pattern is fixed by
+    the (allele-independent) ``guide``, so every column has a fixed guide-frame position and
+    the worst case is the per-column max of the bulge-aware ``position_factor``."""
     g = guide.replace("T", "U")
     score = 1.0
+    dna_gaps = 0
     for i, gb in enumerate(g):
+        pos = (i + 1) - dna_gaps
         best = 0.0
         for a in allele_sets[i]:
-            f = position_factor(gb, a.replace("T", "U"), i + 1, mm_scores)
+            f = position_factor(gb, a.replace("T", "U"), pos, mm_scores)
             if f > best:
                 best = f
         score *= best
+        if gb == "-":
+            dna_gaps += 1
     best_pam = max((pam_scores.get(p, 0.0) for p in pam_set), default=0.0)
     return score * best_pam

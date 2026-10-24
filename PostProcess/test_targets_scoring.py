@@ -2,10 +2,11 @@
 """Unit tests for targets_scoring (the score-a-list CLI backend).
 
 Covers the CasOFFinder + generic-TSV parsers (both schemas, bulge-from-alignment
-inference, 0-vs-1-based positions), the CFD-per-site slicing (vs calc_cfd direct,
-incl. the DNA-bulge front-trim convention), the CRISPR-Bulge null rules (stubbed
-scorer so the test is hermetic and needs no cbulge env), and the variant carrier
-overlay against a synthetic in-memory registry built with compile_registry.
+inference, 0-vs-1-based positions), the CFD-per-site slicing (vs the clean-room
+cfd_score.cfd oracle, incl. the DNA-bulge front-trim convention), the CRISPR-Bulge
+null rules (stubbed scorer so the test is hermetic and needs no cbulge env), and the
+variant carrier overlay against a synthetic in-memory registry built with
+compile_registry.
 
 STDLIB only (+ the repo's tier0_registry for the overlay fixture). Hermetic: no
 installed PAMs/index, no cbulge env.
@@ -101,7 +102,9 @@ class TestParsers(unittest.TestCase):
 
 class TestCFD(unittest.TestCase):
     def setUp(self):
-        self.mm, self.pam = ts.get_mm_pam_scores()
+        import cfd_score
+        self.cfd_score = cfd_score
+        self.mm, self.pam = cfd_score.cfd_tables()
 
     def test_perfect_match_equals_pam_term(self):
         s = ts.Site(G + "GGG", G + "GGG", bulge_type="X0")
@@ -113,27 +116,34 @@ class TestCFD(unittest.TestCase):
         self.assertAlmostEqual(ts.cfd_for_site(s, self.mm, self.pam), self.pam["GA"])
         self.assertLess(ts.cfd_for_site(s, self.mm, self.pam), 0.1)
 
-    def test_matches_calc_cfd_direct_mismatch(self):
+    def test_matches_clean_cfd_direct_mismatch(self):
         off = G[:18] + "T" + G[19:]           # one spacer mismatch
         s = ts.Site(G + "GGG", off + "AGG", bulge_type="X0")
-        expect = ts.calc_cfd(G + "GGG", (off + "AGG")[:-3], (off + "AGG")[-2:],
-                             self.mm, self.pam, True)
+        # clean-room oracle for a mismatch-only alignment (proven bit-identical to the
+        # deleted legacy CFD scorer over 50k+ cases): cfd_score.cfd(guide, spacer, pam, tables)
+        expect = self.cfd_score.cfd(G + "GGG", (off + "AGG")[:-3], (off + "AGG")[-2:],
+                                    (self.mm, self.pam))
         self.assertEqual(ts.cfd_for_site(s, self.mm, self.pam), expect)
 
-    def test_dna_bulge_delete_gap(self):
-        # DNA bulge with the gap NOT at the front: cfd_for_site must DELETE the gap
-        # column from both strands (drop the looped-out DNA base) and score 20-vs-20,
-        # so CFD positions 1..20 stay guide-indexed.
-        crrna = G[:5] + "-" + G[5:] + "GGG"   # gap in crRNA at column 5
-        dna = G[:5] + "A" + G[5:] + "AGG"     # extra DNA base at column 5
+    def test_dna_bulge_delete_gap_then_position_penalty(self):
+        # DNA bulge with the gap NOT at the front: cfd_for_site DELETES the gap column from
+        # both strands (drop the looped-out DNA base) so CFD positions 1..20 stay guide-
+        # indexed, THEN applies the position-aware Doench DNA-bulge factor (2.8.0).
+        import bulge_cfd_penalty as bp
+        crrna = G[:5] + "-" + G[5:] + "GGG"   # gap in crRNA at display column 6
+        dna = G[:5] + "A" + G[5:] + "AGG"     # extra DNA base at column 6 (complement of A = T)
         s = ts.Site(crrna, dna, bulge_type="DNA", bulge_size=1)
         keep = [i for i, ch in enumerate(crrna) if ch != "-"]
         gd = "".join(crrna[i] for i in keep)
         dd = "".join(dna[i] for i in keep)
-        expect = ts.calc_cfd(gd, dd[:-3], dd[-2:], self.mm, self.pam, True)
-        self.assertEqual(ts.cfd_for_site(s, self.mm, self.pam), expect)
+        base = self.cfd_score.cfd(gd, dd[:-3], dd[-2:], (self.mm, self.pam))  # mismatch-only = 1.0
+        corr = bp.bulge_cfd_correction(crrna, dna, self.mm)                  # r-:dT,6
+        self.assertAlmostEqual(corr, self.mm["r-:dT,6"], places=6)
+        self.assertAlmostEqual(ts.cfd_for_site(s, self.mm, self.pam), base * corr, places=9)
+        # the position penalty must actually bite (not the old gap-delete-only 1.0)
+        self.assertLess(ts.cfd_for_site(s, self.mm, self.pam), base)
         # and it must NOT equal the naive front-trim (which would misalign an in-place gap)
-        front = ts.calc_cfd(crrna[1:], dna[1:-3], dna[-2:], self.mm, self.pam, True)
+        front = self.cfd_score.cfd(crrna[1:], dna[1:-3], dna[-2:], (self.mm, self.pam))
         self.assertNotEqual(ts.cfd_for_site(s, self.mm, self.pam), front)
 
 

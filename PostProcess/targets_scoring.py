@@ -7,10 +7,9 @@ or any TSV carrying the aligned guide/off-target columns -- and annotates each w
 the SAME calculations a normal CRISPRme+ report uses, with the genome search
 replaced by the supplied list:
 
-  * CFD score            -- the canonical CRISPRme CFD (``calc_cfd`` below is kept
-                            byte-identical to new_simple_analysis.calc_cfd /
-                            analisi_indels_NNN.calc_cfd; pinned by
-                            test_calc_cfd_twins_agree.py).
+  * CFD score            -- the canonical CRISPRme CFD, computed by the clean-room
+                            own-implementation ``cfd_score.cfd`` (Doench et al. 2016)
+                            via ``bulge_cfd_penalty.cfd_score_bulge_aware``.
   * CRISPR-Bulge score   -- the CRISPRme+ ML scorer (dedicated ``cbulge`` env);
                             -1.0 when the env is absent (never fails the run).
   * carrier overlay      -- OPTIONAL, when an installed variant index is given
@@ -22,85 +21,32 @@ replaced by the supplied list:
 No index is needed for pure scoring; the carrier overlay reads the index's
 ``Dictionaries/registry_<vcf>/`` tier (the same registry the report uses).
 
-Scope note (v1): mismatch-only sites (the common case, and CasOFFinder's default
-NNN scan) are scored exactly. Bulge rows are supported when the aligned
-guide/off-target follow CRISPRme's alignment convention (bulge columns as '-',
-DNA-bulge offset = bulge size). CRISPR-Bulge natively scores <=1-bulge alignments;
-rows it cannot represent (>1 gap column, N in the off-target, length mismatch,
-length > 24) are nulled to -1.0 and carried by CFD + edit distance -- identical to
-the main pipeline's behavior.
+Scope note: mismatch-only sites (the common case, and CasOFFinder's default NNN
+scan) are scored exactly. Bulge rows must follow the in-place display alignment
+convention (crRNA and off-target the SAME length, each bulge column a '-' at the
+bulge position: a DNA bulge is a '-' in the crRNA, an RNA bulge a '-' in the
+off-target, PAM included). As of 2.8.0 CFD scores bulges with Doench's
+position-weighted gap penalty at the bulge's true spacer position (previously a DNA
+bulge was unpenalized) -- byte-identical to the main pipeline (see
+``bulge_cfd_penalty.cfd_score_bulge_aware`` and METHODS Section 3). CRISPR-Bulge
+natively scores <=1-bulge alignments; rows it cannot represent (>1 gap column, N in
+the off-target, length mismatch, length > 24) are nulled to -1.0 and carried by CFD
++ edit distance -- identical to the main pipeline's behavior.
 """
 
 import argparse
 import glob
 import os
-import pickle
 import sys
 from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
-# CFD scorer -- VERBATIM copy of the canonical calc_cfd/revcom/get_mm_pam_scores
-# (new_simple_analysis.py / analisi_indels_NNN.py). Those two modules parse
-# sys.argv at import time, so they cannot be imported here; the codebase already
-# keeps byte-identical copies guarded by test_calc_cfd_twins_agree.py. That test
-# is extended to pin THIS copy to the canonical one as well. Do not edit without
-# updating the twin (the test will fail otherwise).
+# CFD scorer: the clean-room own-implementation cfd_score.cfd (Doench et al.,
+# Nat. Biotechnol. 2016) + its JSON tables. cfd_score has no import-time side effects
+# (unlike new_simple_analysis / analisi_indels_NNN, which parse sys.argv at import), so it
+# imports cleanly here. The bulge-aware wrapper cfd_score_bulge_aware defaults to this base.
 # ---------------------------------------------------------------------------
-
-
-def get_mm_pam_scores():
-    try:
-        mm_scores = pickle.load(
-            open(
-                os.path.dirname(os.path.realpath(__file__)) + "/mismatch_score.pkl",
-                "rb",
-            )
-        )
-        pam_scores = pickle.load(
-            open(os.path.dirname(os.path.realpath(__file__)) + "/PAM_scores.pkl", "rb")
-        )
-        return (mm_scores, pam_scores)
-    except:
-        raise Exception("Could not find file with mismatch scores or PAM scores")
-
-
-def revcom(s):
-    basecomp = {"A": "T", "C": "G", "G": "C", "T": "A", "U": "A", "-": "-"}
-    letters = list(s[::-1])
-    try:
-        letters = [basecomp[base] for base in letters]
-    except:
-        return None  # If some IUPAC were not translated
-    return "".join(letters)
-
-
-def calc_cfd(guide_seq, sg, pam, mm_scores, pam_scores, do_scores):
-    score = 1
-    sg = sg.replace("T", "U")
-    guide_seq = guide_seq.replace("T", "U")
-    s_list = list(sg)
-    guide_seq_list = list(guide_seq)
-
-    for i, sl in enumerate(s_list):
-        if guide_seq_list[i] == sl:
-            score *= 1
-        else:
-            try:  # Catch exception if IUPAC character
-                key = "r" + guide_seq_list[i] + ":d" + revcom(sl) + "," + str(i + 1)
-            except Exception as e:
-                score = 0
-                break
-            try:
-                score *= mm_scores[key]
-            except (
-                Exception
-            ) as e:  # If '-' is in first position, i do not have the score for that position
-                pass
-
-    # Guard against non-ATCG PAM bases (issue #94): a non-canonical PAM contributes
-    # 0 to the CFD product instead of raising KeyError.
-    score *= pam_scores.get(pam, 0.0)
-    return score
+from cfd_score import cfd as _cfd_clean, cfd_tables as _cfd_tables
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +91,7 @@ def cfd_for_site(site, mm_scores, pam_scores):
     IN-PLACE at the bulge position (DNA bulge -> '-' in crRNA, RNA bulge -> '-' in
     DNA), crRNA and DNA are the same length.
 
-    * mismatch-only / RNA bulge: calc_cfd(crRNA, DNA[:-pam], DNA[-2:]). The RNA-bulge
+    * mismatch-only / RNA bulge: cfd_score.cfd(crRNA, DNA[:-pam], DNA[-2:]). The RNA-bulge
       gap sits in DNA, so the 20 guide bases keep CFD positions 1..20 and the bulged
       guide base (vs DNA '-') contributes factor 1 -- verified to reproduce CRISPRme's
       reported CFD exactly on mismatch + RNA-bulge rows.
@@ -158,14 +104,23 @@ def cfd_for_site(site, mm_scores, pam_scores):
       DNA-bulge gap placement, which is not recoverable from an in-place alignment and
       can differ -- a DNA-bulge caveat the caller should surface.)
     """
-    pam = site.pam_len
-    dna = site.dna
-    guide = site.crrna
-    if site.bulge_type == "DNA" and "-" in guide:
-        keep = [i for i, ch in enumerate(guide) if ch != "-"]
-        guide = "".join(guide[i] for i in keep)
-        dna = "".join(dna[i] for i in keep)
-    return calc_cfd(guide, dna[:-pam], dna[-2:], mm_scores, pam_scores, True)
+    # Position-aware bulge scoring (2.8.0): delegate DNA-bulge gap-deletion + the
+    # position penalty (incl. the undefined PAM-proximal / 5'-tip columns) to the shared
+    # helper. Mismatch-only + RNA-bulge rows are byte-identical to the previous scorer.
+    try:
+        from bulge_cfd_penalty import cfd_score_bulge_aware
+        return cfd_score_bulge_aware(
+            site.crrna, site.dna, mm_scores, pam_scores, pam_len=site.pam_len
+        )
+    except Exception:  # pragma: no cover - helper always shipped alongside
+        pam = site.pam_len
+        dna = site.dna
+        guide = site.crrna
+        if site.bulge_type == "DNA" and "-" in guide:
+            keep = [i for i, ch in enumerate(guide) if ch != "-"]
+            guide = "".join(guide[i] for i in keep)
+            dna = "".join(dna[i] for i in keep)
+        return _cfd_clean(guide, dna[:-pam], dna[-2:], (mm_scores, pam_scores))
 
 
 # CRISPR-Bulge null rules -- identical to preprocess_CRISPR_BULGE_score._pair in
@@ -445,7 +400,7 @@ def score_sites(sites, index_path=None, device=None):
     """Score every site with CFD + CRISPR-Bulge and (if index_path) the carrier
     overlay. Returns (header, rows) where rows are lists of strings sorted by CFD
     descending."""
-    mm_scores, pam_scores = get_mm_pam_scores()
+    mm_scores, pam_scores = _cfd_tables()  # clean-room JSON tables
     cfds = [cfd_for_site(s, mm_scores, pam_scores) for s in sites]
     cbs = crispr_bulge_for_sites(sites, device=device)
 
@@ -463,7 +418,7 @@ def score_sites(sites, index_path=None, device=None):
                 s.crrna, s.dna, s.chrom or "", "" if s.pos is None else str(s.pos),
                 s.strand or "", s.bulge_type, str(s.bulge_size),
                 "" if s.mismatches is None else str(s.mismatches),
-                pam_seq, "%.3f" % cfds[i], "%.3f" % cbs[i],
+                pam_seq, "%.6g" % cfds[i], "%.6g" % cbs[i],
             ]
             if overlay is not None:
                 ov = overlay.overlay(s)

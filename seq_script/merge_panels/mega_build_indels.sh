@@ -23,7 +23,13 @@ MC=${MC:-/srv/local/lp698/mega_cleanroom}          # near-complete sites-only me
 SRC=${SRC:-/srv/local/lp698/mega_gw}               # per-chr merged sites VCFs mega.chrN.afmax.vcf.gz (from mega_gw_merge.sh)
 SCR=${SCR:-/srv/local/lp698/mega_gw_indel_scratch} # per-chr scratch builds
 PAM=${PAM:-$(find /srv/local/lp698 -name "20bp-NRG-SpCas9.txt" 2>/dev/null | head -1)}
-mkdir -p "$SCR" "$MC/Genomes/hg38+hg38_mega_INDELS" "$MC/genome_library/NRG_3_hg38+hg38_mega_INDELS"
+PAMBASE=$(basename "$PAM")                          # PAM filename copied into each per-chr workdir
+# Index-name prefix crispritz assigns for $PAM: <MOTIF>_<N> (e.g. NRG_3 for 20bp-NRG + bMax giving N=3).
+# Override IDXNAME to match a non-NRG PAM (e.g. IDXNAME=NGG_3 PAM=/path/20bp-NGG-SpCas9.txt). A mismatch
+# is caught loudly after the first build (the expected dir is verified against what crispritz produced).
+IDXNAME=${IDXNAME:-NRG_3}
+IDXDIR="${IDXNAME}_hg38+hg38_mega_INDELS"
+mkdir -p "$SCR" "$MC/Genomes/hg38+hg38_mega_INDELS" "$MC/genome_library/$IDXDIR"
 CHRS="chr1 chr2 chr3 chr4 chr5 chr6 chr7 chr8 chr9 chr10 chr11 chr12 chr13 chr14 chr15 chr16 chr17 chr18 chr19 chr20 chr21 chr22 chrX chrY"
 strip_and_place() {  # $1=chr  $2=build_root
   local c=$1 W=$2
@@ -35,13 +41,13 @@ strip_and_place() {  # $1=chr  $2=build_root
   # PAM-independent fake-indel GENOME actually lands in the index (needed to rebuild a
   # different-PAM _INDELS index; the search itself only needs the index bins below).
   cp -rf "$W"/Genomes/hg38+hg38_mega_INDELS/fake_hg38_mega_${c} "$MC/Genomes/hg38+hg38_mega_INDELS/" 2>/dev/null
-  cp -rf "$W"/genome_library/NRG_3_hg38+hg38_mega_INDELS/*fakechr${c#chr}* "$MC/genome_library/NRG_3_hg38+hg38_mega_INDELS/" 2>/dev/null
-  local nb; nb=$(find "$MC/genome_library/NRG_3_hg38+hg38_mega_INDELS" -path "*fakechr${c#chr}*" -name "*.bin" 2>/dev/null | wc -l)
+  cp -rf "$W"/genome_library/"$IDXDIR"/*fakechr${c#chr}* "$MC/genome_library/$IDXDIR/" 2>/dev/null
+  local nb; nb=$(find "$MC/genome_library/$IDXDIR" -path "*fakechr${c#chr}*" -name "*.bin" 2>/dev/null | wc -l)
   echo "  [$c] placed: $(zcat "$MC/Dictionaries/log_indels_hg38_mega/log${c}.txt.gz"|wc -l) log recs (MEGA stripped), $nb INDELS bin(s)"
 }
 for c in $CHRS; do
   n=${c#chr}
-  DONE=$(find "$MC/genome_library/NRG_3_hg38+hg38_mega_INDELS" -path "*fakechr${n}*" -name "*.bin" 2>/dev/null | wc -l)
+  DONE=$(find "$MC/genome_library/$IDXDIR" -path "*fakechr${n}*" -name "*.bin" 2>/dev/null | wc -l)
   RLOG=$(zcat "$MC/Dictionaries/log_indels_hg38_mega/log${c}.txt.gz" 2>/dev/null | wc -l)
   if [ "$DONE" -ge 1 ] && [ "$RLOG" -ge 2 ]; then echo "[$c] already done ($DONE bins, $RLOG log recs) -> resume-skip"; continue; fi
   VCF="$SRC/mega.${c}.afmax.vcf.gz"
@@ -54,9 +60,18 @@ for c in $CHRS; do
   apptainer exec -B /srv/local/lp698 "$SIF" /opt/conda/bin/python3 "$CK/PostProcess/synth_sites_gt.py" "$VCF" "$W/VCFs/hg38_mega/${c}.vcf.gz" MEGA >/dev/null 2>&1
   apptainer exec -B /srv/local/lp698 "$SIF" /opt/conda/bin/tabix -f -p vcf "$W/VCFs/hg38_mega/${c}.vcf.gz"
   apptainer exec --writable-tmpfs -B "$CK/crisprme.py":/opt/conda/bin/crisprme.py -B "$CK/PostProcess":/opt/conda/opt/crisprme/PostProcess -B /srv/local/lp698 "$SIF" \
-    bash -c "export PATH=/opt/conda/bin:\$PATH; cd $W; crisprme.py build-index-only --genome $W/Genomes/hg38 --pam $W/PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --thread 16 --vcf $W/VCFs/hg38_mega --path $W" > "$W/build.log" 2>&1
+    bash -c "export PATH=/opt/conda/bin:\$PATH; cd $W; crisprme.py build-index-only --genome $W/Genomes/hg38 --pam $W/PAMs/$PAMBASE --bDNA 2 --bRNA 2 --thread 16 --vcf $W/VCFs/hg38_mega --path $W" > "$W/build.log" 2>&1
   echo "[$c] build exit=$? $(date +%H:%M:%S)"
-  strip_and_place "$c" "$W" && rm -rf "$W/Genomes/run_"* "$W/genome_library/NRG_3_hg38" 2>/dev/null
+  # Guard: confirm crispritz produced exactly the index dir IDXNAME expects. A mismatch means
+  # IDXNAME is wrong for this PAM -- fail loudly with the actual name so it can be set, rather
+  # than silently placing 0 bins.
+  if [ ! -d "$W/genome_library/$IDXDIR" ]; then
+    echo "[$c] ERROR: expected index dir '$IDXDIR' not produced; crispritz built:" \
+         "$(ls -1 "$W"/genome_library/ 2>/dev/null | grep '_mega_INDELS$' | tr '\n' ' ')" \
+         "-- set IDXNAME to the <MOTIF>_<N> prefix matching $PAMBASE and rerun." >&2
+    continue
+  fi
+  strip_and_place "$c" "$W" && rm -rf "$W/Genomes/run_"* "$W"/genome_library/*_hg38 2>/dev/null
 done
 echo "GW MEGA INDEL BUILD COMPLETE $(date +%H:%M:%S)"
-echo "final INDELS bins: $(find "$MC/genome_library/NRG_3_hg38+hg38_mega_INDELS" -name '*.bin' 2>/dev/null | wc -l)"
+echo "final INDELS bins: $(find "$MC/genome_library/$IDXDIR" -name '*.bin' 2>/dev/null | wc -l)"

@@ -21,12 +21,17 @@ import os
 import sys
 from typing import List, Optional, Sequence
 
+import cb_operating_point as cbop
+
 MODAL_ID = "risk-card-modal"
 
 # report bands the card surfaces (label in artifact -> display). Order high->low.
+# The CRISPR-Bulge "sensitive" band is the benchmark-derived operating point
+# (cb_operating_point; 95%-recall default CB >= 1.9e-4), not the ad-hoc "> 0".
 _CFD_ROWS = [("0.5-1", "CFD ≥ 0.5"), ("0.2-0.5", "CFD 0.2–0.5"), ("ge0.2", "CFD ≥ 0.2")]
 _CB_ROWS = [("0.5-1", "CRISPR-Bulge ≥ 0.5"), ("0.2-0.5", "CRISPR-Bulge 0.2–0.5"),
-            ("ge0.2", "CRISPR-Bulge ≥ 0.2")]
+            ("ge0.2", "CRISPR-Bulge ≥ 0.2"),
+            ("gt0", f"CRISPR-Bulge {cbop.sensitive_label_text()}, sensitive")]
 _MIN_BAND = 0.2  # lowest score edge the card displays; scores below are pre-filtered out
 
 
@@ -72,6 +77,8 @@ def _scorer_block(cal, scorer, scores, row_spec):
                 n = int((a >= 0.5).sum()) if a.size else 0
             elif label == "0.2-0.5":
                 n = int(((a >= 0.2) & (a < 0.5)).sum()) if a.size else 0
+            elif label == "gt0":
+                n = int((a >= cbop.sensitive_threshold()).sum()) if a.size else 0
             else:
                 n = int((a >= 0.2).sum()) if a.size else 0
             rows.append(f'<tr><td>{_esc(disp)}</td><td>{n:,}</td><td>&mdash;</td></tr>')
@@ -93,14 +100,19 @@ def _scorer_block(cal, scorer, scores, row_spec):
     return "".join(rows), ge02_point
 
 
-def _pr_curve_uri() -> Optional[str]:
-    """Return a data: URI for the bundled PR-curve PNG, or None if absent."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration", "pr_curves.png")
+def _png_uri(name: str) -> Optional[str]:
+    """Return a data: URI for a bundled calibration PNG, or None if absent."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration", name)
     if not os.path.isfile(path):
         return None
     import base64
     with open(path, "rb") as fh:
         return "data:image/png;base64," + base64.b64encode(fh.read()).decode()
+
+
+def _pr_curve_uri() -> Optional[str]:
+    """Return a data: URI for the bundled overall PR-curve PNG, or None if absent."""
+    return _png_uri("pr_curves.png")
 
 
 # clinician-reviewed modal copy (see METHODS; signed statistician/clinician/genome-editor)
@@ -143,13 +155,19 @@ def render_risk_card(meta: dict, cfd_scores: Sequence[float],
     # modals also emit <thead>/<tbody> tables, so the card deliberately stays out of that markup.)
     _hdr = ('<tr class="rc-hdr"><td>band (≤1-gap)</td><td>sites</td>'
             '<td>expected true (90%)</td></tr>')
-    # the card shows only >=0.2 bands; pre-filter so the calibrator does not bootstrap the
-    # huge near-zero mass (performance) -- all displayed bands start at 0.2.
+    # CFD displays only >=0.2 bands, so pre-filter to 0.2 (keeps the calibrator from
+    # bootstrapping the huge near-zero mass -- performance; every displayed CFD band starts at 0.2).
     _cfd = [s for s in (cfd_scores or []) if s is not None and s >= _MIN_BAND]
     cfd_rows, cfd_pt = _scorer_block(cal, "cfd", _cfd, _CFD_ROWS)
     blocks = [f'<div class="rc-scorer"><table class="rc-tbl">{_hdr}{cfd_rows}</table></div>']
     if cb_scores is not None:
-        _cb = [s for s in cb_scores if s is not None and s >= _MIN_BAND]
+        # CRISPR-Bulge has a "sensitive" band (the benchmark 95%-recall operating point,
+        # cb_operating_point), so keep every score AT/ABOVE that threshold -- the sensitive
+        # band must count exactly the Section-4 sensitive tier, while the >=0.2 bands select
+        # their subset. The sub-threshold near-zero mass (CB's noise floor) is dropped so the
+        # calibrator is not swamped. (Filtering to >=0.2 here previously made the sensitive band
+        # wrongly equal the >=0.2 count.)
+        _cb = [s for s in cb_scores if s is not None and s >= cbop.sensitive_threshold()]
         cb_rows, _ = _scorer_block(cal, "crispr_bulge", _cb, _CB_ROWS)
         blocks.append(f'<div class="rc-scorer"><table class="rc-tbl">{_hdr}{cb_rows}</table></div>')
 
@@ -171,7 +189,9 @@ def render_risk_card(meta: dict, cfd_scores: Sequence[float],
             '&mdash; it is not a shortlist; every listed site stays an assay candidate (see the '
             'validation panel). Sites needing &ge;2 bulges show &ldquo;&ndash;&rdquo; (not scored, '
             'not no-risk) and are kept but demoted there. The two scorers are different views of '
-            'the same sites, not additive. '
+            'the same sites, not additive. A practical default panel is every CRISPR-Bulge-flagged '
+            f'site ({cbop.sensitive_label_text()}, the sensitive default) plus the high-CFD sites it '
+            'misses (CFD &ge; 0.2 on no-bulge sites, and high CFD &ge; 0.5 on single-bulge sites). '
             f'<a class="rc-open" href="#{MODAL_ID}">How to read this →</a></div>')
 
     card = (
@@ -222,7 +242,26 @@ def _render_modal(cal) -> str:
         if summary_html else "")
     pr = _pr_curve_uri()
     pr_html = (f'<div class="rc-pr"><img alt="Precision-recall of each scorer" src="{pr}" '
-               f'style="max-width:100%"></div>') if pr else ""
+               f'style="max-width:100%">'
+               f'<div style="font-size:0.8em;color:#64748b;margin-top:4px">'
+               f'Precision-recall on held-out validated off-target sites. Marked points are the '
+               f'report&rsquo;s own operating points: <b>CFD</b> &ge;&nbsp;0.2 and &ge;&nbsp;0.5; '
+               f'<b>CRISPR-Bulge</b> {cbop.sensitive_label_html()} (the sensitive default), '
+               f'&ge;&nbsp;0.2, and &ge;&nbsp;0.5. The CRISPR-Bulge sensitive point is the 95%-recall '
+               f'threshold on the 40-guide benchmark; pushing recall higher moves left-and-down along '
+               f'the curve (steeply more sites per true off-target).</div></div>') if pr else ""
+    prb = _png_uri("pr_bulge_stratified.png")
+    prb_html = (
+        '<p>Stratified by bulge count, the scores separate sharply. CFD discriminates '
+        'mismatch-only off-targets (bulge=0 AP ≈ 0.27) but <b>cannot rank bulges</b> '
+        '(bulge=1 AP ≈ 0.01, essentially the prevalence floor); CRISPR-Bulge carries the '
+        'bulge signal (bulge=1 AP ≈ 0.25). This is why the recommended panel keys bulges on '
+        'CRISPR-Bulge and only rescues a single-bulge site on CFD when CFD is high (≥ 0.5). '
+        'CFD’s position-aware bulge penalty (2.8.0) corrects the per-site score so a '
+        'PAM-proximal bulge is no longer scored like a perfect match, but it does not make CFD '
+        'a bulge ranker.</p>'
+        f'<div class="rc-pr"><img alt="Precision-recall by bulge class" src="{prb}" '
+        f'style="max-width:100%"></div>') if prb else ""
     # CSS-only (:target) modal -- no JavaScript, so the report stays self-contained.
     return (
         f'<div class="rc-modal" id="{MODAL_ID}"><div class="rc-modal-box">'
@@ -232,6 +271,22 @@ def _render_modal(cal) -> str:
         f'<p>{_READ}</p>'
         f'{summary_html}{aupr_note}'
         f'{pr_html}'
+        f'{prb_html}'
+        '<p><b>Choosing a threshold.</b> The two scores behave differently: CFD is most reliable '
+        'off-bulge and only an extrapolation on bulges, while CRISPR-Bulge &mdash; the stronger ranker '
+        '&mdash; assigns a tiny non-zero score to almost every site, so a literal &ldquo;&gt; 0&rdquo; '
+        'cutoff would list essentially the whole genome. The <b>sensitive default is therefore a '
+        f'principled operating point, {cbop.sensitive_label_text()}</b> &mdash; the threshold that '
+        'recovers about 95% of validated off-targets on the 40-guide held-out benchmark (guide-bootstrap '
+        '95% CI wide; higher recall is reachable but the validation list grows steeply &mdash; 99% recall '
+        'is roughly 6&times; the sites, because the last few percent of true off-targets sit in the '
+        'score&rsquo;s noise floor). The recommended default panel is a union &mdash; <b>every '
+        f'CRISPR-Bulge-flagged site ({cbop.sensitive_label_text()}, the sensitive default), plus the '
+        'high-CFD sites CRISPR-Bulge misses (CFD &ge; 0.2 on no-bulge sites, where CFD is reliable, and high '
+        'CFD &ge; 0.5 on single-bulge sites, where it is an extrapolation), plus perfect/near-perfect '
+        'matches and functional / cancer-gene hits</b>. Sites needing '
+        '&ge; 2 bulges are kept but demoted (uncalibrated for both scores). See the validation panel '
+        '(Section 4) and METHODS &sect;3.5.</p>'
         f'<p><b>What “expected true” means.</b> {_ISOTONIC}</p>'
         '<p style="color:#64748b">Full method: METHODS § off-target risk summary.</p>'
         '</div></div></div>')

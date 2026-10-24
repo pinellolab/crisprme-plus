@@ -12,13 +12,16 @@ This test drives the REAL legacy ``iupac_decomposition`` both ways (slow enumera
 with REAL CFD matrices injected, on a fixture ADAPTIVELY chosen so the min-mm allele is NOT
 the max-CFD allele, and asserts fast's worst-case CFD >= slow's (== the true worst case).
 Without the fix this fails (fast would carry only the lower-CFD lex allele). STDLIB +
-the harness's numpy/pandas/CRISPR-Bulge stubs + the real mismatch_score/PAM_scores pickles.
+the harness's numpy/pandas/CRISPR-Bulge stubs + the clean-room CFD tables (committed JSON).
+
+The ground-truth worst-case oracle is the clean-room ``cfd_score.cfd`` (bulge-agnostic,
+mismatch-only alignment), which was proven bit-identical to the deleted legacy scorer over
+50k+ cases, so substituting it here preserves the equivalence this test asserts.
 
 Run: cd PostProcess && python3 -m unittest test_twopass_legacy_cfd -v
 """
 import io
 import os
-import pickle
 import sys
 import unittest
 
@@ -27,20 +30,21 @@ sys.path.insert(0, PP)
 
 from test_phased_haplotype import _load_pure_functions, GUIDE, GUIDE_NO_PAM, TARGET_LEN
 from test_observed_haplotype_integration import _variant_rows
+import cfd_score
 
-_MM = pickle.load(open(os.path.join(PP, "mismatch_score.pkl"), "rb"))
-_PAM = pickle.load(open(os.path.join(PP, "PAM_scores.pkl"), "rb"))
+# Clean-room CFD tables (committed JSON), passed to the scoring module under test so its
+# CFD rows are computed with the exact same weights as the ground-truth oracle below.
+_MM, _PAM = cfd_score.cfd_tables()
 
-# calc_cfd is a pure function of its args; borrow the real one from the module to score
-# rows exactly as preprocess_CFD_score does (guide-with-PAM, protospacer, last-2 PAM).
-_NS0 = _load_pure_functions({})
-_calc_cfd = _NS0["calc_cfd"]
+# The ground-truth worst-case scorer: the clean-room cfd_score.cfd for a mismatch-only
+# alignment. cfd(GUIDE, proto, pam, (mm,pam)) is the proven equivalent of the deleted
+# legacy oracle for guide-with-PAM / protospacer / last-2 PAM scoring.
 
 
 def _score_row_cfd(final_line):
     """CFD of a finalized variant row, exactly as preprocess_CFD_score computes it."""
     t = final_line[2].upper()
-    return _calc_cfd(GUIDE, t[:-3], t[-2:], _MM, _PAM, True)
+    return cfd_score.cfd(GUIDE, t[:-3], t[-2:], (_MM, _PAM))
 
 
 def _score_single_mm(pos, alt):
@@ -48,7 +52,7 @@ def _score_single_mm(pos, alt):
     proto = list("A" * 20)
     proto[pos] = alt
     target23 = "".join(proto) + "AGG"
-    return _calc_cfd(GUIDE, target23[:-3], target23[-2:], _MM, _PAM, True)
+    return cfd_score.cfd(GUIDE, target23[:-3], target23[-2:], (_MM, _PAM))
 
 
 class LegacyFastWorstCaseCFD(unittest.TestCase):

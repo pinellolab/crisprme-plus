@@ -23,7 +23,7 @@ import os
 import re
 
 
-version = "2.7.10"  # CRISPRme version
+version = "2.8.0"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -309,6 +309,67 @@ def check_crisprme_dirtree() -> None:
             crisprmedir = os.path.join(current_working_directory, directory)
             os.makedirs(crisprmedir)
 
+def _registry_data_type_for_search(args):
+    """Best-effort read of the variant index ``data_type`` (Phase-2.1 registry manifest
+    ``Dictionaries/registry_<...>/reg_<chrom>.idx``) for a complete-search, used to pick
+    the context-aware default analysis mode. Returns one of ``sites-only`` /
+    ``genotyped-unphased`` / ``genotyped-phased`` / ``hybrid``, or ``None`` when there is
+    no variant panel or no readable manifest. NEVER raises (any failure -> None -> the
+    population-level default)."""
+    try:
+        import json
+        if "--vcf" not in args:
+            return None  # reference-only search: no genotypes to resolve
+        dic = os.path.join(current_working_directory, "Dictionaries")
+        if not os.path.isdir(dic):
+            return None
+        # dataset hint(s) from --vcf (a VCF dir, or a list file naming vcf dir(s)) + genome
+        vcf_val = args[args.index("--vcf") + 1]
+        hints = []
+        if os.path.isfile(vcf_val):
+            try:
+                with open(vcf_val) as fh:
+                    hints = [os.path.basename(l.strip().rstrip("/")) for l in fh if l.strip()]
+            except OSError:
+                pass
+        else:
+            hints = [os.path.basename(vcf_val.rstrip("/"))]
+        genome_hint = (os.path.basename(args[args.index("--genome") + 1].rstrip("/"))
+                       if "--genome" in args else "")
+        regdirs = [d for d in sorted(os.listdir(dic))
+                   if d.startswith("registry_") and os.path.isdir(os.path.join(dic, d))]
+        # match the SPECIFIC dataset first (the --vcf dir name); fall back to the genome
+        # only when no dataset matches, and only then to a lone registry -- so that with
+        # several indexes in one data dir (e.g. HGDP1kGP + mega, both registry_hg38_*) a
+        # mega search is not misread as the phased panel.
+        matched = [d for d in regdirs if any(h and h in d for h in hints)]
+        if not matched and genome_hint:
+            genome_matched = [d for d in regdirs if genome_hint in d]
+            # Only adopt a genome-level match when it is UNAMBIGUOUS. If several panels
+            # share the genome (e.g. registry_hg38_HGDP1kGP + registry_hg38_mega), the
+            # searched panel has no registry of its own, and we must NOT borrow a sibling's
+            # data_type -- leaving `matched` empty returns None -> the safe population-level
+            # default, rather than silently defaulting to per-sample off a foreign panel.
+            if len(genome_matched) == 1:
+                matched = genome_matched
+        if not matched and len(regdirs) == 1:
+            matched = regdirs  # unambiguous single panel
+        for d in matched:
+            regdir = os.path.join(dic, d)
+            try:
+                for f in sorted(os.listdir(regdir)):
+                    if f.startswith("reg_") and f.endswith(".idx"):
+                        with open(os.path.join(regdir, f)) as fh:
+                            dt = json.load(fh).get("data_type")
+                        if dt:
+                            return dt  # dataset-wide; one manifest read suffices
+            except (OSError, ValueError):
+                continue
+    except Exception:
+        return None
+    return None
+
+
 def print_help_complete_search() -> None:
     """Prints detailed help information for the complete-search functionality.
 
@@ -386,18 +447,21 @@ def print_help_complete_search() -> None:
         "coverage, AF/FILTER consistency, POS bounds, multiallelic/breakend/"
         "duplicate/phasing survey) before launching the search; slower than the "
         "default lightweight checks, so opt-in [OPTIONAL]\n"
-        "\t--per-sample, resolve per-sample genotypes into observed haplotypes for the "
-        "SNP variant post-analysis (instead of the default population-level analysis): "
-        "reports every per-sample haplotype with CONFIRMED cis phasing + named carrier "
-        "samples + exact joint AF (the per-sample resolution the genotyped indexes are "
-        "built for). Requires a genotyped index (no-op with a warning on sites-only "
-        "panels, which have no genotypes to resolve). Slower, and can be intractable on "
-        "dense panels (measured 49h+ without completing on a 4x-density panel) -- "
-        "recommended for genotyped panels / clinical validation [OPTIONAL]\n"
-        "\t(By default, with no flag, CRISPRme+ runs a POPULATION-LEVEL analysis: one "
-        "worst-possible PUTATIVE representative per variant window, exact worst-case "
-        "CFD, dataset-level allele frequencies -- lossless for detection, tractable on "
-        "any panel, and the only meaningful mode on sites-only panels.)\n"
+        "\t--per-sample, force per-sample genotype resolution into observed haplotypes for "
+        "the SNP variant post-analysis: reports every per-sample haplotype with CONFIRMED "
+        "cis phasing + named carrier samples + exact joint AF (the resolution the genotyped "
+        "indexes are built for). Requires a genotyped index (no-op with a warning on "
+        "sites-only panels). Slower, and can be intractable on dense panels (measured 49h+ "
+        "without completing on a 4x-density panel) [OPTIONAL]\n"
+        "\t--population-level, force the fast population-level analysis: one worst-possible "
+        "PUTATIVE representative per variant window, exact worst-case CFD, dataset-level "
+        "allele frequencies -- lossless for detection, tractable on any panel. Use this to "
+        "opt OUT of per-sample on a phased index (e.g. a very dense / high-edit / "
+        "genome-wide search) [OPTIONAL]\n"
+        "\t(DEFAULT, no flag: CRISPRme+ auto-selects the mode by index type -- PER-SAMPLE on "
+        "a genotyped + PHASED index [e.g. the HGDP+1000G default: CONFIRMED cis + named "
+        "carriers], POPULATION-LEVEL otherwise [sites-only / unphased / hybrid / "
+        "reference-only]. --per-sample / --population-level override it.)\n"
         "\t--alt-alignments / --no-alt-alignments, emit (or skip) the exhaustive "
         "alternative-alignments file (*_all_results_with_alternative_alignments.tsv = the "
         "non-best alignments per locus). Default follows the mode: OFF for the default "
@@ -1733,33 +1797,60 @@ def complete_search() -> None:
             raise ValueError("Missing input for --vcf-filter-pass-values") from e
     full_input_validate = "--full_input_validate" in args
 
-    # POPULATION-LEVEL analysis is the DEFAULT (no flag). The SNP variant post-analysis
-    # emits ONE worst-POSSIBLE representative off-target per IUPAC window instead of
-    # enumerating the 2^k haplotype lattice / the observed per-sample haplotypes -- the
-    # enumeration-free path that stays tractable on dense/aggregate panels (the per-sample
-    # enumeration was measured 49h+ without completing on a 4x-density panel; see
-    # docs/DESIGN_2.5.1_two_pass_fast_mode.md). Rows are worst-possible / PUTATIVE with an
-    # EXACT worst-case CFD and dataset-level allele frequencies; per-sample phased
-    # resolution (CONFIRMED cis + named carriers + exact joint AF) is computed only when
-    # the user opts in with --per-sample (requires a genotyped index; nothing to resolve
-    # on sites-only panels). Propagated to the whole post-analysis subprocess tree via the
-    # internal env var CRISPRME_FAST_MODE (submit_job -> pools -> post_analisi_*.sh ->
-    # new_simple_analysis.py all inherit os.environ): "1" = default population-level,
-    # "0" = --per-sample genotype resolution. We ALWAYS set it so the resolved mode
-    # propagates. (The env var keeps its internal name to avoid resweeping the shell chain;
-    # it is not user-facing. The pre-2.5.4 --fast/--full flags are gone.)
-    per_sample = "--per-sample" in args
+    # Two analysis modes. POPULATION-LEVEL: the SNP variant post-analysis emits ONE
+    # worst-POSSIBLE representative off-target per IUPAC window instead of enumerating the
+    # 2^k haplotype lattice / the observed per-sample haplotypes -- the enumeration-free path
+    # that stays tractable on dense/aggregate panels (the per-sample enumeration was measured
+    # 49h+ without completing on a 4x-density panel; see docs/DESIGN_2.5.1_two_pass_fast_mode.md).
+    # Rows are worst-possible / PUTATIVE with an EXACT worst-case CFD and dataset-level allele
+    # frequencies. PER-SAMPLE: resolves genotypes into observed haplotypes (CONFIRMED cis +
+    # named carriers + exact joint AF) -- what a genotyped+phased panel is built for.
+    # The DEFAULT is context-aware (2.8.0, resolved just below): per-sample on a phased
+    # genotyped index, population-level otherwise; --per-sample / --population-level override.
+    # Propagated to the whole post-analysis subprocess tree via the internal env var
+    # CRISPRME_FAST_MODE (submit_job -> pools -> post_analisi_*.sh -> new_simple_analysis.py all
+    # inherit os.environ): "1" = population-level, "0" = per-sample. We ALWAYS set it so the
+    # resolved mode propagates. (The env var keeps its internal name to avoid resweeping the
+    # shell chain; it is not user-facing. The pre-2.5.4 --fast/--full flags are gone.)
+    # Context-aware DEFAULT (2.8.0): on a genotyped + PHASED index the per-sample
+    # resolution (CONFIRMED cis + named carriers + exact joint AF) is what the panel is
+    # built for, so it is the DEFAULT; population-level otherwise (sites-only / unphased /
+    # hybrid / reference / unknown -- where per-sample buys little or nothing and the fast
+    # worst-case screen is the right call). Explicit flags always win and are mutually
+    # exclusive: --per-sample forces genotype resolution, --population-level forces the fast
+    # worst-case screen. (data_type is read from the Phase-2.1 registry manifest.)
+    _force_ps = "--per-sample" in args
+    _force_pop = "--population-level" in args
+    if _force_ps and _force_pop:
+        error("--per-sample and --population-level are mutually exclusive; omit both to "
+              "auto-select by index type (per-sample on a phased genotyped index).")
+    if _force_ps:
+        per_sample = True
+    elif _force_pop:
+        per_sample = False
+    else:
+        _dt = _registry_data_type_for_search(args)
+        per_sample = _dt == "genotyped-phased"
+        if per_sample:
+            print(
+                "[complete-search] genotyped + PHASED index detected -> PER-SAMPLE analysis "
+                "by DEFAULT: CONFIRMED cis phasing + named carrier samples + exact joint "
+                "allele frequency. Pass --population-level for the fast worst-case screen "
+                "(recommended on a very dense / high-edit / genome-wide search, where "
+                "per-sample resolution can be slow).",
+                flush=True,
+            )
     # The pre-2.5.4 --fast / --full flags were removed (no aliases). argparse-free parsing
     # here means an unknown flag is silently ignored, so a saved stock/2.5.3 script passing
-    # --full would quietly run the population-level default with NO per-sample carriers and
-    # no error. Warn loudly and point at the replacement so the no-op is not invisible.
+    # --full would quietly run with NO explicit mode and no error. Warn loudly and point at
+    # the replacements so the no-op is not invisible.
     for _retired in ("--full", "--fast"):
         if _retired in args:
             print(
                 f"WARNING [complete-search]: '{_retired}' was removed in 2.5.4 and is IGNORED. "
-                f"The default (no flag) is the population-level analysis; pass --per-sample for "
-                f"genotype-resolved observed haplotypes (CONFIRMED cis + named carriers), which "
-                f"is what '{_retired}' used to do.",
+                f"The analysis mode now auto-selects by index (per-sample on a phased genotyped "
+                f"index, population-level otherwise); force it with --per-sample / "
+                f"--population-level. '{_retired}' used to force per-sample.",
                 flush=True,
             )
     os.environ["CRISPRME_FAST_MODE"] = "0" if per_sample else "1"
@@ -2210,7 +2301,7 @@ def complete_search() -> None:
                 "    crisprme.py download --what index --index-name "
                 "NRG_3_hg38+hg38_HGDP1kGP --path .\n"
                 "    (recommended default: phased HGDP + 1000 Genomes, 4,091 samples, "
-                "CONFIRMED carriers; or NRG_3_hg38+hg38_1000G2021 for 1000G-only)\n\n"
+                "CONFIRMED carriers)\n\n"
                 "  or build it locally (source VCFs required):\n"
                 "    crisprme.py build-index-only --genome %s --vcf %s --samplesID "
                 "<samplesID> --pam %s --bDNA <N> --bRNA <N>\n\n"
@@ -2249,7 +2340,7 @@ def complete_search() -> None:
 
     if population_level:
         print(
-            "[complete-search] POPULATION-LEVEL analysis (default): the SNP variant post-analysis "
+            "[complete-search] POPULATION-LEVEL analysis: the SNP variant post-analysis "
             "reports one WORST-POSSIBLE off-target per variant window (no 2^k haplotype "
             "enumeration; rows are worst-possible / PUTATIVE, not per-sample phased). CFD is the "
             "EXACT worst case -- a safe actionable gate (genome-wide validation: 0 CFD>=0.2 loci "
@@ -2266,7 +2357,7 @@ def complete_search() -> None:
             "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
             "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
             "-- the population-level analysis runs instead). Slower, and can be intractable on "
-            "dense panels; omit --per-sample for the default population-level analysis."
+            "dense panels; pass --population-level for the fast worst-case screen."
         )
     # record the resolved search mode so generate-report can surface it (the report note).
     try:
@@ -3223,18 +3314,21 @@ def print_help_download() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--what, component to fetch: genome | annotations | pams | samples | "
-        "vcf | index | assembly | all (all = genome+annotations+pams+samples, plus "
-        "the default hg38 reference index so a reference scan works out of the box) "
+        "vcf | build-inputs | index | assembly | all (all = genome+annotations+pams+samples, "
+        "plus the default hg38 reference index so a reference scan works out of the box) "
         "[REQUIRED]\n"
         "\t--ref, reference genome name for --what genome/index [default: hg38]\n"
-        "\t--dataset, variant dataset name for --what vcf (e.g. 1000G, HGDP; "
-        "custom --hf-repo only -- the default repo does NOT host these raw VCFs, "
-        "it ships them as prebuilt --what index indexes instead) "
-        "[REQUIRED for --what vcf]\n"
+        "\t--dataset, variant dataset name for --what vcf / build-inputs (the SOURCE VCFs "
+        "that built a shipped index, e.g. hg38_HGDP1kGP, hg38_HPRC, "
+        "hg38_mega). `--what vcf` fetches the raw per-chromosome VCFs (build from scratch: "
+        "then `build-index-only --vcf VCFs/<dataset> --samplesID ... --pam ...`); "
+        "`--what build-inputs` fetches the PRE-ENRICHED genome kit so build-index-only skips "
+        "enrichment and only indexes (fast / new-PAM path; kits exist for a subset of datasets) "
+        "[REQUIRED for --what vcf/build-inputs]\n"
         "\t--index-name, precomputed index directory name for --what index "
         "(e.g. the reference index NRG_3_hg38, the recommended variant-aware default "
         "NRG_3_hg38+hg38_HGDP1kGP (phased HGDP + 1000 Genomes, 4,091 samples), or "
-        "NRG_3_hg38+hg38_1000G2021 / NRG_3_hg38+hg38_HPRC / NRG_3_hg38+hg38_mega) "
+        "NRG_3_hg38+hg38_HPRC / NRG_3_hg38+hg38_mega) "
         "[REQUIRED for --what index]\n"
         "\t--sample, HPRC individual id for --what assembly (e.g. HG01255) -- fetches "
         "both haplotypes' genome + chain + chromAlias into Assemblies/<sample>/, the "

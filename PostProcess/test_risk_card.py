@@ -86,6 +86,49 @@ class TestRiskCard(unittest.TestCase):
         self.assertAlmostEqual(
             res["ge0.2"]["point"], res["0.2-0.5"]["point"] + res["0.5-1"]["point"], delta=0.5)
 
+    def test_cb_sensitive_band_counts_down_to_threshold_not_just_ge02(self):
+        """The CRISPR-Bulge "sensitive" band counts every site AT/ABOVE the benchmark
+        95%-recall operating point (cb_operating_point default 1.9e-4) -- not just >=0.2,
+        and not every CB>0 (scores in the sub-threshold noise floor are excluded).
+        Regression for the bug where render_risk_card pre-filtered CB to >=0.2 before
+        counting, so the band collapsed to the >=0.2 count. CFD stays >=0.2."""
+        import re, html
+        import cb_operating_point as cbop
+        sens = f"CRISPR-Bulge {cbop.sensitive_label_text()}, sensitive"
+        # 2 at >=0.5, 2 in [0.2,0.5), 5 in [threshold,0.2): sensitive=9, ge0.2=4, 0.5-1=2.
+        # Plus one value BELOW the 95%-recall threshold -> excluded from the sensitive band.
+        cb = [0.87, 0.55, 0.33, 0.21, 0.13, 0.08, 0.04, 0.02, 0.005,
+              cbop.sensitive_threshold() / 2.0]
+        card, _ = risk_card.render_risk_card(
+            {"guide_display": "G", "nuclease": "SpCas9", "pam": "NRG"},
+            cfd_scores=[0.6, 0.3], cb_scores=cb, n_perfect=0)
+        counts = {}
+        for row in re.findall(r"<tr[^>]*>(.*?)</tr>", card, re.S):
+            cells = [html.unescape(re.sub("<[^>]+>", "", c)).strip()
+                     for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row, re.S)]
+            cells = [c for c in cells if c != ""]
+            if cells and cells[0].startswith("CRISPR-Bulge") and len(cells) > 1:
+                counts[cells[0]] = int(cells[1].replace(",", ""))
+        self.assertEqual(counts.get(sens), 9)                 # >= threshold (sub-threshold one excluded)
+        self.assertEqual(counts.get("CRISPR-Bulge ≥ 0.2"), 4)  # the >=0.2 subset
+        self.assertEqual(counts.get("CRISPR-Bulge ≥ 0.5"), 2)
+        # the bug made the sensitive band == ge0.2; assert they differ when sub-0.2 scores exist
+        self.assertGreater(counts[sens], counts["CRISPR-Bulge ≥ 0.2"])
+
+    def test_pr_curve_section_caption_names_operating_points(self):
+        """The 'how to read this' modal embeds the PR-curve image AND captions the marked
+        operating points, so a reader can interpret the curve: CFD >=0.2/>=0.5 and the
+        CRISPR-Bulge SENSITIVE (95%-recall) default via cb_operating_point. Regression for
+        the previously un-captioned PR image (the reader couldn't tell what the markers were)."""
+        import cb_operating_point as cbop
+        _, modal = risk_card.render_risk_card(
+            {"guide_display": "G", "nuclease": "SpCas9", "pam": "NRG"},
+            cfd_scores=[0.6, 0.3], cb_scores=[0.8, 0.3, 0.1], n_perfect=0)
+        self.assertIn("rc-pr", modal)                       # PR image embedded (ships in-repo)
+        self.assertIn("operating points", modal)            # caption present
+        self.assertIn(cbop.sensitive_label_html(), modal)   # names the sensitive default
+        self.assertIn("95%-recall threshold", modal)        # explains what the sensitive point is
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -125,11 +125,75 @@ sets and held-out populations, not purely discrimination.
 AUROC (≈0.97/0.98) is reported only as a footnote: it is prevalence-invariant and does
 not reflect operating-point precision at this imbalance.
 
-Operating points (held-out): CFD t≥0.2 → recall 0.74 / precision 0.006; t≥0.5 → recall
-0.29 / precision 0.05. CRISPR-Bulge t≥0.26 → recall 0.60 / precision 0.50; t≥0.5 →
+Operating points (held-out): CFD t≥0.2 → recall 0.72 / precision 0.007; t≥0.5 → recall
+0.28 / precision 0.085. CRISPR-Bulge t≥0.26 → recall 0.60 / precision 0.50; t≥0.5 →
 recall 0.50 / precision 0.72. **These CRISPR-Bulge recalls (0.50–0.60) are recall against
 the assay-detected set (§2), not against ground truth, and a low CRISPR-Bulge count is not
-clearance (§7).** These curves are shown in the modal.
+clearance (§7).** These curves (overall and stratified by bulge count) are shown in the modal.
+
+**CFD position-aware bulge penalty (2.8.0).** CFD now applies Doench's position-weighted
+DNA/RNA-bulge factors at each bulge's true spacer position (previously a DNA bulge was realigned
+by a 5' trim that discarded the gap, so every DNA bulge — and any bulge at the two undefined
+terminal columns — was scored as if absent; a PAM-proximal bulge scored like a perfect match).
+This is a **per-site correctness fix, not a bulge-ranking improvement**: mismatch-only and
+in-range RNA-bulge scores are unchanged (bitwise), overall AUPR is unchanged (0.168; the
+benchmark is mismatch-dominated, 297/359 positives bulge-free), and CFD's bulge discrimination
+stays at the floor (bulge=1 AP ≈ 0.01). What it buys is **precision**: removing the
+PAM-proximal over-call drops ~9,000 spurious high-CFD bulge sites at t≥0.2 (precision
+0.006→0.007) and roughly doubles precision at t≥0.5 (0.05→0.085). It therefore *reinforces*
+the §3.5 panel logic (CRISPR-Bulge is the bulge ranker; CFD rescues a single-bulge site only at
+high confidence) rather than changing it. A ≥2-bp bulge (opt-in, outside the single-bulge
+calibration domain) applies the position factor per looped-out base — conservative (lower CFD),
+and flagged here because it is an extrapolation beyond the published matrix.
+
+## 3.5. Recommended default validation panel
+
+CRISPR-Bulge assigns a *non-zero* score to almost every candidate site. On the held-out
+benchmark, scored at **full precision**, **no** validated off-target scores exactly 0 — but
+neither do the negatives: **99.9% of them sit in a tiny noise floor below ≈1.9×10⁻⁴**. So a
+literal `>0` cutoff would list essentially the whole genome, and the earlier report (which
+rounded CRISPR-Bulge to 3 decimals) was in effect thresholding at the rounding floor, 5×10⁻⁴.
+The sensitive operating point is instead a **principled, documented threshold**: the
+CRISPR-Bulge score that recovers **~95% of the assay-detected off-targets** on the 40-guide
+held-out benchmark —
+
+> **CRISPR-Bulge ≥ 1.9×10⁻⁴ (the 95%-recall operating point)**
+
+(point 1.9×10⁻⁴; guide-cluster bootstrap 95% CI [5.8×10⁻⁶, 3.1×10⁻³]; selectable to 90% or 99%
+via `CRISPRME_CB_RECALL_TARGET`, single source of truth `PostProcess/cb_operating_point.py`). The
+threshold is applied to **full-precision** CRISPR-Bulge scores — the report now writes `{:.6g}`,
+not 3 decimals, so the sub-5×10⁻⁴ operating point is representable (3-decimal rounding would have
+floored it at 5×10⁻⁴ and dropped ~7% of validated off-targets from the sensitive tier). The
+practical default panel is a **union**, not a single cutoff:
+
+> **Default panel = (CRISPR-Bulge ≥ 1.9×10⁻⁴, 95%-recall) ∪ (CFD ≥ 0.2 on 0-bulge sites) ∪ (CFD ≥ 0.5 on single-bulge sites) ∪ must-includes**
+
+where *must-includes* are all perfect / near-perfect matches, any site in a functional element
+or cancer-driver gene, and — on a genotyped/phased panel — observed *cis* haplotypes with named
+carriers.
+
+- **CRISPR-Bulge ≥ the 95%-recall threshold** carries the bulge sites and the ML-ranked core —
+  CFD cannot rank bulges (bulge=1 AP ≈ 0.01 vs CRISPR-Bulge ≈ 0.25; §3). CFD's 2.8.0 position-aware
+  bulge penalty fixes the *per-site* over-call (a PAM-proximal bulge no longer scores like a perfect
+  match) but does not make CFD a bulge ranker.
+- **CFD ≥ 0.2 on 0-bulge** rescues the high-CFD no-bulge sites CRISPR-Bulge misses (CFD is
+  reliable off-bulge).
+- **CFD ≥ 0.5 on a single bulge** rescues the *high-CFD* 1-bulge sites: CFD now position-penalizes
+  the bulge but is still not calibrated to rank bulges, so only high-confidence calls are rescued
+  (CRISPR-Bulge remains the primary bulge ranker; this only *adds* sites it scored low).
+- **≥2-bulge sites** are excluded from scoring-driven selection (uncalibrated for both scores)
+  but kept-and-demoted in the report, never dropped.
+
+**Recall vs. validation size.** Recall above ~95% is reachable but the list grows **steeply**,
+because the last few percent of true off-targets sit in the noise floor shared with the
+negatives. On the benchmark the trade is ≈**9 sites per true off-target at 90% recall, ≈21 at
+95%, ≈354 at 99%** (≈6× the 95% list), ≈790 at 100%. For the ACTGA/NRG worked example (189,957
+candidate loci) the 95% threshold yields **162 off-target validation loci** (90% → 58; 99% → 1,158; the shipped crispr_bulge_gt_0.tsv tier; +2 perfect-match candidate on-targets), measured
+directly on the regenerated full-precision report (not the per-true-OT ratios above, which are
+benchmark-wide averages).
+Panel depth is a **risk/validation-size optimization** read off the expected-true counts (§5),
+**not a recall guarantee** — detection is lossless (every site is listed); only score-ranked
+selection carries this trade.
 
 ## 4. Point calibration: isotonic, and why
 

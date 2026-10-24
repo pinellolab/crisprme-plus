@@ -1,8 +1,9 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ℹ️ **CRISPRme+ (v2.7.10)** is the current release of the next-generation line
-> (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, population-level
-> analysis by default with opt-in `--per-sample` genotype resolution). For a frozen
+> ℹ️ **CRISPRme+ (v2.8.0)** is the current release of the next-generation line
+> (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, context-aware analysis
+> mode — per-sample by default on genotyped+phased indexes, population-level on sites-only,
+> with opt-out `--population-level`). For a frozen
 > production/clinical baseline you can instead use the stable line
 > **[CRISPRme 2.1.14](https://github.com/pinellolab/CRISPRme/releases/tag/v2.1.14)**.
 
@@ -76,7 +77,7 @@ docker pull pinellolab/crisprme:latest
 ```
 
 > **Reproducibility:** `:latest` auto-updates to the newest release (and is the
-> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.7.10`
+> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.8.0`
 > everywhere below in place of `:latest`.
 
 > **Already have an older image?** Docker does **not** re-download a tag you already
@@ -135,11 +136,6 @@ complementary production indexes — the recommended default is the fully phased
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 
-# 1000-Genomes-only alternative — 1000 Genomes 2021 (3,202 samples), genotyped and fully phased.
-# CONFIRMED cis haplotypes with named per-sample carriers + exact joint AF (use --per-sample).
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
-
 # Sites-only "mega" panel — five sources (1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + AoU),
 # per-dataset AF + cross-source AF_max. PUTATIVE haplotypes with a conservative min-AF bound.
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
@@ -150,15 +146,19 @@ The web interface picks these up automatically — a search that uses the defaul
 (SpCas9, recognizes NGG + NAG) with up to 2 bulges will reuse them instead of rebuilding.
 (Need a different nuclease? See **"Installing more indexes"** at the bottom.)
 
-> **Population-level (default) vs per-sample.** The axis is genotype resolution, not speed.
-> By default searches run a **population-level analysis** — they report a small set of
-> worst-possible representatives per variant window (reference + minimum-edit + maximum-CFD),
-> which removes the per-haplotype enumeration wall on dense/aggregate panels and is lossless
-> for detection. Add **`--per-sample`** (CLI) or pick **Per-sample** in the web form to resolve
-> per-sample genotypes into observed haplotypes with named carriers + CONFIRMED cis phasing +
-> exact joint AF (recommended on the **genotyped** panel for clinical validation). This needs
-> a genotyped panel — it's a no-op on the sites-only mega panel (no genotypes to resolve), and
-> the web form disables it there. The shareable report states which mode was used.
+> **Analysis mode (context-aware default) — per-sample vs population-level.** The axis is
+> genotype resolution, not speed. By default `complete-search` auto-selects the mode from the
+> index: on a **genotyped+phased** panel (HGDP + 1000 Genomes [the default], HPRC)
+> it runs **per-sample** — resolving per-sample genotypes into observed haplotypes with named
+> carriers + CONFIRMED cis phasing + exact joint AF; on a **sites-only / unphased** panel (e.g.
+> the mega panel) it runs **population-level** — a small set of worst-possible representatives
+> per variant window (reference + minimum-edit + maximum-CFD), which removes the per-haplotype
+> enumeration wall and is lossless for detection. Add **`--per-sample`** (CLI) or pick
+> **Per-sample** in the web form to force resolution — it's a no-op on the sites-only mega panel
+> (no genotypes to resolve), and the web form disables it there. Add **`--population-level`**
+> (CLI) or pick **Population-level** in the web form to force the fast worst-case screen even on
+> a genotyped+phased panel (e.g. a very dense / high-edit / genome-wide search). The shareable
+> report states which mode ran.
 
 ## 5. (Optional, advanced) Add the raw 1000 Genomes VCFs
 
@@ -279,9 +279,10 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 - `--per-sample` resolves per-individual genotypes: it names the **carrier samples**
   and marks co-occurring variants **CONFIRMED cis** (phased) / **PUTATIVE co-carrier**
   (unphased) with the exact joint allele frequency. It needs a genotyped index
-  (HGDP + 1000 Genomes [the default], 1000G-2021, or HPRC); omit it for the faster population-level
-  default, and note it is inert on the sites-only *mega* index. Either way the search
-  is variant-aware with allele frequencies and rsIDs.
+  (HGDP + 1000 Genomes [the default], or HPRC); on these phased panels per-sample
+  is already the context-aware default, so use `--population-level` to force the fast
+  worst-case screen, and note per-sample is inert on the sites-only *mega* index. Either way
+  the search is variant-aware with allele frequencies and rsIDs.
 - COSMIC cancer rows ship in the annotation bundle but are **off by default**
   (licence-gated) — enable with `crisprme.py cosmic-license enable`; IntOGen
   cancer-driver flags are on by default.
@@ -374,8 +375,7 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 # (The index above bundles its genotype store, so sample-level analyses / named
 #  carriers work too — no raw VCFs needed. The default repo does not host raw
-#  per-dataset VCFs; it ships the standard panels as prebuilt indexes. The
-#  1000-Genomes-only alternative is NRG_3_hg38+hg38_1000G2021; see step 4 above.)
+#  per-dataset VCFs; it ships the standard panels as prebuilt indexes.)
 
 # 3. launch the web interface
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
@@ -498,6 +498,17 @@ and deleting data you no longer need. See
   throwaway container.
 - **A search ran out of memory** → raise Docker's memory limit (step 1), or
   start with a smaller search (fewer mismatches/bulges, or one chromosome).
+- **(CLI) `guide '...' is 20 nt but the PAM expects a padded length of 23 nt`** →
+  on the command line each guide in the guide file must be padded to the PAM length
+  with `N`s for the PAM positions. For a 20 bp SpCas9 spacer with a 3 nt PAM, append
+  `NNN` (e.g. `ACTGAAATCTGTAAGCAGGCNNN`). The pre-flight validator catches this before
+  the search starts. (The **web interface** pads automatically — you only type the
+  spacer there.)
+- **(CLI) `Output folder /DATA/Results/<name> not empty!`** → `--output <name>` must
+  name a folder that does not already exist. If a previous run **aborted at the
+  validation step** (e.g. the guide-padding error above), it can leave behind a small
+  setup folder that blocks a re-run with the same name. Delete it
+  (`rm -rf Results/<name>`) or pick a new `--output` name, then re-run.
 - **`download` fails with `Not enough free disk space` (or a small/HPC home
   directory)** → the download first caches files under `~/.cache/huggingface`.
   On systems with a small home (many HPC clusters), point that cache at a roomy

@@ -11,6 +11,128 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-10-23
+
+### Added
+- **Reference-sequence score columns + aligned spacer in the curated tables.** The top-1000 tables and
+  every curated download TSV gain `CFD_ref` and `CRISPR-Bulge_ref` — the score of the REFERENCE sequence
+  at each site, shown beside the ALT/worst-case score so a reviewer sees how much a variant moves each
+  score — and an `Aligned_spacer+PAM` column placed immediately before `Aligned_protospacer+PAM`, so the
+  guide and protospacer read as a pairwise alignment (bulge columns as `-`). `CRISPR-Bulge_ref` is gated
+  like the CRISPR-Bulge column (shown only when CRISPR-Bulge was computed).
+- **CRISPR-Bulge sensitive tier (benchmark 95%-recall operating point) in the Section-4 threshold
+  table + a `crispr_bulge_gt_0.tsv` download.** The CRISPR-Bulge candidate-count table shows
+  `≥ 0.5 / ≥ 0.2 / ≥ 1.9e-4 (95% recall)` — the orphan `≥ 0.1` tier is replaced by the **sensitive
+  operating point** the recommended panel keys on: the threshold that recovers ~95% of validated
+  off-targets on the 40-guide held-out benchmark (point 1.9e-4; guide-bootstrap 95% CI [5.8e-6, 3.1e-3];
+  selectable via `CRISPRME_CB_RECALL_TARGET={90|95|99}`, single source of truth in `cb_operating_point`).
+  The matching subset is bundled as a download, consistent with the risk-card sensitive row. The file
+  key stays `crispr_bulge_gt_0.tsv` (stable download/web identifier).
+- **CRISPR-Bulge scores are written at full precision (`{:.6g}`) instead of 3 decimals.** The sensitive
+  default (1.9e-4) is below the old 3-decimal display floor (5e-4), which would have silently rounded
+  ~7% of validated off-targets to `0.000` and dropped them from the sensitive tier (recall 0.93→1.00 on
+  the benchmark). Full precision across the population/per-sample and indel scorers makes the operating
+  point representable. CFD display is unchanged (3dp; its tiers are ≥0.2/≥0.5, far above the floor).
+
+### Changed
+- **CFD now penalizes bulges by position (Doench et al., 2016 gap matrix), instead of ignoring them.**
+  CFD's score tables include position-weighted DNA-bulge (`r-:dX`) and RNA-bulge (`rX:d-`) factors, but
+  the DNA-bulge factors were never applied: the scorer realigned a DNA-bulge target by trimming the 5'
+  end, which collapsed the gap to a table position that has no entry, so every DNA bulge — and every
+  bulge at the two undefined terminal columns — contributed a factor of 1.0 (no penalty). A bulge
+  immediately adjacent to the PAM (maximally disruptive) therefore scored the same as no bulge
+  (e.g. a chr19 site scored CFD 0.87 with a PAM-proximal DNA bulge, while CRISPR-Bulge scored it 0).
+  CFD now scores the alignment as displayed — the extra genomic base of a DNA bulge is removed so the
+  20 guide bases keep their true Cas9 positions (this also fixes a mispairing in the old 5'-trim), and
+  the position-weighted gap factor is applied at the bulge's real position, with the two undefined
+  terminal columns extrapolated (lenient at the PAM-distal 5' tip, abolished at the PAM-proximal
+  junction). Mismatch-only sites and in-range RNA bulges are unchanged (bitwise); only previously
+  unpenalized bulges move. The same position-aware scoring is applied across every CFD path (the
+  population and per-sample analyzers, the indel analyzer, the two-pass worst-case screen, the
+  standalone target scorer, and the factorized fast-mode scorer). A ≥2-bp bulge (opt-in `--bDNA`/
+  `--bRNA ≥ 2`, outside the single-bulge calibration domain) applies the position factor per looped-out
+  base; see METHODS §3. The deployment calibration (isotonic P(real), AUPR, precision/recall) was refit
+  on the re-scored 2.94M-site benchmark and the report's PR curves regenerated, including a new
+  bulge-stratified panel embedded in the risk-card modal. Measured effect: a per-site correctness fix,
+  not a bulge-ranking gain — overall AUPR unchanged (0.168; the benchmark is mismatch-dominated) and
+  CFD's bulge-only AP stays at the floor (≈0.01 vs CRISPR-Bulge ≈0.25), but removing the PAM-proximal
+  over-call drops ~9,000 spurious high-CFD bulge calls at CFD≥0.2 (precision 0.006→0.007; at CFD≥0.5
+  0.05→0.085). It reinforces the recommended-panel logic (CRISPR-Bulge ranks bulges; CFD rescues a
+  single-bulge site only at high confidence) rather than changing it.
+- **Context-aware default analysis mode: per-sample on a genotyped+phased index.** With no mode flag,
+  `complete-search` now auto-selects **per-sample** (CONFIRMED cis phasing + named carrier samples +
+  exact joint AF) when the variant index is genotyped **and phased** (e.g. the default HGDP+1000G
+  panel), and **population-level** otherwise (sites-only / unphased / hybrid / reference-only). The
+  index `data_type` is read from the Phase-2.1 registry manifest. New **`--population-level`** flag
+  forces the fast worst-case screen (opt out of per-sample on a phased index — recommended on a very
+  dense / high-edit / genome-wide search); `--per-sample` still forces resolution; the two are mutually
+  exclusive. The web Analysis-mode selector mirrors this (defaults to per-sample on a phased panel). A
+  one-line notice prints the auto-selected mode and how to override. Rationale: phased panels are built
+  for exactly this resolution, so the richest, most honest result is the default where it is tractable.
+- **The recommended validation panel (report Section 4) selects on a principled sensitive operating
+  point (benchmark 95%-recall), not an ad-hoc `> 0`.** The panel hard-includes
+  `(CRISPR-Bulge ≥ 1.9e-4) ∪ (mm+b ≤ 2) ∪ (CFD ≥ 0.2 at 0 bulges) ∪ (CFD ≥ 0.5 at 1 bulge) ∪
+  (clean 0-mismatch bulge) ∪ must-includes` — making the shipped `panel_top100.tsv` *be* the recommended
+  default panel rather than a CFD-centric subset. The CRISPR-Bulge sensitive threshold is the **95%-recall
+  operating point** on the 40-guide held-out benchmark (CB cannot rank bulges: bulge=1 AP ≈ 0.02 vs ≈ 0.25,
+  so it is the primary axis); the CFD rescue is sensitive off-bulge (≥ 0.2) but requires high confidence
+  (≥ 0.5) on single-bulge sites where CFD is an extrapolation; ≥2-bulge CFD-only sites are kept-and-demoted
+  (uncalibrated for both scores), never dropped. One consistent threshold message now runs across the risk
+  card, the "how to read this" modal, the Section-4 methods note, the score glossary, and METHODS §3.5.
+  Why a principled cutoff and not literal `> 0`: CRISPR-Bulge assigns a tiny non-zero score to ~every site
+  (99.9% of benchmark negatives fall below 1.9e-4), so `> 0` would list essentially the whole genome.
+  95% recall is the sensible trade — for the ACTGA/NRG worked example (189,957 candidate loci) it yields
+  162 off-target validation loci (90% → 58; 99% → 1,158; the shipped crispr_bulge_gt_0.tsv tier); pushing from 95% to 99% recall is ~7× the sites because the
+  last few percent of true off-targets sit in the score's noise floor. Framed as a risk/validation-size optimization, not a
+  recall guarantee; recall above ~95% is reachable (selectable) but the list grows steeply.
+
+### Fixed
+- **Reference-only search on a read-only install no longer dies on the `vuoto.txt` placeholder.**
+  The serial annotation-index pre-build (the flock-race fix) called `load_annotation_bed()` directly
+  on the annotation file, bypassing the empty-annotation guard; for a reference-only search that file
+  is the empty `vuoto.txt` placeholder, which `pysam.tabix_index()` bgzips in place and removes —
+  consuming it, so the later gene-annotation step's `cp vuoto.txt` failed and aborted the search (and
+  the write fails outright on a truly read-only install / Apptainer SIF). `load_annotation_bed` now
+  returns `None` for `vuoto.txt` (never indexes the placeholder) and the pre-build skips it
+  (`test_annotation.test_vuoto_placeholder_never_indexed_or_consumed`; release trap T-38).
+- **The "Observed" cell no longer reports a misleading raw carrier count for population-level,
+  multi-variant off-targets.** A dense-window site that stacks N variants into one worst-case
+  protospacer previously showed e.g. `128 carriers`, which reads as "128 people carry this
+  off-target" — but in the population-level (unphased) default that number is the **union** of
+  samples carrying ≥1 of the N variants, and the stacked combination may exist on no single
+  haplotype (a possible chimera; the row's own low joint AF gives it away). It now reads
+  `128 carriers (>=1 of 12 vars, poss. chimera)`. A single-variant site still reads `N carriers`, and
+  under `--per-sample` (phased, exact cis set) it reads `N cis carriers`. Applies to the in-report
+  table and the download TSVs (one shared cell).
+- **The per-site "Observed" modal/caption no longer calls population-level reconstructions
+  "observed haplotypes."** In the population-level (unphased) default a site reached by several
+  variant combinations now reads `N variant combinations (worst-case)` (modal), `N other variant
+  combinations` (link), and the caption spells out that these are reconstructed from the observed
+  variants and are unphased — "run `--per-sample` to resolve the true cis haplotypes and carriers."
+  Under `--per-sample` the wording stays `observed haplotypes` (genuinely resolved/phased). Mirrors
+  the carrier-count fix one level up.
+- **`--per-sample` searches no longer fail at the annotation stage on Docker Desktop for Mac/Windows.**
+  The post-search step annotates three target files in parallel, each building the same tabix index;
+  `flock` is non-functional on VM-backed bind mounts (virtiofs/9p → ENOTTY), so the concurrent builds
+  raced, corrupted the index read, and tripped the stderr-fatal gate — killing the whole search at the
+  final stage with a misleading "file may be corrupt, re-download". Fix: pre-build the tabix index once,
+  serially, before the parallel annotators (they then only read a complete index), and tolerate a
+  `flock` that errors on such filesystems. Linux/cluster (working `flock`) was unaffected.
+- **Transient truncated reads of the annotation no longer abort a search.** `load_annotation_bed` now
+  retries the BGZF-EOF guard + index build + open with a short backoff (filesystem read-after-write lag
+  on virtiofs/NFS), declaring the file corrupt only after the view fails to settle (+ 4 regression tests,
+  now wired into CI).
+
+### Documentation
+- Troubleshooting entries for two CLI first-run messages a newcomer can hit: a guide needing `NNN`
+  PAM-padding (23 nt), and the "output folder not empty" a validation-aborted run leaves behind.
+
+### Removed
+- Retired the standalone 1000G-2021 index (`NRG_3_hg38+hg38_1000G2021` + genotype companion) —
+  superseded by the default HGDP1kGP (which includes the jointly re-phased 1000G-2021 samples);
+  deleted from HuggingFace (26 GB reclaimed), rebuildable from the retained `hg38_1000G_2021`
+  source. The `hg38_1000G_2021` source dataset remains (a mega + HGDP1kGP input).
+
 ## [2.7.10] - 2026-10-22
 
 ### Added
@@ -36,18 +158,23 @@ and the `release-crisprme` skill.
   `docs/offtarget_risk_summary_METHODS.md`.
 
 - **Own implementation of the CFD score** (Doench et al., *Nat. Biotechnol.* 2016) in
-  `PostProcess/cfd_score.py`, with the mismatch and PAM penalty tables serialized as reviewable JSON
+  `PostProcess/cfd_score.py`, with the mismatch and PAM penalty tables as reviewable JSON
   (`cfd_mismatch_scores.json`, 392 keys; `cfd_pam_scores.json`, 16 keys) and a committed generator
-  (`scripts/generate_cfd_tables.py`, with a `--check` round-trip mode). The module reproduces the
-  existing CFD values bit-for-bit (`test_cfd_score` checks raw IEEE-754 equality against the current
-  scorer across the mismatch/PAM/gap/IUPAC and T→U paths); it is not yet wired into the production
-  scoring path, which is unchanged in this release.
+  (`scripts/generate_cfd_tables.py`, with a `--check` table-validation mode). It is now **the**
+  production CFD scorer: the SNP, INDEL, fast-mode and `targets-scoring` paths all score through
+  `cfd_score.cfd` via the position-aware `bulge_cfd_penalty.cfd_score_bulge_aware`, and the previous
+  per-module scorer (three `calc_cfd` copies + their helpers) and the binary `.pkl` penalty tables
+  have been removed. Output is **bit-for-bit identical** to prior releases' CFD: a committed golden
+  fixture (`cfd_golden.tsv.gz`, 6,132 cases spanning mismatches, DNA/RNA/terminal/PAM-proximal bulges,
+  every gap key, IUPAC and non-canonical PAM) is reproduced exactly (raw IEEE-754) by
+  `test_cfd_cleanroom_equiv`, which also checks clean-room internal consistency and the published
+  Doench anchor values.
 
 - **`crisprme.py targets-scoring` — score a supplied LIST of off-target sites** (no genome search).
   Takes Cas-OFFinder output (`--casoffinder`, schema auto-detected) or a generic TSV with an explicit
   column map (`--columns guide=..,dna=..,chrom=..,pos=..`) and annotates each site with the **same**
-  CFD and CRISPR-Bulge calculations a normal CRISPRme+ report uses (`calc_cfd` is pinned byte-identical
-  to the canonical copies by `test_calc_cfd_twins_agree`; CRISPR-Bulge via the `cbulge` env, `-1.0`
+  CFD and CRISPR-Bulge calculations a normal CRISPRme+ report uses (the shared clean-room
+  `cfd_score.cfd` via `cfd_score_bulge_aware`; CRISPR-Bulge via the `cbulge` env, `-1.0`
   when absent). With `--index-path` it adds a per-site **variant carrier overlay**: the variants
   overlapping each site's protospacer+PAM window and, per population dataset, their allele frequency +
   carrier count (read from the index's `Dictionaries/registry_<vcf>` tier). Enables scoring
@@ -2429,7 +2556,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.7.10...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.0
 [2.7.10]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.10
 [2.7.9]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.9
 [2.7.8]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.8

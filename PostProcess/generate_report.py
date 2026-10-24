@@ -48,10 +48,11 @@ Report structure (top -> bottom)
 3. SIMPLIFIED reference-vs-population plot (v1 single view).
 4. RECOMMENDED VALIDATION PANEL: the full threshold table (candidate counts at
    CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS the
-   HYBRID worst-case top-100 panel: HARD-INCLUDE every site with mm+b<=2 OR
-   CFD>=0.5 at <=1 bulge OR a clean 0-mismatch bulge (a >=2-bulge CFD-only site is
-   kept too but DEMOTED to the end, CFD being an uncalibrated over-call there), then
-   FILL to 100 by worst-case severity across CFD desc / CRISPR-Bulge
+   recommended default panel: HARD-INCLUDE every site with CRISPR-Bulge >= the
+   sensitive default (95%-recall benchmark threshold, when computed) OR mm+b<=2 OR CFD>=0.2 at 0 bulges OR CFD>=0.5
+   at 1 bulge OR a clean 0-mismatch bulge (a >=2-bulge CFD-only site is kept too but
+   DEMOTED to the end, CFD being an uncalibrated over-call there), then FILL to at
+   least 100 by worst-case severity across CFD desc / CRISPR-Bulge
    desc (if computed) / mm+b asc (no variant quota). An explicit in-report
    methods note (plain-language, real constants) sits under the panel. The panel
    and each non-empty threshold tier are exported (curated columns) and linked.
@@ -115,6 +116,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from utils import gene_region_class  # noqa: E402  # shared with resultIntegrator + web
+import cb_operating_point as cbop  # noqa: E402  # CRISPR-Bulge sensitive operating point (single source of truth)
 
 # report-generator version -- bumped here, stamped in the footer provenance line.
 REPORT_GENERATOR_VERSION = "2.4"
@@ -135,7 +137,12 @@ PANEL_DISPLAY_CFD_THRESHOLDS = (0.5, 0.2)
 # CRISPR-Bulge cut points (0.5/0.2/0.1): calibrated on Refined_TrueOT (positives
 # median 0.36; PR at 0.5=prec .67/rec .40, 0.2=prec .38/rec .55, 0.1=rec .64) --
 # graduated + model-relative on its own [0,1] cleavage-probability scale.
-CRISPR_BULGE_THRESHOLDS = (0.5, 0.2, 0.1)
+# CRISPR-Bulge Section-4 tiers: the >= cut tiers PLUS the sensitive operating point
+# added in _crispr_bulge_tier_specs() -- the benchmark 95%-recall threshold
+# (cb_operating_point, default CB >= 1.9e-4), consistent with the risk-card sensitive
+# row and the panel's selection. The orphan >=0.1 tier was replaced by this sensitive
+# default, the point the recommended panel actually keys on (was an ad-hoc "> 0").
+CRISPR_BULGE_THRESHOLDS = (0.5, 0.2)
 
 
 def _set_active_scorer(scorer=None):
@@ -152,6 +159,23 @@ def scorer_label():
 def scorer_thresholds():
     """Tier thresholds for the second (ML) score column (its own [0,1] scale)."""
     return CRISPR_BULGE_THRESHOLDS
+
+
+def _crispr_bulge_tier_specs():
+    """Section-4 CRISPR-Bulge tiers as ``(display_suffix, file_key, predicate)``:
+    the ``>=`` cut tiers followed by the sensitive operating point (the point the
+    recommended panel keys on; mirrors the risk-card sensitive row). The sensitive
+    default is the 95%-recall threshold on the 40-guide held-out benchmark
+    (``cb_operating_point``; was the ad-hoc ``> 0``). The file key stays
+    ``crispr_bulge_gt0`` for stable download/web identifiers. ``predicate`` maps the
+    CRISPR-Bulge score Series -> boolean mask (NaN -> False for N/A sites)."""
+    import cb_operating_point as cbop
+    thr = cbop.sensitive_threshold()
+    specs = [(f"&ge; {t}", f"crispr_bulge_{t:.2f}", (lambda s, t=t: s >= t))
+             for t in CRISPR_BULGE_THRESHOLDS]
+    specs.append((cbop.sensitive_label_html(), "crispr_bulge_gt0",
+                  (lambda s, thr=thr: s >= thr)))
+    return specs
 MMB_THRESHOLDS = (1, 2, 3, 4)
 # threshold-table variant-created CFD floor (kept for the full threshold table)
 PANEL_VARIANT_CFD_MIN = 0.05
@@ -160,17 +184,21 @@ PANEL_VARIANT_CFD_MIN = 0.05
 # HYBRID worst-case top-100 panel (section 4).
 # --------------------------------------------------------------------------- #
 # Over the OFF-TARGET set (on-target mm+b==0 excluded), the panel is built in two
-# stages:
-#   1. HARD-INCLUDE every site that is close by sequence OR high-scoring IN CFD'S
-#      CALIBRATED DOMAIN OR a pure bulge, i.e. mm+bulges <= PANEL_FLOOR_MMB  OR
-#      (CFD >= PANEL_FLOOR_CFD AND bulges <= 1)  OR  (0 mismatches AND >=1 bulge).
+# stages and IS the recommended default validation panel:
+#   1. HARD-INCLUDE every site flagged by the sensitive model OR close by sequence OR
+#      a high-CFD site (within CFD's defensible reach) OR a pure bulge, i.e.
+#      CRISPR-Bulge >= the sensitive default (95%-recall benchmark threshold)  OR
+#      mm+bulges <= PANEL_FLOOR_MMB  OR  (CFD >= PANEL_RESCUE_CFD AND bulges == 0)  OR
+#      (CFD >= PANEL_HIGH_CFD AND bulges == 1)  OR  (0 mismatches AND >=1 bulge).
 #      These RELIABLE hard-includes are always in the panel even if they exceed the
 #      cap. A >=2-bulge site high on CFD ALONE is also kept (never dropped -- its risk
 #      is unknown, not zero) but DEMOTED: ranked after every reliable site, because
 #      CFD at >=2 bulges is an uncalibrated over-call and CRISPR-Bulge is N/A there.
-#      The pure-bulge floor matters because >=2-bulge off-targets have no ML score
-#      (out of the CRISPR-Bulge domain), so a clean bulged site must not be dropped by
-#      a missing/low score.
+#      The CFD rescue is sensitive off-bulge (CFD >= 0.2 at 0 bulges) but requires HIGH
+#      CFD (>= 0.5) on single-bulge sites, where CFD is an extrapolation; >=2-bulge CFD
+#      sites are demoted. The pure-bulge floor matters because >=2-bulge off-targets
+#      have no ML score (out of the CRISPR-Bulge domain), so a clean bulged site must
+#      not be dropped by a missing/low score.
 #   2. FILL the remaining slots up to PANEL_CAP by worst-case severity: each site
 #      is ranked independently by CFD (desc), CRISPR-Bulge (desc; only when computed),
 #      and mm+bulges (asc, fewer = closer = worse); a site's SEVERITY is the BEST
@@ -178,9 +206,14 @@ PANEL_VARIANT_CFD_MIN = 0.05
 #      single metric floats up. Ties: CFD desc -> CRISPR-Bulge desc -> mm+b asc.
 # There is NO variant-created quota: variant-created sites enter through the same
 # floors/ranks as reference sites.
-PANEL_CAP = 100
-PANEL_FLOOR_MMB = 2  # hard-include every off-target with mm+bulges <= this
-PANEL_FLOOR_CFD = 0.5  # hard-include (reliable) every off-target with CFD >= this AND bulges <= 1
+PANEL_CAP = 100  # fill up to at least this many by worst-case severity; every hard-include
+                 # below is kept even when the hard-includes already exceed this floor.
+PANEL_FLOOR_MMB = 2  # hard-include every off-target with mm+bulges <= this (near-perfect by sequence)
+PANEL_RESCUE_CFD = 0.2  # CFD rescue on 0-bulge (mismatch-only) sites: hard-include CFD >= this.
+                        # CFD is reliable off-bulge, so the sensitive 0.2 floor applies there.
+PANEL_HIGH_CFD = 0.5    # "high CFD" on BULGED sites, where CFD is an extrapolation: a 1-bulge site
+                        # this high is RESCUED (hard-included); a >=2-bulge site this high is KEPT but
+                        # DEMOTED to the end (uncalibrated, CRISPR-Bulge N/A) -- never silently dropped.
 # metrics contributing to the worst-case severity (logical key, direction).
 # direction "desc" => higher is worse; "asc" => lower is worse (closer sequence).
 PANEL_WORSTCASE_METRICS = (
@@ -239,17 +272,20 @@ CURATED_COLUMNS = (
     ("Chromosome", "chrom"),
     ("Position", "pos"),
     ("Strand", "strand"),
+    ("Aligned_spacer+PAM", "aligned_spacer"),  # the guide/spacer side of the alignment (bulge cols as '-'); pairs with the protospacer row below to read like a pairwise alignment
     ("Aligned_protospacer+PAM", "aligned"),  # ALT with REF fallback
     ("Mismatches", "mm"),
     ("Bulges", "bulges"),
     ("Mismatches+bulges", "mmb"),
     ("Perfect_match", "perfect_match"),  # "Yes" when mm+b==0: a perfect genomic match
     ("CFD", "cfd"),
+    ("CFD_ref", "cfd_ref"),  # CFD of the REFERENCE sequence at this site (variant removed)
     ("CRISPR-Bulge", "crispr_bulge"),  # emitted only when crispr_bulge_computed()
+    ("CRISPR-Bulge_ref", "crispr_bulge_ref"),  # REF-sequence CRISPR-Bulge; emitted only when crispr_bulge_computed()
     ("REF/ALT_origin", "origin"),
     ("PAM_creation", "pam_creation"),
     ("Variant", "variant"),  # chrom;pos;ref;alt of the variant(s) creating THIS off-target (rsID companion)
-    ("Observed", "observed"),  # supported by >=1 real individual: reference / N carriers / observed (single variant) / putative (multi-variant, cis unconfirmed)
+    ("Observed", "observed"),  # reference / N cis carriers (--per-sample) / N carriers (pop, 1 variant) / "N carriers (>=1 of K vars, poss. chimera)" (pop, multi-variant union) / observed / putative
     ("MAF", "maf"),  # em-dash when blank
     ("Gene", "gene_name"),
     ("Gene_distance_kb", "gene_dist"),
@@ -271,6 +307,25 @@ CURATED_MISSING = "-"
 # a MAF column would be misleading. Nothing else changes; the raw 85-column dump
 # still carries whatever MAF the source TSV had.
 _DROP_MAF = False
+
+# Set True for a --per-sample run (meta.search_mode == "per-sample"). It changes how
+# the "Observed" cell reads a NAMED carrier roster: under --per-sample the roster is the
+# EXACT cis carriers (phased), so we say "N cis carriers"; in the population-level default
+# a multi-variant roster is the worst-case UNION of samples carrying >=1 of the window's
+# variants (the stacked combination may exist on no single haplotype), so we flag it.
+_PER_SAMPLE = False
+
+
+def _hap_label(n, head=False):
+    """Noun for the per-site distinct-combination rows (the "Observed"-cell modal).
+    Under --per-sample these are genuinely resolved (phased) OBSERVED haplotypes; in the
+    population-level default they are worst-case VARIANT COMBINATIONS enumerated from the
+    observed variants (not phased, not confirmed on any one individual's haplotype).
+    ``head=True`` adds a worst-case qualifier to the population-level modal heading."""
+    if _PER_SAMPLE:
+        return "observed haplotype" + ("" if n == 1 else "s")
+    base = "variant combination" + ("" if n == 1 else "s")
+    return (base + " (worst-case)") if head else base
 
 # Annotation curated kinds that are dropped when their source column is absent from
 # the run's TSV, so a run without a given annotation (legacy no-COSMIC bundle, a
@@ -305,7 +360,12 @@ _POOLED_ANNOTATION_COLS = (
 # --vcf (each haplotype IS the genome). Dropped rather than shown as all-"-".
 # NOT including perfect_match: "mm+b == 0" is perfectly meaningful here, it just
 # happens to be empty for a guide with no exact match anywhere.
-_NO_VARIANT_KINDS = ("origin", "pam_creation", "variant", "maf", "complex_region")
+_NO_VARIANT_KINDS = ("origin", "pam_creation", "variant", "maf", "complex_region",
+                     # REF-sequence CFD/CRISPR-Bulge only exist on a variant run (they
+                     # resolve from CFD_score_REF_* / CRISPR_BULGE_score_REF_*). On an
+                     # assembly / reference-only export the pooled frame has no such
+                     # columns, so drop them rather than emit two all-"-" columns.
+                     "cfd_ref", "crispr_bulge_ref")
 # assembly_reconcile.LIFT_ONE_END's value, duplicated rather than imported so this
 # module stays importable without assembly_reconcile (a light-CI concern)
 LIFT_ONE_END_LABEL = "one_end"
@@ -359,6 +419,7 @@ _COLS = {
     "chrom": ["Chromosome"],
     "pos": [f"Start_coordinate_{_PROJ}", "Start_coordinate"],
     "strand": [f"Strand_{_PROJ}", "Strand"],
+    "aln_spacer": [f"Aligned_spacer+PAM_{_PROJ}", "Aligned_spacer+PAM"],
     "aln_ref": [f"Aligned_protospacer+PAM_REF_{_PROJ}", "Aligned_protospacer+PAM_REF"],
     "aln_alt": [f"Aligned_protospacer+PAM_ALT_{_PROJ}", "Aligned_protospacer+PAM_ALT"],
     "pam": [f"PAM_{_PROJ}", "PAM"],
@@ -684,6 +745,10 @@ def _curated_cell(kind, row, cols):
         v = _get("pos")
     elif kind == "strand":
         v = _get("strand")
+    elif kind == "aligned_spacer":
+        # the aligned guide/spacer (+PAM), bulge columns as '-'; shown next to the
+        # aligned protospacer so the pair reads like a pairwise alignment
+        v = _get("aln_spacer")
     elif kind == "aligned":
         # ALT with REF fallback
         v = row.get(cols["aln_alt"]) if "aln_alt" in cols else None
@@ -698,8 +763,14 @@ def _curated_cell(kind, row, cols):
     elif kind == "cfd":
         num = _scored(pd.to_numeric(_get("cfd"), errors="coerce")) if "cfd" in cols else None
         return f"{num:.4f}" if num is not None else CURATED_MISSING
+    elif kind == "cfd_ref":
+        num = _scored(pd.to_numeric(_get("cfd_ref"), errors="coerce")) if "cfd_ref" in cols else None
+        return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "crispr_bulge":
         num = _scored(pd.to_numeric(_get("crispr_bulge"), errors="coerce")) if "crispr_bulge" in cols else None
+        return f"{num:.4f}" if num is not None else CURATED_MISSING
+    elif kind == "crispr_bulge_ref":
+        num = _scored(pd.to_numeric(_get("crispr_bulge_ref"), errors="coerce")) if "crispr_bulge_ref" in cols else None
         return f"{num:.4f}" if num is not None else CURATED_MISSING
     elif kind == "origin":
         v = _get("origin")
@@ -774,9 +845,20 @@ def _curated_cell(kind, row, cols):
         if o == "ref":
             return "reference"
         n = _count_samples(_get("samples"))
-        if n > 0:
-            return f"{n} carrier{'' if n == 1 else 's'}"
         nvar = _count_variants(_get("var_genome")) if "var_genome" in cols else 0
+        if n > 0:
+            if _PER_SAMPLE:
+                # --per-sample: the roster is the EXACT cis carriers (phased)
+                return f"{n} cis carrier{'' if n == 1 else 's'}"
+            if nvar >= 2:
+                # population-level, multi-variant window: the roster is the worst-case
+                # UNION of samples carrying >=1 of the combination's variants, NOT cis
+                # carriers -- the stacked combination may exist on no one haplotype
+                # (possible chimera). --per-sample resolves the true cis carriers.
+                # Plain ASCII: this cell is shared by the HTML table AND the TSV downloads.
+                return f"{n} carrier{'' if n == 1 else 's'} (>=1 of {nvar} vars, poss. chimera)"
+            # population-level, single variant: carriers of that one variant
+            return f"{n} carrier{'' if n == 1 else 's'}"
         if nvar <= 1:
             return "observed"  # single variant, AF>0 => carried by >=1 individual
         return "putative"      # multi-variant combination, cis co-occurrence unconfirmed
@@ -792,8 +874,10 @@ def curated_headers(has_crispr_bulge):
     """The curated display headers, dropping the ML-score column when not computed
     (and MAF when ``_DROP_MAF`` is set). The ML-score header is "CRISPR-Bulge"; the
     internal kind stays "crispr_bulge"."""
-    return [(scorer_label() if kind == "crispr_bulge" else h)
-            for h, kind in _active_columns() if kind != "crispr_bulge" or has_crispr_bulge]
+    return [(scorer_label() if kind == "crispr_bulge"
+             else (scorer_label() + "_ref" if kind == "crispr_bulge_ref" else h))
+            for h, kind in _active_columns()
+            if kind not in ("crispr_bulge", "crispr_bulge_ref") or has_crispr_bulge]
 
 
 def build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=1):
@@ -806,7 +890,8 @@ def build_curated_frame(sub_df, cols, has_crispr_bulge, start_rank=1):
     columns, in the same order, resolved by name (missing -> "-").
     """
     headers = curated_headers(has_crispr_bulge)
-    kinds = [kind for _h, kind in _active_columns() if kind != "crispr_bulge" or has_crispr_bulge]
+    kinds = [kind for _h, kind in _active_columns()
+             if kind not in ("crispr_bulge", "crispr_bulge_ref") or has_crispr_bulge]
     data = {h: [] for h in headers}
     for offset, (_idx, row) in enumerate(sub_df.iterrows()):
         for h, kind in zip(headers, kinds):
@@ -2414,14 +2499,18 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     candidate cut site with no a-priori on/off-target distinction, never dropped.
     The OFF-TARGET rows are then selected in two stages (over the off-target set):
 
-    1. HARD-INCLUDE every site that is close by sequence OR high-scoring OR a pure bulge:
-       ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR ``CFD >= PANEL_FLOOR_CFD (0.5)`` OR a
-       PURE-BULGE site (0 mismatches, >=1 bulge). These are always kept; if the
-       hard-includes already exceed ``cap`` we keep them all (a low-edit-distance /
-       high-CFD / clean-bulge site is never dropped). The pure-bulge floor exists because
-       >=2-bulge off-targets have NO ML score (out of the CRISPR-Bulge domain) and only an
-       uncalibrated CFD extrapolation, so a clean bulged site must not be de-prioritized by
-       a missing/low score.
+    1. HARD-INCLUDE every site flagged by the sensitive model OR close by sequence OR
+       a high-CFD site (within CFD's defensible reach) OR a pure bulge: ``CRISPR-Bulge >=
+       the sensitive default`` (95%-recall benchmark threshold, when computed) OR ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR
+       ``CFD >= PANEL_RESCUE_CFD (0.2) at 0 bulges`` OR ``CFD >= PANEL_HIGH_CFD (0.5) at
+       1 bulge`` OR a PURE-BULGE site (0 mismatches, >=1 bulge). These are always kept; if
+       the hard-includes already exceed ``cap`` we keep them all (a flagged / low-edit-
+       distance / high-CFD / clean-bulge site is never dropped). The CFD rescue is sensitive
+       off-bulge (>= 0.2 at 0 bulges) but requires HIGH CFD (>= 0.5) on single-bulge sites,
+       where CFD is an extrapolation; the pure-bulge floor exists because >=2-bulge
+       off-targets have NO ML score (out of the CRISPR-Bulge domain) and only an
+       uncalibrated CFD extrapolation, so a clean bulged site must not be de-prioritized
+       by a missing/low score.
     2. FILL the remaining slots up to ``cap`` by worst-case severity. Each site
        is ranked independently by every available metric in
        ``PANEL_WORSTCASE_METRICS``: CFD (desc), CRISPR-Bulge (desc; only when computed)
@@ -2493,21 +2582,32 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
         severity = pd.Series(1.0, index=offt.index)
 
     # STAGE 1: hard-includes -- always kept, even past the cap. Two tiers:
-    #   RELIABLE: close by sequence (mm+b <= floor) OR high CFD IN ITS CALIBRATED DOMAIN
-    #   (<=1 bulge) OR a clean PURE-BULGE site (0 mismatches, >=1 bulge).
+    #   RELIABLE: flagged by the sensitive model (CRISPR-Bulge >= sensitive default, when computed) OR
+    #   close by sequence (mm+b <= floor) OR a high-CFD site within CFD's defensible reach
+    #   (CFD >= rescue at 0 bulges, where CFD is reliable; OR high CFD >= PANEL_HIGH_CFD at
+    #   exactly 1 bulge, where CFD is an extrapolation so only high-confidence calls rescue)
+    #   OR a clean PURE-BULGE site (0 mismatches, >=1 bulge).
     #   DEMOTED: a >=2-bulge site high by CFD ONLY. CFD on a >=2-bulge alignment is an
     #   UNCALIBRATED EXTRAPOLATION that over-calls, and CRISPR-Bulge is N/A there (see METHODS
     #   and the off-target risk card), so we cannot vouch for the score. We DO NOT drop these
     #   -- a >=2-bulge off-target could still be real (the validation benchmark simply has no
     #   >=2-bulge examples, so it is UNKNOWN, and the user must decide what to assay) -- but we
     #   RANK them AFTER every reliable site so the trustworthy candidates come first.
+    import cb_operating_point as cbop
+    _cb_sensitive_thr = cbop.sensitive_threshold()
+    cb_flagged = (
+        (crispr_bulge >= _cb_sensitive_thr) if has_crispr_bulge
+        else pd.Series(False, index=offt.index)
+    )
     pure_bulge = (mm_cnt == 0) & (bulge_cnt >= 1)
     reliable_hard = (
-        (mmb <= PANEL_FLOOR_MMB)
-        | ((cfd >= PANEL_FLOOR_CFD) & (bulge_cnt <= 1))
+        cb_flagged
+        | (mmb <= PANEL_FLOOR_MMB)
+        | ((cfd >= PANEL_RESCUE_CFD) & (bulge_cnt == 0))
+        | ((cfd >= PANEL_HIGH_CFD) & (bulge_cnt == 1))
         | pure_bulge
     )
-    demoted_hard = (cfd >= PANEL_FLOOR_CFD) & (bulge_cnt >= 2) & ~reliable_hard
+    demoted_hard = (cfd >= PANEL_HIGH_CFD) & (bulge_cnt >= 2) & ~reliable_hard
     hard_mask = reliable_hard | demoted_hard
 
     # OBSERVED priority: a site supported by >=1 real individual (a reference site,
@@ -2618,7 +2718,8 @@ def build_validation_panel(df, cols):
     cfd_wide_net = (0.05, int((cfd >= 0.05).sum()))  # download-only wide net (panel note)
     mmb_counts = [(t, int(((mmb >= 0) & (mmb <= t)).sum())) for t in MMB_THRESHOLDS]
     crispr_bulge_counts = (
-        [(t, int((crispr_bulge >= t).sum())) for t in scorer_thresholds()]
+        [(label, fkey, int(pred(crispr_bulge).sum()))
+         for label, fkey, pred in _crispr_bulge_tier_specs()]
         if "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any() else []
     )
 
@@ -2648,7 +2749,7 @@ def build_validation_panel(df, cols):
         if "mm" in cols else pd.Series(10 ** 6, index=offt.index)
     )
     n_panel_demoted = int(
-        ((cfd >= PANEL_FLOOR_CFD) & (_bulge_cnt_vp >= 2) & (_mm_cnt_vp >= 1)).sum()
+        ((cfd >= PANEL_HIGH_CFD) & (_bulge_cnt_vp >= 2) & (_mm_cnt_vp >= 1)).sum()
     )
 
     # hybrid worst-case top-100 panel
@@ -2725,6 +2826,8 @@ def _tier_filename(key):
         return PANEL_TOP100_NAME
     if key.startswith("cfd_"):
         return f"cfd_ge_{key.split('_', 1)[1]}.tsv"
+    if key == "crispr_bulge_gt0":
+        return "crispr_bulge_gt_0.tsv"
     if key.startswith("crispr_bulge_"):
         return f"crispr_bulge_ge_{key[len('crispr_bulge_'):]}.tsv"
     if key.startswith("mmb_"):
@@ -2753,12 +2856,12 @@ def build_tier_frames(df, cols, offt, variant, ontarget, cfd, mmb, crispr_bulge=
             "df": sub,
         })
     if crispr_bulge is not None and "crispr_bulge" in cols and ((crispr_bulge >= 0) & (crispr_bulge <= 1)).any():
-        for t in scorer_thresholds():
-            sub = offt[(crispr_bulge >= t).values]
+        for label, fkey, pred in _crispr_bulge_tier_specs():
+            sub = offt[pred(crispr_bulge).values]
             tiers.append({
-                "key": f"crispr_bulge_{t:.2f}",  # internal key stays 'crispr_bulge' (filenames stable)
-                "label": f"{scorer_label()} &ge; {t}",
-                "filename": _tier_filename(f"crispr_bulge_{t:.2f}"),
+                "key": fkey,  # internal key ('crispr_bulge_0.50' / 'crispr_bulge_gt0'); filenames stable
+                "label": f"{scorer_label()} {label}",
+                "filename": _tier_filename(fkey),
                 "df": sub,
             })
     for t in MMB_THRESHOLDS:
@@ -2839,9 +2942,9 @@ def render_validation_panel(
     crispr_bulge_table_block = ""
     if vp.get("crispr_bulge_counts"):
         crispr_bulge_rows = "".join(
-            f"<tr><td>{scorer_label()} &ge; {t}</td><td class='num'>"
-            f"{_tier_count_link(f'crispr_bulge_{t:.2f}', c)}</td></tr>"
-            for t, c in vp["crispr_bulge_counts"]
+            f"<tr><td>{scorer_label()} {label}</td><td class='num'>"
+            f"{_tier_count_link(fkey, c)}</td></tr>"
+            for label, fkey, c in vp["crispr_bulge_counts"]
         )
         crispr_bulge_table_block = (
             '<div><table class="thr-table"><thead><tr>'
@@ -2862,12 +2965,16 @@ def render_validation_panel(
     note = (
         f"How the panel was chosen (hybrid, ~{PANEL_CAP} sites &mdash; may be more "
         f"when many sites are hard-included). "
-        f"First, every off-target that is CLOSE by sequence OR HIGH-scoring OR a "
-        f"CLEAN BULGE is hard-included &mdash; specifically every site with "
-        f"mismatches+bulges &le; {PANEL_FLOOR_MMB} OR (CFD &ge; {PANEL_FLOOR_CFD} at "
-        f"&le;1 bulge, its calibrated domain) OR 0 mismatches with &ge;1 bulge. These are always "
-        f"kept (if the hard-included sites already exceed {PANEL_CAP}, they are "
-        f"all kept). The remaining slots up to {PANEL_CAP} are then filled by "
+        f"First, every off-target that is FLAGGED by the sensitive model OR CLOSE by "
+        f"sequence OR a HIGH-CFD site (within CFD&rsquo;s defensible reach) OR a CLEAN "
+        f"BULGE is hard-included &mdash; specifically every site with {scorer_label()} "
+        f"{cbop.sensitive_label_html()} (the sensitive default, when computed) OR mismatches+bulges &le; "
+        f"{PANEL_FLOOR_MMB} OR CFD &ge; {PANEL_RESCUE_CFD} at 0 bulges (CFD is reliable "
+        f"off-bulge) OR high CFD &ge; {PANEL_HIGH_CFD} at 1 bulge (rescued; CFD is an "
+        f"extrapolation on bulges, so only high-confidence single-bulge calls qualify) "
+        f"OR 0 mismatches with &ge;1 bulge. "
+        f"These are always kept (if the hard-included sites already exceed {PANEL_CAP}, "
+        f"they are all kept). The remaining slots up to {PANEL_CAP} are then filled by "
         f"worst-case severity: each site is ranked independently by "
         f"{metric_list}, and a site is prioritized if it is worst by ANY single "
         f"one of those metrics ({metric_or}) &mdash; so the highest-scoring "
@@ -2881,15 +2988,16 @@ def render_validation_panel(
         f"(the validation benchmark simply contains no &ge;2-bulge examples, so their "
         f"risk is UNKNOWN and only you can decide what to assay). Instead, a &ge;2-bulge "
         f"site that qualifies on CFD alone is KEPT in the panel but DEMOTED &mdash; "
-        f"ranked after every reliable hard-include (close by sequence, high CFD at "
-        f"&le;1 bulge, or a clean 0-mismatch bulge), so the trustworthy candidates come "
-        f"first and the over-called ones sit at the end, flagged lower-confidence. "
+        f"ranked after every reliable hard-include ({scorer_label()} {cbop.sensitive_label_html()}, close by "
+        f"sequence, a high-CFD site within CFD&rsquo;s defensible reach, or a clean "
+        f"0-mismatch bulge), so the trustworthy candidates come first and the "
+        f"over-called ones sit at the end, flagged lower-confidence. "
         + (
             f"<b>In this run, {vp.get('n_panel_demoted', 0):,} CFD &ge; "
-            f"{PANEL_FLOOR_CFD} sites carry &ge;2 bulges alongside mismatches</b> "
+            f"{PANEL_HIGH_CFD} sites carry &ge;2 bulges alongside mismatches</b> "
             f"(an uncalibrated over-call, outside CFD&rsquo;s domain) &mdash; they are "
             f"kept in the panel but demoted to the end, and are also in the full CFD "
-            f"&ge; {PANEL_FLOOR_CFD} threshold download for independent review. "
+            f"&ge; {PANEL_HIGH_CFD} threshold download for independent review. "
             if vp.get("n_panel_demoted") else ""
         ) +
         f"The clean-bulge hard-include above guarantees a 0-mismatch bulged site is "
@@ -2963,7 +3071,17 @@ def render_validation_panel(
         "(&ge; 0.5, &ge; 0.2); each gives the all-gaps count with the &le;1-gap calibrated subset "
         "(the card&rsquo;s domain) in parentheses, so the two sections reconcile at one threshold. "
         f"A wider CFD &ge; {_wide_t} net ({_wide_n:,} sites) is included in the bundled "
-        "downloads.")
+        "downloads. <strong>Recommended default panel:</strong> validate every "
+        f"CRISPR-Bulge&ndash;flagged site ({cbop.sensitive_label_html()} &mdash; the sensitive "
+        "operating point, the threshold that recovers ~95&#37; of validated off-targets on the "
+        "40-guide held-out benchmark; higher recall is reachable but the list grows steeply), plus the "
+        "high-CFD sites it misses (CFD &ge; 0.2 on no-bulge sites, where CFD is reliable, and "
+        "high CFD &ge; 0.5 on single-bulge sites, where CFD is an extrapolation so only "
+        "high-confidence calls are rescued), plus the perfect/near-perfect and "
+        "functional / cancer-gene hits above &mdash; sized to your assay budget. On &ge;2-bulge "
+        "sites both scores are out of their validated domain, so those stay listed but demoted "
+        "(CRISPR-Bulge is N/A and CFD is an uncalibrated over-call). See the risk card and "
+        "METHODS &sect;3.5.")
     return f"""
 <p class="caption">{_bridge}</p>
 <div class="panel-grid">
@@ -2982,10 +3100,10 @@ def render_validation_panel(
     <tr><td>{_off_label}</td><td class="num">{vp['n_offtarget']:,}</td></tr>
     {_variant_rows}
     <tr class="panel-hi"><td><strong>{_panel_hdr}</strong><br>
-      <span class="caption">hard-include (mm+b &le; {PANEL_FLOOR_MMB} OR CFD &ge;
-      {PANEL_FLOOR_CFD} at &le;1 bulge OR a clean 0-mismatch bulge; a &ge;2-bulge site
-      high on CFD alone is kept too but demoted to the end), then fill up to
-      {PANEL_CAP} by worst-case severity across {metric_list};{_panel_variant_note}</span></td>
+      <span class="caption">hard-include ({scorer_label()} {cbop.sensitive_label_html()} OR mm+b &le; {PANEL_FLOOR_MMB}
+      OR CFD &ge; {PANEL_RESCUE_CFD} at 0 bulges OR CFD &ge; {PANEL_HIGH_CFD} at 1 bulge OR a clean
+      0-mismatch bulge; a &ge;2-bulge site high on CFD alone is kept too but demoted to the end),
+      then fill up to {PANEL_CAP} by worst-case severity across {metric_list};{_panel_variant_note}</span></td>
       <td class="num"><strong>{_tier_count_link('panel', vp['panel_size'])}</strong></td></tr>
   </tbody>
 </table>
@@ -3144,7 +3262,7 @@ def _oh_modal_html(mid, haps, download_name, omitted_note=""):
     if download_name:
         download_link = (
             f'<a class="download" href="{_dl_href(download_name)}" download>'
-            f"&#11015; Download all observed haplotypes (TSV)</a>"
+            f"&#11015; Download all {_hap_label(2)} (TSV)</a>"
         )
     elif omitted_note:
         # The full companion TSV was size-gated out of the slim bundle; the per-site
@@ -3155,7 +3273,7 @@ def _oh_modal_html(mid, haps, download_name, omitted_note=""):
         f'<div class="oh-modal-box">'
         f'<button class="oh-close" aria-label="Close">&times;</button>'
         f'<div class="oh-modal-head">{_esc(chrom)}:{_esc(start)} ({_esc(strand)}) '
-        f'&mdash; {len(ordered)} observed haplotypes</div>'
+        f'&mdash; {len(ordered)} {_hap_label(len(ordered), head=True)}</div>'
         f'<div class="oh-modal-body"><table class="oh-table"><thead><tr>{th}</tr>'
         f'</thead><tbody>{"".join(trs)}</tbody></table></div>'
         f'{download_link}</div></div>'
@@ -3275,7 +3393,7 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
                                               _key[0] + "-" + _key[1])
                         cell += (
                             f' &middot; <a class="oh-open" href="#" data-oh="{mid}">'
-                            f'{n_other} other haplotype{"" if n_other == 1 else "s"}</a>'
+                            f'{n_other} other {_hap_label(n_other)}</a>'
                         )
                         if oh_modals is not None and mid not in oh_modals:
                             oh_modals[mid] = _oh_modal_html(
@@ -3545,9 +3663,12 @@ _SCORE_LEGEND = [
      "<b>Cutting Frequency Determination</b> score (Doench <i>et al.</i>, "
      "<i>Nat. Biotechnol.</i> 2016) &mdash; a 0&ndash;1 estimate of how efficiently "
      "SpCas9 cuts a mismatched site relative to a perfect match (1 = as efficient as "
-     "the on-target). Higher = more likely to be cut. <b>Rule of thumb:</b> treat "
-     "CFD&nbsp;&ge;&nbsp;0.2 as worth validating (the recommended panel already "
-     "hard-includes CFD&nbsp;&ge;&nbsp;0.5 at &le;1 bulge, its calibrated domain). "
+     "the on-target). Higher = more likely to be cut. <b>Rule of thumb:</b> on "
+     "0-bulge (mismatch-only) sites treat CFD&nbsp;&ge;&nbsp;0.2 as worth validating; "
+     "on single-bulge sites, where CFD is an extrapolation, rescue only HIGH CFD "
+     "(&ge;&nbsp;0.5). This CFD rescue supplements the panel&rsquo;s primary "
+     "CRISPR-Bulge sensitive selection (the 95%-recall operating point); on &ge;2-bulge sites CFD is an "
+     "uncalibrated over-call and is not used to select (those sites are demoted). "
      "<b>Caveat:</b> CFD was trained on "
      "single-base mismatches; its values for sites containing DNA/RNA bulges "
      "(insertions/deletions) are an extrapolation beyond the model&rsquo;s training "
@@ -3971,14 +4092,29 @@ def render_html(
     # away from the table itself (the modal also carries this same link).
     observed_haplotypes_table_note = ""
     if observed_haplotypes_bundle_name:
+        if _PER_SAMPLE:
+            _oh_expl = (
+                "Each row is the per-site representative (highest-scoring observed "
+                "haplotype). Sites reached by &ge;2 distinct observed haplotypes show a "
+                "<strong>&ldquo;N other observed haplotypes&rdquo;</strong> link in the "
+                "<code>Observed</code> column &mdash; click it to see every haplotype a "
+                "real individual carries at that site."
+            )
+        else:
+            _oh_expl = (
+                "Each row is the per-site representative (highest-scoring variant "
+                "combination). Sites reached by &ge;2 distinct variant combinations show a "
+                "<strong>&ldquo;N other variant combinations&rdquo;</strong> link in the "
+                "<code>Observed</code> column &mdash; click it to see every worst-case "
+                "combination enumerated at that site. These are reconstructed from the "
+                "observed variants and are <strong>unphased</strong> (not confirmed on any "
+                "one individual&rsquo;s haplotype); run <code>--per-sample</code> to resolve "
+                "the true cis haplotypes and carriers."
+            )
         observed_haplotypes_table_note = (
-            f'<p class="caption">Each row is the per-site representative (highest-scoring '
-            f'observed haplotype). Sites reached by &ge;2 distinct observed variant '
-            f'haplotypes show a <strong>&ldquo;N other haplotypes&rdquo;</strong> link in '
-            f'the <code>Observed</code> column &mdash; click it to see every haplotype a '
-            f'real individual carries at that site.</p>'
+            f'<p class="caption">{_oh_expl}</p>'
             f'<p><a class="download" href="{_dl_href(observed_haplotypes_bundle_name)}" '
-            f'download>&#11015; Download all observed haplotypes (TSV)</a></p>'
+            f'download>&#11015; Download all {_hap_label(2)} (TSV)</a></p>'
         )
 
     # the CRISPR-Bulge-ranked top-1000 sits next to the CFD top-1000 in the Section-5 row
@@ -4801,6 +4937,10 @@ def build_report(
     meta = build_summary_meta(
         result_dir, integrated_tsv, df, cols, params_override=params_override
     )
+    # Under --per-sample a named carrier roster is the EXACT cis set; population-level
+    # multi-variant rosters are a worst-case union (see the "Observed" cell labelling).
+    global _PER_SAMPLE
+    _PER_SAMPLE = meta.get("search_mode") == "per-sample"
     version = meta.get("version") or _package_version()
     has_crispr_bulge = crispr_bulge_computed(df, cols)
 
@@ -5424,8 +5564,8 @@ def build_report(
         # the ZIP is self-sufficient for re-execution. Never break the report on it.
         try:
             _manifest = {
-                "crisprme_version": meta.get("version") or "2.6.2",
-                "report_generator": "v" + (meta.get("version") or "2.6.2"),
+                "crisprme_version": meta.get("version") or "2.8.0",
+                "report_generator": "v" + (meta.get("version") or "2.8.0"),
                 "generated_date": meta.get("date"),
                 "guides": meta.get("guides"),
                 "nuclease": meta.get("nuclease"),
@@ -5881,6 +6021,75 @@ def _combined_perfect_match_banner(combined_df, hap_dirs=None, guide=None):
     )
 
 
+def _reconciled_cb(recon_df, hap_dirs):
+    """CRISPR-Bulge scores for RECONCILED (hg38) rows, joined from each haplotype's own
+    ``integrated_results.tsv``. The reconcile output (combined_hg38.tsv) only projects the
+    ``_(fewest_mm+b)`` alignment, which carries NO CRISPR-Bulge; but the site's native
+    per-haplotype coordinate IS kept (``Chromosome_<hap>`` / ``Start_coordinate_(fewest_mm+b)_<hap>``),
+    so we look that row up in the haplotype's integrated_results and take its
+    ``CRISPR_BULGE_score_(highest_CRISPR_BULGE)`` -- the site's own best-CB alignment -- then MAX
+    across the haplotype(s) it reconciled from (worst-case, matching ``_recon_cfd``). Tolerant of
+    the known +/-1 bp native-coordinate off-by-one (see ``_known_native_keys``). Returns a float
+    Series aligned to ``recon_df.index`` (NaN where no per-haplotype CB is found -- a lookup miss is
+    left blank, never fabricated). CFD stays ``_(fewest_mm+b)``; this adds CB from the best-CB rep,
+    the same two-independent-alignments convention the standard report's two score columns use."""
+    out = pd.Series(np.nan, index=recon_df.index, dtype=float)
+    # Per-row guide of each reconciled row (the panel carries "_recon_guide"). The LUT is
+    # keyed by (guide, chrom, pos) and matched on this, so on a MULTI-GUIDE assembly search
+    # a reconciled row never takes another guide's CRISPR-Bulge from a locus within +/-1 bp
+    # (the same guide scoping _haplotype_private_frame applies). If either side lacks a guide
+    # column the key degrades to None on both and the single-guide behaviour is unchanged.
+    rg = (recon_df["_recon_guide"].astype(str).str.strip()
+          if "_recon_guide" in recon_df.columns else None)
+    for hap, chr_col, start_col in (
+        ("paternal", "Chromosome_paternal", "Start_coordinate_(fewest_mm+b)_paternal"),
+        ("maternal", "Chromosome_maternal", "Start_coordinate_(fewest_mm+b)_maternal"),
+    ):
+        hap_dir = (hap_dirs or {}).get(hap)
+        if not hap_dir or chr_col not in recon_df.columns or start_col not in recon_df.columns:
+            continue
+        tsv = resolve_integrated_tsv(hap_dir)
+        if tsv is None:
+            continue
+        try:
+            hd = pd.read_csv(tsv, sep="\t", dtype=str, na_filter=False, low_memory=False,
+                             compression="gzip" if str(tsv).endswith(".gz") else None)
+        except (OSError, pd.errors.ParserError):
+            continue
+        hc = _resolve(hd.columns, list(_COLS.keys()))
+        chrom_c, cb_c = hc.get("chrom"), hc.get("crispr_bulge")
+        pos_c = "Start_coordinate_(fewest_mm+b)"
+        if not (chrom_c and cb_c and chrom_c in hd.columns
+                and cb_c in hd.columns and pos_c in hd.columns):
+            continue
+        guide_c = hc.get("guide")
+        gcol = (hd[guide_c].astype(str).str.strip().tolist()
+                if (guide_c and guide_c in hd.columns) else None)
+        cbv = pd.to_numeric(hd[cb_c], errors="coerce").tolist()
+        chroms = hd[chrom_c].astype(str).tolist()
+        poss = list(hd[pos_c])
+        guides = gcol if gcol is not None else [None] * len(chroms)
+        lut = {}  # (guide, chrom, pos_str) -> max CB, indexed at pos and pos+/-1 (off-by-one)
+        for g, ch, praw, v in zip(guides, chroms, poss, cbv):
+            if v != v:  # NaN
+                continue
+            try:
+                pi = int(_canon_pos(praw))
+            except (TypeError, ValueError):
+                continue
+            for pp in (pi - 1, pi, pi + 1):
+                k = (g, ch, str(pp))
+                if v > lut.get(k, float("-inf")):
+                    lut[k] = v
+        rgl = rg.tolist() if rg is not None else [None] * len(recon_df)
+        hap_cb = pd.Series(
+            [lut.get((g, c, _canon_pos(s)), np.nan)
+             for g, c, s in zip(rgl, recon_df[chr_col].astype(str), recon_df[start_col])],
+            index=recon_df.index, dtype=float)
+        out = pd.concat([out, hap_cb], axis=1).max(axis=1)
+    return out
+
+
 def _reconciled_panel_frame(combined_df):
     """Adapt combined_df's per-haplotype-suffixed schema into ONE plain frame
     + a `cols` mapping, so the REAL `select_worstcase_panel()` /
@@ -6216,6 +6425,12 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
 
     recon_df, _rc = _reconciled_panel_frame(combined_df)
     if recon_df is not None and not recon_df.empty:
+        # CRISPR-Bulge for reconciled rows: joined from each haplotype's own
+        # integrated_results (the site's best-CB alignment), since the reconcile output
+        # only projects the fewest-mm+b alignment (which has no CRISPR-Bulge). See
+        # _reconciled_cb. CFD stays fewest-mm+b; CB is the site's own best-CB rep -- the
+        # same two-alignment convention the standard report uses.
+        _recon_cb = _reconciled_cb(recon_df, hap_dirs)
         parts.append(pd.DataFrame({
             "Spacer+PAM": recon_df["_recon_guide"],
             "Chromosome": recon_df["hg38_chr"],
@@ -6227,7 +6442,7 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             "Bulges": recon_df["_recon_bulges"],
             "Mismatches+bulges": recon_df["_recon_mmb"],
             "CFD_score": recon_df["_recon_cfd"],
-            "CRISPR_BULGE_score": np.nan,
+            "CRISPR_BULGE_score": _recon_cb,
             "_pv_category": "Reconciled (hg38)",
             # Per-kind annotation columns, so the curated view can read them (see
             # _ANNOTATION_KINDS / _COLS). ONLY the reconciled rows can carry an
@@ -6765,6 +6980,46 @@ def _combined_guide_summary_table_html(
     )
 
 
+def _build_combined_risk_card(pooled_df, pooled_cols, guide_display):
+    """Off-target risk card (card_html, modal_html, note_html) for the assembly
+    combined landing page, so it matches the complete-search report (which gained the
+    card in 2.8.0). Scored on the pooled frame: CFD spans ALL pooled off-targets;
+    CRISPR-Bulge covers the rows that carry a CB score. Reconciled (hg38) rows are scored
+    on their fewest-mm+b alignment, which has NO CRISPR-Bulge projection in the raw data
+    (see _pooled_validation_frame) -> their CB is NaN and drops out, so the CB card is over
+    the haplotype sites that have one; a note states this and points to each haplotype's
+    own report. Same 95%-recall sensitive operating point (cb_operating_point) as the
+    complete-search card. Returns ("", "", "") on an empty frame or any failure -- the
+    card never aborts the combined report."""
+    if pooled_df is None or not len(pooled_df):
+        return "", "", ""
+    try:
+        import risk_card as _rc
+        mmb = _to_int_series(pooled_df[pooled_cols["mmb"]])
+        bul = _to_int_series(pooled_df[pooled_cols["bulges"]])
+        offt = mmb > 0                                             # off-targets (exclude perfect)
+        cfd_sc = _to_float_series(
+            pooled_df[pooled_cols["cfd"]])[offt & (bul <= 1)].dropna().tolist()
+        cb_sc = (_to_float_series(pooled_df[pooled_cols["crispr_bulge"]])[offt].dropna().tolist()
+                 if "crispr_bulge" in pooled_cols else None)
+        nperf = int((mmb == 0).sum())
+        card, modal = _rc.render_risk_card(
+            {"guide_display": guide_display, "nuclease": "", "pam": ""}, cfd_sc, cb_sc, nperf)
+        note = ""
+        if card and "_pv_category" in pooled_df and \
+                pooled_df["_pv_category"].astype(str).str.startswith("Reconciled").any():
+            note = ('<p class="caption">For reconciled (hg38) sites, CFD is the '
+                    'fewest-mismatch+bulge alignment and CRISPR-Bulge is the site&rsquo;s best '
+                    'per-haplotype CRISPR-Bulge alignment (two independent views, as elsewhere in '
+                    'the report); a reconciled site with no per-haplotype CRISPR-Bulge match shows '
+                    '&ldquo;&ndash;&rdquo;. See each haplotype&rsquo;s own report (Section&nbsp;6) '
+                    'for its full CRISPR-Bulge card.</p>')
+        return card, modal, note
+    except Exception as exc:  # noqa: BLE001 - never abort the whole combined report
+        sys.stderr.write(f"generate-report: combined risk card unavailable: {exc}\n")
+        return "", "", ""
+
+
 def build_combined_report(
     combined_output,
     output_base,
@@ -6970,8 +7225,10 @@ def build_combined_report(
     #    cannot populate while top1000.tsv correctly dropped them, so one zip
     #    carried four different schemas.
     global _DROP_MAF, _HAS_VARIANTS, _DROP_KINDS, _PRESENT_ANN_KINDS
-    global _ASSEMBLY_EXTRA_ACTIVE
+    global _ASSEMBLY_EXTRA_ACTIVE, _PER_SAMPLE
     _DROP_MAF = False
+    _PER_SAMPLE = False           # assembly/combined = an individual's own haplotypes,
+                                  # not a variant panel -> population-level cell labels
     _HAS_VARIANTS = None          # keep Observed, as this path always has
     _DROP_KINDS = _NO_VARIANT_KINDS
     _PRESENT_ANN_KINDS = set()    # nothing until the pooled frame proves otherwise
@@ -6986,6 +7243,13 @@ def build_combined_report(
         # _pooled_validation_frame's own note on why an unmapped kind is dropped)
         _PRESENT_ANN_KINDS = {k for k in _ANNOTATION_KINDS if k in _pooled_cols}
         _ASSEMBLY_EXTRA_ACTIVE = _decide_assembly_extra_columns(_pooled_df)
+
+    # OFF-TARGET RISK card for the combined landing page (consistency with the
+    # complete-search report, which carries it since 2.8.0). See _build_combined_risk_card.
+    combined_risk_card_html, combined_risk_modal_html, combined_risk_note_html = (
+        _build_combined_risk_card(_pooled_df, _pooled_cols,
+                                  guides[0] if guides else output_base)
+    )
 
     _panel_staging_dir = tempfile.mkdtemp(prefix="crisprme_combined_panel_")
     try:
@@ -7100,6 +7364,8 @@ off-target prediction, mapped to hg38</p>
   </div>
 </div>
 {perfect_banner}
+{combined_risk_card_html}
+{combined_risk_note_html}
 <p class="caption">Non-mappable sites have no hg38 equivalent &mdash; invisible
 to any reference-based search. Their per-site detail (in that haplotype's
 own assembly coordinates) is in that haplotype's own report, linked below.
@@ -7173,6 +7439,7 @@ the zip itself is intact.</p>
 {footer_html}
 
 </div>
+{combined_risk_modal_html}
 </body></html>
 """
 

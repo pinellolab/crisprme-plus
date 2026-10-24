@@ -59,6 +59,10 @@ _COMPONENT_PREFIXES = {
     "samples": "samplesIDs",
     "vcf": "vcfs",
     "index": "indexes",
+    # build-inputs/<dataset>.tar.gz = the PRE-ENRICHED genome kit (the intermediate build
+    # path): staging it lets build-index-only skip the (slow) enrichment and only index,
+    # so a new-PAM build is just a re-index. The raw-source path is `vcf` above.
+    "build-inputs": "build-inputs",
 }
 
 # Local destination directory for each component (relative to the working dir).
@@ -69,6 +73,7 @@ _COMPONENT_LOCALDIR = {
     "samples": "samplesIDs",
     "vcf": "VCFs",
     "index": "genome_library",
+    "build-inputs": "Genomes",  # the enriched genome kit unpacks under Genomes/
 }
 
 
@@ -804,6 +809,96 @@ def download_component(
             shutil.move(os.path.join(src, fn), os.path.join(dest, fn))  # keep bgzip
         shutil.rmtree(staging, ignore_errors=True)
         return dest
+
+    if component == "build-inputs":
+        if not dataset:
+            raise ValueError(
+                "--dataset is required for 'build-inputs' (e.g. hg38_HGDP1kGP). This fetches "
+                "the PRE-ENRICHED genome kit so build-index-only skips enrichment and only "
+                "indexes (fast / PAM-swap path); use --what vcf to build from the raw source VCFs."
+            )
+        patterns = [f"{remote_prefix}/{dataset}.tar.gz", f"{remote_prefix}/{dataset}.SHA256SUMS"]
+        staging = os.path.join(workdir, ".hf_stage_binputs")
+        _hf_snapshot(repo, patterns, staging, token)
+        tgz = os.path.join(staging, remote_prefix, f"{dataset}.tar.gz")
+        if not os.path.isfile(tgz):
+            shutil.rmtree(staging, ignore_errors=True)
+            raise ValueError(
+                f"No build-inputs kit '{dataset}.tar.gz' in '{repo}' (looked for "
+                f"'{remote_prefix}/{dataset}.tar.gz'). Pre-enriched kits exist for a SUBSET of "
+                f"datasets; build from the raw source VCFs instead:  crisprme.py download "
+                f"--what vcf --dataset {dataset}  then  build-index-only --vcf VCFs/{dataset} ..."
+            )
+        # Optional checksum verification (the kit ships a <dataset>.SHA256SUMS sidecar).
+        sums = os.path.join(staging, remote_prefix, f"{dataset}.SHA256SUMS")
+        if os.path.isfile(sums):
+            import hashlib
+            want = {}
+            for line in open(sums):
+                parts = line.split()
+                if len(parts) >= 2:
+                    want[os.path.basename(parts[-1])] = parts[0].lower()
+            exp = want.get(f"{dataset}.tar.gz")
+            if exp:
+                h = hashlib.sha256()
+                with open(tgz, "rb") as fh:
+                    for blk in iter(lambda: fh.read(1 << 20), b""):
+                        h.update(blk)
+                if h.hexdigest().lower() != exp:
+                    shutil.rmtree(staging, ignore_errors=True)
+                    raise ValueError(
+                        f"build-inputs kit '{dataset}.tar.gz' SHA256 mismatch vs its "
+                        f"SHA256SUMS — re-download (the transfer may be truncated)."
+                    )
+                sys.stderr.write(f"build-inputs: {dataset}.tar.gz SHA256 verified.\n")
+        # Extract the enriched genome into Genomes/. Robust to the archive's internal
+        # layout: unpack to a temp dir, then move every 'hg38+hg38_<ds>...' top dir into
+        # Genomes/ (the kit may be rooted at that dir OR nested under Genomes/).
+        # (tarfile is imported at module scope; do NOT re-import locally — a function-local
+        # import would shadow it for the whole function and break the index/genome branches.)
+        extract = os.path.join(staging, "_x")
+        os.makedirs(extract, exist_ok=True)
+        extract_real = os.path.realpath(extract)
+        with tarfile.open(tgz, "r:gz") as tf:
+            # Validate members before extracting: a build-inputs kit can come from a
+            # user-chosen --hf-repo, so reject non-regular/dir entries (symlink/hardlink/
+            # device) and any member that would resolve OUTSIDE the staging dir (path
+            # traversal). Same guard as personal_assembly.py's bundle unpack.
+            for m in tf.getmembers():
+                if not (m.isreg() or m.isdir()):
+                    raise ValueError(
+                        f"build-inputs: refusing unsafe tar entry (not a regular file "
+                        f"or directory): {m.name!r}")
+                dest = os.path.realpath(os.path.join(extract, m.name))
+                if dest != extract_real and not dest.startswith(extract_real + os.sep):
+                    raise ValueError(
+                        f"build-inputs: refusing tar entry outside the staging dir: {m.name!r}")
+            tf.extractall(extract)
+        os.makedirs(local_dir, exist_ok=True)
+        moved = []
+        for root, dirs, _files in os.walk(extract):
+            for d in list(dirs):
+                if d.startswith(ref + "+") or d.startswith("hg38+hg38_"):
+                    src = os.path.join(root, d)
+                    dst = os.path.join(local_dir, d)
+                    if os.path.exists(dst):
+                        shutil.rmtree(dst, ignore_errors=True)
+                    shutil.move(src, dst)
+                    moved.append(d)
+                    dirs.remove(d)  # don't descend into a moved dir
+        shutil.rmtree(staging, ignore_errors=True)
+        if not moved:
+            raise ValueError(
+                f"build-inputs kit '{dataset}.tar.gz' unpacked but contained no enriched-genome "
+                f"dir (expected 'hg38+hg38_{dataset}/'). Report this kit as malformed."
+            )
+        sys.stderr.write(
+            f"build-inputs: staged {', '.join(moved)} into {local_dir} — build-index-only will "
+            f"now SKIP enrichment and only index. Pair with the PAM-independent Dictionaries "
+            f"(download --what index --index-name <...> for the shipped index, or build-index-only "
+            f"--samplesID to regenerate them).\n"
+        )
+        return local_dir
 
     if component == "index":
         if not index_name:

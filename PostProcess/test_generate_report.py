@@ -22,11 +22,12 @@ HTML is a self-contained IND-briefing-book digest (report v2.4):
     panel_top100.tsv, per-tier tsvs). The table shows the annotation columns
     (Gene, Gene_distance_kb, GENCODE, ENCODE, DHS); the downloads use the SAME
     curated columns (header spot-checked on panel_top100.tsv),
-  * SECTION 4: the HYBRID panel -- hard-include mm+b <= PANEL_FLOOR_MMB (2) OR
-    CFD >= PANEL_FLOOR_CFD (0.5) AT <=1 BULGE OR a clean 0-mismatch bulge (a
-    >=2-bulge CFD-only site is kept too but DEMOTED to the end), fill to PANEL_CAP
-    (100) by worst-case severity (no variant quota); the module-level floors are
-    present, and the in-report methods note is present,
+  * SECTION 4: the recommended default panel -- hard-include CRISPR-Bulge >= 1.9e-4 (the
+    sensitive default) OR mm+b <= PANEL_FLOOR_MMB (2) OR CFD >= PANEL_RESCUE_CFD (0.2)
+    AT 0 BULGES OR CFD >= PANEL_HIGH_CFD (0.5) AT 1 BULGE OR a clean 0-mismatch bulge
+    (a >=2-bulge CFD-only site is kept too but DEMOTED to the end), fill to at least
+    PANEL_CAP (100) by worst-case severity (no variant quota); the module-level floors
+    are present, and the in-report methods note is present,
   * PER-TIER DOWNLOADS: the non-empty CFD/mm+b/variant-created subsets are bundled
     as curated TSVs and linked,
   * MAF FOOTNOTE: the v2.4 blank-MAF explanation is present,
@@ -247,7 +248,7 @@ class TestGenerateReport(unittest.TestCase):
         # variant_created, snp_snp_cooc, high_variant_density) EXCLUDED. For this
         # fixture (5 off-targets):
         #   CFD>= 0.5/0.2/0.05  -> all non-empty (0.1 tier removed)
-        #   CRISPR-Bulge>= 0.5/0.2/0.1 -> all non-empty (fixture has CRISPR-Bulge)
+        #   CRISPR-Bulge >= 0.5/0.2 + sensitive (95%-recall) -> all non-empty (fixture has CRISPR-Bulge)
         #   mm+b<= 1/2/3/4      -> 0/2/4/5 (mmb_le_1 is EMPTY -> not bundled)
         _, names, _ = self._build_and_extract()
         self.assertEqual(
@@ -263,7 +264,7 @@ class TestGenerateReport(unittest.TestCase):
                 "data/cfd_ge_0.05.tsv",
                 "data/crispr_bulge_ge_0.50.tsv",  # CRISPR-Bulge-appropriate tiers (not CFD's)
                 "data/crispr_bulge_ge_0.20.tsv",
-                "data/crispr_bulge_ge_0.10.tsv",
+                "data/crispr_bulge_gt_0.tsv",  # the sensitive (95%-recall) operating-point tier
                 "data/mmb_le_2.tsv",
                 "data/mmb_le_3.tsv",
                 "data/mmb_le_4.tsv",
@@ -346,8 +347,9 @@ class TestGenerateReport(unittest.TestCase):
             gr.curated_headers(has_crispr_bulge=True),
             [
                 "rank", "Chromosome", "Position", "Strand",
-                "Aligned_protospacer+PAM", "Mismatches", "Bulges",
-                "Mismatches+bulges", "Perfect_match", "CFD", "CRISPR-Bulge",
+                "Aligned_spacer+PAM", "Aligned_protospacer+PAM", "Mismatches", "Bulges",
+                "Mismatches+bulges", "Perfect_match", "CFD", "CFD_ref",
+                "CRISPR-Bulge", "CRISPR-Bulge_ref",
                 "REF/ALT_origin",
                 "PAM_creation", "Variant", "Observed", "MAF", "Gene", "Gene_distance_kb",
                 "Gene_region", "GENCODE", "ENCODE", "DHS", "COSMIC_cancer_gene",
@@ -355,11 +357,14 @@ class TestGenerateReport(unittest.TestCase):
                 "High_complexity_region",
             ],
         )
-        # CRISPR-Bulge is dropped when not computed (else identical)
+        # both CRISPR-Bulge columns (score + REF) drop when not computed (else identical)
         no_crispr_bulge = gr.curated_headers(has_crispr_bulge=False)
         self.assertNotIn("CRISPR-Bulge", no_crispr_bulge)
+        self.assertNotIn("CRISPR-Bulge_ref", no_crispr_bulge)
+        self.assertIn("CFD_ref", no_crispr_bulge)  # CFD_ref is NOT gated on CRISPR-Bulge
         self.assertEqual(
-            [c for c in gr.curated_headers(has_crispr_bulge=True) if c != "CRISPR-Bulge"],
+            [c for c in gr.curated_headers(has_crispr_bulge=True)
+             if c not in ("CRISPR-Bulge", "CRISPR-Bulge_ref")],
             no_crispr_bulge,
         )
 
@@ -920,11 +925,16 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("hybrid", html.lower())
         self.assertIn("worst-case", html.lower())
         self.assertIn("~100 sites", html)
-        # C) EXPLICIT IN-REPORT METHODS NOTE with the REAL constants: the CFD hard-include
-        #    is gated on <=1 bulge (CFD's calibrated domain; >=2-bulge CFD is an over-call)
+        # C) EXPLICIT IN-REPORT METHODS NOTE with the REAL constants: the panel's PRIMARY
+        #    selection is CRISPR-Bulge>=1.9e-4 (the 95%-recall sensitive default), the CFD RESCUE is gated to
+        #    0 bulges (CFD over-calls on bulges), and >=2-bulge CFD-only sites are demoted.
         self.assertIn("<strong>Methods.</strong>", html)
         self.assertIn("hard-include", html.lower())
-        self.assertIn("mismatches+bulges &le; 2 OR (CFD &ge; 0.5 at &le;1 bulge", html)
+        import cb_operating_point as cbop
+        self.assertIn("(the sensitive default, when computed)", html)  # CB sensitive primary axis
+        self.assertIn("95% recall", html)                             # principled 95%-recall threshold
+        self.assertIn("CFD &ge; 0.2 at 0 bulges", html)       # CFD rescue off-bulge
+        self.assertIn("high CFD &ge; 0.5 at 1 bulge", html)   # high-CFD single-bulge rescue
         self.assertIn("fill", html.lower())
         self.assertIn("worst by ANY single", html)
         self.assertIn("NO category quota", html)
@@ -941,6 +951,11 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIn(f"CFD &ge; {t}", html)
         self.assertIn("&le;1-gap", html)                 # reconciliation parenthetical
         self.assertIn("same cut points as the card", html)  # bridge note
+        # D2) the CRISPR-Bulge tier table carries the sensitive operating-point ROW (the
+        #     benchmark 95%-recall default, consistent with the risk-card sensitive row + the
+        #     panel's selection), not an orphan >=0.1 tier. Match the table-row shape.
+        self.assertIn(f"<td>CRISPR-Bulge {cbop.sensitive_label_html()}</td>", html)
+        self.assertNotIn("CRISPR-Bulge &ge; 0.1", html)  # orphan 0.1 tier replaced by sensitive default
         self.assertIn("CFD &ge; 0.05", html)             # wide net still referenced (download note)
         self.assertIn("included in the bundled", html)   # 0.05 net is downloads-only
         self.assertNotIn("CFD &ge; 0.1", html)  # 0.1 tier removed
@@ -960,14 +975,16 @@ class TestGenerateReport(unittest.TestCase):
         # HYBRID panel floors + cap + metrics are module-level constants
         self.assertEqual(gr.PANEL_CAP, 100)
         self.assertEqual(gr.PANEL_FLOOR_MMB, 2)
-        self.assertEqual(gr.PANEL_FLOOR_CFD, 0.5)
+        self.assertEqual(gr.PANEL_RESCUE_CFD, 0.2)   # CFD rescue on 0-bulge sites
+        self.assertEqual(gr.PANEL_HIGH_CFD, 0.5)     # high-CFD: rescue 1-bulge / demote >=2-bulge
         self.assertEqual(
             gr.PANEL_WORSTCASE_METRICS,
             (("cfd", "desc"), ("crispr_bulge", "desc"), ("mmb", "asc")),
         )
 
     def test_section4_hybrid_selection_and_cap(self):
-        """Hard-include (mm+b<=2 OR CFD>=0.5), fill by worst-case severity, cap."""
+        """Hard-include (CRISPR-Bulge>=sensitive OR mm+b<=2 OR CFD>=0.2 at 0 bulges OR pure bulge),
+        a >=2-bulge CFD-only site kept-but-demoted, then fill by worst-case severity, cap."""
         import pandas as pd
 
         header = list(_HEADER)
@@ -981,11 +998,13 @@ class TestGenerateReport(unittest.TestCase):
             return r
 
         rows = [
-            _row("chrON", 0, 0, 1.0, 1.0, False),    # perfect match -> forced to top
-            _row("chrCFD", 3, 2, 0.99, 0.10, True),  # HARD (CFD>=0.5)
-            _row("chrMMB", 2, 0, 0.10, 0.10, False), # HARD (mm+b<=2)
-            _row("chrCRI", 4, 3, 0.10, 0.99, True),  # not hard; worst by CRISPR-Bulge
-            _row("chrLOW", 6, 4, 0.05, 0.05, False), # low by every metric
+            _row("chrON",   0, 0, 1.0,  1.0,  False),  # perfect match -> forced to top
+            _row("chrCB",   5, 0, 0.05, 0.40, True),   # HARD via CRISPR-Bulge>=sensitive (95%-recall default)
+            _row("chrCFD",  3, 0, 0.60, 0.0,  True),   # HARD via CFD>=0.2 at 0 bulges (rescue)
+            _row("chrB1",   4, 1, 0.70, 0.0,  True),   # HARD via high CFD>=0.5 at 1 bulge (rescue)
+            _row("chrMMB",  2, 0, 0.05, 0.0,  False),  # HARD via mm+b<=2
+            _row("chrDEM",  1, 2, 0.90, -1,   True),   # >=2 bulge, CFD>=0.5, CB N/A -> KEPT but DEMOTED
+            _row("chrFILL", 5, 0, 0.05, 0.0,  False),  # NOT hard (CB=0, CFD<0.2, mm+b>2) -> fill only
         ]
         tsv = os.path.join(self.tmp, "wc.tsv")
         with open(tsv, "w") as h:
@@ -999,13 +1018,19 @@ class TestGenerateReport(unittest.TestCase):
         chroms = list(panel[cols["chrom"]])
         # perfect match (mm+b==0) is FORCED to the top of the panel (candidate cut site)
         self.assertEqual(chroms[0], "chrON")
-        # hard-includes always present; CRISPR-Bulge-only site enters via the fill ranks
+        # every hard-include present: CRISPR-Bulge>=sensitive (primary), CFD>=0.2 at 0 bulges,
+        # high CFD>=0.5 at 1 bulge (rescue), mm+b<=2
+        self.assertIn("chrCB", chroms)
         self.assertIn("chrCFD", chroms)
+        self.assertIn("chrB1", chroms)   # high-CFD single-bulge site is rescued (reliable)
         self.assertIn("chrMMB", chroms)
-        self.assertIn("chrCRI", chroms)
-        # after the perfect match, hard-includes come first (before the fill); all-low last
-        self.assertEqual({"chrCFD", "chrMMB"}, set(chroms[1:3]))
-        self.assertEqual(chroms[-1], "chrLOW")
+        # a >=2-bulge CFD-only site is KEPT (never dropped) but DEMOTED after every reliable one
+        self.assertIn("chrDEM", chroms)
+        reliable_idx = [chroms.index(c) for c in ("chrCB", "chrCFD", "chrB1", "chrMMB")]
+        self.assertTrue(all(chroms.index("chrDEM") > i for i in reliable_idx))
+        # the non-hard site enters only via the fill (cap=100 has room) and ranks last
+        self.assertIn("chrFILL", chroms)
+        self.assertEqual(chroms[-1], "chrFILL")
 
         # HARD-INCLUDES EXCEED THE CAP -> they are ALL kept (panel > cap allowed).
         # Build many mm+b<=2 hard-include sites, cap at 3.
@@ -1027,8 +1052,9 @@ class TestGenerateReport(unittest.TestCase):
         # cap is honored when hard-includes are few: many mid sites -> exactly cap
         big = [_row("chrON", 0, 0, 1.0, 1.0, False)]
         for i in range(500):
-            # mm+b=4 (>floor) and CFD=0.20 (<floor) -> NOT hard-included
-            big.append(_row(f"c{i}", 3, 1, 0.20, 0.20, i % 2 == 0))
+            # NOT hard: CRISPR-Bulge=0 (< sensitive threshold), CFD=0.05 (<rescue 0.2), mm+b=4 (>floor),
+            # and a single bulge (not a pure 0-mismatch bulge) -> enters only via fill
+            big.append(_row(f"c{i}", 3, 1, 0.05, 0.0, i % 2 == 0))
         tsv2 = os.path.join(self.tmp, "wc_big.tsv")
         with open(tsv2, "w") as h:
             h.write("\t".join(header) + "\n")
@@ -1259,10 +1285,15 @@ class TestGenerateReport(unittest.TestCase):
         for val in ("promoter", "enhancer", "DHS_3", "DHS_5", "exon", "lincRNA"):
             self.assertIn(val, tbody)
         # rows sorted by CFD desc, on-target excluded => 5 rows
-        n_rows = tbody.count("<tr>")
-        self.assertEqual(n_rows, 5)
-        cfds = re.findall(r"<td>(0\.\d{4})</td>", tbody)
-        self.assertEqual(cfds, sorted(cfds, reverse=True))
+        rows_html = re.findall(r"<tr>(.*?)</tr>", tbody, re.S)
+        self.assertEqual(len(rows_html), 5)
+        # several columns now render 0.XXXX (CFD, CFD_ref, CRISPR-Bulge, CRISPR-Bulge_ref),
+        # so extract the CFD column specifically by its header index and check IT is sorted.
+        hdrs = gr.curated_headers(has_crispr_bulge=True)
+        cfd_idx = hdrs.index("CFD")
+        cfd_col = [re.findall(r"<td[^>]*>(.*?)</td>", r, re.S)[cfd_idx] for r in rows_html]
+        cfd_vals = [c for c in cfd_col if re.fullmatch(r"0\.\d{4}", c)]
+        self.assertEqual(cfd_vals, sorted(cfd_vals, reverse=True))
         # the pam_created value from the fixture appears
         self.assertIn("pam_created", html)
 
@@ -1440,19 +1471,95 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("individual reported alignments", html)
 
     def test_cfd_glossary_tooltip_matches_gated_panel_rule(self):
-        """The CFD legend tooltip (Section 7) must agree with the gated hard-include
-        rule: it states the panel hard-includes CFD>=0.5 AT <=1 BULGE (not all gaps),
-        and that >=2-bulge high-CFD sites are kept-but-demoted, never silently dropped.
-        A drift back to the un-gated 'hard-includes CFD>=0.5' wording would mislead an
-        IND reviewer into thinking a demoted (panel-last) site is a top hard-include."""
+        """The CFD legend tooltip (Section 7) must agree with the recommended-panel
+        rule: CFD is the RESCUE axis (CFD>=0.2 restricted to 0-bulge / mismatch-only
+        sites) that supplements the panel's PRIMARY CRISPR-Bulge sensitive selection
+        (the 95%-recall operating point, NOT the legacy '> 0'), CFD is not used to
+        select bulge sites, and >=2-bulge high-CFD sites are kept-but-demoted (never
+        silently dropped). A drift back to presenting CFD>=0.5 at <=1 bulge as the
+        panel key -- or an un-gated CFD>=0.2 cutoff with no 0-bulge restriction -- would
+        misrepresent what the panel actually selects."""
         cfd_entry = dict(gr._SCORE_LEGEND)["CFD"]
-        # the qualifier that must never silently disappear
-        self.assertIn("hard-includes CFD&nbsp;&ge;&nbsp;0.5 at &le;1 bulge", cfd_entry)
-        # the un-gated phrasing must NOT reappear
-        self.assertNotIn("hard-includes CFD&nbsp;&ge;&nbsp;0.5).", cfd_entry)
+        # CFD rescue: sensitive off-bulge (>=0.2 at 0 bulges), HIGH only on single-bulge (>=0.5)
+        self.assertIn("0-bulge (mismatch-only) sites treat CFD&nbsp;&ge;&nbsp;0.2", cfd_entry)
+        self.assertIn("rescue only HIGH CFD (&ge;&nbsp;0.5)", cfd_entry)
+        # it is explicitly subordinate to the primary CRISPR-Bulge SENSITIVE selection
+        # (95%-recall operating point); the legacy "> 0" framing must NOT survive here
+        self.assertIn("CRISPR-Bulge sensitive selection", cfd_entry)
+        self.assertNotIn("CRISPR-Bulge&nbsp;&gt;&nbsp;0", cfd_entry)
+        # >=2-bulge CFD is an over-call and is not used to select
+        self.assertIn("&ge;2-bulge sites CFD is an uncalibrated over-call", cfd_entry)
+        # the superseded "CFD>=0.5 at <=1 bulge is the panel key" wording must NOT reappear
+        self.assertNotIn("hard-includes CFD&nbsp;&ge;&nbsp;0.5 at &le;1 bulge", cfd_entry)
         # demote (not drop/"verify manually") is the >=2-bulge policy
         self.assertIn("demoted", cfd_entry.lower())
         self.assertNotIn("verify manually", cfd_entry.lower())
+
+    def test_combined_assembly_risk_card(self):
+        """The assembly combined landing page carries the SAME off-target risk card as the
+        complete-search report (2.8.0 consistency): CFD over all pooled off-targets, and
+        CRISPR-Bulge over the rows that carry a CB score. Reconciled (hg38) rows have NO
+        fewest-mm+b CRISPR-Bulge projection (NaN) and drop out of the CB card, with a note
+        explaining it. The CB band uses the 95%-recall sensitive operating point, not '> 0'."""
+        import pandas as pd
+        import numpy as np
+        import cb_operating_point as cbop
+        cols = {"mmb": "Mismatches+bulges", "bulges": "Bulges",
+                "cfd": "CFD_score", "crispr_bulge": "CRISPR_BULGE_score"}
+        thr = cbop.sensitive_threshold()
+        df = pd.DataFrame({
+            "Mismatches+bulges":  [0, 3, 4, 5, 2],
+            "Bulges":             [0, 0, 1, 0, 0],
+            "CFD_score":          [1.0, 0.60, 0.55, 0.05, 0.30],
+            # reconciled rows -> NaN CB (no fewest-mm+b projection); private rows -> CB,
+            # one just below the sensitive threshold (must be EXCLUDED from the CB band)
+            "CRISPR_BULGE_score": [1.0, np.nan, 0.80, thr / 2.0, 0.40],
+            "_pv_category": ["Reconciled (hg38)", "Reconciled (hg38)",
+                             "Paternal-private (non-mappable)",
+                             "Maternal-private (non-mappable)",
+                             "Paternal-private (non-mappable)"],
+        })
+        card, modal, note = gr._build_combined_risk_card(df, cols, "ACTGAAATCTGTAAGCAGGC")
+        self.assertIn("OFF-TARGET RISK", card)                 # card rendered
+        self.assertIn("CFD", card)                             # CFD scorer block
+        self.assertIn("CRISPR-Bulge", card)                    # CRISPR-Bulge scorer block
+        self.assertIn(cbop.sensitive_label_text(), card)       # 95%-recall sensitive band label
+        self.assertNotIn("CRISPR-Bulge > 0 (sensitive)", card)  # NOT the legacy framing
+        self.assertIn("best per-haplotype CRISPR-Bulge alignment", note)  # reconciled-CB methodology note
+        self.assertIn("operating points", modal)               # PR-curve section caption
+        # empty frame -> empty card, never a crash
+        self.assertEqual(gr._build_combined_risk_card(pd.DataFrame(), cols, "G"), ("", "", ""))
+
+    def test_reconciled_cb_join(self):
+        """_reconciled_cb carries CRISPR-Bulge onto reconciled (hg38) rows by joining each
+        site's best-CB (highest_CRISPR_BULGE) from the haplotype's own integrated_results via
+        the native fewest-mm+b coord, MAX over pat/mat, tolerant of the +/-1bp off-by-one; a
+        lookup miss stays NaN (never fabricated)."""
+        import pandas as pd
+        import os, tempfile
+
+        def _hap(d, rows):
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "g_integrated_results.tsv"), "w") as h:
+                h.write("Chromosome\tStart_coordinate_(fewest_mm+b)\t"
+                        "CRISPR_BULGE_score_(highest_CRISPR_BULGE)\n")
+                for ch, pos, cb in rows:
+                    h.write(f"{ch}\t{pos}\t{cb}\n")
+        tmp = tempfile.mkdtemp()
+        patd, matd = os.path.join(tmp, "pat"), os.path.join(tmp, "mat")
+        _hap(patd, [("chr1", "1000", "0.80"), ("chr1", "2000", "0.05")])
+        _hap(matd, [("chr1", "1001", "0.30"), ("chr2", "9999", "0.90")])  # 1001 = +1bp of 1000
+        recon = pd.DataFrame({
+            "Chromosome_paternal": ["chr1", "chr1", "chr2", "chr1"],
+            "Start_coordinate_(fewest_mm+b)_paternal": ["1000", "2000", "9999", "5555"],
+            "Chromosome_maternal": ["chr1", "chr1", "chr2", "chr1"],
+            "Start_coordinate_(fewest_mm+b)_maternal": ["1000", "2000", "9999", "5555"],
+        })
+        cb = gr._reconciled_cb(recon, {"paternal": patd, "maternal": matd})
+        self.assertAlmostEqual(cb.iloc[0], 0.80, places=6)   # max(pat 0.80, mat 0.30@+1bp)
+        self.assertAlmostEqual(cb.iloc[1], 0.05, places=6)   # pat only
+        self.assertAlmostEqual(cb.iloc[2], 0.90, places=6)   # mat only (chr2)
+        self.assertTrue(pd.isna(cb.iloc[3]))                 # neither -> NaN, not fabricated
 
     def test_run_manifest_bundled_and_valid(self):
         """The ZIP carries a machine-readable run_manifest.json (IND traceability)."""
@@ -1576,6 +1683,44 @@ class TestGenerateReport(unittest.TestCase):
         # the MIN maf 0.003 -> "3.00e-03"
         self.assertIn("rs333", html)
         self.assertIn("3.00e-03", html)
+
+    def test_observed_cell_label_pop_vs_persample(self):
+        """The "Observed" cell must not label a population-level, multi-variant window
+        roster as plain "N carriers" (it is the worst-case UNION of samples carrying >=1
+        of the variants, not cis carriers -- the stacked combination can be a chimera that
+        exists on no one haplotype). It must flag that; a single-variant roster stays
+        "N carriers"; and under --per-sample the roster is the EXACT cis set."""
+        cols = {"origin": "o", "samples": "s", "var_genome": "v"}
+        def cell(origin, samples, variants):
+            return gr._curated_cell("observed", {"o": origin, "s": samples, "v": variants}, cols)
+        many = ",".join(f"S{i}" for i in range(128))
+        multi = ",".join(f"chr14;{105862743 + i};A;T" for i in range(12))
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
+        # population-level (default)
+        gr._PER_SAMPLE = False
+        self.assertEqual(cell("alt", "S1,S2,S3", "chr1;100;A;T"), "3 carriers")   # 1 variant
+        self.assertEqual(cell("alt", many, multi), "128 carriers (>=1 of 12 vars, poss. chimera)")
+        self.assertEqual(cell("ref", "", "chr1;1;A;T"), "reference")
+        # the misleading plain "128 carriers" must NOT be produced for the chimera case
+        self.assertNotEqual(cell("alt", many, multi), "128 carriers")
+        # --per-sample: a named roster is the exact cis carrier set (phased)
+        gr._PER_SAMPLE = True
+        self.assertEqual(cell("alt", "A,B,C,D,E", multi), "5 cis carriers")
+        self.assertEqual(cell("alt", "A", "chr1;1;A;T"), "1 cis carrier")
+
+    def test_hap_label_mode_aware(self):
+        """The per-site modal noun is mode-aware: population-level = 'variant
+        combination(s)' (worst-case, unphased reconstructions, not confirmed on any one
+        individual); --per-sample = 'observed haplotype(s)' (genuinely resolved/phased)."""
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
+        gr._PER_SAMPLE = False
+        self.assertEqual(gr._hap_label(2), "variant combinations")
+        self.assertEqual(gr._hap_label(1), "variant combination")
+        self.assertEqual(gr._hap_label(2, head=True), "variant combinations (worst-case)")
+        gr._PER_SAMPLE = True
+        self.assertEqual(gr._hap_label(2), "observed haplotypes")
+        self.assertEqual(gr._hap_label(1), "observed haplotype")
+        self.assertEqual(gr._hap_label(2, head=True), "observed haplotypes")
 
     def test_observed_haplotypes_companion_multi_and_single(self):
         """build_observed_haplotypes_companion lists EVERY distinct observed variant
@@ -1921,7 +2066,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn('class="oh-modal"', modal)
         self.assertIn('id="ohm-chrX-400"', modal)
         self.assertIn("chrX:400 (+)", modal)                       # locus header
-        self.assertIn("3 observed haplotypes", modal)              # K count
+        self.assertIn("3 variant combinations (worst-case)", modal)              # K count
         for vs in ("chrX_400_T_A", "chrX_402_C_G", "chrX_404_G_T"):
             self.assertIn(vs, modal)                               # all haplotypes
         for aln in ("ACGTACGTACGTACGTAAAGG", "ACGTACGTACGTACGTGGGGG",
@@ -1930,7 +2075,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("<code>ACGTACGTACGTACGTAAAGG</code>", modal)  # wrapped in <code>
         self.assertIn("oh-close", modal)                           # close button
         self.assertIn("observed_haplotypes.tsv", modal)            # download link
-        self.assertIn("Download all observed haplotypes", modal)
+        self.assertIn("Download all variant combinations", modal)
         # empty haps -> no modal
         self.assertEqual(gr._oh_modal_html("x", [], "x.tsv"), "")
 
@@ -1947,7 +2092,7 @@ class TestGenerateReport(unittest.TestCase):
         )
         self.assertIn("oh-open", html)                             # the link class
         self.assertIn('data-oh="ohm-chrX-400"', html)              # points at the modal
-        self.assertIn("2 other haplotypes", html)                 # N = 3 - 1
+        self.assertIn("2 other variant combinations", html)                 # N = 3 - 1
         self.assertIn("&middot;", html)                            # separator
         # exactly one modal emitted, keyed by the stable id
         self.assertEqual(list(oh_modals), ["ohm-chrX-400"])
@@ -2136,7 +2281,7 @@ class TestGenerateReport(unittest.TestCase):
         # both haplotypes (the CFD-axis + the CRISPR-Bulge-axis varset) render
         self.assertIn("chr5_400_T_A", html)
         self.assertIn("chr5_402_C_G", html)
-        self.assertIn("2 observed haplotypes", html)            # site has K=2
+        self.assertIn("2 variant combinations (worst-case)", html)            # site has K=2
         # the CRISPR-Bulge-ranked table is present (both scorers shown)
         self.assertIn("top1000_crispr_bulge.tsv", html)
 
@@ -2150,7 +2295,7 @@ class TestGenerateReport(unittest.TestCase):
         self._assert_both_axis_modals_intact(html)
         # top-level link + callout + modal download button all present
         self.assertIn("Observed haplotypes at multi-haplotype sites", html)
-        self.assertIn("Download all observed haplotypes", html)
+        self.assertIn("Download all variant combinations", html)
         # no "omitted" degradation note when the companion is bundled
         self.assertNotIn("omitted from this slim report", html)
 
@@ -2169,7 +2314,7 @@ class TestGenerateReport(unittest.TestCase):
         # CRITICAL INVARIANT: the inline modals (both axes) are UNCHANGED
         self._assert_both_axis_modals_intact(html)
         # the download affordances degrade gracefully (no broken link)
-        self.assertNotIn("Download all observed haplotypes", html)
+        self.assertNotIn("Download all variant combinations", html)
         self.assertNotIn(
             'href="data/observed_haplotypes.tsv"', html)
         # the modal shows the short degrade note in place of the download button
@@ -2189,7 +2334,7 @@ class TestGenerateReport(unittest.TestCase):
         self.assertNotIn("data/observed_haplotypes.tsv", slim_names)   # gated out of slim
         self.assertIn("data/observed_haplotypes.tsv", full_names)      # back under --report-full
         # under --report-full the download affordances are present again
-        self.assertIn("Download all observed haplotypes", full_html)
+        self.assertIn("Download all variant combinations", full_html)
         self.assertNotIn("omitted from this slim report", full_html)
         self._assert_both_axis_modals_intact(full_html)
 

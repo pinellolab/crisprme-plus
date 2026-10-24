@@ -23,11 +23,11 @@ through an interactive web-based interface.
 
 - **Dictionary-less variant-aware search** — a compact allele-frequency registry + genotype store ship with the index, so variant off-target search (with allele frequencies, rsIDs, and per-dataset provenance) runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
 - **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
-- **Complementary production indexes** — the **recommended default** is the phased **HGDP + 1000 Genomes** index (`NRG_3_hg38+hg38_HGDP1kGP`: 4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout), with single-source **1000G-2021**, the **HPRC pangenome**, and the sites-only five-source **mega** alternatives. All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence — see the [index comparison table below](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) and [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md). (Per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/).)
-- **Population-level by default; `--per-sample` for genotype resolution** — by default the SNP analysis reports worst-possible representatives per variant window (lossless for detection, tractable on any panel including dense/aggregate ones); add **`--per-sample`** (CLI) or pick **Per-sample** in the web form for CONFIRMED cis phasing + named carriers + exact joint AF on a genotyped panel. This is a **genotype-resolution** dial, not a speed dial — for a single guide the two modes take about the same time; `--per-sample`'s cost shows up only on dense/aggregate panels, and it is inert on a sites-only index. The report states which mode was used. ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution))
-- **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in the default population-level run, **on** under `--per-sample` — on **both the CLI and the web**; override on the CLI with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
+- **Complementary production indexes** — the **recommended default** is the phased **HGDP + 1000 Genomes** index (`NRG_3_hg38+hg38_HGDP1kGP`: 4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout), with the **HPRC pangenome** and the sites-only five-source **mega** alternatives. All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence — see the [index comparison table below](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) and [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md). (Per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/).)
+- **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection, tractable on any panel) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the fast worst-case screen on a phased index; add **`--per-sample`** to force resolution on any index (it cannot name carriers on a sites-only index). This is a **genotype-resolution** dial, not a speed dial — for a single guide the two modes take about the same time; the resolution cost shows up only on dense/aggregate panels. The report states which mode was used. ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution))
+- **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in population-level runs (`--population-level` on a genotyped index, or the default on sites-only/unphased indexes), **on** in per-sample runs (the default on genotyped+phased indexes, or under `--per-sample`) — on **both the CLI and the web**; override on the CLI with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
-- **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, plots, recommended validation panel, annotated top hits, per-tier downloads, legend). ([methods](METHODS.md#7-shareable-off-target-assessment-report))
+- **Shareable off-target report** — every run auto-generates a self-contained HTML report (summary, calibrated per-scorer risk card, precision-recall curves, **recommended validation panel**, annotated top hits, per-tier downloads, legend). The panel keys bulges on **CRISPR-Bulge at a principled sensitive threshold** — the **95%-recall operating point** on a 40-guide held-out benchmark (`CB ≥ 1.9×10⁻⁴`; selectable to 90 % / 95 % / 99 % recall via `CRISPRME_CB_RECALL_TARGET`) — plus a high-CFD rescue for no-/single-bulge sites and all perfect/near-perfect and functional / cancer-gene hits, so the shipped panel *is* the recommended default set. ([methods](METHODS.md#7-shareable-off-target-assessment-report))
 - **One-command Docker web interface + indexes on demand** — no conda, no giant build; pull reference data + prebuilt indexes from the HuggingFace CDN (`crisprme.py download`), or **build & publish your own** dict-less indexes (`build-index-only` / `publish-index --dictless`), and manage genomes / indexes / VCFs / annotations / PAMs from the browser **Data Manager**. ([protocol](docs/PRECOMPUTED_INDEXES.md))
 - **Personal-assembly search (CLI + web)** — `assembly-search` scans a fully assembled diploid genome (paternal + maternal haplotype FASTAs) directly, lifts each haplotype to hg38, and reconciles them (homozygous- / heterozygous-equivalent + haplotype-non-mappable sites) — no VCF inference. Each individual is stored as one self-contained `Assemblies/<individual>/` folder + a `metadata.json` (fetch an HPRC individual, or bring your own as a `.zip`/`.tar.gz` bundle); `--assembly-individual <name>` runs a registered one from the CLI. Available on the website (a "Personal assembly" tab + a Settings card) with a combined report. An optional `--gene_annotation` adds the nearest gene + signed distance (`Gene` / `Gene_distance_kb`) to every hg38-mapped site. ([web guide](docs/crisprme_web_interface_user_guide.md#searching-a-personal-assembly-genome-assembly-search))
 - **Also** — merged multi-dataset VCF panels (per-dataset provenance + per-haplotype phasing), PAM-geometry-aware (pamless) indexes, bounded-complexity controls (`--max-total-edits` + a high-variant-density skip), and optional email notifications.
@@ -42,10 +42,10 @@ that matter most:
 | Topic | CRISPRme 2.1.14 (last stable before CRISPRme+) | CRISPRme+ (now) | What to do |
 |---|---|---|---|
 | Off-target ML score | CFD + **CRISTA** | CFD + **CRISPR-Bulge** (OrensteinLab, *NAR* 2024; MIT — more accurate, esp. on bulges), run in a dedicated `cbulge` env | Nothing: `install_from_source.sh` / the Docker image provision it; or create it later with `crisprme.py scorer-env create` |
-| Analysis mode | single search, **always** per-sample genotype-resolved (named carriers; no mode flag) | **population-level** by default (lossless for detection, faster) + opt-in **`--per-sample`** (genotyped panels) for CONFIRMED cis + named carriers + exact joint AF | Add `--per-sample` to reproduce the old per-sample output ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution)) |
+| Analysis mode | single search, **always** per-sample genotype-resolved (named carriers; no mode flag) | **context-aware default** — per-sample on genotyped+phased panels (CONFIRMED cis + named carriers + exact joint AF), population-level on sites-only/unphased; **`--population-level`** opts out of per-sample, **`--per-sample`** forces it | Add `--per-sample` to reproduce the old per-sample output ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution)) |
 | SNP+SNP / SNP+indel co-occurrence | not detected | **detected + reported** — **CONFIRMED** (phasing proves cis) / **PUTATIVE**, with joint AF; on by default | Opt out with `CRISPRME_INDEL_SNP=0` ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration)) |
-| Alternative-alignments TSV | always written | **off by default, on under `--per-sample`** (both CLI and web) | Force either way on the CLI with `--alt-alignments` / `--no-alt-alignments` ([methods](METHODS.md#7-shareable-off-target-assessment-report)) |
-| Variant datasets / default index | build-your-own from `--vcf` configs (e.g. 1000G + HGDP) | **precomputed, downloadable** indexes on HuggingFace; recommended default **`NRG_3_hg38+hg38_HGDP1kGP`** (phased HGDP + 1000 Genomes, 4,091 samples → CONFIRMED cis + named carriers), with `1000G2021` / `HPRC` / sites-only `mega` alternatives | `crisprme.py download --what index --index-name …` (Quickstart step 2) ([details](docs/PRECOMPUTED_INDEXES.md)) |
+| Alternative-alignments TSV | always written | **off in population-level runs, on in per-sample runs** (per the context-aware default; both CLI and web) | Force either way on the CLI with `--alt-alignments` / `--no-alt-alignments` ([methods](METHODS.md#7-shareable-off-target-assessment-report)) |
+| Variant datasets / default index | build-your-own from `--vcf` configs (e.g. 1000G + HGDP) | **precomputed, downloadable** indexes on HuggingFace; recommended default **`NRG_3_hg38+hg38_HGDP1kGP`** (phased HGDP + 1000 Genomes, 4,091 samples → CONFIRMED cis + named carriers), with `HPRC` / sites-only `mega` alternatives | `crisprme.py download --what index --index-name …` (Quickstart step 2) ([details](docs/PRECOMPUTED_INDEXES.md)) |
 | License | AGPL-3.0 for academic/non-commercial use **plus a separate commercial license required for commercial use** (dual-licensed — AGPL never covered commercial use) | **MGB Open Access License 1.0** — free for non-commercial, non-revenue-generating, academic use; commercial use **likewise requires a separate commercial license** | See [§6 License](#6-license) |
 | Report | CFD / CRISTA summaries | adds an **`Observed`** column (`reference` / `N carrier(s)` / `observed` / `putative`), CRISPR-Bulge panels, and a shareable HTML report | Read it in the report ([methods](METHODS.md#7-shareable-off-target-assessment-report)) |
 
@@ -53,16 +53,18 @@ that matter most:
 > only in the intermediate CRISPRme+ 2.5.x line — never in stock CRISPRme 2.1.14 — and were
 > removed in 2.5.4 (they are **not** aliases). `--per-sample` is the replacement for `--full`.
 > `complete-search` now prints a **WARNING** if a saved script passes the retired
-> `--fast`/`--full`, so a pre-2.5.4 command no longer silently runs the population-level
-> default with no per-sample output.
+> `--fast`/`--full`, so a pre-2.5.4 command no longer silently changes the analysis mode;
+> mode is now the context-aware default unless `--population-level`/`--per-sample` is given.
 
 ### Which analysis mode + which index should I use?
 
-- **Analysis mode.** The **default (no flag) = population-level** worst-possible screen;
-  it works on **any** index and is lossless for detection. Add **`--per-sample`** **only
-  on a genotyped index** (`HGDP1kGP` (the default), `1000G2021`, or `HPRC`) when you need named
-  carriers / CONFIRMED cis / exact joint AF. It is a genotype-resolution dial, not a
-  speed dial.
+- **Analysis mode.** The **default (no flag) is context-aware**: per-sample on a
+  genotyped+PHASED index (`HGDP1kGP` — the default; also `HPRC`) resolving
+  CONFIRMED cis + named carriers + exact joint AF, or population-level otherwise
+  (sites-only/unphased/hybrid/reference-only; lossless for detection, works on any index).
+  Add **`--population-level`** to opt out of per-sample on a phased index (e.g. a very
+  dense / high-edit / genome-wide search); add **`--per-sample`** to force resolution. The
+  two flags are mutually exclusive. It is a genotype-resolution dial, not a speed dial.
 - **Index.** You only need one; pick by what you're after (full detail in the index
   table in the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build)
   below):
@@ -70,7 +72,6 @@ that matter most:
   | Index | Best for |
   |---|---|
   | `HGDP1kGP` *(recommended default)* | most cases — phased HGDP + 1000 Genomes, 4,091 samples → CONFIRMED cis + named carriers throughout |
-  | `1000G2021` | a clean 1000-Genomes-only alternative (3,202 samples, fully phased → CONFIRMED cis + named carriers) |
   | `HPRC` | assembly / pangenome variation |
   | `mega` | **escalate here only** for a widest-provenance worst-case screen (sites-only, all co-occurrences PUTATIVE, no carriers) |
 
@@ -147,9 +148,6 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 #    observed haplotypes)
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
-#    ...or the 1000-Genomes-only alternative hg38 + 1000G-2021 index (3,202 samples,
-#    fully phased → CONFIRMED cis + named carriers):
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /DATA
 #    ...or the HPRC pangenome index (232 phased assembly-derived genomes incl. CHM13,
 #    CONFIRMED cis + named carriers, pangenome-specific variation, searchable indels):
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.py download --what index --index-name NRG_3_hg38+hg38_HPRC --path /DATA
@@ -163,11 +161,11 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 
 > **`:latest` vs a pinned tag.** These commands use `pinellolab/crisprme:latest` — the
 > auto-updating, GPU-capable default image. For a fully reproducible run, pin the exact
-> release instead, e.g. `pinellolab/crisprme:v2.7.10`.
+> release instead, e.g. `pinellolab/crisprme:v2.8.0`.
 
 > **On HPC with Apptainer/Singularity.** Use **`apptainer run`**, which invokes the image
 > entrypoint so `crisprme.py` is on `PATH`, binding your data dir to `/DATA` — e.g.
-> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.7.10 crisprme.py --version`
+> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.8.0 crisprme.py --version`
 > (add `crisprme.py web-interface` / `complete-search …` the same way). Note that
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
 > `PATH` — prefer `apptainer run` (or prefix `bash -lc`).
@@ -179,7 +177,6 @@ indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever yo
 | Index (`--index-name`) | Variant sources | Resolution | Best for |
 |---|---|---|---|
 | **HGDP + 1000 Genomes** — `NRG_3_hg38+hg38_HGDP1kGP` *(recommended default)* | HGDP (925) + 1000 Genomes (3,166), genotyped, **jointly SHAPEIT5-re-phased** — 4,091 samples | **CONFIRMED cis** throughout; named per-sample carriers + exact joint AF (including HGDP's seven genetic regions, with correct chrX PAR allele frequencies) | most use cases; the broadest fully-phased panel of real observed haplotypes |
-| **1000G-2021** — `NRG_3_hg38+hg38_1000G2021` | 1000 Genomes 2021 (3202), genotyped, **fully phased** | **CONFIRMED cis** throughout; named per-sample carriers + exact joint AF (all genotyped-phased, no PUTATIVE-from-phasing) | a 1000-Genomes-only alternative — a clean single-source panel of real observed haplotypes |
 | **HPRC pangenome** — `NRG_3_hg38+hg38_HPRC` | HPRC Release 2 Minigraph-Cactus (`hprc-v2.0-mc-grch38`) — 232 assembly-derived genomes incl. CHM13, phased | CONFIRMED cis + named carriers; captures **pangenome-specific** variation | assembly-derived / pangenome variation |
 | **mega (sites-only)** — `NRG_3_hg38+hg38_mega` | 1000G-2021 + HGDP + gnomAD v4.1 + TOPMed + All-of-Us (aggregate) | **sites-only** — union of allele frequencies, no genotypes; every multi-variant/co-occurring off-target is **PUTATIVE** with a min-AF bound and **no named carriers** | a conservative worst-case screen when you must not miss a rare allele from ANY of five databases (escalate here after a genotyped-index run) |
 
@@ -188,9 +185,7 @@ indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever yo
 > phased HGDP + 1000 Genomes, 4,091 samples jointly SHAPEIT5-re-phased → CONFIRMED cis +
 > named per-sample carriers throughout, including HGDP's seven genetic regions and with
 > correct chrX PAR allele frequencies — the broadest fully-phased panel of real observed
-> haplotypes, covering most use cases. Pick the **1000-Genomes-only 1000G-2021**
-> (`+hg38_1000G2021`, 3,202 samples, fully phased → CONFIRMED cis + named carriers) when you
-> want a clean single-source panel. Pick **HPRC** (`+hg38_HPRC`) for pangenome / assembly-derived
+> haplotypes, covering most use cases. Pick **HPRC** (`+hg38_HPRC`) for pangenome / assembly-derived
 > variation. **Escalate to mega** (`+hg38_mega`) only for a widest-provenance worst-case
 > screen across five databases — it is **sites-only**, so every co-occurring off-target is
 > **PUTATIVE** (a worst-case reconstruction that may or may not exist in any real
@@ -225,9 +220,10 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 #   (e.g. --mm 6 --bDNA 2 --bRNA 2 is a 10-edit budget → add --max-total-edits 10 to keep all).
 #   Uses --per-sample here to resolve per-sample genotypes — CONFIRMED cis phasing throughout
 #   (the whole HGDP + 1000 Genomes panel is jointly re-phased) + named carrier samples + exact joint
-#   allele frequency — recommended for genotyped panels / clinical validation. OMIT --per-sample for the
-#   POPULATION-LEVEL default (worst-possible representatives; removes the per-haplotype enumeration
-#   wall that makes dense/aggregate panels intractable). --per-sample is a genotype-resolution mode,
+#   allele frequency — recommended for genotyped panels / clinical validation. On HGDP1kGP (a
+#   genotyped+phased index) per-sample is already the default; pass --population-level to switch to
+#   the worst-possible representatives (removes the per-haplotype enumeration wall that makes
+#   dense/aggregate panels intractable). --per-sample is a genotype-resolution mode,
 #   not a speed mode: for a single guide the runtimes are comparable, but it can be intractable on
 #   dense/aggregate panels; on a sites-only index (mega) it cannot resolve carriers and is inert.
 #   COSMIC cancer annotations ship in the bundle but are OFF by default (licence-gated) — enable
@@ -295,18 +291,18 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
-> **Which version do I get?** For **CRISPRme+ (2.7.10, this release)** use **Docker**
+> **Which version do I get?** For **CRISPRme+ (2.8.0, this release)** use **Docker**
 > (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above, or
 > §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
-> 2.7.10 line** — use it only if you specifically want the stable release. If in doubt,
+> 2.8.0 line** — use it only if you specifically want the stable release. If in doubt,
 > use Docker.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.7.10)](#12-install-crisprme-via-docker)
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.8.0)](#12-install-crisprme-via-docker)
 
-- [Install CRISPRme from source (§1.3)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.7.10) line on Python 3.11
+- [Install CRISPRme from source (§1.3)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.8.0) line on Python 3.11
 
 - [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
@@ -314,8 +310,8 @@ operating systems. Select the method that best matches your setup:
 ---
 
 Conda/Bioconda installs **only the stable 2.1.x line** (Python 3.8) — *not* the
-CRISPRme+ (2.7.x) line. Use this path only if you specifically want the stable
-release; for CRISPRme+ 2.7.10 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
+CRISPRme+ (2.8.x) line. Use this path only if you specifically want the stable
+release; for CRISPRme+ 2.8.0 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
 or [Docker](#12-install-crisprme-via-docker).
 
 This section is organized into three subsections to guide you through the installation 
@@ -374,7 +370,7 @@ By completing these steps, your system will be fully prepared for installing CRI
 > compiles CRISPRitz 2.9.0 and installs both tools into a conda environment. A native
 > Bioconda package for the CRISPRme+ line is **in preparation**; until it lands, the Bioconda
 > `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** the
-> CRISPRme+ (2.7.x) line.
+> CRISPRme+ (2.8.x) line.
 
 To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
 (`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
@@ -390,7 +386,7 @@ crisprme.py
 #### 1.1.3 Updating CRISPRme
 ---
 
-> **Updating CRISPRme+ (2.7.10)?** Conda/Bioconda cannot update you to the CRISPRme+
+> **Updating CRISPRme+ (2.8.0)?** Conda/Bioconda cannot update you to the CRISPRme+
 > line — update via the [source build (§1.3)](#13-install-crisprme-from-source-without-bioconda)
 > or [Docker](#12-install-crisprme-via-docker). The steps below update only the stable
 > 2.1.x Bioconda line.
@@ -535,7 +531,7 @@ included. `:latest` is the auto-updating default image; it runs on **CPU** out o
 box (fully supported — this is the default scoring path), and a **GPU can optionally
 accelerate the CRISPR-Bulge scorer** on an NVIDIA host (add `--gpus all` + `--compute-backend
 cuda`). For a fully reproducible setup pin the exact release instead, e.g.
-`docker pull pinellolab/crisprme:v2.7.10`.
+`docker pull pinellolab/crisprme:v2.8.0`.
 
 Once the download is complete, the CRISPRme Docker image will be ready for use. 
 To confirm the image is successfully installed, you can list all available Docker 
@@ -666,7 +662,7 @@ The directory organization required by CRISPRme is illustrated below:
 > To run it in **Docker**, prefix it with
 > `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:latest`
 > (add `-p 8080:8080` for `web-interface`; on an NVIDIA host add `--gpus all` to run the
-> CRISPR-Bulge scorer on the GPU). Pin `:v2.7.10` instead of `:latest` for reproducibility.
+> CRISPR-Bulge scorer on the GPU). Pin `:v2.8.0` instead of `:latest` for reproducibility.
 > From a **source / Conda** install, run it as-is inside the activated `crisprme`
 > environment.
 
@@ -906,16 +902,17 @@ its purpose and usage:
   this value.
 
 - `--per-sample` (*Optional*)
-  <br>Resolve per-sample genotypes into observed haplotypes for the SNP post-analysis,
-  instead of the default population-level analysis. Reports each observed haplotype with
-  CONFIRMED cis phasing, named carrier samples, and exact joint allele frequency.
-  **Requires a genotyped index** (HGDP + 1000 Genomes (the default), 1000G-2021, or HPRC); on a sites-only index
-  (`mega`) it cannot resolve carriers (no genotypes) and `complete-search` warns. Can be
-  slow / intractable on dense or aggregate panels. By default (no flag) CRISPRme+ runs a
-  **population-level** analysis: one worst-possible representative per variant window
-  (exact worst-case CFD, dataset-level allele frequencies), lossless for detection and
-  tractable on any panel. It replaces the removed `--full` flag; `--per-sample` is a
-  genotype-resolution dial, not a speed dial (see METHODS §5).
+  <br>Force per-sample genotype resolution into observed haplotypes for the SNP
+  post-analysis. Reports each observed haplotype with CONFIRMED cis phasing, named carrier
+  samples, and exact joint allele frequency. On a genotyped+PHASED index (HGDP + 1000
+  Genomes (the default), or HPRC) this is already the context-aware default; on
+  a sites-only index (`mega`) it cannot resolve carriers (no genotypes) and
+  `complete-search` warns. Can be slow / intractable on dense or aggregate panels. To opt
+  out of per-sample on a phased index use **`--population-level`**, which runs one
+  worst-possible representative per variant window (exact worst-case CFD, dataset-level
+  allele frequencies), lossless for detection and tractable on any panel. It replaces the
+  removed `--full` flag; `--per-sample` is a genotype-resolution dial, not a speed dial
+  (see METHODS §5).
 
 - `--compute-backend {cpu,cuda,metal}` (*Optional*)
   <br>ML-scorer compute device: `cpu` (default) | `cuda` (NVIDIA/Linux GPU) | `metal`
@@ -1014,9 +1011,11 @@ results and understanding the impact of genetic diversity on CRISPR off-target.
     
     - **Purpose**: Facilitates a full exploration of CRISPRme's off-target 
     predictions and their functional relevance.
-    - **Note**: emitted **by analysis mode** — off in the default population-level
-    run, on under `--per-sample`; force either way with `--alt-alignments` /
-    `--no-alt-alignments`. Nothing in the report reads it.
+    - **Note**: emitted **by analysis mode** — off in population-level runs
+    (`--population-level` on genotyped indexes, or the default on sites-only/unphased
+    indexes), on in per-sample runs (the default on genotyped+phased indexes, or under
+    `--per-sample`); force either way with `--alt-alignments` / `--no-alt-alignments`.
+    Nothing in the report reads it.
 
 **Co-occurrence companion outputs** (the default-on SNP+SNP / SNP+indel co-occurrence
 feature; both are bundled into the report ZIP):
@@ -1860,8 +1859,8 @@ is under `data/`). Reading top to bottom:
 - **`--per-sample` reports only off-targets a real individual carries.** In a high-variant-density
   window CRISPRme does **not** fabricate a synthetic cross-sample "worst-case" haplotype under
   `--per-sample`; it reports the real observed haplotypes (exact carriers) and flags the dense region in
-  `high_variant_density_regions.bed`. The population-level default (no `--per-sample`) still reports the
-  conservative worst-case representative, as it should for a screen.
+  `high_variant_density_regions.bed`. A population-level run (`--population-level`, or the default on a
+  sites-only/unphased index) still reports the conservative worst-case representative, as it should for a screen.
 
 ##### Input Arguments
 ---
@@ -1919,7 +1918,6 @@ To build a **different PAM** (NGG, NNGRRT, TTTN, …) on the shipped re-phased *
 crisprme.py download --what all --path /data/crisprme
 crisprme.py download --what index --index-name NRG_3_hg38 --path /data/crisprme
 crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /data/crisprme           # recommended default (phased HGDP + 1000 Genomes, 4,091 samples)
-crisprme.py download --what index --index-name NRG_3_hg38+hg38_1000G2021 --path /data/crisprme          # 1000-Genomes-only alternative (single-source, phased)
 crisprme.py download --what assembly --sample HG01255 --path /data/crisprme                            # an HPRC individual's diploid assembly (for assembly-search)
 ```
 
@@ -1951,7 +1949,12 @@ annotated with the same two scores a normal CRISPRme+ report uses: the **CFD**
 score and the **CRISPR-Bulge** ML score (the exact same calculations, so results
 are directly comparable to a full CRISPRme+ analysis). This is useful for scoring
 sites nominated by another tool — e.g. non-canonical-PAM hits — with CRISPRme+'s
-calculations when building a dedicated index is not warranted.
+calculations when building a dedicated index is not warranted. Bulge-containing
+sites are scored with CFD's position-aware bulge penalty (as of v2.8.0; a
+PAM-proximal bulge is penalized, not ignored) — supply the aligned pair in the
+in-place convention (crRNA and off-target the same length, each bulge a `-` at its
+position). CFD still cannot *rank* bulges; use the CRISPR-Bulge column for those
+(see `docs/offtarget_risk_summary_METHODS.md` §3).
 
 With `--index-path` pointing at an installed variant index, each site also gets a
 **variant carrier overlay**: the variants overlapping its protospacer+PAM window
@@ -2035,7 +2038,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.7.10`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.8.0`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**

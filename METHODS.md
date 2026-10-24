@@ -1,7 +1,7 @@
 # CRISPRme+ — Methods
 
 This document describes the methods introduced in **CRISPRme+** (the 2.3 through
-2.7.x line; current shipped release 2.7.10), intended as a self-contained technical reference and as source material
+2.7.x line; current shipped release 2.8.0), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
@@ -44,12 +44,15 @@ off-target site.
   upper-bounds the score/severity of every realizable haplotype in that window, emitted
   by the default population-level analysis instead of enumerating each haplotype (§5).
 
-**Analysis-mode decision rule.** The **default** (no flag) is a **population-level**
-worst-possible screen and works on **any** index. Add **`--per-sample`** only on a
-**genotyped** index (`HGDP1kGP` — the recommended default, catalog name
-`NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples, jointly
-SHAPEIT5 re-phased — `1000G2021`, or `HPRC`) when you need named carriers /
-CONFIRMED cis / exact joint AF — it is inert on a sites-only index (`mega`). See
+**Analysis-mode decision rule.** The **default** (no flag) is **context-aware**:
+per-sample (CONFIRMED cis phasing + named carriers + exact joint AF) on a
+genotyped+PHASED index, or a population-level worst-possible screen (works on any
+index, lossless for detection) otherwise (sites-only/unphased/hybrid/reference-only).
+Force the fast population-level mode with **`--population-level`**; force resolution
+with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-only
+index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
+catalog name `NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
+jointly SHAPEIT5 re-phased — or `HPRC`. See
 [§5, Search-space control for high-variant-density regions](#population-level-analysis-default-and---per-sample-genotype-resolution).
 
 ---
@@ -112,7 +115,7 @@ does millions of registry lookups (one per candidate off-target window, scattere
 chromosome), and measurement showed raw lookups are **~2× faster** than the compressed path
 even with a warm cache. All shipped indexes (the genotyped 1000 Genomes + HGDP and the
 sites-only mega) use this raw format, for consistency and lookup speed ("speed over space").
-The registry has shipped raw since 2.5.3 (still raw as of 2.7.10).
+The registry has shipped raw since 2.5.3 (still raw as of 2.8.0).
 
 **Optional `zlib` compression.** A block-compressed format is available for
 space-constrained storage. Each section is partitioned into 4,096-record blocks,
@@ -268,8 +271,8 @@ Each registry manifest (`reg_<chrom>.idx`) records the index's **`data_type`** �
 This lets tooling (e.g. the web variant-dataset selector) identify an index's type
 and phasing without scanning the multi-GB per-sample dictionary; a missing flag on
 an older index falls back to genotype-store presence. The shipped indexes are
-`HGDP1kGP` = **genotyped-phased** (the re-phased default, above), `1000G2021` =
-**genotyped-phased**, `HPRC` = **genotyped-phased**, and `mega` = **sites-only**;
+`HGDP1kGP` = **genotyped-phased** (the re-phased default, above), `HPRC` =
+**genotyped-phased**, and `mega` = **sites-only**;
 `hybrid` is the fourth possible value, for a merged panel mixing phased and unphased
 sources.
 
@@ -480,13 +483,17 @@ The controls above bound any *single* window, but a **dense panel** (many merged
 sources) or a **sites-only aggregate panel** can present so many variant-dense windows
 that even the observed-haplotype enumeration of Section 4 becomes intractable — measured
 at **49 h+ without completing** on a 4×-density 1000G+HGDP panel. The two analysis modes
-are therefore not really a *speed* dial but a **genotype-resolution** dial: the default
-reports population-level worst-possible off-targets (works on any panel), while
-`--per-sample` resolves each individual's observed haplotype (only possible, and only
-meaningful, when the panel carries per-sample genotypes). So as of 2.5.4 CRISPRme+ runs a
-**two-pass population-level analysis by default** (propagated to the whole post-analysis via
-the internal `CRISPRME_FAST_MODE` env var); **`--per-sample`** opts into the exact
-observed-haplotype enumeration of Section 4. Instead of enumerating the 2ᵏ IUPAC haplotype
+are therefore not really a *speed* dial but a **genotype-resolution** dial: per-sample
+resolves each individual's observed haplotype (only possible, and only meaningful, when the
+panel carries per-sample genotypes), while the population-level analysis reports
+worst-possible off-targets (works on any panel). As of **2.8.0** the mode is **context-aware
+by default**: on a genotyped+PHASED index CRISPRme+ runs the exact observed-haplotype
+enumeration of Section 4 (per-sample) by default, and on a sites-only / unphased / hybrid /
+reference-only index it runs the two-pass population-level analysis by default (propagated to
+the whole post-analysis via the internal `CRISPRME_FAST_MODE` env var). **`--population-level`**
+forces the worst-possible screen (the opt-out from per-sample on a phased index); **`--per-sample`**
+forces the observed-haplotype enumeration (the two are mutually exclusive). The 2.5.4 two-pass
+population-level machinery is now the opt-out path. Instead of enumerating the 2ᵏ IUPAC haplotype
 lattice per window, the population-level analysis emits a small fixed set of
 **worst-possible representatives** per window:
 
@@ -742,20 +749,28 @@ a value in [0, 1]; higher means more likely to be cut. They are reported
 side-by-side because they can disagree, and the recommended validation panel is
 deliberately model-agnostic (a site worst by *any* metric is included), so no
 single model gates the shortlist. CRISPRme+ does not re-train or modify either
-model; CFD is applied as its published lookup tables and CRISPR-Bulge as its
-published, pinned weights, to the aligned protospacer+PAM of each candidate.
+model; CFD is applied as its published lookup tables (CRISPRme+'s own
+implementation, `PostProcess/cfd_score.py`, Doench et al. 2016) and CRISPR-Bulge
+as its published, pinned weights, to the aligned protospacer+PAM of each candidate.
 
 **Domain-of-validity caveat (important).** Each score has a domain where it is
 trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
 
 - **CFD on gaps is a relative risk indicator, not a calibrated indel probability.**
   CFD was trained on **single-nucleotide mismatches**, but it does *not* ignore gaps:
-  the CRISPRitz-lineage `mismatch_score.pkl` extends Doench's mismatch table with **152
-  position-specific gap entries** (DNA-bulge `r-:dX` and RNA-bulge `rX:d-` at protospacer
-  positions 2–20), so a bulge is penalized by a per-position factor and **two bulges
-  multiply** — a PAM-distal bulge is near-neutral while a seed-proximal one is strongly
-  penalizing. This is a principled *extension* of the mismatch model, so a CFD value on a
-  gapped alignment is a relative risk indicator.
+  the CFD gap table (`cfd_mismatch_scores.json`) carries **152 position-specific gap entries**
+  (DNA-bulge `r-:dX` and RNA-bulge `rX:d-` at protospacer positions 2–20), so a bulge is penalized by a
+  per-position factor and **two bulges multiply** — a PAM-distal bulge is near-neutral while a
+  seed-proximal one is strongly penalizing. **As of v2.8.0 these factors are applied at each
+  bulge's true spacer position** (the extra genomic base of a DNA bulge is removed so the 20
+  guide bases keep their Cas9 positions, then the gap factor is applied; the two undefined
+  terminal columns are extrapolated — lenient at the PAM-distal 5' tip, abolished at the
+  PAM-proximal junction). Before v2.8.0 a DNA-bulge realignment discarded the gap, so DNA
+  bulges — and any bulge at a terminal column — were scored as if absent (a PAM-proximal bulge
+  scored like a perfect match); mismatch-only and in-range RNA-bulge scores are unchanged by the
+  fix. Even corrected, a CFD value on a gapped alignment is only a **relative** risk indicator
+  (held-out bulge-only AP ≈ 0.01) — **CRISPR-Bulge is the calibrated bulge ranker**; see
+  `docs/offtarget_risk_summary_METHODS.md` §3.
 - **CRISPR-Bulge is the model built for gaps — for exactly one bulge.** It natively scores
   a mismatched protospacer carrying **exactly one 1-bp DNA or RNA bulge**; its trained
   weights bake in a fixed input width.
@@ -768,8 +783,9 @@ trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
 - **Nulled ≥ 2-bulge sites are *not dropped*.** They remain scored by CFD's position-specific
   bulge penalty and are covered by two validation-panel safety nets. First, an unconditional
   **pure-bulge** rule: a 0-mismatch site with ≥ 1 bulge is always hard-included. Second, a
-  ≥ 2-bulge site that is high on **CFD alone** (CFD ≥ 0.5, where CFD is an uncalibrated
-  over-call and CRISPR-Bulge is N/A) is **kept in the recommended panel but *demoted*** — ranked
+  ≥ 2-bulge site that is high on **CFD alone** (CFD ≥ 0.5, where CFD position-penalizes each
+  bulge but is an uncalibrated extrapolation outside the single-bulge domain, and CRISPR-Bulge is
+  N/A) is **kept in the recommended panel but *demoted*** — ranked
   after every reliable hard-include (sites close by sequence, or high CFD at ≤ 1 bulge in its
   calibrated domain, or a clean bulge). We demote rather than drop because a ≥ 2-bulge
   off-target can still be real — the benchmark simply contains no ≥ 2-bulge examples, so its
@@ -780,7 +796,14 @@ trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
 The N/A sentinel is uniform across the report: a `-` means *not scored*, not *no risk* — it is
 never sorted or thresholded as if it were a low score. The threshold tiers in the report are
 **model-relative** (CRISPR-Bulge's cut points differ from CFD's because the two scores are on
-different scales).
+different scales). The CRISPR-Bulge **sensitive** tier — the operating point the recommended
+panel keys on — is the **95%-recall threshold** on the 40-guide held-out benchmark
+(**CB ≥ 1.9×10⁻⁴**; point estimate, guide-bootstrap 95% CI [5.8×10⁻⁶, 3.1×10⁻³]; selectable to
+90% / 99% via `CRISPRME_CB_RECALL_TARGET`), not an ad-hoc `> 0`: CRISPR-Bulge scores almost every
+site non-zero, so `> 0` would list the whole genome. CRISPR-Bulge scores are written at full
+precision (`{:.6g}`) so this sub-5×10⁻⁴ operating point is representable. See
+`docs/offtarget_risk_summary_METHODS.md` §3.5 for the recall↔validation-size trade (162 off-target
+validation loci at 95% recall for the ACTGA/NRG worked example).
 
 **Top-of-report off-target risk summary (replaces the aggregated specificity score).**
 The legacy single `100/(100+Σ)` specificity score is replaced by a per-scorer risk card. For
@@ -958,7 +981,8 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.7.x line (CRISPRme+ 2.7.10) (default SNP+indel co-occurrence, two-pass population-level
-analysis with opt-in `--per-sample` genotype resolution, and the CRISPR-Bulge ML off-target
+methods as of the 2.7.x line (CRISPRme+ 2.8.0) (default SNP+indel co-occurrence, context-aware
+analysis mode — per-sample on genotyped+PHASED indexes / population-level otherwise, with opt-out
+`--population-level` / forced `--per-sample`, and the CRISPR-Bulge ML off-target
 scorer in a dedicated conda environment with a `cpu|cuda|metal` compute backend); see the
 CHANGELOG and the referenced source files for implementation detail.*

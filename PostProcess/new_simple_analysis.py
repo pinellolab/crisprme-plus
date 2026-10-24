@@ -32,6 +32,17 @@ except Exception:  # module absent in an old deploy -> no genotype tier
 # isolation). This module has no hard dependency on tier0_registry, so its import
 # cannot break the legacy path either.
 import simple_analysis_registry as _sar
+# Position-aware CFD bulge penalty (2.8.0). Core dependency; if a very old deploy lacks
+# it, fall back to a trivial pass-through so scoring never breaks (bulges then revert to
+# the previous free-pass behaviour rather than raising).
+try:
+    from bulge_cfd_penalty import cfd_score_bulge_aware as _cfd_bulge_aware
+except Exception:  # pragma: no cover - module always shipped alongside
+    _cfd_bulge_aware = None
+# Clean-room CFD base scorer + its JSON tables (own implementation of Doench et al.,
+# Nat. Biotechnol. 2016). This replaces the inherited calc_cfd/revcom/get_mm_pam_scores
+# that used to live in this module; cfd_score_bulge_aware uses it as the mismatch-only base.
+from cfd_score import cfd as _cfd_clean, cfd_tables as _cfd_tables
 # ADDITIVE combination-aware population summary (Phase 3) + its companion-file writer
 # (Phase 3c). GUARDED / lazy exactly like tier0_registry: an old deploy may not ship
 # these -- in that case they stay None and the companion population-summary TSV is
@@ -214,40 +225,6 @@ class reversor:
         return other.obj < self.obj
 
 
-def calc_cfd(guide_seq, sg, pam, mm_scores, pam_scores, do_scores):
-    # if do_scores == False:
-    #     # print("NON CALCOLO")
-    #     score = -1
-    #     return score
-    score = 1
-    sg = sg.replace("T", "U")
-    guide_seq = guide_seq.replace("T", "U")
-    s_list = list(sg)
-    guide_seq_list = list(guide_seq)
-
-    for i, sl in enumerate(s_list):
-        if guide_seq_list[i] == sl:
-            score *= 1
-        else:
-            try:  # Catch exception if IUPAC character
-                key = "r" + guide_seq_list[i] + ":d" + revcom(sl) + "," + str(i + 1)
-            except Exception as e:
-                score = 0
-                break
-            try:
-                score *= mm_scores[key]
-            except (
-                Exception
-            ) as e:  # If '-' is in first position, i do not have the score for that position
-                pass
-
-    # Guard against non-ATCG PAM bases (e.g. from real NIST/NCBI hg38):
-    # a non-canonical PAM contributes 0 to the CFD product instead of raising
-    # KeyError (issue #94). Canonical PAM bases (A/C/G/T) are unaffected.
-    score *= pam_scores.get(pam, 0.0)
-    return score
-
-
 # ADDITIVE (Phase 3c) companion population-summary collection. We accumulate, per
 # chromosome, one record per VARIANT off-target (identity columns + the creating SNP
 # column) so a companion population-summary TSV can be written at the end WITHOUT
@@ -297,33 +274,6 @@ def _collect_variant_off_target(final_line):
         return
     _variant_off_target_keys.add(key)
     _variant_off_targets.append(rec)
-
-
-def revcom(s):
-    basecomp = {"A": "T", "C": "G", "G": "C", "T": "A", "U": "A", "-": "-"}
-    letters = list(s[::-1])
-    try:
-        letters = [basecomp[base] for base in letters]
-    except:
-        return None  # If some IUPAC were not translated
-    return "".join(letters)
-
-
-def get_mm_pam_scores():
-    # print(os.path.dirname(os.path.realpath(__file__)))
-    try:
-        mm_scores = pickle.load(
-            open(
-                os.path.dirname(os.path.realpath(__file__)) + "/mismatch_score.pkl",
-                "rb",
-            )
-        )
-        pam_scores = pickle.load(
-            open(os.path.dirname(os.path.realpath(__file__)) + "/PAM_scores.pkl", "rb")
-        )
-        return (mm_scores, pam_scores)
-    except:
-        raise Exception("Could not find file with mismatch scores or PAM scores")
 
 
 def retrieveFromDict(chr_pos):
@@ -785,11 +735,13 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                     if _c == "-":
                         _tl.insert(_p, "-")
                 _t = "".join(_tl).upper()
-                _bs = int(split[bulge_pos])
-                if split[0] == "DNA":
-                    return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
-                                    mm_scores, pam_scores, do_scores)
-                return calc_cfd(split[1], _t[:-3], _t[-2:], mm_scores, pam_scores, do_scores)
+                # position-aware bulge scoring (2.8.0): the in-place display alignment is
+                # (split[1] crRNA, _t concrete protospacer+PAM); the DNA/RNA-bulge handling
+                # and the PAM-proximal penalty live in cfd_score_bulge_aware.
+                if _cfd_bulge_aware is not None:
+                    return _cfd_bulge_aware(split[1], _t, mm_scores, pam_scores,
+                                            do_scores=do_scores)
+                return _cfd_clean(split[1], _t[:-3], _t[-2:], (mm_scores, pam_scores))
 
             def _emittable_fast(_seq_list, _chosen):
                 # the finalizer KEEPS a variant off-target only if it has >=1 carrier AND
@@ -1145,12 +1097,11 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             if _c == "-":
                                 _tl.insert(_p, "-")
                         _t = "".join(_tl).upper()
-                        _bs = int(split[bulge_pos])
-                        if split[0] == "DNA":
-                            return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
-                                            mm_scores, pam_scores, do_scores)
-                        return calc_cfd(split[1], _t[:-3], _t[-2:],
-                                        mm_scores, pam_scores, do_scores)
+                        # position-aware bulge scoring (2.8.0) -- see _cfd_fast above.
+                        if _cfd_bulge_aware is not None:
+                            return _cfd_bulge_aware(split[1], _t, mm_scores, pam_scores,
+                                                    do_scores=do_scores)
+                        return _cfd_clean(split[1], _t[:-3], _t[-2:], (mm_scores, pam_scores))
 
                     def _emittable_leg(_seq_list, _chosen):
                         # KEEP only what the finalizer keeps: >=1 carrier (unless
@@ -1418,59 +1369,36 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                             _collect_variant_off_target(final_line)
 
 
+def _cfd_from_alignment(aligned_crrna, aligned_proto):
+    """CFD for one in-place display alignment (crRNA/proto include the PAM, gaps '-' in
+    place). Position-aware bulge scoring via cfd_score_bulge_aware (clean-room base); falls
+    back to the bulge-agnostic clean-room scorer only if the helper is unavailable."""
+    if _cfd_bulge_aware is not None:
+        return _cfd_bulge_aware(
+            aligned_crrna, aligned_proto, mm_scores, pam_scores, do_scores=do_scores
+        )
+    # fallback if the bulge-aware helper is somehow unavailable: the bulge-agnostic
+    # clean-room base on the gap-deleted alignment (no PAM-proximal correction). Never
+    # taken on a normal install, where the helper is shipped alongside.
+    up = aligned_proto.upper()
+    return _cfd_clean(aligned_crrna, up[:-3], up[-2:], (mm_scores, pam_scores))
+
+
 def preprocess_CFD_score(target):
-    # preprocess target then calculate CFD score
+    # preprocess target then calculate CFD score. A single bulge-aware path handles DNA
+    # bulges, RNA bulges, combined bulges, and mismatch-only rows uniformly: the crRNA
+    # (target[1]) carries DNA-bulge gaps, the aligned protospacer (alt=target[2],
+    # ref=target[-4]) carries RNA-bulge gaps; both include the trailing PAM.
     if do_scores:
-        if target[0] == "DNA":
-            cfd_score = calc_cfd(
-                target[1][int(target[bulge_pos]) :],
-                target[2].upper()[int(target[bulge_pos]) : -3],
-                target[2].upper()[-2:],
-                mm_scores,
-                pam_scores,
-                do_scores,
-            )
-            # append to target the CFD score of the aligned sequence (alt or ref)
-            target.append("{:.3f}".format(cfd_score))
-            # -3 position is a placeholder for ref score
-            if (
-                target[-3] == 55
-            ):  # if 55 sequence is ref so no score have to be calculated
-                target[-3] = "{:.3f}".format(cfd_score)
-            if (
-                target[-3] == 33
-            ):  # if 33 sequence is alt so ref score must be calculated
-                cfd_ref_score = calc_cfd(
-                    target[1][int(target[bulge_pos]) :],
-                    target[-4].upper()[int(target[bulge_pos]) : -3],
-                    target[-4].upper()[-2:],
-                    mm_scores,
-                    pam_scores,
-                    do_scores,
-                )
-                target[-3] = "{:.3f}".format(cfd_ref_score)
-        else:
-            cfd_score = calc_cfd(
-                target[1],
-                target[2].upper()[:-3],
-                target[2].upper()[-2:],
-                mm_scores,
-                pam_scores,
-                do_scores,
-            )
-            target.append("{:.3f}".format(cfd_score))
-            if target[-3] == 55:
-                target[-3] = "{:.3f}".format(cfd_score)
-            if target[-3] == 33:
-                cfd_ref_score = calc_cfd(
-                    target[1],
-                    target[-4].upper()[:-3],
-                    target[-4].upper()[-2:],
-                    mm_scores,
-                    pam_scores,
-                    do_scores,
-                )
-                target[-3] = "{:.3f}".format(cfd_ref_score)
+        cfd_score = _cfd_from_alignment(target[1], target[2])
+        # append to target the CFD score of the aligned sequence (alt or ref)
+        target.append("{:.3f}".format(cfd_score))
+        # -3 position is a placeholder for ref score
+        if target[-3] == 55:  # if 55 sequence is ref so no score have to be calculated
+            target[-3] = "{:.3f}".format(cfd_score)
+        if target[-3] == 33:  # if 33 sequence is alt so ref score must be calculated
+            cfd_ref_score = _cfd_from_alignment(target[1], target[-4])
+            target[-3] = "{:.3f}".format(cfd_ref_score)
     else:
         # no score calculated, append -1 in CFD score and in position -3 insert -1 value (-1 means no score calculated)
         cfd_score = -1
@@ -1504,8 +1432,8 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
     if not do_scores:
         for target in cluster_targets:
             t = target.copy()
-            t[-2] = "{:.3f}".format(-1)
-            t.append("{:.3f}".format(-1))
+            t[-2] = "{:.6g}".format(-1)
+            t.append("{:.6g}".format(-1))
             cluster_scored.append(t)
         return cluster_scored
 
@@ -1550,20 +1478,24 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
     scores_ref = scorer_runner.CRISPR_BULGE_predict_list(
         [p[0] for p in pairs_ref], [p[1] for p in pairs_ref])
 
+    # CRISPR-Bulge scores are written at FULL precision ("{:.6g}"), NOT 3 decimals:
+    # the sensitive operating point (cb_operating_point, 95%-recall default 1.9e-4) is
+    # below the old 3-decimal floor (5e-4), so rounding would make it unreachable and
+    # silently drop ~7% of validated off-targets from the sensitive tier.
     for index, target in enumerate(cluster_targets):
         t = target.copy()
         if index in index_to_null:
             s = -1
-            t[-2] = "{:.3f}".format(s)
-            t.append("{:.3f}".format(s))
+            t[-2] = "{:.6g}".format(s)
+            t.append("{:.6g}".format(s))
         else:
             # mirror the CRISPR-Bulge marker convention exactly (55 = ref row, 33 = alt row)
             if t[-2] == 55:
-                t[-2] = "{:.3f}".format(scores_alt[index])
-                t.append("{:.3f}".format(scores_alt[index]))
+                t[-2] = "{:.6g}".format(scores_alt[index])
+                t.append("{:.6g}".format(scores_alt[index]))
             if t[-2] == 33:
-                t[-2] = "{:.3f}".format(scores_ref[index])
-                t.append("{:.3f}".format(scores_alt[index]))
+                t[-2] = "{:.6g}".format(scores_ref[index])
+                t.append("{:.6g}".format(scores_alt[index]))
         cluster_scored.append(t)
 
     return cluster_scored
@@ -2085,8 +2017,8 @@ else:
 # start time counter
 global_start = time.time()
 
-# open mm and pam scores matrices for CFD
-mm_scores, pam_scores = get_mm_pam_scores()
+# open mm and pam scores matrices for CFD (clean-room JSON tables)
+mm_scores, pam_scores = _cfd_tables()
 
 # if conditions, execute score (guidelen==20,pamlen==3,pam_at_beginning==FALSE)
 do_scores = True

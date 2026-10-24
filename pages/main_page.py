@@ -1699,6 +1699,17 @@ def change_url(
     # value is a list of ticked values) sets CRISPRME_REPORT_FULL=True so submit_job runs
     # generate_report.py --report-full (mirrors `complete-search --report-full`).
     report_full_env = "True" if (full_report and "full" in full_report) else "False"
+    # Persist the resolved analysis mode as <result_dir>/.search_mode, mirroring the CLI
+    # (crisprme.py complete-search). The web launches submit_job directly, so without this
+    # generate_report.build_summary_meta falls back to "population-level" and would mislabel
+    # a per-sample web run (CONFIRMED cis carriers shown as pop-level "poss. chimera", and a
+    # spurious "re-run with --per-sample" note). per-sample <=> fast_env == "0".
+    try:
+        os.makedirs(result_dir, exist_ok=True)
+        with open(os.path.join(result_dir, ".search_mode"), "w") as _sm:
+            _sm.write("per-sample" if fast_env == "0" else "population-level")
+    except OSError:
+        pass
     cmd = f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} CRISPRME_REPORT_FULL={report_full_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
@@ -2228,7 +2239,7 @@ def _preferred_variant(option_values: List[str], genome: str = None) -> str:
 
     # within the preferred tier: most-covering (combined) first; then the RICHEST panel
     # by genotyped sample count (name-free "biggest phased panel is the default" — e.g.
-    # the 4,091-sample HGDP+1kGP over the 3,202-sample 1000G-2021 or 232-sample HPRC);
+    # the 4,091-sample HGDP+1kGP over the 232-sample HPRC (the standalone 1000G-2021 panel was retired in 2.8.0));
     # final tie broken by listed order. Sample count reads the registry manifest, so no
     # index name is hardcoded and a future larger phased panel wins automatically.
     def _samples(v: str) -> int:
@@ -2278,11 +2289,13 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
     # tailor the label to what per-sample actually BUYS on THIS panel: a phased panel
     # yields CONFIRMED cis + named carriers; an unphased panel can name carriers but the
     # cis co-occurrence is only PUTATIVE; a hybrid panel is CONFIRMED where phased.
+    phased = False
     if not has_gt:
         ps_label = (" Per-sample — resolve genotypes: named carriers & CONFIRMED cis "
                     "(needs a genotyped panel)")
     else:
         _dt = variant_dataset_data_type(genome_value, dataset_value)
+        phased = _dt == "genotyped-phased"
         if _dt == "genotyped-phased":
             ps_label = " Per-sample — named carriers & CONFIRMED cis phasing (phased panel)"
         elif _dt == "genotyped-unphased":
@@ -2293,13 +2306,27 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
                         "PUTATIVE where not (hybrid panel)")
         else:
             ps_label = " Per-sample — resolve genotypes: named carriers & CONFIRMED cis"
+    # DEFAULT is context-aware (2.8.0): per-sample on a genotyped + PHASED panel (the
+    # resolution such panels are built for -- CONFIRMED cis + named carriers), population-
+    # level otherwise. The "(default)" marker moves to match, and a user who has not chosen
+    # yet is seeded accordingly.
+    pop_label = " Population-level — worst-possible screen"
+    if phased:
+        ps_label = ps_label + "  [default]"
+    else:
+        pop_label = pop_label + " (default)"
     options = [
-        {"label": " Population-level (default) — worst-possible screen",
-         "value": "population-level"},
+        {"label": pop_label, "value": "population-level"},
         {"label": ps_label, "value": "per-sample", "disabled": not has_gt},
     ]
-    # a sites-only / reference panel cannot resolve genotypes: fall back to the default
-    value = current_mode if current_mode else "population-level"
+    # `search-mode` is a State (not an Input) of this callback, so it fires only on a
+    # genome/dataset change or initial load -- re-seed the mode from the chosen panel so the
+    # radio SELECTION tracks the context-aware default and the moved "[default]" label.
+    # (A `current_mode if current_mode else ...` guard was dead: current_mode is never falsy
+    # once the layout seeds "population-level", so per-sample was never auto-selected and the
+    # web silently ran population-level while labelling per-sample the default.)
+    value = "per-sample" if phased else "population-level"
+    # a sites-only / reference panel cannot resolve genotypes: never land on per-sample
     if not has_gt and value == "per-sample":
         value = "population-level"
     return options, value
