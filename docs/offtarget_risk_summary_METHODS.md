@@ -188,7 +188,7 @@ carriers.
 because the last few percent of true off-targets sit in the noise floor shared with the
 negatives. On the benchmark the trade is ≈**9 sites per true off-target at 90% recall, ≈21 at
 95%, ≈354 at 99%** (≈6× the 95% list), ≈790 at 100%. For the ACTGA/NRG worked example (189,957
-candidate loci) the 95% threshold yields **164 validation loci** (90% → 60; 99% → 1,160), measured
+candidate loci) the 95% threshold yields **162 off-target validation loci** (90% → 58; 99% → 1,158; the shipped crispr_bulge_gt_0.tsv tier; +2 perfect-match candidate on-targets), measured
 directly on the regenerated full-precision report (not the per-true-OT ratios above, which are
 benchmark-wide averages).
 Panel depth is a **risk/validation-size optimization** read off the expected-true counts (§5),
