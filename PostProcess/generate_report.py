@@ -6900,6 +6900,46 @@ def _combined_guide_summary_table_html(
     )
 
 
+def _build_combined_risk_card(pooled_df, pooled_cols, guide_display):
+    """Off-target risk card (card_html, modal_html, note_html) for the assembly
+    combined landing page, so it matches the complete-search report (which gained the
+    card in 2.8.0). Scored on the pooled frame: CFD spans ALL pooled off-targets;
+    CRISPR-Bulge covers the rows that carry a CB score. Reconciled (hg38) rows are scored
+    on their fewest-mm+b alignment, which has NO CRISPR-Bulge projection in the raw data
+    (see _pooled_validation_frame) -> their CB is NaN and drops out, so the CB card is over
+    the haplotype sites that have one; a note states this and points to each haplotype's
+    own report. Same 95%-recall sensitive operating point (cb_operating_point) as the
+    complete-search card. Returns ("", "", "") on an empty frame or any failure -- the
+    card never aborts the combined report."""
+    if pooled_df is None or not len(pooled_df):
+        return "", "", ""
+    try:
+        import risk_card as _rc
+        mmb = _to_int_series(pooled_df[pooled_cols["mmb"]])
+        bul = _to_int_series(pooled_df[pooled_cols["bulges"]])
+        offt = mmb > 0                                             # off-targets (exclude perfect)
+        cfd_sc = _to_float_series(
+            pooled_df[pooled_cols["cfd"]])[offt & (bul <= 1)].dropna().tolist()
+        cb_sc = (_to_float_series(pooled_df[pooled_cols["crispr_bulge"]])[offt].dropna().tolist()
+                 if "crispr_bulge" in pooled_cols else None)
+        nperf = int((mmb == 0).sum())
+        card, modal = _rc.render_risk_card(
+            {"guide_display": guide_display, "nuclease": "", "pam": ""}, cfd_sc, cb_sc, nperf)
+        note = ""
+        if card and "_pv_category" in pooled_df and \
+                pooled_df["_pv_category"].astype(str).str.startswith("Reconciled").any():
+            note = ('<p class="caption">The risk card&rsquo;s CFD counts span every pooled '
+                    'off-target; its CRISPR-Bulge counts cover the haplotype sites that carry a '
+                    'CRISPR-Bulge score. Reconciled (hg38) sites are scored on their '
+                    'fewest-mismatch+bulge alignment, which has no CRISPR-Bulge projection &mdash; '
+                    'see each haplotype&rsquo;s own report (Section&nbsp;6) for its full '
+                    'CRISPR-Bulge card.</p>')
+        return card, modal, note
+    except Exception as exc:  # noqa: BLE001 - never abort the whole combined report
+        sys.stderr.write(f"generate-report: combined risk card unavailable: {exc}\n")
+        return "", "", ""
+
+
 def build_combined_report(
     combined_output,
     output_base,
@@ -7124,6 +7164,13 @@ def build_combined_report(
         _PRESENT_ANN_KINDS = {k for k in _ANNOTATION_KINDS if k in _pooled_cols}
         _ASSEMBLY_EXTRA_ACTIVE = _decide_assembly_extra_columns(_pooled_df)
 
+    # OFF-TARGET RISK card for the combined landing page (consistency with the
+    # complete-search report, which carries it since 2.8.0). See _build_combined_risk_card.
+    combined_risk_card_html, combined_risk_modal_html, combined_risk_note_html = (
+        _build_combined_risk_card(_pooled_df, _pooled_cols,
+                                  guides[0] if guides else output_base)
+    )
+
     _panel_staging_dir = tempfile.mkdtemp(prefix="crisprme_combined_panel_")
     try:
         validation_html, next_steps_html, _staged_panel_files, pooled_vp = _combined_validation_panel_html(
@@ -7237,6 +7284,8 @@ off-target prediction, mapped to hg38</p>
   </div>
 </div>
 {perfect_banner}
+{combined_risk_card_html}
+{combined_risk_note_html}
 <p class="caption">Non-mappable sites have no hg38 equivalent &mdash; invisible
 to any reference-based search. Their per-site detail (in that haplotype's
 own assembly coordinates) is in that haplotype's own report, linked below.
@@ -7310,6 +7359,7 @@ the zip itself is intact.</p>
 {footer_html}
 
 </div>
+{combined_risk_modal_html}
 </body></html>
 """
 

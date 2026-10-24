@@ -1495,6 +1495,41 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("demoted", cfd_entry.lower())
         self.assertNotIn("verify manually", cfd_entry.lower())
 
+    def test_combined_assembly_risk_card(self):
+        """The assembly combined landing page carries the SAME off-target risk card as the
+        complete-search report (2.8.0 consistency): CFD over all pooled off-targets, and
+        CRISPR-Bulge over the rows that carry a CB score. Reconciled (hg38) rows have NO
+        fewest-mm+b CRISPR-Bulge projection (NaN) and drop out of the CB card, with a note
+        explaining it. The CB band uses the 95%-recall sensitive operating point, not '> 0'."""
+        import pandas as pd
+        import numpy as np
+        import cb_operating_point as cbop
+        cols = {"mmb": "Mismatches+bulges", "bulges": "Bulges",
+                "cfd": "CFD_score", "crispr_bulge": "CRISPR_BULGE_score"}
+        thr = cbop.sensitive_threshold()
+        df = pd.DataFrame({
+            "Mismatches+bulges":  [0, 3, 4, 5, 2],
+            "Bulges":             [0, 0, 1, 0, 0],
+            "CFD_score":          [1.0, 0.60, 0.55, 0.05, 0.30],
+            # reconciled rows -> NaN CB (no fewest-mm+b projection); private rows -> CB,
+            # one just below the sensitive threshold (must be EXCLUDED from the CB band)
+            "CRISPR_BULGE_score": [1.0, np.nan, 0.80, thr / 2.0, 0.40],
+            "_pv_category": ["Reconciled (hg38)", "Reconciled (hg38)",
+                             "Paternal-private (non-mappable)",
+                             "Maternal-private (non-mappable)",
+                             "Paternal-private (non-mappable)"],
+        })
+        card, modal, note = gr._build_combined_risk_card(df, cols, "ACTGAAATCTGTAAGCAGGC")
+        self.assertIn("OFF-TARGET RISK", card)                 # card rendered
+        self.assertIn("CFD", card)                             # CFD scorer block
+        self.assertIn("CRISPR-Bulge", card)                    # CRISPR-Bulge scorer block
+        self.assertIn(cbop.sensitive_label_text(), card)       # 95%-recall sensitive band label
+        self.assertNotIn("CRISPR-Bulge > 0 (sensitive)", card)  # NOT the legacy framing
+        self.assertIn("no CRISPR-Bulge projection", note)      # reconciled-CB scoping note
+        self.assertIn("operating points", modal)               # PR-curve section caption
+        # empty frame -> empty card, never a crash
+        self.assertEqual(gr._build_combined_risk_card(pd.DataFrame(), cols, "G"), ("", "", ""))
+
     def test_run_manifest_bundled_and_valid(self):
         """The ZIP carries a machine-readable run_manifest.json (IND traceability)."""
         import json as _json
