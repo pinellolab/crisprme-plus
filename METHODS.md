@@ -801,7 +801,7 @@ panel keys on — is the **95%-recall threshold** on the 40-guide held-out bench
 90% / 99% via `CRISPRME_CB_RECALL_TARGET`), not an ad-hoc `> 0`: CRISPR-Bulge scores almost every
 site non-zero, so `> 0` would list the whole genome. CRISPR-Bulge scores are written at full
 precision (`{:.6g}`) so this sub-5×10⁻⁴ operating point is representable. See
-`docs/offtarget_risk_summary_METHODS.md` §3.5 for the recall↔validation-size trade (≈206
+`docs/offtarget_risk_summary_METHODS.md` §3.5 for the recall↔validation-size trade (164
 validation loci at 95% recall for the ACTGA/NRG worked example).
 
 **Top-of-report off-target risk summary (replaces the aggregated specificity score).**

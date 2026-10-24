@@ -81,9 +81,9 @@ and the `release-crisprme` skill.
   card, the "how to read this" modal, the Section-4 methods note, the score glossary, and METHODS §3.5.
   Why a principled cutoff and not literal `> 0`: CRISPR-Bulge assigns a tiny non-zero score to ~every site
   (99.9% of benchmark negatives fall below 1.9e-4), so `> 0` would list essentially the whole genome.
-  95% recall is the sensible trade — for the ACTGA/NRG worked example it yields ~206 validation loci
-  (~9/true-OT at 90%, ~21 at 95%); pushing to 99% recall is ~6× the sites because the last few percent of
-  true off-targets sit in the score's noise floor. Framed as a risk/validation-size optimization, not a
+  95% recall is the sensible trade — for the ACTGA/NRG worked example (189,957 candidate loci) it yields
+  164 validation loci (90% → 60; 99% → 1,160); pushing from 95% to 99% recall is ~7× the sites because the
+  last few percent of true off-targets sit in the score's noise floor. Framed as a risk/validation-size optimization, not a
   recall guarantee; recall above ~95% is reachable (selectable) but the list grows steeply.
 
 ### Fixed
