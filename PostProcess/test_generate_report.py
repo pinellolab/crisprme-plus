@@ -1525,10 +1525,41 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("CRISPR-Bulge", card)                    # CRISPR-Bulge scorer block
         self.assertIn(cbop.sensitive_label_text(), card)       # 95%-recall sensitive band label
         self.assertNotIn("CRISPR-Bulge > 0 (sensitive)", card)  # NOT the legacy framing
-        self.assertIn("no CRISPR-Bulge projection", note)      # reconciled-CB scoping note
+        self.assertIn("best per-haplotype CRISPR-Bulge alignment", note)  # reconciled-CB methodology note
         self.assertIn("operating points", modal)               # PR-curve section caption
         # empty frame -> empty card, never a crash
         self.assertEqual(gr._build_combined_risk_card(pd.DataFrame(), cols, "G"), ("", "", ""))
+
+    def test_reconciled_cb_join(self):
+        """_reconciled_cb carries CRISPR-Bulge onto reconciled (hg38) rows by joining each
+        site's best-CB (highest_CRISPR_BULGE) from the haplotype's own integrated_results via
+        the native fewest-mm+b coord, MAX over pat/mat, tolerant of the +/-1bp off-by-one; a
+        lookup miss stays NaN (never fabricated)."""
+        import pandas as pd
+        import os, tempfile
+
+        def _hap(d, rows):
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "g_integrated_results.tsv"), "w") as h:
+                h.write("Chromosome\tStart_coordinate_(fewest_mm+b)\t"
+                        "CRISPR_BULGE_score_(highest_CRISPR_BULGE)\n")
+                for ch, pos, cb in rows:
+                    h.write(f"{ch}\t{pos}\t{cb}\n")
+        tmp = tempfile.mkdtemp()
+        patd, matd = os.path.join(tmp, "pat"), os.path.join(tmp, "mat")
+        _hap(patd, [("chr1", "1000", "0.80"), ("chr1", "2000", "0.05")])
+        _hap(matd, [("chr1", "1001", "0.30"), ("chr2", "9999", "0.90")])  # 1001 = +1bp of 1000
+        recon = pd.DataFrame({
+            "Chromosome_paternal": ["chr1", "chr1", "chr2", "chr1"],
+            "Start_coordinate_(fewest_mm+b)_paternal": ["1000", "2000", "9999", "5555"],
+            "Chromosome_maternal": ["chr1", "chr1", "chr2", "chr1"],
+            "Start_coordinate_(fewest_mm+b)_maternal": ["1000", "2000", "9999", "5555"],
+        })
+        cb = gr._reconciled_cb(recon, {"paternal": patd, "maternal": matd})
+        self.assertAlmostEqual(cb.iloc[0], 0.80, places=6)   # max(pat 0.80, mat 0.30@+1bp)
+        self.assertAlmostEqual(cb.iloc[1], 0.05, places=6)   # pat only
+        self.assertAlmostEqual(cb.iloc[2], 0.90, places=6)   # mat only (chr2)
+        self.assertTrue(pd.isna(cb.iloc[3]))                 # neither -> NaN, not fabricated
 
     def test_run_manifest_bundled_and_valid(self):
         """The ZIP carries a machine-readable run_manifest.json (IND traceability)."""

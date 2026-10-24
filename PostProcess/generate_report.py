@@ -6016,6 +6016,62 @@ def _combined_perfect_match_banner(combined_df, hap_dirs=None, guide=None):
     )
 
 
+def _reconciled_cb(recon_df, hap_dirs):
+    """CRISPR-Bulge scores for RECONCILED (hg38) rows, joined from each haplotype's own
+    ``integrated_results.tsv``. The reconcile output (combined_hg38.tsv) only projects the
+    ``_(fewest_mm+b)`` alignment, which carries NO CRISPR-Bulge; but the site's native
+    per-haplotype coordinate IS kept (``Chromosome_<hap>`` / ``Start_coordinate_(fewest_mm+b)_<hap>``),
+    so we look that row up in the haplotype's integrated_results and take its
+    ``CRISPR_BULGE_score_(highest_CRISPR_BULGE)`` -- the site's own best-CB alignment -- then MAX
+    across the haplotype(s) it reconciled from (worst-case, matching ``_recon_cfd``). Tolerant of
+    the known +/-1 bp native-coordinate off-by-one (see ``_known_native_keys``). Returns a float
+    Series aligned to ``recon_df.index`` (NaN where no per-haplotype CB is found -- a lookup miss is
+    left blank, never fabricated). CFD stays ``_(fewest_mm+b)``; this adds CB from the best-CB rep,
+    the same two-independent-alignments convention the standard report's two score columns use."""
+    out = pd.Series(np.nan, index=recon_df.index, dtype=float)
+    for hap, chr_col, start_col in (
+        ("paternal", "Chromosome_paternal", "Start_coordinate_(fewest_mm+b)_paternal"),
+        ("maternal", "Chromosome_maternal", "Start_coordinate_(fewest_mm+b)_maternal"),
+    ):
+        hap_dir = (hap_dirs or {}).get(hap)
+        if not hap_dir or chr_col not in recon_df.columns or start_col not in recon_df.columns:
+            continue
+        tsv = resolve_integrated_tsv(hap_dir)
+        if tsv is None:
+            continue
+        try:
+            hd = pd.read_csv(tsv, sep="\t", dtype=str, na_filter=False, low_memory=False,
+                             compression="gzip" if str(tsv).endswith(".gz") else None)
+        except (OSError, pd.errors.ParserError):
+            continue
+        hc = _resolve(hd.columns, list(_COLS.keys()))
+        chrom_c, cb_c = hc.get("chrom"), hc.get("crispr_bulge")
+        pos_c = "Start_coordinate_(fewest_mm+b)"
+        if not (chrom_c and cb_c and chrom_c in hd.columns
+                and cb_c in hd.columns and pos_c in hd.columns):
+            continue
+        cbv = pd.to_numeric(hd[cb_c], errors="coerce")
+        lut = {}  # (chrom, pos_str) -> max CB, indexed at pos and pos+/-1 (off-by-one tolerance)
+        for ch, praw, v in zip(hd[chrom_c].astype(str), hd[pos_c], cbv):
+            if v != v:  # NaN
+                continue
+            p = _canon_pos(praw)
+            try:
+                pi = int(p)
+            except (TypeError, ValueError):
+                continue
+            for pp in (pi - 1, pi, pi + 1):
+                k = (ch, str(pp))
+                if v > lut.get(k, float("-inf")):
+                    lut[k] = v
+        hap_cb = pd.Series(
+            [lut.get((c, _canon_pos(s)), np.nan)
+             for c, s in zip(recon_df[chr_col].astype(str), recon_df[start_col])],
+            index=recon_df.index, dtype=float)
+        out = pd.concat([out, hap_cb], axis=1).max(axis=1)
+    return out
+
+
 def _reconciled_panel_frame(combined_df):
     """Adapt combined_df's per-haplotype-suffixed schema into ONE plain frame
     + a `cols` mapping, so the REAL `select_worstcase_panel()` /
@@ -6351,6 +6407,12 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
 
     recon_df, _rc = _reconciled_panel_frame(combined_df)
     if recon_df is not None and not recon_df.empty:
+        # CRISPR-Bulge for reconciled rows: joined from each haplotype's own
+        # integrated_results (the site's best-CB alignment), since the reconcile output
+        # only projects the fewest-mm+b alignment (which has no CRISPR-Bulge). See
+        # _reconciled_cb. CFD stays fewest-mm+b; CB is the site's own best-CB rep -- the
+        # same two-alignment convention the standard report uses.
+        _recon_cb = _reconciled_cb(recon_df, hap_dirs)
         parts.append(pd.DataFrame({
             "Spacer+PAM": recon_df["_recon_guide"],
             "Chromosome": recon_df["hg38_chr"],
@@ -6362,7 +6424,7 @@ def _pooled_validation_frame(combined_df, hap_dirs, guide):
             "Bulges": recon_df["_recon_bulges"],
             "Mismatches+bulges": recon_df["_recon_mmb"],
             "CFD_score": recon_df["_recon_cfd"],
-            "CRISPR_BULGE_score": np.nan,
+            "CRISPR_BULGE_score": _recon_cb,
             "_pv_category": "Reconciled (hg38)",
             # Per-kind annotation columns, so the curated view can read them (see
             # _ANNOTATION_KINDS / _COLS). ONLY the reconciled rows can carry an
@@ -6928,12 +6990,12 @@ def _build_combined_risk_card(pooled_df, pooled_cols, guide_display):
         note = ""
         if card and "_pv_category" in pooled_df and \
                 pooled_df["_pv_category"].astype(str).str.startswith("Reconciled").any():
-            note = ('<p class="caption">The risk card&rsquo;s CFD counts span every pooled '
-                    'off-target; its CRISPR-Bulge counts cover the haplotype sites that carry a '
-                    'CRISPR-Bulge score. Reconciled (hg38) sites are scored on their '
-                    'fewest-mismatch+bulge alignment, which has no CRISPR-Bulge projection &mdash; '
-                    'see each haplotype&rsquo;s own report (Section&nbsp;6) for its full '
-                    'CRISPR-Bulge card.</p>')
+            note = ('<p class="caption">For reconciled (hg38) sites, CFD is the '
+                    'fewest-mismatch+bulge alignment and CRISPR-Bulge is the site&rsquo;s best '
+                    'per-haplotype CRISPR-Bulge alignment (two independent views, as elsewhere in '
+                    'the report); a reconciled site with no per-haplotype CRISPR-Bulge match shows '
+                    '&ldquo;&ndash;&rdquo;. See each haplotype&rsquo;s own report (Section&nbsp;6) '
+                    'for its full CRISPR-Bulge card.</p>')
         return card, modal, note
     except Exception as exc:  # noqa: BLE001 - never abort the whole combined report
         sys.stderr.write(f"generate-report: combined risk card unavailable: {exc}\n")
