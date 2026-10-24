@@ -86,14 +86,19 @@ class TestRiskCard(unittest.TestCase):
         self.assertAlmostEqual(
             res["ge0.2"]["point"], res["0.2-0.5"]["point"] + res["0.5-1"]["point"], delta=0.5)
 
-    def test_cb_gt0_band_counts_all_positive_not_just_ge02(self):
-        """The CRISPR-Bulge "> 0 (sensitive)" band must count EVERY CB>0 site (the sensitive
-        operating point = the Section-4 "CRISPR-Bulge > 0" tier), not just the >=0.2 ones.
-        Regression for the bug where render_risk_card pre-filtered CB to >=0.2 before counting,
-        so gt0 collapsed to the >=0.2 count. CFD stays >=0.2 (it has no gt0 band)."""
+    def test_cb_sensitive_band_counts_down_to_threshold_not_just_ge02(self):
+        """The CRISPR-Bulge "sensitive" band counts every site AT/ABOVE the benchmark
+        95%-recall operating point (cb_operating_point default 1.9e-4) -- not just >=0.2,
+        and not every CB>0 (scores in the sub-threshold noise floor are excluded).
+        Regression for the bug where render_risk_card pre-filtered CB to >=0.2 before
+        counting, so the band collapsed to the >=0.2 count. CFD stays >=0.2."""
         import re, html
-        # 2 at >=0.5, 2 in [0.2,0.5), 5 tiny in (0,0.2): gt0=9, ge0.2=4, 0.5-1=2, 0.2-0.5=2
-        cb = [0.87, 0.55, 0.33, 0.21, 0.13, 0.08, 0.04, 0.02, 0.005]
+        import cb_operating_point as cbop
+        sens = f"CRISPR-Bulge {cbop.sensitive_label_text()}, sensitive"
+        # 2 at >=0.5, 2 in [0.2,0.5), 5 in [threshold,0.2): sensitive=9, ge0.2=4, 0.5-1=2.
+        # Plus one value BELOW the 95%-recall threshold -> excluded from the sensitive band.
+        cb = [0.87, 0.55, 0.33, 0.21, 0.13, 0.08, 0.04, 0.02, 0.005,
+              cbop.sensitive_threshold() / 2.0]
         card, _ = risk_card.render_risk_card(
             {"guide_display": "G", "nuclease": "SpCas9", "pam": "NRG"},
             cfd_scores=[0.6, 0.3], cb_scores=cb, n_perfect=0)
@@ -104,11 +109,11 @@ class TestRiskCard(unittest.TestCase):
             cells = [c for c in cells if c != ""]
             if cells and cells[0].startswith("CRISPR-Bulge") and len(cells) > 1:
                 counts[cells[0]] = int(cells[1].replace(",", ""))
-        self.assertEqual(counts.get("CRISPR-Bulge > 0 (sensitive)"), 9)   # ALL positive
-        self.assertEqual(counts.get("CRISPR-Bulge ≥ 0.2"), 4)             # the >=0.2 subset
+        self.assertEqual(counts.get(sens), 9)                 # >= threshold (sub-threshold one excluded)
+        self.assertEqual(counts.get("CRISPR-Bulge ≥ 0.2"), 4)  # the >=0.2 subset
         self.assertEqual(counts.get("CRISPR-Bulge ≥ 0.5"), 2)
-        # the bug made gt0 == ge0.2; assert they now differ when sub-0.2 scores exist
-        self.assertGreater(counts["CRISPR-Bulge > 0 (sensitive)"], counts["CRISPR-Bulge ≥ 0.2"])
+        # the bug made the sensitive band == ge0.2; assert they differ when sub-0.2 scores exist
+        self.assertGreater(counts[sens], counts["CRISPR-Bulge ≥ 0.2"])
 
 
 if __name__ == "__main__":

@@ -930,7 +930,9 @@ class TestGenerateReport(unittest.TestCase):
         #    0 bulges (CFD over-calls on bulges), and >=2-bulge CFD-only sites are demoted.
         self.assertIn("<strong>Methods.</strong>", html)
         self.assertIn("hard-include", html.lower())
-        self.assertIn("&gt; 0 (the sensitive default", html)  # CRISPR-Bulge>0 primary axis
+        import cb_operating_point as cbop
+        self.assertIn("(the sensitive default, when computed)", html)  # CB sensitive primary axis
+        self.assertIn("95% recall", html)                             # principled 95%-recall threshold
         self.assertIn("CFD &ge; 0.2 at 0 bulges", html)       # CFD rescue off-bulge
         self.assertIn("high CFD &ge; 0.5 at 1 bulge", html)   # high-CFD single-bulge rescue
         self.assertIn("fill", html.lower())
@@ -949,11 +951,11 @@ class TestGenerateReport(unittest.TestCase):
             self.assertIn(f"CFD &ge; {t}", html)
         self.assertIn("&le;1-gap", html)                 # reconciliation parenthetical
         self.assertIn("same cut points as the card", html)  # bridge note
-        # D2) the CRISPR-Bulge tier table carries the sensitive "> 0" operating-point ROW
-        #     (consistent with the risk-card gt0 row + the panel's CB>0 selection), not an
-        #     orphan >=0.1 tier. Match the table-row shape, not just the modal prose.
-        self.assertIn("<td>CRISPR-Bulge &gt; 0</td>", html)
-        self.assertNotIn("CRISPR-Bulge &ge; 0.1", html)  # orphan 0.1 tier replaced by > 0
+        # D2) the CRISPR-Bulge tier table carries the sensitive operating-point ROW (the
+        #     benchmark 95%-recall default, consistent with the risk-card sensitive row + the
+        #     panel's selection), not an orphan >=0.1 tier. Match the table-row shape.
+        self.assertIn(f"<td>CRISPR-Bulge {cbop.sensitive_label_html()}</td>", html)
+        self.assertNotIn("CRISPR-Bulge &ge; 0.1", html)  # orphan 0.1 tier replaced by sensitive default
         self.assertIn("CFD &ge; 0.05", html)             # wide net still referenced (download note)
         self.assertIn("included in the bundled", html)   # 0.05 net is downloads-only
         self.assertNotIn("CFD &ge; 0.1", html)  # 0.1 tier removed

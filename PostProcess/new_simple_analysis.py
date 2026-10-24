@@ -1496,8 +1496,8 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
     if not do_scores:
         for target in cluster_targets:
             t = target.copy()
-            t[-2] = "{:.3f}".format(-1)
-            t.append("{:.3f}".format(-1))
+            t[-2] = "{:.6g}".format(-1)
+            t.append("{:.6g}".format(-1))
             cluster_scored.append(t)
         return cluster_scored
 
@@ -1542,20 +1542,24 @@ def preprocess_CRISPR_BULGE_score(cluster_targets):
     scores_ref = scorer_runner.CRISPR_BULGE_predict_list(
         [p[0] for p in pairs_ref], [p[1] for p in pairs_ref])
 
+    # CRISPR-Bulge scores are written at FULL precision ("{:.6g}"), NOT 3 decimals:
+    # the sensitive operating point (cb_operating_point, 95%-recall default 1.9e-4) is
+    # below the old 3-decimal floor (5e-4), so rounding would make it unreachable and
+    # silently drop ~7% of validated off-targets from the sensitive tier.
     for index, target in enumerate(cluster_targets):
         t = target.copy()
         if index in index_to_null:
             s = -1
-            t[-2] = "{:.3f}".format(s)
-            t.append("{:.3f}".format(s))
+            t[-2] = "{:.6g}".format(s)
+            t.append("{:.6g}".format(s))
         else:
             # mirror the CRISPR-Bulge marker convention exactly (55 = ref row, 33 = alt row)
             if t[-2] == 55:
-                t[-2] = "{:.3f}".format(scores_alt[index])
-                t.append("{:.3f}".format(scores_alt[index]))
+                t[-2] = "{:.6g}".format(scores_alt[index])
+                t.append("{:.6g}".format(scores_alt[index]))
             if t[-2] == 33:
-                t[-2] = "{:.3f}".format(scores_ref[index])
-                t.append("{:.3f}".format(scores_alt[index]))
+                t[-2] = "{:.6g}".format(scores_ref[index])
+                t.append("{:.6g}".format(scores_alt[index]))
         cluster_scored.append(t)
 
     return cluster_scored

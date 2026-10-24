@@ -148,23 +148,34 @@ and flagged here because it is an extrapolation beyond the published matrix.
 
 ## 3.5. Recommended default validation panel
 
-CRISPR-Bulge is a high-precision screen with a **hard recall ceiling**: it scores ~8% of the
-assay-detected off-targets as *exactly* 0, so no single CRISPR-Bulge threshold is both
-high-recall and manageable. A cutoff of `>0` already captures essentially everything the model
-can see (~92% recall against the assay-detected set); chasing higher recall collapses the
-threshold toward 0 and returns the whole genome. The practical default panel is therefore a
-**union, not a cutoff**:
+CRISPR-Bulge assigns a *non-zero* score to almost every candidate site. On the held-out
+benchmark, scored at **full precision**, **no** validated off-target scores exactly 0 — but
+neither do the negatives: **99.9% of them sit in a tiny noise floor below ≈1.9×10⁻⁴**. So a
+literal `>0` cutoff would list essentially the whole genome, and the earlier report (which
+rounded CRISPR-Bulge to 3 decimals) was in effect thresholding at the rounding floor, 5×10⁻⁴.
+The sensitive operating point is instead a **principled, documented threshold**: the
+CRISPR-Bulge score that recovers **~95% of the assay-detected off-targets** on the 40-guide
+held-out benchmark —
 
-> **Default panel = (CRISPR-Bulge > 0) ∪ (CFD ≥ 0.2 on 0-bulge sites) ∪ (CFD ≥ 0.5 on single-bulge sites) ∪ must-includes**
+> **CRISPR-Bulge ≥ 1.9×10⁻⁴ (the 95%-recall operating point)**
+
+(point 1.9×10⁻⁴; guide-cluster bootstrap 95% CI [5.8×10⁻⁶, 3.1×10⁻³]; selectable to 90% or 99%
+via `CRISPRME_CB_RECALL_TARGET`, single source of truth `PostProcess/cb_operating_point.py`). The
+threshold is applied to **full-precision** CRISPR-Bulge scores — the report now writes `{:.6g}`,
+not 3 decimals, so the sub-5×10⁻⁴ operating point is representable (3-decimal rounding would have
+floored it at 5×10⁻⁴ and dropped ~7% of validated off-targets from the sensitive tier). The
+practical default panel is a **union**, not a single cutoff:
+
+> **Default panel = (CRISPR-Bulge ≥ 1.9×10⁻⁴, 95%-recall) ∪ (CFD ≥ 0.2 on 0-bulge sites) ∪ (CFD ≥ 0.5 on single-bulge sites) ∪ must-includes**
 
 where *must-includes* are all perfect / near-perfect matches, any site in a functional element
 or cancer-driver gene, and — on a genotyped/phased panel — observed *cis* haplotypes with named
 carriers.
 
-- **CRISPR-Bulge > 0** carries the bulge sites and the ML-ranked core — CFD cannot rank bulges
-  (bulge=1 AP ≈ 0.01 vs CRISPR-Bulge ≈ 0.25; §3). CFD's 2.8.0 position-aware bulge penalty
-  fixes the *per-site* over-call (a PAM-proximal bulge no longer scores like a perfect match) but
-  does not make CFD a bulge ranker.
+- **CRISPR-Bulge ≥ the 95%-recall threshold** carries the bulge sites and the ML-ranked core —
+  CFD cannot rank bulges (bulge=1 AP ≈ 0.01 vs CRISPR-Bulge ≈ 0.25; §3). CFD's 2.8.0 position-aware
+  bulge penalty fixes the *per-site* over-call (a PAM-proximal bulge no longer scores like a perfect
+  match) but does not make CFD a bulge ranker.
 - **CFD ≥ 0.2 on 0-bulge** rescues the high-CFD no-bulge sites CRISPR-Bulge misses (CFD is
   reliable off-bulge).
 - **CFD ≥ 0.5 on a single bulge** rescues the *high-CFD* 1-bulge sites: CFD now position-penalizes
@@ -173,11 +184,14 @@ carriers.
 - **≥2-bulge sites** are excluded from scoring-driven selection (uncalibrated for both scores)
   but kept-and-demoted in the report, never dropped.
 
-On the benchmark this union reaches **~93% recall** against the assay-detected set; the CFD
-rescue adds only a few sites, and **~7% (dominated by bulge sites) score below both scores** and
-are recovered only by the must-include criteria or by validating deeper. Panel depth is a
-**risk/budget optimization** read off the expected-true counts (§5), **not a recall guarantee** —
-detection is lossless (every site is listed), but score-ranked selection carries this ceiling.
+**Recall vs. validation size.** Recall above ~95% is reachable but the list grows **steeply**,
+because the last few percent of true off-targets sit in the noise floor shared with the
+negatives. On the benchmark the trade is ≈**9 sites per true off-target at 90% recall, ≈21 at
+95%, ≈354 at 99%** (≈6× the 95% list), ≈790 at 100%. For the ACTGA/NRG worked example (189,954
+candidate loci) the 95% threshold yields **~206 validation loci** (90% → ~89; 99% → ~1,286).
+Panel depth is a **risk/validation-size optimization** read off the expected-true counts (§5),
+**not a recall guarantee** — detection is lossless (every site is listed); only score-ranked
+selection carries this trade.
 
 ## 4. Point calibration: isotonic, and why
 

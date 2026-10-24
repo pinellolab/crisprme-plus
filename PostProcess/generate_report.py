@@ -48,8 +48,8 @@ Report structure (top -> bottom)
 3. SIMPLIFIED reference-vs-population plot (v1 single view).
 4. RECOMMENDED VALIDATION PANEL: the full threshold table (candidate counts at
    CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS the
-   recommended default panel: HARD-INCLUDE every site with CRISPR-Bulge>0 (the
-   sensitive default, when computed) OR mm+b<=2 OR CFD>=0.2 at 0 bulges OR CFD>=0.5
+   recommended default panel: HARD-INCLUDE every site with CRISPR-Bulge >= the
+   sensitive default (95%-recall benchmark threshold, when computed) OR mm+b<=2 OR CFD>=0.2 at 0 bulges OR CFD>=0.5
    at 1 bulge OR a clean 0-mismatch bulge (a >=2-bulge CFD-only site is kept too but
    DEMOTED to the end, CFD being an uncalibrated over-call there), then FILL to at
    least 100 by worst-case severity across CFD desc / CRISPR-Bulge
@@ -116,6 +116,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from utils import gene_region_class  # noqa: E402  # shared with resultIntegrator + web
+import cb_operating_point as cbop  # noqa: E402  # CRISPR-Bulge sensitive operating point (single source of truth)
 
 # report-generator version -- bumped here, stamped in the footer provenance line.
 REPORT_GENERATOR_VERSION = "2.4"
@@ -136,10 +137,11 @@ PANEL_DISPLAY_CFD_THRESHOLDS = (0.5, 0.2)
 # CRISPR-Bulge cut points (0.5/0.2/0.1): calibrated on Refined_TrueOT (positives
 # median 0.36; PR at 0.5=prec .67/rec .40, 0.2=prec .38/rec .55, 0.1=rec .64) --
 # graduated + model-relative on its own [0,1] cleavage-probability scale.
-# CRISPR-Bulge Section-4 tiers: the >= cut tiers PLUS the sensitive "> 0" operating
-# point added in _crispr_bulge_tier_specs() (consistent with the risk-card
-# "CRISPR-Bulge > 0" row and the panel's CB>0 selection). The orphan >=0.1 tier was
-# replaced by "> 0", the point the recommended panel actually keys on.
+# CRISPR-Bulge Section-4 tiers: the >= cut tiers PLUS the sensitive operating point
+# added in _crispr_bulge_tier_specs() -- the benchmark 95%-recall threshold
+# (cb_operating_point, default CB >= 1.9e-4), consistent with the risk-card sensitive
+# row and the panel's selection. The orphan >=0.1 tier was replaced by this sensitive
+# default, the point the recommended panel actually keys on (was an ad-hoc "> 0").
 CRISPR_BULGE_THRESHOLDS = (0.5, 0.2)
 
 
@@ -161,13 +163,18 @@ def scorer_thresholds():
 
 def _crispr_bulge_tier_specs():
     """Section-4 CRISPR-Bulge tiers as ``(display_suffix, file_key, predicate)``:
-    the ``>=`` cut tiers followed by the sensitive ``> 0`` operating point (the point
-    the recommended panel keys on; mirrors the risk-card ``CRISPR-Bulge > 0`` row).
-    ``predicate`` maps the CRISPR-Bulge score Series -> boolean mask (NaN -> False for
-    N/A sites in both ``>=`` and ``> 0``)."""
+    the ``>=`` cut tiers followed by the sensitive operating point (the point the
+    recommended panel keys on; mirrors the risk-card sensitive row). The sensitive
+    default is the 95%-recall threshold on the 40-guide held-out benchmark
+    (``cb_operating_point``; was the ad-hoc ``> 0``). The file key stays
+    ``crispr_bulge_gt0`` for stable download/web identifiers. ``predicate`` maps the
+    CRISPR-Bulge score Series -> boolean mask (NaN -> False for N/A sites)."""
+    import cb_operating_point as cbop
+    thr = cbop.sensitive_threshold()
     specs = [(f"&ge; {t}", f"crispr_bulge_{t:.2f}", (lambda s, t=t: s >= t))
              for t in CRISPR_BULGE_THRESHOLDS]
-    specs.append(("&gt; 0", "crispr_bulge_gt0", (lambda s: s > 0)))
+    specs.append((cbop.sensitive_label_html(), "crispr_bulge_gt0",
+                  (lambda s, thr=thr: s >= thr)))
     return specs
 MMB_THRESHOLDS = (1, 2, 3, 4)
 # threshold-table variant-created CFD floor (kept for the full threshold table)
@@ -180,7 +187,7 @@ PANEL_VARIANT_CFD_MIN = 0.05
 # stages and IS the recommended default validation panel:
 #   1. HARD-INCLUDE every site flagged by the sensitive model OR close by sequence OR
 #      a high-CFD site (within CFD's defensible reach) OR a pure bulge, i.e.
-#      CRISPR-Bulge > 0 (the sensitive default, when computed)  OR
+#      CRISPR-Bulge >= the sensitive default (95%-recall benchmark threshold)  OR
 #      mm+bulges <= PANEL_FLOOR_MMB  OR  (CFD >= PANEL_RESCUE_CFD AND bulges == 0)  OR
 #      (CFD >= PANEL_HIGH_CFD AND bulges == 1)  OR  (0 mismatches AND >=1 bulge).
 #      These RELIABLE hard-includes are always in the panel even if they exceed the
@@ -2488,8 +2495,8 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     The OFF-TARGET rows are then selected in two stages (over the off-target set):
 
     1. HARD-INCLUDE every site flagged by the sensitive model OR close by sequence OR
-       a high-CFD site (within CFD's defensible reach) OR a pure bulge: ``CRISPR-Bulge > 0``
-       (the sensitive default, when computed) OR ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR
+       a high-CFD site (within CFD's defensible reach) OR a pure bulge: ``CRISPR-Bulge >=
+       the sensitive default`` (95%-recall benchmark threshold, when computed) OR ``mm+bulges <= PANEL_FLOOR_MMB (2)`` OR
        ``CFD >= PANEL_RESCUE_CFD (0.2) at 0 bulges`` OR ``CFD >= PANEL_HIGH_CFD (0.5) at
        1 bulge`` OR a PURE-BULGE site (0 mismatches, >=1 bulge). These are always kept; if
        the hard-includes already exceed ``cap`` we keep them all (a flagged / low-edit-
@@ -2570,7 +2577,7 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
         severity = pd.Series(1.0, index=offt.index)
 
     # STAGE 1: hard-includes -- always kept, even past the cap. Two tiers:
-    #   RELIABLE: flagged by the sensitive model (CRISPR-Bulge > 0, when computed) OR
+    #   RELIABLE: flagged by the sensitive model (CRISPR-Bulge >= sensitive default, when computed) OR
     #   close by sequence (mm+b <= floor) OR a high-CFD site within CFD's defensible reach
     #   (CFD >= rescue at 0 bulges, where CFD is reliable; OR high CFD >= PANEL_HIGH_CFD at
     #   exactly 1 bulge, where CFD is an extrapolation so only high-confidence calls rescue)
@@ -2581,8 +2588,10 @@ def select_worstcase_panel(df, cols, cap=PANEL_CAP):
     #   -- a >=2-bulge off-target could still be real (the validation benchmark simply has no
     #   >=2-bulge examples, so it is UNKNOWN, and the user must decide what to assay) -- but we
     #   RANK them AFTER every reliable site so the trustworthy candidates come first.
+    import cb_operating_point as cbop
+    _cb_sensitive_thr = cbop.sensitive_threshold()
     cb_flagged = (
-        (crispr_bulge > 0) if has_crispr_bulge
+        (crispr_bulge >= _cb_sensitive_thr) if has_crispr_bulge
         else pd.Series(False, index=offt.index)
     )
     pure_bulge = (mm_cnt == 0) & (bulge_cnt >= 1)
@@ -2954,7 +2963,7 @@ def render_validation_panel(
         f"First, every off-target that is FLAGGED by the sensitive model OR CLOSE by "
         f"sequence OR a HIGH-CFD site (within CFD&rsquo;s defensible reach) OR a CLEAN "
         f"BULGE is hard-included &mdash; specifically every site with {scorer_label()} "
-        f"&gt; 0 (the sensitive default, when computed) OR mismatches+bulges &le; "
+        f"{cbop.sensitive_label_html()} (the sensitive default, when computed) OR mismatches+bulges &le; "
         f"{PANEL_FLOOR_MMB} OR CFD &ge; {PANEL_RESCUE_CFD} at 0 bulges (CFD is reliable "
         f"off-bulge) OR high CFD &ge; {PANEL_HIGH_CFD} at 1 bulge (rescued; CFD is an "
         f"extrapolation on bulges, so only high-confidence single-bulge calls qualify) "
@@ -2974,7 +2983,7 @@ def render_validation_panel(
         f"(the validation benchmark simply contains no &ge;2-bulge examples, so their "
         f"risk is UNKNOWN and only you can decide what to assay). Instead, a &ge;2-bulge "
         f"site that qualifies on CFD alone is KEPT in the panel but DEMOTED &mdash; "
-        f"ranked after every reliable hard-include ({scorer_label()} &gt; 0, close by "
+        f"ranked after every reliable hard-include ({scorer_label()} {cbop.sensitive_label_html()}, close by "
         f"sequence, a high-CFD site within CFD&rsquo;s defensible reach, or a clean "
         f"0-mismatch bulge), so the trustworthy candidates come first and the "
         f"over-called ones sit at the end, flagged lower-confidence. "
@@ -3058,8 +3067,9 @@ def render_validation_panel(
         "(the card&rsquo;s domain) in parentheses, so the two sections reconcile at one threshold. "
         f"A wider CFD &ge; {_wide_t} net ({_wide_n:,} sites) is included in the bundled "
         "downloads. <strong>Recommended default panel:</strong> validate every "
-        "CRISPR-Bulge&ndash;flagged site (score &gt; 0 &mdash; the sensitive operating point; "
-        "CRISPR-Bulge is the stronger ranker but tops out near 92&#37; recall), plus the "
+        f"CRISPR-Bulge&ndash;flagged site ({cbop.sensitive_label_html()} &mdash; the sensitive "
+        "operating point, the threshold that recovers ~95&#37; of validated off-targets on the "
+        "40-guide held-out benchmark; higher recall is reachable but the list grows steeply), plus the "
         "high-CFD sites it misses (CFD &ge; 0.2 on no-bulge sites, where CFD is reliable, and "
         "high CFD &ge; 0.5 on single-bulge sites, where CFD is an extrapolation so only "
         "high-confidence calls are rescued), plus the perfect/near-perfect and "
@@ -3085,7 +3095,7 @@ def render_validation_panel(
     <tr><td>{_off_label}</td><td class="num">{vp['n_offtarget']:,}</td></tr>
     {_variant_rows}
     <tr class="panel-hi"><td><strong>{_panel_hdr}</strong><br>
-      <span class="caption">hard-include ({scorer_label()} &gt; 0 OR mm+b &le; {PANEL_FLOOR_MMB}
+      <span class="caption">hard-include ({scorer_label()} {cbop.sensitive_label_html()} OR mm+b &le; {PANEL_FLOOR_MMB}
       OR CFD &ge; {PANEL_RESCUE_CFD} at 0 bulges OR CFD &ge; {PANEL_HIGH_CFD} at 1 bulge OR a clean
       0-mismatch bulge; a &ge;2-bulge site high on CFD alone is kept too but demoted to the end),
       then fill up to {PANEL_CAP} by worst-case severity across {metric_list};{_panel_variant_note}</span></td>

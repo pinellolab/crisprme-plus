@@ -20,10 +20,19 @@ and the `release-crisprme` skill.
   score — and an `Aligned_spacer+PAM` column placed immediately before `Aligned_protospacer+PAM`, so the
   guide and protospacer read as a pairwise alignment (bulge columns as `-`). `CRISPR-Bulge_ref` is gated
   like the CRISPR-Bulge column (shown only when CRISPR-Bulge was computed).
-- **CRISPR-Bulge `> 0` tier in the Section-4 threshold table + a `crispr_bulge_gt_0.tsv` download.**
-  The CRISPR-Bulge candidate-count table now shows `≥ 0.5 / ≥ 0.2 / > 0` (the orphan `≥ 0.1` tier is
-  replaced by the sensitive `> 0` operating point the recommended panel keys on), and the matching
-  `> 0` subset is bundled as a download — consistent with the risk-card "CRISPR-Bulge > 0" row.
+- **CRISPR-Bulge sensitive tier (benchmark 95%-recall operating point) in the Section-4 threshold
+  table + a `crispr_bulge_gt_0.tsv` download.** The CRISPR-Bulge candidate-count table shows
+  `≥ 0.5 / ≥ 0.2 / ≥ 1.9e-4 (95% recall)` — the orphan `≥ 0.1` tier is replaced by the **sensitive
+  operating point** the recommended panel keys on: the threshold that recovers ~95% of validated
+  off-targets on the 40-guide held-out benchmark (point 1.9e-4; guide-bootstrap 95% CI [5.8e-6, 3.1e-3];
+  selectable via `CRISPRME_CB_RECALL_TARGET={90|95|99}`, single source of truth in `cb_operating_point`).
+  The matching subset is bundled as a download, consistent with the risk-card sensitive row. The file
+  key stays `crispr_bulge_gt_0.tsv` (stable download/web identifier).
+- **CRISPR-Bulge scores are written at full precision (`{:.6g}`) instead of 3 decimals.** The sensitive
+  default (1.9e-4) is below the old 3-decimal display floor (5e-4), which would have silently rounded
+  ~7% of validated off-targets to `0.000` and dropped them from the sensitive tier (recall 0.93→1.00 on
+  the benchmark). Full precision across the population/per-sample and indel scorers makes the operating
+  point representable. CFD display is unchanged (3dp; its tiers are ≥0.2/≥0.5, far above the floor).
 
 ### Changed
 - **CFD now penalizes bulges by position (Doench et al., 2016 gap matrix), instead of ignoring them.**
@@ -60,17 +69,22 @@ and the `release-crisprme` skill.
   exclusive. The web Analysis-mode selector mirrors this (defaults to per-sample on a phased panel). A
   one-line notice prints the auto-selected mode and how to override. Rationale: phased panels are built
   for exactly this resolution, so the richest, most honest result is the default where it is tractable.
-- **The recommended validation panel (report Section 4) now selects on the sensitive operating point.**
-  The panel hard-includes `(CRISPR-Bulge > 0) ∪ (mm+b ≤ 2) ∪ (CFD ≥ 0.2 at 0 bulges) ∪ (CFD ≥ 0.5 at 1
-  bulge) ∪ (clean 0-mismatch bulge) ∪ must-includes` — making the shipped `panel_top100.tsv` *be* the
-  recommended default panel rather than a CFD-centric subset. CRISPR-Bulge > 0 is the primary axis
-  (CFD cannot rank bulges: bulge=1 AP ≈ 0.02 vs ≈ 0.25); the CFD rescue is sensitive off-bulge (≥ 0.2)
-  but requires high confidence (≥ 0.5) on single-bulge sites where CFD is an extrapolation; ≥2-bulge
-  CFD-only sites are kept-and-demoted (uncalibrated for both scores), never dropped. The panel is a
-  strict superset of the previous one (no site removed). One consistent threshold message now runs
-  across the risk card, the "how to read this" modal, the Section-4 methods note, the score glossary,
-  and METHODS §3.5. Framed as a risk/budget optimization, not a recall guarantee (CRISPR-Bulge has a
-  ~92% recall ceiling; ~7%, mostly bulges, sits below both scores and is recovered only by must-includes).
+- **The recommended validation panel (report Section 4) selects on a principled sensitive operating
+  point (benchmark 95%-recall), not an ad-hoc `> 0`.** The panel hard-includes
+  `(CRISPR-Bulge ≥ 1.9e-4) ∪ (mm+b ≤ 2) ∪ (CFD ≥ 0.2 at 0 bulges) ∪ (CFD ≥ 0.5 at 1 bulge) ∪
+  (clean 0-mismatch bulge) ∪ must-includes` — making the shipped `panel_top100.tsv` *be* the recommended
+  default panel rather than a CFD-centric subset. The CRISPR-Bulge sensitive threshold is the **95%-recall
+  operating point** on the 40-guide held-out benchmark (CB cannot rank bulges: bulge=1 AP ≈ 0.02 vs ≈ 0.25,
+  so it is the primary axis); the CFD rescue is sensitive off-bulge (≥ 0.2) but requires high confidence
+  (≥ 0.5) on single-bulge sites where CFD is an extrapolation; ≥2-bulge CFD-only sites are kept-and-demoted
+  (uncalibrated for both scores), never dropped. One consistent threshold message now runs across the risk
+  card, the "how to read this" modal, the Section-4 methods note, the score glossary, and METHODS §3.5.
+  Why a principled cutoff and not literal `> 0`: CRISPR-Bulge assigns a tiny non-zero score to ~every site
+  (99.9% of benchmark negatives fall below 1.9e-4), so `> 0` would list essentially the whole genome.
+  95% recall is the sensible trade — for the ACTGA/NRG worked example it yields ~206 validation loci
+  (~9/true-OT at 90%, ~21 at 95%); pushing to 99% recall is ~6× the sites because the last few percent of
+  true off-targets sit in the score's noise floor. Framed as a risk/validation-size optimization, not a
+  recall guarantee; recall above ~95% is reachable (selectable) but the list grows steeply.
 
 ### Fixed
 - **The "Observed" cell no longer reports a misleading raw carrier count for population-level,

@@ -18,11 +18,18 @@ class TestScorerLabel(unittest.TestCase):
     def test_label_and_thresholds(self):
         self.assertEqual(g.scorer_label(), "CRISPR-Bulge")
         self.assertEqual(g.scorer_thresholds(), (0.5, 0.2))
-        # Section-4 tiers add the sensitive "> 0" operating point after the >= cuts
+        # Section-4 tiers add the sensitive operating point (benchmark 95%-recall default,
+        # cb_operating_point) after the >= cuts; file key stays crispr_bulge_gt0 (stable id).
+        import cb_operating_point as cbop
         specs = g._crispr_bulge_tier_specs()
-        self.assertEqual([s[0] for s in specs], ["&ge; 0.5", "&ge; 0.2", "&gt; 0"])
+        self.assertEqual([s[0] for s in specs],
+                         ["&ge; 0.5", "&ge; 0.2", cbop.sensitive_label_html()])
         self.assertEqual(specs[-1][1], "crispr_bulge_gt0")
         self.assertEqual(g._tier_filename("crispr_bulge_gt0"), "crispr_bulge_gt_0.tsv")
+        # the sensitive tier predicate is ">= threshold", not "> 0"
+        thr = cbop.sensitive_threshold()
+        self.assertTrue(specs[-1][2](thr))            # at threshold -> included
+        self.assertFalse(specs[-1][2](thr / 2.0))     # below -> excluded
 
     def test_set_active_scorer_is_noop(self):
         # retained for call compatibility; any argument keeps CRISPR-Bulge

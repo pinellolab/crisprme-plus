@@ -795,7 +795,14 @@ trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
 The N/A sentinel is uniform across the report: a `-` means *not scored*, not *no risk* — it is
 never sorted or thresholded as if it were a low score. The threshold tiers in the report are
 **model-relative** (CRISPR-Bulge's cut points differ from CFD's because the two scores are on
-different scales).
+different scales). The CRISPR-Bulge **sensitive** tier — the operating point the recommended
+panel keys on — is the **95%-recall threshold** on the 40-guide held-out benchmark
+(**CB ≥ 1.9×10⁻⁴**; point estimate, guide-bootstrap 95% CI [5.8×10⁻⁶, 3.1×10⁻³]; selectable to
+90% / 99% via `CRISPRME_CB_RECALL_TARGET`), not an ad-hoc `> 0`: CRISPR-Bulge scores almost every
+site non-zero, so `> 0` would list the whole genome. CRISPR-Bulge scores are written at full
+precision (`{:.6g}`) so this sub-5×10⁻⁴ operating point is representable. See
+`docs/offtarget_risk_summary_METHODS.md` §3.5 for the recall↔validation-size trade (≈206
+validation loci at 95% recall for the ACTGA/NRG worked example).
 
 **Top-of-report off-target risk summary (replaces the aggregated specificity score).**
 The legacy single `100/(100+Σ)` specificity score is replaced by a per-scorer risk card. For
