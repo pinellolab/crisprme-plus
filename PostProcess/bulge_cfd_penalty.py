@@ -23,6 +23,12 @@ free-passed (contributed 1.0), multiply by the real position factor; for in-rang
 bulges calc_cfd already scored, contribute 1.0 (no double-count).
 """
 
+# Clean-room CFD (own implementation of Doench et al., Nat. Biotechnol. 2016) + its JSON
+# tables. ``cfd_score_bulge_aware`` uses this as the mismatch-only base scorer by default;
+# callers no longer inject a per-module scorer. (cfd_score has no bulge handling -- all of
+# that lives here -- and imports nothing from this module, so there is no import cycle.)
+from cfd_score import cfd as _cfd_clean, cfd_tables as _cfd_tables
+
 SPACER_LEN = 20  # SpCas9 protospacer length; PAM is the trailing columns beyond it
 
 
@@ -129,8 +135,8 @@ def bulge_cfd_correction(aligned_crrna, aligned_protospacer, mm_scores, pam_len=
     return corr
 
 
-def cfd_score_bulge_aware(aligned_crrna, aligned_protospacer, mm_scores, pam_scores,
-                          calc_cfd_fn, pam_len=3, do_scores=True):
+def cfd_score_bulge_aware(aligned_crrna, aligned_protospacer, mm_scores=None,
+                          pam_scores=None, calc_cfd_fn=None, pam_len=3, do_scores=True):
     """Position-aware, byte-stable replacement for the per-caller ``calc_cfd`` bulge paths.
 
     Takes the IN-PLACE display alignment (``aligned_crrna`` / ``aligned_protospacer`` same
@@ -150,14 +156,18 @@ def cfd_score_bulge_aware(aligned_crrna, aligned_protospacer, mm_scores, pam_sco
     Mismatch-only alignments (no gaps) are byte-identical to the previous
     ``calc_cfd(crRNA, proto[:-pam], proto[-2:])``; only bulge rows change.
 
-    ``calc_cfd_fn`` is injected by the caller (``calc_cfd`` in each module) to avoid a
-    circular import.
+    The mismatch-only base is scored by the clean-room ``cfd_score.cfd`` by default
+    (``mm_scores`` / ``pam_scores`` default to its JSON tables). ``calc_cfd_fn`` is an
+    optional override (a scorer with the ``calc_cfd(guide, spacer, pam, mm, pam, do)``
+    signature) used only by the differential tests; production passes nothing.
     """
     # NOTE: CFD (Doench 2016) is defined only for the canonical SpCas9 20-nt-spacer + 3-nt
     # NGG regime, so callers pass pam_len=3 and the PAM factor is the trailing 2 bases
     # (gpr[-2:]). The main pipeline gates CFD off for any other geometry (non-3 PAM,
     # non-20 guide, PAM-at-5'); do NOT rely on this function for pam_len != 3 without first
     # reconciling the gpr[-2:] PAM lookup with a generalized spacer/PAM split.
+    if mm_scores is None or pam_scores is None:
+        mm_scores, pam_scores = _cfd_tables()
     cr = aligned_crrna
     pr = aligned_protospacer.upper()
     if "-" in cr:  # DNA bulge(s): drop the looped-out genomic base(s) from both strands
@@ -166,7 +176,10 @@ def cfd_score_bulge_aware(aligned_crrna, aligned_protospacer, mm_scores, pam_sco
         gpr = "".join(pr[i] for i in keep)
     else:
         gcr, gpr = cr, pr
-    base = calc_cfd_fn(gcr, gpr[:-pam_len], gpr[-2:], mm_scores, pam_scores, do_scores)
+    if calc_cfd_fn is not None:
+        base = calc_cfd_fn(gcr, gpr[:-pam_len], gpr[-2:], mm_scores, pam_scores, do_scores)
+    else:
+        base = _cfd_clean(gcr, gpr[:-pam_len], gpr[-2:], (mm_scores, pam_scores))
     if base == 0 or base == -1:
         return base  # untranslatable IUPAC (0) or no-score sentinel (-1) short-circuit
     return base * bulge_cfd_correction(aligned_crrna, aligned_protospacer, mm_scores, pam_len)

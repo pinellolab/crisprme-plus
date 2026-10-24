@@ -39,6 +39,10 @@ try:
     from bulge_cfd_penalty import cfd_score_bulge_aware as _cfd_bulge_aware
 except Exception:  # pragma: no cover - module always shipped alongside
     _cfd_bulge_aware = None
+# Clean-room CFD base scorer + its JSON tables (own implementation of Doench et al.,
+# Nat. Biotechnol. 2016). This replaces the inherited calc_cfd/revcom/get_mm_pam_scores
+# that used to live in this module; cfd_score_bulge_aware uses it as the mismatch-only base.
+from cfd_score import cfd as _cfd_clean, cfd_tables as _cfd_tables
 # ADDITIVE combination-aware population summary (Phase 3) + its companion-file writer
 # (Phase 3c). GUARDED / lazy exactly like tier0_registry: an old deploy may not ship
 # these -- in that case they stay None and the companion population-summary TSV is
@@ -221,40 +225,6 @@ class reversor:
         return other.obj < self.obj
 
 
-def calc_cfd(guide_seq, sg, pam, mm_scores, pam_scores, do_scores):
-    # if do_scores == False:
-    #     # print("NON CALCOLO")
-    #     score = -1
-    #     return score
-    score = 1
-    sg = sg.replace("T", "U")
-    guide_seq = guide_seq.replace("T", "U")
-    s_list = list(sg)
-    guide_seq_list = list(guide_seq)
-
-    for i, sl in enumerate(s_list):
-        if guide_seq_list[i] == sl:
-            score *= 1
-        else:
-            try:  # Catch exception if IUPAC character
-                key = "r" + guide_seq_list[i] + ":d" + revcom(sl) + "," + str(i + 1)
-            except Exception as e:
-                score = 0
-                break
-            try:
-                score *= mm_scores[key]
-            except (
-                Exception
-            ) as e:  # If '-' is in first position, i do not have the score for that position
-                pass
-
-    # Guard against non-ATCG PAM bases (e.g. from real NIST/NCBI hg38):
-    # a non-canonical PAM contributes 0 to the CFD product instead of raising
-    # KeyError (issue #94). Canonical PAM bases (A/C/G/T) are unaffected.
-    score *= pam_scores.get(pam, 0.0)
-    return score
-
-
 # ADDITIVE (Phase 3c) companion population-summary collection. We accumulate, per
 # chromosome, one record per VARIANT off-target (identity columns + the creating SNP
 # column) so a companion population-summary TSV can be written at the end WITHOUT
@@ -304,33 +274,6 @@ def _collect_variant_off_target(final_line):
         return
     _variant_off_target_keys.add(key)
     _variant_off_targets.append(rec)
-
-
-def revcom(s):
-    basecomp = {"A": "T", "C": "G", "G": "C", "T": "A", "U": "A", "-": "-"}
-    letters = list(s[::-1])
-    try:
-        letters = [basecomp[base] for base in letters]
-    except:
-        return None  # If some IUPAC were not translated
-    return "".join(letters)
-
-
-def get_mm_pam_scores():
-    # print(os.path.dirname(os.path.realpath(__file__)))
-    try:
-        mm_scores = pickle.load(
-            open(
-                os.path.dirname(os.path.realpath(__file__)) + "/mismatch_score.pkl",
-                "rb",
-            )
-        )
-        pam_scores = pickle.load(
-            open(os.path.dirname(os.path.realpath(__file__)) + "/PAM_scores.pkl", "rb")
-        )
-        return (mm_scores, pam_scores)
-    except:
-        raise Exception("Could not find file with mismatch scores or PAM scores")
 
 
 def retrieveFromDict(chr_pos):
@@ -796,13 +739,9 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
                 # (split[1] crRNA, _t concrete protospacer+PAM); the DNA/RNA-bulge handling
                 # and the PAM-proximal penalty live in cfd_score_bulge_aware.
                 if _cfd_bulge_aware is not None:
-                    return _cfd_bulge_aware(split[1], _t, mm_scores, pam_scores, calc_cfd,
+                    return _cfd_bulge_aware(split[1], _t, mm_scores, pam_scores,
                                             do_scores=do_scores)
-                _bs = int(split[bulge_pos])
-                if split[0] == "DNA":
-                    return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
-                                    mm_scores, pam_scores, do_scores)
-                return calc_cfd(split[1], _t[:-3], _t[-2:], mm_scores, pam_scores, do_scores)
+                return _cfd_clean(split[1], _t[:-3], _t[-2:], (mm_scores, pam_scores))
 
             def _emittable_fast(_seq_list, _chosen):
                 # the finalizer KEEPS a variant off-target only if it has >=1 carrier AND
@@ -1161,13 +1100,8 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
                         # position-aware bulge scoring (2.8.0) -- see _cfd_fast above.
                         if _cfd_bulge_aware is not None:
                             return _cfd_bulge_aware(split[1], _t, mm_scores, pam_scores,
-                                                    calc_cfd, do_scores=do_scores)
-                        _bs = int(split[bulge_pos])
-                        if split[0] == "DNA":
-                            return calc_cfd(split[1][_bs:], _t[_bs:-3], _t[-2:],
-                                            mm_scores, pam_scores, do_scores)
-                        return calc_cfd(split[1], _t[:-3], _t[-2:],
-                                        mm_scores, pam_scores, do_scores)
+                                                    do_scores=do_scores)
+                        return _cfd_clean(split[1], _t[:-3], _t[-2:], (mm_scores, pam_scores))
 
                     def _emittable_leg(_seq_list, _chosen):
                         # KEEP only what the finalizer keeps: >=1 carrier (unless
@@ -1437,15 +1371,17 @@ def iupac_decomposition(split, guide_no_bulge, guide_no_pam, cluster_to_save):
 
 def _cfd_from_alignment(aligned_crrna, aligned_proto):
     """CFD for one in-place display alignment (crRNA/proto include the PAM, gaps '-' in
-    place). Position-aware bulge scoring via cfd_score_bulge_aware; falls back to the
-    previous DNA front-trim / in-place calc_cfd only if the helper is unavailable."""
+    place). Position-aware bulge scoring via cfd_score_bulge_aware (clean-room base); falls
+    back to the bulge-agnostic clean-room scorer only if the helper is unavailable."""
     if _cfd_bulge_aware is not None:
         return _cfd_bulge_aware(
-            aligned_crrna, aligned_proto, mm_scores, pam_scores, calc_cfd, do_scores=do_scores
+            aligned_crrna, aligned_proto, mm_scores, pam_scores, do_scores=do_scores
         )
-    # legacy fallback (old deploy without the helper): previous behaviour, unchanged
+    # fallback if the bulge-aware helper is somehow unavailable: the bulge-agnostic
+    # clean-room base on the gap-deleted alignment (no PAM-proximal correction). Never
+    # taken on a normal install, where the helper is shipped alongside.
     up = aligned_proto.upper()
-    return calc_cfd(aligned_crrna, up[:-3], up[-2:], mm_scores, pam_scores, do_scores)
+    return _cfd_clean(aligned_crrna, up[:-3], up[-2:], (mm_scores, pam_scores))
 
 
 def preprocess_CFD_score(target):
@@ -2081,8 +2017,8 @@ else:
 # start time counter
 global_start = time.time()
 
-# open mm and pam scores matrices for CFD
-mm_scores, pam_scores = get_mm_pam_scores()
+# open mm and pam scores matrices for CFD (clean-room JSON tables)
+mm_scores, pam_scores = _cfd_tables()
 
 # if conditions, execute score (guidelen==20,pamlen==3,pam_at_beginning==FALSE)
 do_scores = True

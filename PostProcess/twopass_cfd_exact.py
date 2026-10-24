@@ -1,42 +1,38 @@
 #!/usr/bin/env python3
 """Exact factorized worst-case CFD — 2.5.1 two-pass fast mode (Pass-2 scoring).
 
-Design: docs/DESIGN_2.5.1_two_pass_fast_mode.md §7. `calc_cfd`
-(new_simple_analysis.py) is a pure product of per-position factors × one PAM
-factor, each factor in [0,1] and position-independent, so the MAX CFD over a
-per-position allele SET factorizes EXACTLY:
+Design: docs/DESIGN_2.5.1_two_pass_fast_mode.md §7. CFD (Doench et al.,
+Nat. Biotechnol. 2016) is a pure product of per-position factors × one PAM factor,
+each factor in [0,1] and position-independent, so the MAX CFD over a per-position
+allele SET factorizes EXACTLY:
 
     max_CFD = ( ∏_i  max_{a ∈ S_i} f(guide_i, a, i) )  ×  max_{p ∈ PamSet} pam(p)
 
-computed in O(len guide) with NO haplotype enumeration. For a CONCRETE target it
-is bit-identical to `new_simple_analysis.calc_cfd(..., do_scores=True)` (the panel
-verified 0 ULP over 30K + ~945K cases). This is a fast-mode CONSTRUCT — validated
-against `calc_cfd` (see test_twopass_cfd_exact.py), not yet an authoritative
-replacement. A future C++ port must pass the same differential/oracle/shadow gates
-(design §7) before being trusted. CRISPR-Bulge is NOT factorizable → out of scope here.
+computed in O(len guide) with NO haplotype enumeration. For a CONCRETE target it is
+bit-identical to the clean-room scorer cfd_score.cfd / cfd_score_bulge_aware (the panel
+verified 0 ULP over 30K + ~945K cases; see test_twopass_cfd_exact.py). This is a
+fast-mode CONSTRUCT; a future C++ port must pass the same differential/oracle/shadow
+gates (design §7) before being trusted. CRISPR-Bulge is NOT factorizable → out of scope.
 
-Caveats replicated from `calc_cfd` exactly: T→U on guide AND target before compare
-and key; match → 1.0; mismatch → mm_scores["r{guide}:d{revcom(dna)},{pos}"] with a
-missing key → 1.0 (the position-1 gap is free); an untranslatable IUPAC base →
-0.0 (calc_cfd zeroes the whole score). Only meaningful in the canonical SpCas9
-regime (20-nt guide, per-position factors); the caller gates that.
+Scoring rules (per Doench 2016, shared with cfd_score / column_factor): T→U on guide AND
+target before compare and key; match → 1.0; mismatch →
+mm_scores["r{guide}:d{revcom(dna)},{pos}"] with a missing key → 1.0 (the position-1 gap
+is free); an untranslatable IUPAC base → 0.0 (the whole score). The per-column factor +
+the position-aware bulge rule are shared with bulge_cfd_penalty.column_factor (one
+definition). Only meaningful in the canonical SpCas9 regime (20-nt guide); the caller gates that.
 
-STDLIB + the shipped mismatch_score.pkl / PAM_scores.pkl.
+STDLIB; tables from the clean-room JSON (cfd_score.cfd_tables, via load_scores()).
 """
 import os
-import pickle
 
 _HERE = os.path.dirname(os.path.realpath(__file__))
 _BASECOMP = {"A": "T", "C": "G", "G": "C", "T": "A", "U": "A", "-": "-"}
 
 
 def load_scores():
-    """Load the shipped CFD pickles (mismatch_score.pkl, PAM_scores.pkl)."""
-    with open(os.path.join(_HERE, "mismatch_score.pkl"), "rb") as fh:
-        mm = pickle.load(fh)
-    with open(os.path.join(_HERE, "PAM_scores.pkl"), "rb") as fh:
-        pam = pickle.load(fh)
-    return mm, pam
+    """Return the (mismatch, PAM) CFD tables -- the clean-room JSON tables (cfd_score)."""
+    from cfd_score import cfd_tables
+    return cfd_tables()
 
 
 def _revcom(s):

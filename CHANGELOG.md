@@ -158,18 +158,23 @@ and the `release-crisprme` skill.
   `docs/offtarget_risk_summary_METHODS.md`.
 
 - **Own implementation of the CFD score** (Doench et al., *Nat. Biotechnol.* 2016) in
-  `PostProcess/cfd_score.py`, with the mismatch and PAM penalty tables serialized as reviewable JSON
+  `PostProcess/cfd_score.py`, with the mismatch and PAM penalty tables as reviewable JSON
   (`cfd_mismatch_scores.json`, 392 keys; `cfd_pam_scores.json`, 16 keys) and a committed generator
-  (`scripts/generate_cfd_tables.py`, with a `--check` round-trip mode). The module reproduces the
-  existing CFD values bit-for-bit (`test_cfd_score` checks raw IEEE-754 equality against the current
-  scorer across the mismatch/PAM/gap/IUPAC and T→U paths); it is not yet wired into the production
-  scoring path, which is unchanged in this release.
+  (`scripts/generate_cfd_tables.py`, with a `--check` table-validation mode). It is now **the**
+  production CFD scorer: the SNP, INDEL, fast-mode and `targets-scoring` paths all score through
+  `cfd_score.cfd` via the position-aware `bulge_cfd_penalty.cfd_score_bulge_aware`, and the previous
+  per-module scorer (three `calc_cfd` copies + their helpers) and the binary `.pkl` penalty tables
+  have been removed. Output is **bit-for-bit identical** to prior releases' CFD: a committed golden
+  fixture (`cfd_golden.tsv.gz`, 6,132 cases spanning mismatches, DNA/RNA/terminal/PAM-proximal bulges,
+  every gap key, IUPAC and non-canonical PAM) is reproduced exactly (raw IEEE-754) by
+  `test_cfd_cleanroom_equiv`, which also checks clean-room internal consistency and the published
+  Doench anchor values.
 
 - **`crisprme.py targets-scoring` — score a supplied LIST of off-target sites** (no genome search).
   Takes Cas-OFFinder output (`--casoffinder`, schema auto-detected) or a generic TSV with an explicit
   column map (`--columns guide=..,dna=..,chrom=..,pos=..`) and annotates each site with the **same**
-  CFD and CRISPR-Bulge calculations a normal CRISPRme+ report uses (`calc_cfd` is pinned byte-identical
-  to the canonical copies by `test_calc_cfd_twins_agree`; CRISPR-Bulge via the `cbulge` env, `-1.0`
+  CFD and CRISPR-Bulge calculations a normal CRISPRme+ report uses (the shared clean-room
+  `cfd_score.cfd` via `cfd_score_bulge_aware`; CRISPR-Bulge via the `cbulge` env, `-1.0`
   when absent). With `--index-path` it adds a per-site **variant carrier overlay**: the variants
   overlapping each site's protospacer+PAM window and, per population dataset, their allele frequency +
   carrier count (read from the index's `Dictionaries/registry_<vcf>` tier). Enables scoring

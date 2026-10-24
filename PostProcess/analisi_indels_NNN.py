@@ -53,6 +53,9 @@ try:
     from bulge_cfd_penalty import cfd_score_bulge_aware as _cfd_bulge_aware
 except Exception:  # pragma: no cover - module always shipped alongside
     _cfd_bulge_aware = None
+# Clean-room CFD base scorer + its JSON tables (own implementation of Doench et al.,
+# Nat. Biotechnol. 2016), replacing the inherited calc_cfd/revcom/get_mm_pam_scores.
+from cfd_score import cfd as _cfd_clean, cfd_tables as _cfd_tables
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -78,76 +81,6 @@ def doenchForIupac(sequence_doench, guide_seq, genome_type):
         targets_for_doench[guide_seq][genome_type].append(sequence_doench)
 
 
-def get_mm_pam_scores():
-    try:
-        mm_scores = pickle.load(
-            open(
-                os.path.dirname(os.path.realpath(__file__)) + "/mismatch_score.pkl",
-                "rb",
-            )
-        )
-        pam_scores = pickle.load(
-            open(os.path.dirname(os.path.realpath(__file__)) + "/PAM_scores.pkl", "rb")
-        )
-        return (mm_scores, pam_scores)
-    except:
-        raise Exception("Could not find file with mismatch scores or PAM scores")
-
-
-def revcom(s):
-    basecomp = {"A": "T", "C": "G", "G": "C", "T": "A", "U": "A", "-": "-"}
-    letters = list(s[::-1])
-    try:
-        letters = [basecomp[base] for base in letters]
-    except:
-        return None  # If some IUPAC were not translated
-    return "".join(letters)
-
-
-# Calculates CFD score
-
-
-def calc_cfd(guide_seq, sg, pam, mm_scores, pam_scores, do_scores):
-    # Kept byte-for-byte consistent with the canonical SNP-path implementation
-    # new_simple_analysis.calc_cfd (the test test_calc_cfd_twins_agree asserts the
-    # two stay identical). Two historical INDEL-only divergences were removed, both
-    # reconciled to the SNP rule:
-    #   * an `if "N" == sl` branch in the mismatch loop: dead code. revcom("N")
-    #     returns None, so the key build above raises TypeError and `score` is
-    #     zeroed+broken before the branch could run -> both paths already returned
-    #     0 for an N off-target base.
-    #   * an `if "N" in pam` branch that kept the mismatch-only score for an N in
-    #     the scored 2bp PAM. The SNP path (and the issue-#94 guard) instead zeroes
-    #     a non-canonical PAM via pam_scores.get(pam, 0.0). An N base is an unknown
-    #     genomic base, so zeroing is both consistent with the SNP path and the
-    #     conservative choice (we do not know the real PAM).
-    score = 1
-    sg = sg.replace("T", "U")
-    guide_seq = guide_seq.replace("T", "U")
-    s_list = list(sg)
-    guide_seq_list = list(guide_seq)
-
-    for i, sl in enumerate(s_list):
-        if guide_seq_list[i] == sl:
-            score *= 1
-        else:
-            try:  # Catch exception if IUPAC character
-                key = "r" + guide_seq_list[i] + ":d" + revcom(sl) + "," + str(i + 1)
-            except Exception as e:
-                score = 0
-                break
-            try:
-                score *= mm_scores[key]
-            except (
-                Exception
-            ) as e:  # If '-' is in first position, i do not have the score for that position
-                pass
-
-    # Guard against non-ATCG PAM bases (e.g. from real NIST/NCBI hg38):
-    # a non-canonical PAM contributes 0 to the CFD product instead of raising
-    # KeyError (issue #94). Canonical PAM bases (A/C/G/T) are unaffected.
-    score *= pam_scores.get(pam, 0.0)
-    return score
 
 
 class reversor:
@@ -234,22 +167,6 @@ def alignRefFromVar(line):  # chr_fake, start_pos, len_guide, bulge):
     sequence = "".join(list_t)
 
     # print('ref seq realigned', sequence)
-    # t[2] = sequence
-    # if t[0] == 'DNA':
-    #     if do_scores:
-    #         cfd_score = calc_cfd(t[1][int(line[bulge_pos]):], t[2].upper()[
-    #                              int(t[bulge_pos]):-3], t[2].upper()[-2:], mm_scores, pam_scores)
-    #     else:
-    #         cfd_score = -1
-    #     cfd = "{:.3f}".format(cfd_score)  # str(cfd_score)
-    # else:
-    #     if do_scores:
-    #         cfd_score = calc_cfd(t[1], t[2].upper()[:-3],
-    #                              t[2].upper()[-2:], mm_scores, pam_scores)
-    #     else:
-    #         cfd_score = -1
-    #     cfd = "{:.3f}".format(cfd_score)  # str(cfd_score)
-    # return [sequence, cfd]
     return sequence
 
 
@@ -524,14 +441,14 @@ def rev_comp(a):
 
 def _cfd_from_alignment(aligned_crrna, aligned_proto):
     """CFD for one in-place display alignment (PAM included, gaps '-' in place) with the
-    position-aware bulge penalty (2.8.0); legacy calc_cfd fallback if the helper is
-    unavailable. Mirrors new_simple_analysis._cfd_from_alignment."""
+    position-aware bulge penalty (2.8.0); bulge-agnostic clean-room fallback if the helper
+    is unavailable. Mirrors new_simple_analysis._cfd_from_alignment."""
     if _cfd_bulge_aware is not None:
         return _cfd_bulge_aware(
-            aligned_crrna, aligned_proto, mm_scores, pam_scores, calc_cfd, do_scores=do_scores
+            aligned_crrna, aligned_proto, mm_scores, pam_scores, do_scores=do_scores
         )
     up = aligned_proto.upper()
-    return calc_cfd(aligned_crrna, up[:-3], up[-2:], mm_scores, pam_scores, do_scores)
+    return _cfd_clean(aligned_crrna, up[:-3], up[-2:], (mm_scores, pam_scores))
 
 
 def preprocess_CFD_score(target):
@@ -774,7 +691,7 @@ def reverse_complement_table(seq):
     return seq.translate(tab)[::-1]
 
 
-mm_scores, pam_scores = get_mm_pam_scores()
+mm_scores, pam_scores = _cfd_tables()  # clean-room JSON tables
 guides_dict = dict()  # For CFD score
 guides_dict_doench = dict()
 targets_for_doench = dict()

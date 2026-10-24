@@ -2,20 +2,18 @@
 """Equivalence tests for twopass_cfd_exact (2.5.1 fast-mode exact CFD).
 
 Two guarantees (design docs/DESIGN_2.5.1_two_pass_fast_mode.md §7):
-  (1) cfd_concrete is BIT-identical to the shipped new_simple_analysis.calc_cfd
-      (raw-double ==, not abs<eps) over random + edge inputs.
+  (1) cfd_concrete equals the clean-room CFD oracle: on mismatch-only alignments it is
+      BIT-identical to cfd_score.cfd (raw-double ==, not abs<eps), and on bulge-bearing
+      alignments it matches the live bulge-aware scorer (cfd_score_bulge_aware).
   (2) cfd_worst_case (factorized max over per-position allele sets) EQUALS the
       brute-force max over itertools.product of concrete haplotypes × the PAM set.
 
-The real calc_cfd / revcom / get_mm_pam_scores are loaded by exec'ing ONLY their
-`def` blocks from new_simple_analysis.py (that module runs analysis at import, so
-it cannot be imported directly). STDLIB only.
+The CFD tables and oracle are the clean-room scorer (cfd_score / twopass_cfd_exact),
+loaded from the committed JSON tables. STDLIB only.
 """
 import itertools
 import os
-import pickle
 import random
-import re
 import sys
 import unittest
 
@@ -24,30 +22,11 @@ sys.path.insert(0, _HERE)
 import twopass_cfd_exact as tp  # noqa: E402
 import twopass_emit as te  # noqa: E402
 import bulge_cfd_penalty as bp  # noqa: E402  (the live bulge-aware scorer, 2.8.0)
+import cfd_score as cs  # noqa: E402  (the clean-room CFD oracle)
 
 
-def _extract_defs(src, names):
-    """Return the source of the named top-level `def` blocks, concatenated."""
-    lines = src.splitlines(keepends=True)
-    out, i = [], 0
-    while i < len(lines):
-        m = re.match(r"def (\w+)\(", lines[i])
-        if m and m.group(1) in names:
-            j = i + 1
-            while j < len(lines) and (lines[j][:1] in (" ", "\t") or not lines[j].strip()):
-                j += 1
-            out.append("".join(lines[i:j]))
-            i = j
-        else:
-            i += 1
-    return "".join(out)
-
-
-_NSA = os.path.join(_HERE, "new_simple_analysis.py")
-_ref = {"os": os, "pickle": pickle, "__file__": _NSA}
-exec(_extract_defs(open(_NSA).read(), {"revcom", "calc_cfd", "get_mm_pam_scores"}), _ref)
-_calc_cfd = _ref["calc_cfd"]
-MM, PAM = _ref["get_mm_pam_scores"]()
+# Clean-room CFD tables (JSON), shared by every scorer under test.
+MM, PAM = tp.load_scores()
 
 _BASES = "ACGT"
 _DNA_POOL = "ACGTACGT-N"          # weighted toward ACGT, incl. a bulge gap + an N
@@ -58,14 +37,14 @@ def _live(guide, dna, pam2):
     """The live bulge-aware scorer (cfd_score_bulge_aware) on the same alignment, so the
     matrix cfd_concrete can be pinned to it. Builds the full display alignment: a dummy
     3-nt PAM whose last 2 bases == the matrix pam, and a dummy guide PAM (ignored)."""
-    return bp.cfd_score_bulge_aware(guide + "NNN", dna + "N" + pam2, MM, PAM, _calc_cfd, pam_len=3)
+    return bp.cfd_score_bulge_aware(guide + "NNN", dna + "N" + pam2, MM, PAM, pam_len=3)
 
 
 class TestCfdConcreteBitIdentical(unittest.TestCase):
     def test_random_matches_live_scorer(self):
         # cfd_concrete must equal the live bulge-aware scorer (cfd_score_bulge_aware) on EVERY
-        # alignment, and additionally be BIT-identical to the old calc_cfd on the mismatch-only
-        # subset (no gaps anywhere). The DNA pool includes a bulge gap + an N.
+        # alignment, and additionally be BIT-identical to the clean-room cfd_score.cfd on the
+        # mismatch-only subset (no gaps anywhere). The DNA pool includes a bulge gap + an N.
         random.seed(1)
         for _ in range(20000):
             guide = "".join(random.choice(_BASES) for _ in range(20))
@@ -79,12 +58,12 @@ class TestCfdConcreteBitIdentical(unittest.TestCase):
             self.assertAlmostEqual(ours, _live(guide, dna, pam), places=12,
                                    msg=f"guide={guide} dna={dna} pam={pam}")
             if "-" not in guide and "-" not in dna:   # mismatch-only -> raw-double identical
-                self.assertEqual(ours, _calc_cfd(guide, dna, pam, MM, PAM, True),
+                self.assertEqual(ours, cs.cfd(guide, dna, pam, (MM, PAM)),
                                  f"mm-only {guide}/{dna}/{pam}")
 
     def test_edge_cases(self):
         g = "ACGTACGTACGTACGTACGT"
-        # mismatch-only / PAM edges -> bit-identical to the old calc_cfd (no behaviour change)
+        # mismatch-only / PAM edges -> bit-identical to the clean-room cfd_score.cfd
         mm_only = [
             (g, g, "GG"),                              # all match
             (g, "N" + g[1:], "GG"),                    # untranslatable base -> 0
@@ -94,7 +73,7 @@ class TestCfdConcreteBitIdentical(unittest.TestCase):
         ]
         for guide, dna, pam in mm_only:
             self.assertEqual(tp.cfd_concrete(guide, dna, pam, MM, PAM),
-                             _calc_cfd(guide, dna, pam, MM, PAM, True),
+                             cs.cfd(guide, dna, pam, (MM, PAM)),
                              f"edge {guide}/{dna}/{pam}")
         # bulge rows -> position-aware; pinned to the live scorer (NOT the old free-pass)
         bulge = [
@@ -145,8 +124,8 @@ class TestWorstCaseFactorizationOracle(unittest.TestCase):
 
 class TestGreedyMaxScoreVsFactorizedOracle(unittest.TestCase):
     """2.5.1 item (c): the PRODUCTION worst-case-CFD path
-    (``twopass_emit.greedy_max_score`` -> bounded brute-force with the REAL calc_cfd as
-    score_fn) must agree with the INDEPENDENT factorized oracle
+    (``twopass_emit.greedy_max_score`` -> bounded brute-force with the clean-room
+    cfd_concrete as score_fn) must agree with the INDEPENDENT factorized oracle
     (``twopass_cfd_exact.cfd_worst_case``). Two separately-written EXACT implementations
     returning the same worst-case CFD -- including the JOINT-PAM case that breaks a
     per-column greedy (the PAM factor is a 2-base joint lookup). Windows are kept small so
@@ -180,7 +159,7 @@ class TestGreedyMaxScoreVsFactorizedOracle(unittest.TestCase):
             return tp.cfd_concrete(guide, s[:L], s[L:L + 2], MM, PAM)
 
         rep = te.greedy_max_score(columns, ref_str, ref_str, guide, False, 0, L,
-                                  _ref["revcom"], score_fn)
+                                  tp._revcom, score_fn)
         rs = "".join(rep["seq"])
         got = tp.cfd_concrete(guide, rs[:L], rs[L:L + 2], MM, PAM)
         pam_set = sorted({a + b for a in pam_c1 for b in pam_c2})

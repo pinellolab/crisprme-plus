@@ -749,16 +749,17 @@ a value in [0, 1]; higher means more likely to be cut. They are reported
 side-by-side because they can disagree, and the recommended validation panel is
 deliberately model-agnostic (a site worst by *any* metric is included), so no
 single model gates the shortlist. CRISPRme+ does not re-train or modify either
-model; CFD is applied as its published lookup tables and CRISPR-Bulge as its
-published, pinned weights, to the aligned protospacer+PAM of each candidate.
+model; CFD is applied as its published lookup tables (CRISPRme+'s own
+implementation, `PostProcess/cfd_score.py`, Doench et al. 2016) and CRISPR-Bulge
+as its published, pinned weights, to the aligned protospacer+PAM of each candidate.
 
 **Domain-of-validity caveat (important).** Each score has a domain where it is
 trustworthy and a boundary past which CRISPRme+ refuses to fabricate a value:
 
 - **CFD on gaps is a relative risk indicator, not a calibrated indel probability.**
   CFD was trained on **single-nucleotide mismatches**, but it does *not* ignore gaps:
-  the `mismatch_score.pkl` table carries **152 position-specific gap entries** (DNA-bulge
-  `r-:dX` and RNA-bulge `rX:d-` at protospacer positions 2–20), so a bulge is penalized by a
+  the CFD gap table (`cfd_mismatch_scores.json`) carries **152 position-specific gap entries**
+  (DNA-bulge `r-:dX` and RNA-bulge `rX:d-` at protospacer positions 2–20), so a bulge is penalized by a
   per-position factor and **two bulges multiply** — a PAM-distal bulge is near-neutral while a
   seed-proximal one is strongly penalizing. **As of v2.8.0 these factors are applied at each
   bulge's true spacer position** (the extra genomic base of a DNA bulge is removed so the 20

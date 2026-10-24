@@ -73,6 +73,18 @@ SOFTWARE.
 
 ---
 
+## CFD score tables (reference data)
+
+- **Used for:** the CFD (Cutting Frequency Determination) off-target score, computed
+  by CRISPRme+'s own implementation (`PostProcess/cfd_score.py`).
+- **Source:** the per-position mismatch/gap and PAM penalty values published by
+  Doench et al., *Nat. Biotechnol.* 2016 (doi:10.1038/nbt.3437; supplementary data and
+  Fig. 5c,d). These are published scientific measurements (data), re-serialized here as
+  reviewable JSON (`PostProcess/cfd_mismatch_scores.json`, `cfd_pam_scores.json`; see the
+  committed generator `scripts/generate_cfd_tables.py`).
+
+---
+
 ## pyliftover
 
 - **Used for:** assembly-search coordinate lifting (lifting off-target

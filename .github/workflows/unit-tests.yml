@@ -225,15 +225,17 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_scorer_env test_scorer_runner -v
 
-      - name: "CFD SNP/INDEL twin parity + cosmic-license + info-af registry + synth-sites + change-headers + dash-output-props + complete-test wiring"
-        # These stdlib-only suites previously ran in NO CI job. test_calc_cfd_twins_agree
-        # is the guard for the #63 CFD fix -- it pins the two calc_cfd copies
-        # (new_simple_analysis / analisi_indels_NNN) byte-for-byte so the INDEL path can't
-        # silently drift from the canonical SNP path again. All use only stdlib + the deps
-        # installed above (numpy/pandas/matplotlib/pysam); none need dash/flask/TensorFlow.
+      - name: "CFD clean-room bit-identity (golden fixture) + cosmic-license + info-af registry + synth-sites + change-headers + dash-output-props + complete-test wiring"
+        # These stdlib-only suites previously ran in NO CI job. test_cfd_cleanroom_equiv is
+        # the clean-room gate: it asserts the production scorer (cfd_score.cfd via
+        # cfd_score_bulge_aware) reproduces the frozen historical CFD bit-for-bit from the
+        # committed golden fixture (cfd_golden.tsv.gz) across mismatch/bulge/PAM-proximal/
+        # IUPAC/gap-key cases -- so the single clean-room scorer can't silently drift from
+        # what every released result used. All use only stdlib + the deps installed above
+        # (numpy/pandas/matplotlib/pysam); none need dash/flask/TensorFlow.
         working-directory: PostProcess
         run: >
-          python -m unittest test_calc_cfd_twins_agree test_cosmic_license
+          python -m unittest test_cfd_cleanroom_equiv test_cosmic_license
           test_configure_tmpdir
           test_registry_from_info_af test_synth_sites_gt test_change_headers_bestmerge
           test_dash_output_props test_complete_test -v
@@ -247,11 +249,11 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_targets_scoring -v
 
-      - name: "CFD score module (bit-identity vs calc_cfd oracle: mismatch/PAM/gap/IUPAC/T->U paths)"
+      - name: "CFD clean-room scorer + position-aware bulge penalty (mismatch/PAM/gap/IUPAC/T->U + DNA/RNA/terminal/PAM-proximal bulge)"
         working-directory: PostProcess
-        run: python -m unittest test_cfd_score -v
+        run: python -m unittest test_cfd_score test_bulge_cfd_penalty -v
 
-      - name: "CFD score tables round-trip (JSON tables reload bit-for-bit vs the pickle source)"
+      - name: "CFD score tables validation (JSON structure/counts/anchors; the committed tables are the source of truth)"
         run: python scripts/generate_cfd_tables.py --check
 
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"

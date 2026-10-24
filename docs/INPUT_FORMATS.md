@@ -178,14 +178,14 @@ the set.
 ### The PAM is part of the score
 
 The PAM is not just a filter — it contributes to the **CFD score**. In
-`PostProcess/new_simple_analysis.py` the score is multiplied by a
+`PostProcess/cfd_score.py` the per-position product is multiplied by a
 PAM-dependent factor:
 
 ```python
-score *= pam_scores.get(pam, 0.0)
+return product * pam_penalties.get(pam, 0.0)
 ```
 
-(`PostProcess/new_simple_analysis.py`, line 247, inside `calc_cfd` — which begins at line 217.) So an
+(`PostProcess/cfd_score.py`, in `cfd()`.) So an
 otherwise identical off-target can score differently depending on the PAM it
 was found with (e.g. an `NGG` protospacer scores higher than the same site with
 an `NAG` PAM).
