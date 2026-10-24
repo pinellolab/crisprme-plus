@@ -85,7 +85,7 @@ def parse_commandline(args: List[str]) -> Tuple[str, str, str]:
     return offtargets_fname, annotation_fname, offtargets_out_fname
 
 
-def load_annotation_bed(annotation_fname: str) -> TabixFile:
+def load_annotation_bed(annotation_fname: str) -> Optional[TabixFile]:
     """Loads a BED annotation file and ensures a Tabix index is present.
 
     Checks for the existence of a Tabix index for the given annotation BED file 
@@ -101,6 +101,14 @@ def load_annotation_bed(annotation_fname: str) -> TabixFile:
     Raises:
         SamtoolsError: If the annotation BED file cannot be loaded or indexed.
     """
+    # The empty-annotation placeholder (vuoto.txt) is NEVER a real BED to index: a
+    # no-annotation run is handled specially by every caller (annotation = None). Never
+    # bgzip/tabix it -- pysam.tabix_index() bgzips in place and REMOVES the plain file,
+    # so indexing the placeholder consumes it (breaking a later reference-only search's
+    # `cp vuoto.txt`), and on a read-only install the index write fails outright. Return
+    # None so callers take their no-annotation path (annotate_target already accepts None).
+    if os.path.basename(annotation_fname) == "vuoto.txt":
+        return None
     # Build the index (if missing/empty/stale) and open the handle, retrying a
     # few times with a short backoff. A transient read-after-write lag (virtiofs
     # bind mount / NFS) can briefly present a valid file as truncated -- making the

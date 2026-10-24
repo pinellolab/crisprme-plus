@@ -170,6 +170,25 @@ class LoadAnnotationBedRetryTest(unittest.TestCase):
             self.assertIn(str(an._ANNOT_LOAD_ATTEMPTS), str(ctx.exception))
             self.assertEqual(slp.call_count, an._ANNOT_LOAD_ATTEMPTS - 1)
 
+    def test_vuoto_placeholder_never_indexed_or_consumed(self):
+        """load_annotation_bed must NEVER index the empty-annotation placeholder vuoto.txt.
+        pysam.tabix_index() bgzips in place and REMOVES the plain file, so indexing the
+        placeholder consumes it -- which broke a later reference-only search's `cp vuoto.txt`
+        (the serial pre-build in submit_job called this directly, bypassing annotation.py
+        main()'s empty guard) and failed outright on a read-only install. It must return None
+        (callers take the no-annotation path) and leave vuoto.txt untouched: no .gz / .tbi /
+        .tbi.lock, and crucially pysam.tabix_index is never called."""
+        with tempfile.TemporaryDirectory() as tmp:
+            v = os.path.join(tmp, "vuoto.txt")
+            open(v, "w").close()  # empty placeholder
+            with mock.patch.object(an.pysam, "tabix_index",
+                                   side_effect=AssertionError("must not index vuoto.txt")):
+                self.assertIsNone(an.load_annotation_bed(v))
+            self.assertTrue(os.path.isfile(v))                 # not consumed
+            self.assertFalse(os.path.exists(v + ".gz"))        # not bgzipped
+            self.assertFalse(os.path.exists(v + ".tbi"))
+            self.assertFalse(os.path.exists(v + ".tbi.lock"))  # no lock written (read-only safe)
+
 
 if __name__ == "__main__":
     unittest.main()

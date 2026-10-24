@@ -87,6 +87,14 @@ and the `release-crisprme` skill.
   recall guarantee; recall above ~95% is reachable (selectable) but the list grows steeply.
 
 ### Fixed
+- **Reference-only search on a read-only install no longer dies on the `vuoto.txt` placeholder.**
+  The serial annotation-index pre-build (the flock-race fix) called `load_annotation_bed()` directly
+  on the annotation file, bypassing the empty-annotation guard; for a reference-only search that file
+  is the empty `vuoto.txt` placeholder, which `pysam.tabix_index()` bgzips in place and removes —
+  consuming it, so the later gene-annotation step's `cp vuoto.txt` failed and aborted the search (and
+  the write fails outright on a truly read-only install / Apptainer SIF). `load_annotation_bed` now
+  returns `None` for `vuoto.txt` (never indexes the placeholder) and the pre-build skips it
+  (`test_annotation.test_vuoto_placeholder_never_indexed_or_consumed`; release trap T-38).
 - **The "Observed" cell no longer reports a misleading raw carrier count for population-level,
   multi-variant off-targets.** A dense-window site that stacks N variants into one worst-case
   protospacer previously showed e.g. `128 carriers`, which reads as "128 people carry this

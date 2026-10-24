@@ -981,7 +981,13 @@ echo -e 'Annotating results\tStart\t'$(date) >>$log
 # below even when the Python retry recovers. Building it once up front means the
 # parallel workers only READ an already-complete index (its stderr is swallowed here
 # because load_annotation_bed retries internally and leaves a valid index or fails loud).
-python -c "import annotation,sys; annotation.load_annotation_bed(sys.argv[1])" "$annotation_file" >/dev/null 2>&1 || true
+# SKIP the empty-annotation placeholder (vuoto.txt): it is not a real BED, and indexing it
+# bgzips the placeholder in place -> consumes it (breaking the later gene-annotation
+# `cp vuoto.txt`) and fails on a read-only install. load_annotation_bed now no-ops on it too,
+# but a reference-only search passes vuoto.txt here, so we avoid even the pre-build spawn.
+if [ "$(basename "$annotation_file")" != "vuoto.txt" ]; then
+	python -c "import annotation,sys; annotation.load_annotation_bed(sys.argv[1])" "$annotation_file" >/dev/null 2>&1 || true
+fi
 # annotate primary targets
 python annotation.py $final_res.bestCFD.txt $annotation_file $final_res.bestCFD.txt.annotated &
 python annotation.py $final_res.bestmmblg.txt $annotation_file $final_res.bestmmblg.txt.annotated &
