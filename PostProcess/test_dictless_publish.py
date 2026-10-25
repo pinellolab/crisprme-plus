@@ -222,7 +222,7 @@ class TestDictlessDownload(unittest.TestCase):
 
     def _serve_from_sink(self):
         """snapshot stub: copy any requested indexes/* file out of the sink."""
-        def fake_snapshot(repo, allow_patterns, local_dir, token=None):
+        def fake_snapshot(repo, allow_patterns, local_dir, token=None, reporter=None, **_kw):
             dest = os.path.join(local_dir, "indexes")
             os.makedirs(dest, exist_ok=True)
             for pat in allow_patterns:

@@ -16,10 +16,11 @@ on:
     paths:
       - "crisprme.py"
       - "PostProcess/**"
-      # Only this one pages/ file, not pages/** -- it's the one this
+      # Only these pages/ files, not pages/** -- they are the ones this
       # workflow's own tests cover (via AST-extraction, no Dash needed);
       # the rest of pages/ is covered by web-e2e.yml instead.
       - "pages/history_page.py"
+      - "pages/settings_page.py"
       - ".github/workflows/unit-tests.yml"
   push:
     branches: [ "main", "python3.11", "2.2.0-dev" ]
@@ -52,15 +53,20 @@ jobs:
         run: python -m pip install --upgrade pip requests numpy pandas matplotlib pysam pyliftover
 
       - name: Byte-compile the pipeline (syntax check)
-        # pages/history_page.py: syntax-only (py_compile doesn't execute
-        # imports), included here since test_history_page_assembly.py below
-        # exercises it via AST-extraction rather than a normal import (it
-        # needs a live Dash `app`, which this light CI doesn't set up).
-        run: python -m py_compile crisprme.py PostProcess/*.py pages/history_page.py
+        # pages/history_page.py + pages/settings_page.py: syntax-only (py_compile
+        # doesn't execute imports), included here since test_history_page_assembly.py
+        # and test_settings_progress.py below exercise them via AST-extraction rather
+        # than a normal import (they need a live Dash `app`, which this light CI
+        # doesn't set up).
+        run: python -m py_compile crisprme.py PostProcess/*.py pages/history_page.py pages/settings_page.py
 
       - name: HuggingFace download/publish + index unit tests (network-free)
         working-directory: PostProcess
         run: python -m unittest test_crisprme_hf -v
+
+      - name: "Web Settings download progress + failure relay (2.8.1; AST-extracted, no Dash)"
+        working-directory: PostProcess
+        run: python -m unittest test_settings_progress -v
 
       - name: HF fallback contract (hf_fetch must raise so callers fall back)
         working-directory: PostProcess

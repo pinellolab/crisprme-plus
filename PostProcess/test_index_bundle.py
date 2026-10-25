@@ -72,7 +72,7 @@ class TestIndexBundle(unittest.TestCase):
 
         workdir = tempfile.mkdtemp(prefix="bundle_dst_")
         try:
-            def fake_snapshot(repo, allow_patterns, local_dir, token=None):
+            def fake_snapshot(repo, allow_patterns, local_dir, token=None, reporter=None, **_kw):
                 dest = os.path.join(local_dir, "indexes")
                 os.makedirs(dest, exist_ok=True)
                 shutil.copy(tarball, os.path.join(dest, self.name + ".tar.gz"))
