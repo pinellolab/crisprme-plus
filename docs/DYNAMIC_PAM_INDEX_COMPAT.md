@@ -27,11 +27,17 @@ Confirmed resolver facts (`PostProcess/crisprme_hf.py`):
 - `download --what index` **enumerates `indexes/` recursively** (`list_repo_files`) — so a
   same-repo subtree or new name WOULD be listed/fetchable by old code. A subtree is NOT safe.
 
-**Therefore:** pam-less / variable-flank indexes are published to a **SEPARATE HF repo**
-(proposed `pinellolab/crisprme-indexes-pamless`) that the old default never points at. Old code
-cannot list or download them. New code's resolver knows both: legacy repo for legacy names, the
-pam-less repo for pam-less indexes; `publish-index` targets the pam-less repo for variable-flank
-indexes.
+**Therefore — the isolation boundary is FLANK WIDTH > 3, not "pam-less" per se.** The length-guard
+(Layer 2) only bites on a width MISMATCH (search-PAM length != stored flank width). A **width-3**
+pam-less index (e.g. `NNN_3`) searched with any 3-nt PAM has NO mismatch, so old code handles it as
+an ordinary NNN index — it simply emits ALL 3-nt PAMs (per-PAM narrowing is what `--prune-pam`
+adds). A width-3 NNN index is therefore format- AND width-safe for old code and **ships in the
+standard repo**: CRISPRme 2.8.0 can download and search it with no update (as an all-PAM / broadest
+survey — the top of the NGG->NRR->NNN ladder). Only **variable/longer-flank** indexes (width > 3,
+e.g. `NNNNNNNN_3` with an 8-nt flank) are unsafe for old code — a 3-nt search is a width mismatch
+and old tools lack the guard — so those go in a **SEPARATE HF repo** (proposed
+`pinellolab/crisprme-indexes-pamless`) the old default never points at. New code's resolver knows
+both; `publish-index` targets the pam-less repo only for width>3 indexes.
 
 ### Layer 2 — RUNTIME version-gate: fail-safe even if an index is hand-moved
 Each pam-less index ships a sidecar `index_meta.json`:
@@ -43,6 +49,14 @@ New tools read it, validate the requested PAM (subset + `L ≤ K`), and version-
 new `searchTST` **PAM-length guard** errors cleanly on any width mismatch. Old tools lack the
 guard, which is exactly why Layer 1 (they never obtain the file) is the primary defense; a
 deliberate manual copy still fails loudly (flank-tagged name + length guard on any new tool).
+
+**The sidecar is OPTIONAL — a CRISPRitz index is self-describing.** The build PAM + flank width are
+encoded in the index name (`{PAM}_{bMax+1}_{genome}`) AND stored inside the index itself, so
+`--prune-pam` validates a search PAM (subset + `L ≤ K`) directly against the index's own build PAM
+with **no sidecar**. The current **width-3 NNN index needs NO sidecar** to be used with
+`--prune-pam`. The sidecar only adds explicit min-version metadata + web-picker hints; the
+`searchTST` length guard provides the actual hand-move safety. Ship a sidecar when convenient (it is
+free and ignored by old tools), but nothing depends on it for correctness.
 
 ## 3. Format compatibility
 No `.bin` format change — a pam-less index is a standard CRISPRitz index built with a longer
