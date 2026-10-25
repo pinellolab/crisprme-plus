@@ -72,6 +72,46 @@ flank-tagged name, with the `index_meta.json` sidecar (`build_pam`, `flank_len`,
 State plainly: *existing indexes and commands are unchanged; pam-less (dynamic-PAM) indexes live
 at a separate HF repo and require CRISPRitz ≥ `<X>` and CRISPRme ≥ `<Y>`.*
 
+## 8. Web PAM picker
+Legacy per-PAM indexes keep the **existing flat dropdown** (the `guidelen-PAM-enzyme` list)
+unchanged. Pam-less indexes get a new **index-scoped, data-driven** picker:
+
+- A committed reference table `enzyme -> {guide_len, pam, side, notes}` (the content of the
+  existing dropdown: SpCas9 20bp NGG, SpG NGN, SpRY NRN/NYN/NNN, VQR NGA, VRER NGCG, xCas9,
+  S. canis NNG/NNGT, S. thermophilus NNAGAA, Nme-20bp NNNNGATT, Cj NNNNACA, Thermo NNNNCNAA,
+  SaCas9 21bp NNGRRT, Nme2 24bp, Cas12a/CasX/Cas12b 5' TTTV/TTCN/ATTN, …).
+- On index selection, FILTER that table by the index metadata: show a preset iff
+  `guide_len == index.guide_len AND side == index.side AND len(pam) <= K AND pam ⊆ build_pam`.
+  So the index's geometry prunes the menu — an un-servable enzyme never appears for an index.
+  (A 20-nt / 3' / K=8 pam-less index serves the whole 20-nt 3'-PAM family; it does NOT serve
+  SaCas9/Nme2 (different guide length) or Cas12a/CasX/Cas12b (5' PAM) — those get their own index.)
+- Layout: *SpCas9 & variants (recommended)* — **NGG (default)**, NRG, NRR, SpG, SpRY (NRN/NYN),
+  VQR, xCas9, VRER; *Other 20-nt 3' enzymes (expandable)*; *Custom PAM…*; *Not available on this
+  index (greyed, with reason + link to the matching index)*.
+- Custom field: validate **on blur** — `length <= K` + subset + side — show `✓ valid (~N sites)`
+  or `✗ <reason>` (e.g. "NYY isn't within this index's NRG-class sites"); no submit until valid.
+- Chosen PAM → `--prune-pam <PAM>` to the search. Default preset = NGG.
+
+## 9. Performance characteristics (measured)
+A pam-less index is SLOWER + heavier per search than a dedicated per-PAM index, because the
+`--prune-pam` filter is a leaf-time skip-before-write: it saves the OUTPUT + downstream
+scoring/post-analysis, NOT the TST descent (the pam-less tree is traversed in full).
+
+Measured (hg38 chr22:20-25Mb, EMX1, NGG 4mm/1/1, same host):
+| search | off-targets | wall | peak RAM |
+|---|---|---|---|
+| dedicated NGG index | 772 | 1.3 s | 0.29 GB |
+| pam-less NNN + `--prune-pam NGG` | 772 (identical) | 13.3 s | 3.36 GB |
+| pam-less NNN, no filter | 9,736 | 15.6 s | 3.37 GB |
+
+~10x slower / ~11x RAM for NGG. The penalty scales with PAM SELECTIVITY: largest for selective
+PAMs (NGG ~10-16x, where a dedicated index is tiny), ~4x for NRR, and ~par for near-pamless
+(no small dedicated alternative). Higher mm/bulge pam-less searches are proportionally heavier
+(whole tree traversed regardless of the search PAM). **Guidance:** keep dedicated indexes as the
+fast default for a fixed known PAM; use the pam-less index for PAM flexibility / variable /
+arbitrary PAMs, accepting the per-search cost.
+
 ## Net
 Not a breaking change: a new, opt-in index **type** + capability, quarantined to a new HF repo,
-version-gated, distinctly named; defaults and legacy paths untouched.
+version-gated, distinctly named; defaults and legacy paths untouched. The pam-less index trades
+per-search speed/RAM for one-index-any-PAM flexibility.
