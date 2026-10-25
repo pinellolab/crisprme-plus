@@ -1985,6 +1985,20 @@ def complete_search() -> None:
         if not os.path.isdir(index_path):
             error(f"The index path {index_path} does not exist or is not a directory")
 
+    # --prune-pam (opt-in): filter a PAM-less index (e.g. an all-N "NNN" index) down to
+    # the motif given with --pam, applied at CRISPRitz leaf-emit as a skip-before-write
+    # (one index serves many same-length PAMs). It only *narrows* output -- it never
+    # changes a dedicated-index result -- so it is OFF by default and the normal search
+    # path is byte-identical without it. Requires a prebuilt --index-path (you prune an
+    # existing index) and a CRISPRitz build that supports --prune-pam; CRISPRitz's width
+    # guard rejects a search PAM whose length != the index's stored flank width.
+    prune_pam = "--prune-pam" in args
+    if prune_pam and index_path == "_":
+        error(
+            "--prune-pam requires --index-path: it filters an existing PAM-less index "
+            "(e.g. NNN) down to the motif given with --pam. Point --index-path at the index."
+        )
+
     # cap on TOTAL edits per alignment (--max-total-edits, issue #107): prevents
     # combined-edit alignments (e.g. 6mm+2+2 bulges = 10) from bloating the
     # intermediate files, scoring and post-analysis. Enforced INSIDE the TST
@@ -2385,7 +2399,8 @@ def complete_search() -> None:
                 f"{merge_t} {outputfolder} {script_path} {thread} {current_working_directory} "
                 f"{gene_annotation} {void_mail} {base_start} {base_end} {base_set} "
                 f"{sorting_criteria_scoring} {sorting_criteria} {cicd_test} "
-                f"{vcf_filter_pass_values} {index_path} {max_total_edits}"
+                f"{vcf_filter_pass_values} {index_path} {max_total_edits} "
+                f"{1 if prune_pam else 0}"
             )
             code = subprocess.call(
                 crisprme_run, shell=True, stderr=log_error, stdout=log_verbose

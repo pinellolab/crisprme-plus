@@ -79,6 +79,11 @@ current_working_directory = sys.argv[12]
 threads = int(sys.argv[13])
 # optional total-edits cap (mm+bulges), forwarded to the in-search TST prune (#107)
 max_edits = sys.argv[14] if len(sys.argv) > 14 else "-1"
+# optional --prune-pam pass-through ("1"=on): filter the PAM-less INDELS index down to
+# pam_file at CRISPRitz leaf-emit, so the indel OTs match the SNP OTs' pruned PAM. OFF
+# -> no flag -> byte-identical indel search. Needs a CRISPRitz build with --prune-pam.
+prune_pam = sys.argv[15] if len(sys.argv) > 15 else "0"
+prune_pam_flag = "--prune-pam" if prune_pam == "1" else ""
 
 
 def search_indels(chrom):
@@ -120,7 +125,7 @@ def search_indels(chrom):
         os.system(
             f"crispritz.py search {indexed_fakechrom}/ {pam_file} {guide_file} "
             f"{out_name} -index -mm {mm} -bDNA {bDNA} -bRNA {bRNA} -t -th 1 "
-            f"--max-edits {max_edits} >/dev/null"
+            f"--max-edits {max_edits} {prune_pam_flag} >/dev/null"
         )
     else:
         # Fallback: only a raw fake-indel genome is installed (no indexed one). This

@@ -83,6 +83,14 @@ index_path="${25:-_}"
 # right after the search. "-1" (or unset) means no cap.
 max_total_edits="${26:-4}"  # default cap on total edits (mm+bulges); pruned in-search (#107)
 
+# --prune-pam pass-through ($27, default "0"=off): when "1", the CRISPRitz -index
+# searches filter a PAM-less index down to $pam_file at leaf-emit (skip-before-write),
+# so one NNN index serves the requested PAM. OFF -> no flag added -> byte-identical
+# search. Needs a CRISPRitz build that supports --prune-pam.
+prune_pam="${27:-0}"
+prune_pam_flag=""
+[ "$prune_pam" = "1" ] && prune_pam_flag="--prune-pam"
+
 # Whether to emit the alternative-alignments (altMerge / all_results_with_alternative_alignments)
 # output = the NON-best alignments per locus cluster. Inherited from crisprme.py via the env var
 # CRISPRME_EMIT_ALT_ALIGNMENTS (default population-level=off, --per-sample=on; --alt-alignments /
@@ -634,7 +642,7 @@ while read vcf_f; do
 		echo -e 'Search Reference Start'  # off-targets search on reference genome
 		if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # bulge-enabled: TST index search
 			idx_ref_view="$(_bin_only_view "$idx_ref")"
-			crispritz.py search "$idx_ref_view" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result --max-edits $max_total_edits \
+			crispritz.py search "$idx_ref_view" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result --max-edits $max_total_edits $prune_pam_flag \
 				|| { echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
 		else  # no bulges: brute-force scan
 			crispritz.py search "$current_working_directory/Genomes/${ref_name}/" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
@@ -651,7 +659,7 @@ while read vcf_f; do
 			echo -e 'Search Variant Start'  # search off-targets on the variant-enriched genome (snps)
 			if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # bulge-enabled: TST index search
 				idx_var_view="$(_bin_only_view "$idx_var")"
-				crispritz.py search "$idx_var_view" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits \
+				crispritz.py search "$idx_var_view" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits $prune_pam_flag \
 					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
 			else  # no bulges: brute-force scan
 				crispritz.py search "$current_working_directory/Genomes/${ref_name}+${vcf_name}/" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
@@ -667,7 +675,7 @@ while read vcf_f; do
 			echo -e "Search INDELs Start"
 			cd $starting_dir
 			# TODO: REMOVE POOL SCRIPT FROM PROCESSING
-			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits"
+			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits" "$prune_pam"
 			awk '($3 !~ "n") {print $0}' "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" >"$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp"
 			mv "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp" "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
 		else
