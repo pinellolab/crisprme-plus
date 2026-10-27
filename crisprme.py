@@ -516,7 +516,7 @@ def summarize_pipeline_failure(outputfolder: str) -> str:
     failing_stage = None
     try:
         started, ended = [], set()
-        with open(log_txt) as fh:
+        with open(log_txt, encoding="utf-8", errors="replace") as fh:
             for ln in fh:
                 parts = ln.rstrip("\n").split("\t")
                 if len(parts) >= 2 and parts[1] == "Start":
@@ -532,7 +532,7 @@ def summarize_pipeline_failure(outputfolder: str) -> str:
     if failing_stage:
         lines.append(f"  Failed during stage: {failing_stage}")
     try:
-        with open(log_err) as fh:
+        with open(log_err, encoding="utf-8", errors="replace") as fh:
             errlines = [ln.rstrip("\n") for ln in fh if ln.strip()]
         if errlines:
             lines.append("  Last lines of the error log:")
