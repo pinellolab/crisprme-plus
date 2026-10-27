@@ -252,7 +252,10 @@ while read vcf_f; do
 	# stem, so dict_folder may point at a dictionaries_<vcf>/ that does not exist.
 	precomputed_variant=0
 	if [ "$vcf_name" != "_" ]; then
-		for _d in "$current_working_directory/genome_library"/${true_pam}_*_"${ref_name}+${vcf_name}" "$current_working_directory/genome_library"/NNN_*_"${ref_name}+${vcf_name}"; do
+		# NNN*_* (not NNN_*) so an all-N PAM-less index of any width >=3 is matched
+		# (NNN_3_, NNNN_3_, ... NNNNNNNN_3_ for a --prune-pam search); a dedicated PAM
+		# like NGG/NRG has only one leading N and is excluded.
+		for _d in "$current_working_directory/genome_library"/${true_pam}_*_"${ref_name}+${vcf_name}" "$current_working_directory/genome_library"/NNN*_*_"${ref_name}+${vcf_name}"; do
 			[ -d "$_d" ] || continue
 			case "$_d" in *_INDELS) continue ;; esac
 			_b=$(basename "$_d"); _n=${_b#*_}; _n=${_n%%_*}
@@ -362,7 +365,7 @@ while read vcf_f; do
 	idx_folder1="${ref_lib}/${true_pam}_${bMax}_${ref_name}"  # exact-N name, used only for the auto-build path below
 	idx_ref=""
 	_best_n=""
-	for _d in "$ref_lib"/${true_pam}_*_"${ref_name}" "$ref_lib"/NNN_*_"${ref_name}"; do
+	for _d in "$ref_lib"/${true_pam}_*_"${ref_name}" "$ref_lib"/NNN*_*_"${ref_name}"; do
 		[ -d "$_d" ] || continue
 		case "$_d" in *_INDELS) continue ;; esac
 		_b=$(basename "$_d")
@@ -423,7 +426,7 @@ while read vcf_f; do
 		idx_folder1="${basedir}/${true_pam}_${bMax}_${ref_name}+${vcf_name}"  # exact-budget name, used only for the auto-build path below
 		idx_var=""
 		_best_n=""
-		for _d in "$basedir"/${true_pam}_*_"${ref_name}+${vcf_name}" "$basedir"/NNN_*_"${ref_name}+${vcf_name}"; do
+		for _d in "$basedir"/${true_pam}_*_"${ref_name}+${vcf_name}" "$basedir"/NNN*_*_"${ref_name}+${vcf_name}"; do
 			[ -d "$_d" ] || continue
 			case "$_d" in *_INDELS) continue ;; esac
 			_b=$(basename "$_d")
