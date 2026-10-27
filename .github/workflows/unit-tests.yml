@@ -56,7 +56,7 @@ jobs:
         # imports), included here since test_history_page_assembly.py below
         # exercises it via AST-extraction rather than a normal import (it
         # needs a live Dash `app`, which this light CI doesn't set up).
-        run: python -m py_compile crisprme.py PostProcess/*.py pages/history_page.py
+        run: python -m py_compile crisprme.py PostProcess/*.py pages/history_page.py pages/settings_page.py app.py
 
       - name: HuggingFace download/publish + index unit tests (network-free)
         working-directory: PostProcess
@@ -216,7 +216,7 @@ jobs:
           python -m unittest test_assembly_reconcile test_personal_assembly
           test_ensure_search_lists test_hvdr_greedy_cap test_registry_only_emit
           test_representative_tiebreak test_sanitize_job_name test_tier0_compaction
-          test_history_page_assembly test_annotation -v
+          test_history_page_assembly test_app_settings test_annotation -v
 
       - name: "Modular scorer env-manager + runner (env lifecycle/state + subprocess protocol; no TF)"
         # scorer_env: detect env manager, create-command shape, atomic state file,

@@ -1436,6 +1436,36 @@ def settings_page() -> List:
         ],
     )
 
+    # ---- Concurrent search jobs ------------------------------------------
+    try:
+        import app_settings as _appcfg  # PostProcess on sys.path via crisprme.py
+        _cur_maxjobs, _maxjobs_cap = _appcfg.get_max_concurrent_jobs(), _appcfg.MAX_JOBS_CAP
+    except Exception:
+        _cur_maxjobs, _maxjobs_cap = 2, 16
+    concurrency_card = _add_card(
+        "Concurrent search jobs",
+        "How many searches run at the same time. The default is 2 (conservative — each "
+        "genome-wide search is memory-heavy, ~tens of GB of RAM). Raise it only on a "
+        "machine with enough RAM and cores; extra jobs beyond this limit simply queue. "
+        "Takes effect after the app restarts.",
+        [
+            dcc.Input(
+                id="max-jobs-input",
+                type="number",
+                min=1,
+                max=_maxjobs_cap,
+                step=1,
+                value=_cur_maxjobs,
+                style={"width": "6rem", "margin-right": "0.5rem"},
+            ),
+            html.Button("Save", id="max-jobs-save-btn"),
+            html.Div(
+                id="max-jobs-feedback",
+                style={"margin-top": "0.4rem", "color": "#555"},
+            ),
+        ],
+    )
+
     # ---- Email notifications (SMTP) ---------------------------------------
     _email_cfg = read_email_config()
     email_card = _add_card(
@@ -1636,6 +1666,7 @@ def settings_page() -> List:
                                 annotation_card,
                                 annotation_manage_card,
                                 cosmic_card,
+                                concurrency_card,
                                 email_card,
                                 pam_card,
                                 delete_card,
@@ -2063,6 +2094,36 @@ def _cosmic_license_save(n, value):
     return html.Span(
         "Saved: COSMIC disabled — COSMIC annotations are EXCLUDED from searches "
         "(licence-safe default).",
+        style={"color": "green"},
+    )
+
+
+@app.callback(
+    Output("max-jobs-feedback", "children"),
+    [Input("max-jobs-save-btn", "n_clicks")],
+    [State("max-jobs-input", "value")],
+    prevent_initial_call=True,
+)
+def _max_jobs_save(n, value):
+    """Persist the max concurrent search jobs. The process pool is built at app
+    startup, so the new value applies on the next restart."""
+    if n is None or ONLINE:
+        raise PreventUpdate
+    try:
+        import app_settings as _appcfg
+    except Exception:
+        return html.Span(
+            "Could not persist the setting (config helper unavailable).",
+            style={"color": "#b00"},
+        )
+    if value is None:
+        return html.Span(
+            f"Enter a number between 1 and {_appcfg.MAX_JOBS_CAP}.",
+            style={"color": "#b00"},
+        )
+    stored = _appcfg.set_max_concurrent_jobs(value)
+    return html.Span(
+        f"Saved: up to {stored} concurrent search job(s). Restart the app to apply.",
         style={"color": "green"},
     )
 

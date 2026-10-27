@@ -11,6 +11,23 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Added
+- **Settings: configurable number of concurrent search jobs.** The web app ran at most 2 searches at
+  once (a hard-coded legacy limit); this is now adjustable from the Settings page (or the
+  `CRISPRME_MAX_CONCURRENT_JOBS` environment variable), clamped to `[1, 16]`. The **default stays a
+  conservative 2** — each genome-wide search is memory-heavy (~tens of GB of RAM) — so a laptop / the
+  public server is never accidentally oversubscribed; raise it only on a machine with enough RAM and
+  cores. Extra jobs beyond the limit simply queue. Applies on the next app restart.
+
+### Fixed
+- **History page no longer crashes when a 3rd job is queued.** With the 2 search slots busy, a queued
+  job's `log.txt` exists (a queue note is written to it) but has no `Job\tStart` line yet;
+  `read_job_info()` raised `StopIteration`, which aborted the entire History-table build — so running
+  and completed jobs could not be opened until the queued job started. `read_job_info()` now returns
+  `None` for a not-yet-started or missing log (the caller falls back to the `.Params.txt` mtime, the
+  same stand-in the assembly path uses), and the per-job summary loop is guarded so a single not-ready
+  or malformed job directory can never take down the whole table. (Reported by M. Tognon.)
+
 ## [2.8.0] - 2026-10-23
 
 ### Added
