@@ -11,6 +11,8 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-10-27
+
 ### Added
 - **Settings: configurable number of concurrent search jobs.** The web app ran at most 2 searches at
   once (a hard-coded legacy limit); this is now adjustable from the Settings page (or the
@@ -18,6 +20,10 @@ and the `release-crisprme` skill.
   conservative 2** — each genome-wide search is memory-heavy (~tens of GB of RAM) — so a laptop / the
   public server is never accidentally oversubscribed; raise it only on a machine with enough RAM and
   cores. Extra jobs beyond the limit simply queue. Applies on the next app restart.
+- **Settings: Hugging Face download progress bar.** Index/annotation downloads now show percent,
+  size, ETA, and phase in the Settings page, backed by an env-gated progress file
+  (`CRISPRME_PROGRESS_FILE`); the progress path is a no-op when the variable is unset, so the CLI
+  happy path is byte-for-byte unchanged.
 
 ### Fixed
 - **History page no longer crashes when a 3rd job is queued.** With the 2 search slots busy, a queued
@@ -27,6 +33,12 @@ and the `release-crisprme` skill.
   `None` for a not-yet-started or missing log (the caller falls back to the `.Params.txt` mtime, the
   same stand-in the assembly path uses), and the per-job summary loop is guarded so a single not-ready
   or malformed job directory can never take down the whole table. (Reported by M. Tognon.)
+- **Index/annotation download install is atomic and always structurally verified.** A partial or
+  failed download never touches the final install location, and a failure surfaces a copy-paste log
+  plus a Retry action instead of a silent or corrupt state.
+- **Pipeline failure summaries are binary-safe.** `summarize_pipeline_failure()` now reads `log.txt`
+  and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
+  stderr no longer raises `UnicodeDecodeError` and masks the real error.
 
 ## [2.8.0] - 2026-10-23
 
@@ -2573,7 +2585,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.8.1...HEAD
+[2.8.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.1
 [2.8.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.0
 [2.7.10]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.10
 [2.7.9]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.9
