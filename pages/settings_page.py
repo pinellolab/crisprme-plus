@@ -245,8 +245,13 @@ def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
         # submit time; the single-slot executor may hold it queued for a while).
         with open(logtxt, "a") as lt:
             lt.write(f"{stage}\tStart\n")
+        # Point the download's progress emitter (crisprme_hf._ProgressReporter) at
+        # this job's progress.json so refresh_settings_job can render a real % bar.
+        # Harmless for jobs that don't emit progress (they simply never write it).
+        env = dict(os.environ)
+        env["CRISPRME_PROGRESS_FILE"] = os.path.join(jobdir, "progress.json")
         with open(logverb, "w") as vout, open(logerr, "w") as eout:
-            proc = subprocess.Popen(cmd, shell=True, stdout=vout, stderr=eout)
+            proc = subprocess.Popen(cmd, shell=True, stdout=vout, stderr=eout, env=env)
             # heartbeat: bump log.txt's mtime every 60s while the subprocess runs
             # so refresh_settings_job's stale detector doesn't mistake a long,
             # output-quiet stage (e.g. a big extraction) for a dead worker.
@@ -283,6 +288,15 @@ def _launch_job_cmd(cmd: str, stage: str) -> str:
     # executor actually begins running it, so the banner can distinguish the two.
     with open(os.path.join(jobdir, "log.txt"), "w") as lt:
         lt.write(f"{stage}\tQueued\n")
+    # Persist the exact command + stage so a failed download can be RE-LAUNCHED
+    # verbatim from the web "Retry" button without the page having to reconstruct
+    # the argv (crisprme_hf resumes partial transfers, so a retry is cheap).
+    try:
+        import json
+        with open(os.path.join(jobdir, "cmd.json"), "w") as cf:
+            json.dump({"cmd": cmd, "stage": stage}, cf)
+    except OSError:
+        pass
     settings_executor.submit(_run_settings_job, cmd, jobdir, stage)
     return job_id
 
@@ -363,6 +377,199 @@ def _error_tail(logerr_path: str, n: int = 3) -> str:
         return ""
     meaningful = [ln for ln in lines if not any(p in ln for p in _BENIGN_ERR_PATTERNS)]
     return "  ".join((meaningful or lines)[-n:])
+
+
+# ---------------------------------------------------------------------------
+# Download progress (2.8.1): crisprme_hf writes <jobdir>/progress.json while a
+# download runs; refresh_settings_job renders it as a real dbc.Progress bar. The
+# file is absent on the current happy path / older code, so every reader here
+# degrades gracefully to the existing spinner.
+# ---------------------------------------------------------------------------
+# A progress file older than this (no update) is treated as stale -> fall back to
+# the spinner rather than showing a frozen bar.
+_PROGRESS_STALE_SECONDS = 120
+
+
+def _read_progress(jobdir: str) -> Optional[dict]:
+    """Parsed <jobdir>/progress.json, or None if absent / unreadable / stale."""
+    path = os.path.join(jobdir, "progress.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        import json
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    updated = data.get("updated")
+    if isinstance(updated, (int, float)) and (time.time() - updated) > _PROGRESS_STALE_SECONDS:
+        return None  # frozen -> let the stale/heartbeat logic take over
+    return data
+
+
+def _fmt_eta(seconds) -> str:
+    """'~N min left' / '~N sec left' for the progress line (…'' if unknown)."""
+    if not isinstance(seconds, (int, float)) or seconds <= 0:
+        return ""
+    if seconds < 90:
+        return f"~{int(seconds)} sec left"
+    return f"~{int(round(seconds / 60))} min left"
+
+
+def _render_progress_bar(stage: str, prog: dict):
+    """A dbc.Progress bar + 'X.X / Y.Y GB · ~N min left' + the phase label.
+
+    Falls back (returns None) if the payload has no usable total AND no bytes, so
+    the caller shows the plain spinner instead of an empty bar."""
+    try:
+        done = float(prog.get("bytes_done", 0) or 0)
+        total = float(prog.get("bytes_total", 0) or 0)
+        pct = float(prog.get("pct", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    phase = str(prog.get("phase") or stage)
+    detail = str(prog.get("detail") or "")
+    eta = _fmt_eta(prog.get("eta_seconds"))
+    if total > 0:
+        sizes = f"{_fmt_size(done)} / {_fmt_size(total)}"
+        bar = dbc.Progress(value=max(0, min(100, pct)), label=f"{pct:.0f}%",
+                           striped=True, animated=True, style={"height": "18px"})
+    elif done > 0:
+        # unknown total (size API offline): show bytes moved + an indeterminate bar
+        sizes = f"{_fmt_size(done)} downloaded"
+        bar = dbc.Progress(value=100, striped=True, animated=True,
+                           style={"height": "18px"})
+    else:
+        return None
+    line = "  ·  ".join([p for p in (sizes, eta) if p])
+    return html.Div(
+        [
+            html.Div(phase + (f" — {detail}" if detail else ""),
+                     style={"fontWeight": "bold", "fontSize": "0.9em"}),
+            bar,
+            html.Small(line, style={"color": "#367"}) if line else None,
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Failure relay (2.8.1 piece D): on a FAILED download, show a scrollable
+# full-log panel (log_error.txt + a verbose tail) plus a Retry button that
+# re-launches the same job — modelled on load_page.show_full_log.
+# ---------------------------------------------------------------------------
+def _full_job_log(jobdir: str, verbose_tail: int = 400) -> str:
+    """log_error.txt (full) + log_verbose.txt (tail) for the scrollable panel —
+    the same shape load_page.show_full_log uses for a failed search."""
+    sections: List[str] = []
+    for label, fname, tail in (
+        ("log_error.txt", "log_error.txt", None),
+        ("log_verbose.txt (tail)", "log_verbose.txt", verbose_tail),
+    ):
+        path = os.path.join(jobdir, fname)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError as exc:
+            sections.append(f"===== {label} =====\n(could not read: {exc})")
+            continue
+        if tail and len(lines) > tail:
+            lines = [f"... (showing last {tail} lines) ...\n"] + lines[-tail:]
+        body = "".join(lines).rstrip() or "(empty)"
+        sections.append(f"===== {label} =====\n{body}")
+    return "\n\n".join(sections) if sections else "No log files found for this job."
+
+
+def _render_failure(stage: str, jobdir: str, job_id: str):
+    """Failure banner: a short tail + a scrollable full-log textarea + Retry."""
+    tail = _error_tail(os.path.join(jobdir, "log_error.txt"))
+    return html.Div(
+        [
+            html.Div(f"{stage}: failed.", style={"color": "#b00", "fontWeight": "bold"}),
+            html.Small(tail) if tail else None,
+            html.Div(
+                [
+                    html.Button(
+                        "Retry", id="settings-retry-btn",
+                        style={"margin-right": "0.5rem"},
+                    ),
+                    html.Button("Show full log", id="settings-show-log-btn"),
+                ],
+                style={"margin": "0.4rem 0"},
+            ),
+            # the full log starts hidden; the button toggles the container
+            # (callback below) — same copy-pasteable panel as load_page.
+            html.Div(
+                dcc.Textarea(
+                    id="settings-full-log",
+                    value="",
+                    readOnly=True,
+                    style={"width": "100%", "height": "260px",
+                           "fontFamily": "monospace", "fontSize": "12px",
+                           "whiteSpace": "pre", "overflow": "auto"},
+                ),
+                id="settings-full-log-container",
+                hidden=True,
+                style={"marginTop": "6px"},
+            ),
+            # stash the failed job id so Retry / Show-log know which job to act on
+            dcc.Store(id="settings-failed-job", data=job_id),
+        ]
+    )
+
+
+def _genotypes_degraded_warning(jobdir: str):
+    """A visible DEGRADED warning when a variant index installed but its Tier-1
+    genotype store did NOT (per-sample Samples degraded), else None.
+
+    crisprme_hf emits a STDOUT NOTE ("... Samples degraded") to log_verbose.txt
+    when the genotypes_<vcf>.tar.gz companion fetch fails or is absent; the user
+    never saw it. Detect that marker on a successful install and surface it so the
+    user knows to re-download to complete the per-sample store."""
+    verb = os.path.join(jobdir, "log_verbose.txt")
+    if not os.path.isfile(verb):
+        return None
+    try:
+        with open(verb, "r", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    # the genotypes-companion NOTE / the skip NOTE both end in "Samples degraded"
+    if "Samples degraded" not in text and "genotype store" not in text:
+        return None
+    # only warn if it was NOT installed (an "Installed Tier-1 genotype store" line
+    # means it succeeded despite any earlier chatter)
+    if "Installed Tier-1 genotype store" in text:
+        return None
+    return dbc.Alert(
+        "Index installed but per-sample Samples degraded — the genotype store is "
+        "missing. Off-target detection works, but named carriers / per-sample "
+        "output are unavailable. Re-download this index to complete it.",
+        color="warning",
+        style={"margin-top": "0.5rem", "fontSize": "0.9em"},
+    )
+
+
+def _relaunch_job(job_id: str) -> Optional[str]:
+    """Re-launch the download recorded in <job_id>/cmd.json (the Retry action);
+    returns the NEW job id, or None if the original command can't be recovered."""
+    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
+    cmd_path = os.path.join(jobdir, "cmd.json")
+    if not os.path.isfile(cmd_path):
+        return None
+    try:
+        import json
+        with open(cmd_path) as cf:
+            rec = json.load(cf)
+    except (OSError, ValueError):
+        return None
+    cmd, stage = rec.get("cmd"), rec.get("stage") or "Retry download"
+    if not cmd:
+        return None
+    return _launch_job_cmd(cmd, stage)
 
 
 def _write_vcf_marker(dataset: str, genome: str) -> None:
@@ -1692,7 +1899,10 @@ def settings_page() -> List:
                     ]
                 ),
                 dcc.Store(id="settings-active-job"),
-                dcc.Interval(id="settings-check", interval=3000, disabled=True),
+                # 1s poll (was 3s) so the download progress bar advances smoothly;
+                # the Interval is disabled unless a job is active, so this only
+                # fires while something is actually running.
+                dcc.Interval(id="settings-check", interval=1000, disabled=True),
             ],
             fluid=True,
             style={"margin-top": "1rem"},
@@ -2265,20 +2475,23 @@ def refresh_settings_job(n, job_id):
             stage = line.split("\t")[0]
             break
     if f"{stage}\tEnd" in log:
-        # success: stop polling, clear the active job, refresh tables + storage
+        # success: stop polling, clear the active job, refresh tables + storage.
+        # If the download installed a variant index but its genotypes companion
+        # fetch failed, the index detects off-targets but per-sample Samples are
+        # degraded — surface that as a visible warning, not a quiet stderr NOTE.
+        done = html.Div(f"{stage}: done.", style={"color": "green"})
+        degraded = _genotypes_degraded_warning(jobdir)
+        children = html.Div([done, degraded]) if degraded else done
         return (
-            html.Div(f"{stage}: done.", style={"color": "green"}),
+            children,
             True,
             _render_all_tables(),
             _render_storage(),
             None,
         )
     if f"{stage}\tFAILED" in log:
-        tail = _error_tail(os.path.join(jobdir, "log_error.txt"))
         return (
-            html.Div(
-                [html.Div(f"{stage}: failed.", style={"color": "#b00"}), html.Small(tail)]
-            ),
+            _render_failure(stage, jobdir, job_id),
             True,
             no_update,
             no_update,
@@ -2317,6 +2530,14 @@ def refresh_settings_job(n, job_id):
             no_update,
             None,
         )
+    # running: render the real progress bar when progress.json is present +
+    # fresh; otherwise fall back to the existing spinner (older code / non-
+    # download jobs / the brief window before the first progress write).
+    prog = _read_progress(jobdir)
+    if prog:
+        bar = _render_progress_bar(stage, prog)
+        if bar is not None:
+            return (bar, False, no_update, no_update, no_update)
     return (
         html.Div(
             [
@@ -2328,6 +2549,64 @@ def refresh_settings_job(n, job_id):
         no_update,
         no_update,
         no_update,
+    )
+
+
+# --- failure-relay callbacks (2.8.1 piece D) --------------------------------
+# These target components that only exist after refresh_settings_job renders a
+# FAILED banner (suppress_callback_exceptions=True allows that). Both are
+# prevent_initial_call so they never fire before a failure is shown.
+@app.callback(
+    [Output("settings-full-log-container", "hidden"),
+     Output("settings-full-log", "value")],
+    [Input("settings-show-log-btn", "n_clicks")],
+    [State("settings-full-log-container", "hidden"),
+     State("settings-failed-job", "data")],
+    prevent_initial_call=True,
+)
+def _toggle_settings_full_log(n, currently_hidden, failed_job):
+    """Show/hide the scrollable full job log (log_error.txt + verbose tail), the
+    same copy-pasteable panel the search page offers for a failed search."""
+    if not n:
+        raise PreventUpdate
+    if not currently_hidden:  # open -> collapse
+        return True, ""
+    if not failed_job:
+        return False, "No job to show."
+    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, failed_job)
+    return False, _full_job_log(jobdir)
+
+
+@app.callback(
+    [
+        Output("settings-active-job", "data", allow_duplicate=True),
+        Output("settings-check", "disabled", allow_duplicate=True),
+        Output("settings-progress", "children", allow_duplicate=True),
+    ],
+    [Input("settings-retry-btn", "n_clicks")],
+    [State("settings-failed-job", "data")],
+    prevent_initial_call=True,
+)
+def _retry_settings_job(n, failed_job):
+    """Re-launch the failed download (same command, via cmd.json) and resume
+    polling. crisprme_hf resumes partial transfers, so a retry is cheap."""
+    if not n or ONLINE or not failed_job:
+        raise PreventUpdate
+    new_job = _relaunch_job(failed_job)
+    if not new_job:
+        return (
+            no_update,
+            no_update,
+            html.Div(
+                "Could not retry: the original download command was not found. "
+                "Please start the download again from its card above.",
+                style={"color": "#b00"},
+            ),
+        )
+    return (
+        new_job,
+        False,
+        html.Div([dbc.Spinner(size="sm"), html.Span("  Retrying download...")]),
     )
 
 
