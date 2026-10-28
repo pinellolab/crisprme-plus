@@ -21,6 +21,7 @@ import shutil
 import sys
 import os
 import re
+import difflib
 
 
 version = "2.8.0"  # CRISPRme version
@@ -548,6 +549,52 @@ def summarize_pipeline_failure(outputfolder: str) -> str:
         pass
     lines.append(f"  Full error log: {log_err}")
     return "\n".join(lines)
+
+
+# Every flag complete-search recognizes. Parsing here is argparse-free, so a flag
+# nobody reads is silently ignored: `--prune-pams` would run a full genome-wide
+# search with pruning quietly OFF, and the run would look successful until its
+# results were compared against a dedicated index. Reject unknown flags up front
+# instead. Keep in sync with print_help_complete_search(); the twin test
+# PostProcess/test_complete_search_flags.py asserts every documented flag is here.
+_COMPLETE_SEARCH_FLAGS = frozenset(
+    {
+        # documented in print_help_complete_search()
+        "--alt-alignments", "--annotation", "--bDNA", "--bRNA", "--be-base",
+        "--be-window", "--compute-backend", "--full_input_validate",
+        "--gene_annotation", "--genome", "--guide", "--index-path",
+        "--keep-intermediates", "--max-total-edits", "--merge", "--mm",
+        "--no-alt-alignments", "--output", "--pam", "--per-sample",
+        "--personal_annotation", "--population-level", "--prune-pam",
+        "--report-full", "--samplesID", "--sequence", "--sorting-criteria",
+        "--sorting-criteria-scoring", "--thread", "--vcf",
+        # accepted, deliberately not advertised in the help
+        "--help",
+        "--vcf-filter-pass-values",
+        "--debug",  # read from sys.argv, so valid on any subcommand
+        "--ci-cd-test",  # ditto
+        # removed in 2.5.4: still recognized here so the explicit "was removed and
+        # is IGNORED" warning below fires instead of a bare unknown-flag error
+        "--fast", "--full",
+    }
+)
+
+
+def _check_unknown_flags(args: List[str]) -> None:
+    """Reject any complete-search flag we do not recognize, naming the nearest match."""
+    unknown = [a for a in args if a.startswith("--") and a not in _COMPLETE_SEARCH_FLAGS]
+    if not unknown:
+        return
+    described = []
+    for flag in unknown:
+        near = difflib.get_close_matches(
+            flag, sorted(_COMPLETE_SEARCH_FLAGS), n=1, cutoff=0.6
+        )
+        described.append(f"{flag} (did you mean {near[0]}?)" if near else flag)
+    error(
+        f"unrecognized complete-search flag(s): {'; '.join(described)}. "
+        "Run 'crisprme.py complete-search --help' for the supported flags."
+    )
 
 
 def _check_mandatory_args(args: List[str]) -> None:
@@ -1768,6 +1815,7 @@ def complete_search() -> None:
     args = input_args[2:]  # retrieve complete-search input arguments
     if "--help" in args or not args:  # print help
         print_help_complete_search()
+    _check_unknown_flags(args)  # fail on a typo'd flag before doing any work
     check_crisprme_dirtree()  # check crisprme directory tree structure
     _check_mandatory_args(args)  # check mandatory arguments
     genomedir = _check_genome(args)  # input genome folder
