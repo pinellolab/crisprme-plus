@@ -11,6 +11,26 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **One indel off-target could be reported on every chromosome, each time with that chromosome's real
+  rsID, allele frequency and carrier samples.** The merged indel targets file is the only file in
+  `crispritz_targets/` that carries a header, and `post_analisi_indel.sh` copies its first line as the
+  header of each per-chromosome subset. Two filters read that header as a target and dropped it:
+  `pam_filter.py` guarded headers with a column count, but the CRISPRitz header has all 10 columns, so
+  its `DNA` column was taken for a PAM region and rejected; and the `--max-total-edits` cap compared
+  `$10` (`"Total"`) against the numeric cap as strings. With the header gone, `head -1` returned the
+  first *data* row, and that single row was prepended to all ~23 subsets. Nothing rejected it, because
+  every chromosome's fake genome starts at coordinate 0 with near-uniform windows, so the indel lookup
+  (keyed on the fake position alone) resolved it against whichever chromosome was running and overwrote
+  the `Chromosome` column with that one. One raw search row therefore became one correct plus N phantom
+  report rows, each indistinguishable from a genuine annotated variant off-target. Measured genome-wide
+  on `ACTGAAATCTGTAAGCAGGC` at NRG 4+1+1 over HGDP+1kGP: 8 phantom rows on a dedicated NRG index and 11
+  on a pamless index, against an identical 13,253-row justified core; because the injected row is
+  whatever lands at line 1, the count varied with the index. `pam_filter.py` and the edits cap now keep
+  `#` lines, `post_analisi_indel.sh` prepends only an actual header, and the indel post-analysis rejects
+  and counts rows carrying another contig's label. The SNP leg was never affected. Covered by
+  `PostProcess/test_indel_header_injection.py`.
+
 ## [2.8.0] - 2026-10-23
 
 ### Added
