@@ -1029,7 +1029,11 @@ so a PAM-less search is not faster than a dedicated one — the gain is that one
 answers many PAMs.
 
 **Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
-interface offers a PAM only when it matches the index's own geometry. A flank wider than
+interface never passes the flag. (Its PAM picker prefers a PAM whose geometry matches the
+installed index, but falls back to offering every PAM when none matches, so it does not
+itself prevent an unusable pairing — the engine refuses a width mismatch instead.) A
+shorter PAM off a wider flank is supported for a 3' PAM only; for a 5' PAM the engine
+requires the flank width to equal the PAM length. A flank wider than
 3 nt is not readable by CRISPRme versions before this one, so those indexes are published
 in a separate repository rather than alongside the standard ones.
 

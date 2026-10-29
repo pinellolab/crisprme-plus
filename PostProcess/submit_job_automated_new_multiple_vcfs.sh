@@ -276,11 +276,23 @@ while read vcf_f; do
 			if [ "$_pam" = "$_pam_want" ]; then
 				_exact=1
 			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ] \
-				&& [ "${#_pam}" -ge "${#_pam_want}" ]; then
-				# all-N, and wide enough: a stored flank of width K serves a PAM of
-				# length L only when L <= K -- the index never stored the extra
-				# positions a longer PAM would constrain. Enforcing it here turns a
-				# confusing engine-level error into "no sufficient index".
+				&& [ "${#_pam}" -eq "${#_pam_want}" ]; then
+				# all-N at EXACTLY the PAM width: the stored geometry is identical to a
+				# dedicated index for this PAM, so it serves with or without pruning.
+				_exact=0
+			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ] \
+				&& [ "${#_pam}" -gt "${#_pam_want}" ] \
+				&& [ "${prune_pam:-0}" = "1" ] && [ "${pos:-1}" -gt 0 ]; then
+				# all-N and WIDER than the PAM. Only usable while pruning is on: the
+				# engine reads exactly as many stored PAM nibbles per leaf as the search
+				# PAM is long, and only the --prune-pam path reconciles that width (it
+				# N-pads the search PAM up to the stored flank). Selecting one for a
+				# non-pruned search would hand the engine an index it must refuse --
+				# and before --prune-pam existed the scan could not see these at all,
+				# so a run that used to build a dedicated index would start failing.
+				# Restricted to a 3' PAM ($pos > 0) because the engine refuses a
+				# shorter 5' PAM off a wider flank: the emitted sequence is trimmed at
+				# the end only, so a front pad lands inside the reported PAM region.
 				_exact=0
 			else
 				continue            # a different dedicated PAM cannot stand in

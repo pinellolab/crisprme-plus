@@ -137,7 +137,6 @@ def _importable():
     )
 
 
-@unittest.skipUnless(_importable(), "crisprme.py dependencies not installed")
 class TestCallersUseAcceptedFlags(unittest.TestCase):
     """Every complete-search flag the project itself passes must be accepted.
 
@@ -211,6 +210,11 @@ class TestCallersUseAcceptedFlags(unittest.TestCase):
             self.assertNotIn("--bmax", flags, f"{path} still passes --bmax")
 
 
+# Needs crisprme.py to be importable: these run it as a subprocess, and it imports
+# Bio.Seq at module scope. The static checks above parse the source instead and must
+# stay unguarded -- gating them on a dependency they do not use is how the --bmax
+# regression guard silently stopped running in CI.
+@unittest.skipUnless(_importable(), "crisprme.py dependencies not installed")
 class TestRejectionBehaviour(unittest.TestCase):
     """End to end: the gate runs before any other validation, so these need no data."""
 

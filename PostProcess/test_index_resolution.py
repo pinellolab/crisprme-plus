@@ -39,9 +39,15 @@ def _extract_resolver():
 RESOLVER = _extract_resolver()
 
 
-def resolve(libdir, pam_want, suffix, bmax, locale="C"):
-    """Run the shipped resolver; return the chosen basename, or "" for none."""
-    script = f"{RESOLVER}\n_resolve_index_dir \"$1\" \"$2\" \"$3\" \"$4\"\n"
+def resolve(libdir, pam_want, suffix, bmax, locale="C", prune=0, pos=1):
+    """Run the shipped resolver; return the chosen basename, or "" for none.
+
+    prune/pos mirror the script's own `prune_pam` and `pos` (the PAM-file offset:
+    > 0 is a 3' PAM). The resolver reads them to decide whether a flank WIDER than
+    the PAM may be used.
+    """
+    script = (f"prune_pam={prune}\npos={pos}\n{RESOLVER}\n"
+              f"_resolve_index_dir \"$1\" \"$2\" \"$3\" \"$4\"\n")
     env = dict(os.environ, LC_ALL=locale, LANG=locale)
     out = subprocess.run(
         ["bash", "-c", script, "bash", str(libdir), pam_want, suffix, str(bmax)],
@@ -138,11 +144,31 @@ class PamLessStandIn(_Tree):
     def test_narrowest_pamless_flank_wins(self):
         # least N-padding for --prune-pam
         lib = self.lib("NNNNNNNN_3_hg38", "NNN_3_hg38")
-        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=1), "NNN_3_hg38")
+        # ... and with pruning off only the equal-width one is eligible at all
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=0), "NNN_3_hg38")
 
-    def test_wide_pamless_used_when_it_is_the_only_one(self):
+    def test_wide_pamless_used_only_under_prune(self):
+        """The engine reads as many stored PAM nibbles per leaf as the search PAM is
+        long, and only --prune-pam reconciles that width. Picking a wider index for a
+        non-pruned search hands the engine an index it must refuse -- and before
+        --prune-pam the scan could not see these at all, so a run that used to build a
+        dedicated index would start failing."""
         lib = self.lib("NNNNNNNN_3_hg38")
-        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNNNNNNN_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=0), "")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=1), "NNNNNNNN_3_hg38")
+
+    def test_wide_pamless_refused_for_a_5_prime_pam(self):
+        """The engine refuses a shorter 5' PAM off a wider flank: the emitted sequence
+        is trimmed at the end only, so a front pad lands inside the PAM region."""
+        lib = self.lib("NNNNNNNN_3_hg38")
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 3, prune=1, pos=-4), "")
+
+    def test_equal_width_pamless_serves_either_orientation_without_prune(self):
+        lib = self.lib("NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=0), "NNN_3_hg38")
+        lib2 = self.lib("NNNN_3_hg38")
+        self.assertEqual(resolve(lib2, "TTTV", "hg38", 3, prune=0, pos=-4), "NNNN_3_hg38")
 
 
 class FlankMustBeWideEnough(_Tree):
@@ -155,12 +181,12 @@ class FlankMustBeWideEnough(_Tree):
     def test_narrow_pamless_does_not_serve_a_longer_pam(self):
         lib = self.lib("NNN_3_hg38")
         # a 6-nt PAM (e.g. NNGRRT, SaCas9) needs a flank of at least 6
-        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3), "")
+        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3, prune=1), "")
 
     def test_wide_pamless_serves_a_shorter_pam(self):
         lib = self.lib("NNNNNNNN_3_hg38")
-        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3), "NNNNNNNN_3_hg38")
-        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNNNNNNN_3_hg38")
+        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3, prune=1), "NNNNNNNN_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=1), "NNNNNNNN_3_hg38")
 
     def test_equal_width_serves(self):
         lib = self.lib("NNN_3_hg38")
@@ -170,7 +196,7 @@ class FlankMustBeWideEnough(_Tree):
         lib = self.lib("NNN_3_hg38", "NNNNNNNN_3_hg38")
         # NRG (3) -> the width-3 one; NNGRRT (6) -> only the width-8 one qualifies
         self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNN_3_hg38")
-        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3), "NNNNNNNN_3_hg38")
+        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3, prune=1), "NNNNNNNN_3_hg38")
 
 
 class ChoiceIsLocaleIndependent(_Tree):

@@ -23,8 +23,10 @@ and the `release-crisprme` skill.
   rows, every indel row justified by its own variant window. Pruning changes only which leaves are
   written out, never how a guide is aligned, so it cannot move an alignment or a score. The cost is
   size, since nothing is excluded at build time: 108 GB against 28 GB for the HGDP + 1000 Genomes
-  variant index. Requires `--index-path`, and is command-line only — the web form offers a PAM only
-  when it matches the index's own geometry. The `NNN_3` indexes are published alongside the dedicated
+  variant index. Requires `--index-path`, and is command-line only — the web interface never passes
+  the flag. A shorter PAM off a wider flank is served for a 3' PAM only; a 5' PAM requires the
+  flank width to equal the PAM length, and the engine refuses any other width pairing rather
+  than mis-parsing the index. The `NNN_3` indexes are published alongside the dedicated
   ones; a flank wider than 3 nt is not readable by earlier releases, so those live in a separate
   repository. Needs a CRISPRitz build that supports `--prune-pam`.
   See [`METHODS.md` §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering).
@@ -94,6 +96,16 @@ and the `release-crisprme` skill.
   broke every benchmark. The flag allowlist was checked against the help text and against what the
   parser reads, but not against the commands this repo builds, so a dead flag in a caller could only
   surface by running the benchmarks; that gap is now a static test.
+- **A PAM-less index wider than the search PAM could be selected for a search that cannot use it.**
+  The index scan accepted any all-`N` index at least as wide as the PAM, without regard to whether
+  `--prune-pam` was on. Only the pruning path reconciles the stored flank width against the search
+  PAM, so with pruning off the engine read the leaf stream at the wrong width — which, before the
+  engine-side guard added in CRISPRitz 2.9.1, crashed and was reported as a clean empty result. A
+  wider flank is now selectable only under `--prune-pam`, and only for a 3' PAM, since the engine
+  refuses a shorter 5' PAM off a wider flank. An equal-width PAM-less index is unaffected and still
+  serves with or without pruning. Before `--prune-pam` existed the scan matched width 3 only, so
+  this was reachable only on this branch.
+
 - **A downloaded variant index warned that its genotype store was missing right after installing
   it.** The "no `genotypes_<vcf>.tar.gz` companion ... per-sample Samples degraded" note was written
   as the `else:` of the shared-reference-index `try`/`except`, so it fired whenever *that* download
