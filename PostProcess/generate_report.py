@@ -5564,8 +5564,11 @@ def build_report(
         # the ZIP is self-sufficient for re-execution. Never break the report on it.
         try:
             _manifest = {
-                "crisprme_version": meta.get("version") or "2.8.0",
-                "report_generator": "v" + (meta.get("version") or "2.8.0"),
+                # never a hardcoded release number: this manifest is the IND
+                # traceability record, so stamping a plausible-but-wrong version is
+                # worse than admitting the run did not record one.
+                "crisprme_version": meta.get("version") or _package_version() or "unknown",
+                "report_generator": "v" + (meta.get("version") or _package_version() or "unknown"),
                 "generated_date": meta.get("date"),
                 "guides": meta.get("guides"),
                 "nuclease": meta.get("nuclease"),

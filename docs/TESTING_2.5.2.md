@@ -43,7 +43,7 @@ docker pull pinellolab/crisprme:v2.5.2
 git clone https://github.com/pinellolab/crisprme-plus && cd crisprme-plus
 mamba env create -f environment.yml
 mamba activate crisprme-2.5.2
-bash install_from_source.sh     # builds CRISPRitz 2.8.1 + puts crisprme.py on PATH
+bash install_from_source.sh     # builds CRISPRitz at the pinned tag + puts crisprme.py on PATH
 crisprme.py --version           # expect 2.5.2
 ```
 (See README §1.3 for details / troubleshooting.)

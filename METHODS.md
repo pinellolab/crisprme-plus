@@ -1,7 +1,7 @@
 # CRISPRme+ — Methods
 
 This document describes the methods introduced in **CRISPRme+** (the 2.3 through
-2.7.x line; current shipped release 2.8.0), intended as a self-contained technical reference and as source material
+2.7.x line; current shipped release 2.8.1), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
@@ -23,6 +23,7 @@ Sections:
 6. [Functional annotation of off-targets](#6-functional-annotation-of-off-targets)
 7. [Shareable off-target assessment report](#7-shareable-off-target-assessment-report)
 8. [Off-target scoring, assumptions and limitations](#8-off-target-scoring-assumptions-and-limitations)
+9. [PAM-less indexes and dynamic PAM filtering](#9-pam-less-indexes-and-dynamic-pam-filtering)
 
 Throughout, "protospacer window" means the genomic interval spanned by a
 candidate off-target's protospacer plus PAM (and any bulges), i.e. the interval
@@ -115,7 +116,7 @@ does millions of registry lookups (one per candidate off-target window, scattere
 chromosome), and measurement showed raw lookups are **~2× faster** than the compressed path
 even with a warm cache. All shipped indexes (the genotyped 1000 Genomes + HGDP and the
 sites-only mega) use this raw format, for consistency and lookup speed ("speed over space").
-The registry has shipped raw since 2.5.3 (still raw as of 2.8.0).
+The registry has shipped raw since 2.5.3 (still raw as of 2.8.1).
 
 **Optional `zlib` compression.** A block-compressed format is available for
 space-constrained storage. Each section is partitioned into 4,096-record blocks,
@@ -980,8 +981,62 @@ assays (e.g. GUIDE-seq / CIRCLE-seq / targeted amplicon or rhAMP-Seq).
 
 ---
 
+## 9. PAM-less indexes and dynamic PAM filtering
+
+A CRISPRitz index is built for one PAM. The PAM is matched against the genome at build
+time, only the surviving sites enter the ternary search tree, and the PAM region itself is
+stored as a flank beside each guide. One index therefore answers one PAM: searching NGG
+and NRG over the same genome means building and storing two indexes.
+
+A **PAM-less** index is built with an all-`N` PAM (`PAMs/20bp-NNN-NO-PAM.txt`), which
+constrains nothing, so every guide-length window enters the tree and the stored flank is
+the raw genomic sequence. `--prune-pam` then supplies the real PAM at search time and
+discards a leaf whose stored flank cannot match it — at the moment the leaf is reached,
+before it is written out.
+
+**Validity.** A search PAM of length *L* is served by a stored flank of width *K* when
+*L ≤ K*. The search PAM is widened to *K* with `N`s on the distal side (the end for a 3′
+PAM, the front for a 5′ PAM), and a leaf is rejected when, at any position the real PAM
+covers, the stored and requested IUPAC codes share no nucleotide. Pad positions are not
+tested at all: they state no requirement, and a stored genomic `N` intersects nothing, so
+testing one would reject a target that a dedicated index of the real width keeps. At
+*L = K* the pad is empty and the geometry is exactly a dedicated index's.
+
+**Equivalence.** Pruning changes only which leaves are written out, never how a guide is
+aligned to the genome, so it cannot move an alignment or a score. Measured genome-wide
+over HGDP + 1000 Genomes (4,091 samples, guide `ACTGAAATCTGTAAGCAGGC`, NRG, 4 mismatches +
+1 DNA bulge + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index with `--prune-pam`, an
+8-nt-flank PAM-less index with `--prune-pam`, and a dedicated NRG index produce
+**byte-identical** reports — the same 189,950 rows, every indel row justified by its own
+variant window.
+
+**Genomic `N`.** This equivalence needs engine support, not just a filter. A genomic `N`
+is stored as a code that intersects nothing, so it fails a PAM match at every position; a
+PAM-less index of width *K* stores a wider flank than a dedicated index of a shorter PAM
+and so is more exposed to one. Three separate gates acted on that — the build-time PAM
+scan, the discard of any window containing an `N`, and the prune test itself — and the
+effect is concentrated on the synthetic indel genome, which is `N`-separated roughly every
+56 bases: a width-31 window admitted 34,690,315 start positions on one contig against a
+width-26 window's 41,454,105, so **16.3%** were invisible to a wider index. Real assembly
+`N` sits in megabase gaps where nothing matches, which is why reference and SNP searches
+were never affected. CRISPRitz now keeps a target whose stored PAM/flank region holds an
+`N` and lets the search PAM decide, exactly as a dedicated index does.
+
+**Cost.** A PAM-less index is much larger, because no site is excluded at build time:
+the reference index is 71 GB against 9 GB for a dedicated NRG index, and the HGDP + 1000
+Genomes variant index 108 GB against 28 GB (download sizes). Pruning happens at leaf time,
+so a PAM-less search is not faster than a dedicated one — the gain is that one index
+answers many PAMs.
+
+**Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
+interface offers a PAM only when it matches the index's own geometry. A flank wider than
+3 nt is not readable by CRISPRme versions before this one, so those indexes are published
+in a separate repository rather than alongside the standard ones.
+
+---
+
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.7.x line (CRISPRme+ 2.8.0) (default SNP+indel co-occurrence, context-aware
+methods as of the 2.7.x line (CRISPRme+ 2.8.1) (default SNP+indel co-occurrence, context-aware
 analysis mode — per-sample on genotyped+PHASED indexes / population-level otherwise, with opt-out
 `--population-level` / forced `--per-sample`, and the CRISPR-Bulge ML off-target
 scorer in a dedicated conda environment with a `cpu|cuda|metal` compute backend); see the

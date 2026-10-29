@@ -11,6 +11,29 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-10-29
+
+### Added
+- **`--prune-pam`: one index can serve many PAMs.** A *PAM-less* index stores the raw genomic flank
+  instead of a matched PAM, and `--prune-pam` applies the PAM you pass during the search, discarding
+  a leaf whose stored flank cannot match it. One index therefore answers any PAM no longer than its
+  flank, instead of one index per PAM. Verified genome-wide over HGDP + 1000 Genomes (4,091 samples,
+  NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index, an 8-nt-flank
+  PAM-less index, and a dedicated NRG index produce **byte-identical** reports — the same 189,950
+  rows, every indel row justified by its own variant window. Pruning changes only which leaves are
+  written out, never how a guide is aligned, so it cannot move an alignment or a score. The cost is
+  size, since nothing is excluded at build time: 108 GB against 28 GB for the HGDP + 1000 Genomes
+  variant index. Requires `--index-path`, and is command-line only — the web form offers a PAM only
+  when it matches the index's own geometry. The `NNN_3` indexes are published alongside the dedicated
+  ones; a flank wider than 3 nt is not readable by earlier releases, so those live in a separate
+  repository. Needs a CRISPRitz build that supports `--prune-pam`.
+  See [`METHODS.md` §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering).
+- **Unrecognized `complete-search` flags are now rejected.** `complete-search` parses `sys.argv` by
+  hand, so a flag nothing reads was simply ignored: `--prune-pams` instead of `--prune-pam` ran a
+  genome-wide search with pruning quietly off, finished without complaint, and was detectable only by
+  diffing the results against a dedicated index. Unknown flags now fail up front, with a suggestion
+  for a near miss.
+
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
   rsID, allele frequency and carrier samples.** The merged indel targets file is the only file in
@@ -33,6 +56,31 @@ and the `release-crisprme` skill.
   changes a batch's contents and with it the order of the reductions inside it. That score now agrees
   across indices. The SNP leg was never affected. Covered by
   `PostProcess/test_indel_header_injection.py`.
+- **Which installed index answered a search could depend on the shell's locale.** Three scans pick the
+  index to search — the reference scan, the variant scan, and the precomputed-variant detection. Each
+  globbed the requested PAM and then `NNN*_*`, read the bulge budget out of the directory name, kept
+  the smallest sufficient one, and broke ties by whichever the glob produced first. Glob order follows
+  `LC_COLLATE`, and the orderings disagree: `NNNNNNNN_3_hg38` sorts before `NNN_3_hg38` under
+  `LC_ALL=C` (as inside the container) and after it under `en_US.UTF-8`. Both names encode the same
+  budget, so with two PAM-less flank widths installed side by side the choice depended on the
+  environment. `NNN*` was also too loose in the other direction: it matches a dedicated PAM that
+  merely begins with three `N`s, so the shipped `NNNRRT` (SaCas9-KKH) could be picked to serve an
+  unrelated PAM, which it cannot — and the Python capability checks, which test `"N" * len(motif)`,
+  disagreed with the shell about the same directory. The three scans now share one resolver that
+  requires an all-`N` name for a stand-in and settles every tie by rule: the requested PAM first, then
+  the smallest sufficient budget, then the narrowest PAM-less flank. Covered by
+  `PostProcess/test_index_resolution.py`, which asserts the same choice under `C`, `POSIX` and
+  `en_US.UTF-8`.
+- **`complete-test` passed a flag that did not exist.** The brute-force benchmark command included
+  `--bmax`, which `complete-search` has never had — it recomputes bMax from the per-type budgets — so
+  the argument was discarded unread. Harmless until unknown flags started being rejected, which then
+  broke every benchmark. The flag allowlist was checked against the help text and against what the
+  parser reads, but not against the commands this repo builds, so a dead flag in a caller could only
+  surface by running the benchmarks; that gap is now a static test.
+- **The report manifest could stamp a hardcoded version.** The run manifest in the shareable report
+  fell back to a literal `"2.8.0"` when a run recorded no version. It now resolves the real version,
+  and reports `unknown` rather than a plausible-but-wrong number — this manifest is the IND
+  traceability record.
 
 ## [2.8.0] - 2026-10-23
 
@@ -2579,7 +2627,8 @@ below for the full history); the entries here are the changes since `alpha.30`.
 ### Changed
 - Upgraded the DockerHub image with the latest fixes.
 
-[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/pinellolab/crisprme-plus/compare/v2.8.1...HEAD
+[2.8.1]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.1
 [2.8.0]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.8.0
 [2.7.10]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.10
 [2.7.9]: https://github.com/pinellolab/crisprme-plus/releases/tag/v2.7.9

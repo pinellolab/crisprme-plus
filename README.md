@@ -24,6 +24,7 @@ through an interactive web-based interface.
 - **Dictionary-less variant-aware search** — a compact allele-frequency registry + genotype store ship with the index, so variant off-target search (with allele frequencies, rsIDs, and per-dataset provenance) runs out of the box. ([methods](METHODS.md#1-variant-aware-dictionary-less-data-model))
 - **Co-occurring off-targets** — off-targets that need two nearby variants together on the same chromosome copy (*in cis*, i.e. the same haplotype), so one individual carries both — **SNP+indel** (on by default; opt out with `CRISPRME_INDEL_SNP=0`) or **SNP+SNP** — are detected and reported **CONFIRMED** (phasing proves cis) or **PUTATIVE** (co-occurrence possible but cis unproven — unphased genotyped panels still name the carriers; sites-only panels like `mega` give a conservative min-AF bound with no carriers), with joint AF, and surfaced in the report. ([methods](METHODS.md#4-haplotype-scanning-observed-haplotype-enumeration))
 - **Complementary production indexes** — the **recommended default** is the phased **HGDP + 1000 Genomes** index (`NRG_3_hg38+hg38_HGDP1kGP`: 4,091 samples, jointly SHAPEIT5-re-phased → CONFIRMED cis + named per-sample carriers throughout), with the **HPRC pangenome** and the sites-only five-source **mega** alternatives. All carry searchable indels genome-wide with SNP+SNP / SNP+indel co-occurrence — see the [index comparison table below](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) and [`docs/PRECOMPUTED_INDEXES.md`](docs/PRECOMPUTED_INDEXES.md). (Per-source retrieval recipes for 1000G 2019/2021, HGDP, gnomAD v4.1, TOPMed and All-of-Us are in [`paper/reproducibility/variant-datasets/`](paper/reproducibility/variant-datasets/).)
+- **One index, many PAMs (`--prune-pam`)** — a **PAM-less** index stores the raw genomic flank instead of a fixed PAM, and the PAM you pass is applied during the search, so one index answers any PAM no longer than that flank (a 3-nt flank serves NRG, NGG, NAG, …). Verified genome-wide on HGDP + 1000 Genomes: a PAM-less index with `--prune-pam` returns a **byte-identical** report to a dedicated NRG index, at both a 3-nt and an 8-nt flank. The trade is size — the PAM-less variant index is 108 GB against 28 GB for `NRG_3_hg38+hg38_HGDP1kGP` — and pruning happens as results are emitted, so it is not *faster* than a dedicated index; it is worth it when you expect to search several PAMs over one genome. Command-line only. ([methods](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering))
 - **Context-aware analysis mode: per-sample on phased indexes by default; `--population-level` to opt out** — as of 2.8.0 `complete-search` auto-selects **per-sample** (CONFIRMED cis phasing + named carriers + exact joint AF) on a genotyped + **PHASED** index (e.g. the HGDP + 1000 Genomes default) and **population-level** (worst-possible representatives per variant window, lossless for detection, tractable on any panel) otherwise (sites-only / unphased / hybrid / reference-only). Add **`--population-level`** (CLI) or pick **Population-level** in the web form to force the fast worst-case screen on a phased index; add **`--per-sample`** to force resolution on any index (it cannot name carriers on a sites-only index). This is a **genotype-resolution** dial, not a speed dial — for a single guide the two modes take about the same time; the resolution cost shows up only on dense/aggregate panels. The report states which mode was used. ([methods](METHODS.md#population-level-analysis-default-and---per-sample-genotype-resolution))
 - **Lean default output** — the report, tables, mismatch/bulge matrix and validation panel are built from the **best alignment per locus**. The exhaustive *alternative-alignments* file (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments per locus — expensive on large searches) is emitted by mode: **off** in population-level runs (`--population-level` on a genotyped index, or the default on sites-only/unphased indexes), **on** in per-sample runs (the default on genotyped+phased indexes, or under `--per-sample`) — on **both the CLI and the web**; override on the CLI with **`--alt-alignments`** / **`--no-alt-alignments`**. Each index also self-describes its `data_type` (sites-only / genotyped-unphased / genotyped-phased / hybrid), shown in the web variant-dataset selector.
 - **Cancer-gene annotations: IntOGen by default, COSMIC by licence** — off-targets in cancer-driver genes are flagged via **IntOGen** (CC0, on by default); **COSMIC** (Cancer Gene Census) is licence-gated and **excluded by default** — enable it in **Settings** or with `crisprme.py cosmic-license enable`. Alongside ENCODE SCREEN v4, GENCODE and DHS. ([methods](METHODS.md#6-functional-annotation-of-off-targets))
@@ -161,11 +162,11 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it pinellolab/crisprme:
 
 > **`:latest` vs a pinned tag.** These commands use `pinellolab/crisprme:latest` — the
 > auto-updating, GPU-capable default image. For a fully reproducible run, pin the exact
-> release instead, e.g. `pinellolab/crisprme:v2.8.0`.
+> release instead, e.g. `pinellolab/crisprme:v2.8.1`.
 
 > **On HPC with Apptainer/Singularity.** Use **`apptainer run`**, which invokes the image
 > entrypoint so `crisprme.py` is on `PATH`, binding your data dir to `/DATA` — e.g.
-> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.8.0 crisprme.py --version`
+> `apptainer run --bind "${PWD}:/DATA" --pwd /DATA docker://pinellolab/crisprme:v2.8.1 crisprme.py --version`
 > (add `crisprme.py web-interface` / `complete-search …` the same way). Note that
 > `apptainer exec … crisprme.py …` **bypasses** the entrypoint, so `crisprme.py` is not found on
 > `PATH` — prefer `apptainer run` (or prefix `bash -lc`).
@@ -192,6 +193,30 @@ indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever yo
 > individual) with a min-AF bound and **no named carriers**; run it after a genotyped-index
 > run when you need maximal allele-frequency breadth. Grab the others any time from the web
 > **Settings** or by re-running the download with a different `--index-name`.
+
+**One index for many PAMs.** The indexes above are each built for the SpCas9 NRG PAM. A
+**PAM-less** index instead stores the raw genomic flank, and the PAM is applied during the
+search, so a single index answers any PAM no longer than that flank:
+
+```bash
+crisprme.py complete-search --prune-pam \
+  --index-path ./genome_library \
+  --pam ./PAMs/20bp-NRG-SpCas9.txt  ...   # or NGG, NAG, any PAM up to the flank width
+```
+
+| Index (`--index-name`) | Flank | Serves | Download |
+|---|---|---|---|
+| `NNN_3_hg38` | 3 nt | any 3-nt PAM, reference-only | 71 GB |
+| `NNN_3_hg38+hg38_HGDP1kGP` | 3 nt | any 3-nt PAM, with variants | 108 GB |
+
+A PAM-less index with `--prune-pam` gives a **byte-identical** report to the dedicated
+index for the same PAM (verified genome-wide — see
+[methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)). Two things to know:
+`--prune-pam` needs `--index-path` and is **command-line only** (the web form offers a PAM
+only when it matches the index's own geometry), and because nothing is excluded at build
+time these indexes are several times larger than a dedicated one — so choose one when you
+expect to search several PAMs over the same genome, and a dedicated index when you only
+ever need one.
 
 **Full step-by-step (with variants, more indexes, troubleshooting):
 [`docs/DOCKER_QUICKSTART.md`](docs/DOCKER_QUICKSTART.md).**
@@ -291,18 +316,18 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
-> **Which version do I get?** For **CRISPRme+ (2.8.0, this release)** use **Docker**
+> **Which version do I get?** For **CRISPRme+ (2.8.1, this release)** use **Docker**
 > (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above, or
 > §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
-> 2.8.0 line** — use it only if you specifically want the stable release. If in doubt,
+> 2.8.1 line** — use it only if you specifically want the stable release. If in doubt,
 > use Docker.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.8.0)](#12-install-crisprme-via-docker)
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.8.1)](#12-install-crisprme-via-docker)
 
-- [Install CRISPRme from source (§1.3)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.8.0) line on Python 3.11
+- [Install CRISPRme from source (§1.3)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.8.1) line on Python 3.11
 
 - [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
 
@@ -311,7 +336,7 @@ operating systems. Select the method that best matches your setup:
 
 Conda/Bioconda installs **only the stable 2.1.x line** (Python 3.8) — *not* the
 CRISPRme+ (2.8.x) line. Use this path only if you specifically want the stable
-release; for CRISPRme+ 2.8.0 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
+release; for CRISPRme+ 2.8.1 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
 or [Docker](#12-install-crisprme-via-docker).
 
 This section is organized into three subsections to guide you through the installation 
@@ -386,7 +411,7 @@ crisprme.py
 #### 1.1.3 Updating CRISPRme
 ---
 
-> **Updating CRISPRme+ (2.8.0)?** Conda/Bioconda cannot update you to the CRISPRme+
+> **Updating CRISPRme+ (2.8.1)?** Conda/Bioconda cannot update you to the CRISPRme+
 > line — update via the [source build (§1.3)](#13-install-crisprme-from-source-without-bioconda)
 > or [Docker](#12-install-crisprme-via-docker). The steps below update only the stable
 > 2.1.x Bioconda line.
@@ -531,7 +556,7 @@ included. `:latest` is the auto-updating default image; it runs on **CPU** out o
 box (fully supported — this is the default scoring path), and a **GPU can optionally
 accelerate the CRISPR-Bulge scorer** on an NVIDIA host (add `--gpus all` + `--compute-backend
 cuda`). For a fully reproducible setup pin the exact release instead, e.g.
-`docker pull pinellolab/crisprme:v2.8.0`.
+`docker pull pinellolab/crisprme:v2.8.1`.
 
 Once the download is complete, the CRISPRme Docker image will be ready for use. 
 To confirm the image is successfully installed, you can list all available Docker 
@@ -662,7 +687,7 @@ The directory organization required by CRISPRme is illustrated below:
 > To run it in **Docker**, prefix it with
 > `docker run --rm -v "${PWD}:/DATA" -w /DATA -i pinellolab/crisprme:latest`
 > (add `-p 8080:8080` for `web-interface`; on an NVIDIA host add `--gpus all` to run the
-> CRISPR-Bulge scorer on the GPU). Pin `:v2.8.0` instead of `:latest` for reproducibility.
+> CRISPR-Bulge scorer on the GPU). Pin `:v2.8.1` instead of `:latest` for reproducibility.
 > From a **source / Conda** install, run it as-is inside the activated `crisprme`
 > environment.
 
@@ -2038,7 +2063,7 @@ Open a terminal and execute the following command to check the software version:
   crisprme.py --version
   ```
 
-If the output displays the correct software version (e.g., `v2.8.0`), CRISPRme 
+If the output displays the correct software version (e.g., `v2.8.1`), CRISPRme 
 is successfully installed and ready for use.
 
 **Step 2: Access CRISPRme Help Menu**

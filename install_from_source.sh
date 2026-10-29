@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install CRISPRme+ 2.8.0 FROM SOURCE, without the Bioconda crisprme/crispritz
+# Install CRISPRme+ 2.8.1 FROM SOURCE, without the Bioconda crisprme/crispritz
 # packages. Builds CRISPRitz 2.9.0 from source and installs both CRISPRitz and
 # CRISPRme into the ACTIVE conda environment ($CONDA_PREFIX), using the same
 # bin/ + opt/ layout the Bioconda/Docker builds use (crisprme.py resolves

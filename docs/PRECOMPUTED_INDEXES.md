@@ -93,7 +93,29 @@ indexes/
   NRG_3_hg38+hg38_HPRC.tar.gz                    # SpCas9 (NRG) HPRC pangenome variant index (232 phased assembly-derived genomes)
   genotypes_hg38_HPRC.tar.gz                          # SEPARATE Tier-1 genotype store companion for the HPRC index
   NRG_3_hg38+hg38_mega.tar.gz                    # SpCas9 (NRG) sites-only mega index (5 sources) — NO genotype companion (sites-only)
+  NNN_3_hg38.tar.gz                              # PAM-LESS reference index of hg38, 3-nt flank — serves ANY 3-nt PAM with `--prune-pam`
+  NNN_3_hg38+hg38_HGDP1kGP.tar.gz           # PAM-LESS variant-aware index (HGDP + 1000 Genomes, same variant data as the NRG one)
+  NGG_3_hg38.tar.gz                              # NGG-only reference index (NRG is the default; NGG cannot serve NAG off-targets)
+  NGG_3_hg38+hg38_HGDP1kGP.tar.gz           # NGG-only variant index
+  NRR_3_hg38.tar.gz                              # NRR reference index
+  NRR_3_hg38+hg38_{HGDP1kGP,HPRC,mega}.tar.gz    # NRR variant indexes
 ```
+
+**The PAM-less (`NNN_*`) indexes** store the raw genomic flank instead of a matched PAM,
+so one index answers any PAM no longer than that flank when the search passes
+`--prune-pam` (see [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+They carry exactly the same variant data and `Dictionaries/` as the dedicated index for the
+same panel — those tiers are PAM-independent — and a `--prune-pam` run over one is
+byte-identical to the dedicated index for that PAM, verified genome-wide. They are
+correspondingly larger, because nothing is excluded at build time: 71 GB for the reference
+index against 9 GB for `NRG_3_hg38`, and 108 GB against 28 GB for the HGDP + 1000 Genomes
+variant index. Choose one when you expect to search several PAMs over the same genome.
+
+> **Flank width and compatibility.** A 3-nt flank is readable by any CRISPRme version: the
+> stored geometry is the same as a dedicated 3-nt PAM index, which is why `NNN_3` ships in
+> this repo. A **wider** flank is not — an older release would mis-read it — so indexes
+> with a flank above 3 nt are published in a **separate repository** that older defaults
+> never point at, rather than alongside these.
 
 Each variant index stamps its **`data_type`** (`sites-only` / `genotyped-unphased` /
 `genotyped-phased` / `hybrid`) and a `phased` flag in every `registry_<vcf>/reg_<chrom>.idx`

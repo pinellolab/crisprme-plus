@@ -15,7 +15,9 @@ git tag vX.Y.Z ──▶ GitHub release tarball ──▶ Bioconda meta.yaml (sh
 
 Version-sync points (ALL must equal the same `X.Y.Z`):
 - `crisprme.py` → `version = "X.Y.Z"` (also sets `__version__`)
-- `Dockerfile` → `ARG crisprme_version=X.Y.Z`
+- `Dockerfile` → nothing: there is NO `ARG crisprme_version`. The image is built FROM SOURCE
+  (`COPY . ${PREFIX}/opt/crisprme/`), so the only pin is `crisprme.py`. The Dockerfile does carry
+  `ARG crispritz_ref=vX.Y.Z`, which a release bumps when CRISPRitz moves.
 - git tag / GitHub release → `vX.Y.Z`
 - Bioconda `recipes/crisprme/meta.yaml` → `{% set version = "X.Y.Z" %}` + fresh `sha256` + `build.number: 0`
 
@@ -32,7 +34,7 @@ Confirm where the repo currently stands and that nothing is half-bumped.
 
 ```bash
 echo "crisprme.py: $(grep -E '^version *= *' crisprme.py)"
-echo "Dockerfile:  $(grep -E '^ARG crisprme_version=' Dockerfile)"
+echo "CRISPRitz pin: $(grep -E '^ARG crispritz_ref=' Dockerfile)"
 echo "latest tag:  $(git tag --sort=-v:refname | head -1)"
 echo "latest release: $(gh release list --repo pinellolab/crisprme-plus -L1)"
 curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/recipes/crisprme/meta.yaml | grep -E 'set version|sha256|number:'
@@ -166,15 +168,14 @@ Do this AFTER the Bioconda PR merges and the package is on the channel (can take
 ```bash
 # GitHub / in-repo
 grep -E '^version *= *' crisprme.py
-grep -E '^ARG crisprme_version=' Dockerfile
+grep -E '^ARG crispritz_ref=' Dockerfile   # CRISPRme's own version lives only in crisprme.py
 git tag --sort=-v:refname | head -1
 
 # Bioconda published package
 conda search -c bioconda crisprme | tail -3          # or: mamba search -c bioconda crisprme
 
 # Optional: build the Docker image and check it installs the new version
-# (Dockerfile installs crisprme=$crisprme_version from bioconda, so this fails
-#  until Bioconda has published X.Y.Z)
+# (the image is built from source, so this does NOT wait on Bioconda)
 docker build -t crisprme:X.Y.Z . && \
   docker run --rm crisprme:X.Y.Z crisprme.py --version   # expect vX.Y.Z
 ```
@@ -188,4 +189,4 @@ All four (crisprme.py, Dockerfile ARG, git tag, bioconda version) must read `X.Y
 - Wrong/premature GitHub release: `gh release delete vX.Y.Z --repo pinellolab/crisprme-plus --cleanup-tag` and redo.
 - sha256 mismatch on the Bioconda PR: GitHub can regenerate archive tarballs; recompute the sha256 from the live tarball and update `meta.yaml`, then push.
 - Deps changed but version unchanged: keep `version`, INCREMENT `build.number` (do not reset to 0).
-- Docker build fails on `crisprme=$crisprme_version`: the Bioconda package for that version isn't published yet — wait, then rebuild.
+- Docker build fails building CRISPRitz: check `ARG crispritz_ref` points at a tag that exists.
