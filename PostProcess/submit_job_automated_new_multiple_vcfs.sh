@@ -221,6 +221,62 @@ while read vcf_f; do
 		true_pam=${fullseqpam:0:-$pos}
 	fi
 
+	# Pick which installed index serves this search.
+	#   $1 library dir   $2 requested PAM   $3 name suffix (<ref> or <ref>+<vcf>)
+	#   $4 requested bMax
+	# Writes the chosen directory to stdout, or nothing when none is sufficient.
+	#
+	# An index named <PAM>_<N>_<suffix> was built with -bMax N and so supports searches
+	# up to N-1 bulges of each type: any N >= bMax serves. Among those, in order:
+	#   1. the requested PAM itself, ahead of any PAM-less index -- it needs neither
+	#      N-padding nor the post-search PAM filter to be right;
+	#   2. the smallest sufficient N, so a tighter index beats a wider one;
+	#   3. the narrowest PAM-less flank, so --prune-pam pads as little as possible.
+	# Every tie is settled by a rule, because glob order is not one: it follows
+	# LC_COLLATE, and NNNNNNNN_3_hg38 sorts BEFORE NNN_3_hg38 under LC_ALL=C (as inside
+	# the container) but after it under en_US.UTF-8. Leaving the choice to the glob
+	# makes which index answers a search depend on the environment.
+	# A stand-in index must be ALL N. Globbing NNN* also matches a dedicated PAM --
+	# the shipped NNNRRT (SaCas9-KKH) among them -- which cannot serve another PAM.
+	_resolve_index_dir() {
+		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4"
+		local _d _b _pam _n _exact _better
+		local _best="" _best_n="" _best_pam_len="" _best_exact=""
+		for _d in "$_lib"/*_*_"$_suffix"; do
+			[ -d "$_d" ] || continue
+			case "$_d" in *_INDELS) continue ;; esac
+			_b=$(basename "$_d")
+			_pam=${_b%%_*}          # <PAM>_<N>_<suffix>
+			_n=${_b#*_}
+			_n=${_n%%_*}
+			case "$_n" in '' | *[!0-9]*) continue ;; esac
+			[ "$_n" -ge "$_want" ] || continue
+			if [ "$_pam" = "$_pam_want" ]; then
+				_exact=1
+			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ]; then
+				_exact=0            # all-N: serves any PAM no longer than its flank
+			else
+				continue            # a different dedicated PAM cannot stand in
+			fi
+			_better=0
+			if [ -z "$_best" ]; then
+				_better=1
+			elif [ "$_exact" -gt "$_best_exact" ]; then
+				_better=1
+			elif [ "$_exact" -eq "$_best_exact" ]; then
+				if [ "$_n" -lt "$_best_n" ]; then
+					_better=1
+				elif [ "$_n" -eq "$_best_n" ] && [ "${#_pam}" -lt "$_best_pam_len" ]; then
+					_better=1
+				fi
+			fi
+			if [ "$_better" = 1 ]; then
+				_best="$_d"; _best_n="$_n"; _best_pam_len=${#_pam}; _best_exact="$_exact"
+			fi
+		done
+		[ -n "$_best" ] && printf '%s\n' "$_best"
+	}
+
 	# ensure that fundamental folders are available 
 	if ! [ -d "$current_working_directory/Results" ]; then
 		mkdir "$current_working_directory/Results"
@@ -252,22 +308,13 @@ while read vcf_f; do
 	# stem, so dict_folder may point at a dictionaries_<vcf>/ that does not exist.
 	precomputed_variant=0
 	if [ "$vcf_name" != "_" ]; then
-		# NNN*_* (not NNN_*) so an all-N PAM-less index of any width >=3 is matched
-		# (NNN_3_, NNNN_3_, ... NNNNNNNN_3_ for a --prune-pam search); a dedicated PAM
-		# like NGG/NRG has only one leading N and is excluded.
-		for _d in "$current_working_directory/genome_library"/${true_pam}_*_"${ref_name}+${vcf_name}" "$current_working_directory/genome_library"/NNN*_*_"${ref_name}+${vcf_name}"; do
-			[ -d "$_d" ] || continue
-			case "$_d" in *_INDELS) continue ;; esac
-			_b=$(basename "$_d"); _n=${_b#*_}; _n=${_n%%_*}
-			case "$_n" in '' | *[!0-9]*) continue ;; esac
-			if [ "$_n" -ge "$bMax" ] \
-				&& { [ -d "$current_working_directory/Dictionaries/dictionaries_${vcf_name}" ] \
-					|| [ -d "$current_working_directory/Dictionaries/registry_${vcf_name}" ]; } \
-				&& [ -d "$current_working_directory/Dictionaries/log_indels_${vcf_name}" ]; then
-				precomputed_variant=1
-				break
-			fi
-		done
+		# A PAM-less index of any width counts here -- see _resolve_index_dir.
+		if [ -n "$(_resolve_index_dir "$current_working_directory/genome_library" "$true_pam" "${ref_name}+${vcf_name}" "$bMax")" ] \
+			&& { [ -d "$current_working_directory/Dictionaries/dictionaries_${vcf_name}" ] \
+				|| [ -d "$current_working_directory/Dictionaries/registry_${vcf_name}" ]; } \
+			&& [ -d "$current_working_directory/Dictionaries/log_indels_${vcf_name}" ]; then
+			precomputed_variant=1
+		fi
 	fi
 	if [ "$vcf_name" != "_" ] && [ "$precomputed_variant" = 1 ]; then
 		echo -e "Using precomputed variant index for ${ref_name}+${vcf_name}; skipping genome enrichment (source VCFs not required)"
@@ -355,28 +402,14 @@ while read vcf_f; do
 	else
 		ref_lib="${current_working_directory}/genome_library"
 	fi
-	# Reuse ANY installed index whose encoded number N >= the requested bMax (which the
-	# caller passes as max(bDNA,bRNA)+1), preferring the smallest sufficient one; include
-	# pamless NNN indexes (which serve any PAM — the requested PAM is enforced by the
-	# post-search PAM filter). Folder N = the -bMax the index was built with, and it
-	# supports searches up to N-1 bulges of each type, so e.g. an NGG_3 index serves any
-	# search with max(bDNA,bRNA)<=2 — this is why a batteries-included NGG_3 index is
-	# reused for a smaller bulge request instead of triggering a rebuild.
+	# Reuse any installed index sufficient for the requested bulge budget (the caller
+	# passes bMax as max(bDNA,bRNA)+1), PAM-less ones included -- a PAM-less index
+	# serves any PAM no longer than its flank, and the requested PAM is enforced by
+	# --prune-pam at leaf time and by the post-search PAM filter. An NGG_3 index
+	# therefore serves any search with max(bDNA,bRNA)<=2, which is why a
+	# batteries-included index is reused instead of triggering a rebuild.
 	idx_folder1="${ref_lib}/${true_pam}_${bMax}_${ref_name}"  # exact-N name, used only for the auto-build path below
-	idx_ref=""
-	_best_n=""
-	for _d in "$ref_lib"/${true_pam}_*_"${ref_name}" "$ref_lib"/NNN*_*_"${ref_name}"; do
-		[ -d "$_d" ] || continue
-		case "$_d" in *_INDELS) continue ;; esac
-		_b=$(basename "$_d")
-		_n=${_b#*_}
-		_n=${_n%%_*}
-		case "$_n" in '' | *[!0-9]*) continue ;; esac
-		if [ "$_n" -ge "$bMax" ] && { [ -z "$_best_n" ] || [ "$_n" -lt "$_best_n" ]; }; then
-			_best_n="$_n"
-			idx_ref="$_d"
-		fi
-	done
+	idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
 
 	# use the existing (sufficient) index if the scan found one
 	if [ -n "$idx_ref" ]; then
@@ -418,26 +451,12 @@ while read vcf_f; do
 
 	# START STEP 2.2 Variant genome indexing
 	if [ "$vcf_name" != "_" ]; then  # index alternative genomes (snps only)
-		# Reuse ANY installed variant index whose encoded budget N >= requested bMax
-		# (smallest sufficient first), incl. pamless NNN — mirrors the reference scan,
-		# so a batteries-included NGG_3_<ref>+<vcf> index serves a smaller bulge
-		# request without a rebuild.
+		# Mirrors the reference scan: reuse any sufficient variant index, PAM-less
+		# ones included, so a batteries-included NGG_3_<ref>+<vcf> index serves a
+		# smaller bulge request without a rebuild.
 		basedir="${current_working_directory}/genome_library"
 		idx_folder1="${basedir}/${true_pam}_${bMax}_${ref_name}+${vcf_name}"  # exact-budget name, used only for the auto-build path below
-		idx_var=""
-		_best_n=""
-		for _d in "$basedir"/${true_pam}_*_"${ref_name}+${vcf_name}" "$basedir"/NNN*_*_"${ref_name}+${vcf_name}"; do
-			[ -d "$_d" ] || continue
-			case "$_d" in *_INDELS) continue ;; esac
-			_b=$(basename "$_d")
-			_n=${_b#*_}
-			_n=${_n%%_*}
-			case "$_n" in '' | *[!0-9]*) continue ;; esac
-			if [ "$_n" -ge "$bMax" ] && { [ -z "$_best_n" ] || [ "$_n" -lt "$_best_n" ]; }; then
-				_best_n="$_n"
-				idx_var="$_d"
-			fi
-		done
+		idx_var=$(_resolve_index_dir "$basedir" "$true_pam" "${ref_name}+${vcf_name}" "$bMax")
 
 		# use the existing (sufficient) variant index if the scan found one
 		if [ -n "$idx_var" ]; then

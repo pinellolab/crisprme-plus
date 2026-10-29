@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Which installed index answers a search must not depend on the environment.
+
+An index directory is named ``<PAM>_<N>_<suffix>``. Several can be sufficient for
+one search -- a dedicated PAM, a PAM-less stand-in, the same PAM at a larger bulge
+budget -- so the pipeline picks one. It used to pick whichever the shell glob
+produced first, and glob order follows ``LC_COLLATE``: ``NNNNNNNN_3_hg38`` sorts
+before ``NNN_3_hg38`` under ``LC_ALL=C`` (as inside the container) and after it
+under ``en_US.UTF-8``. Publishing a second PAM-less index of a different width
+would therefore have made the choice depend on the locale.
+
+These tests run the *shipped* ``_resolve_index_dir`` out of
+``submit_job_automated_new_multiple_vcfs.sh`` -- extracted, not copied -- against
+real directory trees, so they fail if the shell function and this file drift apart.
+"""
+
+import os
+import re
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+_SCRIPT = Path(__file__).resolve().parent / "submit_job_automated_new_multiple_vcfs.sh"
+
+
+def _extract_resolver():
+    """Pull `_resolve_index_dir` verbatim out of the shipped script."""
+    text = _SCRIPT.read_text()
+    start = text.index("\t_resolve_index_dir() {")
+    # the body is tab-indented one level; its closing brace is the first "\t}"
+    end = text.index("\n\t}\n", start) + len("\n\t}\n")
+    body = text[start:end]
+    # strip the one leading tab so it is a top-level function in the harness
+    return "\n".join(line[1:] if line.startswith("\t") else line
+                     for line in body.splitlines())
+
+
+RESOLVER = _extract_resolver()
+
+
+def resolve(libdir, pam_want, suffix, bmax, locale="C"):
+    """Run the shipped resolver; return the chosen basename, or "" for none."""
+    script = f"{RESOLVER}\n_resolve_index_dir \"$1\" \"$2\" \"$3\" \"$4\"\n"
+    env = dict(os.environ, LC_ALL=locale, LANG=locale)
+    out = subprocess.run(
+        ["bash", "-c", script, "bash", str(libdir), pam_want, suffix, str(bmax)],
+        capture_output=True, text=True, env=env,
+    )
+    if out.returncode not in (0, 1):
+        raise AssertionError(f"resolver errored rc={out.returncode}: {out.stderr}")
+    chosen = out.stdout.strip()
+    return Path(chosen).name if chosen else ""
+
+
+class ResolverHarness(unittest.TestCase):
+    def test_the_function_was_actually_found(self):
+        self.assertIn("_resolve_index_dir() {", RESOLVER)
+        self.assertIn("_pam_want", RESOLVER)
+        # the whole point: no reliance on glob order
+        self.assertIn("_best_exact", RESOLVER)
+
+
+class _Tree(unittest.TestCase):
+    """Builds a genome_library with the given index directory names."""
+
+    def lib(self, *names):
+        d = Path(self.tmp.name)
+        for n in names:
+            (d / n).mkdir(parents=True, exist_ok=True)
+        return d
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+
+class PicksASufficientIndex(_Tree):
+    def test_exact_pam(self):
+        lib = self.lib("NRG_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
+
+    def test_nothing_when_budget_too_small(self):
+        lib = self.lib("NRG_2_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "")
+
+    def test_smallest_sufficient_budget_wins(self):
+        lib = self.lib("NRG_3_hg38", "NRG_5_hg38", "NRG_4_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
+
+    def test_larger_budget_used_when_it_is_the_only_one(self):
+        lib = self.lib("NRG_5_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_5_hg38")
+
+    def test_indels_companion_is_never_selected(self):
+        lib = self.lib("NRG_3_hg38_INDELS")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "")
+
+    def test_non_numeric_budget_is_skipped(self):
+        lib = self.lib("NRG_x_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "")
+
+    def test_variant_suffix(self):
+        lib = self.lib("NRG_3_hg38", "NRG_3_hg38+hg38_HGDP1kGP")
+        self.assertEqual(resolve(lib, "NRG", "hg38+hg38_HGDP1kGP", 3),
+                         "NRG_3_hg38+hg38_HGDP1kGP")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
+
+
+class PamLessStandIn(_Tree):
+    def test_pamless_serves_a_dedicated_search(self):
+        lib = self.lib("NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNN_3_hg38")
+
+    def test_a_different_dedicated_pam_does_not(self):
+        lib = self.lib("NGG_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "")
+
+    def test_nnnrrt_is_a_dedicated_pam_not_a_pamless_index(self):
+        # PAMs/21bp-NNNRRT-SaCas9KKH.txt ships, so NNNRRT_3_* can exist. A glob of
+        # "NNN*" matches it, but it constrains positions 4-6 and cannot stand in
+        # for another PAM.
+        lib = self.lib("NNNRRT_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "")
+        # ... while it still serves its own search
+        self.assertEqual(resolve(lib, "NNNRRT", "hg38", 3), "NNNRRT_3_hg38")
+
+    def test_exact_pam_beats_a_pamless_stand_in(self):
+        lib = self.lib("NNN_3_hg38", "NRG_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
+
+    def test_exact_pam_wins_even_at_a_larger_budget(self):
+        # no padding and no reliance on the post-search PAM filter beats a tighter
+        # bulge budget
+        lib = self.lib("NNN_3_hg38", "NRG_4_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_4_hg38")
+
+    def test_narrowest_pamless_flank_wins(self):
+        # least N-padding for --prune-pam
+        lib = self.lib("NNNNNNNN_3_hg38", "NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNN_3_hg38")
+
+    def test_wide_pamless_used_when_it_is_the_only_one(self):
+        lib = self.lib("NNNNNNNN_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNNNNNNN_3_hg38")
+
+
+class ChoiceIsLocaleIndependent(_Tree):
+    """The regression this file exists for."""
+
+    LOCALES = ("C", "POSIX", "en_US.UTF-8")
+
+    def test_two_pamless_widths_agree_across_locales(self):
+        lib = self.lib("NNNNNNNN_3_hg38", "NNN_3_hg38")
+        picks = {loc: resolve(lib, "NRG", "hg38", 3, locale=loc) for loc in self.LOCALES}
+        self.assertEqual(set(picks.values()), {"NNN_3_hg38"}, picks)
+
+    def test_dedicated_vs_pamless_agrees_across_locales(self):
+        lib = self.lib("NNNNNNNN_3_hg38", "NNN_3_hg38", "NRG_3_hg38")
+        picks = {loc: resolve(lib, "NRG", "hg38", 3, locale=loc) for loc in self.LOCALES}
+        self.assertEqual(set(picks.values()), {"NRG_3_hg38"}, picks)
+
+    def test_full_library_agrees_across_locales(self):
+        lib = self.lib(
+            "NRG_3_hg38", "NRG_3_hg38_INDELS", "NGG_3_hg38", "NNN_3_hg38",
+            "NNNNNNNN_3_hg38", "NNNRRT_3_hg38", "NRG_5_hg38",
+        )
+        for want, expected in (("NRG", "NRG_3_hg38"),
+                               ("NGG", "NGG_3_hg38"),
+                               ("NNNRRT", "NNNRRT_3_hg38"),
+                               ("NNN", "NNN_3_hg38")):
+            picks = {loc: resolve(lib, want, "hg38", 3, locale=loc) for loc in self.LOCALES}
+            self.assertEqual(set(picks.values()), {expected}, f"{want}: {picks}")
+
+
+class ShippedScriptCarriesTheFix(unittest.TestCase):
+    def test_no_bare_nnn_glob_remains(self):
+        # `NNN*_*` as a glob is what matched NNNRRT and made width ordering
+        # locale-dependent; every scan must go through the resolver instead.
+        text = _SCRIPT.read_text()
+        self.assertNotIn('NNN*_*_"${ref_name}"', text)
+        self.assertNotIn('NNN*_*_"${ref_name}+${vcf_name}"', text)
+
+    def test_all_three_scan_sites_use_the_resolver(self):
+        text = _SCRIPT.read_text()
+        calls = len(re.findall(r'\$\(_resolve_index_dir ', text))
+        self.assertGreaterEqual(calls, 3, "reference, variant and precomputed scans")
+
+    def test_script_is_syntactically_valid(self):
+        out = subprocess.run(["bash", "-n", str(_SCRIPT)], capture_output=True, text=True)
+        self.assertEqual(out.returncode, 0, out.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
