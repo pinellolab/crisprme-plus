@@ -1235,7 +1235,7 @@ def download_component(
                         repo, workdir, vcf_name, remote_prefix, token
                     )
                 except Exception as exc:  # network/extract error -> non-fatal
-                    got = False
+                    got = None  # None = errored and already reported below
                     sys.stdout.write(
                         f"NOTE: could not fetch Tier-1 genotype store "
                         f"'genotypes_{vcf_name}.tar.gz' ({exc}); continuing without "
@@ -1245,6 +1245,15 @@ def download_component(
                     sys.stdout.write(
                         f"Installed Tier-1 genotype store genotypes_{vcf_name}/ "
                         f"into {os.path.join(workdir, 'Dictionaries')}\n"
+                    )
+                elif got is False:
+                    # Genuinely absent (a registry-only publish), as distinct from a
+                    # fetch that errored -- that case reported itself above, and
+                    # saying "has no companion" for it would be wrong.
+                    sys.stdout.write(
+                        f"NOTE: index '{index_name}' has no genotypes_{vcf_name}.tar.gz "
+                        f"companion in {repo} (registry-only/detection publish); "
+                        f"off-target detection works, per-sample Samples degraded.\n"
                     )
             # ALWAYS-SHIP the shared reference index. A variant index tarball
             # (<pam>_<N>_<ref>+<vcf>) does NOT bundle the reference index
@@ -1272,12 +1281,6 @@ def download_component(
                         f"NOTE: could not fetch the reference index "
                         f"'{ref_index_name}' ({exc}); the search will build it on "
                         f"demand from the raw genome (a shared base component).\n"
-                    )
-                else:
-                    sys.stdout.write(
-                        f"NOTE: index '{index_name}' has no genotypes_{vcf_name}.tar.gz "
-                        f"companion in {repo} (registry-only/detection publish); "
-                        f"off-target detection works, per-sample Samples degraded.\n"
                     )
         # GAP 2: a merged variant index searches ONE vcf folder and the search
         # expects a single combined samplesIDs/<vcf_name>.samplesID.txt, but the

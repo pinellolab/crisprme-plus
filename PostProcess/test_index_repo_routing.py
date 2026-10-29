@@ -12,6 +12,7 @@ Hermetic: these are pure functions over names, no network.
 """
 
 import os
+import pathlib
 import unittest
 
 import crisprme_hf as hf
@@ -103,6 +104,70 @@ class ExistenceProbeFailsSoft(unittest.TestCase):
         self.assertFalse(
             hf._index_archive_exists("definitely/not-a-real-repo", "NNN_3_hg38")
         )
+
+
+class GenotypeCompanionNoteIsAttachedToTheRightResult(unittest.TestCase):
+    """The "no genotype companion" note must follow the companion fetch, not the
+    reference-index fetch.
+
+    It had been written as the `else:` of the shared-reference-index try/except, so
+    it fired whenever THAT download succeeded -- telling the user per-sample Samples
+    were degraded moments after the companion was installed -- and, worse, a
+    genuinely missing companion was reported by nothing at all whenever the reference
+    index was already present and its block skipped. Observed on a real
+    `download --what index --index-name NNN_3_hg38+hg38_HGDP1kGP`.
+    """
+
+    NOTE = "has no genotypes_"
+
+    def setUp(self):
+        import ast
+        self.src = pathlib.Path(hf.__file__).read_text()
+        self.tree = ast.parse(self.src)
+
+    def _note_parents(self):
+        """Every statement that directly contains the note, by kind."""
+        import ast
+        hits = []
+        for node in ast.walk(self.tree):
+            if not isinstance(node, (ast.If, ast.Try)):
+                continue
+            for field, branch in (("body", getattr(node, "body", [])),
+                                  ("orelse", getattr(node, "orelse", []))):
+                for stmt in branch:
+                    text = ast.get_source_segment(self.src, stmt) or ""
+                    if self.NOTE in text:
+                        hits.append((type(node).__name__, field,
+                                     ast.get_source_segment(self.src, node) or ""))
+        return hits
+
+    def test_the_note_exists_exactly_once(self):
+        self.assertEqual(self.src.count(self.NOTE), 1)
+
+    def test_the_note_is_not_in_a_try_else(self):
+        """A Try/orelse is what mis-attached it to the reference-index download."""
+        for kind, field, _ in self._note_parents():
+            self.assertNotEqual(
+                (kind, field), ("Try", "orelse"),
+                "the companion note is attached to a try/except else again",
+            )
+
+    def test_the_note_is_guarded_on_the_companion_result(self):
+        """It must sit under a branch testing `got`, not the reference index."""
+        parents = self._note_parents()
+        self.assertTrue(parents, "note not found inside any if/try")
+        self.assertTrue(
+            any("got is False" in src for _, _, src in parents),
+            f"note is not guarded on the companion result: {[k for k, _, _ in parents]}",
+        )
+
+    def test_an_errored_fetch_is_not_reported_as_absent(self):
+        """got=None marks "errored and already reported"; only False means absent."""
+        self.assertIn("got = None", self.src)
+        self.assertIn("elif got is False:", self.src)
+
+    def test_reference_index_success_message_is_still_there(self):
+        self.assertIn("Also installed the shared reference index", self.src)
 
 
 if __name__ == "__main__":

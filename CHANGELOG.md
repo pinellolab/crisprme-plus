@@ -94,6 +94,15 @@ and the `release-crisprme` skill.
   broke every benchmark. The flag allowlist was checked against the help text and against what the
   parser reads, but not against the commands this repo builds, so a dead flag in a caller could only
   surface by running the benchmarks; that gap is now a static test.
+- **A downloaded variant index warned that its genotype store was missing right after installing
+  it.** The "no `genotypes_<vcf>.tar.gz` companion ... per-sample Samples degraded" note was written
+  as the `else:` of the shared-reference-index `try`/`except`, so it fired whenever *that* download
+  succeeded — an unrelated event. It was wrong in both directions: false on a complete download, and
+  silent when the companion really was absent but the reference index was already installed, so its
+  block never ran. The note now follows the companion fetch's own result, and distinguishes
+  "genuinely absent" from "the fetch errored" — the latter already reports itself, and calling it
+  absent would be wrong.
+
 - **A search that legitimately found nothing was reported as a failure.** Three places sized a
   CRISPRitz targets file with `-s` or `wc -l` to decide whether the search had found anything. Those
   are equivalent to counting data rows only while the file has no header — which was true only
