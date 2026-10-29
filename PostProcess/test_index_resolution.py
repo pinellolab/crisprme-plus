@@ -71,10 +71,28 @@ class _Tree(unittest.TestCase):
     """Builds a genome_library with the given index directory names."""
 
     def lib(self, *names):
+        """Each name becomes a FINISHED index: a directory that holds a .bin.
+
+        The .bin matters -- the resolver treats a directory with none as absent,
+        because that is exactly what an index looks like before its build writes
+        the first chromosome.
+        """
+        d = Path(self.tmp.name)
+        for n in names:
+            (d / n).mkdir(parents=True, exist_ok=True)
+            (d / n / "chr1.bin").write_bytes(b"")
+        return d
+
+    def lib_unfinished(self, *names):
+        """Each name becomes a directory with NO .bin -- a build not yet started."""
         d = Path(self.tmp.name)
         for n in names:
             (d / n).mkdir(parents=True, exist_ok=True)
         return d
+
+    def lock(self, libdir, name):
+        """Take the build lock on one index, as `index-genome` holds it while writing."""
+        (Path(libdir) / f"{name}.lock").mkdir()
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -225,6 +243,51 @@ class ChoiceIsLocaleIndependent(_Tree):
                                ("NNN", "NNN_3_hg38")):
             picks = {loc: resolve(lib, want, "hg38", 3, locale=loc) for loc in self.LOCALES}
             self.assertEqual(set(picks.values()), {expected}, f"{want}: {picks}")
+
+
+class AnIndexStillBeingBuiltIsNotSelected(_Tree):
+    """A half-written index is indistinguishable from a finished one by NAME.
+
+    `index-genome` creates the directory, takes "<dir>.lock", and then writes one
+    .bin per chromosome. A run that starts in that window used to see the name,
+    print "Reference index present", and search a PARTIAL index -- returning fewer
+    off-targets with no error and exit 0. That is the same failure shape as a
+    crashed search reported as a clean negative, so the resolver must not pick it.
+    """
+
+    def test_a_locked_index_is_skipped(self):
+        lib = self.lib("NRG_3_hg38")
+        self.lock(lib, "NRG_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "")
+
+    def test_a_finished_index_is_used_while_another_is_building(self):
+        lib = self.lib("NRG_3_hg38", "NRG_4_hg38")
+        self.lock(lib, "NRG_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_4_hg38")
+
+    def test_an_unlocked_index_is_still_used(self):
+        """The guard must not make a normal library look empty."""
+        lib = self.lib("NRG_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
+
+    def test_a_directory_with_no_bin_is_treated_as_absent(self):
+        lib = self.lib_unfinished("NRG_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "")
+
+    def test_a_bin_less_directory_does_not_shadow_a_real_one(self):
+        lib = self.lib("NRG_4_hg38")
+        self.lib_unfinished("NRG_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_4_hg38")
+
+    def test_a_pamless_stand_in_needs_a_bin_too(self):
+        lib = self.lib_unfinished("NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NGG", "hg38", 3, prune=1), "")
+
+    def test_a_lock_without_its_index_is_harmless(self):
+        """Locks are named "<dir>.lock"; the glob must not pick one up as an index."""
+        lib = self.lib("NRG_3_hg38")
+        self.lock(lib, "NRG_9_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
 
 
 class ShippedScriptCarriesTheFix(unittest.TestCase):

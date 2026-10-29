@@ -106,6 +106,15 @@ and the `release-crisprme` skill.
   serves with or without pruning. Before `--prune-pam` existed the scan matched width 3 only, so
   this was reachable only on this branch.
 
+- **An index still being built could be selected as if it were finished.** `index-genome` creates the
+  index directory, takes a `<dir>.lock`, and then writes one `.bin` per chromosome, so for the whole
+  build a half-written index is indistinguishable from a complete one by name. A run starting in that
+  window printed `Reference index present` and searched a **partial** index — fewer off-targets, no
+  error, exit 0 — and did so even when a complete, sufficient index sat right beside it. The scan now
+  skips any candidate whose build lock is held, and any directory holding no `.bin` at all, so such a
+  run takes the existing wait-for-the-build path instead. Index choice on a finished library is
+  unchanged.
+
 - **A downloaded variant index warned that its genotype store was missing right after installing
   it.** The "no `genotypes_<vcf>.tar.gz` companion ... per-sample Samples degraded" note was written
   as the `else:` of the shared-reference-index `try`/`except`, so it fired whenever *that* download

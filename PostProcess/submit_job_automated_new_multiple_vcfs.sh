@@ -267,6 +267,23 @@ while read vcf_f; do
 		for _d in "$_lib"/*_*_"$_suffix"; do
 			[ -d "$_d" ] || continue
 			case "$_d" in *_INDELS) continue ;; esac
+			# A concurrent `index-genome` holds "<dir>.lock" while it writes the
+			# directory one .bin at a time, so a half-written index is indistinguishable
+			# from a finished one by NAME. Selecting one searches a PARTIAL index:
+			# fewer off-targets, no error, exit 0. Skip it and let the build path below
+			# block on the same lock, which is what a concurrent run already does.
+			if [ -d "$_d.lock" ]; then
+				continue
+			fi
+			# No .bin at all cannot serve a search either: a build that has not written
+			# its first chromosome yet, or a leftover from one that was cleaned up.
+			# Treat it as absent rather than hand crispritz an index it refuses with
+			# "no .bin index files found" much further down the pipeline.
+			if [ -z "$(find "$_d" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)" ]; then
+				continue
+			fi
+			# (Both skips are silent on purpose: this function's STDOUT is its return
+			# value, and a write to stderr is fatal to the enclosing stage.)
 			_b=$(basename "$_d")
 			_pam=${_b%%_*}          # <PAM>_<N>_<suffix>
 			_n=${_b#*_}
