@@ -392,7 +392,7 @@ By completing these steps, your system will be fully prepared for installing CRI
 ---
 
 > **CRISPRme+ runs on Python 3.11 and installs from source** — the build
-> compiles CRISPRitz 2.9.0 and installs both tools into a conda environment. A native
+> compiles CRISPRitz 2.9.1 and installs both tools into a conda environment. A native
 > Bioconda package for the CRISPRme+ line is **in preparation**; until it lands, the Bioconda
 > `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** the
 > CRISPRme+ (2.8.x) line.
@@ -588,7 +588,7 @@ cd crisprme-plus
 mamba env create -f environment.yml
 mamba activate crisprme
 
-# 3. build CRISPRitz 2.9.0 from source and install both tools into the env
+# 3. build CRISPRitz 2.9.1 from source and install both tools into the env
 bash install_from_source.sh
 
 # 4. verify (both tools are now on your PATH)

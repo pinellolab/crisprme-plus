@@ -2101,8 +2101,10 @@ def complete_search() -> None:
 
     # Issue #105 (odd-length partially-degenerate PAM + bulges crashing the CRISPRitz
     # C++ engine with a heap-corruption abort) was fixed in CRISPRitz, and CRISPRme+
-    # hard-pins CRISPRitz 2.9.0 on every install surface (Docker builds crispritz_ref
-    # v2.9.0, install_from_source.sh builds 2.9.0, Bioconda pins crispritz >=2.9.0).
+    # hard-pins a CRISPRitz >= 2.9.0 on every install surface (Docker and
+    # install_from_source.sh build the tag in crispritz_ref / CRISPRITZ_REF, Bioconda
+    # pins crispritz >=2.9.0). The pin moves with each release, so this says ">=" and
+    # not an exact version.
     # No supported install can therefore run a vulnerable engine, so the old runtime
     # warning here was removed: it fired on the DEFAULT PAM (NRG is odd-length and
     # carries the partially-degenerate "R"), crying wolf on essentially every default

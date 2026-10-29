@@ -91,6 +91,28 @@ prune_pam="${27:-0}"
 prune_pam_flag=""
 [ "$prune_pam" = "1" ] && prune_pam_flag="--prune-pam"
 
+# Fail loudly if the installed CRISPRitz cannot prune. crispritz.py builds the
+# searchTST argv explicitly from the options it recognizes, so a build without
+# --prune-pam does not reject the flag -- it drops it, and the search runs
+# UNPRUNED. The post-search PAM filter still enforces the requested PAM, so the
+# report would come out right while the run read the whole PAM-less index: far
+# slower, with an enormous intermediate, and silently not what was asked for.
+# CRISPRme pins a CRISPRitz version that supports this, but the pin is
+# overridable (CRISPRITZ_REF / an engine already on PATH), so check rather than
+# assume. Grep the installed script instead of comparing versions: it is the
+# thing that would drop the flag.
+if [ "$prune_pam" = "1" ]; then
+	_cz_path=$(command -v crispritz.py 2>/dev/null)
+	if [ -n "$_cz_path" ] && ! grep -q -- "--prune-pam" "$_cz_path" 2>/dev/null; then
+		printf "ERROR: --prune-pam was requested, but the installed CRISPRitz does not support it\n" >&2
+		printf "       (%s has no --prune-pam handling, so the flag would be dropped and the\n" "$_cz_path" >&2
+		printf "       search would run unpruned over the whole PAM-less index).\n" >&2
+		printf "       Install a CRISPRitz build with --prune-pam, or drop the flag and use a\n" >&2
+		printf "       dedicated index for this PAM.\n" >&2
+		exit 1
+	fi
+fi
+
 # Whether to emit the alternative-alignments (altMerge / all_results_with_alternative_alignments)
 # output = the NON-best alignments per locus cluster. Inherited from crisprme.py via the env var
 # CRISPRME_EMIT_ALT_ALIGNMENTS (default population-level=off, --per-sample=on; --alt-alignments /
