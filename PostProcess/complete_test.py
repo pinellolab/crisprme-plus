@@ -772,11 +772,13 @@ def _run_benchmarks_ondemand(chrom: str, dataset: str, threads: int, debug: bool
             continue
         th = dict(global_th)
         th.update(bench.get("thresholds", {}))
-        # bMax = bDNA+bRNA (provenance; crisprme.py recomputes it). The binding knob is
-        # --max-total-edits: default mm+bDNA+bRNA (non-binding -> per-type mode) unless the
-        # case pins a smaller single-n value. The brute-force ground truth must be generated
-        # with the SAME per-type budgets AND --max-total-edits (see generate_references.py).
-        bmax = th["bDNA"] + th["bRNA"]
+        # bMax (= bDNA+bRNA) is NOT passed: complete-search has never had a --bmax flag,
+        # it recomputes bMax from the per-type budgets. It used to be passed anyway and was
+        # silently ignored until the unknown-flag check started rejecting it. The binding
+        # knob is --max-total-edits: default mm+bDNA+bRNA (non-binding -> per-type mode)
+        # unless the case pins a smaller single-n value. The brute-force ground truth must
+        # be generated with the SAME per-type budgets AND --max-total-edits (see
+        # generate_references.py).
         max_total_edits = th.get("max_total_edits", th["mm"] + th["bDNA"] + th["bRNA"])
         output_dir = f"{COMPLETETESTRESDIR}_{bench['name']}"
         pam = write_pamfile(bench["pam_name"], bench["pam_content"])
@@ -790,7 +792,7 @@ def _run_benchmarks_ondemand(chrom: str, dataset: str, threads: int, debug: bool
         # because run_crisprme_test gated this branch on CRISPRME_ALLOW_ONDEMAND_BUILD).
         crisprme_cmd = (
             f"crisprme.py complete-search --genome {genome_dir} "
-            f"--bmax {bmax} --mm {th['mm']} --bDNA {th['bDNA']} --bRNA {th['bRNA']} "
+            f"--mm {th['mm']} --bDNA {th['bDNA']} --bRNA {th['bRNA']} "
             f"--max-total-edits {max_total_edits} "
             f"--merge 3 --pam {pam} --guide {guide} --vcf {vcf} "
             f"--samplesID {samplesids} --annotation {encode} "

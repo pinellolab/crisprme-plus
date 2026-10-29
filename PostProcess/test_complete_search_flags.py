@@ -24,6 +24,7 @@ importable and are skipped otherwise.
 """
 
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -137,6 +138,79 @@ def _importable():
 
 
 @unittest.skipUnless(_importable(), "crisprme.py dependencies not installed")
+class TestCallersUseAcceptedFlags(unittest.TestCase):
+    """Every complete-search flag the project itself passes must be accepted.
+
+    The allowlist was checked against the help text and against the flags the
+    parser reads, but not against the commands this repo builds. It shipped
+    rejecting ``--bmax``, which ``complete_test.py`` had been passing for the
+    brute-force benchmarks -- complete-search never had such a flag and silently
+    ignored it, so nothing failed until the unknown-flag check arrived and broke
+    the benchmark run. A static scan is cheap; finding this by running the
+    benchmarks is not.
+    """
+
+    # flags that are not complete-search's own: a subcommand's or a shell's
+    IGNORE = frozenset({"--help"})
+
+    def _invocations(self):
+        """Yield (path, flags) for every complete-search command this repo builds.
+
+        Deliberately narrow, because a loose scan reports noise and gets muted:
+        the trigger is a non-comment line literally building `crisprme.py
+        complete-search`, and the command is then followed only through adjacent
+        string pieces. crisprme.py itself is excluded -- it defines the flags, and
+        its help text is covered by test_every_documented_flag_is_accepted.
+        """
+        for path in sorted(pathlib.Path(REPO).rglob("*")):
+            if path.suffix not in (".py", ".sh", ".yml", ".yaml"):
+                continue
+            if (path.name.startswith("test_") or ".git" in path.parts
+                    or path.resolve() == pathlib.Path(CRISPRME).resolve()):
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").split("\n")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for i, line in enumerate(lines):
+                if "crisprme.py complete-search" not in line:
+                    continue
+                if line.lstrip().startswith("#"):
+                    continue
+                block = [line]
+                for nxt in lines[i + 1:i + 30]:
+                    if nxt.lstrip().startswith("#"):
+                        break
+                    if '"' in nxt or "'" in nxt or block[-1].rstrip().endswith("\\"):
+                        block.append(nxt)
+                    else:
+                        break
+                flags = set(FLAG.findall(" ".join(block))) - self.IGNORE
+                if flags:
+                    yield path.relative_to(REPO), flags
+
+    def test_scan_finds_the_benchmark_invocation(self):
+        """Guard the scan itself: if it finds nothing it proves nothing."""
+        paths = {str(p) for p, _ in self._invocations()}
+        self.assertIn("PostProcess/complete_test.py", paths,
+                      f"scan found only: {sorted(paths)}")
+
+    def test_no_caller_passes_a_flag_the_allowlist_rejects(self):
+        allowed = allowlist(_source_lines())
+        offenders = []
+        for path, flags in self._invocations():
+            for flag in sorted(flags - allowed):
+                offenders.append(f"{path}: {flag}")
+        self.assertEqual(offenders, [], "complete-search flags no code accepts: "
+                                        + ", ".join(offenders))
+
+    def test_bmax_is_gone(self):
+        """The specific regression: --bmax was never a complete-search flag."""
+        self.assertNotIn("--bmax", allowlist(_source_lines()))
+        for path, flags in self._invocations():
+            self.assertNotIn("--bmax", flags, f"{path} still passes --bmax")
+
+
 class TestRejectionBehaviour(unittest.TestCase):
     """End to end: the gate runs before any other validation, so these need no data."""
 
