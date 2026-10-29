@@ -48,6 +48,19 @@ from datetime import datetime, timezone
 # repo once it exists).
 DEFAULT_HF_REPO = "lucapinello/crisprme-data"
 
+# PAM-less indexes with a flank WIDER than 3 nt live in their own dataset repo.
+# A 3-nt flank is stored exactly like a dedicated 3-nt PAM index, so any CRISPRme
+# version can read it and NNN_3 ships in the default repo. A wider flank cannot be
+# read correctly by a release that predates --prune-pam, so keeping those out of the
+# repo older defaults point at is what stops an old client from downloading an index
+# it would misread. Routing is by flank width, not by name, so it cannot be forgotten
+# at publish time.
+GENERAL_INDEX_HF_REPO = "lucapinello/crisprme-data-general-index"
+
+# A flank of this width or narrower is readable by every release, so it stays in the
+# default repo.
+_COMPAT_FLANK_WIDTH = 3
+
 # Components understood by the download command and their remote sub-paths.
 # This layout is the single source of truth for the HF dataset tree; the
 # transparent setup/complete_test fast-path (utils.hf_fetch) targets the same
@@ -187,6 +200,55 @@ def resolve_repo(cli_repo: Optional[str] = None) -> str:
     return os.environ.get("CRISPRME_HF_REPO", DEFAULT_HF_REPO)
 
 
+def index_flank_width(index_name: str) -> Optional[int]:
+    """Stored flank width of a PAM-less index, or None if it is not PAM-less.
+
+    An index directory/archive is ``<PAM>_<N>_<ref>[+<ref>_<vcf>]``. A PAM-less
+    index declares an all-N PAM, and its width is that PAM's length.
+    """
+    if not index_name:
+        return None
+    pam = canonical_index_name(index_name).split("_", 1)[0]
+    if pam and set(pam) == {"N"}:
+        return len(pam)
+    return None
+
+
+def repo_overridden(cli_repo: Optional[str] = None) -> bool:
+    """True when the caller named a repo explicitly (flag or env var)."""
+    return bool(cli_repo) or bool(os.environ.get("CRISPRME_HF_REPO"))
+
+
+def _index_archive_exists(repo: str, index_name: str) -> bool:
+    """Best-effort check that ``indexes/<index_name>.tar.gz`` is in ``repo``.
+
+    Returns False on any error (offline, repo absent, dependency missing) so a
+    caller treats "cannot tell" the same as "not there" and falls back.
+    """
+    try:
+        hf = _require_hf()
+        want = f"{_COMPONENT_PREFIXES['index']}/{canonical_index_name(index_name)}.tar.gz"
+        files = hf.HfApi().list_repo_files(repo, repo_type="dataset")
+        return want in set(files)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def resolve_index_repo(index_name: str, cli_repo: Optional[str] = None) -> str:
+    """Which repo holds (or should hold) this index.
+
+    An explicit ``--hf-repo`` / ``CRISPRME_HF_REPO`` always wins. Otherwise a
+    PAM-less index whose flank is wider than a dedicated 3-nt PAM index routes to
+    :data:`GENERAL_INDEX_HF_REPO`; everything else to :data:`DEFAULT_HF_REPO`.
+    """
+    if repo_overridden(cli_repo):
+        return resolve_repo(cli_repo)
+    width = index_flank_width(index_name)
+    if width is not None and width > _COMPAT_FLANK_WIDTH:
+        return GENERAL_INDEX_HF_REPO
+    return DEFAULT_HF_REPO
+
+
 def resolve_token(cli_token: Optional[str] = None) -> Optional[str]:
     """Resolve an HF token for uploads.
 
@@ -235,7 +297,36 @@ def list_available_downloads(
     ``vcfs/`` (size = sum of that folder's files); ``index`` -> the
     ``indexes/<name>.tar.gz`` archives. Returns ``[]`` on any error (offline,
     missing repo, dependency absent) so callers can fall back gracefully.
+
+    For ``index`` with no repo named, both the default repo and the wide-flank
+    PAM-less repo are listed and merged, so the catalog a user sees matches what
+    ``download`` can actually fetch. A failure on either side is skipped rather
+    than emptying the whole listing.
     """
+    if component == "index" and not repo_overridden(repo):
+        merged: Dict[str, Dict] = {}
+        for r in (DEFAULT_HF_REPO, GENERAL_INDEX_HF_REPO):
+            for row in _list_index_archives(r):
+                merged.setdefault(row["name"], row)
+        return sorted(merged.values(), key=lambda row: row["name"])
+    return _list_index_archives(repo) if component == "index" else _list_other(
+        component, repo
+    )
+
+
+def _list_other(component: str, repo: Optional[str] = None) -> List[Dict]:
+    """Original single-repo listing, for the non-index components."""
+    return _list_available_downloads_one(component, repo)
+
+
+def _list_index_archives(repo: Optional[str] = None) -> List[Dict]:
+    """Index archives in one repo (``[]`` if that repo cannot be read)."""
+    return _list_available_downloads_one("index", repo)
+
+
+def _list_available_downloads_one(
+    component: str, repo: Optional[str] = None
+) -> List[Dict]:
     if component not in ("genome", "vcf", "index"):
         return []
     try:
@@ -747,7 +838,14 @@ def download_component(
             f"Unknown component '{component}'. Expected one of: "
             f"{', '.join(sorted(_COMPONENT_PREFIXES))}."
         )
-    repo = resolve_repo(repo)
+    if component == "index" and index_name and not repo_overridden(repo):
+        # Same routing as publish. Fall back to the default repo if the routed one
+        # does not have it, so an index published before the split still resolves.
+        repo = resolve_index_repo(index_name, repo)
+        if repo != DEFAULT_HF_REPO and not _index_archive_exists(repo, index_name):
+            repo = DEFAULT_HF_REPO
+    else:
+        repo = resolve_repo(repo)
     remote_prefix = _COMPONENT_PREFIXES[component]
     local_dir = os.path.join(workdir, _COMPONENT_LOCALDIR[component])
 
@@ -1429,7 +1527,9 @@ def publish_index(
     if not os.path.isdir(index_dir):
         raise ValueError(f"Index directory {index_dir} does not exist")
     index_name = os.path.basename(index_dir)
-    repo = resolve_repo(repo)
+    # Route a wide-flank PAM-less index to its own repo, so an older client that
+    # only knows the default repo cannot download an index it would misread.
+    repo = resolve_index_repo(index_name, repo)
     token = resolve_token(token)
     if not token:
         raise ValueError(

@@ -267,7 +267,7 @@ jobs:
         working-directory: PostProcess
         run: >
           python -m unittest test_indel_header_injection test_complete_search_flags
-          test_index_resolution -v
+          test_index_resolution test_index_repo_routing -v
 
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import

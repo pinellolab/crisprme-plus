@@ -28,6 +28,15 @@ and the `release-crisprme` skill.
   ones; a flank wider than 3 nt is not readable by earlier releases, so those live in a separate
   repository. Needs a CRISPRitz build that supports `--prune-pam`.
   See [`METHODS.md` §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering).
+- **A second dataset repo for wide-flank PAM-less indexes.** A PAM-less index with a 3-nt flank
+  stores what a dedicated 3-nt PAM index stores, so any release can read it and `NNN_3` stays in
+  `lucapinello/crisprme-data`. A wider flank cannot be read by a release predating `--prune-pam`, so
+  those are published to `lucapinello/crisprme-data-general-index`, which older defaults never point
+  at. `download` and `publish-index` route on the flank width parsed from the index name — not on a
+  list of names, so it cannot be forgotten at publish time — `download` falls back to the default
+  repo when the routed one lacks the archive, and the catalog listing merges both repos so what is
+  offered is what can be fetched. `--hf-repo` / `CRISPRME_HF_REPO` still override.
+
 - **Unrecognized `complete-search` flags are now rejected.** `complete-search` parses `sys.argv` by
   hand, so a flag nothing reads was simply ignored: `--prune-pams` instead of `--prune-pam` ran a
   genome-wide search with pruning quietly off, finished without complaint, and was detectable only by

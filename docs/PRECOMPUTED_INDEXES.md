@@ -113,9 +113,13 @@ variant index. Choose one when you expect to search several PAMs over the same g
 
 > **Flank width and compatibility.** A 3-nt flank is readable by any CRISPRme version: the
 > stored geometry is the same as a dedicated 3-nt PAM index, which is why `NNN_3` ships in
-> this repo. A **wider** flank is not — an older release would mis-read it — so indexes
-> with a flank above 3 nt are published in a **separate repository** that older defaults
-> never point at, rather than alongside these.
+> this repo. A **wider** flank is not — a release predating `--prune-pam` would mis-read it
+> — so those indexes live in a separate dataset repo,
+> **`lucapinello/crisprme-data-general-index`**, which older defaults never point at.
+> `download` and `publish-index` route by the flank width in the index name, so a wide-flank
+> index cannot be published to the default repo by accident, and the Settings catalog merges
+> both repos so what is listed is what can be fetched. An explicit `--hf-repo` or
+> `CRISPRME_HF_REPO` overrides the routing.
 
 Each variant index stamps its **`data_type`** (`sites-only` / `genotyped-unphased` /
 `genotyped-phased` / `hybrid`) and a `phased` flag in every `registry_<vcf>/reg_<chrom>.idx`
