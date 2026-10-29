@@ -34,6 +34,13 @@ and the `release-crisprme` skill.
   diffing the results against a dedicated index. Unknown flags now fail up front, with a suggestion
   for a near miss.
 
+### Changed
+- **CRISPRitz pin moved to v2.9.1**, the tag carrying `--prune-pam` plus three engine fixes: a
+  genomic `N` in a stored PAM/flank region no longer drops the target, a non-`.bin` sidecar in the
+  index directory no longer crashes the search, and a multiallelic site no longer compounds its indel
+  alleles into one fake contig. Applies to the Docker build (`crispritz_ref`) and
+  `install_from_source.sh` (`CRISPRITZ_REF`).
+
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
   rsID, allele frequency and carrier samples.** The merged indel targets file is the only file in
@@ -77,6 +84,14 @@ and the `release-crisprme` skill.
   broke every benchmark. The flag allowlist was checked against the help text and against what the
   parser reads, but not against the commands this repo builds, so a dead flag in a caller could only
   surface by running the benchmarks; that gap is now a static test.
+- **`--prune-pam` could run with pruning silently off.** `crispritz.py` builds its search argv
+  explicitly from the options it recognizes, so a CRISPRitz build without `--prune-pam` does not
+  reject the flag — it drops it, and the search runs unpruned over the whole PAM-less index. The
+  post-search PAM filter still enforces the requested PAM, so the report came out right while the run
+  read an index many times larger than it needed. `complete-search` now checks that the installed
+  CRISPRitz can prune and fails with an explanation if not, rather than assuming it from the pin,
+  which is overridable through `CRISPRITZ_REF` or an engine already on `PATH`.
+
 - **The report manifest could stamp a hardcoded version.** The run manifest in the shareable report
   fell back to a literal `"2.8.0"` when a run recorded no version. It now resolves the real version,
   and reports `unknown` rather than a plausible-but-wrong number — this manifest is the IND
