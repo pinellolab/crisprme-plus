@@ -28,7 +28,10 @@ and the `release-crisprme` skill.
   on a pamless index, against an identical 13,253-row justified core; because the injected row is
   whatever lands at line 1, the count varied with the index. `pam_filter.py` and the edits cap now keep
   `#` lines, `post_analisi_indel.sh` prepends only an actual header, and the indel post-analysis rejects
-  and counts rows carrying another contig's label. The SNP leg was never affected. Covered by
+  and counts rows carrying another contig's label. The injected row also moved one legitimate row's
+  CRISPR-Bulge score by one unit in the last place: scoring runs in fixed-size batches, so an extra row
+  changes a batch's contents and with it the order of the reductions inside it. That score now agrees
+  across indices. The SNP leg was never affected. Covered by
   `PostProcess/test_indel_header_injection.py`.
 
 ## [2.8.0] - 2026-10-23

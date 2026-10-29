@@ -56,7 +56,13 @@ false-positive filter `remove_bad_indel_targets.py` + #96 chr-assignment fix). C
   dedicated NRG index, 11 on a K=8 pamless index, against an identical 13,253-row justified core.
   Fixed in four places with `PostProcess/test_indel_header_injection.py` (14 tests) as the
   sequence-level regression test this item asked for. Confirmed by an A/B on the real merged targets
-  through the real pipeline: headerless reproduces the fan-out, header-restored does not.
+  through the real pipeline: headerless reproduces the fan-out, header-restored does not. Verified
+  end-to-end on three re-runs of the same genome-wide search over three different indices: every
+  phantom is gone, each of the 13,253 indel rows is justified by its own window, and the three
+  reports are byte-identical both to each other and to the one arm that had never shown a phantom,
+  so the fix is inert where there was nothing to fix. The injection also moved one legitimate row's
+  CRISPR-Bulge score by one unit in the last place, through batch composition in the scorer — so a
+  fan-out of this kind is not purely additive.
   Still open: whether the exact #77 dataset is fully explained by this, an overlap gap, or both.
 - **#39** radar-chart `guide[count]` IndexError — legitimately closed (user error), but the code still lacks a
   guide-length guard; candidate for a future friendly-error check.
