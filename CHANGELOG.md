@@ -52,9 +52,10 @@ and the `release-crisprme` skill.
 
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
-  rsID, allele frequency and carrier samples.** The merged indel targets file is the only file in
-  `crispritz_targets/` that carries a header, and `post_analisi_indel.sh` copies its first line as the
-  header of each per-chromosome subset. Two filters read that header as a target and dropped it:
+  rsID, allele frequency and carrier samples.** Every CRISPRitz targets file carries a `#` header, and
+  `post_analisi_indel.sh` copies the merged indel file's first line as the header of each
+  per-chromosome subset — it is the only stage that does so, which is why only the indel leg was
+  affected. Two filters read that header as a target and dropped it:
   `pam_filter.py` guarded headers with a column count, but the CRISPRitz header has all 10 columns, so
   its `DNA` column was taken for a PAM region and rejected; and the `--max-total-edits` cap compared
   `$10` (`"Total"`) against the numeric cap as strings. With the header gone, `head -1` returned the
@@ -93,6 +94,16 @@ and the `release-crisprme` skill.
   broke every benchmark. The flag allowlist was checked against the help text and against what the
   parser reads, but not against the commands this repo builds, so a dead flag in a caller could only
   surface by running the benchmarks; that gap is now a static test.
+- **A search that legitimately found nothing was reported as a failure.** Three places sized a
+  CRISPRitz targets file with `-s` or `wc -l` to decide whether the search had found anything. Those
+  are equivalent to counting data rows only while the file has no header — which was true only
+  because the filter bug above was stripping it. With the header correctly preserved, a zero-hit
+  search left a header-only file, the zero-hit short-circuit saw a non-empty file, and the run
+  aborted with "the search found 1 raw off-target(s) but none survived post-analysis". The two bugs
+  had been cancelling. All three sites now count non-header rows through one helper, which also
+  handles a file that has no header rather than blind-skipping its first line. Caught by the Cas12a
+  brute-force benchmark, whose chr22 result is genuinely empty.
+
 - **`--prune-pam` could run with pruning silently off.** `crispritz.py` builds its search argv
   explicitly from the options it recognizes, so a CRISPRitz build without `--prune-pam` does not
   reject the flag — it drops it, and the search runs unpruned over the whole PAM-less index. The

@@ -98,6 +98,22 @@ ROW_OVER_CAP = (
 NRG_PAM_FILE = "ACTGAAATCTGTAAGCAGGCNRG 3\n"  # 3' PAM, motif = last 3 = NRG
 
 
+def _extract_shell_function(name):
+    """Pull a tab-indented shell function verbatim out of submit_job.
+
+    Extracted rather than copied, so the test fails if the shipped function and
+    this file ever drift apart.
+    """
+    with open(SUBMIT, encoding="utf-8") as fh:
+        text = fh.read()
+    start = text.index(f"\t{name}() {{")
+    end = text.index("\n\t}\n", start) + len("\n\t}\n")
+    body = text[start:end]
+    return "\n".join(
+        line[1:] if line.startswith("\t") else line for line in body.splitlines()
+    )
+
+
 def _write(tmpdir, name, lines):
     path = os.path.join(tmpdir, name)
     with open(path, "w") as fh:
@@ -293,6 +309,77 @@ class ShippedScriptsCarryTheFix(unittest.TestCase):
         for ln in cap:
             self.assertIn("/^#/", ln,
                           f"cap awk must keep '#' header lines: {ln.strip()!r}")
+
+
+class TargetRowCountIgnoresTheHeader(unittest.TestCase):
+    """An empty result must not read as one hit.
+
+    A CRISPRitz targets file carries a '#' header. While pam_filter was stripping
+    it, `-s file` and `wc -l` were accidentally equivalent to counting data rows, so
+    three call sites used them. With the header correctly preserved, a zero-hit
+    search produced a header-only file, the zero-hit short-circuit saw a non-empty
+    file, and a search that legitimately found nothing was reported as a failure --
+    "the search found 1 raw off-target(s) but none survived post-analysis". Caught by
+    the Cas12a brute-force benchmark, which has a genuinely empty chr22 result.
+    """
+
+    HEADER = ("#Bulge type\tcrRNA\tDNA\tChromosome\tPosition\tCluster Position"
+              "\tDirection\tMismatches\tBulge Size\tTotal")
+    ROW = "X\tACGT\tACGT\tchr22\t100\t100\t+\t0\t0\t0"
+
+    def _rows(self, content):
+        import subprocess, tempfile, os
+        script = _extract_shell_function("_target_data_rows")
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
+            fh.write(content)
+            path = fh.name
+        self.addCleanup(os.unlink, path)
+        out = subprocess.run(
+            ["bash", "-c", script + '\n_target_data_rows "$1"\n', "bash", path],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return int(out.stdout.strip())
+
+    def test_header_only_is_zero(self):
+        self.assertEqual(self._rows(self.HEADER + "\n"), 0)
+
+    def test_empty_file_is_zero(self):
+        self.assertEqual(self._rows(""), 0)
+
+    def test_header_plus_rows(self):
+        self.assertEqual(self._rows(self.HEADER + "\n" + self.ROW + "\n"), 1)
+        self.assertEqual(
+            self._rows(self.HEADER + "\n" + self.ROW + "\n" + self.ROW + "\n"), 2
+        )
+
+    def test_headerless_file_still_counts_its_rows(self):
+        """Robust either way: it must not blind-skip line 1."""
+        self.assertEqual(self._rows(self.ROW + "\n"), 1)
+
+    def test_missing_file_is_zero(self):
+        import subprocess
+        script = _extract_shell_function("_target_data_rows")
+        out = subprocess.run(
+            ["bash", "-c", script + '\n_target_data_rows "$1"\n', "bash",
+             "/nonexistent/path/targets.txt"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(out.stdout.strip(), "0")
+
+
+class ShippedScriptCountsDataRows(unittest.TestCase):
+    def test_no_site_sizes_a_targets_file_directly(self):
+        with open(SUBMIT, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertNotIn('[ -s "$ref_targets_file" ]', text)
+        self.assertNotIn('[ -s "$raw_ref_targets" ]', text)
+        self.assertIn("_target_data_rows", text)
+
+    def test_all_three_gates_use_the_helper(self):
+        with open(SUBMIT, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertGreaterEqual(text.count("_target_data_rows "), 3)
 
 
 if __name__ == "__main__":

@@ -304,6 +304,19 @@ while read vcf_f; do
 		[ -n "$_best" ] && printf '%s\n' "$_best"
 	}
 
+	# Count DATA rows in a CRISPRitz targets file: every line that is not the header.
+	# These files carry a '#'-prefixed header and pam_filter preserves it, so a plain
+	# `-s` or `wc -l` test reads an EMPTY result as one hit. That used to be
+	# equivalent only because a filter bug stripped the header, and the two bugs
+	# cancelled: the zero-hit short-circuit below saw a non-empty file and reported a
+	# search that found nothing as a failure.
+	_target_data_rows() {
+		[ -f "$1" ] || { echo 0; return; }
+		local _n
+		_n=$(grep -cv '^#' "$1" 2>/dev/null) || _n=0
+		echo "${_n:-0}"
+	}
+
 	# ensure that fundamental folders are available 
 	if ! [ -d "$current_working_directory/Results" ]; then
 		mkdir "$current_working_directory/Results"
@@ -833,7 +846,7 @@ while read vcf_f; do
 		# The INDELs stage already guards this way; the concatenation below uses a
 		# touch-first pattern, so it safely yields an empty (but valid) result.
 		ref_targets_file="$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
-		if [ -s "$ref_targets_file" ]; then
+		if [ "$(_target_data_rows "$ref_targets_file")" -gt 0 ]; then
 			./pool_post_analisi_snp.py $output_folder $ref_folder "_" $guide_file $mm $bDNA $bRNA $annotation_file $pam_file "_" $final_res $final_res_alt $ncpus
 			if [ -s $logerror ]; then
 				printf "ERROR: off-targets post-analysis (reference) failed\n" >&2
@@ -873,7 +886,7 @@ while read vcf_f; do
 		cd "$starting_dir"
 		echo -e 'Post-analysis INDELs\tStart\t'$(date) >>$log
 		#SKIP INDELS ANALYSIS IF NO RESULTS FOUND
-		if [ $(wc -l <"$output_folder/crispritz_targets/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt") -gt 1 ]; then
+		if [ "$(_target_data_rows "$output_folder/crispritz_targets/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt")" -gt 0 ]; then
 			./pool_post_analisi_indel.py $output_folder $ref_folder $vcf_folder $guide_file $mm $bDNA $bRNA $annotation_file $pam_file "$current_working_directory/Dictionaries/" $final_res $final_res_alt $ncpus
 			if [ -s $logerror ]; then
 				printf "ERROR: off-targets post-analysis (indels) failed on variants in %s\n" "$vcf_name" >&2
@@ -967,8 +980,9 @@ if [ -z "$(tail -n +2 "$final_res.bestCFD.txt" 2>/dev/null | head -c 1)" ]; then
 	# genome that is not one FASTA file per sequence -- so fail loudly instead of
 	# reporting a clean, empty "success".
 	raw_ref_targets="$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
-	if [ -s "$raw_ref_targets" ]; then
-		printf "ERROR: the search found %s raw off-target(s) but none survived post-analysis, so the result would be silently empty. Check that the genome folder %s has one FASTA file per sequence (python PostProcess/genome_layout.py %s).\n" "$(wc -l <"$raw_ref_targets")" "$ref_folder" "$ref_folder" >&2
+	raw_ref_rows=$(_target_data_rows "$raw_ref_targets")
+	if [ "$raw_ref_rows" -gt 0 ]; then
+		printf "ERROR: the search found %s raw off-target(s) but none survived post-analysis, so the result would be silently empty. Check that the genome folder %s has one FASTA file per sequence (python PostProcess/genome_layout.py %s).\n" "$raw_ref_rows" "$ref_folder" "$ref_folder" >&2
 		exit 1
 	fi
 	echo "No off-targets found for the provided guide(s) with the given parameters."
