@@ -256,6 +256,19 @@ jobs:
       - name: "CFD score tables validation (JSON structure/counts/anchors; the committed tables are the source of truth)"
         run: python scripts/generate_cfd_tables.py --check
 
+      - name: "Indel report integrity (header injection) + complete-search flag gate + index resolution"
+        # The header-injection guards: a dropped CRISPRitz header made
+        # post_analisi_indel.sh prepend the merged file's first DATA row to every
+        # per-chromosome subset, so one search row was reported on ~23 chromosomes,
+        # each with that chromosome's real rsID/AF/carriers. Plus the unknown-flag
+        # rejector (a mistyped --prune-pams used to run genome-wide with pruning
+        # silently off), and the index resolver, whose choice must not depend on
+        # LC_COLLATE now that a second PAM-less flank width exists.
+        working-directory: PostProcess
+        run: >
+          python -m unittest test_indel_header_injection test_complete_search_flags
+          test_index_resolution -v
+
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import
         # env, array_module (numpy vs cupy), and configure_tf device placement via a fake
