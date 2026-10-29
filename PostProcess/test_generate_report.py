@@ -1569,14 +1569,47 @@ class TestGenerateReport(unittest.TestCase):
         m = _json.load(open(self._dpath(extract, "run_manifest.json")))
         self.assertEqual(m["crisprme_version"] or "2.4.0", m["crisprme_version"] or "2.4.0")
         for k in ("guides", "pam", "genome", "variant_datasets", "search", "counts",
-                  "source_integrated_results", "crispritz_note"):
+                  "source_integrated_results", "crispritz_note", "crispritz_version"):
             self.assertIn(k, m)
         self.assertIn("max_total_edits", m["search"])
         self.assertIn("off_targets", m["counts"])
-        self.assertIn("v2.8.3", m["crispritz_note"])  # engine version recorded
         # report_generator tracks the crisprme version (not a stale hard-coded string)
         self.assertTrue(m.get("report_generator", "").startswith("v"))
-        self.assertNotIn("2.4", m["crispritz_note"])  # no stale v2.4.0-image reference
+        # The engine version must be RESOLVED, never baked into the prose. This
+        # assertion used to read `assertIn("v2.8.3", ...)`, which pinned the wrong
+        # value: that literal outlived three CRISPRitz pins while the test stayed
+        # green, so every shipped manifest named an engine the install never ran.
+        self.assertNotRegex(m["crispritz_note"], r"\bv?\d+\.\d+\.\d+\b")
+        # a version or null -- never a blank or placeholder string
+        if m["crispritz_version"] is not None:
+            self.assertRegex(m["crispritz_version"], r"^\d+\.\d+")
+
+    def test_crispritz_version_is_read_from_the_engine_on_path(self):
+        """It must come from the engine that would actually run, or be null."""
+        import shutil
+        import tempfile as _tf
+        import generate_report as gr
+
+        with _tf.TemporaryDirectory() as d:
+            fake = os.path.join(d, "crispritz.py")
+            with open(fake, "w") as fh:
+                fh.write('#!/usr/bin/env python3\nVERSION = "9.9.9"\n')
+            os.chmod(fake, 0o755)
+            old = os.environ.get("PATH", "")
+            os.environ["PATH"] = d + os.pathsep + old
+            try:
+                self.assertEqual(gr._crispritz_version(), "9.9.9")
+            finally:
+                os.environ["PATH"] = old
+
+        # not on PATH at all -> None, so the manifest names nothing rather than lying
+        old = os.environ.get("PATH", "")
+        os.environ["PATH"] = ""
+        try:
+            self.assertIsNone(gr._crispritz_version())
+        finally:
+            os.environ["PATH"] = old
+        self.assertIsNotNone(shutil.which, "sanity: shutil.which exists")
 
     def test_pipeline_no_readonly_or_bare_relative_writes(self):
         """Regression guard for the read-only-container bug: the search pipeline must

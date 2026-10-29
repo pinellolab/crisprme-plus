@@ -147,6 +147,13 @@ and the `release-crisprme` skill.
   and reports `unknown` rather than a plausible-but-wrong number — this manifest is the IND
   traceability record.
 
+- **The report manifest named the wrong search-engine version.** `crispritz_note` carried a hardcoded
+  `(CRISPRitz v2.8.3)`, a literal that outlived three CRISPRitz pins, so every shipped manifest named
+  an engine the install had never run. The manifest now carries a `crispritz_version` field resolved
+  from the `crispritz.py` on `PATH` — the engine that actually ran — and `null` when it cannot be
+  determined, with no version in the prose. The test that should have caught this was asserting the
+  stale literal; it now asserts the property instead.
+
 ## [2.8.0] - 2026-10-23
 
 ### Added

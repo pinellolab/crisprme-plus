@@ -4371,6 +4371,32 @@ def _package_version():
     return None
 
 
+def _crispritz_version():
+    """Best-effort version of the search engine that actually ran, or None.
+
+    Read from the ``VERSION = "X"`` assignment in the ``crispritz.py`` on PATH --
+    the engine this install would invoke -- by parsing rather than executing, so
+    nothing can write to stderr (fatal to the enclosing stage) and the report
+    cannot be slowed by a subprocess. Returns None when the engine is not on PATH,
+    in which case the manifest names no version instead of guessing one.
+    """
+    try:
+        import re
+        import shutil
+
+        exe = shutil.which("crispritz.py")
+        if not exe:
+            return None
+        with open(exe, "r", errors="replace") as fh:
+            for line in fh:
+                m = re.match(r'VERSION\s*=\s*["\']([^"\']+)["\']', line)
+                if m:
+                    return m.group(1)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Observed-haplotypes companion (report-layer only)
 # --------------------------------------------------------------------------- #
@@ -5594,9 +5620,14 @@ def build_report(
                 },
                 "database": _reg_vc,  # {n_records SNPs, n_indels, databases} or None
                 "source_integrated_results": os.path.basename(integrated_tsv),
+                # Resolved from the engine on PATH, never hardcoded: the literal
+                # "v2.8.3" here outlived three CRISPRitz pins and shipped a wrong
+                # engine version in every report manifest.
+                "crispritz_version": _crispritz_version(),
                 "crispritz_note": (
-                    "search-engine (CRISPRitz v2.8.3) version is recorded in the build. "
-                    "See Params.txt for the exact run parameters."
+                    "search-engine (CRISPRitz) version is resolved from the engine on "
+                    "PATH; null when it could not be determined. See Params.txt for "
+                    "the exact run parameters."
                 ),
             }
             _man_path = os.path.join(staging, "run_manifest.json")
