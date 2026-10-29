@@ -145,6 +145,34 @@ class PamLessStandIn(_Tree):
         self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNNNNNNN_3_hg38")
 
 
+class FlankMustBeWideEnough(_Tree):
+    """A stored flank of width K serves a PAM of length L only when L <= K.
+
+    The index never stored the positions a longer PAM would constrain, so picking a
+    too-narrow PAM-less index just defers the failure to the engine.
+    """
+
+    def test_narrow_pamless_does_not_serve_a_longer_pam(self):
+        lib = self.lib("NNN_3_hg38")
+        # a 6-nt PAM (e.g. NNGRRT, SaCas9) needs a flank of at least 6
+        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3), "")
+
+    def test_wide_pamless_serves_a_shorter_pam(self):
+        lib = self.lib("NNNNNNNN_3_hg38")
+        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3), "NNNNNNNN_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNNNNNNN_3_hg38")
+
+    def test_equal_width_serves(self):
+        lib = self.lib("NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNN_3_hg38")
+
+    def test_narrowest_sufficient_flank_wins(self):
+        lib = self.lib("NNN_3_hg38", "NNNNNNNN_3_hg38")
+        # NRG (3) -> the width-3 one; NNGRRT (6) -> only the width-8 one qualifies
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3), "NNNNNNNN_3_hg38")
+
+
 class ChoiceIsLocaleIndependent(_Tree):
     """The regression this file exists for."""
 

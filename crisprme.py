@@ -1768,9 +1768,19 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int
         lib = os.path.join(current_working_directory, "genome_library")
         if not motif or not genome:
             return 0
-        pamless = "N" * len(motif)
-        prefixes = (f"{motif}_", f"{pamless}_")
+        # A directory is <PAM>_<N>_<genome>. It serves this search when its PAM is
+        # the requested motif, or is all-N and AT LEAST as wide -- a stored flank of
+        # width K serves a PAM of length L only when L <= K. Matching on a fixed
+        # "N" * len(motif) prefix instead would miss a wider PAM-less index that the
+        # search shell's resolver does use, and the two must not disagree about the
+        # same directory (see _resolve_index_dir in
+        # PostProcess/submit_job_automated_new_multiple_vcfs.sh).
         suffix = f"_{genome}"
+
+        def _pam_serves(pam: str) -> bool:
+            if pam == motif:
+                return True
+            return bool(pam) and set(pam) == {"N"} and len(pam) >= len(motif)
 
         def _scan(want_plus: bool) -> int:
             if not os.path.isdir(lib):
@@ -1782,12 +1792,13 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int
                 base, plus, _enriched = d.partition("+")
                 if want_plus != bool(plus):
                     continue
-                pfx = next((p for p in prefixes if base.startswith(p)), None)
-                if pfx is None or not base.endswith(suffix):
+                if not base.endswith(suffix):
                     continue
-                n_str = base[len(pfx) : -len(suffix)]
-                if n_str.isdigit():
-                    best = max(best, int(n_str))
+                stem = base[: -len(suffix)]
+                pam, _sep, n_str = stem.partition("_")
+                if not _sep or not n_str.isdigit() or not _pam_serves(pam):
+                    continue
+                best = max(best, int(n_str))
             return max(0, best - 1)
 
         # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling.

@@ -275,8 +275,13 @@ while read vcf_f; do
 			[ "$_n" -ge "$_want" ] || continue
 			if [ "$_pam" = "$_pam_want" ]; then
 				_exact=1
-			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ]; then
-				_exact=0            # all-N: serves any PAM no longer than its flank
+			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ] \
+				&& [ "${#_pam}" -ge "${#_pam_want}" ]; then
+				# all-N, and wide enough: a stored flank of width K serves a PAM of
+				# length L only when L <= K -- the index never stored the extra
+				# positions a longer PAM would constrain. Enforcing it here turns a
+				# confusing engine-level error into "no sufficient index".
+				_exact=0
 			else
 				continue            # a different dedicated PAM cannot stand in
 			fi
