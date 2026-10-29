@@ -706,12 +706,15 @@ while read vcf_f; do
 	fi
 	# optional --max-total-edits cap (issue #107): drop raw targets whose TOTAL
 	# edits (column 10 = Mismatches + Bulge_Size) exceed the cap, BEFORE the
-	# expensive integration/scoring/post-analysis. The raw CRISPRitz targets have
-	# no header, so a plain numeric comparison on $10 is safe. -1 = disabled.
+	# expensive integration/scoring/post-analysis. -1 = disabled.
+	# Keep '#' lines: the merged indel targets file carries a header (restored by
+	# pool_search_indels.py), and a string compare of $10 ("Total") against the cap
+	# would drop it -- which makes post_analisi_indel.sh prepend a real data row to
+	# every chromosome's subset instead of a header.
 	if [ "$max_total_edits" != "-1" ] && [ -d "${output_folder}/crispritz_targets" ]; then
 		for _tgt in "${output_folder}"/crispritz_targets/*.targets.txt; do
 			[ -f "$_tgt" ] || continue
-			awk -v m="$max_total_edits" 'NF < 10 || $10 <= m' "$_tgt" >"${_tgt}.capped" \
+			awk -v m="$max_total_edits" '/^#/ || NF < 10 || $10 <= m' "$_tgt" >"${_tgt}.capped" \
 				&& mv "${_tgt}.capped" "$_tgt"
 		done
 		echo -e "Applied --max-total-edits cap ($max_total_edits) to raw targets" >>$log

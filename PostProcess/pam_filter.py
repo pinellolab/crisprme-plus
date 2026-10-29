@@ -59,7 +59,16 @@ def main() -> None:
     with open(targets_file) as fin, open(tmp, "w") as fout:
         for row in fin:
             cols = row.rstrip("\n").split("\t")
-            if len(cols) < 3:  # header or malformed -> pass through untouched
+            # Pass headers and malformed rows through untouched. The column-count
+            # test alone does NOT catch a header: the CRISPRitz header carries all
+            # 10 columns, so without the "#" test it is read as a target, its "DNA"
+            # column is taken for a PAM region, and the header is dropped as a
+            # non-matching target. That matters because the merged indel targets
+            # file is the one file here that carries a header (restored by
+            # pool_search_indels.py), and post_analisi_indel.sh copies its first
+            # line as the per-chromosome header -- so losing the header makes that
+            # step inject a real target row into EVERY chromosome's subset.
+            if row.startswith("#") or len(cols) < 3:
                 fout.write(row)
                 continue
             target = cols[2]  # aligned protospacer+PAM (CRISPRitz column 3)
