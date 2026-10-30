@@ -64,11 +64,11 @@ and the `release-crisprme` skill.
 - **The compiled `enricher` is now installed in the image, making it the default enrichment path.**
   It is built beside the three search binaries and copied to both places `crispritz.py`'s
   `_enricher_command()` checks, matching what `install_from_source.sh` already did and removing a
-  silent divergence between the two install routes. Measured **1.75x** faster than `enricher.py` on
-  a real `add-variants` run (chr22, HGDP + 1000 Genomes, 4,091 samples) -- the stage that dominates
-  a from-scratch genome-wide build. Gated on CRISPRitz 2.9.1's byte-identity fix: the two ports are
-  byte-identical across every output, verified on 8 synthetic variant shapes and on 120,000 real
-  chr22 records with 4,091 samples.
+  silent divergence between the two install routes. Measured **1.82x** faster than `enricher.py`
+  through the real `add-variants` CLI on the FULL chr22 of HGDP + 1000 Genomes -- 1,998,332 records,
+  4,091 samples, 2.7 GB of output: 1,776 s vs 974 s -- on the stage that dominates a from-scratch
+  genome-wide build. Gated on CRISPRitz 2.9.1's byte-identity fix, verified at that same scale: all
+  five outputs match `enricher.py` hash for hash, as well as on 8 synthetic variant shapes.
 
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
