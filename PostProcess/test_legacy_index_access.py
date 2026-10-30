@@ -339,6 +339,58 @@ class AnExplicitRepoStillWins(_Fixture):
                          "me/env-repo")
 
 
+class TheGenotypesStageBarKnowsItsSize(_Fixture):
+    """The web bar's total for the 'Downloading genotypes 2/3' stage is the real size
+    of indexes/genotypes_<vcf>.tar.gz.
+
+    It came from the merged catalog, which deliberately skips every genotypes_* row
+    (they are companions, not selectable indexes), so the lookup always returned 0:
+    the stage the labels were added for fell back to an indeterminate bar, and paid
+    for a repo listing that could never answer."""
+
+    NAME = "NRG_3_hg38+hg38_HGDP1kGP"
+    VCF = "hg38_HGDP1kGP"
+    PHASE = "Downloading genotypes 2/3"
+
+    def _hub(self):
+        return _FakeHub({DEFAULT: self._repo(DEFAULT, LEGACY, GENOTYPED_PANELS)})
+
+    def _download_with_progress(self, hub):
+        """Every (phase, bytes_total) the reporter wrote, newest kept, + the hub."""
+        seen = []
+        write = hf._ProgressReporter.write
+
+        def record(reporter, force=False):
+            seen.append((reporter.phase, reporter.bytes_total))
+            return write(reporter, force=force)
+
+        with mock.patch.object(hf._ProgressReporter, "write", record), \
+             mock.patch.dict(os.environ,
+                             {"CRISPRME_PROGRESS_FILE": os.path.join(self.tmp, "p.json")}):
+            self._download(hub, self.NAME)
+        return dict(seen)
+
+    def test_the_stage_total_is_the_companion_archive_size(self):
+        hub = self._hub()
+        expected = os.path.getsize(hub.repos[DEFAULT][f"indexes/genotypes_{self.VCF}.tar.gz"])
+        totals = self._download_with_progress(hub)
+        self.assertIn(self.PHASE, totals)
+        self.assertEqual(totals[self.PHASE], expected)
+
+    def test_the_catalog_is_not_asked_for_a_row_it_never_lists(self):
+        asked = []
+        size = hf._catalog_component_size
+
+        def record(component, name, repo=None):
+            asked.append(name)
+            return size(component, name, repo)
+
+        with mock.patch.object(hf, "_catalog_component_size", record):
+            self._download_with_progress(self._hub())
+        self.assertTrue(asked, "the bar no longer seeds any total from the catalog")
+        self.assertFalse([n for n in asked if n.startswith("genotypes_")], asked)
+
+
 class CatalogKeepsEveryLegacyIndex(_Fixture):
     """list_available_downloads('index') is what the web Settings dropdown shows."""
 

@@ -818,6 +818,20 @@ def _remote_sizes(hf, repo: str, rel_paths: List[str],
     return sizes
 
 
+def _remote_file_size(repo: str, rel_path: str, token: Optional[str] = None) -> int:
+    """Best-effort size (bytes) of ONE remote file, 0 if unknown.
+
+    The companion :func:`_catalog_component_size` reads the catalog, which cannot
+    answer for a file the catalog does not list (the ``genotypes_<vcf>.tar.gz``
+    companions are skipped as rows), so this asks HF for that one path instead.
+    Any failure -> 0, so the bar simply shows transferred bytes with no total."""
+    try:
+        hf = _require_hf()
+        return int(_remote_sizes(hf, repo, [rel_path], token).get(rel_path, 0) or 0)
+    except Exception:  # noqa: BLE001 - sizing is best-effort
+        return 0
+
+
 def _staged_files(local_dir: str) -> List[str]:
     """Relative paths of downloaded files under ``local_dir`` (skip hub cache)."""
     out: List[str] = []
@@ -1624,9 +1638,13 @@ def download_component(
                 )
             else:
                 if reporter.enabled:
+                    # the catalog skips the genotypes_* companions as rows, so size
+                    # this one by its remote path instead (0 -> indeterminate bar).
                     reporter.set_total(
-                        _catalog_component_size(
-                            "index", f"genotypes_{vcf_name}", repo
+                        _remote_file_size(
+                            repo,
+                            f"{remote_prefix}/genotypes_{vcf_name}.tar.gz",
+                            token,
                         )
                     )
                     reporter.set_phase(
