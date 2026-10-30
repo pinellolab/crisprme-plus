@@ -220,17 +220,38 @@ def repo_overridden(cli_repo: Optional[str] = None) -> bool:
     return bool(cli_repo) or bool(os.environ.get("CRISPRME_HF_REPO"))
 
 
-def _index_archive_exists(repo: str, index_name: str) -> bool:
-    """Best-effort check that ``indexes/<index_name>.tar.gz`` is in ``repo``.
+def _dictless_sibling(index_name: str) -> Optional[str]:
+    """The ``-dictless`` spelling of a BARE variant index name, else ``None``.
+
+    A variant index published dict-less carries the marker in its ref segment;
+    both spellings install to the same folder (:func:`canonical_index_name`), so
+    a download asked for the bare name may fetch this sibling instead.
+    """
+    if "+" in index_name and "-dictless" not in index_name:
+        return index_name.replace("+", "-dictless+", 1)
+    return None
+
+
+def _index_archive_exists(repo: str, index_name: str,
+                          token: Optional[str] = None) -> bool:
+    """Best-effort check that ``repo`` holds an index archive ``download`` would
+    fetch for ``index_name``: ``indexes/<index_name>.tar.gz`` verbatim or, for a
+    bare variant name, its ``-dictless`` sibling (the names download_component
+    asks for, in that order).
 
     Returns False on any error (offline, repo absent, dependency missing) so a
     caller treats "cannot tell" the same as "not there" and falls back.
     """
     try:
-        hf = _require_hf()
-        want = f"{_COMPONENT_PREFIXES['index']}/{canonical_index_name(index_name)}.tar.gz"
-        files = hf.HfApi().list_repo_files(repo, repo_type="dataset")
-        return want in set(files)
+        api = _require_hf().HfApi()
+        prefix = _COMPONENT_PREFIXES["index"]
+        names = [index_name, _dictless_sibling(index_name)]
+        return any(
+            api.file_exists(
+                repo, f"{prefix}/{name}.tar.gz", repo_type="dataset", token=token
+            )
+            for name in names if name
+        )
     except Exception:  # noqa: BLE001
         return False
 
@@ -1381,7 +1402,9 @@ def download_component(
             return installed_dir
         # Fall back to the default repo if the routed one does not have it, so an
         # index published before the split still resolves.
-        if routed and repo != DEFAULT_HF_REPO and not _index_archive_exists(repo, index_name):
+        if routed and repo != DEFAULT_HF_REPO and not _index_archive_exists(
+            repo, index_name, token
+        ):
             routed_from, repo = repo, DEFAULT_HF_REPO
         # Dict-less is the default in 2.4.0. If the caller asked for a VARIANT
         # index by its bare (legacy dict-based) name but a corrected `-dictless`
@@ -1391,8 +1414,8 @@ def download_component(
         # smaller, combined-AF one that 2.4.0 ships. Best-effort — any lookup
         # failure falls through to the requested name (legacy behaviour), so this
         # never makes a previously-working download fail.
-        if "+" in index_name and "-dictless" not in index_name:
-            dictless_name = index_name.replace("+", "-dictless+", 1)
+        dictless_name = _dictless_sibling(index_name)
+        if dictless_name:
             try:
                 if _require_hf().HfApi().file_exists(
                     repo,

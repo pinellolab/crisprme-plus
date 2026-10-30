@@ -269,6 +269,54 @@ class WideFlankDownloadKeepsItsPiecesTogether(_Fixture):
         self.assertEqual(hub.calls, [])
 
 
+class TheFallbackProbeLooksForWhatTheDownloadFetches(_Fixture):
+    """The probe that redirects a routed index to the default repo must look up the
+    exact archive(s) the download then asks for, with the same token.
+
+    It used to list the whole repo untokened, for the archive under the CANONICAL
+    name -- so a wide-flank index the general-index repo holds only under its
+    `-dictless` name (the spelling the merged catalog offers), or a repo needing a
+    token, read as absent and was redirected to a default repo without it."""
+
+    REQUESTED = "NNNNNNNN_3_hg38+hg38_HGDP1kGP"
+    DICTLESS = "NNNNNNNN_3_hg38-dictless+hg38_HGDP1kGP"
+    TOKEN = "fake-token-for-tests"
+
+    def _general(self, *names):
+        return _FakeHub({
+            DEFAULT: self._repo(DEFAULT, LEGACY, GENOTYPED_PANELS),
+            GENERAL: self._repo(GENERAL, names, ("hg38_HGDP1kGP",)),
+        })
+
+    def test_an_archive_only_under_its_dictless_name_is_not_redirected(self):
+        hub = self._general(self.DICTLESS, "NNNNNNNN_3_hg38")
+        workdir, returned = self._download(hub, self.REQUESTED)
+        self.assertEqual({c[1] for c in hub.calls if c[0] == "snapshot_download"},
+                         {GENERAL}, hub.calls)
+        # -dictless is a publish marker: it installs under the canonical name
+        self.assertEqual(returned, os.path.join(workdir, "genome_library", self.REQUESTED))
+        self.assertEqual(self._stamp(workdir, f"genome_library/{self.REQUESTED}"), GENERAL)
+
+    def test_the_probe_uses_the_download_token_and_exact_paths(self):
+        hub = self._general(self.REQUESTED, "NNNNNNNN_3_hg38")
+        self._download(hub, self.REQUESTED, token=self.TOKEN)
+        self.assertFalse([c for c in hub.calls if c[0] == "list_repo_files"],
+                         "the probe still lists the whole repo")
+        self.assertEqual({c[3] for c in hub.calls}, {self.TOKEN}, hub.calls)
+        probed = [c[2] for c in hub.calls if c[0] == "file_exists"]
+        self.assertIn(f"indexes/{self.REQUESTED}.tar.gz", probed)
+        self.assertTrue(all(p.startswith("indexes/") and p.endswith(".tar.gz")
+                            for p in probed), probed)
+
+    def test_an_archive_in_neither_repo_still_falls_back_and_names_both(self):
+        hub = self._general("NNNNNNNN_3_hg38")
+        with self.assertRaises(ValueError) as caught:
+            self._download(hub, self.REQUESTED)
+        message = str(caught.exception)
+        for expected in (GENERAL, DEFAULT, f"--hf-repo {GENERAL}"):
+            self.assertIn(expected, message)
+
+
 class AnExplicitRepoStillWins(_Fixture):
     def _hub(self, repo):
         return _FakeHub({
