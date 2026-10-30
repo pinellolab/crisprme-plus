@@ -711,16 +711,57 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
                 raise KeyError("Unknown argument(s): {'name': 'huggingface_hub'}")
             return kwargs["local_dir"]
 
+    class _BarBuildingHub:
+        """Builds and feeds its byte bars from ``tqdm_class`` on EVERY call, as hub
+        2.3.0 does: a network-transfer bar, then a reconstruction bar, both fed each
+        chunk; resumed bytes go to the reconstruction bar only. The first call is
+        rate-limited (429) after ``cut`` of ``size`` bytes."""
+
+        def __init__(self, size=1000, cut=300, chunk=100):
+            self.size, self.cut, self.chunk = size, cut, chunk
+            self.calls = []
+
+        def snapshot_download(self, **kwargs):
+            self.calls.append(kwargs)
+            cls = kwargs["tqdm_class"]
+            transfer = cls(desc="Downloading bytes", total=0, initial=0, unit="B",
+                           unit_scale=True)
+            reconstruct = cls(desc="Reconstructing", total=0, initial=0, unit="B",
+                              unit_scale=True)
+            done = 0 if len(self.calls) == 1 else self.cut
+            reconstruct.update(done)  # what was already on disk (resume)
+            while done < self.size:
+                if len(self.calls) == 1 and done == self.cut:
+                    raise _HTTPErr("429 Too Many Requests", status=429)
+                for bar in (transfer, reconstruct):
+                    bar.update(self.chunk)
+                done += self.chunk
+            return kwargs["local_dir"]
+
     def _snapshot(self, hub, reporter):
         import io
         with mock.patch.object(hf, "_require_hf", return_value=hub), \
              mock.patch.dict(os.environ, {"CRISPRME_SKIP_VERIFY": "1"}), \
+             mock.patch.object(hf.time, "sleep"), \
              mock.patch("sys.stdout", new_callable=io.StringIO) as out, \
              mock.patch("sys.stderr", new_callable=io.StringIO) as err, \
              self._fake_tqdm_modules():
             hf._hf_snapshot("me/repo", ["indexes/x.tar.gz"],
                             os.path.join(self._tmp(), "dl"), None, reporter=reporter)
         return out.getvalue(), err.getvalue()
+
+    def test_a_retried_download_keeps_feeding_the_bar(self):
+        # _hf_call_with_retry exists for this: a 429 mid-download, then the rest.
+        # hf builds new bars on every attempt, so the bar must keep counting through
+        # them; it used to stay at the first attempt's 30% until extraction began.
+        hub = self._BarBuildingHub(size=1000, cut=300)
+        r = self._reporter()
+        r.set_total(1000)
+        printed, _ = self._snapshot(hub, r)
+        self.assertEqual(len(hub.calls), 2)
+        self.assertTrue(all("tqdm_class" in call for call in hub.calls))
+        self.assertEqual(r.bytes_done, 1000)
+        self.assertEqual(printed, "")
 
     def test_a_rejected_bar_retries_the_download_without_it(self):
         hub = self._FakeHub(fail_with_tqdm_class=True)

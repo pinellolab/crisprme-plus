@@ -973,8 +973,10 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
 
     When ``reporter`` is an enabled :class:`_ProgressReporter`, a custom
     ``tqdm_class`` is passed to ``snapshot_download`` so transferred bytes feed
-    the web progress file. The extra kwarg is omitted entirely when progress is
-    off (or tqdm is unavailable), keeping the happy path byte-for-byte unchanged.
+    the web progress file — a fresh one on every retry attempt, so a download
+    retried after a 429/5xx keeps feeding it. The extra kwarg is omitted entirely
+    when progress is off (or tqdm is unavailable), keeping the happy path
+    byte-for-byte unchanged.
     Should the installed huggingface_hub reject that class anyway, the download is
     retried ONCE without it (degraded progress, STDOUT note) — reporting must
     never break a download.
@@ -989,17 +991,21 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
         token=token,
         _what="snapshot",
     )
-    tqdm_cls = None
-    if reporter is not None and reporter.enabled:
-        tqdm_cls = _make_progress_tqdm(reporter)
+    with_bar = (reporter is not None and reporter.enabled
+                and _make_progress_tqdm(reporter) is not None)
+
+    def _snapshot_with_bar(**kwargs):
+        # a FRESH bar class for every attempt _hf_call_with_retry makes: hf builds
+        # new bars on each call, and a class feeds the reporter only from the first
+        # byte bar it built, so a reused one went silent after a 429/5xx retry
+        return hf.snapshot_download(**kwargs, tqdm_class=_make_progress_tqdm(reporter))
+
     try:
         _hf_call_with_retry(
-            hf.snapshot_download,
-            **fetch,
-            **({"tqdm_class": tqdm_cls} if tqdm_cls is not None else {}),
+            _snapshot_with_bar if with_bar else hf.snapshot_download, **fetch
         )
     except Exception as exc:  # noqa: BLE001 - re-raised below when not the hook
-        if tqdm_cls is None:
+        if not with_bar:
             raise
         # the bar may be what failed (an hf version that builds it with keywords
         # this tqdm cannot take); re-run the fetch plain so the data still lands.
