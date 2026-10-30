@@ -521,13 +521,22 @@ class TestProgressReporter(unittest.TestCase):
         r.set_total(300)
         r.set_phase("dl")
 
-        # stub tqdm so the test needs neither tqdm nor network
+        # stub tqdm so the test needs neither tqdm nor network. The modules
+        # themselves are faked: patching the attribute "tqdm.auto.tqdm" would
+        # import the real tqdm.auto, which the light CI image does not have.
+        import sys
+        import types
+
         class _FakeTqdm:
             def __init__(self, *a, **k):
                 pass
             def update(self, n=1):
                 return None
-        with mock.patch("tqdm.auto.tqdm", _FakeTqdm, create=True):
+        fake_auto = types.ModuleType("tqdm.auto")
+        fake_auto.tqdm = _FakeTqdm
+        fake_pkg = types.ModuleType("tqdm")
+        fake_pkg.auto = fake_auto
+        with mock.patch.dict(sys.modules, {"tqdm": fake_pkg, "tqdm.auto": fake_auto}):
             cls = hf._make_progress_tqdm(r)
             self.assertIsNotNone(cls)
             bar = cls(total=300)
