@@ -57,8 +57,11 @@ cp -R sourceCode/Python_Scripts "${CONDA_PREFIX}/opt/crispritz/"
 # checks, in this order: PATH first, else same-directory as this install
 # (corrected_origin_path + "Python_Scripts/Enrichment/enricher"). Without a
 # compiled binary in either spot it silently falls back to the pure-Python
-# enricher.py -- no error, ~15x slower, see this commit's message for the
-# consequence. (add_variants.sh, a separate, not-actually-invoked script, has
+# enricher.py -- no error and correct, but slower: measured 1.75x on a real
+# add-variants run (full chr22, HGDP+1kGP, 4,091 samples). An earlier note here
+# said ~15x; that figure is not reproducible on a many-sample VCF, where
+# per-sample genotype scanning dominates both ports. Quote the measurement, not
+# the folklore. (add_variants.sh, a separate, not-actually-invoked script, has
 # its own unconditional hard-exit if 'enricher' isn't on PATH or beside it --
 # same two paths, so satisfied as a side effect regardless.)
 cp enricher "${CONDA_PREFIX}/bin/enricher"

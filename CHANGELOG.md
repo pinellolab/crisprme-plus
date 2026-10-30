@@ -52,11 +52,23 @@ and the `release-crisprme` skill.
   instead of mis-parsing the leaf stream, and `buildTST`/`searchTST`/`searchBruteForce` now have
   their exit status checked, so a crashed search can no longer be reported as an empty result; a
   multiallelic site no longer compounds its indel alleles into one fake contig; and the compiled C++
-  `enricher` no longer drops a SNP wherever an indel shares its position. That last one never ran in
-  a shipped install -- `conda/build.sh` compiles the binary and does not install it, and this
-  Dockerfile builds only the three search binaries, so enrichment has always used the Python
-  reference -- so **no published index is affected**. Applies to the Docker build (`crispritz_ref`)
-  and `install_from_source.sh` (`CRISPRITZ_REF`).
+  `enricher` no longer drops a SNP wherever an indel shares its position. Applies to the Docker
+  build (`crispritz_ref`) and `install_from_source.sh` (`CRISPRITZ_REF`).
+  **No published index is affected** by the enricher fix: the image built only the three search
+  binaries, so enrichment ran through `enricher.py`, confirmed by direct measurement on the
+  artifacts (chr22:10684299 carries a SNP and an indel as separate records; every enriched
+  `chr22.enriched.fa` on the build host holds the IUPAC `M` there, not a plain `C`). A **source**
+  install is the exception -- `install_from_source.sh` has installed the compiled binary for some
+  time, so an enriched genome produced that way before CRISPRitz 2.9.1 is missing the SNP at every
+  position that also carries an indel, and should be re-enriched.
+- **The compiled `enricher` is now installed in the image, making it the default enrichment path.**
+  It is built beside the three search binaries and copied to both places `crispritz.py`'s
+  `_enricher_command()` checks, matching what `install_from_source.sh` already did and removing a
+  silent divergence between the two install routes. Measured **1.75x** faster than `enricher.py` on
+  a real `add-variants` run (chr22, HGDP + 1000 Genomes, 4,091 samples) -- the stage that dominates
+  a from-scratch genome-wide build. Gated on CRISPRitz 2.9.1's byte-identity fix: the two ports are
+  byte-identical across every output, verified on 8 synthetic variant shapes and on 120,000 real
+  chr22 records with 4,091 samples.
 
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real

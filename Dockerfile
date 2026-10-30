@@ -92,10 +92,24 @@ RUN git clone --depth 1 --branch ${crispritz_ref} \
         sourceCode/CRISPRofiler/pre_computation.cpp \
         sourceCode/CRISPRofiler/reading.cpp \
         sourceCode/CRISPRofiler/analysis.cpp -o searchBruteForce \
+    # The enricher is the 4th binary. It carries no OpenMP pragmas (the -fopenmp
+    # here is inert for it) and links zlib, which this image already has. Until
+    # 2.8.1 the image built only the three search binaries, so crispritz.py's
+    # _enricher_command() fell back to enricher.py -- correct, but ~1.75x slower
+    # on the dominant stage of a from-scratch build. Installing it into BOTH
+    # places _enricher_command() looks (PATH, then beside the reference) makes the
+    # compiled port the default here, as it already is for install_from_source.sh.
+    # Safe to do only as of CRISPRitz 2.9.1, which fixed the port dropping a SNP
+    # wherever an indel shared its position; verify_enricher.sh now covers that
+    # shape and runs in CRISPRitz CI.
+    && g++ -std=c++11 -O3 \
+        sourceCode/Python_Scripts/Enrichment/enricher.cpp -o enricher -lz \
     && mkdir -p ${PREFIX}/opt/crispritz \
     && cp crispritz.py ${PREFIX}/bin/crispritz.py && chmod +x ${PREFIX}/bin/crispritz.py \
     && cp buildTST searchTST searchBruteForce ${PREFIX}/opt/crispritz/ \
     && cp -R sourceCode/Python_Scripts ${PREFIX}/opt/crispritz/ \
+    && cp enricher ${PREFIX}/bin/enricher && chmod +x ${PREFIX}/bin/enricher \
+    && cp enricher ${PREFIX}/opt/crispritz/Python_Scripts/Enrichment/enricher \
     && rm -rf /opt/crispritz-src
 
 # ---- Install crisprme from this build context (source) ---------------------
