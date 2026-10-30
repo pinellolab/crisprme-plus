@@ -56,6 +56,16 @@ and the `release-crisprme` skill.
   genome-wide search with pruning quietly off, finished without complaint, and was detectable only by
   diffing the results against a dedicated index. Unknown flags now fail up front, with a suggestion
   for a near miss.
+- **Settings: configurable number of concurrent search jobs.** The web app ran at most 2 searches at
+  once (a hard-coded legacy limit); this is now adjustable from the Settings page (or the
+  `CRISPRME_MAX_CONCURRENT_JOBS` environment variable), clamped to `[1, 16]`. The **default stays a
+  conservative 2** — each genome-wide search is memory-heavy (~tens of GB of RAM) — so a laptop / the
+  public server is never accidentally oversubscribed; raise it only on a machine with enough RAM and
+  cores. Extra jobs beyond the limit simply queue. Applies on the next app restart.
+- **Settings: Hugging Face download progress bar.** Index/annotation downloads now show percent,
+  size, ETA, and phase in the Settings page, backed by an env-gated progress file
+  (`CRISPRME_PROGRESS_FILE`); the progress path is a no-op when the variable is unset, so the CLI
+  happy path is byte-for-byte unchanged.
 
 ### Changed
 - **CRISPRitz pin moved to v2.9.1**, the tag carrying `--prune-pam` plus eight engine fixes: a
@@ -257,6 +267,20 @@ and the `release-crisprme` skill.
   from the `crispritz.py` on `PATH` — the engine that actually ran — and `null` when it cannot be
   determined, with no version in the prose. The test that should have caught this was asserting the
   stale literal; it now asserts the property instead.
+
+- **History page no longer crashes when a 3rd job is queued.** With the 2 search slots busy, a queued
+  job's `log.txt` exists (a queue note is written to it) but has no `Job\tStart` line yet;
+  `read_job_info()` raised `StopIteration`, which aborted the entire History-table build — so running
+  and completed jobs could not be opened until the queued job started. `read_job_info()` now returns
+  `None` for a not-yet-started or missing log (the caller falls back to the `.Params.txt` mtime, the
+  same stand-in the assembly path uses), and the per-job summary loop is guarded so a single not-ready
+  or malformed job directory can never take down the whole table. (Reported by M. Tognon.)
+- **Index/annotation download install is atomic and always structurally verified.** A partial or
+  failed download never touches the final install location, and a failure surfaces a copy-paste log
+  plus a Retry action instead of a silent or corrupt state.
+- **Pipeline failure summaries are binary-safe.** `summarize_pipeline_failure()` now reads `log.txt`
+  and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
+  stderr no longer raises `UnicodeDecodeError` and masks the real error.
 
 ## [2.8.0] - 2026-10-23
 

@@ -22,6 +22,7 @@ from datetime import datetime
 import math
 import os
 import pathlib
+import sys
 
 SUMMARYTABCOLS = [
     "Job", "Genome", "Variants", "Mismatches", "DNA bulge", "RNA bulge", "Max edits", "PAM", "Number of Guides", "Start"
@@ -148,27 +149,32 @@ def read_params(paramsfile: str, jobid: str) -> Dict[str, str]:
         raise IOError(f"An error occurred while collecting results in {jobid}") from e
     return params
 
-def read_job_info(logfile: str, jobid: str) -> str:
-    """Read job start time from the log file.
+def read_job_info(logfile: str, jobid: str) -> Optional[str]:
+    """Read the job start time from the log file.
 
-    This function extracts the job start time from the specified log file.
+    Returns the ``Job\tStart`` timestamp, or ``None`` when the job has not
+    started yet. A QUEUED job (3rd+ job while the 2 search slots are busy) has a
+    ``log.txt`` -- the submit path writes a queue note to it -- but **no**
+    ``Job\tStart`` line until it actually runs; a missing log is likewise not an
+    error here. Returning ``None`` (instead of raising ``StopIteration`` /
+    ``IOError``) lets :func:`construct_history_summary` fall back to the
+    ``.Params.txt`` mtime, so a queued job never takes down the whole History
+    table (running + completed jobs stay accessible).
 
     Args:
         logfile: The path to the log file.
         jobid: The ID of the job.
 
     Returns:
-        A string representing the job start time.
-
-    Raises:
-        IOError: If an error occurs while reading the log file.
+        The start-time string, or ``None`` if the job has not started.
     """
     try:
         with open(logfile, mode="r") as infile:
             log = infile.read()  # read job log data
-    except OSError as e:
-        raise IOError(f"An error occurred while collecting results in {jobid}") from e
-    return (next(s for s in log.split("\n") if "Job\tStart" in s)).split("\t")[-1]
+    except OSError:
+        return None  # log not written yet (brand-new/queued dir)
+    start = next((s for s in log.split("\n") if "Job\tStart" in s), None)
+    return start.split("\t")[-1] if start is not None else None
 
 def count_guides(guidesfile: str, jobid: str) -> int:
     """Count the number of guides in a guides file.
@@ -361,39 +367,65 @@ def construct_history_summary(results: List[str]) -> pd.DataFrame:
     results_directory = os.path.join(current_working_directory, RESULTS_DIR)
     for jobid in results:
         paramsfile = os.path.join(results_directory, jobid, PARAMS_FILE)
-        if _is_assembly_params(paramsfile):
-            row = _assembly_history_row(
-                jobid, _read_assembly_params_file(paramsfile), results_directory
-            )
-            for col in SUMMARYTABCOLS:
-                summary[col].append(row[col])
+        # Build the whole row FIRST, then append -- and guard the per-job work so
+        # a single not-yet-ready / malformed job dir can never crash the entire
+        # History table (running + completed jobs must stay accessible). This is
+        # the fix for the queued-3rd-job case: with the 2-slot search pool busy,
+        # the queued job's log.txt has no "Job\tStart" line yet.
+        try:
+            if _is_assembly_params(paramsfile):
+                row = _assembly_history_row(
+                    jobid, _read_assembly_params_file(paramsfile), results_directory
+                )
+            else:
+                params = read_params(paramsfile, jobid)
+                # read_job_info returns None for a queued/not-yet-started job (or
+                # a missing log) -> fall back to the .Params.txt mtime, the same
+                # stand-in the assembly path uses, so the row still sorts/renders.
+                jobinfo = read_job_info(
+                    os.path.join(results_directory, jobid, LOG_FILE), jobid
+                )
+                if not jobinfo:
+                    try:
+                        jobinfo = datetime.fromtimestamp(
+                            os.path.getmtime(paramsfile)
+                        ).strftime("%Y-%m-%d %H:%M:%S")
+                    except OSError:
+                        jobinfo = "-"
+                guidesnum = count_guides(
+                    os.path.join(results_directory, jobid, GUIDES_FILE), jobid
+                )
+                genome, variants = process_genome(
+                    params["Genome_selected"], params["Genome_idx"]
+                )
+                # Max edits (total mismatches + bulges cap). Simple-mode searches
+                # are governed by this slider value; advanced-mode searches use the
+                # per-type caps and record their sum. Older jobs show "-".
+                _mte = params.get("Max_total_edits")
+                _mode = params.get("Threshold_mode")
+                if _mte in (None, "", "None"):
+                    _maxedits = "-"
+                elif _mode == "advanced":
+                    _maxedits = f"{_mte} (advanced)"
+                else:
+                    _maxedits = str(_mte)
+                row = {
+                    SUMMARYTABCOLS[0]: jobid,
+                    SUMMARYTABCOLS[1]: genome,
+                    SUMMARYTABCOLS[2]: variants,
+                    SUMMARYTABCOLS[3]: int(params["Mismatches"]),
+                    SUMMARYTABCOLS[4]: int(params["DNA"]),
+                    SUMMARYTABCOLS[5]: int(params["RNA"]),
+                    SUMMARYTABCOLS[6]: _maxedits,
+                    SUMMARYTABCOLS[7]: params["Pam"],
+                    SUMMARYTABCOLS[8]: guidesnum,
+                    SUMMARYTABCOLS[9]: jobinfo,
+                }
+        except Exception as exc:  # never let one bad job dir crash the table
+            sys.stderr.write(f"History: skipping job '{jobid}' ({exc})\n")
             continue
-        params = read_params(os.path.join(current_working_directory, RESULTS_DIR, jobid, PARAMS_FILE), jobid)
-        jobinfo = read_job_info(os.path.join(current_working_directory, RESULTS_DIR, jobid, LOG_FILE), jobid)
-        guidesnum = count_guides(os.path.join(current_working_directory, RESULTS_DIR, jobid, GUIDES_FILE), jobid)
-        genome, variants = process_genome(params["Genome_selected"], params["Genome_idx"])
-        summary[SUMMARYTABCOLS[0]].append(jobid)  # job id
-        summary[SUMMARYTABCOLS[1]].append(genome)  # genome 
-        summary[SUMMARYTABCOLS[2]].append(variants)  # variants
-        summary[SUMMARYTABCOLS[3]].append(int(params["Mismatches"]))  # mms
-        summary[SUMMARYTABCOLS[4]].append(int(params["DNA"]))  # dna bulges
-        summary[SUMMARYTABCOLS[5]].append(int(params["RNA"]))  # rna bulges
-        # Max edits (total mismatches + bulges cap). Simple-mode searches are governed
-        # by this slider value; advanced-mode searches use the per-type caps and record
-        # their sum here. Older jobs (before this was recorded) show "-".
-        _mte = params.get("Max_total_edits")
-        _mode = params.get("Threshold_mode")
-        if _mte in (None, "", "None"):
-            _maxedits = "-"
-        elif _mode == "advanced":
-            _maxedits = f"{_mte} (advanced)"
-        else:
-            _maxedits = str(_mte)
-        summary[SUMMARYTABCOLS[6]].append(_maxedits)  # max total edits
-        summary[SUMMARYTABCOLS[7]].append(params["Pam"])  # pam
-        summary[SUMMARYTABCOLS[8]].append(guidesnum)  # number of guides
-        summary[SUMMARYTABCOLS[9]].append(jobinfo)  # job start time
-        print(jobinfo)
+        for col in SUMMARYTABCOLS:
+            summary[col].append(row[col])
     summary = pd.DataFrame(summary)
     # format="mixed": complete-search's own Start values are a ctime-style
     # string ("Fri 28 Aug 2026 04:09:43 PM UTC"); assembly-search rows above

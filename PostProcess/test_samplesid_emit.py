@@ -334,7 +334,7 @@ class TestDownloadInstallsBundledSamplesID(unittest.TestCase):
     def _serve_from_sink(self, fetch_log):
         """snapshot stub: serve indexes/* from the sink; record every requested
         pattern so we can PROVE no per-db samplesID HF fetch happened."""
-        def fake_snapshot(repo, allow_patterns, local_dir, token=None):
+        def fake_snapshot(repo, allow_patterns, local_dir, token=None, reporter=None, **_kw):
             fetch_log.extend(allow_patterns)
             for pat in allow_patterns:
                 base = os.path.basename(pat)

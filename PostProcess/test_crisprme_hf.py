@@ -436,5 +436,214 @@ class TestIndexAlreadyInstalled(unittest.TestCase):
         self.assertIsNone(self._run(wd, "NRG_3_hg38+hg38_ABSENT"))
 
 
+class TestProgressReporter(unittest.TestCase):
+    """The env-gated download-progress JSON file (2.8.1 web progress bar)."""
+
+    def _tmp(self):
+        import shutil
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(d, ignore_errors=True))
+        return d
+
+    def test_disabled_is_noop(self):
+        # no CRISPRME_PROGRESS_FILE and no explicit path -> enabled False, writes
+        # nothing (the current happy path must be byte-for-byte unchanged).
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CRISPRME_PROGRESS_FILE", None)
+            r = hf._ProgressReporter()
+            self.assertFalse(r.enabled)
+            r.set_phase("x")
+            r.add_bytes(100)
+            r.write(force=True)  # must not raise, must not create a file
+
+    def test_env_gated_path(self):
+        d = self._tmp()
+        p = os.path.join(d, "progress.json")
+        with mock.patch.dict(os.environ, {"CRISPRME_PROGRESS_FILE": p}):
+            r = hf._ProgressReporter()
+            self.assertTrue(r.enabled)
+            self.assertEqual(r.path, p)
+
+    def test_bytes_done_pct_written(self):
+        import json
+        d = self._tmp()
+        p = os.path.join(d, "progress.json")
+        r = hf._ProgressReporter(path=p, min_interval=0.0)
+        r.set_total(1000)
+        r.set_phase("Downloading index", "NRG_3_hg38")
+        r.add_bytes(250)
+        r.add_bytes(250)
+        with open(p) as fh:
+            data = json.load(fh)
+        self.assertEqual(data["bytes_done"], 500)
+        self.assertEqual(data["bytes_total"], 1000)
+        self.assertEqual(data["pct"], 50.0)
+        self.assertEqual(data["phase"], "Downloading index")
+        self.assertEqual(data["detail"], "NRG_3_hg38")
+        self.assertIn("updated", data)
+
+    def test_throttle_and_force(self):
+        import json
+        d = self._tmp()
+        p = os.path.join(d, "progress.json")
+        r = hf._ProgressReporter(path=p, min_interval=1000.0)  # effectively never
+        r.set_total(100)
+        r.set_phase("p")      # force=True -> writes
+        r.add_bytes(10)       # throttled -> no write
+        with open(p) as fh:
+            self.assertEqual(json.load(fh)["bytes_done"], 0)
+        r.write(force=True)   # explicit force -> flush latest
+        with open(p) as fh:
+            self.assertEqual(json.load(fh)["bytes_done"], 10)
+
+    def test_eta_is_null_without_total(self):
+        import json
+        d = self._tmp()
+        p = os.path.join(d, "progress.json")
+        r = hf._ProgressReporter(path=p, min_interval=0.0)
+        r.set_phase("decompress")
+        r.add_bytes(123)  # no total set -> pct 0, eta null, still records bytes
+        with open(p) as fh:
+            data = json.load(fh)
+        self.assertEqual(data["bytes_total"], 0)
+        self.assertEqual(data["pct"], 0.0)
+        self.assertIsNone(data["eta_seconds"])
+        self.assertEqual(data["bytes_done"], 123)
+
+    def test_tqdm_class_accumulates_bytes(self):
+        # the custom tqdm_class' update(n) must feed the reporter so
+        # snapshot_download byte progress lands in progress.json.
+        import json
+        d = self._tmp()
+        p = os.path.join(d, "progress.json")
+        r = hf._ProgressReporter(path=p, min_interval=0.0)
+        r.set_total(300)
+        r.set_phase("dl")
+
+        # stub tqdm so the test needs neither tqdm nor network
+        class _FakeTqdm:
+            def __init__(self, *a, **k):
+                pass
+            def update(self, n=1):
+                return None
+        with mock.patch("tqdm.auto.tqdm", _FakeTqdm, create=True):
+            cls = hf._make_progress_tqdm(r)
+            self.assertIsNotNone(cls)
+            bar = cls(total=300)
+            bar.update(120)
+            bar.update(80)
+        with open(p) as fh:
+            self.assertEqual(json.load(fh)["bytes_done"], 200)
+
+
+class TestAtomicInstallDir(unittest.TestCase):
+    """_atomic_install_dir: a clean build swaps in; a failed build leaves NO
+    partial in the final location (the key 2.8.1 robustness fix)."""
+
+    def _tmp(self):
+        import shutil
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(d, ignore_errors=True))
+        return d
+
+    def test_clean_build_installs(self):
+        d = self._tmp()
+        dest = os.path.join(d, "Genomes", "hg38")
+
+        def build(stage):
+            with open(os.path.join(stage, "chr1.fa"), "w") as fh:
+                fh.write(">chr1\nACGT\n")
+
+        out = hf._atomic_install_dir(dest, build)
+        self.assertEqual(out, dest)
+        self.assertTrue(os.path.isfile(os.path.join(dest, "chr1.fa")))
+        # no staging / backup leftovers
+        self.assertFalse(os.path.exists(os.path.join(d, "Genomes", ".hg38.staging")))
+        self.assertFalse(os.path.exists(os.path.join(d, "Genomes", ".hg38.replaced")))
+
+    def test_failed_build_leaves_no_partial(self):
+        d = self._tmp()
+        dest = os.path.join(d, "VCFs", "mydata")
+
+        def build(stage):
+            with open(os.path.join(stage, "chr1.vcf.gz"), "wb") as fh:
+                fh.write(b"\x00" * 10)
+            raise RuntimeError("simulated mid-download interruption")
+
+        with self.assertRaises(RuntimeError):
+            hf._atomic_install_dir(dest, build)
+        # the final location must NOT exist (no half-installed dataset)
+        self.assertFalse(os.path.exists(dest))
+        # staging must be cleaned up
+        self.assertFalse(os.path.exists(os.path.join(d, "VCFs", ".mydata.staging")))
+
+    def test_failed_build_preserves_existing_dest(self):
+        d = self._tmp()
+        dest = os.path.join(d, "Genomes", "hg38")
+        os.makedirs(dest)
+        with open(os.path.join(dest, "old.fa"), "w") as fh:
+            fh.write("existing")
+
+        def build(stage):
+            with open(os.path.join(stage, "new.fa"), "w") as fh:
+                fh.write("new")
+            raise RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError):
+            hf._atomic_install_dir(dest, build)
+        # the pre-existing good copy must be untouched
+        self.assertTrue(os.path.isfile(os.path.join(dest, "old.fa")))
+        self.assertFalse(os.path.exists(os.path.join(dest, "new.fa")))
+
+    def test_verify_rejects_before_swap(self):
+        d = self._tmp()
+        dest = os.path.join(d, "Genomes", "hg38")
+
+        def build(stage):
+            open(os.path.join(stage, "truncated.fa.gz"), "wb").close()
+
+        def verify(stage):
+            raise hf.DownloadIntegrityError("truncated")
+
+        with self.assertRaises(hf.DownloadIntegrityError):
+            hf._atomic_install_dir(dest, build, verify=verify)
+        self.assertFalse(os.path.exists(dest))
+
+
+class TestStructuralCheckWhenSizesEmpty(unittest.TestCase):
+    """(2.8.1 piece C) when the HF size API fails (_remote_sizes -> {}), the
+    download must STILL run the BGZF/gzip structural checks — only the size
+    comparison is skipped."""
+
+    def _tmp(self):
+        import shutil
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(d, ignore_errors=True))
+        return d
+
+    def test_truncated_bgzf_caught_with_no_sizes(self):
+        d = self._tmp()
+        # expected_size=None (the sizes.get(rel) value when _remote_sizes=={}) must
+        # NOT bypass the structural check
+        p = os.path.join(d, "x.vcf.gz")
+        with open(p, "wb") as fh:
+            fh.write(b"X" * 100)  # no BGZF EOF -> truncated
+        reason = hf.verify_download_file(p, expected_size=None)
+        self.assertIsNotNone(reason)
+        self.assertIn("EOF", reason)
+
+    def test_remote_sizes_empty_on_api_failure(self):
+        # _remote_sizes swallows any HF error and returns {} (structural-only mode)
+        class _Boom:
+            def get_paths_info(self, *a, **k):
+                raise RuntimeError("size API down")
+        self.assertEqual(
+            hf._remote_sizes(_Boom(), "repo", ["a", "b"], None), {}
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

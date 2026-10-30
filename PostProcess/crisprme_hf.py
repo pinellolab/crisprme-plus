@@ -41,6 +41,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 # Default HuggingFace dataset repo. Overridable per-invocation with --hf-repo or
@@ -395,6 +396,23 @@ def _list_available_downloads_raw(
     return [{"name": k, "size": v} for k, v in sorted(sizes.items())]
 
 
+def _catalog_component_size(
+    component: str, name: str, repo: Optional[str] = None
+) -> int:
+    """Best-effort download size (bytes) of a catalog item, 0 if unknown.
+
+    Reuses :func:`list_available_downloads` (which already returns per-item
+    sizes) so the progress bar has a denominator up-front. Any failure (offline,
+    missing item) -> 0, so the bar simply shows transferred bytes with no total."""
+    try:
+        for item in list_available_downloads(component, repo):
+            if item.get("name") == name:
+                return int(item.get("size", 0) or 0)
+    except Exception:  # noqa: BLE001 - sizing is best-effort
+        return 0
+    return 0
+
+
 def decompress_gz(path: str, remove_source: bool = True) -> str:
     """Gunzip ``path`` (``*.gz`` -> ``*``) and return the decompressed path.
 
@@ -410,6 +428,246 @@ def decompress_gz(path: str, remove_source: bool = True) -> str:
     if remove_source:
         os.remove(path)
     return out
+
+
+# --- download progress -------------------------------------------------------
+# The web Settings download used to show only a spinner + a static "running..."
+# while a multi-GB fetch ran for minutes; the underlying huggingface_hub tqdm
+# progress goes to stderr (log_error.txt) and was never parsed. This emits a
+# small JSON progress file the web poller renders as a real bar. It is
+# ENV-GATED: without CRISPRME_PROGRESS_FILE set, every function here is a no-op
+# and the happy path is byte-for-byte unchanged. All failures are swallowed —
+# progress reporting must never break a download.
+
+
+class _ProgressReporter:
+    """Write a throttled JSON progress file for the web Settings poller.
+
+    The file path comes from the ``CRISPRME_PROGRESS_FILE`` environment variable
+    (set by the web launcher, see settings_page._run_settings_job). When it is
+    unset this is a pure no-op — there is zero behaviour change on the CLI / the
+    current happy path. The JSON schema the poller reads::
+
+        {"phase": str, "bytes_done": int, "bytes_total": int, "pct": float,
+         "eta_seconds": int|null, "detail": str, "updated": <epoch float>}
+
+    Writes are throttled (``min_interval`` seconds, default 1.0) and atomic
+    (write a temp sibling + ``os.replace``) so a concurrent reader never sees a
+    half-written file.
+    """
+
+    def __init__(self, path: Optional[str] = None, min_interval: float = 1.0):
+        if path is None:
+            path = os.environ.get("CRISPRME_PROGRESS_FILE") or None
+        self.path = path
+        self.min_interval = min_interval
+        self.phase = ""
+        self.detail = ""
+        self.bytes_total = 0
+        self.bytes_done = 0
+        self._base_done = 0  # bytes finished in PRIOR stages (multi-part index)
+        self._start = time.time()
+        self._last_write = 0.0
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.path)
+
+    def set_total(self, total: int) -> None:
+        """Set the known total byte size for the current stage (0 == unknown)."""
+        try:
+            self.bytes_total = int(total or 0)
+        except (TypeError, ValueError):
+            self.bytes_total = 0
+
+    def set_phase(self, phase: str, detail: str = "", carry_done: bool = False) -> None:
+        """Start a new phase. ``carry_done`` keeps the running byte total across
+        stages (a multi-part index: index 1/3 -> genotypes 2/3 -> reference 3/3);
+        otherwise the per-stage byte counter resets."""
+        self.phase = phase
+        self.detail = detail
+        if carry_done:
+            self._base_done = self.bytes_done
+        else:
+            self._base_done = 0
+            self.bytes_done = 0
+        self.write(force=True)
+
+    def add_bytes(self, n: int) -> None:
+        """Accumulate ``n`` newly-transferred bytes and write (throttled)."""
+        try:
+            self.bytes_done += int(n or 0)
+        except (TypeError, ValueError):
+            return
+        self.write()
+
+    def set_done(self, done: int) -> None:
+        """Set the absolute bytes-done for the current stage (decompress poll)."""
+        try:
+            self.bytes_done = self._base_done + int(done or 0)
+        except (TypeError, ValueError):
+            return
+        self.write()
+
+    def write(self, force: bool = False) -> None:
+        if not self.path:
+            return
+        now = time.time()
+        if not force and (now - self._last_write) < self.min_interval:
+            return
+        self._last_write = now
+        total = self.bytes_total
+        done = min(self.bytes_done, total) if total else self.bytes_done
+        pct = (100.0 * done / total) if total else 0.0
+        eta = None
+        elapsed = now - self._start
+        if total and done > 0 and elapsed > 0:
+            rate = done / elapsed
+            if rate > 0:
+                eta = int(max(0, (total - done) / rate))
+        payload = {
+            "phase": self.phase,
+            "bytes_done": int(done),
+            "bytes_total": int(total),
+            "pct": round(pct, 1),
+            "eta_seconds": eta,
+            "detail": self.detail,
+            "updated": now,
+        }
+        try:
+            tmp = self.path + ".tmp"
+            with open(tmp, "w") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass  # progress reporting is best-effort; never raise
+
+
+def _make_progress_tqdm(reporter: "_ProgressReporter"):
+    """Build a ``tqdm_class`` subclass that feeds a :class:`_ProgressReporter`.
+
+    ``huggingface_hub.snapshot_download`` accepts a ``tqdm_class`` and drives it
+    with per-file byte updates; we subclass tqdm so each ``update(n)`` also
+    accumulates into the reporter. Across the many-small-file index tree tqdm
+    creates several bars, so we sum ``n`` across ALL instances (hence the
+    reporter, not per-bar totals). Returns ``None`` when tqdm is unavailable so
+    the caller falls back to a plain (progress-free) download.
+    """
+    try:
+        from tqdm.auto import tqdm as _tqdm
+    except Exception:  # noqa: BLE001 - tqdm absent -> no custom bar, plain download
+        return None
+
+    class _ProgressTqdm(_tqdm):  # pragma: no cover - exercised via a fake in tests
+        def update(self, n=1):
+            try:
+                reporter.add_bytes(n or 0)
+            except Exception:  # noqa: BLE001 - never let reporting break the bar
+                pass
+            return super().update(n)
+
+    return _ProgressTqdm
+
+
+def _dir_bytes(path: str) -> int:
+    """Total bytes of regular files under ``path`` (no symlink following)."""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for fn in files:
+            fp = os.path.join(root, fn)
+            try:
+                if not os.path.islink(fp):
+                    total += os.path.getsize(fp)
+            except OSError:
+                pass
+    return total
+
+
+@contextmanager
+def _decompress_progress(
+    reporter: Optional["_ProgressReporter"], out_dir: str, phase: str
+):
+    """Context manager: while the body runs a local decompress/extract into
+    ``out_dir``, a background thread polls its growing on-disk size and pushes it
+    to ``reporter`` as phase=``phase``. A strict no-op when progress is disabled —
+    no thread is started, so the CLI path is unchanged. The byte total already
+    reflects the known download size (set by the caller), so the growing extracted
+    size is a reasonable denominator for the decompress stage too."""
+    if reporter is None or not reporter.enabled:
+        yield
+        return
+    import threading
+
+    reporter.set_phase(phase, carry_done=False)
+    stop_evt = threading.Event()
+
+    def _poll():
+        while not stop_evt.is_set():
+            reporter.set_done(_dir_bytes(out_dir))
+            stop_evt.wait(1.0)
+
+    th = threading.Thread(target=_poll, daemon=True)
+    th.start()
+    try:
+        yield
+    finally:
+        stop_evt.set()
+        th.join(timeout=2.0)
+        reporter.set_done(_dir_bytes(out_dir))
+
+
+# --- atomic directory install -----------------------------------------------
+# A download + decompress that writes straight into the final data-tree location
+# (Genomes/<ref>/, VCFs/<ds>/, ...) leaves a half-populated dir on any mid-way
+# failure (interrupt, disk-full, flaky mount) — the search then sees a
+# discoverable-but-incomplete genome/dataset and fails cryptically later. Build
+# into a hidden staging dir on the SAME filesystem, run the verifier, then
+# os.replace the whole dir into place as the LAST step. On ANY exception the
+# staging dir is discarded so the final location is never touched by a partial.
+
+
+def _atomic_install_dir(dest: str, build, verify=None) -> str:
+    """Populate ``dest`` atomically via a same-filesystem staging dir.
+
+    ``build(stage_dir)`` writes the component into a fresh hidden staging dir
+    (created as a sibling of ``dest`` so ``os.replace`` is an atomic rename, not a
+    cross-device copy). ``verify(stage_dir)`` — if given — may raise to reject a
+    bad staging dir BEFORE anything is swapped in. Only after a clean build+verify
+    is the staged dir swapped into ``dest`` (any pre-existing ``dest`` is moved
+    aside first and deleted after the swap; rolled-forward if a prior run died
+    mid-swap). On ANY exception the staging dir is removed and ``dest`` is left
+    exactly as it was — no partial is ever installed. Returns ``dest``."""
+    parent = os.path.dirname(dest.rstrip("/")) or "."
+    os.makedirs(parent, exist_ok=True)
+    base = os.path.basename(dest.rstrip("/"))
+    stage = os.path.join(parent, f".{base}.staging")
+    backup = os.path.join(parent, f".{base}.replaced")
+    # roll forward an interrupted prior swap: a backup with no live dest means a
+    # previous run died between the two renames below -> restore it first.
+    if os.path.isdir(backup) and not os.path.exists(dest):
+        os.rename(backup, dest)
+    shutil.rmtree(backup, ignore_errors=True)
+    shutil.rmtree(stage, ignore_errors=True)
+    os.makedirs(stage)
+    try:
+        build(stage)
+        if verify is not None:
+            verify(stage)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)  # discard the partial; dest intact
+        raise
+    # clean build -> swap in as the last step (same-FS renames == atomic)
+    if os.path.exists(dest):
+        os.rename(dest, backup)
+    try:
+        os.rename(stage, dest)
+    except OSError:
+        if os.path.isdir(backup) and not os.path.exists(dest):
+            os.rename(backup, dest)  # restore on a failed final swap
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    shutil.rmtree(backup, ignore_errors=True)
+    return dest
 
 
 # --- download integrity -----------------------------------------------------
@@ -609,15 +867,27 @@ def _hf_call_with_retry(fn, *args, _what: str = "download",
 
 
 def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
-                 token: Optional[str] = None, retries: int = 2) -> str:
+                 token: Optional[str] = None, retries: int = 2,
+                 reporter: Optional["_ProgressReporter"] = None) -> str:
     """Download the files matching ``allow_patterns`` from ``repo`` into
     ``local_dir`` (flat, following the repo tree), VERIFY each one against HF's
     advertised size + a structural check, and re-fetch any truncated/corrupt file
     (up to ``retries`` extra passes) before returning. Raises
     ``DownloadIntegrityError`` if a file can't be made whole. Returns
-    ``local_dir``. Set CRISPRME_SKIP_VERIFY=1 to bypass (not recommended)."""
+    ``local_dir``. Set CRISPRME_SKIP_VERIFY=1 to bypass (not recommended).
+
+    When ``reporter`` is an enabled :class:`_ProgressReporter`, a custom
+    ``tqdm_class`` is passed to ``snapshot_download`` so transferred bytes feed
+    the web progress file. The extra kwarg is omitted entirely when progress is
+    off (or tqdm is unavailable), keeping the happy path byte-for-byte unchanged.
+    """
     hf = _require_hf()
     os.makedirs(local_dir, exist_ok=True)
+    extra = {}
+    if reporter is not None and reporter.enabled:
+        tqdm_cls = _make_progress_tqdm(reporter)
+        if tqdm_cls is not None:
+            extra["tqdm_class"] = tqdm_cls
     _hf_call_with_retry(
         hf.snapshot_download,
         repo_id=repo,
@@ -626,11 +896,17 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
         local_dir=local_dir,
         token=token,
         _what="snapshot",
+        **extra,
     )
     if os.environ.get("CRISPRME_SKIP_VERIFY") == "1":
         return local_dir
 
     rels = _staged_files(local_dir)
+    # _remote_sizes returns {} when HF's size API fails (old hub / offline). That
+    # is NOT a reason to skip verification: when sizes.get(rel) is None below,
+    # verify_download_file skips ONLY the size comparison and STILL runs the
+    # BGZF-EOF / gzip-magic / tar structural checks. So a truncated bgzf is caught
+    # even with no advertised sizes.
     sizes = _hf_call_with_retry(
         _remote_sizes, hf, repo, rels, token, _what="size-check"
     )
@@ -682,6 +958,7 @@ def _fetch_genotypes_companion(
     vcf_name: str,
     remote_prefix: str,
     token: Optional[str] = None,
+    reporter: Optional["_ProgressReporter"] = None,
 ) -> bool:
     """Fetch + extract the SEPARATE Tier-1 ``genotypes_<vcf>.tar.gz`` companion
     into ``<workdir>/Dictionaries/`` so ``genotypes_<vcf>/`` lands as a sibling of
@@ -696,7 +973,7 @@ def _fetch_genotypes_companion(
     patterns = [f"{remote_prefix}/{remote_name}"]
     staging = os.path.join(workdir, ".hf_stage_genotypes")
     shutil.rmtree(staging, ignore_errors=True)
-    _hf_snapshot(repo, patterns, staging, token)
+    _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
     gt_tarball = os.path.join(staging, remote_prefix, remote_name)
     if not os.path.isfile(gt_tarball):
         shutil.rmtree(staging, ignore_errors=True)
@@ -707,7 +984,9 @@ def _fetch_genotypes_companion(
     shutil.rmtree(extract_tmp, ignore_errors=True)
     os.makedirs(extract_tmp)
     try:
-        with tarfile.open(gt_tarball) as tf:
+        with _decompress_progress(
+            reporter, extract_tmp, phase="Extracting genotypes"
+        ), tarfile.open(gt_tarball) as tf:
             tf.extractall(extract_tmp)
         staged = os.path.join(extract_tmp, "Dictionaries")
         # tolerate an archive rooted at genotypes_<vcf>/ directly (no Dictionaries/
@@ -866,10 +1145,21 @@ def download_component(
     remote_prefix = _COMPONENT_PREFIXES[component]
     local_dir = os.path.join(workdir, _COMPONENT_LOCALDIR[component])
 
+    # Web progress (env-gated via CRISPRME_PROGRESS_FILE; a pure no-op on the CLI /
+    # the current happy path). Seed the known total up-front from the HF catalog so
+    # the bar has a denominator from byte one; refined per-stage for the multi-part
+    # index path below.
+    reporter = _ProgressReporter()
+    if reporter.enabled:
+        _name = {"genome": ref, "vcf": dataset, "index": index_name}.get(component)
+        if component in ("genome", "vcf", "index") and _name:
+            reporter.set_total(_catalog_component_size(component, _name, repo))
+        reporter.set_phase(f"Downloading {component}", _name or "", carry_done=False)
+
     if component == "genome":
         patterns = [f"{remote_prefix}/{ref}/*"]
         staging = os.path.join(workdir, ".hf_stage_genome")
-        _hf_snapshot(repo, patterns, staging, token)
+        _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
         src = os.path.join(staging, remote_prefix, ref)
         if not os.path.isdir(src):
             shutil.rmtree(staging, ignore_errors=True)
@@ -879,7 +1169,6 @@ def download_component(
                 f"may not have this genome uploaded yet."
             )
         dest = os.path.join(local_dir, ref)
-        os.makedirs(dest, exist_ok=True)
         files = sorted(os.listdir(src))
         # The move + gunzip below has no progress bar and, for a full genome
         # (~hundreds of per-contig FASTAs, several GB), runs silently for minutes
@@ -891,11 +1180,25 @@ def download_component(
             + f" into {dest} — no progress bar; a full genome can take a few minutes...\n"
         )
         sys.stderr.flush()
-        for fn in files:
-            moved = shutil.move(os.path.join(src, fn), os.path.join(dest, fn))
-            if moved.endswith(".gz"):
-                decompress_gz(moved)
-        shutil.rmtree(staging, ignore_errors=True)
+
+        def _build_genome(stage_dir):
+            # decompress into the hidden staging dir; it is swapped into Genomes/<ref>/
+            # only after this returns cleanly, so an interrupted/failed decompress
+            # never leaves a half-populated genome folder in place.
+            with _decompress_progress(
+                reporter, stage_dir, phase="Decompressing genome"
+            ):
+                for fn in files:
+                    moved = shutil.move(
+                        os.path.join(src, fn), os.path.join(stage_dir, fn)
+                    )
+                    if moved.endswith(".gz"):
+                        decompress_gz(moved)
+
+        try:
+            _atomic_install_dir(dest, _build_genome)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         return dest
 
     if component == "vcf":
@@ -903,7 +1206,7 @@ def download_component(
             raise ValueError("--dataset is required to download a 'vcf' component")
         patterns = [f"{remote_prefix}/{dataset}/*"]
         staging = os.path.join(workdir, ".hf_stage_vcf")
-        _hf_snapshot(repo, patterns, staging, token)
+        _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
         src = os.path.join(staging, remote_prefix, dataset)
         if not os.path.isdir(src):
             shutil.rmtree(staging, ignore_errors=True)
@@ -919,10 +1222,15 @@ def download_component(
                 f"repo that hosts '{remote_prefix}/{dataset}/'."
             )
         dest = os.path.join(local_dir, dataset)
-        os.makedirs(dest, exist_ok=True)
-        for fn in sorted(os.listdir(src)):
-            shutil.move(os.path.join(src, fn), os.path.join(dest, fn))  # keep bgzip
-        shutil.rmtree(staging, ignore_errors=True)
+
+        def _build_vcf(stage_dir):
+            for fn in sorted(os.listdir(src)):
+                shutil.move(os.path.join(src, fn), os.path.join(stage_dir, fn))  # keep bgzip
+
+        try:
+            _atomic_install_dir(dest, _build_vcf)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         return dest
 
     if component == "build-inputs":
@@ -1086,7 +1394,22 @@ def download_component(
                 pass  # existence check failed — use the requested name as-is
         patterns = [f"{remote_prefix}/{index_name}.tar.gz"]
         staging = os.path.join(workdir, ".hf_stage_index")
-        _hf_snapshot(repo, patterns, staging, token)
+        # multi-part phase labels: a VARIANT index installs in 3 stages (main index
+        # tarball -> genotypes companion -> shared reference index); a reference-only
+        # index is a single download. Re-seed the total to the ACTUAL (possibly
+        # -dictless) tarball's size so the bar denominator matches what is fetched.
+        _is_variant = "+" in index_name
+        if reporter.enabled:
+            reporter.set_total(
+                _catalog_component_size("index", index_name, repo)
+                or reporter.bytes_total
+            )
+            reporter.set_phase(
+                "Downloading index 1/3" if _is_variant else "Downloading index",
+                index_name,
+                carry_done=False,
+            )
+        _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
         tarball = os.path.join(staging, remote_prefix, f"{index_name}.tar.gz")
         if not os.path.isfile(tarball):
             shutil.rmtree(staging, ignore_errors=True)
@@ -1126,7 +1449,10 @@ def download_component(
                 # surface the provenance manifest (if present) without unpacking it
                 # alongside the index; extract only the index folder members
                 members = [m for m in tf.getmembers() if m.name != "manifest.json"]
-                tf.extractall(extract_tmp, members=members)
+                with _decompress_progress(
+                    reporter, extract_tmp, phase="Extracting index"
+                ):
+                    tf.extractall(extract_tmp, members=members)
                 try:
                     mf = tf.extractfile("manifest.json")
                     if mf is not None:
@@ -1258,9 +1584,20 @@ def download_component(
                     f"Samples will be degraded until genotypes_{vcf_name}/ is present.\n"
                 )
             else:
+                if reporter.enabled:
+                    reporter.set_total(
+                        _catalog_component_size(
+                            "index", f"genotypes_{vcf_name}", repo
+                        )
+                    )
+                    reporter.set_phase(
+                        "Downloading genotypes 2/3", f"genotypes_{vcf_name}",
+                        carry_done=False,
+                    )
                 try:
                     got = _fetch_genotypes_companion(
-                        repo, workdir, vcf_name, remote_prefix, token
+                        repo, workdir, vcf_name, remote_prefix, token,
+                        reporter=reporter,
                     )
                 except Exception as exc:  # network/extract error -> non-fatal
                     got = None  # None = errored and already reported below
@@ -1295,7 +1632,17 @@ def download_component(
             if ref_index_name and not os.path.isdir(
                 os.path.join(local_dir, ref_index_name)
             ):
+                if reporter.enabled:
+                    reporter.set_total(
+                        _catalog_component_size("index", ref_index_name, repo)
+                    )
+                    reporter.set_phase(
+                        "Downloading reference 3/3", ref_index_name,
+                        carry_done=False,
+                    )
                 try:
+                    # the recursive call builds its own reporter from the same env
+                    # progress file, so it keeps updating the bar for this stage.
                     download_component(
                         "index", workdir, repo=repo, ref=ref,
                         index_name=ref_index_name, token=token, genotypes=False,

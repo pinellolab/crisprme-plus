@@ -108,8 +108,16 @@ if ONLINE:
     DISPLAY_OFFLINE = "none"
 else:
     DISPLAY_ONLINE = "none"
-# set to execute multiple 2 jobs max at time
-pool_executor = concurrent.futures.ProcessPoolExecutor(max_workers=2)
+# Max concurrent search jobs. Configurable (env CRISPRME_MAX_CONCURRENT_JOBS or the
+# web Settings page), but the DEFAULT stays a conservative 2 so a laptop / the public
+# server is never oversubscribed; a search job is memory-heavy (~tens of GB each). The
+# pool is built once at startup, so a Settings change applies on the next restart.
+try:
+    import app_settings  # PostProcess is on sys.path via crisprme.py
+    _MAX_CONCURRENT_JOBS = app_settings.get_max_concurrent_jobs()
+except Exception:
+    _MAX_CONCURRENT_JOBS = 2
+pool_executor = concurrent.futures.ProcessPoolExecutor(max_workers=_MAX_CONCURRENT_JOBS)
 # A separate single-slot executor for Settings / Data-Manager operations
 # (genome/index/VCF downloads and local index builds). Keeping these off the
 # search `pool_executor` means a long download or index build never starves the
