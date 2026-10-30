@@ -386,6 +386,16 @@ class TestSettingsJobdir(_JobDirCase):
         self.assertTrue(os.path.isfile(os.path.join(self.settings, _LINK_ID, "cmd.json")))
         self.assertIsNone(self.ns["_settings_jobdir"](_LINK_ID))
 
+    def test_symlink_to_settings_itself_rejected(self):
+        # a job-shaped entry that resolves to Settings/ itself is not a job dir:
+        # its log.txt / cmd.json would be Settings/'s own
+        for job_id, target in (("set_ROOTLINK00", self.settings), ("set_DOTLINK000", ".")):
+            with self.subTest(target=target):
+                link = os.path.join(self.settings, job_id)
+                os.symlink(target, link)
+                self.assertEqual(os.path.realpath(link), os.path.realpath(self.settings))
+                self.assertIsNone(self.ns["_settings_jobdir"](job_id))
+
     def test_symlinked_settings_root_still_accepted(self):
         # a data dir whose Settings/ is itself a symlink (e.g. onto a volume) is a
         # legitimate layout: job dirs inside it must still resolve
