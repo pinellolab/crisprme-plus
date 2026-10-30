@@ -68,7 +68,9 @@ and the `release-crisprme` skill.
   real SNP at a multiallelic site whose ALTs include `*` (it left the base unchanged; the C++ port
   already coded it); and `add-variants` now fails when an enricher fails, instead of exiting 0 with
   that chromosome's enriched genome missing, which the index build would then have indexed as it
-  stood. Applies to the Docker build (`crispritz_ref`) and `install_from_source.sh`
+  stood (the Python enricher, moreover, no longer needs a `python` on PATH, and no longer races
+  its sibling workers to create their shared output folder, which could lose a chromosome).
+  Applies to the Docker build (`crispritz_ref`) and `install_from_source.sh`
   (`CRISPRITZ_REF`). The `*` case needs a multiallelic VCF, and every CRISPRme-supplied VCF is
   split, so it moves no published index.
   **No published index is affected** by the C++ enricher fix: the image built only the three search
