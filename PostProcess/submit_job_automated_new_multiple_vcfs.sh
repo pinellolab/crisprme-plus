@@ -204,11 +204,13 @@ _lock_mine() {
 # 0 when lock $1 is stale: its owner record names this host and PID namespace and
 # that PID is gone, or it names another (where this run cannot check the PID) and has
 # gone 15 minutes without a refresh (_lock_hold). Otherwise 1, with the reason in
-# _lock_why. On 0, _lock_gone says what became of the owner. Leaves the record read in
-# _lock_rec, and its pid, host and start time in _lock_pid, _lock_host and
-# _lock_started.
+# _lock_why, and _lock_live=1 when the owner is known to be alive (its PID here, its
+# refreshes elsewhere) -- 0 when this run cannot tell. On 0, _lock_gone says what
+# became of the owner. Leaves the record read in _lock_rec, and its pid, host and
+# start time in _lock_pid, _lock_host and _lock_started.
 _lock_stale() {
 	local _pidns
+	_lock_live=0
 	_lock_read "$1"
 	_lock_field _lock_pid "$_lock_rec" pid
 	_lock_field _lock_host "$_lock_rec" host
@@ -226,7 +228,8 @@ _lock_stale() {
 			_lock_why="$_lock_why, on another host or in another container, and not refreshed for 15 minutes"
 			return 0
 		fi
-		_lock_why="$_lock_why, on another host or in another container, where this run cannot check it"
+		_lock_live=1
+		_lock_why="$_lock_why, on another host or in another container, which refreshed it in the last 15 minutes; this run takes it over once it goes 15 minutes without a refresh"
 		return 1
 	fi
 	case "$_lock_pid" in
@@ -234,6 +237,7 @@ _lock_stale() {
 	esac
 	if [ "$_lock_pid" != "$$" ]; then  # our own PID in a record we did not write: a dead run's, reused
 		if kill -0 "$_lock_pid" 2>/dev/null; then
+			_lock_live=1
 			_lock_why="$_lock_why, which is still running"
 			return 1
 		fi
@@ -248,6 +252,18 @@ _lock_stale() {
 	_lock_gone="is gone"
 	_lock_why="$_lock_why, which is no longer running"
 	return 0
+}
+
+# What to do about a lock _lock_stale found held, into _lock_tip, for a run that is to
+# be $1 (e.g. "indexing <dir>") with what the lock guards $2 (" '<lock>' '<output>'...").
+# Clearing it is offered only when this run cannot check the owner: a run known to be
+# alive would go on writing into what another run then rebuilds.
+_lock_advice() {
+	if [ "$_lock_live" = 1 ]; then
+		_lock_tip="Wait for that run to finish, or stop it."
+	else
+		_lock_tip="If no CRISPRme run is $1, clear the lock and what it left with: rm -rf$2"
+	fi
 }
 
 # Write this run's owner record into lock $1. Through a rename, so a run reading it
@@ -327,7 +343,8 @@ _lock_take() {
 				return 2
 			fi
 			if [ "$SECONDS" -ge "$_next" ] && [ -d "$_lock" ]; then
-				echo "Still waiting for $_lock: $_lock_why. If no CRISPRme run is $_what, clear the lock and what it left with: rm -rf$_clear"
+				_lock_advice "$_what" "$_clear"
+				echo "Still waiting for $_lock: $_lock_why. $_lock_tip"
 				_next=$((SECONDS + ${_lock_notice_s:-300}))
 			fi
 		done

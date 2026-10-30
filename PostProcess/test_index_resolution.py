@@ -1035,13 +1035,19 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         self.assertIn(f"Another run is indexing {self.out}", out)
         self.assertIn(f"pid {owner.pid} on {_this_host()[0]}", self.notices(out)[0])
         self.assertIn("which is still running", self.notices(out)[0])
+        # a run known to be alive: wait for it or stop it -- never "clear its lock",
+        # which would leave its build writing into a directory another run rebuilds
+        self.assertTrue(self.notices(out)[0].endswith(
+            "which is still running. Wait for that run to finish, or stop it."), out)
+        self.assertNotIn("rm -rf", out)
         self.assertIn(f"Stale lock {self.lock}", out)
         self.assertEqual(err, "")
 
-    def assertWaitsAndExplains(self, record, why, aged=0):
+    def assertWaitsAndExplains(self, record, why, aged=0, live=False):
         """The lock is waited on and never broken, and the wait is explained -- at the
-        notice interval, not at every poll -- with how to clear it. `aged`: minutes
-        since the record (or, with none, the lock) was last written."""
+        notice interval, not at every poll: with how to clear it when this run cannot
+        check the owner, with "wait for it" when the owner is known to be alive (`live`).
+        `aged`: minutes since the record (or, with none, the lock) was last written."""
         self.hold(record)
         _age(self.lock / "owner" if record is not None else self.lock, aged)
         rc, out, err = self.take(stop_after=3.2)
@@ -1053,7 +1059,14 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         for notice in notices:
             self.assertIn(f"Still waiting for {self.lock}: ", notice)
             self.assertIn(why, notice)
-            self.assertIn(f"rm -rf '{self.lock}' '{self.out}'", notice)
+            if live:
+                self.assertTrue(notice.endswith(
+                    ". Wait for that run to finish, or stop it."), notice)
+                self.assertNotIn("rm -rf", notice)
+            else:
+                self.assertTrue(notice.endswith(
+                    f"clear the lock and what it left with: rm -rf '{self.lock}' "
+                    f"'{self.out}'"), notice)
         # untouched, and not released by the trap: the lock was never this run's
         self.assertEqual(sorted(p.name for p in self.lock.iterdir()),
                          [] if record is None else ["owner"])
@@ -1066,25 +1079,29 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         # its run is gone -- however long ago it was taken
         self.assertWaitsAndExplains(None, "it has no owner record", aged=60)
 
+    # what a waiting run says of a record that another host or container refreshed lately
+    ELSEWHERE = ("on another host or in another container, which refreshed it in the "
+                 "last 15 minutes; this run takes it over once it goes 15 minutes "
+                 "without a refresh")
+
     def test_a_lock_held_on_another_host_is_never_broken(self):
         # a PID from another host -- or another Docker container -- means nothing here,
         # but its run refreshes the record while it lives
         self.assertWaitsAndExplains(owner_record(dead_pid(), host="another-host"),
-                                    "on another host or in another container")
+                                    self.ELSEWHERE, live=True)
 
     def test_a_lock_held_in_another_pid_namespace_is_never_broken(self):
         # a container that shares the hostname (docker run --network host) still has
         # PIDs of its own
         self.assertWaitsAndExplains(owner_record(dead_pid(), pidns="pid:[1]"),
-                                    "on another host or in another container")
+                                    self.ELSEWHERE, live=True)
 
     def test_a_lock_held_elsewhere_and_refreshed_lately_is_never_broken(self):
         # refreshed 14 minutes ago: its run may be alive, just slow to refresh
         for record in (owner_record(dead_pid(), host="another-host"),
                        owner_record(dead_pid(), pidns="pid:[1]")):
             with self.subTest(record=record):
-                self.assertWaitsAndExplains(record, "on another host or in another "
-                                                    "container", aged=14)
+                self.assertWaitsAndExplains(record, self.ELSEWHERE, aged=14, live=True)
                 shutil.rmtree(self.lock)
 
     def test_a_lock_held_elsewhere_and_not_refreshed_for_15_minutes_is_taken_over(self):
@@ -1383,13 +1400,18 @@ class BuildLocksInTheShippedScript(_ShippedScript):
 
     def test_a_live_build_is_waited_for_and_taken_over_when_it_dies(self):
         holder = self.start_build()
-        waiter = self.launch(variant=False)
-        _wait_for(lambda: "Another run is indexing" in waiter.stdout(), 60,
+        waiter = self.launch(variant=False, env={"_lock_poll_s": "0.2"})
+        _wait_for(lambda: "Still waiting for" in waiter.stdout(), 60,
                   "the second run to wait")
         time.sleep(1)
         # the live holder's lock is honoured: no second build, its record untouched
         self.assertEqual([c for c in waiter.calls() if c[0] == "index-genome"], [])
         self.assertIn(f"\npid={holder.proc.pid}\n", (self.lock / "owner").read_text())
+        # and the wait names it, without the how-to-clear that would break its lock
+        self.assertRegex(waiter.stdout(), rf"Still waiting for {re.escape(str(self.lock))}: "
+                         rf"it is held by pid {holder.proc.pid} on .+, which is still "
+                         r"running\. Wait for that run to finish, or stop it\.\n")
+        self.assertNotIn("rm -rf", waiter.stdout())
         os.killpg(holder.proc.pid, signal.SIGKILL)
         holder.proc.wait()
         run = self.finish(waiter, timeout=60)
