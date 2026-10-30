@@ -170,44 +170,62 @@ fi
 _lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/null)" \
 	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
 _locks_held=()
+# From here to the traps, nothing runs a command substitution: see the traps.
 
-# Print field $2 of owner record $1 (parameter expansion: a here-string would need a
-# writable TMPDIR, and its failure would land on stderr).
+# Set variable $1 to field $3 of owner record $2, or to "" when it has none (parameter
+# expansion and printf -v; a here-string would need a writable TMPDIR, and its failure
+# would land on stderr).
 _lock_field() {
-	local _rec=$'\n'"$1"$'\n'
-	local _v=${_rec#*$'\n'"$2"=}
-	[ "$_v" = "$_rec" ] || printf '%s' "${_v%%$'\n'*}"
+	local _rec=$'\n'"$2"$'\n'
+	local _v=${_rec#*$'\n'"$3"=}
+	if [ "$_v" = "$_rec" ]; then _v=; else _v=${_v%%$'\n'*}; fi
+	printf -v "$1" '%s' "$_v"
+}
+_lock_field _lock_me_host "$_lock_me" host
+_lock_field _lock_me_pidns "$_lock_me" pidns
+
+# Read lock $1's owner record into _lock_rec, "" when it has none.
+_lock_read() {
+	_lock_rec=
+	{ IFS= read -r -d '' _lock_rec <"$1/owner"; } 2>/dev/null
+	_lock_rec=${_lock_rec%$'\n'}
 }
 
 # 0 when lock $1 is stale: its owner record names this host and PID namespace, and
 # that PID is gone. Otherwise 1, with the reason in _lock_why. Leaves the record read
-# in _lock_rec.
+# in _lock_rec, and its pid, host and start time in _lock_pid, _lock_host and
+# _lock_started.
 _lock_stale() {
-	local _pid _err
-	_lock_rec=$(cat "$1/owner" 2>/dev/null)
+	local _pidns
+	_lock_read "$1"
+	_lock_field _lock_pid "$_lock_rec" pid
+	_lock_field _lock_host "$_lock_rec" host
+	_lock_field _lock_started "$_lock_rec" started
+	_lock_field _pidns "$_lock_rec" pidns
 	if [ -z "$_lock_rec" ]; then
 		_lock_why="it has no owner record (an older CRISPRme writes none), so this run cannot check it"
 		return 1
 	fi
-	_pid=$(_lock_field "$_lock_rec" pid)
-	_lock_why="it is held by pid $_pid on $(_lock_field "$_lock_rec" host) (a run started $(_lock_field "$_lock_rec" started))"
-	if [ "$(_lock_field "$_lock_rec" host)" != "$(_lock_field "$_lock_me" host)" ] \
-		|| [ "$(_lock_field "$_lock_rec" pidns)" != "$(_lock_field "$_lock_me" pidns)" ]; then
+	_lock_why="it is held by pid $_lock_pid on $_lock_host (a run started $_lock_started)"
+	if [ "$_lock_host" != "$_lock_me_host" ] || [ "$_pidns" != "$_lock_me_pidns" ]; then
 		_lock_why="$_lock_why, on another host or in another container, where this run cannot check it"
 		return 1
 	fi
-	case "$_pid" in
+	case "$_lock_pid" in
 		'' | 0 | *[!0-9]*) _lock_why="$_lock_why, which is not a PID this run can check"; return 1 ;;
 	esac
-	if [ "$_pid" != "$$" ]; then  # our own PID in a record we did not write: a dead run's, reused
-		if _err=$(LC_ALL=C kill -0 "$_pid" 2>&1); then
+	if [ "$_lock_pid" != "$$" ]; then  # our own PID in a record we did not write: a dead run's, reused
+		if kill -0 "$_lock_pid" 2>/dev/null; then
 			_lock_why="$_lock_why, which is still running"
 			return 1
 		fi
-		case "$_err" in
-			*"No such process"*) ;;
-			*) _lock_why="$_lock_why, a process this run may not signal (another user's)"; return 1 ;;
-		esac
+		# kill -0 fails on a live process this run may not signal, too: only "No such
+		# process" means gone. Asked through a pipe; /proc would not do, as it is absent
+		# on some hosts and hides other users' processes under hidepid.
+		if ! LC_ALL=C kill -0 "$_lock_pid" 2>&1 | grep -q "No such process"; then
+			_lock_why="$_lock_why, a process this run may not signal (another user's)"
+			return 1
+		fi
 	fi
 	_lock_why="$_lock_why, which is no longer running"
 	return 0
@@ -226,9 +244,10 @@ _lock_sign() {
 # it, so two runs that both found the lock stale cannot both take it over.
 # 0 = this run now holds the lock.
 _lock_steal() {
-	local _rc=1
+	local _rc=1 _lock_rec
 	mkdir "$1/.takeover" 2>/dev/null || return 1
-	if [ "$(cat "$1/owner" 2>/dev/null)" = "$2" ] && _lock_sign "$1"; then
+	_lock_read "$1"
+	if [ "$_lock_rec" = "$2" ] && _lock_sign "$1"; then
 		_locks_held+=("$1")
 		_rc=0
 	fi
@@ -247,7 +266,7 @@ _lock_steal() {
 _lock_take() {
 	local _lock="$1" _what="$2" _out="$3" _clear _next
 	shift 2
-	_clear=$(printf " '%s'" "$_lock" "$@")
+	printf -v _clear " '%s'" "$_lock" "$@"
 	while :; do
 		if mkdir "$_lock" 2>/dev/null; then
 			_locks_held+=("$_lock")
@@ -256,7 +275,7 @@ _lock_take() {
 		fi
 		[ -d "$_lock" ] || return 1
 		if _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; then
-			echo "Stale lock $_lock: the run that held it (pid $(_lock_field "$_lock_rec" pid), started $(_lock_field "$_lock_rec" started)) is gone. Taking it over and $_what from scratch."
+			echo "Stale lock $_lock: the run that held it (pid $_lock_pid, started $_lock_started) is gone. Taking it over and $_what from scratch."
 			return 2
 		fi
 		echo "Another run is $_what — waiting..."
@@ -264,7 +283,7 @@ _lock_take() {
 		while [ -d "$_lock" ]; do
 			sleep "${_lock_poll_s:-5}"
 			if _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; then
-				echo "Stale lock $_lock: the run that held it (pid $(_lock_field "$_lock_rec" pid), started $(_lock_field "$_lock_rec" started)) is gone. Taking it over and $_what from scratch."
+				echo "Stale lock $_lock: the run that held it (pid $_lock_pid, started $_lock_started) is gone. Taking it over and $_what from scratch."
 				return 2
 			fi
 			if [ "$SECONDS" -ge "$_next" ] && [ -d "$_lock" ]; then
@@ -282,14 +301,14 @@ _lock_take() {
 # Release lock $1 if this run took it and still holds it. A missing record is this
 # run's own failed write: no run takes over a lock that has none.
 _lock_release() {
-	local _l _rec _held=0 _kept=()
+	local _l _held=0 _kept=() _lock_rec
 	for _l in "${_locks_held[@]}"; do
 		if [ "$_l" = "$1" ]; then _held=1; else _kept+=("$_l"); fi
 	done
 	_locks_held=("${_kept[@]}")
 	[ "$_held" = 1 ] || return 0
-	_rec=$(cat "$1/owner" 2>/dev/null)
-	[ -z "$_rec" ] || [ "$_rec" = "$_lock_me" ] || return 0
+	_lock_read "$1"
+	[ -z "$_lock_rec" ] || [ "$_lock_rec" = "$_lock_me" ] || return 0
 	rm -rf "$1" 2>/dev/null || rm -rf "$1" 2>/dev/null
 	return 0
 }
@@ -298,11 +317,24 @@ _lock_release_all() {
 	local _l
 	for _l in "${_locks_held[@]}"; do _lock_release "$_l"; done
 }
-# This script sets no other traps. INT and TERM release, then re-raise, so the run
-# still ends by the signal; bash runs them once the foreground command returns.
+
+# INT and TERM: release, then re-raise, so the run still ends by the signal.
+_lock_on_signal() {
+	_lock_release_all
+	trap - "$1"
+	kill -s "$1" "$$"
+}
+# This script sets no other traps. Bash runs INT and TERM once the foreground command
+# returns. Each trap is one call, and the helpers above run no command substitution:
+# on bash 5.2 a trap that fires while bash expands one can fail to parse ("trap: line
+# 2: unexpected EOF while looking for matching `)'"), and the signal is lost -- the
+# run goes on, or even abandons the loop it is in. So a run waiting on a lock always
+# ends on INT or TERM. Elsewhere this script expands $(...) throughout, and there the
+# release on INT or TERM stays best-effort on bash 5.2; the EXIT trap still releases
+# when the run ends, and a lock left by a run killed outright is taken over.
 trap '_lock_release_all' EXIT
-trap '_lock_release_all; trap - INT; kill -INT $$' INT
-trap '_lock_release_all; trap - TERM; kill -TERM $$' TERM
+trap '_lock_on_signal INT' INT
+trap '_lock_on_signal TERM' TERM
 
 # iterate over each variant dataset to compute the enriched genomes, index each
 # enriched genome, search off-targets, reconstruct haplotypes (if input VCFs are

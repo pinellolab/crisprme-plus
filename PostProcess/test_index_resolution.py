@@ -830,14 +830,15 @@ class EveryScanInTheShippedScript(_ShippedScript):
 
 
 def _lock_helpers():
-    """The shipped build-lock block, verbatim: from its header comment to its last trap.
+    """The shipped build-lock block, verbatim: from its header comment to its last trap,
+    the TERM one.
 
     Read when a test needs it, not at import, so a script without the block fails
     those tests instead of the whole module."""
     text = _SCRIPT.read_text()
     start = text.index("# Build locks.")
-    last = "trap '_lock_release_all; trap - TERM; kill -TERM $$' TERM"
-    return text[start:text.index(last, start) + len(last)] + "\n"
+    last = re.compile(r"^trap '[^\n]*' TERM$", re.M).search(text, start)
+    return text[start:last.end()] + "\n"
 
 
 def _this_host():
@@ -888,28 +889,34 @@ class _Locks(unittest.TestCase):
         self.out = self.dir / "NRG_2_hg38"
         self.started = 0
 
-    def start(self, body):
-        """Start `body` in bash after the shipped helpers; its output goes to files."""
+    def start(self, body, as_nobody=False):
+        """Start `body` in bash after the shipped helpers; its output goes to files.
+        `as_nobody` runs it as uid/gid 65534 (only root can), with the lock directory
+        open to that user."""
         script = f"_lock_poll_s=0.2\n_lock_notice_s=1\n{_lock_helpers()}{body}\n"
         self.started += 1
         out, err = self.dir / f"stdout{self.started}", self.dir / f"stderr{self.started}"
+        drop = None
+        if as_nobody:
+            self.dir.chmod(0o755)
+            drop = lambda: (os.setgid(65534), os.setuid(65534))  # noqa: E731
         with open(out, "w") as so, open(err, "w") as se:
             proc = subprocess.Popen(["bash", "-c", script], stdout=so, stderr=se,
-                                    text=True, start_new_session=True)
+                                    text=True, start_new_session=True, preexec_fn=drop)
         self.addCleanup(_reap, proc)
         proc.out_path, proc.err_path = out, err
         return proc
 
     def result(self, proc, stop_after=None):
         """(returncode, stdout, stderr) once `proc` ends. With `stop_after`, a run still
-        waiting then is stopped with SIGTERM -- to bash alone, so its trap runs as soon
-        as the poll's sleep returns."""
+        waiting then is stopped with SIGKILL to its process group: what INT and TERM do
+        is tested on a run that holds a lock, not on one waiting for it."""
         try:
             proc.wait(timeout=stop_after or 60)
         except subprocess.TimeoutExpired:
             if stop_after is None:
                 raise
-            proc.send_signal(signal.SIGTERM)
+            os.killpg(proc.pid, signal.SIGKILL)
             proc.wait(timeout=30)
         return proc.returncode, proc.out_path.read_text(), proc.err_path.read_text()
 
@@ -993,7 +1000,7 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         notice interval, not at every poll -- with how to clear it."""
         self.hold(record)
         rc, out, err = self.take(stop_after=3.2)
-        self.assertEqual(rc, -signal.SIGTERM, out + err)  # still waiting when stopped
+        self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
         self.assertNotIn("Stale lock", out)
         notices = self.notices(out)
         self.assertGreaterEqual(len(notices), 2, out)  # repeated ...
@@ -1023,6 +1030,20 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         # PIDs of its own
         self.assertWaitsAndExplains(owner_record(dead_pid(), pidns="pid:[1]"),
                                     "on another host or in another container")
+
+    def test_a_live_owner_this_run_may_not_signal_is_never_broken(self):
+        # kill -0 fails on a live process of another user as well as on a dead one;
+        # only "No such process" means gone. PID 1 is another user's to a run that is
+        # not root -- and root runs the waiter as nobody here to make it so.
+        self.hold(owner_record(1))
+        rc, out, err = self.result(self.start(self.take_body(), as_nobody=os.geteuid() == 0),
+                                   stop_after=1.5)
+        self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
+        self.assertNotIn("Stale lock", out)
+        self.assertIn("a process this run may not signal (another user's)",
+                      self.notices(out)[0])
+        self.assertEqual((self.lock / "owner").read_text(), owner_record(1))
+        self.assertEqual(err, "")
 
     def test_a_takeover_already_under_way_is_left_to_it(self):
         # two runs that find the same dead owner must not both take its lock over
@@ -1098,6 +1119,30 @@ class ALockIsReleasedByTheRunThatHoldsIt(_Locks):
                 self.assertFalse(self.lock.exists(), "an interrupted run left its lock")
                 self.assertEqual(err, "")
 
+    def test_a_waiting_run_expands_no_command_substitution(self):
+        """bash 5.2 can fail to parse a trap that fires while it expands a $(...) --
+        "trap: line 2: unexpected EOF while looking for matching `)'" -- and the signal
+        is lost: a run waiting on a lock ignored SIGTERM, or abandoned the script's
+        main loop, ran the code after it and exited 0. A waiting run spends its time in
+        these helpers, so they run none: no $(...), no backticks. ($((...)) is
+        arithmetic. _lock_me is set once, before any trap is.)"""
+        code, lines = [], iter(_lock_helpers().splitlines())
+        for line in lines:
+            if line.startswith("_lock_me="):
+                while line.endswith("\\"):
+                    line = next(lines)
+                continue
+            code.append(re.sub(r"(^|\s)#.*", "", line))  # drop comments
+        code = "\n".join(code)
+        self.assertEqual(re.findall(r".*\$\((?!\().*", code), [])
+        self.assertNotIn("`", code)
+
+    def test_each_trap_is_one_function_call(self):
+        traps = re.findall(r"^trap '([^']*)' (\w+)$", _lock_helpers(), re.M)
+        self.assertEqual(sorted(sig for _, sig in traps), ["EXIT", "INT", "TERM"])
+        for body, sig in traps:
+            self.assertRegex(body, r"^_lock_\w+( [A-Z]+)?$", sig)
+
 
 class BuildLocksInTheShippedScript(_ShippedScript):
     """The same locks, taken by whole runs of the shipped script. A reference-only
@@ -1166,7 +1211,7 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         self.assertIn(f"rm -rf '{self.lock}' '{self.index}'", out)
         self.assertEqual([c for c in waiter.calls() if c[0] == "index-genome"], [])
         self.assertEqual(waiter.stderr(), "")
-        os.killpg(waiter.proc.pid, signal.SIGTERM)  # stop it while it waits
+        os.killpg(waiter.proc.pid, signal.SIGKILL)  # stop it while it waits
         waiter.proc.wait(timeout=30)
         self.assertEqual(list(self.lock.iterdir()), [])  # not its lock: left as it was
 
