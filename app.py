@@ -112,11 +112,27 @@ else:
 # web Settings page), but the DEFAULT stays a conservative 2 so a laptop / the public
 # server is never oversubscribed; a search job is memory-heavy (~tens of GB each). The
 # pool is built once at startup, so a Settings change applies on the next restart.
+# app_settings lives in PostProcess/, which is NOT on sys.path yet: `crisprme.py
+# web-interface` starts index.py as a fresh subprocess (sys.path[0] is just this
+# directory), and index.py imports this module before pages/pages_utils.py inserts
+# PostProcess/. Insert it here, from this file's own location like pages_utils
+# does, so the setting is found whatever the cwd.
+_POSTPROCESS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "PostProcess"
+)
+if _POSTPROCESS_PATH not in sys.path:
+    sys.path.insert(0, _POSTPROCESS_PATH)
 try:
-    import app_settings  # PostProcess is on sys.path via crisprme.py
+    import app_settings
     _MAX_CONCURRENT_JOBS = app_settings.get_max_concurrent_jobs()
-except Exception:
+except Exception as e:
     _MAX_CONCURRENT_JOBS = 2
+    sys.stdout.write(
+        "WARNING: cannot read the concurrent search jobs setting (app_settings: "
+        f"{type(e).__name__}: {e}); using the default of {_MAX_CONCURRENT_JOBS} "
+        "concurrent search jobs\n"
+    )
+    sys.stdout.flush()
 pool_executor = concurrent.futures.ProcessPoolExecutor(max_workers=_MAX_CONCURRENT_JOBS)
 # A separate single-slot executor for Settings / Data-Manager operations
 # (genome/index/VCF downloads and local index builds). Keeping these off the
