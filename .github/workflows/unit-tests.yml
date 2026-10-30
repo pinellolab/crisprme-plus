@@ -21,6 +21,11 @@ on:
       # the rest of pages/ is covered by web-e2e.yml instead.
       - "pages/history_page.py"
       - "pages/settings_page.py"
+      # app.py sizes the search pool from app_settings at import time and index.py
+      # imports it; test_app_settings guards that, so a PR touching only these two
+      # must still run it.
+      - "app.py"
+      - "index.py"
       - ".github/workflows/unit-tests.yml"
   push:
     branches: [ "main", "python3.11", "2.2.0-dev" ]
