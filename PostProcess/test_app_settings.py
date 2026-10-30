@@ -2,8 +2,10 @@
 
 Default stays a conservative 2; env var overrides a persisted value; values are
 clamped to [1, MAX_JOBS_CAP] so the pool is never oversubscribed. app.py, loaded
-the way the web app is really started, must size its search pool from it."""
+the way the web app is really started, must size its search pool from it, and
+the Settings page must say when the env var overrides the value saved there."""
 
+import ast
 import json
 import os
 import shutil
@@ -12,6 +14,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 import app_settings as a
 
@@ -92,6 +95,13 @@ class TestMaxConcurrentJobs(unittest.TestCase):
             with open(os.path.join(d, a.CONFIG_FILE), "w") as f:
                 f.write("{not valid json")
             self.assertEqual(a.get_max_concurrent_jobs(d), 2)
+
+    def test_env_override_only_for_a_whole_number(self):
+        self.assertIsNone(a.env_override())
+        for raw, pinned in (("8", 8), (" 3 ", 3), ("99", 16), ("0", 1), ('"5"', None), ("", None)):
+            with self.subTest(raw=raw):
+                os.environ["CRISPRME_MAX_CONCURRENT_JOBS"] = raw
+                self.assertEqual(a.env_override(), pinned)
 
 
 class TestAppSearchPoolSize(unittest.TestCase):
@@ -180,6 +190,108 @@ class TestAppSearchPoolSize(unittest.TestCase):
                 workers, out = self._import_app(env_jobs=raw)
                 self.assertEqual(workers, used)
                 self.assertEqual(out, "")
+
+
+_SETTINGS_PAGE = os.path.join(_REPO_ROOT, "pages", "settings_page.py")
+
+
+class _Component:
+    """Stands in for a dash html/dcc component: keeps its children and props."""
+
+    def __init__(self, *args, **kwargs):
+        self.args, self.kwargs = args, kwargs
+
+
+class _Components:
+    """Stands in for dash's html / dcc modules: every name is a _Component."""
+
+    def __getattr__(self, _name):
+        return _Component
+
+
+def _load_concurrency_ui():
+    """The Settings page's "Concurrent search jobs" card and its Save callback,
+    extracted from pages/settings_page.py (which needs a live Dash app to import).
+    Returns (render_card, save): render_card() runs the card's statements from
+    settings_page() and returns the (title, blurb, body) they pass to _add_card;
+    save is _max_jobs_save itself."""
+    src = open(_SETTINGS_PAGE).read()
+    funcs = {n.name: n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)}
+    page = funcs["settings_page"].body
+    card = next(
+        i for i, node in enumerate(page)
+        if isinstance(node, ast.Assign)
+        and [ast.unparse(t) for t in node.targets] == ["concurrency_card"]
+    )
+    if not isinstance(page[card - 1], ast.Try):  # the try: import app_settings ...
+        raise AssertionError("settings_page(): concurrency_card lost its try block")
+    save = funcs["_max_jobs_save"]
+    save.decorator_list = []  # @app.callback needs the live Dash app
+    ns = {
+        "html": _Components(), "dcc": _Components(), "ONLINE": False,
+        "PreventUpdate": type("PreventUpdate", (Exception,), {}),
+        "_add_card": lambda title, blurb, body: (title, blurb, body),
+    }
+    exec(compile(ast.Module(body=[save], type_ignores=[]), _SETTINGS_PAGE, "exec"), ns)  # noqa: S102 - trusted own source
+    card_code = compile(ast.Module(body=page[card - 1:card + 1], type_ignores=[]), _SETTINGS_PAGE, "exec")
+
+    def render_card():
+        exec(card_code, ns)  # noqa: S102 - trusted own source
+        return ns["concurrency_card"]
+
+    return render_card, ns["_max_jobs_save"]
+
+
+class TestSettingsPageEnvOverride(unittest.TestCase):
+    """CRISPRME_MAX_CONCURRENT_JOBS overrides the value saved from the Settings
+    page, which used to say nothing about it: with the env var at 5, saving 3
+    answered "Restart the app to apply." though every restart kept 5."""
+
+    @classmethod
+    def setUpClass(cls):
+        render_card, save = _load_concurrency_ui()
+        cls.render_card, cls.save = staticmethod(render_card), staticmethod(save)
+
+    def _settings(self, env_jobs, save):
+        """With the env var at ``env_jobs`` (None: unset), render the card, then
+        type ``save`` and press Save; return (card blurb, Save feedback, the value
+        now saved)."""
+        with tempfile.TemporaryDirectory() as cfg, \
+                mock.patch.dict(os.environ, {"CRISPRME_CONFIG_DIR": cfg}):
+            os.environ.pop("CRISPRME_MAX_CONCURRENT_JOBS", None)
+            if env_jobs is not None:
+                os.environ["CRISPRME_MAX_CONCURRENT_JOBS"] = env_jobs
+            blurb = self.render_card()[1]
+            feedback = self.save(1, save).args[0]
+            with open(os.path.join(cfg, a.CONFIG_FILE)) as fh:
+                saved = json.load(fh)["max_concurrent_jobs"]
+        return blurb, feedback, saved
+
+    def test_override_and_value_in_effect_are_named(self):
+        blurb, feedback, saved = self._settings("5", save=3)
+        self.assertEqual(saved, 3)  # still saved, for when the env var is dropped
+        for text in (blurb, feedback):
+            self.assertIn("CRISPRME_MAX_CONCURRENT_JOBS", text)
+            self.assertIn("overrides", text)
+            self.assertRegex(text, r"\b5 concurrent search job\(s\) in effect")
+        self.assertNotIn("Restart the app to apply.", feedback)
+
+    def test_clamped_override_names_the_clamped_value(self):
+        blurb, feedback, _ = self._settings("99", save=3)
+        for text in (blurb, feedback):
+            self.assertRegex(text, r"\b16 concurrent search job\(s\) in effect")
+
+    def test_no_override_keeps_the_plain_texts(self):
+        # Unset, or not a whole number: then the env var is ignored (app.py warns
+        # about it) and the saved value does apply after a restart.
+        for env_jobs in (None, '"5"'):
+            with self.subTest(env_jobs=env_jobs):
+                blurb, feedback, saved = self._settings(env_jobs, save=3)
+                self.assertTrue(blurb.endswith("Takes effect after the app restarts."), blurb)
+                self.assertEqual(
+                    feedback, "Saved: up to 3 concurrent search job(s). Restart the app to apply."
+                )
+                self.assertEqual(saved, 3)
 
 
 if __name__ == "__main__":

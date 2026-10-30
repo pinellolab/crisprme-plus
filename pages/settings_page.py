@@ -1732,14 +1732,21 @@ def settings_page() -> List:
     try:
         import app_settings as _appcfg  # PostProcess on sys.path via crisprme.py
         _cur_maxjobs, _maxjobs_cap = _appcfg.get_max_concurrent_jobs(), _appcfg.MAX_JOBS_CAP
+        _maxjobs_env = _appcfg.env_override()
     except Exception:
-        _cur_maxjobs, _maxjobs_cap = 2, 16
+        _cur_maxjobs, _maxjobs_cap, _maxjobs_env = 2, 16, None
     concurrency_card = _add_card(
         "Concurrent search jobs",
         "How many searches run at the same time. The default is 2 (conservative — each "
         "genome-wide search is memory-heavy, ~tens of GB of RAM). Raise it only on a "
         "machine with enough RAM and cores; extra jobs beyond this limit simply queue. "
-        "Takes effect after the app restarts.",
+        "Takes effect after the app restarts."
+        + (
+            " CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, overrides the "
+            f"value saved here: {_maxjobs_env} concurrent search job(s) in effect."
+            if _maxjobs_env is not None
+            else ""
+        ),
         [
             dcc.Input(
                 id="max-jobs-input",
@@ -2417,6 +2424,15 @@ def _max_jobs_save(n, value):
             style={"color": "#b00"},
         )
     stored = _appcfg.set_max_concurrent_jobs(value)
+    pinned = _appcfg.env_override()
+    if pinned is not None:
+        return html.Span(
+            f"Saved: up to {stored} concurrent search job(s), but "
+            "CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, overrides the "
+            f"saved value: {pinned} concurrent search job(s) in effect. To apply "
+            f"{stored}, unset CRISPRME_MAX_CONCURRENT_JOBS and restart the app.",
+            style={"color": "green"},
+        )
     return html.Span(
         f"Saved: up to {stored} concurrent search job(s). Restart the app to apply.",
         style={"color": "green"},

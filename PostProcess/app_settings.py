@@ -31,11 +31,21 @@ def _clamp(n):
     return max(1, min(int(n), MAX_JOBS_CAP))
 
 
-def get_max_concurrent_jobs(workdir=None, default=DEFAULT_MAX_JOBS):
-    """Resolve the configured max concurrent search jobs (env > file > default)."""
+def env_override():
+    """The max concurrent search jobs CRISPRME_MAX_CONCURRENT_JOBS pins (clamped),
+    overriding the persisted value; None when it is unset or not a whole number,
+    which is ignored."""
     env = os.environ.get("CRISPRME_MAX_CONCURRENT_JOBS")
     if env and env.strip().isdigit():
         return _clamp(env.strip())
+    return None
+
+
+def get_max_concurrent_jobs(workdir=None, default=DEFAULT_MAX_JOBS):
+    """Resolve the configured max concurrent search jobs (env > file > default)."""
+    pinned = env_override()
+    if pinned is not None:
+        return pinned
     try:
         with open(_config_path(workdir)) as fh:
             return _clamp(json.load(fh).get("max_concurrent_jobs", default))
