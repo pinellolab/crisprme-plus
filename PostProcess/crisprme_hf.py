@@ -315,28 +315,17 @@ def list_available_downloads(
         except Exception:
             return []
         merged: Dict[str, Dict] = {row["name"]: row for row in default_rows}
-        for row in _list_index_archives(GENERAL_INDEX_HF_REPO):
+        for row in _list_available_downloads_one("index", GENERAL_INDEX_HF_REPO):
             if resolve_index_repo(row["name"]) == GENERAL_INDEX_HF_REPO:
                 merged[row["name"]] = row
         return sorted(merged.values(), key=lambda row: row["name"])
-    return _list_index_archives(repo) if component == "index" else _list_other(
-        component, repo
-    )
-
-
-def _list_other(component: str, repo: Optional[str] = None) -> List[Dict]:
-    """Original single-repo listing, for the non-index components."""
     return _list_available_downloads_one(component, repo)
-
-
-def _list_index_archives(repo: Optional[str] = None) -> List[Dict]:
-    """Index archives in one repo (``[]`` if that repo cannot be read)."""
-    return _list_available_downloads_one("index", repo)
 
 
 def _list_available_downloads_one(
     component: str, repo: Optional[str] = None
 ) -> List[Dict]:
+    """One repo's listing (``[]`` if that repo cannot be read)."""
     try:
         return _list_available_downloads_raw(component, repo)
     except Exception:
