@@ -455,7 +455,7 @@ class _ProgressReporter:
         self.bytes_total = 0
         self.bytes_done = 0
         self._base_done = 0  # bytes finished in PRIOR stages (multi-part index)
-        self._start = time.time()
+        self._start = time.time()  # when the CURRENT stage's bytes started moving
         self._last_write = 0.0
 
     @property
@@ -472,7 +472,11 @@ class _ProgressReporter:
     def set_phase(self, phase: str, detail: str = "", carry_done: bool = False) -> None:
         """Start a new phase. ``carry_done`` keeps the running byte total across
         stages (a multi-part index: index 1/3 -> genotypes 2/3 -> reference 3/3);
-        otherwise the per-stage byte counter resets."""
+        otherwise the per-stage byte counter resets.
+
+        The ETA rate is this stage's bytes over this stage's elapsed time, so the
+        clock restarts with the byte counter — and, when bytes carry over, keeps
+        the time those bytes took so the rate stays consistent."""
         self.phase = phase
         self.detail = detail
         if carry_done:
@@ -480,6 +484,7 @@ class _ProgressReporter:
         else:
             self._base_done = 0
             self.bytes_done = 0
+            self._start = time.time()
         self.write(force=True)
 
     def add_bytes(self, n: int) -> None:
@@ -509,7 +514,7 @@ class _ProgressReporter:
         done = min(self.bytes_done, total) if total else self.bytes_done
         pct = (100.0 * done / total) if total else 0.0
         eta = None
-        elapsed = now - self._start
+        elapsed = now - self._start  # THIS stage's elapsed time (see set_phase)
         if total and done > 0 and elapsed > 0:
             rate = done / elapsed
             if rate > 0:

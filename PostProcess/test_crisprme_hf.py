@@ -511,6 +511,44 @@ class TestProgressReporter(unittest.TestCase):
         self.assertIsNone(data["eta_seconds"])
         self.assertEqual(data["bytes_done"], 123)
 
+    def _eta_after(self, steps):
+        """Drive a reporter on a fake clock; return the last eta_seconds written.
+
+        ``steps`` are ``(advance_seconds, method, args)``."""
+        import json
+        d = self._tmp()
+        p = os.path.join(d, "progress.json")
+        clock = [1000.0]
+        with mock.patch.object(hf.time, "time", lambda: clock[0]):
+            r = hf._ProgressReporter(path=p, min_interval=0.0)
+            for advance, method, args in steps:
+                clock[0] += advance
+                getattr(r, method)(*args)
+        with open(p) as fh:
+            return json.load(fh)["eta_seconds"]
+
+    def test_eta_is_this_stage_bytes_over_this_stage_time(self):
+        # 5 GB in 10 min, then one minute into a 20 GB stage at the same pace: about
+        # 9 min remain, not the ~99 min the time since the download began gives.
+        eta = self._eta_after([
+            (0, "set_total", (5 * 10**9,)), (0, "set_phase", ("Downloading index 1/3",)),
+            (600, "add_bytes", (5 * 10**9,)),
+            (0, "set_total", (20 * 10**9,)), (0, "set_phase", ("Downloading genotypes 2/3",)),
+            (60, "add_bytes", (2 * 10**9,)),
+        ])
+        self.assertAlmostEqual(eta, 540, delta=1)
+
+    def test_carried_bytes_keep_the_time_they_took(self):
+        # carry_done keeps the running byte total, so the clock must not restart:
+        # 2 GB in 200 s is 10 MB/s, leaving 800 s for the other 8 GB.
+        eta = self._eta_after([
+            (0, "set_total", (10 * 10**9,)), (0, "set_phase", ("part 1",)),
+            (100, "add_bytes", (10**9,)),
+            (0, "set_phase", ("part 2", "", True)),
+            (100, "add_bytes", (10**9,)),
+        ])
+        self.assertAlmostEqual(eta, 800, delta=1)
+
     def test_tqdm_class_accumulates_bytes(self):
         # the custom tqdm_class' update(n) must feed the reporter so
         # snapshot_download byte progress lands in progress.json.
