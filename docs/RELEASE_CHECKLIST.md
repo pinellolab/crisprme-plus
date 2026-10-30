@@ -20,7 +20,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 
 - [ ] **Version sweep** — `crisprme.py` `version`, `Dockerfile` (CRISPRitz ARG), the tag/image `vX.Y.Z`, and every version string in README + `docs/` read the SAME `X.Y.Z`. Grep gate: no stale `2.5.x/2.6.x/2.7.x` strings or `v2.6.x` image tags linger outside historical/CHANGELOG/archived-doc context.
 - [ ] **Default index** — every surface names `NRG_3_hg38+hg38_HGDP1kGP` (SHAPEIT5 re-phased, 4,091 = 925 HGDP + 3,166 1000 Genomes) as the recommended **variant** default; `NRG_3_hg38` is the reference-only default. No surface proposes a retired/alternative index as *the* default.
-- [ ] **No retired index advertised** — grep the whole repo (code help strings, scripts, tests, docs) + the HF card for retired names; they may appear ONLY in a past-tense/retirement note. Retired set: `NRG_3_hg38+hg38_1000G2021` (+ `genotypes_hg38_1000G2021`, superseded by the HGDP1kGP default), `NRG_3_hg38+hg38_1000G2021_HGDP` (hybrid), any `*-dictless*`, `NGG_3_hg38`, `genotypes_hg38_1000G_HGDP`.
+- [ ] **No retired index advertised** — grep the whole repo (code help strings, scripts, tests, docs) + the HF card for retired names; they may appear ONLY in a past-tense/retirement note. Retired set: `NRG_3_hg38+hg38_1000G2021` (+ `genotypes_hg38_1000G2021`, superseded by the HGDP1kGP default), `NRG_3_hg38+hg38_1000G2021_HGDP` (hybrid), any `*-dictless*`, `genotypes_hg38_1000G_HGDP`. (`NGG_3_hg38` was retired once and **re-published 2026-10-25**: it is the shared reference index that `download --what index` co-fetches for `NGG_3_hg38+hg38_HGDP1kGP`, so it is live and must stay documented.)
 - [ ] **Scorer** — CFD + CRISPR-Bulge everywhere; zero mentions of CRISTA or azimuth (removed).
 - [ ] **Licence** — MGBOA 1.0 everywhere (README, METHODS, `LICENSE`, HF card frontmatter `license: other` + `license_name`/`license_link`, report footer). The migration table states commercial use needs a separate licence for **both** CRISPRme+ and stock CRISPRme.
 - [ ] **Analysis mode** — population-level default vs opt-in `--per-sample`; zero mentions of the removed `--fast`/`--full`.
@@ -44,7 +44,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 
 ### C. Release mechanics (at/after tag)
 - [ ] Bump `crisprme.py` version; move `CHANGELOG [Unreleased]` → `[X.Y.Z]` dated + fresh `[Unreleased]` + fix link footer.
-- [ ] Tag → `docker-multiarch` CI publishes `pinellolab/crisprme:vX.Y.Z` + `:latest`; verify `crisprme.py --version` == `X.Y.Z` and CRISPRitz `v2.9.0` inside the image.
+- [ ] Tag → `docker-multiarch` CI publishes `pinellolab/crisprme:vX.Y.Z` + `:latest`; verify `crisprme.py --version` == `X.Y.Z` and that `crispritz.py`'s `VERSION` inside the image equals the Dockerfile's `crispritz_ref` (v2.9.1 for 2.8.1).
 - [ ] Bioconda: refresh the recipe/Gmail draft + `sha256` of the new release tarball; README's bioconda-status line matches reality.
 - [ ] HF dataset card re-checked against the shipped catalog (part of surface A).
 - [ ] Ping Ann (@anncir1) to review any web/assembly-search changes on the PR.
@@ -56,7 +56,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 | # | What bit us | The check that catches it |
 |---|---|---|
 | T-01 | Version strings drifted across surfaces (v2.7.8: README/docs still said 2.6.2 / 2.7.1 / 2.5.5 while shipped was 2.7.7). | Gate A "version sweep" grep, every release. |
-| T-02 | Docs/scripts/tests kept advertising indexes **after they were deleted from HF** (hybrid `1000G2021_HGDP`, `*-dictless`, `NGG_3_hg38`). | Gate A "no retired index advertised" repo-wide + HF-card grep. |
+| T-02 | Docs/scripts/tests kept advertising indexes **after they were deleted from HF** (hybrid `1000G2021_HGDP`, `*-dictless`, `NGG_3_hg38` — the last since re-published, 2026-10-25, as the reference companion of `NGG_3_hg38+hg38_HGDP1kGP`). | Gate A "no retired index advertised" repo-wide + HF-card grep. |
 | T-03 | The **HF dataset card** was never part of the consistency sweep → it still declared AGPL, a fictional index layout, and the wrong `pinellolab/` repo-id. | HF card is now an explicit surface in Gate A. |
 | T-04 | Web **first-paint** seeded the variant default via `_preferred_variant()` **without the genome**, so the phased-preference was skipped and it could pick a non-HGDP1kGP panel. | Both call sites pass the genome; Gate A "default index" + a web walkthrough confirming the proposed default. |
 | T-05 | `crisprme.py` path-correction hard-stripped a 3-char `"bin"` suffix → the `opt/` copy spawned by the web got a garbage PostProcess path (`ModuleNotFoundError: validate_inputs`), breaking **every** web assembly-search. | Layout-detection (PostProcess-dir probe) instead of suffix math; web assembly-search e2e in the walkthrough. |
@@ -105,7 +105,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 - Default-index count single-source (T-18): `grep -rnE "929|3,?162|3,?477"` across docs/ must return ONLY raw-source / mega-source-list / retired / 2019-AN-example contexts; any "929 HGDP + 3,162 1kGP" DEFAULT split is the stale pair (correct = 925 + 3,166; 925 = post-QC, 929 = raw source count).
 - No retired-index copy-paste even under a Historical banner: a whole-file banner is not cover for a verbatim dead `download --index-name <retired>` command — replace the inline name with the live equivalent.
 - Help-text value resolvability: every VALUE in a flag's `--help` must resolve against the DEFAULT repo/config or carry an inline "custom only" caveat (e.g. `--what vcf` help listing `1000G, HGDP`).
-- Scripted HF-card + catalog check (make mandatory, not skipped offline): the HF `indexes/` tree must equal the documented 5-index set and the card must carry zero retired names + MGBOA frontmatter.
+- Scripted HF-card + catalog check (make mandatory, not skipped offline): the HF `indexes/` tree of each dataset repo must equal the set [`INDEX_PROVENANCE.md`](INDEX_PROVENANCE.md) documents for it, and the card must carry zero retired names + MGBOA frontmatter.
 
 > **How to use T-rows:** every one is a real incident. When a release pass uncovers a new one,
 > add a row here with the symptom and the check, and wire the check into Gate A or B above.
