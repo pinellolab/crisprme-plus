@@ -98,7 +98,8 @@ class TestMaxConcurrentJobs(unittest.TestCase):
 
     def test_env_override_only_for_a_whole_number(self):
         self.assertIsNone(a.env_override())
-        for raw, pinned in (("8", 8), (" 3 ", 3), ("99", 16), ("0", 1), ('"5"', None), ("", None)):
+        cases = (("8", 8), (" 3 ", 3), ("99", 16), ("0", 1), ('"5"', None), ("", None))
+        for raw, pinned in cases:
             with self.subTest(raw=raw):
                 os.environ["CRISPRME_MAX_CONCURRENT_JOBS"] = raw
                 self.assertEqual(a.env_override(), pinned)
@@ -232,8 +233,10 @@ def _load_concurrency_ui():
         "PreventUpdate": type("PreventUpdate", (Exception,), {}),
         "_add_card": lambda title, blurb, body: (title, blurb, body),
     }
-    exec(compile(ast.Module(body=[save], type_ignores=[]), _SETTINGS_PAGE, "exec"), ns)  # noqa: S102 - trusted own source
-    card_code = compile(ast.Module(body=page[card - 1:card + 1], type_ignores=[]), _SETTINGS_PAGE, "exec")
+    save_stmts = ast.Module(body=[save], type_ignores=[])
+    exec(compile(save_stmts, _SETTINGS_PAGE, "exec"), ns)  # noqa: S102 - own source
+    card_stmts = ast.Module(body=page[card - 1:card + 1], type_ignores=[])
+    card_code = compile(card_stmts, _SETTINGS_PAGE, "exec")
 
     def render_card():
         exec(card_code, ns)  # noqa: S102 - trusted own source
@@ -284,13 +287,16 @@ class TestSettingsPageEnvOverride(unittest.TestCase):
     def test_no_override_keeps_the_plain_texts(self):
         # Unset, or not a whole number: then the env var is ignored (app.py warns
         # about it) and the saved value does apply after a restart.
+        plain_save = (
+            "Saved: up to 3 concurrent search job(s). Restart the app to apply."
+        )
         for env_jobs in (None, '"5"'):
             with self.subTest(env_jobs=env_jobs):
                 blurb, feedback, saved = self._settings(env_jobs, save=3)
-                self.assertTrue(blurb.endswith("Takes effect after the app restarts."), blurb)
-                self.assertEqual(
-                    feedback, "Saved: up to 3 concurrent search job(s). Restart the app to apply."
+                self.assertTrue(
+                    blurb.endswith("Takes effect after the app restarts."), blurb
                 )
+                self.assertEqual(feedback, plain_save)
                 self.assertEqual(saved, 3)
 
 
