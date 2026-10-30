@@ -90,6 +90,21 @@ The two genotyped panels ship a `genotypes_hg38_*` companion that enables
 | `NGG` | `NGG_3_hg38`, `+hg38_HGDP1kGP` | canonical SpCas9 PAM only. **NGG cannot serve NAG off-targets**, so NRG is preferred for a safety screen |
 | `NNN` (PAM-less) | `NNN_3_hg38`, `+hg38_HGDP1kGP` | one index for ANY 3-nt PAM, selected at search time with `--prune-pam`. Larger on disk (67 GB / 101 GB) but removes the per-PAM rebuild |
 
+**`NRR_3_hg38+hg38_mega` was replaced for CRISPRme+ 2.8.1.** The archive uploaded on
+2026-10-27 shipped an empty indel index and empty indel logs, so no indel off-target
+was ever reported from it, and installing it next to `NRG_3_hg38+hg38_mega` emptied
+that index's indel logs as well (an install replaces each `Dictionaries/` folder).
+If you downloaded it before the replacement, remove
+`genome_library/NRR_3_hg38+hg38_mega` and `genome_library/NRR_3_hg38+hg38_mega_INDELS`
+and download it again; that also restores NRG mega's logs. Both mega archives now
+carry identical `Dictionaries/`.
+
+**`NRR_3_hg38+hg38_HPRC` was replaced too**, for a smaller reason: its registry lacked
+the stamp that makes a search on a phased panel default to per-sample analysis, so it
+ran population-level unless `--per-sample` was passed (and, installed next to
+`NRG_3_hg38+hg38_HPRC`, did the same to that one). Its index is unchanged; re-download
+it the same way to get the per-sample default back.
+
 **PAM-less provenance.** The two `NNN_3` archives were built on 2026-10-25, before
 the genomic-`N` flank fix in CRISPRitz 2.9.1. For a **constrained** search PAM —
 `NGG`, `NRG`, `NRR`, i.e. every intended use of a PAM-less index — the results are

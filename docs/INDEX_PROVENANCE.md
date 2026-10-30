@@ -13,6 +13,10 @@ Two separate questions per archive:
    stream at the first leaf.
 2. **Content** — does the 2.9.1 builder produce the same index? Decided by whether
    the genomic-`N` flank fix (CRISPRitz `5c612c0`) changes that PAM's build.
+3. **Completeness** — does the archive hold what a variant search needs? Checked in
+   the archive itself: every variant archive was downloaded (SHA-256 equal to the
+   Hub's LFS oid) and its members listed, for `_INDELS` bins per sub-index and the
+   bundled `Dictionaries/`.
 
 ## Verdict
 
@@ -20,25 +24,29 @@ Two separate questions per archive:
 one of them is readable by any CRISPRme release, 2.8.0 included.** Wider PAM-less
 flanks are the only exception and live in a separate repo.
 
-| Archive | Size | Uploaded | PAM | Readable by 2.8.0 | 2.9.1 builder content |
-|---|---|---|---|---|---|
-| `NRG_3_hg38` | 8.2 GB | 2026-08-25 | NRG | yes | bit-identical |
-| `NRG_3_hg38+hg38_HGDP1kGP` | 25.8 GB | 2026-10-07 | NRG | yes | bit-identical |
-| `NRG_3_hg38+hg38_HPRC` | 14.2 GB | 2026-09-21 | NRG | yes | bit-identical |
-| `NRG_3_hg38+hg38_mega` | 11.3 GB | 2026-09-21 | NRG | yes | bit-identical |
-| `NRR_3_hg38` | 18.7 GB | 2026-10-25 | NRR | yes | bit-identical |
-| `NRR_3_hg38+hg38_HGDP1kGP` | 39.9 GB | 2026-10-25 | NRR | yes | bit-identical |
-| `NRR_3_hg38+hg38_HPRC` | 28.6 GB | 2026-10-27 | NRR | yes | bit-identical |
-| `NRR_3_hg38+hg38_mega` | 20.8 GB | 2026-10-27 | NRR | yes | bit-identical |
-| `NGG_3_hg38` | 3.5 GB | 2026-10-25 | NGG | yes | bit-identical |
-| `NGG_3_hg38+hg38_HGDP1kGP` | 20.0 GB | 2026-10-25 | NGG | yes | bit-identical |
-| `NNN_3_hg38` | 66.6 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs, see below** |
-| `NNN_3_hg38+hg38_HGDP1kGP` | 100.9 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs, see below** |
-| `genotypes_hg38_HGDP1kGP` | 5.4 GB | 2026-10-07 | — | yes | not an index |
-| `genotypes_hg38_HPRC` | 0.5 GB | 2026-10-27 | — | yes | not an index |
+| Archive | Size | Uploaded | PAM | Readable by 2.8.0 | 2.9.1 builder content | `_INDELS` in the archive |
+|---|---|---|---|---|---|---|
+| `NRG_3_hg38` | 8.2 GB | 2026-08-25 | NRG | yes | bit-identical | — |
+| `NRG_3_hg38+hg38_HGDP1kGP` | 25.8 GB | 2026-10-07 | NRG | yes | bit-identical | 23 sub-indexes, 34 bins |
+| `NRG_3_hg38+hg38_HPRC` | 14.2 GB | 2026-09-21 | NRG | yes | bit-identical | 24, 129 |
+| `NRG_3_hg38+hg38_mega` | 11.3 GB | 2026-09-21 | NRG | yes | bit-identical | 24, 32 |
+| `NRR_3_hg38` | 18.7 GB | 2026-10-25 | NRR | yes | bit-identical | — |
+| `NRR_3_hg38+hg38_HGDP1kGP` | 39.9 GB | 2026-10-25 | NRR | yes | bit-identical | 23, 70 |
+| `NRR_3_hg38+hg38_HPRC` | 28.6 GB | 2026-10-27 | NRR | yes | bit-identical | 24, 248 — **registry metadata stale, replaced** |
+| `NRR_3_hg38+hg38_mega` | 20.8 GB | 2026-10-27 | NRR | yes | bit-identical | **24, 0 — empty, replaced** |
+| `NGG_3_hg38` | 3.5 GB | 2026-10-25 | NGG | yes | bit-identical | — |
+| `NGG_3_hg38+hg38_HGDP1kGP` | 20.0 GB | 2026-10-25 | NGG | yes | bit-identical | 23, 23 |
+| `NNN_3_hg38` | 66.6 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs, see below** | — |
+| `NNN_3_hg38+hg38_HGDP1kGP` | 100.9 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs, see below** | 23, 222 |
+| `genotypes_hg38_HGDP1kGP` | 5.4 GB | 2026-10-07 | — | yes | not an index | — |
+| `genotypes_hg38_HPRC` | 0.5 GB | 2026-10-27 | — | yes | not an index | — |
 
-**No archive needs rebuilding.** The two `NNN_3` archives carry a documented
-caveat that does not affect any intended use.
+**2.8.1 replaces `NRR_3_hg38+hg38_mega`**, which shipped an empty indel index, and
+**`NRR_3_hg38+hg38_HPRC`**, whose registry lacks the stamp that selects the per-sample
+default (both below). The two `NNN_3` archives carry the documented caveat below.
+Archives built on one panel now bundle the same `Dictionaries/` (HGDP1kGP: NGG, NRG,
+NRR and NNN already agreed on all 117 members by name and exact size; HPRC and mega
+did not, and their replacements take the NRG archive's dictionaries byte for byte).
 
 ## The 10 dedicated-PAM archives: bit-identical, measured
 
@@ -96,6 +104,78 @@ indel rows each justified by its own window, 0 unjustified.
 `20bp-NNN-NO-PAM` as the *search* PAM — "report off-targets regardless of PAM" —
 under-reports sites whose PAM bases are assembly `N`. Those are sites whose PAM
 sequence is unknown, so a dedicated index would not report them either.
+
+## `NRR_3_hg38+hg38_mega`: published with an empty indel index
+
+The two questions above say nothing about whether an archive actually *contains*
+what an indel search needs, so every published variant archive was also checked in
+the archive itself: downloaded, SHA-256 equal to the Hub's LFS oid, members listed.
+One failed.
+
+| | published 2026-10-27 | replacement (staged) |
+|---|---|---|
+| `_INDELS` | 24 sub-indexes, **0** `.bin` | 24 sub-indexes, 67 `.bin` (5.29 GB) |
+| `Dictionaries/log_indels_hg38_mega` | 24 header-only logs (72–73 B each) | 419.1 MB, as in NRG mega |
+| `Dictionaries/indel_genotypes_hg38_mega` | 48 empty files | absent, as in NRG mega |
+| `Dictionaries/registry_hg38_mega` | data identical to NRG mega's; index metadata predates the `data_type`/`phased` stamps | NRG mega's |
+| SNP index `NRR_3_hg38+hg38_mega` | 346 `.bin` | unchanged |
+
+**Cause.** `build_nrr_ml007.sh` indexed ml007's `mega_gw_build` fake-indel genome,
+built 2026-09-02, before the sites-only fix (#191): the enricher writes an indel
+contig only when a sample carries the indel, a sites-only VCF has no samples, so
+every chromosome's FASTA there is a bare header. `buildTST` crashed on each empty
+genome, `os.system` ignored it, and `publish_nrr_mh.sh` uploaded the result with
+that build's equally empty `log_indels`. The repo's own driver for this,
+`seq_script/merge_panels/mega_build_indels.sh`, adds a synthetic pseudo-sample at
+every indel site precisely to avoid it, and was not used.
+
+**Effect.** Every indel search on NRR mega found nothing: silently on 2.8.0; on 2.8.1
+the empty logs make it read as a panel with no indels, so also silently. And an
+install replaces each `Dictionaries/` directory, so installing NRR mega next to
+`NRG_3_hg38+hg38_mega` replaced NRG mega's 419 MB of indel logs with the empty ones,
+and NRG mega lost its indel off-targets in that working directory too. (The other two
+differences have no effect found: the registry's `.bin` data is byte-identical and,
+without the stamps, the CLI and the web both fall back to population-level/sites-only
+for this panel; an empty indel genotype store changes nothing for a panel with no
+per-sample store, whose co-occurrence rows are PUTATIVE either way.)
+
+**Repair.** The PAM-independent mega fake-indel genome that `mega_build_indels.sh`
+produced on 2026-10-10 (ml007 `mega_kit_stage`) was re-indexed with the 2.9.1
+builder. As a provenance check it was indexed for NRG first: the result is
+**byte-identical to the published NRG mega `_INDELS`** (32 of 32 files,
+2,137,365,874 B), so it is that index's exact input. Indexed for NRR, it gives the
+67 `.bin` above. The replacement archive is the real `publish_index` output
+(upload intercepted) from the published SNP index, that `_INDELS`, and the
+`Dictionaries/` + `samplesIDs/` extracted from the published NRG mega archive.
+
+**Verified.** Genome-wide, sites-only, population-level, 4 mismatches + 1 DNA + 1 RNA
+bulge, guide `ACTGAAATCTGTAAGCAGGC`, all three runs exit 0:
+
+| run | indel off-target rows (per-dataset AF) | integrated rows |
+|---|---|---|
+| published NRR mega, CRISPRme 2.8.0 | **0** | 379,288 |
+| replacement NRR mega, 2.8.1 | 2,081,489 | 400,459 |
+| published NRG mega, 2.8.1 | 1,131,494 | 188,744 |
+
+And at the engine: on each of the 24 `_INDELS` sub-indexes, the replacement's NRR
+targets passed through `pam_filter.py` with NRG **equal** the published NRG mega's
+targets, 24 of 24 chromosomes, 1,131,494 targets in all (NRR's `N[AG][AG]` contains
+NRG's `N[AG]G`, so nothing else would be consistent). Each engine-level total equals
+the pipeline's indel row count above, so the pipeline carried every one through.
+
+## `NRR_3_hg38+hg38_HPRC`: complete, with a registry that sets the wrong default
+
+Its indel index is complete (24 sub-indexes, 248 bins) and its index directories
+match the publish source member for member. But it was published from ml007's
+`hprc_build`, whose registry predates the `data_type`/`phased` stamps the other
+archives carry (`reg_*.idx` 1,584 B against NRG HPRC's 1,625 B). `crisprme.py`
+chooses the default analysis mode from that stamp — per-sample when it reads
+`genotyped-phased`, population-level otherwise — so an NRR HPRC search silently ran
+population-level, without named carriers or CONFIRMED cis phasing, on a phased
+panel. And an install replaces `Dictionaries/registry_hg38_HPRC`, so installing NRR
+HPRC next to NRG HPRC changed NRG HPRC's default too. The replacement takes its
+`Dictionaries/` + `samplesIDs/` from the published NRG HPRC archive and changes
+nothing else.
 
 ## The wide-flank (K = 8) family: a separate repo
 

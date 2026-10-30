@@ -118,6 +118,35 @@ and the `release-crisprme` skill.
   part file for that chromosome only. With the fix the same run exits 0 with a report byte-identical
   to 2.8.0's. An index that is empty although its log lists indels is still a failure, and still
   reported as one. Covered by `PostProcess/test_indel_empty_chromosome.py`.
+- **`NRR_3_hg38+hg38_mega` is republished: the 2026-10-27 archive found no indel off-target at
+  all.** Measured in the archive itself (downloaded; SHA-256 equal to the Hub's): its `_INDELS` holds
+  24 sub-indexes and **0** `.bin` files, and its `log_indels_hg38_mega` logs are header-only. It was
+  indexed from a mega fake-indel genome that predates the sites-only fix (#191) -- every chromosome's
+  FASTA a bare header -- by a script that bypassed `seq_script/merge_panels/mega_build_indels.sh`;
+  `buildTST` crashed on each empty genome and nothing checked. Every NRR mega search therefore
+  reported reference and SNP off-targets only, and on 2.8.0 said nothing. It also damaged
+  `NRG_3_hg38+hg38_mega` in a shared working directory: an install replaces each `Dictionaries/`
+  directory, so it swapped NRG mega's 419 MB of indel logs for the empty ones, and NRG mega then lost
+  its indel off-targets too. The replacement's `_INDELS` is rebuilt with CRISPRitz 2.9.1 from the
+  2026-10-10 mega kit genome -- which reproduces the published NRG mega `_INDELS` byte-for-byte, 32 of
+  32 files -- giving 67 `.bin` across 24 sub-indexes, and its `Dictionaries/` + `samplesIDs/` are
+  taken from the published NRG mega archive, so both mega archives now install identical
+  dictionaries. Its SNP index is unchanged. Measured genome-wide (sites-only, 4+1+1): the published
+  archive gives **0** indel off-target rows on 2.8.0, the replacement 2,081,489 on 2.8.1; and on
+  each of the 24 indel sub-indexes, the replacement's NRR targets filtered to NRG equal the
+  published NRG mega's exactly (1,131,494). **If you downloaded `NRR_3_hg38+hg38_mega` before
+  2.8.1,** remove `genome_library/NRR_3_hg38+hg38_mega{,_INDELS}` and download it again; that also
+  restores NRG mega's indel logs where the two share a working directory. Every other published
+  variant archive was checked the same way and is complete. A new release gate (T-40) checks this in
+  the archive for every variant index.
+- **`NRR_3_hg38+hg38_HPRC` is republished so that it defaults to per-sample analysis, like
+  `NRG_3_hg38+hg38_HPRC`.** Its index is complete, but its registry was built before the
+  `data_type`/`phased` stamps were added, and `complete-search` picks the default mode from that stamp
+  (per-sample only on `genotyped-phased`). An NRR HPRC search therefore ran population-level --
+  no named carriers, no CONFIRMED cis phasing -- on a phased panel, without saying so, and installing
+  it next to NRG HPRC replaced NRG HPRC's stamped registry and changed its default too. The
+  replacement changes only `Dictionaries/`, taken from the published NRG HPRC archive; the registry
+  data itself is unchanged. Passing `--per-sample` explicitly was never affected.
 - **Which installed index answered a search could depend on the shell's locale.** Three scans pick the
   index to search — the reference scan, the variant scan, and the precomputed-variant detection. Each
   globbed the requested PAM and then `NNN*_*`, read the bulge budget out of the directory name, kept

@@ -60,3 +60,14 @@ companion serves every index built on the same panel, so republishing a single
 index from such a directory replaces it for all of them. Publish from a working
 directory that holds only `registry_`, `log_indels_` and `indel_genotypes_`, as
 the 2026-10-25 uploads did.
+
+## Archives on one panel must bundle identical `Dictionaries/`
+
+Every variant archive carries the panel's `Dictionaries/` (`registry_`,
+`log_indels_`, …) and an install **replaces** each of those directories, so with
+two indexes of one panel in a working directory, the one installed last decides
+what both read. On 2026-10-27 `NRR_3_hg38+hg38_mega` shipped empty indel logs and
+thereby emptied `NRG_3_hg38+hg38_mega`'s too (`INDEX_PROVENANCE.md`). Before
+uploading a new PAM for an existing panel, compare its `Dictionaries/` member by
+member with an archive already published for that panel, and take them from that
+archive when in doubt.
