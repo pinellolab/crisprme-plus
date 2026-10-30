@@ -573,9 +573,12 @@ def _make_progress_tqdm(reporter: "_ProgressReporter"):
 
     hf builds those bars with ITS OWN keyword arguments — ``name=`` reaches the
     caller's class on huggingface_hub 1.1.0-1.9.2, and plain tqdm raises
-    TqdmKeyError on any keyword it does not know. huggingface_hub is unpinned, so
-    the bar ACCEPTS AND DROPS whatever the base tqdm cannot take: reporting is
-    best-effort and must never fail the download it reports on.
+    TqdmKeyError on any keyword it does not know whenever the bar is live (stderr
+    a TTY, or TQDM_POSITION=-1; a disabled bar returns before that check).
+    huggingface_hub is unpinned, so the bar ACCEPTS AND DROPS whatever the base
+    tqdm cannot take: reporting is best-effort and must never fail the download it
+    reports on. Should the base's signature be unreadable, every keyword is passed
+    on unchanged.
     """
     try:
         import inspect
@@ -588,13 +591,14 @@ def _make_progress_tqdm(reporter: "_ProgressReporter"):
         # own __init__ is (self, iterable=None, *args, **kwargs) and forwards the
         # rest to tqdm.std.tqdm, which declares total/initial/unit/... So only the
         # whole chain tells us which keywords are real; the immediate signature
-        # alone would drop every one of them.
+        # alone would drop every one of them. Each __init__ is read through the
+        # class (the bound descriptor), not its __dict__: since tqdm 4.66 std's is a
+        # functools.partialmethod (@envwrap), which inspect.signature rejects raw.
         _known = set()
         for _klass in inspect.getmro(_tqdm):
-            _init = _klass.__dict__.get("__init__")
-            if _init is None:
+            if "__init__" not in _klass.__dict__ or _klass is object:
                 continue
-            for _name, _p in inspect.signature(_init).parameters.items():
+            for _name, _p in inspect.signature(_klass.__init__).parameters.items():
                 if _name != "self" and _p.kind in (
                     _p.POSITIONAL_OR_KEYWORD, _p.KEYWORD_ONLY
                 ):

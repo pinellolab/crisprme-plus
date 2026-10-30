@@ -609,22 +609,29 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
         tqdm.std.tqdm, which is where total/unit/... are declared. A fake that
         declared them on the class itself would hide a keyword filter that reads
         only the immediate signature and so drops every one of them.
+
+        And, as in tqdm >= 4.66, tqdm.std.tqdm's ``__init__`` is a
+        ``functools.partialmethod`` (its ``@envwrap`` decorator returns one), which
+        ``inspect.signature`` cannot read straight out of the class ``__dict__``.
         """
+        import functools
         import sys
         import types
 
         unknown = self._TqdmKeyError
 
+        def _std_init(self, iterable=None, desc=None, total=None, disable=False,
+                      unit=None, unit_scale=False, initial=0, bar_format=None,
+                      **kwargs):
+            if kwargs:
+                raise unknown("Unknown argument(s): " + str(kwargs))
+            self.given = {"desc": desc, "total": total, "unit": unit,
+                          "initial": initial}
+            self.total = total
+            self.n = initial
+
         class _FakeStdTqdm:
-            def __init__(self, iterable=None, desc=None, total=None, disable=False,
-                         unit=None, unit_scale=False, initial=0, bar_format=None,
-                         **kwargs):
-                if kwargs:
-                    raise unknown("Unknown argument(s): " + str(kwargs))
-                self.given = {"desc": desc, "total": total, "unit": unit,
-                              "initial": initial}
-                self.total = total
-                self.n = initial
+            __init__ = functools.partialmethod(_std_init)  # what @envwrap leaves
 
             def update(self, n=1):
                 self.n += n or 0
@@ -654,7 +661,8 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
         r = self._reporter()
         with self._fake_tqdm_modules():
             cls = hf._make_progress_tqdm(r)
-            # exactly how hub 1.9.2 builds its aggregated bytes bar
+            # exactly how hub 1.9.2 builds its aggregated bytes bar; the fake checks
+            # keywords as a LIVE bar does (a disabled real one returns before that)
             bar = cls(desc="Downloading (incomplete total...)", disable=None, total=0,
                       initial=0, unit="B", unit_scale=True,
                       name="huggingface_hub.snapshot_download")
