@@ -236,8 +236,9 @@ def _index_archive_exists(repo: str, index_name: str,
                           token: Optional[str] = None) -> bool:
     """Best-effort check that ``repo`` holds an index archive ``download`` would
     fetch for ``index_name``: ``indexes/<index_name>.tar.gz`` verbatim or, for a
-    bare variant name, its ``-dictless`` sibling (the names download_component
-    asks for, in that order).
+    bare variant name, its ``-dictless`` sibling. download_component prefers the
+    sibling when the repo has it and otherwise fetches the verbatim name; either
+    one is enough here, so the order of the lookups does not matter.
 
     Returns False on any error (offline, repo absent, dependency missing) so a
     caller treats "cannot tell" the same as "not there" and falls back.
