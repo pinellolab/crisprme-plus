@@ -154,6 +154,156 @@ if ! python "$starting_dir/genome_layout.py" "$ref_folder" >&2; then
 	exit 1
 fi
 
+# Build locks. A run that builds a shared output -- an enriched genome, a genome
+# index, an INDELS index -- holds "<output>.lock" (an atomic mkdir) while it writes
+# it. Every other run that needs that output waits for the lock to go, and
+# _resolve_index_dir never selects an index whose lock is still there. The lock holds
+# an owner record (host, PID namespace, PID, start time), so a lock left by a run
+# that died -- SIGKILL, OOM kill, container stop, reboot -- does not wedge every later
+# run: when the record names this host and PID namespace and that PID is gone, the
+# next run takes the lock over and redoes the build. A lock whose owner cannot be
+# checked from here is never broken: another host or container (PIDs and hostnames
+# are not comparable across Docker containers; `--network host` even shares the
+# hostname), or no record at all (a lock taken by an older CRISPRme). The run waits
+# for it and says every few minutes how to clear it. Every message goes to stdout:
+# a write to stderr fails the stage.
+_lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/null)" \
+	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
+_locks_held=()
+
+# Print field $2 of owner record $1 (parameter expansion: a here-string would need a
+# writable TMPDIR, and its failure would land on stderr).
+_lock_field() {
+	local _rec=$'\n'"$1"$'\n'
+	local _v=${_rec#*$'\n'"$2"=}
+	[ "$_v" = "$_rec" ] || printf '%s' "${_v%%$'\n'*}"
+}
+
+# 0 when lock $1 is stale: its owner record names this host and PID namespace, and
+# that PID is gone. Otherwise 1, with the reason in _lock_why. Leaves the record read
+# in _lock_rec.
+_lock_stale() {
+	local _pid _err
+	_lock_rec=$(cat "$1/owner" 2>/dev/null)
+	if [ -z "$_lock_rec" ]; then
+		_lock_why="it has no owner record (an older CRISPRme writes none), so this run cannot check it"
+		return 1
+	fi
+	_pid=$(_lock_field "$_lock_rec" pid)
+	_lock_why="it is held by pid $_pid on $(_lock_field "$_lock_rec" host) (a run started $(_lock_field "$_lock_rec" started))"
+	if [ "$(_lock_field "$_lock_rec" host)" != "$(_lock_field "$_lock_me" host)" ] \
+		|| [ "$(_lock_field "$_lock_rec" pidns)" != "$(_lock_field "$_lock_me" pidns)" ]; then
+		_lock_why="$_lock_why, on another host or in another container, where this run cannot check it"
+		return 1
+	fi
+	case "$_pid" in
+		'' | 0 | *[!0-9]*) _lock_why="$_lock_why, which is not a PID this run can check"; return 1 ;;
+	esac
+	if [ "$_pid" != "$$" ]; then  # our own PID in a record we did not write: a dead run's, reused
+		if _err=$(LC_ALL=C kill -0 "$_pid" 2>&1); then
+			_lock_why="$_lock_why, which is still running"
+			return 1
+		fi
+		case "$_err" in
+			*"No such process"*) ;;
+			*) _lock_why="$_lock_why, a process this run may not signal (another user's)"; return 1 ;;
+		esac
+	fi
+	_lock_why="$_lock_why, which is no longer running"
+	return 0
+}
+
+# Write this run's owner record into lock $1. Through a rename, so a run reading it
+# meanwhile sees no record or all of it -- never a torn PID it would find dead.
+_lock_sign() {
+	{ printf '%s\n' "$_lock_me" >"$1/owner.$$"; } 2>/dev/null \
+		&& mv -f "$1/owner.$$" "$1/owner" 2>/dev/null
+}
+
+# Take over lock $1 from the dead owner whose record is $2, without the lock ever
+# going away: a waiter that saw it go would take the half-written output for a
+# finished one. ".takeover" admits one run at a time, and the record is re-read under
+# it, so two runs that both found the lock stale cannot both take it over.
+# 0 = this run now holds the lock.
+_lock_steal() {
+	local _rc=1
+	mkdir "$1/.takeover" 2>/dev/null || return 1
+	if [ "$(cat "$1/owner" 2>/dev/null)" = "$2" ] && _lock_sign "$1"; then
+		_locks_held+=("$1")
+		_rc=0
+	fi
+	rm -f "$1/owner.$$" 2>/dev/null
+	rmdir "$1/.takeover" 2>/dev/null
+	return $_rc
+}
+
+# Take lock $1 before "$2" (e.g. "indexing <dir>", for the messages) writes output $3;
+# any further arguments are more outputs of the same build, named with $3 in the
+# how-to-clear message. Returns 0 when this run took a free lock and 2 when it took
+# over the lock of a run that died: either way this run does the build, and on 2 the
+# outputs may hold that run's half-written work. Returns 1 when another run held the
+# lock and released it with $3 in place -- or when mkdir failed with no lock in the
+# way, as the plain mkdir did -- and the caller builds nothing.
+_lock_take() {
+	local _lock="$1" _what="$2" _out="$3" _clear _next
+	shift 2
+	_clear=$(printf " '%s'" "$_lock" "$@")
+	while :; do
+		if mkdir "$_lock" 2>/dev/null; then
+			_locks_held+=("$_lock")
+			_lock_sign "$_lock"
+			return 0
+		fi
+		[ -d "$_lock" ] || return 1
+		if _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; then
+			echo "Stale lock $_lock: the run that held it (pid $(_lock_field "$_lock_rec" pid), started $(_lock_field "$_lock_rec" started)) is gone. Taking it over and $_what from scratch."
+			return 2
+		fi
+		echo "Another run is $_what — waiting..."
+		_next=$SECONDS  # first notice after the first poll, then every few minutes
+		while [ -d "$_lock" ]; do
+			sleep "${_lock_poll_s:-5}"
+			if _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; then
+				echo "Stale lock $_lock: the run that held it (pid $(_lock_field "$_lock_rec" pid), started $(_lock_field "$_lock_rec" started)) is gone. Taking it over and $_what from scratch."
+				return 2
+			fi
+			if [ "$SECONDS" -ge "$_next" ] && [ -d "$_lock" ]; then
+				echo "Still waiting for $_lock: $_lock_why. If no CRISPRme run is $_what, clear the lock and what it left with: rm -rf$_clear"
+				_next=$((SECONDS + ${_lock_notice_s:-300}))
+			fi
+		done
+		[ -e "$_out" ] && return 1
+		# released without its output: the holder failed, or the lock was cleared by
+		# hand. Searching what is not there would come back empty, so build it here.
+		echo "$_lock was released but $_out is not there; $_what here instead."
+	done
+}
+
+# Release lock $1 if this run took it and still holds it. A missing record is this
+# run's own failed write: no run takes over a lock that has none.
+_lock_release() {
+	local _l _rec _held=0 _kept=()
+	for _l in "${_locks_held[@]}"; do
+		if [ "$_l" = "$1" ]; then _held=1; else _kept+=("$_l"); fi
+	done
+	_locks_held=("${_kept[@]}")
+	[ "$_held" = 1 ] || return 0
+	_rec=$(cat "$1/owner" 2>/dev/null)
+	[ -z "$_rec" ] || [ "$_rec" = "$_lock_me" ] || return 0
+	rm -rf "$1" 2>/dev/null || rm -rf "$1" 2>/dev/null
+	return 0
+}
+
+_lock_release_all() {
+	local _l
+	for _l in "${_locks_held[@]}"; do _lock_release "$_l"; done
+}
+# This script sets no other traps. INT and TERM release, then re-raise, so the run
+# still ends by the signal; bash runs them once the foreground command returns.
+trap '_lock_release_all' EXIT
+trap '_lock_release_all; trap - INT; kill -INT $$' INT
+trap '_lock_release_all; trap - TERM; kill -TERM $$' TERM
+
 # iterate over each variant dataset to compute the enriched genomes, index each
 # enriched genome, search off-targets, reconstruct haplotypes (if input VCFs are
 # phased), and score off-targets
@@ -270,8 +420,10 @@ while read vcf_f; do
 			# A concurrent `index-genome` holds "<dir>.lock" while it writes the
 			# directory one .bin at a time, so a half-written index is indistinguishable
 			# from a finished one by NAME. Selecting one searches a PARTIAL index:
-			# fewer off-targets, no error, exit 0. Skip it and let the build path below
-			# block on the same lock, which is what a concurrent run already does.
+			# fewer off-targets, no error, exit 0. Skip it -- a lock whose builder died
+			# guards a half-written index too -- and let the build path below take the
+			# same lock: _lock_take waits for a live builder, and takes a dead one's over
+			# and rebuilds.
 			if [ -d "$_d.lock" ]; then
 				continue
 			fi
@@ -405,8 +557,22 @@ while read vcf_f; do
 		indels_out="$current_working_directory/Genomes/${ref_name}+${vcf_name}_INDELS"
 
 		_lock="$enriched_folder.lock"
-		if ! [ -d "$enriched_folder" ] && mkdir "$_lock" 2>/dev/null; then
+		_lock_rc=1  # 1 = nothing to build here
+		if [ -d "$enriched_folder" ] && ! [ -d "$_lock" ]; then
+			echo -e "Variants already added"
+		else
+			_lock_take "$_lock" "building $enriched_folder" "$enriched_folder" "$indels_out"
+			_lock_rc=$?
+		fi
+		if [ "$_lock_rc" != 1 ]; then
 			# only one process enters here; mkdir is atomic
+			if [ "$_lock_rc" = 2 ]; then
+				# taken over from a run that died, maybe after it had moved part of its
+				# output into place below: a move into an existing directory nests the
+				# new one inside it or fails, so start from none. No run reads them
+				# while this lock stands: each one that needs them waits on it first.
+				rm -rf "$enriched_folder" "$indels_out"
+			fi
 			echo -e 'Add-variants\tStart\t'$(date) >>$log
 			echo -e "Adding variants"
 
@@ -417,7 +583,7 @@ while read vcf_f; do
 			if [ -s $logerror ]; then
 				printf "ERROR: Genome enrichment failed on %s\n" "$vcf_name" >&2
 				rm -rf "$_run_tmp"
-				rmdir "$_lock"
+				_lock_release "$_lock"
 				exit 1
 			fi
 
@@ -438,14 +604,9 @@ while read vcf_f; do
 			# remove unique temp dir (variants_genome lives inside it)
 			rm -rf "$_run_tmp"
 
-			rmdir "$_lock"
+			_lock_release "$_lock"
 			echo -e 'Add-variants\tEnd\t'$(date) >>"$log"
-		elif [ -d "$_lock" ]; then
-			echo "Another run is building $enriched_folder — waiting..."
-			while [ -d "$_lock" ]; do sleep 5; done
-			rm -rf "$_run_tmp"
 		else
-			echo -e "Variants already added"
 			rm -rf "$_run_tmp"
 		fi
 
@@ -498,9 +659,13 @@ while read vcf_f; do
 		printf "       re-run 'crisprme.py download --what index --index-name %s' (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$(basename "$idx_folder1")" >&2
 		exit 1
 	else
-		# no valid index found, compute it; use mkdir lock to prevent concurrent builds
+		# no valid index found, compute it; use mkdir lock to prevent concurrent builds.
+		# A lock taken over from a run that died guards a half-written directory, which
+		# needs nothing extra here: index-genome removes the directory it is about to
+		# write and builds it whole.
 		_lock="${idx_folder1}.lock"
-		if mkdir "$_lock" 2>/dev/null; then
+		_lock_take "$_lock" "indexing $idx_folder1" "$idx_folder1"
+		if [ $? != 1 ]; then
 			echo -e 'Index-genome Reference\tStart\t'$(date) >>$log
 			echo -e "Indexing reference genome"
 			# index reference genome using crispritz
@@ -508,13 +673,10 @@ while read vcf_f; do
 			if [ -s $logerror ]; then
 				printf "ERROR: reference genome indexing failed\n" >&2
 				[ -d "$idx_folder1" ] && rm -r "$idx_folder1"
-				rmdir "$_lock"
+				_lock_release "$_lock"
 				exit 1
 			fi
-			rmdir "$_lock"
-		elif [ -d "$_lock" ]; then
-			echo "Another run is indexing $idx_folder1 — waiting..."
-			while [ -d "$_lock" ]; do sleep 5; done
+			_lock_release "$_lock"
 		fi
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>$log
 		idx_ref="$idx_folder1"
@@ -536,8 +698,10 @@ while read vcf_f; do
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
 		else
 			# no index found, compute it; use mkdir lock to prevent concurrent builds
+			# (a dead run's half-written directory is rebuilt whole, as for the reference)
 			_lock="${idx_folder1}.lock"
-			if mkdir "$_lock" 2>/dev/null; then
+			_lock_take "$_lock" "indexing $idx_folder1" "$idx_folder1"
+			if [ $? != 1 ]; then
 				echo -e 'Index-genome Variant\tStart\t'$(date) >>$log
 				echo -e "Indexing variant genome"
 				# index alternative genome using crispritz
@@ -549,13 +713,10 @@ while read vcf_f; do
 				if [ -s "$logerror" ]; then
 					printf "ERROR: alternative genome indexing failed on %s\n" "$vcf_name" >&2
 					[ -d "$idx_folder1" ] && rm -r "$idx_folder1"
-					rmdir "$_lock"
+					_lock_release "$_lock"
 					exit 1
 				fi
-				rmdir "$_lock"
-			elif [ -d "$_lock" ]; then
-				echo "Another run is indexing $idx_folder1 — waiting..."
-				while [ -d "$_lock" ]; do sleep 5; done
+				_lock_release "$_lock"
 			fi
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
 			idx_var="$idx_folder1"
@@ -575,14 +736,20 @@ while read vcf_f; do
 		indels_index_dir="$current_working_directory/genome_library/${idx_var_base}_INDELS"
 		indels_out="$current_working_directory/Genomes/${ref_name}+${vcf_name}_INDELS"
 
-		if [ -d "$indels_index_dir" ]; then
+		# A locked INDELS directory is still being written -- or was, by a run that died --
+		# so it is not "present": like _resolve_index_dir above, wait for its lock
+		# instead, and take a dead run's over and rebuild.
+		if [ -d "$indels_index_dir" ] && ! [ -d "${indels_index_dir}.lock" ]; then
 			echo "Indels index present ($(basename "$indels_index_dir"))"
 			echo -e 'Indexing Indels\tEnd\t'$(date) >>"$log"
 		elif [ -d "$indels_out" ]; then
 			# source fake-chrom genome present (on-demand enrichment path) -> build it.
-			# use mkdir lock to prevent concurrent builds
+			# use mkdir lock to prevent concurrent builds. pool_index_indels.py runs
+			# index-genome per chromosome, which removes and rewrites each one, so a dead
+			# run's half-written directory is rebuilt whole.
 			_lock="${indels_index_dir}.lock"
-			if mkdir "$_lock" 2>/dev/null; then
+			_lock_take "$_lock" "indexing $indels_index_dir" "$indels_index_dir"
+			if [ $? != 1 ]; then
 				echo -e 'Indexing Indels\tStart\t'$(date) >>"$log"
 				"$starting_dir/pool_index_indels.py" \
 					"$indels_out/" \
@@ -596,15 +763,12 @@ while read vcf_f; do
 				if [ -s "$logerror" ]; then
 					printf "ERROR: indels indexing failed on %s\n" "$vcf_name" >&2
 					[ -d "$indels_index_dir" ] && rm -r "$indels_index_dir"
-					rmdir "$_lock"
+					_lock_release "$_lock"
 					exit 1
 				fi
 
-				rmdir "$_lock"
+				_lock_release "$_lock"
 				echo -e 'Indexing Indels\tEnd\t'$(date) >>"$log"
-			elif [ -d "$_lock" ]; then
-				echo "Another run is indexing $indels_index_dir — waiting..."
-				while [ -d "$_lock" ]; do sleep 5; done
 			fi
 		else
 			# Precomputed/batteries variant index whose INDELS companion is absent AND whose
