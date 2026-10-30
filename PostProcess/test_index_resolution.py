@@ -19,7 +19,8 @@ the resolver are tested as called, not only the function they share.
 The resolver skips an index whose build lock is still there, so the locks are tested
 here too: ``ADeadRunsLockDoesNotWedgeTheNext`` and ``ALockIsReleasedByTheRunThatHoldsIt``
 run the shipped lock helpers, and ``BuildLocksInTheShippedScript`` kills, interrupts
-and races whole runs.
+and races whole runs. ``TheThreadGuardSizesTheIndexSearched`` covers the RAM guard,
+which must size a search by the index the resolver picked.
 """
 
 import os
@@ -1204,6 +1205,87 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         self.assertFalse(lock.exists())
         self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed",
                          run.stderr)
+
+
+def _mem_available_mb():
+    """MemAvailable in MB, as the guard reads it; 0 where there is none."""
+    try:
+        with open("/proc/meminfo") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) // 1024
+    except OSError:
+        pass
+    return 0
+
+
+@unittest.skipUnless(_mem_available_mb() > 0,
+                     "the RAM thread guard sizes a search from MemAvailable in /proc/meminfo")
+class TheThreadGuardSizesTheIndexSearched(_ShippedScript):
+    """The RAM guard caps the search threads to what MemAvailable can hold: ~12 GB per
+    loaded index + 2.2 GB a thread for a pamless search, ~4 GB + 0.8 GB for a
+    constrained one. A search on an all-N index loads and walks every position,
+    whatever PAM was asked for, but the guard keyed its model on the requested PAM:
+    an NRG search on NNN_3 -- or, under --prune-pam, on NNNNNNNN_3 -- was sized as
+    constrained and could run at enough threads to be OOM-killed. Only the thread
+    count changes; what is searched does not."""
+
+    # the guard on, and no user ceiling under it
+    GUARD_ON = {"CRISPRME_NO_THREAD_GUARD": "0", "CRISPRME_MAX_SEARCH_THREADS": ""}
+
+    def capped(self, **kw):
+        """The guard's (threads, memory model) for a 100000-thread request, checked
+        against what each search was handed and the guard's own arithmetic."""
+        before = _mem_available_mb()
+        run = self.run_pipeline(threads=100000, env=self.GUARD_ON, **kw)
+        after = _mem_available_mb()
+        m = re.search(r"NOTE: capping search threads 100000 -> (\d+) to fit ~\d+GB free "
+                      r"RAM \((.+?)\)\. Override", run.stdout)
+        self.assertIsNotNone(m, run.stdout)
+        threads, kind = int(m.group(1)), m.group(2)
+        handed = {c[c.index("-th") + 1] for c in run.calls if c[0] == "search"}
+        self.assertEqual(handed, {str(threads)}, run.calls)
+        self.assertRegex(run.stderr.strip(), r"^ERROR: Off-targets search \w+ failed$")
+        self.avail = (before, after)
+        return threads, kind
+
+    def assertSized(self, threads, per_thread_mb, base_mb, searches):
+        """`threads` is what the guard's formula gives for MemAvailable as read around
+        the run, give or take 1 GB for the memory moving meanwhile."""
+        def cap(avail):
+            budget = avail - 4000 - base_mb * searches
+            return 1 if budget < per_thread_mb else budget // per_thread_mb
+        lo, hi = cap(min(self.avail) - 1024), cap(max(self.avail) + 1024)
+        self.assertTrue(lo <= threads <= hi, (threads, lo, hi, self.avail))
+
+    def test_an_nrg_search_on_a_pamless_stand_in_is_sized_as_pamless(self):
+        self.install("NNN_3")
+        for prune in (0, 1):
+            with self.subTest(prune=prune):
+                threads, kind = self.capped(prune=prune)
+                self.assertTrue(kind.startswith("pamless (memory-heavy) index NNN_3_hg38"),
+                                kind)
+                self.assertSized(threads, 2200, 12000, searches=2)
+
+    def test_a_wider_pamless_flank_under_prune_is_sized_as_pamless(self):
+        self.install("NNNNNNNN_3")
+        threads, kind = self.capped(prune=1)
+        self.assertTrue(kind.startswith("pamless (memory-heavy) index NNNNNNNN_3_hg38"), kind)
+        self.assertSized(threads, 2200, 12000, searches=2)
+
+    def test_a_dedicated_index_is_sized_as_constrained(self):
+        # NRG_3 answers even with a stand-in beside it (ADedicatedIndexIsTheFastPath)
+        self.install("NRG_3", "NNN_3")
+        threads, kind = self.capped(prune=0)
+        self.assertEqual(kind, "standard PAM")
+        self.assertSized(threads, 800, 4000, searches=2)
+
+    def test_a_no_bulge_search_does_not_open_the_index(self):
+        # it scans the genome FASTA for NRG itself, so the stand-in index changes nothing
+        self.install("NNN_3", variant=False)
+        threads, kind = self.capped(bulges=0, variant=False)
+        self.assertEqual(kind, "standard PAM")
+        self.assertSized(threads, 800, 4000, searches=1)
 
 
 class ShippedScriptCarriesTheFix(unittest.TestCase):

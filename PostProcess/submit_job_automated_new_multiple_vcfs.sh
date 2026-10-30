@@ -815,6 +815,23 @@ while read vcf_f; do
 				*[!Nn]*) pamless=0 ;;   # has a real PAM base -> constrained search
 				*)       pamless=1 ;;   # all-N PAM -> pamless (memory-heavy)
 			esac
+			kind="standard PAM"; [ "$pamless" -eq 1 ] && kind="pamless (memory-heavy) PAM"
+			# ... but a bulge search loads and walks the index _resolve_index_dir picked,
+			# not one built for the requested PAM. For a constrained PAM that can be a
+			# PAM-less stand-in (NNN_3, or under --prune-pam a wider NNNNNNNN_3), which
+			# holds every position, so size it as pamless. A no-bulge search scans the
+			# genome FASTA for the requested PAM and never opens an index.
+			if [ "$pamless" -eq 0 ] && { [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; }; then
+				_searched=("$idx_ref")
+				[ "$vcf_name" != "_" ] && _searched+=("$idx_var")
+				for _idx in "${_searched[@]}"; do
+					_idx_pam=$(basename "$_idx"); _idx_pam=${_idx_pam%%_*}
+					case "$_idx_pam" in
+						'' | *[!Nn]*) ;;
+						*) pamless=1; kind="pamless (memory-heavy) index $(basename "$_idx")" ;;
+					esac
+				done
+			fi
 			# per-thread + fixed (index-load) footprint estimates (MB)
 			if [ "$pamless" -eq 1 ]; then
 				per_thread_mb=2200; base_mb=12000
@@ -835,9 +852,8 @@ while read vcf_f; do
 			fi
 			[ "$safe_ncpus" -lt 1 ] && safe_ncpus=1
 			if [ "$safe_ncpus" -lt "$ncpus" ]; then
-				kind="standard"; [ "$pamless" -eq 1 ] && kind="pamless (memory-heavy)"
-				echo -e "Thread guard\tCapping search threads $ncpus -> $safe_ncpus to fit available memory (~$((avail_mb/1024))GB free, $kind PAM)" >>$log
-				echo "NOTE: capping search threads $ncpus -> $safe_ncpus to fit ~$((avail_mb/1024))GB free RAM ($kind PAM). Override with CRISPRME_MAX_SEARCH_THREADS / CRISPRME_NO_THREAD_GUARD=1."
+				echo -e "Thread guard\tCapping search threads $ncpus -> $safe_ncpus to fit available memory (~$((avail_mb/1024))GB free, $kind)" >>$log
+				echo "NOTE: capping search threads $ncpus -> $safe_ncpus to fit ~$((avail_mb/1024))GB free RAM ($kind). Override with CRISPRME_MAX_SEARCH_THREADS / CRISPRME_NO_THREAD_GUARD=1."
 				ncpus=$safe_ncpus
 			fi
 		fi
