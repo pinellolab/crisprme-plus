@@ -250,6 +250,24 @@ class WideFlankDownloadKeepsItsPiecesTogether(_Fixture):
         self.assertEqual({c[1] for c in hub.calls if c[0] == "snapshot_download"}, {DEFAULT})
         self.assertEqual(self._stamp(workdir, "genome_library/NNNNNNNN_3_hg38"), DEFAULT)
 
+    def test_absent_from_both_repos_names_both(self):
+        hub = _FakeHub({DEFAULT: self._repo(DEFAULT, LEGACY, GENOTYPED_PANELS)})
+        with self.assertRaises(ValueError) as caught:
+            self._download(hub, "NNNNNNNN_3_hg38")
+        message = str(caught.exception)
+        self.assertIn(GENERAL, message)
+        self.assertIn(DEFAULT, message)
+        self.assertIn(f"--hf-repo {GENERAL}", message)
+
+    def test_an_installed_wide_flank_index_costs_no_hub_call(self):
+        hub = _FakeHub({GENERAL: self._repo(GENERAL, WIDE, ("hg38_HGDP1kGP",))})
+        workdir = tempfile.mkdtemp(dir=self.tmp)
+        os.makedirs(os.path.join(workdir, "genome_library", "NNNNNNNN_3_hg38"))
+        with mock.patch.object(hf, "_require_hf", return_value=hub), \
+             mock.patch("sys.stdout", new_callable=io.StringIO):
+            hf.download_component("index", workdir, index_name="NNNNNNNN_3_hg38")
+        self.assertEqual(hub.calls, [])
+
 
 class AnExplicitRepoStillWins(_Fixture):
     def _hub(self, repo):

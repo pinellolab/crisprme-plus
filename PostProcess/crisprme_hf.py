@@ -855,12 +855,12 @@ def download_component(
             f"Unknown component '{component}'. Expected one of: "
             f"{', '.join(sorted(_COMPONENT_PREFIXES))}."
         )
-    if component == "index" and index_name and not repo_overridden(repo):
-        # Same routing as publish. Fall back to the default repo if the routed one
-        # does not have it, so an index published before the split still resolves.
+    routed = component == "index" and bool(index_name) and not repo_overridden(repo)
+    routed_from = None  # the wide-flank repo an index fell back from, if it did
+    if routed:
+        # Same routing as publish; the fallback probe waits until the index is known
+        # not to be installed (below), so a complete install costs no network call.
         repo = resolve_index_repo(index_name, repo)
-        if repo != DEFAULT_HF_REPO and not _index_archive_exists(repo, index_name):
-            repo = DEFAULT_HF_REPO
     else:
         repo = resolve_repo(repo)
     remote_prefix = _COMPONENT_PREFIXES[component]
@@ -1055,6 +1055,10 @@ def download_component(
                 flush=True,
             )
             return installed_dir
+        # Fall back to the default repo if the routed one does not have it, so an
+        # index published before the split still resolves.
+        if routed and repo != DEFAULT_HF_REPO and not _index_archive_exists(repo, index_name):
+            routed_from, repo = repo, DEFAULT_HF_REPO
         # Dict-less is the default in 2.4.0. If the caller asked for a VARIANT
         # index by its bare (legacy dict-based) name but a corrected `-dictless`
         # companion exists on the repo, prefer it: the `-dictless` marker is
@@ -1086,11 +1090,18 @@ def download_component(
         tarball = os.path.join(staging, remote_prefix, f"{index_name}.tar.gz")
         if not os.path.isfile(tarball):
             shutil.rmtree(staging, ignore_errors=True)
+            where = (
+                f"neither in HuggingFace repo '{routed_from}' (where indexes with a "
+                f"flank wider than 3 nt are published) nor in the fallback '{repo}'"
+                if routed_from else f"in HuggingFace repo '{repo}'"
+            )
             raise ValueError(
-                f"No index '{index_name}' found in HuggingFace repo '{repo}' "
+                f"No index '{index_name}' found {where} "
                 f"(looked for '{remote_prefix}/{index_name}.tar.gz'). Check "
                 f"--index-name, or build it locally with 'crisprme.py "
                 f"build-index-only' — the repo may not have it uploaded yet."
+                + (f" If '{routed_from}' was only unreachable, retry, or name it "
+                   f"with --hf-repo {routed_from}." if routed_from else "")
             )
         os.makedirs(local_dir, exist_ok=True)
         # GAP 3: the remote tarball filename AND the archive's internal top-level
