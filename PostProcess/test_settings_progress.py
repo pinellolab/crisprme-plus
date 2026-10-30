@@ -8,16 +8,22 @@ via ast and exec'd with a tiny namespace (stdlib + light stubs for html/dbc).
 This keeps the progress-JSON parsing, ETA formatting, full-log assembly, the
 genotypes-degraded detector, and the retry-command round-trip covered in CI
 without a Dash runtime. The job-id guard (_settings_jobdir) is covered the same
-way, through the undecorated Retry / Show-full-log / progress callbacks.
+way, through the undecorated Retry / Show-full-log / progress callbacks, and so
+is the genome .tar.gz upload's member vetting (_finalize_upload), run on
+archives the tests build.
 """
 
 import ast
+import gzip
+import io
 import json
 import os
 import random
 import re
 import shutil
+import stat
 import string
+import tarfile
 import tempfile
 import time
 import unittest
@@ -450,6 +456,191 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
         self.assertEqual(out[0], ("failure", "Download index", jobdir, _GOOD_ID))
         self.assertIs(out[1], True)
         self.assertIsNone(out[4])
+
+
+# --- genome .tar.gz upload -----------------------------------------------------
+# _finalize_upload unpacks a browser-uploaded genome archive into
+# Genomes/<assembly>/. Its member names are client data: one that is absolute,
+# has a '..' component, is a link, device or FIFO, or resolves outside that
+# folder must refuse the WHOLE archive before anything is written (unvetted, a
+# member could plant a job-shaped Settings/<id>/cmd.json for Retry to run).
+_FA1 = b">chr1\nACGTACGTNNNN\n"
+_FA2 = b">chr2\nTTTTGGGG\n"
+
+
+def _write_tar_gz(path, entries):
+    """Write ``entries``, (name, kind, payload) tuples, as a .tar.gz at ``path``.
+    kind: "file" (payload = bytes), "dir", "symlink" / "hardlink" (payload = the
+    link target), "chrdev", "blkdev" or "fifo"."""
+    with tarfile.open(path, "w:gz") as tar:
+        for name, kind, payload in entries:
+            info = tarfile.TarInfo(name)
+            info.mtime = 1_700_000_000
+            data = None
+            if kind == "file":
+                info.size, data = len(payload), io.BytesIO(payload)
+            elif kind == "dir":
+                info.type, info.mode = tarfile.DIRTYPE, 0o755
+            elif kind in ("symlink", "hardlink"):
+                info.type = tarfile.SYMTYPE if kind == "symlink" else tarfile.LNKTYPE
+                info.linkname = payload
+            elif kind in ("chrdev", "blkdev"):
+                info.type = tarfile.CHRTYPE if kind == "chrdev" else tarfile.BLKTYPE
+                info.devmajor, info.devminor = 1, 3
+            else:
+                info.type = tarfile.FIFOTYPE
+            tar.addfile(info, data)
+
+
+def _tree(root, meta=False):
+    """{path relative to root: what is there} for everything under ``root``,
+    links not followed; ``meta`` adds permission bits and a file's mtime."""
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
+            path = os.path.join(dirpath, name)
+            st = os.lstat(path)
+            if stat.S_ISLNK(st.st_mode):
+                what = ("symlink", os.readlink(path))
+            elif stat.S_ISDIR(st.st_mode):
+                what = ("dir",)
+            elif stat.S_ISREG(st.st_mode):
+                with open(path, "rb") as fh:
+                    what = ("file", fh.read(), st.st_nlink)
+            else:  # a device or FIFO: never opened
+                what = ("special", stat.S_IFMT(st.st_mode))
+            if meta:
+                what += (stat.S_IMODE(st.st_mode),)
+                if stat.S_ISREG(st.st_mode):
+                    what += (int(st.st_mtime),)
+            out[os.path.relpath(path, root)] = what
+    return out
+
+
+class TestGenomeTarUpload(unittest.TestCase):
+    """The genome .tar.gz branch of _finalize_upload, run on archives built here:
+    a bad member refuses the whole archive with nothing written anywhere, and a
+    normal genome archive extracts exactly as tarfile's own extractall does
+    (which is all the code did before)."""
+
+    # Each bad case comes after a benign chroms/chr1.fa, so an extractor that
+    # vets member by member would already have written something.
+    BAD = [
+        ("'..' component (../x)", lambda out, dest: [("../x", "file", b"x")]),
+        ("'..' out to outside/",
+         lambda out, dest: [("chroms/../../../../outside/x", "file", b"x")]),
+        ("'..' that stays inside", lambda out, dest: [("chroms/../chr2.fa", "file", _FA2)]),
+        ("absolute path", lambda out, dest: [(os.path.join(out, "abs.txt"), "file", b"x")]),
+        ("absolute path inside dest",
+         lambda out, dest: [(os.path.join(dest, "chr2.fa"), "file", _FA2)]),
+        ("symlink", lambda out, dest: [("lnk", "symlink", out), ("lnk/x", "file", b"x")]),
+        ("relative symlink",
+         lambda out, dest: [("lnk", "symlink", "../../../outside"), ("lnk/x", "file", b"x")]),
+        ("hardlink", lambda out, dest: [
+            ("hl", "hardlink", os.path.join(out, "secret.txt")), ("hl", "file", b"PWNED\n")]),
+        ("character device", lambda out, dest: [("null", "chrdev", None)]),
+        ("block device", lambda out, dest: [("blk", "blkdev", None)]),
+        ("fifo", lambda out, dest: [("pipe", "fifo", None)]),
+    ]
+    GOOD = [
+        ("chroms/ folder, like hg38.chromFa.tar.gz", [
+            ("chroms", "dir", None),
+            ("chroms/chr1.fa", "file", _FA1),
+            ("chroms/chr2.fa", "file", _FA2),
+        ]),
+        ("files at the top, like hg19 chromFa.tar.gz", [
+            ("chr1.fa", "file", _FA1),
+            ("chr2.fa", "file", _FA2),
+        ]),
+        ("./ names, like tar -C dir .", [
+            (".", "dir", None),
+            ("./chr1.fa", "file", _FA1),
+            ("./alt", "dir", None),
+            ("./alt/chr2.fa", "file", _FA2),
+        ]),
+    ]
+
+    def sandbox(self):
+        """A fresh root holding the app data dir (data/, with Settings/uploads/)
+        and, beside it, outside/ with a file a hardlink member could target.
+        Returns (root, cwd, outside, ns)."""
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        cwd = os.path.join(root, "data")
+        outside = os.path.join(root, "outside")
+        os.makedirs(os.path.join(cwd, "Settings", "uploads"))
+        os.makedirs(outside)
+        with open(os.path.join(outside, "secret.txt"), "w") as fh:
+            fh.write("ORIGINAL\n")
+        ns = _load_functions(
+            ["_validate_name", "_unsafe_tar_member", "_finalize_upload"],
+            current_working_directory=cwd,
+            gzip=gzip,
+            tarfile=tarfile,
+            shutil=shutil,
+        )
+        return root, cwd, outside, ns
+
+    def upload(self, cwd, name, entries):
+        """The finished .part file the chunked-upload route hands over."""
+        part = os.path.join(cwd, "Settings", "uploads", name + ".part")
+        _write_tar_gz(part, entries)
+        return part
+
+    def test_unsafe_member_refuses_whole_archive_writing_nothing(self):
+        for label, bad in self.BAD:
+            with self.subTest(label):
+                root, cwd, outside, ns = self.sandbox()
+                dest = os.path.join(cwd, "Genomes", "evil")
+                part = self.upload(cwd, "evil.tar.gz",
+                                   [("chroms/chr1.fa", "file", _FA1)] + bad(outside, dest))
+                before = _tree(root)
+                with self.assertRaises(ValueError):
+                    ns["_finalize_upload"]("genome", part, "evil.tar.gz", "", "")
+                self.assertEqual(_tree(root), before)  # nothing written, anywhere
+                self.assertFalse(os.path.exists(os.path.join(cwd, "Genomes")))
+
+    def test_member_through_a_symlink_already_in_dest_refused(self):
+        # a plain relative member: only the realpath check sees that
+        # Genomes/<assembly>/chroms already points out of the assembly folder
+        root, cwd, outside, ns = self.sandbox()
+        dest = os.path.join(cwd, "Genomes", "evil")
+        os.makedirs(dest)
+        os.symlink(outside, os.path.join(dest, "chroms"))
+        part = self.upload(cwd, "evil.tar.gz", [("chroms/chr1.fa", "file", _FA1)])
+        before = _tree(root)
+        with self.assertRaises(ValueError):
+            ns["_finalize_upload"]("genome", part, "evil.tar.gz", "", "")
+        self.assertEqual(_tree(root), before)
+
+    def test_normal_genome_archive_extracts_as_before(self):
+        for label, members in self.GOOD:
+            with self.subTest(label):
+                root, cwd, _outside, ns = self.sandbox()
+                part = self.upload(cwd, "myasm.chromFa.tar.gz", members)
+                # the reference: tarfile's own unvetted extractall (the old code)
+                ref = os.path.join(root, "reference")
+                os.makedirs(ref)
+                with gzip.open(part, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
+                    tar.extractall(ref)
+                got = ns["_finalize_upload"]("genome", part, "myasm.chromFa.tar.gz", "", "")
+                self.assertEqual(got, "myasm")
+                self.assertFalse(os.path.exists(part))
+                dest = os.path.join(cwd, "Genomes", "myasm")
+                self.assertTrue(_tree(ref))
+                self.assertEqual(_tree(dest, meta=True), _tree(ref, meta=True))
+
+    def test_symlinked_genomes_root_still_accepted(self):
+        # Genomes/ on another volume through a symlink is a legitimate layout:
+        # containment is checked against the real path of Genomes/<assembly>/
+        root, cwd, _outside, ns = self.sandbox()
+        volume = os.path.join(root, "volume")
+        os.makedirs(volume)
+        os.symlink(volume, os.path.join(cwd, "Genomes"))
+        part = self.upload(cwd, "myasm.tar.gz", self.GOOD[0][1])
+        self.assertEqual(ns["_finalize_upload"]("genome", part, "myasm.tar.gz", "", ""), "myasm")
+        with open(os.path.join(volume, "myasm", "chroms", "chr1.fa"), "rb") as fh:
+            self.assertEqual(fh.read(), _FA1)
 
 
 if __name__ == "__main__":

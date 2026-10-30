@@ -92,6 +92,33 @@ def _uploads_dir() -> str:
     return d
 
 
+def _unsafe_tar_member(tar: tarfile.TarFile, dest_dir: str) -> Optional[str]:
+    """Why an uploaded archive must not be extracted into ``dest_dir``, else None.
+
+    Every member is checked before anything is written, so a bad archive is
+    refused whole: an absolute name or any ``..`` component; anything but a
+    regular file or directory (a symlink or hardlink member can redirect a later
+    write out of dest_dir, and devices/FIFOs have no place in a genome); and any
+    member whose real path leaves dest_dir (e.g. through a symlink already in
+    it). The checks personal_assembly.import_archive makes, minus its single
+    top-folder rule (a UCSC chromFa archive holds many top-level chr*.fa). Does
+    not rely on tarfile's ``filter=``, which is absent before Python 3.11.4.
+    """
+    dest_real = os.path.realpath(dest_dir)
+    for m in tar.getmembers():
+        if m.name.startswith("/") or ".." in m.name.split("/"):
+            return f"unsafe archive entry {m.name!r} (absolute or '..' path)"
+        if not (m.isreg() or m.isdir()):
+            return (
+                f"unsupported archive entry {m.name!r} "
+                "(only regular files and directories are allowed)"
+            )
+        target = os.path.realpath(os.path.join(dest_dir, m.name))
+        if target != dest_real and not target.startswith(dest_real + os.sep):
+            return f"archive member escapes the extraction directory: {m.name!r}"
+    return None
+
+
 def _finalize_upload(
     target: str, part_path: str, name: str, dataset: str, genome: str = ""
 ) -> str:
@@ -117,18 +144,25 @@ def _finalize_upload(
         if err:
             raise ValueError(err)
         dest_dir = os.path.join(current_working_directory, "Genomes", assembly)
-        os.makedirs(dest_dir, exist_ok=True)
         if name.endswith((".tar.gz", ".tgz")):
             with gzip.open(part_path, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
+                # the member names are client data: vet them all first, so a bad
+                # archive is refused before anything (dest_dir too) is written
+                err = _unsafe_tar_member(tar, dest_dir)
+                if err:
+                    raise ValueError(err)
+                os.makedirs(dest_dir, exist_ok=True)
                 tar.extractall(dest_dir)
             os.remove(part_path)
         elif name.endswith(".gz"):
+            os.makedirs(dest_dir, exist_ok=True)
             with gzip.open(part_path, "rb") as fin, open(
                 os.path.join(dest_dir, f"{assembly}.fa"), "wb"
             ) as fout:
                 shutil.copyfileobj(fin, fout)
             os.remove(part_path)
         else:
+            os.makedirs(dest_dir, exist_ok=True)
             os.replace(part_path, os.path.join(dest_dir, f"{assembly}.fa"))
         return assembly
     if target == "vcf":
