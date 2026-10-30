@@ -33,6 +33,7 @@ Design notes
 from typing import Dict, List, Optional
 import os
 import sys
+import errno
 import io
 import json
 import gzip
@@ -713,7 +714,13 @@ def _atomic_install_dir(dest: str, build, verify=None) -> str:
 
     A ``dest`` that is a symlink (e.g. Genomes/hg38 linked to a shared copy) is
     replaced by the new real directory: the old link is removed with ``os.unlink``,
-    never rmtree'd through, and the shared target is never written to or deleted."""
+    never rmtree'd through, and the shared target is never written to or deleted.
+    A ``dest`` that is a mount point is refused before anything is built or moved
+    (OSError EBUSY, saying what to do instead): Linux will not rename one, and
+    macOS renames it with the mount attached, so clearing the moved-aside copy
+    would delete the mounted folder's own files."""
+    if os.path.ismount(dest):
+        raise OSError(errno.EBUSY, _mount_point_message(dest))
     parent = os.path.dirname(dest.rstrip("/")) or "."
     os.makedirs(parent, exist_ok=True)
     base = os.path.basename(dest.rstrip("/"))
@@ -734,7 +741,14 @@ def _atomic_install_dir(dest: str, build, verify=None) -> str:
         # renames are inside this try, so a failed swap still discards the stage.
         link_target = os.readlink(dest) if os.path.islink(dest) else None
         if os.path.lexists(dest):
-            os.rename(dest, backup)
+            try:
+                os.rename(dest, backup)
+            except OSError as exc:
+                if exc.errno != errno.EBUSY:
+                    raise
+                # download_component refuses a mount point before downloading, but
+                # os.path.ismount misses a bind mount from the same filesystem
+                raise OSError(exc.errno, _mount_point_message(dest)) from exc
         try:
             os.rename(stage, dest)
         except BaseException:
@@ -763,6 +777,17 @@ def _remove_moved_aside(path: str) -> None:
             pass
     else:
         shutil.rmtree(path, ignore_errors=True)
+
+
+def _mount_point_message(dest: str) -> str:
+    """Why a download cannot install into ``dest`` when it is a mount point (a
+    folder mounted on its own, e.g. ``docker run -v shared:/data/Genomes/hg38``):
+    :func:`_atomic_install_dir` swaps the new copy in by renaming ``dest`` aside,
+    which the kernel refuses for a mount point (EBUSY)."""
+    return (
+        f"{dest} is a mount point, so the download cannot replace it; mount its "
+        f"parent folder instead, or download into the mounted source folder."
+    )
 
 
 # --- download integrity -----------------------------------------------------
@@ -1279,6 +1304,11 @@ def download_component(
         repo = resolve_repo(repo)
     remote_prefix = _COMPONENT_PREFIXES[component]
     local_dir = os.path.join(workdir, _COMPONENT_LOCALDIR[component])
+    # A genome / VCF dataset installs by swapping its whole folder in, which a mount
+    # point refuses (_atomic_install_dir): say so now, not after a multi-GB download.
+    _install_name = {"genome": ref, "vcf": dataset}.get(component)
+    if _install_name and os.path.ismount(os.path.join(local_dir, _install_name)):
+        raise ValueError(_mount_point_message(os.path.join(local_dir, _install_name)))
 
     # Web progress (env-gated via CRISPRME_PROGRESS_FILE; a pure no-op on the CLI /
     # the current happy path). Seed the known total up-front from the HF catalog so

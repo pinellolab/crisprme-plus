@@ -981,23 +981,65 @@ class TestAtomicInstallDir(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(dest)), ["new.fa"])
         self.assertEqual(sorted(os.listdir(shared)), ["old.fa"])
 
-    def _failing_rename(self, failing_src):
+    def _failing_rename(self, failing_src, err=16):
         real_rename = os.rename
 
         def rename(src, dst):
             if src == failing_src:
-                raise OSError(16, "Device or resource busy")
+                raise OSError(err, os.strerror(err))
             return real_rename(src, dst)
         return mock.patch.object(hf.os, "rename", rename)
 
     def test_a_failed_move_aside_discards_the_stage(self):
+        import errno
         d = self._tmp()
         dest = os.path.join(d, "Genomes", "hg38")
         os.makedirs(dest)
         with open(os.path.join(dest, "old.fa"), "w") as fh:
             fh.write("existing")
-        with self._failing_rename(dest), self.assertRaises(OSError):
+        with self._failing_rename(dest, errno.EACCES), \
+             self.assertRaises(OSError) as caught:
             hf._atomic_install_dir(dest, self._build_new)
+        self.assertEqual(caught.exception.errno, errno.EACCES)  # passed on as it was
+        self.assertEqual(os.listdir(os.path.join(d, "Genomes")), ["hg38"])  # no stage
+        self.assertEqual(sorted(os.listdir(dest)), ["old.fa"])
+
+    def test_a_mount_point_dest_is_refused_before_anything_is_touched(self):
+        # Measured on a real macOS mount: the kernel renames a mount point (the
+        # mount moves with it), and clearing the moved-aside copy then deleted the
+        # mounted folder's own files. So it is refused before any build or rename.
+        import errno
+        d = self._tmp()
+        dest = os.path.join(d, "Genomes", "hg38")
+        os.makedirs(dest)
+        with open(os.path.join(dest, "old.fa"), "w") as fh:
+            fh.write("shared")
+        built = []
+        with mock.patch.object(hf.os.path, "ismount", side_effect=lambda p: p == dest), \
+             self.assertRaises(OSError) as caught:
+            hf._atomic_install_dir(dest, built.append)
+        self.assertEqual(caught.exception.errno, errno.EBUSY)
+        self.assertIn(f"{dest} is a mount point", str(caught.exception))
+        self.assertEqual(built, [])
+        self.assertEqual(sorted(os.listdir(dest)), ["old.fa"])
+        self.assertEqual(os.listdir(os.path.join(d, "Genomes")), ["hg38"])
+
+    def test_a_mount_point_dest_says_why_it_cannot_be_replaced(self):
+        # a folder mounted on its own cannot be renamed aside (EBUSY). A bind mount
+        # from the same filesystem is invisible to os.path.ismount, so this rename
+        # is where it shows: say what to do, and leave everything as it was
+        import errno
+        d = self._tmp()
+        dest = os.path.join(d, "Genomes", "hg38")
+        os.makedirs(dest)
+        with open(os.path.join(dest, "old.fa"), "w") as fh:
+            fh.write("existing")
+        with self._failing_rename(dest, errno.EBUSY), \
+             self.assertRaises(OSError) as caught:
+            hf._atomic_install_dir(dest, self._build_new)
+        self.assertEqual(caught.exception.errno, errno.EBUSY)
+        self.assertIn(f"{dest} is a mount point", str(caught.exception))
+        self.assertIn("mount its parent folder instead", str(caught.exception))
         self.assertEqual(os.listdir(os.path.join(d, "Genomes")), ["hg38"])  # no stage
         self.assertEqual(sorted(os.listdir(dest)), ["old.fa"])
 
@@ -1010,6 +1052,59 @@ class TestAtomicInstallDir(unittest.TestCase):
         self.assertEqual(os.readlink(dest), shared)
         self.assertEqual(os.listdir(os.path.join(d, "Genomes")), ["hg38"])
         self.assertEqual(sorted(os.listdir(shared)), ["old.fa"])
+
+
+class TestMountPointInstallFolder(unittest.TestCase):
+    """A Genomes/<ref> or VCFs/<dataset> folder mounted on its own (e.g. docker run
+    -v shared:/data/Genomes/hg38) cannot be replaced: the atomic install renames it
+    aside and the kernel refuses (EBUSY). That used to surface as a bare errno
+    after the whole multi-GB download; it is now refused before anything is
+    fetched, with what to do instead."""
+
+    class _Reached(Exception):
+        """The download was started."""
+
+    def _download(self, component, mounted, **kw):
+        """download_component with the network cut off at its first call, and the
+        install folder reported as a mount point when ``mounted``; returns that
+        folder."""
+        import shutil
+        workdir = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(workdir, ignore_errors=True))
+        dest = os.path.join(workdir, hf._COMPONENT_LOCALDIR[component],
+                            kw.get("ref") or kw.get("dataset"))
+
+        def reached(*_a, **_k):
+            raise self._Reached()
+
+        with mock.patch.object(hf.os.path, "ismount",
+                               side_effect=lambda p: mounted and p == dest), \
+             mock.patch.object(hf, "_hf_snapshot", reached), \
+             mock.patch.object(hf, "_require_hf", reached):
+            hf.download_component(component, workdir, **kw)
+        return dest
+
+    def _refused(self, component, **kw):
+        with self.assertRaises(ValueError) as caught:
+            dest = self._download(component, mounted=True, **kw)
+        return str(caught.exception)
+
+    def test_a_mounted_genome_folder_is_refused_before_the_download(self):
+        message = self._refused("genome", ref="hg38")
+        self.assertRegex(message, r"/Genomes/hg38 is a mount point, so the download "
+                                  r"cannot replace it")
+        self.assertIn("mount its parent folder instead", message)
+
+    def test_a_mounted_vcf_folder_is_refused_before_the_download(self):
+        message = self._refused("vcf", dataset="hg38_1000G")
+        self.assertRegex(message, r"/VCFs/hg38_1000G is a mount point")
+        self.assertIn("mount its parent folder instead", message)
+
+    def test_an_ordinary_folder_still_downloads(self):
+        for component, kw in (("genome", {"ref": "hg38"}),
+                              ("vcf", {"dataset": "hg38_1000G"})):
+            with self.subTest(component=component), self.assertRaises(self._Reached):
+                self._download(component, mounted=False, **kw)
 
 
 class TestStructuralCheckWhenSizesEmpty(unittest.TestCase):
