@@ -88,7 +88,7 @@ The two genotyped panels ship a `genotypes_hg38_*` companion that enables
 |---|---|---|
 | `NRR` | `NRR_3_hg38`, `+hg38_HGDP1kGP`, `+hg38_HPRC`, `+hg38_mega` | broader than NRG (`NAA`/`NAG`/`NGA`/`NGG`); a wider, more conservative screen |
 | `NGG` | `NGG_3_hg38`, `+hg38_HGDP1kGP` | canonical SpCas9 PAM only. **NGG cannot serve NAG off-targets**, so NRG is preferred for a safety screen |
-| `NNN` (PAM-less) | `NNN_3_hg38`, `+hg38_HGDP1kGP` | one index for ANY 3-nt PAM, selected at search time with `--prune-pam`. Larger on disk (67 GB / 101 GB) but removes the per-PAM rebuild |
+| `NNN` (PAM-less) | `NNN_3_hg38`, `+hg38_HGDP1kGP` | one index for ANY 3-nt PAM, selected at search time with `--prune-pam`. Larger on disk (67 GB / 102 GB) but removes the per-PAM rebuild |
 
 **`NRR_3_hg38+hg38_mega` was replaced for CRISPRme+ 2.8.1.** The archive uploaded on
 2026-10-27 shipped an empty indel index and empty indel logs, so no indel off-target
@@ -105,14 +105,16 @@ ran population-level unless `--per-sample` was passed (and, installed next to
 `NRG_3_hg38+hg38_HPRC`, did the same to that one). Its index is unchanged; re-download
 it the same way to get the per-sample default back.
 
-**PAM-less provenance.** The two `NNN_3` archives were built on 2026-10-25, before
-the genomic-`N` flank fix in CRISPRitz 2.9.1. For a **constrained** search PAM —
-`NGG`, `NRG`, `NRR`, i.e. every intended use of a PAM-less index — the results are
-identical to a freshly built index and to the dedicated PAM index: verified
-genome-wide, per-sample, byte-for-byte against `NRG_3_hg38+hg38_HGDP1kGP`. The
-difference is reachable only by searching with a **fully unconstrained** PAM
-(`20bp-NNN-NO-PAM` as the *search* PAM as well), which under-reports sites whose
-PAM bases are assembly `N` — i.e. sites whose PAM sequence is unknown.
+**`NNN_3_hg38` and `NNN_3_hg38+hg38_HGDP1kGP` were rebuilt for CRISPRme+ 2.8.1**, with
+the genomic-`N` flank fix in CRISPRitz 2.9.1. For a **constrained** search PAM (`NGG`,
+`NRG`, `NRR`, i.e. every intended use of a PAM-less index) the archives uploaded on
+2026-10-25 already gave the same results as the rebuilt ones and as the dedicated PAM
+index (verified genome-wide, per-sample, byte-for-byte against
+`NRG_3_hg38+hg38_HGDP1kGP`), so those searches do not change. The rebuild matters only
+when the *search* PAM is the fully unconstrained `20bp-NNN-NO-PAM`: the old archives
+under-reported sites whose PAM bases are assembly `N`. If you search that way, remove
+`genome_library/NNN_3_hg38`, `genome_library/NNN_3_hg38+hg38_HGDP1kGP` and
+`genome_library/NNN_3_hg38+hg38_HGDP1kGP_INDELS`, then download again.
 
 **Wider PAM-less flanks** (flank > 3, e.g. `NNNNNNNN_3`) are **not** readable by a
 CRISPRme release that predates `--prune-pam`, so they are published separately in

@@ -36,17 +36,25 @@ flanks are the only exception and live in a separate repo.
 | `NRR_3_hg38+hg38_mega` | 20.8 GB | 2026-10-27 | NRR | yes | bit-identical | **24, 0 — empty, replaced** |
 | `NGG_3_hg38` | 3.5 GB | 2026-10-25 | NGG | yes | bit-identical | — |
 | `NGG_3_hg38+hg38_HGDP1kGP` | 20.0 GB | 2026-10-25 | NGG | yes | bit-identical | 23, 23 |
-| `NNN_3_hg38` | 66.6 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs, see below** | — |
-| `NNN_3_hg38+hg38_HGDP1kGP` | 100.9 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs, see below** | 23, 222 |
+| `NNN_3_hg38` | 66.6 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs — rebuilt, replaced** | — |
+| `NNN_3_hg38+hg38_HGDP1kGP` | 100.9 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs — rebuilt, replaced** | 23, 222 (replacement: 23, 245) |
 | `genotypes_hg38_HGDP1kGP` | 5.4 GB | 2026-10-07 | — | yes | not an index | — |
 | `genotypes_hg38_HPRC` | 0.5 GB | 2026-10-27 | — | yes | not an index | — |
 
-**2.8.1 replaces `NRR_3_hg38+hg38_mega`**, which shipped an empty indel index, and
+**2.8.1 replaces `NRR_3_hg38+hg38_mega`**, which shipped an empty indel index,
 **`NRR_3_hg38+hg38_HPRC`**, whose registry lacks the stamp that selects the per-sample
-default (both below). The two `NNN_3` archives carry the documented caveat below.
-Archives built on one panel now bundle the same `Dictionaries/` (HGDP1kGP: NGG, NRG,
-NRR and NNN already agreed on all 117 members by name and exact size; HPRC and mega
-did not, and their replacements take the NRG archive's dictionaries byte for byte).
+default, and **both `NNN_3` archives**, rebuilt with the 2.9.1 builder (all below).
+
+An install replaces each `Dictionaries/` folder of its panel, so every replacement and
+the K = 8 archive were checked member by member (SHA-256) against what the published
+NRG archive of the same panel installs. The mega and HPRC replacements are
+byte-identical to it. The HGDP1kGP archives (the rebuilt `NNN_3` variant archive and
+the K = 8 one) carry the published `NNN_3`'s dictionaries byte for byte, and those
+match NRG's in content: `registry_` and `samplesIDs/` are byte-identical, and the 46
+compressed `log_indels_`/`indel_genotypes_` files differ only in the gzip header's
+4-byte timestamp (identical once it is masked), which no reader uses. The published
+`NNN_3` has carried exactly these dictionaries since 2026-10-25, and the dedicated NRG
+index reproduces its gate report reading them.
 
 ## The 10 dedicated-PAM archives: bit-identical, measured
 
@@ -66,13 +74,13 @@ position. `NGG`/`NRG`/`NRR` each constrain two positions, so a genomic `N`
 (encoded `0000`, intersecting nothing) still fails the PAM match exactly as
 before.
 
-## The 2 `NNN_3` archives: content differs, and it is reachable only by an
-unconstrained search
+## The 2 `NNN_3` archives: rebuilt for 2.8.1
 
-Built 2026-10-25, before the fix. An all-N PAM is fully unconstrained, so the
-relaxation does apply.
+The archives published on 2026-10-25 were built before the fix. An all-N PAM is fully
+unconstrained, so the relaxation applies to them, and 2.8.1 replaces both with a 2.9.1
+build.
 
-**Content** (chr22, same inputs, both builders):
+**What the fix changes** (chr22, same inputs, both builders):
 
 | | bytes | bins |
 |---|---|---|
@@ -92,18 +100,57 @@ extracted window):
 | `20bp-NNN-NO-PAM` (unconstrained) | 1 row | **3 rows** | the two extra rows are the planted `NNN`-PAM sites |
 | `20bp-NRG-SpCas9` (`--prune-pam`) | 1 row | 1 row | identical — genomic `N` satisfies neither `R` nor `G` |
 
-So for a **constrained** search PAM — every intended use of a PAM-less index —
-the published archive behaves exactly like a freshly built one. Confirmed at full
+So for a **constrained** search PAM — every intended use of a PAM-less index — the
+2026-10-25 archives already behaved exactly like a fresh build. Confirmed at full
 scale: the published `NNN_3_hg38+hg38_HGDP1kGP`, downloaded from Hugging Face and
 searched with `NRG --prune-pam` genome-wide at 4 mismatches + 1 DNA + 1 RNA bulge
 with per-sample resolution, reproduces the dedicated-`NRG_3` report
 **byte-for-byte**: md5 `6af7a94e4a5f36c26e8c3a0871638ad0`, 189,950 rows, 13,253
-indel rows each justified by its own window, 0 unjustified.
+indel rows each justified by its own window, 0 unjustified. What they under-reported
+is the unconstrained search: with `20bp-NNN-NO-PAM` as the *search* PAM ("report
+off-targets regardless of PAM"), sites whose PAM bases are assembly `N`, i.e. sites
+whose PAM sequence is unknown.
 
-**The caveat**, stated plainly: searching the published `NNN_3` with
-`20bp-NNN-NO-PAM` as the *search* PAM — "report off-targets regardless of PAM" —
-under-reports sites whose PAM bases are assembly `N`. Those are sites whose PAM
-sequence is unknown, so a dedicated index would not report them either.
+**The rebuild.** Genome-wide, with the 2.9.1 `buildTST` (md5 `76febff1…`), from the
+2026-10-25 build's own inputs: the same hg38 FASTAs, the same enriched genome, the
+same fake-indel genome (the md5 of all 23 files checked before and at the build), the
+same 27-byte PAM file, and `-th 16`, because the builder's parallel sort is not
+stable across thread counts. `Dictionaries/` and `samplesIDs/` are the published
+archive's own, byte for byte, so only the index directories change. Where they
+changed, against the published archive's member list, bin by bin, by exact size:
+
+| index | bins (published → rebuilt) | bins changed | bytes | contigs changed |
+|---|---|---|---|---|
+| reference `NNN_3_hg38` | 1,628 → 1,628 | 1,222 | +145,540 | 66: exactly the contigs that contain `N` |
+| variant `NNN_3_hg38+hg38_HGDP1kGP` | 1,628 → 1,628 | 1,221 | +106,849 | the same 66 |
+| `_INDELS` | 222 → 245 | all | +2,105,770,267 (+9 %) | all 23 fake-indel contigs |
+
+The fix only adds a target whose PAM region overlaps assembly `N`, so it predicts
+that no contig without an `N` changes. None did: 0 of the 389 `N`-free contigs
+changed, in the reference or the variant index. Every fake-indel contig is cut by an
+`N` roughly every 56 bases, so all of them change, and that is where nearly all the
+growth is; a constrained PAM such as NRG still filters those targets out.
+
+**Reproducible.** ml008 and ml007 each built the reference index independently, from
+the same binary and the same inputs: 1,628 of 1,628 bins byte-identical.
+
+**Verified.** The rebuilt pair, searched by 2.8.1 genome-wide with `NRG --prune-pam`
+(4 mm + 1 DNA + 1 RNA bulge, per-sample, HGDP + 1000 Genomes): 189,950 rows, 13,253
+indel rows each justified by its own window, 0 unjustified, and `pam_filter` dropping
+nothing on any of the three searches. Every column is byte-identical to the gate's
+report except `Annotation_COSMIC`: that run used a fresh `download --what
+annotations`, where COSMIC stays off until its licence is attested (its log: "COSMIC
+EXCLUDED ... dropped 742 COSMIC feature(s)"), so the column reads `NA` throughout.
+With that column removed, both reports have md5 `a02f03c5…`. For a user still on
+2.8.0, the released 2.8.0 image, unmodified, searching chr22 on the rebuilt reference
+index and on the published one gives **byte-identical** reports, both with NRG (the
+NNN index as a stand-in, how 2.8.0 serves a PAM it has no dedicated index for; 1,488
+rows) and with the unconstrained NNN PAM (8,108 rows). The second comparison can
+differ only at a site whose PAM bases are assembly `N`.
+
+**Staged as searched.** The staged archives hold the build that was searched: rsync
+checked every transferred file against a whole-file checksum, every file is in the
+archive at its path with its exact size, and the gzip stream's CRC held on unpacking.
 
 ## `NRR_3_hg38+hg38_mega`: published with an empty indel index
 
@@ -238,6 +285,16 @@ compiled into `buildTST`, so it cannot affect index content.
   split — 0 of 1,998,332 chr22 records carry a comma in `ALT` — and reachable only
   through `gnomAD-converter --multiallelic`. The fix does not retroactively touch
   an already-built store, and nothing invalidates one.
+- **At a position carrying more than one SNP record, only the last record's ALT
+  reaches the enriched genome** (CRISPRitz, both enricher ports, every release; in
+  its 2.9.1 Known issues). Normalising a VCF splits a multiallelic site into
+  biallelic records, and each record rebuilds the position's IUPAC code from the
+  reference base and overwrites the SNP dict entry, so an earlier record's ALT is in
+  neither the enriched genome nor the dict, and an off-target that needs it is not
+  found. It applies to any index enriched from a VCF with such sites. Measured for
+  HGDP + 1000 Genomes: on chr22, 45,837 of 1,757,775 SNP records (2.6 %), at 43,389
+  positions, lose their ALT this way. A fix changes the enriched genomes, and with
+  them every affected index, so it is being investigated separately.
 
 ## How to re-run these measurements
 

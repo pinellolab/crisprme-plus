@@ -70,4 +70,8 @@ what both read. On 2026-10-27 `NRR_3_hg38+hg38_mega` shipped empty indel logs an
 thereby emptied `NRG_3_hg38+hg38_mega`'s too (`INDEX_PROVENANCE.md`). Before
 uploading a new PAM for an existing panel, compare its `Dictionaries/` member by
 member with an archive already published for that panel, and take them from that
-archive when in doubt.
+archive when in doubt. Compare content, not names and sizes: for 2.8.1 every member
+was hashed (SHA-256), and equal sizes had hidden 46 compressed files that differed
+only in the gzip header's timestamp (bytes 4-7, which no reader uses; identical once
+masked). That difference is harmless; any other one is not. This holds across the two
+repos too: a K = 8 install replaces the same folders as the NRG index beside it.

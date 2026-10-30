@@ -108,7 +108,7 @@ They carry exactly the same variant data and `Dictionaries/` as the dedicated in
 same panel — those tiers are PAM-independent — and a `--prune-pam` run over one is
 byte-identical to the dedicated index for that PAM, verified genome-wide. They are
 correspondingly larger, because nothing is excluded at build time: 71 GB for the reference
-index against 9 GB for `NRG_3_hg38`, and 108 GB against 28 GB for the HGDP + 1000 Genomes
+index against 9 GB for `NRG_3_hg38`, and 110 GB against 28 GB for the HGDP + 1000 Genomes
 variant index. Choose one when you expect to search several PAMs over the same genome.
 
 > **Flank width and compatibility.** A 3-nt flank is readable by any CRISPRme version: the

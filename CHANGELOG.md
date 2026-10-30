@@ -22,7 +22,7 @@ and the `release-crisprme` skill.
   PAM-less index, and a dedicated NRG index produce **byte-identical** reports — the same 189,950
   rows, every indel row justified by its own variant window. Pruning changes only which leaves are
   written out, never how a guide is aligned, so it cannot move an alignment or a score. The cost is
-  size, since nothing is excluded at build time: 108 GB against 28 GB for the HGDP + 1000 Genomes
+  size, since nothing is excluded at build time: 110 GB against 28 GB for the HGDP + 1000 Genomes
   variant index. Requires `--index-path`, and is command-line only — the web interface never passes
   the flag. A shorter PAM off a wider flank is served for a 3' PAM only; a 5' PAM requires the
   flank width to equal the PAM length, and the engine refuses any other width pairing rather
@@ -36,8 +36,12 @@ and the `release-crisprme` skill.
   those are published to `lucapinello/crisprme-data-general-index`, which older defaults never point
   at. `download` and `publish-index` route on the flank width parsed from the index name — not on a
   list of names, so it cannot be forgotten at publish time — `download` falls back to the default
-  repo when the routed one lacks the archive, and the catalog listing merges both repos so what is
-  offered is what can be fetched. `--hf-repo` / `CRISPRME_HF_REPO` still override. `download` takes
+  repo when the routed one lacks the archive (and, if both lack it, says it looked in both), and the
+  catalog listing merges both repos, taking each name's row from the copy `download` would fetch, so
+  what is offered is what can be fetched. If the default repo cannot be read the catalog is empty,
+  as before, rather than offering only the slower wide-flank indexes. Dedicated-PAM and `NNN_3`
+  indexes are listed and downloaded from the default repo exactly as in 2.8.0, never looked up in
+  the new one. `--hf-repo` / `CRISPRME_HF_REPO` still override. `download` takes
   an index's genotype companion and reference index from that index's own repo, so the new repo
   carries its own copy of `genotypes_hg38_HGDP1kGP.tar.gz`, byte-identical to the main repo's.
 - **`indexes/SHA256SUMS` in both dataset repos**, written by `scripts/hf_sha256sums.py` from the
@@ -54,15 +58,20 @@ and the `release-crisprme` skill.
   for a near miss.
 
 ### Changed
-- **CRISPRitz pin moved to v2.9.1**, the tag carrying `--prune-pam` plus five engine fixes: a
+- **CRISPRitz pin moved to v2.9.1**, the tag carrying `--prune-pam` plus seven engine fixes: a
   genomic `N` in a stored PAM/flank region no longer drops the target; a non-`.bin` sidecar in the
   index directory no longer crashes the search; a PAM/flank width mismatch is refused up front
   instead of mis-parsing the leaf stream, and `buildTST`/`searchTST`/`searchBruteForce` now have
   their exit status checked, so a crashed search can no longer be reported as an empty result; a
-  multiallelic site no longer compounds its indel alleles into one fake contig; and the compiled C++
-  `enricher` no longer drops a SNP wherever an indel shares its position. Applies to the Docker
-  build (`crispritz_ref`) and `install_from_source.sh` (`CRISPRITZ_REF`).
-  **No published index is affected** by the enricher fix: the image built only the three search
+  multiallelic site no longer compounds its indel alleles into one fake contig; the compiled C++
+  `enricher` no longer drops a SNP wherever an indel shares its position; `enricher.py` keeps the
+  real SNP at a multiallelic site whose ALTs include `*` (it left the base unchanged; the C++ port
+  already coded it); and `add-variants` now fails when an enricher fails, instead of exiting 0 with
+  that chromosome's enriched genome missing, which the index build would then have indexed as it
+  stood. Applies to the Docker build (`crispritz_ref`) and `install_from_source.sh`
+  (`CRISPRITZ_REF`). The `*` case needs a multiallelic VCF, and every CRISPRme-supplied VCF is
+  split, so it moves no published index.
+  **No published index is affected** by the C++ enricher fix: the image built only the three search
   binaries, so enrichment ran through `enricher.py`, confirmed by direct measurement on the
   artifacts (chr22:10684299 carries a SNP and an indel as separate records; every enriched
   `chr22.enriched.fa` on the build host holds the IUPAC `M` there, not a plain `C`). A **source**
@@ -75,11 +84,23 @@ and the `release-crisprme` skill.
   silent divergence between the two install routes. Measured **1.82x** faster than `enricher.py`
   through the real `add-variants` CLI on the FULL chr22 of HGDP + 1000 Genomes -- 1,998,332 records,
   4,091 samples, 2.7 GB of output: 1,776 s vs 974 s -- on the stage that dominates a from-scratch
-  genome-wide build. Gated on CRISPRitz 2.9.1's byte-identity fix, verified at that same scale: all
-  five outputs match `enricher.py` hash for hash, as well as on 8 synthetic variant shapes. The same
-  holds off Linux/amd64: natively on macOS arm64 (Apple clang, libc++) the compiled port reproduces
-  those five full-chr22 hashes exactly, and so does `enricher.py` under pandas 3 (the recipe leaves
-  pandas unpinned); inside the arm64 image, the binary it ships passes all 8 synthetic shapes.
+  genome-wide build. Gated on CRISPRitz 2.9.1's byte-identity fixes, verified at that same scale:
+  all four enricher outputs match `enricher.py` hash for hash, as do the 17 synthetic cases of
+  `verify_enricher.sh`, the SNP+indel combinations among them. The same holds off Linux/amd64:
+  natively on macOS arm64 (Apple clang, libc++) the compiled port reproduces those full-chr22
+  hashes exactly, and so does `enricher.py` under pandas 3 (the recipe leaves pandas unpinned);
+  inside the arm64 image, the binary it ships reproduces them too.
+- **When a dedicated index for the PAM is installed beside a PAM-less one, the dedicated index is
+  now searched.** The index scans settle every choice by rule: the requested PAM first, then the
+  smallest sufficient bulge budget, then the narrowest PAM-less flank. 2.8.0 kept the smallest
+  budget first, so with `NRG_4` and `NNN_3` installed it searched `NNN_3`; 2.8.1 searches `NRG_4`,
+  which gives the same report faster (genome-wide, the search stage took 44-51 min on a dedicated
+  NRG index against 2 h 59 min on `NNN_3` under `--prune-pam`). No rule depends on glob order, so
+  the choice cannot depend on the shell's locale either, which matters now that PAM-less indexes
+  of two widths can sit side by side: `NNNNNNNN_3_hg38` globs before `NNN_3_hg38` under
+  `LC_ALL=C` and after it under `en_US.UTF-8`. `PostProcess/test_index_resolution.py` checks each
+  rule with the wrong candidate globbing first, and runs the whole shipped script against a stub
+  engine to check that each scan hands the search the index it picked.
 
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
@@ -147,45 +168,53 @@ and the `release-crisprme` skill.
   it next to NRG HPRC replaced NRG HPRC's stamped registry and changed its default too. The
   replacement changes only `Dictionaries/`, taken from the published NRG HPRC archive; the registry
   data itself is unchanged. Passing `--per-sample` explicitly was never affected.
-- **Which installed index answered a search could depend on the shell's locale.** Three scans pick the
-  index to search — the reference scan, the variant scan, and the precomputed-variant detection. Each
-  globbed the requested PAM and then `NNN*_*`, read the bulge budget out of the directory name, kept
-  the smallest sufficient one, and broke ties by whichever the glob produced first. Glob order follows
-  `LC_COLLATE`, and the orderings disagree: `NNNNNNNN_3_hg38` sorts before `NNN_3_hg38` under
-  `LC_ALL=C` (as inside the container) and after it under `en_US.UTF-8`. Both names encode the same
-  budget, so with two PAM-less flank widths installed side by side the choice depended on the
-  environment. `NNN*` was also too loose in the other direction: it matches a dedicated PAM that
-  merely begins with three `N`s, so the shipped `NNNRRT` (SaCas9-KKH) could be picked to serve an
-  unrelated PAM, which it cannot — and the Python capability checks, which test `"N" * len(motif)`,
-  disagreed with the shell about the same directory. The three scans now share one resolver that
-  requires an all-`N` name for a stand-in and settles every tie by rule: the requested PAM first, then
-  the smallest sufficient budget, then the narrowest PAM-less flank. Covered by
-  `PostProcess/test_index_resolution.py`, which asserts the same choice under `C`, `POSIX` and
-  `en_US.UTF-8`.
+- **Both `NNN_3` archives are republished, rebuilt with the CRISPRitz 2.9.1 builder.** The archives
+  uploaded on 2026-10-25 predate the genomic-`N` flank fix, so a search that used the unconstrained
+  `20bp-NNN-NO-PAM` as its *search* PAM missed sites whose PAM bases are assembly `N`. Any
+  constrained PAM was already exact: the downloaded `NNN_3_hg38+hg38_HGDP1kGP`, searched with NRG
+  `--prune-pam`, reproduced the dedicated NRG report byte-for-byte genome-wide. The rebuild uses the
+  old build's own inputs and changes the index only where the fix predicts: 1,222 of the reference
+  index's 1,628 bins (+145,540 B) and 1,221 of the variant index's (+106,849 B), on exactly the 66
+  contigs that contain `N` and on none of the other 389; and the whole indel index, whose 23 contigs
+  are cut by `N` every ~56 bases by construction (222 bins become 245, +2.1 GB). Built independently
+  on two nodes, the reference index is byte-identical. Searched genome-wide by 2.8.1 (NRG
+  `--prune-pam`, 4 mm + 1 DNA + 1 RNA bulge, per-sample), the rebuilt pair matches the gate's report
+  in every column but `Annotation_COSMIC` (189,950 rows, 0 unjustified indel rows), which differs
+  only because that run used freshly downloaded annotations, where COSMIC stays off until its licence
+  is attested. The released 2.8.0, searching chr22, gives byte-identical reports on the old and the
+  new reference index, with NRG and with NNN. The variant archive grows from 108.4 GB to 109.5 GB.
+  Nothing to do unless you search `NNN_3` with the unconstrained PAM; then remove
+  `genome_library/NNN_3_hg38`, `genome_library/NNN_3_hg38+hg38_HGDP1kGP` and its `_INDELS`, and
+  download again (`download` skips an index that is already installed).
+- **A PAM of any length other than 3 could be handed the 3-nt PAM-less index.** The three scans
+  that pick an index (the reference scan, the variant scan and the precomputed-variant detection)
+  globbed the requested PAM and then a literal `NNN_*`, whatever the PAM's length, and kept the
+  smallest sufficient bulge budget. So with `NNN_3` installed (published since 2026-10-25) and no
+  dedicated index winning, a search with SaCas9's 6-nt `NNGRRT`, SpCas9-NG's `NG` or Cas12a's
+  `TTTV` ran on an index whose stored flank cannot serve it. Reproduced on the released 2.8.0 with a
+  synthetic genome holding three planted SaCas9 sites: with `NNN_2` installed the run reported
+  `Reference index present (NNN_2_synth)` and failed with `Error on reading the PAM, input char is
+  not an IUPAC nucleotide`, where an empty library builds `NNGRRT_2` and finds all three. 2.8.1,
+  in the same layout, builds `NNGRRT_2` and returns the same three rows. The scans now share one
+  resolver that takes a PAM-less stand-in only when its name is all `N` at the PAM's width (or,
+  under `--prune-pam` and for a 3′ PAM, wider), so a dedicated PAM that merely begins with `N`s,
+  such as the shipped `NNNRRT`, is never taken for one either. Covered by
+  `PostProcess/test_index_resolution.py`.
 - **`complete-test` passed a flag that did not exist.** The brute-force benchmark command included
   `--bmax`, which `complete-search` has never had — it recomputes bMax from the per-type budgets — so
   the argument was discarded unread. Harmless until unknown flags started being rejected, which then
   broke every benchmark. The flag allowlist was checked against the help text and against what the
   parser reads, but not against the commands this repo builds, so a dead flag in a caller could only
   surface by running the benchmarks; that gap is now a static test.
-- **A PAM-less index wider than the search PAM could be selected for a search that cannot use it.**
-  The index scan accepted any all-`N` index at least as wide as the PAM, without regard to whether
-  `--prune-pam` was on. Only the pruning path reconciles the stored flank width against the search
-  PAM, so with pruning off the engine read the leaf stream at the wrong width — which, before the
-  engine-side guard added in CRISPRitz 2.9.1, crashed and was reported as a clean empty result. A
-  wider flank is now selectable only under `--prune-pam`, and only for a 3' PAM, since the engine
-  refuses a shorter 5' PAM off a wider flank. An equal-width PAM-less index is unaffected and still
-  serves with or without pruning. Before `--prune-pam` existed the scan matched width 3 only, so
-  this was reachable only on this branch.
-
 - **An index still being built could be selected as if it were finished.** `index-genome` creates the
   index directory, takes a `<dir>.lock`, and then writes one `.bin` per chromosome, so for the whole
   build a half-written index is indistinguishable from a complete one by name. A run starting in that
   window printed `Reference index present` and searched a **partial** index — fewer off-targets, no
   error, exit 0 — and did so even when a complete, sufficient index sat right beside it. The scan now
   skips any candidate whose build lock is held, and any directory holding no `.bin` at all, so such a
-  run takes the existing wait-for-the-build path instead. Index choice on a finished library is
-  unchanged.
+  run takes the existing wait-for-the-build path instead. A symlinked index directory, as a library
+  shared between working directories uses, still counts: the check follows the link. Index choice
+  on a finished library is unchanged.
 
 - **A downloaded variant index warned that its genotype store was missing right after installing
   it.** The "no `genotypes_<vcf>.tar.gz` companion ... per-sample Samples degraded" note was written

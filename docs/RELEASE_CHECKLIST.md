@@ -35,10 +35,15 @@ Every user-facing surface must agree on **version · default index · scorer · 
   confirm: every `<index>_INDELS/<sub-index>/` holds at least one `.bin` unless that chromosome's
   `Dictionaries/log_indels_<vcf>/log<chr>.txt.gz` is header-only (a SNP-only chromosome), and the
   `log_indels_<vcf>` logs are not all header-only. A present-but-empty `_INDELS` is always a broken
-  build: a dataset with no indels gets no `_INDELS` at all. Also confirm two archives built on the
-  same panel bundle byte-identical `Dictionaries/` (an install REPLACES each directory, so a
-  mismatch means whichever archive was installed last wins).
-- [ ] **HF catalog matches reality** — `crisprme_hf.list_available_downloads` / the Settings dropdowns / the docs list EXACTLY the indexes present on HF (`list_repo_files` on `lucapinello/crisprme-data`). Nothing listed that 404s; nothing on HF that is undocumented.
+  build: a dataset with no indels gets no `_INDELS` at all. Also confirm every archive built on a
+  panel bundles the `Dictionaries/` and `samplesIDs/` the published NRG archive of that panel
+  installs, **by content, member by member** (SHA-256 of every member; an install REPLACES each
+  directory, so a mismatch means whichever archive was installed last wins). Names and sizes are
+  not enough: equal sizes passed while 46 files differed. A `.gz` member may differ only in the
+  gzip header's 4-byte MTIME (bytes 4-7); compare those with that field masked, and treat any
+  other difference as a failure. Applies to both dataset repos — the K = 8 archive replaces the
+  same `Dictionaries/` folders as the NRG index it sits beside.
+- [ ] **HF catalog matches reality** — `crisprme_hf.list_available_downloads` / the Settings dropdowns / the docs list EXACTLY the indexes present on HF, in **both** dataset repos (`list_repo_files` on `lucapinello/crisprme-data` and on `lucapinello/crisprme-data-general-index`; the Settings catalog merges the two). Nothing listed that 404s; nothing on HF that is undocumented; `genotypes_hg38_HGDP1kGP.tar.gz` has the same SHA-256 in both repos.
 - [ ] **Every documented `download --what X` example resolves on HF** — for each `download --what {genome,index,vcf,annotations,pams,samples,assembly,all}` command shown in ANY doc (README, DOCKER_QUICKSTART, index.html, DATA_LAYOUT, SETTINGS, web guide, legacy setup), confirm the HF path it fetches actually exists (`list_repo_files`). A documented command that targets unhosted data is a broken step (see trap T-21: `--what vcf --dataset 1000G|HGDP` pointed at a `vcfs/` folder that was never uploaded).
 
 ### B. Functional gates (must pass)

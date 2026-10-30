@@ -1024,7 +1024,7 @@ were never affected. CRISPRitz now keeps a target whose stored PAM/flank region 
 
 **Cost.** A PAM-less index is much larger, because no site is excluded at build time:
 the reference index is 71 GB against 9 GB for a dedicated NRG index, and the HGDP + 1000
-Genomes variant index 108 GB against 28 GB (download sizes). Pruning happens at leaf time,
+Genomes variant index 110 GB against 28 GB (download sizes). Pruning happens at leaf time,
 so a PAM-less search is not faster than a dedicated one — the gain is that one index
 answers many PAMs.
 
