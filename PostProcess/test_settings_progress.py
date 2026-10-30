@@ -263,6 +263,20 @@ class _PreventUpdate(Exception):
 _NO_UPDATE = object()  # stand-in for dash.no_update
 
 
+def _publish_stage():
+    """The stage publish_index_cb launches its job with. That callback is only
+    defined under ``if MAINTAINER_MODE:``, so it is read from the AST."""
+    with open(_SETTINGS_PAGE) as fh:
+        tree = ast.parse(fh.read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "publish_index_cb":
+            for call in ast.walk(node):
+                if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                        and call.func.id == "launch_settings_job"):
+                    return call.args[1].value
+    raise AssertionError("publish_index_cb's launch_settings_job(...) call not found")
+
+
 class _JobDirCase(unittest.TestCase):
     """A temp data dir with Settings/ and, beside it, an ``outside`` dir holding
     a job-shaped cmd.json + logs that no callback may ever read or run."""
@@ -302,6 +316,7 @@ class _JobDirCase(unittest.TestCase):
             _launch_job_cmd=_launch,
             open=_open,
             ONLINE=False,
+            MAINTAINER_MODE=False,
             PreventUpdate=_PreventUpdate,
             no_update=_NO_UPDATE,
             **self.stubs,
@@ -386,11 +401,14 @@ class TestSettingsJobdir(_JobDirCase):
 
 class TestJobCallbacksRefuseBadIds(_JobDirCase):
     """Retry, Show-full-log and the progress poll, undecorated: a bad id is
-    refused before anything is read or run; a real job id works as before."""
+    refused before anything is read or run; a real job id works as before.
+    Retry re-runs only a job the FAILED banner is shown for, and never a
+    'Publish index' job outside MAINTAINER_MODE."""
 
     names = [
         "_JOB_ID_RE",
         "_settings_jobdir",
+        "_job_failed",
         "_relaunch_job",
         "_full_job_log",
         "_retry_settings_job",
@@ -420,13 +438,69 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
         self.assertEqual(self.launched, [])
         self.assertEqual(self.outside_reads(), [])
 
-    def test_retry_valid_id_relaunches_recorded_command(self):
+    def test_retry_failed_job_relaunches_recorded_command(self):
         cmd = "crisprme.py download --what index --index-name NRG_3_hg38 --path /data"
-        self.make_job(_GOOD_ID, {"cmd.json": json.dumps({"cmd": cmd, "stage": "Download index"})})
+        self.make_job(_GOOD_ID, {
+            "log.txt": "Download index\tQueued\nDownload index\tStart\nDownload index\tFAILED\n",
+            "cmd.json": json.dumps({"cmd": cmd, "stage": "Download index"}),
+        })
         out = self.ns["_retry_settings_job"](1, _GOOD_ID)
         self.assertEqual(out[0], "set_NEWJOB0001")
         self.assertIs(out[1], False)
         self.assertEqual(self.launched, [(cmd, "Download index")])
+
+    def test_retry_only_reruns_a_job_the_banner_shows_failed(self):
+        # Retry is offered only on the FAILED banner, but the job id is client
+        # data: a job in any other state must not be re-run, and the decision
+        # must match what the progress poll renders for the same log.txt
+        cases = [
+            ("failed", "S\tQueued\nS\tStart\nS\tFAILED\n", True),
+            ("failed, no Queued marker", "S\tStart\nS\tFAILED\n", True),
+            ("no log.txt", None, False),
+            ("empty log.txt", "", False),
+            ("queued", "S\tQueued\n", False),
+            ("running", "S\tQueued\nS\tStart\n", False),
+            ("done", "S\tQueued\nS\tStart\nS\tEnd\n", False),
+            ("End beside FAILED (shown as done)", "S\tStart\nS\tFAILED\nS\tEnd\n", False),
+            ("FAILED for another stage", "S\tQueued\nS\tStart\nT\tFAILED\n", False),
+        ]
+        for i, (label, log, retry) in enumerate(cases):
+            with self.subTest(label):
+                job_id = f"set_STATE{i:05d}"
+                files = {"cmd.json": json.dumps({"cmd": f"echo job{i}", "stage": "S"})}
+                if log is not None:
+                    files["log.txt"] = log
+                jobdir = self.make_job(job_id, files)
+                try:
+                    banner = self.ns["refresh_settings_job"](1, job_id)[0]
+                except _PreventUpdate:
+                    banner = None
+                self.assertEqual(banner == ("failure", "S", jobdir, job_id), retry)
+                del self.launched[:]
+                out = self.ns["_retry_settings_job"](1, job_id)
+                if retry:
+                    self.assertEqual(self.launched, [(f"echo job{i}", "S")])
+                    self.assertEqual(out[0], "set_NEWJOB0001")
+                else:
+                    self.assertEqual(self.launched, [])
+                    self.assertIs(out[0], _NO_UPDATE)  # the neutral "could not retry"
+
+    def test_retry_refuses_publish_index_outside_maintainer_mode(self):
+        # publish_index_cb only exists in MAINTAINER_MODE: a publish recorded
+        # while it was on must not be re-run through Retry once it is off
+        stage = _publish_stage()
+        cmd = "crisprme.py publish-index --index /data/genome_library/NRG_3_hg38 --path /data"
+        self.make_job(_GOOD_ID, {
+            "log.txt": f"{stage}\tQueued\n{stage}\tStart\n{stage}\tFAILED\n",
+            "cmd.json": json.dumps({"cmd": cmd, "stage": stage}),
+        })
+        out = self.ns["_retry_settings_job"](1, _GOOD_ID)
+        self.assertEqual(self.launched, [])
+        self.assertIs(out[0], _NO_UPDATE)
+        self.ns["MAINTAINER_MODE"] = True  # a maintainer may retry a failed publish
+        out = self.ns["_retry_settings_job"](1, _GOOD_ID)
+        self.assertEqual(self.launched, [(cmd, stage)])
+        self.assertEqual(out[0], "set_NEWJOB0001")
 
     def test_show_full_log_refuses_bad_ids_without_reading(self):
         for bad in self.bad_ids():

@@ -610,11 +610,33 @@ def _genotypes_degraded_warning(jobdir: str):
     )
 
 
+def _job_failed(jobdir: str) -> bool:
+    """Whether the job's log.txt is in the state refresh_settings_job renders as
+    the FAILED banner (its first marker's stage FAILED, not End) -- the only
+    place the page offers Retry."""
+    try:
+        with open(os.path.join(jobdir, "log.txt")) as handle:
+            log = handle.read()
+    except (OSError, ValueError):
+        return False
+    stage = "Operation"
+    for line in log.splitlines():
+        if "\t" in line:
+            stage = line.split("\t")[0]
+            break
+    return f"{stage}\tEnd" not in log and f"{stage}\tFAILED" in log
+
+
 def _relaunch_job(job_id: str) -> Optional[str]:
     """Re-launch the download recorded in <job_id>/cmd.json (the Retry action);
-    returns the NEW job id, or None if the original command can't be recovered."""
+    returns the NEW job id, or None if the original command can't be recovered
+    or may not be re-run. The id is client data, so the server re-checks what
+    the page implies: the job FAILED, and a maintainer-only 'Publish index' job
+    is never re-run outside MAINTAINER_MODE."""
     jobdir = _settings_jobdir(job_id)
     if not jobdir:  # not a Settings job id: never read or run that cmd.json
+        return None
+    if not _job_failed(jobdir):  # queued, running, done, or no log at all
         return None
     cmd_path = os.path.join(jobdir, "cmd.json")
     if not os.path.isfile(cmd_path):
@@ -627,6 +649,8 @@ def _relaunch_job(job_id: str) -> Optional[str]:
         return None
     cmd, stage = rec.get("cmd"), rec.get("stage") or "Retry download"
     if not cmd:
+        return None
+    if stage == "Publish index" and not MAINTAINER_MODE:  # publish_index_cb's job
         return None
     return _launch_job_cmd(cmd, stage)
 
