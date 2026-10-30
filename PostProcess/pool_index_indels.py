@@ -28,8 +28,9 @@ def _fake_genome_is_empty(fake_dir):
 
     The enricher writes one fake contig per chromosome from the windows of the
     indels some sample carries, so a chromosome with none gets a FASTA with no
-    sequence. There is nothing to index, and buildTST crashes on it (SIGSEGV),
-    which CRISPRitz 2.9.1 now reports as a failed build. The search skips the same
+    sequence. There is nothing to index: buildTST writes no .bin for it (before
+    CRISPRitz 2.9.1 it segfaulted, which the exit-status check 2.9.1 adds would
+    report as a failed build). The search skips the same
     chromosome on its indel log (pool_search_indels._logged_no_indels). No FASTA at
     all is not "empty": it is left to fail as before.
     """

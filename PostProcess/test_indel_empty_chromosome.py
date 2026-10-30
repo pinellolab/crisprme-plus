@@ -3,8 +3,8 @@
 
 The enricher writes one fake-indel contig per chromosome from the windows of the
 indels some sample carries, so a chromosome with none gets a header-only FASTA and
-a header-only indel log. buildTST cannot index that genome (it crashes), which
-leaves the chromosome's _INDELS sub-index without a .bin, and CRISPRitz 2.9.1
+a header-only indel log. buildTST cannot index that genome, which leaves the
+chromosome's _INDELS sub-index without a .bin, and CRISPRitz 2.9.1
 refuses to search such a directory -- so before this fix a single SNP-only
 chromosome made the whole search fail, reported as an SNP post-analysis failure,
 where 2.8.0 had returned the right answer (no indel off-target there). Reproduced

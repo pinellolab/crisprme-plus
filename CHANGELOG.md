@@ -58,7 +58,7 @@ and the `release-crisprme` skill.
   for a near miss.
 
 ### Changed
-- **CRISPRitz pin moved to v2.9.1**, the tag carrying `--prune-pam` plus seven engine fixes: a
+- **CRISPRitz pin moved to v2.9.1**, the tag carrying `--prune-pam` plus eight engine fixes: a
   genomic `N` in a stored PAM/flank region no longer drops the target; a non-`.bin` sidecar in the
   index directory no longer crashes the search; a PAM/flank width mismatch is refused up front
   instead of mis-parsing the leaf stream, and `buildTST`/`searchTST`/`searchBruteForce` now have
@@ -69,7 +69,9 @@ and the `release-crisprme` skill.
   already coded it); and `add-variants` now fails when an enricher fails, instead of exiting 0 with
   that chromosome's enriched genome missing, which the index build would then have indexed as it
   stood (the Python enricher, moreover, no longer needs a `python` on PATH, and no longer races
-  its sibling workers to create their shared output folder, which could lose a chromosome).
+  its sibling workers to create their shared output folder, which could lose a chromosome); and
+  `buildTST` skips a contig too short to hold one target, such as the header-only FASTA the
+  enricher writes for a chromosome with no indel, instead of crashing on it.
   Applies to the Docker build (`crispritz_ref`) and `install_from_source.sh`
   (`CRISPRITZ_REF`). The `*` case needs a multiallelic VCF, and every CRISPRme-supplied VCF is
   split, so it moves no published index.
@@ -135,8 +137,7 @@ and the `release-crisprme` skill.
   therefore failed the entire run, reported as an SNP post-analysis failure, where 2.8.0 had silently
   returned the correct answer: no indel off-target there. Reproduced through the real CLI on chr21
   (23,235 SNPs, no indel) + chr22 (2,891 indels): 2.8.0 exits 0 with 284 rows, 2.8.1 without the fix
-  exits 1 with none. `pool_index_indels.py` no longer hands an empty fake genome to `buildTST` (which
-  also removes the `buildTST ... failed (signal SIGSEGV)` line `build-index-only` printed), and
+  exits 1 with none. `pool_index_indels.py` no longer hands an empty fake genome to `buildTST`, and
   `pool_search_indels.py` skips a chromosome whose indel log records no indel, tolerating the missing
   part file for that chromosome only. With the fix the same run exits 0 with a report byte-identical
   to 2.8.0's. An index that is empty although its log lists indels is still a failure, and still
