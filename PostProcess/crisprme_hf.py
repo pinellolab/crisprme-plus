@@ -563,20 +563,60 @@ def _make_progress_tqdm(reporter: "_ProgressReporter"):
 
     ``huggingface_hub.snapshot_download`` accepts a ``tqdm_class`` and drives it
     with per-file byte updates; we subclass tqdm so each ``update(n)`` also
-    accumulates into the reporter. Across the many-small-file index tree tqdm
-    creates several bars, so we sum ``n`` across ALL instances (hence the
-    reporter, not per-bar totals). Returns ``None`` when tqdm is unavailable so
+    accumulates into the reporter. Returns ``None`` when tqdm is unavailable so
     the caller falls back to a plain (progress-free) download.
+
+    hf drives SEVERAL bars from this one class, so only the FIRST byte bar (the
+    ones it builds with ``unit="B"``) feeds the reporter: since hub 1.23.0 it
+    builds two of them — network transfer and reconstruction — each receiving the
+    full byte count, and the "Fetching N files" bar counts files, not bytes.
+
+    hf builds those bars with ITS OWN keyword arguments — ``name=`` reaches the
+    caller's class on huggingface_hub 1.1.0-1.9.2, and plain tqdm raises
+    TqdmKeyError on any keyword it does not know. huggingface_hub is unpinned, so
+    the bar ACCEPTS AND DROPS whatever the base tqdm cannot take: reporting is
+    best-effort and must never fail the download it reports on.
     """
     try:
+        import inspect
+
         from tqdm.auto import tqdm as _tqdm
     except Exception:  # noqa: BLE001 - tqdm absent -> no custom bar, plain download
         return None
+    try:
+        # Union over the MRO: tqdm.auto.tqdm is a thin subclass (tqdm_asyncio) whose
+        # own __init__ is (self, iterable=None, *args, **kwargs) and forwards the
+        # rest to tqdm.std.tqdm, which declares total/initial/unit/... So only the
+        # whole chain tells us which keywords are real; the immediate signature
+        # alone would drop every one of them.
+        _known = set()
+        for _klass in inspect.getmro(_tqdm):
+            _init = _klass.__dict__.get("__init__")
+            if _init is None:
+                continue
+            for _name, _p in inspect.signature(_init).parameters.items():
+                if _name != "self" and _p.kind in (
+                    _p.POSITIONAL_OR_KEYWORD, _p.KEYWORD_ONLY
+                ):
+                    _known.add(_name)
+    except (TypeError, ValueError):  # unintrospectable base -> pass everything on
+        _known = None
+
+    counted = []  # the one byte bar whose updates reach the reporter
 
     class _ProgressTqdm(_tqdm):  # pragma: no cover - exercised via a fake in tests
+        def __init__(self, *args, **kwargs):
+            self._feeds_reporter = kwargs.get("unit") == "B" and not counted
+            if self._feeds_reporter:
+                counted.append(self)
+            if _known is not None:
+                kwargs = {k: v for k, v in kwargs.items() if k in _known}
+            super().__init__(*args, **kwargs)
+
         def update(self, n=1):
             try:
-                reporter.add_bytes(n or 0)
+                if self._feeds_reporter:
+                    reporter.add_bytes(n or 0)
             except Exception:  # noqa: BLE001 - never let reporting break the bar
                 pass
             return super().update(n)
@@ -931,24 +971,40 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
     ``tqdm_class`` is passed to ``snapshot_download`` so transferred bytes feed
     the web progress file. The extra kwarg is omitted entirely when progress is
     off (or tqdm is unavailable), keeping the happy path byte-for-byte unchanged.
+    Should the installed huggingface_hub reject that class anyway, the download is
+    retried ONCE without it (degraded progress, STDOUT note) — reporting must
+    never break a download.
     """
     hf = _require_hf()
     os.makedirs(local_dir, exist_ok=True)
-    extra = {}
-    if reporter is not None and reporter.enabled:
-        tqdm_cls = _make_progress_tqdm(reporter)
-        if tqdm_cls is not None:
-            extra["tqdm_class"] = tqdm_cls
-    _hf_call_with_retry(
-        hf.snapshot_download,
+    fetch = dict(
         repo_id=repo,
         repo_type="dataset",
         allow_patterns=allow_patterns,
         local_dir=local_dir,
         token=token,
         _what="snapshot",
-        **extra,
     )
+    tqdm_cls = None
+    if reporter is not None and reporter.enabled:
+        tqdm_cls = _make_progress_tqdm(reporter)
+    try:
+        _hf_call_with_retry(
+            hf.snapshot_download,
+            **fetch,
+            **({"tqdm_class": tqdm_cls} if tqdm_cls is not None else {}),
+        )
+    except Exception as exc:  # noqa: BLE001 - re-raised below when not the hook
+        if tqdm_cls is None:
+            raise
+        # the bar may be what failed (an hf version that builds it with keywords
+        # this tqdm cannot take); re-run the fetch plain so the data still lands.
+        sys.stdout.write(
+            f"NOTE: the download progress bar could not be used ({exc}); "
+            f"retrying without it — the download proceeds, with progress shown "
+            f"only per extraction stage.\n"
+        )
+        _hf_call_with_retry(hf.snapshot_download, **fetch)
     if os.environ.get("CRISPRME_SKIP_VERIFY") == "1":
         return local_dir
 

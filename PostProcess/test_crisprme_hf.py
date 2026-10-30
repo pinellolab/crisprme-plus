@@ -577,11 +577,172 @@ class TestProgressReporter(unittest.TestCase):
         with mock.patch.dict(sys.modules, {"tqdm": fake_pkg, "tqdm.auto": fake_auto}):
             cls = hf._make_progress_tqdm(r)
             self.assertIsNotNone(cls)
-            bar = cls(total=300)
+            # unit="B" exactly as hf builds its byte bars -- that is the bar whose
+            # updates are bytes, and the only kind that feeds the reporter
+            bar = cls(total=300, unit="B", unit_scale=True)
             bar.update(120)
             bar.update(80)
         with open(p) as fh:
             self.assertEqual(json.load(fh)["bytes_done"], 200)
+
+
+class TestProgressHookNeverBreaksDownload(unittest.TestCase):
+    """Progress reporting is best-effort: the bar must never fail the download it
+    reports on.
+
+    huggingface_hub builds the snapshot bars from the caller's ``tqdm_class`` with
+    its OWN keyword arguments -- ``name="huggingface_hub.snapshot_download"`` on
+    versions 1.1.0 through 1.9.2, which plain tqdm rejects with TqdmKeyError unless
+    the bar happens to be auto-disabled. huggingface_hub is unpinned
+    (environment.yml, Dockerfile), so the hook has to survive whatever it is given.
+    """
+
+    class _TqdmKeyError(KeyError):
+        """Stands in for tqdm.TqdmKeyError (also a KeyError)."""
+
+    def _fake_tqdm_modules(self):
+        """Fake ``tqdm`` / ``tqdm.auto`` whose tqdm rejects unknown kwargs the way
+        the real one does (the light CI image has no tqdm).
+
+        Shaped like the real thing: ``tqdm.auto.tqdm`` is tqdm_asyncio, whose own
+        ``__init__`` is ``(self, iterable=None, *args, **kwargs)`` and forwards to
+        tqdm.std.tqdm, which is where total/unit/... are declared. A fake that
+        declared them on the class itself would hide a keyword filter that reads
+        only the immediate signature and so drops every one of them.
+        """
+        import sys
+        import types
+
+        unknown = self._TqdmKeyError
+
+        class _FakeStdTqdm:
+            def __init__(self, iterable=None, desc=None, total=None, disable=False,
+                         unit=None, unit_scale=False, initial=0, bar_format=None,
+                         **kwargs):
+                if kwargs:
+                    raise unknown("Unknown argument(s): " + str(kwargs))
+                self.given = {"desc": desc, "total": total, "unit": unit,
+                              "initial": initial}
+                self.total = total
+                self.n = initial
+
+            def update(self, n=1):
+                self.n += n or 0
+
+        class _FakeAutoTqdm(_FakeStdTqdm):  # stands in for tqdm_asyncio
+            def __init__(self, iterable=None, *args, **kwargs):
+                super().__init__(iterable, *args, **kwargs)
+
+        auto = types.ModuleType("tqdm.auto")
+        auto.tqdm = _FakeAutoTqdm
+        pkg = types.ModuleType("tqdm")
+        pkg.auto = auto
+        return mock.patch.dict(sys.modules, {"tqdm": pkg, "tqdm.auto": auto})
+
+    def _tmp(self):
+        import shutil
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: shutil.rmtree(d, ignore_errors=True))
+        return d
+
+    def _reporter(self):
+        return hf._ProgressReporter(path=os.path.join(self._tmp(), "p.json"),
+                                    min_interval=0.0)
+
+    def test_the_bar_drops_keywords_plain_tqdm_rejects(self):
+        r = self._reporter()
+        with self._fake_tqdm_modules():
+            cls = hf._make_progress_tqdm(r)
+            # exactly how hub 1.9.2 builds its aggregated bytes bar
+            bar = cls(desc="Downloading (incomplete total...)", disable=None, total=0,
+                      initial=0, unit="B", unit_scale=True,
+                      name="huggingface_hub.snapshot_download")
+            bar.update(7)
+        self.assertEqual(bar.given["unit"], "B")  # known kwargs still get through
+        # hf does `bar.total += total` on this bar, so dropping total (not just the
+        # keyword it does not know) would break the download a different way
+        self.assertEqual(bar.given["total"], 0)
+        self.assertEqual(bar.total, 0)
+        self.assertEqual(bar.n, 7)                # and the base bar still advances
+        self.assertEqual(r.bytes_done, 7)         # and the reporter still sees bytes
+
+    def test_only_one_byte_bar_feeds_the_reporter(self):
+        # hf drives SEVERAL bars from this one class: since hub 1.23.0 a network
+        # "Downloading bytes" bar AND a "Reconstructing" bar, each fed the full byte
+        # count (measured 2.00x the real size on 1.23.0-2.4.0), plus a "Fetching N
+        # files" bar counting files. Summing them all put the web bar at 100% when
+        # half the data had moved.
+        r = self._reporter()
+        with self._fake_tqdm_modules():
+            cls = hf._make_progress_tqdm(r)
+            transfer = cls(desc="Downloading bytes", total=0, unit="B", unit_scale=True)
+            reconstruct = cls(desc="Reconstructing", total=0, unit="B", unit_scale=True)
+            files = cls(desc="Fetching 2 files", total=2)  # no unit -> not bytes
+            for bar in (transfer, reconstruct):
+                bar.update(600)
+            files.update(1)
+        self.assertEqual(r.bytes_done, 600)
+        self.assertEqual((transfer.n, reconstruct.n, files.n), (600, 600, 1))
+
+    # --- the download goes ahead even when the hook cannot be used -------------
+
+    class _FakeHub:
+        """Records each snapshot_download and optionally rejects the progress bar."""
+
+        def __init__(self, fail_with_tqdm_class=False, always_fail=False):
+            self.calls = []
+            self._fail_with_tqdm_class = fail_with_tqdm_class
+            self._always_fail = always_fail
+
+        def snapshot_download(self, **kwargs):
+            self.calls.append(kwargs)
+            if self._always_fail:
+                raise RuntimeError("404 Client Error: Not Found")
+            if self._fail_with_tqdm_class and "tqdm_class" in kwargs:
+                raise KeyError("Unknown argument(s): {'name': 'huggingface_hub'}")
+            return kwargs["local_dir"]
+
+    def _snapshot(self, hub, reporter):
+        import io
+        with mock.patch.object(hf, "_require_hf", return_value=hub), \
+             mock.patch.dict(os.environ, {"CRISPRME_SKIP_VERIFY": "1"}), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as out, \
+             mock.patch("sys.stderr", new_callable=io.StringIO) as err, \
+             self._fake_tqdm_modules():
+            hf._hf_snapshot("me/repo", ["indexes/x.tar.gz"],
+                            os.path.join(self._tmp(), "dl"), None, reporter=reporter)
+        return out.getvalue(), err.getvalue()
+
+    def test_a_rejected_bar_retries_the_download_without_it(self):
+        hub = self._FakeHub(fail_with_tqdm_class=True)
+        printed, errored = self._snapshot(hub, self._reporter())
+        self.assertEqual(len(hub.calls), 2)
+        self.assertIn("tqdm_class", hub.calls[0])
+        self.assertNotIn("tqdm_class", hub.calls[1])  # degraded progress, real download
+        self.assertEqual(hub.calls[1]["allow_patterns"], ["indexes/x.tar.gz"])
+        self.assertIn("progress", printed.lower())
+        self.assertEqual(errored, "")  # diagnostics on stdout, like the rest here
+
+    def test_a_working_bar_is_kept_and_nothing_is_retried(self):
+        hub = self._FakeHub()
+        printed, _ = self._snapshot(hub, self._reporter())
+        self.assertEqual(len(hub.calls), 1)
+        self.assertIn("tqdm_class", hub.calls[0])
+        self.assertEqual(printed, "")
+
+    def test_a_download_that_really_fails_still_fails(self):
+        hub = self._FakeHub(always_fail=True)
+        with self.assertRaises(RuntimeError):
+            self._snapshot(hub, self._reporter())
+
+    def test_with_progress_off_the_call_is_unchanged(self):
+        hub = self._FakeHub()
+        r = hf._ProgressReporter(path=None)
+        self.assertFalse(r.enabled)
+        self._snapshot(hub, r)
+        self.assertEqual(len(hub.calls), 1)
+        self.assertNotIn("tqdm_class", hub.calls[0])
 
 
 class TestAtomicInstallDir(unittest.TestCase):
