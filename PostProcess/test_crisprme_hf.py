@@ -600,9 +600,10 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
     class _TqdmKeyError(KeyError):
         """Stands in for tqdm.TqdmKeyError (also a KeyError)."""
 
-    def _fake_tqdm_modules(self):
+    def _fake_tqdm_modules(self, update_raises=None):
         """Fake ``tqdm`` / ``tqdm.auto`` whose tqdm rejects unknown kwargs the way
-        the real one does (the light CI image has no tqdm).
+        the real one does (the light CI image has no tqdm). ``update_raises``, if
+        given, is raised by every ``update()`` of the base bar.
 
         Shaped like the real thing: ``tqdm.auto.tqdm`` is tqdm_asyncio, whose own
         ``__init__`` is ``(self, iterable=None, *args, **kwargs)`` and forwards to
@@ -634,6 +635,8 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
             __init__ = functools.partialmethod(_std_init)  # what @envwrap leaves
 
             def update(self, n=1):
+                if update_raises is not None:
+                    raise update_raises
                 self.n += n or 0
 
         class _FakeAutoTqdm(_FakeStdTqdm):  # stands in for tqdm_asyncio
@@ -696,19 +699,23 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
     # --- the download goes ahead even when the hook cannot be used -------------
 
     class _FakeHub:
-        """Records each snapshot_download and optionally rejects the progress bar."""
+        """Records each snapshot_download. Given a ``tqdm_class`` it builds the bytes
+        bar from it exactly as hub 1.9.2 does; ``fail_with`` is then raised by every
+        call, as a download that really fails would."""
 
-        def __init__(self, fail_with_tqdm_class=False, always_fail=False):
+        def __init__(self, fail_with=None):
             self.calls = []
-            self._fail_with_tqdm_class = fail_with_tqdm_class
-            self._always_fail = always_fail
+            self._fail_with = fail_with
 
         def snapshot_download(self, **kwargs):
             self.calls.append(kwargs)
-            if self._always_fail:
-                raise RuntimeError("404 Client Error: Not Found")
-            if self._fail_with_tqdm_class and "tqdm_class" in kwargs:
-                raise KeyError("Unknown argument(s): {'name': 'huggingface_hub'}")
+            if "tqdm_class" in kwargs:
+                kwargs["tqdm_class"](desc="Downloading (incomplete total...)",
+                                     disable=None, total=0, initial=0, unit="B",
+                                     unit_scale=True,
+                                     name="huggingface_hub.snapshot_download")
+            if self._fail_with is not None:
+                raise self._fail_with
             return kwargs["local_dir"]
 
     class _BarBuildingHub:
@@ -739,16 +746,19 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
             return kwargs["local_dir"]
 
     def _snapshot(self, hub, reporter):
+        """(stdout, stderr) of one _hf_snapshot; also kept on self.printed for a
+        call that raises."""
         import io
+        self.printed = io.StringIO()
         with mock.patch.object(hf, "_require_hf", return_value=hub), \
              mock.patch.dict(os.environ, {"CRISPRME_SKIP_VERIFY": "1"}), \
              mock.patch.object(hf.time, "sleep"), \
-             mock.patch("sys.stdout", new_callable=io.StringIO) as out, \
+             mock.patch("sys.stdout", self.printed), \
              mock.patch("sys.stderr", new_callable=io.StringIO) as err, \
              self._fake_tqdm_modules():
             hf._hf_snapshot("me/repo", ["indexes/x.tar.gz"],
                             os.path.join(self._tmp(), "dl"), None, reporter=reporter)
-        return out.getvalue(), err.getvalue()
+        return self.printed.getvalue(), err.getvalue()
 
     def test_a_retried_download_keeps_feeding_the_bar(self):
         # _hf_call_with_retry exists for this: a 429 mid-download, then the rest.
@@ -764,13 +774,17 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
         self.assertEqual(printed, "")
 
     def test_a_rejected_bar_retries_the_download_without_it(self):
-        hub = self._FakeHub(fail_with_tqdm_class=True)
-        printed, errored = self._snapshot(hub, self._reporter())
+        # a tqdm whose signature cannot be read gets every keyword passed on; when
+        # it then rejects one, the BAR has failed, so the data is fetched plain
+        hub = self._FakeHub()
+        with mock.patch("inspect.signature", side_effect=ValueError("no signature")):
+            printed, errored = self._snapshot(hub, self._reporter())
         self.assertEqual(len(hub.calls), 2)
         self.assertIn("tqdm_class", hub.calls[0])
         self.assertNotIn("tqdm_class", hub.calls[1])  # degraded progress, real download
         self.assertEqual(hub.calls[1]["allow_patterns"], ["indexes/x.tar.gz"])
-        self.assertIn("progress", printed.lower())
+        self.assertIn("progress bar", printed)
+        self.assertIn("Unknown argument", printed)  # names what the bar raised
         self.assertEqual(errored, "")  # diagnostics on stdout, like the rest here
 
     def test_a_working_bar_is_kept_and_nothing_is_retried(self):
@@ -781,9 +795,48 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
         self.assertEqual(printed, "")
 
     def test_a_download_that_really_fails_still_fails(self):
-        hub = self._FakeHub(always_fail=True)
+        hub = self._FakeHub(fail_with=RuntimeError("404 Client Error: Not Found"))
         with self.assertRaises(RuntimeError):
             self._snapshot(hub, self._reporter())
+
+    # --- ...and only when it is the BAR that failed ----------------------------
+    # Anything else propagates exactly as without a bar: the same attempts as on
+    # b5d6cc1, and no NOTE blaming the bar for a failure it did not cause.
+
+    def test_what_the_bar_itself_raises_is_recorded(self):
+        failures = []
+        with self._fake_tqdm_modules(), \
+             mock.patch("inspect.signature", side_effect=ValueError("no signature")):
+            cls = hf._make_progress_tqdm(self._reporter(), failures)
+            with self.assertRaises(self._TqdmKeyError) as built:
+                cls(unit="B", name="huggingface_hub.snapshot_download")
+        boom = RuntimeError("the bar could not advance")
+        with self._fake_tqdm_modules(update_raises=boom):
+            bar = hf._make_progress_tqdm(self._reporter(), failures)(unit="B")
+            with self.assertRaises(RuntimeError):
+                bar.update(5)
+        self.assertEqual(failures, [built.exception, boom])
+
+    BUDGET = 4  # CRISPRME_HF_MAX_RETRIES in the tests below
+
+    def _fails_every_attempt(self, exc):
+        hub = self._FakeHub(fail_with=exc)
+        with mock.patch.dict(os.environ, {"CRISPRME_HF_MAX_RETRIES": str(self.BUDGET)}), \
+             self.assertRaises(type(exc)) as caught:
+            self._snapshot(hub, self._reporter())
+        self.assertIs(caught.exception, exc)  # re-raised unchanged
+        return hub
+
+    def test_a_persistent_503_uses_the_retry_budget_once(self):
+        hub = self._fails_every_attempt(_HTTPErr("503 Service Unavailable", status=503))
+        self.assertEqual(len(hub.calls), self.BUDGET)
+        self.assertEqual(self.printed.getvalue(), "")
+
+    def test_a_401_fails_at_once(self):
+        hub = self._fails_every_attempt(_HTTPErr("401 Client Error: Unauthorized",
+                                                 status=401))
+        self.assertEqual(len(hub.calls), 1)
+        self.assertEqual(self.printed.getvalue(), "")
 
     def test_with_progress_off_the_call_is_unchanged(self):
         hub = self._FakeHub()

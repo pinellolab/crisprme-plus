@@ -558,13 +558,16 @@ class _ProgressReporter:
             pass  # progress reporting is best-effort; never raise
 
 
-def _make_progress_tqdm(reporter: "_ProgressReporter"):
+def _make_progress_tqdm(reporter: "_ProgressReporter",
+                        failures: Optional[List[BaseException]] = None):
     """Build a ``tqdm_class`` subclass that feeds a :class:`_ProgressReporter`.
 
     ``huggingface_hub.snapshot_download`` accepts a ``tqdm_class`` and drives it
     with per-file byte updates; we subclass tqdm so each ``update(n)`` also
     accumulates into the reporter. Returns ``None`` when tqdm is unavailable so
-    the caller falls back to a plain (progress-free) download.
+    the caller falls back to a plain (progress-free) download. ``failures``, if
+    given, collects every exception the bar ITSELF raises (building or advancing
+    a bar), so the caller can tell a failed bar from a failed download.
 
     hf drives SEVERAL bars from this one class, so only the FIRST byte bar (the
     ones it builds with ``unit="B"``) feeds the reporter: since hub 1.23.0 it
@@ -606,6 +609,8 @@ def _make_progress_tqdm(reporter: "_ProgressReporter"):
     except (TypeError, ValueError):  # unintrospectable base -> pass everything on
         _known = None
 
+    if failures is None:
+        failures = []
     counted = []  # the one byte bar whose updates reach the reporter
 
     class _ProgressTqdm(_tqdm):  # pragma: no cover - exercised via a fake in tests
@@ -615,7 +620,11 @@ def _make_progress_tqdm(reporter: "_ProgressReporter"):
                 counted.append(self)
             if _known is not None:
                 kwargs = {k: v for k, v in kwargs.items() if k in _known}
-            super().__init__(*args, **kwargs)
+            try:
+                super().__init__(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - the bar failed: record, re-raise
+                failures.append(exc)
+                raise
 
         def update(self, n=1):
             try:
@@ -623,7 +632,11 @@ def _make_progress_tqdm(reporter: "_ProgressReporter"):
                     reporter.add_bytes(n or 0)
             except Exception:  # noqa: BLE001 - never let reporting break the bar
                 pass
-            return super().update(n)
+            try:
+                return super().update(n)
+            except Exception as exc:  # noqa: BLE001 - the bar failed: record, re-raise
+                failures.append(exc)
+                raise
 
     return _ProgressTqdm
 
@@ -977,9 +990,10 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
     retried after a 429/5xx keeps feeding it. The extra kwarg is omitted entirely
     when progress is off (or tqdm is unavailable), keeping the happy path
     byte-for-byte unchanged.
-    Should the installed huggingface_hub reject that class anyway, the download is
-    retried ONCE without it (degraded progress, STDOUT note) — reporting must
-    never break a download.
+    Should the bar ITSELF fail (an exception raised inside the progress class,
+    e.g. a keyword this tqdm rejects), the fetch runs once more without it
+    (degraded progress, STDOUT note) — reporting must never break a download.
+    Any other failure propagates exactly as it would without a bar.
     """
     hf = _require_hf()
     os.makedirs(local_dir, exist_ok=True)
@@ -991,6 +1005,7 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
         token=token,
         _what="snapshot",
     )
+    bar_failures: List[BaseException] = []  # what the progress bar ITSELF raised
     with_bar = (reporter is not None and reporter.enabled
                 and _make_progress_tqdm(reporter) is not None)
 
@@ -998,21 +1013,23 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
         # a FRESH bar class for every attempt _hf_call_with_retry makes: hf builds
         # new bars on each call, and a class feeds the reporter only from the first
         # byte bar it built, so a reused one went silent after a 429/5xx retry
-        return hf.snapshot_download(**kwargs, tqdm_class=_make_progress_tqdm(reporter))
+        return hf.snapshot_download(
+            **kwargs, tqdm_class=_make_progress_tqdm(reporter, bar_failures)
+        )
 
     try:
         _hf_call_with_retry(
             _snapshot_with_bar if with_bar else hf.snapshot_download, **fetch
         )
-    except Exception as exc:  # noqa: BLE001 - re-raised below when not the hook
-        if not with_bar:
-            raise
-        # the bar may be what failed (an hf version that builds it with keywords
-        # this tqdm cannot take); re-run the fetch plain so the data still lands.
+    except Exception as exc:  # noqa: BLE001 - re-raised unless the bar raised it
+        if not any(exc is failure for failure in bar_failures):
+            raise  # the download itself failed: exactly as without a bar
+        # the bar itself failed (e.g. an hf version that builds it with a keyword
+        # this tqdm rejects); fetch again plain so the data still lands.
         sys.stdout.write(
-            f"NOTE: the download progress bar could not be used ({exc}); "
-            f"retrying without it — the download proceeds, with progress shown "
-            f"only per extraction stage.\n"
+            f"NOTE: the download progress bar failed ({type(exc).__name__}: {exc}); "
+            f"fetching again without it, so progress shows per extraction stage "
+            f"only.\n"
         )
         _hf_call_with_retry(hf.snapshot_download, **fetch)
     if os.environ.get("CRISPRME_SKIP_VERIFY") == "1":
