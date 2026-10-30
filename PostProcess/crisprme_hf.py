@@ -636,7 +636,11 @@ def _atomic_install_dir(dest: str, build, verify=None) -> str:
     is the staged dir swapped into ``dest`` (any pre-existing ``dest`` is moved
     aside first and deleted after the swap; rolled-forward if a prior run died
     mid-swap). On ANY exception the staging dir is removed and ``dest`` is left
-    exactly as it was — no partial is ever installed. Returns ``dest``."""
+    exactly as it was — no partial is ever installed. Returns ``dest``.
+
+    A ``dest`` that is a symlink (e.g. Genomes/hg38 linked to a shared copy) is
+    replaced by the new real directory: the old link is removed with ``os.unlink``,
+    never rmtree'd through, and the shared target is never written to or deleted."""
     parent = os.path.dirname(dest.rstrip("/")) or "."
     os.makedirs(parent, exist_ok=True)
     base = os.path.basename(dest.rstrip("/"))
@@ -644,30 +648,48 @@ def _atomic_install_dir(dest: str, build, verify=None) -> str:
     backup = os.path.join(parent, f".{base}.replaced")
     # roll forward an interrupted prior swap: a backup with no live dest means a
     # previous run died between the two renames below -> restore it first.
-    if os.path.isdir(backup) and not os.path.exists(dest):
+    if os.path.isdir(backup) and not os.path.lexists(dest):
         os.rename(backup, dest)
-    shutil.rmtree(backup, ignore_errors=True)
+    _remove_moved_aside(backup)
     shutil.rmtree(stage, ignore_errors=True)
     os.makedirs(stage)
     try:
         build(stage)
         if verify is not None:
             verify(stage)
+        # clean build -> swap in as the last step (same-FS renames == atomic). Both
+        # renames are inside this try, so a failed swap still discards the stage.
+        link_target = os.readlink(dest) if os.path.islink(dest) else None
+        if os.path.lexists(dest):
+            os.rename(dest, backup)
+        try:
+            os.rename(stage, dest)
+        except BaseException:
+            if os.path.lexists(backup) and not os.path.lexists(dest):
+                os.rename(backup, dest)  # restore on a failed final swap
+            raise
     except BaseException:
         shutil.rmtree(stage, ignore_errors=True)  # discard the partial; dest intact
         raise
-    # clean build -> swap in as the last step (same-FS renames == atomic)
-    if os.path.exists(dest):
-        os.rename(dest, backup)
-    try:
-        os.rename(stage, dest)
-    except OSError:
-        if os.path.isdir(backup) and not os.path.exists(dest):
-            os.rename(backup, dest)  # restore on a failed final swap
-        shutil.rmtree(stage, ignore_errors=True)
-        raise
-    shutil.rmtree(backup, ignore_errors=True)
+    _remove_moved_aside(backup)
+    if link_target is not None:
+        sys.stdout.write(
+            f"NOTE: {dest} was a symbolic link to {link_target}; replaced the link "
+            f"with the downloaded copy and left {link_target} untouched.\n"
+        )
     return dest
+
+
+def _remove_moved_aside(path: str) -> None:
+    """Delete a moved-aside ``dest``: rmtree a real directory, but only unlink a
+    symlink (or file), so a linked shared copy is never followed. Best-effort."""
+    if os.path.islink(path) or os.path.isfile(path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    else:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 # --- download integrity -----------------------------------------------------

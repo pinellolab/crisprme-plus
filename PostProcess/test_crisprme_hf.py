@@ -620,6 +620,96 @@ class TestAtomicInstallDir(unittest.TestCase):
             hf._atomic_install_dir(dest, build, verify=verify)
         self.assertFalse(os.path.exists(dest))
 
+    # A dest that is a symlink to a shared copy (Genomes/hg38 -> /shared/hg38): the
+    # download replaces the LINK with a real directory and never touches the target.
+
+    def _linked_dest(self):
+        d = self._tmp()
+        shared = os.path.join(d, "shared", "hg38")
+        os.makedirs(shared)
+        with open(os.path.join(shared, "old.fa"), "w") as fh:
+            fh.write("shared")
+        dest = os.path.join(d, "Genomes", "hg38")
+        os.makedirs(os.path.dirname(dest))
+        os.symlink(shared, dest)
+        return d, shared, dest
+
+    @staticmethod
+    def _build_new(stage):
+        with open(os.path.join(stage, "new.fa"), "w") as fh:
+            fh.write("new")
+
+    def _install(self, dest, build):
+        import io
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            hf._atomic_install_dir(dest, build)
+        return out.getvalue()
+
+    def test_symlinked_dest_replaces_the_link_not_its_target(self):
+        d, shared, dest = self._linked_dest()
+        printed = self._install(dest, self._build_new)
+        self.assertFalse(os.path.islink(dest))
+        self.assertEqual(sorted(os.listdir(dest)), ["new.fa"])
+        self.assertEqual(sorted(os.listdir(shared)), ["old.fa"])  # target untouched
+        genomes = os.path.join(d, "Genomes")
+        self.assertEqual(os.listdir(genomes), ["hg38"])  # no .replaced link left behind
+        self.assertEqual(printed.count("\n"), 1, printed)
+        self.assertIn(shared, printed)
+        self.assertIn("untouched", printed)
+
+    def test_reinstalling_over_a_replaced_link_succeeds(self):
+        # the second download used to hit ENOTDIR renaming the real dir onto the
+        # leftover .hg38.replaced link, after the whole build, and leak the stage
+        d, shared, dest = self._linked_dest()
+        self._install(dest, self._build_new)
+        self._install(dest, self._build_new)
+        self.assertEqual(sorted(os.listdir(dest)), ["new.fa"])
+        self.assertEqual(sorted(os.listdir(shared)), ["old.fa"])
+        self.assertEqual(os.listdir(os.path.join(d, "Genomes")), ["hg38"])
+
+    def test_a_leftover_backup_link_is_unlinked_not_followed(self):
+        # what an earlier run left on disk: a private dest plus a backup that is a
+        # link to the shared copy
+        d, shared, dest = self._linked_dest()
+        os.unlink(dest)
+        os.makedirs(dest)
+        backup = os.path.join(d, "Genomes", ".hg38.replaced")
+        os.symlink(shared, backup)
+        self._install(dest, self._build_new)
+        self.assertFalse(os.path.lexists(backup))
+        self.assertEqual(sorted(os.listdir(dest)), ["new.fa"])
+        self.assertEqual(sorted(os.listdir(shared)), ["old.fa"])
+
+    def _failing_rename(self, failing_src):
+        real_rename = os.rename
+
+        def rename(src, dst):
+            if src == failing_src:
+                raise OSError(16, "Device or resource busy")
+            return real_rename(src, dst)
+        return mock.patch.object(hf.os, "rename", rename)
+
+    def test_a_failed_move_aside_discards_the_stage(self):
+        d = self._tmp()
+        dest = os.path.join(d, "Genomes", "hg38")
+        os.makedirs(dest)
+        with open(os.path.join(dest, "old.fa"), "w") as fh:
+            fh.write("existing")
+        with self._failing_rename(dest), self.assertRaises(OSError):
+            hf._atomic_install_dir(dest, self._build_new)
+        self.assertEqual(os.listdir(os.path.join(d, "Genomes")), ["hg38"])  # no stage
+        self.assertEqual(sorted(os.listdir(dest)), ["old.fa"])
+
+    def test_a_failed_swap_puts_the_link_back(self):
+        d, shared, dest = self._linked_dest()
+        stage = os.path.join(d, "Genomes", ".hg38.staging")
+        with self._failing_rename(stage), self.assertRaises(OSError):
+            hf._atomic_install_dir(dest, self._build_new)
+        self.assertTrue(os.path.islink(dest))
+        self.assertEqual(os.readlink(dest), shared)
+        self.assertEqual(os.listdir(os.path.join(d, "Genomes")), ["hg38"])
+        self.assertEqual(sorted(os.listdir(shared)), ["old.fa"])
+
 
 class TestStructuralCheckWhenSizesEmpty(unittest.TestCase):
     """(2.8.1 piece C) when the HF size API fails (_remote_sizes -> {}), the
