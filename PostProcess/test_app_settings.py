@@ -143,6 +143,44 @@ class TestAppSearchPoolSize(unittest.TestCase):
         self.assertIn("app_settings", out)
         self.assertRegex(out, r"\b2\b")
 
+    # An env value app_settings cannot use as given used to change the pool size
+    # without a word: ignored if it is not a whole number, clamped into [1, 16].
+
+    def test_env_value_not_a_whole_number_is_ignored_and_says_so(self):
+        # `docker run --env-file` keeps quotes: a CRISPRME_MAX_CONCURRENT_JOBS="5"
+        # line arrives as the value "5" with its quotes.
+        for raw in ('"5"', "4.0", "-1", "five"):
+            with self.subTest(raw=raw):
+                workers, out = self._import_app(env_jobs=raw)
+                self.assertEqual(workers, 2)
+                self.assertEqual(len(out.splitlines()), 1, out)
+                self.assertIn(f"CRISPRME_MAX_CONCURRENT_JOBS={raw!r}", out)
+                self.assertRegex(out, r"\busing 2\b")
+
+    def test_ignored_env_value_names_the_saved_value_used_instead(self):
+        workers, out = self._import_app(env_jobs='"5"', saved_jobs=3)
+        self.assertEqual(workers, 3)
+        self.assertEqual(len(out.splitlines()), 1, out)
+        self.assertRegex(out, r"\busing 3\b")
+
+    def test_out_of_range_env_value_is_clamped_and_says_so(self):
+        for raw, used in (("99", 16), ("0", 1)):
+            with self.subTest(raw=raw):
+                workers, out = self._import_app(env_jobs=raw)
+                self.assertEqual(workers, used)
+                self.assertEqual(len(out.splitlines()), 1, out)
+                self.assertIn(f"CRISPRME_MAX_CONCURRENT_JOBS={raw!r}", out)
+                self.assertRegex(out, rf"\busing {used}\b")
+
+    def test_env_value_used_as_given_prints_nothing(self):
+        # Whole numbers 1-16 are used as given, blanks and a leading zero
+        # included; an empty value counts as unset.
+        for raw, used in (("1", 1), ("16", 16), (" 7 ", 7), ("05", 5), ("", 2)):
+            with self.subTest(raw=raw):
+                workers, out = self._import_app(env_jobs=raw)
+                self.assertEqual(workers, used)
+                self.assertEqual(out, "")
+
 
 if __name__ == "__main__":
     unittest.main()

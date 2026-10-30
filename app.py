@@ -133,6 +133,18 @@ except Exception as e:
         "concurrent search jobs\n"
     )
     sys.stdout.flush()
+else:
+    # app_settings ignores a CRISPRME_MAX_CONCURRENT_JOBS that is not a whole number
+    # (e.g. "5" with the quotes `docker run --env-file` keeps) and clamps one into
+    # [1, MAX_JOBS_CAP]; say so rather than silently run another pool size.
+    _env_jobs = os.environ.get("CRISPRME_MAX_CONCURRENT_JOBS", "").strip()
+    if _env_jobs and not (_env_jobs.isdigit() and int(_env_jobs) == _MAX_CONCURRENT_JOBS):
+        sys.stdout.write(
+            f"WARNING: CRISPRME_MAX_CONCURRENT_JOBS={_env_jobs!r} is not a whole number "
+            f"from 1 to {app_settings.MAX_JOBS_CAP}; using {_MAX_CONCURRENT_JOBS} "
+            "concurrent search job(s)\n"
+        )
+        sys.stdout.flush()
 pool_executor = concurrent.futures.ProcessPoolExecutor(max_workers=_MAX_CONCURRENT_JOBS)
 # A separate single-slot executor for Settings / Data-Manager operations
 # (genome/index/VCF downloads and local index builds). Keeping these off the
