@@ -116,6 +116,12 @@ and the `release-crisprme` skill.
   rule with the wrong candidate globbing first, and runs the whole shipped script against a stub
   engine to check that each scan hands the search the index it picked.
 
+- **`build-index-only` makes a missing `--samplesID` impossible to miss.** Building a genotyped
+  variant index without `--samplesID` (or with no usable entries) skips the dict-less Tier-0
+  registry, so the index lacks fast post-analysis, the report's variant-count panel and the web's
+  data-type labels, and cannot be published. The one-line notice is now a red banner on stderr
+  that names the consequence and the fix (re-run with `--samplesID`). Behaviour is unchanged.
+
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
   rsID, allele frequency and carrier samples.** Every CRISPRitz targets file carries a `#` header, and
