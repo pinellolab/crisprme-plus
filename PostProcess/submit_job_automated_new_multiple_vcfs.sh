@@ -278,8 +278,11 @@ while read vcf_f; do
 			# No .bin at all cannot serve a search either: a build that has not written
 			# its first chromosome yet, or a leftover from one that was cleaned up.
 			# Treat it as absent rather than hand crispritz an index it refuses with
-			# "no .bin index files found" much further down the pipeline.
-			if [ -z "$(find "$_d" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)" ]; then
+			# "no .bin index files found" much further down the pipeline. -L: an index
+			# may be a symlink to a shared copy, and find does not follow a symlink
+			# given as its starting point, so without it every linked index looked
+			# unbuilt.
+			if [ -z "$(find -L "$_d" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)" ]; then
 				continue
 			fi
 			# (Both skips are silent on purpose: this function's STDOUT is its return

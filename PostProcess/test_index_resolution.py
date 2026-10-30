@@ -290,6 +290,49 @@ class AnIndexStillBeingBuiltIsNotSelected(_Tree):
         self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
 
 
+class ASymlinkedIndexIsStillAnIndex(_Tree):
+    """genome_library/<name> may be a symlink to an index stored elsewhere.
+
+    Sharing one copy of a 100 GB index across working directories that way is
+    ordinary, and it is how this release's own validation layouts were built. The
+    .bin check must look INSIDE the link: GNU find does not follow a symlink given
+    as its starting point, so a plain `find "$_d"` saw no .bin and the resolver
+    dropped every symlinked index as unbuilt.
+    """
+
+    def store(self, name, finished=True):
+        d = Path(self.tmp.name) / "store" / name
+        d.mkdir(parents=True)
+        if finished:
+            (d / "chr1.bin").write_bytes(b"")
+        return d
+
+    def libdir(self):
+        d = Path(self.tmp.name) / "lib"
+        d.mkdir(exist_ok=True)
+        return d
+
+    def test_a_symlinked_finished_index_is_selected(self):
+        lib = self.libdir()
+        (lib / "NRG_3_hg38").symlink_to(self.store("NRG_3_hg38"))
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
+
+    def test_a_symlinked_pamless_stand_in_is_selected(self):
+        lib = self.libdir()
+        (lib / "NNN_3_hg38").symlink_to(self.store("NNN_3_hg38"))
+        self.assertEqual(resolve(lib, "NGG", "hg38", 3, prune=1), "NNN_3_hg38")
+
+    def test_a_symlink_to_an_unbuilt_index_is_still_absent(self):
+        lib = self.libdir()
+        (lib / "NRG_3_hg38").symlink_to(self.store("NRG_3_hg38", finished=False))
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "")
+
+    def test_a_dangling_symlink_is_absent(self):
+        lib = self.libdir()
+        (lib / "NRG_3_hg38").symlink_to(Path(self.tmp.name) / "nowhere")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "")
+
+
 class ShippedScriptCarriesTheFix(unittest.TestCase):
     def test_no_bare_nnn_glob_remains(self):
         # `NNN*_*` as a glob is what matched NNNRRT and made width ordering
