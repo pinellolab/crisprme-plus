@@ -153,7 +153,8 @@ def read_job_info(logfile: str, jobid: str) -> Optional[str]:
     """Read the job start time from the log file.
 
     Returns the ``Job\tStart`` timestamp, or ``None`` when the job has not
-    started yet. A QUEUED job (3rd+ job while the 2 search slots are busy) has a
+    started yet. A QUEUED job (one submitted while every search slot is busy:
+    2 by default, configurable 1-16) has a
     ``log.txt`` -- the submit path writes a queue note to it -- but **no**
     ``Job\tStart`` line until it actually runs; a missing log is likewise not an
     error here. Returning ``None`` (instead of raising ``StopIteration`` /
@@ -370,8 +371,9 @@ def construct_history_summary(results: List[str]) -> pd.DataFrame:
         # Build the whole row FIRST, then append -- and guard the per-job work so
         # a single not-yet-ready / malformed job dir can never crash the entire
         # History table (running + completed jobs must stay accessible). This is
-        # the fix for the queued-3rd-job case: with the 2-slot search pool busy,
-        # the queued job's log.txt has no "Job\tStart" line yet.
+        # the fix for the queued-job case: while every search slot is busy (2 by
+        # default, configurable 1-16), a queued job's log.txt has no "Job\tStart"
+        # line yet.
         try:
             if _is_assembly_params(paramsfile):
                 row = _assembly_history_row(

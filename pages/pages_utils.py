@@ -17,9 +17,10 @@ import os
 import json
 import gzip
 
-# personal_assembly lives in PostProcess/ (like assembly_reconcile), which
-# crisprme.py puts on sys.path at web-app boot. Insert it explicitly too so this
-# module-top import is robust regardless of import order.
+# personal_assembly lives in PostProcess/ (like assembly_reconcile). crisprme.py's
+# sys.path inserts never reach the web app (`crisprme.py web-interface` runs
+# index.py as a fresh subprocess), so app.py and this module each put PostProcess/
+# on sys.path from their own location, whatever the import order.
 _POSTPROCESS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "PostProcess"
 )
@@ -2419,7 +2420,7 @@ def _cosmic_mod():
     (PostProcess/cosmic_license.py). Returns the module, or None if unavailable
     (in which case COSMIC is treated as NOT licensed -- the safe default)."""
     try:
-        import cosmic_license as _c  # PostProcess is on sys.path via crisprme.py
+        import cosmic_license as _c  # PostProcess/ is on sys.path via the insert at the top
         return _c
     except Exception:
         try:

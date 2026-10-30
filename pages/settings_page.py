@@ -9,8 +9,8 @@ Large data (multi-GB genomes/VCFs) never goes through an in-memory browser
 upload: it is fetched server-side (UCSC by assembly, HuggingFace by name, an
 explicit URL, or an already-staged server path). Only small files (annotations)
 use a direct upload. Long operations run as detached jobs on a dedicated
-single-slot executor so they never starve the two search slots, and their
-progress is polled from the browser exactly like a search.
+single-slot executor so they never starve the search slots (1-16, 2 by default),
+and their progress is polled from the browser exactly like a search.
 
 All mutations are local-mode only (disabled when app.ONLINE is True). Publishing
 an index to the shared HuggingFace repo is maintainer-only (app.MAINTAINER_MODE).
@@ -1730,7 +1730,7 @@ def settings_page() -> List:
 
     # ---- Concurrent search jobs ------------------------------------------
     try:
-        import app_settings as _appcfg  # PostProcess on sys.path via crisprme.py
+        import app_settings as _appcfg  # app.py and pages_utils put PostProcess/ on sys.path
         _cur_maxjobs, _maxjobs_cap = _appcfg.get_max_concurrent_jobs(), _appcfg.MAX_JOBS_CAP
         _maxjobs_env = _appcfg.env_override()
     except Exception:

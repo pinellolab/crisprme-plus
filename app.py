@@ -149,7 +149,7 @@ pool_executor = concurrent.futures.ProcessPoolExecutor(max_workers=_MAX_CONCURRE
 # A separate single-slot executor for Settings / Data-Manager operations
 # (genome/index/VCF downloads and local index builds). Keeping these off the
 # search `pool_executor` means a long download or index build never starves the
-# 2 search slots.
+# search slots (_MAX_CONCURRENT_JOBS of them: 1-16, 2 by default).
 settings_executor = concurrent.futures.ProcessPoolExecutor(max_workers=1)
 # Maintainer-only actions (e.g. publishing an index to the shared HuggingFace
 # repo) are gated behind this flag: enabled only when a HuggingFace write token

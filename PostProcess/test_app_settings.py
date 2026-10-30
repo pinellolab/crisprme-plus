@@ -24,8 +24,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # runs `subprocess.run([sys.executable, index.py])`: a fresh interpreter whose
 # sys.path holds only the install root (index.py's directory, no PostProcess/),
 # whose cwd is the user's working directory, and whose index.py imports app.py
-# first, before pages/pages_utils.py puts PostProcess/ on sys.path. -I drops this
-# test's own cwd (PostProcess/) and any PYTHONPATH; the root is then put back as
+# first, before pages/pages_utils.py puts PostProcess/ on sys.path. -I drops
+# PYTHONPATH, user site-packages and the cwd entry; the root is then put back as
 # sys.path[0]. The web stack (not in the light CI env) plays no part in the
 # import-path logic, so it is faked through sys.modules.
 _APP_IMPORT_DRIVER = textwrap.dedent('''
