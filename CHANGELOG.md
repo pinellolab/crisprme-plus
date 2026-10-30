@@ -11,7 +11,7 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
-## [2.8.1] - 2026-10-29
+## [2.8.1] - 2026-10-30
 
 ### Added
 - **`--prune-pam`: one index can serve many PAMs.** A *PAM-less* index stores the raw genomic flank
