@@ -233,6 +233,33 @@ class TestCliBulgeCap(unittest.TestCase):
         cap = crisprme._installed_index_bulge_cap(_MOTIF, _REF, is_variant=False)
         self.assertEqual(cap, 3, "an installed deeper reference index must win")
 
+    def test_a_wider_pamless_index_counts_only_where_the_search_uses_it(self):
+        """The search shell takes an all-N index WIDER than the PAM only under
+        --prune-pam and for a 3' PAM; the derived default must not come from one the
+        search will not use. No raw genome, so the installed index is the only term."""
+        _mkfile(os.path.join(self.root, "genome_library", f"NNNNNNNN_4_{_REF}",
+                             "TSTgenome.NNNNNNNN.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True), 3)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True,
+                             three_prime=False), 0)
+
+    def test_an_equal_width_pamless_index_counts_either_way(self):
+        _mkfile(os.path.join(self.root, "genome_library", f"NNN_4_{_REF}",
+                             "TSTgenome.NNN.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        for prune in (False, True):
+            for three_prime in (True, False):
+                self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=prune,
+                                     three_prime=three_prime), 3, (prune, three_prime))
+
+    def test_a_dedicated_pam_starting_with_n_is_not_pamless(self):
+        _mkfile(os.path.join(self.root, "genome_library", f"NNNRRT_4_{_REF}",
+                             "TSTgenome.NNNRRT.bin"))
+        self.assertEqual(crisprme._installed_index_bulge_cap(
+            _MOTIF, _REF, is_variant=False, prune=True), 0)
+
 
 # --------------------------------------------------------------------------- #
 # (1) BULGE-CAP -- web pages_utils.reference_bulge_capacity
@@ -271,6 +298,17 @@ class TestWebReferenceBulgeCapacity(unittest.TestCase):
         ref = pages_utils.reference_bulge_capacity(_REF, _PAM_VALUE)
         var = pages_utils.index_max_bulges(_REF, _PAM_VALUE, _DATASET)
         self.assertEqual(min(ref, var), 2)
+
+    def test_only_an_equal_width_pamless_index_counts(self):
+        """The web never passes --prune-pam, so the search shell never takes a WIDER
+        all-N index for it; the slider must not offer bulges on the strength of one."""
+        _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        _mkfile(os.path.join(self.root, "genome_library", f"NNNNNNNN_3_{_REF}",
+                             "TSTgenome.NNNNNNNN.bin"))
+        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 0)
+        _mkfile(os.path.join(self.root, "genome_library", f"NNN_3_{_REF}",
+                             "TSTgenome.NNN.bin"))
+        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 2)
 
 
 # --------------------------------------------------------------------------- #

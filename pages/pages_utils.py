@@ -1606,20 +1606,20 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     lib = os.path.join(current_working_directory, "genome_library")
     if not os.path.isdir(lib):
         return 0
-    # Accept the exact PAM motif OR an all-N "pamless" index AT LEAST as wide: a
-    # stored flank of width K serves a PAM of length L whenever L <= K (the requested
-    # PAM is enforced during the search by --prune-pam and afterwards by the PAM
-    # filter). Mirrors _resolve_index_dir in
+    # Accept the exact PAM motif OR an all-N "pamless" index of the SAME width. The
+    # search shell takes a wider all-N index only under --prune-pam, which the web
+    # never passes, so counting one here would offer bulges for an index the search
+    # will not use. Mirrors _resolve_index_dir in
     # PostProcess/submit_job_automated_new_multiple_vcfs.sh -- the shell and this must
-    # not disagree about the same directory. Matching a fixed "N" * len(motif) prefix
-    # missed a WIDER pamless index that the search does use, and admitted a dedicated
-    # PAM that merely starts with N's (the shipped NNNRRT, SaCas9-KKH).
+    # not disagree about the same directory. The all-N test, rather than a fixed
+    # "N" * len(motif) prefix, keeps out a dedicated PAM that merely starts with N's
+    # (the shipped NNNRRT, SaCas9-KKH).
     base_suffix = f"_{genome}"  # base = "<motif>_<N>_<genome>"
 
     def _pam_serves(pam: str) -> bool:
         if pam == motif:
             return True
-        return bool(pam) and set(pam) == {"N"} and len(pam) >= len(motif)
+        return bool(pam) and set(pam) == {"N"} and len(pam) == len(motif)
     # A variant search needs an index whose enriched-genome name is EXACTLY
     # "<genome>_<dataset>" -- the same "+<ref>_<vcf>" folder submit_job resolves. So the
     # combined dropdown value "1000G_HGDP" matches "..._hg38_1000G_HGDP", and a single

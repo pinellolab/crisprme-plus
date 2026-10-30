@@ -436,10 +436,11 @@ def print_help_complete_search() -> None:
         "\t--prune-pam, serve the search from a PAM-less all-N index (e.g. an "
         "'NNNNNNNN' index) by filtering it at search time to the PAM given in "
         "--pam, so one flexible index answers any PAM up to its flank width "
-        "(the PAM must be no longer than that width). Requires --index-path "
-        "pointing at such an index; the result is identical to a dedicated index "
-        "built for that PAM, at the cost of a slower traversal. Off by default "
-        "(a dedicated-PAM index is used as-is) [OPTIONAL]\n"
+        "(a 3' PAM may be shorter than that width; a 5' PAM must equal it). "
+        "Requires --index-path. The result is identical to a dedicated index "
+        "built for that PAM, at the cost of a slower traversal, so a dedicated "
+        "index for the PAM, when installed, is still the one searched. Off by "
+        "default [OPTIONAL]\n"
         "\t--max-total-edits, cap the TOTAL edits (mismatches + bulges) per "
         "reported alignment, pruned INSIDE the TST search so excess alignments "
         "are never generated (much faster + smaller intermediates). E.g. with "
@@ -1739,14 +1740,16 @@ def _check_threads(args: List[str], threads: bool) -> int:
 MAX_BULGES = 3
 
 
-def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int:
+def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
+                               prune: bool = False, three_prime: bool = True) -> int:
     """Bulge depth a search can REACH for this PAM motif + genome (mirrors the web's
     pages_utils.reference_bulge_capacity/index_max_bulges cap without web dependencies).
 
     Index folders are named ``<motif>_<N>_<genome>`` (reference) or
     ``<motif>_<N>_<genome>+<enriched>`` (variant); the usable bulge count is N-1 (the +1
     covers alignments that start with a gap). A pamless all-N index of the same length
-    serves any PAM.
+    serves any PAM; a wider one serves only under ``prune`` (--prune-pam) and only a 3'
+    PAM (``three_prime``), exactly as the search shell decides.
 
     The REFERENCE and VARIANT terms are ASYMMETRIC:
       * REFERENCE: the larger of the installed reference index depth and -- when the raw
@@ -1769,18 +1772,22 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int
         if not motif or not genome:
             return 0
         # A directory is <PAM>_<N>_<genome>. It serves this search when its PAM is
-        # the requested motif, or is all-N and AT LEAST as wide -- a stored flank of
-        # width K serves a PAM of length L only when L <= K. Matching on a fixed
-        # "N" * len(motif) prefix instead would miss a wider PAM-less index that the
-        # search shell's resolver does use, and the two must not disagree about the
-        # same directory (see _resolve_index_dir in
-        # PostProcess/submit_job_automated_new_multiple_vcfs.sh).
+        # the requested motif, or is all-N of the same width, or -- under --prune-pam
+        # and for a 3' PAM only -- all-N and wider: a stored flank of width K serves a
+        # shorter 3' PAM by N-padding it, and the engine refuses a shorter 5' PAM.
+        # These are the search shell's rules (_resolve_index_dir in
+        # PostProcess/submit_job_automated_new_multiple_vcfs.sh); the two must not
+        # disagree about the same directory, or the derived default bulges come from
+        # an index the search then does not use.
         suffix = f"_{genome}"
 
         def _pam_serves(pam: str) -> bool:
             if pam == motif:
                 return True
-            return bool(pam) and set(pam) == {"N"} and len(pam) >= len(motif)
+            if not pam or set(pam) != {"N"}:
+                return False
+            return len(pam) == len(motif) or (
+                prune and three_prime and len(pam) > len(motif))
 
         def _scan(want_plus: bool) -> int:
             if not os.path.isdir(lib):
@@ -2053,16 +2060,20 @@ def complete_search() -> None:
 
     # --prune-pam (opt-in): filter a PAM-less index (e.g. an all-N "NNN" index) down to
     # the motif given with --pam, applied at CRISPRitz leaf-emit as a skip-before-write
-    # (one index serves many same-length PAMs). It only *narrows* output -- it never
-    # changes a dedicated-index result -- so it is OFF by default and the normal search
-    # path is byte-identical without it. Requires a prebuilt --index-path (you prune an
-    # existing index) and a CRISPRitz build that supports --prune-pam; CRISPRitz's width
-    # guard rejects a search PAM whose length != the index's stored flank width.
+    # (one index serves many PAMs). It only *narrows* output -- it never changes a
+    # dedicated-index result -- so it is OFF by default and the normal search path is
+    # byte-identical without it. A dedicated index for --pam, when installed, is still
+    # the one searched, and pruning it is a no-op. Requires a prebuilt --index-path and
+    # a CRISPRitz build that supports --prune-pam. Against the stored flank width K, a
+    # PAM of length L > K is refused, a shorter 3' PAM is N-padded to K, and a shorter
+    # 5' PAM off a wider flank is refused.
     prune_pam = "--prune-pam" in args
     if prune_pam and index_path == "_":
         error(
-            "--prune-pam requires --index-path: it filters an existing PAM-less index "
-            "(e.g. NNN) down to the motif given with --pam. Point --index-path at the index."
+            "--prune-pam requires --index-path (the prebuilt reference-index library). "
+            "Wherever a dedicated index for the --pam motif is installed it is used as-is "
+            "and pruning it is a no-op; otherwise a PAM-less (all-N) index is filtered "
+            "down to that motif."
         )
 
     # cap on TOTAL edits per alignment (--max-total-edits, issue #107): prevents
@@ -2147,7 +2158,8 @@ def complete_search() -> None:
     # raw genome exists the search stays bulge-free (fast, safe).
     _SIMPLE_BULGE_CAP = 1
     if not _bdna_given and not _brna_given and max_total_edits > 0:
-        _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant)
+        _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant,
+                                              prune=prune_pam, three_prime=not pam_begin)
         _derived = min(max_total_edits, _idx_cap, _SIMPLE_BULGE_CAP)
         if _derived > 0:
             bDNA = bRNA = _derived
