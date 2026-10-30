@@ -104,6 +104,20 @@ and the `release-crisprme` skill.
   changes a batch's contents and with it the order of the reductions inside it. That score now agrees
   across indices. The SNP leg was never affected. Covered by
   `PostProcess/test_indel_header_injection.py`.
+- **A chromosome with SNPs but no indels no longer aborts the whole search** (a regression in this
+  release's CRISPRitz pin, caught before shipping). The enricher builds each chromosome's fake-indel
+  genome from the indels some sample carries, so a chromosome with none gets an empty genome;
+  `buildTST` cannot index it and leaves that `_INDELS` sub-index without a `.bin`, and CRISPRitz 2.9.1
+  -- rightly, for a broken index -- refuses to search such a directory. One SNP-only chromosome
+  therefore failed the entire run, reported as an SNP post-analysis failure, where 2.8.0 had silently
+  returned the correct answer: no indel off-target there. Reproduced through the real CLI on chr21
+  (23,235 SNPs, no indel) + chr22 (2,891 indels): 2.8.0 exits 0 with 284 rows, 2.8.1 without the fix
+  exits 1 with none. `pool_index_indels.py` no longer hands an empty fake genome to `buildTST` (which
+  also removes the `buildTST ... failed (signal SIGSEGV)` line `build-index-only` printed), and
+  `pool_search_indels.py` skips a chromosome whose indel log records no indel, tolerating the missing
+  part file for that chromosome only. With the fix the same run exits 0 with a report byte-identical
+  to 2.8.0's. An index that is empty although its log lists indels is still a failure, and still
+  reported as one. Covered by `PostProcess/test_indel_empty_chromosome.py`.
 - **Which installed index answered a search could depend on the shell's locale.** Three scans pick the
   index to search — the reference scan, the variant scan, and the precomputed-variant detection. Each
   globbed the requested PAM and then `NNN*_*`, read the bulge budget out of the directory name, kept

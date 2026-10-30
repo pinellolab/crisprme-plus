@@ -25,6 +25,45 @@ def _normalize_chrom(chrom: str) -> str:
     return chrom if chrom.startswith("chr") else "chr" + chrom
 
 
+# CRISPRitz's targets header, written on its own when every chromosome was skipped,
+# so the stages downstream still read a well-formed (empty) targets file.
+_TARGETS_HEADER = (
+    "#Bulge type\tcrRNA\tDNA\tChromosome\tPosition\tCluster Position\t"
+    "Direction\tMismatches\tBulge Size\tTotal"
+)
+
+
+def _logged_no_indels(log_dir: str, chrom: str) -> bool:
+    """True only when the enricher's indel log for ``chrom`` exists and is empty.
+
+    ``Dictionaries/log_indels_<vcf>/log<chrom>.txt[.gz]`` holds one row per indel
+    window the enricher wrote into that chromosome's fake-indel genome, under a
+    ``CHR`` header, and ships with every variant index. Header-only means that
+    genome is empty -- a chromosome whose VCF carries no indel in any sample.
+    buildTST cannot index an empty genome, so its sub-index holds no ``.bin``, and
+    CRISPRitz 2.9.1 refuses to search an index directory without one: rightly for
+    a broken index, wrongly here, where no indel off-target is the answer. Before
+    2.9.1 the same state silently produced an empty result.
+
+    A missing log returns False -- unknown, so the search runs, and an index that
+    is empty although its log lists indels still fails loudly.
+    """
+    for name in (f"log{chrom}.txt.gz", f"log{chrom}.txt"):
+        path = os.path.join(log_dir, name)
+        if not os.path.isfile(path):
+            continue
+        opener = gzip.open if name.endswith(".gz") else open
+        with opener(path, "rt") as fh:
+            for i, line in enumerate(fh):
+                if not line.strip():
+                    continue
+                if i == 0 and line.split("\t", 1)[0] == "CHR":
+                    continue
+                return False
+        return True
+    return False
+
+
 def _dataset_chroms(vcf_dir: str, log_indels_dir: str):
     """Chromosome list for a variant dataset.
 
@@ -105,7 +144,13 @@ def search_indels(chrom):
     preferred whenever present, which it always is on batteries/dict-less installs; the
     calling shell guarantees the indexed ``_INDELS`` dir exists or errors out before this
     script runs).
+
+    Returns True when the chromosome was skipped because it has no indels (see
+    ``_logged_no_indels``); it then writes no part file, and the merge knows why.
     """
+    if _logged_no_indels(log_indels_dir, chrom):
+        print(f"No indels on {chrom}: skipping its indel search (no indel off-target possible)", flush=True)
+        return True
     print("Searching for INDELs in", chrom)
     indexed_fakechrom = os.path.join(
         current_working_directory,
@@ -135,12 +180,11 @@ def search_indels(chrom):
             f"{out_name} -mm {mm} -t -th 1 >/dev/null"
         )
     print("Search ended for INDELs in", chrom)
+    return False
 
 
-chrs = _dataset_chroms(
-    vcf_dir,
-    os.path.join(current_working_directory, "Dictionaries", "log_indels_" + vcf_name),
-)
+log_indels_dir = os.path.join(current_working_directory, "Dictionaries", "log_indels_" + vcf_name)
+chrs = _dataset_chroms(vcf_dir, log_indels_dir)
 
 # cpus = len(os.sched_getaffinity(0))
 # if cpus - 3 < 10:
@@ -154,10 +198,17 @@ chrs = _dataset_chroms(
 os.chdir(output_folder)
 # with Pool(processes=t) as pool:
 with Pool(processes=threads) as pool:
-    pool.map(search_indels, chrs)
+    skipped = {c for c, was_skipped in zip(chrs, pool.map(search_indels, chrs)) if was_skipped}
 
 
+header = ""
+merged = f"{output_folder}/indels_{ref_name}+{vcf_name}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}.targets.txt"
 for chrom in chrs:
+    # Only a chromosome skipped for having no indels may lack its part file. Any
+    # other missing part file still reaches tail/head/rm below, whose stderr fails
+    # the stage -- a search that produced nothing must not pass as an empty one.
+    if chrom in skipped:
+        continue
     os.system(
         f"tail -n +2 {output_folder}/fake{chrom}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}.targets.txt >> {output_folder}/indels_{ref_name}+{vcf_name}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}.targets.txt"
     )
@@ -168,9 +219,13 @@ for chrom in chrs:
         f"rm {output_folder}/fake{chrom}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}.targets.txt"
     )
 
-os.system(
-    f'sed -i 1i"{header}" {output_folder}/indels_{ref_name}+{vcf_name}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}.targets.txt'
-)
+if len(skipped) == len(chrs):
+    # no chromosome has an indel: there is nothing to merge, and no part file to
+    # take the header from
+    with open(merged, "w") as fh:
+        fh.write(_TARGETS_HEADER + "\n")
+else:
+    os.system(f'sed -i 1i"{header}" {merged}')
 
 
 # os.system('echo "Search INDELs End: '+datetime.now().strftime('%Y-%m-%d %H:%M:%S')+'" >> '+output_folder+'/../log.txt')

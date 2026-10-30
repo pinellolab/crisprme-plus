@@ -23,7 +23,34 @@ bMax = sys.argv[6]
 ncpus = sys.argv[7]
 
 
+def _fake_genome_is_empty(fake_dir):
+    """True when every FASTA in this chromosome's fake-indel genome is header-only.
+
+    The enricher writes one fake contig per chromosome from the windows of the
+    indels some sample carries, so a chromosome with none gets a FASTA with no
+    sequence. There is nothing to index, and buildTST crashes on it (SIGSEGV),
+    which CRISPRitz 2.9.1 now reports as a failed build. The search skips the same
+    chromosome on its indel log (pool_search_indels._logged_no_indels). No FASTA at
+    all is not "empty": it is left to fail as before.
+    """
+    try:
+        fastas = [f for f in os.listdir(fake_dir) if f.endswith((".fa", ".fasta"))]
+    except OSError:
+        return False
+    if not fastas:
+        return False
+    for f in fastas:
+        with open(os.path.join(fake_dir, f)) as fh:
+            for line in fh:
+                if line.strip() and not line.startswith(">"):
+                    return False
+    return True
+
+
 def index_indels(chrom):
+    if _fake_genome_is_empty(f"{indels_folder}/fake_{vcf_name}_{chrom}"):
+        print(f"No indels on {chrom}: nothing to index", flush=True)
+        return
     print("Indexing INDELs in", chrom)
     os.system(
         f"crispritz.py index-genome {ref_name}+{vcf_name}_INDELS/{true_pam}_{bMax}_fake{chrom} {indels_folder}/fake_{vcf_name}_{chrom} {pam_file} -bMax {bMax} -th 1  >/dev/null"
