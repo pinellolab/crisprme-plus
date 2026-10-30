@@ -60,6 +60,7 @@ import subprocess
 import tarfile
 import string
 import random
+import re
 import base64
 import shutil
 import gzip
@@ -227,6 +228,28 @@ def _new_job_id(prefix: str = "set") -> str:
         )
         if not os.path.isdir(os.path.join(settings_root, jid)):
             return jid
+
+
+# Exactly the ids _new_job_id makes (its default "set" prefix is the only one in
+# use). Job ids come back from the browser as dcc.Store data, which a client can
+# set to anything, so _settings_jobdir checks them before any path is built.
+_JOB_ID_RE = re.compile(r"set_[A-Z0-9]{10}")
+
+
+def _settings_jobdir(job_id) -> Optional[str]:
+    """``<cwd>/Settings/<job_id>`` for an id `_new_job_id` could have made, else
+    None. Refuses a traversal (``../x``), an absolute path, a non-string, and a
+    job dir whose real path leaves Settings/ (a symlink), so the callbacks that
+    read a job's logs or re-run its cmd.json (Retry, shell=True) never act on a
+    directory outside Settings/."""
+    if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
+        return None
+    root = os.path.realpath(os.path.join(current_working_directory, SETTINGS_DIR))
+    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
+    real = os.path.realpath(jobdir)
+    if real == root or os.path.commonpath([root, real]) != root:
+        return None
+    return jobdir
 
 
 def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
@@ -556,7 +579,9 @@ def _genotypes_degraded_warning(jobdir: str):
 def _relaunch_job(job_id: str) -> Optional[str]:
     """Re-launch the download recorded in <job_id>/cmd.json (the Retry action);
     returns the NEW job id, or None if the original command can't be recovered."""
-    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
+    jobdir = _settings_jobdir(job_id)
+    if not jobdir:  # not a Settings job id: never read or run that cmd.json
+        return None
     cmd_path = os.path.join(jobdir, "cmd.json")
     if not os.path.isfile(cmd_path):
         return None
@@ -2460,9 +2485,9 @@ if MAINTAINER_MODE:
     prevent_initial_call=True,
 )
 def refresh_settings_job(n, job_id):
-    if not job_id:
+    jobdir = _settings_jobdir(job_id)
+    if not jobdir:  # no active job, or not a Settings job id
         raise PreventUpdate
-    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
     logtxt = os.path.join(jobdir, "log.txt")
     if not os.path.isfile(logtxt):
         raise PreventUpdate
@@ -2571,9 +2596,9 @@ def _toggle_settings_full_log(n, currently_hidden, failed_job):
         raise PreventUpdate
     if not currently_hidden:  # open -> collapse
         return True, ""
-    if not failed_job:
+    jobdir = _settings_jobdir(failed_job)
+    if not jobdir:  # no failed job, or not a Settings job id
         return False, "No job to show."
-    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, failed_job)
     return False, _full_job_log(jobdir)
 
 
