@@ -299,15 +299,24 @@ def list_available_downloads(
     missing repo, dependency absent) so callers can fall back gracefully.
 
     For ``index`` with no repo named, both the default repo and the wide-flank
-    PAM-less repo are listed and merged, so the catalog a user sees matches what
-    ``download`` can actually fetch. A failure on either side is skipped rather
-    than emptying the whole listing.
+    PAM-less repo are listed and merged, each row taken from the copy ``download``
+    would fetch: every default-repo row (a legacy name is fetched only there, and a
+    wide-flank name falls back there), and a wide-flank-repo row only for a name
+    routed to that repo, where it replaces the default repo's copy. A legacy-named
+    archive that exists only in the wide-flank repo is therefore not offered, since
+    ``download`` would never look there for it. The wide-flank repo being
+    unreadable just drops its rows; the default repo being unreadable returns
+    ``[]``, the offline signal, rather than a catalog of only wide-flank indexes.
     """
     if component == "index" and not repo_overridden(repo):
-        merged: Dict[str, Dict] = {}
-        for r in (DEFAULT_HF_REPO, GENERAL_INDEX_HF_REPO):
-            for row in _list_index_archives(r):
-                merged.setdefault(row["name"], row)
+        try:
+            default_rows = _list_available_downloads_raw("index", DEFAULT_HF_REPO)
+        except Exception:
+            return []
+        merged: Dict[str, Dict] = {row["name"]: row for row in default_rows}
+        for row in _list_index_archives(GENERAL_INDEX_HF_REPO):
+            if resolve_index_repo(row["name"]) == GENERAL_INDEX_HF_REPO:
+                merged[row["name"]] = row
         return sorted(merged.values(), key=lambda row: row["name"])
     return _list_index_archives(repo) if component == "index" else _list_other(
         component, repo
@@ -327,55 +336,63 @@ def _list_index_archives(repo: Optional[str] = None) -> List[Dict]:
 def _list_available_downloads_one(
     component: str, repo: Optional[str] = None
 ) -> List[Dict]:
+    try:
+        return _list_available_downloads_raw(component, repo)
+    except Exception:
+        return []
+
+
+def _list_available_downloads_raw(
+    component: str, repo: Optional[str] = None
+) -> List[Dict]:
+    """One repo's listing; raises on any error, so a caller can tell a repo that
+    cannot be read from one that holds nothing."""
     if component not in ("genome", "vcf", "index"):
         return []
-    try:
-        hf = _require_hf()
-        repo = resolve_repo(repo)
-        api = hf.HfApi()
-        prefix = _COMPONENT_PREFIXES[component]
-        if component == "index":
-            items = []
-            gt_present = set()  # vcf names that have a genotypes_<vcf>.tar.gz companion
-            for entry in api.list_repo_tree(
-                repo, repo_type="dataset", path_in_repo=prefix
-            ):
-                size = getattr(entry, "size", None)
-                path = getattr(entry, "path", "")
-                if size is None or not path.endswith(".tar.gz"):
-                    continue
-                name = os.path.basename(path)[: -len(".tar.gz")]
-                # The separate Tier-1 genotype companions live under the SAME
-                # indexes/ prefix but are NOT selectable indexes themselves — they
-                # ride along with their index on download. Record which vcfs have
-                # one (so the index rows can advertise it) and skip them as rows.
-                if name.startswith("genotypes_"):
-                    gt_present.add(name[len("genotypes_"):])
-                    continue
-                items.append({"name": name, "size": size})
-            # ADDITIVE metadata: mark whether each variant index has a genotype
-            # companion available (has_genotypes). Consumers that only read
-            # name/size are unaffected (extra keys are ignored).
-            for it in items:
-                vcf = it["name"].partition("+")[2]
-                it["has_genotypes"] = bool(vcf) and vcf in gt_present
-            return sorted(items, key=lambda d: d["name"])
-        # genome / vcf: folders under prefix/, sum their files' sizes
-        sizes: Dict[str, int] = {}
+    hf = _require_hf()
+    repo = resolve_repo(repo)
+    api = hf.HfApi()
+    prefix = _COMPONENT_PREFIXES[component]
+    if component == "index":
+        items = []
+        gt_present = set()  # vcf names that have a genotypes_<vcf>.tar.gz companion
         for entry in api.list_repo_tree(
-            repo, repo_type="dataset", path_in_repo=prefix, recursive=True
+            repo, repo_type="dataset", path_in_repo=prefix
         ):
             size = getattr(entry, "size", None)
             path = getattr(entry, "path", "")
-            if size is None:  # a folder entry, not a file
+            if size is None or not path.endswith(".tar.gz"):
                 continue
-            rel = path[len(prefix) + 1 :]
-            top = rel.split("/")[0]
-            if top:
-                sizes[top] = sizes.get(top, 0) + size
-        return [{"name": k, "size": v} for k, v in sorted(sizes.items())]
-    except Exception:
-        return []
+            name = os.path.basename(path)[: -len(".tar.gz")]
+            # The separate Tier-1 genotype companions live under the SAME
+            # indexes/ prefix but are NOT selectable indexes themselves — they
+            # ride along with their index on download. Record which vcfs have
+            # one (so the index rows can advertise it) and skip them as rows.
+            if name.startswith("genotypes_"):
+                gt_present.add(name[len("genotypes_"):])
+                continue
+            items.append({"name": name, "size": size})
+        # ADDITIVE metadata: mark whether each variant index has a genotype
+        # companion available (has_genotypes). Consumers that only read
+        # name/size are unaffected (extra keys are ignored).
+        for it in items:
+            vcf = it["name"].partition("+")[2]
+            it["has_genotypes"] = bool(vcf) and vcf in gt_present
+        return sorted(items, key=lambda d: d["name"])
+    # genome / vcf: folders under prefix/, sum their files' sizes
+    sizes: Dict[str, int] = {}
+    for entry in api.list_repo_tree(
+        repo, repo_type="dataset", path_in_repo=prefix, recursive=True
+    ):
+        size = getattr(entry, "size", None)
+        path = getattr(entry, "path", "")
+        if size is None:  # a folder entry, not a file
+            continue
+        rel = path[len(prefix) + 1 :]
+        top = rel.split("/")[0]
+        if top:
+            sizes[top] = sizes.get(top, 0) + size
+    return [{"name": k, "size": v} for k, v in sorted(sizes.items())]
 
 
 def decompress_gz(path: str, remove_source: bool = True) -> str:

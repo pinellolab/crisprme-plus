@@ -266,11 +266,13 @@ jobs:
         # LC_COLLATE now that a second PAM-less flank width exists. Plus the
         # indexes/SHA256SUMS writer (hermetic; it must never emit an empty file), and
         # a chromosome with SNPs but no indels, which CRISPRitz 2.9.1's refusal of an
-        # index dir without a .bin turned into a whole-run abort.
+        # index dir without a .bin turned into a whole-run abort. Plus legacy-index
+        # access: dedicated-PAM and NNN_3 indexes are still listed and downloaded from
+        # the default repo only, and the catalog offers each name's fetchable copy.
         working-directory: PostProcess
         run: >
           python -m unittest test_indel_header_injection test_complete_search_flags
-          test_index_resolution test_index_repo_routing
+          test_index_resolution test_index_repo_routing test_legacy_index_access
           test_iupac_collapse_consistency test_hf_sha256sums
           test_indel_empty_chromosome -v
 
