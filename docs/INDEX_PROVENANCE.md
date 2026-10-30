@@ -114,6 +114,12 @@ names.
 | `n8_fixed_install/genome_library/NNNNNNNN_3_hg38+hg38_HGDP1kGP` (1,628 bins) + `_INDELS` | 2026-10-28 19:56 / 20:00 | **publish this** |
 | `nnn_fromscratch/genome_library/NNNNNNNN_3_*` | 2026-10-26 11:25 | **do not publish** — pre-N-gate-fix |
 
+The repo also needs its own `genotypes_hg38_HGDP1kGP.tar.gz`. `download` fetches
+the genotype companion (and the shared reference index) from the repo the index
+came from, with no fallback, so without a copy there a per-sample search on the
+K = 8 variant index runs with degraded Samples. Upload the main repo's file
+unchanged, so both repos hold the same SHA-256.
+
 A wide PAM-less index is the one case the N-gate fix materially changes, and it
 bites hardest on the synthetic indel genome, which is `N`-separated roughly every
 56 bases: a width-31 window saw 34,690,315 usable starts against a width-26
@@ -136,9 +142,12 @@ compiled into `buildTST`, so it cannot affect index content.
 ## Gaps to close at publish time
 
 - **No `SHA256SUMS` under `indexes/`** in either repo, although `build-inputs/`
-  has shipped them since the kits were uploaded. Publish one per repo so the
-  "is what is on Hugging Face what we validated?" question is answerable by
-  checksum instead of by re-running a gate arm.
+  has shipped them since the kits were uploaded. `scripts/hf_sha256sums.py` now
+  writes one from the Hub's own LFS checksums (an LFS object is addressed by its
+  SHA-256; the oids match both shipped `build-inputs/*.SHA256SUMS`), so the "is
+  what is on Hugging Face what we validated?" question is answered by checksum
+  instead of by re-running a gate arm. Stage it with the archives, then diff the
+  regenerated file after the upload (`docs/hf/README.md`).
 - **Nothing stamps the builder version into an index.** The provenance above was
   reconstructed from upload dates, build mtimes and source hashes. A
   `.pam_build`-style sidecar recording the CRISPRitz version and git SHA would

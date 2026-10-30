@@ -26,3 +26,37 @@ huggingface-cli upload lucapinello/crisprme-data-general-index \
 **Gate:** after pushing, re-read both live cards and diff them against these
 files. A card that disagrees with `list_repo_files` is a release-blocking
 inconsistency (`RELEASE_CHECKLIST.md` → "nothing on HF that is undocumented").
+
+## `indexes/SHA256SUMS`
+
+Each repo carries one, so a user can `sha256sum -c SHA256SUMS` a download. The
+Hub already records every LFS file's SHA-256, so the file is generated from that
+metadata rather than by re-downloading the archives:
+
+```bash
+# archives about to be uploaded: hash them where they were built
+( cd staged/indexes && sha256sum *.tar.gz ) > staged.sha256
+python scripts/hf_sha256sums.py lucapinello/crisprme-data --staged staged.sha256 > SHA256SUMS
+# upload the archives and SHA256SUMS together, then confirm the Hub holds what was staged:
+python scripts/hf_sha256sums.py lucapinello/crisprme-data | diff - SHA256SUMS
+```
+
+That final diff must be empty: it is the check that what is on the Hub is
+byte-for-byte what was validated. For a repo that does not exist yet, the staged
+file alone is the whole list (`LC_ALL=C sort -k2 staged.sha256`, the order the
+script writes).
+
+## The genotype companion travels with its index
+
+`download --what index` fetches `genotypes_<vcf>.tar.gz` and the shared reference
+index from the **same repo** the index came from. A variant index published to
+`crisprme-data-general-index` therefore needs its own copy of
+`genotypes_hg38_HGDP1kGP.tar.gz` there; upload the main repo's file unchanged
+(same SHA-256) rather than re-packing it.
+
+Conversely, `publish-index` re-packs and re-uploads that companion whenever
+`Dictionaries/genotypes_<vcf>/` sits in the publishing working directory. One
+companion serves every index built on the same panel, so republishing a single
+index from such a directory replaces it for all of them. Publish from a working
+directory that holds only `registry_`, `log_indels_` and `indel_genotypes_`, as
+the 2026-10-25 uploads did.

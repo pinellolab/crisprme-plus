@@ -46,6 +46,7 @@ crisprme-data-general-index/
 ├── indexes/
 │   ├── NNNNNNNN_3_hg38.tar.gz                   # reference-only, 8-nt flank
 │   ├── NNNNNNNN_3_hg38+hg38_HGDP1kGP.tar.gz     # HGDP + 1000 Genomes (4,091 samples, phased)
+│   ├── genotypes_hg38_HGDP1kGP.tar.gz           # per-sample genotype companion of the variant index
 │   └── SHA256SUMS                               # checksum per archive
 └── README.md
 ```
@@ -57,8 +58,11 @@ crisprme-data-general-index/
 | `NNNNNNNN_3_hg38` | 8 nt | any PAM of length ≤ 8 | none (reference-only) |
 | `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 8 nt | any PAM of length ≤ 8 | HGDP + 1000 Genomes, genotyped-phased (SHAPEIT5 re-phased) |
 
-Both carry the matching `_INDELS` companion, and the variant index is accompanied
-by the per-sample genotype store already published in the main repo.
+The variant archive bundles its `_INDELS` companion. Its per-sample genotype
+store, `genotypes_hg38_HGDP1kGP.tar.gz`, is published here as well, byte-identical
+to the copy in the main repo: `download` fetches the genotype companion and the
+reference index from the repo the index itself came from, so without a copy here
+a per-sample search on this index would run with degraded Samples.
 
 **Orientation limit.** A wider flank currently serves a **3′** PAM only. For a 5′
 PAM (Cas12a-style) the engine refuses a *shorter* PAM off a wider flank, because
@@ -75,7 +79,7 @@ crisprme.py download --what index --index-name NNNNNNNN_3_hg38+hg38_HGDP1kGP --p
 # then search with whatever PAM you need -- no rebuild
 crisprme.py complete-search --genome Genomes/hg38 \
   --vcf vcf_config.txt --guide guide.txt --pam PAMs/20bp-NRG-SpCas9.txt \
-  --bMax 2 --mm 4 --bDNA 1 --bRNA 1 --prune-pam \
+  --mm 4 --bDNA 1 --bRNA 1 --prune-pam \
   --annotation ... --output my_search
 ```
 
