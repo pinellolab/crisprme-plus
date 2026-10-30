@@ -20,15 +20,16 @@ and re-running one search command (Section 3). Information on how to include a n
 ### Configure Bioconda channels (one-time)
 
 ```bash
-mamba config --add channels bioconda
-mamba config --add channels conda-forge
-mamba config --set channel_priority strict
+# conda config even with Mamba: Mamba 2 (current Miniforge) has no `config --add`
+conda config --add channels bioconda
+conda config --add channels conda-forge
+conda config --set channel_priority strict
 ```
 
 ### Create and activate the environment
 
 ```bash
-# CRISPRme+ (2.8.1) is a Python 3.11 source build (Bioconda serves stable 2.1.x, py3.8):
+# CRISPRme+ (2.8.1) from source, Python 3.11 (or from Bioconda instead: README §1.1):
 git clone https://github.com/pinellolab/crisprme-plus.git && cd crisprme-plus
 mamba env create -f environment.yml   # env 'crisprme' (Python 3.11)
 mamba activate crisprme

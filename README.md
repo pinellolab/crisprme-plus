@@ -37,7 +37,7 @@ through an interactive web-based interface.
 
 Coming from the original CRISPRme? The baseline below is **CRISPRme 2.1.14** — the last
 stable release of the original [`pinellolab/CRISPRme`](https://github.com/pinellolab/CRISPRme)
-before CRISPRme+ (installable with `mamba install crisprme`). Here are the behavior deltas
+before CRISPRme+ (still on Bioconda as `crisprme=2.1.14`). Here are the behavior deltas
 that matter most:
 
 | Topic | CRISPRme 2.1.14 (last stable before CRISPRme+) | CRISPRme+ (now) | What to do |
@@ -316,28 +316,27 @@ front, see `docs/SCALABILITY_ANALYSIS.md`.
 
 ## 1 Installation
 
-> **Which version do I get?** For **CRISPRme+ (2.8.1, this release)** use **Docker**
-> (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above, or
-> §1.2). **Conda/Bioconda currently installs the stable 2.1.x line (Python 3.8), not the
-> 2.8.1 line** — use it only if you specifically want the stable release. If in doubt,
-> use Docker.
+> **Which version do I get?** Every route below installs **CRISPRme+** on Python 3.11.
+> **Docker** (the [Quickstart](#-quickstart--web-interface-in-docker-no-conda-no-giant-build) above,
+> or §1.2) is the simplest: it runs on any OS and ships the CRISPR-Bulge scorer pre-built.
+> **Bioconda** (§1.1, Linux) has served CRISPRme+ since 2.7.9; a release reaches it shortly after
+> it is tagged, once its recipe update is merged. The original CRISPRme 2.1.x line is still on
+> Bioconda as `crisprme=2.1.14`. If in doubt, use Docker.
 
 This section outlines the steps to install CRISPRme, tailored to suit different 
 operating systems. Select the method that best matches your setup:
 
-- [Install CRISPRme via Docker (compatible with all operating systems — recommended for 2.8.1)](#12-install-crisprme-via-docker)
+- [Install CRISPRme via Docker (compatible with all operating systems — recommended)](#12-install-crisprme-via-docker)
 
 - [Install CRISPRme from source (§1.3)](#13-install-crisprme-from-source-without-bioconda) — the CRISPRme+ (2.8.1) line on Python 3.11
 
-- [Install CRISPRme via Conda/Mamba (Linux; installs the stable 2.1.x line)](#11-install-crisprme-via-condamamba)
+- [Install CRISPRme via Conda/Mamba (Bioconda; Linux)](#11-install-crisprme-via-condamamba)
 
-### 1.1 Install CRISPRme via Conda/Mamba (stable 2.1.x line only)
+### 1.1 Install CRISPRme via Conda/Mamba
 ---
 
-Conda/Bioconda installs **only the stable 2.1.x line** (Python 3.8) — *not* the
-CRISPRme+ (2.8.x) line. Use this path only if you specifically want the stable
-release; for CRISPRme+ 2.8.1 use [source (§1.3)](#13-install-crisprme-from-source-without-bioconda)
-or [Docker](#12-install-crisprme-via-docker).
+Bioconda's `crisprme` package is CRISPRme+ (Python 3.11, Linux), and it installs CRISPRitz from
+Bioconda too. Always install it with an explicit version (§1.1.2).
 
 This section is organized into three subsections to guide you through the installation 
 and maintenance of CRISPRme:
@@ -359,11 +358,10 @@ and maintenance of CRISPRme:
 #### 1.1.1 Installing Conda or Mamba
 ---
 
-Before installing CRISPRme, ensure you have either Conda or Mamba installed on 
-your machine. Based on recommendations from the Bioconda community, we highly 
-recommend using Mamba over Conda. Mamba is a faster, more efficient drop-in replacement 
-for Conda, leveraging a high-performance dependency solver and components 
-optimized in C++.
+Before installing CRISPRme, ensure you have Conda installed on your machine. We
+recommend [Miniforge](https://github.com/conda-forge/miniforge), which installs both `conda`
+and `mamba` and is set up for conda-forge (`conda` itself has used the fast libmamba solver
+by default since 23.10).
 
 **Step1: Install `Conda` or `Mamba`**
 
@@ -375,31 +373,41 @@ optimized in C++.
 
 **Step 2: Configure Bioconda Channels**
 
-Once `Mamba` is installed, configure it to use Bioconda and related channels by 
-running the following one-time setup commands:
+Configure the Bioconda and conda-forge channels by running the following one-time
+setup commands:
 ```bash
-mamba config --add channels bioconda
-mamba config --add channels conda-forge
-mamba config --set channel_priority strict
+conda config --add channels bioconda
+conda config --add channels conda-forge
+conda config --set channel_priority strict
 ```
-> **Note:** If you prefer to use `Conda`, replace `mamba` with `conda` in the 
-commands above. (Per current Bioconda guidance we do **not** add the `defaults`
-channel, and `conda-forge` is given the highest priority.)
+> **Note:** Use `conda config` here even if you use Mamba: Mamba 2 (shipped with current
+Miniforge) has no `config --add` and rejects these commands. Per current Bioconda guidance
+we do **not** add the `defaults` channel, and `conda-forge` is given the highest priority.
 
 By completing these steps, your system will be fully prepared for installing CRISPRme.
 
 #### 1.1.2 Installing CRISPRme
 ---
 
-> **CRISPRme+ runs on Python 3.11 and installs from source** — the build
-> compiles CRISPRitz 2.9.1 and installs both tools into a conda environment. A native
-> Bioconda package for the CRISPRme+ line is **in preparation**; until it lands, the Bioconda
-> `crisprme` package installs the last **stable 2.1.x** line (Python 3.8), **not** the
-> CRISPRme+ (2.8.x) line.
+Create a dedicated environment, naming the CRISPRme version and Python 3.11 explicitly, then
+set up the CRISPR-Bulge scorer, which runs in its own conda env (`cbulge`):
+```bash
+conda create -n crisprme crisprme=2.8.1 python=3.11
+conda activate crisprme
+crisprme.py scorer-env create    # CPU build; add --gpu for CUDA
+crisprme.py scorer-env doctor    # compute self-test: must report OK
+```
 
-To create the CRISPRme+ conda environment, follow **[1.3 Install CRISPRme from source](#13-install-crisprme-from-source-without-bioconda)**
-(`git clone` → `mamba env create -f environment.yml` (Python 3.11) → `bash install_from_source.sh`),
-or use the **[Docker quickstart](docs/DOCKER_QUICKSTART.md)** for the fastest path.
+> **Always name the version.** Given a bare `crisprme`, the solver silently falls back to the
+> newest release it can satisfy, which can be years old: in testing, an unsolvable 2.8.0 resolved
+> to `crisprme 2.0.0` on Python 3.6. With an explicit version the install fails loudly instead. If
+> conda reports that nothing provides `crisprme=2.8.1`, the release has not reached Bioconda yet:
+> use [Docker](#12-install-crisprme-via-docker) or the
+> [source build](#13-install-crisprme-from-source-without-bioconda) until it does.
+
+Every search scores off-targets with both CFD and CRISPR-Bulge, so `complete-search` refuses to
+start while the scorer env is missing or broken (`crisprme.py scorer-env doctor` says why), unless
+you opt into CFD-only scoring with `CRISPRME_SKIP_SCORER_ENV=1`.
 
 Verify the installation:
 
@@ -411,31 +419,22 @@ crisprme.py
 #### 1.1.3 Updating CRISPRme
 ---
 
-> **Updating CRISPRme+ (2.8.1)?** Conda/Bioconda cannot update you to the CRISPRme+
-> line — update via the [source build (§1.3)](#13-install-crisprme-from-source-without-bioconda)
-> or [Docker](#12-install-crisprme-via-docker). The steps below update only the stable
-> 2.1.x Bioconda line.
-
-To update an existing **stable 2.1.x** installation using `Mamba` or `Conda`, follow
-the steps below:
+To update an existing Bioconda installation, follow the steps below:
 
 **Step 1: Check the Latest Version**
 
-Visit the CRISPRme README to identify the latest version of the tool.
+See the [releases page](https://github.com/pinellolab/crisprme-plus/releases) for the latest
+version of the tool.
 
 **Step 2: Update CRISPRme**
 
-Run the following command in your terminal, replacing <latest_version> with the 
-desired version number:
+Install it into the existing environment, replacing `<version>` with the version number:
 ```bash
-mamba install crisprme=<latest_version>
+conda install -n crisprme crisprme=<version>
+crisprme.py scorer-env doctor    # re-check the scorer env after an update
 ```
-
-This updates within the **stable 2.1.x** Bioconda line (latest is `crisprme=2.1.14`):
-```bash
-mamba install crisprme=2.1.14
-```
-If you're using `Conda`, replace `mamba` with `conda` in the commands above.
+The original CRISPRme 2.1.x line (Python 3.8; last release `crisprme=2.1.14`) cannot be
+updated in place to CRISPRme+: create a new environment as in §1.1.2.
 
 **Step 3: Verify the Update**
 

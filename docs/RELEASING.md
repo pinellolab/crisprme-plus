@@ -1,13 +1,15 @@
-> ⚠️ **CRISPRme+ release model (being finalized).** Target = **two channels**:
+> ⚠️ **CRISPRme+ release model.** Two channels, both live:
 > 1. **Docker** *(live)* — a source-built multi-arch image published on version tags by
 >    `.github/workflows/docker-multiarch.yml` (needs the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`
 >    repo secrets). It builds **CRISPRitz 2.9.1 + CRISPRme from source**; the version lives in
 >    `crisprme.py` (there is **no** `ARG crisprme_version`).
-> 2. **Conda / Bioconda** *(in progress)* — a native `crisprme=2.8.1` package on **Python 3.11**.
->    **Prerequisite:** publish **CRISPRitz 2.9.1 to Bioconda for py3.11 first** (it is currently
->    source-built because it is not yet on Bioconda for 3.11), then update the `crisprme` recipe
->    to 2.8.1 / py3.11 (dropping the py3.8 pin). Until then, `mamba install crisprme` serves the
->    stable **2.1.x** line, and 2.8.1 is installed via the source build or Docker.
+> 2. **Conda / Bioconda** *(live)* — the Bioconda `crisprme` recipe has built CRISPRme+ on
+>    **Python 3.11** from `pinellolab/crisprme-plus` tags since 2.7.9 (the 2.1.x line stays
+>    available as `crisprme=2.1.14`). Per release: when the CRISPRitz pin moves, bump the
+>    `crispritz` recipe first (2.9.1 for 2.8.1), then the `crisprme` recipe: version, sha256 of
+>    the tag tarball, and its `crispritz >=` pin. Check the result like a user: a fresh
+>    Miniforge, `conda create -n crisprme crisprme=X.Y.Z python=3.11`, then
+>    `crisprme.py scorer-env create` and `scorer-env doctor`.
 >
 > The sections below have been corrected for this model: the image is built from source, so the
 > Dockerfile pins **CRISPRitz** (`ARG crispritz_ref`) and never CRISPRme's own version.
