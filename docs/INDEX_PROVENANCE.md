@@ -1,0 +1,164 @@
+# Published-index provenance and validity
+
+Which published index is valid, for which client, and why — with the measurement
+behind each claim. Written for the 2.8.1 release, when CRISPRitz 2.9.1 changed
+the index builder and a second, non-backward-compatible index family appeared.
+
+Two separate questions per archive:
+
+1. **Readability** — can an older CRISPRme release read it? Decided by the
+   **stored flank width**, which equals the PAM length in the archive's name.
+   `loadTST` consumes exactly `ceil(len(search_pam)/2)` stored PAM bytes per leaf,
+   so a stored width that differs from the search PAM desynchronises the leaf
+   stream at the first leaf.
+2. **Content** — does the 2.9.1 builder produce the same index? Decided by whether
+   the genomic-`N` flank fix (CRISPRitz `5c612c0`) changes that PAM's build.
+
+## Verdict
+
+**Every index in `lucapinello/crisprme-data` stores a 3-nt PAM region, so every
+one of them is readable by any CRISPRme release, 2.8.0 included.** Wider PAM-less
+flanks are the only exception and live in a separate repo.
+
+| Archive | Size | Uploaded | PAM | Readable by 2.8.0 | 2.9.1 builder content |
+|---|---|---|---|---|---|
+| `NRG_3_hg38` | 8.2 GB | 2026-08-25 | NRG | yes | bit-identical |
+| `NRG_3_hg38+hg38_HGDP1kGP` | 25.8 GB | 2026-10-07 | NRG | yes | bit-identical |
+| `NRG_3_hg38+hg38_HPRC` | 14.2 GB | 2026-09-21 | NRG | yes | bit-identical |
+| `NRG_3_hg38+hg38_mega` | 11.3 GB | 2026-09-21 | NRG | yes | bit-identical |
+| `NRR_3_hg38` | 18.7 GB | 2026-10-25 | NRR | yes | bit-identical |
+| `NRR_3_hg38+hg38_HGDP1kGP` | 39.9 GB | 2026-10-25 | NRR | yes | bit-identical |
+| `NRR_3_hg38+hg38_HPRC` | 28.6 GB | 2026-10-27 | NRR | yes | bit-identical |
+| `NRR_3_hg38+hg38_mega` | 20.8 GB | 2026-10-27 | NRR | yes | bit-identical |
+| `NGG_3_hg38` | 3.5 GB | 2026-10-25 | NGG | yes | bit-identical |
+| `NGG_3_hg38+hg38_HGDP1kGP` | 20.0 GB | 2026-10-25 | NGG | yes | bit-identical |
+| `NNN_3_hg38` | 66.6 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs, see below** |
+| `NNN_3_hg38+hg38_HGDP1kGP` | 100.9 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs, see below** |
+| `genotypes_hg38_HGDP1kGP` | 5.4 GB | 2026-10-07 | — | yes | not an index |
+| `genotypes_hg38_HPRC` | 0.5 GB | 2026-10-27 | — | yes | not an index |
+
+**No archive needs rebuilding.** The two `NNN_3` archives carry a documented
+caveat that does not affect any intended use.
+
+## The 10 dedicated-PAM archives: bit-identical, measured
+
+The N-gate commit claims a dedicated index built by the patched builder is
+bit-identical to one from the pristine builder. Measured rather than quoted —
+same chr22, same PAM file, both builders, driven through
+`crispritz.py index-genome`:
+
+| PAM | pre-fix builder | post-fix builder | verdict |
+|---|---|---|---|
+| NRG | 276,820,413 B, 3 bins | 276,820,413 B, 3 bins | bit-identical |
+| NGG | 136,238,465 B, 2 bins | 136,238,465 B, 2 bins | bit-identical |
+| NRR | 533,448,996 B, 5 bins | 533,448,996 B, 5 bins | bit-identical |
+
+Why: the relaxation applies only when the PAM states **no** constraint at any
+position. `NGG`/`NRG`/`NRR` each constrain two positions, so a genomic `N`
+(encoded `0000`, intersecting nothing) still fails the PAM match exactly as
+before.
+
+## The 2 `NNN_3` archives: content differs, and it is reachable only by an
+unconstrained search
+
+Built 2026-10-25, before the fix. An all-N PAM is fully unconstrained, so the
+relaxation does apply.
+
+**Content** (chr22, same inputs, both builders):
+
+| | bytes | bins |
+|---|---|---|
+| pre-fix builder | 1,801,785,226 | 16 |
+| post-fix builder | 1,801,789,651 | 16 |
+
+A difference of **4,425 bytes in 1.8 GB (0.00025 %)** — the extra entries are
+targets whose 3-nt PAM region holds a genomic `N` while the 20-nt guide region
+does not, i.e. sites at the edge of an assembly gap.
+
+**Reachability**, measured on a genome with such a site planted on both strands
+(the minus-strand case matters: a minus-strand 3′ PAM sits at the *front* of the
+extracted window):
+
+| search PAM | pre-fix index | post-fix index | |
+|---|---|---|---|
+| `20bp-NNN-NO-PAM` (unconstrained) | 1 row | **3 rows** | the two extra rows are the planted `NNN`-PAM sites |
+| `20bp-NRG-SpCas9` (`--prune-pam`) | 1 row | 1 row | identical — genomic `N` satisfies neither `R` nor `G` |
+
+So for a **constrained** search PAM — every intended use of a PAM-less index —
+the published archive behaves exactly like a freshly built one. Confirmed at full
+scale: the published `NNN_3_hg38+hg38_HGDP1kGP`, downloaded from Hugging Face and
+searched with `NRG --prune-pam` genome-wide at 4 mismatches + 1 DNA + 1 RNA bulge
+with per-sample resolution, reproduces the dedicated-`NRG_3` report
+**byte-for-byte**: md5 `6af7a94e4a5f36c26e8c3a0871638ad0`, 189,950 rows, 13,253
+indel rows each justified by its own window, 0 unjustified.
+
+**The caveat**, stated plainly: searching the published `NNN_3` with
+`20bp-NNN-NO-PAM` as the *search* PAM — "report off-targets regardless of PAM" —
+under-reports sites whose PAM bases are assembly `N`. Those are sites whose PAM
+sequence is unknown, so a dedicated index would not report them either.
+
+## The wide-flank (K = 8) family: a separate repo
+
+`NNNNNNNN_3` stores 8 PAM bytes. A release predating `--prune-pam` reads 2 bytes
+per leaf for a 3-nt PAM, desynchronises, and (before 2.9.1's refusal) crashed —
+reported as a clean empty result. These therefore go to
+`lucapinello/crisprme-data-general-index`, which no older default points at, with
+the split derived from the flank width at publish time rather than from a list of
+names.
+
+**Publish the 2026-10-28 build**, not the 2026-10-26 one:
+
+| source | built | status |
+|---|---|---|
+| `n8_fixed_install/genome_library/NNNNNNNN_3_hg38` (1,628 bins) | 2026-10-28 17:01 | **publish this** |
+| `n8_fixed_install/genome_library/NNNNNNNN_3_hg38+hg38_HGDP1kGP` (1,628 bins) + `_INDELS` | 2026-10-28 19:56 / 20:00 | **publish this** |
+| `nnn_fromscratch/genome_library/NNNNNNNN_3_*` | 2026-10-26 11:25 | **do not publish** — pre-N-gate-fix |
+
+A wide PAM-less index is the one case the N-gate fix materially changes, and it
+bites hardest on the synthetic indel genome, which is `N`-separated roughly every
+56 bases: a width-31 window saw 34,690,315 usable starts against a width-26
+window's 41,454,105, so **16.3 % of start positions were invisible** to a
+pre-fix wide PAM-less build.
+
+**Provenance of the 2026-10-28 build.** `buildTST` compiles from
+`mainParallel.cpp` alone (`Makefile_conda`), which includes `pamGenerator.cpp`.
+Both are byte-identical between the ml008 tree that produced the index and the
+committed 2.9.1 release:
+
+```
+1bb392601d1ecd9fee138451e991540b  pamGenerator.cpp
+6854efd77db8cd128a3f124422986097  mainParallel.cpp
+```
+
+`searchOnTST.cpp` did change afterwards (the width-mismatch refusal) but is not
+compiled into `buildTST`, so it cannot affect index content.
+
+## Gaps to close at publish time
+
+- **No `SHA256SUMS` under `indexes/`** in either repo, although `build-inputs/`
+  has shipped them since the kits were uploaded. Publish one per repo so the
+  "is what is on Hugging Face what we validated?" question is answerable by
+  checksum instead of by re-running a gate arm.
+- **Nothing stamps the builder version into an index.** The provenance above was
+  reconstructed from upload dates, build mtimes and source hashes. A
+  `.pam_build`-style sidecar recording the CRISPRitz version and git SHA would
+  make this a lookup. Not done in 2.8.1.
+- **An indel genotype store built by an enricher at or below 2.9.0 from a
+  multiallelic VCF** can hold a fabricated compound allele under a real variant's
+  rsID (CRISPRitz `cfcb6a6`). Latent on every CRISPRme-supplied VCF, which are
+  split — 0 of 1,998,332 chr22 records carry a comma in `ALT` — and reachable only
+  through `gnomAD-converter --multiallelic`. The fix does not retroactively touch
+  an already-built store, and nothing invalidates one.
+
+## How to re-run these measurements
+
+The builder comparison needs two engines from the same tree, one with the three
+N-gate files reverted to `5c612c0^`, each driven through its own conda-style
+layout (`<root>/bin/crispritz.py` + `<root>/opt/crispritz/`). Two gotchas on a
+cluster node: `apptainer exec` does **not** activate the image's conda
+environment, so call `/opt/conda/bin/python3` by absolute path (`bash -lc` also
+re-reads the profile and drops conda's `PATH`), and `/srv/local` is visible inside
+the container only if it is the working directory or is bound with
+`-B /srv/local`. Guard every comparison against an empty result: two empty hash
+listings compare equal, so a failed build reads as "bit-identical" unless the
+script counts the files it hashed.

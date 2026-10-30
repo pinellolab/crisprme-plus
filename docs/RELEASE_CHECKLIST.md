@@ -24,6 +24,12 @@ Every user-facing surface must agree on **version · default index · scorer · 
 - [ ] **Scorer** — CFD + CRISPR-Bulge everywhere; zero mentions of CRISTA or azimuth (removed).
 - [ ] **Licence** — MGBOA 1.0 everywhere (README, METHODS, `LICENSE`, HF card frontmatter `license: other` + `license_name`/`license_link`, report footer). The migration table states commercial use needs a separate licence for **both** CRISPRme+ and stock CRISPRme.
 - [ ] **Analysis mode** — population-level default vs opt-in `--per-sample`; zero mentions of the removed `--fast`/`--full`.
+- [ ] **Published-index provenance recorded** — every archive on HF is accounted for in
+  [`INDEX_PROVENANCE.md`](INDEX_PROVENANCE.md) with its stored flank width (which decides
+  whether an older client can read it) and whether the current CRISPRitz builder would
+  reproduce its content. A new archive, or a CRISPRitz change touching `mainParallel.cpp`
+  or `pamGenerator.cpp`, means re-running that comparison. `SHA256SUMS` present under
+  `indexes/` in both dataset repos.
 - [ ] **HF catalog matches reality** — `crisprme_hf.list_available_downloads` / the Settings dropdowns / the docs list EXACTLY the indexes present on HF (`list_repo_files` on `lucapinello/crisprme-data`). Nothing listed that 404s; nothing on HF that is undocumented.
 - [ ] **Every documented `download --what X` example resolves on HF** — for each `download --what {genome,index,vcf,annotations,pams,samples,assembly,all}` command shown in ANY doc (README, DOCKER_QUICKSTART, index.html, DATA_LAYOUT, SETTINGS, web guide, legacy setup), confirm the HF path it fetches actually exists (`list_repo_files`). A documented command that targets unhosted data is a broken step (see trap T-21: `--what vcf --dataset 1000G|HGDP` pointed at a `vcfs/` folder that was never uploaded).
 

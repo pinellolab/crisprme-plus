@@ -121,6 +121,9 @@ variant index. Choose one when you expect to search several PAMs over the same g
 > both repos so what is listed is what can be fetched. An explicit `--hf-repo` or
 > `CRISPRME_HF_REPO` overrides the routing.
 
+> Per-archive provenance and validity, with the measurement behind each claim, is in
+> [`INDEX_PROVENANCE.md`](INDEX_PROVENANCE.md).
+
 Each variant index stamps its **`data_type`** (`sites-only` / `genotyped-unphased` /
 `genotyped-phased` / `hybrid`) and a `phased` flag in every `registry_<vcf>/reg_<chrom>.idx`
 manifest, so tooling (e.g. the web variant-dataset selector) can label an index's type
