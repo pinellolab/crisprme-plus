@@ -203,9 +203,14 @@ class LegacyDownloadNeverTouchesTheGeneralIndexRepo(_Fixture):
         for name in LEGACY:
             with self.subTest(name=name):
                 hub = _FakeHub(repos)
-                workdir, returned = self._download(hub, name)
+                # record the probe itself, whatever hub call it makes (it moved from
+                # list_repo_files to file_exists once, and a guard on the hub call
+                # went quietly stale)
+                with mock.patch.object(hf, "_index_archive_exists",
+                                       wraps=hf._index_archive_exists) as probe:
+                    workdir, returned = self._download(hub, name)
                 self.assertEqual(hub.repos_contacted(), {DEFAULT}, hub.calls)
-                self.assertFalse([c for c in hub.calls if c[0] == "list_repo_files"],
+                self.assertFalse(probe.call_args_list,
                                  "a legacy name must not trigger the routing probe")
                 self.assertEqual({c[3] for c in hub.calls}, {None}, "anonymous download")
                 self.assertEqual(returned, os.path.join(workdir, "genome_library", name))
