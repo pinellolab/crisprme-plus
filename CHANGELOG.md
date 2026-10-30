@@ -46,11 +46,17 @@ and the `release-crisprme` skill.
   for a near miss.
 
 ### Changed
-- **CRISPRitz pin moved to v2.9.1**, the tag carrying `--prune-pam` plus three engine fixes: a
-  genomic `N` in a stored PAM/flank region no longer drops the target, a non-`.bin` sidecar in the
-  index directory no longer crashes the search, and a multiallelic site no longer compounds its indel
-  alleles into one fake contig. Applies to the Docker build (`crispritz_ref`) and
-  `install_from_source.sh` (`CRISPRITZ_REF`).
+- **CRISPRitz pin moved to v2.9.1**, the tag carrying `--prune-pam` plus five engine fixes: a
+  genomic `N` in a stored PAM/flank region no longer drops the target; a non-`.bin` sidecar in the
+  index directory no longer crashes the search; a PAM/flank width mismatch is refused up front
+  instead of mis-parsing the leaf stream, and `buildTST`/`searchTST`/`searchBruteForce` now have
+  their exit status checked, so a crashed search can no longer be reported as an empty result; a
+  multiallelic site no longer compounds its indel alleles into one fake contig; and the compiled C++
+  `enricher` no longer drops a SNP wherever an indel shares its position. That last one never ran in
+  a shipped install -- `conda/build.sh` compiles the binary and does not install it, and this
+  Dockerfile builds only the three search binaries, so enrichment has always used the Python
+  reference -- so **no published index is affected**. Applies to the Docker build (`crispritz_ref`)
+  and `install_from_source.sh` (`CRISPRITZ_REF`).
 
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
