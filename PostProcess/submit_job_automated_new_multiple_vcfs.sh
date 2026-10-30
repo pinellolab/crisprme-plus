@@ -161,15 +161,18 @@ fi
 # an owner record (host, PID namespace, PID, start time), so a lock left by a run
 # that died -- SIGKILL, OOM kill, container stop, reboot -- does not wedge every later
 # run: when the record names this host and PID namespace and that PID is gone, the
-# next run takes the lock over and redoes the build. A lock whose owner cannot be
-# checked from here is never broken: another host or container (PIDs and hostnames
-# are not comparable across Docker containers; `--network host` even shares the
-# hostname), or no record at all (a lock taken by an older CRISPRme). The run waits
-# for it and says every few minutes how to clear it. Every message goes to stdout:
-# a write to stderr fails the stage.
+# next run takes the lock over and redoes the build. From another host or container
+# the PID cannot be checked (PIDs and hostnames are not comparable across Docker
+# containers; `--network host` even shares the hostname), so the holder also
+# refreshes its record every minute, and a run there takes the lock over once the
+# record has gone 15 minutes without a refresh. A lock with no record at all (taken
+# by an older CRISPRme) is never broken: the run waits for it and says every few
+# minutes how to clear it. Every message goes to stdout: a write to stderr fails the
+# stage.
 _lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/null)" \
 	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
 _locks_held=()
+_lock_beats=()  # the PID of each held lock's refresh loop, at its index in _locks_held
 # From here to the traps, nothing runs a command substitution: see the traps.
 
 # Set variable $1 to field $3 of owner record $2, or to "" when it has none (parameter
@@ -191,9 +194,18 @@ _lock_read() {
 	_lock_rec=${_lock_rec%$'\n'}
 }
 
-# 0 when lock $1 is stale: its owner record names this host and PID namespace, and
-# that PID is gone. Otherwise 1, with the reason in _lock_why. Leaves the record read
-# in _lock_rec, and its pid, host and start time in _lock_pid, _lock_host and
+# 0 when lock $1's owner record is this run's.
+_lock_mine() {
+	local _lock_rec
+	_lock_read "$1"
+	[ "$_lock_rec" = "$_lock_me" ]
+}
+
+# 0 when lock $1 is stale: its owner record names this host and PID namespace and
+# that PID is gone, or it names another (where this run cannot check the PID) and has
+# gone 15 minutes without a refresh (_lock_hold). Otherwise 1, with the reason in
+# _lock_why. On 0, _lock_gone says what became of the owner. Leaves the record read in
+# _lock_rec, and its pid, host and start time in _lock_pid, _lock_host and
 # _lock_started.
 _lock_stale() {
 	local _pidns
@@ -208,6 +220,12 @@ _lock_stale() {
 	fi
 	_lock_why="it is held by pid $_lock_pid on $_lock_host (a run started $_lock_started)"
 	if [ "$_lock_host" != "$_lock_me_host" ] || [ "$_pidns" != "$_lock_me_pidns" ]; then
+		# (find through a pipe: a test, not $(...))
+		if find "$1/owner" -mmin +15 2>/dev/null | grep -q .; then
+			_lock_gone="has not refreshed its lock for 15 minutes"
+			_lock_why="$_lock_why, on another host or in another container, and not refreshed for 15 minutes"
+			return 0
+		fi
 		_lock_why="$_lock_why, on another host or in another container, where this run cannot check it"
 		return 1
 	fi
@@ -227,6 +245,7 @@ _lock_stale() {
 			return 1
 		fi
 	fi
+	_lock_gone="is gone"
 	_lock_why="$_lock_why, which is no longer running"
 	return 0
 }
@@ -236,6 +255,27 @@ _lock_stale() {
 _lock_sign() {
 	{ printf '%s\n' "$_lock_me" >"$1/owner.$$"; } 2>/dev/null \
 		&& mv -f "$1/owner.$$" "$1/owner" 2>/dev/null
+}
+
+# Count lock $1, which this run has just signed, as this run's, and keep its record
+# fresh: a loop in the background touches it every minute, for runs that cannot check
+# this one's PID (_lock_stale). The loop stops as soon as this run is gone (killed
+# outright, so no trap ran) or the record is no longer this run's; _lock_release stops
+# it otherwise. It writes nothing anywhere: this script's stderr fails the stage.
+_lock_hold() {
+	_locks_held+=("$1")
+	(
+		_s=
+		trap '[ -z "$_s" ] || kill "$_s"; exit 0' TERM
+		while kill -0 "$$" && _lock_mine "$1"; do
+			touch -c "$1/owner"
+			sleep "${_lock_beat_s:-60}" &
+			_s=$!
+			wait "$_s"
+			_s=
+		done
+	) </dev/null >/dev/null 2>&1 &
+	_lock_beats+=("$!")
 }
 
 # Take over lock $1 from the dead owner whose record is $2, without the lock ever
@@ -248,7 +288,7 @@ _lock_steal() {
 	mkdir "$1/.takeover" 2>/dev/null || return 1
 	_lock_read "$1"
 	if [ "$_lock_rec" = "$2" ] && _lock_sign "$1"; then
-		_locks_held+=("$1")
+		_lock_hold "$1"
 		_rc=0
 	fi
 	rm -f "$1/owner.$$" 2>/dev/null
@@ -269,13 +309,13 @@ _lock_take() {
 	printf -v _clear " '%s'" "$_lock" "$@"
 	while :; do
 		if mkdir "$_lock" 2>/dev/null; then
-			_locks_held+=("$_lock")
 			_lock_sign "$_lock"
+			_lock_hold "$_lock"
 			return 0
 		fi
 		[ -d "$_lock" ] || return 1
 		if _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; then
-			echo "Stale lock $_lock: the run that held it (pid $_lock_pid, started $_lock_started) is gone. Taking it over and $_what from scratch."
+			echo "Stale lock $_lock: the run that held it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Taking it over and $_what from scratch."
 			return 2
 		fi
 		echo "Another run is $_what — waiting..."
@@ -283,7 +323,7 @@ _lock_take() {
 		while [ -d "$_lock" ]; do
 			sleep "${_lock_poll_s:-5}"
 			if _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; then
-				echo "Stale lock $_lock: the run that held it (pid $_lock_pid, started $_lock_started) is gone. Taking it over and $_what from scratch."
+				echo "Stale lock $_lock: the run that held it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Taking it over and $_what from scratch."
 				return 2
 			fi
 			if [ "$SECONDS" -ge "$_next" ] && [ -d "$_lock" ]; then
@@ -298,18 +338,29 @@ _lock_take() {
 	done
 }
 
-# Release lock $1 if this run took it and still holds it. A missing record is this
-# run's own failed write: no run takes over a lock that has none.
+# Release lock $1 if this run took it and still holds it, and stop and reap its
+# refresh loop -- after the lock is gone, so that a loop that missed the signal still
+# ends at its next look. A missing record is this run's own failed write: no run takes
+# over a lock that has none.
 _lock_release() {
-	local _l _held=0 _kept=() _lock_rec
-	for _l in "${_locks_held[@]}"; do
-		if [ "$_l" = "$1" ]; then _held=1; else _kept+=("$_l"); fi
+	local _i _beat= _kept=() _beats=() _lock_rec
+	for _i in "${!_locks_held[@]}"; do
+		if [ "${_locks_held[$_i]}" = "$1" ]; then
+			_beat=${_lock_beats[$_i]}
+		else
+			_kept+=("${_locks_held[$_i]}")
+			_beats+=("${_lock_beats[$_i]}")
+		fi
 	done
+	[ -n "$_beat" ] || return 0
 	_locks_held=("${_kept[@]}")
-	[ "$_held" = 1 ] || return 0
+	_lock_beats=("${_beats[@]}")
 	_lock_read "$1"
-	[ -z "$_lock_rec" ] || [ "$_lock_rec" = "$_lock_me" ] || return 0
-	rm -rf "$1" 2>/dev/null || rm -rf "$1" 2>/dev/null
+	if [ -z "$_lock_rec" ] || [ "$_lock_rec" = "$_lock_me" ]; then
+		rm -rf "$1" 2>/dev/null || rm -rf "$1" 2>/dev/null
+	fi
+	kill "$_beat" 2>/dev/null
+	wait "$_beat" 2>/dev/null
 	return 0
 }
 

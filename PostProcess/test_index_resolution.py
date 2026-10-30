@@ -500,6 +500,14 @@ printf '%s\n' "$*" >> "$STUB_LOG"
 if [ "$1" = index-genome ] && [ "$STUB_HOLD_BUILD" = 1 ]; then
 	exec sleep 300
 fi
+# STUB_BUILD_UNTIL / STUB_SEARCH_UNTIL=<file> hold an index build / a search until the
+# test creates <file>, which ends it as usual.
+if [ "$1" = index-genome ] && [ -n "$STUB_BUILD_UNTIL" ]; then
+	while ! [ -e "$STUB_BUILD_UNTIL" ]; do sleep 0.05; done
+fi
+if [ "$1" = search ] && [ -n "$STUB_SEARCH_UNTIL" ]; then
+	while ! [ -e "$STUB_SEARCH_UNTIL" ]; do sleep 0.05; done
+fi
 if [ "$1" = search ]; then
 	# Stop at the last search: the variant one, or the reference one in a
 	# reference-only run. Every index decision has been made by then.
@@ -877,6 +885,41 @@ def _q(path):
     return shlex.quote(str(path))
 
 
+def _age(path, minutes):
+    """Set `path`'s mtime `minutes` back: a record its holder last refreshed then."""
+    then = time.time() - minutes * 60
+    os.utime(path, (then, then))
+
+
+def _processes(pgid):
+    """(pid, ppid, command line) of every process still running -- zombies left out --
+    in process group `pgid`."""
+    out = subprocess.run(["ps", "-ww", "-e", "-o", "pid=,ppid=,pgid=,stat=,args="],
+                         capture_output=True, text=True).stdout
+    procs = []
+    for line in out.splitlines():
+        pid, ppid, group, stat, *args = line.split(None, 4)
+        if int(group) == pgid and not stat.startswith("Z"):
+            procs.append((int(pid), int(ppid), args[0] if args else ""))
+    return procs
+
+
+def _subshells(pid):
+    """The background subshells of bash process `pid`: forks that run its command
+    line. A lock's heartbeat is one."""
+    procs = _processes(os.getpgid(pid))
+    me = [args for p, _, args in procs if p == pid]
+    return [p for p, _, args in procs if p != pid and me and args == me[0]]
+
+
+def _wait_until_gone(pgid, timeout=10):
+    """Wait for every process of group `pgid` to end; what is still running then."""
+    deadline = time.monotonic() + timeout
+    while _processes(pgid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return _processes(pgid)
+
+
 class _Locks(unittest.TestCase):
     """Runs the shipped lock helpers in bash against real lock directories, polling
     every 0.2 s and repeating the waiting notice every 1 s (the script: 5 s, 5 min)."""
@@ -995,10 +1038,12 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         self.assertIn(f"Stale lock {self.lock}", out)
         self.assertEqual(err, "")
 
-    def assertWaitsAndExplains(self, record, why):
+    def assertWaitsAndExplains(self, record, why, aged=0):
         """The lock is waited on and never broken, and the wait is explained -- at the
-        notice interval, not at every poll -- with how to clear it."""
+        notice interval, not at every poll -- with how to clear it. `aged`: minutes
+        since the record (or, with none, the lock) was last written."""
         self.hold(record)
+        _age(self.lock / "owner" if record is not None else self.lock, aged)
         rc, out, err = self.take(stop_after=3.2)
         self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
         self.assertNotIn("Stale lock", out)
@@ -1017,11 +1062,13 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         self.assertEqual(err, "")
 
     def test_a_lock_with_no_owner_record_is_never_broken(self):
-        # as an older CRISPRme leaves every lock: nothing says whose it is
-        self.assertWaitsAndExplains(None, "it has no owner record")
+        # as an older CRISPRme leaves every lock: nothing says whose it is, nor that
+        # its run is gone -- however long ago it was taken
+        self.assertWaitsAndExplains(None, "it has no owner record", aged=60)
 
     def test_a_lock_held_on_another_host_is_never_broken(self):
-        # a PID from another host -- or another Docker container -- means nothing here
+        # a PID from another host -- or another Docker container -- means nothing here,
+        # but its run refreshes the record while it lives
         self.assertWaitsAndExplains(owner_record(dead_pid(), host="another-host"),
                                     "on another host or in another container")
 
@@ -1030,6 +1077,36 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         # PIDs of its own
         self.assertWaitsAndExplains(owner_record(dead_pid(), pidns="pid:[1]"),
                                     "on another host or in another container")
+
+    def test_a_lock_held_elsewhere_and_refreshed_lately_is_never_broken(self):
+        # refreshed 14 minutes ago: its run may be alive, just slow to refresh
+        for record in (owner_record(dead_pid(), host="another-host"),
+                       owner_record(dead_pid(), pidns="pid:[1]")):
+            with self.subTest(record=record):
+                self.assertWaitsAndExplains(record, "on another host or in another "
+                                                    "container", aged=14)
+                shutil.rmtree(self.lock)
+
+    def test_a_lock_held_elsewhere_and_not_refreshed_for_15_minutes_is_taken_over(self):
+        # The Docker case: every `docker run` has a hostname and PID namespace of its
+        # own, so the next run cannot check the PID; but a killed container's run never
+        # refreshes its record again. Taken over as a dead run's.
+        for host, pidns in (("another-host", None), (None, "pid:[1]")):
+            with self.subTest(host=host, pidns=pidns):
+                self.hold(owner_record(4242, host=host, pidns=pidns))
+                _age(self.lock / "owner", 16)
+                rc, out, err = self.take(then=f"cat {_q(self.lock)}/owner; echo self=$$",
+                                         stop_after=10)
+                self.assertEqual(rc, 2, out + err)  # 2: taken over, the build redone
+                self.assertIn(f"Stale lock {self.lock}: the run that held it (pid 4242 on "
+                              f"{host or _this_host()[0]}, started 2026-10-30T00:00:00Z) "
+                              "has not refreshed its lock for 15 minutes. Taking it over",
+                              out)
+                me = re.search(r"^self=(\d+)$", out, re.M).group(1)
+                self.assertIn(f"\npid={me}\n", out)  # the record names this run now
+                self.assertNotIn("waiting", out)
+                self.assertFalse(self.lock.exists())  # and it released it at its exit
+                self.assertEqual(err, "")
 
     def test_a_live_owner_this_run_may_not_signal_is_never_broken(self):
         # kill -0 fails on a live process of another user as well as on a dead one;
@@ -1144,6 +1221,87 @@ class ALockIsReleasedByTheRunThatHoldsIt(_Locks):
             self.assertRegex(body, r"^_lock_\w+( [A-Z]+)?$", sig)
 
 
+class ALockIsKeptFreshByTheRunThatHoldsIt(_Locks):
+    """A run that cannot check the holder's PID -- in another container, on another host
+    -- takes a lock whose record has gone 15 minutes without a refresh for a dead run's.
+    So the holder refreshes the record every minute (here every 0.2 s) for as long as
+    it holds the lock, from a background loop that stops when the lock is released or
+    the holder is gone, and leaves nothing running behind it."""
+
+    def hold_then(self, after_take):
+        """A run that takes the lock with a 0.2 s refresh, says "taken", waits for the
+        test's go and then runs `after_take`."""
+        self.go = self.dir / "go"
+        return self.start(f"_lock_beat_s=0.2\n"
+                          f"_lock_take {_q(self.lock)} 'indexing a' {_q(self.out)} || exit 9\n"
+                          f"echo taken\nwhile ! [ -e {_q(self.go)} ]; do sleep 0.05; done\n"
+                          f"{after_take}")
+
+    def assertRefreshed(self, proc):
+        """The record's mtime is moved on, and nothing else about it changes."""
+        _wait_for(lambda: "taken" in proc.out_path.read_text(), 10, "the lock")
+        owner = self.lock / "owner"
+        record = owner.read_text()
+        _age(owner, 60)
+        _wait_for(lambda: time.time() - owner.stat().st_mtime < 30, 10, "a refresh")
+        self.assertEqual(owner.read_text(), record)
+        self.assertEqual(len(_subshells(proc.pid)), 1, _processes(proc.pid))  # the loop
+
+    def test_the_record_is_refreshed_until_the_lock_is_released(self):
+        jobs = self.dir / "jobs"
+        proc = self.hold_then(f"_lock_release {_q(self.lock)}\njobs -p >{_q(jobs)}\n"
+                              "echo released\nsleep 1")
+        self.assertRefreshed(proc)
+        self.go.touch()
+        _wait_for(lambda: "released" in proc.out_path.read_text(), 10, "the release")
+        self.assertFalse(self.lock.exists())
+        self.assertEqual(jobs.read_text(), "")  # the release stopped and reaped the loop
+        self.assertEqual(_subshells(proc.pid), [])
+        rc, out, err = self.result(proc)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(_wait_until_gone(proc.pid), [])
+        self.assertEqual(err, "")
+
+    def test_the_refresh_stops_when_the_run_ends(self):
+        # an exit, or INT/TERM, which reach the loop through the release
+        for how, status in (("exit 3", 3), ("kill -s TERM $$", -signal.SIGTERM),
+                            ("kill -s INT $$", -signal.SIGINT)):
+            with self.subTest(how=how):
+                proc = self.hold_then(how)
+                self.assertRefreshed(proc)
+                self.go.touch()
+                rc, out, err = self.result(proc)
+                self.assertEqual(rc, status, out + err)
+                self.assertFalse(self.lock.exists())
+                self.assertEqual(_wait_until_gone(proc.pid), [])
+                self.assertEqual(err, "")
+                self.go.unlink()
+
+    def test_the_refresh_stops_when_the_holder_is_killed_outright(self):
+        # SIGKILL to bash alone runs no trap: the loop sees its run gone, and stops
+        proc = self.hold_then("")
+        self.assertRefreshed(proc)
+        proc.kill()
+        proc.wait()
+        self.assertEqual(_wait_until_gone(proc.pid), [])
+        stopped = (self.lock / "owner").stat().st_mtime
+        time.sleep(1)  # five refresh intervals
+        self.assertEqual((self.lock / "owner").stat().st_mtime, stopped)
+
+    def test_the_refresh_stops_when_the_lock_is_no_longer_this_runs(self):
+        # taken over meanwhile -- the holder was frozen for 15 minutes, say: the new
+        # holder's record is not this run's to refresh
+        proc = self.hold_then("sleep 30")
+        self.assertRefreshed(proc)
+        theirs = owner_record(4242, host="another-host")
+        (self.lock / "owner").write_text(theirs)
+        _wait_for(lambda: _subshells(proc.pid) == [], 10, "the loop to stop")
+        _age(self.lock / "owner", 60)
+        time.sleep(1)
+        self.assertGreater(time.time() - (self.lock / "owner").stat().st_mtime, 3000)
+        self.assertEqual((self.lock / "owner").read_text(), theirs)
+
+
 class BuildLocksInTheShippedScript(_ShippedScript):
     """The same locks, taken by whole runs of the shipped script. A reference-only
     search with no index installed builds NRG_2_hg38 under
@@ -1185,6 +1343,43 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {killed.proc.pid}",
                       run.stdout)
         self.assertBuiltAndSearched(run)
+
+    def test_a_lock_left_in_another_container_is_taken_over_once_stale(self):
+        # Each `docker run` has a hostname and PID namespace of its own, so the next
+        # container cannot check this PID -- but the run that held the lock stopped
+        # refreshing it when its container went away, 16 minutes ago.
+        self.lock.mkdir()
+        (self.lock / "owner").write_text(owner_record(4242, host="3f9c2a1b7d10",
+                                                      pidns="pid:[4026532123]"))
+        _age(self.lock / "owner", 16)
+        self.index.mkdir()  # its half-written index
+        (self.index / "chr1.bin").write_bytes(b"")
+        run = self.run_pipeline(variant=False, timeout=60)
+        self.assertIn(f"Stale lock {self.lock}: the run that held it (pid 4242 on "
+                      "3f9c2a1b7d10, started 2026-10-30T00:00:00Z) has not refreshed its "
+                      "lock for 15 minutes.", run.stdout)
+        self.assertBuiltAndSearched(run)
+
+    def test_the_lock_is_kept_fresh_while_building_and_let_go_after(self):
+        built, searching = self.root / "built", self.root / "searched"
+        run = self.launch(variant=False, env={"STUB_BUILD_UNTIL": str(built),
+                                              "STUB_SEARCH_UNTIL": str(searching),
+                                              "_lock_beat_s": "0.2"})
+        _wait_for(lambda: any(c[0] == "index-genome" for c in run.calls()), 60,
+                  "the build to start")
+        owner = self.lock / "owner"
+        self.assertEqual(len(_subshells(run.proc.pid)), 1, _processes(run.proc.pid))
+        _age(owner, 60)
+        _wait_for(lambda: time.time() - owner.stat().st_mtime < 30, 10, "a refresh")
+        built.touch()  # the build ends, and the run releases its lock and searches
+        _wait_for(lambda: any(c[0] == "search" for c in run.calls()), 60, "the search")
+        self.assertFalse(self.lock.exists())
+        self.assertEqual(_subshells(run.proc.pid), [])  # the refresh stopped with it
+        searching.touch()
+        result = self.finish(run, timeout=60)
+        self.assertEqual(_wait_until_gone(run.proc.pid), [])  # nothing left running
+        self.assertEqual(result.stderr.strip(), "ERROR: Off-targets search Reference failed",
+                         result.stderr)
 
     def test_a_live_build_is_waited_for_and_taken_over_when_it_dies(self):
         holder = self.start_build()
