@@ -37,7 +37,15 @@ and the `release-crisprme` skill.
   at. `download` and `publish-index` route on the flank width parsed from the index name — not on a
   list of names, so it cannot be forgotten at publish time — `download` falls back to the default
   repo when the routed one lacks the archive, and the catalog listing merges both repos so what is
-  offered is what can be fetched. `--hf-repo` / `CRISPRME_HF_REPO` still override.
+  offered is what can be fetched. `--hf-repo` / `CRISPRME_HF_REPO` still override. `download` takes
+  an index's genotype companion and reference index from that index's own repo, so the new repo
+  carries its own copy of `genotypes_hg38_HGDP1kGP.tar.gz`, byte-identical to the main repo's.
+- **`indexes/SHA256SUMS` in both dataset repos**, written by `scripts/hf_sha256sums.py` from the
+  checksums the Hub already records (a Git LFS object is addressed by its SHA-256; the oids match
+  the independently computed `build-inputs/*.SHA256SUMS`), so `sha256sum -c SHA256SUMS` verifies a
+  download without anyone re-hashing 400 GB. `--staged` folds in the checksums of archives about to
+  be uploaded; regenerating after the upload and diffing proves the Hub holds exactly what was
+  staged. It refuses to write an empty file, which would verify nothing and read as a pass.
 
 - **Unrecognized `complete-search` flags are now rejected.** `complete-search` parses `sys.argv` by
   hand, so a flag nothing reads was simply ignored: `--prune-pams` instead of `--prune-pam` ran a
@@ -68,7 +76,10 @@ and the `release-crisprme` skill.
   through the real `add-variants` CLI on the FULL chr22 of HGDP + 1000 Genomes -- 1,998,332 records,
   4,091 samples, 2.7 GB of output: 1,776 s vs 974 s -- on the stage that dominates a from-scratch
   genome-wide build. Gated on CRISPRitz 2.9.1's byte-identity fix, verified at that same scale: all
-  five outputs match `enricher.py` hash for hash, as well as on 8 synthetic variant shapes.
+  five outputs match `enricher.py` hash for hash, as well as on 8 synthetic variant shapes. The same
+  holds off Linux/amd64: natively on macOS arm64 (Apple clang, libc++) the compiled port reproduces
+  those five full-chr22 hashes exactly, and so does `enricher.py` under pandas 3 (the recipe leaves
+  pandas unpinned); inside the arm64 image, the binary it ships passes all 8 synthetic shapes.
 
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
