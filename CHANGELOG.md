@@ -288,6 +288,19 @@ and the `release-crisprme` skill.
   and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
   stderr no longer raises `UnicodeDecodeError` and masks the real error.
 
+- **`scorer-env create` failed whenever conda was the env manager, so a Bioconda or source install
+  could not run a search.** The CRISPR-Bulge env was created with
+  `conda create -y -n cbulge python=3.10 -c conda-forge tensorflow-cpu=2.13 …`. conda parses the
+  package specs as one positional argument, so the specs after `-c` were rejected as "unrecognized
+  arguments" (conda 25.3 and 26.9 alike; mamba and micromamba accept either order). conda is the
+  manager whenever the env was activated with `conda activate` (it sets `CONDA_EXE`), which covers a
+  Bioconda install and `install_from_source.sh`: the scorer env was never created, and every search
+  then refused to start (or ran CFD-only under `CRISPRME_SKIP_SCORER_ENV=1`). The command now puts
+  every option before the package specs. The Docker image builds the env with micromamba and was not
+  affected. Found by installing `crisprme` 2.8.0 from Bioconda the way a new user would (fresh
+  Miniforge, conda 26.9.4); with the fix, `scorer-env create`, its compute self-test and real
+  searches all pass.
+
 ## [2.8.0] - 2026-10-23
 
 ### Added

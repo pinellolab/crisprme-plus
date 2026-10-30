@@ -120,6 +120,19 @@ class TestCreateCommand(unittest.TestCase):
                                           "CONDA_CHANNEL_BASE": "https://conda.anaconda.org"}, clear=True):
             self.assertEqual(se._channel_args(spec), ["-c", "https://prefix.dev/conda-forge"])
 
+    def test_package_specs_follow_every_option(self):
+        # conda takes the specs as ONE positional: a spec before `-c` makes it reject the
+        # rest as "unrecognized arguments" (conda 25.x/26.x), so `scorer-env create` failed
+        # outright whenever conda was the manager (a Bioconda install + `conda activate`).
+        for kind in ("conda", "mamba", "micromamba"):
+            for variant in ("cpu", "cuda", "metal", "linux_aarch64"):
+                with mock.patch.object(se, "detect_env_manager", return_value=("/m/" + kind, kind)):
+                    cmd = se.build_create_command("cbulge", variant=variant)
+                first_spec = cmd.index("python=3.10")
+                self.assertIn("-c", cmd[:first_spec])
+                self.assertEqual([a for a in cmd[first_spec:] if a.startswith("-")], [],
+                                 f"{kind}/{variant}: an option follows the package specs: {cmd}")
+
     def test_no_manager_returns_none(self):
         with mock.patch.object(se, "detect_env_manager", return_value=None):
             self.assertIsNone(se.build_create_command("cbulge"))

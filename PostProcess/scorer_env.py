@@ -294,9 +294,14 @@ def build_create_command(name: str, gpu: bool = False, variant: Optional[str] = 
         return None
     exe, _ = mgr
     variant = variant or _variant(gpu)
+    # Every option BEFORE the package specs: conda parses the specs as one positional, so
+    # specs split by `-c` make it reject the rest as "unrecognized arguments" (conda 25.x
+    # and 26.x) and `scorer-env create` failed wherever conda is the manager (CONDA_EXE is
+    # set by `conda activate`). mamba/micromamba accept either order.
     return (
-        [exe, "create", "-y", "-n", name, "python=" + spec["python"]]
+        [exe, "create", "-y", "-n", name]
         + _channel_args(spec)
+        + ["python=" + spec["python"]]
         + _conda_packages(spec, variant)
     )
 
