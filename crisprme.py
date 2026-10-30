@@ -508,6 +508,20 @@ def error(msg: str) -> NoReturn:
     sys.exit(1)
 
 
+def loud_warn(lines) -> None:
+    """Print a deliberately HARD-TO-MISS warning banner (bold red on a TTY, a plain
+    boxed banner otherwise so it is still obvious in a piped build log). ``lines`` is a
+    string or a list of strings (the banner body)."""
+    if isinstance(lines, str):
+        lines = [lines]
+    use_color = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+    red, rst = ("\033[1;31m", "\033[0m") if use_color else ("", "")
+    bar = "!" * 78
+    body = "\n".join("!! " + ln for ln in lines)
+    sys.stderr.write(f"\n{red}{bar}\n{body}\n{bar}{rst}\n\n")
+    sys.stderr.flush()
+
+
 def summarize_pipeline_failure(outputfolder: str) -> str:
     """Build a concise, actionable summary of a failed pipeline run.
 
@@ -3043,20 +3057,18 @@ def build_index_only() -> None:
     # panel would over-count phantom hom-ref individuals and inflate AN.
     db_to_samplesid = _build_db_to_samplesid(samples_listing, workdir)
     if not db_to_samplesid:
-        if samples_listing:
-            print(
-                "build-index-only: no usable samplesID entries -> skipping dictless "
-                "tier emission (dicts unaffected; search falls back to the dict "
-                "path).",
-                flush=True,
-            )
-        else:
-            print(
-                "build-index-only: no --samplesID given -> skipping dictless tier "
-                "emission (dicts still built; pass --samplesID to also emit the "
-                "fast-post-analysis tiers).",
-                flush=True,
-            )
+        _why = ("no usable samplesID entries (check the --samplesID listing)"
+                if samples_listing else "no --samplesID was given")
+        loud_warn([
+            "WARNING: INCOMPLETE VARIANT INDEX -- the Tier-0 registry will NOT be built.",
+            f"Reason: {_why}.",
+            "This index is MISSING registry_<vcf>/ + genotypes_<vcf>/, so it will NOT support:",
+            "  - fast variant/indel post-analysis (falls back to the slow dict path),",
+            "  - the report's variant-count panel + the web dataset (data_type) labelling,",
+            "  - publishing to Hugging Face (publish-index needs the registry manifest).",
+            "The genome SEARCH still works. To build a COMPLETE, publishable variant index,",
+            "re-run build-index-only WITH --samplesID (the per-dataset genotyped sample lists).",
+        ])
     else:
         try:
             import build_dictless_tiers as _bdt
