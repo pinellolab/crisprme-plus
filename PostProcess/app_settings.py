@@ -33,11 +33,16 @@ def _clamp(n):
 
 def env_override():
     """The max concurrent search jobs CRISPRME_MAX_CONCURRENT_JOBS pins (clamped),
-    overriding the persisted value; None when it is unset or not a whole number,
-    which is ignored."""
-    env = os.environ.get("CRISPRME_MAX_CONCURRENT_JOBS")
-    if env and env.strip().isdigit():
-        return _clamp(env.strip())
+    overriding the persisted value; None when it is unset or not a whole number in
+    ASCII digits, which is ignored. Never raises."""
+    env = os.environ.get("CRISPRME_MAX_CONCURRENT_JOBS", "").strip()
+    # ASCII only: int() rejects some other str.isdigit() characters, such as
+    # superscript or circled digits.
+    if env.isascii() and env.isdigit():
+        try:
+            return _clamp(env)
+        except ValueError:  # more digits than int() converts (4300 by default)
+            pass
     return None
 
 

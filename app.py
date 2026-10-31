@@ -135,10 +135,13 @@ except Exception as e:
     sys.stdout.flush()
 else:
     # app_settings ignores a CRISPRME_MAX_CONCURRENT_JOBS that is not a whole number
-    # (e.g. "5" with the quotes `docker run --env-file` keeps) and clamps one into
-    # [1, MAX_JOBS_CAP]; say so rather than silently run another pool size.
+    # in ASCII digits (e.g. "5" with the quotes `docker run --env-file` keeps) and
+    # clamps one into [1, MAX_JOBS_CAP]; say so rather than silently run another
+    # pool size. Compare as text, leading zeros aside: int() raises on some values
+    # (a superscript digit, over 4300 digits), and an exception here would stop
+    # the app from starting.
     _env_jobs = os.environ.get("CRISPRME_MAX_CONCURRENT_JOBS", "").strip()
-    if _env_jobs and not (_env_jobs.isdigit() and int(_env_jobs) == _MAX_CONCURRENT_JOBS):
+    if _env_jobs and _env_jobs.lstrip("0") != str(_MAX_CONCURRENT_JOBS):
         sys.stdout.write(
             f"WARNING: CRISPRME_MAX_CONCURRENT_JOBS={_env_jobs!r} is not a whole number "
             f"from 1 to {app_settings.MAX_JOBS_CAP}; using {_MAX_CONCURRENT_JOBS} "

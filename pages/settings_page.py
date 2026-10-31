@@ -2423,7 +2423,13 @@ def _max_jobs_save(n, value):
             f"Enter a number between 1 and {_appcfg.MAX_JOBS_CAP}.",
             style={"color": "#b00"},
         )
-    stored = _appcfg.set_max_concurrent_jobs(value)
+    try:
+        stored = _appcfg.set_max_concurrent_jobs(value)
+    except Exception as e:  # e.g. a config dir it cannot write
+        return html.Span(
+            f"Could not persist the setting: {e}",
+            style={"color": "#b00"},
+        )
     pinned = _appcfg.env_override()
     if pinned is not None:
         return html.Span(

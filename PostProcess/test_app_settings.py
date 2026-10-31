@@ -97,12 +97,32 @@ class TestMaxConcurrentJobs(unittest.TestCase):
             self.assertEqual(a.get_max_concurrent_jobs(d), 2)
 
     def test_env_override_only_for_a_whole_number(self):
+        # ASCII digits only: int() rejects some other str.isdigit() characters,
+        # such as superscript two and circled one, and env_override() raised
+        # on them.
         self.assertIsNone(a.env_override())
-        cases = (("8", 8), (" 3 ", 3), ("99", 16), ("0", 1), ('"5"', None), ("", None))
+        cases = (
+            ("8", 8), ("5", 5), (" 3 ", 3), (" 5 ", 5), ("99", 16), ("0", 1),
+            ('"5"', None), ("", None), ("\u00b2", None), ("\u2460", None),
+            ("\u0661\u0662", None),  # Arabic-Indic 12: int() takes it, not ASCII
+        )
         for raw, pinned in cases:
             with self.subTest(raw=raw):
                 os.environ["CRISPRME_MAX_CONCURRENT_JOBS"] = raw
                 self.assertEqual(a.env_override(), pinned)
+
+    def test_env_override_never_raises_on_too_many_digits(self):
+        # int() converts at most sys.get_int_max_str_digits() (4300) digits.
+        os.environ["CRISPRME_MAX_CONCURRENT_JOBS"] = "9" * 5000
+        self.assertIsNone(a.env_override())
+
+    def test_ignored_env_value_falls_back_to_the_saved_value(self):
+        with tempfile.TemporaryDirectory() as d:
+            a.set_max_concurrent_jobs(4, d)
+            for raw in ('"5"', "\u00b2", "\u2460"):
+                with self.subTest(raw=raw):
+                    os.environ["CRISPRME_MAX_CONCURRENT_JOBS"] = raw
+                    self.assertEqual(a.get_max_concurrent_jobs(d), 4)
 
 
 class TestAppSearchPoolSize(unittest.TestCase):
@@ -169,10 +189,21 @@ class TestAppSearchPoolSize(unittest.TestCase):
                 self.assertRegex(out, r"\busing 2\b")
 
     def test_ignored_env_value_names_the_saved_value_used_instead(self):
-        workers, out = self._import_app(env_jobs='"5"', saved_jobs=3)
-        self.assertEqual(workers, 3)
-        self.assertEqual(len(out.splitlines()), 1, out)
-        self.assertRegex(out, r"\busing 3\b")
+        # Superscript two and circled one pass str.isdigit() but not int():
+        # app_settings raised on them, so the pool fell back to 2 and the saved
+        # value went unused.
+        for raw in ('"5"', "\u00b2", "\u2460"):
+            with self.subTest(raw=raw):
+                workers, out = self._import_app(env_jobs=raw, saved_jobs=3)
+                self.assertEqual(workers, 3)
+                self.assertEqual(len(out.splitlines()), 1, out)
+                self.assertRegex(out, r"\busing 3\b")
+
+    def test_env_value_too_long_for_int_is_ignored_and_says_so(self):
+        workers, out = self._import_app(env_jobs="9" * 5000)
+        self.assertEqual(workers, 2)
+        self.assertEqual(len(out.splitlines()), 1, out[:200])
+        self.assertRegex(out, r"\busing 2\b")
 
     def test_out_of_range_env_value_is_clamped_and_says_so(self):
         for raw, used in (("99", 16), ("0", 1)):
@@ -286,11 +317,13 @@ class TestSettingsPageEnvOverride(unittest.TestCase):
 
     def test_no_override_keeps_the_plain_texts(self):
         # Unset, or not a whole number: then the env var is ignored (app.py warns
-        # about it) and the saved value does apply after a restart.
+        # about it) and the saved value does apply after a restart. Superscript
+        # two and circled one pass str.isdigit() but not int(): Save raised on
+        # them (HTTP 500, no feedback, though the value was written).
         plain_save = (
             "Saved: up to 3 concurrent search job(s). Restart the app to apply."
         )
-        for env_jobs in (None, '"5"'):
+        for env_jobs in (None, "", '"5"', "\u00b2", "\u2460"):
             with self.subTest(env_jobs=env_jobs):
                 blurb, feedback, saved = self._settings(env_jobs, save=3)
                 self.assertTrue(
@@ -298,6 +331,20 @@ class TestSettingsPageEnvOverride(unittest.TestCase):
                 )
                 self.assertEqual(feedback, plain_save)
                 self.assertEqual(saved, 3)
+
+    def test_save_reports_what_it_cannot_persist(self):
+        # A config dir it cannot write, or a value that is not a number (only a
+        # hand-made request sends one), used to raise out of the callback.
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"CRISPRME_CONFIG_DIR": os.path.join(tmp, "missing")}
+        ):
+            os.environ.pop("CRISPRME_MAX_CONCURRENT_JOBS", None)
+            for value in (3, "three"):
+                with self.subTest(value=value):
+                    feedback = self.save(1, value).args[0]
+                    self.assertTrue(
+                        feedback.startswith("Could not persist the setting"), feedback
+                    )
 
 
 if __name__ == "__main__":
