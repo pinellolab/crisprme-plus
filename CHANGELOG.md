@@ -11,80 +11,6 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
-### Fixed
-- **An interrupted or failed `build-index-only` no longer leaves a partial index or enrichment that
-  later runs use.** Every later run, `build-index-only` and `complete-search` alike, takes an index
-  directory or an enriched genome that is there for a finished one. `build-index-only` ran the engine
-  straight into `genome_library/<PAM>_<N>_<genome>[+<vcf>[_INDELS]]`, and moved the enriched genome
-  into place before the rest of the enrichment, so a build that ended early (Ctrl-C, an OOM kill, a
-  container stop, an engine error) left a partial one that every later search used: a reference
-  build killed after `chr1` was searched without `chr2`, with fewer off-targets and no error, and a
-  run killed while it compressed the dictionaries left them half compressed beside a finished-looking
-  enriched genome. Each index is now built by the same command in a hidden directory of
-  `genome_library` and renamed into place once the command has succeeded. A rename within one
-  directory never crosses a mount point, so a `genome_library` mounted on its own (`docker -v`,
-  `apptainer --bind`) works as before, and the index takes `genome_library`'s setgid group and
-  default ACL, as one built in place does. The enrichment is staged the same way: its dictionaries
-  are compressed before anything moves, then the fake-indel genomes and the dictionaries are moved
-  into place, and the enriched genome last, so a run that ends before then leaves none of it and the
-  next one enriches again. Those moves are renames, done in moments, when `Genomes` and
-  `Dictionaries` share a file system and mount, as in the documented single-mount layout; with
-  `Dictionaries` mounted on its own they copy the dictionaries, and a search started during that
-  copy, or after a run killed in it, fails until `build-index-only` has enriched again. A
-  compression that fails now fails the build and puts nothing in place: `pigz`'s exit status was
-  ignored, and a Python gzip (used without `pigz`) that failed ended the run with a traceback, the
-  enriched genome already in place. An index or an enriched genome that another run finished
-  meanwhile is kept, with a line on stdout. Ctrl-C, SIGTERM and SIGHUP still end the run by that
-  signal, once it has removed its build directory; a second one meanwhile (Ctrl-C pressed twice)
-  waits for that. On success the files, their contents (the `.gz` files included), permissions,
-  sidecars, stdout lines and exit status are as before.
-- **`build-index-only` stops while a search holds the build lock of what it uses or builds.**
-  `complete-search` holds `<output>.lock` while it enriches a genome or builds an index, and never
-  uses an output whose lock is there. `build-index-only` looked at no lock: started while a search
-  built the variant index, it took the half-written index for present and exited 0; started while a
-  search enriched the genome, it moved its own enrichment into the places the search was writing.
-  Now, while such a lock sits beside the reference, variant or INDELS index or the enriched genome
-  that it would use or build, it neither uses nor builds that output: it ends with an ERROR on stderr
-  and exit status 1, which names the lock and its owner and says what to do (in the web Settings page
-  the build then shows as failed, with that ERROR). The locks are checked before anything is built,
-  before each step, and just before a finished build or enrichment goes into place. With no lock
-  there nothing changes, and `build-index-only` takes no lock of its own.
-- **A chromosome whose INDELS index fails to build now fails the build.** `pool_index_indels.py`
-  ignored each chromosome's `index-genome` exit status, so a chromosome that failed (a `buildTST`
-  error, an OOM kill) left a partial `_INDELS` index, which `build-index-only` took for built. It now
-  prints `Indexing failed for INDELs in <chromosomes>` on stdout and exits 1, and `build-index-only`
-  puts no index in place. The search ignores this status, as it goes by the engine's stderr, and is
-  unchanged.
-- **`build-index-only` checks `--vcf` before it builds the reference index.** A `--vcf` that names no
-  dataset, or a listing that names more than one, failed only once the reference index had been
-  built; it now fails first, with the same message. A valid `--vcf` builds what it built before.
-- **The SNP overlay can no longer leave a fake-indel FASTA cut short** (since 2.5.0). Before it indexes
-  the fake-indel genome, `build-index-only` overlays the SNP codes onto each
-  `Genomes/<genome>+<vcf>_INDELS/fake_<vcf>_<chr>/fake<chr>.fa`, rewriting it in place. A run stopped
-  in that write left the file empty or cut short, and the next run indexed it as a whole one (an empty
-  one as `No indels on <chr>`), so the INDELS index had no indel target past the cut, with no error;
-  a write that failed (a full disk) was a WARNING, and the same run indexed what was left. Each FASTA
-  is now written in a hidden directory beside the original and renamed over it, with the same
-  contents, mode and owner, and an overlay that fails fails the build (an ERROR, and no INDELS index).
-  A FASTA that an earlier release cut short is not detected: if a `build-index-only` run was stopped
-  while it overlaid, remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`, `Genomes/<genome>+<vcf>`
-  and `Genomes/<genome>+<vcf>_INDELS`, then run `build-index-only` again, which enriches again, and do
-  not search with that dataset until it has finished.
-- **The build directories of killed runs are reclaimed.** A SIGKILL (an OOM kill, a container stop)
-  leaves the build directory, holding a partial index or enrichment as large as the finished one,
-  which nothing read or removed. Each build directory now holds an owner record (host, PID namespace,
-  PID and start time, as a search's build lock does), and each `build-index-only` run first removes
-  those whose owner is gone on this host and PID namespace (dead, a zombie, or its PID now another
-  process's), with a line on stdout for each, whatever it goes on to build: after a kill, the next run
-  is often a `complete-search`, which builds the missing index or enriches the genome itself. The SNP
-  overlay's hidden directories beside the fake-indel FASTAs of the run's dataset hold an owner record
-  too, and are removed the same way. One whose owner is running or stopped, or has no record, is left
-  alone, as is any directory `build-index-only` did not make. One made in another PID namespace or on
-  another host, whose owner cannot be checked from here (a web container's own, once it restarted),
-  is left too, with a line on stdout that says how to remove it. The enrichment's directory,
-  `Genomes/run_*` before, which the web genome list showed as a genome, is now hidden and reclaimed
-  the same way; the search's own `Genomes/run_*` directories are untouched.
-
 ## [2.8.1] - 2026-10-31
 
 ### Added
@@ -418,6 +344,104 @@ and the `release-crisprme` skill.
   affected. Found by installing `crisprme` 2.8.0 from Bioconda the way a new user would (fresh
   Miniforge, conda 26.9.4); with the fix, `scorer-env create`, its compute self-test and real
   searches all pass.
+- **An interrupted or failed `build-index-only` no longer leaves a partial index or enrichment that
+  later runs use.** Every later run, `build-index-only` and `complete-search` alike, takes an index
+  directory or an enriched genome that is there for a finished one. `build-index-only` ran the engine
+  straight into `genome_library/<PAM>_<N>_<genome>[+<vcf>[_INDELS]]`, and moved the enriched genome
+  into place before the rest of the enrichment, so a build that ended early (Ctrl-C, an OOM kill, a
+  container stop, an engine error) left a partial one that every later search used: a reference
+  build killed after `chr1` was searched without `chr2`, with fewer off-targets and no error, and a
+  run killed while it compressed the dictionaries left them half compressed beside a finished-looking
+  enriched genome. Each index is now built by the same command in a hidden directory of
+  `genome_library` and renamed into place once the command has succeeded. A rename within one
+  directory never crosses a mount point, so a `genome_library` mounted on its own (`docker -v`,
+  `apptainer --bind`) works as before, and the index takes `genome_library`'s setgid group and
+  default ACL, as one built in place does. The enrichment is staged the same way: its dictionaries
+  are compressed and its fake-indel genome gets its SNP codes (see below) before anything moves, then
+  the fake-indel genomes and the dictionaries are moved into place, and the enriched genome last, so
+  a run that ends before then leaves none of it and the next one enriches again. Those moves are
+  renames, done in moments, when `Genomes` and `Dictionaries` share a file system and mount, as in
+  the documented single-mount layout; with `Dictionaries` mounted on its own they copy the
+  dictionaries, and a search started during that copy, or after a run killed in it, fails until
+  `build-index-only` has enriched again. A compression that fails now fails the build and puts
+  nothing in place: `pigz`'s exit status was ignored, and a Python gzip (used without `pigz`) that
+  failed ended the run with a traceback, the enriched genome already in place. An index or an
+  enriched genome that another run finished meanwhile is kept, with a line on stdout. Ctrl-C, SIGTERM
+  and SIGHUP still end the run by that signal, once it has removed its build directory; a second one
+  meanwhile (Ctrl-C pressed twice) waits for that. On success the files, their contents (the `.gz`
+  files included), permissions, sidecars, stdout lines and exit status are as before.
+- **`build-index-only` stops while a search holds the build lock of what it uses or builds.**
+  `complete-search` holds `<output>.lock` while it enriches a genome or builds an index, and never
+  uses an output whose lock is there. `build-index-only` looked at no lock: started while a search
+  built the variant index, it took the half-written index for present and exited 0; started while a
+  search enriched the genome, it moved its own enrichment into the places the search was writing.
+  Now, while such a lock sits beside the reference, variant or INDELS index or the enriched genome
+  that it would use or build, it neither uses nor builds that output: it ends with an ERROR on stderr
+  and exit status 1, which names the lock and its owner and says what to do (in the web Settings page
+  the build then shows as failed, with that ERROR). The locks are checked before anything is built,
+  before each step, and just before a finished build or enrichment goes into place. With no lock
+  there nothing changes, and `build-index-only` takes no lock of its own.
+- **A chromosome whose INDELS index fails to build now fails the build.** `pool_index_indels.py`
+  ignored each chromosome's `index-genome` exit status, so a chromosome that failed (a `buildTST`
+  error, an OOM kill) left a partial `_INDELS` index, which `build-index-only` took for built. It now
+  prints `Indexing failed for INDELs in <chromosomes>` on stdout and exits 1, and `build-index-only`
+  puts no index in place. The search ignores this status, as it goes by the engine's stderr, and is
+  unchanged.
+- **`build-index-only` checks `--vcf` before it builds the reference index.** A `--vcf` that names no
+  dataset, or a listing that names more than one, failed only once the reference index had been
+  built; it now fails first, with the same message. A valid `--vcf` builds what it built before.
+- **The SNP overlay can no longer leave a fake-indel FASTA cut short** (since 2.5.0). Before it indexed
+  the fake-indel genome, `build-index-only` overlaid the SNP codes onto each
+  `Genomes/<genome>+<vcf>_INDELS/fake_<vcf>_<chr>/fake<chr>.fa`, rewriting it in place. A run stopped
+  in that write left the file empty or cut short, and the next run indexed it as a whole one (an empty
+  one as `No indels on <chr>`), so the INDELS index had no indel target past the cut, with no error;
+  a write that failed (a full disk) was a WARNING, and the same run indexed what was left. The
+  fake-indel genome of an enrichment the run makes is now overlaid before it goes into place (next
+  entry); one already in place (a `build-inputs` kit, a run of an earlier release) is still overlaid
+  in place. Either way each FASTA is written in a hidden directory beside the original and renamed
+  over it, with the same contents, mode and owner, and an overlay that fails fails the build with an
+  ERROR: nothing of an enrichment the run makes goes into place, and no INDELS index is built. A
+  FASTA that an earlier release cut short is not detected: if a `build-index-only` run was stopped
+  while it overlaid, remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`, `Genomes/<genome>+<vcf>`
+  and `Genomes/<genome>+<vcf>_INDELS`, then run `build-index-only` again, which enriches again, and do
+  not search with that dataset until it has finished.
+- **A `build-index-only --vcf` run stopped after the enrichment no longer leaves the INDELS index blind
+  to the SNPs beside an indel** (since 2.5.0). `build-index-only` added the SNP codes to the
+  fake-indel genome only just before it indexed it, after the tier emission, the indel genotype store
+  and the variant index, most of a long build. A run stopped in between (killed, or its variant index
+  failing) left the fake-indel genome in place without them, with the dictionaries that let a
+  `complete-search` start. That search built the missing INDELS index from it (a search adds no SNP
+  codes), and every later `build-index-only` printed `Indels index already present` and kept that
+  index: off-targets that need both an indel and a nearby SNP were missing or scored too low, with no
+  error. A search that built the INDELS index while `build-index-only` built the variant index made
+  the same one. With the real engine, a toy site that needs an insertion and an SNP 5 bp from it on
+  one haplotype came out, after a kill while the variant index was built, with 4 mismatches and 1
+  bulge, CFD 0.197 and one of its two rsIDs, instead of 3 and 1, CFD 0.281 and both, and was lost at
+  `--mm 3`. The SNP codes now go onto the fake-indel genome in the enrichment's hidden build
+  directory, before any of the enrichment is in place, so an INDELS index a search builds from it is
+  the one `build-index-only` builds. On success the files, their contents, stdout lines (the
+  overlay's still print just before the INDELS index is built) and exit status are as before. An
+  INDELS index that `complete-search` builds from a genome it enriched itself (the on-demand build)
+  still has no SNP codes, as before. If, with an earlier release, a `build-index-only --vcf` run
+  stopped after its enrichment and a `complete-search` with that dataset ran before
+  `build-index-only` was run again to the end, or a search built the dataset's INDELS index while
+  `build-index-only` ran, remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS` and run
+  `build-index-only` again: it adds the codes to the fake-indel genome in place and builds the
+  INDELS index anew.
+- **The build directories of killed runs are reclaimed.** A SIGKILL (an OOM kill, a container stop)
+  leaves the build directory, holding a partial index or enrichment as large as the finished one,
+  which nothing read or removed. Each build directory now holds an owner record (host, PID namespace,
+  PID and start time, as a search's build lock does), and each `build-index-only` run first removes
+  those whose owner is gone on this host and PID namespace (dead, a zombie, or its PID now another
+  process's), with a line on stdout for each, whatever it goes on to build: after a kill, the next run
+  is often a `complete-search`, which builds the missing index or enriches the genome itself. The SNP
+  overlay's hidden directories beside the fake-indel FASTAs of the run's dataset hold an owner record
+  too, and are removed the same way. One whose owner is running or stopped, or has no record, is left
+  alone, as is any directory `build-index-only` did not make. One made in another PID namespace or on
+  another host, whose owner cannot be checked from here (a web container's own, once it restarted),
+  is left too, with a line on stdout that says how to remove it. The enrichment's directory,
+  `Genomes/run_*` before, which the web genome list showed as a genome, is now hidden and reclaimed
+  the same way; the search's own `Genomes/run_*` directories are untouched.
 
 ### Security
 - **The web Settings page could be pointed outside `Settings/` and made to re-run a recorded
