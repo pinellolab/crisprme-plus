@@ -307,12 +307,14 @@ _lock_run_alive() {
 # _lock_release or _lock_abandon_all stops it otherwise. It writes nothing anywhere:
 # this script's stderr fails the stage. So its output goes to /dev/null before it is
 # forked: a loop stopped the moment it starts can run this script's traps (bash 5.2
-# does) before it reaches a redirection of its own.
+# does) before it reaches a redirection of its own. Stopped, it reaps its sleep, else
+# handed to PID 1 -- in the web container a server that never reaps it. With KILL: a
+# TERM to a sleep just forked can be lost, and the wait would last the whole sleep.
 _lock_hold() {
 	_locks_held+=("$1")
 	{ (
 		_s=
-		trap '[ -z "$_s" ] || kill "$_s"; exit 0' TERM
+		trap '[ -z "$_s" ] || { kill -KILL "$_s"; wait "$_s"; }; exit 0' TERM
 		while _lock_run_alive && _lock_mine "$1"; do
 			touch -c "$1/owner"
 			sleep "${_lock_beat_s:-60}" &

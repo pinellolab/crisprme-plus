@@ -29,6 +29,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -664,11 +665,12 @@ class _ShippedScript(unittest.TestCase):
         return _Run(run.stdout(), run.calls(), run.stderr())
 
     def launch(self, pam="20bp-NRG-SpCas9", bulges=1, prune=0, variant=True,
-               index_path=None, threads=1, env=None):
+               index_path=None, threads=1, env=None, wrap=()):
         """Start the script the way complete-search launches it (argument order of
         crisprme.py's crisprme_run), in a session of its own, so that a test can
         signal the whole run as Ctrl-C or a container stop does. `env` adds to its
-        environment; the RAM thread guard is off unless `env` turns it on."""
+        environment; the RAM thread guard is off unless `env` turns it on. `wrap` is a
+        command that runs the script's bash as its child."""
         self.runs += 1
         work = self.root / f"run{self.runs}"
         out = work / "out"
@@ -699,7 +701,7 @@ class _ShippedScript(unittest.TestCase):
         # stderr goes where complete-search sends it: the script fails a stage
         # whenever log_error.txt is non-empty
         with open(out / "log_error.txt", "w") as err, open(work / "stdout.txt", "w") as so:
-            proc = subprocess.Popen(["bash", str(_SCRIPT), *map(str, args)], cwd=work,
+            proc = subprocess.Popen([*wrap, "bash", str(_SCRIPT), *map(str, args)], cwd=work,
                                     env=run_env, stdout=so, stderr=err, text=True,
                                     start_new_session=True)
         self.addCleanup(_reap, proc)
@@ -1508,6 +1510,39 @@ class ALockIsKeptFreshByTheRunThatHoldsIt(_Locks):
         self.assertEqual((self.lock / "owner").read_text(), theirs)
 
 
+# A container's PID 1 that reaps only its own child, as the web server does (its
+# subprocess waits for the run it started): as a subreaper, it is handed every process
+# that a run leaves behind, and never waits for one. Runs argv[1:], then writes each
+# process it was handed to $ORPHANS ("<pid> <state> <name>"; Z for a zombie) and clears
+# them up.
+_NON_REAPING_PID1 = r"""
+import ctypes, os, signal, subprocess, sys, time
+if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
+    sys.exit("prctl(PR_SET_CHILD_SUBREAPER) failed")
+rc = subprocess.call(sys.argv[1:])
+time.sleep(0.5)  # for what the run stopped last to end
+left = []
+for pid in filter(str.isdigit, os.listdir("/proc")):
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            stat = fh.read()
+    except OSError:
+        continue
+    state, ppid = stat[stat.rindex(")") + 2:].split()[:2]
+    if int(ppid) == os.getpid():
+        left.append((int(pid), state, stat[stat.index("(") + 1:stat.rindex(")")]))
+with open(os.environ["ORPHANS"], "w") as fh:
+    fh.writelines(f"{pid} {state} {name}\n" for pid, state, name in left)
+for pid, _, _ in left:
+    try:
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+    except OSError:
+        pass
+sys.exit(rc if rc >= 0 else 128 - rc)
+"""
+
+
 class BuildLocksInTheShippedScript(_ShippedScript):
     """The same locks, taken by whole runs of the shipped script. A reference-only
     search with no index installed builds NRG_2_hg38 under
@@ -1586,6 +1621,24 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         self.assertEqual(_wait_until_gone(run.proc.pid), [])  # nothing left running
         self.assertEqual(result.stderr.strip(), "ERROR: Off-targets search Reference failed",
                          result.stderr)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"),
+                         "a process handed a run's orphans is a Linux subreaper")
+    def test_a_run_leaves_no_zombie_under_a_pid_1_that_does_not_reap(self):
+        # In the web container the server is PID 1, and it reaps only the runs it starts.
+        # A refresh loop that was stopped left its sleep unreaped, so every lock a run
+        # took and let go left one zombie sleep there for the life of the container.
+        # With nothing installed, the run takes and lets go of all four locks.
+        orphans = self.root / "orphans.txt"
+        run = self.finish(self.launch(env={"STUB_ENRICH": "1", "ORPHANS": str(orphans)},
+                                      wrap=(sys.executable, "-c", _NON_REAPING_PID1)),
+                          timeout=120)
+        self.assertTrue(run.enriched)
+        self.assertEqual([c[1] for c in run.builds],
+                         ["hg38", f"hg38+{self.VCF}", f"hg38+{self.VCF}_INDELS/NRG_2_fakechr1"])
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed",
+                         run.stderr)
+        self.assertEqual(orphans.read_text(), "")
 
     def test_a_live_build_is_waited_for_and_taken_over_when_it_dies(self):
         holder = self.start_build()
