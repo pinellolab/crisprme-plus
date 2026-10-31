@@ -481,6 +481,22 @@ and the `release-crisprme` skill.
   `Genomes/run_*` before, which the web genome list showed as a genome, is now hidden and reclaimed
   the same way, as is the one in `Dictionaries` that its dictionaries are put together in; the
   search's own `Genomes/run_*` directories are untouched.
+- **A full disk while `build-index-only` builds an index no longer leaves that index in place, cut
+  short.** `buildTST` (CRISPRitz 2.9.1 and earlier) does not check its writes, so on a full disk it
+  left a `.bin` empty or cut short and still exited 0. `build-index-only` put that index in place
+  (`Index built`, `Variant index ready`) and, when the rest of the run fitted, exited 0 with empty
+  stderr; every later run printed `already present` and kept it, and every search failed on it
+  (`is not a valid CRISPRitz index (.bin) file (numLeaves=65535)`, `invalid TST node count
+  (numNodes=0)`, or a crash) until its directory was removed by hand. Before an index goes into
+  place, each `.bin` the engine wrote is now checked against what it records of itself (its number
+  of targets, of tree nodes, and the target its tree ends with), the INDELS index's chromosome by
+  chromosome; one that is not whole ends the run with an ERROR that names it and says the disk may
+  be full, nothing goes into place, and the next run, once there is room, builds it again. A whole
+  index goes into place as before; the check reads each `.bin`'s targets, about half a second for
+  every 5 million (one `.bin`), so a few minutes for a genome-wide index. An index that a run of an
+  earlier release put in place cut short is not detected: if a search fails on an index with one
+  of the messages above, remove its directory and run `build-index-only` again. The indexes a
+  search builds itself, on demand, are not checked, and CRISPRitz's own writes are still unchecked.
 
 ### Security
 - **The web Settings page could be pointed outside `Settings/` and made to re-run a recorded

@@ -11,8 +11,9 @@ went ahead while a search held the build lock of what it was about to use or bui
 
 These tests run the real crisprme.py build-index-only, and the real
 pool_index_indels.py under it, with a stub engine on PATH. The stub crispritz.py
-writes the layout the real one writes and can be told to fail, or to wait, before
-one chromosome; the stub pigz compresses as pigz does and can be told to wait. A
+writes the layout the real one writes, each .bin a tree as buildTST saves one, and
+can be told to fail, or to wait, before one chromosome, or to cut its .bin short;
+the stub pigz compresses as pigz does and can be told to wait. A
 wait ends on a kill, a signal or a release file, so every case is deterministic.
 SameTreeAsBefore pins the successful builds to what the code before the fix
 produced with the same stub, file for file.
@@ -26,10 +27,12 @@ import gzip
 import hashlib
 import json
 import os
+import random
 import resource
 import shutil
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -52,15 +55,35 @@ STUB_ENGINE = r'''#!PYTHON
 
 Each output file is a step "<command> <name> <input file>". A step whose key holds
 $STUB_FAIL fails (exit 1) before it is written; one whose key holds $STUB_HANG
-waits there, once $STUB_MARK is made, until $STUB_RELEASE exists. add-variants
-pads the fake contig of chromosome $STUB_BIG_FAKE with a megabase of N (and this
-stub lifts any file-size limit of its own), and with $STUB_GZ_BLOCKED leaves a
-directory where the last dictionary's .gz would go.
+waits there, once $STUB_MARK is made, until $STUB_RELEASE exists. index-genome
+writes each .bin as buildTST does, a tree of one target (the whole sequence); one
+whose step's key holds $STUB_CUT it cuts to $STUB_CUT_TO bytes (half by default)
+and still exits 0, as buildTST does on a full disk. add-variants pads the fake
+contig of chromosome $STUB_BIG_FAKE with a megabase of N (and this stub lifts any
+file-size limit of its own), and with $STUB_GZ_BLOCKED leaves a directory where the
+last dictionary's .gz would go.
 """
-import json, os, resource, shutil, sys, time
+import json, os, resource, shutil, struct, sys, time
 
 if os.environ.get("STUB_BIG_FAKE"):
     resource.setrlimit(resource.RLIMIT_FSIZE, (resource.getrlimit(resource.RLIMIT_FSIZE)[1],) * 2)
+
+# the four bits a tree gives a base (writePair, in CRISPRitz's mainParallel.cpp), N's 0000
+CODE = dict(zip("ACGTRYSWKMBDHV", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7)))
+
+
+def tst(pam, nb, seq):
+    """A .bin as saveTST writes one, of a single target: the sequence seq, with pam
+    for its PAM and nb in the guide-length field; its tree is a chain of one node a
+    base, which ends with the target's index (crispritz_bins has the layout)."""
+    nibbles = [n for base in seq for n in (CODE.get(base, 0), 0, 0)]  # a base, no lo/hi kid
+    tree = bytes(a << 4 | b for a, b in zip(nibbles[::2], nibbles[1::2]))
+    tree += bytes([nibbles[-1] << 4 | 0xF if len(nibbles) % 2 else 0xF0])  # "_": the end
+    codes = [CODE.get(base, 0) for base in pam] + [0]
+    target = struct.pack("=i", 0) + bytes(codes[i] << 4 | codes[i + 1]
+                                          for i in range(0, len(pam), 2)) + b"0"
+    return (struct.pack("=ii", 1, int(nb)) + target + struct.pack("=i", len(seq)) + tree
+            + struct.pack("=i", -1))
 
 
 def note(line):
@@ -106,9 +129,16 @@ if sys.argv[1] == "index-genome":
         shutil.rmtree(out)
     os.makedirs(out)
     for fa in fastas(gdir):
-        step("index-genome %s %s" % (name, fa))
-        write(os.path.join(out, "%s_%s_1.bin" % (pam, fa[: -len(".fa")])),
-              "%s %s %s\n" % (pam, nb, sequence(os.path.join(gdir, fa))))
+        key = "index-genome %s %s" % (name, fa)
+        step(key)
+        seq = sequence(os.path.join(gdir, fa))
+        if not seq:  # (buildTST writes no tree where there is no target)
+            continue
+        data = tst(pam, nb, seq)
+        if os.environ.get("STUB_CUT") and os.environ["STUB_CUT"] in key:
+            data = data[: int(os.environ.get("STUB_CUT_TO", len(data) // 2))]
+        with open(os.path.join(out, "%s_%s_1.bin" % (pam, fa[: -len(".fa")])), "wb") as fh:
+            fh.write(data)
 elif sys.argv[1] == "add-variants":
     vdir, gdir = os.path.realpath(sys.argv[2]), os.path.realpath(sys.argv[3])
     vcf, genome = os.path.basename(vdir), os.path.basename(gdir)
@@ -669,6 +699,30 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                     self.assertIn("Indexing failed for INDELs in chr2\n", out)
                 self.assertFalse(os.path.lexists(self.lib(name)))
                 self.assertEqual(self.leftovers(), [])
+
+    def test_a_build_the_engine_left_cut_short_is_not_put_in_place(self):
+        """buildTST does not check its writes: on a full disk it left a .bin empty or
+        cut short and still exited 0 (the stub does so at $STUB_CUT). That index went
+        into place ('Index built', 'Variant index ready'), every later run printed
+        'already present' and kept it, and every search failed on it ('numLeaves=',
+        'numNodes=0'), until it was removed by hand. Each .bin is now checked first."""
+        for name, (vcf, chr2, whole) in WHOLE.items():
+            for cut, size in (("empty", {"STUB_CUT_TO": "0"}), ("cut short", {})):
+                with self.subTest(index=name, bin=cut):
+                    self.fresh()
+                    rc, out, err = self.run_bio(vcf=vcf, STUB_CUT=chr2, **size)
+                    self.assertEqual(rc, 1, out + err)
+                    # (for the INDELS index, the file of the chromosome it is)
+                    self.assertIn(f" indexing failed: the engine exited 0, but {whole[1]} is "
+                                  f"{cut}", err)
+                    self.assertIn(", as when the disk fills up: nothing was put in place "
+                                  f"(expected {self.lib(name)})\n", err)
+                    self.assertFalse(os.path.lexists(self.lib(name)))
+                    self.assertEqual(self.leftovers(), [])
+                    # and once there is room, the next run builds it whole
+                    rc, out, err = self.run_bio(vcf=vcf)
+                    self.assertEqual(rc, 0, err)
+                    self.assertEqual(self.bins(name), whole)
 
     def test_a_genome_library_on_another_file_system_still_gets_its_index(self):
         """No rename crosses file systems: the build runs beside the indexes."""
@@ -1702,6 +1756,116 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                 shutil.rmtree(marker)
 
 
+def save_tst(targets, guide_len=23):
+    """A .bin as buildTST writes one (insall, insert, saveTST and serialize in
+    CRISPRitz's mainParallel.cpp, ported): targets are (guideIndex, sequence, PAM),
+    sorted by sequence, all sequences of one length."""
+    code = dict(zip("ACGTRYSWKMBDHVN0_", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7, 0, 0, 15)))
+    nodes, nexts = [], [0] * len(targets)  # a node: [base, lokid, hikid, eqkid]
+
+    def insert(seq, i):
+        k, p = 0, 0
+        while nodes:
+            node = nodes[p]
+            if seq[k] == node[0]:
+                k += 1
+                if k == len(seq):  # another target with this sequence
+                    nexts[i], node[3] = node[3], -(i + 1)
+                    return
+                if not node[3]:
+                    node[3] = len(nodes)
+                    break
+                p = node[3]
+            else:
+                kid = 1 if seq[k] < node[0] else 2
+                if not node[kid]:
+                    node[kid] = len(nodes)
+                    break
+                p = node[kid]
+        while True:
+            nodes.append([seq[k], 0, 0, 0])
+            k += 1
+            if k == len(seq):
+                nodes[-1][3] = -(i + 1)
+                return
+            nodes[-1][3] = len(nodes)
+
+    def insall(lo, hi):
+        if hi >= lo:
+            mid = lo + (hi - lo) // 2
+            insert(targets[mid][1], mid)
+            insall(lo, mid - 1)
+            insall(mid + 1, hi)
+
+    insall(0, len(targets) - 1)
+    out = bytearray(struct.pack("=ii", len(targets), guide_len))
+    for i, (index, _, pam) in enumerate(targets):
+        out += struct.pack("=i", index)
+        nibble, k = 0, 0
+        for j, base in enumerate(pam):
+            nibble, k = nibble + code[base], k + 1
+            if j == len(pam) - 1 or k == 2:
+                out.append(nibble)
+                nibble, k = 0, 0
+            if k == 1:
+                nibble <<= 4
+        out += b"_" + struct.pack("=i", nexts[i]) if nexts[i] else b"0"
+    out += struct.pack("=i", len(nodes))
+    pair, first = ["0", "0"], [True]
+
+    def put(base):
+        pair[0 if first[0] else 1] = base
+        if base == "_" or not first[0]:
+            out.append(0xF0 if pair[0] == "_" else code[pair[0]] << 4 | code[pair[1]])
+            first[0] = True
+        else:
+            first[0] = False
+
+    def serialize(p):
+        base, lo, hi, eq = nodes[p]
+        put(base)
+        serialize(lo) if lo > 0 else put("0")
+        serialize(hi) if hi > 0 else put("0")
+        if eq > 0:
+            serialize(eq)
+        else:
+            put("_")
+            out.extend(struct.pack("=i", eq))
+
+    serialize(0)
+    return bytes(out)
+
+
+class TheIndexCheckTellsAWholeTreeFromOneCutShort(unittest.TestCase):
+    """crispritz_bins, on trees as buildTST saves them: of many targets, some of one
+    sequence, with shared starts and IUPAC bases, for PAMs of odd and even length.
+    Each is whole, and each cut of it, at every length, is not."""
+
+    def test_every_cut_of_a_whole_tree_is_told_apart(self):
+        sys.path.insert(0, HERE)
+        import crispritz_bins
+        rng = random.Random(7)
+        tmp = tempfile.mkdtemp(prefix="bio_atomic_bins_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for pam, n in (("NRG", 40), ("TTTV", 25), ("NNNNNNNN", 1), ("NGG", 2)):
+            with self.subTest(pam=pam, targets=n):
+                seqs = ["".join(rng.choice("ACGTACGTRY") for _ in range(6)) for _ in range(n)]
+                seqs += seqs[: n // 4]  # some sequences more than once
+                targets = sorted((rng.randrange(1 << 20), s, "".join(rng.choice("ACGTN")
+                                                                     for _ in pam))
+                                 for s in seqs)
+                targets = sorted(targets, key=lambda t: t[1])
+                data = save_tst(targets)
+                path = os.path.join(tmp, f"{pam}_chr1_1.bin")
+                with open(path, "wb") as fh:
+                    fh.write(data)
+                self.assertIsNone(crispritz_bins.bin_problem(path))
+                for size in range(len(data)):
+                    with open(path, "wb") as fh:
+                        fh.write(data[:size])
+                    self.assertIsNotNone(crispritz_bins.bin_problem(path), size)
+
+
 # What the code before this fix (379b5b0) did with the same stub and inputs, for
 # SameTreeAsBefore: its exit status, the tree it left as `digest  path` (tree(), with
 # the run's own paths written <W>, <R> and <REPO>), the lines it printed, sorted, and
@@ -1723,8 +1887,8 @@ BEFORE = {
             "dir  genome_library/NRG_2_hg38/",
             "4983ff2823805684  genome_library/NRG_2_hg38/.display_label",
             "425fad713f395627  genome_library/NRG_2_hg38/.pam_build",
-            "836398cfb63675bc  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
-            "400e714b6d577f71  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
+            "dee1e9b039f12fe0  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
+            "338fbfb5efc7044c  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
             "c442c9cdd4d80f67  samples.txt",
             "dir  samplesIDs/",
             "036a130b3364d826  samplesIDs/hg38_ds.samplesID.txt",
@@ -1785,17 +1949,17 @@ BEFORE = {
             "dir  genome_library/NRG_2_hg38+ds/",
             "4983ff2823805684  genome_library/NRG_2_hg38+ds/.display_label",
             "425fad713f395627  genome_library/NRG_2_hg38+ds/.pam_build",
-            "04fd219b01b57b8e  genome_library/NRG_2_hg38+ds/NRG_chr1.enriched_1.bin",
-            "8e3da51d843e800e  genome_library/NRG_2_hg38+ds/NRG_chr2.enriched_1.bin",
+            "1dafb9f88a997704  genome_library/NRG_2_hg38+ds/NRG_chr1.enriched_1.bin",
+            "fdb7a83262a278ee  genome_library/NRG_2_hg38+ds/NRG_chr2.enriched_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
-            "e3c79f97ace30cbd  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
+            "270e5e2a33dbf6ed  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
-            "82ec6931a4d9ff3d  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
+            "5086fa72ea1b3534  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/NRG_2_hg38/",
             "425fad713f395627  genome_library/NRG_2_hg38/.pam_build",
-            "836398cfb63675bc  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
-            "400e714b6d577f71  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
+            "dee1e9b039f12fe0  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
+            "338fbfb5efc7044c  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
             "c442c9cdd4d80f67  samples.txt",
             "dir  samplesIDs/",
             "036a130b3364d826  samplesIDs/hg38_ds.samplesID.txt",
@@ -1873,17 +2037,17 @@ BEFORE = {
             "dir  genome_library/NRG_2_hg38+ds/",
             "4983ff2823805684  genome_library/NRG_2_hg38+ds/.display_label",
             "425fad713f395627  genome_library/NRG_2_hg38+ds/.pam_build",
-            "04fd219b01b57b8e  genome_library/NRG_2_hg38+ds/NRG_chr1.enriched_1.bin",
-            "8e3da51d843e800e  genome_library/NRG_2_hg38+ds/NRG_chr2.enriched_1.bin",
+            "1dafb9f88a997704  genome_library/NRG_2_hg38+ds/NRG_chr1.enriched_1.bin",
+            "fdb7a83262a278ee  genome_library/NRG_2_hg38+ds/NRG_chr2.enriched_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
-            "e3c79f97ace30cbd  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
+            "270e5e2a33dbf6ed  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
-            "82ec6931a4d9ff3d  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
+            "5086fa72ea1b3534  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/NRG_2_hg38/",
             "425fad713f395627  genome_library/NRG_2_hg38/.pam_build",
-            "836398cfb63675bc  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
-            "400e714b6d577f71  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
+            "dee1e9b039f12fe0  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
+            "338fbfb5efc7044c  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
             "c442c9cdd4d80f67  samples.txt",
             "dir  samplesIDs/",
             "036a130b3364d826  samplesIDs/hg38_ds.samplesID.txt",

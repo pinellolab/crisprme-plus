@@ -3285,11 +3285,15 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bo
     mount point (genome_library may be a bind mount of its own), and the index
     takes genome_library's setgid group and default ACL, as one built in place
     does. Every path ``cmd`` names is absolute, so it resolves from there.
-    ``failure`` is the error for a command that fails. If a search holds the
-    index's build lock by then, the run stops (_refuse_locked_build); if another
-    run has put the index in place meanwhile, that one is kept and this build
-    discarded. Returns True when this build went into place.
+    ``failure`` is the error for a command that fails, or that exits 0 but leaves a
+    .bin that is not whole (crispritz_bins: buildTST does not check its writes, so a
+    full disk leaves one empty or cut short). If a search holds the index's build
+    lock by then, the run stops (_refuse_locked_build); if another run has put the
+    index in place meanwhile, that one is kept and this build discarded. Returns
+    True when this build went into place.
     """
+    import crispritz_bins
+
     lib = os.path.join(workdir, "genome_library")
     final = os.path.join(lib, name)
     os.makedirs(lib, exist_ok=True)
@@ -3299,6 +3303,13 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bo
         code = subprocess.call(cmd, cwd=tmp, **kwargs)
         if code != 0 or not os.path.isdir(built):
             error(f"{failure} (expected {final})")
+        cut = crispritz_bins.incomplete_bins(built)
+        if cut:
+            error(
+                f"{failure}: the engine exited 0, but {os.path.relpath(cut[0][0], built)} "
+                f"is {cut[0][1]}, as when the disk fills up: nothing was put in place "
+                f"(expected {final})"
+            )
         _refuse_locked_build(final)
         if not os.path.isdir(final):
             try:
