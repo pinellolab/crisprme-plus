@@ -19,9 +19,10 @@ pipeline launch stubbed to succeed or fail, and sort-bed / bgzip replaced by Pyt
 stand-ins (the light CI env has neither). Every other step of complete-search runs.
 
 A pipeline that may still be running keeps them: after a Ctrl-C, subprocess.call has
-killed only the /bin/sh that runs it (dash does not exec it), and a signal that killed
-the pipeline's bash need not have killed its workers. One test sends SIGINT to a real
-crisprme.py process alone while a stub pipeline outlives that sh.
+killed only its /bin/sh (dash does not exec the pipeline, which runs on; bash does, and
+the step it was running runs on), and a signal that killed the pipeline's bash need not
+have killed its workers. One test sends SIGINT to a real crisprme.py process alone while
+the worker of a stub pipeline, which goes on under either shell, is still to read them.
 """
 import contextlib
 import gzip

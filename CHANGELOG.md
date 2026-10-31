@@ -413,10 +413,12 @@ and the `release-crisprme` skill.
   are now removed once the command that made them is over, whether it succeeded or failed (an
   input error, a failed pipeline), and never another job's; `--keep-intermediates` keeps them.
   They are kept, as before, whenever the pipeline may still be running on them: after a Ctrl-C,
-  on which `crisprme.py` kills only the shell that runs the pipeline (an interrupt sent to
-  `crisprme.py` alone, such as `kill -INT <pid>`, leaves the whole pipeline running to the end),
-  and after a signal that killed the pipeline itself, whose workers may outlive it. Search results
-  are unchanged. Covered by `PostProcess/test_annotation_tmpdirs.py`.
+  on which `crisprme.py` kills only the `/bin/sh` it started the pipeline with (where `/bin/sh` is
+  dash, as in the Docker and Apptainer images, an interrupt sent to `crisprme.py` alone, such as
+  `kill -INT <pid>`, leaves the whole pipeline running to the end; where it is bash, as on
+  RHEL-family hosts, that shell is the pipeline's own, and the step then running finishes on its
+  own), and after a signal that killed the pipeline itself, whose workers may outlive it. Search
+  results are unchanged. Covered by `PostProcess/test_annotation_tmpdirs.py`.
 - **Pipeline failure summaries are binary-safe.** `summarize_pipeline_failure()` now reads `log.txt`
   and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
   stderr no longer raises `UnicodeDecodeError` and masks the real error.

@@ -2530,8 +2530,10 @@ def complete_search() -> None:
             # The pipeline reads the annotation temp folders until it ends, so they are
             # not removed (_run_and_remove_annotation_tmpdirs) unless it is known to have
             # ended: an exit of its own (0-128), which comes after it has waited for every
-            # worker. On a Ctrl-C subprocess.call kills only its /bin/sh (dash does not
-            # exec it), and a signal that killed its bash (128 + N) or that sh (-N) can
+            # worker. On a Ctrl-C subprocess.call kills only its /bin/sh: dash does not
+            # exec the pipeline, which runs on; bash does, so the kill ends the pipeline's
+            # own bash and the step it was running runs on. A signal that killed its bash
+            # (128 + N through dash, -N where /bin/sh is bash) or that sh (-N) can likewise
             # leave it, or its workers, running on them.
             handed_over = _ANNOTATION_TMPDIRS[:]
             del _ANNOTATION_TMPDIRS[:]
