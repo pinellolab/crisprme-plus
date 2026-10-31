@@ -877,12 +877,21 @@ def _this_host():
     return os.uname().nodename, pidns
 
 
-def owner_record(pid, host=None, pidns=None, started="2026-10-30T00:00:00Z"):
-    """An owner record as the script writes one into a lock; for this host by default."""
+def owner_record(pid, host=None, pidns=None, started="2026-10-30T00:00:00Z", pstart=None):
+    """An owner record as the script writes one into a lock; for this host by default.
+    `pstart`: the process's start time, as the script records its own (none: an owner
+    this run can tell by its PID alone)."""
     this_host, this_pidns = _this_host()
     return (f"host={this_host if host is None else host}\n"
             f"pidns={this_pidns if pidns is None else pidns}\n"
-            f"pid={pid}\nstarted={started}\n")
+            f"pid={pid}\nstarted={started}\n"
+            + ("" if pstart is None else f"pstart={pstart}\n"))
+
+
+def _pstart(pid):
+    """`pid`'s start time: field 22 of /proc/<pid>/stat, after its name in parentheses."""
+    stat = Path(f"/proc/{pid}/stat").read_text()
+    return stat[stat.rindex(")") + 2:].split()[19]
 
 
 def dead_pid():
@@ -1235,6 +1244,51 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         rc, out, err = self.take(stop_after=1.5)
         self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
         self.assertIn(", which is still running. Wait for that run to finish", out)
+        self.assertEqual(err, "")
+
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"),
+                         "a process's start time is read through /proc")
+    def test_the_very_run_is_waited_for_however_old_its_record(self):
+        # Its record names its start time: this host's process of that PID with that start
+        # time is that run. Resumed after 15 minutes stopped (Ctrl-Z, then fg), it was taken
+        # over at once, its record not refreshed yet -- not until its refresh loop's next
+        # beat, a minute later at most -- and both runs wrote one index.
+        owner = self.sleeper()
+        record = owner_record(owner.pid, pstart=_pstart(owner.pid))
+        self.hold(record)
+        _age(self.lock / "owner", 16)
+        rc, out, err = self.take(stop_after=1.5)
+        self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
+        self.assertNotIn("Stale lock", out)
+        self.assertTrue(self.notices(out)[0].endswith(
+            "which is still running. Wait for that run to finish, or stop it."), out)
+        self.assertNotIn("rm -rf", out)
+        self.assertEqual((self.lock / "owner").read_text(), record)
+        self.assertEqual(err, "")
+
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"),
+                         "a process's start time is read through /proc")
+    def test_a_pid_given_since_to_another_process_is_taken_over_at_once(self):
+        # The run that held the lock is gone and its PID reused: the process there now
+        # started at another time. Its record, refreshed a moment ago, is a dead run's.
+        owner = self.sleeper()
+        self.hold(owner_record(owner.pid, pstart=int(_pstart(owner.pid)) - 1))
+        rc, out, err = self.take(stop_after=10)
+        self.assertEqual(rc, 2, out + err)  # 2: taken over, the build redone
+        self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {owner.pid} on "
+                      f"{_this_host()[0]}, started 2026-10-30T00:00:00Z) is gone. Taking it "
+                      "over", out)
+        self.assertEqual(err, "")
+
+    def test_a_lock_with_this_runs_own_record_is_not_waited_on(self):
+        # Left by a release whose rm -rf failed, say: its record is this very run's, which
+        # must not wait for itself.
+        rc, out, err = self.take(
+            then=f'_lock_take {_q(self.lock)} "indexing {self.out}" {_q(self.out)}; rc=$?',
+            stop_after=10)
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn(f"Stale lock {self.lock}: the run that held it", out)
+        self.assertNotIn("waiting", out)
         self.assertEqual(err, "")
 
     def test_a_record_not_refreshed_for_15_minutes_is_abandoned_whatever_its_pid_says(self):
@@ -1819,8 +1873,17 @@ class BuildLocksInTheShippedScript(_ShippedScript):
                          rf"it with fg or kill -CONT {holder.proc.pid}, or stop it\.\n")
         self.assertNotIn("rm -rf", waiter.stdout())
         self.assertEqual(waiter.stderr(), "")
-        # resumed, the run finishes its build and lets go, and the waiter searches it
-        os.killpg(holder.proc.pid, signal.SIGCONT)
+        # Resumed, it is the same run, however old its record -- whose refresh waits for the
+        # loop's next beat -- whether bash alone is resumed (kill -CONT <pid>, as the notice
+        # says: its build step and refresh loop stay stopped) or the whole run (fg).
+        for resume in (lambda: os.kill(holder.proc.pid, signal.SIGCONT),
+                       lambda: os.killpg(holder.proc.pid, signal.SIGCONT)):
+            resume()
+            _wait_for(lambda: _state(holder.proc.pid) != "T", 10, "the run to resume")
+            time.sleep(1)  # several polls
+            self.assertEqual([c for c in waiter.calls() if c[0] == "index-genome"], [])
+            self.assertEqual((self.lock / "owner").read_text(), record)
+        # its build ends, it lets go, and the waiter searches what it built
         self.index.mkdir()
         (self.index / "chr1.bin").write_bytes(b"")
         built.touch()

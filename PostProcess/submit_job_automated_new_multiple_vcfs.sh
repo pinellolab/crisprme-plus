@@ -160,29 +160,29 @@ fi
 # _resolve_index_dir never selects an index whose lock is still there. The lock holds
 # an owner record (host, PID namespace, PID, start time), so a lock left by a run
 # that died -- SIGKILL, OOM kill, container stop, reboot -- does not wedge every later
-# run: when the record names this host and PID namespace and that PID is gone, or is
-# a zombie (a run that died unreaped), the next run takes the lock over and redoes
-# the build. A run stopped before its build is done -- Ctrl-C, a SIGTERM (SLURM's
-# scancel or time limit), a hangup -- leaves its lock and record the same way, for
-# the same takeover: letting go would hand on what the lock guards, half-written, as
-# finished. From another host or container the PID cannot be checked (PIDs and
-# hostnames are not comparable across Docker containers; `--network host` even shares
-# the hostname), so the holder also refreshes its record every minute, and a run
-# there takes the lock over once the record has gone 15 minutes without a refresh. So
-# does a run on this host when that PID is a live process's, which may be one reused
-# since -- but not when it is stopped (Ctrl-Z, kill -STOP): a stopped run's refresh
-# is stopped with it, and it is waited for, however old its record. A run stopped
-# where no other run can see it so -- frozen through its cgroup, which /proc shows as
-# sleeping (docker pause, a SLURM suspend through cgroups), or stopped in another
-# container or on another host (a job suspended elsewhere) -- can have its lock taken
-# over after 15 minutes. Resumed, it ends with an ERROR as soon as its build step
-# returns, and uses and removes nothing that the lock guards (_lock_lost). A lock with
-# no record at all is never broken, however old: CRISPRme 2.8.0 takes its locks with
-# a bare mkdir and may still be building under one. So a run that ends in the moment
-# between a free lock's mkdir and the write of its record leaves a lock that someone
-# must clear: the run waits for it and says every few minutes how to. Every message
-# goes to stdout -- a write to stderr fails the stage -- except the ERROR of a run
-# that ends in failure.
+# run: when the record names this host and PID namespace and that PID is gone, a
+# zombie (a run that died unreaped), or another process's by now (one that started at
+# another time), the next run takes the lock over and redoes the build. That very run
+# is waited for, however old its record: stopped (Ctrl-Z, kill -STOP, a SLURM
+# suspend), it does not refresh it (below). A run stopped before its build is done --
+# Ctrl-C, a SIGTERM (SLURM's scancel or time limit), a hangup -- leaves its lock and
+# record the same way, for the same takeover: letting go would hand on what the lock
+# guards, half-written, as finished. From another host or container the PID cannot be
+# checked (PIDs and hostnames are not comparable across Docker containers; `--network
+# host` even shares the hostname), so the holder also refreshes its record every
+# minute, and a run there takes the lock over once the record has gone 15 minutes
+# without a refresh. So does a run on this host where /proc cannot tell the run from a
+# process given its PID since (hidepid, no /proc), as a reused PID answers kill -0. A
+# run stopped where no other run can see it -- in another container or on another host
+# (docker pause, a job suspended elsewhere) -- can thus lose its lock to a takeover
+# after 15 minutes; resumed, it ends with an ERROR as soon as its build step returns,
+# using and removing nothing that the lock guards (_lock_lost). A lock with no record
+# at all is never broken, however old: CRISPRme 2.8.0 takes its locks with a bare
+# mkdir and may still be building under one. So a run that ends in the moment between
+# a free lock's mkdir and the write of its record leaves a lock that someone must
+# clear: the run waits for it and says every few minutes how to. Every message goes to
+# stdout -- a write to stderr fails the stage -- except the ERROR of a run that ends
+# in failure.
 _lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/null)" \
 	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
 _locks_held=()
@@ -217,39 +217,51 @@ _lock_mine() {
 }
 
 # Set _lock_st to the state of process $1 as /proc/<pid>/stat gives it -- R, S, D...;
-# T stopped, t traced, Z exited but not reaped -- or to "" where /proc cannot tell: no
-# such process, one hidden from this run (hidepid), no /proc, or a /proc that is not
-# this PID namespace's (it shows this shell under another PID). Read with the read
-# builtin; the state follows the last ") ", as the name before it may hold either.
+# T stopped, t traced, Z exited but not reaped -- and _lock_pstart to its start time
+# (field 22), or both to "" where /proc cannot tell: no such process, one hidden from
+# this run (hidepid), no /proc, or a /proc that is not this PID namespace's (it shows
+# this shell under another PID). Read with the read builtin; the fields follow the
+# last ") ", as the name before it may hold either.
 _lock_state() {
-	local _s=
-	_lock_st=
+	local _s= _i=0
+	_lock_st= _lock_pstart=
 	case "$1" in '' | 0 | *[!0-9]*) return 0 ;; esac
 	{ IFS= read -r _s </proc/self/stat; } 2>/dev/null
 	[ "${_s%% *}" = "${BASHPID:-$$}" ] || return 0
 	_s=
 	{ IFS= read -r -d '' _s <"/proc/$1/stat"; } 2>/dev/null
-	case "$_s" in *") "*) _s=${_s##*") "}; _lock_st=${_s%% *} ;; esac
+	case "$_s" in *") "*) ;; *) return 0 ;; esac
+	_s=${_s##*") "}
+	_lock_st=${_s%% *}
+	while [ "$_i" -lt 19 ]; do _s=${_s#* }; _i=$((_i + 1)); done
+	_lock_pstart=${_s%% *}
 	return 0
 }
+# This run's start time goes into its record: on this host it tells this run from a
+# process given its PID once it is gone (_lock_stale).
+_lock_state "$$"
+[ -z "$_lock_pstart" ] || _lock_me="$_lock_me"$'\n'"pstart=$_lock_pstart"
 
 # 0 when lock $1 is stale: its owner record names this host and PID namespace and that
-# PID is gone or a zombie (it died unreaped), or the record has gone 15 minutes without
-# a refresh (_lock_hold) -- on this host too when the PID is a live process's, which
-# may be one reused since. But a stopped process (Ctrl-Z, kill -STOP) is a live run
-# whose refresh is stopped with it, however old its record. Otherwise 1, with the
-# reason in _lock_why, and _lock_live=1 when the owner is known to be alive (its PID
-# here, or its refreshes), 2 when it is stopped, 0 when this run cannot tell. On 0,
-# _lock_gone says what became of the owner. Leaves the record read in _lock_rec, and
-# its pid, host and start time in _lock_pid, _lock_host and _lock_started.
+# PID is gone, a zombie (it died unreaped) or another process's by now (it started at
+# another time than the record says), or the record has gone 15 minutes without a
+# refresh (_lock_hold) -- on this host too where /proc cannot tell the run from a
+# process given its PID since, or the record names no start time. That very run is
+# alive however old its record: stopped (Ctrl-Z, kill -STOP), its refresh is stopped
+# with it, and once resumed it refreshes only at its loop's next beat. Otherwise 1,
+# with the reason in _lock_why, and _lock_live=1 when the owner is known to be alive
+# (its PID here, or its refreshes), 2 when it is stopped, 0 when this run cannot tell.
+# On 0, _lock_gone says what became of the owner. Leaves the record read in _lock_rec,
+# and its pid, host and start time in _lock_pid, _lock_host and _lock_started.
 _lock_stale() {
-	local _pidns _where=
+	local _pidns _pstart _where=
 	_lock_live=0
 	_lock_read "$1"
 	_lock_field _lock_pid "$_lock_rec" pid
 	_lock_field _lock_host "$_lock_rec" host
 	_lock_field _lock_started "$_lock_rec" started
 	_lock_field _pidns "$_lock_rec" pidns
+	_lock_field _pstart "$_lock_rec" pstart
 	if [ -z "$_lock_rec" ]; then
 		_lock_why="it has no owner record (an older CRISPRme writes none), so this run cannot check it"
 		return 1
@@ -257,8 +269,12 @@ _lock_stale() {
 	_lock_why="it is held by pid $_lock_pid on $_lock_host (a run started $_lock_started)"
 	if [ "$_lock_host" != "$_lock_me_host" ] || [ "$_pidns" != "$_lock_me_pidns" ]; then
 		_where=", on another host or in another container"
-	else
+	elif [ "$_lock_pid" != "$$" ]; then  # (this run's own PID: see below)
 		_lock_state "$_lock_pid"
+		# started at another time than the record says: not that run, but its PID reused
+		if [ -n "$_lock_st" ] && [ -n "$_pstart" ] && [ "$_lock_pstart" != "$_pstart" ]; then
+			_lock_st=X
+		fi
 		case "$_lock_st" in
 			Z | X)
 				_lock_gone="is gone"
@@ -268,6 +284,12 @@ _lock_stale() {
 				_lock_live=2
 				_lock_why="$_lock_why, which is stopped"
 				return 1 ;;
+			?*)
+				if [ -n "$_pstart" ]; then  # the very run, however old its record
+					_lock_live=1
+					_lock_why="$_lock_why, which is still running"
+					return 1
+				fi ;;
 		esac
 	fi
 	# (find through a pipe: a test, not $(...))
