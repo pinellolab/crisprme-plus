@@ -506,6 +506,11 @@ fi
 if [ "$1" = index-genome ] && [ -n "$STUB_BUILD_UNTIL" ]; then
 	while ! [ -e "$STUB_BUILD_UNTIL" ]; do sleep 0.05; done
 fi
+# STUB_BUILD_FAILS=1: the index build then fails, saying so on stderr as crispritz does.
+if [ "$1" = index-genome ] && [ "$STUB_BUILD_FAILS" = 1 ]; then
+	echo "ERROR: buildTST (index build) failed (exit code 1)." >&2
+	exit 1
+fi
 if [ "$1" = search ] && [ -n "$STUB_SEARCH_UNTIL" ]; then
 	while ! [ -e "$STUB_SEARCH_UNTIL" ]; do sleep 0.05; done
 fi
@@ -1171,6 +1176,50 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         self.assertEqual((self.lock / "owner").read_text(), owner_record(1))
         self.assertEqual(err, "")
 
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"),
+                         "a stopped run is told from a live one through /proc")
+    def test_a_stopped_owner_on_this_host_is_waited_for_however_old_its_record(self):
+        # Stopped (Ctrl-Z, kill -STOP, a SLURM suspend), a run's refresh loop is stopped
+        # with it, so its record ages. A run on this host took the lock over after 15
+        # minutes and rebuilt under the live build; resumed, that build wrote on, and its
+        # run searched the index being rebuilt -- or removed it.
+        owner = self.sleeper()
+        os.kill(owner.pid, signal.SIGSTOP)
+        _wait_for(lambda: _state(owner.pid) == "T", 10, "the owner to stop")
+        record = owner_record(owner.pid)
+        self.hold(record)
+        _age(self.lock / "owner", 16)
+        rc, out, err = self.take(stop_after=3.2)
+        self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
+        self.assertNotIn("Stale lock", out)
+        notices = self.notices(out)
+        self.assertGreaterEqual(len(notices), 2, out)
+        for notice in notices:  # stopped, not finishing: how to go on
+            self.assertTrue(notice.endswith(
+                f"it is held by pid {owner.pid} on {_this_host()[0]} (a run started "
+                f"2026-10-30T00:00:00Z), which is stopped. Resume it with fg or kill -CONT "
+                f"{owner.pid}, or stop it."), notice)
+        self.assertNotIn("rm -rf", out)
+        self.assertEqual((self.lock / "owner").read_text(), record)
+        self.assertEqual(err, "")
+
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"),
+                         "a dead run that was never reaped is told from a live one through /proc")
+    def test_a_zombie_owner_on_this_host_is_taken_over_at_once(self):
+        # Dead but never reaped, a run still answers kill -0: a zombie. Its record, just
+        # refreshed, is a dead run's all the same.
+        zombie = subprocess.Popen(["true"])
+        self.addCleanup(zombie.wait)
+        _wait_for(lambda: _state(zombie.pid) == "Z", 10, "the owner to die")
+        self.hold(owner_record(zombie.pid))
+        rc, out, err = self.take(stop_after=10)
+        self.assertEqual(rc, 2, out + err)  # 2: taken over, the build redone
+        self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {zombie.pid} on "
+                      f"{_this_host()[0]}, started 2026-10-30T00:00:00Z) is gone. Taking it "
+                      "over", out)
+        self.assertNotIn("waiting", out)
+        self.assertEqual(err, "")
+
     def test_a_record_not_refreshed_for_15_minutes_is_abandoned_whatever_its_pid_says(self):
         # A live holder refreshes its record every minute, on this host as elsewhere, so
         # one 16 minutes old is a dead run's even though its PID answers kill -0 -- a
@@ -1367,6 +1416,42 @@ class ARunThatEndsMidBuildLeavesItsLock(_Locks):
                                  [])
                 shutil.rmtree(self.lock)
 
+    def test_a_lock_taken_over_meanwhile_is_neither_used_nor_let_go(self):
+        # Another run took the lock over while this one was stopped, or could not refresh
+        # it, and builds again under it. After a build step (_lock_lost) and when letting
+        # go (_lock_release), this run says so on stderr, as a run that is to end in
+        # failure, and leaves the lock as it is. A lock with no record is still this
+        # run's: its own record failed to write.
+        theirs = owner_record(4242, host="3f9c2a1b7d10")
+        taken = (f"ERROR: the lock on {self.out} was taken over by another run (pid 4242 on "
+                 "3f9c2a1b7d10, started 2026-10-30T00:00:00Z) while this run held it; that "
+                 "run builds it again, and this run uses none of what it built. Re-run once "
+                 "that run is done.")
+        gone = (f"ERROR: the lock on {self.out} was taken over or cleared while this run "
+                "held it; this run uses none of what it built. Re-run once no other run is "
+                "building it.")
+        for lock, change, says, released, left in (
+                ("taken over", f"printf %s {_q(theirs)} >{_q(self.lock)}/owner", taken, 1,
+                 ["owner"]),
+                ("gone", f"rm -rf {_q(self.lock)}", gone, 1, None),
+                ("with no record", f"rm {_q(self.lock)}/owner", None, 0, None)):
+            with self.subTest(lock=lock):
+                proc = self.start(f"_lock_beat_s=0.2\n"
+                                  f"_lock_take {_q(self.lock)} 'indexing a' {_q(self.out)} "
+                                  f"|| exit 9\n{change}\n"
+                                  f"_lock_lost {_q(self.lock)}; echo lost=$?\n"
+                                  f"_lock_release {_q(self.lock)}; echo released=$?")
+                rc, out, err = self.result(proc)
+                self.assertEqual(out, f"lost={0 if says else 1}\nreleased={released}\n", err)
+                self.assertEqual(err, f"{says}\n" * 2 if says else "")
+                if left is None:
+                    self.assertFalse(self.lock.exists())
+                else:
+                    self.assertEqual(sorted(os.listdir(self.lock)), left)
+                    self.assertEqual((self.lock / "owner").read_text(), theirs)
+                    shutil.rmtree(self.lock)
+                self.assertEqual(_wait_until_gone(proc.pid), [])  # its refresh stopped
+
     def test_a_waiting_run_expands_no_command_substitution(self):
         """bash 5.2 can fail to parse a trap that fires while it expands a $(...) --
         "trap: line 2: unexpected EOF while looking for matching `)'" -- and the signal
@@ -1509,7 +1594,7 @@ class ALockIsKeptFreshByTheRunThatHoldsIt(_Locks):
         rc, out, err = self.take(stop_after=10)
         self.assertEqual(rc, 2, out + err)
         self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {proc.pid} ", out)
-        self.assertIn("has not refreshed its lock for 15 minutes", out)
+        self.assertIn(") is gone. Taking it over", out)  # a zombie: dead, whatever its age
         self.assertEqual(err, "")
 
     @unittest.skipUnless(os.path.isdir("/proc/self/fd"),
@@ -1692,6 +1777,97 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         run = self.finish(waiter, timeout=60)
         self.assertIn(f"Stale lock {self.lock}", run.stdout)
         self.assertBuiltAndSearched(run)
+
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"),
+                         "a stopped run is told from a live one through /proc")
+    def test_a_stopped_build_on_this_host_is_waited_for_however_long_it_is_stopped(self):
+        # Ctrl-Z, kill -STOP, a SLURM suspend: the run is stopped, its refresh loop with it,
+        # and its record ages. A run on this host took the lock over after 15 minutes and
+        # rebuilt under the stopped build, which went on writing once resumed.
+        built = self.root / "built"
+        holder = self.launch(variant=False, env={"STUB_BUILD_UNTIL": str(built)})
+        _wait_for(lambda: any(c[0] == "index-genome" for c in holder.calls()), 60,
+                  "the build to start")
+        os.killpg(holder.proc.pid, signal.SIGSTOP)
+        _wait_for(lambda: _state(holder.proc.pid) == "T", 10, "the run to stop")
+        record = (self.lock / "owner").read_text()
+        _age(self.lock / "owner", 16)  # stopped for 16 minutes: never refreshed meanwhile
+        waiter = self.launch(variant=False, env={"_lock_poll_s": "0.2"})
+        _wait_for(lambda: "Still waiting for" in waiter.stdout(), 60, "the second run to wait")
+        time.sleep(1)  # several polls
+        self.assertEqual([c for c in waiter.calls() if c[0] == "index-genome"], [])
+        self.assertEqual((self.lock / "owner").read_text(), record)
+        self.assertRegex(waiter.stdout(), rf"Still waiting for {re.escape(str(self.lock))}: "
+                         rf"it is held by pid {holder.proc.pid} on .+, which is stopped\. Resume "
+                         rf"it with fg or kill -CONT {holder.proc.pid}, or stop it\.\n")
+        self.assertNotIn("rm -rf", waiter.stdout())
+        self.assertEqual(waiter.stderr(), "")
+        # resumed, the run finishes its build and lets go, and the waiter searches it
+        os.killpg(holder.proc.pid, signal.SIGCONT)
+        self.index.mkdir()
+        (self.index / "chr1.bin").write_bytes(b"")
+        built.touch()
+        run = self.finish(waiter, timeout=60)
+        self.assertEqual(run.builds, [])
+        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed",
+                         run.stderr)
+        self.assertEqual(self.finish(holder, timeout=60).searched(variant=False),
+                         ("NRG_2_hg38", False))
+
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"),
+                         "a dead run that was never reaped is told from a live one through /proc")
+    def test_a_build_whose_run_died_unreaped_is_taken_over_at_once(self):
+        # Killed outright and never reaped -- its parent killed first, and the container's
+        # PID 1 does not reap -- the run is a zombie, which answers kill -0. Its record,
+        # refreshed a moment ago, is a dead run's all the same.
+        killed = self.start_build()
+        self.index.mkdir()
+        (self.index / "chr1.bin").write_bytes(b"")
+        os.killpg(killed.proc.pid, signal.SIGKILL)  # and no wait(): left unreaped
+        _wait_for(lambda: _state(killed.proc.pid) == "Z", 10, "the run to die")
+        run = self.run_pipeline(variant=False, timeout=30)
+        self.assertRegex(run.stdout, rf"Stale lock {re.escape(str(self.lock))}: the run that "
+                         rf"held it \(pid {killed.proc.pid} on \S+, started \S+\) is gone\. ")
+        self.assertBuiltAndSearched(run)
+
+    def test_a_run_whose_lock_was_taken_over_meanwhile_leaves_it_to_that_run(self):
+        # Stopped for 15 minutes where no other run can see it stopped -- in another
+        # container, on another host -- a run has its lock taken over, and the taker builds
+        # again. Resumed, its own build step ended: with success, it searched the index
+        # being rebuilt; with a failure (its directory removed under it), it removed the
+        # taker's build. Now it ends with an ERROR and touches neither.
+        theirs = owner_record(4242, host="3f9c2a1b7d10", pidns="pid:[4026532123]")
+        for fails in (False, True):
+            with self.subTest(build_fails=fails):
+                for left in (self.lock, self.index):
+                    shutil.rmtree(left, ignore_errors=True)
+                built = self.root / f"built{int(fails)}"
+                run = self.launch(variant=False, env={"STUB_BUILD_UNTIL": str(built),
+                                                      "STUB_BUILD_FAILS": str(int(fails))})
+                _wait_for(lambda: any(c[0] == "index-genome" for c in run.calls()), 60,
+                          "the build to start")
+                os.killpg(run.proc.pid, signal.SIGSTOP)
+                _wait_for(lambda: _state(run.proc.pid) == "T", 10, "the run to stop")
+                # what the run in another container leaves, once it has taken over
+                (self.lock / "owner").write_text(theirs)
+                self.index.mkdir()
+                (self.index / "chr1.bin").write_bytes(b"theirs")
+                os.killpg(run.proc.pid, signal.SIGCONT)
+                built.touch()
+                result = self.finish(run, timeout=60)
+                self.assertEqual(run.proc.returncode, 1)
+                self.assertEqual(result.stderr.splitlines()[-1],
+                                 f"ERROR: the lock on {self.index} was taken over by another "
+                                 "run (pid 4242 on 3f9c2a1b7d10, started 2026-10-30T00:00:00Z) "
+                                 "while this run held it; that run builds it again, and this run "
+                                 "uses none of what it built. Re-run once that run is done.")
+                self.assertEqual(len(result.stderr.splitlines()), 1 + fails, result.stderr)
+                self.assertIsNone(result.searched(variant=False))
+                self.assertEqual((self.lock / "owner").read_text(), theirs)
+                self.assertEqual(os.listdir(self.index), ["chr1.bin"])
+                self.assertEqual((self.index / "chr1.bin").read_bytes(), b"theirs")
+                self.assertEqual(_wait_until_gone(run.proc.pid), [])
 
     def test_index_path_names_a_dead_builds_partial_index(self):
         # --index-path never builds, and the scan skips a locked index. A run that died

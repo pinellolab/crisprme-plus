@@ -160,21 +160,29 @@ fi
 # _resolve_index_dir never selects an index whose lock is still there. The lock holds
 # an owner record (host, PID namespace, PID, start time), so a lock left by a run
 # that died -- SIGKILL, OOM kill, container stop, reboot -- does not wedge every later
-# run: when the record names this host and PID namespace and that PID is gone, the
-# next run takes the lock over and redoes the build. A run stopped before its build
-# is done -- Ctrl-C, a SIGTERM (SLURM's scancel or time limit), a hangup -- leaves
-# its lock and record the same way, for the same takeover: letting go would hand on
-# what the lock guards, half-written, as finished. From another host or container
-# the PID cannot be checked (PIDs and hostnames are not comparable across Docker
-# containers; `--network host` even shares the hostname), so the holder also
-# refreshes its record every minute, and a run there takes the lock over once the
-# record has gone 15 minutes without a refresh. So does a run on this host, whatever
-# the PID says: a run that died unreaped (a zombie), or a PID reused since, still
-# answers kill -0. A lock with no record at all is never broken, however old: CRISPRme
-# 2.8.0 takes its locks with a bare mkdir and may still be building under one. So a
-# run that ends in the moment between a free lock's mkdir and the write of its record
-# leaves a lock that someone must clear: the run waits for it and says every few
-# minutes how to. Every message goes to stdout: a write to stderr fails the stage.
+# run: when the record names this host and PID namespace and that PID is gone, or is
+# a zombie (a run that died unreaped), the next run takes the lock over and redoes
+# the build. A run stopped before its build is done -- Ctrl-C, a SIGTERM (SLURM's
+# scancel or time limit), a hangup -- leaves its lock and record the same way, for
+# the same takeover: letting go would hand on what the lock guards, half-written, as
+# finished. From another host or container the PID cannot be checked (PIDs and
+# hostnames are not comparable across Docker containers; `--network host` even shares
+# the hostname), so the holder also refreshes its record every minute, and a run
+# there takes the lock over once the record has gone 15 minutes without a refresh. So
+# does a run on this host when that PID is a live process's, which may be one reused
+# since -- but not when it is stopped (Ctrl-Z, kill -STOP): a stopped run's refresh
+# is stopped with it, and it is waited for, however old its record. A run stopped
+# where no other run can see it so -- frozen through its cgroup, which /proc shows as
+# sleeping (docker pause, a SLURM suspend through cgroups), or stopped in another
+# container or on another host (a job suspended elsewhere) -- can have its lock taken
+# over after 15 minutes. Resumed, it ends with an ERROR as soon as its build step
+# returns, and uses and removes nothing that the lock guards (_lock_lost). A lock with
+# no record at all is never broken, however old: CRISPRme 2.8.0 takes its locks with
+# a bare mkdir and may still be building under one. So a run that ends in the moment
+# between a free lock's mkdir and the write of its record leaves a lock that someone
+# must clear: the run waits for it and says every few minutes how to. Every message
+# goes to stdout -- a write to stderr fails the stage -- except the ERROR of a run
+# that ends in failure.
 _lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/null)" \
 	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
 _locks_held=()
@@ -208,14 +216,32 @@ _lock_mine() {
 	[ "$_lock_rec" = "$_lock_me" ]
 }
 
-# 0 when lock $1 is stale: its owner record has gone 15 minutes without a refresh
-# (_lock_hold), or it names this host and PID namespace and that PID is gone. The
-# refresh rule holds here too, whatever the PID says: kill -0 answers for a run that
-# died unreaped (a zombie) and for a PID reused since. Otherwise 1, with the reason in
-# _lock_why, and _lock_live=1 when the owner is known to be alive (its PID here, or its
-# refreshes) -- 0 when this run cannot tell. On 0, _lock_gone says what became of the
-# owner. Leaves the record read in _lock_rec, and its pid, host and start time in
-# _lock_pid, _lock_host and _lock_started.
+# Set _lock_st to the state of process $1 as /proc/<pid>/stat gives it -- R, S, D...;
+# T stopped, t traced, Z exited but not reaped -- or to "" where /proc cannot tell: no
+# such process, one hidden from this run (hidepid), no /proc, or a /proc that is not
+# this PID namespace's (it shows this shell under another PID). Read with the read
+# builtin; the state follows the last ") ", as the name before it may hold either.
+_lock_state() {
+	local _s=
+	_lock_st=
+	case "$1" in '' | 0 | *[!0-9]*) return 0 ;; esac
+	{ IFS= read -r _s </proc/self/stat; } 2>/dev/null
+	[ "${_s%% *}" = "${BASHPID:-$$}" ] || return 0
+	_s=
+	{ IFS= read -r -d '' _s <"/proc/$1/stat"; } 2>/dev/null
+	case "$_s" in *") "*) _s=${_s##*") "}; _lock_st=${_s%% *} ;; esac
+	return 0
+}
+
+# 0 when lock $1 is stale: its owner record names this host and PID namespace and that
+# PID is gone or a zombie (it died unreaped), or the record has gone 15 minutes without
+# a refresh (_lock_hold) -- on this host too when the PID is a live process's, which
+# may be one reused since. But a stopped process (Ctrl-Z, kill -STOP) is a live run
+# whose refresh is stopped with it, however old its record. Otherwise 1, with the
+# reason in _lock_why, and _lock_live=1 when the owner is known to be alive (its PID
+# here, or its refreshes), 2 when it is stopped, 0 when this run cannot tell. On 0,
+# _lock_gone says what became of the owner. Leaves the record read in _lock_rec, and
+# its pid, host and start time in _lock_pid, _lock_host and _lock_started.
 _lock_stale() {
 	local _pidns _where=
 	_lock_live=0
@@ -231,6 +257,18 @@ _lock_stale() {
 	_lock_why="it is held by pid $_lock_pid on $_lock_host (a run started $_lock_started)"
 	if [ "$_lock_host" != "$_lock_me_host" ] || [ "$_pidns" != "$_lock_me_pidns" ]; then
 		_where=", on another host or in another container"
+	else
+		_lock_state "$_lock_pid"
+		case "$_lock_st" in
+			Z | X)
+				_lock_gone="is gone"
+				_lock_why="$_lock_why, which is no longer running"
+				return 0 ;;
+			T | t)
+				_lock_live=2
+				_lock_why="$_lock_why, which is stopped"
+				return 1 ;;
+		esac
 	fi
 	# (find through a pipe: a test, not $(...))
 	if find "$1/owner" -mmin +15 2>/dev/null | grep -q .; then
@@ -270,9 +308,12 @@ _lock_stale() {
 # What to do about a lock _lock_stale found held, into _lock_tip, for a run that is to
 # be $1 (e.g. "indexing <dir>") with what the lock guards $2 (" '<lock>' '<output>'...").
 # Clearing it is offered only when this run cannot check the owner: a run known to be
-# alive would go on writing into what another run then rebuilds.
+# alive would go on writing into what another run then rebuilds. A stopped one does
+# not finish until it is resumed.
 _lock_advice() {
-	if [ "$_lock_live" = 1 ]; then
+	if [ "$_lock_live" = 2 ]; then
+		_lock_tip="Resume it with fg or kill -CONT $_lock_pid, or stop it."
+	elif [ "$_lock_live" = 1 ]; then
 		_lock_tip="Wait for that run to finish, or stop it."
 	else
 		_lock_tip="If no CRISPRme run is $1, clear the lock and what it left with: rm -rf$2"
@@ -434,13 +475,37 @@ _lock_wait() {
 	return 0
 }
 
+# 0 when this run has lost lock $1, which it took: the lock is gone, or its record now
+# names another run -- one that took it over while this run was stopped, or could not
+# refresh it, for 15 minutes (_lock_stale), and builds what it guards again. What this
+# run built under it is then neither to be used nor removed. Says so on stderr, for a
+# run that is to end in failure there and then. A lock with no record is still this
+# run's: its own record failed to write.
+_lock_lost() {
+	local _lock_rec _p _h _s
+	_lock_read "$1"
+	if [ -z "$_lock_rec" ]; then
+		[ -d "$1" ] && return 1
+		printf "ERROR: the lock on %s was taken over or cleared while this run held it; this run uses none of what it built. Re-run once no other run is building it.\n" "${1%.lock}" >&2
+		return 0
+	fi
+	[ "$_lock_rec" = "$_lock_me" ] && return 1
+	_lock_field _p "$_lock_rec" pid
+	_lock_field _h "$_lock_rec" host
+	_lock_field _s "$_lock_rec" started
+	printf "ERROR: the lock on %s was taken over by another run (pid %s on %s, started %s) while this run held it; that run builds it again, and this run uses none of what it built. Re-run once that run is done.\n" "${1%.lock}" "$_p" "$_h" "$_s" >&2
+	return 0
+}
+
 # Release lock $1 if this run took it and still holds it, and stop and reap its
 # refresh loop -- after the lock is gone, so that a loop that missed the signal still
 # ends at its next look. Called only once what the lock guards is final: built, removed
 # by a build that failed, or (_lock_take) found in place. A missing record is this
-# run's own failed write: no run takes over a lock that has none.
+# run's own failed write: no run takes over a lock that has none. 1 when this run has
+# lost the lock meanwhile (_lock_lost, which says so): the lock is left as it is, and
+# the caller is to end the run in failure.
 _lock_release() {
-	local _i _beat= _kept=() _beats=() _lock_rec
+	local _i _beat= _kept=() _beats=() _rc=0
 	for _i in "${!_locks_held[@]}"; do
 		if [ "${_locks_held[$_i]}" = "$1" ]; then
 			_beat=${_lock_beats[$_i]}
@@ -452,13 +517,14 @@ _lock_release() {
 	[ -n "$_beat" ] || return 0
 	_locks_held=("${_kept[@]}")
 	_lock_beats=("${_beats[@]}")
-	_lock_read "$1"
-	if [ -z "$_lock_rec" ] || [ "$_lock_rec" = "$_lock_me" ]; then
+	if _lock_lost "$1"; then
+		_rc=1
+	else
 		rm -rf "$1" 2>/dev/null || rm -rf "$1" 2>/dev/null
 	fi
 	kill "$_beat" 2>/dev/null
 	wait "$_beat" 2>/dev/null
-	return 0
+	return $_rc
 }
 
 # The run is ending while it still holds locks -- on a signal, or on an exit before
@@ -777,6 +843,12 @@ while read vcf_f; do
 			# fixed-name variants_genome/ output does not collide with concurrent runs)
 			cd "$_run_tmp"
 			crispritz.py add-variants "$vcf_folder/" "$ref_folder/" "true"
+			# Taken over meanwhile, the lock is another run's, and so is what it guards:
+			# move nothing into place, and remove only this run's own scratch (_lock_lost).
+			if _lock_lost "$_lock"; then
+				rm -rf "$_run_tmp"
+				exit 1
+			fi
 			if [ -s $logerror ]; then
 				printf "ERROR: Genome enrichment failed on %s\n" "$vcf_name" >&2
 				rm -rf "$_run_tmp"
@@ -801,7 +873,7 @@ while read vcf_f; do
 			# remove unique temp dir (variants_genome lives inside it)
 			rm -rf "$_run_tmp"
 
-			_lock_release "$_lock"
+			_lock_release "$_lock" || exit 1
 			echo -e 'Add-variants\tEnd\t'$(date) >>"$log"
 		else
 			rm -rf "$_run_tmp"
@@ -902,13 +974,15 @@ while read vcf_f; do
 			echo -e "Indexing reference genome"
 			# index reference genome using crispritz
 			crispritz.py index-genome "$ref_name" "$ref_folder/" "$pam_file" -bMax $bMax -th $ncpus
+			# taken over meanwhile: neither search nor remove what that run builds now
+			_lock_lost "$_lock" && exit 1
 			if [ -s $logerror ]; then
 				printf "ERROR: reference genome indexing failed\n" >&2
 				[ -d "$idx_folder1" ] && rm -r "$idx_folder1"
 				_lock_release "$_lock"
 				exit 1
 			fi
-			_lock_release "$_lock"
+			_lock_release "$_lock" || exit 1
 		fi
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>$log
 		idx_ref="$idx_folder1"
@@ -942,13 +1016,14 @@ while read vcf_f; do
 					"$current_working_directory/Genomes/${ref_name}+${vcf_name}/" \
 					"$pam_file" \
 					-bMax $bMax -th $ncpus
+				_lock_lost "$_lock" && exit 1  # taken over meanwhile, as for the reference
 				if [ -s "$logerror" ]; then
 					printf "ERROR: alternative genome indexing failed on %s\n" "$vcf_name" >&2
 					[ -d "$idx_folder1" ] && rm -r "$idx_folder1"
 					_lock_release "$_lock"
 					exit 1
 				fi
-				_lock_release "$_lock"
+				_lock_release "$_lock" || exit 1
 			fi
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
 			idx_var="$idx_folder1"
@@ -991,6 +1066,7 @@ while read vcf_f; do
 					"$vcf_name" \
 					"$idx_n" \
 					"$ncpus"
+				_lock_lost "$_lock" && exit 1  # taken over meanwhile, as for the reference
 
 				if [ -s "$logerror" ]; then
 					printf "ERROR: indels indexing failed on %s\n" "$vcf_name" >&2
@@ -999,7 +1075,7 @@ while read vcf_f; do
 					exit 1
 				fi
 
-				_lock_release "$_lock"
+				_lock_release "$_lock" || exit 1
 				echo -e 'Indexing Indels\tEnd\t'$(date) >>"$log"
 			fi
 		else
