@@ -330,7 +330,7 @@ _lock_built() {
 # another run built it meanwhile -- or when mkdir failed with no lock in the way, as
 # the plain mkdir did, and the caller builds nothing.
 _lock_take() {
-	local _bin=0 _lock _what _out _clear _next
+	local _bin=0 _lock _what _out _clear
 	if [ "$1" = -bin ]; then _bin=1; shift; fi
 	_lock="$1" _what="$2" _out="$3"
 	shift 2
@@ -350,29 +350,41 @@ _lock_take() {
 			return 0
 		fi
 		[ -d "$_lock" ] || return 1
-		if _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; then
-			echo "Stale lock $_lock: the run that held it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Taking it over and $_what from scratch."
-			return 2
+		if ! { _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; }; then
+			echo "Another run is $_what — waiting..."
+			if _lock_wait "$_lock" "$_what" "$_clear" take; then
+				_lock_built "$_out" "$_bin" && return 1
+				# released without its output: the holder failed, or the lock was cleared
+				# by hand. Searching what is not there would come back empty, so build it.
+				echo "$_lock was released but $_out is not there; $_what here instead."
+				continue
+			fi
 		fi
-		echo "Another run is $_what — waiting..."
-		_next=$SECONDS  # first notice after the first poll, then every few minutes
-		while [ -d "$_lock" ]; do
-			sleep "${_lock_poll_s:-5}"
-			if _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; then
-				echo "Stale lock $_lock: the run that held it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Taking it over and $_what from scratch."
-				return 2
-			fi
-			if [ "$SECONDS" -ge "$_next" ] && [ -d "$_lock" ]; then
-				_lock_advice "$_what" "$_clear"
-				echo "Still waiting for $_lock: $_lock_why. $_lock_tip"
-				_next=$((SECONDS + ${_lock_notice_s:-300}))
-			fi
-		done
-		_lock_built "$_out" "$_bin" && return 1
-		# released without its output: the holder failed, or the lock was cleared by
-		# hand. Searching what is not there would come back empty, so build it here.
-		echo "$_lock was released but $_out is not there; $_what here instead."
+		echo "Stale lock $_lock: the run that held it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Taking it over and $_what from scratch."
+		return 2
 	done
+}
+
+# Wait while lock $1 is held by a live run or by one this run cannot check, saying how
+# it stands after the first poll and then every few minutes ($2 and $3 as for
+# _lock_advice). 0 once the lock is gone; 2 once its owner is dead or abandoned
+# (_lock_stale) -- with "take" as $4, once this run has taken it over, else with the
+# lock left as it is.
+_lock_wait() {
+	local _next=$SECONDS
+	while [ -d "$1" ]; do
+		sleep "${_lock_poll_s:-5}"
+		if _lock_stale "$1"; then
+			[ "$4" = take ] || return 2
+			_lock_steal "$1" "$_lock_rec" && return 2
+		fi
+		if [ "$SECONDS" -ge "$_next" ] && [ -d "$1" ]; then
+			_lock_advice "$2" "$3"
+			echo "Still waiting for $1: $_lock_why. $_lock_tip"
+			_next=$((SECONDS + ${_lock_notice_s:-300}))
+		fi
+	done
+	return 0
 }
 
 # Release lock $1 if this run took it and still holds it, and stop and reap its
@@ -763,6 +775,33 @@ while read vcf_f; do
 	# batteries-included index is reused instead of triggering a rebuild.
 	idx_folder1="${ref_lib}/${true_pam}_${bMax}_${ref_name}"  # exact-N name, used only for the auto-build path below
 	idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
+	# The scan skips an index whose build lock is there, and --index-path never builds
+	# one -- but another run may be building in that library (the working one, as
+	# usual). Wait for a lock whose owner is alive or cannot be checked, as a run that
+	# builds does, and look again. A dead or abandoned owner's lock guards a partial
+	# index, which the error below names. Only the lock of an index that could serve
+	# this search counts: the requested PAM or a PAM-less one, at a sufficient budget.
+	_dead_locks=()
+	while [ -z "$idx_ref" ] && [ "$index_path" != "_" ] && [ -n "$index_path" ]; do
+		_dead_locks=() _held=
+		for _l in "$ref_lib"/*_*_"$ref_name".lock; do
+			[ -d "$_l" ] || continue
+			_b=${_l##*/}; _b=${_b%.lock}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+			case "$_n" in '' | *[!0-9]*) continue ;; esac
+			[ "$_n" -ge "$bMax" ] || continue
+			[ "$_p" = "$true_pam" ] || { [ -n "$_p" ] && [ -z "${_p//N/}" ]; } || continue
+			if _lock_stale "$_l"; then
+				_dead_locks+=("ERROR: ${_l%.lock} is a partial index: the run that was building it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Clear it, and its lock, with: rm -rf '$_l' '${_l%.lock}'")
+			else
+				_held=$_l
+				break
+			fi
+		done
+		[ -n "$_held" ] || break
+		echo "Another run is indexing ${_held%.lock} — waiting..."
+		_lock_wait "$_held" "indexing ${_held%.lock}" " '$_held' '${_held%.lock}'"
+		idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
+	done
 
 	# use the existing (sufficient) index if the scan found one
 	if [ -n "$idx_ref" ]; then
@@ -774,6 +813,7 @@ while read vcf_f; do
 		# index alongside it (crisprme_hf co-fetches <pam>_<N>_<ref>), so this should
 		# not happen from a normal `download`; fail loudly rather than silently
 		# rebuilding (extra compute) -- point the user at the one-download fix.
+		for _l in "${_dead_locks[@]}"; do printf '%s\n' "$_l" >&2; done
 		printf "ERROR: no matching reference index under --index-path '%s'\n" "$ref_lib" >&2
 		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s)\n" "$true_pam" "$ref_name" "$bMax" "$(basename "$idx_folder1")" >&2
 		printf "       re-run 'crisprme.py download --what index --index-name %s' (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$(basename "$idx_folder1")" >&2
@@ -895,7 +935,16 @@ while read vcf_f; do
 			# Precomputed/batteries variant index whose INDELS companion is absent AND whose
 			# source fake-chrom genome was not shipped: indels can neither be searched nor
 			# (re)built. Fail clearly instead of crashing inside pool_index_indels.py.
-			printf "ERROR: INDELS index '%s' is missing and cannot be built (source genome '%s' is not installed). The precomputed index looks incomplete — re-download it: crisprme.py download --what index --index-name %s\n" "$(basename "$indels_index_dir")" "$(basename "$indels_out")" "$idx_var_base" >&2
+			# With its lock there the companion is not missing but unfinished: say whose.
+			_l="${indels_index_dir}.lock"
+			if ! [ -d "$_l" ]; then
+				printf "ERROR: INDELS index '%s' is missing and cannot be built (source genome '%s' is not installed). The precomputed index looks incomplete — re-download it: crisprme.py download --what index --index-name %s\n" "$(basename "$indels_index_dir")" "$(basename "$indels_out")" "$idx_var_base" >&2
+			elif _lock_stale "$_l"; then
+				printf "ERROR: INDELS index '%s' is a partial build: the run that was building it (pid %s on %s, started %s) %s, and it cannot be rebuilt here (source genome '%s' is not installed). Clear it, and its lock, with rm -rf '%s' '%s', then re-download it: crisprme.py download --what index --index-name %s\n" "$indels_index_dir" "$_lock_pid" "$_lock_host" "$_lock_started" "$_lock_gone" "$(basename "$indels_out")" "$_l" "$indels_index_dir" "$idx_var_base" >&2
+			else
+				_lock_advice "indexing $indels_index_dir" " '$_l' '$indels_index_dir'"
+				printf "ERROR: INDELS index '%s' is locked, and it cannot be built here (source genome '%s' is not installed): %s. %s\n" "$indels_index_dir" "$(basename "$indels_out")" "$_lock_why" "$_lock_tip" >&2
+			fi
 			exit 1
 		fi
 		# END STEP 2.3 - indels indexing

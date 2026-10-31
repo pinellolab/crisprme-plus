@@ -1464,6 +1464,117 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         self.assertIn(f"Stale lock {self.lock}", run.stdout)
         self.assertBuiltAndSearched(run)
 
+    def test_index_path_names_a_dead_builds_partial_index(self):
+        # --index-path never builds, and the scan skips a locked index. A run that died
+        # building one there used to leave every later --index-path run failing with
+        # "re-download it" and no word of the lock -- which nothing ever cleared.
+        self.index.mkdir()  # as complete as it looks
+        (self.index / "chr1.bin").write_bytes(b"")
+        for record, aged, gone in (
+                (owner_record(dead_pid()), 0, "is gone"),
+                (owner_record(4242, host="3f9c2a1b7d10"), 16,
+                 "has not refreshed its lock for 15 minutes")):
+            with self.subTest(gone=gone):
+                self.lock.mkdir()
+                (self.lock / "owner").write_text(record)
+                _age(self.lock / "owner", aged)
+                run = self.run_pipeline(variant=False, index_path=self.library, timeout=60)
+                err = run.stderr.splitlines()
+                self.assertRegex(err[0], rf"^ERROR: {re.escape(str(self.index))} is a partial "
+                                         rf"index: the run that was building it \(pid \d+ on "
+                                         rf"\S+, started \S+\) {gone}\. Clear it, and its "
+                                         rf"lock, with: rm -rf '{re.escape(str(self.lock))}' "
+                                         rf"'{re.escape(str(self.index))}'$")
+                self.assertEqual(err[1], "ERROR: no matching reference index under "
+                                         f"--index-path '{self.library}'")
+                self.assertEqual(len(err), 4, run.stderr)  # then how to get the index again
+                self.assertEqual(run.builds, [])
+                self.assertEqual((self.lock / "owner").read_text(), record)  # left as it was
+                shutil.rmtree(self.lock)
+
+    def test_index_path_waits_for_a_live_build_and_then_uses_it(self):
+        # A run building in the working library -- the usual --index-path -- is waited
+        # for, as by a run that builds, instead of failing at once.
+        built = self.root / "built"
+        holder = self.launch(variant=False, env={"STUB_BUILD_UNTIL": str(built)})
+        _wait_for(lambda: any(c[0] == "index-genome" for c in holder.calls()), 60,
+                  "the build to start")
+        waiter = self.launch(variant=False, index_path=self.library,
+                             env={"_lock_poll_s": "0.2"})
+        _wait_for(lambda: "Still waiting for" in waiter.stdout(), 60, "the second run to wait")
+        self.assertIn(f"Another run is indexing {self.index} — waiting...", waiter.stdout())
+        self.assertIsNone(waiter.proc.poll())
+        self.assertEqual(waiter.stderr(), "")
+        self.index.mkdir()  # the build finishes ...
+        (self.index / "chr1.bin").write_bytes(b"")
+        built.touch()  # ... and its run lets go of the lock
+        run = self.finish(waiter, timeout=60)
+        self.assertEqual(run.reference, "NRG_2_hg38")
+        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(run.builds, [])
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed",
+                         run.stderr)
+        self.finish(holder, timeout=60)
+
+    def test_index_path_waits_on_a_lock_it_cannot_check(self):
+        # no owner record: as when building, waited on and explained, never broken
+        self.index.mkdir()
+        (self.index / "chr1.bin").write_bytes(b"")
+        self.lock.mkdir()
+        waiter = self.launch(variant=False, index_path=self.library,
+                             env={"_lock_poll_s": "0.2"})
+        _wait_for(lambda: "Still waiting for" in waiter.stdout(), 60, "the notice")
+        self.assertIn(f"Still waiting for {self.lock}: it has no owner record", waiter.stdout())
+        self.assertIn(f"rm -rf '{self.lock}' '{self.index}'", waiter.stdout())
+        self.assertEqual(waiter.stderr(), "")
+        os.killpg(waiter.proc.pid, signal.SIGKILL)
+        waiter.proc.wait(timeout=30)
+        self.assertEqual(list(self.lock.iterdir()), [])
+
+    def test_index_path_ignores_the_lock_of_an_index_that_could_not_serve(self):
+        # a dead run's NGG build in the same library is no part of an NRG search
+        other = self.library / "NGG_2_hg38.lock"
+        other.mkdir()
+        (other / "owner").write_text(owner_record(dead_pid()))
+        run = self.run_pipeline(variant=False, index_path=self.library, timeout=60)
+        self.assertTrue(run.stderr.startswith("ERROR: no matching reference index under "
+                                              "--index-path"), run.stderr)
+        self.assertNotIn("NGG_2_hg38", run.stderr)
+        self.assertNotIn("waiting", run.stdout)
+
+    def test_a_locked_indels_index_that_cannot_be_rebuilt_says_whose_lock_it_is(self):
+        # A precomputed variant index whose INDELS companion is locked, with no source
+        # genome to rebuild it from: not "missing", but a dead run's partial build, or a
+        # live run's build in progress.
+        self.install("NRG_3")
+        indels = self.library / f"NRG_3_hg38+{self.VCF}_INDELS"
+        lock = Path(f"{indels}.lock")
+        source = f"hg38+{self.VCF}_INDELS"
+        live = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (live.kill(), live.wait()))
+        for record, says in (
+                (owner_record(dead_pid()),
+                 rf"^ERROR: INDELS index '{re.escape(str(indels))}' is a partial build: the "
+                 rf"run that was building it \(pid \d+ on \S+, started \S+\) is gone, and it "
+                 rf"cannot be rebuilt here \(source genome '{re.escape(source)}' is not "
+                 rf"installed\)\. Clear it, and its lock, with rm -rf "
+                 rf"'{re.escape(str(lock))}' '{re.escape(str(indels))}', then re-download "
+                 rf"it: crisprme\.py download --what index --index-name "
+                 rf"NRG_3_hg38\+{self.VCF}$"),
+                (owner_record(live.pid),
+                 rf"^ERROR: INDELS index '{re.escape(str(indels))}' is locked, and it "
+                 rf"cannot be built here \(source genome '{re.escape(source)}' is not "
+                 rf"installed\): it is held by pid {live.pid} on \S+ \(a run started "
+                 r"\S+\), which is still running\. Wait for that run to finish, or stop "
+                 r"it\.$")):
+            with self.subTest(record=record):
+                lock.mkdir()
+                (lock / "owner").write_text(record)
+                run = self.run_pipeline(timeout=60)
+                self.assertRegex(run.stderr.strip(), says)
+                self.assertEqual((lock / "owner").read_text(), record)
+                shutil.rmtree(lock)
+
     def test_an_index_directory_with_no_bin_and_no_lock_is_built(self):
         # The scan takes a directory with no .bin for no index (a download or a build
         # that never wrote one), and the build replaces it. A lock found free with its
