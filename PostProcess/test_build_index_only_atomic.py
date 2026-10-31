@@ -923,6 +923,34 @@ class TheBuildDirectoriesOfRunsThatAreGoneAreReclaimed(_Fixture):
         for name, (_, _, whole) in WHOLE.items():
             self.assertEqual(self.bins(name), whole)
 
+    def test_one_whose_output_another_run_has_put_in_place_since_is_removed_too(self):
+        """After a kill, the next run is often a complete-search, which builds the
+        missing index or enriches the genome itself, in place (here the output is put
+        back as it leaves it). The next build-index-only then builds nothing there
+        that needs a build directory, and still removes the one the kill left."""
+        kinds = (("index", ("genome_library", REF), dict(vcf=False, STUB_HANG=WHOLE[REF][1])),
+                 ("enrichment", ("Genomes", "hg38+ds"), dict(STUB_PIGZ_HANG="1")))
+        for kind, where, killed in kinds:
+            with self.subTest(kind=kind):
+                self.fresh()
+                vcf = killed.get("vcf", True)
+                rc, out, err = self.run_bio(vcf=vcf)
+                self.assertEqual(rc, 0, err)
+                output, aside = self.path(*where), os.path.join(self.root, "aside")
+                os.rename(output, aside)
+                proc = self.start(**killed)
+                self.wait_for_mark(proc)
+                self.kill_group(proc)
+                left = self.leftovers()
+                self.assertEqual(len(left), 1)
+                os.rename(aside, output)
+                rc, out, err = self.run_bio(vcf=vcf)
+                self.assertEqual(rc, 0, err)
+                self.assertIn(f" already present: {output}\n", out)
+                self.assertIn(f"Removing {left[0]}: the build-index-only run that made it "
+                              f"(pid {proc.pid} on {os.uname().nodename}, started ", out)
+                self.assertEqual(self.leftovers(), [])
+
 
 # Runs overlay_indel_snps.overlay_fake_chromosome on argv[2:5] (a fake-indel FASTA,
 # the enriched chromosome, the indel log), with argv[1] the PostProcess directory.

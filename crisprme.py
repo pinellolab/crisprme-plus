@@ -3262,6 +3262,11 @@ def build_index_only() -> None:
         _outputs += [(enriched, indels_out), (snp_idx,), (indels_idx,)]
     for _out in _outputs:
         _refuse_locked_build(*_out)
+    # The build directories that killed runs left (_reclaim_build_dirs) are removed
+    # first, whatever this run goes on to build: a search may have built since what
+    # one of them was building, and then no build here would reclaim it.
+    _reclaim_build_dirs(os.path.join(workdir, "genome_library"), ".build-index-only-")
+    _reclaim_build_dirs(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-")
     # ---- reference index ------------------------------------------------------
     if os.path.isdir(idx_folder):
         print(f"Reference index already present: {idx_folder}", flush=True)
