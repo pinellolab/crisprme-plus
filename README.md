@@ -336,7 +336,8 @@ operating systems. Select the method that best matches your setup:
 ---
 
 Bioconda's `crisprme` package is CRISPRme+ (Python 3.11, Linux), and it installs CRISPRitz from
-Bioconda too. Always install it with an explicit version (§1.1.2).
+Bioconda too. Always install it with an explicit version (§1.1.2). Bioconda has no macOS build
+of CRISPRitz, so on a Mac use [Docker](#12-install-crisprme-via-docker).
 
 This section is organized into three subsections to guide you through the installation 
 and maintenance of CRISPRme:
@@ -574,9 +575,15 @@ You are now ready to run CRISPRme using Docker.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
-Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from source — the recommended path until it is published to Bioconda, or for development. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
+Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for development or on a Linux system where you prefer not to use Bioconda. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.
 
-**Prerequisites:** `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
+**Prerequisites:** Linux, `conda`/`mamba`, `git`, and internet access. A C++ compiler with OpenMP and every Python dependency are provided by the environment file below (no `apt`/system packages required).
+
+> **macOS: use Docker (§1.2).** The source build is Linux-only. CRISPRitz's index builder
+> (`buildTST`) uses GCC's parallel-mode STL (`<parallel/algorithm>`), which the macOS
+> toolchain (Apple clang, or conda's clang with libc++) does not provide, and
+> `environment.yml` lists tools with no macOS build (e.g. `axel` on Apple Silicon). The
+> Docker image runs natively on Apple Silicon (`linux/arm64`).
 
 ```bash
 # 1. clone the repository (the CRISPRme+ development line lives on the main branch)
