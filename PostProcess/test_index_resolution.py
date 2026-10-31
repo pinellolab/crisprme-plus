@@ -514,6 +514,15 @@ fi
 if [ "$1" = search ] && [ -n "$STUB_SEARCH_UNTIL" ]; then
 	while ! [ -e "$STUB_SEARCH_UNTIL" ]; do sleep 0.05; done
 fi
+# STUB_ENRICH_UNTIL=<file> holds add-variants the same way; STUB_ENRICH_FAILS=1 then
+# fails it, on stderr, before it writes anything.
+if [ "$1" = add-variants ] && [ -n "$STUB_ENRICH_UNTIL" ]; then
+	while ! [ -e "$STUB_ENRICH_UNTIL" ]; do sleep 0.05; done
+fi
+if [ "$1" = add-variants ] && [ "$STUB_ENRICH_FAILS" = 1 ]; then
+	echo "ERROR: add-variants failed" >&2
+	exit 1
+fi
 # STUB_ENRICH=1: add-variants leaves in the current directory what crispritz's does for
 # VCF folder $2 and reference folder $3 -- the enriched genome, its dictionaries and
 # indel logs, one fake-indel genome per chromosome. Otherwise it writes nothing, as
@@ -2105,6 +2114,116 @@ class BuildLocksInTheShippedScript(_ShippedScript):
                 self.assertEqual(os.listdir(self.index), ["chr1.bin"])
                 self.assertEqual((self.index / "chr1.bin").read_bytes(), b"theirs")
                 self.assertEqual(_wait_until_gone(run.proc.pid), [])
+
+    # the record of a run in another container that has taken a lock over
+    THEIRS = owner_record(4242, host="3f9c2a1b7d10", pidns="pid:[4026532123]")
+
+    def take_over_while_stopped(self, run, lock, theirs, release):
+        """Stop `run` in its build step, and do meanwhile what a run in another container
+        does once it has taken `lock` over: its record, and `theirs()` for what it has
+        built so far. Then resume `run` and end its build step, by creating `release`."""
+        os.killpg(run.proc.pid, signal.SIGSTOP)
+        _wait_for(lambda: _state(run.proc.pid) == "T", 10, "the run to stop")
+        (lock / "owner").write_text(self.THEIRS)
+        theirs()
+        os.killpg(run.proc.pid, signal.SIGCONT)
+        release.touch()
+
+    def assertLeftToTheTaker(self, run, output, lock, build_errors):
+        """`run` ended in failure, the ERROR of a lost lock on `output` its last line on
+        stderr after `build_errors` of its build step's, searched nothing, left the taker's
+        record as it was, and left nothing running."""
+        result = self.finish(run, timeout=60)
+        self.assertEqual(run.proc.returncode, 1, result.stdout[-2000:] + result.stderr)
+        self.assertEqual(result.stderr.splitlines()[-1],
+                         f"ERROR: the lock on {output} was taken over by another run (pid 4242 "
+                         "on 3f9c2a1b7d10, started 2026-10-30T00:00:00Z) while this run held "
+                         "it; that run builds it again, and this run uses none of what it "
+                         "built. Re-run once that run is done.")
+        self.assertEqual(len(result.stderr.splitlines()), 1 + build_errors, result.stderr)
+        self.assertEqual([c for c in result.calls if c[0] == "search"], [])
+        self.assertEqual((lock / "owner").read_text(), self.THEIRS)
+        self.assertEqual(_wait_until_gone(run.proc.pid), [])
+
+    def test_a_run_whose_enrichment_lock_was_taken_over_meanwhile_leaves_it_to_that_run(self):
+        # The enrichment site, as the reference index one above: resumed with its lock lost,
+        # the run moved its enriched genome and fake-indel genomes into the taker's.
+        enriched = self.home / "Genomes" / f"hg38+{self.VCF}"
+        indels = self.home / "Genomes" / f"hg38+{self.VCF}_INDELS"
+        lock = Path(f"{enriched}.lock")
+        for fails in (False, True):
+            with self.subTest(enrichment_fails=fails):
+                for left in (enriched, indels, lock):
+                    shutil.rmtree(left, ignore_errors=True)
+                done = self.root / f"enriched{int(fails)}"
+                run = self.launch(env={"STUB_ENRICH": "1", "STUB_ENRICH_UNTIL": str(done),
+                                       "STUB_ENRICH_FAILS": str(int(fails))})
+                _wait_for(lambda: any(c[0] == "add-variants" for c in run.calls()), 60,
+                          "the enrichment to start")
+
+                def theirs():
+                    enriched.mkdir()
+                    (enriched / "chr1.fa").write_text("theirs")
+                    indels.mkdir()
+                    (indels / "theirs").write_text("")
+                self.take_over_while_stopped(run, lock, theirs, done)
+                self.assertLeftToTheTaker(run, enriched, lock, fails)
+                self.assertEqual(os.listdir(enriched), ["chr1.fa"])
+                self.assertEqual((enriched / "chr1.fa").read_text(), "theirs")
+                self.assertEqual(os.listdir(indels), ["theirs"])
+                self.assertEqual(list((self.home / "Genomes").glob("run_*")), [])  # its scratch
+                self.assertFalse(any(c[0] == "index-genome" for c in run.calls()))
+
+    def test_a_run_whose_variant_index_lock_was_taken_over_meanwhile_leaves_it_to_that_run(self):
+        # resumed with its lock lost, a failed build removed the taker's variant index
+        self.install("NRG_2", variant=False)  # a reference index; the variant one is built
+        var = self.library / f"NRG_2_hg38+{self.VCF}"
+        lock = Path(f"{var}.lock")
+        for fails in (False, True):
+            with self.subTest(build_fails=fails):
+                for left in (var, lock, self.home / "Genomes" / f"hg38+{self.VCF}",
+                             self.home / "Genomes" / f"hg38+{self.VCF}_INDELS"):
+                    shutil.rmtree(left, ignore_errors=True)
+                built = self.root / f"built{int(fails)}"
+                run = self.launch(env={"STUB_ENRICH": "1", "STUB_BUILD_UNTIL": str(built),
+                                       "STUB_BUILD_FAILS": str(int(fails))})
+                _wait_for(lambda: ["index-genome", f"hg38+{self.VCF}"] in
+                          [c[:2] for c in run.calls()], 60, "the variant index build")
+
+                def theirs():
+                    var.mkdir(exist_ok=True)
+                    (var / "chr1.bin").write_bytes(b"theirs")
+                self.take_over_while_stopped(run, lock, theirs, built)
+                self.assertLeftToTheTaker(run, var, lock, fails)
+                self.assertEqual(os.listdir(var), ["chr1.bin"])
+                self.assertEqual((var / "chr1.bin").read_bytes(), b"theirs")
+
+    def test_a_run_whose_indels_lock_was_taken_over_meanwhile_leaves_it_to_that_run(self):
+        # resumed with its lock lost, a failed build removed the taker's INDELS index
+        self.install("NRG_3")  # a downloaded variant index; its INDELS companion built here
+        indels = self.library / f"NRG_3_hg38+{self.VCF}_INDELS"
+        lock = Path(f"{indels}.lock")
+        source = self.home / "Genomes" / f"hg38+{self.VCF}_INDELS" / f"fake_{self.VCF}_chr1"
+        source.mkdir(parents=True)
+        (source / "fakechr1.fa").write_text(">fakechr1\nACGTACGTACGTACGTACGTACGTACGT\n")
+        for fails in (False, True):
+            with self.subTest(build_fails=fails):
+                for left in (indels, lock):
+                    shutil.rmtree(left, ignore_errors=True)
+                built = self.root / f"built{int(fails)}"
+                run = self.launch(env={"STUB_BUILD_UNTIL": str(built),
+                                       "STUB_BUILD_FAILS": str(int(fails))})
+                _wait_for(lambda: any(c[0] == "index-genome" for c in run.calls()), 60,
+                          "the INDELS build")
+
+                def theirs():
+                    (indels / "NRG_3_fakechr1").mkdir(parents=True, exist_ok=True)
+                    (indels / "NRG_3_fakechr1" / "fakechr1.bin").write_bytes(b"theirs")
+                self.take_over_while_stopped(run, lock, theirs, built)
+                self.assertLeftToTheTaker(run, indels, lock, fails)
+                self.assertEqual(os.listdir(indels), ["NRG_3_fakechr1"])
+                self.assertEqual((indels / "NRG_3_fakechr1" / "fakechr1.bin").read_bytes(),
+                                 b"theirs")
 
     def test_index_path_names_a_dead_builds_partial_index(self):
         # --index-path never builds, and the scan skips a locked index. A run that died
