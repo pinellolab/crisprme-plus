@@ -3068,26 +3068,41 @@ def _reclaim_build_dirs(parent: str, prefix: str) -> None:
 
 
 def _end_cleanly(cleanup, handlers: dict) -> None:
-    """Calls ``cleanup()`` and puts the signal handlers in ``handlers`` back, with a
-    second signal held back until both are done."""
+    """Calls ``cleanup()`` and puts the signal handlers in ``handlers`` back, then
+    ends the run by the first SIGINT, SIGTERM or SIGHUP that came meanwhile: until
+    then a handler only notes it, so that a second Ctrl-C cannot cut the cleanup
+    short. (A signal mask cannot hold it back: it does so for the thread that sets
+    it only, and the kernel then gives the signal to another thread -- numpy's
+    OpenBLAS starts them at import -- while its Python handler still runs in the
+    main thread.)"""
     import signal
 
-    mask = signal.pthread_sigmask(
-        signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
-    )
+    came = []
+    # the handler each one gets back: the one from before _with_cleanup, else its own.
+    # SIGINT's goes back last: from then on a Ctrl-C raises KeyboardInterrupt.
+    back = {sig: handlers.get(sig, signal.getsignal(sig))
+            for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)}
     try:
+        for sig, handler in back.items():
+            if handler not in (signal.SIG_IGN, None):  # (one ignored, as under nohup, stays so)
+                signal.signal(sig, lambda signum, frame: came.append(signum))
         cleanup()
-        for sig, handler in handlers.items():
-            signal.signal(sig, handler)
     finally:
-        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+        for sig, handler in back.items():
+            if handler is not None:
+                signal.signal(sig, handler)
+    if came:
+        os.kill(os.getpid(), came[0])
+        sys.exit(128 + came[0])  # (as PID 1, whom a signal's default action spares)
 
 
 def _with_cleanup(run, cleanup):
     """Returns ``run()``, and calls ``cleanup()`` on every way out but SIGKILL:
     success, failure, an exception, Ctrl-C, SIGTERM (scancel, docker stop) and
     SIGHUP. Those two are handled for that while ``run`` runs only, and the run
-    still ends by the signal; one this run ignores (nohup) stays ignored."""
+    still ends by the signal; one this run ignores (nohup) stays ignored. A signal
+    that comes during the cleanup waits for its end, then ends the run
+    (_end_cleanly)."""
     import signal
 
     handlers = {}
@@ -3101,6 +3116,11 @@ def _with_cleanup(run, cleanup):
             return run()
         finally:
             _end_cleanly(cleanup, handlers)
+    except KeyboardInterrupt:
+        # A Ctrl-C that came just as run ended, before the cleanup held signals back,
+        # can have cut it short too: finish it, then end the run by that Ctrl-C
+        _end_cleanly(cleanup, handlers)
+        raise
     except _BuildSignal as stop:
         # A signal that came just as run ended can have cut that cleanup short, with
         # its handler still in place, which os.kill would raise into again

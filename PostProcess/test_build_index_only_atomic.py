@@ -169,10 +169,15 @@ for i, f in enumerate(files):
 # (sitecustomize), it stands in for what a test cannot set up for real.
 # STUB_MOUNT=<dir>: <dir> is a mount point of its own, so a rename into or out of it
 # fails with EXDEV, as between two bind mounts of one file system, whose st_dev is
-# the same. STUB_SIGNAL_AT_CLEANUP=1: a SIGTERM comes just as the build's cleanup
-# starts, before its first pthread_sigmask holds signals back. STUB_OVERLAY_HANG=1:
-# the SNP overlay, about to write a FASTA's temporary file, waits there once
-# $STUB_MARK is made, until $STUB_RELEASE exists.
+# the same. STUB_SIGNAL_AT_CLEANUP=before: a SIGTERM comes just as the build's
+# cleanup starts, before it holds signals back (as it first replaces the build's
+# SIGTERM handler); =after: one comes just after that. STUB_OVERLAY_HANG=1: the SNP
+# overlay, about to write a FASTA's temporary file, waits there once $STUB_MARK is
+# made, until $STUB_RELEASE exists. STUB_SLOW_CLEANUP=<file>: the cleanup, about to
+# remove what a build directory holds, makes <file> and waits until $STUB_RELEASE
+# exists, as removing a large partial index takes a while. STUB_THREAD=1: a thread
+# that does nothing, as numpy's OpenBLAS starts at import, for the kernel to give a
+# signal to when the one that runs Python has it blocked.
 SHIM = r'''
 import builtins, errno, os, signal, time
 
@@ -195,16 +200,21 @@ if _mount:
     os.replace = _within_mounts(os.replace)
 
 if os.environ.get("STUB_SIGNAL_AT_CLEANUP"):
-    _sigmask, _sent = signal.pthread_sigmask, []
+    _signal, _sent = signal.signal, []
 
-    def pthread_sigmask(how, mask):
-        handler = signal.getsignal(signal.SIGTERM)
-        if not _sent and how == signal.SIG_BLOCK and callable(handler):
+    def _signal_at_cleanup(sig, handler):
+        current = signal.getsignal(signal.SIGTERM)
+        if not _sent and sig == signal.SIGTERM and callable(current):  # the build's own
             _sent.append(1)
-            handler(signal.SIGTERM, None)  # what a SIGTERM that comes now runs
-        return _sigmask(how, mask)
+            if os.environ["STUB_SIGNAL_AT_CLEANUP"] == "before":
+                current(signal.SIGTERM, None)  # what a SIGTERM that comes now runs
+            else:
+                old = _signal(sig, handler)
+                os.kill(os.getpid(), signal.SIGTERM)
+                return old
+        return _signal(sig, handler)
 
-    signal.pthread_sigmask = pthread_sigmask
+    signal.signal = _signal_at_cleanup
 
 if os.environ.get("STUB_OVERLAY_HANG"):
     _open = builtins.open
@@ -217,6 +227,24 @@ if os.environ.get("STUB_OVERLAY_HANG"):
         return _open(file, mode, *args, **kwargs)
 
     builtins.open = open
+
+if os.environ.get("STUB_SLOW_CLEANUP"):
+    import shutil
+    _rmtree = shutil.rmtree
+
+    def rmtree(path, *args, **kwargs):
+        parent = os.path.basename(os.path.dirname(os.path.abspath(path)))
+        if parent.startswith(".build-index-only-"):
+            builtins.open(os.environ["STUB_SLOW_CLEANUP"], "w").close()
+            while not os.path.exists(os.environ["STUB_RELEASE"]):
+                time.sleep(0.02)
+        return _rmtree(path, *args, **kwargs)
+
+    shutil.rmtree = rmtree
+
+if os.environ.get("STUB_THREAD"):
+    import threading
+    threading.Thread(target=time.sleep, args=(3600,), daemon=True).start()
 '''
 
 SHARED = None  # the stub Bio package and a warmed matplotlib cache, for every run
@@ -708,14 +736,48 @@ class SignalsRemoveTheBuildDirectory(_Fixture):
                 self.assertEqual(self.leftovers(), [])
 
     def test_a_sigterm_just_as_the_build_ends_still_ends_the_run_by_it(self):
-        """One that comes once the index is in place, as the cleanup begins and before
-        it holds signals back (SHIM sends it there): the run removes its build
-        directory and ends by that signal, with no traceback."""
-        rc, out, err = self.run_bio(vcf=False, shim=True, STUB_SIGNAL_AT_CLEANUP="1")
-        self.assertEqual(rc, -signal.SIGTERM, err)
-        self.assertNotIn("Traceback", err)
-        self.assertEqual(self.leftovers(), [])
-        self.assertEqual(self.bins(REF), WHOLE[REF][2])
+        """One that comes once the index is in place, as the cleanup begins, before it
+        holds signals back or just after (SHIM sends it there): the run removes its
+        build directory and ends by that signal, with no traceback."""
+        for when in ("before", "after"):
+            with self.subTest(when=when):
+                self.fresh()
+                rc, out, err = self.run_bio(vcf=False, shim=True, STUB_SIGNAL_AT_CLEANUP=when)
+                self.assertEqual(rc, -signal.SIGTERM, err)
+                self.assertNotIn("Traceback", err)
+                self.assertEqual(self.leftovers(), [])
+                self.assertEqual(self.bins(REF), WHOLE[REF][2])
+
+    def test_a_second_signal_while_it_cleans_up_waits_for_the_cleanup(self):
+        """Ctrl-C pressed twice, or scancel and then Ctrl-C: the second signal comes
+        while the cleanup removes the partial index, which takes seconds for a large
+        one (SHIM holds the cleanup there), and the kernel gives it to another thread
+        than the one cleaning up, as to OpenBLAS's in a run that imported numpy (SHIM
+        starts one). It does not cut the cleanup short: the run removes its build
+        directory, then ends by that signal."""
+        cases = ((signal.SIGINT, signal.SIGINT), (signal.SIGTERM, signal.SIGINT),
+                 (signal.SIGINT, signal.SIGTERM))
+        for first, second in cases:
+            with self.subTest(first=first.name, second=second.name):
+                self.fresh()
+                cleaning = os.path.join(self.root, "cleaning")
+                proc = self.start(vcf=False, shim=True, STUB_HANG=WHOLE[REF][1],
+                                  STUB_SLOW_CLEANUP=cleaning, STUB_THREAD="1")
+                self.wait_for_mark(proc)
+                os.killpg(proc.pid, first)
+                deadline = time.monotonic() + 60
+                while not os.path.exists(cleaning):
+                    self.assertIsNone(proc.poll(), f"the run ended before its cleanup:\n"
+                                                   f"{self.stderr()}")
+                    self.assertLess(time.monotonic(), deadline, "the cleanup never began")
+                    time.sleep(0.01)
+                os.killpg(proc.pid, second)
+                time.sleep(0.3)  # (one that cuts the cleanup short does so by then)
+                open(self.release, "w").close()
+                proc.wait(timeout=60)
+                self.assertEqual(proc.returncode, -second, self.stderr())
+                self.assertFalse(os.path.lexists(self.lib(REF)))
+                self.assertEqual(self.leftovers(), [])
 
     def test_a_hangup_ignored_as_under_nohup_does_not_stop_the_build(self):
         proc = self.start(vcf=False, keep_hup=True, STUB_HANG=WHOLE[REF][1])
