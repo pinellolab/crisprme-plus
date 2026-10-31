@@ -2905,11 +2905,77 @@ def _refuse_locked_build(output: str, *guarded: str) -> None:
 
 
 class _BuildSignal(BaseException):
-    """A SIGTERM or SIGHUP that ends an index build (see _build_index_dir)."""
+    """A SIGTERM or SIGHUP that ends a build (see _in_build_dir)."""
 
 
 def _raise_build_signal(signum, frame):
     raise _BuildSignal(signum)
+
+
+def _end_cleanly(cleanup, handlers: dict) -> None:
+    """Calls ``cleanup()`` and puts the signal handlers in ``handlers`` back, with a
+    second signal held back until both are done."""
+    import signal
+
+    mask = signal.pthread_sigmask(
+        signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
+    )
+    try:
+        cleanup()
+        for sig, handler in handlers.items():
+            signal.signal(sig, handler)
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+
+
+def _with_cleanup(run, cleanup):
+    """Returns ``run()``, and calls ``cleanup()`` on every way out but SIGKILL:
+    success, failure, an exception, Ctrl-C, SIGTERM (scancel, docker stop) and
+    SIGHUP. Those two are handled for that while ``run`` runs only, and the run
+    still ends by the signal; one this run ignores (nohup) stays ignored."""
+    import signal
+
+    handlers = {}
+    try:
+        try:
+            # SIGTERM and SIGHUP would end the run at once, with no cleanup: raise
+            # instead, for the cleanup below
+            for sig in (signal.SIGTERM, signal.SIGHUP):
+                if signal.getsignal(sig) == signal.SIG_DFL:
+                    handlers[sig] = signal.signal(sig, _raise_build_signal)
+            return run()
+        finally:
+            _end_cleanly(cleanup, handlers)
+    except _BuildSignal as stop:
+        # A signal that came just as run ended can have cut that cleanup short, with
+        # its handler still in place, which os.kill would raise into again
+        signal.signal(stop.args[0], signal.SIG_DFL)
+        _end_cleanly(cleanup, handlers)
+        # end the run by that signal, as it did before
+        os.kill(os.getpid(), stop.args[0])
+        sys.exit(128 + stop.args[0])
+
+
+def _in_build_dir(parent: str, prefix: str, build):
+    """Returns ``build(tmp)``, called with ``tmp`` a fresh hidden directory
+    ``<parent>/<prefix>*`` to build in, under a name no index or genome listing
+    matches. It is removed on every way out but SIGKILL (_with_cleanup)."""
+    import tempfile
+
+    made = []
+
+    def run():
+        try:
+            made.append(tempfile.mkdtemp(prefix=prefix, dir=parent))
+        except OSError as exc:
+            error(f"Cannot make a build directory in {parent} ({exc})")
+        return build(made[0])
+
+    def cleanup():
+        for tmp in made:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    return _with_cleanup(run, cleanup)
 
 
 def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bool:
@@ -2919,77 +2985,42 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bo
 
     Every later run takes an index directory that is there for a finished one, so
     a build that ends early -- Ctrl-C, an OOM kill, a container stop, an engine
-    error -- must leave none. The command therefore runs in a fresh hidden
-    directory of ``workdir``, on the same file system and under a name no index
-    glob or listing matches, and its index is renamed into place. That directory
-    is removed on every way out but SIGKILL: success, failure, an exception,
-    Ctrl-C, SIGTERM (scancel, docker stop) and SIGHUP. Every path ``cmd`` names is
-    absolute, so it resolves from there. ``failure`` is the error for a command
-    that fails. If a search holds the index's build lock by then, the run stops
-    (_refuse_locked_build); if another run has put the index in place meanwhile,
-    that one is kept and this build discarded. Returns True when this build went
-    into place.
+    error -- must leave none. The command therefore runs in a hidden build
+    directory of genome_library itself (_in_build_dir), and its index is renamed
+    into place. A rename within one directory never crosses a file system or a
+    mount point (genome_library may be a bind mount of its own), and the index
+    takes genome_library's setgid group and default ACL, as one built in place
+    does. Every path ``cmd`` names is absolute, so it resolves from there.
+    ``failure`` is the error for a command that fails. If a search holds the
+    index's build lock by then, the run stops (_refuse_locked_build); if another
+    run has put the index in place meanwhile, that one is kept and this build
+    discarded. Returns True when this build went into place.
     """
-    import signal
-    import tempfile
-
     lib = os.path.join(workdir, "genome_library")
     final = os.path.join(lib, name)
     os.makedirs(lib, exist_ok=True)
-    try:
-        tmp = tempfile.mkdtemp(prefix=".build-index-only-", dir=workdir)
-    except OSError:
-        tmp = None
-    if tmp is None or os.stat(tmp).st_dev != os.stat(lib).st_dev:
-        # genome_library is on another file system (a symlink or a mount point),
-        # which a rename from here cannot reach, or only it is writable: build
-        # beside the indexes instead
-        if tmp is not None:
-            os.rmdir(tmp)
-        tmp = tempfile.mkdtemp(prefix=".build-index-only-", dir=lib)
-    built = os.path.join(tmp, "genome_library", name)
-    handlers = {}
-    try:
-        try:
-            # SIGTERM and SIGHUP would end the run at once and leave the directory:
-            # raise instead, for the cleanup below. One this run ignores (nohup)
-            # stays ignored.
-            for sig in (signal.SIGTERM, signal.SIGHUP):
-                if signal.getsignal(sig) == signal.SIG_DFL:
-                    handlers[sig] = signal.signal(sig, _raise_build_signal)
-            code = subprocess.call(cmd, cwd=tmp, **kwargs)
-            if code != 0 or not os.path.isdir(built):
-                error(f"{failure} (expected {final})")
-            _refuse_locked_build(final)
-            if not os.path.isdir(final):
-                try:
-                    os.rename(built, final)
-                    return True
-                except OSError:
-                    if not os.path.isdir(final):
-                        raise
-            print(
-                f"{final} appeared while this run was building it (another run built "
-                f"it): keeping that one, and discarding this run's build.",
-                flush=True,
-            )
-            return False
-        finally:
-            # a second signal waits until the directory is gone
-            mask = signal.pthread_sigmask(
-                signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
-            )
+
+    def build(tmp):
+        built = os.path.join(tmp, "genome_library", name)
+        code = subprocess.call(cmd, cwd=tmp, **kwargs)
+        if code != 0 or not os.path.isdir(built):
+            error(f"{failure} (expected {final})")
+        _refuse_locked_build(final)
+        if not os.path.isdir(final):
             try:
-                shutil.rmtree(tmp, ignore_errors=True)
-                for sig, handler in handlers.items():
-                    signal.signal(sig, handler)
-            finally:
-                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
-    except _BuildSignal as stop:
-        # end the run by that signal, as it did before, now that its handler is
-        # the default again
-        os.kill(os.getpid(), stop.args[0])
-        sys.exit(128 + stop.args[0])
+                os.rename(built, final)
+                return True
+            except OSError:
+                if not os.path.isdir(final):
+                    raise
+        print(
+            f"{final} appeared while this run was building it (another run built "
+            f"it): keeping that one, and discarding this run's build.",
+            flush=True,
+        )
+        return False
+
+    return _in_build_dir(lib, ".build-index-only-", build)
 
 
 def build_index_only() -> None:
@@ -3077,7 +3108,13 @@ def build_index_only() -> None:
             flush=True,
         )
         # exactly the invocation complete-search uses; it writes the index under
-        # its working directory as genome_library/<index_name> (_build_index_dir)
+        # its working directory as genome_library/<index_name> (_build_index_dir).
+        # It runs through the shell, as every engine command here does: the engine
+        # gets the argv that shell builds from the paths a user gives, and a list
+        # could differ from it (a path with a space, a quote or a glob character).
+        # So a SIGTERM to this run alone ends the shell, not the engine under it,
+        # which runs on until its current step ends: nothing it writes goes into
+        # place.
         index_cmd = (
             f"crispritz.py index-genome {genome_ref} {genomedir}/ {pamfile} "
             f"-bMax {bMax + 1} -th {thread}"

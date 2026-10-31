@@ -27,6 +27,7 @@ import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -148,6 +149,46 @@ for f in files:
     os.remove(f)
 '''
 
+# Imported first by each Python process of a run started with shim=True
+# (sitecustomize), it stands in for what a test cannot set up for real.
+# STUB_MOUNT=<dir>: <dir> is a mount point of its own, so a rename into or out of it
+# fails with EXDEV, as between two bind mounts of one file system, whose st_dev is
+# the same. STUB_SIGNAL_AT_CLEANUP=1: a SIGTERM comes just as the build's cleanup
+# starts, before its first pthread_sigmask holds signals back.
+SHIM = r'''
+import errno, os, signal
+
+_mount = os.environ.get("STUB_MOUNT")
+if _mount:
+    _mount = os.path.realpath(_mount)
+
+    def _inside(path):
+        parent = os.path.realpath(os.path.dirname(os.path.abspath(path)))
+        return parent == _mount or parent.startswith(_mount + os.sep)
+
+    def _within_mounts(rename):
+        def renamed(src, dst, *args, **kwargs):
+            if _inside(src) != _inside(dst):
+                raise OSError(errno.EXDEV, os.strerror(errno.EXDEV), src, None, dst)
+            return rename(src, dst, *args, **kwargs)
+        return renamed
+
+    os.rename = _within_mounts(os.rename)
+    os.replace = _within_mounts(os.replace)
+
+if os.environ.get("STUB_SIGNAL_AT_CLEANUP"):
+    _sigmask, _sent = signal.pthread_sigmask, []
+
+    def pthread_sigmask(how, mask):
+        handler = signal.getsignal(signal.SIGTERM)
+        if not _sent and how == signal.SIG_BLOCK and callable(handler):
+            _sent.append(1)
+            handler(signal.SIGTERM, None)  # what a SIGTERM that comes now runs
+        return _sigmask(how, mask)
+
+    signal.pthread_sigmask = pthread_sigmask
+'''
+
 SHARED = None  # the stub Bio package and a warmed matplotlib cache, for every run
 
 
@@ -158,6 +199,9 @@ def setUpModule():
     open(os.path.join(SHARED, "py", "Bio", "__init__.py"), "w").close()
     with open(os.path.join(SHARED, "py", "Bio", "Seq.py"), "w") as fh:
         fh.write("Seq = object\n")
+    os.makedirs(os.path.join(SHARED, "shim"))
+    with open(os.path.join(SHARED, "shim", "sitecustomize.py"), "w") as fh:
+        fh.write(SHIM)
     # crisprme.py imports matplotlib, which builds its font cache (and says so on
     # stderr) the first time: do it here, once
     subprocess.run([sys.executable, "-c", "import matplotlib.pyplot"],
@@ -246,9 +290,10 @@ class _Fixture(unittest.TestCase):
     def lib(self, name):
         return self.path("genome_library", name)
 
-    def start(self, vcf=True, name=None, keep_hup=False, **stub):
+    def start(self, vcf=True, name=None, keep_hup=False, shim=False, **stub):
         """Launch build-index-only in a session of its own (so its whole process
-        group can be killed, as an OOM kill or a container stop would)."""
+        group can be killed, as an OOM kill or a container stop would); shim loads
+        SHIM in each Python process of the run."""
         args = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
                 "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work]
         if vcf:
@@ -257,8 +302,9 @@ class _Fixture(unittest.TestCase):
             args += ["--name", name]
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("STUB_", "CRISPRME_"))}
+        pythonpath = [os.path.join(SHARED, "py")] + [os.path.join(SHARED, "shim")] * shim
         env.update(PATH=self.bin + os.pathsep + os.environ.get("PATH", ""),
-                   PYTHONPATH=os.path.join(SHARED, "py"),
+                   PYTHONPATH=os.pathsep.join(pythonpath),
                    MPLCONFIGDIR=os.path.join(SHARED, "mpl"),
                    STUB_LOG=self.log, STUB_MARK=self.mark, STUB_RELEASE=self.release,
                    **stub)
@@ -377,6 +423,54 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                 self.assertEqual(self.bins(name), whole)
                 self.assertEqual(self.leftovers(), left)
 
+    def test_an_index_is_built_in_a_hidden_directory_of_genome_library(self):
+        """Where the index is renamed from: no rename then crosses a mount point, and
+        the index is made with what genome_library gives a new directory."""
+        proc = self.start(vcf=False, STUB_HANG=WHOLE[REF][1])
+        self.wait_for_mark(proc)
+        left = self.leftovers()
+        self.assertEqual([os.path.dirname(d) for d in left], [self.path("genome_library")])
+        open(self.release, "w").close()
+        rc, out, err = self.finish(proc)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.bins(REF), WHOLE[REF][2])
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_genome_library_mounted_on_its_own_gets_its_indexes(self):
+        """genome_library as a bind mount of its own (docker -v, apptainer --bind) on
+        the working directory's file system: a rename between the two fails with
+        EXDEV though their st_dev is the same. SHIM makes os.rename and os.replace do
+        that here, as a test cannot mount."""
+        os.makedirs(self.path("genome_library"))
+        rc, out, err = self.run_bio(shim=True, STUB_MOUNT=self.path("genome_library"))
+        self.assertEqual(rc, 0, err)
+        for name, (_, _, whole) in WHOLE.items():
+            self.assertEqual(self.bins(name), whole)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_the_indexes_take_the_setgid_group_of_genome_library(self):
+        """A shared genome_library, setgid to its lab's group: each index and its
+        files take that group, and the setgid bit, as they do built in place."""
+        if not sys.platform.startswith("linux"):
+            self.skipTest("setgid directories pass their group on as on Linux only")
+        if os.geteuid() == 0:
+            gid = 4242
+        else:
+            gid = next((g for g in os.getgroups() if g != os.getegid()), None)
+            if gid is None:
+                self.skipTest("no group to give genome_library but this user's own")
+        lib = self.path("genome_library")
+        os.makedirs(lib)
+        os.chown(lib, -1, gid)
+        os.chmod(lib, 0o2775)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        for name in WHOLE:
+            for top, dirs, files in os.walk(self.lib(name)):
+                self.assertTrue(os.stat(top).st_mode & stat.S_ISGID, top)
+                for entry in [top] + [os.path.join(top, f) for f in files]:
+                    self.assertEqual(os.stat(entry).st_gid, gid, entry)
+
     def test_a_failed_build_exits_non_zero_and_leaves_neither_index_nor_build_directory(self):
         for name, (vcf, chr2, _) in WHOLE.items():
             with self.subTest(index=name):
@@ -390,7 +484,7 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                 self.assertEqual(self.leftovers(), [])
 
     def test_a_genome_library_on_another_file_system_still_gets_its_index(self):
-        """No rename crosses file systems: the build then runs beside the indexes."""
+        """No rename crosses file systems: the build runs beside the indexes."""
         if not os.access("/dev/shm", os.W_OK):
             self.skipTest("no /dev/shm here")
         elsewhere = tempfile.mkdtemp(prefix="bio_atomic_lib_", dir="/dev/shm")
@@ -483,6 +577,16 @@ class SignalsRemoveTheBuildDirectory(_Fixture):
                 self.assertEqual(proc.returncode, -sig, self.stderr())
                 self.assertFalse(os.path.lexists(self.lib(REF)))
                 self.assertEqual(self.leftovers(), [])
+
+    def test_a_sigterm_just_as_the_build_ends_still_ends_the_run_by_it(self):
+        """One that comes once the index is in place, as the cleanup begins and before
+        it holds signals back (SHIM sends it there): the run removes its build
+        directory and ends by that signal, with no traceback."""
+        rc, out, err = self.run_bio(vcf=False, shim=True, STUB_SIGNAL_AT_CLEANUP="1")
+        self.assertEqual(rc, -signal.SIGTERM, err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(self.bins(REF), WHOLE[REF][2])
 
     def test_a_hangup_ignored_as_under_nohup_does_not_stop_the_build(self):
         proc = self.start(vcf=False, keep_hup=True, STUB_HANG=WHOLE[REF][1])
