@@ -1643,6 +1643,66 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         self.assertNotIn("NGG_2_hg38", run.stderr)
         self.assertNotIn("waiting", run.stdout)
 
+    def test_index_path_names_a_dead_lock_exactly_where_its_index_could_serve(self):
+        # The resolver's own width rule, both ways: an all-N index serves at the PAM's
+        # width, and a wider one only under --prune-pam with a 3' PAM. A dead run's lock
+        # on one that could serve guards a partial index, which the error names; one on
+        # an index that could not is no part of the search.
+        for pam, prefix, prune, serves in (
+                ("20bp-NRG-SpCas9", "NNN_2", 0, True),
+                ("20bp-NRG-SpCas9", "NNNNNNNN_2", 0, False),
+                ("20bp-NRG-SpCas9", "NNNNNNNN_2", 1, True),
+                ("20bp-NRG-SpCas9", "NN_2", 1, False),
+                ("23bp-TTTV-Cas12a", "NNNN_2", 0, True),
+                ("23bp-TTTV-Cas12a", "NNNNNNNN_2", 1, False)):
+            with self.subTest(pam=pam, index=prefix, prune=prune):
+                for left in self.library.glob("*.lock"):
+                    shutil.rmtree(left)
+                index = self.library / f"{prefix}_hg38"
+                # the resolver, given that index finished, serves this search from it or not
+                finished = Path(tempfile.mkdtemp(dir=self.root))
+                (finished / index.name).mkdir()
+                (finished / index.name / "chr1.bin").write_bytes(b"")
+                seq, pos = (_PAMS / f"{pam}.txt").read_text().split()
+                pos = int(pos)
+                want = seq[-pos:] if pos > 0 else seq[:-pos]
+                self.assertEqual(resolve(finished, want, "hg38", 2, prune=prune, pos=pos),
+                                 index.name if serves else "")
+                lock = Path(f"{index}.lock")
+                lock.mkdir()
+                (lock / "owner").write_text(owner_record(dead_pid()))
+                run = self.run_pipeline(pam=pam, prune=prune, variant=False,
+                                        index_path=self.library, timeout=60)
+                self.assertEqual(f"ERROR: {index} is a partial index" in run.stderr, serves,
+                                 run.stderr)
+                self.assertIn("ERROR: no matching reference index under --index-path",
+                              run.stderr)
+                self.assertNotIn("waiting", run.stdout)
+
+    def test_index_path_waits_only_for_a_build_that_could_serve(self):
+        live = subprocess.Popen(["sleep", "120"])
+        self.addCleanup(lambda: (live.kill(), live.wait()))
+        lock = self.library / "NNNNNNNN_2_hg38.lock"
+        lock.mkdir()
+        (lock / "owner").write_text(owner_record(live.pid))
+        # without --prune-pam an 8-N flank never serves an NRG search: no wait for that
+        # build, which would end in the same error
+        run = self.run_pipeline(variant=False, index_path=self.library, timeout=20,
+                                env={"_lock_poll_s": "0.2"})
+        self.assertNotIn("waiting", run.stdout)
+        self.assertTrue(run.stderr.startswith("ERROR: no matching reference index under "
+                                              "--index-path"), run.stderr)
+        # under --prune-pam it does: the run waits for it
+        waiter = self.launch(variant=False, prune=1, index_path=self.library,
+                             env={"_lock_poll_s": "0.2"})
+        _wait_for(lambda: "Still waiting for" in waiter.stdout(), 60, "the wait")
+        self.assertIn(f"Another run is indexing {self.library / 'NNNNNNNN_2_hg38'} — "
+                      "waiting...", waiter.stdout())
+        self.assertEqual(waiter.stderr(), "")
+        os.killpg(waiter.proc.pid, signal.SIGKILL)
+        waiter.proc.wait(timeout=30)
+        self.assertEqual((lock / "owner").read_text(), owner_record(live.pid))
+
     def test_a_locked_indels_index_that_cannot_be_rebuilt_says_whose_lock_it_is(self):
         # A precomputed variant index whose INDELS companion is locked, with no source
         # genome to rebuild it from: not "missing", but a dead run's partial build, or a

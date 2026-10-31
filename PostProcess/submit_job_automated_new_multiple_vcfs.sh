@@ -820,7 +820,9 @@ while read vcf_f; do
 	# usual). Wait for a lock whose owner is alive or cannot be checked, as a run that
 	# builds does, and look again. A dead or abandoned owner's lock guards a partial
 	# index, which the error below names. Only the lock of an index that could serve
-	# this search counts: the requested PAM or a PAM-less one, at a sufficient budget.
+	# this search counts, by _resolve_index_dir's rule: a sufficient budget, and the
+	# requested PAM or an all-N one of its width -- or wider, under --prune-pam with a
+	# 3' PAM.
 	_dead_locks=()
 	while [ -z "$idx_ref" ] && [ "$index_path" != "_" ] && [ -n "$index_path" ]; do
 		_dead_locks=() _held=
@@ -829,7 +831,11 @@ while read vcf_f; do
 			_b=${_l##*/}; _b=${_b%.lock}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
 			case "$_n" in '' | *[!0-9]*) continue ;; esac
 			[ "$_n" -ge "$bMax" ] || continue
-			[ "$_p" = "$true_pam" ] || { [ -n "$_p" ] && [ -z "${_p//N/}" ]; } || continue
+			if [ "$_p" != "$true_pam" ]; then
+				{ [ -n "$_p" ] && [ -z "${_p//N/}" ]; } || continue
+				[ "${#_p}" -eq "${#true_pam}" ] || { [ "${#_p}" -gt "${#true_pam}" ] \
+					&& [ "${prune_pam:-0}" = "1" ] && [ "${pos:-1}" -gt 0 ]; } || continue
+			fi
 			if _lock_stale "$_l"; then
 				_dead_locks+=("ERROR: ${_l%.lock} is a partial index: the run that was building it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Clear it, and its lock, with: rm -rf '$_l' '${_l%.lock}'")
 			else
