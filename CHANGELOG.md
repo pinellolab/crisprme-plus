@@ -11,7 +11,7 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
-## [2.8.1] - 2026-10-30
+## [2.8.1] - 2026-10-31
 
 ### Added
 - **`--prune-pam`: one index can serve many PAMs.** A *PAM-less* index stores the raw genomic flank
@@ -235,15 +235,45 @@ and the `release-crisprme` skill.
   broke every benchmark. The flag allowlist was checked against the help text and against what the
   parser reads, but not against the commands this repo builds, so a dead flag in a caller could only
   surface by running the benchmarks; that gap is now a static test.
-- **An index still being built could be selected as if it were finished.** `index-genome` creates the
-  index directory, takes a `<dir>.lock`, and then writes one `.bin` per chromosome, so for the whole
-  build a half-written index is indistinguishable from a complete one by name. A run starting in that
+- **An index still being built could be selected as if it were finished.** A build takes
+  `<dir>.lock`, and `index-genome` then creates the index directory and writes one `.bin` per
+  chromosome, so for the whole build a half-written index is indistinguishable from a complete one
+  by name. A run starting in that
   window printed `Reference index present` and searched a **partial** index — fewer off-targets, no
   error, exit 0 — and did so even when a complete, sufficient index sat right beside it. The scan now
-  skips any candidate whose build lock is held, and any directory holding no `.bin` at all, so such a
-  run takes the existing wait-for-the-build path instead. A symlinked index directory, as a library
-  shared between working directories uses, still counts: the check follows the link. Index choice
-  on a finished library is unchanged.
+  skips any candidate whose build lock is held, and any directory holding no `.bin` at all, and the
+  run waits for that build instead, under `--index-path` as well. A symlinked index directory, as a
+  library shared between working directories uses, still counts: the check follows the link. Index
+  choice on a finished library is unchanged.
+- **A build lock left by a run that died stopped every later run that needed the same build.** A run
+  that builds a shared output (an enriched genome, a genome index, an INDELS index) holds
+  `<output>.lock` while it writes it, and every other run that needs that output waits for the lock
+  to go. In 2.8.0 that wait had no end: a run killed mid-build (SIGKILL, an OOM kill, a container
+  stop, a reboot) left its lock behind, and a later run needing the same output waited on it
+  forever, or, for an index, took the partial one for finished (above). Each lock now holds an owner
+  record (host, PID namespace, PID, start time), refreshed every minute while the build runs. When
+  the owner is gone on this host (it died, is a zombie, or its PID now belongs to another process),
+  the next run takes the lock over and builds the output again from scratch; from another host or
+  container, where the PID cannot be checked, it does so once the record has gone 15 minutes without
+  a refresh. With `--index-path`, which never builds a reference index, the run stops instead with
+  an ERROR that names the partial index and the command that clears it. A build stopped on this host
+  (Ctrl-Z, `kill -STOP`, a SLURM suspend) is waited for however long. A run ended by Ctrl-C, a
+  SIGTERM (`scancel`, a SLURM time limit) or a hangup leaves its lock for that takeover rather than
+  releasing it, since a released lock would hand on a half-written output as finished. A build
+  stopped for 15 minutes or more where no other run can check it (in another container or on
+  another host) can lose its lock; resumed, it ends with an ERROR once its build step returns and
+  uses none of what it built, so a library shared across hosts or containers must not have a build
+  suspended that long. While it waits, a run notes in `log_verbose.txt` who holds the lock and what
+  to do. A lock with no record, as 2.8.0 takes, is never broken by age, since a 2.8.0 run may still
+  be building under it: the run waits and says every five minutes how to clear it. Covered by
+  `PostProcess/test_index_resolution.py`.
+- **The RAM thread guard sized a search served by a PAM-less index as if it were a dedicated one.**
+  It chose its memory model from the requested PAM, so an NRG bulge search served by an all-N index
+  (`NNN_3`, or a wider flank under `--prune-pam`) was sized as constrained (4 GB base, 0.8 GB per
+  thread) instead of PAM-less (12 GB base, 2.2 GB per thread), and could be given more threads than
+  the host's memory holds, and be OOM-killed. A bulge search is now sized by the index it actually
+  searches; a search with no bulges, which scans the genome FASTA and opens no index, is sized as
+  before. Only the thread count changes, never the results.
 
 - **A downloaded variant index warned that its genotype store was missing right after installing
   it.** The "no `genotypes_<vcf>.tar.gz` companion ... per-sample Samples degraded" note was written
