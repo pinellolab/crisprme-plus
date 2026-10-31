@@ -389,8 +389,12 @@ _lock_run_alive() {
 # this script's stderr fails the stage. So its output goes to /dev/null before it is
 # forked: a loop stopped the moment it starts can run this script's traps (bash 5.2
 # does) before it reaches a redirection of its own. Stopped, it reaps its sleep, else
-# handed to PID 1 -- in the web container a server that never reaps it. With KILL: a
-# TERM to a sleep just forked can be lost, and the wait would last the whole sleep.
+# handed to PID 1 -- in the web container a server that never reaps it -- even one it
+# has forked but not yet noted in _s: $! then differs from _r, the last PID it dealt
+# with -- the run's, inherited, or a sleep it reaped -- which it never signals, but for
+# the instant between a reap and _r=, when a PID just freed names no process yet. With
+# KILL: a TERM to a sleep just forked can be lost, and the wait would last the whole
+# sleep.
 # It is forked with TERM untrapped, so a TERM that reaches it before it sets its own
 # trap ends it: caught by the run's trap, inherited, bash dropped it, and the loop went
 # on refreshing a lock the run then waited on for good. A TERM to the run in that
@@ -400,14 +404,14 @@ _lock_hold() {
 	_locks_held+=("$1")
 	trap - TERM
 	{ (
-		_s=
-		trap '[ -z "$_s" ] || { kill -KILL "$_s"; wait "$_s"; }; exit 0' TERM
+		_s= _r=$!
+		trap '[ -n "$_s" ] || [ "$!" = "$_r" ] || _s=$!; [ -z "$_s" ] || { kill -KILL "$_s"; wait "$_s"; }; exit 0' TERM
 		while _lock_run_alive && _lock_mine "$1"; do
 			touch -c "$1/owner"
 			sleep "${_lock_beat_s:-60}" &
 			_s=$!
 			wait "$_s"
-			_s=
+			_s= _r=$!
 		done
 	) & } </dev/null >/dev/null 2>&1
 	trap '_lock_on_signal TERM' TERM

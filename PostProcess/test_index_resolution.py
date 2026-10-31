@@ -1744,6 +1744,37 @@ class ALockIsKeptFreshByTheRunThatHoldsIt(_Locks):
         self.assertEqual((rc, out), (0, "done\n"), out + err)
         self.assertEqual(err, "")
 
+    def test_a_loop_stopped_before_it_notes_its_sleep_still_reaps_it(self):
+        # Stopped between forking its sleep and noting the sleep's PID -- a lock let go the
+        # moment it is taken (a free lock whose output is in place), about 5% of the time
+        # -- the loop left that sleep to PID 1, which in the web container never reaps it.
+        # It now reaps what $! names then -- but only what it forked: before its first
+        # sleep, $! names the run's own last background process (here a sleep 30). A DEBUG
+        # trap, inherited by the loop under set -T, lands the TERM as the loop is about to
+        # note its sleep, or to take its first look.
+        for command, forked in (("_s=$!", True), ("_lock_run_alive", False)):
+            with self.subTest(term_before=command):
+                shutil.rmtree(self.lock, ignore_errors=True)
+                pid_file = self.dir / f"pid_{forked}"
+                trigger = command.replace("$", "\\$")
+                proc = self.start(
+                    f"_sp={_q(pid_file)}\nsleep 30 &\nset -T\n"
+                    f"trap '[ -n \"$_hit\" ] || [ \"$BASH_COMMAND\" != \"{trigger}\" ] || "
+                    '{ _hit=1; echo "$!" >"$_sp"; kill -s TERM "$BASHPID"; :; }\' DEBUG\n'
+                    f"mkdir {_q(self.lock)}; _lock_sign {_q(self.lock)}\n"
+                    f"_lock_hold {_q(self.lock)}\n"
+                    'wait "${_lock_beats[0]}"; echo "loop: $?"')
+                rc, out, err = self.result(proc)
+                self.addCleanup(lambda g=proc.pid: [os.kill(p, signal.SIGKILL)
+                                                    for p, _, _ in _processes(g)])
+                self.assertTrue(pid_file.exists(), f"no TERM landed before {command}")
+                pid = int(pid_file.read_text())
+                self.assertEqual((rc, out), (0, "loop: 0\n"), out + err)
+                self.assertEqual(_state(pid), "" if forked else "S",
+                                 "the loop left its sleep running" if forked else
+                                 "the loop killed a process it did not fork")
+                self.assertEqual(err, "")
+
     def test_a_loop_stopped_the_moment_it_is_forked_still_stops(self):
         # A TERM that reached a refresh loop before it had set its own trap was lost: the
         # loop had inherited the run's TERM trap, and bash drops a signal caught that way.
