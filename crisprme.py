@@ -3287,6 +3287,16 @@ def build_index_only() -> None:
     # one of them was building, and then no build here would reclaim it.
     _reclaim_build_dirs(os.path.join(workdir, "genome_library"), ".build-index-only-")
     _reclaim_build_dirs(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-")
+    if vcf_given:
+        # and the SNP overlay's, beside each fake-indel FASTA of this dataset
+        # (overlay_indel_snps.overlay_fake_chromosome)
+        try:
+            _fakes = sorted(os.listdir(indels_out))
+        except OSError:
+            _fakes = []
+        for _fake in _fakes:
+            if _fake.startswith("fake_"):
+                _reclaim_build_dirs(os.path.join(indels_out, _fake), ".overlay-")
     # ---- reference index ------------------------------------------------------
     if os.path.isdir(idx_folder):
         print(f"Reference index already present: {idx_folder}", flush=True)
@@ -3768,12 +3778,15 @@ def build_index_only() -> None:
             # overlay fails the build: it rewrites the fake-indel FASTA files in place,
             # each one whole or not at all (overlay_fake_chromosome), but an index built
             # after a failure would be SNP-blind where the overlay did not get to. Under
-            # _with_cleanup, a SIGTERM or SIGHUP lets it remove its temporary file.
+            # _with_cleanup, a SIGTERM or SIGHUP lets it remove its temporary file; one
+            # a SIGKILL leaves holds this run's owner record, for a later run to remove.
             if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+                _owner = "".join(f"{k}={v}\n" for k, v in _build_dir_owner().items())
                 try:
                     import overlay_indel_snps as _ois
                     _n = _with_cleanup(
-                        lambda: _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict]),
+                        lambda: _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict],
+                                          owner=_owner),
                         lambda: None,
                     )
                 except Exception as _ois_err:

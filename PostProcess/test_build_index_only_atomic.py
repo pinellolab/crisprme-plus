@@ -220,7 +220,8 @@ if os.environ.get("STUB_OVERLAY_HANG"):
     _open = builtins.open
 
     def open(file, mode="r", *args, **kwargs):
-        if "w" in mode and os.path.basename(os.path.dirname(str(file))).startswith(".overlay-"):
+        if ("w" in mode and str(file).endswith(".fa.tmp")
+                and os.path.basename(os.path.dirname(str(file))).startswith(".overlay-")):
             _open(os.environ["STUB_MARK"], "w").close()
             while not os.path.exists(os.environ["STUB_RELEASE"]):
                 time.sleep(0.02)
@@ -1171,6 +1172,37 @@ class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
                 self.assertEqual(fh.read(), f">fake{chrom}\n{seq[:26]}T{seq[26:60]}\n")
         self.assertFalse(os.path.lexists(self.lib(INDELS)))
         self.assertEqual(self.leftovers(), [])
+
+    def test_a_kill_while_it_overlays_leaves_its_temporary_file_to_the_next_run(self):
+        """An OOM kill or a container stop while the overlay writes a FASTA's
+        temporary file leaves that file, in its hidden directory beside the FASTA.
+        The directory holds the run's owner record, and the next run removes it,
+        whether it overlays again or finds the INDELS index built since (by a
+        complete-search, here put back as that leaves it)."""
+        for since in (False, True):
+            with self.subTest(indels_index_built_since=since):
+                self.fresh()
+                fake = self.path("Genomes", "hg38+ds_INDELS", "fake_ds_chr1")
+                if since:
+                    rc, out, err = self.run_bio()
+                    self.assertEqual(rc, 0, err)
+                    aside = os.path.join(self.root, "aside")
+                    os.rename(self.lib(INDELS), aside)
+                proc = self.start(shim=True, STUB_OVERLAY_HANG="1")
+                self.wait_for_mark(proc)
+                self.kill_group(proc)
+                left = [os.path.join(fake, d) for d in os.listdir(fake) if d.startswith(".overlay-")]
+                self.assertEqual(len(left), 1)
+                with open(os.path.join(left[0], "owner")) as fh:
+                    self.assertIn(f"\npid={proc.pid}\n", fh.read())
+                if since:
+                    os.rename(aside, self.lib(INDELS))
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 0, err)
+                self.assertIn(f"Removing {left[0]}: the build-index-only run that made it "
+                              f"(pid {proc.pid} on {os.uname().nodename}, started ", out)
+                self.assertEqual(os.listdir(fake), ["fakechr1.fa"])
+                self.assertEqual(self.bins(INDELS), WHOLE[INDELS][2])
 
 
 # What the code before this fix (379b5b0) did with the same stub and inputs, for
