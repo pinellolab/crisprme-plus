@@ -11,6 +11,71 @@ and the `release-crisprme` skill.
 
 ## [Unreleased]
 
+### Fixed
+- **An interrupted or failed `build-index-only` no longer leaves a partial index or enrichment that
+  later runs use.** Every later run, `build-index-only` and `complete-search` alike, takes an index
+  directory or an enriched genome that is there for a finished one. `build-index-only` ran the engine
+  straight into `genome_library/<PAM>_<N>_<genome>[+<vcf>[_INDELS]]`, and moved the enriched genome
+  into place before the rest of the enrichment, so a build that ended early (Ctrl-C, an OOM kill, a
+  container stop, an engine error) left a partial one that every later search used: a reference
+  build killed after `chr1` was searched without `chr2`, with fewer off-targets and no error, and a
+  run killed while it compressed the dictionaries left them half compressed beside a finished-looking
+  enriched genome. Each index is now built by the same command in a hidden directory of
+  `genome_library` and renamed into place once the command has succeeded. A rename within one
+  directory never crosses a mount point, so a `genome_library` mounted on its own (`docker -v`,
+  `apptainer --bind`) works as before, and the index takes `genome_library`'s setgid group and
+  default ACL, as one built in place does. The enrichment is staged the same way: its dictionaries
+  are compressed before anything moves, then the fake-indel genomes and the dictionaries are moved
+  into place, and the enriched genome last, so a run that ends before then leaves none of it and the
+  next one enriches again. A compression that fails now fails the build and puts nothing in place:
+  `pigz`'s exit status was ignored, and a Python gzip (used without `pigz`) that failed ended the run
+  with a traceback, the enriched genome already in place. An index or an enriched genome that
+  another run finished meanwhile is kept, with a line on stdout. Ctrl-C, SIGTERM and SIGHUP still end
+  the run by that signal. On success the files, their contents (the `.gz` files included),
+  permissions, sidecars, stdout lines and exit status are as before.
+- **`build-index-only` stops while a search holds the build lock of what it uses or builds.**
+  `complete-search` holds `<output>.lock` while it enriches a genome or builds an index, and never
+  uses an output whose lock is there. `build-index-only` looked at no lock: started while a search
+  built the variant index, it took the half-written index for present and exited 0; started while a
+  search enriched the genome, it moved its own enrichment into the places the search was writing.
+  Now, while such a lock sits beside the reference, variant or INDELS index or the enriched genome
+  that it would use or build, it neither uses nor builds that output: it ends with an ERROR on stderr
+  and exit status 1, which names the lock and its owner and says what to do (in the web Settings page
+  the build then shows as failed, with that ERROR). The locks are checked before anything is built,
+  before each step, and just before a finished build or enrichment goes into place. With no lock
+  there nothing changes, and `build-index-only` takes no lock of its own.
+- **A chromosome whose INDELS index fails to build now fails the build.** `pool_index_indels.py`
+  ignored each chromosome's `index-genome` exit status, so a chromosome that failed (a `buildTST`
+  error, an OOM kill) left a partial `_INDELS` index, which `build-index-only` took for built. It now
+  prints `Indexing failed for INDELs in <chromosomes>` on stdout and exits 1, and `build-index-only`
+  puts no index in place. The search ignores this status, as it goes by the engine's stderr, and is
+  unchanged.
+- **`build-index-only` checks `--vcf` before it builds the reference index.** A `--vcf` that names no
+  dataset, or a listing that names more than one, failed only once the reference index had been
+  built; it now fails first, with the same message. A valid `--vcf` builds what it built before.
+- **The SNP overlay can no longer leave a fake-indel FASTA cut short** (since 2.5.0). Before it indexes
+  the fake-indel genome, `build-index-only` overlays the SNP codes onto each
+  `Genomes/<genome>+<vcf>_INDELS/fake_<vcf>_<chr>/fake<chr>.fa`, rewriting it in place. A run stopped
+  in that write left the file empty or cut short, and the next run indexed it as a whole one (an empty
+  one as `No indels on <chr>`), so the INDELS index had no indel target past the cut, with no error;
+  a write that failed (a full disk) was a WARNING, and the same run indexed what was left. Each FASTA
+  is now written beside the original and renamed over it, with the same contents, mode and owner,
+  and an overlay that fails fails the build (an ERROR, and no INDELS index). A FASTA that an earlier
+  release cut short is not detected: if a `build-index-only` run was stopped while it overlaid,
+  remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS` and `Genomes/<genome>+<vcf>` and run it
+  again, which enriches again.
+- **The build directories of killed runs are reclaimed.** A SIGKILL (an OOM kill, a container stop)
+  leaves the build directory, holding a partial index or enrichment as large as the finished one,
+  which nothing read or removed. Each build directory now holds an owner record (host, PID namespace,
+  PID and start time, as a search's build lock does), and each build first removes those whose owner
+  is gone on this host and PID namespace (dead, a zombie, or its PID now another process's), with a
+  line on stdout for each. One whose owner is running or stopped, or has no record, is left alone,
+  as is any directory `build-index-only` did not make. One made in another PID namespace or on
+  another host, whose owner cannot be checked from here (a web container's own, once it restarted),
+  is left too, with a line on stdout that says how to remove it. The enrichment's directory,
+  `Genomes/run_*` before, which the web genome list showed as a genome, is now hidden and reclaimed
+  the same way; the search's own `Genomes/run_*` directories are untouched.
+
 ## [2.8.1] - 2026-10-31
 
 ### Added
