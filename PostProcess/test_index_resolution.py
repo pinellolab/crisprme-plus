@@ -21,6 +21,8 @@ here too: ``ADeadRunsLockDoesNotWedgeTheNext`` and ``ARunThatEndsMidBuildLeavesI
 run the shipped lock helpers, and ``BuildLocksInTheShippedScript`` kills, interrupts
 and races whole runs. ``TheThreadGuardSizesTheIndexSearched`` covers the RAM guard,
 which must size a search by the index the resolver picked.
+``AFinishedRunRestoresOnlyRealAnnotations`` runs the script's last annotation step,
+which must leave the empty placeholder alone.
 """
 
 import os
@@ -2720,6 +2722,55 @@ class TheThreadGuardSizesTheIndexSearched(_ShippedScript):
         threads, kind = self.capped(bulges=0, variant=False)
         self.assertEqual(kind, "standard PAM")
         self.assertSized(threads, 800, 4000, searches=1)
+
+
+def _annotation_restore_block():
+    """The shipped end-of-run block that gunzips the annotation files back, verbatim:
+    from its comment to the log_error rename that follows it."""
+    text = _SCRIPT.read_text()
+    start = text.index("# restore an unzipped copy of the annotation files")
+    return text[start:text.index("# keep log_error but no block visualization", start)]
+
+
+class AFinishedRunRestoresOnlyRealAnnotations(unittest.TestCase):
+    """A run with no --annotation / --gene_annotation is handed the empty placeholder
+    vuoto.txt as both files, as a path (complete-search: <install>/PostProcess/vuoto.txt,
+    the web: <job>/vuoto.txt). The block compared that path with the bare name, so it
+    gunzipped the placeholder too, and every such run's error log got two
+    "gzip: .../vuoto.txt: unknown suffix -- ignored" lines. The block runs at the very
+    end of a run, which the stub-engine runs above never reach, so it is run on its
+    own here, with the real gunzip."""
+
+    def run_block(self, annotation_file, gene_proximity):
+        script = (f'annotation_file={shlex.quote(str(annotation_file))}\n'
+                  f'gene_proximity={shlex.quote(str(gene_proximity))}\n'
+                  f'{_annotation_restore_block()}')
+        return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_the_placeholder_is_left_alone(self):
+        vuoto = self.tmp / "vuoto.txt"
+        vuoto.write_text("")
+        out = self.run_block(vuoto, vuoto)
+        self.assertEqual((out.returncode, out.stderr), (0, ""))
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), ["vuoto.txt"])
+
+    def test_real_annotations_are_still_restored_beside_their_gz(self):
+        import gzip
+        beds = {"annotation.sorted.bed": "chr1\t0\t10\texon\n",
+                "genes.sorted.bed": "chr1\t5\t20\tgene\n"}
+        for name, body in beds.items():
+            with gzip.open(self.tmp / f"{name}.gz", "wt") as fh:
+                fh.write(body)
+        out = self.run_block(self.tmp / "annotation.sorted.bed.gz",
+                             self.tmp / "genes.sorted.bed.gz")
+        self.assertEqual((out.returncode, out.stderr), (0, ""))
+        for name, body in beds.items():
+            self.assertEqual((self.tmp / name).read_text(), body)
+            self.assertTrue((self.tmp / f"{name}.gz").is_file())  # -k: the .gz stays
 
 
 class ShippedScriptCarriesTheFix(unittest.TestCase):

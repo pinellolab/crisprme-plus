@@ -1989,12 +1989,14 @@ fi
 # restore an unzipped copy of the annotation files, but KEEP the .gz (-k): the
 # pipeline entry + input validation require the bgzipped .bed.gz, so consuming it
 # here (plain `gunzip -f` removes the .gz) broke every re-run that referenced the
-# same .bed.gz ("--annotation does not exist"). Keep both.
-if [ "$annotation_file" != "vuoto.txt" ]; then
+# same .bed.gz ("--annotation does not exist"). Keep both. Both variables are
+# realpaths, so compare the basename with the empty placeholder (as the annotation
+# step does), or the placeholder is gunzipped too and gzip complains on stderr.
+if [ "$(basename "$annotation_file")" != "vuoto.txt" ]; then
     gunzip -kf "$annotation_file"
 fi
 
-if [ "$gene_proximity" != "vuoto.txt" ]; then
+if [ "$(basename "$gene_proximity")" != "vuoto.txt" ]; then
 	gunzip -kf "$gene_proximity"
 fi
 

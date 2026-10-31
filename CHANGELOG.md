@@ -344,6 +344,16 @@ and the `release-crisprme` skill.
 - **Pipeline failure summaries are binary-safe.** `summarize_pipeline_failure()` now reads `log.txt`
   and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
   stderr no longer raises `UnicodeDecodeError` and masks the real error.
+- **A search without annotations wrote two `gzip` errors to its error log.** Every
+  `complete-search` run without `--annotation` or `--gene_annotation`, and every web search with no
+  annotation enabled, ended with `gzip: .../vuoto.txt: unknown suffix -- ignored` twice in
+  `log_error_no_check.txt`, so its error log was never empty although nothing had failed. The
+  pipeline's last step gunzips the annotation files back beside their `.gz`; it compared each
+  path with the bare name of the empty placeholder, `vuoto.txt`, which a path never equals, and so
+  gunzipped the placeholder too. It now compares the basename, as the annotation step already
+  does. The noise came after the last stage check, so no run failed because of it, and an
+  annotated search still gets its `.bed` back beside the `.gz`. Present since 2.2.0. Covered by
+  `PostProcess/test_index_resolution.py`.
 
 - **`scorer-env create` failed whenever conda was the env manager, so a Bioconda or source install
   could not run a search.** The CRISPR-Bulge env was created with
