@@ -2047,8 +2047,10 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         # kill -CONT <pid> resumes the script alone: its build step stays stopped
         os.kill(bash, signal.SIGCONT)
         _wait_for(lambda: _state(bash) != "T", 10, "bash to resume")
-        build = [p for p, _, args in _processes(holder.proc.pid)
-                 if "crispritz.py index-genome" in args]
+        # bash's own child only: a child the group stop caught between its fork and its
+        # exec shows the build step's command line too
+        build = [p for p, ppid, args in _processes(holder.proc.pid)
+                 if ppid == bash and "crispritz.py index-genome" in args]
         self.assertEqual([_state(p) for p in build], ["T"])
         # resumed with it, the run finishes, and the waiter searches what it built
         os.killpg(holder.proc.pid, signal.SIGCONT)
