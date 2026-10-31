@@ -78,12 +78,12 @@ compute that hash until the GitHub release (and therefore the tarball) exists.
                                                 build.number: 0
 ```
 
-Note the dependency chain: the Dockerfile installs `crisprme=$crisprme_version`
-from the Bioconda channel, so a freshly built Docker image only works once the
-Bioconda package for that version has been published. The typical timeline is:
+Note the order: the Docker image is built from source on the tag, so it never waits
+for Bioconda, while the Bioconda recipe needs the tag's tarball for its sha256. The
+typical timeline is:
 
-1. Bump in-repo files → 2. GitHub release/tag → 3. Bioconda recipe update (merged)
-→ 4. Docker image rebuild works.
+1. Bump in-repo files → 2. GitHub release/tag (the Docker image publishes from it)
+→ 3. Bioconda recipe update (merged).
 
 ## The four version-sync points
 
@@ -139,7 +139,7 @@ update the link-reference footer at the bottom of the file.
 ### 4. Create the GitHub release and tag
 
 Commit the version bump and changelog, push, then create the release. `gh`
-creates the annotated tag `vX.Y.Z` as part of the release.
+creates the tag `vX.Y.Z` as part of the release.
 
 ```bash
 git add crisprme.py Dockerfile CHANGELOG.md
@@ -148,7 +148,7 @@ git push origin HEAD
 
 gh release create vX.Y.Z \
   --repo pinellolab/crisprme-plus \
-  --title "CRISPRme vX.Y.Z" \
+  --title "CRISPRme+ vX.Y.Z" \
   --notes-file <changelog-section-for-X.Y.Z>
 ```
 
@@ -242,5 +242,4 @@ is missing/broken in the shipped artifact.
 - **Bad in-repo bump:** `git checkout crisprme.py Dockerfile CHANGELOG.md`.
 - **Premature/incorrect GitHub release:** `gh release delete vX.Y.Z --repo pinellolab/crisprme-plus --cleanup-tag`, then redo.
 - **sha256 mismatch in the Bioconda PR:** GitHub occasionally regenerates archive tarballs; recompute the hash from the live tarball and update `meta.yaml`.
-- **Docker build fails on `crisprme=$crisprme_version`:** the Bioconda package for that version has not published yet — wait and rebuild.
 - **Version lag between files:** always run the step-1 pre-flight; the most common historical drift is the `Dockerfile` ARG trailing `crisprme.py`.
