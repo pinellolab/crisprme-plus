@@ -508,6 +508,18 @@ fi
 if [ "$1" = search ] && [ -n "$STUB_SEARCH_UNTIL" ]; then
 	while ! [ -e "$STUB_SEARCH_UNTIL" ]; do sleep 0.05; done
 fi
+# STUB_ENRICH=1: add-variants leaves in the current directory what crispritz's does for
+# VCF folder $2 and reference folder $3 -- the enriched genome, its dictionaries and
+# indel logs, one fake-indel genome per chromosome. Otherwise it writes nothing, as
+# with no source VCFs installed.
+if [ "$1" = add-variants ] && [ "$STUB_ENRICH" = 1 ]; then
+	_ref=${3%/}; _ref=${_ref##*/}; _vcf=${2%/}; _vcf=${_vcf##*/}
+	mkdir -p "variants_genome/SNPs_genome/${_ref}_enriched" "variants_genome/fake_${_vcf}_chr1"
+	printf '>chr1\nACGT\n' >"variants_genome/SNPs_genome/${_ref}_enriched/chr1.fa"
+	printf '{}\n' >"variants_genome/SNPs_genome/my_dict_chr1.json"
+	: >"variants_genome/SNPs_genome/logchr1.txt"
+	printf '>fakechr1\nACGTACGTACGTACGTACGTACGTACGT\n' >"variants_genome/fake_${_vcf}_chr1/fakechr1.fa"
+fi
 if [ "$1" = search ]; then
 	# Stop at the last search: the variant one, or the reference one in a
 	# reference-only run. Every index decision has been made by then.
@@ -1574,6 +1586,43 @@ class BuildLocksInTheShippedScript(_ShippedScript):
                 self.assertRegex(run.stderr.strip(), says)
                 self.assertEqual((lock / "owner").read_text(), record)
                 shutil.rmtree(lock)
+
+    def test_a_dead_runs_enrichment_is_redone_from_scratch(self):
+        # The enrichment site: a run died holding Genomes/<ref>+<vcf>.lock after it had
+        # moved part of its output into place -- the enriched genome, a fake-indel
+        # genome. The takeover clears both before it enriches again: a `mv` into an
+        # existing directory nests the new genome inside the old one, or fails on stderr.
+        self.install("NRG_2", variant=False)  # a reference index; no variant index
+        enriched = self.home / "Genomes" / f"hg38+{self.VCF}"
+        indels = self.home / "Genomes" / f"hg38+{self.VCF}_INDELS"
+        fake = indels / f"fake_{self.VCF}_chr1"
+        lock = Path(f"{enriched}.lock")
+        lock.mkdir()
+        (lock / "owner").write_text(owner_record(dead_pid()))
+        enriched.mkdir()
+        (enriched / "chr1.fa").write_text(">chr1\nPARTIAL\n")
+        fake.mkdir(parents=True)
+        (fake / "fakechr1.fa").write_text(">fakechr1\nPARTIAL\n")
+        run = self.run_pipeline(timeout=60, env={"STUB_ENRICH": "1"})
+        self.assertIn(f"Stale lock {lock}: the run that held it (pid ", run.stdout)
+        self.assertEqual([c[0] for c in run.calls].count("add-variants"), 1)
+        # this run's output, each in its place: nothing nested, nothing of the dead run's
+        self.assertEqual([p.name for p in enriched.iterdir()], ["chr1.fa"])
+        self.assertEqual((enriched / "chr1.fa").read_text(), ">chr1\nACGT\n")
+        self.assertEqual([p.name for p in indels.iterdir()], [fake.name])
+        self.assertEqual([p.name for p in fake.iterdir()], ["fakechr1.fa"])
+        self.assertNotIn("PARTIAL", (fake / "fakechr1.fa").read_text())
+        dicts = self.home / "Dictionaries" / f"dictionaries_{self.VCF}"
+        self.assertEqual([p.name for p in dicts.iterdir()], ["my_dict_chr1.json"])
+        self.assertFalse(lock.exists())
+        self.assertEqual(list((self.home / "Genomes").glob("run_*")), [])  # its scratch
+        # and the new genome went on to be indexed, its indels too, and searched
+        self.assertIn(["index-genome", f"hg38+{self.VCF}"], [c[:2] for c in run.calls])
+        self.assertIn(["index-genome", f"hg38+{self.VCF}_INDELS/NRG_2_fakechr1"],
+                      [c[:2] for c in run.calls])
+        self.assertEqual(run.searched(variant=True), (f"NRG_2_hg38+{self.VCF}", False))
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed",
+                         run.stderr)
 
     def test_an_index_directory_with_no_bin_and_no_lock_is_built(self):
         # The scan takes a directory with no .bin for no index (a download or a build
