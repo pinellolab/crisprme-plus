@@ -2387,6 +2387,31 @@ def complete_search() -> None:
     # the index, so a dict-less variant index cannot be built on demand -- download it, or
     # build-index-only first. Override for advanced / legacy on-demand builds with
     # CRISPRME_ALLOW_ONDEMAND_BUILD=1.
+    if variant:
+        # build-index-only writes some of a dataset's outputs in place, chromosome by
+        # chromosome, after its dictionaries are there, and marks each meanwhile
+        # (_mark_unfinished): a run stopped there leaves a part of it that looks whole,
+        # and this search would use it as if it were, with no error. Refuse it until a
+        # build-index-only run has finished it (with or without the override below).
+        _dict_root = os.path.join(current_working_directory, "Dictionaries")
+        _snp_on = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
+        for _vdir in vcf_dataset_dirs:
+            _vn = os.path.basename(os.path.normpath(_vdir))
+            _rerun = f"Run build-index-only again with {_vn}"
+            _reg = os.path.join(_dict_root, f"registry_{_vn}")
+            _gt = os.path.join(_dict_root, f"genotypes_{_vn}")
+            _refuse_unfinished(
+                _reg, f"the dict-less tiers of {_vn}",
+                f"{_rerun} and its --samplesID, which finishes them, or remove them to "
+                f"search without them (rm -rf '{_reg}' '{_gt}')",
+            )
+            if _snp_on:  # (the store is read for the SNP+indel co-occurrence only)
+                _igt = os.path.join(_dict_root, f"indel_genotypes_{_vn}")
+                _refuse_unfinished(
+                    _igt, f"the phased indel genotype store of {_vn}",
+                    f"{_rerun}, which finishes it, or remove it to search without it "
+                    f"(rm -rf '{_igt}')",
+                )
     if variant and not os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
         _missing = []
@@ -3067,6 +3092,73 @@ def _reclaim_build_dirs(parent: str, prefix: str) -> None:
             )
 
 
+def _mark_unfinished(directory: str) -> None:
+    """Marks ``directory`` as being written in place by this run: a hidden
+    ``<directory>/.building`` that holds this run's owner record (_build_dir_owner).
+    A step that writes its output into place file by file -- the dict-less tiers,
+    the indel genotype store, the SNP overlay of a fake-indel genome in place --
+    sets it before it starts and takes it away once it has ended
+    (_unmark_unfinished): a part that a stop leaves looks like a whole one, and
+    complete-search refuses it while the mark is there (_refuse_unfinished). It
+    makes ``directory`` if need be."""
+    marker = os.path.join(directory, ".building")
+    try:
+        os.makedirs(marker, exist_ok=True)
+        # through a rename, as a build directory's record (_in_build_dir)
+        record = os.path.join(marker, f"owner.{os.getpid()}")
+        with open(record, "w") as fh:
+            fh.write("".join(f"{k}={v}\n" for k, v in _build_dir_owner().items()))
+        os.replace(record, os.path.join(marker, "owner"))
+    except OSError as exc:
+        error(f"Cannot mark {directory} as being written ({exc})")
+
+
+def _unmark_unfinished(directory: str, made: bool = False) -> None:
+    """Takes away the mark of _mark_unfinished, its owner record last; with ``made``
+    (``directory`` was made for the mark), ``directory`` too if nothing else is in
+    it."""
+    _remove_build_dir(os.path.join(directory, ".building"))
+    if made:
+        try:
+            os.rmdir(directory)
+        except OSError:
+            pass
+
+
+def _refuse_unfinished(directory: str, what: str, rerun: str) -> None:
+    """Ends complete-search with an ERROR while ``directory`` holds the mark of a
+    build-index-only run that writes ``what`` there in place (_mark_unfinished): a
+    search would take the part written so far for the whole of it, with no error.
+    ``rerun`` says what to do once that run has stopped."""
+    marker = os.path.join(directory, ".building")
+    if not os.path.isdir(marker):
+        return
+    gone, record = _build_dir_gone(marker)
+    who = (
+        f" (pid {record.get('pid', '?')} on {record.get('host', '?')}, started "
+        f"{record.get('started', '?')})" if record else ""
+    )
+    if gone or not record:
+        error(
+            f"{directory} is unfinished: the build-index-only run that wrote {what} "
+            f"there{who} stopped before it was done, and a search would use what is "
+            f"there as if it were whole. {rerun}, then run this search again."
+        )
+    if gone is None:
+        error(
+            f"{directory} is being written, or was left unfinished: the build-index-only "
+            f"run that writes {what} there{who} ran in another PID namespace (another "
+            f"container, or this one before a restart) or on another host, so this run "
+            f"cannot tell whether it still runs. Wait for it to finish, then run this "
+            f"search again. If it no longer runs: {rerun}, then run this search again."
+        )
+    error(
+        f"{directory} is being written: a build-index-only run{who} is writing {what} "
+        f"there, and a search would use the part written so far as if it were whole. "
+        f"Wait for that run to finish, then run this search again."
+    )
+
+
 def _end_cleanly(cleanup, handlers: dict) -> None:
     """Calls ``cleanup()`` and puts the signal handlers in ``handlers`` back, then
     ends the run by the first SIGINT, SIGTERM or SIGHUP that came meanwhile: until
@@ -3619,6 +3711,15 @@ def build_index_only() -> None:
             if _tier_present:
                 print(f"  {_tier_present} chromosome(s) already emitted; resuming "
                       f"{len(_tier_jobs)} remaining", flush=True)
+            # The tiers are written in place, chromosome by chromosome, and a search
+            # takes them chromosome by chromosome, falling back to the dicts for the
+            # rest: a run stopped here (an OOM kill, at ~150-180GB a chromosome) left a
+            # part of them that every search used as if it were whole, with no error.
+            # So they are marked unfinished until this step ends, its guarded failures
+            # included, and complete-search refuses them meanwhile (_refuse_unfinished).
+            _reg_made = not os.path.isdir(_reg_dir)
+            if _tier_jobs:
+                _mark_unfinished(_reg_dir)
             try:
                 _tier_workers = int(os.environ.get("CRISPRME_TIER_WORKERS", "4"))
             except ValueError:
@@ -3653,6 +3754,7 @@ def build_index_only() -> None:
                 "of the dicts).",
                 flush=True,
             )
+            _unmark_unfinished(_reg_dir, _reg_made)
             # Persist a tiny variant-count manifest so reports can state the
             # database size (SNP variants + genotyped panel sizes) with ZERO VCF
             # access -- summed from the per-chrom registry .idx headers just
@@ -3725,9 +3827,9 @@ def build_index_only() -> None:
     # analysis degrades to PUTATIVE via the log's unphased carriers. Enabled by
     # default (opt-out): set CRISPRME_INDEL_SNP=0 to disable.
     if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+        _igt_dir = os.path.join(workdir, "Dictionaries", f"indel_genotypes_{vcf_name}")
         try:
             import build_indel_genotypes as _big
-            _igt_dir = os.path.join(workdir, "Dictionaries", f"indel_genotypes_{vcf_name}")
             os.makedirs(_igt_dir, exist_ok=True)
             _keep = None
             if db_to_samplesid:  # union of the per-db panels (match the SNP tiers)
@@ -3773,6 +3875,9 @@ def build_index_only() -> None:
                 _igw = max(1, min(_igw, len(_ig_jobs)))
                 print(f"[indel-snp] building phased indel GT for {len(_ig_jobs)} "
                       f"chromosome(s) with {_igw} parallel worker(s)", flush=True)
+                # written in place too, a chromosome at a time: marked unfinished
+                # until this step ends, as the tiers above are
+                _mark_unfinished(_igt_dir)
                 if _igw > 1:
                     import multiprocessing as _mp
                     with _mp.get_context("fork").Pool(_igw) as _igpool:
@@ -3788,6 +3893,7 @@ def build_index_only() -> None:
         except Exception as _ig_err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
             print(f"WARNING [indel-snp]: phased indel genotype store not built "
                   f"({_ig_err}); indel post-analysis falls back to PUTATIVE.", flush=True)
+        _unmark_unfinished(_igt_dir)
     # STEP 2: index the enriched (SNP) genome
     _refuse_locked_build(snp_idx)
     if not os.path.isdir(snp_idx):

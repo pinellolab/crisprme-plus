@@ -177,7 +177,10 @@ for i, f in enumerate(files):
 # remove what a build directory holds, makes <file> and waits until $STUB_RELEASE
 # exists, as removing a large partial index takes a while. STUB_THREAD=1: a thread
 # that does nothing, as numpy's OpenBLAS starts at import, for the kernel to give a
-# signal to when the one that runs Python has it blocked.
+# signal to when the one that runs Python has it blocked. STUB_WRITE_HANG=<text>: a
+# file opened for writing whose path holds <text> (a chromosome's dict-less tier or
+# indel genotype store) waits there, once $STUB_MARK is made, until $STUB_RELEASE
+# exists; STUB_WRITE_FAIL=<text>: that open fails, as on a full disk.
 SHIM = r'''
 import builtins, errno, os, signal, time
 
@@ -246,6 +249,20 @@ if os.environ.get("STUB_SLOW_CLEANUP"):
 if os.environ.get("STUB_THREAD"):
     import threading
     threading.Thread(target=time.sleep, args=(3600,), daemon=True).start()
+
+if os.environ.get("STUB_WRITE_HANG") or os.environ.get("STUB_WRITE_FAIL"):
+    _open_for = builtins.open
+
+    def open(file, mode="r", *args, **kwargs):
+        if "w" in mode and os.environ.get("STUB_WRITE_HANG", "\0") in str(file):
+            _open_for(os.environ["STUB_MARK"], "w").close()
+            while not os.path.exists(os.environ["STUB_RELEASE"]):
+                time.sleep(0.02)
+        if "w" in mode and os.environ.get("STUB_WRITE_FAIL", "\0") in str(file):
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), str(file))
+        return _open_for(file, mode, *args, **kwargs)
+
+    builtins.open = open
 '''
 
 SHARED = None  # the stub Bio package and a warmed matplotlib cache, for every run
@@ -442,7 +459,8 @@ class _Fixture(unittest.TestCase):
 
     def run_search(self):
         """complete-search --vcf here, as a user runs it next (CFD only, as no
-        CRISPR-Bulge env is here)."""
+        CRISPR-Bulge env is here), into an output folder of its own."""
+        shutil.rmtree(self.path("Results", "search"), ignore_errors=True)
         _write(self.path("guides.txt"), GENOME["chr1"][:20] + "NNN\n")
         _write(self.path("vcfs.txt"), "ds\n")
         command = ["complete-search", "--genome", self.path("Genomes", "hg38"),
@@ -450,6 +468,14 @@ class _Fixture(unittest.TestCase):
                    "--guide", self.path("guides.txt"), "--pam", PAM, "--mm", "4",
                    "--bDNA", "1", "--bRNA", "1", "--output", "search", "--thread", "2"]
         return self.finish(self.start(command=command, CRISPRME_SKIP_SCORER_ENV="1"))
+
+    def assert_searched(self):
+        """complete-search goes past its checks of the variant index (the stub
+        engine then fails it)."""
+        rc, out, err = self.run_search()
+        self.assertNotIn(" is unfinished: ", err)
+        self.assertNotIn(" is being written", err)
+        self.assertIn("Launching job ", out)
 
     def stdout(self):
         with open(self.out) as fh:
@@ -1352,6 +1378,127 @@ class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
                 self.assertEqual(tree(self.lib(INDELS)), clean[0])
                 self.assertEqual(tree(self.path("Genomes", "hg38+ds_INDELS")), clean[1])
                 self.assertEqual(self.leftovers(), [])
+
+
+class AStoppedRunsTiersAreNotSearched(_Fixture):
+    """Once the enrichment is in place, build-index-only writes the dict-less tiers
+    (registry_<vcf>/, genotypes_<vcf>/) and the phased indel genotype store
+    (indel_genotypes_<vcf>/) in place, chromosome by chromosome, and a search takes
+    them chromosome by chromosome. A run stopped there (an OOM kill: the tiers take
+    ~150-180 GB a chromosome at scale) left the part written so far, and every
+    complete-search used it as if it were whole, with no error: no SNP+indel
+    co-occurrence on the chromosomes not written yet, other best alignments. Each is
+    now marked unfinished while it is written, and complete-search refuses it until a
+    build-index-only run has finished it."""
+
+    # each step, the write of its second chromosome (held or failed there), and the
+    # directory it writes (one worker, so the first chromosome is written by then)
+    STEPS = (("tiers", "/registry_ds/reg_chr2.bin", "registry_ds",
+              dict(CRISPRME_TIER_WORKERS="1")),
+             ("indel genotype store", "/indel_genotypes_ds/gt_indel_chr2",
+              "indel_genotypes_ds", dict(CRISPRME_INDELGT_WORKERS="1")))
+
+    def outputs(self):
+        return {top: tree(self.path(top), ((self.work, "<W>"),))
+                for top in ("Dictionaries", "Genomes", "genome_library")}
+
+    def test_a_run_stopped_while_it_writes_them_leaves_them_refused_until_one_finishes_them(self):
+        self.run_bio()
+        clean = self.outputs()
+        for step, held, where, workers in self.STEPS:
+            with self.subTest(step=step):
+                self.fresh()
+                proc = self.start(shim=True, STUB_WRITE_HANG=held, **workers)
+                self.wait_for_mark(proc)
+                self.kill_group(proc)
+                directory = self.path("Dictionaries", where)
+                rc, out, err = self.run_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn(f"Error: {directory} is unfinished: the build-index-only run that "
+                              f"wrote the ", err)
+                self.assertIn(f" there (pid {proc.pid} on {os.uname().nodename}, started ", err)
+                self.assertIn("Run build-index-only again with ds", err)
+                self.assertNotIn("Launching job ", out)
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 0, err)
+                if step == "tiers":
+                    self.assertIn("  1 chromosome(s) already emitted; resuming 1 remaining\n", out)
+                self.assertEqual(self.outputs(), clean)
+                self.assert_searched()
+
+    def test_a_search_while_a_run_writes_them_is_told_to_wait_for_it(self):
+        step, held, where, workers = self.STEPS[0]
+        proc = self.start(shim=True, STUB_WRITE_HANG=held, **workers)
+        self.wait_for_mark(proc)
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"Error: {self.path('Dictionaries', where)} is being written: a "
+                      f"build-index-only run (pid {proc.pid} on {os.uname().nodename}, started ",
+                      err)
+        self.assertIn(") is writing the dict-less tiers of ds there, and a search would use "
+                      "the part written so far as if it were whole. Wait for that run to "
+                      "finish, then run this search again.\n", err)
+        open(self.release, "w").close()
+        rc, out, err = self.finish(proc)
+        self.assertEqual(rc, 0, err)
+        self.assert_searched()
+
+    def test_a_step_that_ends_with_a_guarded_failure_is_not_refused(self):
+        """A chromosome whose tiers or indel genotypes fail to be written (a full disk)
+        is skipped with a line on stdout, and the search falls back for it, as
+        before: the step has ended, so it is not marked unfinished."""
+        for step, failed, where, workers in self.STEPS:
+            with self.subTest(step=step):
+                self.fresh()
+                rc, out, err = self.run_bio(shim=True, STUB_WRITE_FAIL=failed, **workers)
+                self.assertEqual(rc, 0, err)
+                self.assertIn("Dictless tier emission complete: 1/2 chromosome(s)" if step == "tiers"
+                              else "[indel-snp] phased indel genotype store: 1 chromosome(s)", out)
+                self.assertFalse(os.path.lexists(self.path("Dictionaries", where, ".building")))
+                self.assert_searched()
+
+    def test_a_mark_whose_run_cannot_be_checked_is_refused_too(self):
+        """One a run left as it wrote its owner record, and one made in another PID
+        namespace (another container, or this one before a restart)."""
+        if not os.path.exists("/proc/self/stat"):
+            self.skipTest("no /proc here")
+        marker = self.path("Dictionaries", "registry_ds", ".building")
+        for case, record, says in (
+                ("no record", None, "is unfinished: the build-index-only run that wrote the "
+                                    "dict-less tiers of ds there stopped before it was done"),
+                ("another PID namespace", owner_record(os.getpid(), pidns="pid:[1]"),
+                 "is being written, or was left unfinished: the build-index-only run that "
+                 f"writes the dict-less tiers of ds there (pid {os.getpid()} on "
+                 f"{os.uname().nodename}, started 2026-10-31T01:02:03Z) ran in another PID "
+                 "namespace")):
+            with self.subTest(case=case):
+                os.makedirs(marker, exist_ok=True)
+                if record:
+                    _write(os.path.join(marker, "owner"), record)
+                rc, out, err = self.run_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn(f"Error: {os.path.dirname(marker)} {says}", err)
+                self.assertIn(" or remove them to search without them (rm -rf "
+                              f"'{os.path.dirname(marker)}' "
+                              f"'{self.path('Dictionaries', 'genotypes_ds')}'), then run this "
+                              "search again.\n", err)
+
+    def test_publish_index_refuses_them_too(self):
+        """Published, they would be searched as if whole wherever they are downloaded."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        for where in ("registry_ds", "indel_genotypes_ds"):
+            with self.subTest(where=where):
+                marker = self.path("Dictionaries", where, ".building")
+                _write(os.path.join(marker, "owner"), "host=otherhost\npid=4242\n")
+                rc, out, err = self.finish(self.start(
+                    command=["publish-index", "--index", self.lib(VAR)]))
+                self.assertEqual(rc, 1, out + err)
+                self.assertEqual(err, f"Error: {os.path.dirname(marker)} is unfinished, or still "
+                                      "being written: the build-index-only run that writes it "
+                                      "has not finished it. Run build-index-only again to its "
+                                      "end, then publish the index.\n")
+                shutil.rmtree(marker)
 
 
 # What the code before this fix (379b5b0) did with the same stub and inputs, for

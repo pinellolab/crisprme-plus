@@ -2111,6 +2111,19 @@ def publish_index(
     if not os.path.isdir(index_dir):
         raise ValueError(f"Index directory {index_dir} does not exist")
     index_name = os.path.basename(index_dir)
+    # build-index-only marks the dict-less tiers and the indel genotype store unfinished
+    # (a .building directory in each) while it writes them in place: a run stopped there
+    # leaves a part of them, which would be published as if whole.
+    if index_name.partition("+")[2]:
+        for sub in ("registry_", "indel_genotypes_"):
+            unfinished = os.path.join(os.path.dirname(os.path.dirname(index_dir)),
+                                      "Dictionaries", sub + index_name.partition("+")[2])
+            if os.path.isdir(os.path.join(unfinished, ".building")):
+                raise ValueError(
+                    f"{unfinished} is unfinished, or still being written: the "
+                    f"build-index-only run that writes it has not finished it. Run "
+                    f"build-index-only again to its end, then publish the index."
+                )
     # Route a wide-flank PAM-less index to its own repo, so an older client that
     # only knows the default repo cannot download an index it would misread.
     repo = resolve_index_repo(index_name, repo)
