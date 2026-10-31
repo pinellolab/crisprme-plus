@@ -50,7 +50,8 @@ STUB_ENGINE = r'''#!PYTHON
 
 Each output file is a step "<command> <name> <input file>". A step whose key holds
 $STUB_FAIL fails (exit 1) before it is written; one whose key holds $STUB_HANG
-waits there, once $STUB_MARK is made, until $STUB_RELEASE exists.
+waits there, once $STUB_MARK is made, until $STUB_RELEASE exists. add-variants,
+with $STUB_GZ_BLOCKED, leaves a directory where the last dictionary's .gz would go.
 """
 import json, os, shutil, sys, time
 
@@ -125,25 +126,31 @@ elif sys.argv[1] == "add-variants":
         os.makedirs(os.path.join("variants_genome", "fake_%s_%s" % (vcf, chrom)))
         write(os.path.join("variants_genome", "fake_%s_%s" % (vcf, chrom), "fake%s.fa" % chrom),
               ">fake%s\n%s\n" % (chrom, fake))
+    if os.environ.get("STUB_GZ_BLOCKED"):
+        os.makedirs(os.path.join(snps, "my_dict_%s.json.gz" % chrom))
 else:
     sys.exit("stub crispritz.py: no %s here" % sys.argv[1])
 '''.replace("LOG_HEADER", repr(LOG_HEADER))
 
 STUB_PIGZ = r'''#!PYTHON
-"""Stub pigz: compresses each file to <file>.gz and removes it; with
-$STUB_PIGZ_HANG set, waits first, once $STUB_MARK is made, for a kill."""
+"""Stub pigz: compresses each file to <file>.gz and removes it. With
+$STUB_PIGZ_HANG set, it first waits, once $STUB_MARK is made, until $STUB_RELEASE
+exists; with $STUB_PIGZ_FAIL, it fails after the first file, as on a write error."""
 import gzip, os, sys, time
 
 if os.environ.get("STUB_PIGZ_HANG"):
     open(os.environ["STUB_MARK"], "w").close()
-    time.sleep(600)
+    while not os.path.exists(os.environ["STUB_RELEASE"]):
+        time.sleep(0.02)
 args, files = iter(sys.argv[1:]), []
 for a in args:
     if a == "-p":
         next(args)
     elif not a.startswith("-"):
         files.append(a)
-for f in files:
+for i, f in enumerate(files):
+    if i and os.environ.get("STUB_PIGZ_FAIL"):
+        sys.exit("pigz: abort: write error on %s.gz" % f)
     with open(f, "rb") as src, open(f + ".gz", "wb") as dst:
         dst.write(gzip.compress(src.read(), mtime=0))
     os.remove(f)
@@ -238,8 +245,8 @@ def make_inputs(work):
     _write(os.path.join(work, "samples.txt"), "hg38_ds.samplesID.txt\n")
 
 
-def make_stubs(bindir):
-    for name, text in (("crispritz.py", STUB_ENGINE), ("pigz", STUB_PIGZ)):
+def make_stubs(bindir, pigz=True):
+    for name, text in (("crispritz.py", STUB_ENGINE), ("pigz", STUB_PIGZ))[: 2 if pigz else 1]:
         path = os.path.join(bindir, name)
         _write(path, text.replace("#!PYTHON", "#!" + sys.executable, 1))
         os.chmod(path, 0o755)
@@ -290,10 +297,12 @@ class _Fixture(unittest.TestCase):
     def lib(self, name):
         return self.path("genome_library", name)
 
-    def start(self, vcf=True, name=None, keep_hup=False, shim=False, **stub):
+    def start(self, vcf=True, name=None, keep_hup=False, pigz=True, shim=False, command=None,
+              **stub):
         """Launch build-index-only in a session of its own (so its whole process
-        group can be killed, as an OOM kill or a container stop would); shim loads
-        SHIM in each Python process of the run."""
+        group can be killed, as an OOM kill or a container stop would). Without
+        pigz, no pigz is on PATH; shim loads SHIM in each Python process of the
+        run; command runs that crisprme.py command line instead."""
         args = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
                 "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work]
         if vcf:
@@ -302,9 +311,16 @@ class _Fixture(unittest.TestCase):
             args += ["--name", name]
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("STUB_", "CRISPRME_"))}
+        path = os.environ.get("PATH", "").split(os.pathsep)
+        if not pigz:
+            bindir = os.path.join(self.root, "bin_without_pigz")
+            if not os.path.isdir(bindir):
+                make_stubs(bindir, pigz=False)
+            path = [bindir] + [d for d in path if not shutil.which("pigz", path=d)]
+        else:
+            path = [self.bin] + path
         pythonpath = [os.path.join(SHARED, "py")] + [os.path.join(SHARED, "shim")] * shim
-        env.update(PATH=self.bin + os.pathsep + os.environ.get("PATH", ""),
-                   PYTHONPATH=os.pathsep.join(pythonpath),
+        env.update(PATH=os.pathsep.join(path), PYTHONPATH=os.pathsep.join(pythonpath),
                    MPLCONFIGDIR=os.path.join(SHARED, "mpl"),
                    STUB_LOG=self.log, STUB_MARK=self.mark, STUB_RELEASE=self.release,
                    **stub)
@@ -322,8 +338,8 @@ class _Fixture(unittest.TestCase):
                 signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
         with open(self.out, "w") as out, open(self.err, "w") as err:
-            proc = subprocess.Popen([sys.executable, CRISPRME, *args], cwd=self.work,
-                                    env=env, stdout=out, stderr=err,
+            proc = subprocess.Popen([sys.executable, CRISPRME, *(command or args)],
+                                    cwd=self.work, env=env, stdout=out, stderr=err,
                                     start_new_session=True, preexec_fn=signals)
         self.addCleanup(self._reap, proc)
         return proc
@@ -342,6 +358,17 @@ class _Fixture(unittest.TestCase):
 
     def run_bio(self, **kw):
         return self.finish(self.start(**kw))
+
+    def run_search(self):
+        """complete-search --vcf here, as a user runs it next (CFD only, as no
+        CRISPR-Bulge env is here)."""
+        _write(self.path("guides.txt"), GENOME["chr1"][:20] + "NNN\n")
+        _write(self.path("vcfs.txt"), "ds\n")
+        command = ["complete-search", "--genome", self.path("Genomes", "hg38"),
+                   "--vcf", self.path("vcfs.txt"), "--samplesID", self.path("samples.txt"),
+                   "--guide", self.path("guides.txt"), "--pam", PAM, "--mm", "4",
+                   "--bDNA", "1", "--bRNA", "1", "--output", "search", "--thread", "2"]
+        return self.finish(self.start(command=command, CRISPRME_SKIP_SCORER_ENV="1"))
 
     def stdout(self):
         with open(self.out) as fh:
@@ -500,16 +527,34 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
 
 
 class AnEnrichmentIsDoneWholeOrRedone(_Fixture):
-    """(d): the enriched genome is moved into place last."""
+    """(d): nothing of an enrichment is in place before all of it is: the
+    dictionaries are compressed in its build directory, and the enriched genome is
+    moved into place last."""
 
-    def test_an_enrichment_killed_before_its_end_leaves_no_enriched_genome_and_is_redone(self):
+    def enrichment(self):
+        return (self.path("Genomes", "hg38+ds"), self.path("Genomes", "hg38+ds_INDELS"),
+                self.path("Dictionaries", "dictionaries_ds"),
+                self.path("Dictionaries", "log_indels_ds"))
+
+    def test_an_enrichment_killed_before_its_end_leaves_nothing_of_it_and_is_redone(self):
         enriched = self.path("Genomes", "hg38+ds")
         proc = self.start(STUB_PIGZ_HANG="1")  # add-variants is done; compressing
         self.wait_for_mark(proc)
         self.kill_group(proc)
-        self.assertFalse(os.path.lexists(enriched), "a partial enrichment was left in place")
+        for output in self.enrichment():
+            self.assertFalse(os.path.lexists(output), f"{output} was left in place")
+        # the dictionaries alone would pass complete-search's check for a prebuilt
+        # variant index, and its own enrichment would then fail on the fake-indel
+        # genomes in its way: it refuses up front instead
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Error: No prebuilt variant index found for: ds.\n", err)
+        self.assertIn("crisprme.py build-index-only --genome ", err)
+        left = self.leftovers()
+        self.assertEqual([os.path.dirname(d) for d in left], [self.path("Genomes")])
         rc, out, err = self.run_bio()
         self.assertEqual(rc, 0, err)
+        self.assertEqual(self.leftovers(), left)  # (the build directory a SIGKILL left)
         self.assertIn("Enriching hg38 with ds (add-variants)...", out)
         self.assertEqual(sum(c.startswith("add-variants ") for c in self.calls()), 2)
         self.assertEqual(sorted(os.listdir(enriched)), ["chr1.enriched.fa", "chr2.enriched.fa"])
@@ -521,6 +566,24 @@ class AnEnrichmentIsDoneWholeOrRedone(_Fixture):
                          ["fake_ds_chr1", "fake_ds_chr2"])
         for name, (_, _, whole) in WHOLE.items():
             self.assertEqual(self.bins(name), whole)
+
+    def test_a_failed_compression_fails_the_run_and_moves_nothing_into_place(self):
+        """pigz failing partway, or the Python gzip that stands in for it without
+        pigz failing to write, as on a full disk."""
+        for compressor, kw in (("pigz", dict(STUB_PIGZ_FAIL="1")),
+                               ("gzip", dict(pigz=False, STUB_GZ_BLOCKED="1"))):
+            with self.subTest(compressor=compressor):
+                self.fresh()
+                rc, out, err = self.run_bio(**kw)
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("Error: Compressing the ds dictionaries failed (", err)
+                self.assertIn("): nothing of the enrichment was put in place.\n", err)
+                for output in self.enrichment():
+                    self.assertFalse(os.path.lexists(output), f"{output} was put in place")
+                self.assertEqual(self.leftovers(), [])
+                self.assertEqual([c.split()[:2] for c in self.calls()],
+                                 [["index-genome", "hg38"],
+                                  ["add-variants", self.path("VCFs", "ds") + "/"]])
 
 
 class AnotherRunsBuildIsKept(_Fixture):
@@ -695,6 +758,23 @@ class ASearchsBuildLockStopsIt(_Fixture):
         self.assertIn(f"Error: {enriched} is locked by the run that builds it", err)
         self.assertEqual(sorted(os.listdir(self.path("Genomes"))), ["hg38", "hg38+ds.lock"])
         self.assertFalse(os.path.lexists(self.path("Dictionaries", "dictionaries_ds")))
+
+    def test_a_lock_taken_while_the_dictionaries_are_compressed_moves_nothing_into_place(self):
+        """Compressing takes minutes at scale: a search that starts meanwhile takes
+        the free lock and enriches the genome itself."""
+        enriched = self.path("Genomes", "hg38+ds")
+        proc = self.start(STUB_PIGZ_HANG="1")
+        self.wait_for_mark(proc)
+        self.lock(enriched)
+        open(self.release, "w").close()
+        rc, out, err = self.finish(proc)
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"Error: {enriched} is locked by the run that builds it", err)
+        self.assertEqual(sorted(os.listdir(self.path("Genomes"))), ["hg38", "hg38+ds.lock"])
+        for d in ("dictionaries_ds", "log_indels_ds"):
+            self.assertFalse(os.path.lexists(self.path("Dictionaries", d)), d)
+        self.assertEqual([c.split()[1] for c in self.calls()[1:]],
+                         [self.path("VCFs", "ds") + "/"])
 
 
 # What the code before this fix (379b5b0) did with the same stub and inputs, for

@@ -3140,7 +3140,6 @@ def build_index_only() -> None:
     # pipeline (submit_job_automated_new_multiple_vcfs.sh) exactly, producing the
     # same folder names a later search looks for.
     import shutil
-    import tempfile
     import gzip
     from glob import glob as _glob
 
@@ -3165,8 +3164,9 @@ def build_index_only() -> None:
             error(f"The file specified for --samplesID does not exist: "
                   f"{samples_listing}")
     # STEP 1: enrich the genome with the VCF (crispritz add-variants). add-variants
-    # writes a fixed-name variants_genome/ in its cwd, so run it in a throwaway
-    # temp dir to avoid collisions, then move the outputs into place.
+    # writes a fixed-name variants_genome/ in its cwd, so run it in a hidden build
+    # directory of Genomes/ (_in_build_dir; never one of the search's run_*), then
+    # move the outputs into place.
     _refuse_locked_build(enriched, indels_out)
     if not os.path.isdir(enriched):
         print(f"Enriching {genome_ref} with {vcf_name} (add-variants)...", flush=True)
@@ -3175,27 +3175,67 @@ def build_index_only() -> None:
         # need not pre-exist. (It happened to exist when the reference was staged under
         # workdir/Genomes; don't rely on that.)
         os.makedirs(os.path.join(workdir, "Genomes"), exist_ok=True)
-        tmp = tempfile.mkdtemp(prefix="run_", dir=os.path.join(workdir, "Genomes"))
-        variants_tmp = os.path.join(tmp, "variants_genome")
-        code = subprocess.call(
-            f"crispritz.py add-variants {vcfdir}/ {genomedir}/ true",
-            shell=True,
-            cwd=tmp,
-        )
-        if code != 0:
-            shutil.rmtree(tmp, ignore_errors=True)
-            error(f"Genome enrichment (add-variants) failed on {vcf_name}")
-        if os.path.isdir(enriched + ".lock") or os.path.isdir(enriched):
-            # a search took this enrichment on while add-variants ran, or another
-            # run finished it: leave what it writes or wrote as it is
-            shutil.rmtree(tmp, ignore_errors=True)
-            _refuse_locked_build(enriched, indels_out)
-            print(
-                f"{enriched} appeared while this run was enriching it (another run "
-                f"built it): keeping that one, and discarding this run's enrichment.",
-                flush=True,
+
+        def _enrich(tmp):
+            variants_tmp = os.path.join(tmp, "variants_genome")
+            snps_tmp = os.path.join(variants_tmp, "SNPs_genome")
+
+            def _taken():
+                # a search took this enrichment on while this run enriched (the run
+                # stops), or another run finished it: leave what it writes or wrote be
+                if not (os.path.isdir(enriched + ".lock") or os.path.isdir(enriched)):
+                    return False
+                _refuse_locked_build(enriched, indels_out)
+                print(
+                    f"{enriched} appeared while this run was enriching it (another run "
+                    f"built it): keeping that one, and discarding this run's enrichment.",
+                    flush=True,
+                )
+                return True
+
+            code = subprocess.call(
+                f"crispritz.py add-variants {vcfdir}/ {genomedir}/ true",
+                shell=True,
+                cwd=tmp,
             )
-        else:
+            if code != 0:
+                error(f"Genome enrichment (add-variants) failed on {vcf_name}")
+            if _taken():
+                return
+            # Compress the per-chromosome dicts (my_dict_*.json -> .json.gz, log*.txt ->
+            # .txt.gz) so the published index ships them ~3.5x smaller (~40-50GB not
+            # ~152GB for 1000G+HGDP) and the variant post-analysis reads them gzipped on
+            # the fly (no 150GB decompress). pigz (parallel) when available, else Python
+            # gzip. Mirrors _make_index_tarball's pigz preference. That takes minutes at
+            # that scale, so it is done here, before anything goes into place: the
+            # dictionaries alone pass complete-search's pre-flight check for a prebuilt
+            # variant index. A compression that fails puts nothing in place.
+            _pigz = shutil.which("pigz")
+            _dicts = _glob(os.path.join(snps_tmp, "*.json"))
+            _logs = _glob(os.path.join(snps_tmp, "log*.txt"))
+            for _files in (_dicts, _logs):
+                if not _files:
+                    continue
+                _why = None
+                if _pigz:
+                    _code = subprocess.call([_pigz, "-f", "-p", str(thread), *_files])
+                    if _code != 0:
+                        _why = f"pigz exit status {_code}"
+                else:
+                    try:
+                        for _f in _files:
+                            with open(_f, "rb") as _src, gzip.open(_f + ".gz", "wb") as _dst:
+                                shutil.copyfileobj(_src, _dst)
+                            os.remove(_f)
+                    except Exception as _gz_err:  # noqa: BLE001 - any failure is fatal
+                        _why = str(_gz_err)
+                if _why:
+                    error(
+                        f"Compressing the {vcf_name} dictionaries failed ({_why}): "
+                        f"nothing of the enrichment was put in place."
+                    )
+            if _taken():  # (again: a search may have started while this run compressed)
+                return
             # This block only runs on a FRESH enrichment (enriched was absent), so any
             # pre-existing dataset-specific output dirs are stale/partial from a prior
             # aborted build. Clear them first, else shutil.move onto an existing
@@ -3203,40 +3243,22 @@ def build_index_only() -> None:
             for _d in (indels_out, dict_folder, indel_dict):
                 if os.path.isdir(_d):
                     shutil.rmtree(_d)
+            # Then only moves (renames on one file system): the fake-indel genomes, the
+            # dictionaries, and the enriched genome last. A later run takes it for a
+            # finished enrichment (above), so a run that ends before here leaves none,
+            # and the next one enriches again, clearing what this one moved.
             os.makedirs(indels_out, exist_ok=True)
             for f in _glob(os.path.join(variants_tmp, "fake*")):
                 shutil.move(f, indels_out)
             os.makedirs(dict_folder, exist_ok=True)
             os.makedirs(indel_dict, exist_ok=True)
-            for f in _glob(os.path.join(variants_tmp, "SNPs_genome", "*.json")):
-                shutil.move(f, dict_folder)
-            for f in _glob(os.path.join(variants_tmp, "SNPs_genome", "log*.txt")):
-                shutil.move(f, indel_dict)
-            # Compress the per-chromosome dicts in place (my_dict_*.json -> .json.gz,
-            # log*.txt -> .txt.gz) so the published index ships them ~3.5x smaller
-            # (~40-50GB not ~152GB for 1000G+HGDP) and the variant post-analysis reads
-            # them gzipped on the fly (no 150GB decompress). pigz (parallel) when
-            # available, else Python gzip. Mirrors _make_index_tarball's pigz preference.
-            _pigz = shutil.which("pigz")
-            for _d, _pat in ((dict_folder, "*.json"), (indel_dict, "log*.txt")):
-                _files = _glob(os.path.join(_d, _pat))
-                if not _files:
-                    continue
-                if _pigz:
-                    subprocess.call([_pigz, "-f", "-p", str(thread), *_files])
-                else:
-                    for _f in _files:
-                        with open(_f, "rb") as _src, gzip.open(_f + ".gz", "wb") as _dst:
-                            shutil.copyfileobj(_src, _dst)
-                        os.remove(_f)
-            # The enriched genome goes into place last: a later run takes it for a
-            # finished enrichment (above), so a run that ends before here leaves
-            # none, and the next one enriches again, clearing what this one moved.
-            shutil.move(
-                os.path.join(variants_tmp, "SNPs_genome", f"{genome_ref}_enriched"),
-                enriched,
-            )
-        shutil.rmtree(tmp, ignore_errors=True)
+            for f in _dicts:
+                shutil.move(f + ".gz", dict_folder)
+            for f in _logs:
+                shutil.move(f + ".gz", indel_dict)
+            shutil.move(os.path.join(snps_tmp, f"{genome_ref}_enriched"), enriched)
+
+        _in_build_dir(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-", _enrich)
     else:
         print(f"Enriched genome already present: {enriched}", flush=True)
     # STEP 1b (ADDITIVE): emit the dictless tiers (Tier-0 registry + Tier-1 genotype
