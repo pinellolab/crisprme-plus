@@ -6,7 +6,8 @@ directory, or an enriched genome, that is there for a finished one. build-index-
 used to run the engine straight into genome_library/<name>, and to move the enriched
 genome into place before the rest of the enrichment, so a run that ended early
 (Ctrl-C, an OOM kill, a container stop, an engine error) left a partial one there,
-which every later search then used, with no error and fewer off-targets.
+which every later search then used, with no error and fewer off-targets. It also
+went ahead while a search held the build lock of what it was about to use or build.
 
 These tests run the real crisprme.py build-index-only, and the real
 pool_index_indels.py under it, with a stub engine on PATH. The stub crispritz.py
@@ -337,6 +338,13 @@ class _Fixture(unittest.TestCase):
         return sorted(os.path.relpath(os.path.join(d, f), top)
                       for d, _, fs in os.walk(top) for f in fs if f.endswith(".bin"))
 
+    def lock(self, output, record=True):
+        os.makedirs(output + ".lock")
+        if record:
+            _write(os.path.join(output + ".lock", "owner"),
+                   "host=otherhost\npidns=pid:[4026531836]\npid=4242\n"
+                   "started=2026-10-31T00:00:00Z\npstart=12345\n")
+
 
 # What each index looks like once built, and the step of the stub's that builds its
 # second chromosome (so stopping there leaves the first one built).
@@ -486,6 +494,103 @@ class SignalsRemoveTheBuildDirectory(_Fixture):
         rc, out, err = self.finish(proc)
         self.assertEqual(rc, 0, err)
         self.assertEqual(self.bins(REF), WHOLE[REF][2])
+
+
+class ASearchsBuildLockStopsIt(_Fixture):
+    """(e): while complete-search holds "<output>.lock", build-index-only neither
+    takes that output as present nor builds it: it stops with an ERROR."""
+
+    OUTPUTS = (("genome_library", REF), ("Genomes", "hg38+ds"),
+               ("genome_library", VAR), ("genome_library", INDELS))
+
+    def check_refused(self, output, before, owner=True, vcf=True):
+        rc, out, err = self.run_bio(vcf=vcf)
+        self.assertEqual(rc, 1, out + err)
+        lock = output + ".lock"
+        if owner:
+            self.assertIn(f"Error: {output} is locked by the run that builds it: {lock} is "
+                          "held by pid 4242 on otherhost (a run started "
+                          "2026-10-31T00:00:00Z). Wait for that run to finish", err)
+            self.assertIn("run complete-search, which takes a dead run's lock over", err)
+        else:
+            self.assertIn(f"Error: {output} is locked by the run that builds it: {lock} "
+                          "has no owner record", err)
+        guarded = " '" + self.path("Genomes", "hg38+ds_INDELS") + "'" \
+            if output.endswith("Genomes/hg38+ds") else ""
+        self.assertIn(f"rm -rf '{lock}' '{output}'{guarded}\n", err)
+        self.assertEqual(self.calls(), [], "it built something")
+        self.assertEqual(tree(self.work), before, "it changed the working directory")
+
+    def test_a_lock_beside_each_output_stops_the_run_before_it_builds_anything(self):
+        for where, name in self.OUTPUTS:
+            for present in (False, True):
+                with self.subTest(output=name, present=present):
+                    self.fresh()
+                    if present:
+                        rc, out, err = self.run_bio()
+                        self.assertEqual(rc, 0, err)
+                        os.remove(self.log)
+                    output = self.path(where, name)
+                    self.lock(output)
+                    self.check_refused(output, tree(self.work))
+        with self.subTest(output=REF, present=False, vcf=False):
+            self.fresh()
+            self.lock(self.lib(REF))
+            self.check_refused(self.lib(REF), tree(self.work), vcf=False)
+
+    def test_a_lock_without_an_owner_record_stops_it_too(self):
+        output = self.lib(VAR)
+        self.lock(output, record=False)
+        self.check_refused(output, tree(self.work), owner=False)
+
+    def test_a_lock_taken_while_an_index_is_built_discards_the_build(self):
+        for name, (vcf, chr2, _) in WHOLE.items():
+            with self.subTest(index=name):
+                self.fresh()
+                proc = self.start(vcf=vcf, STUB_HANG=chr2)
+                self.wait_for_mark(proc)
+                self.lock(self.lib(name))
+                open(self.release, "w").close()
+                rc, out, err = self.finish(proc)
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn(f"Error: {self.lib(name)} is locked by the run that builds it", err)
+                self.assertFalse(os.path.lexists(self.lib(name)))
+                self.assertEqual(self.leftovers(), [])
+
+    def test_a_lock_taken_after_the_run_began_stops_it_at_that_output(self):
+        """Each step looks again: here the lock appears while the reference index is
+        built, beside an output a later step would otherwise take as present."""
+        for where, name in self.OUTPUTS[1:]:
+            with self.subTest(output=name):
+                self.fresh()
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 0, err)
+                shutil.rmtree(self.lib(REF))
+                os.remove(self.log)
+                proc = self.start(STUB_HANG=WHOLE[REF][1])
+                self.wait_for_mark(proc)
+                output = self.path(where, name)
+                self.lock(output)
+                before = tree(output)
+                open(self.release, "w").close()
+                rc, out, err = self.finish(proc)
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn(f"Error: {output} is locked by the run that builds it", err)
+                self.assertNotIn("already present: " + output, out)
+                self.assertEqual(tree(output), before)
+                self.assertEqual([c.split()[1] for c in self.calls()], ["hg38"])
+
+    def test_a_lock_taken_while_the_genome_is_enriched_moves_nothing_into_place(self):
+        enriched = self.path("Genomes", "hg38+ds")
+        proc = self.start(STUB_HANG="add-variants ds chr2.fa")
+        self.wait_for_mark(proc)
+        self.lock(enriched)
+        open(self.release, "w").close()
+        rc, out, err = self.finish(proc)
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"Error: {enriched} is locked by the run that builds it", err)
+        self.assertEqual(sorted(os.listdir(self.path("Genomes"))), ["hg38", "hg38+ds.lock"])
+        self.assertFalse(os.path.lexists(self.path("Dictionaries", "dictionaries_ds")))
 
 
 # What the code before this fix (379b5b0) did with the same stub and inputs, for

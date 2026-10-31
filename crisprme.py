@@ -2829,6 +2829,81 @@ def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
     )
 
 
+def _build_index_vcfdir(args: List[str], workdir: str) -> str:
+    """Returns the VCF dataset directory build-index-only's --vcf names.
+
+    --vcf accepts EITHER a VCF dataset directory (build-index-only's original form)
+    OR a config file listing VCF folder names under VCFs/ (the SAME form
+    complete-search uses), so the two subcommands take --vcf consistently. A
+    directory is used as-is; a listing file must name exactly ONE dataset folder
+    (build-index-only builds a single dataset's index -- combined panels are made
+    by merging the source VCFs first, then building the merged folder).
+    """
+    _vcf_arg = os.path.abspath(args[args.index("--vcf") + 1])
+    if os.path.isdir(_vcf_arg):
+        vcfdir = _vcf_arg
+    elif os.path.isfile(_vcf_arg):
+        with open(_vcf_arg) as _vf:
+            _folders = [ln.strip() for ln in _vf if ln.strip() and not ln.startswith("#")]
+        if not _folders:
+            error(f"The --vcf config file {_vcf_arg} is empty (expected one VCF folder name)")
+        if len(_folders) > 1:
+            error(
+                "build-index-only builds ONE dataset's index, but the --vcf config file "
+                f"lists {len(_folders)} folders ({', '.join(_folders)}). Build each "
+                "separately, or merge the source VCFs into one folder first for a combined panel."
+            )
+        vcfdir = os.path.abspath(os.path.join(workdir, "VCFs", _folders[0]))
+        if not os.path.isdir(vcfdir):
+            error(f"VCF folder '{_folders[0]}' from {_vcf_arg} not found under {workdir}/VCFs/")
+    else:
+        error(
+            f"--vcf must be a VCF dataset directory or a config file listing VCF folder "
+            f"names under VCFs/ (got {_vcf_arg}, which is neither)"
+        )
+    return vcfdir
+
+
+def _refuse_locked_build(output: str, *guarded: str) -> None:
+    """Stops build-index-only while a search holds the build lock of ``output``.
+
+    complete-search holds ``<output>.lock`` while it enriches a genome or builds an
+    index: a directory whose ``owner`` record has host=, pid= and started= lines
+    (CRISPRme 2.8.0 writes none). What the lock guards -- ``output``, and the
+    ``guarded`` paths with it -- is unfinished meanwhile, and stays so after that
+    run dies, until a search takes the lock over and builds it again. So it is
+    neither used as present nor built here: the run ends with an ERROR on stderr
+    that names the lock, its owner and what to do, and exit status 1.
+    """
+    lock = output + ".lock"
+    if not os.path.isdir(lock):
+        return
+    owner = {}
+    try:
+        with open(os.path.join(lock, "owner")) as fh:
+            for line in fh:
+                key, _, value = line.rstrip("\n").partition("=")
+                owner.setdefault(key, value)
+    except OSError:
+        pass
+    clear = "".join(f" '{p}'" for p in (lock, output) + guarded)
+    if owner.get("pid"):
+        error(
+            f"{output} is locked by the run that builds it: {lock} is held by pid "
+            f"{owner['pid']} on {owner.get('host', '?')} (a run started "
+            f"{owner.get('started', '?')}). Wait for that run to finish, then run "
+            f"build-index-only again. If no run is building it, run complete-search, "
+            f"which takes a dead run's lock over and builds it again, or remove the "
+            f"lock and what it guards: rm -rf{clear}"
+        )
+    error(
+        f"{output} is locked by the run that builds it: {lock} has no owner record "
+        f"(CRISPRme 2.8.0 writes none, and complete-search never takes such a lock "
+        f"over). Wait for that run to finish, then run build-index-only again. If no "
+        f"run is building it, remove the lock and what it guards: rm -rf{clear}"
+    )
+
+
 class _BuildSignal(BaseException):
     """A SIGTERM or SIGHUP that ends an index build (see _build_index_dir)."""
 
@@ -2850,8 +2925,10 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bo
     is removed on every way out but SIGKILL: success, failure, an exception,
     Ctrl-C, SIGTERM (scancel, docker stop) and SIGHUP. Every path ``cmd`` names is
     absolute, so it resolves from there. ``failure`` is the error for a command
-    that fails. If another run has put the index in place meanwhile, that one is
-    kept and this build discarded. Returns True when this build went into place.
+    that fails. If a search holds the index's build lock by then, the run stops
+    (_refuse_locked_build); if another run has put the index in place meanwhile,
+    that one is kept and this build discarded. Returns True when this build went
+    into place.
     """
     import signal
     import tempfile
@@ -2883,6 +2960,7 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bo
             code = subprocess.call(cmd, cwd=tmp, **kwargs)
             if code != 0 or not os.path.isdir(built):
                 error(f"{failure} (expected {final})")
+            _refuse_locked_build(final)
             if not os.path.isdir(final):
                 try:
                     os.rename(built, final)
@@ -2970,6 +3048,25 @@ def build_index_only() -> None:
     index_name = f"{pam_char}_{bMax + 1}_{genome_ref}"
     idx_folder = os.path.join(workdir, "genome_library", index_name)
     vcf_given = "--vcf" in args
+    # Every output this run uses or builds, each with what its build lock guards
+    # besides it. While a search holds one of those locks, the run stops before it
+    # builds anything (_refuse_locked_build); each step looks again before it uses
+    # or builds its output, as a search may have started since.
+    _outputs = [(idx_folder,)]
+    if vcf_given:
+        vcfdir = _build_index_vcfdir(args, workdir)
+        vcf_name = os.path.basename(vcfdir.rstrip("/"))
+        enriched = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}")
+        indels_out = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}_INDELS")
+        dict_folder = os.path.join(workdir, "Dictionaries", f"dictionaries_{vcf_name}")
+        indel_dict = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
+        snp_idx = os.path.join(
+            workdir, "genome_library", f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}"
+        )
+        indels_idx = snp_idx + "_INDELS"
+        _outputs += [(enriched, indels_out), (snp_idx,), (indels_idx,)]
+    for _out in _outputs:
+        _refuse_locked_build(*_out)
     # ---- reference index ------------------------------------------------------
     if os.path.isdir(idx_folder):
         print(f"Reference index already present: {idx_folder}", flush=True)
@@ -3010,35 +3107,6 @@ def build_index_only() -> None:
     import gzip
     from glob import glob as _glob
 
-    # --vcf accepts EITHER a VCF dataset directory (build-index-only's original form)
-    # OR a config file listing VCF folder names under VCFs/ (the SAME form
-    # complete-search uses), so the two subcommands take --vcf consistently. A
-    # directory is used as-is; a listing file must name exactly ONE dataset folder
-    # (build-index-only builds a single dataset's index -- combined panels are made
-    # by merging the source VCFs first, then building the merged folder).
-    _vcf_arg = os.path.abspath(args[args.index("--vcf") + 1])
-    if os.path.isdir(_vcf_arg):
-        vcfdir = _vcf_arg
-    elif os.path.isfile(_vcf_arg):
-        with open(_vcf_arg) as _vf:
-            _folders = [ln.strip() for ln in _vf if ln.strip() and not ln.startswith("#")]
-        if not _folders:
-            error(f"The --vcf config file {_vcf_arg} is empty (expected one VCF folder name)")
-        if len(_folders) > 1:
-            error(
-                "build-index-only builds ONE dataset's index, but the --vcf config file "
-                f"lists {len(_folders)} folders ({', '.join(_folders)}). Build each "
-                "separately, or merge the source VCFs into one folder first for a combined panel."
-            )
-        vcfdir = os.path.abspath(os.path.join(workdir, "VCFs", _folders[0]))
-        if not os.path.isdir(vcfdir):
-            error(f"VCF folder '{_folders[0]}' from {_vcf_arg} not found under {workdir}/VCFs/")
-    else:
-        error(
-            f"--vcf must be a VCF dataset directory or a config file listing VCF folder "
-            f"names under VCFs/ (got {_vcf_arg}, which is neither)"
-        )
-    vcf_name = os.path.basename(vcfdir.rstrip("/"))
     # crispritz add-variants needs per-chromosome VCF files; transparently split a
     # single multi-chromosome VCF so a user-provided dataset "just works" (no-op when
     # the folder is already per-chromosome, e.g. the shipped datasets).
@@ -3059,17 +3127,10 @@ def build_index_only() -> None:
         if not os.path.isfile(samples_listing):
             error(f"The file specified for --samplesID does not exist: "
                   f"{samples_listing}")
-    enriched = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}")
-    indels_out = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}_INDELS")
-    dict_folder = os.path.join(workdir, "Dictionaries", f"dictionaries_{vcf_name}")
-    indel_dict = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
-    snp_idx = os.path.join(
-        workdir, "genome_library", f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}"
-    )
-    indels_idx = snp_idx + "_INDELS"
     # STEP 1: enrich the genome with the VCF (crispritz add-variants). add-variants
     # writes a fixed-name variants_genome/ in its cwd, so run it in a throwaway
     # temp dir to avoid collisions, then move the outputs into place.
+    _refuse_locked_build(enriched, indels_out)
     if not os.path.isdir(enriched):
         print(f"Enriching {genome_ref} with {vcf_name} (add-variants)...", flush=True)
         # Ensure workdir/Genomes exists: the enriched genome lands here, but --genome
@@ -3087,10 +3148,11 @@ def build_index_only() -> None:
         if code != 0:
             shutil.rmtree(tmp, ignore_errors=True)
             error(f"Genome enrichment (add-variants) failed on {vcf_name}")
-        if os.path.isdir(enriched):
-            # another run finished this enrichment while add-variants ran: leave
-            # what it wrote as it is
+        if os.path.isdir(enriched + ".lock") or os.path.isdir(enriched):
+            # a search took this enrichment on while add-variants ran, or another
+            # run finished it: leave what it writes or wrote as it is
             shutil.rmtree(tmp, ignore_errors=True)
+            _refuse_locked_build(enriched, indels_out)
             print(
                 f"{enriched} appeared while this run was enriching it (another run "
                 f"built it): keeping that one, and discarding this run's enrichment.",
@@ -3410,6 +3472,7 @@ def build_index_only() -> None:
             print(f"WARNING [indel-snp]: phased indel genotype store not built "
                   f"({_ig_err}); indel post-analysis falls back to PUTATIVE.", flush=True)
     # STEP 2: index the enriched (SNP) genome
+    _refuse_locked_build(snp_idx)
     if not os.path.isdir(snp_idx):
         print(f"Building variant index {os.path.basename(snp_idx)}...", flush=True)
         _build_index_dir(
@@ -3423,6 +3486,7 @@ def build_index_only() -> None:
     else:
         print(f"Variant index already present: {snp_idx}", flush=True)
     # STEP 3: index the indels genome (pool_index_indels.py, as the pipeline does)
+    _refuse_locked_build(indels_idx)
     if not os.path.isdir(indels_idx):
         # A variant dataset with NO indels (e.g. a SNP-only VCF) yields empty
         # fake-indel contigs that pool_index_indels cannot index. Detect zero indels
