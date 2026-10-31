@@ -214,9 +214,9 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_report_scorer_label -v
 
-      - name: "Intermediate cleanup guard (default-on rm keeps finalized outputs + web drill-down source; env/cicd guards)"
+      - name: "Intermediate cleanup guard (default-on rm keeps finalized outputs + web drill-down source; env/cicd guards) + annotation temp folders removed after every search"
         working-directory: PostProcess
-        run: python -m unittest test_clean_intermediates -v
+        run: python -m unittest test_clean_intermediates test_annotation_tmpdirs -v
 
       - name: "Additional coverage (tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile / history-page assembly jobs)"
         # test_annotation: the retry / flock-fallback / BGZF-EOF-guard logic is mock-based

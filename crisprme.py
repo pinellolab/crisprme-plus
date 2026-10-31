@@ -1027,6 +1027,7 @@ def _sort_annotation(annotationfile: str) -> str:
     import tempfile
 
     tmpdir = tempfile.mkdtemp(prefix="crisprme_annot_", dir=_writable_tmp_base())
+    _ANNOTATION_TMPDIRS.append(tmpdir)
     if annotationfile.endswith(".gz"):
         plain_path = os.path.join(tmpdir, "annotation.bed")
         _decompress_file(annotationfile, plain_path)  # gz -> temp plain
@@ -1041,6 +1042,32 @@ def _sort_annotation(annotationfile: str) -> str:
         plain_path, os.path.join(tmpdir, "annotation.sorted.bed")
     )
     return _compress_file(annotationfile_sorted)  # temp annotation.sorted.bed.gz
+
+
+# The per-run annotation temp folders this process made (crisprme_annot_* by
+# _sort_annotation, crisprme_pannot_* by _process_personal_annotation), in the
+# working directory unless $CRISPRME_TMPDIR is set. The pipeline reads them, and
+# gunzips back into them, until it ends, so they are removed only once the subcommand
+# that made them is over: see _run_and_remove_annotation_tmpdirs. Never another job's.
+_ANNOTATION_TMPDIRS = []
+
+
+def _run_and_remove_annotation_tmpdirs(subcommand) -> None:
+    """Runs a subcommand that sorts annotations (complete-search, assembly-search),
+    then removes the annotation temp folders it made, whether it returned or failed
+    (an error() exit, a failed pipeline's OSError, Ctrl-C). Left behind, they took
+    ~1.7 GB per annotated search with the shipped annotations. --keep-intermediates
+    (CRISPRME_KEEP_INTERMEDIATES=True) keeps them, like the pipeline's other working
+    files.
+    """
+    try:
+        subcommand()
+    finally:
+        keep = ("--keep-intermediates" in input_args
+                or os.environ.get("CRISPRME_KEEP_INTERMEDIATES") == "True")
+        if not keep:
+            for tmpdir in _ANNOTATION_TMPDIRS:
+                shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _apply_cosmic_license(args: List[str], annotationfile: str) -> str:
@@ -1370,6 +1397,7 @@ def _process_personal_annotation(personal_annotationfile: str, annotationfile: s
     import tempfile
 
     tmpdir = tempfile.mkdtemp(prefix="crisprme_pannot_", dir=_writable_tmp_base())
+    _ANNOTATION_TMPDIRS.append(tmpdir)
     pannotation_tag = _tag_personal_annotation(
         personal_annotationfile, os.path.join(tmpdir, "personal.tag.bed")
     )
@@ -4923,11 +4951,11 @@ if len(sys.argv) < 2:
     check_crisprme_dirtree()  # check crisprme directory tree structure
     crisprme_help()  # no arg? print help
 elif sys.argv[1] == "complete-search":  # run complete search
-    complete_search()
+    _run_and_remove_annotation_tmpdirs(complete_search)
 elif sys.argv[1] == "complete-test":  # run complete test
     complete_test_crisprme()
 elif sys.argv[1] == "assembly-search":  # run diploid assembly search
-    assembly_search()
+    _run_and_remove_annotation_tmpdirs(assembly_search)
 elif sys.argv[1] == "build-index-only":  # pre-build reusable reference index
     build_index_only()
 elif sys.argv[1] == "download":  # fast HuggingFace download of reference data

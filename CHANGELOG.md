@@ -381,6 +381,16 @@ and the `release-crisprme` skill.
   link (for example to a shared copy) is replaced by the downloaded copy, with a NOTE, and the shared
   copy is left untouched; a folder that is a mount point (including a bind mount) is refused before
   the download starts, saying what to do instead, so `download --what all` stops at that component.
+- **Every annotated search left its sorted annotations behind, about 1.7 GB each.**
+  `complete-search` and `assembly-search` sort each `--annotation` / `--gene_annotation` into a new
+  `crisprme_annot_*` folder in the working directory (`$CRISPRME_TMPDIR` if set), and
+  `--personal_annotation` into a `crisprme_pannot_*` one. Nothing removed them, and the pipeline's
+  last step gunzipped the plain `.bed` back into them: with the shipped annotations about 280 MB
+  plus 1.4 GB per search, and one benchmark-mode `complete-test` left four of them, 3.4 GB. They
+  are now removed once the command that made them is over, whether it succeeded or failed (an
+  input error, a failed pipeline, Ctrl-C), never while the pipeline runs and never another job's;
+  `--keep-intermediates` keeps them. Search results are unchanged. Covered by
+  `PostProcess/test_annotation_tmpdirs.py`.
 - **Pipeline failure summaries are binary-safe.** `summarize_pipeline_failure()` now reads `log.txt`
   and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
   stderr no longer raises `UnicodeDecodeError` and masks the real error.
