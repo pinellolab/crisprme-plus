@@ -177,10 +177,12 @@ fi
 # (docker pause, a job suspended elsewhere) -- can thus lose its lock to a takeover
 # after 15 minutes. Resumed, it goes on with its build step until that step returns,
 # and only then ends with an ERROR, using and removing nothing that the lock guards
-# (_lock_lost). For the INDELS index, pool_index_indels.py meanwhile goes on removing
-# and rebuilding per-chromosome directories inside the taker's index. So a library
-# shared across hosts or containers must never have a build suspended for 15 minutes
-# or more. A lock with no record at all is never broken, however old: CRISPRme 2.8.0
+# (_lock_lost). Its build step can meanwhile write into the taker's output:
+# index-genome removes and re-creates its directory as it starts, so one stopped before
+# that point removes and rebuilds the taker's index in place, and for the INDELS index
+# pool_index_indels.py removes and rebuilds per-chromosome directories inside it
+# throughout. So a library shared across hosts or containers must never have a build
+# suspended for 15 minutes or more. A lock with no record at all is never broken, however old: CRISPRme 2.8.0
 # takes its locks with a bare mkdir and may still be building under one. So a run that
 # ends in the moment between a free lock's mkdir and the write of its record leaves a
 # lock that someone must clear: the run waits for it and says every few minutes how
@@ -399,7 +401,9 @@ _lock_run_alive() {
 # trap ends it: caught by the run's trap, inherited, bash dropped it, and the loop went
 # on refreshing a lock the run then waited on for good. A TERM to the run in that
 # moment takes the default action: bash runs the EXIT trap and the run ends as if
-# killed, its locks left to the next run.
+# killed, its locks left to the next run. One that arrives just as the trap is reset
+# stays pending with no trap set: bash re-sends it to itself once that command ends,
+# with two warnings on stderr (run_pending_traps), and the run still ends by it.
 _lock_hold() {
 	_locks_held+=("$1")
 	trap - TERM
@@ -424,10 +428,12 @@ _lock_hold() {
 # it, so two runs that both found the lock stale cannot both take it over. A takeover
 # takes milliseconds, so a ".takeover" more than a minute old was left by a run that
 # ended inside one: it is cleared, for a later poll to take the lock over. A run that
-# ends inside its own clears it (_lock_abandon_all), named in _lock_takeover once its
-# mkdir has succeeded -- never before, or a run whose mkdir failed would remove another
-# run's. Bash runs a trap as soon as a command it waits for returns, so a run that ends
-# as that mkdir returns leaves it, and the next run waits up to a minute.
+# ends inside its own clears it (_lock_abandon_all), named in _lock_takeover from once
+# its mkdir has succeeded until just before its rmdir -- never outside that, or a run
+# whose mkdir failed, or whose rmdir has removed its own, would remove another run's.
+# Bash runs a trap as soon as a command it waits for returns, so a run that ends as
+# that mkdir returns, or just before that rmdir, leaves it, and the next run waits up
+# to a minute.
 # 0 = this run now holds the lock.
 _lock_steal() {
 	local _rc=1 _lock_rec
@@ -444,8 +450,8 @@ _lock_steal() {
 		_rc=0
 	fi
 	rm -f "$1/owner.$$" 2>/dev/null
-	rmdir "$1/.takeover" 2>/dev/null
 	_lock_takeover=
+	rmdir "$1/.takeover" 2>/dev/null
 	return $_rc
 }
 
