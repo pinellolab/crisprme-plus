@@ -1180,9 +1180,10 @@ for that index (per-sample on a phased genotyped index such as
 
 With `--chrom` (e.g. `--chrom chr22`) it searches that chromosome only. It runs from a
 per-run view of the working directory in which that chromosome is the only one: a hidden
-`.crisprme-test-view-*` folder of symlinks, removed when the run ends. So it reports
-exactly the off-targets the whole-genome test reports on that chromosome, for a fraction
-of the cost: with `NRG_3_hg38+hg38_HGDP1kGP`, `--chrom chr22` peaked at about 5 GB of RAM
+`.crisprme-test-view-*` folder of symlinks, removed when the run ends. So its result
+tables hold exactly the off-targets the whole-genome test reports on that chromosome (the
+shareable report's top-1000 view then ranks that chromosome alone, so it can list sites the
+whole-genome report ranks below its top 1000), for a fraction of the cost: with `NRG_3_hg38+hg38_HGDP1kGP`, `--chrom chr22` peaked at about 5 GB of RAM
 and took about 1.5 to 4 minutes at 16 threads in testing. A chromosome that holds none of
 the example guide's off-targets, as `chrM` and most contigs of the reference-only
 `NRG_3_hg38` do, passes with an empty result, which Complete Search ends without an
