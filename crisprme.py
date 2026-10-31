@@ -4511,13 +4511,17 @@ def print_help_complete_test():
         "chromosome (e.g., chr22). By default, the test is conducted on all "
         "chromosomes\n"
         "\t--vcf_dataset, variant dataset for the LEGACY build-from-source test "
-        "(builds an index from raw VCFs): 1000G | HGDP | 1000G+HGDP = 1000 Genomes "
+        "(the benchmark mode: it builds small test indexes from raw VCFs for "
+        "validate-test, and runs only with CRISPRME_ALLOW_ONDEMAND_BUILD=1 set; this "
+        "flag does not select it): 1000G | HGDP | 1000G+HGDP = 1000 Genomes "
         "2019 (phased) and/or HGDP 2019 -- a build-pipeline test panel, NOT the "
         "shipped re-phased HGDP1kGP default and NOT the retired "
-        "NRG_3_hg38+hg38_1000G2021_HGDP index [default: 1000G]. The DEFAULT "
-        "complete-test (no --vcf_dataset) instead runs the example guide against "
+        "NRG_3_hg38+hg38_1000G2021_HGDP index [default: 1000G]. Without "
+        "CRISPRME_ALLOW_ONDEMAND_BUILD, complete-test instead runs the example guide against "
         "whichever index you downloaded (recommended: NRG_3_hg38+hg38_HGDP1kGP) -- "
-        "the modern smoke test.\n"
+        "the prebuilt-index smoke test. The self-test, as CI runs it: "
+        "CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test "
+        "--chrom chr22 --vcf_dataset 1000G, then crisprme.py validate-test --chrom chr22.\n"
         "\t--thread, number of threads.\n"
         "\t--debug, debug mode.\n"
     )
@@ -4598,7 +4602,9 @@ def print_help_validate_test() -> None:
         "This functionality compares the off-targets identified by CRISPRme "
         "against results obtained via brute-force search and alignment.\n" 
         "Requirements:\n"
-        "\t- The `complete-test` functionality must have been executed beforehand\n"
+        "\t- The `complete-test` functionality must have been executed beforehand, "
+        "in its benchmark mode and in this folder: CRISPRME_ALLOW_ONDEMAND_BUILD=1 "
+        "CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G\n"
         "\t- Validation is supported only when complete-test was run using "
         "1000 Genomes variant data\n\n"
     )
@@ -4606,8 +4612,8 @@ def print_help_validate_test() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--chrom, Validate off-target sites on a specific chromosome "
-        "(e.g., chr22). If not provided, validation is performed across "
-        "all available chromosomes\n"
+        "(e.g., chr22); use the --chrom complete-test ran with. If not provided, "
+        "the whole-genome output of a complete-test run without --chrom is validated\n"
         "\t--debug, debug mode\n"
     )
     sys.exit(1)
@@ -4622,8 +4628,8 @@ def validate_test():
     against reference results on a specified chromosome or across all chromosomes.
 
     Raises:
-        OSError: If the validation script returns a non-zero exit code,
-            indicating that an error occurred during off-target validation.
+        SystemExit: With status 1 if the validation script returns a non-zero exit
+            code, indicating that an error occurred during off-target validation.
     """
     if "--help" in input_args or len(input_args) < 2:
         print_help_validate_test()
@@ -4644,7 +4650,9 @@ def validate_test():
         f"{sys.executable} {script_validation} {chrom}", shell=True
     )
     if code != 0:
-        raise OSError("CRISPRme off-target sites validation encountered an Error!")
+        # validate.py has already said why on stderr (a mismatch, or no complete-test
+        # benchmark output to check); a traceback here would only bury it
+        sys.exit(1)
     
 
 def print_help_setup_database_test() -> None:

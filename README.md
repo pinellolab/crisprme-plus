@@ -480,11 +480,11 @@ official Docker installation guide specific to your OS:
 
 The CRISPRme Docker image is now published as a multi-architecture image with a
 native `linux/arm64` build, so it runs **natively on Apple Silicon Macs with no
-emulation** (no Rosetta / QEMU, no "platform mismatch" warning). Both the
-`crispritz` dependency (native `linux-aarch64` bioconda build) and `crisprme`
-itself (a `noarch` package) install per-architecture without any source
-compilation. Docker automatically selects the correct architecture when you
-pull or run the image, so no special flags are required.
+emulation** (no Rosetta / QEMU, no "platform mismatch" warning). Each architecture's
+image is built from source: it compiles CRISPRitz v2.9.1 and installs CRISPRme+ from
+this repository, so it does not depend on the Bioconda packages. Docker automatically
+selects the correct architecture when you pull or run the image, so no special flags
+are required.
 
 **Docker Desktop memory allocation (important)**
 
@@ -567,9 +567,13 @@ docker images
 
 Look for an entry similar to the following:
 ```
-REPOSITORY          TAG       IMAGE ID       CREATED        SIZE
-pinellolab/crisprme   latest    <image_id>     <timestamp>    ~5 GB (amd64; ~1.8 GB on Apple Silicon)
+REPOSITORY            TAG       IMAGE ID       CREATED        SIZE
+pinellolab/crisprme   latest    <image_id>     <timestamp>    ~7 GB on Apple Silicon (more on amd64)
 ```
+
+The pull downloads about 5 GB on amd64 and 1.8 GB on Apple Silicon (arm64). `docker images`
+shows what the image takes on disk once unpacked: about 7 GB on Apple Silicon, and more on
+amd64, whose CRISPR-Bulge scorer env carries the CUDA build of TensorFlow.
 
 You are now ready to run CRISPRme using Docker.
 
@@ -586,8 +590,8 @@ Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for
 > Docker image runs natively on Apple Silicon (`linux/arm64`).
 
 ```bash
-# 1. clone the repository (the CRISPRme+ development line lives on the main branch)
-git clone https://github.com/pinellolab/crisprme-plus.git
+# 1. clone the release (omit --branch for the development line on main)
+git clone --branch v2.8.1 https://github.com/pinellolab/crisprme-plus.git
 cd crisprme-plus
 
 # 2. create + activate the runtime environment (pinned deps from environment.yml)
@@ -604,13 +608,16 @@ command -v crispritz.py
 
 The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then copies `crisprme.py`/`crispritz.py` into `$CONDA_PREFIX/bin` and their support trees into `$CONDA_PREFIX/opt/…`, and creates the dedicated `cbulge` conda env for the CRISPR-Bulge off-target scorer (set `CRISPRME_SKIP_SCORER_ENV=1` to defer it — create it later with `crisprme.py scorer-env create`). `CRISPRITZ_REF` defaults to the **v2.9.1** tag; override it with `CRISPRITZ_REF=<tag> bash install_from_source.sh` to build a different CRISPRitz revision.
 
-**Smoke-test the install** (downloads a small chr22 dataset, runs the full pipeline, and compares against the committed ground truth):
+**Smoke-test the install** with the brute-force benchmark CI runs: `complete-test`'s benchmark mode downloads chromosome 22 with its 1000 Genomes variants, builds small test indexes and runs the full pipeline for every registered benchmark, and `validate-test` then compares the off-targets with the committed brute-force ground truth:
 
 ```bash
 mkdir crisprme_test && cd crisprme_test
-crisprme.py complete-test --chrom chr22 --thread 4
-crisprme.py validate-test --chrom chr22
+CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 \
+  crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+crisprme.py validate-test --chrom chr22   # expect: 2 passed, 0 failed, 2 skipped
 ```
+
+`CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode: without it, `complete-test` runs the prebuilt-index smoke ([§2.2.2](#222-complete-test)), which needs an index you have downloaded and gives `validate-test` nothing to check. `CRISPRME_SKIP_HEAVY=1` skips the two bulge-2 benchmarks, whose index builds need more than 16 GB of RAM. The run took 10 to 20 minutes at 8 threads in testing.
 
 Notes:
 - This is exactly the recipe the project `Dockerfile` automates — if you prefer full isolation, build the image instead (Section 1.2).
@@ -1156,7 +1163,8 @@ populations.
 
 The **Complete Test** module verifies the correct installation and functionality 
 of CRISPRme by running the built-in example guide against a **prebuilt index that 
-you have already downloaded** (or built). It does **not** build an index or 
+you have already downloaded** (or built); its benchmark mode is described under *Two
+modes* below. By default it does **not** build an index or
 auto-download all the data for you: CRISPRme never auto-builds an index, so if no 
 prebuilt index is present, `complete-test` prints guidance to download one (e.g. 
 `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`) and 
@@ -1215,23 +1223,33 @@ function, including detailed explanations and default behaviors:
   faster execution for targeted validation. *Default behavior*: Run the test 
   across the entire genome.
 
-> **Note:** `complete-test` requires a prebuilt index to already be present.
+> **Note:** `complete-test`'s default smoke requires a prebuilt index to already be present.
 > CRISPRme never auto-builds an index; download one first with
 > `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP`.
 > If no index is found, `complete-test` prints this guidance and exits cleanly.
 
-> **Two modes.** With no `--vcf_dataset`, `complete-test` runs the **modern smoke** above —
-> the example guide against whichever prebuilt index you downloaded (recommended: the default
-> `NRG_3_hg38+hg38_HGDP1kGP`). There is also a **legacy build-from-raw** mode,
-> `complete-test --vcf_dataset {1000G|HGDP|1000G+HGDP}`, which downloads raw VCFs and builds a
-> small test index on the fly; it exists mainly to feed the brute-force `validate-test` gate
-> (see [§2.2.3](#223-validate-test)), which is supported only for a **1000 Genomes** run.
+> **Two modes.** By default `complete-test` runs the **prebuilt-index smoke** above — the
+> example guide against whichever prebuilt index you downloaded (recommended: the default
+> `NRG_3_hg38+hg38_HGDP1kGP`). With `CRISPRME_ALLOW_ONDEMAND_BUILD=1` set it runs the
+> **benchmark mode** instead: it downloads the chromosome and the raw `--vcf_dataset` VCFs
+> (`1000G` [default], `HGDP` or `1000G+HGDP`), builds small test indexes on the fly and runs every
+> registered benchmark. That is what the brute-force `validate-test`
+> ([§2.2.3](#223-off-target-sites-validation-test)) checks, for a **1000 Genomes** run only.
+> `--vcf_dataset` on its own does not select this mode. The self-test, as CI runs it:
+> ```bash
+> CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 \
+>   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G
+> crisprme.py validate-test --chrom chr22
+> ```
+> `CRISPRME_SKIP_HEAVY=1` skips the two bulge-2 benchmarks, whose index builds need more than
+> 16 GB of RAM.
 
 ##### Output Data Overview
 ---
 
 The results generated by the Complete Test function are saved in a subdirectory 
-within the Results directory, named `crisprme-test-out`.
+within the Results directory, named `crisprme-test-out` (the benchmark mode writes one
+`crisprme-test-out_<benchmark>` folder per benchmark).
 
 The output folder contains the same set of files produced by the 
 Complete Search functionality, including:
@@ -1247,9 +1265,10 @@ assessments of genetic variants on target metrics.
 For a detailed description of the contents of these files, please refer to the 
 corresponding subsection in [Complete Search](#221-complete-search).
 
-Finally, the off-target sites generated by the Complete Test workflow can be
+Finally, the off-target sites generated by the benchmark mode can be
 validated using the Off-Target Sites Validation Test functionality, which
-compares CRISPRme predictions against brute-force ground-truth results.
+compares CRISPRme predictions against brute-force ground-truth results (the
+prebuilt-index smoke leaves nothing for it to check).
 For additional details on this validation step, refer to the
 [Off-Target Sites Validation Test section](#223-off-target-sites-validation-test)
 in the documentation.
@@ -1269,7 +1288,11 @@ pipeline, particularly when working with large-scale population variant data.
 
 > ⚠️ **Important Requirements**
 >
-> * The `complete-test` functionality **must be executed beforehand**
+> * `complete-test` **must have been run beforehand, in its benchmark mode and in the same
+>   folder** (see [§2.2.2](#222-complete-test)):
+>   `CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G`.
+>   Anywhere else, including after the prebuilt-index smoke, `validate-test` finds nothing to
+>   check, says so in one line and exits 1
 > * Validation is **supported only** when `complete-test` was run using
 >   **1000 Genomes Project variant data**
 
@@ -1279,8 +1302,9 @@ Usage Example for the Off-Target Sites Validation Test function:
     --chrom chr22
   ```
 
-If no chromosome is specified, validation is performed across all chromosomes
-available from the prior `complete-test` execution.
+Give `validate-test` the same `--chrom` as the benchmark-mode `complete-test` run: the
+target reports it reads are named after it, so after a `--chrom chr22` run,
+`validate-test` without `--chrom` finds none and exits 1.
 
 ##### Input Arguments
 ---
@@ -1300,9 +1324,9 @@ Validation Test function, including their purpose and default behavior:
 **Validation Parameters**
 
 - `--chrom` (*Optional*)
-  <br>Restricts validation to a specific chromosome (e.g., chr22).
-  If not provided, validation is performed across all chromosomes processed
-  during the `complete-test` run.
+  <br>Restricts validation to a specific chromosome (e.g., chr22); use the
+  `--chrom` the benchmark-mode `complete-test` ran with. If not provided, the
+  whole-genome target reports of a `complete-test` run without `--chrom` are validated.
 
 ##### Output Data Overview
 ---
@@ -2106,10 +2130,10 @@ quicker, focused test on a single chromosome and a more detailed, exhaustive
 test across the entire genome:
 
 - **Single Chromosome Test**
-  <br>This test runs a search for potential off-targets on a single chromosome, 
-  such as chromosome 22, using a prebuilt variant-aware index you have already 
-  downloaded. This provides a fast way to check CRISPRme's ability to process 
-  variant data and identify off-targets for a specific chromosome.
+  <br>`complete-test`'s benchmark mode: it downloads chromosome 22 with its 1000 Genomes
+  variants, builds small test indexes and runs the registered benchmarks, so that
+  `validate-test` can compare the off-targets with the committed brute-force ground
+  truth. It needs no prebuilt index, and it is what CI runs.
 
 - **Full Genome Test**
   <br>This test checks CRISPRme's ability to search for potential off-targets 
@@ -2117,12 +2141,11 @@ test across the entire genome:
   the example guide RNA, incorporating both Gencode and ENCODE annotations to 
   ensure comprehensive results.
 
-Upon successful completion of the Complete Test, users may optionally
-perform an additional off-target validation step using the
-Off-Target Sites Validation Test functionality. This step compares 
-CRISPRme-predicted off-targets against brute-force ground-truth alignments 
-derived from 1000 Genomes variant data, providing a rigorous correctness check 
-of the pipeline.
+After the Single Chromosome Test, the Off-Target Sites Validation Test
+(`validate-test`) compares CRISPRme-predicted off-targets against brute-force
+ground-truth alignments derived from 1000 Genomes variant data, providing a
+rigorous correctness check of the pipeline. It applies to that test only: the
+Full Genome Test leaves it nothing to check.
 
 **Why Perform the Detailed Test?**
 
@@ -2151,9 +2174,15 @@ execute the following commands:
     --chrom chr22
   ```
 
-After completion, off-target sites generated by this test can be validated using:
+The single-chromosome test is `complete-test`'s benchmark mode followed by `validate-test`,
+as CI runs them: it downloads chromosome 22 with its 1000 Genomes variants, builds small
+test indexes, runs every registered benchmark, and `validate-test` compares the off-targets
+with the committed brute-force ground truth. Run it from an empty folder; it fits in 16 GB
+of RAM and took 10 to 20 minutes at 8 threads in testing:
 ```bash
-crisprme.py validate-test --chrom chr22
+CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 \
+  crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+crisprme.py validate-test --chrom chr22   # expect: 2 passed, 0 failed, 2 skipped
 ```
 
 #### 3.2.2 Full Genome Test
@@ -2166,11 +2195,9 @@ have already downloaded, execute the following commands:
   crisprme.py complete-test
   ```
 
-Once the full genome test has completed, validation can be performed across all
-chromosomes using:
-```bash
-crisprme.py validate-test
-```
+`validate-test` does not apply to this test: it checks the benchmark mode's output only
+([§3.2.1](#321-single-chromosome-test)), so after this test it finds nothing to check,
+says so in one line and exits 1.
 
 ## 4 Citation
 If you use CRISPRme in your research, please cite our [paper](https://rdcu.be/c1GYQ):

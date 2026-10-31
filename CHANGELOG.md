@@ -235,6 +235,22 @@ and the `release-crisprme` skill.
   broke every benchmark. The flag allowlist was checked against the help text and against what the
   parser reads, but not against the commands this repo builds, so a dead flag in a caller could only
   surface by running the benchmarks; that gap is now a static test.
+- **The documented install self-test tested nothing, and `validate-test` then failed with a
+  traceback.** README §1.3, §3.2 and the installer's last line presented `crisprme.py complete-test
+  --chrom chr22` followed by `validate-test` as a self-test that downloads chr22 and compares with
+  the brute-force ground truth. That benchmark mode runs only with `CRISPRME_ALLOW_ONDEMAND_BUILD=1`
+  set (`--vcf_dataset` does not select it, whatever the help said). Without it, `complete-test`
+  looked for a prebuilt index, found none in a fresh folder and exited 0 having tested nothing,
+  and `validate-test` then stopped with two tracebacks (`FileNotFoundError: ... vcf.config.test.txt`,
+  then `OSError`). The README (§1.3, §2.2.2, §2.2.3, §3.2), both commands' `--help` and the
+  installer now give the commands CI runs: `CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1
+  crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G`, then `crisprme.py validate-test
+  --chrom chr22`. Where that run has left nothing to check, `validate-test` says so in one line,
+  naming the command, and exits 1; any failed validation now exits 1 without `crisprme.py`'s
+  `OSError` traceback after `validate.py`'s own report. Also in the README: §1.3 clones the
+  `v2.8.1` tag rather than `main`, and §1.2 says the image is built from source (CRISPRitz v2.9.1
+  compiled in it) and gives its download and on-disk sizes separately. Both `complete-test` modes
+  are unchanged. Covered by `PostProcess/test_validate_test.py`.
 - **An index still being built could be selected as if it were finished.** A build takes
   `<dir>.lock`, and `index-genome` then creates the index directory and writes one `.bin` per
   chromosome, so for the whole build a half-written index is indistinguishable from a complete one

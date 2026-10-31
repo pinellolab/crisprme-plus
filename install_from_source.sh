@@ -123,4 +123,6 @@ fi
 echo ">> Installed:"
 echo "   crisprme.py  -> $(command -v crisprme.py)   ($(crisprme.py --version 2>/dev/null))"
 echo "   crispritz.py -> $(command -v crispritz.py)"
-echo ">> Done. Try:  crisprme.py complete-test --chrom chr22 --thread 4"
+echo ">> Done. Self-test it from an empty folder (README 1.3; downloads chromosome 22):"
+echo "     CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8"
+echo "     crisprme.py validate-test --chrom chr22"

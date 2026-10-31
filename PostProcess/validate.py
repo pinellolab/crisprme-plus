@@ -97,9 +97,15 @@ def check_variant_dataset() -> None:
     """Ensure complete-test used the 1000G dataset (required for validation)."""
     vcf_config_file = "vcf.config.test.txt"
     if not os.path.isfile(vcf_config_file):
-        raise FileNotFoundError(
-            f"Variant dataset configuration file not found: {vcf_config_file}"
+        # nothing to validate here: complete-test's benchmark mode writes this file, the
+        # default prebuilt-index smoke does not. Say what to run, without a traceback.
+        sys.stderr.write(
+            f"ERROR: {vcf_config_file} not found in {os.getcwd()}: validate-test checks "
+            "the output of complete-test's benchmark mode, so run that here first: "
+            "CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py "
+            "complete-test --chrom chr22 --vcf_dataset 1000G\n"
         )
+        sys.exit(1)
     with open(vcf_config_file, mode="r") as fin:
         datasets = [d for line in fin if (d := line.strip())]
     if len(datasets) != 1 or datasets[0] != "hg38_1000G":

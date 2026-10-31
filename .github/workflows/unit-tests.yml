@@ -249,7 +249,7 @@ jobs:
           python -m unittest test_cfd_cleanroom_equiv test_cosmic_license
           test_configure_tmpdir
           test_registry_from_info_af test_synth_sites_gt test_change_headers_bestmerge
-          test_dash_output_props test_complete_test -v
+          test_dash_output_props test_complete_test test_validate_test -v
 
       - name: "targets-scoring (score-a-list: CasOFFinder/TSV parsers, CFD slicing, CRISPR-Bulge null rules, carrier overlay vs synthetic registry)"
         # The score-a-list backend (crisprme.py targets-scoring). Hermetic: the
