@@ -917,11 +917,16 @@ def _processes(pgid):
 
 
 def _subshells(pid):
-    """The background subshells of bash process `pid`: forks that run its command
-    line. A lock's heartbeat is one."""
-    procs = _processes(os.getpgid(pid))
-    me = [args for p, _, args in procs if p == pid]
-    return [p for p, _, args in procs if p != pid and me and args == me[0]]
+    """The background subshells of bash process `pid`: its children that run its own
+    command line -- a lock's refresh loop is one. Seen in two looks 0.2 s apart, as a
+    child caught between its fork and its exec shows its parent's command line too."""
+    def look():
+        procs = _processes(os.getpgid(pid))
+        me = [args for p, _, args in procs if p == pid]
+        return {p for p, ppid, args in procs if ppid == pid and me and args == me[0]}
+    first = look()
+    time.sleep(0.2)
+    return sorted(first & look())
 
 
 def _wait_until_gone(pgid, timeout=10):
