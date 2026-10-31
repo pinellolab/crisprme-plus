@@ -302,6 +302,16 @@ and the `release-crisprme` skill.
   CRISPRitz can prune and fails with an explanation if not, rather than assuming it from the pin,
   which is overridable through `CRISPRITZ_REF` or an engine already on `PATH`.
 
+- **"The error log is empty" checks passed after any finished job, whatever it had written.** A
+  job that finishes renames its `log_error.txt` to `log_error_no_check.txt`, so a check of
+  `log_error.txt` could no longer fail by then. CI's read-only-container smoke checked only
+  `log_error.txt`, and printed PASS on this release's candidate although the reference-only
+  search it runs had no report (`report.log`: a TypeError) and its error log held three lines.
+  The smoke now checks whichever of the two files exists and requires the job's
+  `<job>_report.zip`; the zero-hit check, whose job ends before the rename, checks the same way.
+  `docs/DOCKER_QUICKSTART.md` and the web interface guide now name `log_error_no_check.txt` where
+  they tell you to check a finished job's error log. The rename itself is unchanged.
+
 - **The report manifest could stamp a hardcoded version.** The run manifest in the shareable report
   fell back to a literal `"2.8.0"` when a run recorded no version. It now resolves the real version,
   and reports `unknown` rather than a plausible-but-wrong number — this manifest is the IND
