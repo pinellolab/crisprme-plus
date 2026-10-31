@@ -847,6 +847,16 @@ class TestProgressHookNeverBreaksDownload(unittest.TestCase):
         self.assertNotIn("tqdm_class", hub.calls[0])
 
 
+def _mountinfo_line(n, root, mount_point):
+    """One /proc/self/mountinfo line: field 4 is the mounted folder's path inside
+    its own filesystem, field 5 the mount point, both escaped as the kernel writes
+    them (space, tab, newline and backslash in octal, e.g. \\040)."""
+    def escape(path):
+        return "".join(f"\\{ord(c):03o}" if c in " \t\n\\" else c for c in path)
+    return (f"{30 + n} 1 0:52 {escape(root)} {escape(mount_point)} rw,relatime "
+            f"shared:1 - ext4 /dev/vda1 rw\n")
+
+
 class TestAtomicInstallDir(unittest.TestCase):
     """_atomic_install_dir: a clean build swaps in; a failed build leaves NO
     partial in the final location (the key 2.8.1 robustness fix)."""
@@ -1007,15 +1017,20 @@ class TestAtomicInstallDir(unittest.TestCase):
     def test_a_mount_point_dest_is_refused_before_anything_is_touched(self):
         # Measured on a real macOS mount: the kernel renames a mount point (the
         # mount moves with it), and clearing the moved-aside copy then deleted the
-        # mounted folder's own files. So it is refused before any build or rename.
+        # mounted folder's own files. So it is refused before any build or rename,
+        # here a bind mount from the same filesystem that only the mount table shows.
         import errno
         d = self._tmp()
         dest = os.path.join(d, "Genomes", "hg38")
         os.makedirs(dest)
         with open(os.path.join(dest, "old.fa"), "w") as fh:
             fh.write("shared")
+        mountinfo = os.path.join(d, "mountinfo")
+        with open(mountinfo, "w") as fh:
+            fh.write(_mountinfo_line(0, "/", "/"))
+            fh.write(_mountinfo_line(1, "/srv/hg38", os.path.realpath(dest)))
         built = []
-        with mock.patch.object(hf.os.path, "ismount", side_effect=lambda p: p == dest), \
+        with mock.patch.object(hf, "_MOUNTINFO", mountinfo), \
              self.assertRaises(OSError) as caught:
             hf._atomic_install_dir(dest, built.append)
         self.assertEqual(caught.exception.errno, errno.EBUSY)
@@ -1025,16 +1040,18 @@ class TestAtomicInstallDir(unittest.TestCase):
         self.assertEqual(os.listdir(os.path.join(d, "Genomes")), ["hg38"])
 
     def test_a_mount_point_dest_says_why_it_cannot_be_replaced(self):
-        # a folder mounted on its own cannot be renamed aside (EBUSY). A bind mount
-        # from the same filesystem is invisible to os.path.ismount, so this rename
-        # is where it shows: say what to do, and leave everything as it was
+        # a folder mounted on its own cannot be renamed aside (EBUSY). Without a
+        # readable mount table, os.path.ismount misses a bind mount from the same
+        # filesystem, so this rename is where it shows: say what to do, and leave
+        # everything as it was
         import errno
         d = self._tmp()
         dest = os.path.join(d, "Genomes", "hg38")
         os.makedirs(dest)
         with open(os.path.join(dest, "old.fa"), "w") as fh:
             fh.write("existing")
-        with self._failing_rename(dest, errno.EBUSY), \
+        with mock.patch.object(hf, "_MOUNTINFO", os.path.join(d, "absent")), \
+             self._failing_rename(dest, errno.EBUSY), \
              self.assertRaises(OSError) as caught:
             hf._atomic_install_dir(dest, self._build_new)
         self.assertEqual(caught.exception.errno, errno.EBUSY)
@@ -1059,52 +1076,106 @@ class TestMountPointInstallFolder(unittest.TestCase):
     -v shared:/data/Genomes/hg38) cannot be replaced: the atomic install renames it
     aside and the kernel refuses (EBUSY). That used to surface as a bare errno
     after the whole multi-GB download; it is now refused before anything is
-    fetched, with what to do instead."""
+    fetched, with what to do instead. A bind mount whose source is on the same
+    filesystem as its parent (Docker Desktop host binds, Apptainer --bind, mount
+    --bind) has its parent's device, so os.path.ismount misses it; on Linux the
+    process's mount table (/proc/self/mountinfo, faked here) shows it."""
 
     class _Reached(Exception):
         """The download was started."""
 
-    def _download(self, component, mounted, **kw):
-        """download_component with the network cut off at its first call, and the
-        install folder reported as a mount point when ``mounted``; returns that
-        folder."""
+    def setUp(self):
         import shutil
-        workdir = tempfile.mkdtemp()
-        self.addCleanup(lambda: shutil.rmtree(workdir, ignore_errors=True))
-        dest = os.path.join(workdir, hf._COMPONENT_LOCALDIR[component],
-                            kw.get("ref") or kw.get("dataset"))
+        real = tempfile.mkdtemp(prefix="crisprme mount ")  # the table writes \040
+        self.addCleanup(shutil.rmtree, real, True)
+        # the work dir is reached through a link; the table lists real paths
+        self.workdir = real + " link"
+        os.symlink(real, self.workdir)
+        self.addCleanup(os.unlink, self.workdir)
+        self.mountinfo = os.path.join(real, "mountinfo")  # unreadable until written
 
+    def _folder(self, component, name):
+        """The install folder of ``name``, holding one file already."""
+        dest = os.path.join(self.workdir, hf._COMPONENT_LOCALDIR[component], name)
+        os.makedirs(dest)
+        with open(os.path.join(dest, "old"), "w") as fh:
+            fh.write("old")
+        return dest
+
+    def _mount_table(self, *mounts):
+        """Write the fake mount table: the root mount plus ``mounts``, each a
+        (folder inside its filesystem, mount point) pair."""
+        with open(self.mountinfo, "w") as fh:
+            for n, (root, point) in enumerate((("/", "/"),) + mounts):
+                fh.write(_mountinfo_line(n, root, point))
+
+    def _download(self, component, ismount=False, **kw):
+        """download_component under the fake mount table, with os.path.ismount
+        answering ``ismount`` and the network cut off at its first call."""
         def reached(*_a, **_k):
             raise self._Reached()
 
-        with mock.patch.object(hf.os.path, "ismount",
-                               side_effect=lambda p: mounted and p == dest), \
+        with mock.patch.object(hf, "_MOUNTINFO", self.mountinfo), \
+             mock.patch.object(hf.os.path, "ismount", return_value=ismount), \
              mock.patch.object(hf, "_hf_snapshot", reached), \
              mock.patch.object(hf, "_require_hf", reached):
-            hf.download_component(component, workdir, **kw)
-        return dest
+            hf.download_component(component, self.workdir, **kw)
 
     def _refused(self, component, **kw):
         with self.assertRaises(ValueError) as caught:
-            dest = self._download(component, mounted=True, **kw)
+            self._download(component, **kw)
         return str(caught.exception)
 
     def test_a_mounted_genome_folder_is_refused_before_the_download(self):
+        # a bind mount from the same filesystem: os.path.ismount says no, and the
+        # mount table lists the folder's real path, its spaces written as \040
+        dest = self._folder("genome", "hg38")
+        self._mount_table(("/srv/hg38", os.path.realpath(dest)))
         message = self._refused("genome", ref="hg38")
-        self.assertRegex(message, r"/Genomes/hg38 is a mount point, so the download "
-                                  r"cannot replace it")
+        self.assertIn(f"{dest} is a mount point, so the download cannot replace it",
+                      message)
         self.assertIn("mount its parent folder instead", message)
+        self.assertEqual(os.listdir(dest), ["old"])
 
     def test_a_mounted_vcf_folder_is_refused_before_the_download(self):
+        dest = self._folder("vcf", "hg38_1000G")
+        self._mount_table(("/srv/hg38_1000G", os.path.realpath(dest)))
         message = self._refused("vcf", dataset="hg38_1000G")
-        self.assertRegex(message, r"/VCFs/hg38_1000G is a mount point")
+        self.assertIn(f"{dest} is a mount point", message)
         self.assertIn("mount its parent folder instead", message)
+        self.assertEqual(os.listdir(dest), ["old"])
 
     def test_an_ordinary_folder_still_downloads(self):
+        # the table lists the work dir, and the folder only as what another mount
+        # point shows (field 4); neither makes the folder a mount point
         for component, kw in (("genome", {"ref": "hg38"}),
                               ("vcf", {"dataset": "hg38_1000G"})):
-            with self.subTest(component=component), self.assertRaises(self._Reached):
-                self._download(component, mounted=False, **kw)
+            with self.subTest(component=component):
+                dest = self._folder(component, kw.get("ref") or kw.get("dataset"))
+                self._mount_table(("/srv/work", os.path.realpath(self.workdir)),
+                                  (os.path.realpath(dest), "/elsewhere"))
+                with self.assertRaises(self._Reached):
+                    self._download(component, **kw)
+
+    def test_without_a_readable_mount_table_os_path_ismount_decides(self):
+        # as on macOS, which has no /proc/self/mountinfo
+        self._folder("genome", "hg38")
+        self.assertFalse(os.path.exists(self.mountinfo))
+        message = self._refused("genome", ref="hg38", ismount=True)
+        self.assertIn("/Genomes/hg38 is a mount point", message)
+        with self.assertRaises(self._Reached):
+            self._download("genome", ref="hg38", ismount=False)
+
+    def test_a_link_to_a_mounted_folder_still_downloads(self):
+        # the install replaces the link itself and never touches its target, so a
+        # link is never a mount point, as for os.path.ismount
+        shared = os.path.join(os.path.realpath(self.workdir), "shared")
+        os.makedirs(shared)
+        os.makedirs(os.path.join(self.workdir, "Genomes"))
+        os.symlink(shared, os.path.join(self.workdir, "Genomes", "hg38"))
+        self._mount_table(("/srv/hg38", shared))
+        with self.assertRaises(self._Reached):
+            self._download("genome", ref="hg38")
 
 
 class TestStructuralCheckWhenSizesEmpty(unittest.TestCase):

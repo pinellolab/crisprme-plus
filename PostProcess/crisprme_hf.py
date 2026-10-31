@@ -37,6 +37,7 @@ import errno
 import io
 import json
 import gzip
+import re
 import shutil
 import subprocess
 import tarfile
@@ -715,11 +716,11 @@ def _atomic_install_dir(dest: str, build, verify=None) -> str:
     A ``dest`` that is a symlink (e.g. Genomes/hg38 linked to a shared copy) is
     replaced by the new real directory: the old link is removed with ``os.unlink``,
     never rmtree'd through, and the shared target is never written to or deleted.
-    A ``dest`` that is a mount point is refused before anything is built or moved
-    (OSError EBUSY, saying what to do instead): Linux will not rename one, and
-    macOS renames it with the mount attached, so clearing the moved-aside copy
-    would delete the mounted folder's own files."""
-    if os.path.ismount(dest):
+    A ``dest`` that is a mount point (:func:`_is_mount_point`) is refused before
+    anything is built or moved (OSError EBUSY, saying what to do instead): Linux
+    will not rename one, and macOS renames it with the mount attached, so clearing
+    the moved-aside copy would delete the mounted folder's own files."""
+    if _is_mount_point(dest):
         raise OSError(errno.EBUSY, _mount_point_message(dest))
     parent = os.path.dirname(dest.rstrip("/")) or "."
     os.makedirs(parent, exist_ok=True)
@@ -746,8 +747,9 @@ def _atomic_install_dir(dest: str, build, verify=None) -> str:
             except OSError as exc:
                 if exc.errno != errno.EBUSY:
                     raise
-                # download_component refuses a mount point before downloading, but
-                # os.path.ismount misses a bind mount from the same filesystem
+                # a mount point _is_mount_point could not see: without a readable
+                # mount table, os.path.ismount misses a bind mount from the same
+                # filesystem
                 raise OSError(exc.errno, _mount_point_message(dest)) from exc
         try:
             os.rename(stage, dest)
@@ -788,6 +790,37 @@ def _mount_point_message(dest: str) -> str:
         f"{dest} is a mount point, so the download cannot replace it; mount its "
         f"parent folder instead, or download into the mounted source folder."
     )
+
+
+# Linux's table of this process's mounts: one line per mount, whose 5th field is
+# the mount point, with space, tab, newline and backslash written as octal escapes
+# (\040, \011, \012, \134). There is none on macOS.
+_MOUNTINFO = "/proc/self/mountinfo"
+_MOUNTINFO_ESCAPE = re.compile(rb"\\([0-7]{3})")
+
+
+def _is_mount_point(path: str) -> bool:
+    """Whether ``path`` is a mount point, for the check before a download and the
+    one in :func:`_atomic_install_dir`. ``os.path.ismount`` only compares the device
+    of ``path`` with its parent's, so it misses a bind mount whose source is on the
+    same filesystem (Docker Desktop host binds, Apptainer --bind, mount --bind).
+    On Linux ``path`` is therefore one when its real path is listed in the mount
+    table; where that table cannot be read (macOS), ``os.path.ismount`` decides. A
+    symlink is never one, as for ``os.path.ismount``: the install replaces the link
+    itself and never touches its target."""
+    if os.path.islink(path):
+        return False
+    try:
+        with open(_MOUNTINFO, "rb") as fh:
+            table = fh.read()
+    except OSError:
+        return os.path.ismount(path)
+    mount_points = {
+        _MOUNTINFO_ESCAPE.sub(lambda m: bytes([int(m.group(1), 8)]), fields[4])
+        for fields in (line.split(b" ") for line in table.splitlines())
+        if len(fields) > 4
+    }
+    return os.fsencode(os.path.realpath(path)) in mount_points
 
 
 # --- download integrity -----------------------------------------------------
@@ -1307,7 +1340,7 @@ def download_component(
     # A genome / VCF dataset installs by swapping its whole folder in, which a mount
     # point refuses (_atomic_install_dir): say so now, not after a multi-GB download.
     _install_name = {"genome": ref, "vcf": dataset}.get(component)
-    if _install_name and os.path.ismount(os.path.join(local_dir, _install_name)):
+    if _install_name and _is_mount_point(os.path.join(local_dir, _install_name)):
         raise ValueError(_mount_point_message(os.path.join(local_dir, _install_name)))
 
     # Web progress (env-gated via CRISPRME_PROGRESS_FILE; a pure no-op on the CLI /
