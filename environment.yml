@@ -38,6 +38,8 @@ dependencies:
   - statsmodels
   - intervaltree
   - ijson                      # streaming low-RAM SNP-dict reader in new_simple_analysis.py (else falls back to whole-file json.load); matches the Docker image
+  - yajl                       # + cffi: ijson's C backend (yajl2_cffi), as in the Docker image; without them ijson parses in pure Python, ~45x slower
+  - cffi
   - pysam
   - bcftools
   - bedtools

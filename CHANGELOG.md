@@ -378,6 +378,17 @@ and the `release-crisprme` skill.
   Miniforge, conda 26.9.4); with the fix, `scorer-env create`, its compute self-test and real
   searches all pass.
 
+- **A source install read SNP dictionaries about 45 times slower than the Docker image.**
+  `environment.yml` installed `ijson` without `yajl` and `cffi`, so ijson fell back to its
+  pure-Python parser where the image uses its C backend (`yajl2_cffi`). The dictionary-based variant
+  post-analysis (complete-test's benchmark mode, a search on an index built from your own VCFs) and
+  `build-index-only`'s Tier-0 registry compile stream those dictionaries: one pass over chr22's
+  1.55 GB dictionary took 189 s instead of 4 s, and the chr22 benchmark's SNP post-analysis about
+  200 s instead of 5 to 17 s. `environment.yml` now lists `yajl` and `cffi` beside `ijson`, as the
+  Dockerfile does; a linux-64 solve of it adds exactly `yajl`, `cffi` and `pycparser`. Results were
+  identical either way, and a search on a shipped prebuilt index reads no such dictionary. A
+  Bioconda install lacks the two packages too until its recipe adds them.
+
 ### Security
 - **The web Settings page could be pointed outside `Settings/` and made to re-run a recorded
   command.** Retry, Show-full-log and the job-progress refresh built a path from the job id the
