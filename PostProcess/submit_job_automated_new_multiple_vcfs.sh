@@ -312,21 +312,41 @@ _lock_steal() {
 	return $_rc
 }
 
+# 0 when output $1 is in place: it exists, and with $2 = 1, a genome index directory,
+# it holds a .bin as _resolve_index_dir requires (index-genome creates the directory
+# before it writes one, and a directory with none is no index).
+_lock_built() {
+	[ -e "$1" ] || return 1
+	[ "$2" = 1 ] || return 0
+	find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null | grep -q .
+}
+
 # Take lock $1 before "$2" (e.g. "indexing <dir>", for the messages) writes output $3;
 # any further arguments are more outputs of the same build, named with $3 in the
-# how-to-clear message. Returns 0 when this run took a free lock and 2 when it took
-# over the lock of a run that died: either way this run does the build, and on 2 the
-# outputs may hold that run's half-written work. Returns 1 when another run held the
-# lock and released it with $3 in place -- or when mkdir failed with no lock in the
-# way, as the plain mkdir did -- and the caller builds nothing.
+# how-to-clear message. With -bin first, $3 is a genome index (see _lock_built).
+# Returns 0 when this run took a free lock and 2 when it took over the lock of a run
+# that died: either way this run does the build, and on 2 the outputs may hold that
+# run's half-written work. Returns 1 when $3 is in place once the lock is free --
+# another run built it meanwhile -- or when mkdir failed with no lock in the way, as
+# the plain mkdir did, and the caller builds nothing.
 _lock_take() {
-	local _lock="$1" _what="$2" _out="$3" _clear _next
+	local _bin=0 _lock _what _out _clear _next
+	if [ "$1" = -bin ]; then _bin=1; shift; fi
+	_lock="$1" _what="$2" _out="$3"
 	shift 2
 	printf -v _clear " '%s'" "$_lock" "$@"
 	while :; do
 		if mkdir "$_lock" 2>/dev/null; then
 			_lock_sign "$_lock"
 			_lock_hold "$_lock"
+			# Free -- but maybe only since a moment ago: the run that held it may have
+			# finished $3 between the caller's look and this mkdir. A free lock means
+			# its last holder is done (a dead one never frees it, a failed one removes
+			# its output first), so what is in place is final: leave it be.
+			if _lock_built "$_out" "$_bin"; then
+				_lock_release "$_lock"
+				return 1
+			fi
 			return 0
 		fi
 		[ -d "$_lock" ] || return 1
@@ -348,7 +368,7 @@ _lock_take() {
 				_next=$((SECONDS + ${_lock_notice_s:-300}))
 			fi
 		done
-		[ -e "$_out" ] && return 1
+		_lock_built "$_out" "$_bin" && return 1
 		# released without its output: the holder failed, or the lock was cleared by
 		# hand. Searching what is not there would come back empty, so build it here.
 		echo "$_lock was released but $_out is not there; $_what here instead."
@@ -762,9 +782,10 @@ while read vcf_f; do
 		# no valid index found, compute it; use mkdir lock to prevent concurrent builds.
 		# A lock taken over from a run that died guards a half-written directory, which
 		# needs nothing extra here: index-genome removes the directory it is about to
-		# write and builds it whole.
+		# write and builds it whole. -bin: a directory with no .bin, which the scan
+		# skipped, is no index yet, and is rebuilt the same way.
 		_lock="${idx_folder1}.lock"
-		_lock_take "$_lock" "indexing $idx_folder1" "$idx_folder1"
+		_lock_take -bin "$_lock" "indexing $idx_folder1" "$idx_folder1"
 		if [ $? != 1 ]; then
 			echo -e 'Index-genome Reference\tStart\t'$(date) >>$log
 			echo -e "Indexing reference genome"
@@ -800,7 +821,7 @@ while read vcf_f; do
 			# no index found, compute it; use mkdir lock to prevent concurrent builds
 			# (a dead run's half-written directory is rebuilt whole, as for the reference)
 			_lock="${idx_folder1}.lock"
-			_lock_take "$_lock" "indexing $idx_folder1" "$idx_folder1"
+			_lock_take -bin "$_lock" "indexing $idx_folder1" "$idx_folder1"
 			if [ $? != 1 ]; then
 				echo -e 'Index-genome Variant\tStart\t'$(date) >>$log
 				echo -e "Indexing variant genome"

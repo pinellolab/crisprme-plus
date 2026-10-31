@@ -1160,6 +1160,52 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         self.assertEqual(rc, 1, out + err)  # 1: the caller builds nothing
         self.assertEqual(err, "")
 
+    def test_a_free_lock_whose_output_is_in_place_is_let_go(self):
+        # The caller found the lock held, and its holder finished and released it before
+        # this run's mkdir: the lock is free, but the output is final. Rebuilding it
+        # would rewrite (or nest into) what the holder and its waiters are reading.
+        self.out.mkdir()
+        rc, out, err = self.take(then=f"[ -d {_q(self.lock)} ] && echo HELD || echo FREE")
+        self.assertEqual(rc, 1, out + err)  # 1: the caller builds nothing
+        self.assertIn("FREE", out)  # and the lock is let go at once
+        self.assertNotIn("waiting", out)
+        self.assertEqual(err, "")
+
+    def test_a_dead_runs_lock_is_still_taken_over_with_its_output_in_place(self):
+        # its output is that run's half-written work, not a finished one
+        self.hold(owner_record(dead_pid()))
+        self.out.mkdir()
+        rc, out, err = self.take()
+        self.assertEqual(rc, 2, out + err)
+        self.assertEqual(err, "")
+
+    def test_an_index_is_in_place_only_once_it_holds_a_bin(self):
+        # -bin: index-genome creates the directory before it writes any .bin, and a
+        # directory without one is no index (_resolve_index_dir skips it): build it
+        take = f'_lock_take -bin {_q(self.lock)} "indexing {self.out}" {_q(self.out)}\nexit $?'
+        self.out.mkdir()
+        rc, out, err = self.result(self.start(take))
+        self.assertEqual(rc, 0, out + err)  # a free lock, the index to build
+        self.assertFalse(self.lock.exists())  # (released when that run exited)
+        (self.out / "chr1.bin").write_bytes(b"")
+        rc, out, err = self.result(self.start(take))
+        self.assertEqual(rc, 1, out + err)  # in place: nothing to build
+        self.assertEqual(err, "")
+
+    def test_a_lock_released_beside_a_bin_less_index_is_built_here(self):
+        # cleared by hand, say, while its index directory had no .bin yet
+        owner = self.sleeper()
+        self.hold(owner_record(owner.pid))
+        self.out.mkdir()
+        waiter = self.start(f'_lock_take -bin {_q(self.lock)} "indexing {self.out}" '
+                            f'{_q(self.out)}\nexit $?')
+        _wait_for(lambda: "Another run is" in waiter.out_path.read_text(), 10, "the wait")
+        shutil.rmtree(self.lock)
+        rc, out, err = self.result(waiter)
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn(f"{self.out} is not there", out)
+        self.assertEqual(err, "")
+
     def test_a_lock_released_without_its_output_is_built_here(self):
         # The holder failed (it removes what it wrote), or the lock was cleared by hand.
         # A search on an index that is not there comes back EMPTY, not as an error, so
@@ -1418,6 +1464,14 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         self.assertIn(f"Stale lock {self.lock}", run.stdout)
         self.assertBuiltAndSearched(run)
 
+    def test_an_index_directory_with_no_bin_and_no_lock_is_built(self):
+        # The scan takes a directory with no .bin for no index (a download or a build
+        # that never wrote one), and the build replaces it. A lock found free with its
+        # "output" in place must not count such a directory as built.
+        self.index.mkdir()
+        run = self.run_pipeline(variant=False, timeout=60)
+        self.assertBuiltAndSearched(run)
+
     def test_a_lock_with_no_owner_record_is_waited_on_never_broken(self):
         # an older CRISPRme's lock: whether its run is still alive cannot be told
         self.lock.mkdir()
@@ -1558,7 +1612,10 @@ class ShippedScriptCarriesTheFix(unittest.TestCase):
         for bare in ('rmdir "$_lock"', 'mkdir "$_lock"', 'while [ -d "$_lock" ]'):
             self.assertNotIn(bare, text)
         # the enrichment, reference index, variant index and INDELS index builds
-        self.assertEqual(len(re.findall(r'^\s*_lock_take "\$_lock" ', text, re.M)), 4)
+        self.assertEqual(len(re.findall(r'^\s*_lock_take (-bin )?"\$_lock" ', text, re.M)), 4)
+        # the two genome indexes count as built only once they hold a .bin
+        self.assertEqual(len(re.findall(r'^\s*_lock_take -bin "\$_lock" "indexing '
+                                        r'\$idx_folder1" ', text, re.M)), 2)
         self.assertNotIn("trap ", text)  # the helpers' traps are the only ones
 
     def test_no_bare_nnn_glob_remains(self):
