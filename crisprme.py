@@ -2412,10 +2412,14 @@ def complete_search() -> None:
                     f"{_rerun}, which finishes it, or remove it to search without it "
                     f"(rm -rf '{_igt}')",
                 )
-            # (and the fake-indel genome a search builds its INDELS index from)
+            # (and the enrichment, and the fake-indel genome a search builds its INDELS
+            # index from)
+            _enriched = os.path.join(current_working_directory, "Genomes",
+                                     f"{os.path.basename(os.path.normpath(genomedir))}+{_vn}")
+            _refuse_unfinished(_enriched, f"the enrichment of {_vn}",
+                               f"{_rerun}, which enriches it again")
             _refuse_unfinished(
-                os.path.join(current_working_directory, "Genomes",
-                             f"{os.path.basename(os.path.normpath(genomedir))}+{_vn}_INDELS"),
+                _enriched + "_INDELS",
                 f"the SNP codes of the {_vn} fake-indel genome", f"{_rerun}, which finishes them",
             )
     if variant and not os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
@@ -3104,8 +3108,9 @@ def _mark_unfinished(directory: str) -> None:
     """Marks ``directory`` as being written in place by this run: a hidden
     ``<directory>/.building`` that holds this run's owner record (_build_dir_owner).
     A step that writes its output into place file by file -- the dict-less tiers,
-    the indel genotype store, the SNP overlay of a fake-indel genome in place --
-    sets it before it starts and takes it away once it has ended
+    the indel genotype store, the SNP overlay of a fake-indel genome in place, an
+    enrichment going into place -- sets it before it starts and takes it away once
+    it has ended
     (_unmark_unfinished): a part that a stop leaves looks like a whole one, and
     complete-search refuses it while the mark is there (_refuse_unfinished). It
     makes ``directory`` if need be."""
@@ -3556,9 +3561,10 @@ def build_index_only() -> None:
         _overlaid.append((_said.getvalue(), _n, _coded[0]))
 
     def _enriched_already():
-        # an enrichment is all in place once its indel logs are: they go in last (_place
-        # below), and every search needs them
-        return os.path.isdir(enriched) and os.path.isdir(indel_dict)
+        # an enriched genome is there for a finished enrichment, but for one this command
+        # put in place marked unfinished, with the rest of it to go in after it (_place
+        # below), and a run stopped before that ended
+        return os.path.isdir(enriched) and not os.path.isdir(os.path.join(enriched, ".building"))
 
     if not _enriched_already():
         print(f"Enriching {genome_ref} with {vcf_name} (add-variants)...", flush=True)
@@ -3674,7 +3680,7 @@ def build_index_only() -> None:
                 return
             # This block only runs on a FRESH enrichment (no finished one in place), so any
             # pre-existing dataset-specific output dirs are stale/partial from a prior
-            # aborted build -- an enriched genome without its indel logs too. Clear them
+            # aborted build -- an enriched genome still marked unfinished too. Clear them
             # first, else a move onto an existing fake_chrN / dict raises "Destination path
             # already exists" (issue #54).
             for _d in (indels_out, dict_folder, indel_dict, enriched):
@@ -3682,15 +3688,17 @@ def build_index_only() -> None:
                     shutil.rmtree(_d)
 
             # Then only renames, within Genomes and within Dictionaries, done in moments:
-            # the fake-indel genomes, the enriched genome, the dictionaries, and the indel
-            # logs last. A later run takes the enrichment for finished once they are in
-            # place (_enriched_already), and a search needs them and the dictionaries, so
-            # a run that ends before then leaves none for either to use: the next run
-            # enriches again, clearing what this one renamed. (The dictionaries alone used
-            # to pass a search's check: that search enriched the genome itself and failed
-            # on the fake-indel genomes in its way, leaving its own dictionaries,
-            # uncompressed, which later runs kept.) A Ctrl-C, SIGTERM or SIGHUP meanwhile
-            # waits for the last rename (_end_cleanly).
+            # the fake-indel genomes, the enriched genome -- marked unfinished until the
+            # rest is in place (_enriched_already) -- the dictionaries, and the indel logs.
+            # A search needs both sets of dictionaries and refuses the marked genome, so a
+            # run that ends before the last rename leaves nothing that a search or a later
+            # run uses: the next run enriches again, clearing what this one renamed. (The
+            # dictionaries alone used to pass a search's check: that search enriched the
+            # genome itself and failed on the fake-indel genomes in its way, leaving its own
+            # dictionaries, uncompressed, which later runs kept.) A Ctrl-C, SIGTERM or
+            # SIGHUP meanwhile waits for the last rename (_end_cleanly).
+            _mark_unfinished(os.path.join(snps_tmp, f"{genome_ref}_enriched"))
+
             def _place():
                 os.makedirs(indels_out, exist_ok=True)
                 for f in _glob(os.path.join(variants_tmp, "fake*")):
@@ -3698,6 +3706,7 @@ def build_index_only() -> None:
                 shutil.move(os.path.join(snps_tmp, f"{genome_ref}_enriched"), enriched)
                 os.rename(_staged[0], dict_folder)
                 os.rename(_staged[1], indel_dict)
+                _unmark_unfinished(enriched)
 
             # The tiers and the indel genotype store this run writes next (STEP 1b, 1c)
             # are marked unfinished first: a run stopped once the enrichment is in place

@@ -831,8 +831,8 @@ class AnEnrichmentIsDoneWholeOrRedone(_Fixture):
         """A SIGKILL can still land between two of them (SHIM stops the run before the
         enriched genome's, the dictionaries' or the indel logs' rename). What is in
         place then passes neither a search's check, which needs both sets of
-        dictionaries, nor the next build-index-only's, which needs the indel logs, the
-        last of it: that one enriches again."""
+        dictionaries, nor the next build-index-only's: the enriched genome goes into
+        place marked unfinished until the rest is, so that one enriches again."""
         rc, out, err = self.run_bio()
         self.assertEqual(rc, 0, err)
         clean = self.outputs()
@@ -891,8 +891,21 @@ class AnEnrichmentIsDoneWholeOrRedone(_Fixture):
         self.assertEqual(self.leftovers(), [])
         self.assertEqual(self.outputs(), clean)
 
-
-class AnotherRunsBuildIsKept(_Fixture):
+    def test_an_enriched_genome_in_place_without_its_dictionaries_is_used_as_before(self):
+        """A build-inputs kit ships the enriched genome and the fake-indel genome only,
+        for build-index-only to index a new PAM from: it is taken for a finished
+        enrichment, as before (only an enriched genome still marked unfinished is
+        not)."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        for d in ("genome_library/" + VAR, "genome_library/" + INDELS, "Dictionaries"):
+            shutil.rmtree(self.path(d))
+        os.remove(self.log)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"Enriched genome already present: {self.path('Genomes', 'hg38+ds')}\n", out)
+        self.assertEqual([c for c in self.calls() if c.startswith("add-variants ")], [])
+        self.assertEqual(self.bins(VAR), WHOLE[VAR][2])
     """An index or enriched genome another run put in place while this one built it
     is kept, and this run's build discarded (a rename onto it would fail, and a move
     would nest this one inside it)."""
@@ -915,8 +928,6 @@ class AnotherRunsBuildIsKept(_Fixture):
         self.wait_for_mark(proc)
         for chrom, seq in GENOME.items():
             _write(os.path.join(enriched, chrom + ".enriched.fa"), f">{chrom}\n{seq}\n")
-        # (an enrichment is all in place once its indel logs are, the last of it)
-        os.makedirs(self.path("Dictionaries", "log_indels_ds"))
         open(self.release, "w").close()
         rc, out, err = self.finish(proc)
         self.assertEqual(rc, 0, err)

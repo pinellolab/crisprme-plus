@@ -361,8 +361,9 @@ and the `release-crisprme` skill.
   each set of dictionaries is put together whole in a hidden directory of `Dictionaries` (with
   `Dictionaries` mounted on its own, that copies them); then the fake-indel genomes, the enriched
   genome and the dictionaries are renamed into place, the indel logs last, in moments, a Ctrl-C,
-  SIGTERM or SIGHUP meanwhile waiting for the last rename. `build-index-only` takes an enrichment for
-  finished only once its indel logs are in place, and a search needs them and the dictionaries, so
+  SIGTERM or SIGHUP meanwhile waiting for the last rename. The enriched genome goes in marked
+  unfinished (a hidden `.building` in it) until the rest is in place: `build-index-only` does not
+  take a marked one for finished, and a search refuses it and needs both sets of dictionaries, so
   a run that ends before then, even by a SIGKILL between two renames, leaves nothing either uses: a
   search refuses the dataset up front, and the next `build-index-only` enriches again. (The
   dictionaries alone used to let a search start, which enriched the genome itself, failed on the
