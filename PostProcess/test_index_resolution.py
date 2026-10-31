@@ -1559,7 +1559,10 @@ class ARunThatEndsMidBuildLeavesItsLock(_Locks):
                           '( _lock_on_signal TERM ) & wait "$!"\n'
                           'echo "child: $?"\nwhile :; do sleep 0.2; done')
         _wait_for(lambda: "child:" in proc.out_path.read_text(), 10, "the children")
-        self.assertIn("child: 143", proc.out_path.read_text())  # ended by TERM: itself
+        # ended by its own TERM, not the run: 143 -- or 0 on bash 5.2.21 (Ubuntu 24.04's,
+        # as in CI), where an async subshell that is sent TERM exits 0 when an EXIT trap
+        # was set before the TERM trap, as here
+        self.assertRegex(proc.out_path.read_text(), r"child: (0|143)\n")
         owner = self.lock / "owner"
         record = owner.read_text()
         _age(owner, 60)
