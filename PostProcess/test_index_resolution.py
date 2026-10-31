@@ -2499,30 +2499,34 @@ class BuildLocksInTheShippedScript(_ShippedScript):
                 self.assertBuiltAndSearched(after)  # never "Reference index present"
                 shutil.rmtree(self.index)
 
-    def test_a_hangup_to_bash_alone_waits_for_the_build_and_leaves_the_lock(self):
-        # `kill -HUP <pid>`, or a hangup that reaches bash alone. Untrapped, HUP ran the
-        # EXIT trap at once and ended bash mid-build, its build step left writing as an
-        # orphan into what the next run takes over and rebuilds. Trapped, the run waits
-        # for that step, then leaves the lock for the next run to redo the build.
-        built = self.root / "built"
-        run = self.launch(variant=False, env={"STUB_BUILD_UNTIL": str(built)})
-        _wait_for(lambda: any(c[0] == "index-genome" for c in run.calls()), 60,
-                  "the build to start")
-        record = (self.lock / "owner").read_text()
-        os.kill(run.proc.pid, signal.SIGHUP)  # bash alone
-        time.sleep(1)
-        self.assertIsNone(run.proc.poll(), "bash did not wait for its build step")
-        self.assertEqual((self.lock / "owner").read_text(), record)
-        built.touch()  # the build step ends
-        run.proc.wait(timeout=30)
-        self.assertEqual(run.proc.returncode, -signal.SIGHUP)  # ended by the hangup
-        self.assertEqual((self.lock / "owner").read_text(), record)
-        self.assertEqual(_wait_until_gone(run.proc.pid), [])
-        self.assertEqual(run.stderr(), "")
-        after = self.run_pipeline(variant=False, timeout=60)
-        self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {run.proc.pid} ",
-                      after.stdout)
-        self.assertBuiltAndSearched(after)
+    def test_a_hangup_or_term_to_bash_alone_waits_for_the_build_and_leaves_the_lock(self):
+        # `kill -HUP <pid>` or `kill <pid>`, or a hangup that reaches bash alone.
+        # Untrapped, either ran the EXIT trap at once and ended bash mid-build, its build
+        # step left writing as an orphan into what the next run takes over and rebuilds.
+        # Trapped, the run waits for that step, then leaves the lock for the next run to
+        # redo the build. TERM is trapped again after each refresh loop's fork.
+        for sig in (signal.SIGHUP, signal.SIGTERM):
+            with self.subTest(signal=sig.name):
+                built = self.root / "built"
+                run = self.launch(variant=False, env={"STUB_BUILD_UNTIL": str(built)})
+                _wait_for(lambda: any(c[0] == "index-genome" for c in run.calls()), 60,
+                          "the build to start")
+                record = (self.lock / "owner").read_text()
+                os.kill(run.proc.pid, sig)  # bash alone
+                time.sleep(1)
+                self.assertIsNone(run.proc.poll(), "bash did not wait for its build step")
+                self.assertEqual((self.lock / "owner").read_text(), record)
+                built.touch()  # the build step ends
+                run.proc.wait(timeout=30)
+                self.assertEqual(run.proc.returncode, -sig)  # ended by the signal
+                self.assertEqual((self.lock / "owner").read_text(), record)
+                self.assertEqual(_wait_until_gone(run.proc.pid), [])
+                self.assertEqual(run.stderr(), "")
+                after = self.run_pipeline(variant=False, timeout=60)
+                self.assertIn(f"Stale lock {self.lock}: the run that held it (pid "
+                              f"{run.proc.pid} ", after.stdout)
+                self.assertBuiltAndSearched(after)
+                built.unlink()  # the stub builds nothing, so this is all there is to undo
 
     def test_an_interrupted_variant_index_build_leaves_its_lock_and_the_next_run_redoes_it(self):
         self.install("NRG_2", variant=False)  # a reference index; the variant one is built
