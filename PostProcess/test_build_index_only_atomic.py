@@ -21,10 +21,12 @@ Stdlib only: crisprme.py imports Bio.Seq at module scope, so a stub Bio package 
 on PYTHONPATH (build-index-only never uses it).
 """
 
+import errno
 import gzip
 import hashlib
 import json
 import os
+import resource
 import shutil
 import signal
 import stat
@@ -50,10 +52,15 @@ STUB_ENGINE = r'''#!PYTHON
 
 Each output file is a step "<command> <name> <input file>". A step whose key holds
 $STUB_FAIL fails (exit 1) before it is written; one whose key holds $STUB_HANG
-waits there, once $STUB_MARK is made, until $STUB_RELEASE exists. add-variants,
-with $STUB_GZ_BLOCKED, leaves a directory where the last dictionary's .gz would go.
+waits there, once $STUB_MARK is made, until $STUB_RELEASE exists. add-variants
+pads the fake contig of chromosome $STUB_BIG_FAKE with a megabase of N (and this
+stub lifts any file-size limit of its own), and with $STUB_GZ_BLOCKED leaves a
+directory where the last dictionary's .gz would go.
 """
-import json, os, shutil, sys, time
+import json, os, resource, shutil, sys, time
+
+if os.environ.get("STUB_BIG_FAKE"):
+    resource.setrlimit(resource.RLIMIT_FSIZE, (resource.getrlimit(resource.RLIMIT_FSIZE)[1],) * 2)
 
 
 def note(line):
@@ -123,6 +130,8 @@ elif sys.argv[1] == "add-variants":
         write(os.path.join(snps, "log%s.txt" % chrom),
               "%s\n%s_0-60_1\tS2\trs_%s_26\t0.25\t%s_26_%s_%sT\t0,%d\t%s\n"
               % (LOG_HEADER, chrom, chrom, chrom, seq[25], seq[25], len(fake), seq[:60]))
+        if os.environ.get("STUB_BIG_FAKE") == chrom:
+            fake += "N" * 1000000
         os.makedirs(os.path.join("variants_genome", "fake_%s_%s" % (vcf, chrom)))
         write(os.path.join("variants_genome", "fake_%s_%s" % (vcf, chrom), "fake%s.fa" % chrom),
               ">fake%s\n%s\n" % (chrom, fake))
@@ -161,9 +170,11 @@ for i, f in enumerate(files):
 # STUB_MOUNT=<dir>: <dir> is a mount point of its own, so a rename into or out of it
 # fails with EXDEV, as between two bind mounts of one file system, whose st_dev is
 # the same. STUB_SIGNAL_AT_CLEANUP=1: a SIGTERM comes just as the build's cleanup
-# starts, before its first pthread_sigmask holds signals back.
+# starts, before its first pthread_sigmask holds signals back. STUB_OVERLAY_HANG=1:
+# the SNP overlay, about to write a FASTA's temporary file, waits there once
+# $STUB_MARK is made, until $STUB_RELEASE exists.
 SHIM = r'''
-import errno, os, signal
+import builtins, errno, os, signal, time
 
 _mount = os.environ.get("STUB_MOUNT")
 if _mount:
@@ -194,6 +205,18 @@ if os.environ.get("STUB_SIGNAL_AT_CLEANUP"):
         return _sigmask(how, mask)
 
     signal.pthread_sigmask = pthread_sigmask
+
+if os.environ.get("STUB_OVERLAY_HANG"):
+    _open = builtins.open
+
+    def open(file, mode="r", *args, **kwargs):
+        if "w" in mode and os.path.basename(os.path.dirname(str(file))).startswith(".overlay-"):
+            _open(os.environ["STUB_MARK"], "w").close()
+            while not os.path.exists(os.environ["STUB_RELEASE"]):
+                time.sleep(0.02)
+        return _open(file, mode, *args, **kwargs)
+
+    builtins.open = open
 '''
 
 SHARED = None  # the stub Bio package and a warmed matplotlib cache, for every run
@@ -322,12 +345,13 @@ class _Fixture(unittest.TestCase):
     def lib(self, name):
         return self.path("genome_library", name)
 
-    def start(self, vcf=True, name=None, keep_hup=False, pigz=True, shim=False, command=None,
-              **stub):
+    def start(self, vcf=True, name=None, keep_hup=False, pigz=True, fsize=None, shim=False,
+              command=None, **stub):
         """Launch build-index-only in a session of its own (so its whole process
         group can be killed, as an OOM kill or a container stop would). Without
-        pigz, no pigz is on PATH; shim loads SHIM in each Python process of the
-        run; command runs that crisprme.py command line instead."""
+        pigz, no pigz is on PATH; fsize limits the size of the files it writes, as
+        a full disk would; shim loads SHIM in each Python process of the run;
+        command runs that crisprme.py command line instead."""
         args = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
                 "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work]
         if vcf:
@@ -361,6 +385,9 @@ class _Fixture(unittest.TestCase):
                 signal.signal(sig, signal.SIG_DFL)
             if keep_hup:  # as under nohup
                 signal.signal(signal.SIGHUP, signal.SIG_IGN)
+            if fsize:
+                resource.setrlimit(resource.RLIMIT_FSIZE,
+                                   (fsize, resource.getrlimit(resource.RLIMIT_FSIZE)[1]))
 
         with open(self.out, "w") as out, open(self.err, "w") as err:
             proc = subprocess.Popen([sys.executable, CRISPRME, *(command or args)],
@@ -895,6 +922,165 @@ class TheBuildDirectoriesOfRunsThatAreGoneAreReclaimed(_Fixture):
                          {k: v for k, v in after.items() if k in before})
         for name, (_, _, whole) in WHOLE.items():
             self.assertEqual(self.bins(name), whole)
+
+
+# Runs overlay_indel_snps.overlay_fake_chromosome on argv[2:5] (a fake-indel FASTA,
+# the enriched chromosome, the indel log), with argv[1] the PostProcess directory.
+# Given a mark file as argv[5], it stops at the first write of the overlaid FASTA,
+# once the mark is made, for a kill -- whichever file object it writes through.
+OVERLAY = r"""
+import os, sys, time
+sys.path.insert(0, sys.argv[1])
+import overlay_indel_snps
+
+if sys.argv[5:]:
+    def stop_at_the_first_write(frame, event, arg):
+        if (event == "c_call" and getattr(arg, "__name__", "") == "write"
+                and getattr(arg, "__self__", None) not in (sys.stdout, sys.stderr)):
+            open(sys.argv[5], "w").close()
+            time.sleep(600)
+    sys.setprofile(stop_at_the_first_write)
+try:
+    overlay_indel_snps.overlay_fake_chromosome(*sys.argv[2:5])
+except OSError as exc:
+    print("OSError", exc.errno)
+    sys.exit(3)
+"""
+
+
+class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
+    """Before indexing the fake-indel genome, build-index-only overlays SNP codes onto
+    each of its FASTA files, rewriting it in place. A run stopped while it wrote one,
+    or a write that failed, left that FASTA cut short, and the next run took it for
+    a whole one: its INDELS index then had no target past the cut, with no error."""
+
+    def fixture(self, pad=6000):
+        """A fake-indel FASTA holding one indel's window (then N), the enriched
+        chromosome with a SNP in that window's left flank, and the indel log; and
+        that FASTA's text, before and after the overlay."""
+        seq = GENOME["chr1"]
+        fake = seq[:26] + "T" + seq[26:60]
+        files = (os.path.join(self.root, "fake_ds_chr1", "fakechr1.fa"),
+                 os.path.join(self.root, "chr1.enriched.fa"),
+                 os.path.join(self.root, "logchr1.txt"))
+        _write(files[0], f">fakechr1\n{fake}{'N' * pad}\n")
+        _write(files[1], f">chr1\n{seq[:10]}R{seq[11:]}\n")
+        _write(files[2], f"{LOG_HEADER}\nchr1_0-60_1\tS2\trs1\t0.25\tchr1_26_{seq[25]}_"
+                         f"{seq[25]}T\t0,{len(fake)}\t{seq[:60]}\n")
+        whole = f">fakechr1\n{fake}{'N' * pad}\n"
+        return files, whole, f">fakechr1\n{fake[:10]}R{fake[11:]}{'N' * pad}\n"
+
+    def overlay(self, files, *mark, fsize=None):
+        def limit():
+            if fsize:
+                resource.setrlimit(resource.RLIMIT_FSIZE,
+                                   (fsize, resource.getrlimit(resource.RLIMIT_FSIZE)[1]))
+
+        proc = subprocess.Popen([sys.executable, "-c", OVERLAY, HERE, *files, *mark],
+                                stdout=subprocess.PIPE, text=True, preexec_fn=limit,
+                                env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        return proc
+
+    def listed(self, fasta):
+        """What a FASTA listing of its directory sees beside it: index-genome and a
+        FASTA search take every file there."""
+        d = os.path.dirname(fasta)
+        return sorted(f for f in os.listdir(d) if not os.path.isdir(os.path.join(d, f)))
+
+    def test_a_kill_while_it_writes_leaves_the_fasta_whole(self):
+        files, whole, _ = self.fixture()
+        mark = os.path.join(self.root, "mark")
+        proc = self.overlay(files, mark)
+        deadline = time.monotonic() + 60
+        while not os.path.exists(mark):
+            self.assertIsNone(proc.poll(), "the overlay ended before it wrote")
+            self.assertLess(time.monotonic(), deadline, "the overlay never wrote")
+            time.sleep(0.01)
+        proc.kill()
+        proc.communicate()
+        with open(files[0]) as fh:
+            self.assertEqual(fh.read(), whole)
+        self.assertEqual(self.listed(files[0]), ["fakechr1.fa"])
+
+    def test_a_write_that_fails_leaves_the_fasta_whole(self):
+        files, whole, _ = self.fixture()
+        proc = self.overlay(files, fsize=4096)  # less than the FASTA: a write fails partway
+        out, _ = proc.communicate(timeout=60)
+        self.assertEqual((proc.returncode, out), (3, f"OSError {errno.EFBIG}\n"))
+        with open(files[0]) as fh:
+            self.assertEqual(fh.read(), whole)
+        self.assertEqual(os.listdir(os.path.dirname(files[0])), ["fakechr1.fa"])
+
+    def test_the_fasta_it_writes_is_the_same_with_the_same_mode_and_through_a_symlink(self):
+        files, _, overlaid = self.fixture()
+        os.chmod(files[0], 0o640)
+        # (as root, an owner that is not root, as a shared install can have)
+        owner = (4242, 4242) if os.geteuid() == 0 else tuple(os.stat(files[0])[4:6])
+        os.chown(files[0], *owner)
+        proc = self.overlay(files)
+        proc.communicate(timeout=60)
+        self.assertEqual(proc.returncode, 0)
+        with open(files[0]) as fh:
+            self.assertEqual(fh.read(), overlaid)
+        self.assertEqual(stat.S_IMODE(os.stat(files[0]).st_mode), 0o640)
+        self.assertEqual(tuple(os.stat(files[0])[4:6]), owner)
+        self.assertEqual(os.listdir(os.path.dirname(files[0])), ["fakechr1.fa"])
+        # a FASTA that is a symlink: the file it names is overlaid, and it stays a link
+        files, _, overlaid = self.fixture()
+        store = os.path.join(self.root, "store", "fakechr1.fa")
+        os.makedirs(os.path.dirname(store))
+        os.rename(files[0], store)
+        os.symlink(store, files[0])
+        proc = self.overlay(files)
+        proc.communicate(timeout=60)
+        self.assertEqual(proc.returncode, 0)
+        self.assertTrue(os.path.islink(files[0]))
+        with open(store) as fh:
+            self.assertEqual(fh.read(), overlaid)
+        self.assertEqual(os.listdir(os.path.dirname(store)), ["fakechr1.fa"])
+
+    def test_a_failed_overlay_fails_the_build_and_indexes_nothing(self):
+        """A write inside the overlay that fails (here past a file-size limit, as on
+        a full disk): the run fails rather than index what is left, and each fake
+        FASTA is whole -- chr1's overlaid, chr2's as add-variants wrote it."""
+        rc, out, err = self.run_bio(fsize=1 << 19, STUB_BIG_FAKE="chr2")
+        self.assertEqual(rc, 1, out + err)
+        indels = self.path("Genomes", "hg38+ds_INDELS")
+        self.assertIn(f"Error: The SNP overlay of the fake-indel genome {indels} failed (", err)
+        self.assertIn(f"), so {INDELS} is not built.", err)
+        self.assertFalse(os.path.lexists(self.lib(INDELS)))
+        self.assertEqual([c for c in self.calls() if "fakechr" in c], [])
+        built = dict(reversed(line.split("  ", 1)) for line in BEFORE["variant"]["tree"])
+        chr1 = "Genomes/hg38+ds_INDELS/fake_ds_chr1/fakechr1.fa"
+        self.assertEqual(tree(self.work)[chr1], built[chr1])
+        seq = GENOME["chr2"]
+        with open(os.path.join(indels, "fake_ds_chr2", "fakechr2.fa")) as fh:
+            self.assertEqual(fh.read(), f">fakechr2\n{seq[:26]}T{seq[26:60]}{'N' * 1000000}\n")
+        for chrom in ("chr1", "chr2"):
+            fasta = os.path.join(indels, f"fake_ds_{chrom}", f"fake{chrom}.fa")
+            self.assertEqual(os.listdir(os.path.dirname(fasta)), [f"fake{chrom}.fa"])
+        # once the cause is gone, the next run finishes it
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.bins(INDELS), WHOLE[INDELS][2])
+
+    def test_a_sigterm_while_it_overlays_ends_the_run_and_leaves_no_temporary_file(self):
+        """scancel, docker stop: the run ends by the signal, as before, with each fake
+        FASTA as add-variants wrote it and no temporary file left beside one."""
+        proc = self.start(shim=True, STUB_OVERLAY_HANG="1")
+        self.wait_for_mark(proc)
+        os.kill(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=60)
+        self.assertEqual(proc.returncode, -signal.SIGTERM, self.stderr())
+        for chrom, seq in GENOME.items():
+            fasta = self.path("Genomes", "hg38+ds_INDELS", f"fake_ds_{chrom}", f"fake{chrom}.fa")
+            self.assertEqual(os.listdir(os.path.dirname(fasta)), [f"fake{chrom}.fa"])
+            with open(fasta) as fh:
+                self.assertEqual(fh.read(), f">fake{chrom}\n{seq[:26]}T{seq[26:60]}\n")
+        self.assertFalse(os.path.lexists(self.lib(INDELS)))
+        self.assertEqual(self.leftovers(), [])
 
 
 # What the code before this fix (379b5b0) did with the same stub and inputs, for

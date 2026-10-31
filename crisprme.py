@@ -3739,23 +3739,30 @@ def build_index_only() -> None:
             # [indel-snp] Overlay SNP IUPAC codes onto the fake-indel flanks BEFORE
             # indexing so this _INDELS index also finds SNP+indel co-occurring
             # off-targets (searchTST matches IUPAC codes for free -- no -var needed).
-            # Enabled by default (opt-out): set CRISPRME_INDEL_SNP=0 to disable. GUARDED
-            # (stdout warning, never abort -- stderr is fatal here), mirroring the tiers above.
+            # Enabled by default (opt-out): set CRISPRME_INDEL_SNP=0 to disable. A failed
+            # overlay fails the build: it rewrites the fake-indel FASTA files in place,
+            # each one whole or not at all (overlay_fake_chromosome), but an index built
+            # after a failure would be SNP-blind where the overlay did not get to. Under
+            # _with_cleanup, a SIGTERM or SIGHUP lets it remove its temporary file.
             if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
                 try:
                     import overlay_indel_snps as _ois
-                    _n = _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict])
-                    print(
-                        f"[indel-snp] SNP-overlaid the fake-indel genome "
-                        f"({_n} flank bases IUPAC-coded).",
-                        flush=True,
+                    _n = _with_cleanup(
+                        lambda: _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict]),
+                        lambda: None,
                     )
                 except Exception as _ois_err:
-                    print(
-                        f"WARNING [indel-snp]: fake-indel SNP overlay failed "
-                        f"({_ois_err}); this _INDELS index will be SNP-blind.",
-                        flush=True,
+                    error(
+                        f"The SNP overlay of the fake-indel genome {indels_out} failed "
+                        f"({_ois_err}), so {os.path.basename(indels_idx)} is not built. "
+                        f"Each fake-indel FASTA there is whole, overlaid or as it was: "
+                        f"run build-index-only again once that is fixed."
                     )
+                print(
+                    f"[indel-snp] SNP-overlaid the fake-indel genome "
+                    f"({_n} flank bases IUPAC-coded).",
+                    flush=True,
+                )
             pool = os.path.join(script_path, "pool_index_indels.py")
             _build_index_dir(
                 [

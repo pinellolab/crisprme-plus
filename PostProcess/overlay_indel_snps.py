@@ -25,6 +25,9 @@ REF->ALT re.sub at offset 25, ``refseq``/``FAKEPOS`` = matched-length window,
 import os
 import sys
 import gzip
+import shutil
+import stat
+import tempfile
 
 # The 15 non-ACGT / non-N IUPAC ambiguity codes the enricher writes for SNPs. A
 # base is "SNP-carrying" in the enriched genome iff it is one of these.
@@ -141,7 +144,11 @@ def parse_log_indels(log_path):
 def overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=None):
     """Overlay SNP IUPAC codes onto one fake chromosome FASTA in place (or to
     ``out_fa``). Preserves the exact record/line structure and all lengths; only
-    substitutes flank base identities. Returns the number of bases changed."""
+    substitutes flank base identities. Returns the number of bases changed.
+
+    The FASTA is replaced whole or not at all: an interrupted or failed write leaves
+    it as it was, never cut short (an index built from a cut FASTA has no target
+    past the cut, and nothing tells it from a whole one)."""
     enriched = read_enriched_chromosome(enriched_fa)
     records = list(parse_log_indels(log_path))
 
@@ -162,12 +169,31 @@ def overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=None):
                 seq[fs + i] = ch
                 changed += 1
 
-    out_fa = out_fa or fake_fa
-    with open(out_fa, "w") as out:
-        out.write(header + "\n")
-        # one base per position; write the whole sequence on a single line (CRISPRitz
-        # index strips newlines, so line wrapping is irrelevant to correctness)
-        out.write("".join(seq) + "\n")
+    # Written beside the FASTA, then renamed over it. The temporary file sits in a
+    # hidden directory of its own, so one a kill leaves is in no FASTA listing
+    # (index-genome's, a FASTA search's, pool_index_indels' empty-genome check). The
+    # file a symlink names is the one replaced, and its mode and owner are kept, as
+    # writing it in place did.
+    target = os.path.realpath(out_fa or fake_fa)
+    tmp_dir = tempfile.mkdtemp(prefix=".overlay-", dir=os.path.dirname(target))
+    tmp_fa = os.path.join(tmp_dir, os.path.basename(target) + ".tmp")
+    try:
+        with open(tmp_fa, "w") as out:
+            out.write(header + "\n")
+            # one base per position; write the whole sequence on a single line (CRISPRitz
+            # index strips newlines, so line wrapping is irrelevant to correctness)
+            out.write("".join(seq) + "\n")
+        if os.path.exists(target):
+            st, new = os.stat(target), os.stat(tmp_fa)
+            if (new.st_uid, new.st_gid) != (st.st_uid, st.st_gid):
+                try:
+                    os.chown(tmp_fa, st.st_uid, st.st_gid)
+                except OSError:
+                    pass
+            os.chmod(tmp_fa, stat.S_IMODE(st.st_mode))
+        os.replace(tmp_fa, target)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
     return changed
 
 
