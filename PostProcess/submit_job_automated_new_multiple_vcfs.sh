@@ -305,10 +305,12 @@ _lock_run_alive() {
 # this one's PID or tell it from a zombie (_lock_stale). The loop stops as soon as this
 # run is gone (killed outright, so no trap ran) or the record is no longer this run's;
 # _lock_release or _lock_abandon_all stops it otherwise. It writes nothing anywhere:
-# this script's stderr fails the stage.
+# this script's stderr fails the stage. So its output goes to /dev/null before it is
+# forked: a loop stopped the moment it starts can run this script's traps (bash 5.2
+# does) before it reaches a redirection of its own.
 _lock_hold() {
 	_locks_held+=("$1")
-	(
+	{ (
 		_s=
 		trap '[ -z "$_s" ] || kill "$_s"; exit 0' TERM
 		while _lock_run_alive && _lock_mine "$1"; do
@@ -318,7 +320,7 @@ _lock_hold() {
 			wait "$_s"
 			_s=
 		done
-	) </dev/null >/dev/null 2>&1 &
+	) & } </dev/null >/dev/null 2>&1
 	_lock_beats+=("$!")
 }
 
@@ -445,9 +447,11 @@ _lock_release() {
 # The run is ending while it still holds locks -- on a signal, or on an exit before
 # their release -- so their builds are not done: leave each lock and its record as
 # they are, for the next run to take over as a dead run's and build again, and stop
-# only the refresh loops, which must not outlive the run.
+# only the refresh loops, which must not outlive the run. Only the run itself does: a
+# child that runs this trap -- as bash 5.2 can, right after forking it -- returns.
 _lock_abandon_all() {
 	local _b
+	[ "${BASHPID:-$$}" = "$$" ] || return 0
 	for _b in "${_lock_beats[@]}"; do
 		kill "$_b" 2>/dev/null
 		wait "$_b" 2>/dev/null
@@ -456,11 +460,11 @@ _lock_abandon_all() {
 }
 
 # INT, TERM and HUP: abandon the locks held, then re-raise, so the run still ends by
-# the signal.
+# the signal -- on the process that caught it, which in a child is not the run ($$).
 _lock_on_signal() {
 	_lock_abandon_all
 	trap - "$1"
-	kill -s "$1" "$$"
+	kill -s "$1" "${BASHPID:-$$}"
 }
 # This script sets no other traps. Bash runs INT, TERM and HUP once the foreground
 # command returns, and EXIT at once on a fatal signal it does not trap. Each trap is

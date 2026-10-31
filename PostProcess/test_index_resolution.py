@@ -1356,6 +1356,31 @@ class ARunThatEndsMidBuildLeavesItsLock(_Locks):
         for body, sig in traps:
             self.assertRegex(body, r"^_lock_\w+( [A-Z]+)?$", sig)
 
+    def test_a_child_of_the_run_never_acts_for_it(self):
+        # bash 5.2 can run the run's traps in a child it has just forked, before the child
+        # resets them: a refresh loop stopped at once ran the EXIT trap's abandon. A child
+        # must neither stop the run's refresh loops (nor wait for what is not its own,
+        # which bash reports on stderr) nor end the run: its INT, TERM or HUP, re-raised
+        # on $$, reached the run itself.
+        proc = self.start(f"_lock_beat_s=0.2\n"
+                          f"_lock_take {_q(self.lock)} 'indexing a' {_q(self.out)} || exit 9\n"
+                          '( _lock_abandon_all ) & wait "$!"\n'
+                          '( _lock_on_signal TERM ) & wait "$!"\n'
+                          'echo "child: $?"\nwhile :; do sleep 0.2; done')
+        _wait_for(lambda: "child:" in proc.out_path.read_text(), 10, "the children")
+        self.assertIn("child: 143", proc.out_path.read_text())  # ended by TERM: itself
+        owner = self.lock / "owner"
+        record = owner.read_text()
+        _age(owner, 60)
+        _wait_for(lambda: time.time() - owner.stat().st_mtime < 30, 10, "a refresh")
+        self.assertEqual(len(_subshells(proc.pid)), 1, _processes(proc.pid))  # the loop
+        os.killpg(proc.pid, signal.SIGINT)
+        rc, out, err = self.result(proc)
+        self.assertEqual(rc, -signal.SIGINT, out + err)
+        self.assertEqual(owner.read_text(), record)
+        self.assertEqual(_wait_until_gone(proc.pid), [])
+        self.assertEqual(err, "")
+
 
 class ALockIsKeptFreshByTheRunThatHoldsIt(_Locks):
     """A run that cannot check the holder's PID -- in another container, on another host
@@ -1450,6 +1475,23 @@ class ALockIsKeptFreshByTheRunThatHoldsIt(_Locks):
         self.assertEqual(rc, 2, out + err)
         self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {proc.pid} ", out)
         self.assertIn("has not refreshed its lock for 15 minutes", out)
+        self.assertEqual(err, "")
+
+    @unittest.skipUnless(os.path.isdir("/proc/self/fd"),
+                         "what a process has open is read through /proc")
+    def test_the_loop_never_holds_the_runs_stderr(self):
+        # A loop stopped as soon as it is forked -- its lock let go at once (a free lock
+        # whose output is in place) or abandoned at once -- can run the run's EXIT trap
+        # before it reaches a redirection of its own, and bash 5.2 then wrote "wait_for: No
+        # record of process ..." on the stderr it still shared with the run: log_error.txt,
+        # which fails the stage although nothing failed. So the loop has /dev/null for
+        # its output from its fork on: looked at right after it.
+        body = (f"_lock_beat_s=0.2\ni=0\nwhile [ $i -lt 100 ]; do i=$((i+1))\n"
+                f"\tmkdir {_q(self.lock)}; _lock_sign {_q(self.lock)}; _lock_hold {_q(self.lock)}\n"
+                '\t[ "/proc/$!/fd/2" -ef /dev/null ] || echo "loop $i holds the stderr"\n'
+                f"\t_lock_release {_q(self.lock)}\ndone\necho done")
+        rc, out, err = self.result(self.start(body))
+        self.assertEqual((rc, out), (0, "done\n"), out + err)
         self.assertEqual(err, "")
 
     def test_the_refresh_stops_when_the_lock_is_no_longer_this_runs(self):
