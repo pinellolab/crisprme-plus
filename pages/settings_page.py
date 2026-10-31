@@ -103,6 +103,8 @@ def _unsafe_tar_member(tar: tarfile.TarFile, dest_dir: str) -> Optional[str]:
     it). The checks personal_assembly.import_archive makes, minus its single
     top-folder rule (a UCSC chromFa archive holds many top-level chr*.fa). Does
     not rely on tarfile's ``filter=``, which is absent before Python 3.11.4.
+    PostProcess/utils.py's _unsafe_tar_member is its twin for downloaded archives
+    (kept separate because the light-env tests AST-extract this page); change both.
     """
     dest_real = os.path.realpath(dest_dir)
     for m in tar.getmembers():

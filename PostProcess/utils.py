@@ -407,6 +407,33 @@ def rename(orig: str, newname: str) -> str:
     return newname
 
 
+def _unsafe_tar_member(tar: tarfile.TarFile, dest: str) -> Optional[str]:
+    """Why ``tar`` must not be extracted into ``dest``, else None.
+
+    Every member is checked before anything is written: an absolute name or any
+    ``..`` component, anything but a regular file or directory (a symlink or
+    hardlink member can redirect a later write out of dest), and any member whose
+    real path leaves dest. ``download --what genome --source url`` (the web
+    Settings "Direct URL" genome source) extracts an archive fetched from a URL
+    the client chose, so its member names are client data. The same checks as
+    its twin, pages/settings_page.py's genome-upload guard (change both);
+    tarfile's ``filter=`` is not relied on (absent before Python 3.11.4).
+    """
+    dest_real = os.path.realpath(dest)
+    for m in tar.getmembers():
+        if m.name.startswith("/") or ".." in m.name.split("/"):
+            return f"unsafe archive entry {m.name!r} (absolute or '..' path)"
+        if not (m.isreg() or m.isdir()):
+            return (
+                f"unsupported archive entry {m.name!r} "
+                "(only regular files and directories are allowed)"
+            )
+        target = os.path.realpath(os.path.join(dest, m.name))
+        if target != dest_real and not target.startswith(dest_real + os.sep):
+            return f"archive member escapes the extraction directory: {m.name!r}"
+    return None
+
+
 def untar(fname_tar_gz: str, dest: str, outdir: Optional[str] = "") -> str:
     """
     Decompress and extract the contents of a tar.gz file to the specified
@@ -428,6 +455,11 @@ def untar(fname_tar_gz: str, dest: str, outdir: Optional[str] = "") -> str:
     try:
         with gzip.open(fname_tar_gz, mode="rb") as fin:
             with tarfile.open(fileobj=fin, mode="r") as tar:  # type: ignore
+                # vet every member first: a bad archive is refused before
+                # anything is extracted (a ValueError, not the IOError below)
+                err = _unsafe_tar_member(tar, dest)
+                if err:
+                    raise ValueError(f"refusing {os.path.basename(fname_tar_gz)}: {err}")
                 tar.extractall(dest)
     except IOError as e:
         raise IOError(f"An error occurred while decompressing {fname_tar_gz}") from e
