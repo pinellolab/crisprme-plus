@@ -379,8 +379,14 @@ _lock_run_alive() {
 # does) before it reaches a redirection of its own. Stopped, it reaps its sleep, else
 # handed to PID 1 -- in the web container a server that never reaps it. With KILL: a
 # TERM to a sleep just forked can be lost, and the wait would last the whole sleep.
+# It is forked with TERM untrapped, so a TERM that reaches it before it sets its own
+# trap ends it: caught by the run's trap, inherited, bash dropped it, and the loop went
+# on refreshing a lock the run then waited on for good. A TERM to the run in that
+# moment takes the default action: bash runs the EXIT trap and the run ends as if
+# killed, its locks left to the next run.
 _lock_hold() {
 	_locks_held+=("$1")
+	trap - TERM
 	{ (
 		_s=
 		trap '[ -z "$_s" ] || { kill -KILL "$_s"; wait "$_s"; }; exit 0' TERM
@@ -392,6 +398,7 @@ _lock_hold() {
 			_s=
 		done
 	) & } </dev/null >/dev/null 2>&1
+	trap '_lock_on_signal TERM' TERM
 	_lock_beats+=("$!")
 }
 

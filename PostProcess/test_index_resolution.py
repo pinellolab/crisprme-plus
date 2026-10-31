@@ -1688,6 +1688,27 @@ class ALockIsKeptFreshByTheRunThatHoldsIt(_Locks):
         self.assertEqual((rc, out), (0, "done\n"), out + err)
         self.assertEqual(err, "")
 
+    def test_a_loop_stopped_the_moment_it_is_forked_still_stops(self):
+        # A TERM that reached a refresh loop before it had set its own trap was lost: the
+        # loop had inherited the run's TERM trap, and bash drops a signal caught that way.
+        # The lock stayed the run's, so the loop went on refreshing it, and the run waited
+        # for that loop for good -- a run never ended on a Ctrl-C right after a take, and
+        # every later run waited on a lock kept fresh. A lock taken and abandoned at once,
+        # as a signal right after the take does, over and over in six runs at a time: a
+        # rare race, which this hit in every round before the fix.
+        procs, deadline = [], time.monotonic() + 120
+        for k in range(6):
+            lock = self.dir / f"x{k}.lock"
+            procs.append(self.start(
+                f"i=0\nwhile [ $i -lt 1000 ]; do i=$((i+1))\n"
+                f"\t_lock_take {_q(lock)} 'indexing x' {_q(self.dir / f'x{k}')} || exit 9\n"
+                f"\t_lock_abandon_all\n\trm -rf {_q(lock)}\ndone\necho done"))
+        for proc in procs:
+            rc, out, err = self.result(proc, stop_after=max(deadline - time.monotonic(), 1))
+            self.assertEqual((rc, out), (0, "done\n"),
+                             "a run waited for good on a loop that missed its TERM")
+            self.assertEqual(err, "")
+
     def test_the_refresh_stops_when_the_lock_is_no_longer_this_runs(self):
         # taken over meanwhile -- the holder was frozen for 15 minutes, say: the new
         # holder's record is not this run's to refresh
