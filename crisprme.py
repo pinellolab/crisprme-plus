@@ -3511,6 +3511,13 @@ def build_index_only() -> None:
     # (STEP 3 prints them)
     _overlaid = []
     _snp_overlay = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
+    # where STEP 1b and 1c write the dict-less tiers and the indel genotype store, each
+    # marked unfinished meanwhile (_mark_unfinished); a fresh enrichment marks them as
+    # it goes into place, and _tiers_marked says it did so for the tiers
+    _reg_dir = os.path.join(workdir, "Dictionaries", f"registry_{vcf_name}")
+    _igt_dir = os.path.join(workdir, "Dictionaries", f"indel_genotypes_{vcf_name}")
+    _reg_made = not os.path.isdir(_reg_dir)
+    _tiers_marked = []
 
     def _overlay_in_place():
         # [indel-snp] The SNP overlay of a fake-indel genome already in place: one that
@@ -3692,6 +3699,16 @@ def build_index_only() -> None:
                 os.rename(_staged[0], dict_folder)
                 os.rename(_staged[1], indel_dict)
 
+            # The tiers and the indel genotype store this run writes next (STEP 1b, 1c)
+            # are marked unfinished first: a run stopped once the enrichment is in place
+            # and before they are written (a signal during the renames ends the run right
+            # after them) left an enrichment that a search took for one built without
+            # them. Each step takes its mark away as it ends.
+            if samples_listing:
+                _mark_unfinished(_reg_dir)
+                _tiers_marked.append(1)
+            if _snp_overlay:
+                _mark_unfinished(_igt_dir)
             _end_cleanly(_place, {})
             if _said is not None:
                 _overlaid.append((_said.getvalue(), _n, _coded[0]))
@@ -3739,6 +3756,8 @@ def build_index_only() -> None:
             "The genome SEARCH still works. To build a COMPLETE, publishable variant index,",
             "re-run build-index-only WITH --samplesID (the per-dataset genotyped sample lists).",
         ])
+        if _tiers_marked:  # (as the enrichment went into place: no tiers come)
+            _unmark_unfinished(_reg_dir, _reg_made)
     else:
         try:
             import build_dictless_tiers as _bdt
@@ -3750,6 +3769,8 @@ def build_index_only() -> None:
                 "path.",
                 flush=True,
             )
+            if _tiers_marked:
+                _unmark_unfinished(_reg_dir, _reg_made)
         if _bdt is not None:
             # Enumerate the chromosomes from the dict files just written. A chromosome
             # normally has exactly ONE of my_dict_<chrom>.json / .json.gz (the gzip
@@ -3816,9 +3837,9 @@ def build_index_only() -> None:
             # takes them chromosome by chromosome, falling back to the dicts for the
             # rest: a run stopped here (an OOM kill, at ~150-180GB a chromosome) left a
             # part of them that every search used as if it were whole, with no error.
-            # So they are marked unfinished until this step ends, its guarded failures
-            # included, and complete-search refuses them meanwhile (_refuse_unfinished).
-            _reg_made = not os.path.isdir(_reg_dir)
+            # So they are marked unfinished (here, or as a fresh enrichment went into
+            # place) until this step ends, its guarded failures included, and
+            # complete-search refuses them meanwhile (_refuse_unfinished).
             if _tier_jobs:
                 _mark_unfinished(_reg_dir)
             try:
@@ -3928,7 +3949,6 @@ def build_index_only() -> None:
     # analysis degrades to PUTATIVE via the log's unphased carriers. Enabled by
     # default (opt-out): set CRISPRME_INDEL_SNP=0 to disable.
     if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
-        _igt_dir = os.path.join(workdir, "Dictionaries", f"indel_genotypes_{vcf_name}")
         try:
             import build_indel_genotypes as _big
             os.makedirs(_igt_dir, exist_ok=True)

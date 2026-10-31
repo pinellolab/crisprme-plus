@@ -456,16 +456,18 @@ and the `release-crisprme` skill.
   SNP was reported only by an alignment one base over, with 4 mismatches and 2 bulges, CFD 0.101
   and one of its two rsIDs, instead of 3 and 1, CFD 0.281 and both, and another site's best
   CRISPR-Bulge alignment came out from the reference, score 0.399, instead of from its variant,
-  score 1.0 with its rsID and carriers. Each of them is now marked unfinished while it is written
-  (a hidden `.building` directory in it, holding the run's owner record), and `complete-search`
-  ends with an ERROR while the mark is there: for a run that has stopped, it says to run
-  `build-index-only` again, which resumes them and removes the mark; for a run still writing them,
-  to wait for it. `publish-index` refuses such an index too. On success the files, their contents,
-  stdout lines and exit status are as before, and a chromosome whose tiers or indel genotypes fail
-  to be written is still skipped with a WARNING and searched without them, as before. Downloaded
-  indexes carry no mark. A part that a run of an earlier release left has no mark and is not
-  detected: if such a run was stopped while it emitted the tiers or the indel genotype store, run
-  `build-index-only` again to its end before you search with that dataset.
+  score 1.0 with its rsID and carriers. A run stopped once its enrichment was in place, before it
+  began on them, left the same enrichment without them, which a search took for one built without
+  `--samplesID`. Each of them is now marked unfinished (a hidden `.building` directory in it,
+  holding the run's owner record) from before a fresh enrichment goes into place until it is
+  written, and `complete-search` ends with an ERROR while the mark is there: for a run that has
+  stopped, it says to run `build-index-only` again, which resumes them and removes the mark; for a
+  run still writing them, to wait for it. `publish-index` refuses such an index too. On success the
+  files, their contents, stdout lines and exit status are as before, and a chromosome whose tiers or
+  indel genotypes fail to be written is still skipped with a WARNING and searched without them, as
+  before. Downloaded indexes carry no mark. A part that a run of an earlier release left has no mark
+  and is not detected: if such a run was stopped while it emitted the tiers or the indel genotype
+  store, run `build-index-only` again to its end before you search with that dataset.
 - **The build directories of killed runs are reclaimed.** A SIGKILL (an OOM kill, a container stop)
   leaves the build directory, holding a partial index or enrichment as large as the finished one,
   which nothing read or removed. Each build directory now holds an owner record (host, PID namespace,

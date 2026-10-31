@@ -844,9 +844,13 @@ class AnEnrichmentIsDoneWholeOrRedone(_Fixture):
                 self.wait_for_mark(proc)
                 self.kill_group(proc)
                 self.assertFalse(os.path.lexists(self.path(*where)))
+                # refused up front: by then the tiers the run was to write next are
+                # marked unfinished too (AStoppedRunsTiersAreNotSearched)
                 rc, out, err = self.run_search()
                 self.assertEqual(rc, 1, out + err)
-                self.assertIn("Error: No prebuilt variant index found for: ds.\n", err)
+                self.assertIn(f"Error: {self.path('Dictionaries', 'registry_ds')} is unfinished: ",
+                              err)
+                self.assertNotIn("Launching job ", out)
                 rc, out, err = self.run_bio()
                 self.assertEqual(rc, 0, err)
                 self.assertIn("Enriching hg38 with ds (add-variants)...", out)
@@ -1680,6 +1684,31 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                     self.assertIn("  1 chromosome(s) already emitted; resuming 1 remaining\n", out)
                 self.assertEqual(self.outputs(), clean)
                 self.assert_searched()
+
+    def test_a_run_stopped_as_its_enrichment_goes_into_place_leaves_them_refused(self):
+        """A SIGTERM as the enrichment goes into place (SHIM sends one there) waits for
+        the last rename and then ends the run, before the tiers and the indel genotype
+        store are begun: a whole enrichment without them, which a search took for one
+        built without --samplesID. They are marked unfinished before the enrichment
+        goes into place, until the steps that write them end."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = self.outputs()
+        self.fresh()
+        rc, out, err = self.run_bio(
+            shim=True, STUB_SIGNAL_AT_RENAME=self.path("Dictionaries", "dictionaries_ds"))
+        self.assertEqual(rc, -signal.SIGTERM, err)
+        for where in ("registry_ds", "indel_genotypes_ds"):
+            self.assertTrue(os.path.isdir(self.path("Dictionaries", where, ".building")), where)
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"Error: {self.path('Dictionaries', 'registry_ds')} is unfinished: the "
+                      "build-index-only run that wrote the dict-less tiers of ds there", err)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"Enriched genome already present: {self.path('Genomes', 'hg38+ds')}\n", out)
+        self.assertEqual(self.outputs(), clean)
+        self.assert_searched()
 
     def test_a_search_while_a_run_writes_them_is_told_to_wait_for_it(self):
         step, held, where, workers = self.STEPS[0]
