@@ -1742,12 +1742,16 @@ def settings_page() -> List:
         "machine with enough RAM and cores; extra jobs beyond this limit simply queue. "
         "Takes effect after the app restarts."
         + (
-            " CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, overrides the "
-            f"value saved here: {_maxjobs_env} concurrent search job(s) in effect."
+            " CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, sets this "
+            f"to {_maxjobs_env} concurrent search job(s). To change it, set "
+            "CRISPRME_MAX_CONCURRENT_JOBS to another value, or unset it to use this "
+            "setting, and restart the app."
             if _maxjobs_env is not None
             else ""
         ),
         [
+            # While the env var pins the value, a value saved here would not
+            # apply, so the input and Save are disabled; the blurb says why.
             dcc.Input(
                 id="max-jobs-input",
                 type="number",
@@ -1755,9 +1759,12 @@ def settings_page() -> List:
                 max=_maxjobs_cap,
                 step=1,
                 value=_cur_maxjobs,
+                disabled=_maxjobs_env is not None,
                 style={"width": "6rem", "margin-right": "0.5rem"},
             ),
-            html.Button("Save", id="max-jobs-save-btn"),
+            html.Button(
+                "Save", id="max-jobs-save-btn", disabled=_maxjobs_env is not None
+            ),
             html.Div(
                 id="max-jobs-feedback",
                 style={"margin-top": "0.4rem", "color": "#555"},
@@ -2408,7 +2415,9 @@ def _cosmic_license_save(n, value):
 )
 def _max_jobs_save(n, value):
     """Persist the max concurrent search jobs. The process pool is built at app
-    startup, so the new value applies on the next restart."""
+    startup, so the new value applies on the next restart, unless
+    CRISPRME_MAX_CONCURRENT_JOBS pins it: then nothing is saved (the page shows
+    the input and Save disabled)."""
     if n is None or ONLINE:
         raise PreventUpdate
     try:
@@ -2416,6 +2425,15 @@ def _max_jobs_save(n, value):
     except Exception:
         return html.Span(
             "Could not persist the setting (config helper unavailable).",
+            style={"color": "#b00"},
+        )
+    pinned = _appcfg.env_override()
+    if pinned is not None:  # a page rendered before a restart set the env var
+        return html.Span(
+            "Not saved: CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, "
+            f"sets this to {pinned} concurrent search job(s). To change it, set "
+            "CRISPRME_MAX_CONCURRENT_JOBS to another value, or unset it to use this "
+            "setting, and restart the app.",
             style={"color": "#b00"},
         )
     if value is None:
@@ -2429,15 +2447,6 @@ def _max_jobs_save(n, value):
         return html.Span(
             f"Could not persist the setting: {e}",
             style={"color": "#b00"},
-        )
-    pinned = _appcfg.env_override()
-    if pinned is not None:
-        return html.Span(
-            f"Saved: up to {stored} concurrent search job(s), but "
-            "CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, overrides the "
-            f"saved value: {pinned} concurrent search job(s) in effect. To apply "
-            f"{stored}, unset CRISPRME_MAX_CONCURRENT_JOBS and restart the app.",
-            style={"color": "green"},
         )
     return html.Span(
         f"Saved: up to {stored} concurrent search job(s). Restart the app to apply.",

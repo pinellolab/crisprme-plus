@@ -3,7 +3,7 @@
 Default stays a conservative 2; env var overrides a persisted value; values are
 clamped to [1, MAX_JOBS_CAP] so the pool is never oversubscribed. app.py, loaded
 the way the web app is really started, must size its search pool from it, and
-the Settings page must say when the env var overrides the value saved there."""
+while the env var pins it the Settings page must say so and disable its input."""
 
 import ast
 import json
@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import types
 import unittest
 from unittest import mock
 
@@ -312,44 +313,73 @@ def _load_concurrency_ui():
 
 class TestSettingsPageEnvOverride(unittest.TestCase):
     """CRISPRME_MAX_CONCURRENT_JOBS overrides the value saved from the Settings
-    page, which used to say nothing about it: with the env var at 5, saving 3
-    answered "Restart the app to apply." though every restart kept 5."""
+    page. The page used to say nothing about it (with the env var at 5, saving 3
+    answered "Restart the app to apply." though every restart kept 5), and then
+    kept the input and Save live: Save wrote the pinned value over the saved one
+    and said to restart to apply a value already in effect."""
 
     @classmethod
     def setUpClass(cls):
         render_card, save = _load_concurrency_ui()
         cls.render_card, cls.save = staticmethod(render_card), staticmethod(save)
 
-    def _settings(self, env_jobs, save):
-        """With the env var at ``env_jobs`` (None: unset), render the card, then
-        type ``save`` and press Save; return (card blurb, Save feedback, the value
-        now saved)."""
+    def _settings(self, env_jobs, save, saved_before=None):
+        """With ``saved_before`` saved (None: nothing) and the env var at
+        ``env_jobs`` (None: unset), render the card, then type ``save`` and press
+        Save, as a page left open from before a restart still can. Returns the
+        card blurb, which of the input and Save are disabled, the value the input
+        shows, the Save feedback and the value now saved (None: nothing)."""
         with tempfile.TemporaryDirectory() as cfg, \
                 mock.patch.dict(os.environ, {"CRISPRME_CONFIG_DIR": cfg}):
             os.environ.pop("CRISPRME_MAX_CONCURRENT_JOBS", None)
+            if saved_before is not None:
+                a.set_max_concurrent_jobs(saved_before, cfg)
             if env_jobs is not None:
                 os.environ["CRISPRME_MAX_CONCURRENT_JOBS"] = env_jobs
-            blurb = self.render_card()[1]
+            _title, blurb, body = self.render_card()
+            controls = {c.kwargs.get("id"): c.kwargs for c in body}
             feedback = self.save(1, save).args[0]
-            with open(os.path.join(cfg, a.CONFIG_FILE)) as fh:
-                saved = json.load(fh)["max_concurrent_jobs"]
-        return blurb, feedback, saved
+            try:
+                with open(os.path.join(cfg, a.CONFIG_FILE)) as fh:
+                    saved = json.load(fh)["max_concurrent_jobs"]
+            except FileNotFoundError:
+                saved = None
+        return types.SimpleNamespace(
+            blurb=blurb,
+            disabled={
+                cid: bool(controls[cid].get("disabled"))
+                for cid in ("max-jobs-input", "max-jobs-save-btn")
+            },
+            shown=controls["max-jobs-input"]["value"],
+            feedback=feedback,
+            saved=saved,
+        )
 
-    def test_override_and_value_in_effect_are_named(self):
-        blurb, feedback, saved = self._settings("5", save=3)
-        self.assertEqual(saved, 3)  # still saved, for when the env var is dropped
-        for text in (blurb, feedback):
-            self.assertIn("CRISPRME_MAX_CONCURRENT_JOBS", text)
-            self.assertIn("overrides", text)
-            self.assertRegex(text, r"\b5 concurrent search job\(s\) in effect")
-        self.assertNotIn("Restart the app to apply.", feedback)
+    def test_pin_disables_the_input_and_save(self):
+        # The input shows the pinned value, and card and Save say the same: what
+        # sets it and how to change it. A Save that still arrives keeps the value
+        # saved before.
+        for env_jobs, pinned in (("5", 5), (" 5 ", 5), ("0", 1), ("99", 16)):
+            note = (
+                "CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, sets "
+                f"this to {pinned} concurrent search job(s). To change it, set "
+                "CRISPRME_MAX_CONCURRENT_JOBS to another value, or unset it to use "
+                "this setting, and restart the app."
+            )
+            with self.subTest(env_jobs=env_jobs):
+                r = self._settings(env_jobs, save=pinned, saved_before=3)
+                self.assertEqual(
+                    r.disabled, {"max-jobs-input": True, "max-jobs-save-btn": True}
+                )
+                self.assertEqual(r.shown, pinned)
+                self.assertTrue(
+                    r.blurb.endswith("Takes effect after the app restarts. " + note),
+                    r.blurb,
+                )
+                self.assertEqual(r.feedback, "Not saved: " + note)
+                self.assertEqual(r.saved, 3)
 
-    def test_clamped_override_names_the_clamped_value(self):
-        blurb, feedback, _ = self._settings("99", save=3)
-        for text in (blurb, feedback):
-            self.assertRegex(text, r"\b16 concurrent search job\(s\) in effect")
-
-    def test_no_override_keeps_the_plain_texts(self):
+    def test_no_pin_keeps_the_page_unchanged(self):
         # Unset, or not a whole number: then the env var is ignored (app.py warns
         # about it) and the saved value does apply after a restart. Superscript
         # two and circled one pass str.isdigit() but not int(): Save raised on
@@ -359,12 +389,16 @@ class TestSettingsPageEnvOverride(unittest.TestCase):
         )
         for env_jobs in (None, "", '"5"', "\u00b2", "\u2460"):
             with self.subTest(env_jobs=env_jobs):
-                blurb, feedback, saved = self._settings(env_jobs, save=3)
-                self.assertTrue(
-                    blurb.endswith("Takes effect after the app restarts."), blurb
+                r = self._settings(env_jobs, save=3, saved_before=4)
+                self.assertEqual(
+                    r.disabled, {"max-jobs-input": False, "max-jobs-save-btn": False}
                 )
-                self.assertEqual(feedback, plain_save)
-                self.assertEqual(saved, 3)
+                self.assertEqual(r.shown, 4)
+                self.assertTrue(
+                    r.blurb.endswith("Takes effect after the app restarts."), r.blurb
+                )
+                self.assertEqual(r.feedback, plain_save)
+                self.assertEqual(r.saved, 3)
 
     def test_save_reports_what_it_cannot_persist(self):
         # A config dir it cannot write, or a value that is not a number (only a
