@@ -154,8 +154,8 @@ jobs:
             chmod -R a-w /opt/conda/opt/crisprme
             crisprme.py complete-search --genome Genomes/synth --pam PAMs/20bp-NGG-SpCas9.txt \
               --guide guide.txt --mm 1 --bDNA 0 --bRNA 0 --output ro
-            # A finished job renames log_error.txt to log_error_no_check.txt, so a check of
-            # log_error.txt alone passed whatever the job wrote: check whichever exists.
+            # A job that runs to the end renames log_error.txt to log_error_no_check.txt, so a
+            # check of log_error.txt alone passed whatever the job wrote: check whichever exists.
             err=Results/ro/log_error.txt
             [ -e "$err" ] || err=Results/ro/log_error_no_check.txt
             if [ ! -e "$err" ] || [ -s "$err" ]; then

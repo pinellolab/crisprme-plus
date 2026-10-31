@@ -791,8 +791,9 @@ For the full scoring assumptions and limitations, see **METHODS §8**.
 This section covers issues specific to the local server environment and browser
 interaction. For problems with the CRISPRme search pipeline itself — such as
 unexpected output or missing results files — consult the `log_error.txt` file in
-the relevant results folder (`log_error_no_check.txt` once the job has finished: a
-finished job renames it) and refer to the
+the relevant results folder (`log_error_no_check.txt` once the job has run to the end,
+which renames it; a job that is still running, failed, or found no off-targets keeps
+`log_error.txt`) and refer to the
 [CRISPRme GitHub Issues page](https://github.com/pinellolab/crisprme-plus/issues).
 
 ---
@@ -836,8 +837,11 @@ variants.
    `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
    (the recommended default panel).
 4. **Confirm success** — `Results/<name>/log_error_no_check.txt` is empty and
-   `*.integrated_results.tsv` is non-empty. (A finished job renames its `log_error.txt` to
-   `log_error_no_check.txt`; a job whose `log_error.txt` is still there has not finished.)
+   `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its
+   `log_error.txt` to `log_error_no_check.txt`. A job that is still running, failed, or
+   found no off-targets keeps `log_error.txt`, so check whichever of the two exists. A job
+   that found no off-targets says `No off-targets found` in its `log.txt` and writes no
+   `*.integrated_results.tsv`.)
 
 ---
 
@@ -953,7 +957,8 @@ expires or you close the tab:
 2. If the results folder still does not appear, confirm the search completed
    successfully by checking that `Results/<output-name>/` exists in your working
    directory and that its `log_error_no_check.txt` (the name `log_error.txt` takes
-   when the job finishes) is empty.
+   when a job runs to the end; a job that found no off-targets keeps `log_error.txt`)
+   is empty.
 
 ---
 

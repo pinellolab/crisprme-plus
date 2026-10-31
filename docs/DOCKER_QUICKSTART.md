@@ -529,8 +529,11 @@ and deleting data you no longer need. See
      `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
      (the recommended default panel).
   4. Confirm success: `Results/<name>/log_error_no_check.txt` is empty and
-     `*.integrated_results.tsv` is non-empty. (A finished job renames its `log_error.txt` to
-     `log_error_no_check.txt`; a job whose `log_error.txt` is still there has not finished.)
+     `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its
+     `log_error.txt` to `log_error_no_check.txt`. A job that is still running, failed, or
+     found no off-targets keeps `log_error.txt`, so check whichever of the two exists. A job
+     that found no off-targets says `No off-targets found` in its `log.txt` and writes no
+     `*.integrated_results.tsv`.)
 
 For the full web-interface reference (every form field, all the result tabs),
 see [`crisprme_web_interface_user_guide.md`](crisprme_web_interface_user_guide.md).
