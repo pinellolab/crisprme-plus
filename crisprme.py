@@ -2829,6 +2829,91 @@ def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
     )
 
 
+class _BuildSignal(BaseException):
+    """A SIGTERM or SIGHUP that ends an index build (see _build_index_dir)."""
+
+
+def _raise_build_signal(signum, frame):
+    raise _BuildSignal(signum)
+
+
+def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bool:
+    """Runs index command ``cmd``, which writes ``./genome_library/<name>`` under its
+    working directory, and puts that in ``<workdir>/genome_library/<name>`` only
+    once the command has succeeded.
+
+    Every later run takes an index directory that is there for a finished one, so
+    a build that ends early -- Ctrl-C, an OOM kill, a container stop, an engine
+    error -- must leave none. The command therefore runs in a fresh hidden
+    directory of ``workdir``, on the same file system and under a name no index
+    glob or listing matches, and its index is renamed into place. That directory
+    is removed on every way out but SIGKILL: success, failure, an exception,
+    Ctrl-C, SIGTERM (scancel, docker stop) and SIGHUP. Every path ``cmd`` names is
+    absolute, so it resolves from there. ``failure`` is the error for a command
+    that fails. If another run has put the index in place meanwhile, that one is
+    kept and this build discarded. Returns True when this build went into place.
+    """
+    import signal
+    import tempfile
+
+    lib = os.path.join(workdir, "genome_library")
+    final = os.path.join(lib, name)
+    os.makedirs(lib, exist_ok=True)
+    try:
+        tmp = tempfile.mkdtemp(prefix=".build-index-only-", dir=workdir)
+    except OSError:
+        tmp = None
+    if tmp is None or os.stat(tmp).st_dev != os.stat(lib).st_dev:
+        # genome_library is on another file system (a symlink or a mount point),
+        # which a rename from here cannot reach, or only it is writable: build
+        # beside the indexes instead
+        if tmp is not None:
+            os.rmdir(tmp)
+        tmp = tempfile.mkdtemp(prefix=".build-index-only-", dir=lib)
+    built = os.path.join(tmp, "genome_library", name)
+    handlers = {}
+    try:
+        try:
+            # SIGTERM and SIGHUP would end the run at once and leave the directory:
+            # raise instead, for the cleanup below. One this run ignores (nohup)
+            # stays ignored.
+            for sig in (signal.SIGTERM, signal.SIGHUP):
+                if signal.getsignal(sig) == signal.SIG_DFL:
+                    handlers[sig] = signal.signal(sig, _raise_build_signal)
+            code = subprocess.call(cmd, cwd=tmp, **kwargs)
+            if code != 0 or not os.path.isdir(built):
+                error(f"{failure} (expected {final})")
+            if not os.path.isdir(final):
+                try:
+                    os.rename(built, final)
+                    return True
+                except OSError:
+                    if not os.path.isdir(final):
+                        raise
+            print(
+                f"{final} appeared while this run was building it (another run built "
+                f"it): keeping that one, and discarding this run's build.",
+                flush=True,
+            )
+            return False
+        finally:
+            # a second signal waits until the directory is gone
+            mask = signal.pthread_sigmask(
+                signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM, signal.SIGHUP}
+            )
+            try:
+                shutil.rmtree(tmp, ignore_errors=True)
+                for sig, handler in handlers.items():
+                    signal.signal(sig, handler)
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+    except _BuildSignal as stop:
+        # end the run by that signal, as it did before, now that its handler is
+        # the default again
+        os.kill(os.getpid(), stop.args[0])
+        sys.exit(128 + stop.args[0])
+
+
 def build_index_only() -> None:
     """Pre-builds the CRISPRitz reference index for a genome+PAM+bulge combo.
 
@@ -2889,22 +2974,22 @@ def build_index_only() -> None:
     if os.path.isdir(idx_folder):
         print(f"Reference index already present: {idx_folder}", flush=True)
     else:
-        os.makedirs(os.path.join(workdir, "genome_library"), exist_ok=True)
         print(
             f"Building reference index {index_name} (bMax {bMax + 1}, "
             f"{thread} thread(s))...",
             flush=True,
         )
-        # exactly the invocation complete-search uses, run from workdir so the
-        # index lands in <workdir>/genome_library/ under the expected name
+        # exactly the invocation complete-search uses; it writes the index under
+        # its working directory as genome_library/<index_name> (_build_index_dir)
         index_cmd = (
             f"crispritz.py index-genome {genome_ref} {genomedir}/ {pamfile} "
             f"-bMax {bMax + 1} -th {thread}"
         )
-        code = subprocess.call(index_cmd, shell=True, cwd=workdir)
-        if code != 0 or not os.path.isdir(idx_folder):
-            error(f"Reference genome indexing failed (expected {idx_folder})")
-        print(f"Index built: {idx_folder}", flush=True)
+        if _build_index_dir(
+            index_cmd, workdir, index_name, "Reference genome indexing failed",
+            shell=True,
+        ):
+            print(f"Index built: {idx_folder}", flush=True)
     _write_pam_build(idx_folder, pamfile)
     if not vcf_given:
         _write_display_label(idx_folder, display_name)
@@ -3002,43 +3087,56 @@ def build_index_only() -> None:
         if code != 0:
             shutil.rmtree(tmp, ignore_errors=True)
             error(f"Genome enrichment (add-variants) failed on {vcf_name}")
-        # This block only runs on a FRESH enrichment (enriched was absent), so any
-        # pre-existing dataset-specific output dirs are stale/partial from a prior
-        # aborted build. Clear them first, else shutil.move onto an existing
-        # fake_chrN / dict raises "Destination path already exists" (issue #54).
-        for _d in (indels_out, dict_folder, indel_dict):
-            if os.path.isdir(_d):
-                shutil.rmtree(_d)
-        os.makedirs(indels_out, exist_ok=True)
-        shutil.move(
-            os.path.join(variants_tmp, "SNPs_genome", f"{genome_ref}_enriched"),
-            enriched,
-        )
-        for f in _glob(os.path.join(variants_tmp, "fake*")):
-            shutil.move(f, indels_out)
-        os.makedirs(dict_folder, exist_ok=True)
-        os.makedirs(indel_dict, exist_ok=True)
-        for f in _glob(os.path.join(variants_tmp, "SNPs_genome", "*.json")):
-            shutil.move(f, dict_folder)
-        for f in _glob(os.path.join(variants_tmp, "SNPs_genome", "log*.txt")):
-            shutil.move(f, indel_dict)
-        # Compress the per-chromosome dicts in place (my_dict_*.json -> .json.gz,
-        # log*.txt -> .txt.gz) so the published index ships them ~3.5x smaller
-        # (~40-50GB not ~152GB for 1000G+HGDP) and the variant post-analysis reads
-        # them gzipped on the fly (no 150GB decompress). pigz (parallel) when
-        # available, else Python gzip. Mirrors _make_index_tarball's pigz preference.
-        _pigz = shutil.which("pigz")
-        for _d, _pat in ((dict_folder, "*.json"), (indel_dict, "log*.txt")):
-            _files = _glob(os.path.join(_d, _pat))
-            if not _files:
-                continue
-            if _pigz:
-                subprocess.call([_pigz, "-f", "-p", str(thread), *_files])
-            else:
-                for _f in _files:
-                    with open(_f, "rb") as _src, gzip.open(_f + ".gz", "wb") as _dst:
-                        shutil.copyfileobj(_src, _dst)
-                    os.remove(_f)
+        if os.path.isdir(enriched):
+            # another run finished this enrichment while add-variants ran: leave
+            # what it wrote as it is
+            shutil.rmtree(tmp, ignore_errors=True)
+            print(
+                f"{enriched} appeared while this run was enriching it (another run "
+                f"built it): keeping that one, and discarding this run's enrichment.",
+                flush=True,
+            )
+        else:
+            # This block only runs on a FRESH enrichment (enriched was absent), so any
+            # pre-existing dataset-specific output dirs are stale/partial from a prior
+            # aborted build. Clear them first, else shutil.move onto an existing
+            # fake_chrN / dict raises "Destination path already exists" (issue #54).
+            for _d in (indels_out, dict_folder, indel_dict):
+                if os.path.isdir(_d):
+                    shutil.rmtree(_d)
+            os.makedirs(indels_out, exist_ok=True)
+            for f in _glob(os.path.join(variants_tmp, "fake*")):
+                shutil.move(f, indels_out)
+            os.makedirs(dict_folder, exist_ok=True)
+            os.makedirs(indel_dict, exist_ok=True)
+            for f in _glob(os.path.join(variants_tmp, "SNPs_genome", "*.json")):
+                shutil.move(f, dict_folder)
+            for f in _glob(os.path.join(variants_tmp, "SNPs_genome", "log*.txt")):
+                shutil.move(f, indel_dict)
+            # Compress the per-chromosome dicts in place (my_dict_*.json -> .json.gz,
+            # log*.txt -> .txt.gz) so the published index ships them ~3.5x smaller
+            # (~40-50GB not ~152GB for 1000G+HGDP) and the variant post-analysis reads
+            # them gzipped on the fly (no 150GB decompress). pigz (parallel) when
+            # available, else Python gzip. Mirrors _make_index_tarball's pigz preference.
+            _pigz = shutil.which("pigz")
+            for _d, _pat in ((dict_folder, "*.json"), (indel_dict, "log*.txt")):
+                _files = _glob(os.path.join(_d, _pat))
+                if not _files:
+                    continue
+                if _pigz:
+                    subprocess.call([_pigz, "-f", "-p", str(thread), *_files])
+                else:
+                    for _f in _files:
+                        with open(_f, "rb") as _src, gzip.open(_f + ".gz", "wb") as _dst:
+                            shutil.copyfileobj(_src, _dst)
+                        os.remove(_f)
+            # The enriched genome goes into place last: a later run takes it for a
+            # finished enrichment (above), so a run that ends before here leaves
+            # none, and the next one enriches again, clearing what this one moved.
+            shutil.move(
+                os.path.join(variants_tmp, "SNPs_genome", f"{genome_ref}_enriched"),
+                enriched,
+            )
         shutil.rmtree(tmp, ignore_errors=True)
     else:
         print(f"Enriched genome already present: {enriched}", flush=True)
@@ -3314,14 +3412,14 @@ def build_index_only() -> None:
     # STEP 2: index the enriched (SNP) genome
     if not os.path.isdir(snp_idx):
         print(f"Building variant index {os.path.basename(snp_idx)}...", flush=True)
-        code = subprocess.call(
+        _build_index_dir(
             f"crispritz.py index-genome {genome_ref}+{vcf_name} {enriched}/ "
             f"{pamfile} -bMax {bMax + 1} -th {thread}",
+            workdir,
+            os.path.basename(snp_idx),
+            "Variant genome indexing failed",
             shell=True,
-            cwd=workdir,
         )
-        if code != 0 or not os.path.isdir(snp_idx):
-            error(f"Variant genome indexing failed (expected {snp_idx})")
     else:
         print(f"Variant index already present: {snp_idx}", flush=True)
     # STEP 3: index the indels genome (pool_index_indels.py, as the pipeline does)
@@ -3372,7 +3470,7 @@ def build_index_only() -> None:
                         flush=True,
                     )
             pool = os.path.join(script_path, "pool_index_indels.py")
-            code = subprocess.call(
+            _build_index_dir(
                 [
                     sys.executable,
                     pool,
@@ -3384,10 +3482,10 @@ def build_index_only() -> None:
                     str(bMax + 1),
                     str(thread),
                 ],
-                cwd=workdir,
+                workdir,
+                os.path.basename(indels_idx),
+                "Indels indexing failed",
             )
-            if code != 0 or not os.path.isdir(indels_idx):
-                error(f"Indels indexing failed (expected {indels_idx})")
     else:
         print(f"Indels index already present: {indels_idx}", flush=True)
     _write_pam_build(snp_idx, pamfile)

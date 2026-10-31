@@ -53,10 +53,11 @@ def index_indels(chrom):
         print(f"No indels on {chrom}: nothing to index", flush=True)
         return
     print("Indexing INDELs in", chrom)
-    os.system(
+    status = os.system(
         f"crispritz.py index-genome {ref_name}+{vcf_name}_INDELS/{true_pam}_{bMax}_fake{chrom} {indels_folder}/fake_{vcf_name}_{chrom} {pam_file} -bMax {bMax} -th 1  >/dev/null"
     )  # {indels_folder}/fake_{vcf_name}_{chrom}
     print("Indexing ended for INDELs in", chrom)
+    return status
 
 
 chrs = []
@@ -65,7 +66,16 @@ for f in os.listdir(indels_folder):
         chrs.append(f.split("_")[-1])
 
 with Pool(processes=int(ncpus)) as pool:
-    pool.map(index_indels, chrs)
+    statuses = pool.map(index_indels, chrs)
+
+# A chromosome whose index-genome failed (a buildTST error, an OOM kill) leaves its
+# part of the _INDELS index absent or partial: say so by the exit status, which
+# build-index-only checks before it puts the index in place. (The search goes by
+# the engine's error on stderr instead; this line goes to stdout.)
+failed = sorted(c for c, s in zip(chrs, statuses) if s)
+if failed:
+    print("Indexing failed for INDELs in", ", ".join(failed), flush=True)
+    sys.exit(1)
 
 
 # os.system('echo "Indexing INDELs End: '+datetime.now().strftime('%Y-%m-%d %H:%M:%S')+'" >> '+output_folder+'/../log.txt')
