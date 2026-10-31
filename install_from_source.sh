@@ -15,6 +15,13 @@
 # Override the CRISPRitz tag with CRISPRITZ_REF (default v2.9.1).
 set -euo pipefail
 
+# Linux only: environment.yml has packages with no macOS build, and CRISPRitz's
+# buildTST needs GCC's parallel STL, which no macOS toolchain provides.
+if [ "$(uname -s)" = Darwin ]; then
+    echo "ERROR: the source build is Linux-only; on macOS use Docker (README 1.2)." >&2
+    exit 1
+fi
+
 : "${CONDA_PREFIX:?Activate the conda env first: 'mamba activate crisprme'}"
 CRISPRITZ_REF="${CRISPRITZ_REF:-v2.9.1}"
 CXX="${CXX:-g++}"

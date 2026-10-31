@@ -1,6 +1,7 @@
 # CRISPRme+ 2.8.1 runtime environment (Python 3.11), for installing FROM SOURCE
 # without the Bioconda crisprme/crispritz packages. Mirrors the dependency set
 # validated in the project Dockerfile.
+# Linux only: some packages have no macOS build; on macOS use Docker (README 1.2).
 #
 #   mamba env create -f environment.yml
 #   mamba activate crisprme

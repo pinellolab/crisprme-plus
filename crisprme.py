@@ -4507,9 +4507,11 @@ def print_help_complete_test():
     # list functionality options
     sys.stderr.write(
         "Options:\n"
-        "\t--chrom, test the complete-search functionality on the specified "
-        "chromosome (e.g., chr22). By default, the test is conducted on all "
-        "chromosomes\n"
+        "\t--chrom, the chromosome the benchmark mode tests (e.g., chr22) [default: "
+        "all]. The prebuilt-index smoke ignores it and always searches every "
+        "chromosome of the index's genome: with a variant index such as "
+        "NRG_3_hg38+hg38_HGDP1kGP that is a genome-wide variant search, which needs "
+        "64 GB+ of RAM\n"
         "\t--vcf_dataset, variant dataset for the LEGACY build-from-source test "
         "(the benchmark mode: it builds small test indexes from raw VCFs for "
         "validate-test, and runs only with CRISPRME_ALLOW_ONDEMAND_BUILD=1 set; this "

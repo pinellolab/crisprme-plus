@@ -14,9 +14,12 @@ they run in the fast unit suite (unit-tests.yml, which DOES run on push-to-main)
     and run EVERY registered benchmark via complete-search with ON-DEMAND build (no
     --index-path), one per-benchmark output dir (crisprme-test-out_<name>).
   * default USER path (flag unset): require a prebuilt index, run a single smoke against it
-    via --index-path, and NEVER download/build.
+    via --index-path, and NEVER download/build. The smoke searches the whole genome, so a
+    --chrom (the benchmark mode's) only adds a NOTE saying so.
 """
 
+import contextlib
+import io
 import os
 import unittest
 from unittest import mock
@@ -38,11 +41,12 @@ _REGISTRY = {
 
 
 class DispatchContract(unittest.TestCase):
-    def _run(self, allow_ondemand):
+    def _run(self, allow_ondemand, chrom="chr22"):
         """Run run_crisprme_test with every side-effecting dependency mocked; return the
         list of complete-search command strings + a flag of whether require_prebuilt_index
-        was consulted."""
+        was consulted. What it wrote to stderr is kept in self.stderr."""
         calls = []
+        err = io.StringIO()
         env = dict(os.environ)
         env.pop("CRISPRME_ALLOW_ONDEMAND_BUILD", None)
         env.pop("CRISPRME_SKIP_HEAVY", None)
@@ -66,10 +70,12 @@ class DispatchContract(unittest.TestCase):
              mock.patch.object(ct, "_parse_index_name", return_value=("NRG", "hg38_HGDP1kGP", True)), \
              mock.patch.object(ct, "glob", return_value=["x.integrated_results.tsv"]), \
              mock.patch("os.path.isdir", return_value=True), \
-             mock.patch("os.path.isfile", return_value=True):
+             mock.patch("os.path.isfile", return_value=True), \
+             contextlib.redirect_stderr(err):
             mreq.return_value = "NRG_3_hg38+hg38_HGDP1kGP"
             msub.call.side_effect = lambda cmd, **_k: calls.append(cmd) or 0
-            ct.run_crisprme_test("chr22", "1000G", 4, False)
+            ct.run_crisprme_test(chrom, "1000G", 4, False)
+        self.stderr = err.getvalue()
         return calls, mreq.called, mdl.called
 
     def test_ci_mode_downloads_and_builds_per_benchmark_on_demand(self):
@@ -99,6 +105,23 @@ class DispatchContract(unittest.TestCase):
         self.assertEqual(len(calls), 1, "user mode runs exactly one example smoke")
         self.assertIn("--index-path genome_library", calls[0],
                       "user-mode smoke must reuse the prebuilt index (--index-path)")
+
+    def test_user_mode_notes_that_chrom_is_for_the_benchmark_mode(self):
+        """The smoke searches every chromosome of the index's genome whatever --chrom
+        says, so a given --chrom gets one NOTE line -- and the smoke stays exactly the
+        one run without it."""
+        with_chrom, _, _ = self._run(allow_ondemand=False, chrom="chr22")
+        notes = [ln for ln in self.stderr.splitlines() if ln.startswith("NOTE: --chrom")]
+        self.assertEqual(len(notes), 1, self.stderr)
+        self.assertIn("benchmark mode only", notes[0])
+        without, _, _ = self._run(allow_ondemand=False, chrom="all")
+        self.assertNotIn("NOTE: --chrom", self.stderr)
+        self.assertEqual(with_chrom, without)
+
+    def test_ci_mode_has_no_chrom_note(self):
+        """The benchmark mode is the one --chrom is for."""
+        self._run(allow_ondemand=True, chrom="chr22")
+        self.assertNotIn("NOTE: --chrom", self.stderr)
 
 
 if __name__ == "__main__":

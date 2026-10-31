@@ -117,7 +117,7 @@ def require_prebuilt_index() -> str:
             "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP\n"
             "  (the recommended default: phased HGDP + 1000 Genomes, 4,091 samples;\n"
             "   or --index-name NRG_3_hg38 for a reference-only scan)\n\n"
-            "then re-run:  crisprme.py complete-test --chrom chr22\n"
+            "then re-run:  crisprme.py complete-test --thread 4\n"
         )
         sys.exit(0)
     # prefer a variant index (name contains "+") so the smoke exercises the variant path
@@ -682,7 +682,7 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool) -> None:
             f"(Genomes/{ref}) is not.\nCRISPRme does not build data automatically -- "
             "download the genome, e.g.:\n"
             f"  crisprme.py download --what genome --ref {ref}   (or --what all)\n\n"
-            "then re-run:  crisprme.py complete-test\n"
+            "then re-run:  crisprme.py complete-test --thread 4\n"
         )
         sys.exit(0)
     # PAM matching the index: 20 guide N's + the PAM token (e.g. NRG -> N*20 + 'NRG').
@@ -823,6 +823,14 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
     if os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
         _run_benchmarks_ondemand(chrom, dataset, threads, debug)
     else:
+        if chrom != "all":
+            # --chrom picks the benchmark mode's chromosome; the smoke always searches
+            # the whole genome of the index it finds, so say so rather than ignore it
+            sys.stderr.write(
+                f"NOTE: --chrom {chrom} applies to the benchmark mode only "
+                "(CRISPRME_ALLOW_ONDEMAND_BUILD=1); this prebuilt-index smoke searches "
+                "every chromosome of the index's genome.\n"
+            )
         _run_prebuilt_index_smoke(threads, debug)
 
 

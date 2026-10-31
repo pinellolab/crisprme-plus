@@ -310,6 +310,20 @@ and the `release-crisprme` skill.
   handles a file that has no header rather than blind-skipping its first line. Caught by the Cas12a
   brute-force benchmark, whose chr22 result is genuinely empty.
 
+- **`complete-test --chrom chr22` searched the whole genome, and the source installer started on
+  macOS.** The README (§2.2.2, §3.2.1) and `complete-test --help` presented `complete-test --chrom
+  chr22` against a downloaded index as a quicker single-chromosome test, but the prebuilt-index
+  smoke never receives `--chrom`: it searches every chromosome of the index's genome, so with
+  `NRG_3_hg38+hg38_HGDP1kGP` it is a genome-wide variant search, with the 64 GB or more of RAM that
+  §0 gives for one. On a two-chromosome genome it returned 10 rows on `chr22` and 10 on `chrA`. The
+  smoke's search is unchanged. The README, the help and the no-index hint now say what it does, a
+  given `--chrom` prints one NOTE that it applies to the benchmark mode only, and the README's
+  "Full Genome Test" runs `complete-test --thread 4`, since `complete-test` with no option only
+  prints its help. `install_from_source.sh` now stops at once on macOS with one line pointing to
+  Docker (README §1.2), instead of failing later on a solver or compiler error, and
+  `environment.yml` and the README's source-build entry say Linux only. Covered by
+  `PostProcess/test_complete_test.py` and `PostProcess/test_install_from_source.py`.
+
 - **`--prune-pam` could run with pruning silently off.** `crispritz.py` builds its search argv
   explicitly from the options it recognizes, so a CRISPRitz build without `--prune-pam` does not
   reject the flag — it drops it, and the search runs unpruned over the whole PAM-less index. The
