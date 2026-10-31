@@ -84,11 +84,20 @@ ROW_NON_NRG = (
     "X\t" + GUIDE + "\tGACTGACTGACTGACTGACTTGC\tfakechr13\t"
     "4000\t4000\t+\t0\t0\t0"
 )
-# PAM region NGG: variant-created / degenerate, must be KEPT (IUPAC-aware).
+# PAM region ARG: variant-created (R = A/G at the PAM's middle), must be KEPT
+# (IUPAC-aware).
 ROW_IUPAC_PAM = (
-    "X\t" + GUIDE + "\tGACTGACTGACTGACTGACTNGG\tfakechr13\t"
+    "X\t" + GUIDE + "\tGACTGACTGACTGACTGACTARG\tfakechr13\t"
     "5000\t5000\t+\t0\t0\t0"
 )
+# PAM regions holding a genomic N, at each position: never returned by a dedicated
+# or --prune-pam search (the engine's N matches no base), so must be DROPPED, even
+# at the PAM's own N.
+ROWS_N_PAM = [
+    "X\t" + GUIDE + "\tGACTGACTGACTGACTGACT" + pam + "\tfakechr13\t"
+    "7000\t7000\t+\t0\t0\t0"
+    for pam in ("NGG", "ANG", "AGN")
+]
 # Total (col 10) = 9, above a cap of 6.
 ROW_OVER_CAP = (
     "X\t" + GUIDE + "\tGACTGACTGACTGACTGACTCGG\tfakechr13\t"
@@ -164,10 +173,20 @@ class PamFilterKeepsHeader(unittest.TestCase):
         self.assertIn("dropped 1", log)
 
     def test_keeps_iupac_and_variant_created_pam(self):
-        """NGG/degenerate PAM regions stay (IUPAC-aware intersection)."""
+        """IUPAC PAM regions stay (IUPAC-aware intersection)."""
         out, _ = self._run([HEADER, ROW_IUPAC_PAM, ROW_FAKECHR1])
         self.assertIn(ROW_IUPAC_PAM, out)
         self.assertIn(ROW_FAKECHR1, out)
+
+    def test_drops_a_genomic_n_anywhere_in_the_pam_region(self):
+        """A target N matches nothing, as in the engine, so a PAM-less index
+        searched without --prune-pam keeps exactly what the dedicated one finds
+        (genome-wide NRR, HGDP+1kGP: 93,820 extra indel targets otherwise)."""
+        for row in ROWS_N_PAM:
+            with self.subTest(pam=row.split("\t")[2][-3:]):
+                out, log = self._run([HEADER, row, ROW_FAKECHR13])
+                self.assertEqual(out, [HEADER, ROW_FAKECHR13])
+                self.assertIn("kept 1, dropped 1", log)
 
     def test_headerless_input_is_unchanged(self):
         """Files that legitimately have no header still filter normally."""

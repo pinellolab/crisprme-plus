@@ -229,6 +229,21 @@ and the `release-crisprme` skill.
   under `--prune-pam` and for a 3′ PAM, wider), so a dedicated PAM that merely begins with `N`s,
   such as the shipped `NNNRRT`, is never taken for one either. Covered by
   `PostProcess/test_index_resolution.py`.
+- **A PAM-less index searched without `--prune-pam` kept targets with a genomic `N` in their PAM,
+  and the per-sample search then crashed.** With `NNN_3` serving an NRR (or NRG) search and no
+  `--prune-pam`, the post-search PAM filter (`pam_filter.py`, in releases since 2.2.0) treated an `N`
+  in a target's PAM region as matching any base, so it kept targets a dedicated index never returns:
+  CRISPRitz stores a genomic `N` as a code that matches nothing, so neither a dedicated nor a
+  `--prune-pam` search reports one. Genome-wide, NRR, 4 mismatches + 1 + 1 bulge, HGDP+1kGP
+  per-sample, the filter kept 1 extra reference target, 1 extra variant target and 93,820 extra
+  indel targets (an assembly-gap edge, and the `N`s that separate the windows of the fake-indel
+  genome), exactly the targets with an `N` in their PAM region, and the SNP post-analysis then
+  failed on the `N` (`cluster.dict.py`: `ValueError: substring not found`, `ERROR: off-targets
+  post-analysis (snps) failed`). A target's `N` now matches nothing, at every position of the PAM.
+  The filter is unchanged for dedicated indexes and under `--prune-pam`, whose targets never carry
+  an `N` there (it dropped 0 in every such arm). With `--prune-pam`, `NNN_3` and `NNNNNNNN_3` were
+  already byte-identical to a dedicated NRR index on that search: 399,664 rows, the alternative
+  alignments and observed haplotypes included. Covered by `PostProcess/test_indel_header_injection.py`.
 - **`complete-test` passed a flag that did not exist.** The brute-force benchmark command included
   `--bmax`, which `complete-search` has never had — it recomputes bMax from the per-type budgets — so
   the argument was discarded unread. Harmless until unknown flags started being rejected, which then
