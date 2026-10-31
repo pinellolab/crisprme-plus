@@ -1337,24 +1337,68 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         self.assertEqual(err, "")
 
     def test_a_run_that_ends_inside_its_takeover_leaves_no_takeover_behind(self):
-        # Ctrl-C lands while bash waits for the takeover's mkdir, which a takeover spends
-        # most of its time in, and bash runs the trap as soon as the mkdir returns, before
-        # anything after it. Stood for by a mkdir that hangs once it has made ".takeover".
-        self.hold(owner_record(dead_pid()))
+        # Once its mkdir has made ".takeover", a run counts it as its own: ended inside its
+        # takeover from then on -- Ctrl-C as it signs the lock, say -- it removes it, and
+        # the next run takes the lock over at once. Stood for by the signing's mv, hung.
+        record = owner_record(dead_pid())
+        self.hold(record)
         made = self.dir / "made"
-        proc = self.start(f'mkdir() {{ command mkdir "$@" || return; '
-                          f'[ "${{1##*/}}" = .takeover ] || return 0; : >{_q(made)}; sleep 30; }}\n'
+        proc = self.start(f'mv() {{ : >{_q(made)}; sleep 30; command mv "$@"; }}\n'
                           + self.take_body())
         _wait_for(made.exists, 10, "the takeover")
         self.assertTrue((self.lock / ".takeover").is_dir())
         os.killpg(proc.pid, signal.SIGINT)
         rc, out, err = self.result(proc)
         self.assertEqual(rc, -signal.SIGINT, out + err)
-        self.assertEqual(os.listdir(self.lock), ["owner"])
+        self.assertNotIn(".takeover", os.listdir(self.lock))
+        self.assertEqual((self.lock / "owner").read_text(), record)
         self.assertEqual(_wait_until_gone(proc.pid), [])
         self.assertEqual(err, "")
         rc, out, err = self.take()  # and the next run takes it over at once
         self.assertEqual(rc, 2, out + err)
+
+    def test_a_run_that_ends_as_its_takeover_begins_leaves_it_to_the_minute_rule(self):
+        # Ctrl-C lands while bash waits for the takeover's mkdir, which a takeover spends
+        # most of its time in, and bash runs the trap as soon as the mkdir returns, before
+        # the run can count ".takeover" as its own: it is left. The next run waits, as for a
+        # takeover under way, and takes the lock over once that ".takeover" is a minute old.
+        # Stood for by a mkdir that hangs once it has made ".takeover".
+        self.hold(owner_record(dead_pid()))
+        made = self.dir / "made"
+        proc = self.start(f'mkdir() {{ command mkdir "$@" || return; '
+                          f'[ "${{1##*/}}" = .takeover ] || return 0; : >{_q(made)}; sleep 30; }}\n'
+                          + self.take_body())
+        _wait_for(made.exists, 10, "the takeover")
+        os.killpg(proc.pid, signal.SIGINT)
+        rc, out, err = self.result(proc)
+        self.assertEqual(rc, -signal.SIGINT, out + err)
+        self.assertEqual(sorted(os.listdir(self.lock)), [".takeover", "owner"])
+        self.assertEqual(_wait_until_gone(proc.pid), [])
+        self.assertEqual(err, "")
+        rc, out, err = self.take(stop_after=1.5)
+        self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
+        self.assertNotIn("Stale lock", out)
+        _age(self.lock / ".takeover", 2)
+        rc, out, err = self.take(stop_after=10)
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn(f"Stale lock {self.lock}: the run that held it", out)
+        self.assertEqual(err, "")
+
+    def test_a_failed_takeover_never_clears_another_runs_takeover(self):
+        # Another run is inside its own takeover of the same dead run's lock, so this run's
+        # mkdir of ".takeover" fails -- and Ctrl-C lands meanwhile, its trap run as soon as
+        # the mkdir returns. This run removed the other's ".takeover", and a third run could
+        # then take the lock over beside it: two builds of one index. Stood for by a mkdir
+        # that sends the run INT when it fails on ".takeover".
+        self.hold(owner_record(dead_pid()))
+        (self.lock / ".takeover").mkdir()  # the other run's
+        proc = self.start('mkdir() { command mkdir "$@"; local rc=$?\n'
+                          '\t[ "${1##*/}" = .takeover ] && [ $rc != 0 ] && kill -INT $$\n'
+                          '\treturn $rc; }\n' + self.take_body())
+        rc, out, err = self.result(proc, stop_after=10)
+        self.assertEqual(rc, -signal.SIGINT, out + err)
+        self.assertEqual(sorted(os.listdir(self.lock)), [".takeover", "owner"])
+        self.assertEqual(err, "")
 
     def test_a_lock_released_with_its_output_in_place_is_not_built_again(self):
         owner = self.sleeper()
@@ -2326,7 +2370,9 @@ class BuildLocksInTheShippedScript(_ShippedScript):
 
     def test_a_run_interrupted_as_it_takes_a_lock_over_leaves_it_to_the_next(self):
         # Ctrl-C as soon as a takeover had begun (".takeover" appeared) left ".takeover" in
-        # the lock, 40 times out of 40, and no run ever took that lock over again.
+        # the lock, 40 times out of 40, and no run ever took that lock over again. One that
+        # lands as the takeover's mkdir returns may still leave it, before the run counts it
+        # as its own; the next run clears it once it is a minute old (aged here for that).
         takeover, hits = self.lock / ".takeover", 0
         for _ in range(20):
             for left in (self.lock, self.index):
@@ -2347,12 +2393,14 @@ class BuildLocksInTheShippedScript(_ShippedScript):
             os.killpg(run.proc.pid, signal.SIGINT)
             run.proc.wait(timeout=30)
             self.assertEqual(run.proc.returncode, -signal.SIGINT)
-            self.assertNotIn(".takeover", os.listdir(self.lock))
+            self.assertTrue((self.lock / "owner").is_file())  # the lock is left, not let go
             self.assertEqual(_wait_until_gone(run.proc.pid), [])
             hits += 1
             if hits == 5:
                 break
         self.assertGreaterEqual(hits, 3, "the takeover was too quick to be interrupted")
+        if takeover.is_dir():
+            _age(takeover, 2)
         after = self.run_pipeline(variant=False, timeout=60)
         self.assertIn(f"Stale lock {self.lock}: the run that held it", after.stdout)
         self.assertBuiltAndSearched(after)

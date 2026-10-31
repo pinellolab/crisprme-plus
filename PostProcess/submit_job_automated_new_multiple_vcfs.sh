@@ -190,7 +190,7 @@ _lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/nul
 	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
 _locks_held=()
 _lock_beats=()  # the PID of each held lock's refresh loop, at its index in _locks_held
-_lock_takeover=  # the ".takeover" this run is making or holds, while it does (_lock_steal)
+_lock_takeover=  # the ".takeover" this run has made, while it holds it (_lock_steal)
 # From here to the traps, nothing runs a command substitution: see the traps.
 
 # Set variable $1 to field $3 of owner record $2, or to "" when it has none (parameter
@@ -408,19 +408,20 @@ _lock_hold() {
 # it, so two runs that both found the lock stale cannot both take it over. A takeover
 # takes milliseconds, so a ".takeover" more than a minute old was left by a run that
 # ended inside one: it is cleared, for a later poll to take the lock over. A run that
-# ends inside its own clears it (_lock_abandon_all), named in _lock_takeover from just
-# before the mkdir: bash runs a trap as soon as a command it waits for returns.
+# ends inside its own clears it (_lock_abandon_all), named in _lock_takeover once its
+# mkdir has succeeded -- never before, or a run whose mkdir failed would remove another
+# run's. Bash runs a trap as soon as a command it waits for returns, so a run that ends
+# as that mkdir returns leaves it, and the next run waits up to a minute.
 # 0 = this run now holds the lock.
 _lock_steal() {
 	local _rc=1 _lock_rec
-	_lock_takeover="$1/.takeover"
 	if ! mkdir "$1/.takeover" 2>/dev/null; then
-		_lock_takeover=
 		# (find through a pipe: a test, not $(...))
 		find "$1/.takeover" -maxdepth 0 -mmin +1 2>/dev/null | grep -q . \
 			&& rmdir "$1/.takeover" 2>/dev/null
 		return 1
 	fi
+	_lock_takeover="$1/.takeover"
 	_lock_read "$1"
 	if [ "$_lock_rec" = "$2" ] && _lock_sign "$1"; then
 		_lock_hold "$1"
