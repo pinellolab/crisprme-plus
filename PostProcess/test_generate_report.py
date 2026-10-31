@@ -2384,6 +2384,56 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("chr5_400_T_A", body)
         self.assertIn("chr5_402_C_G", body)
 
+    # ------------------------------------------------------------------ #
+    # Reference-only run (no --vcf): no row carries a variant haplotype, so
+    # the observed-haplotypes companion has no observation to group. Its early
+    # exit returned a bare None, which build_report unpacked as a 3-tuple:
+    # every reference-only search failed to build its report.zip (TypeError).
+    # ------------------------------------------------------------------ #
+    def _reference_only_result_dir(self):
+        """A result dir holding only the fixture's on-target + REFERENCE rows,
+        under the name a reference-only search gives it (VCF name "_").
+        Returns (result_dir, integrated_tsv_path)."""
+        rd = tempfile.mkdtemp(prefix="ro_", dir=self.tmp)
+        itsv = os.path.join(rd, f"{_GUIDE}+NRG_hg38+__6+3_integrated_results.tsv")
+        with open(itsv, "w") as fh:
+            fh.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                if row[10] == "ref":  # REF/ALT_origin_(highest_CFD)
+                    fh.write("\t".join(row) + "\n")
+        return rd, itsv
+
+    def test_observed_haplotypes_companion_no_observations_returns_3_tuple(self):
+        import pandas as pd
+
+        from generate_report import build_observed_haplotypes_companion
+
+        rd, itsv = self._reference_only_result_dir()
+        df = pd.read_csv(itsv, sep="\t", dtype=str, na_filter=False)
+        staging = os.path.join(self.tmp, "ro_staging")
+        os.makedirs(staging)
+        self.assertEqual(
+            build_observed_haplotypes_companion(df, itsv, rd, staging, merge_window=3),
+            (None, [], {}),
+        )
+        self.assertFalse(os.path.exists(os.path.join(staging, "observed_haplotypes.tsv")))
+
+    def test_build_report_on_a_reference_only_result_dir(self):
+        """What the pipeline runs at the end of every search: generate_report.py
+        --result-dir <job>. A reference-only job must get its <job>_report.zip."""
+        rd, _itsv = self._reference_only_result_dir()
+        rc = gr.main(["--result-dir", rd, "--samplesID-dir", self.sid_dir])
+        self.assertEqual(rc, 0)
+        out_zip = os.path.join(rd, f"{os.path.basename(rd)}_report.zip")
+        self.assertTrue(os.path.isfile(out_zip))
+        with zipfile.ZipFile(out_zip) as zf:
+            names = zf.namelist()
+            top = zf.read("data/top1000.tsv").decode().strip().splitlines()
+        self.assertIn("report.html", names)
+        self.assertNotIn("data/observed_haplotypes.tsv", names)
+        self.assertEqual(len(top), 1 + 2)  # header + the two reference off-targets
+        self.assertFalse(os.path.exists(os.path.join(rd, "observed_haplotypes.tsv")))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

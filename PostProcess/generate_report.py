@@ -4663,7 +4663,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                     })
 
         if not observations:
-            return None
+            return None, [], {}
 
         # ---- 3. group observations into SITES -------------------------------
         # group by (chrom, strand, spacer), sort by start, single-linkage cluster

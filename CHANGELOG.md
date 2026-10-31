@@ -314,6 +314,19 @@ and the `release-crisprme` skill.
   determined, with no version in the prose. The test that should have caught this was asserting the
   stale literal; it now asserts the property instead.
 
+- **A search with no variant off-target never got its shareable report.** Every reference-only
+  search, and any search in which no row carries a variant haplotype, ended its report step with
+  `TypeError: cannot unpack non-iterable NoneType object` in `report.log`: no `<job>_report.zip`,
+  `Building shareable report FAILED (non-fatal)` in `log.txt`, the "shareable report generation
+  failed" WARNING in the error log, and `generate-report --result-dir` exiting 1 with the same
+  traceback, while the web results page kept waiting for a report that never came. The
+  observed-haplotypes companion returned a bare `None` when it found no variant haplotype to group,
+  where its docstring and every other exit return `(None, [], {})`, the three values the report
+  unpacks. It now returns those, and the report is built without the companion, as it already was
+  for a variant search with no multi-haplotype site. Search results never changed, and the report
+  of a search with variant rows is byte-identical. Present since 2.7.10. Covered by
+  `PostProcess/test_generate_report.py`.
+
 - **History page no longer crashes when a job is queued.** With every search slot busy, a queued
   job's `log.txt` exists (a queue note is written to it) but has no `Job\tStart` line yet;
   `read_job_info()` raised `StopIteration`, which aborted the entire History-table build — so running
