@@ -154,13 +154,13 @@ def read_job_info(logfile: str, jobid: str) -> Optional[str]:
 
     Returns the ``Job\tStart`` timestamp, or ``None`` when the job has not
     started yet. A QUEUED job (one submitted while every search slot is busy:
-    2 by default, configurable 1-16) has a
-    ``log.txt`` -- the submit path writes a queue note to it -- but **no**
-    ``Job\tStart`` line until it actually runs; a missing log is likewise not an
-    error here. Returning ``None`` (instead of raising ``StopIteration`` /
-    ``IOError``) lets :func:`construct_history_summary` fall back to the
-    ``.Params.txt`` mtime, so a queued job never takes down the whole History
-    table (running + completed jobs stay accessible).
+    2 by default, configurable 1-16) has a ``log.txt`` -- the submit path
+    writes a queue note to it -- but **no** ``Job\tStart`` line until it
+    actually runs; a missing log is likewise not an error here. Returning
+    ``None`` (instead of raising ``StopIteration`` / ``IOError``) lets
+    :func:`construct_history_summary` fall back to the ``.Params.txt`` mtime,
+    so a queued job never takes down the whole History table (running +
+    completed jobs stay accessible).
 
     Args:
         logfile: The path to the log file.

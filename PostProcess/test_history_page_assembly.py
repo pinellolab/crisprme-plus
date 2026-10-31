@@ -265,10 +265,11 @@ if __name__ == "__main__":
 
 
 class TestReadJobInfoQueued(unittest.TestCase):
-    """A QUEUED job (3rd+ while the 2 search slots are busy) has a log.txt but no
-    'Job\\tStart' line yet. read_job_info() must return None (not raise
-    StopIteration/IOError) so construct_history_summary falls back to the Params
-    mtime and the whole History table keeps rendering -- the bug Manuel reported."""
+    """A QUEUED job (one submitted while every search slot is busy: 2 by default,
+    configurable 1-16) has a log.txt but no 'Job\\tStart' line yet. read_job_info()
+    must return None (not raise StopIteration/IOError) so construct_history_summary
+    falls back to the Params mtime and the whole History table keeps rendering --
+    the bug Manuel reported."""
 
     read_job_info = staticmethod(_NS["read_job_info"])
 
