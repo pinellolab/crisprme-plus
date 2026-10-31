@@ -13,6 +13,11 @@ verbatim from crisprme.py, whose definitions are exec'd without the dispatch (th
 truncate-and-exec loader of test_bulge_cap) -- on a tiny synthetic genome, with the
 pipeline launch stubbed to succeed or fail, and sort-bed / bgzip replaced by Python
 stand-ins (the light CI env has neither). Every other step of complete-search runs.
+
+A pipeline that may still be running keeps them: after a Ctrl-C, subprocess.call has
+killed only the /bin/sh that runs it (dash does not exec it), and a signal that killed
+the pipeline's bash need not have killed its workers. One test sends SIGINT to a real
+crisprme.py process alone while a stub pipeline outlives that sh.
 """
 import contextlib
 import gzip
@@ -20,10 +25,12 @@ import io
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import types
 import unittest
 from unittest import mock
@@ -103,6 +110,48 @@ def _compress_file(fname):
     return f"{fname}.gz"
 
 
+# The pipeline, as far as the annotation folders go: it starts a worker in the
+# background, as the real one starts its annotation.py workers, and that worker outlives
+# it and its /bin/sh. Once told to (a "go" file), the worker reads both sorted
+# annotations ($5 --annotation, $16 --gene_annotation) and says whether they were there.
+_STUB_PIPELINE = r"""#!/bin/bash
+d=$(dirname "$0")
+(
+	for _ in $(seq 1200); do [ -e "$d/go" ] && break; sleep 0.1; done
+	if cat "$5" "${16}" >/dev/null 2>&1; then echo read; else echo gone; fi >"$d/worker.tmp"
+	mv "$d/worker.tmp" "$d/worker.result"
+) &
+touch "$d/started"
+wait
+"""
+
+
+def _search_until_interrupted(work, stub):
+    """Run in a child process by the SIGINT test: complete-search as the CLI dispatch runs
+    it, in `work`, sort-bed / bgzip stood in for, and the real subprocess.call launching
+    `stub` in place of the pipeline script."""
+    signal.signal(signal.SIGINT, signal.default_int_handler)  # whatever it inherited
+    pipeline = os.path.join(crisprme.script_path, "submit_job_automated_new_multiple_vcfs.sh")
+    real_call = subprocess.call
+
+    def call(cmd, *a, **k):
+        if isinstance(cmd, str):
+            cmd = cmd.replace(pipeline, stub)
+        return real_call(cmd, *a, **k)
+
+    argv = ["crisprme.py", "complete-search", "--genome", "Genomes/synth",
+            "--pam", "PAMs/20bp-NGG-SpCas9.txt", "--guide", "guide.txt",
+            "--mm", "1", "--bDNA", "0", "--bRNA", "0", "--output", "int",
+            "--thread", "1", "--annotation", "myann/func.bed",
+            "--gene_annotation", "myann/genes.bed"]
+    with mock.patch.object(crisprme, "input_args", argv), \
+         mock.patch.object(crisprme, "current_working_directory", work + os.sep), \
+         mock.patch.object(crisprme, "_sort_bed", _sort_bed), \
+         mock.patch.object(crisprme, "_compress_file", _compress_file), \
+         mock.patch.object(crisprme.subprocess, "call", side_effect=call):
+        exec(_dispatch("complete-search"), crisprme.__dict__)
+
+
 class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
     def setUp(self):
         # realpath: the folders are made under os.getcwd(), which resolves symlinks
@@ -159,6 +208,8 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
                 # the pipeline is handed the sorted files in folders that still exist
                 during.extend(d for d in self.leftovers()
                               if os.path.join(self.work, d) in cmd)
+                if pipeline_rc is KeyboardInterrupt:  # Ctrl-C while it runs
+                    raise KeyboardInterrupt
                 return pipeline_rc
             return real_call(cmd, *a, **k)
 
@@ -205,6 +256,76 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
         during = self.search(*self.ANNOTATED, "--keep-intermediates")
         self.assertEqual(len(during), 2)
         self.assertEqual(self.leftovers(), sorted(during))
+
+    def test_a_ctrl_c_while_the_pipeline_runs_keeps_them(self):
+        # subprocess.call has killed only the pipeline's /bin/sh: the pipeline may go on
+        with self.assertRaises(KeyboardInterrupt):
+            self.search(*self.ANNOTATED, pipeline_rc=KeyboardInterrupt)
+        self.assertEqual(len(self.leftovers()), 2)
+
+    def test_a_pipeline_ended_by_a_signal_keeps_them(self):
+        # 128 + N: its bash was killed by signal N, its workers need not have been
+        # (an INT, TERM or HUP trap ends it at once in a `wait`); -N: its /bin/sh was
+        for i, rc in enumerate((130, 137, 143, -15)):
+            with self.subTest(rc=rc):
+                for d in self.leftovers():
+                    shutil.rmtree(os.path.join(self.work, d))
+                with self.assertRaises(OSError):  # complete-search: "CRISPRme run failed!"
+                    self.search(*self.ANNOTATED, pipeline_rc=rc, output=f"sig{i}")
+                self.assertEqual(len(self.leftovers()), 2)
+
+    def test_a_sigint_to_crisprme_py_alone_leaves_the_running_pipeline_its_folders(self):
+        # kill -INT <crisprme.py pid>, not to its process group: the pipeline, here a
+        # worker of it that outlives its /bin/sh, goes on after crisprme.py has exited,
+        # and still finds both sorted annotations
+        sdir = os.path.join(self.work, "stub")
+        os.makedirs(sdir)
+        stub = os.path.join(sdir, "pipeline.sh")
+        with open(stub, "w") as fh:
+            fh.write(_STUB_PIPELINE)
+        os.chmod(stub, 0o755)
+        go, started, result, log = (os.path.join(sdir, f) for f in
+                                    ("go", "started", "worker.result", "child.log"))
+        with open(log, "wb") as fh:
+            child = subprocess.Popen(
+                [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); "
+                 "import test_annotation_tmpdirs as t; t._search_until_interrupted("
+                 "*sys.argv[2:])", HERE, self.work, stub],
+                cwd=self.work, env=dict(os.environ), stdout=fh, stderr=subprocess.STDOUT)
+
+        def child_log():
+            with open(log, errors="replace") as fh:
+                return fh.read()
+
+        def until(done, what):
+            deadline = time.monotonic() + 120
+            while not done():
+                if time.monotonic() > deadline:
+                    self.fail(f"no {what} after 120 s:\n{child_log()}")
+                time.sleep(0.05)
+
+        def stop():  # never leave the child or the worker running
+            open(go, "w").close()
+            if child.poll() is None:
+                child.kill()
+            child.wait()
+            deadline = time.monotonic() + 30
+            while (os.path.exists(started) and not os.path.exists(result)
+                   and time.monotonic() < deadline):
+                time.sleep(0.05)
+        self.addCleanup(stop)
+
+        until(lambda: os.path.exists(started) or child.poll() is not None,
+              "pipeline started")
+        self.assertIsNone(child.poll(), child_log())
+        os.kill(child.pid, signal.SIGINT)
+        child.wait(timeout=120)
+        self.assertIn("KeyboardInterrupt", child_log())
+        self.assertEqual(len(self.leftovers()), 2, "the running pipeline's folders")
+        open(go, "w").close()
+        until(lambda: os.path.exists(result), "worker result")
+        with open(result) as fh:
+            self.assertEqual(fh.read().strip(), "read")
 
 
 class TheDispatchRemovesThemForEveryCallerThatSortsAnnotations(unittest.TestCase):

@@ -1048,17 +1048,19 @@ def _sort_annotation(annotationfile: str) -> str:
 # _sort_annotation, crisprme_pannot_* by _process_personal_annotation), in the
 # working directory unless $CRISPRME_TMPDIR is set. The pipeline reads them, and
 # gunzips back into them, until it ends, so they are removed only once the subcommand
-# that made them is over: see _run_and_remove_annotation_tmpdirs. Never another job's.
+# that made them is over: see _run_and_remove_annotation_tmpdirs. Never another job's,
+# and never one complete_search has handed to a pipeline that may still be running.
 _ANNOTATION_TMPDIRS = []
 
 
 def _run_and_remove_annotation_tmpdirs(subcommand) -> None:
     """Runs a subcommand that sorts annotations (complete-search, assembly-search),
     then removes the annotation temp folders it made, whether it returned or failed
-    (an error() exit, a failed pipeline's OSError, Ctrl-C). Left behind, they took
-    ~1.7 GB per annotated search with the shipped annotations. --keep-intermediates
+    (an error() exit, a failed pipeline's OSError). Left behind, they took ~1.7 GB
+    per annotated search with the shipped annotations. --keep-intermediates
     (CRISPRME_KEEP_INTERMEDIATES=True) keeps them, like the pipeline's other working
-    files.
+    files. So does a Ctrl-C or a signal that leaves the pipeline, or its workers,
+    running on them: complete_search lists them again only once it has ended.
     """
     try:
         subcommand()
@@ -2524,9 +2526,19 @@ def complete_search() -> None:
                 f"{vcf_filter_pass_values} {index_path} {max_total_edits} "
                 f"{1 if prune_pam else 0}"
             )
+            # The pipeline reads the annotation temp folders until it ends, so they are
+            # not removed (_run_and_remove_annotation_tmpdirs) unless it is known to have
+            # ended: an exit of its own (0-128), which comes after it has waited for every
+            # worker. On a Ctrl-C subprocess.call kills only its /bin/sh (dash does not
+            # exec it), and a signal that killed its bash (128 + N) or that sh (-N) can
+            # leave it, or its workers, running on them.
+            handed_over = _ANNOTATION_TMPDIRS[:]
+            del _ANNOTATION_TMPDIRS[:]
             code = subprocess.call(
                 crisprme_run, shell=True, stderr=log_error, stdout=log_verbose
             )
+            if 0 <= code <= 128:
+                _ANNOTATION_TMPDIRS.extend(handed_over)
             if code != 0:
                 # surface WHERE it failed + the actual error, not just "failed"
                 sys.stderr.write(
