@@ -161,7 +161,10 @@ fi
 # an owner record (host, PID namespace, PID, start time), so a lock left by a run
 # that died -- SIGKILL, OOM kill, container stop, reboot -- does not wedge every later
 # run: when the record names this host and PID namespace and that PID is gone, the
-# next run takes the lock over and redoes the build. From another host or container
+# next run takes the lock over and redoes the build. A run stopped before its build
+# is done -- Ctrl-C, a SIGTERM (SLURM's scancel or time limit), a hangup -- leaves
+# its lock and record the same way, for the same takeover: letting go would hand on
+# what the lock guards, half-written, as finished. From another host or container
 # the PID cannot be checked (PIDs and hostnames are not comparable across Docker
 # containers; `--network host` even shares the hostname), so the holder also
 # refreshes its record every minute, and a run there takes the lock over once the
@@ -276,8 +279,9 @@ _lock_sign() {
 # Count lock $1, which this run has just signed, as this run's, and keep its record
 # fresh: a loop in the background touches it every minute, for runs that cannot check
 # this one's PID (_lock_stale). The loop stops as soon as this run is gone (killed
-# outright, so no trap ran) or the record is no longer this run's; _lock_release stops
-# it otherwise. It writes nothing anywhere: this script's stderr fails the stage.
+# outright, so no trap ran) or the record is no longer this run's; _lock_release or
+# _lock_abandon_all stops it otherwise. It writes nothing anywhere: this script's
+# stderr fails the stage.
 _lock_hold() {
 	_locks_held+=("$1")
 	(
@@ -340,9 +344,9 @@ _lock_take() {
 			_lock_sign "$_lock"
 			_lock_hold "$_lock"
 			# Free -- but maybe only since a moment ago: the run that held it may have
-			# finished $3 between the caller's look and this mkdir. A free lock means
-			# its last holder is done (a dead one never frees it, a failed one removes
-			# its output first), so what is in place is final: leave it be.
+			# finished $3 between the caller's look and this mkdir. A free lock means its
+			# last holder is done (a dead or interrupted one never frees it, a failed one
+			# removes its output first), so what is in place is final: leave it be.
 			if _lock_built "$_out" "$_bin"; then
 				_lock_release "$_lock"
 				return 1
@@ -389,8 +393,9 @@ _lock_wait() {
 
 # Release lock $1 if this run took it and still holds it, and stop and reap its
 # refresh loop -- after the lock is gone, so that a loop that missed the signal still
-# ends at its next look. A missing record is this run's own failed write: no run takes
-# over a lock that has none.
+# ends at its next look. Called only once what the lock guards is final: built, removed
+# by a build that failed, or (_lock_take) found in place. A missing record is this
+# run's own failed write: no run takes over a lock that has none.
 _lock_release() {
 	local _i _beat= _kept=() _beats=() _lock_rec
 	for _i in "${!_locks_held[@]}"; do
@@ -413,27 +418,38 @@ _lock_release() {
 	return 0
 }
 
-_lock_release_all() {
-	local _l
-	for _l in "${_locks_held[@]}"; do _lock_release "$_l"; done
+# The run is ending while it still holds locks -- on a signal, or on an exit before
+# their release -- so their builds are not done: leave each lock and its record as
+# they are, for the next run to take over as a dead run's and build again, and stop
+# only the refresh loops, which must not outlive the run.
+_lock_abandon_all() {
+	local _b
+	for _b in "${_lock_beats[@]}"; do
+		kill "$_b" 2>/dev/null
+		wait "$_b" 2>/dev/null
+	done
+	_locks_held=() _lock_beats=()
 }
 
-# INT and TERM: release, then re-raise, so the run still ends by the signal.
+# INT, TERM and HUP: abandon the locks held, then re-raise, so the run still ends by
+# the signal.
 _lock_on_signal() {
-	_lock_release_all
+	_lock_abandon_all
 	trap - "$1"
 	kill -s "$1" "$$"
 }
-# This script sets no other traps. Bash runs INT and TERM once the foreground command
-# returns. Each trap is one call, and the helpers above run no command substitution:
-# on bash 5.2 a trap that fires while bash expands one can fail to parse ("trap: line
-# 2: unexpected EOF while looking for matching `)'"), and the signal is lost -- the
-# run goes on, or even abandons the loop it is in. So a run waiting on a lock always
-# ends on INT or TERM. Elsewhere this script expands $(...) throughout, and there the
-# release on INT or TERM stays best-effort on bash 5.2; the EXIT trap still releases
+# This script sets no other traps. Bash runs INT, TERM and HUP once the foreground
+# command returns, and EXIT at once on a fatal signal it does not trap. Each trap is
+# one call, and the helpers above run no command substitution: on bash 5.2 a trap that
+# fires while bash expands one can fail to parse ("trap: line 2: unexpected EOF while
+# looking for matching `)'"), and the signal is lost -- the run goes on, or even
+# abandons the loop it is in. So a run waiting on a lock always ends on INT, TERM or
+# HUP. Elsewhere this script expands $(...) throughout, and there the trap on INT, TERM
+# or HUP stays best-effort on bash 5.2; the EXIT trap still stops the refresh loops
 # when the run ends, and a lock left by a run killed outright is taken over.
-trap '_lock_release_all' EXIT
+trap '_lock_abandon_all' EXIT
 trap '_lock_on_signal INT' INT
+trap '_lock_on_signal HUP' HUP
 trap '_lock_on_signal TERM' TERM
 
 # iterate over each variant dataset to compute the enriched genomes, index each

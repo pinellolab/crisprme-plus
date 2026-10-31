@@ -17,7 +17,7 @@ with a stub engine on PATH, up to its variant search, so the three places that c
 the resolver are tested as called, not only the function they share.
 
 The resolver skips an index whose build lock is still there, so the locks are tested
-here too: ``ADeadRunsLockDoesNotWedgeTheNext`` and ``ALockIsReleasedByTheRunThatHoldsIt``
+here too: ``ADeadRunsLockDoesNotWedgeTheNext`` and ``ARunThatEndsMidBuildLeavesItsLock``
 run the shipped lock helpers, and ``BuildLocksInTheShippedScript`` kills, interrupts
 and races whole runs. ``TheThreadGuardSizesTheIndexSearched`` covers the RAM guard,
 which must size a search by the index the resolver picked.
@@ -1015,7 +1015,7 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
     def test_the_lock_helpers_were_actually_found(self):
         block = _lock_helpers()
         for part in ("_lock_take() {", "_lock_stale() {", "_lock_steal() {",
-                     "_lock_release() {", "trap '_lock_release_all' EXIT"):
+                     "_lock_release() {", "trap '_lock_abandon_all' EXIT"):
             self.assertIn(part, block)
 
     def test_a_free_lock_is_taken_with_this_runs_owner_record(self):
@@ -1129,7 +1129,8 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
             with self.subTest(host=host, pidns=pidns):
                 self.hold(owner_record(4242, host=host, pidns=pidns))
                 _age(self.lock / "owner", 16)
-                rc, out, err = self.take(then=f"cat {_q(self.lock)}/owner; echo self=$$",
+                rc, out, err = self.take(then=f"cat {_q(self.lock)}/owner; echo self=$$\n"
+                                              f"_lock_release {_q(self.lock)}",
                                          stop_after=10)
                 self.assertEqual(rc, 2, out + err)  # 2: taken over, the build redone
                 self.assertIn(f"Stale lock {self.lock}: the run that held it (pid 4242 on "
@@ -1139,7 +1140,7 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
                 me = re.search(r"^self=(\d+)$", out, re.M).group(1)
                 self.assertIn(f"\npid={me}\n", out)  # the record names this run now
                 self.assertNotIn("waiting", out)
-                self.assertFalse(self.lock.exists())  # and it released it at its exit
+                self.assertFalse(self.lock.exists())  # and released, its build done
                 self.assertEqual(err, "")
 
     def test_a_live_owner_this_run_may_not_signal_is_never_broken(self):
@@ -1199,11 +1200,12 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
     def test_an_index_is_in_place_only_once_it_holds_a_bin(self):
         # -bin: index-genome creates the directory before it writes any .bin, and a
         # directory without one is no index (_resolve_index_dir skips it): build it
-        take = f'_lock_take -bin {_q(self.lock)} "indexing {self.out}" {_q(self.out)}\nexit $?'
+        take = (f'_lock_take -bin {_q(self.lock)} "indexing {self.out}" {_q(self.out)}\n'
+                f"rc=$?\n_lock_release {_q(self.lock)}\nexit $rc")
         self.out.mkdir()
         rc, out, err = self.result(self.start(take))
         self.assertEqual(rc, 0, out + err)  # a free lock, the index to build
-        self.assertFalse(self.lock.exists())  # (released when that run exited)
+        self.assertFalse(self.lock.exists())  # (released, as once that build is done)
         (self.out / "chr1.bin").write_bytes(b"")
         rc, out, err = self.result(self.start(take))
         self.assertEqual(rc, 1, out + err)  # in place: nothing to build
@@ -1238,11 +1240,15 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         self.assertEqual(err, "")
 
 
-class ALockIsReleasedByTheRunThatHoldsIt(_Locks):
-    """A run releases every lock it holds however it ends -- an exit, Ctrl-C, SIGTERM
-    -- and no lock it does not hold: another run's, or one taken over from it since."""
+class ARunThatEndsMidBuildLeavesItsLock(_Locks):
+    """A run lets go of a lock once its build is done, or has failed and removed what it
+    wrote (_lock_release). One that ends any other way -- an exit, Ctrl-C, SIGTERM, a
+    hangup -- leaves that build half-written, so it leaves the lock and its record as
+    they are, for the next run to take over and build again, and stops only the lock's
+    refresh. Letting go would hand the half-written index on as a finished one. It
+    never touches a lock it does not hold: another run's, or one taken over since."""
 
-    def test_exit_releases_this_runs_locks_and_keeps_its_status(self):
+    def test_exit_leaves_this_runs_locks_and_keeps_its_status(self):
         theirs = self.dir / "theirs.lock"
         theirs.mkdir()
         (theirs / "owner").write_text(owner_record(1))
@@ -1251,30 +1257,46 @@ class ALockIsReleasedByTheRunThatHoldsIt(_Locks):
                 f"_lock_take {_q(lost)} 'indexing b' {_q(self.dir / 'b')} || exit 9\n"
                 # another run has taken this one over since: it is no longer this run's
                 f"printf 'host=elsewhere\\npid=1\\n' > {_q(lost)}/owner\n"
-                "exit 3")
-        rc, out, err = self.result(self.start(body))
+                f"cat {_q(self.lock)}/owner\nexit 3")
+        proc = self.start(body)
+        rc, out, err = self.result(proc)
         self.assertEqual(rc, 3, out + err)  # the run's own exit status survives the trap
-        self.assertFalse(self.lock.exists(), "a lock this run held outlived it")
+        self.assertEqual((self.lock / "owner").read_text(), out,
+                         "a lock whose build was not done was let go")
+        self.assertEqual(_wait_until_gone(proc.pid), [])  # its refresh loops stopped
         self.assertEqual((theirs / "owner").read_text(), owner_record(1))
         self.assertEqual((lost / "owner").read_text(), "host=elsewhere\npid=1\n")
         self.assertEqual(err, "")
+        # the next run takes it over, as a dead run's, and does the build
+        rc, out, err = self.take()
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {proc.pid} ", out)
 
-    def test_a_signal_releases_this_runs_locks_and_still_ends_the_run(self):
-        # Ctrl-C reaches the whole process group; `kill` reaches bash alone
-        for sig, to_group in ((signal.SIGINT, True), (signal.SIGTERM, False)):
-            with self.subTest(signal=sig.name):
+    def test_a_signal_leaves_this_runs_lock_and_still_ends_the_run(self):
+        # Ctrl-C and a terminal's hangup reach the whole process group; `kill` reaches
+        # bash alone
+        for sig, to_group in ((signal.SIGINT, True), (signal.SIGTERM, False),
+                              (signal.SIGHUP, True), (signal.SIGHUP, False)):
+            with self.subTest(signal=sig.name, to_group=to_group):
                 body = (f"_lock_take {_q(self.lock)} 'indexing a' {_q(self.out)} || exit 9\n"
                         "echo taken\nwhile :; do sleep 0.2; done")
                 proc = self.start(body)
                 _wait_for(lambda: "taken" in proc.out_path.read_text(), 10, "the lock")
+                record = (self.lock / "owner").read_text()
                 if to_group:
                     os.killpg(proc.pid, sig)
                 else:
                     proc.send_signal(sig)
                 rc, out, err = self.result(proc)
                 self.assertEqual(rc, -sig, out + err)  # ended by the signal, as without a trap
-                self.assertFalse(self.lock.exists(), "an interrupted run left its lock")
-                self.assertEqual(err, "")
+                self.assertEqual((self.lock / "owner").read_text(), record,
+                                 "an interrupted run let go of its lock")
+                self.assertEqual(_wait_until_gone(proc.pid), [])
+                # bash reports the sleep a hangup to the group killed ("Hangup"); nothing
+                # else may reach stderr
+                self.assertEqual([line for line in err.splitlines() if "Hangup" not in line],
+                                 [])
+                shutil.rmtree(self.lock)
 
     def test_a_waiting_run_expands_no_command_substitution(self):
         """bash 5.2 can fail to parse a trap that fires while it expands a $(...) --
@@ -1296,7 +1318,7 @@ class ALockIsReleasedByTheRunThatHoldsIt(_Locks):
 
     def test_each_trap_is_one_function_call(self):
         traps = re.findall(r"^trap '([^']*)' (\w+)$", _lock_helpers(), re.M)
-        self.assertEqual(sorted(sig for _, sig in traps), ["EXIT", "INT", "TERM"])
+        self.assertEqual(sorted(sig for _, sig in traps), ["EXIT", "HUP", "INT", "TERM"])
         for body, sig in traps:
             self.assertRegex(body, r"^_lock_\w+( [A-Z]+)?$", sig)
 
@@ -1343,18 +1365,23 @@ class ALockIsKeptFreshByTheRunThatHoldsIt(_Locks):
         self.assertEqual(err, "")
 
     def test_the_refresh_stops_when_the_run_ends(self):
-        # an exit, or INT/TERM, which reach the loop through the release
+        # an exit, or INT, TERM or HUP, before the build is done: the lock is left for
+        # the next run to take over, and no longer refreshed
         for how, status in (("exit 3", 3), ("kill -s TERM $$", -signal.SIGTERM),
-                            ("kill -s INT $$", -signal.SIGINT)):
+                            ("kill -s INT $$", -signal.SIGINT),
+                            ("kill -s HUP $$", -signal.SIGHUP)):
             with self.subTest(how=how):
                 proc = self.hold_then(how)
                 self.assertRefreshed(proc)
                 self.go.touch()
                 rc, out, err = self.result(proc)
                 self.assertEqual(rc, status, out + err)
-                self.assertFalse(self.lock.exists())
                 self.assertEqual(_wait_until_gone(proc.pid), [])
+                _age(self.lock / "owner", 60)
+                time.sleep(1)  # five refresh intervals
+                self.assertGreater(time.time() - (self.lock / "owner").stat().st_mtime, 3000)
                 self.assertEqual(err, "")
+                shutil.rmtree(self.lock)
                 self.go.unlink()
 
     def test_the_refresh_stops_when_the_holder_is_killed_outright(self):
@@ -1651,20 +1678,101 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         waiter.proc.wait(timeout=30)
         self.assertEqual(list(self.lock.iterdir()), [])  # not its lock: left as it was
 
-    def test_an_interrupted_build_releases_its_lock(self):
-        # Ctrl-C reaches the whole run; so does a stop sent to its process group
-        for sig in (signal.SIGINT, signal.SIGTERM):
+    # Ctrl-C reaches the whole run; so do a stop sent to all of its processes (SLURM's
+    # scancel or time limit) and a terminal's hangup
+    INTERRUPTS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+
+    def interrupt(self, run, sig, partial, lock, quiet=True, again=False):
+        """Signal the whole of `run` once the build it holds `lock` for has written
+        `partial`, one .bin of its index, and check that the run left the lock as it
+        held it. `quiet`: nothing reaches stderr but bash's word for a step the signal
+        killed ("Terminated", "Hangup"; none for Ctrl-C). `again`: signal once more if
+        the first leaves the step hung, as a user presses Ctrl-C again."""
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes(b"")
+        record = (lock / "owner").read_text()
+        os.killpg(run.proc.pid, sig)
+        try:
+            run.proc.wait(timeout=10 if again else 30)
+        except subprocess.TimeoutExpired:
+            if not again:
+                raise
+            os.killpg(run.proc.pid, sig)
+            run.proc.wait(timeout=30)
+        self.assertEqual(run.proc.returncode, -sig)  # still ended by the signal
+        self.assertEqual((lock / "owner").read_text(), record,
+                         "an interrupted build let go of its lock")
+        self.assertEqual(_wait_until_gone(run.proc.pid), [])  # its refresh stopped too
+        if quiet:
+            self.assertEqual([line for line in run.stderr().splitlines()
+                              if not re.search(r"\b(Terminated|Hangup)\b", line)], [])
+
+    def test_an_interrupted_build_leaves_its_lock_and_the_next_run_redoes_it(self):
+        # Letting go of the lock would leave the half-written index looking finished, and
+        # the next run would search it: fewer off-targets, no error.
+        for sig in self.INTERRUPTS:
             with self.subTest(signal=sig.name):
                 run = self.start_build()
-                self.assertTrue(self.lock.is_dir())
-                os.killpg(run.proc.pid, sig)
-                run.proc.wait(timeout=30)
-                self.assertEqual(run.proc.returncode, -sig)  # still ended by the signal
-                self.assertFalse(self.lock.exists(), "an interrupted build left its lock")
-                # bash reports a build killed by SIGTERM ("... Terminated ..."), never one
-                # killed by Ctrl-C; nothing else may reach stderr
-                self.assertEqual([line for line in run.stderr().splitlines()
-                                  if "Terminated" not in line], [])
+                self.interrupt(run, sig, self.index / "chr1.bin", self.lock)
+                after = self.run_pipeline(variant=False, timeout=60)
+                self.assertIn(f"Stale lock {self.lock}: the run that held it (pid "
+                              f"{run.proc.pid} ", after.stdout)
+                self.assertBuiltAndSearched(after)  # never "Reference index present"
+                shutil.rmtree(self.index)
+
+    def test_an_interrupted_variant_index_build_leaves_its_lock_and_the_next_run_redoes_it(self):
+        self.install("NRG_2", variant=False)  # a reference index; the variant one is built
+        var = self.library / f"NRG_2_hg38+{self.VCF}"
+        lock = Path(f"{var}.lock")
+        for sig in self.INTERRUPTS:
+            with self.subTest(signal=sig.name):
+                run = self.launch(env={"STUB_ENRICH": "1", "STUB_HOLD_BUILD": "1"})
+                _wait_for(lambda: ["index-genome", f"hg38+{self.VCF}"] in
+                          [c[:2] for c in run.calls()], 60, "the variant index build")
+                self.interrupt(run, sig, var / "chr1.bin", lock)
+                after = self.run_pipeline(timeout=60)
+                self.assertIn(f"Stale lock {lock}: the run that held it (pid {run.proc.pid} ",
+                              after.stdout)
+                # never "Variant index present", nor taken for a precomputed one
+                self.assertIsNone(after.variant, after.stdout)
+                self.assertFalse(after.precomputed, after.stdout)
+                self.assertIn(["index-genome", f"hg38+{self.VCF}"], [c[:2] for c in after.calls])
+                self.assertEqual(after.searched(variant=True), (var.name, False))
+                self.assertFalse(lock.exists())
+                self.assertEqual(after.stderr.strip(), "ERROR: Off-targets search Variant failed",
+                                 after.stderr)
+                shutil.rmtree(var)
+
+    def test_an_interrupted_indels_build_leaves_its_lock_and_the_next_run_redoes_it(self):
+        # a downloaded variant index whose INDELS companion is built here, from its source
+        self.install("NRG_3")
+        indels = self.library / f"NRG_3_hg38+{self.VCF}_INDELS"
+        shutil.rmtree(indels)
+        lock = Path(f"{indels}.lock")
+        source = self.home / "Genomes" / f"hg38+{self.VCF}_INDELS" / f"fake_{self.VCF}_chr1"
+        source.mkdir(parents=True)
+        (source / "fakechr1.fa").write_text(">fakechr1\nACGTACGTACGTACGTACGTACGTACGT\n")
+        for sig in self.INTERRUPTS:
+            with self.subTest(signal=sig.name):
+                run = self.launch(env={"STUB_HOLD_BUILD": "1"})
+                _wait_for(lambda: any(c[0] == "index-genome" for c in run.calls()), 60,
+                          "the INDELS build")
+                # pool_index_indels.py may say on stderr how it was stopped. On Ctrl-C it
+                # can also hang, as at b5d6cc1: its pool's terminate() can kill a worker
+                # that holds the result queue's lock while handing back its result.
+                # Another Ctrl-C ends it.
+                self.interrupt(run, sig, indels / "NRG_3_fakechr1" / "fakechr1.bin", lock,
+                               quiet=False, again=sig == signal.SIGINT)
+                after = self.run_pipeline(timeout=60)
+                self.assertIn(f"Stale lock {lock}: the run that held it (pid {run.proc.pid} ",
+                              after.stdout)
+                self.assertIsNone(after.indels, after.stdout)  # never "Indels index present"
+                self.assertIn(["index-genome", f"hg38+{self.VCF}_INDELS/NRG_3_fakechr1"],
+                              [c[:2] for c in after.calls])
+                self.assertFalse(lock.exists())
+                self.assertEqual(after.stderr.strip(), "ERROR: Off-targets search Variant failed",
+                                 after.stderr)
+                shutil.rmtree(indels)
 
     def test_a_locked_indels_index_is_not_taken_as_present(self):
         # An INDELS build that died left its lock beside its half-written directory. The
