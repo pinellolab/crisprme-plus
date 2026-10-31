@@ -1203,6 +1203,39 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         self.assertEqual((self.lock / "owner").read_text(), record)
         self.assertEqual(err, "")
 
+    def test_a_takeover_more_than_a_minute_old_is_abandoned(self):
+        # A takeover takes milliseconds. A run that ended inside one (SIGKILL, say) left
+        # ".takeover" in the lock, and every later takeover failed on it: no run ever took
+        # that lock over, and each waited for good.
+        self.hold(owner_record(dead_pid()))
+        (self.lock / ".takeover").mkdir()
+        _age(self.lock / ".takeover", 60)
+        rc, out, err = self.take(then=f"ls -A {_q(self.lock)}", stop_after=10)
+        self.assertEqual(rc, 2, out + err)  # 2: taken over, the build redone
+        self.assertIn(f"Stale lock {self.lock}: the run that held it", out)
+        self.assertEqual(out.splitlines()[-1], "owner")  # this run's record, nothing else
+        self.assertEqual(err, "")
+
+    def test_a_run_that_ends_inside_its_takeover_leaves_no_takeover_behind(self):
+        # Ctrl-C lands while bash waits for the takeover's mkdir, which a takeover spends
+        # most of its time in, and bash runs the trap as soon as the mkdir returns, before
+        # anything after it. Stood for by a mkdir that hangs once it has made ".takeover".
+        self.hold(owner_record(dead_pid()))
+        made = self.dir / "made"
+        proc = self.start(f'mkdir() {{ command mkdir "$@" || return; '
+                          f'[ "${{1##*/}}" = .takeover ] || return 0; : >{_q(made)}; sleep 30; }}\n'
+                          + self.take_body())
+        _wait_for(made.exists, 10, "the takeover")
+        self.assertTrue((self.lock / ".takeover").is_dir())
+        os.killpg(proc.pid, signal.SIGINT)
+        rc, out, err = self.result(proc)
+        self.assertEqual(rc, -signal.SIGINT, out + err)
+        self.assertEqual(os.listdir(self.lock), ["owner"])
+        self.assertEqual(_wait_until_gone(proc.pid), [])
+        self.assertEqual(err, "")
+        rc, out, err = self.take()  # and the next run takes it over at once
+        self.assertEqual(rc, 2, out + err)
+
     def test_a_lock_released_with_its_output_in_place_is_not_built_again(self):
         owner = self.sleeper()
         self.hold(owner_record(owner.pid))
@@ -1985,6 +2018,39 @@ class BuildLocksInTheShippedScript(_ShippedScript):
                 self.assertEqual(after.stderr.strip(), "ERROR: Off-targets search Variant failed",
                                  after.stderr)
                 shutil.rmtree(indels)
+
+    def test_a_run_interrupted_as_it_takes_a_lock_over_leaves_it_to_the_next(self):
+        # Ctrl-C as soon as a takeover had begun (".takeover" appeared) left ".takeover" in
+        # the lock, 40 times out of 40, and no run ever took that lock over again.
+        takeover, hits = self.lock / ".takeover", 0
+        for _ in range(20):
+            for left in (self.lock, self.index):
+                shutil.rmtree(left, ignore_errors=True)
+            self.lock.mkdir()
+            (self.lock / "owner").write_text(owner_record(dead_pid()))
+            self.index.mkdir()
+            (self.index / "chr1.bin").write_bytes(b"")
+            run = self.launch(variant=False, env={"STUB_HOLD_BUILD": "1",
+                                                  "_lock_beat_s": "0.2"})
+            calls, deadline = run.work / "engine_calls.txt", time.monotonic() + 30
+            while not (takeover.is_dir() or calls.exists() or run.proc.poll() is not None
+                       or time.monotonic() > deadline):
+                pass
+            if not takeover.is_dir():  # missed: the takeover was over before it was seen
+                _reap(run.proc)
+                continue
+            os.killpg(run.proc.pid, signal.SIGINT)
+            run.proc.wait(timeout=30)
+            self.assertEqual(run.proc.returncode, -signal.SIGINT)
+            self.assertNotIn(".takeover", os.listdir(self.lock))
+            self.assertEqual(_wait_until_gone(run.proc.pid), [])
+            hits += 1
+            if hits == 5:
+                break
+        self.assertGreaterEqual(hits, 3, "the takeover was too quick to be interrupted")
+        after = self.run_pipeline(variant=False, timeout=60)
+        self.assertIn(f"Stale lock {self.lock}: the run that held it", after.stdout)
+        self.assertBuiltAndSearched(after)
 
     def test_a_locked_indels_index_is_not_taken_as_present(self):
         # An INDELS build that died left its lock beside its half-written directory. The

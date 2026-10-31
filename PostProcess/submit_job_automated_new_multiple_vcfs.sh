@@ -170,13 +170,16 @@ fi
 # refreshes its record every minute, and a run there takes the lock over once the
 # record has gone 15 minutes without a refresh. So does a run on this host, whatever
 # the PID says: a run that died unreaped (a zombie), or a PID reused since, still
-# answers kill -0. A lock with no record at all (taken by an older CRISPRme) is never
-# broken: the run waits for it and says every few minutes how to clear it. Every
-# message goes to stdout: a write to stderr fails the stage.
+# answers kill -0. A lock with no record at all is never broken, however old: CRISPRme
+# 2.8.0 takes its locks with a bare mkdir and may still be building under one. So a
+# run that ends in the moment between a free lock's mkdir and the write of its record
+# leaves a lock that someone must clear: the run waits for it and says every few
+# minutes how to. Every message goes to stdout: a write to stderr fails the stage.
 _lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/null)" \
 	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
 _locks_held=()
 _lock_beats=()  # the PID of each held lock's refresh loop, at its index in _locks_held
+_lock_takeover=  # the ".takeover" this run is making or holds, while it does (_lock_steal)
 # From here to the traps, nothing runs a command substitution: see the traps.
 
 # Set variable $1 to field $3 of owner record $2, or to "" when it has none (parameter
@@ -329,11 +332,22 @@ _lock_hold() {
 # Take over lock $1 from the dead owner whose record is $2, without the lock ever
 # going away: a waiter that saw it go would take the half-written output for a
 # finished one. ".takeover" admits one run at a time, and the record is re-read under
-# it, so two runs that both found the lock stale cannot both take it over.
+# it, so two runs that both found the lock stale cannot both take it over. A takeover
+# takes milliseconds, so a ".takeover" more than a minute old was left by a run that
+# ended inside one: it is cleared, for a later poll to take the lock over. A run that
+# ends inside its own clears it (_lock_abandon_all), named in _lock_takeover from just
+# before the mkdir: bash runs a trap as soon as a command it waits for returns.
 # 0 = this run now holds the lock.
 _lock_steal() {
 	local _rc=1 _lock_rec
-	mkdir "$1/.takeover" 2>/dev/null || return 1
+	_lock_takeover="$1/.takeover"
+	if ! mkdir "$1/.takeover" 2>/dev/null; then
+		_lock_takeover=
+		# (find through a pipe: a test, not $(...))
+		find "$1/.takeover" -maxdepth 0 -mmin +1 2>/dev/null | grep -q . \
+			&& rmdir "$1/.takeover" 2>/dev/null
+		return 1
+	fi
 	_lock_read "$1"
 	if [ "$_lock_rec" = "$2" ] && _lock_sign "$1"; then
 		_lock_hold "$1"
@@ -341,6 +355,7 @@ _lock_steal() {
 	fi
 	rm -f "$1/owner.$$" 2>/dev/null
 	rmdir "$1/.takeover" 2>/dev/null
+	_lock_takeover=
 	return $_rc
 }
 
@@ -449,11 +464,15 @@ _lock_release() {
 # The run is ending while it still holds locks -- on a signal, or on an exit before
 # their release -- so their builds are not done: leave each lock and its record as
 # they are, for the next run to take over as a dead run's and build again, and stop
-# only the refresh loops, which must not outlive the run. Only the run itself does: a
-# child that runs this trap -- as bash 5.2 can, right after forking it -- returns.
+# only the refresh loops, which must not outlive the run -- and clear a ".takeover"
+# this run is inside (_lock_steal), which would stop every takeover for a minute. Only
+# the run itself does: a child that runs this trap -- as bash 5.2 can, right after
+# forking it -- returns.
 _lock_abandon_all() {
 	local _b
 	[ "${BASHPID:-$$}" = "$$" ] || return 0
+	[ -z "$_lock_takeover" ] || rmdir "$_lock_takeover" 2>/dev/null
+	_lock_takeover=
 	for _b in "${_lock_beats[@]}"; do
 		kill "$_b" 2>/dev/null
 		wait "$_b" 2>/dev/null
