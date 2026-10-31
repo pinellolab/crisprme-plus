@@ -164,7 +164,7 @@ fi
 # zombie (a run that died unreaped), or another process's by now (one that started at
 # another time), the next run takes the lock over and redoes the build. That very run
 # is waited for, however old its record: stopped (Ctrl-Z, kill -STOP, a SLURM
-# suspend), it does not refresh it (below). A run stopped before its build is done --
+# suspend), it does not refresh it (below). A run ended before its build is done --
 # Ctrl-C, a SIGTERM (SLURM's scancel or time limit), a hangup -- leaves its lock and
 # record the same way, for the same takeover: letting go would hand on what the lock
 # guards, half-written, as finished. From another host or container the PID cannot be
@@ -175,14 +175,17 @@ fi
 # process given its PID since (hidepid, no /proc), as a reused PID answers kill -0. A
 # run stopped where no other run can see it -- in another container or on another host
 # (docker pause, a job suspended elsewhere) -- can thus lose its lock to a takeover
-# after 15 minutes; resumed, it ends with an ERROR as soon as its build step returns,
-# using and removing nothing that the lock guards (_lock_lost). A lock with no record
-# at all is never broken, however old: CRISPRme 2.8.0 takes its locks with a bare
-# mkdir and may still be building under one. So a run that ends in the moment between
-# a free lock's mkdir and the write of its record leaves a lock that someone must
-# clear: the run waits for it and says every few minutes how to. Every message goes to
-# stdout -- a write to stderr fails the stage -- except the ERROR of a run that ends
-# in failure.
+# after 15 minutes. Resumed, it goes on with its build step until that step returns,
+# and only then ends with an ERROR, using and removing nothing that the lock guards
+# (_lock_lost). For the INDELS index, pool_index_indels.py meanwhile goes on removing
+# and rebuilding per-chromosome directories inside the taker's index. So a library
+# shared across hosts or containers must never have a build suspended for 15 minutes
+# or more. A lock with no record at all is never broken, however old: CRISPRme 2.8.0
+# takes its locks with a bare mkdir and may still be building under one. So a run that
+# ends in the moment between a free lock's mkdir and the write of its record leaves a
+# lock that someone must clear: the run waits for it and says every few minutes how
+# to. Every message goes to stdout -- a write to stderr fails the stage -- except the
+# ERROR of a run that ends in failure.
 _lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/null)" \
 	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
 _locks_held=()
