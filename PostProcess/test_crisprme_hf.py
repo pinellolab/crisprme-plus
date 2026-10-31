@@ -383,6 +383,65 @@ class TestHfRetry(unittest.TestCase):
         self.assertIn("still failing after 2 attempts", err.getvalue())
         self.assertIn("re-run the same command", err.getvalue())
 
+    def _fake_hub(self, xet_off=False):
+        """A stand-in huggingface_hub whose constants module carries the Xet switch."""
+        constants = mock.MagicMock(HF_HUB_DISABLE_XET=xet_off)
+        hub = mock.MagicMock(constants=constants)
+        return constants, {"huggingface_hub": hub, "huggingface_hub.constants": constants}
+
+    def test_a_failed_xet_transfer_switches_to_plain_https(self):
+        constants, modules = self._fake_hub()
+        seen = []
+
+        def flaky(**kw):
+            seen.append(constants.HF_HUB_DISABLE_XET)
+            if len(seen) == 1:
+                raise RuntimeError(self.XET_DROP)
+            return "ok"
+
+        err = io.StringIO()
+        with mock.patch.dict("sys.modules", modules), \
+                mock.patch.dict(os.environ, {}, clear=False), \
+                mock.patch.object(hf.time, "sleep"), contextlib.redirect_stderr(err):
+            os.environ.pop("HF_HUB_DISABLE_XET", None)
+            self.assertEqual(hf._hf_call_with_retry(flaky, _what="snapshot"), "ok")
+            self.assertEqual(os.environ.get("HF_HUB_DISABLE_XET"), "1")
+        self.assertEqual(seen, [False, True])  # the retry ran with Xet off
+        self.assertIn("fetching over plain HTTPS from now on", err.getvalue())
+
+    def test_other_transport_errors_keep_xet(self):
+        constants, modules = self._fake_hub()
+        calls = {"n": 0}
+
+        def flaky(**kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ConnectionResetError(104, "Connection reset by peer")
+            return "ok"
+
+        err = io.StringIO()
+        with mock.patch.dict("sys.modules", modules), \
+                mock.patch.object(hf.time, "sleep"), contextlib.redirect_stderr(err):
+            hf._hf_call_with_retry(flaky, _what="snapshot")
+        self.assertFalse(constants.HF_HUB_DISABLE_XET)
+        self.assertNotIn("plain HTTPS", err.getvalue())
+
+    def test_no_switch_message_when_xet_is_already_off(self):
+        constants, modules = self._fake_hub(xet_off=True)
+        seq = [RuntimeError(self.XET_DROP), "ok"]
+
+        def flaky(**kw):
+            v = seq.pop(0)
+            if isinstance(v, Exception):
+                raise v
+            return v
+
+        err = io.StringIO()
+        with mock.patch.dict("sys.modules", modules), \
+                mock.patch.object(hf.time, "sleep"), contextlib.redirect_stderr(err):
+            hf._hf_call_with_retry(flaky, _what="snapshot")
+        self.assertNotIn("plain HTTPS", err.getvalue())
+
 
 class TestIndexAlreadyInstalled(unittest.TestCase):
     """`--what index` must NO-OP when the index is already installed.

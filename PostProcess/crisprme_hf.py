@@ -1026,6 +1026,35 @@ def _hf_retry_after(exc: BaseException) -> Optional[float]:
     return secs if 0 < secs <= 300 else None
 
 
+# hf_xet's own transfer failures (its Rust errors reach Python as a RuntimeError)
+_HF_XET_MESSAGES = ("cas client error", "file reconstruction error")
+
+
+def _hf_fall_back_from_xet(exc: BaseException, what: str) -> None:
+    """After an hf_xet transfer failure, fetch over plain HTTPS from then on (HF
+    serves every Xet file through its xet-bridge as well). One archive failed this
+    way on every attempt, from two networks and two hf_xet versions, while plain
+    HTTPS delivered it whole; retrying through Xet would only repeat it. Sets the
+    constant huggingface_hub reads on every call (``is_xet_available()``), and the
+    environment variable for anything started later; no-op when Xet is already
+    off or the hub has no such switch."""
+    if not any(s in str(exc).lower() for s in _HF_XET_MESSAGES):
+        return
+    try:
+        from huggingface_hub import constants as hub_constants
+    except ImportError:
+        return
+    if getattr(hub_constants, "HF_HUB_DISABLE_XET", True):
+        return
+    hub_constants.HF_HUB_DISABLE_XET = True
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    sys.stderr.write(
+        f"HF {what}: the Xet transfer failed; fetching over plain HTTPS from now on "
+        f"(slower, but it does not depend on Xet).\n"
+    )
+    sys.stderr.flush()
+
+
 def _hf_call_with_retry(fn, *args, _what: str = "download",
                         _max_attempts: int = 6, **kwargs):
     """Call ``fn(*args, **kwargs)``, retrying transient HF errors (429 rate-limit,
@@ -1070,6 +1099,7 @@ def _hf_call_with_retry(fn, *args, _what: str = "download",
                 f"with an HF token to avoid rate limits)...\n"
             )
             sys.stderr.flush()
+            _hf_fall_back_from_xet(e, _what)
             time.sleep(wait)
             delay = min(delay * 2, 60.0)
     raise RuntimeError("unreachable")  # pragma: no cover
