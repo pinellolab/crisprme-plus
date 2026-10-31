@@ -3442,10 +3442,17 @@ def build_index_only() -> None:
             for _d in (indels_out, dict_folder, indel_dict):
                 if os.path.isdir(_d):
                     shutil.rmtree(_d)
-            # Then only moves (renames on one file system): the fake-indel genomes, the
-            # dictionaries, and the enriched genome last. A later run takes it for a
-            # finished enrichment (above), so a run that ends before here leaves none,
-            # and the next one enriches again, clearing what this one moved.
+            # Then only moves: the fake-indel genomes, the dictionaries, and the enriched
+            # genome last. A later run takes it for a finished enrichment (above), so a
+            # run that ends before here leaves none, and the next one enriches again,
+            # clearing what this one moved. The moves are renames, done in moments, only
+            # when Genomes and Dictionaries are on one file system and mount (as in the
+            # documented single-mount layout). With Dictionaries on another, shutil.move
+            # copies the dictionaries (40-50 GB at 1000 Genomes scale), and for that time
+            # the fake-indel genomes and some of the dictionaries are in place without the
+            # enriched genome: a search started then, or after a kill then, fails as it
+            # moves its own enrichment into place, until a build-index-only run clears
+            # them as it enriches again.
             os.makedirs(indels_out, exist_ok=True)
             for f in _glob(os.path.join(variants_tmp, "fake*")):
                 shutil.move(f, indels_out)

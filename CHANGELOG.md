@@ -27,12 +27,17 @@ and the `release-crisprme` skill.
   default ACL, as one built in place does. The enrichment is staged the same way: its dictionaries
   are compressed before anything moves, then the fake-indel genomes and the dictionaries are moved
   into place, and the enriched genome last, so a run that ends before then leaves none of it and the
-  next one enriches again. A compression that fails now fails the build and puts nothing in place:
-  `pigz`'s exit status was ignored, and a Python gzip (used without `pigz`) that failed ended the run
-  with a traceback, the enriched genome already in place. An index or an enriched genome that
-  another run finished meanwhile is kept, with a line on stdout. Ctrl-C, SIGTERM and SIGHUP still end
-  the run by that signal. On success the files, their contents (the `.gz` files included),
-  permissions, sidecars, stdout lines and exit status are as before.
+  next one enriches again. Those moves are renames, done in moments, when `Genomes` and
+  `Dictionaries` share a file system and mount, as in the documented single-mount layout; with
+  `Dictionaries` mounted on its own they copy the dictionaries, and a search started during that
+  copy, or after a run killed in it, fails until `build-index-only` has enriched again. A
+  compression that fails now fails the build and puts nothing in place: `pigz`'s exit status was
+  ignored, and a Python gzip (used without `pigz`) that failed ended the run with a traceback, the
+  enriched genome already in place. An index or an enriched genome that another run finished
+  meanwhile is kept, with a line on stdout. Ctrl-C, SIGTERM and SIGHUP still end the run by that
+  signal, once it has removed its build directory; a second one meanwhile (Ctrl-C pressed twice)
+  waits for that. On success the files, their contents (the `.gz` files included), permissions,
+  sidecars, stdout lines and exit status are as before.
 - **`build-index-only` stops while a search holds the build lock of what it uses or builds.**
   `complete-search` holds `<output>.lock` while it enriches a genome or builds an index, and never
   uses an output whose lock is there. `build-index-only` looked at no lock: started while a search
@@ -59,18 +64,22 @@ and the `release-crisprme` skill.
   in that write left the file empty or cut short, and the next run indexed it as a whole one (an empty
   one as `No indels on <chr>`), so the INDELS index had no indel target past the cut, with no error;
   a write that failed (a full disk) was a WARNING, and the same run indexed what was left. Each FASTA
-  is now written beside the original and renamed over it, with the same contents, mode and owner,
-  and an overlay that fails fails the build (an ERROR, and no INDELS index). A FASTA that an earlier
-  release cut short is not detected: if a `build-index-only` run was stopped while it overlaid,
-  remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS` and `Genomes/<genome>+<vcf>` and run it
-  again, which enriches again.
+  is now written in a hidden directory beside the original and renamed over it, with the same
+  contents, mode and owner, and an overlay that fails fails the build (an ERROR, and no INDELS index).
+  A FASTA that an earlier release cut short is not detected: if a `build-index-only` run was stopped
+  while it overlaid, remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`, `Genomes/<genome>+<vcf>`
+  and `Genomes/<genome>+<vcf>_INDELS`, then run `build-index-only` again, which enriches again, and do
+  not search with that dataset until it has finished.
 - **The build directories of killed runs are reclaimed.** A SIGKILL (an OOM kill, a container stop)
   leaves the build directory, holding a partial index or enrichment as large as the finished one,
   which nothing read or removed. Each build directory now holds an owner record (host, PID namespace,
-  PID and start time, as a search's build lock does), and each build first removes those whose owner
-  is gone on this host and PID namespace (dead, a zombie, or its PID now another process's), with a
-  line on stdout for each. One whose owner is running or stopped, or has no record, is left alone,
-  as is any directory `build-index-only` did not make. One made in another PID namespace or on
+  PID and start time, as a search's build lock does), and each `build-index-only` run first removes
+  those whose owner is gone on this host and PID namespace (dead, a zombie, or its PID now another
+  process's), with a line on stdout for each, whatever it goes on to build: after a kill, the next run
+  is often a `complete-search`, which builds the missing index or enriches the genome itself. The SNP
+  overlay's hidden directories beside the fake-indel FASTAs of the run's dataset hold an owner record
+  too, and are removed the same way. One whose owner is running or stopped, or has no record, is left
+  alone, as is any directory `build-index-only` did not make. One made in another PID namespace or on
   another host, whose owner cannot be checked from here (a web container's own, once it restarted),
   is left too, with a line on stdout that says how to remove it. The enrichment's directory,
   `Genomes/run_*` before, which the web genome list showed as a genome, is now hidden and reclaimed
