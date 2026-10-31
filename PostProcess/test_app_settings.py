@@ -131,19 +131,28 @@ class TestAppSearchPoolSize(unittest.TestCase):
     except silently pinned the search pool to 2, whatever the env var or the
     Settings page said."""
 
-    def _import_app(self, root=_REPO_ROOT, env_jobs=None, saved_jobs=None):
+    def _import_app(
+        self, root=_REPO_ROOT, env_jobs=None, saved_jobs=None, io_encoding=None
+    ):
         """Import <root>/app.py like the web app does; return (search pool
-        max_workers, everything app.py printed on stdout)."""
+        max_workers, everything app.py printed on stdout). ``io_encoding`` is the
+        child's PYTHONIOENCODING, which -I ignores: the child then runs with -s -P
+        (the rest of -I) and without PYTHONPATH."""
         env = dict(os.environ)
         env.pop("CRISPRME_CONFIG_DIR", None)
         env.pop("CRISPRME_MAX_CONCURRENT_JOBS", None)
         if env_jobs is not None:
             env["CRISPRME_MAX_CONCURRENT_JOBS"] = str(env_jobs)
+        flags = ["-I"]
+        if io_encoding is not None:
+            env["PYTHONIOENCODING"] = io_encoding
+            env.pop("PYTHONPATH", None)
+            flags = ["-s", "-P"]
         with tempfile.TemporaryDirectory() as workdir:  # the user's cwd, not the repo
             if saved_jobs is not None:  # what the Settings page persists
                 a.set_max_concurrent_jobs(saved_jobs, workdir)
             res = subprocess.run(
-                [sys.executable, "-I", "-c", _APP_IMPORT_DRIVER, root],
+                [sys.executable, *flags, "-c", _APP_IMPORT_DRIVER, root],
                 cwd=workdir, env=env, capture_output=True, text=True, timeout=120,
             )
         self.assertEqual(res.returncode, 0, res.stderr)
@@ -213,6 +222,31 @@ class TestAppSearchPoolSize(unittest.TestCase):
                 self.assertEqual(len(out.splitlines()), 1, out)
                 self.assertIn(f"CRISPRME_MAX_CONCURRENT_JOBS={raw!r}", out)
                 self.assertRegex(out, rf"\busing {used}\b")
+
+    # The warnings run at import: one that stdout cannot encode used to raise
+    # there and stop the web server, e.g. a latin-1 locale and a value pasted
+    # with curly quotes. They now print the value and the error ASCII-escaped.
+
+    def test_non_ascii_env_value_is_reported_on_an_ascii_stdout(self):
+        for raw in ("\u201c5\u201d", "\u00b2", "\u2460"):
+            with self.subTest(raw=raw):
+                workers, out = self._import_app(env_jobs=raw, io_encoding="ascii")
+                self.assertEqual(workers, 2)
+                self.assertEqual(len(out.splitlines()), 1, out)
+                self.assertIn(f"CRISPRME_MAX_CONCURRENT_JOBS={raw!a}", out)
+                self.assertRegex(out, r"\busing 2\b")
+
+    def test_unreadable_setting_is_reported_on_an_ascii_stdout(self):
+        with tempfile.TemporaryDirectory() as root:  # app_settings fails, non-ASCII
+            shutil.copy(os.path.join(_REPO_ROOT, "app.py"), root)
+            os.mkdir(os.path.join(root, "PostProcess"))
+            with open(os.path.join(root, "PostProcess", "app_settings.py"), "w") as fh:
+                fh.write('raise OSError("cannot read /srv/caf\\u00e9")\n')
+            workers, out = self._import_app(root=root, io_encoding="ascii")
+        self.assertEqual(workers, 2)
+        self.assertEqual(len(out.splitlines()), 1, out)
+        self.assertIn("app_settings", out)
+        self.assertIn("caf\\xe9", out)
 
     def test_env_value_used_as_given_prints_nothing(self):
         # Whole numbers 1-16 are used as given, blanks and a leading zero

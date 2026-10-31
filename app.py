@@ -127,9 +127,11 @@ try:
     _MAX_CONCURRENT_JOBS = app_settings.get_max_concurrent_jobs()
 except Exception as e:
     _MAX_CONCURRENT_JOBS = 2
+    # ascii(): this runs at import, so the line must encode on any stdout (a
+    # latin-1 locale, say) or the app would not start; the warning below too.
     sys.stdout.write(
         "WARNING: cannot read the concurrent search jobs setting (app_settings: "
-        f"{type(e).__name__}: {e}); using the default of {_MAX_CONCURRENT_JOBS} "
+        f"{type(e).__name__}: {str(e)!a}); using the default of {_MAX_CONCURRENT_JOBS} "
         "concurrent search jobs\n"
     )
     sys.stdout.flush()
@@ -143,9 +145,9 @@ else:
     _env_jobs = os.environ.get("CRISPRME_MAX_CONCURRENT_JOBS", "").strip()
     if _env_jobs and _env_jobs.lstrip("0") != str(_MAX_CONCURRENT_JOBS):
         sys.stdout.write(
-            f"WARNING: CRISPRME_MAX_CONCURRENT_JOBS={_env_jobs!r} is not a whole number "
-            f"from 1 to {app_settings.MAX_JOBS_CAP}; using {_MAX_CONCURRENT_JOBS} "
-            "concurrent search job(s)\n"
+            f"WARNING: CRISPRME_MAX_CONCURRENT_JOBS={_env_jobs!a} is not a whole "
+            f"number from 1 to {app_settings.MAX_JOBS_CAP}; using "
+            f"{_MAX_CONCURRENT_JOBS} concurrent search job(s)\n"
         )
         sys.stdout.flush()
 pool_executor = concurrent.futures.ProcessPoolExecutor(max_workers=_MAX_CONCURRENT_JOBS)
