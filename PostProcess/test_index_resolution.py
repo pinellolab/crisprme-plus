@@ -916,6 +916,13 @@ def _processes(pgid):
     return procs
 
 
+def _state(pid):
+    """`pid`'s state as ps gives it ("Z": exited but not reaped), or "" once it is gone."""
+    out = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True,
+                         text=True).stdout
+    return out.strip()[:1]
+
+
 def _subshells(pid):
     """The background subshells of bash process `pid`: its children that run its own
     command line -- a lock's refresh loop is one. Seen in two looks 0.2 s apart, as a
@@ -1006,7 +1013,8 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
     """A run that died holding a build lock -- SIGKILL, an OOM kill, a container stop,
     a reboot -- used to leave the lock for good, and every later run that needed the
     same index waited on it forever: no error, no message, a search slot held. The
-    lock now names its owner. A dead owner on this host is taken over; one this run
+    lock now names its owner. A dead owner on this host is taken over, and so is a
+    record that has gone 15 minutes without a refresh, here or elsewhere; one this run
     cannot check is waited on, never broken, and the wait is explained."""
 
     def notices(self, out):
@@ -1146,16 +1154,42 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
     def test_a_live_owner_this_run_may_not_signal_is_never_broken(self):
         # kill -0 fails on a live process of another user as well as on a dead one;
         # only "No such process" means gone. PID 1 is another user's to a run that is
-        # not root -- and root runs the waiter as nobody here to make it so.
+        # not root -- and root runs the waiter as nobody here to make it so. With its
+        # record refreshed lately it is a live run: waited for, never offered to clear.
         self.hold(owner_record(1))
         rc, out, err = self.result(self.start(self.take_body(), as_nobody=os.geteuid() == 0),
                                    stop_after=1.5)
         self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
         self.assertNotIn("Stale lock", out)
-        self.assertIn("a process this run may not signal (another user's)",
-                      self.notices(out)[0])
+        notice = self.notices(out)[0]
+        self.assertIn("a process this run may not signal (another user's), which refreshed "
+                      "it in the last 15 minutes", notice)
+        self.assertTrue(notice.endswith(". Wait for that run to finish, or stop it."), notice)
+        self.assertNotIn("rm -rf", out)
         self.assertEqual((self.lock / "owner").read_text(), owner_record(1))
         self.assertEqual(err, "")
+
+    def test_a_record_not_refreshed_for_15_minutes_is_abandoned_whatever_its_pid_says(self):
+        # A live holder refreshes its record every minute, on this host as elsewhere, so
+        # one 16 minutes old is a dead run's even though its PID answers kill -0 -- a
+        # zombie's does, and so does a reused PID: a process of this user's, or of
+        # another's (EPERM, as nobody under root).
+        live = self.sleeper()
+        for pid, as_nobody in ((live.pid, False), (1, os.geteuid() == 0)):
+            with self.subTest(pid=pid):
+                shutil.rmtree(self.lock, ignore_errors=True)
+                self.hold(owner_record(pid))
+                _age(self.lock / "owner", 16)
+                if as_nobody:
+                    self.lock.chmod(0o777)  # where the takeover writes its own record
+                rc, out, err = self.result(self.start(self.take_body(), as_nobody=as_nobody),
+                                           stop_after=10)
+                self.assertEqual(rc, 2, out + err)  # 2: taken over, the build redone
+                self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {pid} on "
+                              f"{_this_host()[0]}, started 2026-10-30T00:00:00Z) has not "
+                              "refreshed its lock for 15 minutes. Taking it over", out)
+                self.assertNotIn("waiting", out)
+                self.assertEqual(err, "")
 
     def test_a_takeover_already_under_way_is_left_to_it(self):
         # two runs that find the same dead owner must not both take its lock over
@@ -1394,6 +1428,29 @@ class ALockIsKeptFreshByTheRunThatHoldsIt(_Locks):
         stopped = (self.lock / "owner").stat().st_mtime
         time.sleep(1)  # five refresh intervals
         self.assertEqual((self.lock / "owner").stat().st_mtime, stopped)
+
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"),
+                         "a dead run that was never reaped is told from a live one through /proc")
+    def test_the_refresh_stops_when_the_holder_dies_unreaped(self):
+        # Killed outright and never reaped -- its parent was killed first, say, and the
+        # container's PID 1 does not reap -- the run is a zombie, which still answers
+        # kill -0. Its lock must not stay fresh for good, or no run anywhere could ever
+        # take it over.
+        proc = self.hold_then("")
+        self.assertRefreshed(proc)
+        os.kill(proc.pid, signal.SIGKILL)  # bash alone, and no wait(): left unreaped
+        _wait_for(lambda: _state(proc.pid) == "Z", 10, "the holder to die")
+        self.assertEqual(_wait_until_gone(proc.pid), [])  # its refresh loop stopped
+        _age(self.lock / "owner", 16)
+        time.sleep(1)  # five refresh intervals
+        self.assertGreater(time.time() - (self.lock / "owner").stat().st_mtime, 15 * 60)
+        # and a run on this host, where the zombie's PID still answers, takes it over
+        self.assertEqual(_state(proc.pid), "Z")
+        rc, out, err = self.take(stop_after=10)
+        self.assertEqual(rc, 2, out + err)
+        self.assertIn(f"Stale lock {self.lock}: the run that held it (pid {proc.pid} ", out)
+        self.assertIn("has not refreshed its lock for 15 minutes", out)
+        self.assertEqual(err, "")
 
     def test_the_refresh_stops_when_the_lock_is_no_longer_this_runs(self):
         # taken over meanwhile -- the holder was frozen for 15 minutes, say: the new

@@ -168,10 +168,11 @@ fi
 # the PID cannot be checked (PIDs and hostnames are not comparable across Docker
 # containers; `--network host` even shares the hostname), so the holder also
 # refreshes its record every minute, and a run there takes the lock over once the
-# record has gone 15 minutes without a refresh. A lock with no record at all (taken
-# by an older CRISPRme) is never broken: the run waits for it and says every few
-# minutes how to clear it. Every message goes to stdout: a write to stderr fails the
-# stage.
+# record has gone 15 minutes without a refresh. So does a run on this host, whatever
+# the PID says: a run that died unreaped (a zombie), or a PID reused since, still
+# answers kill -0. A lock with no record at all (taken by an older CRISPRme) is never
+# broken: the run waits for it and says every few minutes how to clear it. Every
+# message goes to stdout: a write to stderr fails the stage.
 _lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/null)" \
 	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
 _locks_held=()
@@ -204,15 +205,16 @@ _lock_mine() {
 	[ "$_lock_rec" = "$_lock_me" ]
 }
 
-# 0 when lock $1 is stale: its owner record names this host and PID namespace and
-# that PID is gone, or it names another (where this run cannot check the PID) and has
-# gone 15 minutes without a refresh (_lock_hold). Otherwise 1, with the reason in
-# _lock_why, and _lock_live=1 when the owner is known to be alive (its PID here, its
-# refreshes elsewhere) -- 0 when this run cannot tell. On 0, _lock_gone says what
-# became of the owner. Leaves the record read in _lock_rec, and its pid, host and
-# start time in _lock_pid, _lock_host and _lock_started.
+# 0 when lock $1 is stale: its owner record has gone 15 minutes without a refresh
+# (_lock_hold), or it names this host and PID namespace and that PID is gone. The
+# refresh rule holds here too, whatever the PID says: kill -0 answers for a run that
+# died unreaped (a zombie) and for a PID reused since. Otherwise 1, with the reason in
+# _lock_why, and _lock_live=1 when the owner is known to be alive (its PID here, or its
+# refreshes) -- 0 when this run cannot tell. On 0, _lock_gone says what became of the
+# owner. Leaves the record read in _lock_rec, and its pid, host and start time in
+# _lock_pid, _lock_host and _lock_started.
 _lock_stale() {
-	local _pidns
+	local _pidns _where=
 	_lock_live=0
 	_lock_read "$1"
 	_lock_field _lock_pid "$_lock_rec" pid
@@ -225,14 +227,17 @@ _lock_stale() {
 	fi
 	_lock_why="it is held by pid $_lock_pid on $_lock_host (a run started $_lock_started)"
 	if [ "$_lock_host" != "$_lock_me_host" ] || [ "$_pidns" != "$_lock_me_pidns" ]; then
-		# (find through a pipe: a test, not $(...))
-		if find "$1/owner" -mmin +15 2>/dev/null | grep -q .; then
-			_lock_gone="has not refreshed its lock for 15 minutes"
-			_lock_why="$_lock_why, on another host or in another container, and not refreshed for 15 minutes"
-			return 0
-		fi
+		_where=", on another host or in another container"
+	fi
+	# (find through a pipe: a test, not $(...))
+	if find "$1/owner" -mmin +15 2>/dev/null | grep -q .; then
+		_lock_gone="has not refreshed its lock for 15 minutes"
+		_lock_why="$_lock_why$_where, and not refreshed for 15 minutes"
+		return 0
+	fi
+	if [ -n "$_where" ]; then  # where this run cannot check the PID
 		_lock_live=1
-		_lock_why="$_lock_why, on another host or in another container, which refreshed it in the last 15 minutes; this run takes it over once it goes 15 minutes without a refresh"
+		_lock_why="$_lock_why$_where, which refreshed it in the last 15 minutes; this run takes it over once it goes 15 minutes without a refresh"
 		return 1
 	fi
 	case "$_lock_pid" in
@@ -246,9 +251,11 @@ _lock_stale() {
 		fi
 		# kill -0 fails on a live process this run may not signal, too: only "No such
 		# process" means gone. Asked through a pipe; /proc would not do, as it is absent
-		# on some hosts and hides other users' processes under hidepid.
+		# on some hosts and hides other users' processes under hidepid. Refreshed in the
+		# last 15 minutes (above), such an owner is a live run.
 		if ! LC_ALL=C kill -0 "$_lock_pid" 2>&1 | grep -q "No such process"; then
-			_lock_why="$_lock_why, a process this run may not signal (another user's)"
+			_lock_live=1
+			_lock_why="$_lock_why, a process this run may not signal (another user's), which refreshed it in the last 15 minutes"
 			return 1
 		fi
 	fi
@@ -276,18 +283,35 @@ _lock_sign() {
 		&& mv -f "$1/owner.$$" "$1/owner" 2>/dev/null
 }
 
+# In a background subshell of this run: 0 while the run is alive. kill -0 "$$" is not
+# enough, as it answers for a run that died but was never reaped (a zombie: say its
+# parent was killed first, and the container's PID 1 does not reap). A run that dies,
+# reaped or not, hands its children to another parent at once, so ask /proc whose
+# child this subshell still is -- where /proc is this PID namespace's -- and fall back
+# to kill -0 elsewhere.
+_lock_run_alive() {
+	local _st
+	if { IFS= read -r _st </proc/self/stat; } 2>/dev/null && [ "${_st%% *}" = "$BASHPID" ]; then
+		_st=${_st##*") "}  # "<pid> (<name>) <state> <ppid> ..."
+		_st=${_st#* }
+		[ "${_st%% *}" = "$$" ]
+	else
+		kill -0 "$$" 2>/dev/null
+	fi
+}
+
 # Count lock $1, which this run has just signed, as this run's, and keep its record
 # fresh: a loop in the background touches it every minute, for runs that cannot check
-# this one's PID (_lock_stale). The loop stops as soon as this run is gone (killed
-# outright, so no trap ran) or the record is no longer this run's; _lock_release or
-# _lock_abandon_all stops it otherwise. It writes nothing anywhere: this script's
-# stderr fails the stage.
+# this one's PID or tell it from a zombie (_lock_stale). The loop stops as soon as this
+# run is gone (killed outright, so no trap ran) or the record is no longer this run's;
+# _lock_release or _lock_abandon_all stops it otherwise. It writes nothing anywhere:
+# this script's stderr fails the stage.
 _lock_hold() {
 	_locks_held+=("$1")
 	(
 		_s=
 		trap '[ -z "$_s" ] || kill "$_s"; exit 0' TERM
-		while kill -0 "$$" && _lock_mine "$1"; do
+		while _lock_run_alive && _lock_mine "$1"; do
 			touch -c "$1/owner"
 			sleep "${_lock_beat_s:-60}" &
 			_s=$!
