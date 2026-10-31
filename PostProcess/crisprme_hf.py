@@ -817,7 +817,9 @@ def _is_mount_point(path: str) -> bool:
         return os.path.ismount(path)
     mount_points = {
         _MOUNTINFO_ESCAPE.sub(lambda m: bytes([int(m.group(1), 8)]), fields[4])
-        for fields in (line.split(b" ") for line in table.splitlines())
+        # split on \n only: the kernel escapes newline, not \r, which splitlines()
+        # would also break on, cutting a mount point that contains one in two
+        for fields in (line.split(b" ") for line in table.split(b"\n"))
         if len(fields) > 4
     }
     return os.fsencode(os.path.realpath(path)) in mount_points

@@ -1145,6 +1145,17 @@ class TestMountPointInstallFolder(unittest.TestCase):
         self.assertIn("mount its parent folder instead", message)
         self.assertEqual(os.listdir(dest), ["old"])
 
+    def test_a_mount_point_with_a_carriage_return_is_still_seen(self):
+        # the kernel escapes newline but not \r, so the table holds a \r raw; a
+        # parser that also split lines on \r cut that line and missed the mount
+        self.workdir = os.path.join(os.path.realpath(self.workdir), "work\rdir")
+        os.makedirs(self.workdir)
+        dest = self._folder("genome", "hg38")
+        self._mount_table(("/srv/hg38", os.path.realpath(dest)))
+        message = self._refused("genome", ref="hg38")
+        self.assertIn(f"{dest} is a mount point", message)
+        self.assertEqual(os.listdir(dest), ["old"])
+
     def test_an_ordinary_folder_still_downloads(self):
         # the table lists the work dir, and the folder only as what another mount
         # point shows (field 4); neither makes the folder a mount point
