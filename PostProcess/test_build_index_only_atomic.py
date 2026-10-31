@@ -252,6 +252,31 @@ def make_stubs(bindir, pigz=True):
         os.chmod(path, 0o755)
 
 
+def proc_start(pid):
+    """Field 22 of /proc/<pid>/stat, the start time an owner record holds."""
+    with open(f"/proc/{pid}/stat") as fh:
+        return fh.read().rpartition(") ")[2].split()[19]
+
+
+def proc_state(pid):
+    """Field 3 of /proc/<pid>/stat: R, S, T (stopped), Z (a zombie)..."""
+    with open(f"/proc/{pid}/stat") as fh:
+        return fh.read().rpartition(") ")[2][:1]
+
+
+def owner_record(owner, **fields):
+    """An owner record of a build directory, as build-index-only writes it, for
+    process owner on this host and PID namespace; fields replace (None drops) any."""
+    record = {"host": os.uname().nodename, "pidns": os.readlink("/proc/self/ns/pid"),
+              "pid": str(owner), "started": "2026-10-31T01:02:03Z"}
+    try:
+        record["pstart"] = proc_start(owner)
+    except OSError:  # no such process
+        record["pstart"] = "12345"
+    record.update(fields)
+    return "".join(f"{k}={v}\n" for k, v in record.items() if v is not None)
+
+
 def tree(top, normalize=()):
     """{path: digest} of everything under top, a directory as "dir". A gzip file is
     taken by its content (the header holds a time), and every (path, label) in
@@ -442,21 +467,33 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                 self.kill_group(proc)
                 self.assertFalse(os.path.lexists(self.lib(name)),
                                  f"a partial {name} was left in place")
-                # a SIGKILL leaves the hidden build directory, which nothing reads
+                # a SIGKILL leaves the hidden build directory, which nothing reads, and
+                # which the next build removes, as the run that left it is gone
                 left = self.leftovers()
                 self.assertEqual(len(left), 1)
                 rc, out, err = self.run_bio(vcf=vcf)
                 self.assertEqual(rc, 0, err)
                 self.assertEqual(self.bins(name), whole)
-                self.assertEqual(self.leftovers(), left)
+                self.assertIn(f"Removing {left[0]}: the build-index-only run that made it "
+                              f"(pid {proc.pid} on {os.uname().nodename}, started ", out)
+                self.assertEqual(self.leftovers(), [])
 
     def test_an_index_is_built_in_a_hidden_directory_of_genome_library(self):
         """Where the index is renamed from: no rename then crosses a mount point, and
         the index is made with what genome_library gives a new directory."""
+        if not os.path.exists("/proc/self/stat"):
+            self.skipTest("no /proc here")
         proc = self.start(vcf=False, STUB_HANG=WHOLE[REF][1])
         self.wait_for_mark(proc)
         left = self.leftovers()
         self.assertEqual([os.path.dirname(d) for d in left], [self.path("genome_library")])
+        # with the owner record that lets a later run tell whether it is still in use
+        with open(os.path.join(left[0], "owner")) as fh:
+            record = dict(line.split("=", 1) for line in fh.read().splitlines())
+        self.assertEqual(sorted(record), ["host", "pid", "pidns", "pstart", "started"])
+        self.assertEqual((record["host"], record["pid"], record["pstart"]),
+                         (os.uname().nodename, str(proc.pid), proc_start(proc.pid)))
+        self.assertEqual(record["pidns"], os.readlink("/proc/self/ns/pid"))
         open(self.release, "w").close()
         rc, out, err = self.finish(proc)
         self.assertEqual(rc, 0, err)
@@ -554,7 +591,9 @@ class AnEnrichmentIsDoneWholeOrRedone(_Fixture):
         self.assertEqual([os.path.dirname(d) for d in left], [self.path("Genomes")])
         rc, out, err = self.run_bio()
         self.assertEqual(rc, 0, err)
-        self.assertEqual(self.leftovers(), left)  # (the build directory a SIGKILL left)
+        self.assertIn(f"Removing {left[0]}: the build-index-only run that made it "
+                      f"(pid {proc.pid} on {os.uname().nodename}, started ", out)
+        self.assertEqual(self.leftovers(), [])
         self.assertIn("Enriching hg38 with ds (add-variants)...", out)
         self.assertEqual(sum(c.startswith("add-variants ") for c in self.calls()), 2)
         self.assertEqual(sorted(os.listdir(enriched)), ["chr1.enriched.fa", "chr2.enriched.fa"])
@@ -775,6 +814,87 @@ class ASearchsBuildLockStopsIt(_Fixture):
             self.assertFalse(os.path.lexists(self.path("Dictionaries", d)), d)
         self.assertEqual([c.split()[1] for c in self.calls()[1:]],
                          [self.path("VCFs", "ds") + "/"])
+
+
+class TheBuildDirectoriesOfRunsThatAreGoneAreReclaimed(_Fixture):
+    """A SIGKILL leaves a build directory, holding a partial index or enrichment as
+    large as the finished one. Each build first removes those whose owner record
+    names a run that is gone on this host and PID namespace, and only those."""
+
+    def child(self, state=None):
+        """A process of this test's: running, stopped ("T"), or a zombie ("Z")."""
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        if state:
+            os.kill(proc.pid, signal.SIGSTOP if state == "T" else signal.SIGKILL)
+            deadline = time.monotonic() + 30
+            while proc_state(proc.pid) != state:
+                self.assertLess(time.monotonic(), deadline, f"pid {proc.pid} never got {state}")
+                time.sleep(0.01)
+        return proc.pid
+
+    def test_only_those_of_runs_that_are_gone_are_removed(self):
+        if not os.path.exists("/proc/self/stat"):
+            self.skipTest("no /proc here")
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        live = self.child()
+        lib, genomes = self.path("genome_library"), self.path("Genomes")
+        dirs = {  # path: (its owner's PID, other fields of its record or None for no record, removed?)
+            os.path.join(lib, ".build-index-only-dead"): (dead.pid, {}, True),
+            os.path.join(lib, ".build-index-only-zombie"): (self.child("Z"), {}, True),
+            os.path.join(lib, ".build-index-only-reused"): (live, {"pstart": "1"}, True),
+            os.path.join(genomes, ".build-index-only-enrich-dead"): (dead.pid, {}, True),
+            os.path.join(lib, ".build-index-only-live"): (live, {}, False),
+            os.path.join(lib, ".build-index-only-stopped"): (self.child("T"), {}, False),
+            os.path.join(genomes, ".build-index-only-enrich-live"): (live, {}, False),
+            os.path.join(lib, ".build-index-only-elsewhere"): (dead.pid, {"host": "otherhost"}, False),
+            os.path.join(lib, ".build-index-only-container"): (dead.pid, {"pidns": "pid:[1]"}, False),
+            os.path.join(lib, ".build-index-only-no-pid"): (dead.pid, {"pid": "x"}, False),
+            os.path.join(lib, ".build-index-only-no-record"): (dead.pid, None, False),
+            # not of this kind: a search's scratch, and other hidden directories
+            os.path.join(genomes, "run_a1b2c3"): (dead.pid, {}, False),
+            os.path.join(genomes, ".stage_hg19"): (dead.pid, {}, False),
+            os.path.join(lib, ".extract_NRG_2_hg19"): (dead.pid, {}, False),
+        }
+        for path, (pid, fields, _) in dirs.items():
+            _write(os.path.join(path, "genome_library", "NRG_2_hg38", "NRG_chr1_1.bin"), "partial\n")
+            if fields is not None:
+                _write(os.path.join(path, "owner"), owner_record(pid, **fields))
+        # one whose record is still being written (owner.<pid>, before its rename), and
+        # a symlink by the name of a build directory, to a directory that must stay
+        _write(os.path.join(lib, ".build-index-only-torn", f"owner.{dead.pid}"),
+               owner_record(dead.pid))
+        _write(self.path("elsewhere", "owner"), owner_record(dead.pid))
+        os.symlink(self.path("elsewhere"), os.path.join(lib, ".build-index-only-link"))
+        before = tree(self.work)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        gone = sorted(path for path, (_, _, removed) in dirs.items() if removed)
+        self.assertEqual(
+            sorted(line for line in out.splitlines() if line.startswith("Removing ")),
+            [f"Removing {path}: the build-index-only run that made it (pid {dirs[path][0]} "
+             f"on {os.uname().nodename}, started 2026-10-31T01:02:03Z) is gone." for path in gone])
+        # where the owner cannot be checked, a line says how to remove it once it is gone
+        self.assertEqual(
+            sorted(line for line in out.splitlines() if line.startswith("Leaving ")),
+            [f"Leaving {os.path.join(lib, name)}: the build-index-only run that made it (pid "
+             f"{dead.pid} on {host}, started 2026-10-31T01:02:03Z) ran in another PID namespace "
+             f"(another container, or this one before a restart) or on another host, so this "
+             f"run cannot tell whether it still runs. If it does not, remove it: rm -rf "
+             f"'{os.path.join(lib, name)}'"
+             for name, host in ((".build-index-only-container", os.uname().nodename),
+                                (".build-index-only-elsewhere", "otherhost"))])
+        for path in gone:
+            self.assertFalse(os.path.lexists(path), path)
+        # and all else as it was
+        after = tree(self.work)
+        gone = tuple(os.path.relpath(path, self.work) + "/" for path in gone)
+        self.assertEqual({k: v for k, v in before.items() if not (k + "/").startswith(gone)},
+                         {k: v for k, v in after.items() if k in before})
+        for name, (_, _, whole) in WHOLE.items():
+            self.assertEqual(self.bins(name), whole)
 
 
 # What the code before this fix (379b5b0) did with the same stub and inputs, for

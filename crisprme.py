@@ -2912,6 +2912,161 @@ def _raise_build_signal(signum, frame):
     raise _BuildSignal(signum)
 
 
+def _proc_stat(pid) -> Tuple[str, str]:
+    """The state of process ``pid`` -- R, S, D...; T stopped, t traced, Z exited but
+    not reaped -- and its start time: fields 3 and 22 of /proc/<pid>/stat, as the
+    search's _lock_state reads them (submit_job_automated_new_multiple_vcfs.sh). Two
+    empty strings where /proc cannot tell: no such process, one hidden from this run
+    (hidepid), no /proc, or a /proc that is not this PID namespace's (it shows this
+    run under another PID)."""
+    try:
+        with open("/proc/self/stat") as fh:
+            if fh.read().split(" ", 1)[0] != str(os.getpid()):
+                return "", ""
+        with open(f"/proc/{pid}/stat") as fh:
+            # the fields follow the last ") ", as the name before it may hold either
+            fields = fh.read().rpartition(") ")[2].split()
+    except OSError:
+        return "", ""
+    return (fields[0], fields[19]) if len(fields) > 19 else ("", "")
+
+
+_build_owner = {}  # this run's owner record (_build_dir_owner)
+
+
+def _build_dir_owner() -> dict:
+    """This run's owner record, which every build directory it makes holds
+    (_in_build_dir): the host, PID namespace, PID and start time that a search's
+    build lock records, with the same keys (_lock_me in
+    submit_job_automated_new_multiple_vcfs.sh)."""
+    import time
+
+    if not _build_owner:
+        try:
+            pidns = os.readlink("/proc/self/ns/pid")
+        except OSError:
+            pidns = ""
+        _build_owner.update(
+            host=os.uname().nodename,
+            pidns=pidns,
+            pid=str(os.getpid()),
+            started=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
+        pstart = _proc_stat(os.getpid())[1]
+        if pstart:
+            _build_owner["pstart"] = pstart
+    return _build_owner
+
+
+def _build_dir_gone(path: str) -> Tuple["bool | None", dict]:
+    """Whether the owner of build directory ``path`` is gone, and its owner record.
+    True when the record names this host and PID namespace and that PID is no longer
+    running, is a zombie (a run that died unreaped) or is another process's by now
+    (one that started at another time than the record says). None when the record
+    names another host or PID namespace, where the PID cannot be checked. Else
+    False: the owner is running or stopped (Ctrl-Z, a SLURM suspend), or is a
+    process this run may not signal, or there is no record. These are the rules of
+    the search's _lock_stale, but for its 15-minute refresh, which a build directory
+    does not have."""
+    record = {}
+    try:
+        with open(os.path.join(path, "owner")) as fh:
+            for line in fh:
+                key, sep, value = line.rstrip("\n").partition("=")
+                if sep:
+                    record.setdefault(key, value)
+    except OSError:
+        return False, record
+    me = _build_dir_owner()
+    if not record or record == me:
+        return False, record
+    if record.get("host") != me["host"] or record.get("pidns") != me["pidns"]:
+        return None, record
+    pid = record.get("pid", "")
+    if not pid.isdigit() or not 0 < int(pid) < 1 << 31:
+        return False, record
+    if pid != me["pid"]:  # (this run's own PID in a record it did not write: a dead run's, reused)
+        state, pstart = _proc_stat(pid)
+        if state and record.get("pstart") and pstart != record["pstart"]:
+            return True, record  # not that run, but its PID reused
+        if state:
+            return state in ("Z", "X"), record
+        # where /proc cannot tell: only "No such process" means gone
+        try:
+            os.kill(int(pid), 0)
+        except ProcessLookupError:
+            return True, record
+        except OSError:  # a process this run may not signal (another user's)
+            return False, record
+        return False, record
+    return True, record
+
+
+def _remove_build_dir(path: str) -> None:
+    """Removes build directory ``path``, its owner record last: a run ended while it
+    removes the directory, or an engine still writing into it, leaves the record,
+    and with it the directory for a later build to reclaim (_reclaim_build_dirs)."""
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return
+    for name in names:
+        entry = os.path.join(path, name)
+        if name == "owner":
+            continue
+        if os.path.isdir(entry) and not os.path.islink(entry):
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            try:
+                os.remove(entry)
+            except OSError:
+                pass
+    try:
+        if os.listdir(path) == ["owner"]:
+            os.remove(os.path.join(path, "owner"))
+        os.rmdir(path)
+    except OSError:
+        pass
+
+
+_build_dirs_left = set()  # the ones _reclaim_build_dirs has said it leaves
+
+
+def _reclaim_build_dirs(parent: str, prefix: str) -> None:
+    """Removes the build directories ``<parent>/<prefix>*`` whose owner is gone
+    (_build_dir_gone), with a line on stdout for each. A run SIGKILLed (an OOM kill,
+    a container stop) leaves its build directory, holding a partial index or
+    enrichment that nothing else ever reclaims: as large as the index or enriched
+    genome itself, and hidden. One whose owner cannot be checked from here is left,
+    with a line on stdout (once a run) that says how to remove it once that run is
+    gone."""
+    try:
+        names = sorted(os.listdir(parent))
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(parent, name)
+        if not name.startswith(prefix) or os.path.islink(path) or not os.path.isdir(path):
+            continue
+        gone, record = _build_dir_gone(path)
+        owner = (
+            f"the build-index-only run that made it (pid {record.get('pid')} on "
+            f"{record.get('host')}, started {record.get('started', '?')})"
+        )
+        if gone:
+            print(f"Removing {path}: {owner} is gone.", flush=True)
+            _remove_build_dir(path)
+        elif gone is None and path not in _build_dirs_left:
+            _build_dirs_left.add(path)
+            print(
+                f"Leaving {path}: {owner} ran in another PID namespace (another "
+                f"container, or this one before a restart) or on another host, so this "
+                f"run cannot tell whether it still runs. If it does not, remove it: "
+                f"rm -rf '{path}'",
+                flush=True,
+            )
+
+
 def _end_cleanly(cleanup, handlers: dict) -> None:
     """Calls ``cleanup()`` and puts the signal handlers in ``handlers`` back, with a
     second signal held back until both are done."""
@@ -2959,21 +3114,30 @@ def _with_cleanup(run, cleanup):
 def _in_build_dir(parent: str, prefix: str, build):
     """Returns ``build(tmp)``, called with ``tmp`` a fresh hidden directory
     ``<parent>/<prefix>*`` to build in, under a name no index or genome listing
-    matches. It is removed on every way out but SIGKILL (_with_cleanup)."""
+    matches. It holds this run's owner record (_build_dir_owner), and is removed on
+    every way out but SIGKILL (_with_cleanup). The directories that SIGKILLed runs
+    left are removed first (_reclaim_build_dirs)."""
     import tempfile
 
+    _reclaim_build_dirs(parent, prefix)
     made = []
 
     def run():
         try:
             made.append(tempfile.mkdtemp(prefix=prefix, dir=parent))
+            # through a rename, so a run reading the record meanwhile sees none or all
+            # of it -- never a torn PID it would find dead
+            record = os.path.join(made[0], f"owner.{os.getpid()}")
+            with open(record, "w") as fh:
+                fh.write("".join(f"{k}={v}\n" for k, v in _build_dir_owner().items()))
+            os.replace(record, os.path.join(made[0], "owner"))
         except OSError as exc:
             error(f"Cannot make a build directory in {parent} ({exc})")
         return build(made[0])
 
     def cleanup():
         for tmp in made:
-            shutil.rmtree(tmp, ignore_errors=True)
+            _remove_build_dir(tmp)
 
     return _with_cleanup(run, cleanup)
 
@@ -3114,7 +3278,7 @@ def build_index_only() -> None:
         # could differ from it (a path with a space, a quote or a glob character).
         # So a SIGTERM to this run alone ends the shell, not the engine under it,
         # which runs on until its current step ends: nothing it writes goes into
-        # place.
+        # place, and a build directory it keeps from going is reclaimed later.
         index_cmd = (
             f"crispritz.py index-genome {genome_ref} {genomedir}/ {pamfile} "
             f"-bMax {bMax + 1} -th {thread}"
