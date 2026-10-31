@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""validate-test where there is no complete-test benchmark output to check.
+"""validate-test where there is no complete-test benchmark output to check, and on a
+chromosome that a benchmark's brute-force reference does not cover.
 
 validate-test compares the off-targets that complete-test's BENCHMARK mode wrote
 (CRISPRME_ALLOW_ONDEMAND_BUILD=1 ... --vcf_dataset 1000G, as validate-benchmarks.yml
@@ -9,10 +10,18 @@ the default prebuilt-index smoke, which writes no such file -- it ended in two P
 tracebacks: validate.py's FileNotFoundError, then crisprme.py's OSError. It now says
 in one line what to run first, and exits 1.
 
-validate.py is run as a subprocess, as crisprme.py runs it. crisprme.py's
+That line names the pair for the chromosome asked for, but the Cas12a reference and
+both single-"n edits" ones cover chr22 only ("scope" in benchmarks.json): compared on
+chr21, or on a whole genome, each site CRISPRme found off chr22 counted as extra and
+the benchmark FAILED. Such a benchmark is now skipped there.
+
+validate.py is run as a subprocess, as crisprme.py runs it, and its
+run_test_validation in-process with each comparison stubbed. crisprme.py's
 validate_test is exec'd without the CLI dispatch (the truncate-and-exec loader of
 test_bulge_cap), with its subprocess call stubbed.
 """
+import contextlib
+import io
 import os
 import subprocess
 import sys
@@ -71,6 +80,7 @@ def _load_crisprme():
 
 
 crisprme = _load_crisprme()
+import validate  # noqa: E402 -- PostProcess is on sys.path now (_load_crisprme)
 
 
 class ValidatePyWithoutBenchmarkOutput(unittest.TestCase):
@@ -111,6 +121,97 @@ class ValidatePyWithoutBenchmarkOutput(unittest.TestCase):
         line = self.hint("all")
         self.assertIn("complete-test --chrom chr22 --vcf_dataset 1000G", line)
         self.assertIn("then crisprme.py validate-test --chrom chr22", line)
+
+
+class ABenchmarkOffItsReferenceIsSkipped(unittest.TestCase):
+    """After the `complete-test --chrom chr21 --vcf_dataset 1000G` that the line above
+    names for chr21, `validate-test --chrom chr21` reported '[cas12a_hbg] FAILED:
+    mismatch. CRISPRme sites: 223  Brute-force sites: 0': its reference covers chr22
+    only, so every chr21 site counted as extra. A benchmark is now compared only on
+    the chromosome its reference covers, and skipped elsewhere."""
+
+    # what the benchmark mode runs with CRISPRME_SKIP_HEAVY=1, as that line has it
+    LIGHT = ["cas9_sg1617", "cas12a_hbg"]
+
+    def run_validation(self, chrom, ran):
+        """run_test_validation(chrom) on the shipped registry, with CRISPRME_SKIP_HEAVY
+        unset as in the validate-test that line names, where the benchmarks in `ran`
+        left their output, each comparison stubbed to a match. Returns (exit code,
+        stderr lines, the benchmarks compared)."""
+        compared = []
+        err = io.StringIO()
+        env = dict(os.environ)
+        env.pop("CRISPRME_SKIP_HEAVY", None)
+
+        def found(name, *_a):
+            return (f"{name}.ref.txt", f"{name}.alt.txt") if name in ran else None
+
+        def match(name, *_a):
+            compared.append(name)
+            return True
+
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(validate, "check_variant_dataset"), \
+             mock.patch.object(validate, "find_crispritz_targets", side_effect=found), \
+             mock.patch.object(validate, "download_brute_force_targets", return_value="bf.tsv"), \
+             mock.patch.object(validate, "load_targets", return_value=(None, None)), \
+             mock.patch.object(validate, "validate", side_effect=match), \
+             contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit) as cm:
+                validate.run_test_validation(chrom)
+        return cm.exception.code, err.getvalue().splitlines(), compared
+
+    def test_chr21_compares_only_what_the_references_cover(self):
+        code, lines, compared = self.run_validation("chr21", self.LIGHT)
+        self.assertEqual(compared, ["cas9_sg1617"])
+        self.assertIn("[cas12a_hbg] SKIPPED: its brute-force reference covers chr22 only, "
+                      "not chr21.", lines)
+        self.assertIn("Validation summary: 1 passed, 0 failed, 3 skipped.", lines)
+        self.assertEqual(code, 0)
+
+    def test_so_does_a_whole_genome_run(self):
+        # validate-test without --chrom
+        code, lines, compared = self.run_validation("all", self.LIGHT)
+        self.assertEqual(compared, ["cas9_sg1617"])
+        self.assertIn("[cas12a_hbg] SKIPPED: its brute-force reference covers chr22 only, "
+                      "not the whole genome.", lines)
+        self.assertIn("Validation summary: 1 passed, 0 failed, 3 skipped.", lines)
+        self.assertEqual(code, 0)
+
+    def test_chr22_still_compares_every_benchmark_that_ran(self):
+        # the documented self-test ("expect: 2 passed, 0 failed, 2 skipped")
+        code, lines, compared = self.run_validation("chr22", self.LIGHT)
+        self.assertEqual(compared, self.LIGHT)
+        self.assertIn("Validation summary: 2 passed, 0 failed, 2 skipped.", lines)
+        self.assertEqual(code, 0)
+        # and a run of all four, the heavy ones included
+        every = [b["name"] for b in validate.load_benchmarks()["benchmarks"]]
+        code, lines, compared = self.run_validation("chr22", every)
+        self.assertEqual(compared, every)
+        self.assertEqual(code, 0)
+
+    def test_validate_py_no_longer_fails_chr21_sites_against_the_chr22_reference(self):
+        # validate.py itself and the committed Cas12a reference, on chr21 output of
+        # cas12a_hbg's: before, the real comparison counted each of these sites as extra
+        registry = validate.load_benchmarks()
+        bench = next(b for b in registry["benchmarks"] if b["name"] == "cas12a_hbg")
+        th = registry["thresholds"]
+        site = "X\tTTTVCCTTGTCAAGGCTATTGGTC\tTTTACCTTGTCAAGGCTATTGGTC\tchr21\t{}\t{}\t+\t0\t0\t0\n"
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "vcf.config.test.txt"), "w") as fout:
+                fout.write("hg38_1000G\n")
+            tdir = os.path.join(d, validate.targets_dir("cas12a_hbg"))
+            os.makedirs(tdir)
+            names = validate.target_report_names(bench["pam_name"], th["mm"], th["bDNA"],
+                                                 th["bRNA"], "chr21")
+            for fname, positions in zip(names, ((5010000, 5020000), (5030000,))):
+                with open(os.path.join(tdir, fname), "w") as fout:
+                    fout.writelines(site.format(p, p) for p in positions)
+            out = subprocess.run([sys.executable, VALIDATE, "chr21"], cwd=d,
+                                 capture_output=True, text=True)
+        self.assertIn("[cas12a_hbg] SKIPPED: its brute-force reference covers chr22 only, "
+                      "not chr21.", out.stderr.splitlines(), out.stderr)
+        self.assertNotIn("FAILED", out.stderr)
 
 
 class TheCliCallerAddsNoTraceback(unittest.TestCase):

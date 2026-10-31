@@ -230,7 +230,8 @@ def validate(name: str, crisprme_targets: pd.DataFrame, bf_targets: pd.DataFrame
 
 
 def run_test_validation(chrom: str) -> None:
-    """Validate every registered benchmark that has complete-test output present."""
+    """Validate every registered benchmark that has complete-test output present, on a
+    chromosome its brute-force reference covers."""
     check_variant_dataset(chrom)
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
@@ -245,6 +246,16 @@ def run_test_validation(chrom: str) -> None:
         if skip_heavy and bench.get("heavy"):
             sys.stderr.write(f"[{name}] SKIPPED: heavy benchmark not run on this runner "
                              "(CRISPRME_SKIP_HEAVY=1).\n")
+            skipped += 1
+            continue
+        # A reference that covers one chromosome only ("scope": the chr22 Cas12a and
+        # single-"n edits" ones) cannot check another chromosome or a whole genome:
+        # every site CRISPRme finds outside it would count as "extra" and fail the case.
+        scope = bench.get("scope")
+        if scope and scope != chrom:
+            where = "the whole genome" if chrom == "all" else chrom
+            sys.stderr.write(f"[{name}] SKIPPED: its brute-force reference covers {scope} "
+                             f"only, not {where}.\n")
             skipped += 1
             continue
         # Per-case thresholds mirror complete_test.py, so the output-report filename
