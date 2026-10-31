@@ -1447,8 +1447,9 @@ def _check_personal_annotation(args: List[str], annotationfile: str, personal_an
         error("Missing input for --personal_annotation. Annotation file must be specified")
     if not os.path.isfile(personal_annotationfile):
         error("The file specified for --personal_annotation does not exist")
-    if annotationfile.endswith(".gz"):
-        annotationfile = annotationfile[:-3]
+    if annotationfile.endswith(".gz"):  # the sorted --annotation, in its own temp dir:
+        # concatenated as plain text, and bgzip -f has removed the plain copy
+        annotationfile = _decompress_file(annotationfile, annotationfile[:-3])
     return _process_personal_annotation(personal_annotationfile, annotationfile)
 
 def _check_samples_ids(args: List[str], variant: bool) -> str:

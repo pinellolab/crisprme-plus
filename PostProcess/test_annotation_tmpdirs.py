@@ -8,6 +8,10 @@ The pipeline reads those files, and gunzips back into them, until it ends. Nothi
 removed them, so every annotated search left two behind, ~1.7 GB with the shipped
 annotations.
 
+--personal_annotation with --annotation is merged into one sorted file in the
+crisprme_pannot_* folder; the merge looked for the plain copy of the sorted --annotation,
+which bgzip had removed, and stopped the search.
+
 These tests run complete-search the way the CLI does -- the dispatch statement is taken
 verbatim from crisprme.py, whose definitions are exec'd without the dispatch (the
 truncate-and-exec loader of test_bulge_cap) -- on a tiny synthetic genome, with the
@@ -242,6 +246,22 @@ class AnnotatedSearchRemovesItsTempFolders(unittest.TestCase):
     def test_a_personal_annotation_folder_is_removed_too(self):
         during = self.search("--personal_annotation", "personal.bed")
         self.assertEqual([d[:16] for d in during], ["crisprme_pannot_"])
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_personal_annotation_is_added_to_the_annotation(self):
+        # with --annotation too, the pipeline gets the sorted --annotation and the
+        # personal intervals, tagged _personal, in one sorted file (kept here to read it)
+        during = self.search("--annotation", "myann/func.bed",
+                             "--personal_annotation", "personal.bed", "--keep-intermediates")
+        self.assertEqual([d[:16] for d in during], ["crisprme_pannot_"])
+        merged = os.path.join(self.work, during[0], "annotation+personal.bed.gz")
+        with gzip.open(merged, "rt") as fh:
+            self.assertEqual(fh.read().splitlines(), sorted([
+                "chrS\t2000\t4600\tpromoter_test", "chrS\t0\t2000\texon_test",
+                "chrS\t10\t200\tmy_site_personal"]))
+
+    def test_a_personal_annotation_with_an_annotation_leaves_none(self):
+        self.search("--annotation", "myann/func.bed", "--personal_annotation", "personal.bed")
         self.assertEqual(self.leftovers(), [])
 
     def test_another_jobs_folder_is_left_alone(self):

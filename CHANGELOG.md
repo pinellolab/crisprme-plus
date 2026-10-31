@@ -414,6 +414,16 @@ and the `release-crisprme` skill.
 - **Pipeline failure summaries are binary-safe.** `summarize_pipeline_failure()` now reads `log.txt`
   and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
   stderr no longer raises `UnicodeDecodeError` and masks the real error.
+- **`--personal_annotation` together with `--annotation` stopped the search before it began.**
+  `complete-search` exited 1 with `cat: .../crisprme_annot_*/annotation.sorted.bed: No such file
+  or directory` and `Error: Concatenating files failed`, so a personal annotation could only be
+  used without `--annotation`. The personal intervals are added to the sorted `--annotation` as
+  plain text, and since 2.4.0 that sorted file is bgzipped in its temp folder, which removes the
+  plain copy the merge then looked for. The sorted annotation is now decompressed for the merge.
+  The search's tables equal those of the same search given, as its only `--annotation`, the two
+  files concatenated by hand with each personal name tagged `_personal`: the personal intervals
+  appear in `Annotation_personal`. `--annotation` alone and `--personal_annotation` alone are
+  unchanged. Covered by `PostProcess/test_annotation_tmpdirs.py`.
 - **A search without annotations wrote two `gzip` errors to its error log.** Every
   `complete-search` run without `--annotation` or `--gene_annotation`, and every web search with no
   annotation enabled, ended with `gzip: .../vuoto.txt: unknown suffix -- ignored` twice in
