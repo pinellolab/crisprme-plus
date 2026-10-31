@@ -905,6 +905,23 @@ class ASearchsBuildLockStopsIt(_Fixture):
         self.assertEqual([c.split()[1] for c in self.calls()[1:]],
                          [self.path("VCFs", "ds") + "/"])
 
+    def test_a_lock_taken_while_the_fake_indel_genome_is_overlaid_moves_nothing_into_place(self):
+        """The SNP overlay, after the compression, takes minutes at scale too (it
+        reads each enriched chromosome whole)."""
+        enriched = self.path("Genomes", "hg38+ds")
+        proc = self.start(shim=True, STUB_OVERLAY_HANG="1")
+        self.wait_for_mark(proc)
+        self.lock(enriched)
+        open(self.release, "w").close()
+        rc, out, err = self.finish(proc)
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"Error: {enriched} is locked by the run that builds it", err)
+        self.assertEqual(sorted(os.listdir(self.path("Genomes"))), ["hg38", "hg38+ds.lock"])
+        for d in ("dictionaries_ds", "log_indels_ds"):
+            self.assertFalse(os.path.lexists(self.path("Dictionaries", d)), d)
+        self.assertEqual([c.split()[1] for c in self.calls()[1:]],
+                         [self.path("VCFs", "ds") + "/"])
+
 
 class TheBuildDirectoriesOfRunsThatAreGoneAreReclaimed(_Fixture):
     """A SIGKILL leaves a build directory, holding a partial index or enrichment as
@@ -1043,7 +1060,26 @@ class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
     """Before indexing the fake-indel genome, build-index-only overlays SNP codes onto
     each of its FASTA files, rewriting it in place. A run stopped while it wrote one,
     or a write that failed, left that FASTA cut short, and the next run took it for
-    a whole one: its INDELS index then had no target past the cut, with no error."""
+    a whole one: its INDELS index then had no target past the cut, with no error.
+    The fake-indel genome of an enrichment the run makes is overlaid in that
+    enrichment's build directory (TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes); one
+    in place, that came another way, is overlaid in place."""
+
+    def kit(self, pad=0):
+        """An enrichment in place that came another way (a build-inputs kit, a run of
+        an earlier release): its fake-indel genome as add-variants wrote it, without
+        the SNP codes (chr2's padded with pad N), and no INDELS index yet."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        shutil.rmtree(self.lib(INDELS))
+        for chrom, seq in GENOME.items():
+            _write(self.path("Genomes", "hg38+ds_INDELS", f"fake_ds_{chrom}", f"fake{chrom}.fa"),
+                   f">fake{chrom}\n{seq[:26]}T{seq[26:60]}{'N' * pad * (chrom == 'chr2')}\n")
+        os.remove(self.log)
+
+    def overlays(self):
+        """The overlay's hidden directories anywhere in the working directory."""
+        return [d for d, _, _ in os.walk(self.work) if os.path.basename(d).startswith(".overlay-")]
 
     def fixture(self, pad=6000):
         """A fake-indel FASTA holding one indel's window (then N), the enriched
@@ -1134,53 +1170,106 @@ class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
 
     def test_a_failed_overlay_fails_the_build_and_indexes_nothing(self):
         """A write inside the overlay that fails (here past a file-size limit, as on
-        a full disk): the run fails rather than index what is left, and each fake
-        FASTA is whole -- chr1's overlaid, chr2's as add-variants wrote it."""
-        rc, out, err = self.run_bio(fsize=1 << 19, STUB_BIG_FAKE="chr2")
-        self.assertEqual(rc, 1, out + err)
-        indels = self.path("Genomes", "hg38+ds_INDELS")
-        self.assertIn(f"Error: The SNP overlay of the fake-indel genome {indels} failed (", err)
-        self.assertIn(f"), so {INDELS} is not built.", err)
-        self.assertFalse(os.path.lexists(self.lib(INDELS)))
-        self.assertEqual([c for c in self.calls() if "fakechr" in c], [])
-        built = dict(reversed(line.split("  ", 1)) for line in BEFORE["variant"]["tree"])
-        chr1 = "Genomes/hg38+ds_INDELS/fake_ds_chr1/fakechr1.fa"
-        self.assertEqual(tree(self.work)[chr1], built[chr1])
-        seq = GENOME["chr2"]
-        with open(os.path.join(indels, "fake_ds_chr2", "fakechr2.fa")) as fh:
-            self.assertEqual(fh.read(), f">fakechr2\n{seq[:26]}T{seq[26:60]}{'N' * 1000000}\n")
-        for chrom in ("chr1", "chr2"):
-            fasta = os.path.join(indels, f"fake_ds_{chrom}", f"fake{chrom}.fa")
-            self.assertEqual(os.listdir(os.path.dirname(fasta)), [f"fake{chrom}.fa"])
-        # once the cause is gone, the next run finishes it
-        rc, out, err = self.run_bio()
-        self.assertEqual(rc, 0, err)
-        self.assertEqual(self.bins(INDELS), WHOLE[INDELS][2])
+        a full disk): the run fails rather than index what is left. Of the enrichment
+        it makes, it puts nothing in place; of one in place, each fake FASTA is left
+        whole -- chr1's overlaid, chr2's as add-variants wrote it."""
+        with self.subTest(enrichment="this run's"):
+            indels = self.path("Genomes", "hg38+ds_INDELS")
+            rc, out, err = self.run_bio(fsize=1 << 19, STUB_BIG_FAKE="chr2")
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn("Error: The SNP overlay of the ds fake-indel genome failed (", err)
+            self.assertIn("): nothing of the enrichment was put in place.\n", err)
+            for output in (self.path("Genomes", "hg38+ds"), indels,
+                           self.path("Dictionaries", "dictionaries_ds"),
+                           self.path("Dictionaries", "log_indels_ds")):
+                self.assertFalse(os.path.lexists(output), f"{output} was put in place")
+            self.assertEqual(self.leftovers(), [])
+            # once the cause is gone, the next run does it all
+            rc, out, err = self.run_bio()
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(self.bins(INDELS), WHOLE[INDELS][2])
+        with self.subTest(enrichment="in place"):
+            self.fresh()
+            indels = self.path("Genomes", "hg38+ds_INDELS")
+            self.kit(pad=1000000)
+            rc, out, err = self.run_bio(fsize=1 << 19)
+            self.assertEqual(rc, 1, out + err)
+            self.assertIn(f"Error: The SNP overlay of the fake-indel genome {indels} failed (", err)
+            self.assertIn(f"), so {INDELS} is not built.", err)
+            self.assertFalse(os.path.lexists(self.lib(INDELS)))
+            self.assertEqual([c for c in self.calls() if "fakechr" in c], [])
+            built = dict(reversed(line.split("  ", 1)) for line in BEFORE["variant"]["tree"])
+            chr1 = "Genomes/hg38+ds_INDELS/fake_ds_chr1/fakechr1.fa"
+            self.assertEqual(tree(self.work)[chr1], built[chr1])
+            seq = GENOME["chr2"]
+            with open(os.path.join(indels, "fake_ds_chr2", "fakechr2.fa")) as fh:
+                self.assertEqual(fh.read(), f">fakechr2\n{seq[:26]}T{seq[26:60]}{'N' * 1000000}\n")
+            for chrom in ("chr1", "chr2"):
+                fasta = os.path.join(indels, f"fake_ds_{chrom}", f"fake{chrom}.fa")
+                self.assertEqual(os.listdir(os.path.dirname(fasta)), [f"fake{chrom}.fa"])
+            # once the cause is gone, the next run finishes it
+            rc, out, err = self.run_bio()
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(self.bins(INDELS), WHOLE[INDELS][2])
 
     def test_a_sigterm_while_it_overlays_ends_the_run_and_leaves_no_temporary_file(self):
-        """scancel, docker stop: the run ends by the signal, as before, with each fake
-        FASTA as add-variants wrote it and no temporary file left beside one."""
-        proc = self.start(shim=True, STUB_OVERLAY_HANG="1")
-        self.wait_for_mark(proc)
-        os.kill(proc.pid, signal.SIGTERM)
-        proc.wait(timeout=60)
-        self.assertEqual(proc.returncode, -signal.SIGTERM, self.stderr())
-        for chrom, seq in GENOME.items():
-            fasta = self.path("Genomes", "hg38+ds_INDELS", f"fake_ds_{chrom}", f"fake{chrom}.fa")
-            self.assertEqual(os.listdir(os.path.dirname(fasta)), [f"fake{chrom}.fa"])
-            with open(fasta) as fh:
-                self.assertEqual(fh.read(), f">fake{chrom}\n{seq[:26]}T{seq[26:60]}\n")
-        self.assertFalse(os.path.lexists(self.lib(INDELS)))
-        self.assertEqual(self.leftovers(), [])
+        """scancel, docker stop: the run ends by the signal, as before, with no
+        temporary file left: of the enrichment it makes, nothing is in place; of one
+        in place, each fake FASTA is as add-variants wrote it."""
+        for kit in (False, True):
+            with self.subTest(enrichment="in place" if kit else "this run's"):
+                self.fresh()
+                if kit:
+                    self.kit()
+                proc = self.start(shim=True, STUB_OVERLAY_HANG="1")
+                self.wait_for_mark(proc)
+                os.kill(proc.pid, signal.SIGTERM)
+                proc.wait(timeout=60)
+                self.assertEqual(proc.returncode, -signal.SIGTERM, self.stderr())
+                self.assertFalse(os.path.lexists(self.lib(INDELS)))
+                self.assertEqual(self.leftovers(), [])
+                self.assertEqual(self.overlays(), [])
+                if not kit:
+                    for output in (self.path("Genomes", "hg38+ds"),
+                                   self.path("Genomes", "hg38+ds_INDELS")):
+                        self.assertFalse(os.path.lexists(output), f"{output} was put in place")
+                    continue
+                for chrom, seq in GENOME.items():
+                    fasta = self.path("Genomes", "hg38+ds_INDELS", f"fake_ds_{chrom}",
+                                      f"fake{chrom}.fa")
+                    self.assertEqual(os.listdir(os.path.dirname(fasta)), [f"fake{chrom}.fa"])
+                    with open(fasta) as fh:
+                        self.assertEqual(fh.read(), f">fake{chrom}\n{seq[:26]}T{seq[26:60]}\n")
 
     def test_a_kill_while_it_overlays_leaves_its_temporary_file_to_the_next_run(self):
         """An OOM kill or a container stop while the overlay writes a FASTA's
-        temporary file leaves that file, in its hidden directory beside the FASTA.
-        The directory holds the run's owner record, and the next run removes it,
-        whether it overlays again or finds the INDELS index built since (by a
-        complete-search, here put back as that leaves it)."""
+        temporary file leaves that file. Of the enrichment the run makes, it is in
+        that enrichment's build directory, which the next run removes before it
+        enriches again. Of one in place, it is in a hidden directory beside the FASTA,
+        which holds the run's owner record, and the next run removes it, whether it
+        overlays again or finds the INDELS index built since (by a complete-search,
+        here put back as that leaves it)."""
+        with self.subTest(enrichment="this run's"):
+            fake = self.path("Genomes", "hg38+ds_INDELS", "fake_ds_chr1")
+            proc = self.start(shim=True, STUB_OVERLAY_HANG="1")
+            self.wait_for_mark(proc)
+            self.kill_group(proc)
+            self.assertFalse(os.path.lexists(fake), "the fake-indel genome was put in place")
+            left = self.leftovers()
+            self.assertEqual([os.path.dirname(d) for d in left], [self.path("Genomes")])
+            # its temporary file is there with the rest of the enrichment, in no listing
+            self.assertEqual([d.startswith(left[0] + os.sep) for d in self.overlays()], [True])
+            rc, out, err = self.run_bio()
+            self.assertEqual(rc, 0, err)
+            self.assertIn(f"Removing {left[0]}: the build-index-only run that made it "
+                          f"(pid {proc.pid} on {os.uname().nodename}, started ", out)
+            self.assertIn("Enriching hg38 with ds (add-variants)...", out)
+            self.assertEqual(self.leftovers(), [])
+            self.assertEqual(self.overlays(), [])
+            self.assertEqual(os.listdir(fake), ["fakechr1.fa"])
+            self.assertEqual(self.bins(INDELS), WHOLE[INDELS][2])
         for since in (False, True):
-            with self.subTest(indels_index_built_since=since):
+            with self.subTest(enrichment="in place", indels_index_built_since=since):
                 self.fresh()
                 fake = self.path("Genomes", "hg38+ds_INDELS", "fake_ds_chr1")
                 if since:
@@ -1188,6 +1277,8 @@ class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
                     self.assertEqual(rc, 0, err)
                     aside = os.path.join(self.root, "aside")
                     os.rename(self.lib(INDELS), aside)
+                else:
+                    self.kit()
                 proc = self.start(shim=True, STUB_OVERLAY_HANG="1")
                 self.wait_for_mark(proc)
                 self.kill_group(proc)
@@ -1203,6 +1294,64 @@ class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
                               f"(pid {proc.pid} on {os.uname().nodename}, started ", out)
                 self.assertEqual(os.listdir(fake), ["fakechr1.fa"])
                 self.assertEqual(self.bins(INDELS), WHOLE[INDELS][2])
+
+
+class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
+    """build-index-only added the SNP codes to the fake-indel genome only just before
+    it indexed it, so a run stopped after the enrichment (in the tier emission, the
+    indel genotype store, the variant index) left it in place without them. A
+    complete-search then built the INDELS index from it, with pool_index_indels.py,
+    which adds none, and every later build-index-only kept that one: the off-targets
+    that need both an indel and a nearby SNP were missing or scored too low, with no
+    error. The codes now go on in the enrichment's build directory, before any of it
+    is in place."""
+
+    def search_builds_the_indels_index(self):
+        """What complete-search does when it finds the fake-indel genome but no
+        INDELS index: pool_index_indels.py, in the working directory, with the
+        variant index's PAM and N."""
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(("STUB_", "CRISPRME_"))}
+        env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
+                   STUB_LOG=self.log)
+        subprocess.run([sys.executable, os.path.join(HERE, "pool_index_indels.py"),
+                        self.path("Genomes", "hg38+ds_INDELS") + "/", PAM, "NRG", "hg38", "ds",
+                        "2", "2"], cwd=self.work, env=env, check=True, capture_output=True)
+
+    def test_an_indels_index_a_search_builds_from_it_is_the_one_build_index_only_builds(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = tree(self.lib(INDELS)), tree(self.path("Genomes", "hg38+ds_INDELS"))
+        # what the overlay prints comes where it did, as it overlaid just before indexing
+        lines = out.splitlines()
+        at = lines.index(f"Building indels index {INDELS}...")
+        self.assertEqual(lines[at + 1:at + 5], [
+            "overlay_indel_snps: chr1 -> 1 SNP overlays",
+            "overlay_indel_snps: chr2 -> 1 SNP overlays",
+            "overlay_indel_snps: 2 total SNP overlays",
+            "[indel-snp] SNP-overlaid the fake-indel genome (2 flank bases IUPAC-coded).",
+        ])
+        cases = (("killed while it builds the variant index", WHOLE[VAR][1], True),
+                 ("killed while it builds the INDELS index", WHOLE[INDELS][1], True),
+                 ("a search builds the INDELS index meanwhile", WHOLE[VAR][1], False))
+        for case, step, killed in cases:
+            with self.subTest(case):
+                self.fresh()
+                proc = self.start(STUB_HANG=step)
+                self.wait_for_mark(proc)
+                if killed:
+                    self.kill_group(proc)
+                self.search_builds_the_indels_index()
+                if killed:
+                    rc, out, err = self.run_bio()
+                else:
+                    open(self.release, "w").close()
+                    rc, out, err = self.finish(proc)
+                self.assertEqual(rc, 0, err)
+                self.assertIn(f"Indels index already present: {self.lib(INDELS)}\n", out)
+                self.assertEqual(tree(self.lib(INDELS)), clean[0])
+                self.assertEqual(tree(self.path("Genomes", "hg38+ds_INDELS")), clean[1])
+                self.assertEqual(self.leftovers(), [])
 
 
 # What the code before this fix (379b5b0) did with the same stub and inputs, for
