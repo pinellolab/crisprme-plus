@@ -261,7 +261,8 @@ and the `release-crisprme` skill.
   installer now give the commands CI runs: `CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G`, then `crisprme.py validate-test
   --chrom chr22`. Where that run has left nothing to check, `validate-test` says so in one line,
-  naming the command, and exits 1; any failed validation now exits 1 without `crisprme.py`'s
+  naming both commands for the chromosome it was asked to check (the chr22 pair without
+  `--chrom`), and exits 1; any failed validation now exits 1 without `crisprme.py`'s
   `OSError` traceback after `validate.py`'s own report. Also in the README: §1.3 clones the
   `v2.8.1` tag rather than `main`, and §1.2 says the image is built from source (CRISPRitz v2.9.1
   compiled in it) and gives its download and on-disk sizes separately. Both `complete-test` modes

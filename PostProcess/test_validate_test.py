@@ -88,6 +88,30 @@ class ValidatePyWithoutBenchmarkOutput(unittest.TestCase):
                      "complete-test --chrom chr22 --vcf_dataset 1000G"):
             self.assertIn(part, lines[0])
 
+    def hint(self, chrom):
+        """validate.py's one line, run as validate-test runs it for `chrom`."""
+        with tempfile.TemporaryDirectory() as d:
+            out = subprocess.run([sys.executable, VALIDATE, chrom], cwd=d,
+                                 capture_output=True, text=True)
+        self.assertEqual(out.returncode, 1, out.stderr)
+        lines = out.stderr.splitlines()
+        self.assertEqual(len(lines), 1, out.stderr)
+        return lines[0]
+
+    def test_the_commands_are_for_the_chromosome_asked_for(self):
+        # validate-test --chrom chr21 reads hg38_chr21 reports, which a chr22 run never writes
+        line = self.hint("chr21")
+        self.assertIn("complete-test --chrom chr21 --vcf_dataset 1000G", line)
+        self.assertIn("then crisprme.py validate-test --chrom chr21", line)
+        self.assertNotIn("chr22", line)
+
+    def test_without_chrom_they_are_the_documented_chr22_pair(self):
+        # validate-test without --chrom ("all") checks a whole-genome run: rather than
+        # that, the chr22 self-test, and the validate-test that then has something to check
+        line = self.hint("all")
+        self.assertIn("complete-test --chrom chr22 --vcf_dataset 1000G", line)
+        self.assertIn("then crisprme.py validate-test --chrom chr22", line)
+
 
 class TheCliCallerAddsNoTraceback(unittest.TestCase):
     """validate.py has said why on stderr; crisprme.py only passes the failure on."""
