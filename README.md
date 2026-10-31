@@ -1183,11 +1183,14 @@ per-run view of the working directory in which that chromosome is the only one: 
 `.crisprme-test-view-*` folder of symlinks, removed when the run ends. So it reports
 exactly the off-targets the whole-genome test reports on that chromosome, for a fraction
 of the cost: with `NRG_3_hg38+hg38_HGDP1kGP`, `--chrom chr22` peaked at about 5 GB of RAM
-and took 2 to 4 minutes at 16 threads in testing. A chromosome that the genome or the
-index does not have is refused in one line naming those it has. Without `--chrom` it
-searches **every chromosome** of the index's genome; with a variant index such as
-`NRG_3_hg38+hg38_HGDP1kGP` that is a genome-wide variant search, which needs the memory
-given in [§0](#0-system-requirements) (64 GB or more).
+and took about 1.5 to 4 minutes at 16 threads in testing. A chromosome that holds none of
+the example guide's off-targets, as `chrM` and most contigs of the reference-only
+`NRG_3_hg38` do, passes with an empty result, which Complete Search ends without an
+`integrated_results.tsv`. A chromosome that the genome or the index does not have is
+refused in one line naming those it has.
+Without `--chrom` it searches **every chromosome** of the index's genome; with a variant
+index such as `NRG_3_hg38+hg38_HGDP1kGP` that is a genome-wide variant search, which needs
+the memory given in [§0](#0-system-requirements) (64 GB or more).
 
 This module is suited for:
 
@@ -2195,7 +2198,7 @@ downloaded (e.g. `NRG_3_hg38+hg38_HGDP1kGP`), execute the following command:
 
 It searches chromosome 22 alone and reports the off-targets the
 [Full Genome Test](#322-full-genome-test) reports there. With `NRG_3_hg38+hg38_HGDP1kGP`
-it peaked at about 5 GB of RAM and took 2 to 4 minutes at 16 threads in testing.
+it peaked at about 5 GB of RAM and took about 1.5 to 4 minutes at 16 threads in testing.
 `validate-test` does not apply to it, as to any run of the prebuilt-index smoke.
 
 As CI runs it, the single-chromosome test is `complete-test`'s benchmark mode followed by

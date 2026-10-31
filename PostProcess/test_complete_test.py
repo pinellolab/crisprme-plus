@@ -22,10 +22,14 @@ searched every chromosome of the index's genome: on a two-chromosome genome it r
 variant search. Now a chromosome other than "all" runs the same complete-search from a
 per-run view of the working directory in which it is the only chromosome, removed on
 every exit, and one the genome or the index lacks is refused in one line before anything
-is searched. ChromView checks the view in-process on a small working directory, with
-complete-search stubbed; RealSignals sends real signals to complete_test.py run as a
-process, with a stub crisprme.py on PATH; the CLI test checks that crisprme.py passes the
-refusal on without a traceback.
+is searched. A chromosome holding no off-target of the example guide passes with an
+empty result, as complete-search ends it. A SIGTERM or SIGHUP is passed on to the
+search, which is waited for before the view goes, and one ignored at entry (nohup's
+SIGHUP) stays ignored. ChromView checks the view in-process on a small working
+directory, with complete-search stubbed; RealSignals sends real signals to
+complete_test.py run as a process, with a stub crisprme.py on PATH that starts a few
+processes; StopSearch checks the kill of a search that outlasts its wait; the CLI test
+checks that crisprme.py passes the refusal on without a traceback.
 """
 
 import contextlib
@@ -266,30 +270,48 @@ class ChromView(unittest.TestCase):
 
     def smoke(self, chrom, search=None):
         """Run the smoke for chrom with complete-search stubbed by search(cmd, cwd), which
-        by default writes an integrated_results file and returns 0. Returns the (cmd,
-        cwd, tree of cwd) of each call, what went to stderr, and the SystemExit code
-        (None when it returned)."""
+        by default writes an integrated_results file and returns 0: the whole-genome
+        search's subprocess.call, and _search_in_view, which runs a one-chromosome one
+        from its view. Returns the (cmd, cwd, tree of cwd) of each call, what went to
+        stderr, and the SystemExit code (None when it returned)."""
         calls = []
+
+        def run(cmd, cwd):
+            calls.append((cmd, cwd, _tree(cwd) if cwd else None))
+            return (search or self._result)(cmd, cwd)
 
         def call(cmd, shell=False, cwd=None):
             self.assertTrue(shell)
-            calls.append((cmd, cwd, _tree(cwd) if cwd else None))
-            if search:
-                return search(cmd, cwd)
-            res = os.path.join(self.wd, "Results", ct.COMPLETETESTRESDIR)
-            os.makedirs(res, exist_ok=True)
-            open(os.path.join(res, "x_integrated_results.tsv"), "w").close()
-            return 0
+            return run(cmd, cwd)
 
         err = io.StringIO()
         code = None
+        # create=True: the tests also run against a commit before _search_in_view, which
+        # ran the one-chromosome search with subprocess.call too
         with mock.patch.object(ct.subprocess, "call", side_effect=call), \
+             mock.patch.object(ct, "_search_in_view", side_effect=run, create=True), \
              contextlib.redirect_stderr(err):
             try:
                 ct.run_crisprme_test(chrom, "1000G", 2, False)
             except SystemExit as e:
                 code = e.code
         return calls, err.getvalue(), code
+
+    def _result(self, cmd, cwd):
+        """complete-search with off-targets: an integrated_results table."""
+        res = os.path.join(self.wd, "Results", ct.COMPLETETESTRESDIR)
+        os.makedirs(res, exist_ok=True)
+        open(os.path.join(res, "x_integrated_results.tsv"), "w").close()
+        return 0
+
+    def _empty(self, cmd, cwd):
+        """complete-search's zero-hit end, as submit_job has it: exit 0, no
+        integrated_results table, and the marker the web status page reads in log.txt."""
+        res = os.path.join(self.wd, "Results", ct.COMPLETETESTRESDIR)
+        os.makedirs(res, exist_ok=True)
+        with open(os.path.join(res, "log.txt"), "w") as fh:
+            fh.write("Post-analysis\tEnd\tSat\nNo off-targets found\nJob\tEnd\tSat\n")
+        return 0
 
     def test_the_search_runs_from_a_view_holding_only_the_chromosome(self):
         """Its genome folder holds chr22.fa alone; each index the search could resolve,
@@ -399,14 +421,79 @@ class ChromView(unittest.TestCase):
     def test_the_view_is_removed_on_sigterm_and_sighup(self):
         for sig in (signal.SIGTERM, signal.SIGHUP):
             with self.subTest(signal=sig.name):
-                before = signal.getsignal(sig)
+                # at its default, whatever this test run inherited: an ignored one stays so
+                before = signal.signal(sig, signal.SIG_DFL)
+                try:
+                    def stopped(cmd, cwd):
+                        os.kill(os.getpid(), sig)
+                        time.sleep(5)  # the handler runs first
+                        return 0
+                    self._assert_removed_on(stopped, want_code=128 + sig)
+                    self.assertIs(signal.getsignal(sig), signal.SIG_DFL)
+                finally:
+                    signal.signal(sig, before)
 
-                def stopped(cmd, cwd):
-                    os.kill(os.getpid(), sig)
-                    time.sleep(5)  # the handler runs first
-                    return 0
-                self._assert_removed_on(stopped, want_code=128 + sig)
-                self.assertIs(signal.getsignal(sig), before)
+    def test_a_signal_ignored_at_entry_stays_ignored(self):
+        """nohup ignores SIGHUP: complete_test.py must leave it so, and the search it
+        starts then inherits it (exec keeps an ignored signal, and resets a handled one
+        to its default), so a hangup stops neither, as without --chrom. The other
+        signal is still handled."""
+        for sig, other in ((signal.SIGHUP, signal.SIGTERM), (signal.SIGTERM, signal.SIGHUP)):
+            with self.subTest(signal=sig.name):
+                before = signal.signal(sig, signal.SIG_IGN)
+                before_other = signal.signal(other, signal.SIG_DFL)
+                try:
+                    seen = []
+
+                    def hung_up(cmd, cwd):
+                        seen.append((signal.getsignal(sig), signal.getsignal(other)))
+                        os.kill(os.getpid(), sig)
+                        time.sleep(0.2)
+                        return self._result(cmd, cwd)
+
+                    calls, err, code = self.smoke("chr22", hung_up)
+                    self.assertIsNone(code, err)
+                    self.assertIsNotNone(calls[0][1], "complete-search must run from the view")
+                    self.assertEqual(seen, [(signal.SIG_IGN, ct._exit_on_signal)])
+                    self.assertIs(signal.getsignal(sig), signal.SIG_IGN)
+                    self.assertIn("complete-test PASSED", err)
+                    self.assertEqual(_views(self.wd), [])
+                finally:
+                    signal.signal(sig, before)
+                    signal.signal(other, before_other)
+                    shutil.rmtree(os.path.join(self.wd, "Results", ct.COMPLETETESTRESDIR),
+                                  ignore_errors=True)
+
+    def test_a_chromosome_without_an_off_target_passes_with_an_empty_result(self):
+        """The example guide has no off-target there (chrM, most unplaced contigs):
+        complete-search ends at its zero-hit short-circuit, exit 0 and no
+        integrated_results table, as the whole-genome test then reports none there
+        either. The test passes, saying so in one line, rather than failing on the
+        missing table, with crisprme.py's traceback pointing at an empty error log."""
+        calls, err, code = self.smoke("chr22", self._empty)
+        self.assertIsNone(code, err)
+        self.assertIsNotNone(calls[0][1], "complete-search must run from the view")
+        last = err.splitlines()[-1]
+        self.assertTrue(last.startswith(
+            "complete-test PASSED: searched the example guide against "
+            "'NGG_2_toy+toy_panel' on chr22, which holds none of its off-targets"), last)
+        self.assertNotIn("ERROR", err)
+        self.assertEqual(_views(self.wd), [])
+
+    def test_an_empty_result_still_fails_without_the_zero_hit_end(self):
+        """No table, and no zero-hit marker in log.txt: the search did not end as an
+        empty one, so the test still fails."""
+        _, err, code = self.smoke("chr22", lambda cmd, cwd: 0)
+        self.assertEqual(code, 1)
+        self.assertIn("ERROR: complete-test produced no integrated_results.tsv", err)
+
+    def test_an_empty_whole_genome_result_still_fails(self):
+        """Without --chrom the smoke is unchanged: the example guide has off-targets in
+        the genome, and a run without a table fails, zero-hit marker or not."""
+        calls, err, code = self.smoke("all", self._empty)
+        self.assertIsNone(calls[0][1])
+        self.assertEqual(code, 1)
+        self.assertIn("ERROR: complete-test produced no integrated_results.tsv", err)
 
     def test_a_view_left_half_built_is_removed(self):
         real = os.symlink
@@ -459,38 +546,90 @@ class ChromView(unittest.TestCase):
         self.assertTrue(line.endswith(f"; available: {', '.join(primary)} and 21 more"), line)
 
 
+# complete-search's stand-in for RealSignals: it and a child shell, as the real search
+# has a tree of processes, note their PIDs, and any SIGTERM or SIGHUP they get, with
+# whether the view they run from is still there; released, it writes the table
+# complete-search would in its --output folder, and ends.
+_STUB = r"""#!/bin/sh
+b=@BIN@
+echo $$ >> "$b/pids"
+trap 'echo "$$ TERM $([ -d "$PWD" ] && echo in-view || echo view-gone)" >> "$b/got"; exit 143' TERM
+trap 'echo "$$ HUP $([ -d "$PWD" ] && echo in-view || echo view-gone)" >> "$b/got"; exit 129' HUP
+if [ "$1" = child ]; then
+	while [ ! -e "$b/release" ]; do sleep 0.05; done
+	exit 0
+fi
+"$0" child &
+while [ "$(grep -c '' "$b/pids")" -lt 2 ]; do sleep 0.05; done
+pwd -P > "$b/started.tmp" && mv "$b/started.tmp" "$b/started"
+while [ ! -e "$b/release" ]; do sleep 0.05; done
+wait
+for a; do [ "$prev" = --output ] && out=$a; prev=$a; done
+mkdir -p "$out" && : > "$out/x_integrated_results.tsv"
+"""
+
+_HAS_PROC = os.path.isdir("/proc/self")
+
+
+def _running(pid):
+    """Whether process pid still runs, from /proc (Linux): a zombie, ended but not yet
+    reaped, does not."""
+    try:
+        with open(f"/proc/{pid}/stat") as fh:
+            return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        return False
+
+
 class RealSignals(unittest.TestCase):
     """complete_test.py run as a process, as crisprme.py runs it, in its own session with
-    SIGINT at its default (as under a terminal), with crisprme.py on PATH a stub that
-    notes where complete-search was started and waits. The view must go however the
-    run is stopped: Ctrl-C (SIGINT to the whole process group), or SIGTERM or SIGHUP
-    to complete_test.py alone."""
+    SIGINT at its default (as under a terminal), with crisprme.py on PATH the stub
+    above. The view must go however the run is stopped: Ctrl-C (SIGINT to the whole
+    process group), or SIGTERM or SIGHUP to complete_test.py alone, which it passes on
+    to the search, waiting for it to end before the view goes. Under nohup a hangup
+    stops neither."""
 
     def setUp(self):
         self.wd = os.path.realpath(tempfile.mkdtemp())
-        self.bin = tempfile.mkdtemp()
+        self.bin = os.path.realpath(tempfile.mkdtemp())
         _make_workdir(self.wd)
         self.mark = os.path.join(self.bin, "started")
         stub = os.path.join(self.bin, "crisprme.py")
         with open(stub, "w") as fh:
-            fh.write(f'#!/bin/sh\npwd -P > "{self.mark}.tmp" && mv "{self.mark}.tmp" "{self.mark}"\n'
-                     "exec sleep 60\n")
+            fh.write(_STUB.replace("@BIN@", self.bin))
         os.chmod(stub, 0o755)
 
     def tearDown(self):
         shutil.rmtree(self.wd)
         shutil.rmtree(self.bin)
 
-    def _stop(self, sig, group):
+    def _lines(self, name):
+        try:
+            with open(os.path.join(self.bin, name)) as fh:
+                return fh.read().split("\n")[:-1]
+        except FileNotFoundError:
+            return []
+
+    def _run(self, stop, nohup=False):
+        """Start complete_test.py --chrom chr22 and, once the stub runs in the view,
+        call stop(proc); return its exit code, its stderr, the stub's PIDs, those of
+        them still running as it ended, and what the stub noted of the signals."""
         env = {k: v for k, v in os.environ.items() if k != "CRISPRME_ALLOW_ONDEMAND_BUILD"}
         env["PATH"] = self.bin + os.pathsep + env.get("PATH", "")
+
+        def preexec():
+            # as under a terminal, or nohup, whatever this test run inherited
+            for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                signal.signal(s, signal.SIG_DFL)
+            if nohup:
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
         with tempfile.TemporaryFile() as err:
             proc = subprocess.Popen(
                 [sys.executable, os.path.join(HERE, "complete_test.py"), "chr22", "1000G",
                  "1", "False"],
                 cwd=self.wd, env=env, stdout=subprocess.DEVNULL, stderr=err,
-                start_new_session=True,
-                preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL),
+                start_new_session=True, preexec_fn=preexec,
             )
             try:
                 deadline = time.time() + 30
@@ -504,27 +643,94 @@ class RealSignals(unittest.TestCase):
                 self.assertEqual(os.path.dirname(view), self.wd)
                 self.assertTrue(os.path.basename(view).startswith(ct.CHROMVIEWPREFIX), view)
                 self.assertTrue(os.path.isdir(view))
-                if group:
-                    os.killpg(proc.pid, sig)
-                else:
-                    proc.send_signal(sig)
+                stop(proc)
                 proc.wait(timeout=30)
+                pids = [int(p) for p in self._lines("pids")]
+                left = [p for p in pids if _running(p)]
             finally:
                 with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.killpg(proc.pid, signal.SIGKILL)  # the stub's sleep, if still there
+                    os.killpg(proc.pid, signal.SIGKILL)  # the stub, if still there
                 proc.wait()
+            err.seek(0)
+            stderr = err.read().decode()
         self.assertFalse(os.path.lexists(view))
         self.assertEqual(_views(self.wd), [])
-        return proc.returncode
+        return proc.returncode, stderr, pids, left, self._lines("got")
 
     def test_ctrl_c(self):
-        self.assertNotEqual(self._stop(signal.SIGINT, group=True), 0)
+        rc, *_ = self._run(lambda proc: os.killpg(proc.pid, signal.SIGINT))
+        self.assertNotEqual(rc, 0)
+
+    def _alone(self, sig):
+        """sig to complete_test.py alone, as `kill <its PID>` sends it: complete-search
+        and the processes under it, in the same process group, get none, so it passes
+        sig on to them and waits for them to end before it removes the view, lest they
+        go on without it."""
+        rc, stderr, pids, left, got = self._run(lambda proc: proc.send_signal(sig))
+        self.assertEqual(rc, 128 + sig, stderr)
+        self.assertEqual(len(pids), 2)
+        if _HAS_PROC:  # where complete_test.py finds the search's processes
+            self.assertEqual(left, [], "the search outlived complete-test")
+            self.assertEqual(sorted(got), sorted(f"{p} {sig.name[3:]} in-view" for p in pids))
 
     def test_sigterm_to_complete_test_alone(self):
-        self.assertEqual(self._stop(signal.SIGTERM, group=False), 128 + signal.SIGTERM)
+        self._alone(signal.SIGTERM)
 
     def test_sighup_to_complete_test_alone(self):
-        self.assertEqual(self._stop(signal.SIGHUP, group=False), 128 + signal.SIGHUP)
+        self._alone(signal.SIGHUP)
+
+    def test_a_hangup_under_nohup(self):
+        """nohup ignores SIGHUP, and so must complete_test.py and the search it starts:
+        a hangup (SIGHUP to the whole process group) stops neither, and the test
+        passes once the search ends, as without --chrom."""
+        def hang_up(proc):
+            os.killpg(proc.pid, signal.SIGHUP)
+            time.sleep(0.5)
+            self.assertIsNone(proc.poll(), "complete-test ended on an ignored hangup")
+            open(os.path.join(self.bin, "release"), "w").close()
+
+        rc, stderr, pids, left, got = self._run(hang_up, nohup=True)
+        self.assertEqual(rc, 0, stderr)
+        self.assertIn("complete-test PASSED", stderr)
+        self.assertEqual(got, [], "the search was sent the ignored SIGHUP")
+        self.assertEqual(left, [])
+
+
+class StopSearch(unittest.TestCase):
+    """_stop_search on a real search that ignores the signal passed on: it is killed,
+    with the processes under it, once SEARCHSTOPWAIT seconds are over."""
+
+    @unittest.skipUnless(_HAS_PROC, "complete_test.py finds a search's processes in /proc")
+    def test_a_search_outlasting_the_wait_is_killed(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        pids = os.path.join(tmp, "pids")
+        proc = subprocess.Popen(
+            # ignored here, the signal is ignored in every process under it too
+            f"trap '' TERM; sh -c 'echo $$ >> {pids}; while :; do sleep 0.05; done' & "
+            f"echo $$ >> {pids}; while :; do sleep 0.05; done",
+            shell=True,
+        )
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+
+        def noted():
+            with contextlib.suppress(FileNotFoundError), open(pids) as fh:
+                return [int(p) for p in fh.read().split()]
+            return []
+
+        deadline = time.time() + 10
+        while time.time() < deadline and len(noted()) < 2:
+            time.sleep(0.05)
+        tree = noted()
+        self.assertEqual(len(tree), 2)
+        t0 = time.monotonic()
+        with mock.patch.object(ct, "SEARCHSTOPWAIT", 0.5):
+            ct._stop_search(proc, signal.SIGTERM)
+        took = time.monotonic() - t0
+        self.assertGreaterEqual(took, 0.5)
+        self.assertLess(took, 5)
+        self.assertEqual(proc.returncode, -signal.SIGKILL)
+        self.assertEqual([p for p in tree if _running(p)], [])
 
 
 # --------------------------------------------------------------------------- #

@@ -58,6 +58,7 @@ import tempfile
 import shutil
 import signal
 import json
+import time
 import sys
 import os
 import re
@@ -96,6 +97,10 @@ COMPLETETESTRESDIR = "crisprme-test-out"
 
 # name prefix of the per-run view a one-chromosome smoke searches from (_chrom_view)
 CHROMVIEWPREFIX = ".crisprme-test-view-"
+
+# seconds a one-chromosome search has to end on the SIGTERM or SIGHUP passed on to it
+# before it is killed (_stop_search)
+SEARCHSTOPWAIT = 10
 
 
 def require_prebuilt_index() -> str:
@@ -711,8 +716,95 @@ def _require_chrom(chrom: str, genome_dir: str, ref: str, index_name: str) -> No
 
 
 def _exit_on_signal(signum, _frame) -> None:
-    """SIGTERM / SIGHUP: leave through the finally that removes the per-run view."""
+    """SIGTERM / SIGHUP: leave through _search_in_view, which stops the search first, and
+    the finally that removes the per-run view."""
     sys.exit(128 + signum)
+
+
+def _proc_stat(pid: int):
+    """(state, parent PID, start time) of process ``pid`` from /proc/<pid>/stat (Linux),
+    or None once it is gone. Its name, in parentheses, may hold spaces and parentheses,
+    so the fields are counted from the last ')'."""
+    try:
+        with open(f"/proc/{pid}/stat") as fin:
+            fields = fin.read().rsplit(")", 1)[1].split()
+        return fields[0], int(fields[1]), fields[19]
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _stop_search(proc, signum: int) -> None:
+    """Pass the SIGTERM or SIGHUP ``signum`` complete_test.py got on to the search
+    ``proc`` and every process under it, wait for all of them to end, and SIGKILL those
+    still running after SEARCHSTOPWAIT seconds.
+
+    A ``kill`` of complete_test.py's PID reaches it alone: the shell under it,
+    complete-search, the search script and its children, which share its process
+    group, would go on, and fail on the view's paths once it is removed. They are found
+    in /proc before any of them ends, as the children of one that ends go to init;
+    without /proc (macOS) only ``proc`` is sent the signal. A signal sent to the whole
+    group (a hangup, ``kill -- -<pgid>``, ``timeout``) has reached them already, and
+    this second one changes nothing: they end on the first. A further SIGTERM or SIGHUP
+    (a hangup can bring two) does not cut the wait short; _chrom_view's finally puts
+    the handlers back.
+    """
+    for s in (signal.SIGTERM, signal.SIGHUP):
+        if signal.getsignal(s) is _exit_on_signal:
+            signal.signal(s, signal.SIG_IGN)
+    found = {}  # PID -> start time, of each process found under proc
+
+    def running(pid):
+        stat = _proc_stat(pid)
+        return stat is not None and stat[0] != "Z" and stat[2] == found[pid]
+
+    def send(sig):
+        # find the processes under proc, or under one found before that still runs (its
+        # own parent may have ended), then send sig to those still running
+        children = {}
+        with contextlib.suppress(OSError):
+            for name in os.listdir("/proc"):
+                stat = _proc_stat(int(name)) if name.isdigit() else None
+                if stat is not None:
+                    children.setdefault(stat[1], []).append((int(name), stat[2]))
+        todo = [pid for pid in found if running(pid)]
+        if proc.returncode is None:  # not reaped yet, so its PID is still its own
+            todo.append(proc.pid)
+        while todo:
+            for pid, start in children.get(todo.pop(), ()):
+                if pid not in found:
+                    found[pid] = start
+                    todo.append(pid)
+        proc.send_signal(sig)
+        for pid in found:
+            if running(pid):
+                with contextlib.suppress(OSError):
+                    os.kill(pid, sig)
+
+    send(signum)
+    deadline = time.monotonic() + SEARCHSTOPWAIT
+    while time.monotonic() < deadline and (
+        proc.poll() is None or any(running(pid) for pid in found)
+    ):
+        time.sleep(0.05)
+    send(signal.SIGKILL)
+    proc.wait()
+
+
+def _search_in_view(cmd: str, view: str) -> int:
+    """Run the one-chromosome search, the shell command ``cmd``, from ``view`` and return
+    its exit code, as subprocess.call does, but on a SIGTERM or SIGHUP stop the search
+    (_stop_search) before the view is removed. On a Ctrl-C, which the terminal sends
+    the search too, kill the shell and leave at once, as subprocess.call does: where
+    /bin/sh execs complete_test.py, crisprme.py kills it 0.25 s after a Ctrl-C."""
+    with subprocess.Popen(cmd, shell=True, cwd=view) as proc:
+        try:
+            return proc.wait()
+        except SystemExit as stop:  # _exit_on_signal's: 128 + the signal's number
+            _stop_search(proc, stop.code - 128)
+            raise
+        except BaseException:
+            proc.kill()
+            raise
 
 
 def _log_chrom(fname: str):
@@ -745,17 +837,34 @@ def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
     the search reads these index folders as they are, rather than through a .binview in
     the results whose links would outlive the view.
 
+    The search's results are the whole-genome search's on <chrom> but for one file: for
+    a chromosome with an indel log and no indel off-target, the whole-genome run, whose
+    indel post-analysis runs for the other chromosomes' indel off-targets, writes a
+    header-only fake<chrom>_*.indel_snp_cooc.tsv, which a run with no indel off-target
+    at all skips with its post-analysis. It holds no row, and the report leaves
+    header-only ones out.
+
     Nothing is copied or written outside the view, and no listing or later run looks
     for an index in it (they read genome_library/ and Genomes/ only). It is removed on
-    success, failure, Ctrl-C, SIGTERM and SIGHUP; a SIGKILL leaves it behind, which is
-    harmless: a folder of symlinks that nothing reads.
+    success, failure, Ctrl-C, SIGTERM and SIGHUP, the last two passed on to the search
+    and waited for first (_search_in_view); a signal ignored at entry, as nohup ignores
+    SIGHUP, stays ignored, here and in the search. A SIGKILL leaves the view behind,
+    which is harmless: a folder of symlinks that nothing reads. A SIGINT sent to
+    complete_test.py alone, not the Ctrl-C a terminal sends the whole process group,
+    removes it but leaves the search running, to fail without it.
     """
     cwd = os.getcwd()
     vcf_names = []
     if vcf_list:
         with open(vcf_list) as fin:  # as the search reads them
             vcf_names = [os.path.basename(l.strip().rstrip("/")) for l in fin if l.strip()]
-    saved = {s: signal.signal(s, _exit_on_signal) for s in (signal.SIGTERM, signal.SIGHUP)}
+    # a signal ignored at entry stays so, and the search inherits it, for exec keeps an
+    # ignored signal and resets a handled one to its default: nohup ignores SIGHUP
+    saved = {
+        s: signal.signal(s, _exit_on_signal)
+        for s in (signal.SIGTERM, signal.SIGHUP)
+        if signal.getsignal(s) is not signal.SIG_IGN
+    }
     view = None
     try:
         view = tempfile.mkdtemp(prefix=CHROMVIEWPREFIX, dir=cwd)
@@ -819,6 +928,17 @@ def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
             signal.signal(s, handler)
 
 
+def _zero_hit(res_dir: str) -> bool:
+    """Whether the search into ``res_dir`` ended at complete-search's zero-hit
+    short-circuit (submit_job): exit 0 with no off-target, so no integrated_results
+    table, and its log.txt marked as the web status page reads it."""
+    try:
+        with open(os.path.join(res_dir, "log.txt")) as fin:
+            return "No off-targets found" in fin.read()
+    except OSError:
+        return False
+
+
 def _run_prebuilt_index_smoke(threads: int, debug: bool, chrom: str = "all") -> None:
     """Default (user) complete-test: run the built-in example guide against an index the
     user has DOWNLOADED (or built). CRISPRme never builds an index automatically here; if
@@ -828,7 +948,8 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool, chrom: str = "all") -> 
         threads (int): Number of threads for the search.
         debug (bool): Run complete-search in debug mode.
         chrom (str): "all" searches every chromosome of the index's genome; any other
-            value only that chromosome, from a per-run view (``_chrom_view``).
+            value only that chromosome, from a per-run view (``_chrom_view``), and one
+            that holds no off-target of the example guide passes with an empty result.
     """
     index_name = require_prebuilt_index()
     parsed = _parse_index_name(index_name)
@@ -883,17 +1004,18 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool, chrom: str = "all") -> 
         f"mm=2 bDNA=1 bRNA=1 -> Results/{output_dir}\n"
     )
 
-    def complete_search(genome: str, output: str, cwd=None) -> int:
+    def complete_search(genome: str, output: str, view=None) -> int:
         # complete-search will NOT build an index.
-        return subprocess.call(
+        cmd = (
             f"crisprme.py complete-search --genome {genome} "
             f"--mm 2 --bDNA 1 --bRNA 1 --max-total-edits 4 "
             f"--merge 3 --pam {pam} --guide {guide} {vcf_arg} {sid_arg} "
             f"--index-path genome_library --output {output} "
-            f"--thread {threads} {debug_arg} --ci-cd-test",
-            shell=True,
-            cwd=cwd,
+            f"--thread {threads} {debug_arg} --ci-cd-test"
         )
+        if view is None:
+            return subprocess.call(cmd, shell=True)
+        return _search_in_view(cmd, view)
 
     if chrom == "all":
         returncode = complete_search(genome_dir, output_dir)
@@ -905,7 +1027,7 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool, chrom: str = "all") -> 
             returncode = complete_search(
                 os.path.join(view, CRISPRME_DIRS[0], ref),
                 os.path.join(os.getcwd(), CRISPRME_DIRS[1], output_dir),
-                cwd=view,
+                view,
             )
     if returncode != 0:
         sys.stderr.write(
@@ -915,6 +1037,15 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool, chrom: str = "all") -> 
     # confirm a report / integrated_results was produced
     res_dir = os.path.join(os.getcwd(), CRISPRME_DIRS[1], output_dir)
     produced = glob(os.path.join(res_dir, "*integrated_results.tsv"))
+    if not produced and chrom != "all" and _zero_hit(res_dir):
+        # the example guide has no off-target on chrom (chrM, most unplaced contigs), so
+        # the whole-genome test reports none there either: an empty result
+        sys.stderr.write(
+            f"\ncomplete-test PASSED: searched the example guide against '{index_name}' "
+            f"on {chrom}, which holds none of its off-targets (an empty result, so no "
+            "integrated_results.tsv).\n"
+        )
+        return
     if not produced:
         sys.stderr.write(
             f"ERROR: complete-test produced no integrated_results.tsv in {res_dir}.\n"

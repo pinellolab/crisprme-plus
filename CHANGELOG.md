@@ -341,19 +341,26 @@ and the `release-crisprme` skill.
   `chrA`. The smoke now searches only the chromosome `--chrom` names. It runs the same search from
   a per-run view of the working directory in which that chromosome is the only one: a hidden
   `.crisprme-test-view-*` folder of symlinks to its FASTA, to its trees in every index the search
-  could pick, to its `fake<chrom>` INDELS sub-index and to its indel log, so that neither the
-  search nor the post-analysis can load another chromosome. Nothing is copied, and the folder is
-  removed when the run ends, on Ctrl-C, SIGTERM or SIGHUP too. Its rows are the whole-genome
-  smoke's rows on that chromosome, identical in every column, as checked on each sequence of a
-  synthetic genome with a phased variant index and on `chr22` with `NRG_3_hg38+hg38_HGDP1kGP`,
-  both searched per-sample, the default on such an index. There `--chrom chr22` took 2 to 4
-  minutes and 5 GB of RAM at 16 threads, the whole genome 17 minutes and 50 GB. A chromosome
-  the genome or the index does not have is refused before anything is searched, in one line
-  naming those both have, and `crisprme.py` exits 2 without a traceback. Without `--chrom`, or
-  with `--chrom all`, the smoke runs the search it always ran, and the benchmark mode is
-  unchanged. The help, the no-index hints and the README say so, and the README's "Full Genome
-  Test" runs `complete-test --thread 4`, since `complete-test` with no option only prints its
-  help.
+  could pick, to its `fake<chrom>` INDELS sub-index and to its indel log, so that the search does
+  not load another chromosome's search or post-analysis data (the dataset-wide tier folders are
+  linked whole). Nothing is copied, and the folder is removed when the run ends, on Ctrl-C,
+  SIGTERM or SIGHUP too: a SIGTERM or SIGHUP sent to `complete_test.py` alone is passed on to the
+  search, which is waited for (and killed after 10 s) before the folder goes, and a hangup that
+  `nohup` ignores stays ignored, as without `--chrom`. Its rows are the whole-genome smoke's rows
+  on that chromosome, identical in every column, as checked on each sequence of a synthetic genome
+  with a phased variant index and on `chr22` with `NRG_3_hg38+hg38_HGDP1kGP`, both searched
+  per-sample, the default on such an index; the one file it leaves out is the header-only
+  `fake<chrom>_*.indel_snp_cooc.tsv` that the whole-genome run writes for a chromosome with
+  indels but no indel off-target, which holds no row. There `--chrom chr22` took about 1.5 to 4
+  minutes and 5 GB of RAM at 16 threads, the whole genome 11 to 17 minutes and 44 to 50 GB. A
+  chromosome holding no off-target of the example guide, such as `chrM` with `NRG_3_hg38`,
+  passes with an empty result, as the whole-genome test reports none there either
+  (complete-search then writes no `integrated_results.tsv`). A chromosome the genome or the index
+  does not have is refused before anything is searched, in one line naming those both have, and
+  `crisprme.py` exits 2 without a traceback. Without `--chrom`, or with `--chrom all`, the smoke
+  runs the search it always ran, and the benchmark mode is unchanged. The help, the no-index
+  hints and the README say so, and the README's "Full Genome Test" runs
+  `complete-test --thread 4`, since `complete-test` with no option only prints its help.
   `install_from_source.sh` now stops at once on macOS with one line pointing to Docker (README
   §1.2), instead of failing later on a solver or compiler error, and `environment.yml` and the
   README's source-build entry say Linux only. Covered by `PostProcess/test_complete_test.py` and
