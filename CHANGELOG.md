@@ -61,7 +61,10 @@ and the `release-crisprme` skill.
   `CRISPRME_MAX_CONCURRENT_JOBS` environment variable), clamped to `[1, 16]`. The **default stays a
   conservative 2** — each genome-wide search is memory-heavy (~tens of GB of RAM) — so a laptop / the
   public server is never accidentally oversubscribed; raise it only on a machine with enough RAM and
-  cores. Extra jobs beyond the limit simply queue. Applies on the next app restart.
+  cores. Extra jobs beyond the limit simply queue. Applies on the next app restart. When
+  `CRISPRME_MAX_CONCURRENT_JOBS` is set it takes precedence: the Settings card says so and its input
+  is disabled, and a value that is not a whole number from 1 to 16 is ignored or clamped, with a
+  one-line warning at startup.
 - **Settings: Hugging Face download progress bar.** Index/annotation downloads now show percent,
   size, ETA, and phase in the Settings page, backed by an env-gated progress file
   (`CRISPRME_PROGRESS_FILE`); the progress path is a no-op when the variable is unset, so the CLI
@@ -121,6 +124,13 @@ and the `release-crisprme` skill.
   registry, so the index lacks fast post-analysis, the report's variant-count panel and the web's
   data-type labels, and cannot be published. The one-line notice is now a red banner on stderr
   that names the consequence and the fix (re-run with `--samplesID`). Behaviour is unchanged.
+
+- **Install docs: Bioconda and macOS.** The README and website said Bioconda installs the old 2.1.x
+  line; it has served CRISPRme+ (Python 3.11, Linux) since 2.7.9. The channel setup now uses
+  `conda config` (Mamba 2 rejects `mamba config --add`), and the install names its version
+  (`crisprme=2.8.1 python=3.11`), since an unpinned solve can silently fall back to a years-old
+  release; `scorer-env create` and `doctor` are part of it. macOS is Docker-only: Bioconda has no
+  macOS CRISPRitz, and the source build needs GCC (`buildTST` uses GCC's parallel-mode STL).
 
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
@@ -274,7 +284,7 @@ and the `release-crisprme` skill.
   determined, with no version in the prose. The test that should have caught this was asserting the
   stale literal; it now asserts the property instead.
 
-- **History page no longer crashes when a 3rd job is queued.** With the 2 search slots busy, a queued
+- **History page no longer crashes when a job is queued.** With every search slot busy, a queued
   job's `log.txt` exists (a queue note is written to it) but has no `Job\tStart` line yet;
   `read_job_info()` raised `StopIteration`, which aborted the entire History-table build — so running
   and completed jobs could not be opened until the queued job started. `read_job_info()` now returns
@@ -283,7 +293,11 @@ and the `release-crisprme` skill.
   or malformed job directory can never take down the whole table. (Reported by M. Tognon.)
 - **Index/annotation download install is atomic and always structurally verified.** A partial or
   failed download never touches the final install location, and a failure surfaces a copy-paste log
-  plus a Retry action instead of a silent or corrupt state.
+  plus a Retry action instead of a silent or corrupt state. Two genome/VCF download behaviours change
+  from 2.8.0, which wrote straight into `Genomes/<ref>` and `VCFs/<ds>`: a folder that is a symbolic
+  link (for example to a shared copy) is replaced by the downloaded copy, with a NOTE, and the shared
+  copy is left untouched; a folder that is a mount point (including a bind mount) is refused before
+  the download starts, saying what to do instead, so `download --what all` stops at that component.
 - **Pipeline failure summaries are binary-safe.** `summarize_pipeline_failure()` now reads `log.txt`
   and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
   stderr no longer raises `UnicodeDecodeError` and masks the real error.
@@ -300,6 +314,20 @@ and the `release-crisprme` skill.
   affected. Found by installing `crisprme` 2.8.0 from Bioconda the way a new user would (fresh
   Miniforge, conda 26.9.4); with the fix, `scorer-env create`, its compute self-test and real
   searches all pass.
+
+### Security
+- **The web Settings page could be pointed outside `Settings/` and made to re-run a recorded
+  command.** Retry, Show-full-log and the job-progress refresh built a path from the job id the
+  browser sends back, so an id such as `../../x` reached outside `Settings/`, and Retry re-ran the
+  `cmd.json` it found there through the shell. The page now accepts only ids of the exact form it
+  issues and only directories inside `Settings/`, and Retry re-runs only a job its log shows as
+  failed, never a maintainer-only publish while maintainer mode is off.
+- **Genome archives are checked before they are extracted.** A genome `.tar.gz` uploaded in
+  Settings, or fetched by `download --what genome --source url` (the Settings "Direct URL" source),
+  was extracted with no check on its member names, so a crafted archive could write anywhere the app
+  can (as root in the Docker image), including a job folder that Retry would then run. Every member
+  is now checked first: an absolute or `..` path, a link, a device or a FIFO refuses the whole
+  archive and nothing is written. Real genome archives (UCSC hg38 and mm39 chromFa) are unaffected.
 
 ## [2.8.0] - 2026-10-23
 
