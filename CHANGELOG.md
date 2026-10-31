@@ -357,19 +357,23 @@ and the `release-crisprme` skill.
   directory never crosses a mount point, so a `genome_library` mounted on its own (`docker -v`,
   `apptainer --bind`) works as before, and the index takes `genome_library`'s setgid group and
   default ACL, as one built in place does. The enrichment is staged the same way: its dictionaries
-  are compressed and its fake-indel genome gets its SNP codes (see below) before anything moves, then
-  the fake-indel genomes and the dictionaries are moved into place, and the enriched genome last, so
-  a run that ends before then leaves none of it and the next one enriches again. Those moves are
-  renames, done in moments, when `Genomes` and `Dictionaries` share a file system and mount, as in
-  the documented single-mount layout; with `Dictionaries` mounted on its own they copy the
-  dictionaries, and a search started during that copy, or after a run killed in it, fails until
-  `build-index-only` has enriched again. A compression that fails now fails the build and puts
-  nothing in place: `pigz`'s exit status was ignored, and a Python gzip (used without `pigz`) that
-  failed ended the run with a traceback, the enriched genome already in place. An index or an
-  enriched genome that another run finished meanwhile is kept, with a line on stdout. Ctrl-C, SIGTERM
-  and SIGHUP still end the run by that signal, once it has removed its build directory; a second one
-  meanwhile (Ctrl-C pressed twice) waits for that. On success the files, their contents (the `.gz`
-  files included), permissions, sidecars, stdout lines and exit status are as before.
+  are compressed and its fake-indel genome gets its SNP codes (see below) before anything moves, and
+  each set of dictionaries is put together whole in a hidden directory of `Dictionaries` (with
+  `Dictionaries` mounted on its own, that copies them); then the fake-indel genomes, the enriched
+  genome and the dictionaries are renamed into place, the indel logs last, in moments, a Ctrl-C,
+  SIGTERM or SIGHUP meanwhile waiting for the last rename. `build-index-only` takes an enrichment for
+  finished only once its indel logs are in place, and a search needs them and the dictionaries, so
+  a run that ends before then, even by a SIGKILL between two renames, leaves nothing either uses: a
+  search refuses the dataset up front, and the next `build-index-only` enriches again. (The
+  dictionaries alone used to let a search start, which enriched the genome itself, failed on the
+  fake-indel genomes in its way and left its own dictionaries, uncompressed, which later runs kept.)
+  A compression that fails now fails the build and puts nothing in place: `pigz`'s exit status was
+  ignored, and a Python gzip (used without `pigz`) that failed ended the run with a traceback, the
+  enriched genome already in place. An index or an enrichment that another run finished meanwhile
+  is kept, with a line on stdout. Ctrl-C, SIGTERM and SIGHUP still end the run by that signal, once
+  it has removed its build directories; a second one meanwhile (Ctrl-C pressed twice) waits for
+  that. On success the files, their contents (the `.gz` files included), permissions, sidecars,
+  stdout lines and exit status are as before.
 - **`build-index-only` stops while a search holds the build lock of what it uses or builds.**
   `complete-search` holds `<output>.lock` while it enriches a genome or builds an index, and never
   uses an output whose lock is there. `build-index-only` looked at no lock: started while a search
@@ -475,7 +479,8 @@ and the `release-crisprme` skill.
   another host, whose owner cannot be checked from here (a web container's own, once it restarted),
   is left too, with a line on stdout that says how to remove it. The enrichment's directory,
   `Genomes/run_*` before, which the web genome list showed as a genome, is now hidden and reclaimed
-  the same way; the search's own `Genomes/run_*` directories are untouched.
+  the same way, as is the one in `Dictionaries` that its dictionaries are put together in; the
+  search's own `Genomes/run_*` directories are untouched.
 
 ### Security
 - **The web Settings page could be pointed outside `Settings/` and made to re-run a recorded

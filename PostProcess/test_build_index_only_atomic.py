@@ -181,6 +181,10 @@ for i, f in enumerate(files):
 # file opened for writing whose path holds <text> (a chromosome's dict-less tier or
 # indel genotype store) waits there, once $STUB_MARK is made, until $STUB_RELEASE
 # exists; STUB_WRITE_FAIL=<text>: that open fails, as on a full disk.
+# STUB_SIGNAL_AT_RENAME=<path>: the first rename to <path>, or into it, is preceded by
+# a signal to the process itself, SIGTERM or the one $STUB_SIGNAL_AT_RENAME_SIG names;
+# STUB_RENAME_HANG=<path>: it waits instead, once $STUB_MARK is made, until
+# $STUB_RELEASE exists.
 SHIM = r'''
 import builtins, errno, os, signal, time
 
@@ -263,6 +267,26 @@ if os.environ.get("STUB_WRITE_HANG") or os.environ.get("STUB_WRITE_FAIL"):
         return _open_for(file, mode, *args, **kwargs)
 
     builtins.open = open
+
+if os.environ.get("STUB_SIGNAL_AT_RENAME") or os.environ.get("STUB_RENAME_HANG"):
+    _to = os.environ.get("STUB_SIGNAL_AT_RENAME") or os.environ["STUB_RENAME_HANG"]
+    _stopped = []
+
+    def _stop_before(rename):
+        def renamed(src, dst, *args, **kwargs):
+            if not _stopped and (str(dst) == _to or str(dst).startswith(_to + os.sep)):
+                _stopped.append(1)
+                if os.environ.get("STUB_SIGNAL_AT_RENAME"):
+                    os.kill(os.getpid(), getattr(signal, "SIG" + os.environ.get(
+                        "STUB_SIGNAL_AT_RENAME_SIG", "TERM")))
+                else:
+                    builtins.open(os.environ["STUB_MARK"], "w").close()
+                    while not os.path.exists(os.environ["STUB_RELEASE"]):
+                        time.sleep(0.02)
+            return rename(src, dst, *args, **kwargs)
+        return renamed
+
+    os.rename = _stop_before(os.rename)
 '''
 
 SHARED = None  # the stub Bio package and a warmed matplotlib cache, for every run
@@ -476,6 +500,11 @@ class _Fixture(unittest.TestCase):
         self.assertNotIn(" is unfinished: ", err)
         self.assertNotIn(" is being written", err)
         self.assertIn("Launching job ", out)
+
+    def outputs(self):
+        """What build-index-only builds, as tree() has it."""
+        return {top: tree(self.path(top), ((self.work, "<W>"),))
+                for top in ("Dictionaries", "Genomes", "genome_library")}
 
     def stdout(self):
         with open(self.out) as fh:
@@ -718,6 +747,92 @@ class AnEnrichmentIsDoneWholeOrRedone(_Fixture):
                                  [["index-genome", "hg38"],
                                   ["add-variants", self.path("VCFs", "ds") + "/"]])
 
+    def test_a_signal_as_it_goes_into_place_waits_for_its_last_rename(self):
+        """Its moves take moments, but a Ctrl-C, SIGTERM or SIGHUP among them (SHIM
+        sends one as the dictionaries go into place) left the dictionaries in place
+        without the enriched genome: a search passed its check for them, enriched the
+        genome itself, and failed on the fake-indel genomes in its way, leaving its own
+        dictionaries, uncompressed, which every later run kept. The signal now waits
+        for the last rename, then ends the run by it."""
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            with self.subTest(signal=sig.name):
+                self.fresh()
+                rc, out, err = self.run_bio(
+                    shim=True, STUB_SIGNAL_AT_RENAME=self.path("Dictionaries", "dictionaries_ds"),
+                    STUB_SIGNAL_AT_RENAME_SIG=sig.name[3:])
+                self.assertEqual(rc, -sig, err)
+                for output in self.enrichment():
+                    self.assertTrue(os.path.isdir(output), f"{output} is not in place")
+                self.assertEqual(sorted(os.listdir(self.path("Dictionaries", "dictionaries_ds"))),
+                                 ["my_dict_chr1.json.gz", "my_dict_chr2.json.gz"])
+                self.assertEqual(sorted(os.listdir(self.path("Dictionaries", "log_indels_ds"))),
+                                 ["logchr1.txt.gz", "logchr2.txt.gz"])
+                self.assertEqual(self.leftovers(), [])
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 0, err)
+                self.assertIn(f"Enriched genome already present: {self.path('Genomes', 'hg38+ds')}\n",
+                              out)
+
+    def test_a_kill_between_its_renames_leaves_nothing_a_later_run_uses(self):
+        """A SIGKILL can still land between two of them (SHIM stops the run before the
+        enriched genome's, the dictionaries' or the indel logs' rename). What is in
+        place then passes neither a search's check, which needs both sets of
+        dictionaries, nor the next build-index-only's, which needs the indel logs, the
+        last of it: that one enriches again."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = self.outputs()
+        for where in (("Genomes", "hg38+ds"), ("Dictionaries", "dictionaries_ds"),
+                      ("Dictionaries", "log_indels_ds")):
+            with self.subTest(stopped_before=where[1]):
+                self.fresh()
+                proc = self.start(shim=True, STUB_RENAME_HANG=self.path(*where))
+                self.wait_for_mark(proc)
+                self.kill_group(proc)
+                self.assertFalse(os.path.lexists(self.path(*where)))
+                rc, out, err = self.run_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("Error: No prebuilt variant index found for: ds.\n", err)
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 0, err)
+                self.assertIn("Enriching hg38 with ds (add-variants)...", out)
+                self.assertEqual(self.leftovers(), [])
+                self.assertEqual(self.outputs(), clean)
+
+    def test_a_kill_while_its_dictionaries_are_copied_to_a_mount_of_their_own_leaves_none_of_it(self):
+        """Dictionaries mounted on its own (docker -v, apptainer --bind; SHIM makes a
+        rename into it fail with EXDEV): the dictionaries are copied there, which takes
+        minutes at scale. A run killed in that copy left the fake-indel genomes and
+        part of the dictionaries in place without the enriched genome, which let a
+        search start and enrich the genome itself. Each set is now copied whole into a
+        hidden directory of Dictionaries first, and renamed into place with the rest."""
+        def mount():
+            os.makedirs(self.path("Dictionaries"), exist_ok=True)
+            return dict(shim=True, STUB_MOUNT=self.path("Dictionaries"))
+
+        rc, out, err = self.run_bio(**mount())
+        self.assertEqual(rc, 0, err)
+        clean = self.outputs()
+        self.fresh()
+        proc = self.start(STUB_WRITE_HANG="dictionaries_ds/my_dict_chr2.json.gz", **mount())
+        self.wait_for_mark(proc)
+        self.kill_group(proc)
+        for output in self.enrichment():
+            self.assertFalse(os.path.lexists(output), f"{output} was left in place")
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("Error: No prebuilt variant index found for: ds.\n", err)
+        left = self.leftovers()
+        self.assertEqual(sorted(os.path.dirname(d) for d in left),
+                         [self.path("Dictionaries"), self.path("Genomes")])
+        rc, out, err = self.run_bio(**mount())
+        self.assertEqual(rc, 0, err)
+        for d in left:
+            self.assertIn(f"Removing {d}: the build-index-only run that made it (pid {proc.pid} "
+                          f"on {os.uname().nodename}, started ", out)
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(self.outputs(), clean)
+
 
 class AnotherRunsBuildIsKept(_Fixture):
     """An index or enriched genome another run put in place while this one built it
@@ -742,6 +857,8 @@ class AnotherRunsBuildIsKept(_Fixture):
         self.wait_for_mark(proc)
         for chrom, seq in GENOME.items():
             _write(os.path.join(enriched, chrom + ".enriched.fa"), f">{chrom}\n{seq}\n")
+        # (an enrichment is all in place once its indel logs are, the last of it)
+        os.makedirs(self.path("Dictionaries", "log_indels_ds"))
         open(self.release, "w").close()
         rc, out, err = self.finish(proc)
         self.assertEqual(rc, 0, err)
@@ -988,14 +1105,17 @@ class TheBuildDirectoriesOfRunsThatAreGoneAreReclaimed(_Fixture):
         dead.wait()
         live = self.child()
         lib, genomes = self.path("genome_library"), self.path("Genomes")
+        dicts = self.path("Dictionaries")
         dirs = {  # path: (its owner's PID, other fields of its record or None for no record, removed?)
             os.path.join(lib, ".build-index-only-dead"): (dead.pid, {}, True),
             os.path.join(lib, ".build-index-only-zombie"): (self.child("Z"), {}, True),
             os.path.join(lib, ".build-index-only-reused"): (live, {"pstart": "1"}, True),
             os.path.join(genomes, ".build-index-only-enrich-dead"): (dead.pid, {}, True),
+            os.path.join(dicts, ".build-index-only-dicts-dead"): (dead.pid, {}, True),
             os.path.join(lib, ".build-index-only-live"): (live, {}, False),
             os.path.join(lib, ".build-index-only-stopped"): (self.child("T"), {}, False),
             os.path.join(genomes, ".build-index-only-enrich-live"): (live, {}, False),
+            os.path.join(dicts, ".build-index-only-dicts-live"): (live, {}, False),
             os.path.join(lib, ".build-index-only-elsewhere"): (dead.pid, {"host": "otherhost"}, False),
             os.path.join(lib, ".build-index-only-container"): (dead.pid, {"pidns": "pid:[1]"}, False),
             os.path.join(lib, ".build-index-only-no-pid"): (dead.pid, {"pid": "x"}, False),
@@ -1482,10 +1602,6 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
               dict(CRISPRME_TIER_WORKERS="1")),
              ("indel genotype store", "/indel_genotypes_ds/gt_indel_chr2",
               "indel_genotypes_ds", dict(CRISPRME_INDELGT_WORKERS="1")))
-
-    def outputs(self):
-        return {top: tree(self.path(top), ((self.work, "<W>"),))
-                for top in ("Dictionaries", "Genomes", "genome_library")}
 
     def test_a_run_stopped_while_it_writes_them_leaves_them_refused_until_one_finishes_them(self):
         self.run_bio()

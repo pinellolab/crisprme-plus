@@ -3174,7 +3174,7 @@ def _end_cleanly(cleanup, handlers: dict) -> None:
     short. (A signal mask cannot hold it back: it does so for the thread that sets
     it only, and the kernel then gives the signal to another thread -- numpy's
     OpenBLAS starts them at import -- while its Python handler still runs in the
-    main thread.)"""
+    main thread.) The enrichment's last renames are held back the same way."""
     import signal
 
     came = []
@@ -3231,29 +3231,39 @@ def _with_cleanup(run, cleanup):
         sys.exit(128 + stop.args[0])
 
 
-def _in_build_dir(parent: str, prefix: str, build):
+def _in_build_dir(parent: str, prefix: str, build, stage=None):
     """Returns ``build(tmp)``, called with ``tmp`` a fresh hidden directory
     ``<parent>/<prefix>*`` to build in, under a name no index or genome listing
     matches. It holds this run's owner record (_build_dir_owner), and is removed on
     every way out but SIGKILL (_with_cleanup). The directories that SIGKILLed runs
-    left are removed first (_reclaim_build_dirs)."""
+    left are removed first (_reclaim_build_dirs). With ``stage``, a ``(parent,
+    prefix)`` pair, ``build`` gets a second argument: a function that makes one more
+    such directory there, held and removed the same way, for a build that puts
+    outputs in place on another file system or mount too (the enrichment's
+    dictionaries, in Dictionaries/)."""
     import tempfile
 
-    _reclaim_build_dirs(parent, prefix)
+    places = [(parent, prefix)] + ([stage] if stage else [])
+    for where, start in places:
+        _reclaim_build_dirs(where, start)
     made = []
 
-    def run():
+    def make(where, start):
         try:
-            made.append(tempfile.mkdtemp(prefix=prefix, dir=parent))
+            made.append(tempfile.mkdtemp(prefix=start, dir=where))
             # through a rename, so a run reading the record meanwhile sees none or all
             # of it -- never a torn PID it would find dead
-            record = os.path.join(made[0], f"owner.{os.getpid()}")
+            record = os.path.join(made[-1], f"owner.{os.getpid()}")
             with open(record, "w") as fh:
                 fh.write("".join(f"{k}={v}\n" for k, v in _build_dir_owner().items()))
-            os.replace(record, os.path.join(made[0], "owner"))
+            os.replace(record, os.path.join(made[-1], "owner"))
         except OSError as exc:
-            error(f"Cannot make a build directory in {parent} ({exc})")
-        return build(made[0])
+            error(f"Cannot make a build directory in {where} ({exc})")
+        return made[-1]
+
+    def run():
+        tmp = make(parent, prefix)
+        return build(tmp, lambda: make(*stage)) if stage else build(tmp)
 
     def cleanup():
         for tmp in made:
@@ -3388,6 +3398,8 @@ def build_index_only() -> None:
     _reclaim_build_dirs(os.path.join(workdir, "genome_library"), ".build-index-only-")
     _reclaim_build_dirs(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-")
     if vcf_given:
+        # and those the enrichment stages its dictionaries in (_in_build_dir's stage)
+        _reclaim_build_dirs(os.path.join(workdir, "Dictionaries"), ".build-index-only-dicts-")
         # and the SNP overlay's, beside each fake-indel FASTA of this dataset
         # (overlay_indel_snps.overlay_fake_chromosome)
         try:
@@ -3525,7 +3537,12 @@ def build_index_only() -> None:
         _unmark_unfinished(indels_out)
         _overlaid.append((_said.getvalue(), _n, _coded[0]))
 
-    if not os.path.isdir(enriched):
+    def _enriched_already():
+        # an enrichment is all in place once its indel logs are: they go in last (_place
+        # below), and every search needs them
+        return os.path.isdir(enriched) and os.path.isdir(indel_dict)
+
+    if not _enriched_already():
         print(f"Enriching {genome_ref} with {vcf_name} (add-variants)...", flush=True)
         # Ensure workdir/Genomes exists: the enriched genome lands here, but --genome
         # may point at a reference staged ELSEWHERE (not under workdir), so this dir
@@ -3533,14 +3550,14 @@ def build_index_only() -> None:
         # workdir/Genomes; don't rely on that.)
         os.makedirs(os.path.join(workdir, "Genomes"), exist_ok=True)
 
-        def _enrich(tmp):
+        def _enrich(tmp, staging):
             variants_tmp = os.path.join(tmp, "variants_genome")
             snps_tmp = os.path.join(variants_tmp, "SNPs_genome")
 
             def _taken():
                 # a search took this enrichment on while this run enriched (the run
                 # stops), or another run finished it: leave what it writes or wrote be
-                if not (os.path.isdir(enriched + ".lock") or os.path.isdir(enriched)):
+                if not (os.path.isdir(enriched + ".lock") or _enriched_already()):
                     return False
                 _refuse_locked_build(enriched, indels_out)
                 print(
@@ -3622,38 +3639,54 @@ def build_index_only() -> None:
                     )
                 if _taken():  # (and again: the overlay reads each enriched chromosome whole)
                     return
-            # This block only runs on a FRESH enrichment (enriched was absent), so any
+            # Each set of dictionaries is put together whole in a hidden directory of
+            # Dictionaries/ (_in_build_dir's stage), while nothing of the enrichment is in
+            # place: with Dictionaries on a file system or mount of its own, that copies
+            # them (40-50 GB at 1000 Genomes scale), and a search then refuses the dataset
+            # up front, as a later run enriches it again.
+            os.makedirs(os.path.dirname(dict_folder), exist_ok=True)
+            _stage = staging()
+            _staged = (os.path.join(_stage, os.path.basename(dict_folder)),
+                       os.path.join(_stage, os.path.basename(indel_dict)))
+            for _to, _files in zip(_staged, (_dicts, _logs)):
+                os.makedirs(_to)
+                for f in _files:
+                    shutil.move(f + ".gz", _to)
+            if _taken():  # (a copy takes a while)
+                return
+            # This block only runs on a FRESH enrichment (no finished one in place), so any
             # pre-existing dataset-specific output dirs are stale/partial from a prior
-            # aborted build. Clear them first, else shutil.move onto an existing
-            # fake_chrN / dict raises "Destination path already exists" (issue #54).
-            for _d in (indels_out, dict_folder, indel_dict):
+            # aborted build -- an enriched genome without its indel logs too. Clear them
+            # first, else a move onto an existing fake_chrN / dict raises "Destination path
+            # already exists" (issue #54).
+            for _d in (indels_out, dict_folder, indel_dict, enriched):
                 if os.path.isdir(_d):
                     shutil.rmtree(_d)
-            # Then only moves: the fake-indel genomes, the dictionaries, and the enriched
-            # genome last. A later run takes it for a finished enrichment (above), so a
-            # run that ends before here leaves none, and the next one enriches again,
-            # clearing what this one moved. The moves are renames, done in moments, only
-            # when Genomes and Dictionaries are on one file system and mount (as in the
-            # documented single-mount layout). With Dictionaries on another, shutil.move
-            # copies the dictionaries (40-50 GB at 1000 Genomes scale), and for that time
-            # the fake-indel genomes and some of the dictionaries are in place without the
-            # enriched genome: a search started then, or after a kill then, fails as it
-            # moves its own enrichment into place, until a build-index-only run clears
-            # them as it enriches again.
-            os.makedirs(indels_out, exist_ok=True)
-            for f in _glob(os.path.join(variants_tmp, "fake*")):
-                shutil.move(f, indels_out)
-            os.makedirs(dict_folder, exist_ok=True)
-            os.makedirs(indel_dict, exist_ok=True)
-            for f in _dicts:
-                shutil.move(f + ".gz", dict_folder)
-            for f in _logs:
-                shutil.move(f + ".gz", indel_dict)
-            shutil.move(os.path.join(snps_tmp, f"{genome_ref}_enriched"), enriched)
+
+            # Then only renames, within Genomes and within Dictionaries, done in moments:
+            # the fake-indel genomes, the enriched genome, the dictionaries, and the indel
+            # logs last. A later run takes the enrichment for finished once they are in
+            # place (_enriched_already), and a search needs them and the dictionaries, so
+            # a run that ends before then leaves none for either to use: the next run
+            # enriches again, clearing what this one renamed. (The dictionaries alone used
+            # to pass a search's check: that search enriched the genome itself and failed
+            # on the fake-indel genomes in its way, leaving its own dictionaries,
+            # uncompressed, which later runs kept.) A Ctrl-C, SIGTERM or SIGHUP meanwhile
+            # waits for the last rename (_end_cleanly).
+            def _place():
+                os.makedirs(indels_out, exist_ok=True)
+                for f in _glob(os.path.join(variants_tmp, "fake*")):
+                    shutil.move(f, indels_out)
+                shutil.move(os.path.join(snps_tmp, f"{genome_ref}_enriched"), enriched)
+                os.rename(_staged[0], dict_folder)
+                os.rename(_staged[1], indel_dict)
+
+            _end_cleanly(_place, {})
             if _said is not None:
                 _overlaid.append((_said.getvalue(), _n, _coded[0]))
 
-        _in_build_dir(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-", _enrich)
+        _in_build_dir(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-", _enrich,
+                      stage=(os.path.join(workdir, "Dictionaries"), ".build-index-only-dicts-"))
     else:
         print(f"Enriched genome already present: {enriched}", flush=True)
         # One that came another way may lack the SNP codes. Overlaid only at STEP 3,
