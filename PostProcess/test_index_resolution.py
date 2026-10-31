@@ -1220,6 +1220,23 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         self.assertNotIn("waiting", out)
         self.assertEqual(err, "")
 
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"),
+                         "a process's state is read through /proc")
+    def test_an_owner_whose_name_holds_a_parenthesis_is_read_rightly(self):
+        # /proc/<pid>/stat is "<pid> (<name>) <state> ...", and the name may hold spaces and
+        # parentheses: a live owner named "x) Z y" is no zombie.
+        link = self.dir / "x) Z y"
+        link.symlink_to(shutil.which("sleep"))
+        owner = subprocess.Popen([str(link), "60"])
+        self.addCleanup(lambda: (owner.kill(), owner.wait()))
+        _wait_for(lambda: Path(f"/proc/{owner.pid}/stat").read_text().startswith(
+            f"{owner.pid} (x) Z y) "), 10, "the owner's name")
+        self.hold(owner_record(owner.pid))
+        rc, out, err = self.take(stop_after=1.5)
+        self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
+        self.assertIn(", which is still running. Wait for that run to finish", out)
+        self.assertEqual(err, "")
+
     def test_a_record_not_refreshed_for_15_minutes_is_abandoned_whatever_its_pid_says(self):
         # A live holder refreshes its record every minute, on this host as elsewhere, so
         # one 16 minutes old is a dead run's even though its PID answers kill -0 -- a
@@ -2369,6 +2386,21 @@ class ShippedScriptCarriesTheFix(unittest.TestCase):
         self.assertEqual(len(re.findall(r'^\s*_lock_take -bin "\$_lock" "indexing '
                                         r'\$idx_folder1" ', text, re.M)), 2)
         self.assertNotIn("trap ", text)  # the helpers' traps are the only ones
+
+    def test_every_build_site_stops_once_its_lock_is_lost(self):
+        """A build site checks, as soon as its build step returns and before its failure
+        check (whose rm -r would remove the other run's build), that its lock is still
+        its own; and lets go of it on success only while it is."""
+        lines = [line.strip() for line in
+                 _SCRIPT.read_text().replace(_lock_helpers(), "").splitlines()]
+        checks = [i for i, line in enumerate(lines) if '_lock_lost "$_lock"' in line]
+        self.assertEqual(len(checks), 4, "enrichment, reference, variant and INDELS builds")
+        for i in checks:
+            j = lines.index("fi", i) + 1 if lines[i].startswith("if ") else i + 1
+            while not lines[j] or lines[j].startswith("#"):
+                j += 1
+            self.assertRegex(lines[j], r'^if \[ -s "?\$logerror"? \]; then$', lines[i])
+        self.assertEqual(lines.count('_lock_release "$_lock" || exit 1'), 4)
 
     def test_no_bare_nnn_glob_remains(self):
         # `NNN*_*` as a glob is what matched NNNRRT and made width ordering
