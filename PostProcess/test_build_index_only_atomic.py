@@ -525,6 +525,18 @@ class _Fixture(unittest.TestCase):
                    "host=otherhost\npidns=pid:[4026531836]\npid=4242\n"
                    "started=2026-10-31T00:00:00Z\npstart=12345\n")
 
+    def kit(self, pad=0):
+        """An enrichment in place that came another way (a build-inputs kit, a run of
+        an earlier release): its fake-indel genome as add-variants wrote it, without
+        the SNP codes (chr2's padded with pad N), and no INDELS index yet."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        shutil.rmtree(self.lib(INDELS))
+        for chrom, seq in GENOME.items():
+            _write(self.path("Genomes", "hg38+ds_INDELS", f"fake_ds_{chrom}", f"fake{chrom}.fa"),
+                   f">fake{chrom}\n{seq[:26]}T{seq[26:60]}{'N' * pad * (chrom == 'chr2')}\n")
+        os.remove(self.log)
+
 
 # What each index looks like once built, and the step of the stub's that builds its
 # second chromosome (so stopping there leaves the first one built).
@@ -833,13 +845,15 @@ class ASearchsBuildLockStopsIt(_Fixture):
             self.assertIn(f"Error: {output} is locked by the run that builds it: {lock} is "
                           "held by pid 4242 on otherhost (a run started "
                           "2026-10-31T00:00:00Z). Wait for that run to finish", err)
-            self.assertIn("run complete-search, which takes a dead run's lock over", err)
         else:
             self.assertIn(f"Error: {output} is locked by the run that builds it: {lock} "
                           "has no owner record", err)
         guarded = " '" + self.path("Genomes", "hg38+ds_INDELS") + "'" \
             if output.endswith("Genomes/hg38+ds") else ""
-        self.assertIn(f"rm -rf '{lock}' '{output}'{guarded}\n", err)
+        # (not complete-search's takeover: an enrichment that makes has no SNP codes)
+        self.assertIn(f"Wait for that run to finish, then run build-index-only again. If no "
+                      f"run is building it, remove the lock and what it guards, then run "
+                      f"build-index-only again: rm -rf '{lock}' '{output}'{guarded}\n", err)
         self.assertEqual(self.calls(), [], "it built something")
         self.assertEqual(tree(self.work), before, "it changed the working directory")
 
@@ -1090,18 +1104,6 @@ class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
     The fake-indel genome of an enrichment the run makes is overlaid in that
     enrichment's build directory (TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes); one
     in place, that came another way, is overlaid in place."""
-
-    def kit(self, pad=0):
-        """An enrichment in place that came another way (a build-inputs kit, a run of
-        an earlier release): its fake-indel genome as add-variants wrote it, without
-        the SNP codes (chr2's padded with pad N), and no INDELS index yet."""
-        rc, out, err = self.run_bio()
-        self.assertEqual(rc, 0, err)
-        shutil.rmtree(self.lib(INDELS))
-        for chrom, seq in GENOME.items():
-            _write(self.path("Genomes", "hg38+ds_INDELS", f"fake_ds_{chrom}", f"fake{chrom}.fa"),
-                   f">fake{chrom}\n{seq[:26]}T{seq[26:60]}{'N' * pad * (chrom == 'chr2')}\n")
-        os.remove(self.log)
 
     def overlays(self):
         """The overlay's hidden directories anywhere in the working directory."""
@@ -1378,6 +1380,69 @@ class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
                 self.assertEqual(tree(self.lib(INDELS)), clean[0])
                 self.assertEqual(tree(self.path("Genomes", "hg38+ds_INDELS")), clean[1])
                 self.assertEqual(self.leftovers(), [])
+
+    def test_one_in_place_without_them_gets_them_as_the_run_begins(self):
+        """One that came another way (a kit, an earlier release, a search's own) got
+        them at STEP 3 only, so a run stopped before then (the tiers, the indel
+        genotype store, the variant index: hours at scale) left it without them, and
+        a search built the INDELS index from it, SNP-blind. It now gets them right
+        after the run finds it in place; STEP 3 prints what that printed, as before."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = tree(self.lib(INDELS)), tree(self.path("Genomes", "hg38+ds_INDELS"))
+        self.fresh()
+        self.kit()
+        shutil.rmtree(self.lib(VAR))
+        proc = self.start(STUB_HANG=WHOLE[VAR][1])
+        self.wait_for_mark(proc)
+        self.kill_group(proc)
+        self.assertEqual(tree(self.path("Genomes", "hg38+ds_INDELS")), clean[1])
+        self.search_builds_the_indels_index()
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"Indels index already present: {self.lib(INDELS)}\n", out)
+        self.assertEqual(tree(self.lib(INDELS)), clean[0])
+        # and a run to its end prints the overlay where it did
+        self.fresh()
+        self.kit()
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        lines = out.splitlines()
+        at = lines.index(f"Building indels index {INDELS}...")
+        self.assertEqual(lines[at + 1:at + 5], [
+            "overlay_indel_snps: chr1 -> 1 SNP overlays",
+            "overlay_indel_snps: chr2 -> 1 SNP overlays",
+            "overlay_indel_snps: 2 total SNP overlays",
+            "[indel-snp] SNP-overlaid the fake-indel genome (2 flank bases IUPAC-coded).",
+        ])
+        self.assertEqual(tree(self.lib(INDELS)), clean[0])
+
+    def test_a_search_refuses_it_while_a_run_stopped_partway_has_left_it_half_coded(self):
+        """A run stopped while it overlays one in place leaves some FASTAs overlaid
+        and some not (here chr1's and chr2's): an INDELS index a search builds from
+        them is blind to the SNPs on the others. The next run overlays the rest."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = tree(self.lib(INDELS))
+        self.fresh()
+        self.kit()
+        indels = self.path("Genomes", "hg38+ds_INDELS")
+        proc = self.start(shim=True, STUB_WRITE_HANG="fakechr2.fa.tmp")
+        self.wait_for_mark(proc)
+        self.kill_group(proc)
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"Error: {indels} is unfinished: the build-index-only run that wrote the "
+                      f"SNP codes of the ds fake-indel genome there (pid {proc.pid} on "
+                      f"{os.uname().nodename}, started ", err)
+        self.assertIn(") stopped before it was done, and a search would use what is there as "
+                      "if it were whole. Run build-index-only again with ds, which finishes "
+                      "them, then run this search again.\n", err)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(sorted(os.listdir(indels)), ["fake_ds_chr1", "fake_ds_chr2"])
+        self.assertEqual(tree(self.lib(INDELS)), clean)
+        self.assert_searched()
 
 
 class AStoppedRunsTiersAreNotSearched(_Fixture):

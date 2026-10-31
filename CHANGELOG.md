@@ -377,10 +377,13 @@ and the `release-crisprme` skill.
   search enriched the genome, it moved its own enrichment into the places the search was writing.
   Now, while such a lock sits beside the reference, variant or INDELS index or the enriched genome
   that it would use or build, it neither uses nor builds that output: it ends with an ERROR on stderr
-  and exit status 1, which names the lock and its owner and says what to do (in the web Settings page
-  the build then shows as failed, with that ERROR). The locks are checked before anything is built,
-  before each step, and just before a finished build or enrichment goes into place. With no lock
-  there nothing changes, and `build-index-only` takes no lock of its own.
+  and exit status 1, which names the lock and its owner and says what to do: wait for that run to
+  finish, or, if no run is building it, remove the lock and what it guards and run `build-index-only`
+  again (not `complete-search`: an enrichment it makes as it takes a dead run's lock over has no SNP
+  codes on its fake-indel genome). In the web Settings page the build then shows as failed, with
+  that ERROR. The locks are checked before anything is built, before each step, and just before a
+  finished build or enrichment goes into place. With no lock there nothing changes, and
+  `build-index-only` takes no lock of its own.
 - **A chromosome whose INDELS index fails to build now fails the build.** `pool_index_indels.py`
   ignored each chromosome's `index-genome` exit status, so a chromosome that failed (a `buildTST`
   error, an OOM kill) left a partial `_INDELS` index, which `build-index-only` took for built. It now
@@ -398,12 +401,13 @@ and the `release-crisprme` skill.
   a write that failed (a full disk) was a WARNING, and the same run indexed what was left. The
   fake-indel genome of an enrichment the run makes is now overlaid before it goes into place (next
   entry); one already in place (a `build-inputs` kit, a run of an earlier release) is still overlaid
-  in place. Either way each FASTA is written in a hidden directory beside the original and renamed
-  over it, with the same contents, mode and owner, and an overlay that fails fails the build with an
-  ERROR: nothing of an enrichment the run makes goes into place, and no INDELS index is built. A
-  FASTA that an earlier release cut short is not detected: if a `build-index-only` run was stopped
-  while it overlaid, remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`, `Genomes/<genome>+<vcf>`
-  and `Genomes/<genome>+<vcf>_INDELS`, then run `build-index-only` again, which enriches again, and do
+  in place, now as the run begins. Either way each FASTA is written in a hidden directory beside the
+  original and renamed over it, with the same contents, mode and owner, and an overlay that fails
+  fails the build with an ERROR: nothing of an enrichment the run makes goes into place, and no
+  INDELS index is built. A FASTA that an earlier release cut short is not detected: if a
+  `build-index-only` run was stopped while it overlaid, remove
+  `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`, `Genomes/<genome>+<vcf>` and
+  `Genomes/<genome>+<vcf>_INDELS`, then run `build-index-only` again, which enriches again, and do
   not search with that dataset until it has finished.
 - **A `build-index-only --vcf` run stopped after the enrichment no longer leaves the INDELS index blind
   to the SNPs beside an indel** (since 2.5.0). `build-index-only` added the SNP codes to the
@@ -419,15 +423,19 @@ and the `release-crisprme` skill.
   bulge, CFD 0.197 and one of its two rsIDs, instead of 3 and 1, CFD 0.281 and both, and was lost at
   `--mm 3`. The SNP codes now go onto the fake-indel genome in the enrichment's hidden build
   directory, before any of the enrichment is in place, so an INDELS index a search builds from it is
-  the one `build-index-only` builds. On success the files, their contents, stdout lines (the
-  overlay's still print just before the INDELS index is built) and exit status are as before. An
-  INDELS index that `complete-search` builds from a genome it enriched itself (the on-demand build)
-  still has no SNP codes, as before. If, with an earlier release, a `build-index-only --vcf` run
-  stopped after its enrichment and a `complete-search` with that dataset ran before
-  `build-index-only` was run again to the end, or a search built the dataset's INDELS index while
-  `build-index-only` ran, remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS` and run
-  `build-index-only` again: it adds the codes to the fake-indel genome in place and builds the
-  INDELS index anew.
+  the one `build-index-only` builds. An enrichment already in place without them (a kit, a run of an
+  earlier release, a search's own) got them only at that point too, so a run stopped before it left
+  the same: it now gets them as the run begins, whenever its INDELS index is still to be built, and
+  while they go on the fake-indel genome is marked unfinished, as the tiers are (next entry), so a
+  `complete-search` refuses it until a `build-index-only` run has finished them. On success the
+  files, their contents, stdout lines (the overlay's still print just before the INDELS index is
+  built) and exit status are as before. An INDELS index that `complete-search` builds from a genome
+  it enriched itself (the on-demand build) still has no SNP codes, as before. If, with an earlier
+  release, a `build-index-only --vcf` run stopped after its enrichment and a `complete-search` with
+  that dataset ran before `build-index-only` was run again to the end, or a search built the
+  dataset's INDELS index while `build-index-only` ran, remove
+  `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS` and run `build-index-only` again: it first adds
+  the codes to the fake-indel genome in place, then builds the INDELS index anew.
 - **A `build-index-only --vcf` run stopped while it writes the dict-less tiers or the indel genotype
   store no longer leaves a part of them that searches use as the whole.** Once its enrichment is in
   place, `build-index-only` writes the dict-less tiers (`Dictionaries/registry_<vcf>/` and

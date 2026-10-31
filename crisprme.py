@@ -2412,6 +2412,12 @@ def complete_search() -> None:
                     f"{_rerun}, which finishes it, or remove it to search without it "
                     f"(rm -rf '{_igt}')",
                 )
+            # (and the fake-indel genome a search builds its INDELS index from)
+            _refuse_unfinished(
+                os.path.join(current_working_directory, "Genomes",
+                             f"{os.path.basename(os.path.normpath(genomedir))}+{_vn}_INDELS"),
+                f"the SNP codes of the {_vn} fake-indel genome", f"{_rerun}, which finishes them",
+            )
     if variant and not os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
         _missing = []
@@ -2911,21 +2917,23 @@ def _refuse_locked_build(output: str, *guarded: str) -> None:
                 owner.setdefault(key, value)
     except OSError:
         pass
+    # (not "run complete-search", which takes a dead run's lock over: an enrichment it
+    # makes has no SNP codes on its fake-indel genome, nor an INDELS index built from it)
     clear = "".join(f" '{p}'" for p in (lock, output) + guarded)
     if owner.get("pid"):
         error(
             f"{output} is locked by the run that builds it: {lock} is held by pid "
             f"{owner['pid']} on {owner.get('host', '?')} (a run started "
             f"{owner.get('started', '?')}). Wait for that run to finish, then run "
-            f"build-index-only again. If no run is building it, run complete-search, "
-            f"which takes a dead run's lock over and builds it again, or remove the "
-            f"lock and what it guards: rm -rf{clear}"
+            f"build-index-only again. If no run is building it, remove the lock and "
+            f"what it guards, then run build-index-only again: rm -rf{clear}"
         )
     error(
         f"{output} is locked by the run that builds it: {lock} has no owner record "
         f"(CRISPRme 2.8.0 writes none, and complete-search never takes such a lock "
         f"over). Wait for that run to finish, then run build-index-only again. If no "
-        f"run is building it, remove the lock and what it guards: rm -rf{clear}"
+        f"run is building it, remove the lock and what it guards, then run "
+        f"build-index-only again: rm -rf{clear}"
     )
 
 
@@ -3476,9 +3484,47 @@ def build_index_only() -> None:
     # directory of Genomes/ (_in_build_dir; never one of the search's run_*), then
     # move the outputs into place.
     _refuse_locked_build(enriched, indels_out)
-    # what the SNP overlay of this run's enrichment printed, and the bases it coded
+    # what the SNP overlay of the fake-indel genome printed, and the bases it coded
     # (STEP 3 prints them)
     _overlaid = []
+    _snp_overlay = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
+
+    def _overlay_in_place():
+        # [indel-snp] The SNP overlay of a fake-indel genome already in place: one that
+        # came another way (a kit, an earlier release, a search's own enrichment), or
+        # this release's own, overlaid already, which it leaves as it is. Each FASTA is
+        # rewritten whole or not at all (overlay_fake_chromosome), but a run stopped
+        # partway leaves some overlaid and some not, from which a search would build an
+        # INDELS index blind to the SNPs on the others, kept by every later run: so the
+        # fake-indel genome is marked unfinished meanwhile (_mark_unfinished), and
+        # complete-search refuses it. Under _with_cleanup, a SIGTERM or SIGHUP lets it
+        # remove its temporary file; one a SIGKILL leaves holds this run's owner record,
+        # for a later run to remove. What it prints is held for STEP 3.
+        import contextlib
+        import io
+
+        _said = io.StringIO()
+        _owner = "".join(f"{k}={v}\n" for k, v in _build_dir_owner().items())
+        _mark_unfinished(indels_out)
+        try:
+            import overlay_indel_snps as _ois
+            with contextlib.redirect_stdout(_said):
+                _n = _with_cleanup(
+                    lambda: _ois.main(["overlay_indel_snps", indels_out, enriched,
+                                       indel_dict], owner=_owner),
+                    lambda: None,
+                )
+        except Exception as _ois_err:
+            print(_said.getvalue(), end="", flush=True)
+            error(
+                f"The SNP overlay of the fake-indel genome {indels_out} failed "
+                f"({_ois_err}), so {os.path.basename(indels_idx)} is not built. "
+                f"Each fake-indel FASTA there is whole, overlaid or as it was: "
+                f"run build-index-only again once that is fixed."
+            )
+        _unmark_unfinished(indels_out)
+        _overlaid.append((_said.getvalue(), _n))
+
     if not os.path.isdir(enriched):
         print(f"Enriching {genome_ref} with {vcf_name} (add-variants)...", flush=True)
         # Ensure workdir/Genomes exists: the enriched genome lands here, but --genome
@@ -3553,12 +3599,11 @@ def build_index_only() -> None:
             # (pool_index_indels.py, which adds none), and every later run keeps that
             # one. Added at STEP 3 only, they were missing from it after a run stopped in
             # between, and it was blind to the SNPs beside an indel. STEP 3 prints what
-            # the overlay prints, as before, and adds them to an enrichment that came
-            # another way (a kit, an older release). An overlay that fails puts nothing
-            # in place.
+            # the overlay prints, as before; an enrichment that came another way (a kit,
+            # an older release) gets them in place (_overlay_in_place). An overlay that
+            # fails puts nothing in place.
             _said = None
-            if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes") \
-                    and _indel_bases(variants_tmp):
+            if _snp_overlay and _indel_bases(variants_tmp):
                 import contextlib
                 import io
 
@@ -3611,6 +3656,18 @@ def build_index_only() -> None:
         _in_build_dir(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-", _enrich)
     else:
         print(f"Enriched genome already present: {enriched}", flush=True)
+        # One that came another way may lack the SNP codes. Overlaid only at STEP 3,
+        # after the hours of the steps between, it stayed without them after a run
+        # stopped in between, and a complete-search then built the INDELS index from it,
+        # blind to the SNPs beside an indel, which every later run kept. So it is
+        # overlaid now, whenever its INDELS index is still to be built (and no search
+        # holds that index's lock, building it from this genome), or a run stopped while
+        # it overlaid it (its mark).
+        if (_snp_overlay and not os.path.isdir(indels_idx + ".lock")
+                and (not os.path.isdir(indels_idx)
+                     or os.path.isdir(os.path.join(indels_out, ".building")))
+                and _indel_bases(indels_out)):
+            _overlay_in_place()
     # STEP 1b (ADDITIVE): emit the dictless tiers (Tier-0 registry + Tier-1 genotype
     # store) per chromosome, FROM the per-sample dicts just produced -- WITHOUT
     # touching the dicts. The search side (new_simple_analysis.py) already CONSUMES
@@ -3929,34 +3986,16 @@ def build_index_only() -> None:
             # indexing so this _INDELS index also finds SNP+indel co-occurring
             # off-targets (searchTST matches IUPAC codes for free -- no -var needed).
             # Enabled by default (opt-out): set CRISPRME_INDEL_SNP=0 to disable. A failed
-            # overlay fails the build: it rewrites the fake-indel FASTA files in place,
-            # each one whole or not at all (overlay_fake_chromosome), but an index built
-            # after a failure would be SNP-blind where the overlay did not get to. Under
-            # _with_cleanup, a SIGTERM or SIGHUP lets it remove its temporary file; one
-            # a SIGKILL leaves holds this run's owner record, for a later run to remove.
-            # This run's own enrichment was overlaid before it went into place (STEP 1):
-            # what that printed is printed here. One that came another way (a kit, an
-            # older release) is overlaid here; a second overlay changes nothing.
-            if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
-                if _overlaid:
-                    _said, _n = _overlaid[0]
-                    print(_said, end="", flush=True)
-                else:
-                    _owner = "".join(f"{k}={v}\n" for k, v in _build_dir_owner().items())
-                    try:
-                        import overlay_indel_snps as _ois
-                        _n = _with_cleanup(
-                            lambda: _ois.main(["overlay_indel_snps", indels_out, enriched,
-                                               indel_dict], owner=_owner),
-                            lambda: None,
-                        )
-                    except Exception as _ois_err:
-                        error(
-                            f"The SNP overlay of the fake-indel genome {indels_out} failed "
-                            f"({_ois_err}), so {os.path.basename(indels_idx)} is not built. "
-                            f"Each fake-indel FASTA there is whole, overlaid or as it was: "
-                            f"run build-index-only again once that is fixed."
-                        )
+            # overlay fails the build: an index built after a failure would be SNP-blind
+            # where the overlay did not get to. This run's own enrichment was overlaid
+            # before it went into place, and one already in place as the run began
+            # (STEP 1): what that printed is printed here. One whose overlay did not run
+            # then (its INDELS index was there, or locked) is overlaid here, in place.
+            if _snp_overlay:
+                if not _overlaid:
+                    _overlay_in_place()
+                _said, _n = _overlaid[0]
+                print(_said, end="", flush=True)
                 print(
                     f"[indel-snp] SNP-overlaid the fake-indel genome "
                     f"({_n} flank bases IUPAC-coded).",
