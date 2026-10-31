@@ -335,16 +335,29 @@ and the `release-crisprme` skill.
 - **`complete-test --chrom chr22` searched the whole genome, and the source installer started on
   macOS.** The README (§2.2.2, §3.2.1) and `complete-test --help` presented `complete-test --chrom
   chr22` against a downloaded index as a quicker single-chromosome test, but the prebuilt-index
-  smoke never receives `--chrom`: it searches every chromosome of the index's genome, so with
-  `NRG_3_hg38+hg38_HGDP1kGP` it is a genome-wide variant search, with the 64 GB or more of RAM that
-  §0 gives for one. On a two-chromosome genome it returned 10 rows on `chr22` and 10 on `chrA`. The
-  smoke's search is unchanged. The README, the help and the no-index hint now say what it does, a
-  given `--chrom` prints one NOTE that it applies to the benchmark mode only, and the README's
-  "Full Genome Test" runs `complete-test --thread 4`, since `complete-test` with no option only
-  prints its help. `install_from_source.sh` now stops at once on macOS with one line pointing to
-  Docker (README §1.2), instead of failing later on a solver or compiler error, and
-  `environment.yml` and the README's source-build entry say Linux only. Covered by
-  `PostProcess/test_complete_test.py` and `PostProcess/test_install_from_source.py`.
+  smoke never received `--chrom`: it searched every chromosome of the index's genome, so with
+  `NRG_3_hg38+hg38_HGDP1kGP` it was a genome-wide variant search, with the 64 GB or more of RAM
+  that §0 gives for one. On a two-chromosome genome it returned 10 rows on `chr22` and 10 on
+  `chrA`. The smoke now searches only the chromosome `--chrom` names. It runs the same search from
+  a per-run view of the working directory in which that chromosome is the only one: a hidden
+  `.crisprme-test-view-*` folder of symlinks to its FASTA, to its trees in every index the search
+  could pick, to its `fake<chrom>` INDELS sub-index and to its indel log, so that neither the
+  search nor the post-analysis can load another chromosome. Nothing is copied, and the folder is
+  removed when the run ends, on Ctrl-C, SIGTERM or SIGHUP too. Its rows are the whole-genome
+  smoke's rows on that chromosome, identical in every column, as checked on each sequence of a
+  synthetic genome with a phased variant index and on `chr22` with `NRG_3_hg38+hg38_HGDP1kGP`,
+  both searched per-sample, the default on such an index. There `--chrom chr22` took 2 to 4
+  minutes and 5 GB of RAM at 16 threads, the whole genome 17 minutes and 50 GB. A chromosome
+  the genome or the index does not have is refused before anything is searched, in one line
+  naming those both have, and `crisprme.py` exits 2 without a traceback. Without `--chrom`, or
+  with `--chrom all`, the smoke runs the search it always ran, and the benchmark mode is
+  unchanged. The help, the no-index hints and the README say so, and the README's "Full Genome
+  Test" runs `complete-test --thread 4`, since `complete-test` with no option only prints its
+  help.
+  `install_from_source.sh` now stops at once on macOS with one line pointing to Docker (README
+  §1.2), instead of failing later on a solver or compiler error, and `environment.yml` and the
+  README's source-build entry say Linux only. Covered by `PostProcess/test_complete_test.py` and
+  `PostProcess/test_install_from_source.py`.
 
 - **`--prune-pam` could run with pruning silently off.** `crispritz.py` builds its search argv
   explicitly from the options it recognizes, so a CRISPRitz build without `--prune-pam` does not

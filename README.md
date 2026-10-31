@@ -1174,11 +1174,20 @@ Once an index is available, `complete-test` runs the example search end-to-end
 and produces the same set of outputs as Complete Search, confirming that the 
 installed tool works as expected. It searches the example guide (up to 2 mismatches
 plus one DNA and one RNA bulge) against the first variant index it finds in
-`genome_library/` (else the reference one), over **every chromosome** of that index's
-genome: `--chrom` does not limit it (it is the benchmark mode's option, see *Two modes*
-below, and the smoke prints a NOTE saying so). With a variant index such as
-`NRG_3_hg38+hg38_HGDP1kGP` the smoke is therefore a genome-wide variant search, which
-needs the memory given in [§0](#0-system-requirements) (64 GB or more).
+`genome_library/` (else the reference one), in the analysis mode Complete Search picks
+for that index (per-sample on a phased genotyped index such as
+`NRG_3_hg38+hg38_HGDP1kGP`).
+
+With `--chrom` (e.g. `--chrom chr22`) it searches that chromosome only. It runs from a
+per-run view of the working directory in which that chromosome is the only one: a hidden
+`.crisprme-test-view-*` folder of symlinks, removed when the run ends. So it reports
+exactly the off-targets the whole-genome test reports on that chromosome, for a fraction
+of the cost: with `NRG_3_hg38+hg38_HGDP1kGP`, `--chrom chr22` peaked at about 5 GB of RAM
+and took 2 to 4 minutes at 16 threads in testing. A chromosome that the genome or the
+index does not have is refused in one line naming those it has. Without `--chrom` it
+searches **every chromosome** of the index's genome; with a variant index such as
+`NRG_3_hg38+hg38_HGDP1kGP` that is a genome-wide variant search, which needs the memory
+given in [§0](#0-system-requirements) (64 GB or more).
 
 This module is suited for:
 
@@ -1197,8 +1206,11 @@ index, e.g. `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP
 with no option at all, `complete-test` prints its help):
   ```bash
   crisprme.py complete-test \
+    --chrom chr22 \
     --thread 4
   ```
+
+Leave out `--chrom` to test the whole genome.
 
 ##### Input Arguments
 ---
@@ -1222,9 +1234,10 @@ function, including detailed explanations and default behaviors:
 **Input Data Parameters (*Optional*)**
 
 - `--chrom`
-  <br>Specifies the chromosome the benchmark mode tests (see *Two modes* below). The
-  chromosome identifier must be prefixed with chr (e.g., chr22). The prebuilt-index
-  smoke ignores it and searches the entire genome, printing a NOTE that says so.
+  <br>Specifies the chromosome to test. The chromosome identifier must be prefixed
+  with chr (e.g., chr22). The prebuilt-index smoke searches only that chromosome of the
+  index's genome, and refuses one that the genome or the index does not have; the
+  benchmark mode (see *Two modes* below) downloads and tests that chromosome.
   *Default behavior*: the entire genome.
 
 > **Note:** `complete-test`'s default smoke requires a prebuilt index to already be present.
@@ -2134,24 +2147,27 @@ quicker, focused test on a single chromosome and a more detailed, exhaustive
 test across the entire genome:
 
 - **Single Chromosome Test**
-  <br>`complete-test`'s benchmark mode: it downloads chromosome 22 with its 1000 Genomes
-  variants, builds small test indexes and runs the registered benchmarks, so that
-  `validate-test` can compare the off-targets with the committed brute-force ground
-  truth. It needs no prebuilt index, and it is what CI runs.
+  <br>`complete-test --chrom chr22` against a prebuilt index you have downloaded,
+  which searches the example guide RNA on chromosome 22 only; or `complete-test`'s
+  benchmark mode, which downloads chromosome 22 with its 1000 Genomes variants, builds
+  small test indexes and runs the registered benchmarks, so that `validate-test` can
+  compare the off-targets with the committed brute-force ground truth. The benchmark
+  mode needs no prebuilt index, and it is what CI runs.
 
 - **Full Genome Test**
   <br>This test checks CRISPRme's ability to search for potential off-targets 
-  across the entire human genome using a prebuilt index you have downloaded: the
-  prebuilt-index smoke searches the example guide RNA over every chromosome of the
-  index's genome. With a variant index such as `NRG_3_hg38+hg38_HGDP1kGP` it is a
-  genome-wide variant search and needs the memory given in
-  [§0](#0-system-requirements) (64 GB or more).
+  across the entire human genome using a prebuilt index you have downloaded: without
+  `--chrom`, the prebuilt-index smoke searches the example guide RNA over every
+  chromosome of the index's genome. With a variant index such as
+  `NRG_3_hg38+hg38_HGDP1kGP` it is a genome-wide variant search and needs the memory
+  given in [§0](#0-system-requirements) (64 GB or more).
 
-After the Single Chromosome Test, the Off-Target Sites Validation Test
+After the benchmark mode's Single Chromosome Test, the Off-Target Sites Validation Test
 (`validate-test`) compares CRISPRme-predicted off-targets against brute-force
 ground-truth alignments derived from 1000 Genomes variant data, providing a
-rigorous correctness check of the pipeline. It applies to that test only: the
-Full Genome Test leaves it nothing to check.
+rigorous correctness check of the pipeline. It applies to that test only: a test
+against a prebuilt index, on one chromosome or the whole genome, leaves it nothing to
+check.
 
 **Why Perform the Detailed Test?**
 
@@ -2170,14 +2186,20 @@ to handle large datasets and complex genetic analysis tasks.
 #### 3.2.1 Single Chromosome Test
 ---
 
-`--chrom` limits only `complete-test`'s benchmark mode. Against a prebuilt index you have
-downloaded (e.g. `NRG_3_hg38+hg38_HGDP1kGP`), `complete-test --chrom chr22` still searches
-every chromosome of the index's genome, a genome-wide search with the memory needs of
-[§3.2.2](#322-full-genome-test), and prints a NOTE that `--chrom` applies to the benchmark
-mode only.
+To run the quicker test on chromosome 22 against a prebuilt index you have already
+downloaded (e.g. `NRG_3_hg38+hg38_HGDP1kGP`), execute the following command:
 
-The single-chromosome test is `complete-test`'s benchmark mode followed by `validate-test`,
-as CI runs them: it downloads chromosome 22 with its 1000 Genomes variants, builds small
+  ```bash
+  crisprme.py complete-test --chrom chr22 --thread 4
+  ```
+
+It searches chromosome 22 alone and reports the off-targets the
+[Full Genome Test](#322-full-genome-test) reports there. With `NRG_3_hg38+hg38_HGDP1kGP`
+it peaked at about 5 GB of RAM and took 2 to 4 minutes at 16 threads in testing.
+`validate-test` does not apply to it, as to any run of the prebuilt-index smoke.
+
+As CI runs it, the single-chromosome test is `complete-test`'s benchmark mode followed by
+`validate-test`: it downloads chromosome 22 with its 1000 Genomes variants, builds small
 test indexes, runs every registered benchmark, and `validate-test` compares the off-targets
 with the committed brute-force ground truth. Run it from an empty folder; it fits in 16 GB
 of RAM and took 10 to 20 minutes at 8 threads in testing:
@@ -2192,9 +2214,9 @@ crisprme.py validate-test --chrom chr22   # expect: 2 passed, 0 failed, 2 skippe
 
 To run the detailed test across the entire genome against a prebuilt index you
 have already downloaded, execute the following command (with no option at all,
-`complete-test` prints its help instead). It searches every chromosome of the index's
-genome, `--chrom` or not; with a variant index such as `NRG_3_hg38+hg38_HGDP1kGP` it is
-a genome-wide variant search, so give it the 64 GB or more of RAM that
+`complete-test` prints its help instead). Without `--chrom` it searches every chromosome
+of the index's genome; with a variant index such as `NRG_3_hg38+hg38_HGDP1kGP` it is a
+genome-wide variant search, so give it the 64 GB or more of RAM that
 [§0](#0-system-requirements) gives for one:
 
   ```bash

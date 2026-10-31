@@ -4550,11 +4550,12 @@ def print_help_complete_test():
     # list functionality options
     sys.stderr.write(
         "Options:\n"
-        "\t--chrom, the chromosome the benchmark mode tests (e.g., chr22) [default: "
-        "all]. The prebuilt-index smoke ignores it and always searches every "
-        "chromosome of the index's genome: with a variant index such as "
-        "NRG_3_hg38+hg38_HGDP1kGP that is a genome-wide variant search, which needs "
-        "64 GB+ of RAM\n"
+        "\t--chrom, the chromosome to test, e.g. chr22 [default: all]. The "
+        "prebuilt-index smoke searches only that chromosome of the index's genome, and "
+        "refuses one the genome or the index lacks, naming those it has; with all it "
+        "searches every chromosome, which with a variant index such as "
+        "NRG_3_hg38+hg38_HGDP1kGP is a genome-wide variant search needing 64 GB+ of "
+        "RAM. The benchmark mode downloads and tests that chromosome\n"
         "\t--vcf_dataset, variant dataset for the LEGACY build-from-source test "
         "(the benchmark mode: it builds small test indexes from raw VCFs for "
         "validate-test, and runs only with CRISPRME_ALLOW_ONDEMAND_BUILD=1 set; this "
@@ -4623,6 +4624,10 @@ def complete_test_crisprme():
     code = subprocess.call(
         f"python {script_test} {chrom} {vcf_dataset} {threads} {debug}", shell=True
     )
+    if code == 2:
+        # complete_test.py refused --chrom, a chromosome the genome or the index lacks,
+        # and said so in one line before searching; a traceback would only bury it
+        sys.exit(2)
     if code != 0:
         raise OSError(
             "\nCRISPRme complete test encountered an Error! See Results/crisprme-test-out/log_error.txt for details\n"
