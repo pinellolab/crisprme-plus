@@ -249,6 +249,25 @@ class TestAppSearchPoolSize(unittest.TestCase):
         self.assertIn("app_settings", out)
         self.assertIn("caf\\xe9", out)
 
+    def test_a_closed_stdout_does_not_stop_the_app(self):
+        # A server started with fd 1 closed has sys.stdout None: the warnings used
+        # sys.stdout.write, so the import raised there and the app did not start.
+        driver = _APP_IMPORT_DRIVER.replace(
+            'print(json.dumps({"max_workers": app.pool_executor._max_workers}))',
+            'sys.stderr.write(json.dumps({"max_workers": app.pool_executor._max_workers}))',
+        )
+        env = dict(os.environ, CRISPRME_MAX_CONCURRENT_JOBS='"5"')
+        env.pop("CRISPRME_CONFIG_DIR", None)
+        with tempfile.TemporaryDirectory() as workdir:
+            res = subprocess.run(
+                ["sh", "-c", 'exec "$0" -I -c "$1" "$2" 1>&-',
+                 sys.executable, driver, _REPO_ROOT],
+                cwd=workdir, env=env, capture_output=True, text=True, timeout=120,
+            )
+        self.assertEqual(res.returncode, 0, res.stderr)
+        result = [ln for ln in res.stderr.splitlines() if ln.startswith('{"max_workers"')]
+        self.assertEqual(json.loads(result[-1])["max_workers"], 2)
+
     def test_env_value_used_as_given_prints_nothing(self):
         # Whole numbers 1-16 are used as given, blanks and a leading zero
         # included; an empty value counts as unset.
