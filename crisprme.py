@@ -3503,7 +3503,7 @@ def build_index_only() -> None:
         import contextlib
         import io
 
-        _said = io.StringIO()
+        _said, _coded = io.StringIO(), []
         _owner = "".join(f"{k}={v}\n" for k, v in _build_dir_owner().items())
         _mark_unfinished(indels_out)
         try:
@@ -3511,7 +3511,7 @@ def build_index_only() -> None:
             with contextlib.redirect_stdout(_said):
                 _n = _with_cleanup(
                     lambda: _ois.main(["overlay_indel_snps", indels_out, enriched,
-                                       indel_dict], owner=_owner),
+                                       indel_dict], owner=_owner, coded=_coded),
                     lambda: None,
                 )
         except Exception as _ois_err:
@@ -3523,7 +3523,7 @@ def build_index_only() -> None:
                 f"run build-index-only again once that is fixed."
             )
         _unmark_unfinished(indels_out)
-        _overlaid.append((_said.getvalue(), _n))
+        _overlaid.append((_said.getvalue(), _n, _coded[0]))
 
     if not os.path.isdir(enriched):
         print(f"Enriching {genome_ref} with {vcf_name} (add-variants)...", flush=True)
@@ -3607,13 +3607,13 @@ def build_index_only() -> None:
                 import contextlib
                 import io
 
-                _said = io.StringIO()
+                _said, _coded = io.StringIO(), []
                 try:
                     import overlay_indel_snps as _ois
                     with contextlib.redirect_stdout(_said):
                         _n = _ois.main(["overlay_indel_snps", variants_tmp,
                                         os.path.join(snps_tmp, f"{genome_ref}_enriched"),
-                                        snps_tmp])
+                                        snps_tmp], coded=_coded)
                 except Exception as _ois_err:
                     print(_said.getvalue(), end="", flush=True)
                     error(
@@ -3651,7 +3651,7 @@ def build_index_only() -> None:
                 shutil.move(f + ".gz", indel_dict)
             shutil.move(os.path.join(snps_tmp, f"{genome_ref}_enriched"), enriched)
             if _said is not None:
-                _overlaid.append((_said.getvalue(), _n))
+                _overlaid.append((_said.getvalue(), _n, _coded[0]))
 
         _in_build_dir(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-", _enrich)
     else:
@@ -3994,11 +3994,15 @@ def build_index_only() -> None:
             if _snp_overlay:
                 if not _overlaid:
                     _overlay_in_place()
-                _said, _n = _overlaid[0]
+                _said, _n, _coded = _overlaid[0]
                 print(_said, end="", flush=True)
+                # (one overlaid before -- this release's own, on a re-run -- changes no
+                # base: say it carries its codes, lest "0" read as a failed overlay)
                 print(
                     f"[indel-snp] SNP-overlaid the fake-indel genome "
-                    f"({_n} flank bases IUPAC-coded).",
+                    f"({_n} flank bases IUPAC-coded"
+                    + (f"; it already carries its SNP codes, {_coded} of them"
+                       if _coded and not _n else "") + ").",
                     flush=True,
                 )
             pool = os.path.join(script_path, "pool_index_indels.py")

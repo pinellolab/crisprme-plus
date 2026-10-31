@@ -429,13 +429,16 @@ and the `release-crisprme` skill.
   while they go on the fake-indel genome is marked unfinished, as the tiers are (next entry), so a
   `complete-search` refuses it until a `build-index-only` run has finished them. On success the
   files, their contents, stdout lines (the overlay's still print just before the INDELS index is
-  built) and exit status are as before. An INDELS index that `complete-search` builds from a genome
-  it enriched itself (the on-demand build) still has no SNP codes, as before. If, with an earlier
-  release, a `build-index-only --vcf` run stopped after its enrichment and a `complete-search` with
-  that dataset ran before `build-index-only` was run again to the end, or a search built the
-  dataset's INDELS index while `build-index-only` ran, remove
-  `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS` and run `build-index-only` again: it first adds
-  the codes to the fake-indel genome in place, then builds the INDELS index anew.
+  built) and exit status are as before, but for a re-run on a fake-indel genome that carries its
+  codes already: its overlay changes no base, and where its lines said `0 SNP overlays` and
+  `0 flank bases IUPAC-coded`, as if it had found nothing, they now say how many bases were coded
+  already. An INDELS index that `complete-search` builds from a genome it enriched itself (the
+  on-demand build) still has no SNP codes, as before. If, with an earlier release, a
+  `build-index-only --vcf` run stopped after its enrichment and a `complete-search` with that
+  dataset ran before `build-index-only` was run again to the end, or a search built the dataset's
+  INDELS index while `build-index-only` ran, remove `genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`
+  and run `build-index-only` again: it first adds the codes to the fake-indel genome in place, then
+  builds the INDELS index anew.
 - **A `build-index-only --vcf` run stopped while it writes the dict-less tiers or the indel genotype
   store no longer leaves a part of them that searches use as the whole.** Once its enrichment is in
   place, `build-index-only` writes the dict-less tiers (`Dictionaries/registry_<vcf>/` and

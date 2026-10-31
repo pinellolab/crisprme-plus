@@ -1417,6 +1417,26 @@ class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
         ])
         self.assertEqual(tree(self.lib(INDELS)), clean[0])
 
+    def test_a_rerun_says_the_fake_indel_genome_already_carries_its_codes(self):
+        """A re-run, after a kill while the variant index was built, overlays this
+        release's own enrichment, coded before it went into place: no base changes,
+        and the lines say why, rather than read as an empty or failed overlay."""
+        proc = self.start(STUB_HANG=WHOLE[VAR][1])
+        self.wait_for_mark(proc)
+        self.kill_group(proc)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        lines = out.splitlines()
+        at = lines.index(f"Building indels index {INDELS}...")
+        self.assertEqual(lines[at + 1:at + 5], [
+            "overlay_indel_snps: chr1 -> 0 SNP overlays (1 already coded)",
+            "overlay_indel_snps: chr2 -> 0 SNP overlays (1 already coded)",
+            "overlay_indel_snps: 0 total SNP overlays (2 already coded)",
+            "[indel-snp] SNP-overlaid the fake-indel genome (0 flank bases IUPAC-coded; it "
+            "already carries its SNP codes, 2 of them).",
+        ])
+        self.assertEqual(self.bins(INDELS), WHOLE[INDELS][2])
+
     def test_a_search_refuses_it_while_a_run_stopped_partway_has_left_it_half_coded(self):
         """A run stopped while it overlays one in place leaves some FASTAs overlaid
         and some not (here chr1's and chr2's): an INDELS index a search builds from
