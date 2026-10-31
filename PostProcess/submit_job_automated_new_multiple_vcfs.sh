@@ -220,14 +220,15 @@ _lock_mine() {
 }
 
 # Set _lock_st to the state of process $1 as /proc/<pid>/stat gives it -- R, S, D...;
-# T stopped, t traced, Z exited but not reaped -- and _lock_pstart to its start time
-# (field 22), or both to "" where /proc cannot tell: no such process, one hidden from
-# this run (hidepid), no /proc, or a /proc that is not this PID namespace's (it shows
-# this shell under another PID). Read with the read builtin; the fields follow the
-# last ") ", as the name before it may hold either.
+# T stopped, t traced, Z exited but not reaped -- _lock_pgid to its process group
+# (field 5) and _lock_pstart to its start time (field 22), or all to "" where /proc
+# cannot tell: no such process, one hidden from this run (hidepid), no /proc, or a
+# /proc that is not this PID namespace's (it shows this shell under another PID). Read
+# with the read builtin; the fields follow the last ") ", as the name before it may
+# hold either.
 _lock_state() {
 	local _s= _i=0
-	_lock_st= _lock_pstart=
+	_lock_st= _lock_pgid= _lock_pstart=
 	case "$1" in '' | 0 | *[!0-9]*) return 0 ;; esac
 	{ IFS= read -r _s </proc/self/stat; } 2>/dev/null
 	[ "${_s%% *}" = "${BASHPID:-$$}" ] || return 0
@@ -236,7 +237,10 @@ _lock_state() {
 	case "$_s" in *") "*) ;; *) return 0 ;; esac
 	_s=${_s##*") "}
 	_lock_st=${_s%% *}
-	while [ "$_i" -lt 19 ]; do _s=${_s#* }; _i=$((_i + 1)); done
+	while [ "$_i" -lt 19 ]; do
+		_s=${_s#* }; _i=$((_i + 1))
+		[ "$_i" != 2 ] || _lock_pgid=${_s%% *}
+	done
 	_lock_pstart=${_s%% *}
 	return 0
 }
@@ -253,9 +257,10 @@ _lock_state "$$"
 # alive however old its record: stopped (Ctrl-Z, kill -STOP), its refresh is stopped
 # with it, and once resumed it refreshes only at its loop's next beat. Otherwise 1,
 # with the reason in _lock_why, and _lock_live=1 when the owner is known to be alive
-# (its PID here, or its refreshes), 2 when it is stopped, 0 when this run cannot tell.
-# On 0, _lock_gone says what became of the owner. Leaves the record read in _lock_rec,
-# and its pid, host and start time in _lock_pid, _lock_host and _lock_started.
+# (its PID here, or its refreshes), 2 when it is stopped (its process group then in
+# _lock_pgid), 0 when this run cannot tell. On 0, _lock_gone says what became of the
+# owner. Leaves the record read in _lock_rec, and its pid, host and start time in
+# _lock_pid, _lock_host and _lock_started.
 _lock_stale() {
 	local _pidns _pstart _where=
 	_lock_live=0
@@ -334,10 +339,17 @@ _lock_stale() {
 # be $1 (e.g. "indexing <dir>") with what the lock guards $2 (" '<lock>' '<output>'...").
 # Clearing it is offered only when this run cannot check the owner: a run known to be
 # alive would go on writing into what another run then rebuilds. A stopped one does
-# not finish until it is resumed.
+# not finish until it is resumed with its build step and refresh loop, stopped with it:
+# kill -CONT of its PID resumes bash alone. So a run that leads its process group is
+# resumed, or ended, as a group -- ended with KILL, the one signal that ends a stopped
+# run at once. One that does not is offered no signal to that group, which may hold the
+# web server or a user's shell, nor a kill of bash alone, whose build step could go on
+# writing later.
 _lock_advice() {
-	if [ "$_lock_live" = 2 ]; then
-		_lock_tip="Resume it with fg or kill -CONT $_lock_pid, or stop it."
+	if [ "$_lock_live" = 2 ] && [ "$_lock_pgid" = "$_lock_pid" ]; then
+		_lock_tip="Resume it with fg or kill -CONT -- -$_lock_pgid, or end it with kill -KILL -- -$_lock_pgid."
+	elif [ "$_lock_live" = 2 ]; then
+		_lock_tip="It must be resumed together with its stopped child processes, as fg does: kill -CONT $_lock_pid resumes the script alone."
 	elif [ "$_lock_live" = 1 ]; then
 		_lock_tip="Wait for that run to finish, or stop it."
 	else

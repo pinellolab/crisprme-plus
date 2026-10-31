@@ -1018,9 +1018,10 @@ class _Locks(unittest.TestCase):
         if record is not None:
             (self.lock / "owner").write_text(record)
 
-    def sleeper(self):
-        """A live process, to stand for a run that holds a lock."""
-        proc = subprocess.Popen(["sleep", "60"])
+    def sleeper(self, leader=False):
+        """A live process, to stand for a run that holds a lock; with `leader`, one that
+        leads a process group of its own."""
+        proc = subprocess.Popen(["sleep", "60"], start_new_session=leader)
         self.addCleanup(lambda: (proc.kill(), proc.wait()))
         return proc
 
@@ -1192,25 +1193,36 @@ class ADeadRunsLockDoesNotWedgeTheNext(_Locks):
         # with it, so its record ages. A run on this host took the lock over after 15
         # minutes and rebuilt under the live build; resumed, that build wrote on, and its
         # run searched the index being rebuilt -- or removed it.
-        owner = self.sleeper()
-        os.kill(owner.pid, signal.SIGSTOP)
-        _wait_for(lambda: _state(owner.pid) == "T", 10, "the owner to stop")
-        record = owner_record(owner.pid)
-        self.hold(record)
-        _age(self.lock / "owner", 16)
-        rc, out, err = self.take(stop_after=3.2)
-        self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
-        self.assertNotIn("Stale lock", out)
-        notices = self.notices(out)
-        self.assertGreaterEqual(len(notices), 2, out)
-        for notice in notices:  # stopped, not finishing: how to go on
-            self.assertTrue(notice.endswith(
-                f"it is held by pid {owner.pid} on {_this_host()[0]} (a run started "
-                f"2026-10-30T00:00:00Z), which is stopped. Resume it with fg or kill -CONT "
-                f"{owner.pid}, or stop it."), notice)
-        self.assertNotIn("rm -rf", out)
-        self.assertEqual((self.lock / "owner").read_text(), record)
-        self.assertEqual(err, "")
+        # How to go on: kill -CONT of the run's PID resumes bash alone, its build step and
+        # refresh loop left stopped, so a run that leads its own process group is resumed
+        # or ended as a group. One that does not -- in the group of crisprme.py's job, or
+        # of the web server -- is offered no signal to that group, nor one to bash alone.
+        for leader, tip in (
+                (True, "Resume it with fg or kill -CONT -- -{pid}, or end it with kill -KILL "
+                       "-- -{pid}."),
+                (False, "It must be resumed together with its stopped child processes, as fg "
+                        "does: kill -CONT {pid} resumes the script alone.")):
+            with self.subTest(leads_its_group=leader):
+                shutil.rmtree(self.lock, ignore_errors=True)
+                owner = self.sleeper(leader)
+                os.kill(owner.pid, signal.SIGSTOP)
+                _wait_for(lambda: _state(owner.pid) == "T", 10, "the owner to stop")
+                record = owner_record(owner.pid)
+                self.hold(record)
+                _age(self.lock / "owner", 16)
+                rc, out, err = self.take(stop_after=3.2)
+                self.assertEqual(rc, -signal.SIGKILL, out + err)  # still waiting when stopped
+                self.assertNotIn("Stale lock", out)
+                notices = self.notices(out)
+                self.assertGreaterEqual(len(notices), 2, out)
+                for notice in notices:  # stopped, not finishing: how to go on
+                    self.assertTrue(notice.endswith(
+                        f"it is held by pid {owner.pid} on {_this_host()[0]} (a run started "
+                        f"2026-10-30T00:00:00Z), which is stopped. {tip.format(pid=owner.pid)}"),
+                        notice)
+                self.assertNotIn("rm -rf", out)
+                self.assertEqual((self.lock / "owner").read_text(), record)
+                self.assertEqual(err, "")
 
     @unittest.skipUnless(os.path.exists("/proc/self/stat"),
                          "a dead run that was never reaped is told from a live one through /proc")
@@ -1936,14 +1948,16 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         time.sleep(1)  # several polls
         self.assertEqual([c for c in waiter.calls() if c[0] == "index-genome"], [])
         self.assertEqual((self.lock / "owner").read_text(), record)
+        # bash leads its process group here, so the run is resumed, or ended, as a group
         self.assertRegex(waiter.stdout(), rf"Still waiting for {re.escape(str(self.lock))}: "
                          rf"it is held by pid {holder.proc.pid} on .+, which is stopped\. Resume "
-                         rf"it with fg or kill -CONT {holder.proc.pid}, or stop it\.\n")
+                         rf"it with fg or kill -CONT -- -{holder.proc.pid}, or end it with kill "
+                         rf"-KILL -- -{holder.proc.pid}\.\n")
         self.assertNotIn("rm -rf", waiter.stdout())
         self.assertEqual(waiter.stderr(), "")
         # Resumed, it is the same run, however old its record -- whose refresh waits for the
-        # loop's next beat -- whether bash alone is resumed (kill -CONT <pid>, as the notice
-        # says: its build step and refresh loop stay stopped) or the whole run (fg).
+        # loop's next beat -- whether bash alone is resumed (kill -CONT <pid>: its build step
+        # and refresh loop stay stopped) or the whole run (fg, or kill -CONT -- -<pgid>).
         for resume in (lambda: os.kill(holder.proc.pid, signal.SIGCONT),
                        lambda: os.killpg(holder.proc.pid, signal.SIGCONT)):
             resume()
@@ -1960,6 +1974,50 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
         self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed",
                          run.stderr)
+        self.assertEqual(self.finish(holder, timeout=60).searched(variant=False),
+                         ("NRG_2_hg38", False))
+
+    @unittest.skipUnless(os.path.exists("/proc/self/stat"),
+                         "a stopped run is told from a live one through /proc")
+    def test_a_stopped_build_in_a_group_it_does_not_lead_is_offered_no_group_signal(self):
+        # Launched by crisprme.py from a shell, or by the web server, the run's bash is in a
+        # process group it does not lead -- the job's, the server's -- which a signal to the
+        # group would stop or kill as well. And resumed alone (kill -CONT <pid>, as the
+        # notice said), bash waits on for its build step and refresh loop, still stopped:
+        # the run never finished. Stood for by a launcher that leads the group.
+        built = self.root / "built"
+        launcher = "import subprocess, sys; sys.exit(subprocess.call(sys.argv[1:]))"
+        holder = self.launch(variant=False, env={"STUB_BUILD_UNTIL": str(built)},
+                             wrap=(sys.executable, "-c", launcher))
+        _wait_for(lambda: any(c[0] == "index-genome" for c in holder.calls()), 60,
+                  "the build to start")
+        bash = int(re.search(r"^pid=(\d+)$", (self.lock / "owner").read_text(), re.M).group(1))
+        self.assertEqual(os.getpgid(bash), holder.proc.pid)  # its launcher's group
+        os.killpg(holder.proc.pid, signal.SIGSTOP)  # the whole job: Ctrl-Z, a SLURM suspend
+        _wait_for(lambda: _state(bash) == "T", 10, "the run to stop")
+        waiter = self.launch(variant=False, env={"_lock_poll_s": "0.2"})
+        _wait_for(lambda: "Still waiting for" in waiter.stdout(), 60, "the second run to wait")
+        self.assertRegex(waiter.stdout(), rf"Still waiting for {re.escape(str(self.lock))}: "
+                         rf"it is held by pid {bash} on .+, which is stopped\. It must be resumed "
+                         r"together with its stopped child processes, as fg does: kill -CONT "
+                         rf"{bash} resumes the script alone\.\n")
+        for advice in ("-- -", "kill -KILL", "rm -rf"):
+            self.assertNotIn(advice, waiter.stdout())
+        self.assertEqual(waiter.stderr(), "")
+        # kill -CONT <pid> resumes the script alone: its build step stays stopped
+        os.kill(bash, signal.SIGCONT)
+        _wait_for(lambda: _state(bash) != "T", 10, "bash to resume")
+        build = [p for p, _, args in _processes(holder.proc.pid)
+                 if "crispritz.py index-genome" in args]
+        self.assertEqual([_state(p) for p in build], ["T"])
+        # resumed with it, the run finishes, and the waiter searches what it built
+        os.killpg(holder.proc.pid, signal.SIGCONT)
+        self.index.mkdir()
+        (self.index / "chr1.bin").write_bytes(b"")
+        built.touch()
+        run = self.finish(waiter, timeout=60)
+        self.assertEqual(run.builds, [])
+        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
         self.assertEqual(self.finish(holder, timeout=60).searched(variant=False),
                          ("NRG_2_hg38", False))
 
