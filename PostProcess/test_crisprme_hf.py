@@ -9,6 +9,7 @@ an end-to-end test against a populated repo once one exists.
 import contextlib
 import gzip
 import importlib.util
+import io
 import os
 import tarfile
 import tempfile
@@ -327,6 +328,60 @@ class TestHfRetry(unittest.TestCase):
                 with self.assertRaises(_HTTPErr):
                     hf._hf_call_with_retry(always429)
         self.assertEqual(calls["n"], 1)  # no retry
+
+    # what hf_xet raised, 7.5 minutes into NRG_3_hg38+hg38_HGDP1kGP.tar.gz on ml008
+    XET_DROP = ("Task error: File reconstruction error: CAS Client Error: Format "
+                "error: I/O error: error decoding response body")
+
+    def test_transport_errors_are_retryable(self):
+        class ChunkedEncodingError(OSError):  # as requests names it
+            pass
+
+        for exc in (RuntimeError(self.XET_DROP),
+                    ConnectionResetError(104, "Connection reset by peer"),
+                    TimeoutError("timed out"),
+                    ChunkedEncodingError("Connection broken: IncompleteRead")):
+            with self.subTest(exc=repr(exc)):
+                self.assertTrue(hf._hf_retryable(exc))
+        # what a retry would only repeat, or no network failure at all
+        for exc in (RuntimeError("CAS Client Error: 401 Unauthorized"),
+                    RuntimeError("CAS Client Error: 404 Not Found"),
+                    OSError(28, "No space left on device"),
+                    FileNotFoundError("index.tar.gz"),
+                    PermissionError(13, "Permission denied"),
+                    RuntimeError("something else went wrong")):
+            with self.subTest(exc=repr(exc)):
+                self.assertFalse(hf._hf_retryable(exc))
+
+    def test_succeeds_after_a_dropped_xet_transfer(self):
+        calls = {"n": 0}
+
+        def flaky(**kw):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RuntimeError(self.XET_DROP)
+            return "ok"
+
+        err = io.StringIO()
+        with mock.patch.object(hf.time, "sleep") as slept, contextlib.redirect_stderr(err):
+            out = hf._hf_call_with_retry(flaky, _what="snapshot")
+        self.assertEqual(out, "ok")
+        self.assertEqual(slept.call_count, 2)
+        self.assertIn("HF snapshot: transient error (RuntimeError: Task error: File "
+                      "reconstruction error", err.getvalue())
+
+    def test_gives_up_on_a_lasting_transport_error_with_a_hint(self):
+        def always(**kw):
+            raise RuntimeError(self.XET_DROP)
+
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, {"CRISPRME_HF_MAX_RETRIES": "2"}):
+            with mock.patch.object(hf.time, "sleep"), contextlib.redirect_stderr(err):
+                with self.assertRaises(RuntimeError) as cm:
+                    hf._hf_call_with_retry(always, _what="snapshot")
+        self.assertEqual(str(cm.exception), self.XET_DROP)  # the same error, re-raised
+        self.assertIn("still failing after 2 attempts", err.getvalue())
+        self.assertIn("re-run the same command", err.getvalue())
 
 
 class TestIndexAlreadyInstalled(unittest.TestCase):

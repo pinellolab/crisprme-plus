@@ -439,6 +439,15 @@ and the `release-crisprme` skill.
   RHEL-family hosts, that shell is the pipeline's own, and the step then running finishes on its
   own), and after a signal that killed the pipeline itself, whose workers may outlive it. Search
   results are unchanged. Covered by `PostProcess/test_annotation_tmpdirs.py`.
+- **A download that lost its connection part way was given up at once.** The Hugging Face download
+  retried only a rate limit (HTTP 429) or a server error (5xx). A dropped transfer is neither: hf_xet,
+  which serves the archives, reports it as `File reconstruction error: CAS Client Error: Format
+  error: I/O error: error decoding response body`, and requests and httpx raise connection-reset or
+  timeout errors. So the first one ended the download with that message and nothing else, as it did
+  7.5 minutes into the default `NRG_3_hg38+hg38_HGDP1kGP` index during the 2.8.1 release check. Such
+  transport failures are now retried with the same backoff, and once the retries run out the error
+  says it is usually a flaky network and to re-run the same command. HTTP answers a retry would only
+  repeat (401, 403, 404) and local errors such as a full disk still fail at once.
 - **Pipeline failure summaries are binary-safe.** `summarize_pipeline_failure()` now reads `log.txt`
   and `log_error.txt` with `errors="replace"`, so a single non-UTF-8 byte in a tool's captured
   stderr no longer raises `UnicodeDecodeError` and masks the real error.

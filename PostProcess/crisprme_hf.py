@@ -965,22 +965,50 @@ def _staged_files(local_dir: str) -> List[str]:
 # HTTP statuses worth retrying: 429 (rate limit) + transient 5xx from the CDN.
 _HF_RETRY_STATUS = (429, 500, 502, 503, 504)
 
+# Transport failures a later attempt can get past: a dropped or reset connection, a
+# timeout, a response body cut short. Matched by exception class name anywhere in the
+# MRO (requests, httpx, urllib3 and the standard library name them so) and, for
+# hf_xet, whose Rust errors reach Python as a plain RuntimeError ("File
+# reconstruction error: CAS Client Error: ... error decoding response body"), by
+# message.
+_HF_TRANSIENT_TYPES = frozenset((
+    "ConnectionError", "ConnectTimeout", "ConnectError", "ReadTimeout", "ReadError",
+    "WriteError", "Timeout", "TimeoutError", "TimeoutException", "ChunkedEncodingError",
+    "ContentDecodingError", "IncompleteRead", "ProtocolError", "RemoteProtocolError",
+    "NetworkError",
+))
+_HF_TRANSIENT_MESSAGES = (
+    "cas client error", "file reconstruction error", "error decoding response body",
+    "connection reset", "connection closed", "connection aborted", "broken pipe",
+    "timed out", "incomplete read",
+)
+# An answer a retry would only repeat, even inside a transport-looking message.
+_HF_FINAL_MESSAGES = ("401", "403", "404", "unauthorized", "forbidden", "not found")
+
 
 def _hf_retryable(exc: BaseException) -> bool:
-    """True when ``exc`` is a transient HF HTTP error worth retrying — a 429
-    rate-limit or a 5xx. Prefers the structured ``response.status_code`` and
-    falls back to matching the status in the message (some hub errors don't
-    expose ``.response``)."""
+    """True when ``exc`` is a transient HF error worth retrying: a 429 rate-limit
+    or a 5xx, or a transport failure (``_HF_TRANSIENT_TYPES`` /
+    ``_HF_TRANSIENT_MESSAGES``) that carries no other HTTP status. Prefers the
+    structured ``response.status_code`` and falls back to matching the status in
+    the message (some hub errors don't expose ``.response``)."""
     status = getattr(getattr(exc, "response", None), "status_code", None)
     if status in _HF_RETRY_STATUS:
         return True
     msg = str(exc)
-    return (
+    if (
         "Too Many Requests" in msg
         or "rate limit" in msg.lower()
         or "Service Unavailable" in msg
         or any((" %d " % c) in (" %s " % msg) for c in _HF_RETRY_STATUS)
-    )
+    ):
+        return True
+    low = msg.lower()
+    if status is not None or any(s in low for s in _HF_FINAL_MESSAGES):
+        return False
+    if any(c.__name__ in _HF_TRANSIENT_TYPES for c in type(exc).__mro__):
+        return True
+    return any(s in low for s in _HF_TRANSIENT_MESSAGES)
 
 
 def _hf_retry_after(exc: BaseException) -> Optional[float]:
@@ -1000,12 +1028,14 @@ def _hf_retry_after(exc: BaseException) -> Optional[float]:
 
 def _hf_call_with_retry(fn, *args, _what: str = "download",
                         _max_attempts: int = 6, **kwargs):
-    """Call ``fn(*args, **kwargs)``, retrying transient HF HTTP errors (429
-    rate-limit + 5xx) with exponential backoff. Anonymous downloads of the
-    many-small-file indices hit 429 easily; without this the whole download
-    aborts on the first rate-limit. ``snapshot_download`` resumes (already-present
-    files are skipped) so a retry is cheap. Honors CRISPRME_HF_MAX_RETRIES; set
-    it to 1 to disable retrying."""
+    """Call ``fn(*args, **kwargs)``, retrying transient HF errors (429 rate-limit,
+    5xx, and transport failures such as a reset connection or hf_xet's "error
+    decoding response body") with exponential backoff. Anonymous downloads of the
+    many-small-file indices hit 429 easily, and a multi-GB archive can lose its
+    connection part way; without this the whole download aborts on the first
+    one. ``snapshot_download`` resumes (already-present files are skipped) so a
+    retry is cheap. Honors CRISPRME_HF_MAX_RETRIES; set it to 1 to disable
+    retrying."""
     try:
         _max_attempts = max(
             1, int(os.environ.get("CRISPRME_HF_MAX_RETRIES", _max_attempts))
@@ -1017,14 +1047,24 @@ def _hf_call_with_retry(fn, *args, _what: str = "download",
         try:
             return fn(*args, **kwargs)
         except Exception as e:  # noqa: BLE001 - re-raised below if not retryable
-            if attempt >= _max_attempts or not _hf_retryable(e):
+            retryable = _hf_retryable(e)
+            if attempt >= _max_attempts or not retryable:
+                if retryable and attempt > 1:
+                    sys.stderr.write(
+                        f"HF {_what}: still failing after {attempt} attempts. This "
+                        f"is usually a flaky network: re-run the same command.\n"
+                    )
+                    sys.stderr.flush()
                 raise
             wait = _hf_retry_after(e)
             if wait is None:
                 wait = delay
-            status = getattr(getattr(e, "response", None), "status_code", "?")
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            why = f"HTTP {status}" if status is not None else (
+                f"{type(e).__name__}: {str(e)[:160]}"
+            )
             sys.stderr.write(
-                f"HF {_what}: transient error (HTTP {status}); retry "
+                f"HF {_what}: transient error ({why}); retry "
                 f"{attempt}/{_max_attempts - 1} in {wait:.0f}s "
                 f"(set CRISPRME_HF_MAX_RETRIES=1 to disable, or authenticate "
                 f"with an HF token to avoid rate limits)...\n"
