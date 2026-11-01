@@ -449,9 +449,10 @@ haplotype** (`indel_snp_cis.resolve_target`):
 - the fake-indel window holds **one indel**, so a haplotype that carries a second indel
   inside the target does not have the window's sequence and is not listed for it, on any
   indel row (§8, residuals). That includes a second indel inserted right next to the
-  indel's anchor base, and one overlapping the indel on the same phased slot (one complex
-  allele the VCF splits into overlapping records); an unphased carrier of two overlapping
-  records is a multi-allelic heterozygote, one allele per haplotype, and stays listed;
+  indel's anchor base, and, on the same phased slot, one overlapping the indel or a SNP alt
+  on the indel's own bases (one complex allele the VCF splits into overlapping records; the
+  window keeps the reference there). An unphased carrier of two overlapping records is a
+  multi-allelic heterozygote, one allele per haplotype, and stays listed;
 - a classic dictionary install (no Tier-1 store, e.g. an index built without `--samplesID`)
   reads the same genotypes from the per-sample SNP dictionary; with `CRISPRME_INDEL_SNP=0`
   at search time every code reads as the reference base, as on a fake-indel genome built
@@ -1007,9 +1008,9 @@ classic dict builds are byte-identical.) One **residual**: the indel search mate
 **one indel per fake contig**, so an off-target requiring **≥ 2 co-occurring cis indels
 within a single protospacer** is not generated as a candidate — a pre-existing
 single-indel-search property, independent of the analysis mode; since 2.8.1 an individual
-whose haplotype carries such a second indel inside a target (or overlapping the first, a
-complex allele split into overlapping records) is not listed for that target, whose
-sequence it does not have. This residual is **low-frequency**: raw multi-indel cis
+whose haplotype carries such a second indel inside a target (or, as one complex allele
+split into overlapping records, an indel or a SNP alt on the first indel's own bases) is not
+listed for that target, whose sequence it does not have. This residual is **low-frequency**: raw multi-indel cis
 co-occurrence is dominated by STR/VNTR repeats (which off-target analysis should
 soft-mask), falling to **~1–2%** of indel loci after
 repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**

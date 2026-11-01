@@ -16,9 +16,9 @@ on them and its rows checked:
   * every PAM satisfies NRG, and no IUPAC code is left;
   * the planted sites give exactly the rows their carriers have (a PAM SNP in cis
     and in trans, a chimera only another sample's SNP would complete, a cis spacer
-    SNP, an unphased carrier, a minus-strand PAM SNP, a second indel on the same
-    slot: inside the target, inserted next to the indel's anchor, or overlapping
-    the indel as part of one complex allele);
+    SNP, an unphased carrier, a minus-strand PAM SNP, a second variant on the same
+    slot: an indel inside the target, inserted next to the indel's anchor or
+    overlapping the indel (one complex allele), a SNP on the indel's own anchor);
   * the SNP+indel co-occurrence companion names the SNPs a row requires, CONFIRMED
     or PUTATIVE, PAM-window SNPs included;
   * a classic dictionary install (no Tier-1 store: the per-sample SNP dictionary), a
@@ -168,6 +168,13 @@ class World(object):
         self._put(q0, g + "T" * 30)
         self._indel("Q", q0 + 20, g[19], g[19] + "TGG", {"S07": "0|1", "S10": "0/1", "S12": "0|1"})
         self._indel("Q2", q0 + 17, g[16:20], g[16], {"S10": "0/1", "S12": "0|1"})
+        # R (+): the same insertion, with a C>T SNP on its own anchor base, in cis in S05
+        # and in trans in S06. The overlay leaves the anchor alone, so the window shows
+        # the reference base there: S05's slot does not have the window's sequence.
+        r0 = 1630
+        self._put(r0, g + "T" * 30)
+        self._indel("R", r0 + 20, g[19], g[19] + "TGG", {"S05": "1|0", "S06": "1|0"})
+        self._snp("R", r0 + 20, g[19], "T", {"S05": "1|0", "S06": "0|1"})
         self.ref = "".join(self.seq)
 
     def _put(self, start0, s):
@@ -465,6 +472,8 @@ class FullTiers(_Base):
         self.assertEqual([(r["dna"], r["samples"]) for r in site["Q"]],
                          [(g + "TGG", "S07,S10")])
         self.assertFalse([r for r in site.get("Q2", ()) if "S12" in r["samples"].split(",")])
+        # R: a SNP on the indel's own anchor, on the same slot in S05: S06 only
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["R"]], [(g + "TGG", "S06")])
         # every recomputed CFD and mismatch count agrees with its alignment
         for r in rows:
             self.assertAlmostEqual(cfd_score_bulge_aware(r["crRNA"], r["dna"]), r["cfd"],

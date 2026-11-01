@@ -821,8 +821,9 @@ def _indel_window(indel_data):
 
 
 def _overlaid_positions(path):
-    """The 1-based positions of every IUPAC code of this chromosome's overlaid indel
-    targets: the per-sample dictionary entries the per-haplotype resolution reads."""
+    """The 1-based positions the per-haplotype resolution reads from the per-sample
+    dictionary: every IUPAC code of this chromosome's overlaid indel targets, and the
+    REF bases of each target's own indel (_ref_snps)."""
     out = set()
     with open(path) as fh:
         fh.readline()  # header
@@ -830,14 +831,15 @@ def _overlaid_positions(path):
             ln = raw.rstrip("\n").split("\t")
             if len(ln) < 7 or ln[3] != "fake" + current_chr:
                 continue
-            amb = _isc.ambiguous_columns(ln[2])
-            if not amb:
-                continue
             try:
                 idata = sorted(INDELS_tree[int(ln[4])])[0].data
             except Exception:  # noqa: BLE001 - no indel here: skipped by the loop too
                 continue
             _ipos, _iref, _ialt, _istart = _indel_window(idata)
+            out.update(range(_ipos, _ipos + len(_iref)))
+            amb = _isc.ambiguous_columns(ln[2])
+            if not amb:
+                continue
             real_of = _isc.build_offset_to_real(
                 ln[2], int(ln[4]), ln[6], int(idata[5]), _istart, _iref, _ialt)
             for j in amb:
@@ -976,6 +978,35 @@ def _other_indels(lo, hi, ipos, iref, ialt):
     return out
 
 
+def _ref_snps(ipos, iref):
+    """Carriers ({sample: genotype}) of each SNP alt on the indel's own REF bases. The
+    fake-indel window keeps the reference base there (the overlay leaves the ALT
+    alone), so a slot holding both is one complex allele the window does not hold. As
+    for an overlapping indel, an unphased carrier of both is a multi-allelic
+    heterozygote, one allele per haplotype, so only phased and haploid carriers count."""
+    out = []
+    for p in range(ipos, ipos + len(iref)):
+        for carriers in (_snp_record(p) or {}).values():
+            kept = {s: g for s, g in carriers.items() if "/" not in g}
+            if kept:
+                out.append(kept)
+    return out
+
+
+def _window_breakers(dna, real_of, ipos, iref, ialt):
+    """The carriers ({sample: genotype}, one per variant) whose slot does not have an
+    indel target's sequence although it carries the indel: another indel changes the
+    bases the target covers (_other_indels), or, for a target that reaches the indel,
+    a SNP alt sits on the indel's own bases (_ref_snps)."""
+    span = _isc.target_ref_span(dna, real_of, ipos, iref)
+    if not span:
+        return ()
+    out = list(_other_indels(span[0], span[1], ipos, iref, ialt))
+    if span[0] <= ipos - 1 <= span[1]:
+        out += _ref_snps(ipos, iref)
+    return out
+
+
 def _indel_carriers(indel_data, ipos, iref, ialt):
     """The indel's carriers (indel_snp_cis.IndelCarriers): its phased genotypes from
     the indel store, else the indel log's carriers with their phase unknown."""
@@ -1041,9 +1072,7 @@ def _overlaid_rows(line, final_result, indel_data, amb):
         # the indel's phased carriers (the store), else the log's, phase unknown
         carriers = _indel_carriers(indel_data, _ipos, _iref, _ialt)
         if carriers.phase_known:
-            _span = _isc.target_ref_span(line[2], real_of, _ipos, _iref)
-            if _span:
-                others = _other_indels(_span[0], _span[1], _ipos, _iref, _ialt)
+            others = _window_breakers(line[2], real_of, _ipos, _iref, _ialt)
     if do_scores:
         def score_fn(bases, _cols=cols):
             return _cfd_from_alignment(line[1], _isc.realize(line[2], line[1], _cols, bases))
@@ -1120,18 +1149,17 @@ def _overlaid_rows(line, final_result, indel_data, amb):
 
 def _second_indel_rows(line, final_result, indel_data):
     """A target with no IUPAC code is the same sequence on every slot that carries
-    its indel -- except a slot that also carries a second indel inside the target,
-    which the one-indel fake-indel window cannot hold. With the phased indel store,
-    such carriers leave the row (the log's list, in its order); a row left with no
-    carrier is dropped. Without a second indel there (nearly always) the row is the
-    one the engine reported, unchanged."""
+    its indel -- except a slot that also carries a second indel inside the target, or
+    a SNP alt on the indel's own bases, which the one-indel fake-indel window cannot
+    hold (_window_breakers). With the phased indel store, such carriers leave the row
+    (the log's list, in its order); a row left with no carrier is dropped. Without
+    one there (nearly always) the row is the one the engine reported, unchanged."""
     if _indelgt is None or not _indel_snp:
         return [final_result]
     _ipos, _iref, _ialt, _istart = _indel_window(indel_data)
     real_of = _isc.build_offset_to_real(
         line[2], int(line[4]), line[6], int(indel_data[5]), _istart, _iref, _ialt)
-    span = _isc.target_ref_span(line[2], real_of, _ipos, _iref)
-    others = _other_indels(span[0], span[1], _ipos, _iref, _ialt) if span else ()
+    others = _window_breakers(line[2], real_of, _ipos, _iref, _ialt)
     if not others:
         return [final_result]
     carriers = _indel_carriers(indel_data, _ipos, _iref, _ialt)
