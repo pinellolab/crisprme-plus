@@ -16,7 +16,9 @@ on them and its rows checked:
   * every PAM satisfies NRG, and no IUPAC code is left;
   * the planted sites give exactly the rows their carriers have (a PAM SNP in cis
     and in trans, a chimera only another sample's SNP would complete, a cis spacer
-    SNP, an unphased carrier, a minus-strand PAM SNP);
+    SNP, an unphased carrier, a minus-strand PAM SNP, a second indel on the same
+    slot: inside the target, inserted next to the indel's anchor, or overlapping
+    the indel as part of one complex allele);
   * the SNP+indel co-occurrence companion names the SNPs a row requires, CONFIRMED
     or PUTATIVE, PAM-window SNPs included;
   * a classic dictionary install (no Tier-1 store: the per-sample SNP dictionary), a
@@ -100,7 +102,7 @@ class World(object):
 
     def __init__(self):
         rng = random.Random(28101)
-        self.seq = [rng.choice("ACGT") for _ in range(1400)]
+        self.seq = [rng.choice("ACGT") for _ in range(1700)]
         self.snps = []    # (pos1, ref, alt, rsid, {sample: gt})
         self.indels = []  # (pos1, ref, alt, rsid, {sample: gt})
         g = GUIDE
@@ -151,6 +153,21 @@ class World(object):
         self._put(o0, g[:10] + "C" + g[10:] + "TGG")
         self._indel("O", o0 + 10, g[9] + "C", g[9], {"S01": "1|0", "S02": "0|1"})
         self._indel("O2", o0 + 3, g[2] + g[3], g[2], {"S01": "1|0"})
+        # P (+), no SNP: inserting the PAM after the spacer's last base (the anchor) makes
+        # a perfect target that ends inside the insertion; S09's slot also holds an A
+        # inserted right before the anchor (P2), inside the target, S08's the other slot.
+        p0 = 1400
+        self._put(p0, g + "T" * 30)
+        self._indel("P", p0 + 20, g[19], g[19] + "TGG", {"S08": "1|0", "S09": "1|0"})
+        self._indel("P2", p0 + 19, g[18], g[18] + "A", {"S08": "0|1", "S09": "1|0"})
+        # Q (+), no SNP: the same insertion; on S12's slot a deletion of the anchor and
+        # the two bases before it (Q2) overlaps it, one complex allele split into two
+        # records that the window does not hold. S10 carries both unphased: a
+        # multi-allelic heterozygote, one allele per haplotype, so it stays listed.
+        q0 = 1550
+        self._put(q0, g + "T" * 30)
+        self._indel("Q", q0 + 20, g[19], g[19] + "TGG", {"S07": "0|1", "S10": "0/1", "S12": "0|1"})
+        self._indel("Q2", q0 + 17, g[16:20], g[16], {"S10": "0/1", "S12": "0|1"})
         self.ref = "".join(self.seq)
 
     def _put(self, start0, s):
@@ -440,6 +457,14 @@ class FullTiers(_Base):
         # O: no SNP code, but S01's slot also holds the second deletion: S02 only
         self.assertEqual([(r["dna"], r["samples"]) for r in site["O"]], [(g + "TGG", "S02")])
         self.assertNotIn("O2", site, site.get("O2"))
+        # P: the target ends inside the insertion, and S09's slot has an A inserted
+        # next to the anchor: S08 only; S09 is never listed for P2's window either
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["P"]], [(g + "TGG", "S08")])
+        self.assertFalse([r for r in site.get("P2", ()) if "S09" in r["samples"].split(",")])
+        # Q: S12's slot holds the overlapping deletion: listed on neither window
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["Q"]],
+                         [(g + "TGG", "S07,S10")])
+        self.assertFalse([r for r in site.get("Q2", ()) if "S12" in r["samples"].split(",")])
         # every recomputed CFD and mismatch count agrees with its alignment
         for r in rows:
             self.assertAlmostEqual(cfd_score_bulge_aware(r["crRNA"], r["dna"]), r["cfd"],

@@ -389,6 +389,24 @@ def changes_span(pos1, ref, alt, lo, hi):
     return False
 
 
+def target_ref_span(dna_aligned, real_of, indel_pos1, ref):
+    """(lo, hi): the reference bases (0-based, inclusive) an indel off-target covers
+    on a haplotype carrying its indel, or None for a target with no base.
+
+    ``real_of`` (build_offset_to_real) maps the ALT bases to no reference position,
+    the anchor base included, so a target that ends inside them would stop one
+    base short of the indel. A target holding any ALT base also holds the indel's
+    REF place (the anchor; for a deletion, the bases the ALT replaces), so the span
+    takes in REF: a second variant there, or inserted next to the anchor, is inside
+    the target."""
+    reals = [r for r in real_of if r is not None]
+    if any(r is None and c != "-" for c, r in zip(dna_aligned, real_of)):
+        reals += [indel_pos1 - 1, indel_pos1 - 2 + len(ref)]
+    if not reals:
+        return None
+    return min(reals), max(reals)
+
+
 class IndelCarriers(object):
     """The carriers of one indel, parsed once: {sample: (genotype tokens, kind,
     indel-carrying slots)} plus the slot total. ``phase_known`` is False when they

@@ -330,6 +330,28 @@ class PerHaplotypeCases(unittest.TestCase):
         self.assertFalse(cs(101, "T", "TGG", 90, 100))    # ends at the anchor
         self.assertFalse(cs(101, "A", "A", 0, 1000))      # no change
 
+    def test_target_ref_span_takes_in_the_indel_place(self):
+        """The ALT bases, anchor included, map to no reference position, so a target
+        that ends inside them would stop one base short of the indel; the span takes
+        in the indel's REF. The genome-wide case: chr2:148517281(-) on the window of
+        A>ACTT at 148517302, whose only carrier HG00344 also holds T>TC at 148517301
+        on the same slot (a C inserted next to the anchor, inside the target)."""
+        dna = "AgTaAGAAgMaGTAAG-AGGCTRG"
+        real_of = isc.build_offset_to_real(dna, 48764595, "-", 48764590, 148517276,
+                                           "A", "ACTT")
+        reals = [r for r in real_of if r is not None]
+        self.assertEqual((min(reals), max(reals)), (148517281, 148517300))
+        self.assertFalse(isc.changes_span(148517301, "T", "TC", 148517281, 148517300))
+        span = isc.target_ref_span(dna, real_of, 148517302, "A")
+        self.assertEqual(span, (148517281, 148517301))
+        self.assertTrue(isc.changes_span(148517301, "T", "TC", *span))
+        # a deletion's span takes in the bases its ALT replaces
+        self.assertEqual(isc.target_ref_span("ACGT", [10, 11, None, 15], 13, "ATT"),
+                         (10, 15))
+        # a target with no ALT base (a flank, or a bulge column) is its own bases
+        self.assertEqual(isc.target_ref_span("AC-T", [10, 11, None, 12], 40, "A"), (10, 12))
+        self.assertIsNone(isc.target_ref_span("--", [None, None], 40, "A"))
+
     def test_overlapping_indels(self):
         """A second indel inside the target on the SAME slot: that slot does not
         have the window's sequence. On the other slot it does not matter; unphased,

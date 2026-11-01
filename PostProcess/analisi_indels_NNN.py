@@ -943,9 +943,12 @@ _jgt_cache = {}      # (pos, REF, ALT) -> {sample: genotype} of an indel of the 
 
 def _other_indels(lo, hi, ipos, iref, ialt):
     """Carriers ({sample: genotype}) of each OTHER indel of the phased store that
-    changes the reference bases lo..hi (0-based) of a haplotype: a slot carrying one
-    of them does not have the fake-indel window's sequence there. An indel whose
-    REF overlaps this one's cannot share its haplotype and is skipped."""
+    changes the reference bases lo..hi (0-based, indel_snp_cis.target_ref_span) of a
+    haplotype: a slot carrying one of them does not have the fake-indel window's
+    sequence there. An indel whose REF overlaps this one's shares a slot with it only
+    as part of one complex allele split into overlapping records, which the window
+    does not hold either; an unphased carrier of both is a multi-allelic heterozygote
+    (one allele per haplotype), so only its phased and haploid carriers count."""
     global _indel_index, _indel_starts, _indel_maxref
     if _indelgt is None:
         return ()
@@ -959,7 +962,7 @@ def _other_indels(lo, hi, ipos, iref, ialt):
     while k < len(_indel_index) and _indel_index[k][0] - 1 <= hi:
         p, r, a = _indel_index[k]
         k += 1
-        if (p, r, a) == (ipos, iref, ialt) or (p - 1 < i1 and i0 < p - 1 + len(r)):
+        if (p, r, a) == (ipos, iref, ialt):
             continue
         if not _isc.changes_span(p, r, a, lo, hi):
             continue
@@ -967,6 +970,8 @@ def _other_indels(lo, hi, ipos, iref, ialt):
         if gts is None:
             gts = _indelgt.carriers_dict(p, r, a)
             _cache_put(_jgt_cache, (p, r, a), gts, 1 + len(gts))
+        if p - 1 < i1 and i0 < p - 1 + len(r):
+            gts = {s: g for s, g in gts.items() if "/" not in g}
         out.append(gts)
     return out
 
@@ -1036,9 +1041,9 @@ def _overlaid_rows(line, final_result, indel_data, amb):
         # the indel's phased carriers (the store), else the log's, phase unknown
         carriers = _indel_carriers(indel_data, _ipos, _iref, _ialt)
         if carriers.phase_known:
-            _span = [r for r in real_of if r is not None]
+            _span = _isc.target_ref_span(line[2], real_of, _ipos, _iref)
             if _span:
-                others = _other_indels(min(_span), max(_span), _ipos, _iref, _ialt)
+                others = _other_indels(_span[0], _span[1], _ipos, _iref, _ialt)
     if do_scores:
         def score_fn(bases, _cols=cols):
             return _cfd_from_alignment(line[1], _isc.realize(line[2], line[1], _cols, bases))
@@ -1125,8 +1130,8 @@ def _second_indel_rows(line, final_result, indel_data):
     _ipos, _iref, _ialt, _istart = _indel_window(indel_data)
     real_of = _isc.build_offset_to_real(
         line[2], int(line[4]), line[6], int(indel_data[5]), _istart, _iref, _ialt)
-    span = [r for r in real_of if r is not None]
-    others = _other_indels(min(span), max(span), _ipos, _iref, _ialt) if span else ()
+    span = _isc.target_ref_span(line[2], real_of, _ipos, _iref)
+    others = _other_indels(span[0], span[1], _ipos, _iref, _ialt) if span else ()
     if not others:
         return [final_result]
     carriers = _indel_carriers(indel_data, _ipos, _iref, _ialt)
