@@ -68,6 +68,7 @@ import shutil
 import gzip
 import os
 import sys
+import threading
 import time
 
 SETTINGS_DIR = "Settings"
@@ -963,9 +964,12 @@ def _write_dataset_samplesid(dataset: str) -> Optional[str]:
     if samples == ours:
         return target
     os.makedirs(sdir, exist_ok=True)
-    # through a hidden temporary file renamed into place, as the search side writes a
-    # combined list (main_page._ensure_samplesid): never one cut short
-    tmp = os.path.join(sdir, f".{dataset}.samplesID.txt.{os.getpid()}.tmp")
+    # through a hidden temporary file (this thread's) renamed into place, as the search
+    # side writes a combined list (main_page._ensure_samplesid): never one cut short, nor
+    # one two uploads into the dataset that finish together write at once (the server
+    # runs each request in a thread of one process)
+    tmp = os.path.join(sdir, f".{dataset}.samplesID.txt.{os.getpid()}."
+                             f"{threading.get_ident()}.tmp")
     try:
         with open(tmp, "w") as out:
             out.write(SAMPLESID_HEADER)

@@ -25,6 +25,7 @@ import stat
 import string
 import tarfile
 import tempfile
+import threading
 import time
 import unittest
 from typing import List, Optional
@@ -931,7 +932,8 @@ class _SamplesIDCase(unittest.TestCase):
         for d in ("VCFs", "samplesIDs", "Genomes/hg38", "Settings/uploads"):
             os.makedirs(os.path.join(self.cwd, d))
         self.ns = _load_functions(self.names, current_working_directory=self.cwd + "/",
-                                  gzip=gzip, shutil=shutil, **self.stubs)
+                                  gzip=gzip, shutil=shutil, threading=threading,
+                                  **self.stubs)
 
     def vcf(self, dataset, fname, samples, **kw):
         _write_vcf(os.path.join(self.cwd, "VCFs", dataset, fname), samples, **kw)
@@ -1060,6 +1062,42 @@ class TestDatasetSamplesID(_SamplesIDCase):
         self.assertEqual(listing, os.path.join(self.cwd + "/", "samplesIDs",
                                                ".walk.samplesID.list"))
         self.assertEqual(self.read(listing), "walk.samplesID.txt\n")
+
+    def test_two_threads_writing_the_list_at_once_each_use_their_own_file(self):
+        # the web server runs each request in a thread of one process, so two uploads
+        # into one dataset that finish together write its list at once: through one
+        # temporary file, one truncated the other's and its rename found nothing there
+        # (round 2 review, R2-2). Each thread holds its temporary file open until the
+        # other has opened its own.
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2"])
+        both_open = threading.Barrier(2, timeout=10)
+        opened, errors = [], []
+
+        def open_(path, mode="r", *args, **kwargs):
+            fh = open(path, mode, *args, **kwargs)
+            if "w" in mode and os.path.basename(path).startswith(".walk.samplesID.txt."):
+                opened.append(path)
+                both_open.wait()
+            return fh
+
+        def write():
+            try:
+                self.ns["_write_dataset_samplesid"]("walk")
+            except Exception as exc:  # noqa: BLE001 - reported below
+                errors.append(exc)
+
+        self.ns["open"] = open_
+        threads = [threading.Thread(target=write) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        self.assertEqual(errors, [])
+        self.assertEqual(len(set(opened)), 2, opened)
+        self.assertEqual(self.read(self.sid("walk")), _HEADER
+                         + "S1\twalk\tunknown\tunknown\nS2\twalk\tunknown\tunknown\n")
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "samplesIDs")),
+                         ["walk.samplesID.txt"])
 
 
 class TestVcfUploadWritesItsSampleList(_SamplesIDCase):
