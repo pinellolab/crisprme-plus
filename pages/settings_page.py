@@ -922,11 +922,12 @@ def _hf_options(component: str, installed: List[str]) -> List[dict]:
     return opts
 
 
-# Rough "space required" hints for the download actions (uncompressed on disk).
+# Rough "space required" hints for the download actions (disk space once installed).
 _SIZE_HINTS = {
     "genome": "a reference genome is typically ~1-3 GB",
-    "index": "a genome-wide bulge index is typically ~5-10 GB",
-    "vcf": "a population VCF set (e.g. 1000G) is typically ~15-20 GB",
+    "index": ("the download size shown in the list (from a few GB to over 100 GB) "
+              "plus room to unpack it"),
+    "vcf": "a hosted VCF set takes about 2-30 GB (the list shows each one's size)",
 }
 
 

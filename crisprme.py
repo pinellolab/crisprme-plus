@@ -473,9 +473,10 @@ def print_help_complete_search() -> None:
         "reference-only]. --per-sample / --population-level override it.)\n"
         "\t--alt-alignments / --no-alt-alignments, emit (or skip) the exhaustive "
         "alternative-alignments file (*_all_results_with_alternative_alignments.tsv = the "
-        "non-best alignments per locus). Default follows the mode: OFF for the default "
+        "non-best alignments per locus). Default follows the mode: OFF for a "
         "population-level analysis (the report is built from the best alignment per locus, "
-        "so this only adds a large, slow-to-build companion file), ON under --per-sample. "
+        "so this only adds a large, slow-to-build companion file), ON for a per-sample one "
+        "(the default on a phased genotyped index, or forced with --per-sample). "
         "Use --alt-alignments to force it, --no-alt-alignments to suppress it [OPTIONAL]\n"
         "\t--keep-intermediates, keep the bulky pre-integration working files (the merged "
         "bestMerge/altMerge tables, the raw all_results_with_alternative_alignments.tsv, and "
@@ -1968,7 +1969,8 @@ def complete_search() -> None:
                 f"WARNING [complete-search]: '{_retired}' was removed in 2.5.4 and is IGNORED. "
                 f"The analysis mode now auto-selects by index (per-sample on a phased genotyped "
                 f"index, population-level otherwise); force it with --per-sample / "
-                f"--population-level. '{_retired}' used to force per-sample.",
+                f"--population-level. '{_retired}' used to select the "
+                f"{'per-sample' if _retired == '--full' else 'population-level'} analysis.",
                 flush=True,
             )
     os.environ["CRISPRME_FAST_MODE"] = "0" if per_sample else "1"
@@ -1980,7 +1982,7 @@ def complete_search() -> None:
     # most expensive step on a large search -- yet nothing in the report reads it (the report,
     # summary tables, mm+b matrix and top-100 panel are all built from bestMerge ->
     # integrated_results). Its only real consumer is assembly-search's haplotype reconciliation.
-    # So it is EMITTED BY MODE: OFF for the default population-level analysis, ON for --per-sample
+    # So it is EMITTED BY MODE: OFF for a population-level analysis, ON for a per-sample one
     # (where the observed-haplotype detail is wanted and bounded). --alt-alignments /
     # --no-alt-alignments override explicitly. The default is purely MODE-driven here; the
     # sites-only refinement in the plan's matrix (a sites-only panel should stay alt-off even
@@ -2168,10 +2170,10 @@ def complete_search() -> None:
 
     # Issue #105 (odd-length partially-degenerate PAM + bulges crashing the CRISPRitz
     # C++ engine with a heap-corruption abort) was fixed in CRISPRitz, and CRISPRme+
-    # hard-pins a CRISPRitz >= 2.9.0 on every install surface (Docker and
-    # install_from_source.sh build the tag in crispritz_ref / CRISPRITZ_REF, Bioconda
-    # pins crispritz >=2.9.0). The pin moves with each release, so this says ">=" and
-    # not an exact version.
+    # hard-pins a CRISPRitz >= 2.9.1 on every install surface (Docker and
+    # install_from_source.sh build the tag in crispritz_ref / CRISPRITZ_REF, and the
+    # 2.8.1 Bioconda recipe pins crispritz >=2.9.1). The pin moves with each release,
+    # so this says ">=" and not an exact version.
     # No supported install can therefore run a vulnerable engine, so the old runtime
     # warning here was removed: it fired on the DEFAULT PAM (NRG is odd-length and
     # carries the partially-degenerate "R"), crying wolf on essentially every default
@@ -2590,7 +2592,8 @@ def print_help_build_index() -> None:
         "\t--bRNA, number of RNA bulges the index must support [OPTIONAL, "
         "default 0]\n"
         "\t--thread, set number of threads to use [default: 8]\n"
-        "\t--vcf, a VCF dataset directory (e.g. VCFs/1000G) OR a config file "
+        "\t--vcf, a VCF dataset directory (e.g. VCFs/hg38_HGDP1kGP, which "
+        "'download --what vcf --dataset hg38_HGDP1kGP' fetches) OR a config file "
         "listing one VCF folder name under VCFs/ (the same --vcf form "
         "complete-search accepts; the listing must name exactly one dataset). "
         "When given, also pre-builds the variant-aware index: enriches the genome "
@@ -2598,7 +2601,9 @@ def print_help_build_index() -> None:
         "first variant-aware search does not pay the enrichment/indexing cost "
         "[OPTIONAL]\n"
         "\t--samplesID, a listing file (one samplesID filename per line, under "
-        "samplesIDs/; a combined panel lists both 1000G and HGDP). When given "
+        "samplesIDs/: for VCFs/hg38_HGDP1kGP the one line "
+        "hg38_HGDP1kGP.samplesID.txt; a panel merged from several datasets lists "
+        "each dataset's file). When given "
         "with --vcf, the build ALSO emits the additive dictless tiers (Tier-0 "
         "registry + Tier-1 genotype store) per chromosome alongside the dicts, so "
         "the built index carries the fast-post-analysis tiers; omit to build dicts "
@@ -3702,8 +3707,9 @@ def print_help_assembly_search() -> None:
         "\t--max-total-edits, cap the TOTAL edits (mismatches + bulges) per "
         "alignment [default: mm+bDNA+bRNA, i.e. no additional cap beyond what "
         "--mm/--bDNA/--bRNA already imply -- unlike complete-search, whose own "
-        "bare default of 4 would otherwise silently drop most real off-targets "
-        "here; set this explicitly to tighten it, e.g. for performance]\n"
+        "default of 6 would otherwise silently drop every alignment with more "
+        "edits whenever --mm/--bDNA/--bRNA allow more; set this explicitly to "
+        "tighten it, e.g. for performance]\n"
         "\t--annotation, an hg38 BED annotation file (bgzipped, fourth column = "
         "feature name -- e.g. Annotations/dhs+encode_screenv4+gencode+cosmic."
         "hg38.bed.gz) to annotate the reconciled sites with [OPTIONAL]. Adds an "
@@ -3795,7 +3801,7 @@ def _run_haplotype_search(
             `complete-search`'s own `--max-total-edits` -- computed once by
             `assembly_search()` (an explicit `--max-total-edits` override if
             given, else `mm+bDNA+bRNA`; see its own comment for why the
-            latter differs from `complete-search`'s bare default of 4).
+            latter differs from `complete-search`'s bare default of 6).
 
     Returns:
         The absolute path to the haplotype's `complete-search` output folder.
@@ -3909,12 +3915,12 @@ def assembly_search() -> None:
         _check_gene_annotation(args, True) if "--gene_annotation" in args else None
     )
     # --max-total-edits: same flag `complete-search` accepts, but a different
-    # default when omitted. `complete-search`'s own bare default (4) was
-    # measured to silently drop the vast majority of real off-targets here --
-    # see `_run_haplotype_search()`'s docstring -- so `assembly_search()`
-    # defaults to the full mm+bDNA+bRNA budget instead, while still letting a
-    # user explicitly tighten (or further raise) it the same way they would
-    # for `complete-search`.
+    # default when omitted. `complete-search`'s own bare default (6; it was 4
+    # when this was measured to silently drop the vast majority of real
+    # off-targets here) prunes every alignment over it whenever mm+bDNA+bRNA
+    # is larger, so `assembly_search()` defaults to the full mm+bDNA+bRNA
+    # budget instead, while still letting a user explicitly tighten (or
+    # further raise) it the same way they would for `complete-search`.
     if "--max-total-edits" in args:
         try:
             max_total_edits = int(args[args.index("--max-total-edits") + 1])

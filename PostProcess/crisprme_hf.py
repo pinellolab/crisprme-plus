@@ -1383,13 +1383,14 @@ def download_component(
     local layout under ``workdir``.
 
     Args:
-        component: one of genome|annotations|pams|samples|vcf|index.
+        component: one of genome|annotations|pams|samples|vcf|build-inputs|index.
         workdir: working directory the CRISPRme dir-tree lives under.
         repo: HF repo id (defaults via :func:`resolve_repo`).
         ref: reference-genome name (for ``genome``/``index``), e.g. "hg38".
-        dataset: variant dataset name for ``vcf`` (e.g. "1000G", "HGDP").
+        dataset: variant dataset name for ``vcf`` / ``build-inputs``
+            (e.g. "hg38_HGDP1kGP").
         index_name: precomputed index directory name for ``index``
-            (e.g. "NGG_2_hg38").
+            (e.g. "NRG_3_hg38").
 
     Returns:
         The local destination directory populated by the download.
@@ -1482,14 +1483,14 @@ def download_component(
             shutil.rmtree(staging, ignore_errors=True)
             raise ValueError(
                 f"No raw VCF dataset '{dataset}' found in HuggingFace repo '{repo}' "
-                f"(looked for '{remote_prefix}/{dataset}/'). The default repo hosts "
-                f"prebuilt variant-aware INDEXES (with their genotype stores for "
-                f"sample-level analysis), not raw per-dataset VCFs. For variant-aware "
-                f"search use:  crisprme.py download --what index --index-name "
-                f"NRG_3_hg38+hg38_HGDP1kGP  (the genotype store it ships covers carriers "
-                f"and per-sample output). To build your own index from raw VCFs, place "
-                f"them under VCFs/{dataset}/ yourself, or use --hf-repo to point at a "
-                f"repo that hosts '{remote_prefix}/{dataset}/'."
+                f"(looked for '{remote_prefix}/{dataset}/'). The default repo hosts the "
+                f"source VCFs of its prebuilt variant indexes as the datasets "
+                f"hg38_HGDP1kGP, hg38_HPRC and hg38_mega (e.g. --what vcf --dataset "
+                f"hg38_HGDP1kGP). A variant-aware search does not need them:  crisprme.py "
+                f"download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP  (the "
+                f"genotype store it ships covers carriers and per-sample output). To build "
+                f"an index from other VCFs, place them under VCFs/{dataset}/ yourself, or "
+                f"use --hf-repo to point at a repo that hosts '{remote_prefix}/{dataset}/'."
             )
         dest = os.path.join(local_dir, dataset)
 
