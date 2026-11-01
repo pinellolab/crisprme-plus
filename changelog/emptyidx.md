@@ -34,33 +34,34 @@
   which rebuilds it from that genome (after `complete-test --chrom`, run `complete-test` without
   `--chrom` or a `complete-search`, as a run of one chromosome does not rebuild the index for later
   runs); with neither those VCFs nor that genome, the download command for a downloaded index,
-  which removes only the index it puts back, and for one you built, putting its VCFs back; with
-  those VCFs but no such PAM file or fake-indel genome, the PAM line to write into a PAM file for
-  build-index-only. Measured through the real CLI: the TTTV, TTTN and NGCG searches now exit 0,
-  both on an index built with the fix and on one built before it, and every result file is the same
-  as that of the same code run on CRISPRitz 2.9.0's search engine, which has no such refusal (but
-  for timestamps, and the engine version `run_manifest.json` records), with bulges, and for TTTV
-  without bulges; for TTTV the result tables are also the same as 2.8.0's. A search with no
-  off-target at all (NGCG without bulges there) ends as on that engine, with `No off-targets
-  found`, but its folder lacks the all-zero CRISPRitz profile tables of the skipped chromosome
-  (`crispritz_prof/fake<chrom>_*`). NRG, NGG and NNGRRT searches, NNN searches and `--prune-pam`
-  searches over 3- and 8-nt-flank PAM-less indexes give byte-identical results to before, and the
-  indexes build-index-only writes are the same file for file, apart from the new record where a
-  sub-index holds no target. `complete-test` on an intact NRG index, with and without `--chrom`,
-  gives the same files as before, but for what differs between any two of its runs: under
-  `--chrom`, the name of its per-run folder in `.command_line.txt`, and at `--thread 2`, the row
-  order of CRISPRitz's raw target files. Each route the ERROR gives but the download, which was not
-  run, was followed as given, and led to the same result files as an intact index: for an NRG
-  index, and for NRG served by the 3- and 8-nt-flank PAM-less indexes, with a sub-index missing or
-  holding no `.bin`, with and without the fake-indel genome, and with and without the VCF folder;
-  and from `complete-test --chrom` for an NRG index, once its results folder is removed, as it
-  asks, but for those two differences. A run that succeeds does not reach the new stop. **No
-  published index is affected:** in the copies of the published indexes on the build machine, every
-  indel sub-index holds a `.bin`, except in the superseded `NRR_3_hg38+hg38_mega` archive (see its
-  entry above), whose own indel logs are empty, so a search skips those chromosomes as before.
-  **What to do:** nothing for an index built with 2.8.1, or for one built before whose fake-indel
-  genome is still in place; otherwise follow the ERROR. Covered by
-  `PostProcess/test_indel_empty_chromosome.py`.
+  which removes only the INDELS index, so that a download that fails leaves the rest in place, and
+  for one you built, putting its VCFs back; with those VCFs but no such PAM file or fake-indel
+  genome, the PAM line to write into a PAM file for build-index-only. Measured through the real
+  CLI: the TTTV, TTTN and NGCG searches now exit 0, both on an index built with the fix and on one
+  built before it, and every result file is the same as that of the same code run on CRISPRitz
+  2.9.0's search engine, which has no such refusal (but for timestamps, and the engine version
+  `run_manifest.json` records), with bulges, and for TTTV without bulges; for TTTV the result
+  tables are also the same as 2.8.0's. A search with no off-target at all (NGCG without bulges
+  there) ends as on that engine, with `No off-targets found`, but its folder lacks the all-zero
+  CRISPRitz profile tables of the skipped chromosome (`crispritz_prof/fake<chrom>_*`). NRG, NGG and
+  NNGRRT searches, NNN searches and `--prune-pam` searches over 3- and 8-nt-flank PAM-less indexes
+  give byte-identical results to before, and the indexes build-index-only writes are the same file
+  for file, apart from the new record where a sub-index holds no target. `complete-test` on an
+  intact NRG index, with and without `--chrom`, gives the same files as before, but for what
+  differs between any two of its runs: under `--chrom`, the name of its per-run folder in
+  `.command_line.txt`, and at `--thread 2`, the row order of CRISPRitz's raw target files. Each
+  route the ERROR gives was followed as given, and led to the same result files as an intact index:
+  for an NRG index, and for NRG served by the 3- and 8-nt-flank PAM-less indexes, with a sub-index
+  missing or holding no `.bin`, with and without the fake-indel genome, and with and without the
+  VCF folder; and from `complete-test --chrom` for an NRG index, once its results folder is
+  removed, as it asks, but for those two differences. The download command was run for an NRG index
+  only, and with its archive served from a local folder, not from the hub. A run that succeeds does
+  not reach the new stop. **No published index is affected:** in the copies of the published
+  indexes on the build machine, every indel sub-index holds a `.bin`, except in the superseded
+  `NRR_3_hg38+hg38_mega` archive (see its entry above), whose own indel logs are empty, so a search
+  skips those chromosomes as before. **What to do:** nothing for an index built with 2.8.1, or for
+  one built before whose fake-indel genome is still in place; otherwise follow the ERROR. Covered
+  by `PostProcess/test_indel_empty_chromosome.py`.
 - **A variant search with bulges no longer loses the indel off-targets of a chromosome whose indel
   sub-index is missing** (in 2.8.0 too). Such a chromosome was searched in its fake-indel genome
   without bulges, a fallback meant for searches without bulges: the run exited 0 with no message,
