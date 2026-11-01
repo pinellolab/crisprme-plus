@@ -1,7 +1,7 @@
 <!-- [2.8.1] entries of the "wset" track (web Settings / data manager), to merge into
-CHANGELOG.md. All go under "### Fixed".
+CHANGELOG.md: the first two under "### Changed", the others under "### Fixed".
 For the docs track: a Settings variant build now passes the dataset's sample list as
---samplesID (first entry below), so the build-index-only / search ERROR for unfinished
+--samplesID (first Fixed entry below), so the build-index-only / search ERROR for unfinished
 tiers no longer says "a build from the web Settings page passes none": it says to run
 build-index-only again to its end "with <dataset> and its --samplesID (or build it again in
 the web Settings page, which passes the dataset's sample list)". The two places in
@@ -11,10 +11,36 @@ web Settings page passes none of" and "a run without it (a build from the web Se
 page) does not write") should say the same: "(for the tiers, with their `--samplesID`, or
 built again in the web Settings page)" and "a run without it (as a build from the web
 Settings page was before this release)".
-The first entry's last sentence gives the tables of a search that reads the tiers. It
-leaves out the REF columns of a SNP row there (no lowercase mismatches, so the REF seed and
-non-seed counts leave the mismatches out: round 4 review F3-tier-REF), which another track
-fixes in this release (PostProcess/new_simple_analysis.py). -->
+The first Changed entry gives the tables of a search that reads the tiers. It leaves out
+the REF columns of a SNP row there (no lowercase mismatches, so the REF seed and non-seed
+counts leave the mismatches out: round 4 review F3-tier-REF), which another track fixes in
+this release (PostProcess/new_simple_analysis.py). -->
+
+### Changed
+- **A search of a VCF dataset built in the web Settings page reads its dict-less tiers, so its
+  tables change.** A variant build in Settings now passes the dataset's sample list as
+  `--samplesID` (see Fixed), so it also writes the dict-less tiers (`Dictionaries/registry_<dataset>/`
+  and `Dictionaries/genotypes_<dataset>/`). Searches of an index built (or built again) in Settings
+  now read them, as searches of a command-line `--samplesID` build and of a downloaded index do,
+  where they read the dataset's dictionaries before, so their tables change: an indel and a SNP that
+  one haplotype carries are reported as one off-target, for the samples that carry both (the
+  dictionary path reported the SNP alone, aligned with a bulge, for every carrier of the SNP),
+  allele frequencies have six decimals, and rows come in another order. On a phased dataset a
+  search now runs per-sample by default, as on the default index. A dataset built in Settings
+  before this release is searched from its dictionaries, as before, until its variant index is
+  built again there.
+- **A genome uploaded in the web Settings page under the name of an installed genome replaces it,
+  and is refused while indexes built on a genome of that name are installed.** The upload went into
+  that genome's folder, beside the files already there (and so into the shared copy, when that
+  folder is a link to one). It is now built in a hidden folder and replaces the installed genome
+  only once whole; a link is replaced and the copy it points to left alone. It is refused, at its
+  first chunk, while indexes or variant genomes built on a genome of that name are installed
+  (`genome_library/<PAM>_<N>_<genome>[+<dataset>]`, `Genomes/<genome>+<dataset>`): every search
+  and build of the new genome would go on using them, with the sequences and positions of the one
+  they were built from. Remove them first (an index under *Remove installed data*, a
+  `Genomes/<genome>+<dataset>` folder from your data folder), or upload the genome under another
+  name; to add the very genome an installed index was built on, use *Download genome*, which this
+  does not refuse.
 
 ### Fixed
 - **A VCF dataset added in the web Settings page can be searched from the browser, per sample too.**
@@ -33,11 +59,14 @@ fixes in this release (PostProcess/new_simple_analysis.py). -->
   The list is written again when a file added to the dataset, or a build of its index, gives another
   one (a file with other samples, a sample list installed or removed since), and it goes when the
   dataset is removed in Settings. A list from anywhere else (one you wrote or edited, or a
-  download's) is never changed. The Settings build passes the list, so it also builds the dict-less
-  tiers: the dataset reads `[genotyped, phased]` and per-sample analysis is available. It passes a
-  list only when it names samples the VCFs genotype: a sites-only dataset (no sample columns, as the
-  `hg38_mega` VCFs) is built without one, as before, so the per-dataset allele-frequency registry
-  put in place for it is left as it is. Checked in the browser on a phased 6-sample dataset uploaded
+  download's) is never changed: the page tells its own by the SHA-256 it keeps of it in the hidden
+  `samplesIDs/.<dataset>.samplesID.sha256`. The Settings build passes the list, as a hidden one-line
+  listing, `samplesIDs/.<dataset>.samplesID.list`, so it also builds the dict-less tiers (which
+  searches of its index then read: see Changed): the dataset reads `[genotyped, phased]` and
+  per-sample analysis is available. It passes a list only when it names samples the VCFs genotype:
+  a sites-only dataset (no sample columns, as the `hg38_mega` VCFs) is built without one, as
+  before, so the per-dataset allele-frequency registry put in place for it is left as it is.
+  Removing the dataset in Settings removes the two hidden files too. Checked in the browser on a phased 6-sample dataset uploaded
   and built only in Settings, once per chromosome and once as a single multi-chromosome file named
   without the genome: the per-sample search runs to its end and names the same carriers, with the
   same allele frequencies, as the same panel built from the command line with `--samplesID`. Submit
@@ -45,12 +74,7 @@ fixes in this release (PostProcess/new_simple_analysis.py). -->
   one, rather than letting it fail at its end (for a sites-only dataset, which has no samples to
   list, it says so, and that a search reports such a VCF's variants only through a per-dataset
   allele-frequency registry, as the shipped `hg38_mega` index has); and a genotyped dataset with no
-  tiers yet reads `[genotyped, samples not indexed]`, not sites-only. Searches of an index built (or
-  built again) in Settings now read its dict-less tiers, as searches of a command-line `--samplesID`
-  build and of a downloaded index do, where they read the dataset's dictionaries before, so their
-  tables change: an indel and a SNP that one haplotype carries are reported as one off-target, for
-  the samples that carry both (the dictionary path reported the SNP alone, aligned with a bulge, for
-  every carrier of the SNP), allele frequencies have six decimals, and rows come in another order.
+  tiers yet reads `[genotyped, samples not indexed]`, not sites-only.
   **If you added a dataset in Settings,** build its variant index again there; to give its
   samples' populations and sex, put your own list at `samplesIDs/<dataset>.samplesID.txt` first.
 - **The Settings VCF upload records the reference genome you pick, and the search form offers the
@@ -77,12 +101,8 @@ fixes in this release (PostProcess/new_simple_analysis.py). -->
   file too.) Hidden files of an archive are left out: the `._chr1.fa` that macOS `tar` adds beside
   `chr1.fa` (its file attributes) was installed too, and every search read it as a chromosome and
   failed, though the build said done. An archive with two FASTA files that would go in under one
-  name (`chr1.fa` and `chr1.fasta`, or two files of one sequence) is refused. It is built in a
-  hidden folder and replaces an installed genome of the same name only once whole (a genome folder
-  that is a link to a shared copy is replaced and the copy left alone, where the upload used to
-  write into it). An upload is refused, at its first chunk, while indexes or variant genomes built
-  on a genome of that name are installed: every search and build of the new genome would go on using
-  them, with the sequences and positions of the one they were built from.
+  name (`chr1.fa` and `chr1.fasta`, or two files of one sequence) is refused. (An upload under the
+  name of an installed genome now replaces it: see Changed.)
   **A genome uploaded before** this fix that holds a multi-sequence FASTA, a `chroms/` folder,
   `.fasta` files, `._` files or a FASTA not named after its one sequence: remove it in Settings with
   the indexes built on it (*Remove installed data*), and any `Genomes/<genome>+<dataset>` variant
