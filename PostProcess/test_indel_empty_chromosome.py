@@ -42,8 +42,8 @@ rebuild it (no traceback, no merged file, and no command with a blank to fill in
 bulge search of a chromosome with indels but no sub-index fails the same way while a
 search without bulges still searches its fake-indel genome, a PAM-less stand-in's
 INDELS index is built with its own PAM, a search from complete-test --chrom's view (the
-real one) names and reads the working directory's paths, and the normal path is
-unchanged.
+real one) names and reads the working directory's paths, a refusal ends the run at its
+own stage, and the normal path is unchanged.
 
 Hermetic: a stub crispritz.py on PATH stands in for the engine and, like
 CRISPRitz 2.9.1, refuses an index directory with no .bin; its index-genome writes
@@ -61,6 +61,7 @@ import tempfile
 import unittest
 
 import complete_test as ct
+from test_index_resolution import _ShippedScript
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEARCH = os.path.join(HERE, "pool_search_indels.py")
@@ -897,6 +898,66 @@ class IndexThenSearch(_Fixture):
         with open(os.path.join(out, "indels_ref+ds_pam.txt_guide.txt_4_1_1.targets.txt")) as fh:
             self.assertEqual(fh.read().split("\n"),
                              [HEADER, ROW_A, ROW.format("chrB", 10, 10), ""])
+
+
+class TheSearchScriptAtARefusal(_ShippedScript):
+    """The shipped script with a stub engine, up to the real pool_search_indels.py and past
+    it. A refusal ends the run at its own stage, with its ERROR alone: it went on to read
+    the merged file that was not written ("awk: cannot open"), to take the empty file awk's
+    redirect left for the indel targets, and through the SNP post-analysis, the failure
+    then read "Post-analysis SNPs"."""
+
+    ENGINE = r"""#!/bin/bash
+printf '%s\n' "$*" >> "$STUB_LOG"
+if [ "$1" = search ]; then
+	printf '%s\n' HEADER > "$5.targets.txt"
+fi
+exit 0
+""".replace("HEADER", repr(HEADER))
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "bin" / "crispritz.py").write_text(self.ENGINE)
+        (self.home / "Dictionaries" / f"log_indels_{self.VCF}" / "logchr1.txt").write_text(
+            f"{LOG_HEADER}\nchr1\t\trs1\t0.1\tA>AT\t5\tACGT\n")
+        self.install("NRG_3")
+        self.sub = self.library / f"NRG_3_hg38+{self.VCF}_INDELS" / "NRG_3_fakechr1"
+
+    def run_it(self):
+        launched = self.launch()
+        run = self.finish(launched)
+        with open(launched.work / "out" / "log.txt") as fh:
+            stages = [ln.split("\t")[:2] for ln in fh]
+        out = launched.work / "out"
+        targets = sorted(p.name for p in out.rglob("indels_*.targets.txt*"))
+        return launched.proc.returncode, run, stages, targets
+
+    def test_it_ends_the_run_at_its_own_stage(self):
+        for why, state in (("is not there, though chr1 has indels", None),
+                           ("holds no .bin and no record that its build found no target there",
+                            self.sub)):
+            with self.subTest(why=why):
+                if state:
+                    state.mkdir()
+                code, run, stages, targets = self.run_it()
+                self.assertEqual(code, 1)
+                self.assertRegex(run.stderr, r"\AERROR: the indel index of chr1 \(\S+\) " + why)
+                self.assertEqual(len(run.stderr.splitlines()), 1, run.stderr)
+                self.assertIn(["Off-targets search", "Start"], stages)
+                self.assertNotIn(["Off-targets search", "End"], stages)
+                self.assertNotIn("Post-analysis SNPs", [s[0] for s in stages])
+                self.assertEqual(targets, [])
+                self.assertNotIn("Search INDELs completed", run.stdout)
+
+    def test_a_search_of_the_index_goes_on_past_its_stage(self):
+        self.sub.mkdir()
+        (self.sub / "NRG_fakechr1_1.bin").write_bytes(b"")
+        _, run, stages, targets = self.run_it()
+        self.assertIn("Search INDELs completed", run.stdout)
+        self.assertIn(["Off-targets search", "End"], stages)
+        self.assertIn(["Post-analysis SNPs", "Start"], stages)
+        self.assertEqual(len(targets), 1)
+        self.assertNotIn("ERROR: the indel index", run.stderr)
 
 
 class TheRecordsName(unittest.TestCase):
