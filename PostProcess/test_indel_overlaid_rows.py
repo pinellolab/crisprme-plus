@@ -56,6 +56,16 @@ COMP = str.maketrans("ACGTRYSWKMacgtryswkm", "TGCAYRSWMKtgcayrswmk")
 SAMPLES = ["S%02d" % i for i in range(1, 13)]
 SAMPLE_META = {s: ("synth", "POP", "female") for s in SAMPLES}
 
+
+def _gnu_wc():
+    try:
+        return subprocess.run(["wc", "--version"], capture_output=True).returncode == 0
+    except OSError:
+        return False
+
+
+_SKIP_WC = "analisi_indels_NNN.py reads the line count from GNU `wc -l`, as the pipeline image has"
+
 _STUB_INTERVALTREE = '''
 class Interval(tuple):
     """Hashed and compared by (begin, end), as intervaltree's Interval is."""
@@ -387,6 +397,7 @@ class _Base(unittest.TestCase):
                 self.assertTrue(found, "%s does not carry %s (%s)" % (s, r["dna"], r["var"]))
 
 
+@unittest.skipUnless(_gnu_wc(), _SKIP_WC)
 class FullTiers(_Base):
     """A genotyped, phased panel: registry + Tier-1 + phased indel store."""
 
@@ -453,6 +464,7 @@ class FullTiers(_Base):
         self.assertTrue(all(r["total"] == 0 for r in rows), rows)
 
 
+@unittest.skipUnless(_gnu_wc(), _SKIP_WC)
 class OtherInstalls(_Base):
     def test_classic_dictionary_install(self):
         """No Tier-1 store and no registry: the per-sample SNP dictionary gives the
