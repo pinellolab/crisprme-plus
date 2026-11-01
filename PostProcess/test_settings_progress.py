@@ -658,11 +658,13 @@ class TestGenomeTarUpload(unittest.TestCase):
         with open(os.path.join(outside, "secret.txt"), "w") as fh:
             fh.write("ORIGINAL\n")
         ns = _load_functions(
-            ["_validate_name", "_unsafe_tar_member", "_finalize_upload"],
+            ["_validate_name", "_unsafe_tar_member", "_install_uploaded_genome",
+             "_finalize_upload"],
             current_working_directory=cwd,
             gzip=gzip,
             tarfile=tarfile,
             shutil=shutil,
+            tempfile=tempfile,
         )
         return root, cwd, outside, ns
 
@@ -698,22 +700,27 @@ class TestGenomeTarUpload(unittest.TestCase):
             ns["_finalize_upload"]("genome", part, "evil.tar.gz", "", "")
         self.assertEqual(_tree(root), before)
 
-    def test_normal_genome_archive_extracts_as_before(self):
+    def test_normal_genome_archive_extracts_flat(self):
+        # every FASTA lands at the top of Genomes/<assembly>/, as index-genome and the
+        # search take only those (a UCSC chromFa.tar.gz holds them in chroms/): the
+        # files tarfile's own extractall writes, byte for byte, mode and mtime too
         for label, members in self.GOOD:
             with self.subTest(label):
                 root, cwd, _outside, ns = self.sandbox()
                 part = self.upload(cwd, "myasm.chromFa.tar.gz", members)
-                # the reference: tarfile's own unvetted extractall (the old code)
                 ref = os.path.join(root, "reference")
                 os.makedirs(ref)
                 with gzip.open(part, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
                     tar.extractall(ref)
+                want = {os.path.basename(path): what
+                        for path, what in _tree(ref, meta=True).items() if what[0] == "file"}
                 got = ns["_finalize_upload"]("genome", part, "myasm.chromFa.tar.gz", "", "")
                 self.assertEqual(got, "myasm")
                 self.assertFalse(os.path.exists(part))
                 dest = os.path.join(cwd, "Genomes", "myasm")
-                self.assertTrue(_tree(ref))
-                self.assertEqual(_tree(dest, meta=True), _tree(ref, meta=True))
+                self.assertEqual(sorted(want), ["chr1.fa", "chr2.fa"])
+                self.assertEqual(_tree(dest, meta=True), want)
+                self.assertEqual(os.listdir(os.path.join(cwd, "Genomes")), ["myasm"])
 
     def test_symlinked_genomes_root_still_accepted(self):
         # Genomes/ on another volume through a symlink is a legitimate layout:
@@ -724,8 +731,91 @@ class TestGenomeTarUpload(unittest.TestCase):
         os.symlink(volume, os.path.join(cwd, "Genomes"))
         part = self.upload(cwd, "myasm.tar.gz", self.GOOD[0][1])
         self.assertEqual(ns["_finalize_upload"]("genome", part, "myasm.tar.gz", "", ""), "myasm")
-        with open(os.path.join(volume, "myasm", "chroms", "chr1.fa"), "rb") as fh:
+        with open(os.path.join(volume, "myasm", "chr1.fa"), "rb") as fh:
             self.assertEqual(fh.read(), _FA1)
+
+    # --- the layout every search needs: one FASTA a sequence, at the top -------------
+    # (a Direct URL download gives it: utils.download_reference_genome)
+    def plain_upload(self, cwd, name, data):
+        part = os.path.join(cwd, "Settings", "uploads", name + ".part")
+        with open(part, "wb") as fh:
+            fh.write(data)
+        return part
+
+    def assert_one_file_a_sequence(self, cwd, assembly, want):
+        dest = os.path.join(cwd, "Genomes", assembly)
+        got = {}
+        for f in sorted(os.listdir(dest)):
+            with open(os.path.join(dest, f), "rb") as fh:
+                got[f] = fh.read()
+        self.assertEqual(got, want)
+        # nothing else in Genomes/: no staging folder left, no other genome
+        self.assertEqual(os.listdir(os.path.join(cwd, "Genomes")), [assembly])
+
+    def test_multi_record_fasta_upload_is_split(self):
+        both = _FA1 + _FA2
+        for name, data in (("walkdel.fa", both), ("walkdel.fasta", both),
+                           ("walkdel.fa.gz", gzip.compress(both))):
+            with self.subTest(name):
+                root, cwd, _outside, ns = self.sandbox()
+                part = self.plain_upload(cwd, name, data)
+                self.assertEqual(ns["_finalize_upload"]("genome", part, name, "", ""), "walkdel")
+                self.assertFalse(os.path.exists(part))
+                self.assert_one_file_a_sequence(cwd, "walkdel", {"chr1.fa": _FA1, "chr2.fa": _FA2})
+
+    def test_single_record_fasta_upload_is_kept_as_is(self):
+        root, cwd, _outside, ns = self.sandbox()
+        part = self.plain_upload(cwd, "chrM.fa", b">chrM\nACGT\n")
+        self.assertEqual(ns["_finalize_upload"]("genome", part, "chrM.fa", "", ""), "chrM")
+        self.assert_one_file_a_sequence(cwd, "chrM", {"chrM.fa": b">chrM\nACGT\n"})
+
+    def test_archive_member_with_several_sequences_is_split(self):
+        root, cwd, _outside, ns = self.sandbox()
+        part = self.upload(cwd, "asm.tar.gz", [("asm/asm.fa", "file", _FA1 + _FA2),
+                                               ("asm/README", "file", b"not a genome\n")])
+        self.assertEqual(ns["_finalize_upload"]("genome", part, "asm.tar.gz", "", ""), "asm")
+        self.assert_one_file_a_sequence(cwd, "asm", {"chr1.fa": _FA1, "chr2.fa": _FA2})
+
+    def test_unusable_upload_refused_installing_nothing(self):
+        cases = [
+            ("no FASTA in the archive", "asm.tar.gz", [("asm/README", "file", b"x\n")]),
+            ("two FASTA files of one name", "asm.tar.gz",
+             [("a/chr1.fa", "file", _FA1), ("b/chr1.fa", "file", _FA1)]),
+            ("two sequences of one id", "asm.tar.gz", [("asm.fa", "file", _FA1 + _FA1)]),
+        ]
+        for label, name, entries in cases:
+            with self.subTest(label):
+                root, cwd, _outside, ns = self.sandbox()
+                part = self.upload(cwd, name, entries)
+                with self.assertRaises(ValueError):
+                    ns["_finalize_upload"]("genome", part, name, "", "")
+                self.assertEqual(os.listdir(os.path.join(cwd, "Genomes")), [])
+
+    def test_upload_replaces_a_genome_of_the_same_name_whole(self):
+        root, cwd, _outside, ns = self.sandbox()
+        old = os.path.join(cwd, "Genomes", "asm")
+        os.makedirs(old)
+        with open(os.path.join(old, "chrOld.fa"), "wb") as fh:
+            fh.write(b">chrOld\nAAAA\n")
+        part = self.plain_upload(cwd, "asm.fa", _FA1 + _FA2)
+        ns["_finalize_upload"]("genome", part, "asm.fa", "", "")
+        self.assert_one_file_a_sequence(cwd, "asm", {"chr1.fa": _FA1, "chr2.fa": _FA2})
+
+    def test_genome_linked_to_a_shared_copy_is_not_written_through(self):
+        root, cwd, _outside, ns = self.sandbox()
+        shared = os.path.join(root, "shared")
+        os.makedirs(shared)
+        with open(os.path.join(shared, "chrS.fa"), "wb") as fh:
+            fh.write(b">chrS\nCCCC\n")
+        os.makedirs(os.path.join(cwd, "Genomes"))
+        os.symlink(shared, os.path.join(cwd, "Genomes", "asm"))
+        part = self.plain_upload(cwd, "asm.fa", _FA1 + _FA2)
+        ns["_finalize_upload"]("genome", part, "asm.fa", "", "")
+        self.assertFalse(os.path.islink(os.path.join(cwd, "Genomes", "asm")))
+        self.assert_one_file_a_sequence(cwd, "asm", {"chr1.fa": _FA1, "chr2.fa": _FA2})
+        self.assertEqual(os.listdir(shared), ["chrS.fa"])
+
+
 # --- the false 'Samples degraded' alert after a build (final review FR#8) ------------
 class TestDegradedAlertOnlyForIndexDownloads(unittest.TestCase):
     """The detector matches crisprme_hf's own notes only, and refresh_settings_job runs

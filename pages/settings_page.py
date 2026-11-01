@@ -59,6 +59,7 @@ from flask import request
 from typing import List, Optional
 import subprocess
 import tarfile
+import tempfile
 import string
 import random
 import re
@@ -122,6 +123,75 @@ def _unsafe_tar_member(tar: tarfile.TarFile, dest_dir: str) -> Optional[str]:
     return None
 
 
+def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir: str) -> None:
+    """Puts the genome of a finished upload into ``dest_dir`` (Genomes/<assembly>/) as
+    a Direct URL download does (utils.download_reference_genome): every FASTA of the
+    archive moved to the top of the folder (a UCSC chromFa.tar.gz holds them in
+    chroms/), and each file holding several sequences split into one file a sequence
+    (genome_layout.py: CRISPRme takes each FASTA file for one chromosome, and indexes
+    only those at the top of the folder). It is built in a hidden folder of Genomes/,
+    which no genome listing shows, and replaces a genome of the same name only once
+    whole. A .tar.gz has had its members vetted (_unsafe_tar_member)."""
+    from genome_layout import split_multi_record_fastas
+
+    genomes = os.path.dirname(dest_dir)
+    os.makedirs(genomes, exist_ok=True)
+    stage = tempfile.mkdtemp(prefix=f".upload_{assembly}_", dir=genomes)
+    try:
+        unpacked = os.path.join(stage, "unpacked")
+        os.makedirs(unpacked)
+        if name.endswith((".tar.gz", ".tgz")):
+            with gzip.open(part_path, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
+                tar.extractall(unpacked)
+        elif name.endswith(".gz"):
+            with gzip.open(part_path, "rb") as fin, open(
+                os.path.join(unpacked, f"{assembly}.fa"), "wb"
+            ) as fout:
+                shutil.copyfileobj(fin, fout)
+        else:
+            os.replace(part_path, os.path.join(unpacked, f"{assembly}.fa"))
+        fastas = sorted(
+            os.path.join(root, f)
+            for root, _dirs, files in os.walk(unpacked)
+            for f in files
+            if f.endswith((".fa", ".fasta"))
+        )
+        if not fastas:
+            raise ValueError(f"no .fa or .fasta file in {name}")
+        seen = {}
+        for fa in fastas:
+            other = seen.setdefault(os.path.basename(fa), fa)
+            if other != fa:
+                raise ValueError(
+                    f"{name} holds two FASTA files named {os.path.basename(fa)} "
+                    f"({os.path.relpath(other, unpacked)}, {os.path.relpath(fa, unpacked)})"
+                )
+        built = os.path.join(stage, assembly)
+        os.makedirs(built)
+        for fa in fastas:
+            os.rename(fa, os.path.join(built, os.path.basename(fa)))
+        split_multi_record_fastas(built)
+        # the genome it replaces is moved aside, never written through (a link to a
+        # shared copy is only unlinked), and back if this one cannot go in
+        old, link = os.path.join(stage, "replaced"), None
+        if os.path.islink(dest_dir):
+            link = os.readlink(dest_dir)
+            os.unlink(dest_dir)
+        elif os.path.isdir(dest_dir):
+            os.rename(dest_dir, old)
+        try:
+            os.rename(built, dest_dir)
+        except OSError:
+            if not os.path.lexists(dest_dir):
+                if link is not None:
+                    os.symlink(link, dest_dir)
+                elif os.path.isdir(old):
+                    os.rename(old, dest_dir)
+            raise
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
 def _finalize_upload(
     target: str, part_path: str, name: str, dataset: str, genome: str = ""
 ) -> str:
@@ -154,19 +224,9 @@ def _finalize_upload(
                 err = _unsafe_tar_member(tar, dest_dir)
                 if err:
                     raise ValueError(err)
-                os.makedirs(dest_dir, exist_ok=True)
-                tar.extractall(dest_dir)
+        _install_uploaded_genome(part_path, name, assembly, dest_dir)
+        if os.path.exists(part_path):
             os.remove(part_path)
-        elif name.endswith(".gz"):
-            os.makedirs(dest_dir, exist_ok=True)
-            with gzip.open(part_path, "rb") as fin, open(
-                os.path.join(dest_dir, f"{assembly}.fa"), "wb"
-            ) as fout:
-                shutil.copyfileobj(fin, fout)
-            os.remove(part_path)
-        else:
-            os.makedirs(dest_dir, exist_ok=True)
-            os.replace(part_path, os.path.join(dest_dir, f"{assembly}.fa"))
         return assembly
     if target == "vcf":
         err = _validate_name(dataset)
