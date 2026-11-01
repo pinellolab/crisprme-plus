@@ -2497,9 +2497,18 @@ def limit_bulges_to_index(
     dna_v = want_dna if (isinstance(want_dna, int) and want_dna <= maxb) else maxb
     rna_v = want_rna if (isinstance(want_rna, int) and want_rna <= maxb) else maxb
     if (dna_v, rna_v) != (want_dna, want_rna):
-        # lowered (still, or now): remember the values to give back, and the Max edits,
-        # which sync_max_edits_bound pulls down to mismatches + bulges in turn (unless
-        # the user has moved it since the last time: then theirs stands)
+        if held.get("set") == [dna_v, rna_v]:
+            # Lowered to these values already, and remembered: the memory stands as it
+            # is. The browser runs this callback twice for one change (for the variant
+            # dataset, then for the PAM that update_pam_options writes back), and
+            # recomputing the memory in the second run, which can see Max edits not yet
+            # lowered, took that for a value the user had set and forgot the Max edits
+            # to give back.
+            return opts, opts, dna_v, rna_v, no_update, held
+        # lowered now: remember the values to give back, and the Max edits (unless the
+        # user has moved it since the cap last set it: then theirs stands). Max edits
+        # comes down to mismatches + bulges here, with the bulges and the memory, as
+        # sync_max_edits_bound then does too: a later run sees all three as they are.
         if held:
             edits = held.get("edits") if cur_edits == held.get("edits_set") else None
         else:
@@ -2513,7 +2522,8 @@ def limit_bulges_to_index(
             "dna": want_dna, "rna": want_rna, "set": [dna_v, rna_v],
             "edits": edits, "edits_set": edits_set,
         }
-        return opts, opts, dna_v, rna_v, no_update, memory
+        edits_v = no_update if edits_set is None else edits_set
+        return opts, opts, dna_v, rna_v, edits_v, memory
     edits_v = no_update
     if held and held.get("edits") is not None and cur_edits == held.get("edits_set"):
         edits_v = held["edits"]  # given back with the bulges, if left where it was put
