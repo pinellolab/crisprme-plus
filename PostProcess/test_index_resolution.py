@@ -47,11 +47,13 @@ _PAMS = _SCRIPT.parent.parent / "PAMs"
 
 
 def _extract_resolver():
-    """Pull `_resolve_index_dir` verbatim out of the shipped script."""
+    """Pull `_resolve_index_dir` verbatim out of the shipped script, with the
+    `_index_side` it calls, which the script defines just before it."""
     text = _SCRIPT.read_text()
-    start = text.index("\t_resolve_index_dir() {")
+    start = text.index("\t_index_side() {")
+    resolver = text.index("\t_resolve_index_dir() {", start)
     # the body is tab-indented one level; its closing brace is the first "\t}"
-    end = text.index("\n\t}\n", start) + len("\n\t}\n")
+    end = text.index("\n\t}\n", resolver) + len("\n\t}\n")
     body = text[start:end]
     # strip the one leading tab so it is a top-level function in the harness
     return "\n".join(line[1:] if line.startswith("\t") else line
@@ -61,18 +63,18 @@ def _extract_resolver():
 RESOLVER = _extract_resolver()
 
 
-def resolve(libdir, pam_want, suffix, bmax, locale="C", prune=0, pos=1):
+def resolve(libdir, pam_want, suffix, bmax, locale="C", prune=0, pos=1, any_side=""):
     """Run the shipped resolver; return the chosen basename, or "" for none.
 
     prune/pos mirror the script's own `prune_pam` and `pos` (the PAM-file offset:
     > 0 is a 3' PAM). The resolver reads them to decide whether a flank WIDER than
-    the PAM may be used.
+    the PAM may be used. any_side is its optional fifth argument.
     """
     script = (f"prune_pam={prune}\npos={pos}\n{RESOLVER}\n"
-              f"_resolve_index_dir \"$1\" \"$2\" \"$3\" \"$4\"\n")
+              f"_resolve_index_dir \"$1\" \"$2\" \"$3\" \"$4\" \"$5\"\n")
     env = dict(os.environ, LC_ALL=locale, LANG=locale)
     out = subprocess.run(
-        ["bash", "-c", script, "bash", str(libdir), pam_want, suffix, str(bmax)],
+        ["bash", "-c", script, "bash", str(libdir), pam_want, suffix, str(bmax), any_side],
         capture_output=True, text=True, env=env,
     )
     if out.returncode not in (0, 1):
@@ -290,9 +292,21 @@ class APamLessIndexServesOnlyTheSideItWasBuiltFor(_Tree):
         self.assertEqual(resolve(lib, "NNN", "hg38", 3, pos=3), "NNN_3_hg38")
         self.assertEqual(resolve(lib, "NNN", "hg38", 3, pos=-3), "")
 
+    def test_any_side_takes_one_built_for_the_other_side(self):
+        # only to name it in an error: the search never uses what it returns
+        lib = self.lib("NNNN_3_hg38", "TTTV_2_hg38")
+        built_for(lib / "NNNN_3_hg38", 4)
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 3, pos=-4), "")
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 3, pos=-4, any_side="any"),
+                         "NNNN_3_hg38")
+        # and nothing else is relaxed: the budget, the width and a dedicated PAM hold
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 4, pos=-4, any_side="any"), "")
+        self.assertEqual(resolve(lib, "NGG", "hg38", 3, any_side="any"), "")
+        self.assertEqual(resolve(lib, "NNNGRRT", "hg38", 3, prune=1, any_side="any"), "")
+
     def test_a_dedicated_index_needs_no_record(self):
-        # a search builds a missing index itself and writes no .pam_build: the name
-        # of a dedicated index says what it serves
+        # a search writes no .pam_build when it builds a dedicated index: the name of
+        # a dedicated index says what it serves
         lib = self.lib("TTTV_3_hg38", "NRG_3_hg38")
         self.assertEqual(resolve(lib, "TTTV", "hg38", 3, pos=-4), "TTTV_3_hg38")
         self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
@@ -627,6 +641,15 @@ if [ "$1" = index-genome ] && [ "$STUB_BUILD_FAILS" = 1 ]; then
 	echo "ERROR: buildTST (index build) failed (exit code 1)." >&2
 	exit 1
 fi
+# STUB_BUILD_WRITES=1: index-genome <name> <genome> <PAM file> -bMax <N> leaves what
+# crispritz's does in the current directory, genome_library/<PAM>_<N>_<name>, made
+# anew, with a .bin in it.
+if [ "$1" = index-genome ] && [ "$STUB_BUILD_WRITES" = 1 ]; then
+	_seq=$(cut -f1 -d' ' "$4") _pos=$(cut -f2 -d' ' "$4")
+	if [ "$_pos" -gt 0 ]; then _pam=${_seq:${#_seq}-$_pos}; else _pam=${_seq:0:-$_pos}; fi
+	_out="genome_library/${_pam}_${6}_$2"
+	rm -rf "$_out" && mkdir -p "$_out" && : >"$_out/chr1.bin"
+fi
 if [ "$1" = search ] && [ -n "$STUB_SEARCH_UNTIL" ]; then
 	while ! [ -e "$STUB_SEARCH_UNTIL" ]; do sleep 0.05; done
 fi
@@ -779,12 +802,13 @@ class _ShippedScript(unittest.TestCase):
 
     def run_pipeline(self, pam="20bp-NRG-SpCas9", bulges=1, prune=0, variant=True,
                      index_path=None, threads=1, env=None, timeout=300, samples=None,
-                     postprocess=None):
+                     postprocess=None, pam_text=None):
         """Run the script the way complete-search launches it, stopping at its last
         search."""
         return self.finish(self.launch(pam, bulges, prune, variant, index_path,
                                        threads, env, samples=samples,
-                                       postprocess=postprocess), timeout)
+                                       postprocess=postprocess,
+                                       pam_text=pam_text), timeout)
 
     def finish(self, run, timeout=300):
         """Wait for a launched run; a run still going after `timeout` is a failure."""
@@ -798,7 +822,7 @@ class _ShippedScript(unittest.TestCase):
 
     def launch(self, pam="20bp-NRG-SpCas9", bulges=1, prune=0, variant=True,
                index_path=None, threads=1, env=None, wrap=(), samples=None,
-               postprocess=None):
+               postprocess=None, pam_text=None):
         """Start the script the way complete-search launches it (argument order of
         crisprme.py's crisprme_run), in a session of its own, so that a test can
         signal the whole run as Ctrl-C or a container stop does. `env` adds to its
@@ -806,14 +830,19 @@ class _ShippedScript(unittest.TestCase):
         command that runs the script's bash as its child. `samples` is the samplefile
         to hand it in place of the run's own. `postprocess` is the PostProcess folder
         to run it from, which complete-search also passes as its folder (the helpers
-        the script runs, and the samples placeholder); the shipped one by default."""
+        the script runs, and the samples placeholder); the shipped one by default.
+        `pam_text`: the PAM file <pam>.txt holds it, for a PAM file none of the shipped
+        ones is."""
         postprocess = Path(postprocess or _SCRIPT.parent)
         self.runs += 1
         work = self.root / f"run{self.runs}"
         out = work / "out"
         out.mkdir(parents=True)
         pam_file = work / f"{pam}.txt"
-        shutil.copy(_PAMS / f"{pam}.txt", pam_file)
+        if pam_text is None:
+            shutil.copy(_PAMS / f"{pam}.txt", pam_file)
+        else:
+            pam_file.write_text(pam_text)
         guides = work / "guides.txt"
         guides.write_text("N" * len(pam_file.read_text().split()[0]) + "\n")
         empty = work / "empty.txt"
@@ -1011,6 +1040,168 @@ class EveryScanInTheShippedScript(_ShippedScript):
         for prune in (0, 1):
             self.assertServedBy(self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=prune),
                                 "TTTV_3", prune)
+
+
+# All-N PAM files of a 20-nt guide, as a user writes one: none ships for a 5' PAM.
+_PAM_5P_4 = ("27bp-NNNN-5p", "N" * 27 + " -4\n")
+_PAM_5P_3 = ("23bp-NNN-5p", "N" * 23 + " -3\n")
+
+
+class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
+    """The side of the guide an all-N index was built for is known only from its
+    .pam_build (_index_side). A search that built one wrote none, so a 5' PAM-less
+    index a search had built was taken for a 3' build and refused by every later 5'
+    search under --index-path, which --prune-pam needs: TTTV with --prune-pam on the
+    NNNN_2 a 27bp-NNNN-5p search had built stopped with "no matching reference index",
+    where the resolver before the side check took it and found the dedicated index's
+    3 rows. And an all-N search PAM builds its index under the name of an all-N index,
+    so one in place under that name, built for the other side, was searched as if just
+    built: no target, exit 0. A search now records the side of an all-N index it
+    builds, refuses one in the way, and says why an all-N index under --index-path was
+    not used."""
+
+    def pam_build(self, name):
+        return (self.library / name / ".pam_build").read_text()
+
+    def test_a_search_records_the_side_of_an_all_n_index_it_builds(self):
+        pam, text = _PAM_5P_4
+        run = self.run_pipeline(pam=pam, pam_text=text, variant=False,
+                                env={"STUB_BUILD_WRITES": "1"})
+        self.assertEqual([c[1] for c in run.builds], ["hg38"])
+        self.assertEqual(run.searched(variant=False), ("NNNN_2_hg38", False))
+        self.assertEqual(self.pam_build("NNNN_2_hg38"), "27bp-NNNN-5p 27 -4\n")
+        # and a 5' search under --index-path takes it, as it took one before
+        for prune in (0, 1):
+            run = self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=prune, variant=False,
+                                    index_path=self.library)
+            self.assertEqual(run.builds, [])
+            self.assertEqual(run.searched(variant=False), ("NNNN_2_hg38", bool(prune)))
+            self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed")
+
+    def test_a_3_prime_all_n_build_records_its_side_and_a_dedicated_one_none(self):
+        run = self.run_pipeline(pam="20bp-NRG-SpCas9", variant=False,
+                                env={"STUB_BUILD_WRITES": "1"})
+        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertEqual(sorted(p.name for p in (self.library / "NRG_2_hg38").iterdir()),
+                         ["chr1.bin"])
+        run = self.run_pipeline(pam="20bp-NNN-NO-PAM", variant=False,
+                                env={"STUB_BUILD_WRITES": "1"})
+        self.assertEqual([c[1] for c in run.builds], ["hg38"])
+        self.assertEqual(run.searched(variant=False), ("NNN_2_hg38", False))
+        self.assertEqual(self.pam_build("NNN_2_hg38"), "20bp-NNN-NO-PAM 23 3\n")
+
+    def test_a_variant_build_records_its_side_too(self):
+        pam, text = _PAM_5P_4
+        run = self.run_pipeline(pam=pam, pam_text=text,
+                                env={"STUB_BUILD_WRITES": "1", "STUB_ENRICH": "1"})
+        self.assertTrue(run.enriched)
+        self.assertEqual([c[1] for c in run.builds][:2], ["hg38", f"hg38+{self.VCF}"])
+        self.assertEqual(run.searched(variant=True), (f"NNNN_2_hg38+{self.VCF}", False))
+        self.assertEqual(self.pam_build(f"NNNN_2_hg38+{self.VCF}"), "27bp-NNNN-5p 27 -4\n")
+
+    def assertRefused(self, run, index, have, why, pam_file, want, also="", hint=""):
+        """The run stopped before it built or searched anything, at `index`, built
+        for side `have`, in the way of this search's own all-N index."""
+        lib = os.path.realpath(self.library)
+        self.assertEqual(run.builds, [])
+        self.assertIsNone(run.searched(variant=False))
+        self.assertIsNone(run.searched(variant=True))
+        self.assertEqual(run.stderr,
+                         f"ERROR: {lib}/{index} is in the way: this search builds its index "
+                         "under that name\n"
+                         f"       {index} is a PAM-less index for a PAM on the {have}' side of "
+                         f"the guide ({why}), and {pam_file} puts the PAM on the {want}' side, "
+                         "so a search of it would find nothing\n" + hint +
+                         f"       move it{also} out of {lib}, or run this search from another "
+                         "working directory\n")
+
+    def test_an_all_n_search_does_not_search_one_built_for_the_other_side(self):
+        # It used to: the build path found the name in place and searched it.
+        self.install("NNN_2", variant=False)
+        built_for(self.library / "NNN_2_hg38", -3)
+        self.assertRefused(self.run_pipeline(pam="20bp-NNN-NO-PAM", variant=False),
+                           "NNN_2_hg38", 5, "as its .pam_build records",
+                           "20bp-NNN-NO-PAM.txt", 3)
+        self.assertEqual(self.pam_build("NNN_2_hg38"), "23bp-NNN-NO-PAM 23 -3\n")  # untouched
+
+    def test_nor_a_5_prime_one_a_3_prime_build_without_a_record(self):
+        self.install("NNN_2", variant=False)
+        pam, text = _PAM_5P_3
+        self.assertRefused(
+            self.run_pipeline(pam=pam, pam_text=text, variant=False), "NNN_2_hg38", 3,
+            "it records no side in a .pam_build, and an index that does not is taken for "
+            "a 3' build", "23bp-NNN-5p.txt", 5,
+            hint="       if it was built from a 5' PAM file, record that by running "
+                 "'crisprme.py build-index-only' with that file, the same --genome (and "
+                 "--vcf) and --bDNA 1\n")
+        # once its side is recorded, it is searched
+        built_for(self.library / "NNN_2_hg38", -3)
+        run = self.run_pipeline(pam=pam, pam_text=text, variant=False)
+        self.assertEqual(run.reference, "NNN_2_hg38")
+        self.assertEqual(run.searched(variant=False), ("NNN_2_hg38", False))
+
+    def test_the_variant_build_path_refuses_one_too(self):
+        # the reference index serves; the variant one in place was built for the 5' side
+        self.install("NNN_2")
+        built_for(self.library / "NNN_2_hg38", 3)
+        built_for(self.library / f"NNN_2_hg38+{self.VCF}", -3)
+        run = self.run_pipeline(pam="20bp-NNN-NO-PAM", env={"STUB_ENRICH": "1"})
+        self.assertEqual(run.reference, "NNN_2_hg38")
+        self.assertRefused(run, f"NNN_2_hg38+{self.VCF}", 5, "as its .pam_build records",
+                           "20bp-NNN-NO-PAM.txt", 3, also=f" and NNN_2_hg38+{self.VCF}_INDELS")
+
+    def test_an_index_this_run_may_use_is_not_refused(self):
+        # the same side, and a dedicated PAM, whose index is never all-N
+        self.install("NNN_2", variant=False)
+        built_for(self.library / "NNN_2_hg38", 3)
+        run = self.run_pipeline(pam="20bp-NNN-NO-PAM", variant=False)
+        self.assertEqual(run.reference, "NNN_2_hg38")
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed")
+        run = self.run_pipeline(pam="23bp-TTTV-Cas12a", variant=False)
+        self.assertEqual([c[1] for c in run.builds], ["hg38"])
+        self.assertEqual(run.searched(variant=False), ("TTTV_2_hg38", False))
+
+    def assertNoMatchSaysWhy(self, run, note, pam, n=2):
+        """Under --index-path: the error, why the all-N index there was not used
+        (`note`, if any), and what would serve."""
+        lib = os.path.realpath(self.library)
+        self.assertIsNone(run.searched(variant=False))
+        self.assertEqual(run.stderr,
+                         f"ERROR: no matching reference index under --index-path '{lib}'\n"
+                         + note +
+                         f"       expected an index '{pam}_N_hg38' with N >= {n} "
+                         f"(e.g. {pam}_{n}_hg38)\n"
+                         f"       re-run 'crisprme.py download --what index --index-name "
+                         f"{pam}_{n}_hg38' (it fetches the shared reference index too), or "
+                         "build it with 'crisprme.py build-index-only'.\n")
+
+    def test_index_path_says_why_an_all_n_index_there_was_not_used(self):
+        self.install("NNN_2", variant=False)
+        built_for(self.library / "NNN_2_hg38", -3)
+        for prune in (0, 1):
+            self.assertNoMatchSaysWhy(
+                self.run_pipeline(pam="20bp-NNN-NO-PAM", prune=prune, variant=False,
+                                  index_path=self.library),
+                "       NNN_2_hg38 is a PAM-less index for a PAM on the 5' side of the guide "
+                "(as its .pam_build records), and 20bp-NNN-NO-PAM.txt puts the PAM on the "
+                "3' side, so a search of it would find nothing\n", "NNN")
+
+    def test_and_an_index_without_a_record_is_named_with_how_to_record_its_side(self):
+        # a 5' PAM-less index a search built before this release
+        self.install("NNNN_2", variant=False)
+        self.assertNoMatchSaysWhy(
+            self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=1, variant=False),
+            "       NNNN_2_hg38 is a PAM-less index for a PAM on the 3' side of the guide "
+            "(it records no side in a .pam_build, and an index that does not is taken for "
+            "a 3' build), and 23bp-TTTV-Cas12a.txt puts the PAM on the 5' side, so a search "
+            "of it would find nothing\n"
+            "       if it was built from a 5' PAM file, record that by running "
+            "'crisprme.py build-index-only' with that file, the same --genome (and --vcf) "
+            "and --bDNA 1\n", "TTTV")
+
+    def test_a_plain_miss_says_what_it_said(self):
+        self.install("NGG_3", variant=False)
+        self.assertNoMatchSaysWhy(self.run_pipeline(prune=1, variant=False), "", "NRG")
 
 
 class AnUnfinishedBuildIsNotSearched(_ShippedScript):

@@ -2897,6 +2897,38 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
         sys.stderr.write(f"Warning: could not write index PAM provenance: {exc}\n")
 
 
+def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
+    """Stops build-index-only when ``index_dir`` is an all-N index already in place
+    whose ``.pam_build`` records a PAM on the other side of the guide from ``pamfile``.
+
+    An all-N index stores its flank on the side where the PAM file it was built from
+    puts the PAM, and its name does not say which. build-index-only keeps an index it
+    finds in place and records ``pamfile`` on it (_write_pam_build), so recording a 5'
+    file on a 3' build, or the reverse, would make a search on its real side refuse it
+    and one on the other side find nothing. The index ``pamfile`` asks for has the
+    same name, so it needs another working directory. An index with no usable
+    ``.pam_build`` records no side to contradict, and is recorded as before.
+    """
+    motif = os.path.basename(index_dir).split("_")[0]
+    if not motif or set(motif) != {"N"} or not os.path.isdir(index_dir):
+        return
+    try:
+        with open(os.path.join(index_dir, ".pam_build")) as fh:
+            built = int(fh.readline().split()[-1])
+        with open(pamfile) as fh:
+            wanted = int(fh.readline().split()[-1])
+    except (OSError, ValueError, IndexError):
+        return
+    if built and wanted and (built < 0) != (wanted < 0):
+        side = {True: "5'", False: "3'"}
+        error(
+            f"{index_dir} is already there, a PAM-less index for a PAM on the "
+            f"{side[built < 0]} side of the guide (as its .pam_build records), and "
+            f"{pamfile} puts the PAM on the {side[wanted < 0]} side. The index for that "
+            f"PAM file has the same name: build it in another working directory (--path)."
+        )
+
+
 def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
     """Make a variant dataset usable by ``crispritz add-variants``, which requires
     the VCF folder to hold **per-chromosome** files and derives each chromosome from
@@ -3538,6 +3570,11 @@ def build_index_only() -> None:
         _outputs += [(enriched, indels_out), (snp_idx,), (indels_idx,)]
     for _out in _outputs:
         _refuse_locked_build(*_out)
+    # An all-N index already in place is kept, and pamfile recorded on it: not over a
+    # record of the other side of the guide.
+    _refuse_other_side_build(idx_folder, pamfile)
+    if vcf_given:
+        _refuse_other_side_build(snp_idx, pamfile)
     # The build directories that killed runs left (_reclaim_build_dirs) are removed
     # first, whatever this run goes on to build: a search may have built since what
     # one of them was building, and then no build here would reclaim it.

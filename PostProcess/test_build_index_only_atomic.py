@@ -2697,6 +2697,75 @@ BEFORE = {
 }
 
 
+class AnAllNIndexInPlaceKeepsItsSide(_Fixture):
+    """An all-N index stores its flank on the side of the guide where the PAM file it
+    was built from puts the PAM, and its name does not say which: its .pam_build does,
+    and a search takes only an index recorded for its PAM's side. build-index-only
+    keeps an index it finds in place and records the PAM file it was given on it, so a
+    5' all-N PAM file over a 3' build relabelled it: searches on its real side then
+    refused it, and searches on the other side found nothing. It now stops first."""
+
+    PAM_3P = os.path.join(REPO, "PAMs", "20bp-NNN-NO-PAM.txt")
+
+    def setUp(self):
+        super().setUp()
+        self.pam_5p = self.path("PAMs", "23bp-NNN-5p.txt")
+        _write(self.pam_5p, "N" * 23 + " -3\n")
+
+    def in_place(self, name, record):
+        """An all-N index already in genome_library, with .pam_build `record` (none
+        for None)."""
+        _write(os.path.join(self.lib(name), "NNN_chr1_1.bin"), "")
+        if record is not None:
+            _write(os.path.join(self.lib(name), ".pam_build"), record)
+
+    def record(self, name):
+        with open(os.path.join(self.lib(name), ".pam_build")) as fh:
+            return fh.read()
+
+    def build(self, pam, vcf=False):
+        command = ["build-index-only", "--genome", self.path("Genomes", "hg38"),
+                   "--pam", pam, "--bDNA", "1", "--bRNA", "1", "--thread", "2",
+                   "--path", self.work]
+        if vcf:
+            command += ["--vcf", self.path("VCFs", "ds"), "--samplesID", self.path("samples.txt")]
+        return self.finish(self.start(command=command))
+
+    def test_a_pam_file_for_the_other_side_is_refused_before_anything_is_built(self):
+        self.in_place("NNN_2_hg38", "20bp-NNN-NO-PAM 23 3\n")
+        rc, out, err = self.build(self.pam_5p)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(err, f"Error: {self.lib('NNN_2_hg38')} is already there, a PAM-less "
+                              "index for a PAM on the 3' side of the guide (as its .pam_build "
+                              f"records), and {self.pam_5p} puts the PAM on the 5' side. The "
+                              "index for that PAM file has the same name: build it in another "
+                              "working directory (--path).\n")
+        self.assertEqual(self.record("NNN_2_hg38"), "20bp-NNN-NO-PAM 23 3\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_and_so_is_one_over_a_variant_index_recorded_for_the_other_side(self):
+        self.in_place("NNN_2_hg38+ds", "23bp-NNN-5p 23 -3\n")
+        rc, out, err = self.build(self.PAM_3P, vcf=True)
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"Error: {self.lib('NNN_2_hg38+ds')} is already there, a PAM-less index "
+                      "for a PAM on the 5' side of the guide", err)
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(os.path.exists(self.lib("NNN_2_hg38")))
+
+    def test_the_same_side_or_no_record_is_recorded_as_before(self):
+        self.in_place("NNN_2_hg38", "20bp-NNN-NO-PAM 23 3\n")
+        rc, out, err = self.build(self.PAM_3P)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn(f"Reference index already present: {self.lib('NNN_2_hg38')}", out)
+        self.assertEqual(self.record("NNN_2_hg38"), "20bp-NNN-NO-PAM 23 3\n")
+        # one with no record -- a search built it before 2.8.1 -- takes the side given
+        os.remove(os.path.join(self.lib("NNN_2_hg38"), ".pam_build"))
+        rc, out, err = self.build(self.pam_5p)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(self.record("NNN_2_hg38"), "23bp-NNN-5p 23 -3\n")
+        self.assertEqual(self.calls(), [])
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix."""

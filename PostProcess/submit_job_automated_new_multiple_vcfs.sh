@@ -718,9 +718,37 @@ while read vcf_f; do
 		true_pam=${fullseqpam:0:-$pos}
 	fi
 
+	# The side of the guide all-N index $1 was built for, on stdout: 3 or 5. An all-N
+	# index stores its flank where the PAM file it was built from puts the PAM, and the
+	# engine reads the flank on the side the SEARCH PAM file names, so an index built for
+	# the other side gives no target at all, and no error. build-index-only and this
+	# script's own builds record that file's geometry in .pam_build ("<name> <seq_len>
+	# <pam_pos>", pam_pos < 0 for a 5' PAM). An index without one -- built by a search
+	# before 2.8.1, or by crispritz.py itself -- is taken for a 3' build, as every
+	# published one is (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. Silent on
+	# stderr, which is fatal to the stage.
+	_index_side() {
+		local _line=
+		if [ -f "$1/.pam_build" ]; then
+			{ read -r _line <"$1/.pam_build"; } 2>/dev/null
+			_line=${_line%$'\r'}
+			if [ "${_line##* }" -lt 0 ] 2>/dev/null; then
+				echo 5
+				return 0
+			elif [ "${_line##* }" -gt 0 ] 2>/dev/null; then
+				echo 3
+				return 0
+			fi
+		fi
+		echo 3
+		return 1
+	}
+
 	# Pick which installed index serves this search.
 	#   $1 library dir   $2 requested PAM   $3 name suffix (<ref> or <ref>+<vcf>)
 	#   $4 requested bMax
+	#   $5 optional: any non-empty value takes an all-N index whichever side it was
+	#      built for (only to say why one was refused)
 	# Writes the chosen directory to stdout, or nothing when none is sufficient.
 	#
 	# An index named <PAM>_<N>_<suffix> was built with -bMax N and so supports searches
@@ -737,8 +765,8 @@ while read vcf_f; do
 	# the shipped NNNRRT (SaCas9-KKH) among them -- which cannot serve another PAM.
 	# An all-N index must also have been built for a PAM on the search PAM's side.
 	_resolve_index_dir() {
-		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4"
-		local _d _b _pam _n _exact _better _side _line
+		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4" _any_side="$5"
+		local _d _b _pam _n _exact _better _side
 		local _best="" _best_n="" _best_pam_len="" _best_exact=""
 		for _d in "$_lib"/*_*_"$_suffix"; do
 			[ -d "$_d" ] || continue
@@ -796,21 +824,9 @@ while read vcf_f; do
 			else
 				continue            # a different dedicated PAM cannot stand in
 			fi
-			# An all-N index stores its flank on the side of the guide where the PAM file
-			# it was built from puts the PAM, and the engine reads the flank on the side
-			# the SEARCH PAM file names, so an index built for the other side gives no
-			# target at all, and no error. build-index-only records that file's geometry
-			# in .pam_build ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); an
-			# index without one is taken for a 3' build, as every published one is
-			# (PAMs/20bp-NNN-NO-PAM.txt).
-			if [ -z "${_pam//N/}" ]; then
-				_side=3
-				if [ -f "$_d/.pam_build" ]; then
-					_line=
-					{ read -r _line <"$_d/.pam_build"; } 2>/dev/null
-					_line=${_line%$'\r'}
-					[ "${_line##* }" -lt 0 ] 2>/dev/null && _side=5
-				fi
+			# An all-N index serves only a PAM on the side it was built for (_index_side).
+			if [ -z "${_pam//N/}" ] && [ -z "$_any_side" ]; then
+				_side=$(_index_side "$_d")
 				if [ "${pos:-1}" -gt 0 ]; then
 					[ "$_side" = 3 ] || continue
 				else
@@ -834,6 +850,48 @@ while read vcf_f; do
 			fi
 		done
 		[ -n "$_best" ] && printf '%s\n' "$_best"
+	}
+
+	# Record on all-N index $1, which this run has just built, the side of the guide its
+	# PAM file puts the PAM, as build-index-only does: without it, _index_side takes a
+	# 5' build for a 3' one. A dedicated index needs no record. Silent on stderr.
+	_record_index_side() {
+		{ [ -z "${true_pam//N/}" ] && [ -d "$1" ]; } || return 0
+		{ printf '%s %s %s\n' "${pam_name%.*}" "${#fullseqpam}" "$pos" >"$1/.pam_build"; } 2>/dev/null
+		return 0
+	}
+
+	# Say on stderr why all-N index $1 cannot serve this search, when it was built for
+	# the other side of the guide.
+	_say_other_side() {
+		local _have _want=3 _why="as its .pam_build records" _n
+		_have=$(_index_side "$1") \
+			|| _why="it records no side in a .pam_build, and an index that does not is taken for a 3' build"
+		[ "${pos:-1}" -gt 0 ] || _want=5
+		[ "$_have" = "$_want" ] && return 0
+		printf "       %s is a PAM-less index for a PAM on the %s' side of the guide (%s), and %s puts the PAM on the %s' side, so a search of it would find nothing\n" \
+			"$(basename "$1")" "$_have" "$_why" "$pam_name" "$_want" >&2
+		_index_side "$1" >/dev/null && return 0
+		_n=$(basename "$1"); _n=${_n#*_}; _n=${_n%%_*}
+		printf "       if it was built from a %s' PAM file, record that by running 'crisprme.py build-index-only' with that file, the same --genome (and --vcf) and --bDNA %s\n" \
+			"$_want" "$((_n - 1))" >&2
+	}
+
+	# An all-N search PAM builds its index under an all-N name, so all-N index $1 in
+	# place under that name, which the scan refused, was built for the other side of the
+	# guide: a search of it would find nothing, and exit 0. Stop instead. $2 is its
+	# _INDELS companion, for a variant index.
+	_refuse_other_side() {
+		{ [ -z "${true_pam//N/}" ] && _lock_built "$1" 1; } || return 0
+		local _want=3 _also=
+		[ "${pos:-1}" -gt 0 ] || _want=5
+		[ "$(_index_side "$1")" = "$_want" ] && return 0
+		[ -n "$2" ] && [ -d "$2" ] && _also=" and $(basename "$2")"
+		printf "ERROR: %s is in the way: this search builds its index under that name\n" "$1" >&2
+		_say_other_side "$1"
+		printf "       move it%s out of %s, or run this search from another working directory\n" \
+			"$_also" "$(dirname "$1")" >&2
+		exit 1
 	}
 
 	# Count DATA rows in a CRISPRitz targets file: every line that is not the header.
@@ -1066,6 +1124,8 @@ while read vcf_f; do
 		# rebuilding (extra compute) -- point the user at the one-download fix.
 		for _l in "${_dead_locks[@]}"; do printf '%s\n' "$_l" >&2; done
 		printf "ERROR: no matching reference index under --index-path '%s'\n" "$ref_lib" >&2
+		_other=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax" any)
+		[ -n "$_other" ] && _say_other_side "$_other"
 		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s)\n" "$true_pam" "$ref_name" "$bMax" "$(basename "$idx_folder1")" >&2
 		printf "       re-run 'crisprme.py download --what index --index-name %s' (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$(basename "$idx_folder1")" >&2
 		exit 1
@@ -1090,7 +1150,10 @@ while read vcf_f; do
 				_lock_release "$_lock"
 				exit 1
 			fi
+			_record_index_side "$idx_folder1"
 			_lock_release "$_lock" || exit 1
+		else
+			_refuse_other_side "$idx_folder1"  # in place, and not this run's build
 		fi
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>$log
 		idx_ref="$idx_folder1"
@@ -1131,7 +1194,10 @@ while read vcf_f; do
 					_lock_release "$_lock"
 					exit 1
 				fi
+				_record_index_side "$idx_folder1"
 				_lock_release "$_lock" || exit 1
+			else
+				_refuse_other_side "$idx_folder1" "${idx_folder1}_INDELS"
 			fi
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
 			idx_var="$idx_folder1"

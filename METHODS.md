@@ -1002,7 +1002,10 @@ the index was built from puts the PAM (the 3′ side for `PAMs/20bp-NNN-NO-PAM.t
 published PAM-less index), and the engine reads it on the side the search's PAM file names,
 so a 5′ search of a 3′-built index finds nothing at all. CRISPRme therefore takes a PAM-less
 index only for a PAM on the side recorded in the index's `.pam_build` (written by
-`build-index-only`), and takes an index without one for a 3′ build. The search PAM is
+`build-index-only`, and by a search that builds an all-`N` index), and takes an index without
+one for a 3′ build. A search with an all-`N` PAM builds its index under the name an index for
+the other side may already have, and stops rather than search that one; `build-index-only` does
+not record a PAM file over an index recorded for the other side. The search PAM is
 widened to *K* with `N`s on the distal side (the end for a 3′ PAM, the front for a 5′ PAM),
 and a leaf is rejected when, at any position the real PAM covers, the stored and requested
 IUPAC codes share no nucleotide. Pad positions are not tested at all: they state no
@@ -1042,7 +1045,8 @@ installed index, but falls back to offering every PAM when none matches, so it d
 itself prevent an unusable pairing: the engine refuses a width mismatch, and the search
 does not take an index built for the other side.) A shorter PAM off a wider flank is
 supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
-PAM length, and the index must have been built from a 5′ all-`N` PAM file. The published
+PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its
+`.pam_build` records (above). The published
 PAM-less indexes are 3′ builds, so they serve no 5′ PAM: a Cas12a search needs a dedicated
 index. A flank wider than
 3 nt is not readable by CRISPRme versions before this one, so those indexes are published

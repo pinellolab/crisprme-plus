@@ -27,7 +27,8 @@ and the `release-crisprme` skill.
   interface never passes the flag. The published PAM-less indexes store the flank on the 3′ side of
   the guide and serve no 5′ PAM, so a Cas12a (`TTTV`) search needs a dedicated index. A shorter PAM
   off a wider flank is served for a 3′ PAM only; a 5′ PAM needs an index built from a 5′ all-`N`
-  PAM file at exactly its width, and the engine refuses any other width pairing rather than
+  PAM file at exactly its width, which its `.pam_build` records (an all-`N` index without one is
+  taken for a 3′ build: see Fixed), and the engine refuses any other width pairing rather than
   mis-parsing the index. The `NNN_3` indexes are published alongside the dedicated ones; a flank
   wider than 3 nt is not readable by earlier releases, so those live in a separate repository.
   Needs a CRISPRitz build that supports `--prune-pam`.
@@ -305,16 +306,31 @@ and the `release-crisprme` skill.
   0 rows, with or without `--prune-pam` and with or without `--index-path`, where a dedicated
   `TTTV_2` index finds the three; an 8-nt 5′ PAM on a 3′-built `NNNNNNNN_2`, and `NGG` on an
   `NNN_2` or `NNNN_2` built from a 5′ all-`N` PAM file, returned 0 rows too. CRISPRme now reads
-  the side from the index's `.pam_build`, which `build-index-only` writes, and takes an index
-  without one for a 3′ build, as every published one is. With no index left for its side, a search
-  builds a dedicated one, as for any missing index, and under `--index-path` stops with `no
-  matching reference index`. Without `--index-path`, the `TTTV` and `NGG` searches above now build
-  the dedicated index and report its 3 rows, byte-identical to a search of it. A 3′ build serving a
-  3′ PAM, and a 5′ build serving a 5′ PAM of its width, are chosen as before. No published index
-  searched with a shipped PAM file reached this (the shipped 5′ PAMs are 4 nt, and the published
-  PAM-less flanks are 3 and 8 nt, all built for the 3′ side). A PAM-less index you built yourself
-  could: if you searched one with a PAM on the other side, run that search again. Covered by
-  `PostProcess/test_index_resolution.py` and `PostProcess/test_bulge_cap.py`.
+  the side from the index's `.pam_build`, which `build-index-only` writes and, from this release,
+  so does a search that builds an all-`N` index; an index without one (built by a search before
+  2.8.1, or by `crispritz.py` itself) is taken for a 3′ build, as every published one is. With no
+  index left for its side, a search builds a dedicated one, as for any missing index, and under
+  `--index-path` stops with `no matching reference index`, naming the all-`N` index it did not
+  take and why. Without `--index-path`, the `TTTV` and `NGG` searches above now build the
+  dedicated index and report its 3 rows, byte-identical to a search of it. A search whose PAM is
+  itself all-`N` builds its index under the name an all-`N` index of that width has, and searched
+  one built for the other side under that name as if it had built it: `20bp-NNN-NO-PAM` on an
+  `NNN_2` built from a 5′ all-`N` PAM file reported no off-targets and exited 0, where a 3′ build
+  gives 4 rows. It now stops there and says to move that index out of the way. A 3′ build serving
+  a 3′ PAM, and a 5′ build serving a 5′ PAM of its width, are chosen as before, one a search built
+  included: on a synthetic genome with three planted Cas12a sites, the 5′ `NNNN_2` a
+  `27bp-NNNN-5p` search builds serves `TTTV` with or without `--prune-pam` under `--index-path`,
+  3 rows, the dedicated `TTTV_2` index's. A 5′ all-`N` index that a search built before 2.8.1
+  records no side, so a 5′ search refuses it and says so: run `build-index-only` with the PAM file
+  it was built from, the same `--genome` and its bulges, which finds it in place and records the
+  side. `build-index-only` no longer records a PAM file over an all-`N` index whose `.pam_build`
+  names the other side, which, now that a search reads that record, would make a search on its
+  real side refuse it and one on the other side find nothing; it stops and says to build in
+  another working directory. No published index searched with a shipped PAM file reached any of
+  this (the shipped 5′ PAMs are 4 nt, and the published PAM-less flanks are 3 and 8 nt, all built
+  for the 3′ side). A PAM-less index you built yourself could: if you searched one with a PAM on
+  the other side, run that search again. Covered by `PostProcess/test_index_resolution.py`,
+  `PostProcess/test_bulge_cap.py` and `PostProcess/test_build_index_only_atomic.py`.
 - **A PAM-less index searched without `--prune-pam` kept targets with a genomic `N` in their PAM,
   and the search then crashed.** With `NNN_3` serving an NRR (or NRG) search and no `--prune-pam`,
   the post-search PAM filter (`pam_filter.py`, in releases since 2.2.0) treated an `N` in a target's
