@@ -327,6 +327,30 @@ def _aligned_mm(seq_prerevert, realTarget, guide_no_pam, revert):
     return mm
 
 
+def _ref_with_bulges(refSeq_final, realTarget, guide_no_pam):
+    """The REFERENCE alignment an alt row carries in its Reference column, built exactly
+    as the legacy (dictionary-path) block of iupac_decomposition builds it: the strand-
+    corrected reference window with realTarget's RNA-bulge gaps ('-') re-inserted, then
+    every protospacer base that differs from the guide lower-cased (a DNA-bulge column,
+    '-' in the guide, keeps its base as it is).
+
+    The lower case is load-bearing downstream: resultIntegrator counts the REF seed /
+    non-seed mismatches from it, and CRISPRme_plots / CRISPRme_plots_personal count the
+    REF mismatches from it. Only [pos_beg:pos_end] (the protospacer) is touched, so the
+    PAM bases stay upper case and the iupac_code_set lookups of the PAM-creation check
+    on this string keep working. CFD and CRISPR-Bulge upper-case their input, so the
+    scores do not depend on the case."""
+    ref = list(refSeq_final)
+    for pos, char in enumerate(realTarget):
+        if char == "-":
+            ref.insert(pos, "-")
+    for position_t, char_t in enumerate(ref[pos_beg:pos_end]):
+        if char_t.upper() != guide_no_pam[position_t]:
+            if guide_no_pam[position_t] != "-":
+                ref[pos_beg + position_t] = char_t.lower()
+    return "".join(ref)
+
+
 def _record_phase_confirmation(final_line, phase_state):
     """Record one dict-less variant off-target's identity + CONFIRMED/PUTATIVE flag
     for the ADDITIVE phase-confirmation companion TSV. PURE w.r.t. ``final_line``
@@ -674,11 +698,7 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     # CRISPRME_FAST_MODE); the observed/legacy enumeration below is untouched when OFF.
     if _FAST_MODE:
         refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
-        refSeq_with_bulges = list(refSeq_final)
-        for _p, _ch in enumerate(realTarget):
-            if _ch == "-":
-                refSeq_with_bulges.insert(_p, "-")
-        refSeq_with_bulges = "".join(refSeq_with_bulges)
+        refSeq_with_bulges = _ref_with_bulges(refSeq_final, realTarget, guide_no_pam)
         # reference off-target ONCE (LOCUS-COVERAGE FIX), identical to the non-fast path.
         _finalize_reference_entry(
             split, realTarget, refSeq_final, refSeq_with_bulges, guide_no_pam,
@@ -812,11 +832,7 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
 
     # 3) Build the reference-with-bulges row ONCE (mirrors the legacy block).
     refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
-    refSeq_with_bulges = list(refSeq_final)
-    for pos, char in enumerate(realTarget):
-        if char == "-":
-            refSeq_with_bulges.insert(pos, "-")
-    refSeq_with_bulges = "".join(refSeq_with_bulges)
+    refSeq_with_bulges = _ref_with_bulges(refSeq_final, realTarget, guide_no_pam)
 
     # 3a) Emit the candidate's REFERENCE off-target ONCE (LOCUS-COVERAGE FIX). This is
     #     emitted whether or not any observed variant haplotype survived, mirroring the
