@@ -4233,6 +4233,28 @@ def build_index_only() -> None:
     # NO-OP for a single-dataset panel / when --samplesID was absent (empty map).
     # Fully guarded (STDOUT-only; never aborts) — the index/dicts are already built.
     _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid)
+    # A part of the dataset still marked unfinished -- the tiers or the indel genotype
+    # store a step above kept marked, as it skipped a chromosome with a WARNING, or a
+    # mark another run left, such as one with --samplesID, whose tiers a run without it
+    # does not write -- is refused by every search: so this run fails, rather than end
+    # as done (the web Settings page shows a build that exits 0 as done), and says what
+    # to do
+    _redo = f"run build-index-only again to its end with {vcf_name}"
+    _gt_dir = os.path.join(workdir, "Dictionaries", f"genotypes_{vcf_name}")
+    for _part, _do in (
+        (_reg_dir, f"{_redo} and its --samplesID (a build from the web Settings page passes "
+                   f"none), or remove the dict-less tiers to search without them (rm -rf "
+                   f"'{_reg_dir}' '{_gt_dir}')"),
+        (_igt_dir, f"{_redo}, or remove the phased indel genotype store to search without it "
+                   f"(rm -rf '{_igt_dir}')"),
+        (enriched, _redo),
+        (indels_out, _redo),
+    ):
+        if os.path.isdir(os.path.join(_part, ".building")):
+            error(
+                f"{_part} is still marked unfinished, and every search with {vcf_name} "
+                f"refuses it until a build-index-only run has finished it: {_do}."
+            )
     print(
         f"Variant index ready: {os.path.basename(snp_idx)} (+ _INDELS). A later "
         f"variant-aware search on {genome_ref} with {vcf_name} reuses it.",

@@ -1885,6 +1885,21 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
              ("indel genotype store", "/indel_genotypes_ds/gt_indel_chr2",
               "indel_genotypes_ds", dict(CRISPRME_INDELGT_WORKERS="1")))
 
+    def still_marked(self, where):
+        """The ERROR build-index-only ends with when the dict-less tiers of ds or its
+        indel genotype store (where) is still marked unfinished as it ends."""
+        directory = self.path("Dictionaries", where)
+        if where == "registry_ds":
+            do = ("and its --samplesID (a build from the web Settings page passes none), or "
+                  "remove the dict-less tiers to search without them (rm -rf "
+                  f"'{directory}' '{self.path('Dictionaries', 'genotypes_ds')}')")
+        else:
+            do = (", or remove the phased indel genotype store to search without it (rm -rf "
+                  f"'{directory}')")
+        return (f"Error: {directory} is still marked unfinished, and every search with ds "
+                "refuses it until a build-index-only run has finished it: run build-index-only "
+                f"again to its end with ds{' ' * (where == 'registry_ds')}{do}.\n")
+
     def test_a_run_stopped_while_it_writes_them_leaves_them_refused_until_one_finishes_them(self):
         self.run_bio()
         clean = self.outputs()
@@ -1938,12 +1953,17 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
         """The web UI runs the search script straight (pages/main_page.py), past
         complete-search's checks, and that search used the part a stopped run left as
         if it were whole, with exit status 0. The script refuses it too: the job ends
-        with the ERROR in its log_error.txt, which the results page shows."""
-        cases = [(step, where, dict(shim=True, STUB_WRITE_HANG=held, **workers))
+        with the ERROR in its log_error.txt, which the results page shows. It names the
+        tiers' --samplesID, which a build from the web Settings page passes none of,
+        and how to search without the tiers or the indel genotype store."""
+        tiers = (" from the command line with ds and its --samplesID (a build from the web "
+                 "Settings page passes none), or remove it and {} to search without them,")
+        cases = [(step, where, dict(shim=True, STUB_WRITE_HANG=held, **workers),
+                  tiers if step == "tiers" else ", or remove it to search without it,")
                  for step, held, where, workers in self.STEPS]
         cases.append(("SNP codes of the fake-indel genome", "../Genomes/hg38+ds_INDELS",
-                      dict(shim=True, STUB_WRITE_HANG="fakechr2.fa.tmp")))
-        for step, where, stub in cases:
+                      dict(shim=True, STUB_WRITE_HANG="fakechr2.fa.tmp"), ","))
+        for step, where, stub, then in cases:
             with self.subTest(step=step):
                 self.fresh()
                 if step.startswith("SNP codes"):
@@ -1957,8 +1977,9 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                 self.assertEqual(err, f"ERROR: {os.path.normpath(self.path('Dictionaries', where))} "
                                       "is unfinished: a build-index-only run is writing it, or "
                                       "stopped before it was done. Let that run finish, or run "
-                                      "build-index-only again to its end, then run this search "
-                                      "again\n")
+                                      "build-index-only again to its end"
+                                      f"{then.format(self.path('Dictionaries', 'genotypes_ds'))} "
+                                      "then run this search again\n")
                 self.assertEqual(self.calls()[calls:], [])  # nothing searched or built
                 rc, out, err = self.run_bio()
                 self.assertEqual(rc, 0, err)
@@ -1966,6 +1987,36 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                 self.assertIn("Using precomputed variant index for hg38+ds; skipping genome "
                               "enrichment", out)
                 self.assertNotIn(" is unfinished: ", err)
+
+    def test_a_run_without_samplesid_fails_while_the_tiers_stay_unfinished(self):
+        """The tiers are written only by a run given --samplesID, which a build from the
+        web Settings page never passes: after a run with it was stopped while it wrote
+        them, such a build exited 0 (Done) and left them marked, and every web search
+        of the dataset was refused, saying to run build-index-only again to its end,
+        which such a build cannot do. That build now fails with an ERROR, and it and
+        the web search say what to do: run it with --samplesID, from the command line,
+        or remove the tiers."""
+        step, held, where, workers = self.STEPS[0]
+        proc = self.start(shim=True, STUB_WRITE_HANG=held, **workers)
+        self.wait_for_mark(proc)
+        self.kill_group(proc)
+        settings = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
+                    "--bDNA", "1", "--bRNA", "1", "--vcf", self.path("VCFs", "ds"),
+                    "--path", self.work]  # (as the Settings page runs it)
+        rc, out, err = self.finish(self.start(command=settings))
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("WARNING: INCOMPLETE VARIANT INDEX", err)
+        self.assertTrue(err.endswith(self.still_marked(where)), err)
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"{self.path('Dictionaries', where)} is unfinished: ", err)
+        self.assertIn(" from the command line with ds and its --samplesID (a build from the web "
+                      "Settings page passes none), or remove it and ", err)
+        rc, out, err = self.run_bio()  # (with it)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Variant index ready: ", out)
+        rc, out, err = self.run_web_search()
+        self.assertNotIn(" is unfinished: ", err)
 
     def test_a_search_launched_from_the_web_takes_an_empty_co_occurrence_setting_for_off(self):
         """The indel genotype store is read for the SNP+indel co-occurrence alone, which
@@ -2010,9 +2061,11 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
         with a WARNING on stdout, and the step took its mark away as it ended: a search
         then used the part written as if it were whole, and after a full disk (the
         run then failed at the variant index) once space was freed. The mark now stays,
-        and the line after the WARNING says so. A full disk or quota, an I/O error or no
-        memory left, which every chromosome after would hit too, ends the run with an
-        ERROR, the mark kept. Either way, the next run finishes them."""
+        and a line after the step's summary says so; the run builds the rest, then
+        fails with an ERROR (it exited 0, which the web Settings page shows as done). A
+        full disk or quota, an I/O error or no memory left, which every chromosome after
+        would hit too, ends the run with an ERROR there, the mark kept. Either way, the
+        next run finishes them."""
         rc, out, err = self.run_bio()
         self.assertEqual(rc, 0, err)
         clean = self.outputs()
@@ -2028,7 +2081,7 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                                                 STUB_WRITE_FAIL_ERRNO=why, **(workers if alone else {}))
                     self.assertTrue(os.path.isdir(os.path.join(directory, ".building")), out + err)
                     if why == "EACCES":
-                        self.assertEqual(rc, 0, err)
+                        self.assertEqual(rc, 1, out + err)
                         lines = out.splitlines()
                         warned = [i for i, line in enumerate(lines) if line.startswith(
                             ("WARNING [build_dictless_tiers]: could not emit dictless tiers for ",
@@ -2048,6 +2101,10 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                                     "build-index-only again with ds, which builds it, or remove it to "
                                     f"search without it (rm -rf '{directory}').")
                         self.assertIn(kept, lines[warned[0] + 1:], out)
+                        # it builds the rest, then fails
+                        self.assertEqual(sorted(os.listdir(self.lib(""))), [REF, VAR, INDELS])
+                        self.assertNotIn("Variant index ready: ", out)
+                        self.assertEqual(err, self.still_marked(where))
                     else:
                         self.assertEqual(rc, 1, out + err)
                         what = ("Emitting the dict-less tiers" if step == "tiers"

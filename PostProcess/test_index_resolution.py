@@ -893,14 +893,22 @@ class AnUnfinishedBuildIsNotSearched(_ShippedScript):
 
     def test_each_part_marked_unfinished_is_refused_before_anything_is_used(self):
         self.install("NRG_3")
+        # (and how to search without the tiers, which only a run given --samplesID
+        # writes, or without the indel genotype store)
+        then = {self.MARKED[0]: " from the command line with {} and its --samplesID (a build "
+                                "from the web Settings page passes none), or remove it and {} "
+                                "to search without them,",
+                self.MARKED[1]: ", or remove it to search without it,"}
         for marked in self.MARKED:
             with self.subTest(marked=marked):
                 rc, run, where = self.run_marked(marked)
                 self.assertEqual(rc, 1, run.stdout)
+                do = then.get(marked, ",").format(
+                    self.VCF, self.home / "Dictionaries" / f"genotypes_{self.VCF}")
                 self.assertEqual(run.stderr, f"ERROR: {where} is unfinished: a build-index-only "
                                              "run is writing it, or stopped before it was done. "
                                              "Let that run finish, or run build-index-only "
-                                             "again to its end, then run this search again\n")
+                                             f"again to its end{do} then run this search again\n")
                 self.assertEqual(run.calls, [])
                 self.assertFalse(run.precomputed, run.stdout)
                 self.assertNotIn("Variants already added", run.stdout)
