@@ -49,6 +49,7 @@ from .pages_utils import (
     ASSEMBLIES_DIR,
 )
 import personal_assembly
+import assembly_reconcile  # (PostProcess/, as personal_assembly)
 
 from dash import Input, Output, State, html, dcc, no_update
 from dash.exceptions import PreventUpdate
@@ -1097,10 +1098,13 @@ def _delete_targets(kind: str, name: str) -> List[str]:
         # Bundle layout (Assemblies/<individual>/ + metadata.json): the
         # individual is one self-contained folder, so delete removes the WHOLE
         # folder -- reclaiming every genome/chain/chromAlias file for that
-        # person, which is what "remove this individual" should do.
+        # person, which is what "remove this individual" should do -- and what
+        # its searches left: each haplotype's own indexes, the size of a
+        # reference index each, and the link it is searched through. Computed
+        # BEFORE deletion: their names come from its metadata.json.
         bundle = personal_assembly.delete_target(cwd, name)
         if bundle is not None:
-            return [bundle]
+            return [bundle] + assembly_reconcile.bundle_search_leftovers(cwd, name)
         # Legacy flat layout: remove only the pairing MARKERS, never the
         # underlying genome/chain/chromAlias files -- the genome folders there
         # are shared with plain single-haplotype complete-search (Component A's
@@ -1207,10 +1211,13 @@ def _delete_summary(item: str) -> str:
     extra = " (with its _INDELS companion)" if kind == "index" and has_indels else ""
     if kind == "assembly":
         if personal_assembly.delete_target(current_working_directory, name) is not None:
+            built = [os.path.basename(t) for t in targets
+                     if os.path.basename(os.path.dirname(t)) == "genome_library"]
+            with_built = f", with the indexes its searches built ({', '.join(built)})" if built else ""
             return (
                 f"Delete personal assembly “{name}”?\n\nThis removes the whole "
                 f"Assemblies/{name}/ folder — both haplotypes' genome, chain and "
-                f"chromAlias files — and frees about {_fmt_size(total)}. This "
+                f"chromAlias files — and frees about {_fmt_size(total)}{with_built}. This "
                 "cannot be undone; you can re-download or re-import it later."
             )
         return (

@@ -469,6 +469,14 @@ def haplotype_search_name(cwd: str, genome_dir: str, haplotype: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "_", name)
 
 
+def _haplotype_view_dir(cwd: str, genome_dir: str) -> str:
+    """`haplotype_genomes/<key>/`, the folder of the link a genome folder outside
+    `Genomes/` is searched through (`haplotype_genome_view`); `<key>` is derived from
+    the folder's path."""
+    key = hashlib.sha1(_genome_identity(cwd, genome_dir).encode()).hexdigest()[:12]
+    return os.path.join(os.path.abspath(cwd), HAPLOTYPE_GENOMES_DIRNAME, key)
+
+
 def haplotype_genome_view(cwd: str, genome_dir: str, haplotype: str) -> str:
     """The `--genome` folder one haplotype is searched with.
 
@@ -489,8 +497,7 @@ def haplotype_genome_view(cwd: str, genome_dir: str, haplotype: str) -> str:
     if os.path.dirname(os.path.abspath(genome_dir)) == os.path.join(cwd_abs, GENOMES_DIRNAME):
         return genome_dir
     identity = _genome_identity(cwd_abs, genome_dir)
-    key = hashlib.sha1(identity.encode()).hexdigest()[:12]
-    view_dir = os.path.join(cwd_abs, HAPLOTYPE_GENOMES_DIRNAME, key)
+    view_dir = _haplotype_view_dir(cwd_abs, genome_dir)
     view = os.path.join(view_dir, haplotype_search_name(cwd_abs, genome_dir, haplotype))
     os.makedirs(view_dir, exist_ok=True)
     real = os.path.realpath(genome_dir)
@@ -717,6 +724,31 @@ def foreign_index_sources(cwd: str, genome_dir: str) -> List[Tuple[str, str]]:
         if held and held != identity:
             found.append((index_dir, held if os.path.isabs(held)
                           else os.path.join(os.path.realpath(cwd), held)))
+    return found
+
+
+def bundle_search_leftovers(cwd: str, individual: str) -> List[str]:
+    """What the searches of a bundle individual's haplotypes left in the working
+    directory, to remove with the individual (Settings > Delete): each
+    haplotype's indexes (`genome_library/<PAM>_<N>_<haplotype_search_name>`, each
+    the size of a reference index) and the folder of the link it is searched
+    through (`haplotype_genomes/<key>/`). `[]` for an individual that is no
+    bundle."""
+    meta = personal_assembly.read_metadata(cwd, individual)
+    if meta is None:
+        return []
+    root = personal_assembly.individual_dir(cwd, individual)
+    found = []
+    for hap in personal_assembly.HAPLOTYPES:
+        hap_meta = (meta.get("haplotypes") or {}).get(hap)
+        rel = hap_meta.get("genome_dir") if isinstance(hap_meta, dict) else None
+        if not rel:
+            continue
+        genome_dir = os.path.join(root, rel)
+        view_dir = _haplotype_view_dir(cwd, genome_dir)
+        for path in _haplotype_index_dirs(cwd, haplotype_search_name(cwd, genome_dir, hap)) + [view_dir]:
+            if os.path.lexists(path) and path not in found:
+                found.append(path)
     return found
 
 

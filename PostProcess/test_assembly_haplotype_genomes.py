@@ -34,8 +34,10 @@ These tests pin:
     genome in Genomes/, or like another folder whose index is here, is refused, the
     index it builds records its folder, and a genome in Genomes/ is searched as before;
   * runs that start together: a stale index both find is taken away from its name in
-    one step.
+    one step;
+  * deleting an individual in Settings removes its haplotypes' indexes and links too.
 """
+import ast
 import contextlib
 import io
 import json
@@ -49,6 +51,7 @@ import tempfile
 import textwrap
 import time
 import types
+import typing
 import unittest
 from unittest import mock
 
@@ -849,6 +852,87 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
         with open(os.path.join(shared, "NRG_2_ref", ar.INDEX_SOURCE_FILENAME), "w") as fh:
             json.dump({"genome": "projB/ref", "fingerprint": "0" * 40}, fh)
         self.assertEqual(self.search("b", "projA/ref", 1, "--index-path", shared), self.SEQ["maternal"])
+
+
+# --------------------------------------------------------------------------- #
+# Settings > Delete: an individual goes with what its searches left
+# --------------------------------------------------------------------------- #
+_SETTINGS_PAGE = os.path.join(os.path.dirname(HERE), "pages", "settings_page.py")
+
+
+def _settings_functions(names, **namespace):
+    """The named functions of pages/settings_page.py, extracted from its source and
+    exec'd in `namespace` (it imports a live Dash app, as test_settings_progress
+    explains)."""
+    with open(_SETTINGS_PAGE) as fh:
+        tree = ast.parse(fh.read())
+    body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
+    namespace.update(os=os, List=typing.List)
+    exec(compile(ast.Module(body=body, type_ignores=[]), _SETTINGS_PAGE, "exec"), namespace)
+    return namespace
+
+
+class DeletingAnIndividualRemovesItsHaplotypeIndexes(_Workdir):
+    """Each searched haplotype has its own index, the size of a reference index, and
+    a link it is searched through. Settings > Delete > Personal assembly removed only
+    Assemblies/<individual>/: both indexes stayed in Installed indexes, two more for
+    every individual searched and deleted, and the links pointed nowhere."""
+
+    def setUp(self):
+        super().setUp()
+        _make_bundle(self.cwd, "W1", {"paternal": "ACGT", "maternal": "TTTT"})
+        _make_bundle(self.cwd, "W2", {"paternal": "GGGG", "maternal": "CCCC"})
+        self.lib = os.path.join(self.cwd, "genome_library")
+        self.built = {}
+        for ind in ("W1", "W2"):
+            for hap in pa.HAPLOTYPES:
+                view = ar.haplotype_genome_view(self.cwd, self.genome(ind, hap), hap)
+                for budget in ("NRG_2", "NGG_3"):
+                    index = os.path.join(self.lib, f"{budget}_{os.path.basename(view)}")
+                    os.makedirs(index)
+                    with open(os.path.join(index, "NRG_chr1_1.bin"), "w") as fh:
+                        fh.write("x" * 1000)
+                    self.built.setdefault(ind, []).append(index)
+                self.built[ind].append(os.path.dirname(view))
+        self.others = [os.path.join(self.lib, n) for n in ("NRG_2_hg38", "NRG_2_genome", "NRG_2_W1_paternal")]
+        for index in self.others:
+            os.makedirs(index)
+
+    def test_its_indexes_and_links_are_found(self):
+        self.assertEqual(sorted(ar.bundle_search_leftovers(self.cwd, "W1")), sorted(self.built["W1"]))
+        self.assertEqual(ar.bundle_search_leftovers(self.cwd, "not_there"), [])
+
+    def settings(self):
+        return _settings_functions(
+            ("_delete_targets", "_delete_summary", "_dir_size", "_fmt_size"),
+            current_working_directory=self.cwd + os.sep, personal_assembly=pa,
+            assembly_reconcile=ar, installed_assemblies=lambda: [],
+            GENOMES_DIR="Genomes", LIFTOVER_DIR="LiftoverFiles")
+
+    def test_settings_deletes_them_with_the_individual(self):
+        ns = self.settings()
+        targets = ns["_delete_targets"]("assembly", "W1")
+        self.assertEqual(targets[0], os.path.join(self.cwd, "Assemblies", "W1"))
+        self.assertEqual(sorted(targets[1:]), sorted(self.built["W1"]))
+        summary = ns["_delete_summary"]("assembly:W1")
+        for index in self.built["W1"]:
+            if os.path.dirname(index) == self.lib:
+                self.assertIn(os.path.basename(index), summary)
+        size = ns["_dir_size"](targets[0]) + 4 * 1000  # the four indexes counted
+        self.assertIn(f"frees about {ns['_fmt_size'](size)}", summary)
+        for path in targets:  # as do_delete removes them
+            shutil.rmtree(path)
+        self.assertEqual(sorted(os.listdir(self.lib)),
+                         sorted(os.path.basename(i) for i in self.built["W2"] + self.others
+                                if os.path.dirname(i) == self.lib))
+        self.assertTrue(all(os.path.exists(p) for p in self.built["W2"] + self.others))
+
+    def test_an_individual_never_searched_has_nothing_more(self):
+        _make_bundle(self.cwd, "W3", {"paternal": "ACGT", "maternal": "TTTT"})
+        ns = self.settings()
+        self.assertEqual(ns["_delete_targets"]("assembly", "W3"),
+                         [os.path.join(self.cwd, "Assemblies", "W3")])
+        self.assertNotIn("indexes its searches built", ns["_delete_summary"]("assembly:W3"))
 
 
 # --------------------------------------------------------------------------- #
