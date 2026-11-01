@@ -422,6 +422,54 @@ requires ≥2 nearby SNP alt alleles together; `snp_snp_cooc.tsv`) and **SNP+ind
 carriers; on a sites-only panel both fall to rung 3 (PUTATIVE, min-AF, no carriers) —
 so the co-occurrence signal is never silently dropped for lack of genotypes.
 
+### SNP+indel off-targets: each carrier's own haplotype
+Off-targets that need an indel are searched on the **fake-indel genome**: one short window
+per indel (25 bp of reference, the indel's ALT, then reference), onto which the build
+writes the IUPAC code of every SNP of the enriched genome. The search engine matches a code
+when **any** of its alleles fits the guide (or the PAM), so one raw indel target stands for
+every combination of the window's SNP alleles at once; only the genotypes say which of them
+exist. The indel post-analysis therefore resolves each such target **per carrier
+haplotype** (`indel_snp_cis.resolve_target`):
+
+- every haplotype that carries the indel gets **its own allele** at each code column — the
+  SNP alt it carries, else the reference base — and the haplotypes left with the same
+  sequence form **one reported row**, listing only their individuals and naming the SNP alts
+  they hold next to the indel (Variant info, rsID, MAF);
+- a sequence whose PAM no longer satisfies the searched motif, or whose mismatches,
+  recounted on the concrete sequence, exceed `--mm` or `--max-total-edits`, is **dropped**:
+  a raw target that no individual carries gives no row;
+- an individual whose genotypes cannot put an allele on the indel's haplotype (an unphased
+  call, a missing allele, no phased indel genotype, a haploid call against a diploid one)
+  gets the **strongest target its own alleles allow** (the guide's base wherever it carries
+  it; elsewhere, and at the PAM jointly, the alleles that maximize CFD among those the motif
+  allows), PUTATIVE in the co-occurrence companion: it is never listed for an allele it
+  does not carry. With **no genotypes at all** (a sites-only panel such as `mega`) the row
+  holds that worst case over the code's alleles, keeps the carriers the indel log lists,
+  and its co-occurrence is rung 3 above (PUTATIVE, min-AF bound);
+- the fake-indel window holds **one indel**, so a haplotype that carries a second indel
+  inside the target does not have the window's sequence and is not listed for it, on any
+  indel row (§8, residuals);
+- a classic dictionary install (no Tier-1 store, e.g. an index built without `--samplesID`)
+  reads the same genotypes from the per-sample SNP dictionary; with `CRISPRME_INDEL_SNP=0`
+  at search time every code reads as the reference base, as on a fake-indel genome built
+  without the overlay.
+
+The co-occurrence companion `indel_snp_cooc.tsv` lists, for each reported row, the SNP alts
+the target **requires** — the guide's own base at a spacer column, or a base that creates
+the PAM where the reference does not — with that row's carriers: CONFIRMED when every
+carrier was resolved exactly, PUTATIVE otherwise. The resolution does not depend on the
+analysis mode (§5). A target with no code (every target of a classic, non-overlaid
+fake-indel genome) is reported as the engine found it.
+
+From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
+the guide's base when it was an allele, else the code's first allele. That reported one
+individual's indel together with SNP alleles that only other individuals carry, scored as
+if real (on the default HGDP + 1000 Genomes index, a guide's report listed at its fifth
+highest CFD, 0.708, a site whose only listed carrier is homozygous reference at the SNP the
+displayed sequence uses), understated mismatch counts, and read an R at NRG's last PAM base
+as A (a PAM the search never matched; CFD ≈ 0). 2.8.1 fixes this; results of earlier
+releases are corrected only by running the search again.
+
 ### Locus completeness
 For every candidate window, CRISPRme+ additionally emits the **reference**
 off-target (the site as it appears in the reference genome, independent of any
@@ -945,13 +993,19 @@ chromatin accessibility as a cutting determinant. **SNP+indel co-occurrence** is
 searched **by default** as of 2.5.0: the build overlays SNP IUPAC codes onto the
 fake-indel genome and compiles a phased indel genotype tier, and post-analysis reports
 off-targets that require **both** a nearby SNP **and** an indel in the same protospacer,
-tagged CONFIRMED-cis (phased) / PUTATIVE (unphased) with per-sample carriers and joint
-allele frequency. (The pre-2.5.0 behavior — two independent passes, SNPs on the
-IUPAC-enriched genome and indels on a plain-reference fake-indel genome — remains available
-by disabling the integration; classic dict builds are byte-identical.) One **residual**:
-the indel search materializes **one indel per fake contig**, so an off-target requiring
-**≥ 2 co-occurring cis indels within a single protospacer** is not generated as a candidate
-— a pre-existing single-indel-search property, independent of the analysis mode. This is a
+each resolved on its carriers' own haplotypes (§4; since 2.8.1) and tagged CONFIRMED-cis
+(phased) / PUTATIVE (unphased) with per-sample carriers and joint allele frequency. (The
+pre-2.5.0 behavior — two independent passes, SNPs on the IUPAC-enriched genome and indels
+on a plain-reference fake-indel genome — remains available by disabling the integration;
+classic dict builds are byte-identical.) One **residual**: the indel search materializes
+**one indel per fake contig**, so an off-target requiring **≥ 2 co-occurring cis indels
+within a single protospacer** is not generated as a candidate — a pre-existing
+single-indel-search property, independent of the analysis mode; since 2.8.1 an individual
+whose haplotype carries such a second indel inside a target is not listed for that target,
+whose sequence it does not have. Two SNP records at one position (a split multi-allelic
+site) keep only the last record's alt in the enriched genome and its dictionaries (a
+CRISPRitz `add-variants` property), so a carrier of an earlier record's alt is read as
+reference there, in the SNP and the indel post-analysis alike. This is a
 **low-frequency** case: raw multi-indel cis co-occurrence is dominated by STR/VNTR repeats
 (which off-target analysis should soft-mask), falling to **~1–2%** of indel loci after
 repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**
@@ -959,8 +1013,9 @@ of indel off-targets — all at the edit-budget ceiling (the weakest, ≈0-CFD t
 carrying ≥ 2 cis indels **can** be flag-all'd for conservative (lossless over-reporting)
 treatment — a design option the min-edit primitive supports (proven lossless in
 `test_twopass_lynchpin_counterexamples`), **not yet wired into the production indel search**. The `Max_total_edits` value is a
-**search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded
-alignments may exceed it (the report surfaces the observed maximum). A reported MAF
+**search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
+alignments may exceed it (the report surfaces the observed maximum), while an indel row,
+recounted on its carriers' own sequence, is dropped past it as past `--mm` (§4). A reported MAF
 of `1e-05` is a **display floor** for a source-AF of 0, not a measured frequency
 (§3, §7). These are computational predictions and are **not a substitute for
 experimental off-target validation** (e.g. GUIDE-seq / CIRCLE-seq / targeted

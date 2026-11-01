@@ -504,22 +504,26 @@ maximal cis combo and subtracts it from strict allelic-subset ancestors (matched
 multiallelic-safe). Tested across **N=3/4/6/8/12** + trans + unphased (`test_phased_haplotype.py`).
 
 ### 9b. Indel + SNP co-occurrence is structurally immune (verified)
-The SNP+indel cis join (`indel_snp_cis.cis_cooccurrence`) is **not** a lattice: it takes the indel +
-ALL SNP alts the aligned target uses (fixed by the alignment) and does a **direct per-sample
-same-slot check** (`some haplotype slot carries the indel AND every SNP alt`) that scales to any
-multiplicity with nothing to starve. Added ≥4 regression tests (`test_indel_snp_cis.py`: indel + 4
-SNPs cis→CONFIRMED, one-trans→excluded, homozygous→2 copies, population cis/trans/unphased mix).
+An overlaid indel target is **not** resolved through a lattice either: since 2.8.1
+(`indel_snp_cis.resolve_target`) every haplotype slot that carries the indel gets its own allele at
+each SNP code column of the target (the alt it carries, else the reference), and the slots with the
+same sequence form one row, a **direct per-slot** construction that scales to any multiplicity with
+nothing to starve (`test_indel_haplotype_resolution.py`, and `test_indel_snp_cis.py` for the
+same-slot join: indel + 4 SNPs cis→CONFIRMED, one-trans→excluded, homozygous→2 copies, population
+cis/trans/unphased mix).
 
-**Report surfacing — the complete cis-phased variant set.** For an indel off-target whose CONFIRMED
-cis haplotype is an indel **plus** co-occurring SNP(s), the report's `Variant` column (and the
-`observed_haplotypes` companion, which reads the same field) lists **the full cis-phased variant set**
-— the indel followed by each co-occurring SNP as a forward-strand `chrom_pos_ref_alt` token (same
-format the SNP path emits, so `resultIntegrator` parses and strand-corrects them identically), with the
-`rsID` / `MAF` lists kept 1:1 token-aligned — and the `Samples` column is the **exact cis carriers**
-(individuals carrying the indel AND every required SNP on the same phased slot). This applies **only**
-to CONFIRMED genotype-phased co-occurrence; a PUTATIVE (unphased / sites-only / mega) call is recorded
-in the `*.indel_snp_cooc.tsv` sidecar only and never asserts a cis haplotype on the row (the
-anti-chimera contract of §9c).
+**Report surfacing — the haplotype's variant set.** An indel row whose haplotype holds SNP alts next
+to the indel lists, in the report's `Variant` column (and the `observed_haplotypes` companion, which
+reads the same field), the indel followed by each SNP alt as a forward-strand `chrom_pos_ref_alt`
+token (same format the SNP path emits, so `resultIntegrator` parses and strand-corrects them
+identically), with the `rsID` / `MAF` lists kept 1:1 token-aligned, and its `Samples` column is the
+individuals whose own haplotype has that sequence. A slot whose phase cannot be read (unphased, a
+missing allele, no phased indel genotype) gets the strongest target its own alleles allow, and a
+sites-only panel (mega) the strongest target the codes allow, listing the indel log's carriers; the
+`*.indel_snp_cooc.tsv` sidecar marks those PUTATIVE (the anti-chimera contract of §9c: no individual
+is listed for an allele it does not carry). Up to 2.8.0 the indel row's sequence was instead resolved
+column by column without genotypes, and a PUTATIVE call stayed in the sidecar while the row kept that
+guide-optimistic sequence and every indel carrier.
 
 ### 9c. The dense-window APPROXIMATION (the greedy cap) + FLAGS + DEFAULT behaviour
 Enumerating the lattice is 2^k in the number of co-located variants, so extreme-density windows are

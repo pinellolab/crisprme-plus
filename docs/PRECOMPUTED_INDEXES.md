@@ -663,12 +663,14 @@ crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.tx
 With co-occurrence on, the build (a) compiles a per-chromosome **phased indel
 genotype store** (`Dictionaries/indel_genotypes_<vcf>/`) and (b) **overlays SNP IUPAC
 codes** onto the fake-indel genome flanks before indexing the `_INDELS` companion, so
-the indel search can match SNP+indel haplotypes. Post-analysis then emits, per
-co-occurring off-target, a **CONFIRMED-cis** call (all covered variants phased on one
-haplotype) or **PUTATIVE** (unphased / can't prove cis), with the per-sample carriers
-and the joint allele frequency (`AC_cis / AN` over the VCF-genotyped panel). On a
-sites-only panel it falls back to a PUTATIVE min-AF bound with no carriers (see
-METHODS §4/§8).
+the indel search can match SNP+indel haplotypes. Post-analysis resolves each indel
+target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
+lists only the individuals that have its sequence, and one no individual has is dropped;
+since 2.8.1), then emits, per co-occurring off-target, a **CONFIRMED-cis** call (all
+covered variants phased on one haplotype) or **PUTATIVE** (unphased / can't prove cis),
+with the per-sample carriers and the joint allele frequency (`AC_cis / AN` over the
+VCF-genotyped panel). On a sites-only panel it falls back to a PUTATIVE min-AF bound with
+no carriers (see METHODS §4/§8).
 
 > **Note.** With `mm` at its maximum, raise `--max-total-edits` (e.g. `--max-total-edits
 > 6`) so the extra alignment budget for the indel bulge isn't consumed by mismatches,
