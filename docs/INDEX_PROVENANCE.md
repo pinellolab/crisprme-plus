@@ -179,8 +179,9 @@ target's `N` as matching any base, so it keeps the targets with an `N` in their 
 that the rebuild adds; a bulge search that reaches one then fails in post-analysis
 (`cluster.dict.py`). Measured with 2.8.0's own code (`crisprme.py`, `PostProcess/`,
 `pages/`) on the CRISPRitz 2.9.1 engine, whose search without `--prune-pam` is
-2.9.0's, on the synthetic genome of the table above, reference-only, 2 mismatches +
-1 DNA + 1 RNA bulge:
+2.9.0's, on the synthetic gap-edge genome and the two `NNN_2` indexes of *What a
+CRISPRme 2.8.1 report shows* above, reference-only, 2 mismatches + 1 DNA + 1 RNA
+bulge:
 
 | search PAM | pre-fix index | post-fix index |
 |---|---|---|

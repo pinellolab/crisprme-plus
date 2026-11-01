@@ -156,11 +156,11 @@ and the `release-crisprme` skill.
   The general-index card's search example now runs: it lacked `--index-path`, which `--prune-pam`
   requires, and `--samplesID`, and named a `--vcf` file `download` does not write. The website and
   the index pages say that a PAM-less index serves a shorter PAM only when it is a 3′ PAM (the
-  card listed Cas12a's `TTTV`), and the README, the index pages, METHODS and `complete-search
-  --help` that the published ones serve no 5′ PAM at any width (they said an equal-width one
-  worked). README §1.1.2 checks an install with `crisprme.py --version` alone, and §3.1 shows the
-  help with `crisprme.py --help`, since a bare `crisprme.py` exits 1 and creates the CRISPRme
-  folders where it runs.
+  card listed Cas12a's `TTTV`), and the README, the index pages, METHODS and the
+  `complete-search --help` entry for `--prune-pam` that the published ones serve no 5′ PAM at any
+  width (they said an equal-width one worked). README §1.1.2 checks an install with
+  `crisprme.py --version` alone, and §3.1 shows the help with `crisprme.py --help`, since a bare
+  `crisprme.py` exits 1 and creates the CRISPRme folders where it runs.
   `RESUME.md`, a scratch file committed by accident in 2.5.4, is gone from the tree, so the Docker
   image no longer ships it.
 
@@ -261,10 +261,10 @@ and the `release-crisprme` skill.
   used freshly downloaded annotations, where COSMIC stays off until its licence is attested. The
   released 2.8.0, searching chr22, gives byte-identical reports on the old and the new reference
   index, with NRG and with NNN, but only because no hit there has an `N` in its PAM: use the
-  rebuilt archives with 2.8.1 or later. 2.8.0 keeps the targets with an `N` in their PAM that they
-  add (it has no `--prune-pam`, ignores the flag, and its post-search PAM filter lets the `N`
-  through), and a bulge search that reaches one fails in post-analysis (`ValueError: substring not
-  found`). On the synthetic gap-edge genome, 2.8.0 searching an index from the new builder exited
+  rebuilt archives with 2.8.1 or later. 2.8.0 keeps the targets with an `N` in their PAM that the
+  rebuild adds (it has no `--prune-pam`, ignores the flag, and its post-search PAM filter lets the
+  `N` through), and a bulge search that reaches one fails in post-analysis (`ValueError: substring
+  not found`). On the synthetic gap-edge genome, 2.8.0 searching an index from the new builder exited
   1 with NRG and with NNN, where one from the old builder gave 2 and 3 rows; genome-wide, the NRR
   search in the post-search PAM filter entry below meets 1 such reference target, 1 variant target
   and 93,820 indel targets. The variant archive grows from 108.4 GB to 109.5 GB. Hugging Face has
@@ -299,12 +299,12 @@ and the `release-crisprme` skill.
   the side from the index's `.pam_build`, which `build-index-only` writes, and takes an index
   without one for a 3′ build, as every published one is. With no index left for its side, a search
   builds a dedicated one, as for any missing index, and under `--index-path` stops with `no
-  matching reference index`: in the cases above, without `--index-path`, it now builds the
-  dedicated index and reports its rows, byte-identical. A 3′ build serving a 3′ PAM, and a 5′
-  build serving a 5′ PAM of its width, are chosen as before. No published index searched with a
-  shipped PAM file reached this (the shipped 5′ PAMs are 4 nt, and the published PAM-less flanks
-  are 3 and 8 nt, all built for the 3′ side); a PAM-less index you built yourself could, and a
-  search of one with a PAM on the other side is worth running again. Covered by
+  matching reference index`. Without `--index-path`, the `TTTV` and `NGG` searches above now build
+  the dedicated index and report its 3 rows, byte-identical to a search of it. A 3′ build serving a
+  3′ PAM, and a 5′ build serving a 5′ PAM of its width, are chosen as before. No published index
+  searched with a shipped PAM file reached this (the shipped 5′ PAMs are 4 nt, and the published
+  PAM-less flanks are 3 and 8 nt, all built for the 3′ side). A PAM-less index you built yourself
+  could: if you searched one with a PAM on the other side, run that search again. Covered by
   `PostProcess/test_index_resolution.py` and `PostProcess/test_bulge_cap.py`.
 - **A PAM-less index searched without `--prune-pam` kept targets with a genomic `N` in their PAM,
   and the search then crashed.** With `NNN_3` serving an NRR (or NRG) search and no `--prune-pam`,

@@ -121,7 +121,7 @@ replacement and search it that way, remove `genome_library/NNN_3_hg38`,
 `genome_library/NNN_3_hg38+hg38_HGDP1kGP` and
 `genome_library/NNN_3_hg38+hg38_HGDP1kGP_INDELS`, then download again.
 Use the rebuilt archives with CRISPRme+ 2.8.1 or later: 2.8.0 keeps the targets with
-an `N` in their PAM that they add, and a bulge search that reaches one fails in
+an `N` in their PAM that the rebuild adds, and a bulge search that reaches one fails in
 post-analysis (`ValueError: substring not found`).
 
 **Wider PAM-less flanks** (flank > 3, e.g. `NNNNNNNN_3`) are **not** readable by a
