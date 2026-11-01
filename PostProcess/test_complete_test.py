@@ -545,6 +545,53 @@ class ChromView(unittest.TestCase):
         line = self._refused("chrQ")
         self.assertTrue(line.endswith(f"; available: {', '.join(primary)} and 21 more"), line)
 
+    def _fake_indel_genome(self, *chroms):
+        """Genomes/toy+toy_panel_INDELS as add-variants writes it, a header-only
+        fake-indel FASTA for each of chroms (no indel there to index)."""
+        for chrom in chroms:
+            path = os.path.join(self.wd, "Genomes", "toy+toy_panel_INDELS",
+                                f"fake_toy_panel_{chrom}", f"fake{chrom}.fa")
+            os.makedirs(os.path.dirname(path))
+            with open(path, "w") as fh:
+                fh.write(f">fake{chrom}\n")
+
+    def test_a_variant_index_without_its_indels_index_gets_its_fake_indel_genome(self):
+        """build-index-only builds no INDELS index for an indel-free dataset, and a build
+        stopped before its INDELS index leaves the variant index without it: the search
+        builds it from Genomes/<ref>+<vcf>_INDELS, or finds no indel there to index, as
+        the whole-genome test does. The view had no such folder, so the one-chromosome
+        smoke failed, saying to re-download an index that does not exist. It now holds
+        it, with the chromosome's fake-indel genome alone."""
+        shutil.rmtree(os.path.join(self.wd, "genome_library", "NGG_2_toy+toy_panel_INDELS"))
+        self._fake_indel_genome("chr2", "chr22")
+        calls, err, code = self.smoke("chr22")
+        self.assertIsNone(code, err)
+        _, cwd, tree = calls[0]
+        self.assertIsNotNone(cwd, "complete-search must run from the view")
+        rel = "Genomes/toy+toy_panel_INDELS/fake_toy_panel_chr22"
+        self.assertEqual({r: v for r, v in tree.items() if r.startswith("Genomes/toy+")}, {
+            "Genomes/toy+toy_panel_INDELS": None,
+            rel: ("link", os.path.join(self.wd, rel)),
+        })
+        self.assertEqual(sorted(r for r in tree if r.startswith("genome_library/NGG_2_toy+")),
+                         ["genome_library/NGG_2_toy+toy_panel",
+                          "genome_library/NGG_2_toy+toy_panel/NGG_chr22_1.bin"])
+        self.assertEqual(_views(self.wd), [])
+
+    def test_the_fake_indel_genomes_mark_goes_into_the_view_with_it(self):
+        """Its INDELS index in place, the search does not read the fake-indel genome,
+        and its mark does not stop the smoke; were the search to build an INDELS index
+        from it, the view's copy of the folder carries the mark, which the search then
+        refuses, as it does outside."""
+        self._fake_indel_genome("chr22")
+        mark = os.path.join(self.wd, "Genomes", "toy+toy_panel_INDELS", ".building")
+        os.makedirs(mark)
+        calls, err, code = self.smoke("chr22")
+        self.assertIsNone(code, err)
+        _, cwd, tree = calls[0]
+        self.assertIsNotNone(cwd, "complete-search must run from the view")
+        self.assertEqual(tree["Genomes/toy+toy_panel_INDELS/.building"], ("link", mark))
+
 
 # complete-search's stand-in for RealSignals: it and a child shell, as the real search
 # has a tree of processes, note their PIDs, and any SIGTERM or SIGHUP they get, with

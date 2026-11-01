@@ -827,9 +827,12 @@ def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
     Genomes/<ref>/ holds only <chrom>.fa; every index the search could resolve
     (genome_library/*_*_<ref> and *_*_<ref>+<vcf>, locked ones aside, as its
     _resolve_index_dir has them) only its <PAM>_<chrom>_<n>.bin trees, and its _INDELS
-    companion only the <PAM>_<N>_fake<chrom> sub-index; Dictionaries/log_indels_<vcf>/,
-    from which the indel search and post-analysis take their chromosomes, only
-    <chrom>'s log (an empty one if the panel has none: no indel to search there).
+    companion only the <PAM>_<N>_fake<chrom> sub-index; Genomes/<ref>+<vcf>_INDELS/,
+    from which the search builds an INDELS index it does not find, only
+    fake_<vcf>_<chrom>/ (and the folder's unfinished mark, if it has one);
+    Dictionaries/log_indels_<vcf>/, from which the indel search and post-analysis take
+    their chromosomes, only <chrom>'s log (an empty one if the panel has none: no indel
+    to search there).
     Everything else in the working directory is linked as it is, but VCFs/, which
     stays empty: a search of a prebuilt index never reads the source VCFs, which would
     list the chromosomes in the logs' place. The index sidecars (.pam_build,
@@ -905,6 +908,19 @@ def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
                 fake = "_".join(name.split("_", 2)[:2]) + f"_fake{chrom}"  # <PAM>_<N>_
                 if os.path.isdir(os.path.join(lib, indels, fake)):
                     link("genome_library", indels, fake)
+        # A variant index with no _INDELS companion (an indel-free dataset, for which
+        # build-index-only builds none; a build stopped before its INDELS index): the
+        # search builds it from Genomes/<ref>+<vcf>_INDELS, or finds no indel to index
+        # there. It gets <chrom>'s fake-indel genome alone, and the folder's mark if it
+        # has one, which the search then refuses as it does outside.
+        for vcf in vcf_names:
+            fakes = f"{ref}+{vcf}_INDELS"
+            if not os.path.isdir(os.path.join(cwd, genomes, fakes)):
+                continue
+            os.mkdir(os.path.join(view, genomes, fakes))
+            for f in (f"fake_{vcf}_{chrom}", ".building"):
+                if os.path.exists(os.path.join(cwd, genomes, fakes, f)):
+                    link(genomes, fakes, f)
         logdirs = {f"log_indels_{vcf}" for vcf in vcf_names}
         for name in os.listdir(os.path.join(cwd, dicts)):
             if name not in logdirs:
