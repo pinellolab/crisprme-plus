@@ -34,7 +34,7 @@ These tests pin:
     genome in Genomes/, or like another folder whose index is here, is refused, the
     index it builds records its folder, and a genome in Genomes/ is searched as before;
   * runs that start together: a stale index both find is taken away from its name in
-    one step;
+    one step, and the data folders the pipeline makes are made without an error;
   * deleting an individual in Settings removes its haplotypes' indexes and links too.
 """
 import ast
@@ -478,6 +478,63 @@ class RunsStartingTogetherDoNotTripEachOtherUp(_Workdir):
         self.assertFalse(removing[0][1], "the index was emptied under its own name")
         self.assertEqual(os.listdir(os.path.join(self.cwd, "genome_library")), [])
         self.assertIn(f"Removing index {os.path.basename(index)}", out.getvalue())
+
+
+class RunsStartingTogetherBothMakeTheDataFolders(_Workdir):
+    """The pipeline makes Results/, Dictionaries/, Genomes/ and genome_library/ when
+    they are missing: a test, then a plain mkdir. Two runs starting together on a data
+    folder without genome_library/ (the first searches after an install, say) both
+    found it missing, and the one that made it second wrote "mkdir: cannot create
+    directory '/DATA/genome_library': File exists" to stderr, which fails the run
+    ("ERROR: Genome enrichment failed on _"). Runs the shipped block, with the other
+    run making each of those folders right between the test and the mkdir."""
+
+    SHARED = ("Results", "Dictionaries", "Genomes", "genome_library")
+
+    def block(self):
+        with open(SHELL_SCRIPT) as fh:
+            text = fh.read()
+        start = text.index("\t# ensure that fundamental folders are available")
+        return text[start:text.index("\t# START STEP 1 - Genome enrichment", start)]
+
+    def test_a_folder_the_other_run_made_meanwhile_is_no_error(self):
+        real_mkdir = shutil.which("mkdir")
+        bindir = os.path.join(self.cwd, "bin")
+        os.makedirs(bindir)
+        with open(os.path.join(bindir, "mkdir"), "w") as fh:
+            fh.write("#!/bin/bash\n"
+                     'for a in "$@"; do\n'
+                     f'\tcase "${{a##*/}}" in {"|".join(self.SHARED)}) "{real_mkdir}" -p "$a" ;; esac\n'
+                     "done\n"
+                     f'exec "{real_mkdir}" "$@"\n')
+        os.chmod(os.path.join(bindir, "mkdir"), 0o755)
+        data, out = os.path.join(self.cwd, "data"), os.path.join(self.cwd, "out")
+        os.makedirs(data)
+        os.makedirs(out)
+        env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
+                   current_working_directory=data, output_folder=out)
+        run = subprocess.run(["bash", "-c", self.block()], env=env, capture_output=True, text=True)
+        self.assertEqual(run.stderr, "")
+        self.assertEqual(run.returncode, 0)
+        self.assertEqual(sorted(os.listdir(data)), sorted(self.SHARED))
+        self.assertEqual(os.listdir(out), ["crispritz_targets"])
+
+    def test_crisprme_py_takes_a_folder_the_other_run_made_meanwhile(self):
+        # crisprme.py makes Genomes/, Results/, ... first, the same way (FileExistsError)
+        made, real_exists = [], os.path.exists
+
+        def exists(path):
+            if os.path.dirname(path) == self.cwd and os.path.basename(path) in crisprme.CRISPRMEDIRS:
+                os.mkdir(path)  # made by the other run, once this one has looked
+                made.append(path)
+                return False
+            return real_exists(path)
+
+        with mock.patch.object(crisprme, "current_working_directory", self.cwd + os.sep), \
+                mock.patch.object(crisprme.os.path, "exists", exists):
+            crisprme.check_crisprme_dirtree()
+        self.assertEqual(len(made), len(crisprme.CRISPRMEDIRS))
+        self.assertEqual(sorted(os.listdir(self.cwd)), sorted(crisprme.CRISPRMEDIRS))
 
 
 # --------------------------------------------------------------------------- #

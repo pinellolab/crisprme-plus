@@ -915,18 +915,20 @@ while read vcf_f; do
 		echo "${_n:-0}"
 	}
 
-	# ensure that fundamental folders are available 
+	# ensure that fundamental folders are available (-p: a run that started
+	# together may make one between the test and the mkdir, and the "File exists"
+	# a plain mkdir writes to stderr then fails this run)
 	if ! [ -d "$current_working_directory/Results" ]; then
-		mkdir "$current_working_directory/Results"
+		mkdir -p "$current_working_directory/Results"
 	fi
 	if ! [ -d "$current_working_directory/Dictionaries" ]; then
-		mkdir "$current_working_directory/Dictionaries"
+		mkdir -p "$current_working_directory/Dictionaries"
 	fi
 	if ! [ -d "$current_working_directory/Genomes" ]; then
-		mkdir "$current_working_directory/Genomes"
+		mkdir -p "$current_working_directory/Genomes"
 	fi
 	if ! [ -d "$current_working_directory/genome_library/" ]; then
-		mkdir "$current_working_directory/genome_library"
+		mkdir -p "$current_working_directory/genome_library"
 	fi
 	if ! [ -d "$output_folder/crispritz_targets" ]; then
 		mkdir "$output_folder/crispritz_targets"

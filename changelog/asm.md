@@ -141,6 +141,16 @@
   `X_WALK01`'s sites. Only an index named for the genome itself is now taken. A library without
   two such names picks the same index as before, and reference and variant search outputs were
   compared byte for byte. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+- **Two searches that started together on a data folder without `genome_library/` could fail.** The
+  pipeline makes `Results/`, `Dictionaries/`, `Genomes/` and `genome_library/` when they are
+  missing, after checking for each; two runs that started at the same moment (two web jobs, or two
+  `docker run`s) both found `genome_library/` missing, and the second to make it stopped with
+  `mkdir: cannot create directory '/DATA/genome_library': File exists` and `ERROR: Genome enrichment
+  failed on _` (exit 1). `crisprme.py` makes `Genomes/`, `Results/` and its other folders the same
+  way, and could stop with `FileExistsError` there. A folder made meanwhile is now no error.
+  **Affected:** searches started together on a data folder without those folders, such as the first
+  ones before any index is downloaded or built there, from the CLI or the web. **What to do:** run
+  the one that failed again. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
 - **The personal-assembly results header, History and combined report named both haplotypes
   "genome".** The header and History showed `Paternal genome: genome | Maternal genome: genome`, and
   the combined report (`report.html` in `<job>_combined_report.zip`) the same in its Paternal genome

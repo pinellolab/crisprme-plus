@@ -306,9 +306,10 @@ def check_crisprme_dirtree() -> None:
     # check that working folder respect crisprme's directory tree structure
     for directory in CRISPRMEDIRS:
         if not os.path.exists(os.path.join(current_working_directory, directory)):
-            # expected folder not found, create it
+            # expected folder not found, create it (a run that started together
+            # may have made it meanwhile)
             crisprmedir = os.path.join(current_working_directory, directory)
-            os.makedirs(crisprmedir)
+            os.makedirs(crisprmedir, exist_ok=True)
 
 def _registry_data_type_for_search(args):
     """Best-effort read of the variant index ``data_type`` (Phase-2.1 registry manifest
