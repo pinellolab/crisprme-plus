@@ -271,42 +271,62 @@ def _pam_file_of(line, name):
     return None
 
 
+def _holds_vcfs(vcf_folder):
+    """Whether ``vcf_folder`` holds VCFs, as add-variants and _dataset_chroms read one."""
+    try:
+        return any(f.endswith("vcf.gz") for f in os.listdir(vcf_folder))
+    except OSError:
+        return False
+
+
 def _rebuild(raw_fakechrom, fasta):
-    """How to rebuild the INDELS index this search reads, the end of "Rebuild it": the
-    build-index-only command, with the PAM file the index was built with, that does it,
-    with the enrichment that makes the fake-indel genome too when that genome is not
-    here (``fasta`` false), or else the download, for an index that came that way.
-    Where no such PAM file is to be found (a PAM-less index searched for another PAM,
-    built with one that is not in _pam_dirs), the steps are said in words, never as a
-    command with a blank to fill in: with the fake-indel genome here, the search builds
-    a missing INDELS index from it with the index's own PAM, so removing it is enough."""
+    """How to rebuild the INDELS index this search reads, the end of "Rebuild it", by what
+    is here. With the dataset's VCFs, the build-index-only command, with the PAM file the
+    index was built with, that does it, with the enrichment that makes the fake-indel
+    genome too when that genome is not here (``fasta`` false), or else the download, for
+    an index that came that way. Without those VCFs (an index downloaded, or copied from
+    where it was built) that command cannot run, and what it removes first it could not
+    make again: with the fake-indel genome here, the search builds a missing INDELS index
+    from it with the index's own PAM, so removing it is enough; without it, there is the
+    download. So too where no such PAM file is to be found (a PAM-less index searched for
+    another PAM, built with one that is not in _pam_dirs): the steps are said in words,
+    never as a command with a blank to fill in. complete-test --chrom's view may not hold
+    that genome, and an INDELS index built there would go with it, so that run sends the
+    user to the one that does build it."""
     cwd = os.path.normpath(_outside_view(current_working_directory))
     indels_index = os.path.join(cwd, "genome_library",
                                 f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS")
+    variant = indels_index[: -len("_INDELS")]
+    # (a downloaded index comes without the fake-indel genome; download skips an index
+    # in place)
+    download = (f"rm -rf '{variant}' '{indels_index}' && crisprme.py download --what index "
+                f"--index-name {os.path.basename(variant)} --path '{cwd}'")
+    vcfs = _outside_view(vcf_dir)
+    with_vcfs = _holds_vcfs(vcfs)
+    own = _own_pam()
+    pam = _pam_file_of(*own) if own else pam_file
+    if fasta and not (with_vcfs and pam):
+        again = "complete-test without --chrom" if _in_chrom_view() else "this search again"
+        return (f": remove the INDELS index with rm -rf '{indels_index}' and run {again}, which "
+                f"builds it anew from the fake-indel genome in {os.path.dirname(raw_fakechrom)}")
+    if not with_vcfs:
+        return (f": for an index you downloaded, download it again: {download}; for one you "
+                f"built, put its VCFs back in '{vcfs}' and run this search again, which then "
+                f"gives the command that rebuilds it")
     remove = [indels_index]
     again = ""
     if not fasta:
         # build-index-only makes that genome as it enriches, and with an enriched
         # genome in place it takes the dataset for one without indels
         remove.append(os.path.join(cwd, "Genomes", f"{ref_name}+{vcf_name}"))
-        # (a downloaded index comes without it; download skips an index in place)
-        variant = indels_index[: -len("_INDELS")]
-        again = (f"; or, for an index you downloaded, download it again: rm -rf "
-                 f"'{variant}' '{indels_index}' && crisprme.py download --what index "
-                 f"--index-name {os.path.basename(variant)} --path '{cwd}'")
+        again = f"; or, for an index you downloaded, download it again: {download}"
     # the bulges build-index-only builds the index's N from
     n = int(bMax) - 1 if bMax.isdigit() and int(bMax) > 0 else bMax
-    rest = f"--bDNA {n} --bRNA {n} --vcf '{_outside_view(vcf_dir)}' --path '{cwd}'"
-    own = _own_pam()
-    pam = _pam_file_of(*own) if own else pam_file
+    rest = f"--bDNA {n} --bRNA {n} --vcf '{vcfs}' --path '{cwd}'"
     if pam:
         removed = " ".join("'%s'" % p for p in remove)
         return (f": rm -rf {removed} && crisprme.py build-index-only --genome "
                 f"'{_outside_view(ref_folder)}' --pam '{pam}' {rest}{again}")
-    if fasta:
-        return (f": remove the INDELS index with rm -rf '{indels_index}' and run this search "
-                f"again, which builds it anew from the fake-indel genome in "
-                f"{os.path.dirname(raw_fakechrom)}")
     named = f"{own[1]}.txt, " if own[1] else ""
     return (f" with build-index-only and a PAM file of the PAM it was built with ({named}the "
             f"line '{own[0]}'), which is not in {' or '.join(_pam_dirs())}: remove "
