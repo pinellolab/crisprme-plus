@@ -61,15 +61,16 @@ to retain them (for debugging / custom parsing).
 
 ---
 
-## 3. PAM `NRG` (or other partially-degenerate PAM) + bulges warning
+## 3. (Historical) PAM `NRG` (or other partially-degenerate PAM) + bulges warning
 
-**Symptom.** At the start of a search:
+Some releases before 2.7.10 printed this at the start of a search:
 
 > `WARNING: PAM motif 'NRG' is a partially-degenerate, odd-length motif used with
 > bulges. This combination can crash the underlying search engine (issue #105 ...)`
 
-This is informational. The underlying crash was fixed in CRISPRitz 2.7.1 (bundled in
-current images), so the search normally proceeds. If a search **aborts with a memory
+CRISPRme+ no longer prints it. The crash it warned about was fixed in CRISPRitz 2.7.1,
+and every supported install pins a later CRISPRitz (2.9.1 for CRISPRme+ 2.8.1). Only if
+you run CRISPRme against an older, unpinned CRISPRitz and a search **aborts with a memory
 error** while using a degenerate PAM (`NRG`, `NNN`, …) *with* bulges, either:
 
 - retry with bulges set to 0 (`--bDNA 0 --bRNA 0`), or
@@ -79,17 +80,21 @@ error** while using a degenerate PAM (`NRG`, `NNN`, …) *with* bulges, either:
 
 ## 4. Per-sample runs need memory (and a genotyped index)
 
-`--per-sample` resolves genotypes across the whole panel (e.g. 4,091 individuals for
-the HGDP+1000G index) and is both slower and more memory-hungry than the default
-population-level mode. On a large panel budget **tens of GB of RAM** per run.
+Per-sample analysis resolves genotypes across the whole panel (e.g. 4,091 individuals
+for the HGDP+1000G index) and is both slower and more memory-hungry than the
+population-level analysis. On a large panel budget **tens of GB of RAM** per run. It is
+the default on a genotyped + phased index (HGDP + 1000 Genomes, HPRC), and `--per-sample`
+forces it on any other genotyped one.
 
 - `--per-sample` requires a **genotyped** index. It no-ops (with a warning) on a
   sites-only index such as `NRG_3_hg38+hg38_mega`.
 - Named carriers / personal risk cards come from the **genotype store** bundled with
   the index (`download --what index`, unless you pass `--no-genotypes`). If carriers
   show as degraded/absent, the store was skipped — re-download without `--no-genotypes`.
-- If you only need site-level results, omit `--per-sample` (population-level) — it is
-  much lighter and is the default.
+- If you only need site-level results, pass `--population-level` — it is much lighter.
+  On a phased index leaving out `--per-sample` is not enough, since per-sample is that
+  index's default; population-level is the default only on a sites-only, unphased,
+  hybrid or reference-only index.
 
 ---
 
@@ -115,9 +120,10 @@ due to initialization overhead.
   the genome, annotations, PAMs, sample lists, and the default reference index.
 - **Add a variant-aware index:** `crisprme.py download --what index --index-name
   NRG_3_hg38+hg38_HGDP1kGP` (the recommended phased HGDP + 1000 Genomes default).
-- The public repository ships **prebuilt indexes**, not raw per-dataset VCFs — you do
-  not download VCFs and build locally for the shipped datasets; the index already
-  encodes the variants.
+- The public repository ships **prebuilt indexes** that already encode the variants, so
+  you do not need the VCFs to search the shipped datasets. It also hosts their source
+  VCFs (`hg38_HGDP1kGP`, `hg38_HPRC`, `hg38_mega`), for building an index yourself:
+  `crisprme.py download --what vcf --dataset hg38_HGDP1kGP`.
 - A partial/interrupted download is re-fetched and structurally verified on the next
   run; set `CRISPRME_VERIFY_DEEP=1` to force a deep re-check, or `SKIP_VERIFY=1` to
   skip verification.

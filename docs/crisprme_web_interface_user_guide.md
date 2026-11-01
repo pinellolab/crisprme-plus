@@ -90,7 +90,8 @@ pre-downloaded `NRG_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
 search variant-aware. Sample-level analyses / named carriers / personal risk cards
 come from the **genotype store bundled with that index** (fetched by `download --what
 index` unless you pass `--no-genotypes`), not from raw VCFs — so a single index
-download covers both. The default repo does not host raw per-dataset VCFs.
+download covers both. (The default repo also hosts the source VCFs, `hg38_HGDP1kGP`,
+`hg38_HPRC` and `hg38_mega`, which you need only to build an index yourself.)
 
 ### 2b. Start the local server
 

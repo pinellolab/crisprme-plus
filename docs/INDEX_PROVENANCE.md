@@ -24,26 +24,31 @@ Two separate questions per archive:
 one of them is readable by any CRISPRme release, 2.8.0 included.** Wider PAM-less
 flanks are the only exception and live in a separate repo.
 
+Sizes are download sizes as the Hugging Face API reports them, in GB (10⁹ bytes); "Uploaded"
+is the date of the commit that last wrote the archive, so for the four 2.8.1 replacements it is
+the replacement's upload.
+
 | Archive | Size | Uploaded | PAM | Readable by 2.8.0 | 2.9.1 builder content | `_INDELS` in the archive |
 |---|---|---|---|---|---|---|
-| `NRG_3_hg38` | 8.2 GB | 2026-08-25 | NRG | yes | bit-identical | — |
-| `NRG_3_hg38+hg38_HGDP1kGP` | 25.8 GB | 2026-10-07 | NRG | yes | bit-identical | 23 sub-indexes, 34 bins |
-| `NRG_3_hg38+hg38_HPRC` | 14.2 GB | 2026-09-21 | NRG | yes | bit-identical | 24, 129 |
-| `NRG_3_hg38+hg38_mega` | 11.3 GB | 2026-09-21 | NRG | yes | bit-identical | 24, 32 |
-| `NRR_3_hg38` | 18.7 GB | 2026-10-25 | NRR | yes | bit-identical | — |
-| `NRR_3_hg38+hg38_HGDP1kGP` | 39.9 GB | 2026-10-25 | NRR | yes | bit-identical | 23, 70 |
-| `NRR_3_hg38+hg38_HPRC` | 28.6 GB | 2026-10-27 | NRR | yes | bit-identical | 24, 248 — **registry metadata stale, replaced** |
-| `NRR_3_hg38+hg38_mega` | 20.8 GB | 2026-10-27 | NRR | yes | bit-identical | **24, 0 — empty, replaced** |
-| `NGG_3_hg38` | 3.5 GB | 2026-10-25 | NGG | yes | bit-identical | — |
-| `NGG_3_hg38+hg38_HGDP1kGP` | 20.0 GB | 2026-10-25 | NGG | yes | bit-identical | 23, 23 |
-| `NNN_3_hg38` | 66.6 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs — rebuilt, replaced** | — |
-| `NNN_3_hg38+hg38_HGDP1kGP` | 100.9 GB | 2026-10-25 | none (all-N, width 3) | yes | **differs — rebuilt, replaced** | 23, 222 (replacement: 23, 245) |
-| `genotypes_hg38_HGDP1kGP` | 5.4 GB | 2026-10-07 | — | yes | not an index | — |
-| `genotypes_hg38_HPRC` | 0.5 GB | 2026-10-27 | — | yes | not an index | — |
+| `NRG_3_hg38` | 8.9 GB | 2026-08-25 | NRG | yes | bit-identical | — |
+| `NRG_3_hg38+hg38_HGDP1kGP` | 27.7 GB | 2026-10-07 | NRG | yes | bit-identical | 23 sub-indexes, 34 bins |
+| `NRG_3_hg38+hg38_HPRC` | 15.2 GB | 2026-09-21 | NRG | yes | bit-identical | 24, 129 |
+| `NRG_3_hg38+hg38_mega` | 12.1 GB | 2026-09-21 | NRG | yes | bit-identical | 24, 32 |
+| `NRR_3_hg38` | 20.1 GB | 2026-10-25 | NRR | yes | bit-identical | — |
+| `NRR_3_hg38+hg38_HGDP1kGP` | 42.9 GB | 2026-10-25 | NRR | yes | bit-identical | 23, 70 |
+| `NRR_3_hg38+hg38_HPRC` | 30.7 GB | 2026-10-30 | NRR | yes | bit-identical | 24, 248; **replaced** (the 2026-10-27 archive's registry metadata was stale) |
+| `NRR_3_hg38+hg38_mega` | 25.2 GB | 2026-10-30 | NRR | yes | bit-identical | 24, 67; **replaced** (the 2026-10-27 archive had 24, 0: empty) |
+| `NGG_3_hg38` | 3.7 GB | 2026-10-25 | NGG | yes | bit-identical | — |
+| `NGG_3_hg38+hg38_HGDP1kGP` | 21.5 GB | 2026-10-25 | NGG | yes | bit-identical | 23, 23 |
+| `NNN_3_hg38` | 71.5 GB | 2026-10-30 | none (all-N, width 3) | yes | **rebuilt with it, replaced** (the 2026-10-25 archive differs) | — |
+| `NNN_3_hg38+hg38_HGDP1kGP` | 109.5 GB | 2026-10-30 | none (all-N, width 3) | yes | **rebuilt with it, replaced** (the 2026-10-25 archive differs) | 23, 245 (the 2026-10-25 archive: 23, 222) |
+| `genotypes_hg38_HGDP1kGP` | 5.7 GB | 2026-10-07 | — | yes | not an index | — |
+| `genotypes_hg38_HPRC` | 0.6 GB | 2026-10-27 | — | yes | not an index | — |
 
-**2.8.1 replaces `NRR_3_hg38+hg38_mega`**, which shipped an empty indel index,
-**`NRR_3_hg38+hg38_HPRC`**, whose registry lacks the stamp that selects the per-sample
-default, and **both `NNN_3` archives**, rebuilt with the 2.9.1 builder (all below).
+**2.8.1 replaced `NRR_3_hg38+hg38_mega`**, which shipped an empty indel index,
+**`NRR_3_hg38+hg38_HPRC`**, whose registry lacked the stamp that selects the per-sample
+default, and **both `NNN_3` archives**, rebuilt with the 2.9.1 builder (all below). The
+replacements were uploaded on 2026-10-30, each at its archive's existing path.
 
 An install replaces each `Dictionaries/` folder of its panel, so every replacement and
 the K = 8 archive were checked member by member (SHA-256) against what the published
@@ -77,8 +82,8 @@ before.
 ## The 2 `NNN_3` archives: rebuilt for 2.8.1
 
 The archives published on 2026-10-25 were built before the fix. An all-N PAM is fully
-unconstrained, so the relaxation applies to them, and 2.8.1 replaces both with a 2.9.1
-build.
+unconstrained, so the relaxation applies to them, and 2.8.1 replaced both with a 2.9.1
+build, uploaded on 2026-10-30.
 
 **What the fix changes** (chr22, same inputs, both builders):
 
@@ -151,6 +156,9 @@ differ only at a site whose PAM bases are assembly `N`.
 **Staged as searched.** The staged archives hold the build that was searched: rsync
 checked every transferred file against a whole-file checksum, every file is in the
 archive at its path with its exact size, and the gzip stream's CRC held on unpacking.
+After the upload every entry of `indexes/SHA256SUMS` equals the Hub's LFS SHA-256 for that
+archive, the post-upload check `docs/hf/README.md` prescribes for proving that the Hub holds
+what was staged.
 
 ## `NRR_3_hg38+hg38_mega`: published with an empty indel index
 
@@ -159,7 +167,7 @@ what an indel search needs, so every published variant archive was also checked 
 the archive itself: downloaded, SHA-256 equal to the Hub's LFS oid, members listed.
 One failed.
 
-| | published 2026-10-27 | replacement (staged) |
+| | published 2026-10-27 | replacement (on the Hub since 2026-10-30) |
 |---|---|---|
 | `_INDELS` | 24 sub-indexes, **0** `.bin` | 24 sub-indexes, 67 `.bin` (5.29 GB) |
 | `Dictionaries/log_indels_hg38_mega` | 24 header-only logs (72–73 B each) | 419.1 MB, as in NRG mega |
@@ -210,7 +218,7 @@ targets, 24 of 24 chromosomes, 1,131,494 targets in all (NRR's `N[AG][AG]` conta
 NRG's `N[AG]G`, so nothing else would be consistent). Each engine-level total equals
 the pipeline's indel row count above, so the pipeline carried every one through.
 
-## `NRR_3_hg38+hg38_HPRC`: complete, with a registry that sets the wrong default
+## `NRR_3_hg38+hg38_HPRC`: complete, with a registry that set the wrong default
 
 Its indel index is complete (24 sub-indexes, 248 bins) and its index directories
 match the publish source member for member. But it was published from ml007's
@@ -220,9 +228,9 @@ chooses the default analysis mode from that stamp — per-sample when it reads
 `genotyped-phased`, population-level otherwise — so an NRR HPRC search silently ran
 population-level, without named carriers or CONFIRMED cis phasing, on a phased
 panel. And an install replaces `Dictionaries/registry_hg38_HPRC`, so installing NRR
-HPRC next to NRG HPRC changed NRG HPRC's default too. The replacement takes its
-`Dictionaries/` + `samplesIDs/` from the published NRG HPRC archive and changes
-nothing else.
+HPRC next to NRG HPRC changed NRG HPRC's default too. The replacement, uploaded on
+2026-10-30, takes its `Dictionaries/` + `samplesIDs/` from the published NRG HPRC
+archive and changes nothing else.
 
 ## The wide-flank (K = 8) family: a separate repo
 
@@ -233,19 +241,27 @@ reported as a clean empty result. These therefore go to
 the split derived from the flank width at publish time rather than from a list of
 names.
 
-**Publish the 2026-10-28 build**, not the 2026-10-26 one:
+In `lucapinello/crisprme-data-general-index` (Size and Uploaded as defined above):
+
+| Archive | Size | Uploaded | Readable by 2.8.0 | 2.9.1 builder content |
+|---|---|---|---|---|
+| `NNNNNNNN_3_hg38` | 82.2 GB | 2026-10-30 | no (8-nt flank) | built with it (the 2026-10-28 build below) |
+| `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 122.7 GB | 2026-10-30 | no (8-nt flank) | built with it (the 2026-10-28 build below) |
+| `genotypes_hg38_HGDP1kGP` | 5.7 GB | 2026-10-30 | yes | not an index; the main repo's file, unchanged |
+
+**The 2026-10-28 build was published**, not the 2026-10-26 one:
 
 | source | built | status |
 |---|---|---|
-| `n8_fixed_install/genome_library/NNNNNNNN_3_hg38` (1,628 bins) | 2026-10-28 17:01 | **publish this** |
-| `n8_fixed_install/genome_library/NNNNNNNN_3_hg38+hg38_HGDP1kGP` (1,628 bins) + `_INDELS` | 2026-10-28 19:56 / 20:00 | **publish this** |
-| `nnn_fromscratch/genome_library/NNNNNNNN_3_*` | 2026-10-26 11:25 | **do not publish** — pre-N-gate-fix |
+| `n8_fixed_install/genome_library/NNNNNNNN_3_hg38` (1,628 bins) | 2026-10-28 17:01 | **published** |
+| `n8_fixed_install/genome_library/NNNNNNNN_3_hg38+hg38_HGDP1kGP` (1,628 bins) + `_INDELS` | 2026-10-28 19:56 / 20:00 | **published** |
+| `nnn_fromscratch/genome_library/NNNNNNNN_3_*` | 2026-10-26 11:25 | **not published**: pre-N-gate-fix |
 
-The repo also needs its own `genotypes_hg38_HGDP1kGP.tar.gz`. `download` fetches
+The repo carries its own `genotypes_hg38_HGDP1kGP.tar.gz`. `download` fetches
 the genotype companion (and the shared reference index) from the repo the index
 came from, with no fallback, so without a copy there a per-sample search on the
-K = 8 variant index runs with degraded Samples. Upload the main repo's file
-unchanged, so both repos hold the same SHA-256.
+K = 8 variant index would run with degraded Samples. It is the main repo's file
+uploaded unchanged: both repos' `SHA256SUMS` list the same SHA-256 for it.
 
 A wide PAM-less index is the one case the N-gate fix materially changes, and it
 bites hardest on the synthetic indel genome, which is `N`-separated roughly every
@@ -266,15 +282,17 @@ committed 2.9.1 release:
 `searchOnTST.cpp` did change afterwards (the width-mismatch refusal) but is not
 compiled into `buildTST`, so it cannot affect index content.
 
-## Gaps to close at publish time
+## Gaps
 
-- **No `SHA256SUMS` under `indexes/`** in either repo, although `build-inputs/`
-  has shipped them since the kits were uploaded. `scripts/hf_sha256sums.py` now
-  writes one from the Hub's own LFS checksums (an LFS object is addressed by its
-  SHA-256; the oids match both shipped `build-inputs/*.SHA256SUMS`), so the "is
-  what is on Hugging Face what we validated?" question is answered by checksum
-  instead of by re-running a gate arm. Stage it with the archives, then diff the
-  regenerated file after the upload (`docs/hf/README.md`).
+- **Closed at the 2026-10-30 upload: `SHA256SUMS` under `indexes/`.** Until then
+  neither repo had one, although `build-inputs/` has shipped them since the kits
+  were uploaded. Both repos now carry one, written by `scripts/hf_sha256sums.py`
+  from the Hub's own LFS checksums (an LFS object is addressed by its SHA-256; the
+  oids match both shipped `build-inputs/*.SHA256SUMS`): 14 archives in
+  `lucapinello/crisprme-data` and 3 in `lucapinello/crisprme-data-general-index`,
+  each entry equal to that archive's LFS SHA-256. The "is what is on Hugging Face
+  what we validated?" question is now answered by checksum instead of by re-running
+  a gate arm (`docs/hf/README.md`).
 - **Nothing stamps the builder version into an index.** The provenance above was
   reconstructed from upload dates, build mtimes and source hashes. A
   `.pam_build`-style sidecar recording the CRISPRitz version and git SHA would

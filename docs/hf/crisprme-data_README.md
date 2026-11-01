@@ -49,7 +49,8 @@ crisprme-data/
 │   ├── NRR_3_hg38{,+hg38_HGDP1kGP,+hg38_HPRC,+hg38_mega}.tar.gz   # NRR PAM
 │   ├── NGG_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # NGG PAM (cannot serve NAG off-targets)
 │   ├── NNN_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # PAM-LESS 3-nt flank — serves ANY 3-nt PAM
-│   └── genotypes_hg38_{HGDP1kGP,HPRC}.tar.gz   # per-sample genotype companions
+│   ├── genotypes_hg38_{HGDP1kGP,HPRC}.tar.gz   # per-sample genotype companions
+│   └── SHA256SUMS                              # checksum per archive (sha256sum -c, inside indexes/)
 ├── build-inputs/                   # PRE-ENRICHED kits (fast rebuild / new PAM: download --what build-inputs)
 │   ├── hg38_HGDP1kGP.tar.gz (+ .SHA256SUMS)
 │   └── hg38_mega.tar.gz     (+ .SHA256SUMS)
@@ -63,9 +64,9 @@ crisprme-data/
 
 ## Precomputed indexes
 
-**NRG** is the recommended PAM (the SpCas9 `NGG`/`NGA` superset — the conservative
-choice for off-target screening) and the only one with a full set of variant
-panels. NRR, NGG and a PAM-less index are also published; all are scored with
+**NRG** is the recommended PAM (the SpCas9 `NGG` + `NAG` superset — the conservative
+choice for off-target screening); NRG and NRR are published on all three variant
+panels, NGG and a PAM-less index on HGDP + 1000 Genomes only. All are scored with
 **CFD + CRISPR-Bulge**. Every index here stores a **3-nt PAM region**, which is
 what any CRISPRme release reads for a 3-nt PAM, so all of them work with older
 clients.
@@ -88,7 +89,7 @@ The two genotyped panels ship a `genotypes_hg38_*` companion that enables
 |---|---|---|
 | `NRR` | `NRR_3_hg38`, `+hg38_HGDP1kGP`, `+hg38_HPRC`, `+hg38_mega` | broader than NRG (`NAA`/`NAG`/`NGA`/`NGG`); a wider, more conservative screen |
 | `NGG` | `NGG_3_hg38`, `+hg38_HGDP1kGP` | canonical SpCas9 PAM only. **NGG cannot serve NAG off-targets**, so NRG is preferred for a safety screen |
-| `NNN` (PAM-less) | `NNN_3_hg38`, `+hg38_HGDP1kGP` | one index for ANY 3-nt PAM, selected at search time with `--prune-pam`. Larger on disk (67 GB / 102 GB) but removes the per-PAM rebuild |
+| `NNN` (PAM-less) | `NNN_3_hg38`, `+hg38_HGDP1kGP` | one index for ANY 3-nt PAM, selected at search time with `--prune-pam`. Larger (71 GB / 110 GB downloads, GB = 10⁹ bytes) but removes the per-PAM rebuild |
 
 **`NRR_3_hg38+hg38_mega` was replaced for CRISPRme+ 2.8.1.** The archive uploaded on
 2026-10-27 shipped an empty indel index and empty indel logs, so no indel off-target
@@ -131,17 +132,19 @@ cancer, with COSMIC gated behind a licence attestation),
 The indexes are fetched automatically:
 
 ```bash
-# one-shot: reference + recommended variant default + annotations + PAMs
+# one-shot: genome + annotations + PAMs + sample lists + the NRG_3_hg38 reference index
 crisprme.py download --what all --path .
 
-# or a single index
+# then the recommended variant default (or any other index by name)
 crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path .
 ```
 
-Direct download also works:
+Direct download of single files also works (`crisprme.py download` additionally unpacks and
+installs them). Name the files: the whole repo is about 432 GB.
 
 ```bash
-hf download lucapinello/crisprme-data --repo-type dataset --local-dir crisprme-data
+hf download lucapinello/crisprme-data indexes/NRG_3_hg38+hg38_HGDP1kGP.tar.gz \
+  indexes/SHA256SUMS --repo-type dataset --local-dir crisprme-data
 ```
 
 ## License & citation

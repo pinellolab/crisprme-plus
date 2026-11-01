@@ -194,7 +194,25 @@ indels genome-wide with SNP+SNP / SNP+indel co-occurrence; download whichever yo
 > run when you need maximal allele-frequency breadth. Grab the others any time from the web
 > **Settings** or by re-running the download with a different `--index-name`.
 
-**One index for many PAMs.** The indexes above are each built for the SpCas9 NRG PAM. A
+Download sizes (GB = 10⁹ bytes): `NRG_3_hg38` 8.9 GB; `NRG_3_hg38+hg38_HGDP1kGP` 27.7 GB plus
+its 5.7 GB genotype store; `NRG_3_hg38+hg38_HPRC` 15.2 GB plus 0.6 GB; `NRG_3_hg38+hg38_mega`
+12.1 GB (sites-only, no genotype store). A variant index also fetches `NRG_3_hg38` if it is
+not installed yet.
+
+**Other PAMs.** Some of the same panels are also published for the NGG and NRR PAMs:
+
+| Index (`--index-name`) | PAM | Variants | Download |
+|---|---|---|---|
+| `NGG_3_hg38` | NGG | none (reference-only) | 3.7 GB |
+| `NGG_3_hg38+hg38_HGDP1kGP` | NGG | HGDP + 1000 Genomes | 21.5 GB |
+| `NRR_3_hg38` | NRR (NAA, NAG, NGA, NGG) | none (reference-only) | 20.1 GB |
+| `NRR_3_hg38+hg38_HGDP1kGP` | NRR | HGDP + 1000 Genomes | 42.9 GB |
+| `NRR_3_hg38+hg38_HPRC` | NRR | HPRC pangenome | 30.7 GB |
+| `NRR_3_hg38+hg38_mega` | NRR | mega (sites-only) | 25.2 GB |
+
+NGG cannot serve NAG off-targets, so NRG stays the recommended PAM for a safety screen.
+
+**One index for many PAMs.** Each index above is built for one PAM. A
 **PAM-less** index instead stores the raw genomic flank, and the PAM is applied during the
 search, so a single index answers any PAM no longer than that flank:
 
@@ -208,6 +226,12 @@ crisprme.py complete-search --prune-pam \
 |---|---|---|---|
 | `NNN_3_hg38` | 3 nt | any 3-nt PAM, reference-only | 71 GB |
 | `NNN_3_hg38+hg38_HGDP1kGP` | 3 nt | any 3-nt PAM, with variants | 110 GB |
+| `NNNNNNNN_3_hg38` | 8 nt | any 3′ PAM up to 8 nt (a 5′ PAM only at exactly 8 nt), reference-only | 82 GB |
+| `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 8 nt | the same, with variants | 123 GB |
+
+The two 8-nt-flank indexes live in a separate dataset repo,
+`lucapinello/crisprme-data-general-index`, because a release older than CRISPRme+ 2.8.1
+cannot read them; `download` fetches them from there by itself.
 
 A PAM-less index with `--prune-pam` gives a **byte-identical** report to the dedicated
 index for the same PAM (verified genome-wide — see
@@ -1988,7 +2012,7 @@ To build a **different PAM** (NGG, NNGRRT, TTTN, …) on the shipped re-phased *
 
 **`complete-search --index-path <dir>`** — reuse a prebuilt/staged index library instead of building one under the working directory. A missing matching index is a hard error (rather than a silent rebuild), which is what you want on a read-only shared mount.
 
-**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), `vcf` (with `--dataset` — raw per-dataset VCFs, only if the repo hosts a `vcfs/<dataset>/` folder; the default repo ships the standard panels as prebuilt `index`es instead, so this is for custom/self-hosted repos), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `NRG_3_hg38` reference index so a reference scan works with no on-demand build). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and variant off-target rows require the genotype tier** — omit `--no-genotypes` for full dict-less variant-aware output. Default repo `lucapinello/crisprme-data`, overridable with `--hf-repo` or `CRISPRME_HF_REPO`:
+**`download`** — fetch reference data from a HuggingFace dataset repository over HF's CDN (typically much faster than the FTP/UCSC sources). `--what` selects the component: `genome`, `annotations`, `pams`, `samples`, `index` (with `--index-name`), `assembly` (with `--sample <HPRC id>`), `vcf` (with `--dataset` — the raw source VCFs of a variant panel, kept bgzipped under `VCFs/<dataset>/`; the default repo hosts `hg38_HGDP1kGP`, `hg38_HPRC` and `hg38_mega`, which you need only to build an index yourself), `build-inputs` (with `--dataset`: the pre-enriched genome kit that lets `build-index-only` skip enrichment for a new PAM; hosted for `hg38_HGDP1kGP` and `hg38_mega`), or `all` (genome + annotations + PAMs + samples; on hg38 `all` also fetches the default `NRG_3_hg38` reference index so a reference scan works with no on-demand build). For `--what index`, `--no-genotypes` skips the big separate Tier-1 genotype store; the Tier-0 registry it keeps still corrects allele frequencies and rsIDs, but **per-individual `Samples` and variant off-target rows require the genotype tier** — omit `--no-genotypes` for full dict-less variant-aware output. Default repo `lucapinello/crisprme-data`, overridable with `--hf-repo` or `CRISPRME_HF_REPO`:
 
 ```bash
 crisprme.py download --what all --path /data/crisprme
