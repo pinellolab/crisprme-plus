@@ -11,12 +11,10 @@ web Settings page passes none of" and "a run without it (a build from the web Se
 page) does not write") should say the same: "(for the tiers, with their `--samplesID`, or
 built again in the web Settings page)" and "a run without it (as a build from the web
 Settings page was before this release)".
-The first entry's last sentence describes the tables of a search that reads the tiers as
-they are at this commit: if the fix of their REF columns (round 3 review F3:
-PostProcess/new_simple_analysis.py writes the REF alignment of an observed or fast-mode row
-without lowercase mismatches, so its REF seed and non-seed counts read 0) lands in 2.8.1,
-drop its clause "and on a SNP row the reference alignment has no lowercase mismatches and
-its REF seed and non-seed counts read 0, as on every search that reads the tiers". -->
+The first entry's last sentence gives the tables of a search that reads the tiers. It
+leaves out the REF columns of a SNP row there (no lowercase mismatches, so the REF seed and
+non-seed counts leave the mismatches out: round 4 review F3-tier-REF), which another track
+fixes in this release (PostProcess/new_simple_analysis.py). -->
 
 ### Fixed
 - **A VCF dataset added in the web Settings page can be searched from the browser, per sample too.**
@@ -52,9 +50,7 @@ its REF seed and non-seed counts read 0, as on every search that reads the tiers
   build and of a downloaded index do, where they read the dataset's dictionaries before, so their
   tables change: an indel and a SNP that one haplotype carries are reported as one off-target, for
   the samples that carry both (the dictionary path reported the SNP alone, aligned with a bulge, for
-  every carrier of the SNP), allele frequencies have six decimals, rows come in another order, and
-  on a SNP row the reference alignment has no lowercase mismatches and its REF seed and non-seed
-  counts read 0, as on every search that reads the tiers.
+  every carrier of the SNP), allele frequencies have six decimals, and rows come in another order.
   **If you added a dataset in Settings,** build its variant index again there; to give its
   samples' populations and sex, put your own list at `samplesIDs/<dataset>.samplesID.txt` first.
 - **The Settings VCF upload records the reference genome you pick, and the search form offers the
