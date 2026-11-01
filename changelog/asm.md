@@ -33,32 +33,54 @@
   searched with that index does not. **What to do:** run those searches again. The index
   `genome_library/<PAM>_<N>_genome` they left (in Settings > Installed indexes, e.g. `NRG_2_genome`)
   is no longer used and can be deleted there. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
-- **A personal-assembly search without bulges returned no off-target for a bundle assembly, and then
-  stopped with a traceback.** The 0-bulge search scanned `Genomes/<genome name>/` instead of the
-  genome folder it was given. A bundle haplotype has no folder there, the search engine reported
-  `ERROR! /DATA/Genomes/genome/ is not a directory.` but exited 0, and both haplotypes came back
-  empty ("The search completed successfully; the result set is empty"); the combined report then
-  failed on the empty set (`TypeError`), so `assembly-search` exited 1. `--bDNA` and `--bRNA` are
-  optional and default to 0, so this was the documented minimal command
+- **A search without bulges of a genome folder outside `Genomes/` came back empty, or scanned
+  another genome.** The 0-bulge search reads the genome's FASTA files directly, and read them from
+  `Genomes/<name of the --genome folder>/` instead of the folder it was given. Without such a folder
+  the search engine reported `ERROR! /DATA/Genomes/<name>/ is not a directory.` but exited 0, and
+  the search ended with "The search completed successfully; the result set is empty". With one,
+  that folder was scanned in place of the given one (a `--genome other/hg38` whose chr1 carries a
+  2-mismatch site at chr1:35000 reported the 4-mismatch protospacer of `Genomes/hg38` there). On
+  the command line this hit `complete-search --genome <folder outside Genomes/>` with
+  `--bDNA 0 --bRNA 0`, and the same search without bulge flags when the library has no index of
+  that genome, since the bulges then default to 0
+  (`complete-search --genome /data/mygenome --guide ... --pam ... --mm 4`). It also hit every
+  personal-assembly search without bulges, as a bundle keeps each haplotype in
+  `Assemblies/<individual>/<haplotype>/genome`: both haplotypes came back empty, and the combined
+  report then failed on the empty set (`TypeError`, see below), so `assembly-search` exited 1;
+  `--bDNA` and `--bRNA` are optional and default to 0, so this was the documented minimal command
   (`assembly-search --assembly-individual <name> --guide ... --pam ... --mm ...`). The search now
-  scans the folder it is given: on the synthetic bundle each haplotype reports its 9 sites and the
-  run completes. Searches of a genome in `Genomes/` are unchanged (the same folder); reference and
-  variant search outputs were compared byte for byte, with and without bulges. Covered by
-  `PostProcess/test_assembly_haplotype_genomes.py`.
+  scans the folder it is given: a copy of `Genomes/hg38` outside `Genomes/` reports the same 9 sites
+  as `Genomes/hg38`, and on the synthetic bundle each haplotype reports its 9 sites. A search of a
+  genome in `Genomes/`, which includes every search from the web's Reference genome tab, scans the
+  same folder as before; reference and variant search outputs were compared byte for byte, with
+  and without bulges. **Affected:** 0-bulge `complete-search` runs of a genome folder outside
+  `Genomes/` from the command line, and 0-bulge personal-assembly searches from the CLI or the
+  web. **What to do:** run them again. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+- **A genome in `Genomes/` that is a link to a folder of another name failed in the
+  post-analysis.** The pipeline resolved the link and named the genome after the link's target in
+  one step and after the link in another, so a search of `Genomes/hg38lnk` -> `../shared/GRCh38_copy`
+  stopped with `grep: .../crispritz_targets/GRCh38_copy_..._targets.txt: No such file or directory`
+  and `ERROR: off-targets post-analysis (reference) failed` (exit 1), with or without bulges. The web
+  runs the same pipeline on `Genomes/<name>`, so its searches of such a genome failed the same way.
+  A link named like its target (`Genomes/hg38` -> `/shared/genomes/hg38`) was not affected. The
+  genome now keeps the name of the folder the search is given (each personal-assembly haplotype is
+  searched through such a link, named after the haplotype). The linked genome's results equal those
+  of the same sequence in `Genomes/hg38`, apart from the genome's name in the file names.
+  **Affected:** every search of such a link, from the CLI or the web. **What to do:** run them
+  again.
 - **A personal-assembly search stopped before its combined report when a haplotype had no
   off-target.** When the guide had no off-target on one haplotype (or none there that lifted to
   hg38), or none on either, `assembly-search` wrote the combined table and then failed with
-  `TypeError: cannot concatenate object of type '<class 'numpy.float64'>'; only Series and
-  DataFrame objs are valid` (exit 1); on the web the job finished without a combined report. The
-  combined table (`<job>_combined_hg38.tsv`) left out the columns of a haplotype without
-  off-targets (19 columns instead of 34), and the report reads both haplotypes' columns. The table
-  now always has both haplotypes' columns, blank for a haplotype without off-targets as on any row
-  found on one haplotype only, and the combined report is built (with no off-target on either
-  haplotype it says "No off-targets in this run."). A search with off-targets on both haplotypes
-  writes the same table and report as before (compared byte for byte, apart from the report's
-  generation time). **Affected:** such searches, from the CLI or the web, e.g. `--mm 0` with a
-  guide that matches one haplotype only. **What to do:** run them again for the combined report.
-  Covered by `PostProcess/test_assembly_reconcile.py`.
+  `TypeError: cannot concatenate object of type '<class 'numpy.float64'>'` (exit 1); on the web
+  the job finished without a combined report. The combined table (`<job>_combined_hg38.tsv`) left
+  out the columns of a haplotype without off-targets (19 columns instead of 34), and the report
+  reads both haplotypes' columns. The table now always has both haplotypes' columns, blank for a
+  haplotype without off-targets as on any row found on one haplotype only, and the combined report
+  is built (with no off-target on either haplotype it says "No off-targets in this run."). A search
+  with off-targets on both haplotypes writes the same table and report as before (compared byte for
+  byte, apart from the report's generation time). **Affected:** such searches, from the CLI or the
+  web, e.g. `--mm 0` with a guide that matches one haplotype only. **What to do:** run them again
+  for the combined report. Covered by `PostProcess/test_assembly_reconcile.py`.
 - **A search could run on the index of another genome whose name ends in the searched genome's
   name.** The pipeline picks an installed index by the genome's name,
   `genome_library/<PAM>_<N>_<name>`, but the pattern it matched also took
@@ -71,14 +93,15 @@
   index named for the genome itself is now taken. A library without two such names picks the same
   index as before, and reference and variant search outputs were compared byte for byte. Covered by
   `PostProcess/test_assembly_haplotype_genomes.py`.
-- **The personal-assembly results header and History named both haplotypes "genome".** They showed
-  `Paternal genome: genome | Maternal genome: genome`: the name of the folder every bundle haplotype
-  is kept in, which `assembly-search` wrote into the job's `.Params.txt` when it finished (the web
-  form's own label was overwritten). Both now show the bundle's assembly name (`assembly_name` in
-  its `metadata.json`; for an HPRC fetch, the HPRC assembly name), or `<individual>_<haplotype>` when
-  the bundle records none, from the CLI and the web alike; a legacy `Genomes/<name>` folder keeps its
-  name.
-  Jobs that already finished keep the label they were written with.
+- **The personal-assembly results header, History and combined report named both haplotypes
+  "genome".** The header and History showed `Paternal genome: genome | Maternal genome: genome`, and
+  the combined report (`report.html` in `<job>_combined_report.zip`) the same in its Paternal genome
+  and Maternal genome rows: the name of the folder every bundle haplotype is kept in, which
+  `assembly-search` wrote into the job's `.Params.txt` when it finished (the web form's own label
+  was overwritten). All three now show the bundle's assembly name (`assembly_name` in its
+  `metadata.json`; for an HPRC fetch, the HPRC assembly name), or `<individual>_<haplotype>` when
+  the bundle records none, from the CLI and the web alike; a legacy `Genomes/<name>` folder keeps
+  its name. Jobs that already finished keep the label they were written with.
 - **Submitting the Personal assembly tab with no individual selected listed six fields the form does
   not show.** The warning listed "paternal genome", "maternal genome", the two chain files and the
   two chromAlias files, which the Individual picker fills. It now says "select an individual on the
