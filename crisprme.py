@@ -3277,7 +3277,8 @@ def _in_build_dir(parent: str, prefix: str, build, stage=None):
     return _with_cleanup(run, cleanup)
 
 
-def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bool:
+def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
+                     **kwargs) -> bool:
     """Runs index command ``cmd``, which writes ``./genome_library/<name>`` under its
     working directory, and puts that in ``<workdir>/genome_library/<name>`` only
     once the command has succeeded.
@@ -3292,11 +3293,20 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bo
     does. Every path ``cmd`` names is absolute, so it resolves from there.
     ``failure`` is the error for a command that fails, or that exits 0 but leaves a
     .bin that is not whole (crispritz_bins: buildTST does not check its writes, so a
-    full disk leaves one empty or cut short). If a search holds the index's build
-    lock by then, the run stops (_refuse_locked_build); if another run has put the
-    index in place meanwhile, that one is kept and this build discarded. Returns
-    True when this build went into place.
+    full disk leaves one empty or cut short). buildTST does not check that a .bin
+    opened either: with the disk's inode table or a file-count quota full, it
+    writes none for the contigs left and still exits 0. So the run fails the same
+    way when a contig that holds a target has no .bin (crispritz_bins.missing_bins),
+    and, where a contig has no .bin that missing_bins cannot read as buildTST does,
+    when a directory of the index cannot take a file more once the command has ended:
+    ``indexed`` is ``(pam_file, max_bulges, [(genome_dir, subdir)...])``, what ``cmd``
+    indexes, each genome into ``subdir`` of the index (None: no contig read). If a
+    search holds the index's build lock by then, the run stops
+    (_refuse_locked_build); if another run has put the index in place meanwhile,
+    that one is kept and this build discarded. Returns True when this build went
+    into place.
     """
+    import errno
     import crispritz_bins
 
     lib = os.path.join(workdir, "genome_library")
@@ -3315,6 +3325,31 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, **kwargs) -> bo
                 f"is {cut[0][1]}, as when the disk fills up: nothing was put in place "
                 f"(expected {final})"
             )
+        unread = indexed is None
+        for genome_dir, subdir in indexed[2] if indexed else []:
+            missing, cannot = crispritz_bins.missing_bins(
+                os.path.join(built, subdir), genome_dir, indexed[0], indexed[1])
+            if missing:
+                error(
+                    f"{failure}: the engine exited 0, but wrote no .bin for {missing[0][1]} "
+                    f"({os.path.join(genome_dir, missing[0][0])}), which holds a target, as "
+                    f"when the disk's inode table or a file-count quota is full: nothing "
+                    f"was put in place (expected {final})"
+                )
+            unread = unread or bool(cannot)
+        for top, _dirs, _files in os.walk(built) if unread else ():
+            probe = os.path.join(top, ".build-index-only-probe")
+            try:
+                os.close(os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL))
+            except OSError as exc:
+                if exc.errno in (errno.ENOSPC, errno.EDQUOT):
+                    error(
+                        f"{failure}: the engine exited 0, but the disk or its inode table "
+                        f"is full ({exc}), so it may have left out the .bin of a contig: "
+                        f"nothing was put in place (expected {final})"
+                    )
+                continue
+            os.remove(probe)
         _refuse_locked_build(final)
         if not os.path.isdir(final):
             try:
@@ -3448,7 +3483,7 @@ def build_index_only() -> None:
         )
         if _build_index_dir(
             index_cmd, workdir, index_name, "Reference genome indexing failed",
-            shell=True,
+            indexed=(pamfile, bMax + 1, [(genomedir, "")]), shell=True,
         ):
             print(f"Index built: {idx_folder}", flush=True)
     _write_pam_build(idx_folder, pamfile)
@@ -4114,6 +4149,7 @@ def build_index_only() -> None:
             workdir,
             os.path.basename(snp_idx),
             "Variant genome indexing failed",
+            indexed=(pamfile, bMax + 1, [(enriched, "")]),
             shell=True,
         )
     else:
@@ -4174,6 +4210,13 @@ def build_index_only() -> None:
                 workdir,
                 os.path.basename(indels_idx),
                 "Indels indexing failed",
+                # each chromosome's fake-indel genome, into its directory of the index,
+                # as pool_index_indels.py indexes them
+                indexed=(pamfile, bMax + 1, [
+                    (os.path.join(indels_out, _fk),
+                     f"{pam_char}_{bMax + 1}_fake{_fk.split('_')[-1]}")
+                    for _fk in sorted(os.listdir(indels_out)) if "chr" in _fk
+                    and os.path.isdir(os.path.join(indels_out, _fk))]),
             )
     else:
         print(f"Indels index already present: {indels_idx}", flush=True)

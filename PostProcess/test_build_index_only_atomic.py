@@ -56,9 +56,11 @@ STUB_ENGINE = r'''#!PYTHON
 Each output file is a step "<command> <name> <input file>". A step whose key holds
 $STUB_FAIL fails (exit 1) before it is written; one whose key holds $STUB_HANG
 waits there, once $STUB_MARK is made, until $STUB_RELEASE exists. index-genome
-writes each .bin as buildTST does, a tree of one target (the whole sequence); one
-whose step's key holds $STUB_CUT it cuts to $STUB_CUT_TO bytes (half by default)
-and still exits 0, as buildTST does on a full disk. add-variants pads the fake
+writes each .bin as buildTST does, named by its contig's header, a tree of one
+target (the whole sequence), and none for a contig of N alone; one whose step's key
+holds $STUB_CUT it cuts to $STUB_CUT_TO bytes (half by default), and one whose key
+holds $STUB_NO_BIN it does not write, and still exits 0, as buildTST does on a full
+disk, or with the disk's inode table full. add-variants pads the fake
 contig of chromosome $STUB_BIG_FAKE with a megabase of N (and this stub lifts any
 file-size limit of its own), and with $STUB_GZ_BLOCKED leaves a directory where the
 last dictionary's .gz would go.
@@ -111,6 +113,11 @@ def sequence(path):
         return "".join(line.strip() for line in fh)
 
 
+def header(path):
+    with open(path) as fh:
+        return fh.readline().rstrip("\n")[1:]
+
+
 def write(path, text):
     with open(path, "w") as fh:
         fh.write(text)
@@ -132,12 +139,15 @@ if sys.argv[1] == "index-genome":
         key = "index-genome %s %s" % (name, fa)
         step(key)
         seq = sequence(os.path.join(gdir, fa))
-        if not seq:  # (buildTST writes no tree where there is no target)
+        if not seq.strip("N"):  # (buildTST writes no tree where there is no target)
+            continue
+        if os.environ.get("STUB_NO_BIN") and os.environ["STUB_NO_BIN"] in key:
             continue
         data = tst(pam, nb, seq)
         if os.environ.get("STUB_CUT") and os.environ["STUB_CUT"] in key:
             data = data[: int(os.environ.get("STUB_CUT_TO", len(data) // 2))]
-        with open(os.path.join(out, "%s_%s_1.bin" % (pam, fa[: -len(".fa")])), "wb") as fh:
+        with open(os.path.join(out, "%s_%s_1.bin" % (pam, header(os.path.join(gdir, fa)))),
+                  "wb") as fh:
             fh.write(data)
 elif sys.argv[1] == "add-variants":
     vdir, gdir = os.path.realpath(sys.argv[2]), os.path.realpath(sys.argv[3])
@@ -215,7 +225,9 @@ for i, f in enumerate(files):
 # STUB_SIGNAL_AT_RENAME=<path>: the first rename to <path>, or into it, is preceded by
 # a signal to the process itself, SIGTERM or the one $STUB_SIGNAL_AT_RENAME_SIG names;
 # STUB_RENAME_HANG=<path>: it waits instead, once $STUB_MARK is made, until
-# $STUB_RELEASE exists.
+# $STUB_RELEASE exists. STUB_PROBE_FULL=<errno name>: the file build-index-only makes
+# and removes in each directory of an index it built cannot be made, with that errno,
+# as with the disk's inode table or a file-count quota full.
 SHIM = r'''
 import builtins, errno, os, signal, time
 
@@ -321,6 +333,17 @@ if os.environ.get("STUB_SIGNAL_AT_RENAME") or os.environ.get("STUB_RENAME_HANG")
         return renamed
 
     os.rename = _stop_before(os.rename)
+
+if os.environ.get("STUB_PROBE_FULL"):
+    _os_open = os.open
+
+    def _open_probe(path, flags, *args, **kwargs):
+        if os.path.basename(str(path)) == ".build-index-only-probe":
+            why = getattr(errno, os.environ["STUB_PROBE_FULL"])
+            raise OSError(why, os.strerror(why), str(path))
+        return _os_open(path, flags, *args, **kwargs)
+
+    os.open = _open_probe
 '''
 
 SHARED = None  # the stub Bio package and a warmed matplotlib cache, for every run
@@ -634,8 +657,7 @@ class _Fixture(unittest.TestCase):
 # second chromosome (so stopping there leaves the first one built).
 WHOLE = {
     REF: (False, "index-genome hg38 chr2.fa", ["NRG_chr1_1.bin", "NRG_chr2_1.bin"]),
-    VAR: (True, "index-genome hg38+ds chr2.enriched.fa",
-          ["NRG_chr1.enriched_1.bin", "NRG_chr2.enriched_1.bin"]),
+    VAR: (True, "index-genome hg38+ds chr2.enriched.fa", ["NRG_chr1_1.bin", "NRG_chr2_1.bin"]),
     INDELS: (True, "NRG_2_fakechr2 fakechr2.fa",
              ["NRG_2_fakechr1/NRG_fakechr1_1.bin", "NRG_2_fakechr2/NRG_fakechr2_1.bin"]),
 }
@@ -756,6 +778,73 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                     rc, out, err = self.run_bio(vcf=vcf)
                     self.assertEqual(rc, 0, err)
                     self.assertEqual(self.bins(name), whole)
+
+    def test_a_build_the_engine_left_without_a_bin_is_not_put_in_place(self):
+        """buildTST does not check that a .bin opened either: with the disk's inode
+        table or a file-count quota full, it wrote no .bin for the contigs left and
+        exited 0, every .bin there whole (the stub does so at $STUB_NO_BIN). That index
+        went into place, every later run kept it, and every search lacked the
+        off-targets of those contigs, with no error. A contig that holds a target and
+        has no .bin now fails the build. Where a contig has no .bin and cannot be read
+        as buildTST reads it, so does a directory of the index that cannot take a file
+        more as the engine ends. A contig with no target gets no .bin, and an index
+        whole goes into place as before, though its build filled the inode table."""
+        failure = {REF: "Reference genome", VAR: "Variant genome", INDELS: "Indels"}
+        fasta = {REF: ("Genomes", "hg38", "chr2.fa"), VAR: ("Genomes", "hg38+ds", "chr2.enriched.fa"),
+                 INDELS: ("Genomes", "hg38+ds_INDELS", "fake_ds_chr2", "fakechr2.fa")}
+        contig = {REF: "chr2", VAR: "chr2", INDELS: "fakechr2"}
+        for name, (vcf, chr2, whole) in WHOLE.items():
+            for how, stub in (("no .bin", dict(STUB_NO_BIN=chr2)),
+                              ("the inode table full as it ends", dict(shim=True, STUB_PROBE_FULL="ENOSPC"))):
+                with self.subTest(index=name, how=how):
+                    self.fresh()
+                    if name != REF:  # (only that index to build)
+                        rc, out, err = self.run_bio()
+                        self.assertEqual(rc, 0, err)
+                        shutil.rmtree(self.lib(name))
+                    rc, out, err = self.run_bio(vcf=vcf, **stub)
+                    if how != "no .bin":  # (every contig has its .bin)
+                        self.assertEqual(rc, 0, err)
+                        self.assertEqual(self.bins(name), whole)
+                        continue
+                    self.assertEqual(rc, 1, out + err)
+                    self.assertEqual(err, f"Error: {failure[name]} indexing failed: the engine "
+                                          f"exited 0, but wrote no .bin for {contig[name]} "
+                                          f"({self.path(*fasta[name])}), which holds a target, as "
+                                          "when the disk's inode table or a file-count quota is "
+                                          f"full: nothing was put in place (expected {self.lib(name)})\n")
+                    self.assertFalse(os.path.lexists(self.lib(name)))
+                    self.assertEqual(self.leftovers(), [])
+                    rc, out, err = self.run_bio(vcf=vcf)
+                    self.assertEqual(rc, 0, err)
+                    self.assertEqual(self.bins(name), whole)
+        # a contig it cannot read as buildTST does (a byte no IUPAC base), with no .bin
+        for full in (None, "ENOSPC", "EDQUOT"):
+            with self.subTest(unread=True, full=full):
+                self.fresh()
+                _write(self.path("Genomes", "hg38", "chrUn.fa"), ">chrUn\n" + GENOME["chr1"] + "*\n")
+                rc, out, err = self.run_bio(vcf=False, STUB_NO_BIN="chrUn.fa",
+                                            **(dict(shim=True, STUB_PROBE_FULL=full) if full else {}))
+                if not full:  # (as before: not told from one with no target)
+                    self.assertEqual(rc, 0, err)
+                    self.assertEqual(self.bins(REF), WHOLE[REF][2])
+                    continue
+                why = getattr(errno, full)
+                self.assertEqual(rc, 1, out + err)
+                self.assertTrue(err.startswith("Error: Reference genome indexing failed: the engine "
+                                               "exited 0, but the disk or its inode table is full "
+                                               f"([Errno {why}] {os.strerror(why)}: "), err)
+                self.assertTrue(err.endswith(".build-index-only-probe'), so it may have left out "
+                                             "the .bin of a contig: nothing was put in place "
+                                             f"(expected {self.lib(REF)})\n"), err)
+                self.assertFalse(os.path.lexists(self.lib(REF)))
+                self.assertEqual(self.leftovers(), [])
+        # a contig with no target (N alone) gets no .bin, as before
+        self.fresh()
+        _write(self.path("Genomes", "hg38", "chr3.fa"), ">chr3\n" + "N" * 120 + "\n")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.bins(REF), WHOLE[REF][2])
 
     def test_a_genome_library_on_another_file_system_still_gets_its_index(self):
         """No rename crosses file systems: the build runs beside the indexes."""
@@ -2087,6 +2176,115 @@ class TheIndexCheckTellsAWholeTreeFromOneCutShort(unittest.TestCase):
                     self.assertIsNotNone(crispritz_bins.bin_problem(path), size)
 
 
+def buildtst_targets(seq, pam, pam_len, at_start, max_bulges):
+    """The number of targets buildTST keeps in contig seq: searchPAMonGenome,
+    guideRegionHasN and main in CRISPRitz 2.9.1 (pamGenerator.cpp, mainParallel.cpp),
+    loop for loop, as slow as they are. It gives the real buildTST's count."""
+    import crispritz_bins
+
+    size, width, n = len(pam), pam_len + max_bulges, len(seq)
+    if n < width:
+        return 0
+    genome = {b: crispritz_bins._BITS.get(b, 0) for b in "ACGTNRYSWKMBDHV"}
+    plus = [crispritz_bins._PAM_BITS[b] for b in pam]
+    minus = [crispritz_bins._PAM_BITS[b] for b in pam.translate(crispritz_bins._REVERSE)[::-1]]
+    free = all(b == 15 for b in plus)
+    indices = []
+    for nt in range(n - (pam_len if at_start else size)):
+        on_plus = free or all(genome[seq[nt + j]] & plus[j] for j in range(size))
+        on_minus = free or all(genome[seq[nt + j]] & minus[j] for j in range(size))
+        upstream, downstream = nt + size - width >= 0, nt <= n - width
+        if not at_start:
+            indices += [nt + size - width] * (on_plus and upstream) + [-nt] * (on_minus and downstream)
+        else:
+            indices += [-nt] * (on_plus and downstream) + [nt + size - width] * (on_minus and upstream)
+
+    def has_n(target, pam_in_front):
+        if pam_in_front:
+            return target.find("N", size) >= 0
+        return 0 <= target.find("N") < len(target) - size
+
+    kept = 0
+    for i in indices:
+        if (i > 0) if not at_start else (i >= 0):
+            kept += not has_n(seq[i:i + width], False)
+        else:
+            kept += not has_n(seq[-i:-i + width], True)
+    return kept
+
+
+class TheContigCheckFindsATargetWhereBuildTSTDoes(unittest.TestCase):
+    """crispritz_bins.holds_target, which tells a contig a full inode table left
+    without a .bin from one with no target, against buildTST's own loops
+    (buildtst_targets): random contigs of every kind (N runs, IUPAC codes, lower case,
+    targets at either end and windows at 0) and the shipped PAMs, 3' and 5', PAM-less
+    among them, at 0 to 3 bulges. And missing_bins, on the .bin names buildTST
+    writes: <PAM>_<the whole header>_<part>.bin."""
+
+    PAMS = ("NNNNNNNNNNNNNNNNNNNNNRG 3", "NNNNNNNNNNNNNNNNNNNNNGG 3", "NNNNNNNNNNNNNNNNNNNNNNN 3",
+            "TTTVNNNNNNNNNNNNNNNNNNNNNNN -4", "NNNNNNNNNNNNNNNNNNNNNNNGRRT 6",
+            "NNNNNNNNNNNNNNNNNNNNNNNNNNN -4", "NNNNNNNNNNNNNNNNNNNNNNNNNNNN 8")
+
+    def test_it_agrees_with_buildtst_on_random_contigs(self):
+        import crispritz_bins
+
+        r = random.Random(7)
+        held = 0
+        for case in range(2500):
+            motif, limit = r.choice(self.PAMS).split()
+            limit = int(limit)
+            pam = motif[:-limit] if limit < 0 else motif[-limit:]
+            bulges = r.randint(0, 3)
+            n = r.choice((r.randint(0, 40), r.randint(20, 60), r.randint(40, 300)))
+            mix = r.choice(("ACGT", "ACGT" * 6 + "N", "ACGTN", "ACGTNNNNRYSWKMBDHV", "ACGTNRYSWKMBDHV"))
+            seq = "".join(r.choice(mix) for _ in range(n))
+            if n > 10 and r.random() < 0.3:
+                a = r.randrange(n)
+                seq = seq[:a] + "N" * min(n - a, r.randint(1, 30)) + seq[a + 30:]
+            want = buildtst_targets(seq, pam, len(motif), limit < 0, bulges) > 0
+            held += want
+            self.assertEqual(crispritz_bins.holds_target(seq, pam, len(motif), limit < 0, bulges),
+                             want, (seq, motif, limit, bulges))
+        self.assertGreater(held, 500)
+        self.assertLess(held, 2000)
+
+    def test_missing_bins_names_only_a_contig_that_holds_a_target(self):
+        import crispritz_bins
+
+        top = tempfile.mkdtemp(prefix="bio_contigs_")
+        self.addCleanup(shutil.rmtree, top, True)
+        genome, index = os.path.join(top, "genome"), os.path.join(top, "index")
+        os.makedirs(index)
+        site = "ACGTTGCAAGACGTTGCAAGACGTAGG"  # a target for NRG at 0-2 bulges
+        contigs = {
+            "chr1.fa": ">chr1\n" + site + "\n",  # its .bin there: NRG_chr1_1.bin
+            "chr1_random.fa": ">chr1_random\n" + site + "\n",  # no .bin of its own
+            "chr2.fa": ">chr2 desc here\n" + site.lower() + "\n",  # no .bin
+            "chr3.fa": ">chr3\n" + "N" * 60 + "\n",  # no target
+            "chr4.fa": ">chr4\n" + site[:20] + "\n",  # shorter than a target
+            "chr5.fa": ">chr5\n" + site,  # its only line has no end: buildTST drops it
+            "chr6.fa": ">chr6\r\n" + site + "\r\n",  # read otherwise: unread, not missing
+            "chr7.fa": ">chr7\n" + site + "U\n",  # as is a byte no IUPAC base
+            "chr8.fa": ">chr8\n" + site + "\n",  # its .bin of part 2 alone: still there
+            "notes.txt": ">chr9\n" + site + "\n",  # not indexed
+        }
+        for name, text in contigs.items():
+            _write(os.path.join(genome, name), text)
+        for name in ("NRG_chr1_1.bin", "NRG_chr8_2.bin", "NGG_chr2 desc here_1.bin"):
+            open(os.path.join(index, name), "w").close()
+        unread = ["chr6.fa", "chr7.fa"]
+        self.assertEqual(crispritz_bins.missing_bins(index, genome, PAM, 2),
+                         ([("chr1_random.fa", "chr1_random"), ("chr2.fa", "chr2 desc here")], unread))
+        # with no index directory at all, every contig that holds a target
+        self.assertEqual(crispritz_bins.missing_bins(os.path.join(top, "none"), genome, PAM, 2),
+                         ([("chr1.fa", "chr1"), ("chr1_random.fa", "chr1_random"),
+                           ("chr2.fa", "chr2 desc here"), ("chr8.fa", "chr8")], unread))
+        # and with a PAM file it cannot read, none is told: each without a .bin is unread
+        pam = os.path.join(top, "pam.txt")
+        _write(pam, "NNNNNNNNNNNNNNNNNNNNNRG\n")
+        self.assertEqual(crispritz_bins.missing_bins(index, genome, pam, 2)[0], [])
+
+
 # What the code before this fix (379b5b0) did with the same stub and inputs, for
 # SameTreeAsBefore: its exit status, the tree it left as `digest  path` (tree(), with
 # the run's own paths written <W>, <R> and <REPO>), the lines it printed, sorted, and
@@ -2170,8 +2368,8 @@ BEFORE = {
             "dir  genome_library/NRG_2_hg38+ds/",
             "4983ff2823805684  genome_library/NRG_2_hg38+ds/.display_label",
             "425fad713f395627  genome_library/NRG_2_hg38+ds/.pam_build",
-            "1dafb9f88a997704  genome_library/NRG_2_hg38+ds/NRG_chr1.enriched_1.bin",
-            "fdb7a83262a278ee  genome_library/NRG_2_hg38+ds/NRG_chr2.enriched_1.bin",
+            "1dafb9f88a997704  genome_library/NRG_2_hg38+ds/NRG_chr1_1.bin",
+            "fdb7a83262a278ee  genome_library/NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
             "270e5e2a33dbf6ed  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
@@ -2258,8 +2456,8 @@ BEFORE = {
             "dir  genome_library/NRG_2_hg38+ds/",
             "4983ff2823805684  genome_library/NRG_2_hg38+ds/.display_label",
             "425fad713f395627  genome_library/NRG_2_hg38+ds/.pam_build",
-            "1dafb9f88a997704  genome_library/NRG_2_hg38+ds/NRG_chr1.enriched_1.bin",
-            "fdb7a83262a278ee  genome_library/NRG_2_hg38+ds/NRG_chr2.enriched_1.bin",
+            "1dafb9f88a997704  genome_library/NRG_2_hg38+ds/NRG_chr1_1.bin",
+            "fdb7a83262a278ee  genome_library/NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
             "270e5e2a33dbf6ed  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",

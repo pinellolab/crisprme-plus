@@ -26,10 +26,16 @@ So with D distinct sequences (the targets whose flag is ``0``) the tree takes
 sequence inserted, the middle target's (insall), whose chain of earlier targets
 ends at that middle target. A file cut short anywhere fails one of these. Ints are
 in the byte order of the machine that wrote them, which is this one.
+
+buildTST does not check that a .bin opened either: with the disk's inode table or
+a file-count quota full, it writes nothing for the contigs left and exits 0, and
+every .bin there is whole. A contig with no target gets no .bin, so missing_bins
+tells which contigs without one hold a target, by buildTST's own rule for one.
 """
 
 import array
 import os
+import re
 import struct
 
 
@@ -95,3 +101,130 @@ def incomplete_bins(directory):
                 if problem:
                     found.append((path, problem))
     return found
+
+
+# The four bits buildTST gives a base of the genome (genome_bit_conversion, in
+# CRISPRitz's pamGenerator.cpp; N 0000) and of the PAM (pam_bit_conversion; N 1111):
+# a genome base matches a PAM base when their bits meet, so a genome N matches none.
+_BITS = dict(zip("ACGTRYSWKMBDHV", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7)))
+_PAM_BITS = dict(_BITS, N=15)
+_REVERSE = str.maketrans("ACGTRYMKHDBV", "TGCAYRKMDHVB")  # reversenuc, less the reversal
+
+
+def holds_target(seq, pam, pam_len, at_start, max_bulges):
+    """Whether buildTST (CRISPRitz 2.9.1) indexes a target in contig ``seq`` (upper
+    case, each base one of ACGTN and the IUPAC codes), for ``pam`` (the PAM itself,
+    at the start of the pam_len bases of a target with ``at_start``, as a 5' PAM),
+    with ``max_bulges``: as searchPAMonGenome finds its PAM on either strand,
+    guideRegionHasN drops a window of pam_len + max_bulges bases with an N outside its
+    PAM, and main takes each kept window (a window at 0 as on the minus strand)."""
+    width, size, n = pam_len + max_bulges, len(pam), len(seq)
+    if n < width:
+        return False
+    scanned = n - (pam_len if at_start else size)  # where searchPAMonGenome looks
+
+    def clean(a, b):  # no N in seq[a:b]
+        return seq.find("N", a, b) < 0
+
+    def plus(nt):  # a PAM on the plus strand at nt
+        if at_start:
+            return nt <= n - width and (
+                clean(nt + size, nt + width) if nt else clean(0, width - size))
+        start = nt + size - width
+        return start >= 0 and (clean(start, nt) if start else clean(size, width))
+
+    def minus(nt):  # one on the minus strand
+        if at_start:
+            return nt + size - width >= 0 and clean(nt + size - width, nt)
+        return nt <= n - width and clean(nt + size, nt + width)
+
+    if all(_PAM_BITS[base] == 15 for base in pam):
+        # Every position is a PAM on both strands: try those whose window can be
+        # clean, from each N-free run of its length, and 0 and the window at 0 (whose
+        # N test differs)
+        def tried():
+            yield 0
+            yield width - size
+            for m in re.finditer("(?=[^N]{%d})" % (width - size), seq):
+                yield m.start() + width - size
+                yield m.start() - size
+        return any(0 <= nt < scanned and (plus(nt) or minus(nt)) for nt in tried())
+    for strand, motif in ((plus, pam), (minus, pam.translate(_REVERSE)[::-1])):
+        regex = "(?=%s)" % "".join(
+            "[%s]" % "".join(b for b in _BITS if _BITS[b] & _PAM_BITS[base])
+            for base in motif)
+        for m in re.finditer(regex, seq):
+            if m.start() >= scanned:
+                break
+            if strand(m.start()):
+                return True
+    return False
+
+
+def _read_pam(pam_file):
+    """(the PAM, pam_len, at_start) as buildTST reads them from the first line of
+    ``pam_file``, or None where this module would read it otherwise."""
+    try:
+        with open(pam_file) as fh:
+            line = fh.readline().rstrip("\n").upper()
+        motif, _, limit = line.partition(" ")
+        limit = int(limit.strip())
+    except (OSError, ValueError):
+        return None
+    if not motif or not 0 < abs(limit) <= len(motif) or set(motif) - set(_PAM_BITS):
+        return None
+    return (motif[:-limit] if limit < 0 else motif[-limit:]), len(motif), limit < 0
+
+
+def _read_contig(fasta):
+    """(header, sequence) of a FASTA as buildTST reads it: its first line less one
+    character, then every whole line after it, upper case; or None where this module
+    would read it otherwise (a byte other than an IUPAC base, CRLF line ends, a
+    first line that is no header)."""
+    try:
+        with open(fasta, "rb") as fh:
+            lines = fh.read().split(b"\n")
+    except OSError:
+        return None
+    # (getline's last line, with no \n after it, is not taken; nor is the empty
+    # string after a last \n)
+    head, body = lines[0], b"".join(lines[1:-1]).upper()
+    if not head.startswith(b">") or body.translate(None, b"ACGTNRYSWKMBDHV"):
+        return None
+    return head[1:].decode("utf-8", "surrogateescape"), body.decode("ascii")
+
+
+def missing_bins(directory, genome_dir, pam_file, max_bulges):
+    """``([(FASTA, contig)], [FASTA])``, of the FASTAs of ``genome_dir`` that
+    index-genome indexed into ``directory`` (every ``*.fa``) with ``pam_file`` and
+    ``max_bulges`` and that have no ``<PAM>_<contig>_<part>.bin`` there: those whose
+    contig holds a target (holds_target), and those this module would read otherwise
+    than buildTST, which may (a byte other than an IUPAC base, CRLF line ends, a
+    first line that is no header, a PAM file it cannot read)."""
+    pam = _read_pam(pam_file)
+    try:
+        bins = os.listdir(directory)
+    except OSError:
+        bins = []
+    named = re.compile(r"%s_(.*)_[0-9]+\.bin\Z" % re.escape(pam[0]) if pam else r"\Z.")
+    have = {m.group(1) for m in map(named.match, bins) if m}  # the contigs with a .bin
+    found, unread = [], []
+    for name in sorted(os.listdir(genome_dir)):
+        path = os.path.join(genome_dir, name)
+        if name.strip().split(".")[-1] != "fa" or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "rb") as fh:
+                head = fh.readline().rstrip(b"\n")[1:]
+            head = head.decode("utf-8", "surrogateescape")
+        except OSError:
+            unread.append(name)
+            continue
+        if head in have:
+            continue
+        contig = _read_contig(path) if pam is not None else None
+        if contig is None:
+            unread.append(name)
+        elif holds_target(contig[1], *pam, max_bulges):
+            found.append((name, contig[0]))
+    return found, unread
