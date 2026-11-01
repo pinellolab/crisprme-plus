@@ -435,12 +435,14 @@ Every search scores off-targets with both CFD and CRISPR-Bulge, so `complete-sea
 start while the scorer env is missing or broken (`crisprme.py scorer-env doctor` says why), unless
 you opt into CFD-only scoring with `CRISPRME_SKIP_SCORER_ENV=1`.
 
-Verify the installation:
+Verify the installation; it prints the installed version, `v2.8.1`:
 
 ```bash
 crisprme.py --version
-crisprme.py
 ```
+
+(A bare `crisprme.py` prints its list of commands, exits 1, and creates the CRISPRme folders,
+`Genomes/`, `Results/` and the rest, in the current directory.)
 
 #### 1.1.3 Updating CRISPRme
 ---
