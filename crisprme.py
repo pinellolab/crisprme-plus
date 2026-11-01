@@ -97,7 +97,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
     DEFAULT_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
-from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes, stamp_index_source, foreign_index_sources  # noqa: E402
+from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes, stamp_index_source, foreign_index_sources, haplotype_search_name, unrecorded_index_dirs  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
 from assembly_annotate import add_annotation_column, add_closest_gene_columns  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
@@ -1900,7 +1900,26 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
 _BUILT_REFERENCE_INDEX_LINE = "Indexing reference genome"
 
 
-def _check_genome_name_is_its_own(genomedir: str, index_path: str) -> bool:
+def _index_serves_search(index: str, genome: str, motif: str, want: int, prune: bool,
+                         three_prime: bool) -> bool:
+    """Whether the pipeline's _resolve_index_dir (submit_job_automated_new_multiple_vcfs.sh)
+    could take the index folder named `index`, locked or not, for a search of `genome`
+    with the PAM `motif` that needs `want` (its bulges + 1): `<PAM>_<N>_<genome>` with N
+    at least `want`, and a PAM that is the motif, or all-N of its width, or all-N and
+    wider under --prune-pam for a 3' PAM."""
+    pam, _, rest = index.partition("_")
+    n, _, name = rest.partition("_")
+    if name != genome or not n.isdigit() or int(n) < want:
+        return False
+    if pam == motif:
+        return True
+    return bool(pam) and set(pam) == {"N"} and (
+        len(pam) == len(motif) or (prune and three_prime and len(pam) > len(motif)))
+
+
+def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int = 0,
+                                  pam: str = "", prune: bool = False,
+                                  three_prime: bool = True) -> bool:
     """Refuses a search that would take another genome folder's index or variant
     genomes for this one's.
 
@@ -1914,16 +1933,32 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str) -> bool:
     * the folder is outside Genomes/ and Genomes/<name> is another folder;
     * an index of that name in genome_library/ records (.genome_source) that it was
       built from another folder: _record_built_index_source records it in an index a
-      search of a folder outside Genomes/ builds.
+      search of a folder outside Genomes/ builds;
+    * the folder is a haplotype of a personal assembly (personal_assembly.
+      bundle_haplotype) given by its own path, not through the link assembly-search
+      searches it through (haplotype_genome_view, named after the haplotype), and an
+      index of its name that this search with bulges could take records no folder.
+      Before 2.8.1 assembly-search searched each haplotype under its folder's name,
+      the same for every haplotype of a bundle (genome), all on the index the first
+      such search built, which a search of any of them takes.
 
     An index that records nothing -- of a folder in Genomes/, built by an earlier
-    CRISPRme, or downloaded -- is used as before. Of a folder outside Genomes/, an
-    index recorded from it before its FASTA files changed is removed, and the search
-    builds it again, as for an assembly-search haplotype (not with --index-path, under
-    which the pipeline builds none). Not called for a reference search without
-    bulges, which scans the folder it is given. A library given with --index-path
-    other than genome_library/ is not looked at: no search builds an index there, and
-    its records would name folders of another working directory.
+    CRISPRme, or downloaded -- is otherwise used as before. Of a folder outside
+    Genomes/, an index recorded from it before its FASTA files changed is removed, and
+    the search builds it again, as for an assembly-search haplotype (not with
+    --index-path, under which the pipeline builds none). Not called for a reference
+    search without bulges, which scans the folder it is given. A library given with
+    --index-path other than genome_library/ is not looked at: no search builds an index
+    there, and its records would name folders of another working directory.
+
+    Args:
+        genomedir: The --genome folder, as an absolute path.
+        index_path: The --index-path library, or "_" for none.
+        bulges: The search's bulges (the larger of --bDNA and --bRNA); 0 for a search
+            that takes no reference index.
+        pam: The PAM motif; with `prune` (--prune-pam) and `three_prime` (a 3' PAM),
+            which indexes of the genome's name the search could take
+            (_index_serves_search).
 
     Returns:
         Whether to record, in the reference index this search builds, the folder it
@@ -1949,6 +1984,35 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str) -> bool:
         os.path.join(cwd, "genome_library")
     ):
         return False
+    hap = personal_assembly.bundle_haplotype(genomedir) if outside else None
+    if hap is not None and name not in {
+        haplotype_search_name(cwd, genomedir, h) for h in personal_assembly.HAPLOTYPES
+    }:
+        in_the_way = [
+            (index_dir, f"holds the genome in {held}: a search takes an index by the genome "
+                        f"folder's name alone, so this one would search {held}")
+            for index_dir, held in foreign_index_sources(cwd, genomedir)
+        ]
+        if bulges:
+            in_the_way += [
+                (index_dir, "records no genome folder: a search takes an index by the genome "
+                            "folder's name alone, and before 2.8.1 assembly-search searched "
+                            "every haplotype under its folder's name, all on the index the "
+                            "first such search built, so this one could search another "
+                            "haplotype's sequence")
+                for index_dir in unrecorded_index_dirs(cwd, genomedir)
+                if _index_serves_search(os.path.basename(index_dir), name, pam, bulges + 1,
+                                        prune, three_prime)
+            ]
+        again = "again" if index_path == "_" else "again without --index-path"
+        for index_dir, why in in_the_way:
+            error(
+                f"--genome {genomedir} is the {hap['haplotype']} haplotype of the personal "
+                f"assembly {hap['individual']}, and {index_dir} {why}. Search the individual "
+                f"with assembly-search, which searches each haplotype on an index of its own. "
+                f"Or, when no search is using {index_dir}, remove it and run this search "
+                f"{again}: it then builds the index from {genomedir}."
+            )
     for index_dir, held in foreign_index_sources(cwd, genomedir):
         error(
             f"{index_dir} holds the genome in {held}, not {genomedir}: the two folders "
@@ -2353,7 +2417,7 @@ def complete_search() -> None:
     # variant genomes by the genome folder's name alone: refuse one whose folder
     # shares its name with another genome folder (_check_genome_name_is_its_own).
     record_index_source = (search_index or variant) and _check_genome_name_is_its_own(
-        genomedir, index_path
+        genomedir, index_path, bMax, pam_char, prune_pam, not pam_begin
     )
     if variant:
         genome_idx_list = []

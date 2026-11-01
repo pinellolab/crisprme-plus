@@ -33,6 +33,9 @@ These tests pin:
     pipeline does): a search with bulges of a folder outside Genomes/ named like a
     genome in Genomes/, or like another folder whose index is here, is refused, the
     index it builds records its folder, and a genome in Genomes/ is searched as before;
+    one haplotype of a bundle searched by its own folder is refused the index of its
+    folder's name that records no folder (the one assembly-search shared before 2.8.1)
+    and could serve the search, but not the link assembly-search searches it through;
   * runs that start together: a stale index both find is taken away from its name in
     one step, and the data folders the pipeline makes are made without an error;
   * deleting an individual in Settings removes its haplotypes' indexes and links too.
@@ -781,8 +784,10 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
     """complete-search names a genome's index (genome_library/<PAM>_<N>_<name>) after
     the genome folder's name, and takes any index of that name. Searched with
     bulges, projB/ref took the index projA/ref's search had built and reported
-    projA/ref's sites; other/hg38 took Genomes/hg38's. The same command without
-    bulges scanned the folder itself, so the two searches of one folder disagreed."""
+    projA/ref's sites; other/hg38 took Genomes/hg38's; one haplotype of a bundle,
+    searched by its own folder, took the index that assembly-search had shared
+    between all haplotypes before 2.8.1 (NRG_2_genome). Without bulges a search
+    scans the folder it is given."""
 
     SEQ = {"paternal": "CTTACAGTTGCTTTTACCACTGG", "maternal": "CTTACTGTTGCCTTTACCACTGG",
            "reference": "CTAACAGTTGCTTTTATCACTGG"}
@@ -808,11 +813,13 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
             self.addCleanup(patcher.stop)
 
     def search(self, output, genome, bulges=1, *extra):
-        """`crisprme.py complete-search ...` as the CLI dispatch runs it; the sequence
-        searched. Its stderr is kept as self.err."""
+        """`crisprme.py complete-search ...` as the CLI dispatch runs it (with no
+        --bDNA/--bRNA for `bulges` None); the sequence searched. Its stderr is kept
+        as self.err."""
+        flags = [] if bulges is None else ["--bDNA", str(bulges), "--bRNA", str(bulges)]
         argv = ["crisprme.py", "complete-search", "--genome", genome, "--guide", "guide.txt",
-                "--pam", "PAMs/20bp-NRG-SpCas9.txt", "--mm", "4", "--bDNA", str(bulges),
-                "--bRNA", str(bulges), "--output", output, "--thread", "1", *extra]
+                "--pam", "PAMs/20bp-NRG-SpCas9.txt", "--mm", "4", *flags,
+                "--output", output, "--thread", "1", *extra]
         err = io.StringIO()
         try:
             with mock.patch.object(crisprme, "input_args", argv), \
@@ -909,6 +916,103 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
         with open(os.path.join(shared, "NRG_2_ref", ar.INDEX_SOURCE_FILENAME), "w") as fh:
             json.dump({"genome": "projB/ref", "fingerprint": "0" * 40}, fh)
         self.assertEqual(self.search("b", "projA/ref", 1, "--index-path", shared), self.SEQ["maternal"])
+
+    # One haplotype of a bundle searched by its own folder. Before 2.8.1 assembly-search
+    # searched every haplotype under its folder's name, "genome", all on the index the
+    # first one built, NRG_2_genome, which records no folder and is left in every data
+    # folder that ran a bundle search with bulges.
+
+    def bundle(self):
+        _make_bundle(self.cwd, "W1", {hap: self.SEQ[hap] for hap in pa.HAPLOTYPES})
+        return {hap: os.path.join("Assemblies", "W1", hap, "genome") for hap in pa.HAPLOTYPES}
+
+    def old_index(self, name="NRG_2_genome"):
+        """The index of the folder name as assembly-search left it before 2.8.1: built
+        from the paternal haplotype, the first searched, and recording nothing."""
+        index = os.path.join(self.lib, name)
+        os.makedirs(index)
+        shutil.copy(os.path.join(self.cwd, "Assemblies", "W1", "paternal", "genome", "chr1.fa"),
+                    os.path.join(index, "NRG_chr1_1.bin"))
+        return index
+
+    def test_a_haplotype_is_refused_the_index_assembly_search_shared(self):
+        haps = self.bundle()
+        self.old_index()
+        # without bulge flags the search takes 1 + 1 bulges, an index being there; under
+        # --index-path the pipeline builds no index
+        for bulges, extra, again in ((1, (), "again:"), (None, (), "again:"),
+                                     (1, ("--index-path", "genome_library"),
+                                      "again without --index-path:")):
+            with self.assertRaises(SystemExit):
+                self.search("m", haps["maternal"], bulges, *extra)
+            self.assertIn(f"--genome {self.cwd}/{haps['maternal']} is the maternal haplotype of "
+                          f"the personal assembly W1, and {self.lib}/NRG_2_genome records no "
+                          f"genome folder", self.err)
+            self.assertIn("Search the individual with assembly-search", self.err)
+            self.assertIn(f"remove it and run this search {again} it then builds the index "
+                          f"from {self.cwd}/{haps['maternal']}.", self.err)
+        self.assertEqual(self.pipeline.calls, [])
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "Results", "m")), [])  # rerun as it is
+
+    def test_without_bulges_the_haplotype_is_searched(self):
+        # (it scans its folder, and takes no index)
+        haps = self.bundle()
+        self.old_index()
+        self.assertEqual(self.search("m0", haps["maternal"], 0), self.SEQ["maternal"])
+        genome = os.path.join(self.cwd, haps["maternal"])
+        # nor is a --vcf search without bulges, which reads the folder's variant genomes
+        self.assertTrue(crisprme._check_genome_name_is_its_own(genome, "_", 0, "NRG"))
+
+    def test_an_index_this_search_cannot_take_is_no_reason_to_refuse_it(self):
+        # of no bulges (a search without bulges builds one, and never uses it), or of
+        # another PAM: this search builds its own
+        haps = self.bundle()
+        self.old_index("NRG_1_genome")
+        self.old_index("NGG_2_genome")
+        self.assertEqual(self.search("m", haps["maternal"]), self.SEQ["maternal"])
+        self.assertEqual(self.pipeline.built, ["NRG_2_genome"])
+
+    def test_the_link_assembly_search_searches_the_haplotype_through_is_not_refused(self):
+        # its own name: an index of it records nothing only while a search of that
+        # haplotype runs (another guide on the web, say), or after one was killed
+        haps = self.bundle()
+        self.old_index()
+        view = ar.haplotype_genome_view(self.cwd, os.path.join(self.cwd, haps["maternal"]),
+                                        "maternal")
+        own = os.path.join(self.lib, f"NRG_2_{os.path.basename(view)}")
+        os.makedirs(own)
+        shutil.copy(os.path.join(self.cwd, haps["maternal"], "chr1.fa"),
+                    os.path.join(own, "NRG_chr1_1.bin"))
+        self.assertEqual(self.search("v", view), self.SEQ["maternal"])
+        self.assertEqual(self.pipeline.built, [])
+
+    def test_with_no_such_index_the_haplotype_builds_and_takes_its_own(self):
+        haps = self.bundle()
+        self.assertEqual(self.search("m", haps["maternal"]), self.SEQ["maternal"])
+        self.assertEqual(self.record("NRG_2_genome")["genome"], haps["maternal"])
+        self.assertEqual(self.search("m2", haps["maternal"]), self.SEQ["maternal"])
+        self.assertEqual(self.pipeline.built, ["NRG_2_genome"])
+
+    def test_the_other_haplotype_is_then_pointed_to_assembly_search(self):
+        # a bundle's folders keep their names: renaming one is no way out
+        haps = self.bundle()
+        self.search("m", haps["maternal"])
+        with self.assertRaises(SystemExit):
+            self.search("p", haps["paternal"])
+        self.assertIn(f"is the paternal haplotype of the personal assembly W1, and "
+                      f"{self.lib}/NRG_2_genome holds the genome in {self.cwd}/{haps['maternal']}",
+                      self.err)
+        self.assertIn("Search the individual with assembly-search", self.err)
+        self.assertNotIn("another name", self.err)
+        self.assertEqual(self.pipeline.calls, ["m"])
+
+    def test_a_folder_named_genome_that_is_no_haplotype_takes_it_as_before(self):
+        # which folder an index that records nothing holds is unknown
+        _write_genome(os.path.join(self.cwd, "other", "genome"), self.SEQ["maternal"])
+        self.bundle()
+        self.old_index()
+        self.search("o", "other/genome")
+        self.assertEqual(self.pipeline.built, [])
 
 
 # --------------------------------------------------------------------------- #

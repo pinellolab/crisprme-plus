@@ -727,6 +727,16 @@ def foreign_index_sources(cwd: str, genome_dir: str) -> List[Tuple[str, str]]:
     return found
 
 
+def unrecorded_index_dirs(cwd: str, genome_dir: str) -> List[str]:
+    """The indexes of the genome's name in `cwd`'s `genome_library/` that record no
+    genome folder (`.genome_source`): built by an earlier CRISPRme, downloaded, built
+    by build-index-only, or built by a search that has not ended (the record is
+    written when it ends) or was killed. Which folder they hold is unknown."""
+    name = os.path.basename(os.path.normpath(genome_dir))
+    return [d for d in _haplotype_index_dirs(cwd, name)
+            if not (_read_index_source(d) or {}).get("genome")]
+
+
 def bundle_search_leftovers(cwd: str, individual: str) -> List[str]:
     """What the searches of a bundle individual's haplotypes left in the working
     directory, to remove with the individual (Settings > Delete): each
