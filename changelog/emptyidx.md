@@ -11,38 +11,55 @@
   "Post-analysis SNPs" with `ERROR: no .bin index files found in '.../TTTV_2_fakechr3/'`, where
   2.8.0 returned the correct report. **Affected:** variant indexes built for a PAM whose sites are
   rare enough, on a dataset with few indels on some chromosome: the shipped Cas12a (TTTV, TTTN) and
-  SpCas9-VRER (NGCG) PAMs on a test genome whose chr3 carries a single deletion; NRG, NGG and SaCas9
-  (NNGRRT) had a site there. The same failure followed a search that rebuilt a missing INDELS index
-  itself. `pool_index_indels.py` now writes `.no_targets` into such a sub-index, after checking by
-  `buildTST`'s own rule (the check build-index-only already makes) that no window holds a target,
-  and the search skips that chromosome as it skips one without indels. The record travels with the
-  index, so a copied or downloaded index needs nothing else. An index built before this fix has no
-  record: the search then checks the fake-indel genome the index was built from
+  SpCas9-VRER (NGCG) PAMs on a test genome whose chr3 carries a single deletion; NRG, NGG and
+  SaCas9 (NNGRRT) had a site there. The same failure followed a search that rebuilt a missing
+  INDELS index itself. `pool_index_indels.py` now writes `.no_targets` into such a sub-index, after
+  checking by `buildTST`'s own rule (the check build-index-only already makes) that no window holds
+  a target, and the search skips that chromosome as it skips one without indels. The record travels
+  with the index, so a copied or downloaded index needs nothing else. An index built before this
+  fix has no record: the search then checks the fake-indel genome the index was built from
   (`Genomes/<genome>+<dataset>_INDELS/`) by the same rule, for the PAM the index was built with
   (for a PAM-less index searched for another PAM, such as `NNN_2` serving NRG, the one its
-  `.pam_build` records), and skips the chromosome when no window holds a target. Otherwise (a
-  window holds one, so the index is incomplete, or that genome is not there) the search stops with
-  an ERROR that says which and how to rebuild the index, where it used to show the engine's
-  message: the command `rm -rf ... && crisprme.py build-index-only ...` with the PAM file the index
-  was built with (for a PAM-less index, a file of its PAM in `PAMs/` or beside the search's PAM
-  file), and, for a downloaded index, also the download command. Where there is no such PAM file,
-  the ERROR gives the steps in words instead of a command: remove the INDELS index and run the
-  search again, which rebuilds it from the fake-indel genome, or, without that genome, the PAM line
-  to write into a PAM file for build-index-only. Measured through the real CLI: the TTTV, TTTN and
-  NGCG searches now exit 0, both on an index built with the fix and on one built before it, and
-  every result file is the same as that of the same code run on CRISPRitz 2.9.0's search engine,
-  which has no such refusal (but for timestamps, and the engine version `run_manifest.json`
-  records); for TTTV the result tables are also the same as 2.8.0's. NRG, NGG and NNGRRT searches,
-  NNN searches and `--prune-pam` searches over 3- and 8-nt-flank PAM-less indexes give
-  byte-identical results to before, and the indexes build-index-only writes are the same file for
-  file, apart from the new record where a sub-index holds no target. Each rebuild the ERROR gives,
-  followed as given, leads to the same result files as an intact index (measured for an NRG index,
-  and for NRG served by the 3- and 8-nt-flank PAM-less indexes, with and without the fake-indel
-  genome). **No published index is affected:** in the copies of the published indexes on the build
-  machine, every indel sub-index holds a `.bin`, except in the superseded `NRR_3_hg38+hg38_mega`
-  archive (see its entry above), whose own indel logs are empty, so a search skips those
-  chromosomes as before. **What to do:** nothing for an index built with 2.8.1, or for one built
-  before whose fake-indel genome is still in place; otherwise follow the ERROR. Covered by
+  `.pam_build` records), and skips the chromosome when no window holds a target, under
+  `complete-test --chrom` too. Otherwise (a window holds one, so the index is incomplete, or that
+  genome is not there) the search stops, at its "Off-targets search" stage, with an ERROR alone,
+  where it used to go on through the SNP post-analysis and fail at "Post-analysis SNPs" with the
+  engine's message. The ERROR says which, and how to rebuild the index, by what is there, with the
+  paths of the working directory, under `complete-test --chrom` too. With the dataset's VCFs in
+  `VCFs/<dataset>`: the command `rm -rf ... && crisprme.py build-index-only ...` with the PAM file
+  the index was built with (for a PAM-less index, a file of its PAM in `PAMs/` or beside the
+  search's PAM file) and, when the fake-indel genome is not there either, the download command for
+  a downloaded index. Where that command cannot run, the steps in words: with the fake-indel genome
+  there (no such VCFs, or no such PAM file), remove the INDELS index and run the search again,
+  which rebuilds it from that genome (after `complete-test --chrom`, run `complete-test` without
+  `--chrom` or a `complete-search`, as a run of one chromosome does not rebuild the index for later
+  runs); with neither those VCFs nor that genome, the download command for a downloaded index,
+  which removes only the index it puts back, and for one you built, putting its VCFs back; with
+  those VCFs but no such PAM file or fake-indel genome, the PAM line to write into a PAM file for
+  build-index-only. Measured through the real CLI: the TTTV, TTTN and NGCG searches now exit 0,
+  both on an index built with the fix and on one built before it, and every result file is the same
+  as that of the same code run on CRISPRitz 2.9.0's search engine, which has no such refusal (but
+  for timestamps, and the engine version `run_manifest.json` records), with bulges, and for TTTV
+  without bulges; for TTTV the result tables are also the same as 2.8.0's. A search with no
+  off-target at all (NGCG without bulges there) ends as on that engine, with `No off-targets
+  found`, but its folder lacks the all-zero CRISPRitz profile tables of the skipped chromosome
+  (`crispritz_prof/fake<chrom>_*`). NRG, NGG and NNGRRT searches, NNN searches and `--prune-pam`
+  searches over 3- and 8-nt-flank PAM-less indexes give byte-identical results to before, and the
+  indexes build-index-only writes are the same file for file, apart from the new record where a
+  sub-index holds no target. `complete-test` on an intact NRG index, with and without `--chrom`,
+  gives the same files as before, but for what differs between any two of its runs: under
+  `--chrom`, the name of its per-run folder in `.command_line.txt`, and at `--thread 2`, the row
+  order of CRISPRitz's raw target files. Each route the ERROR gives but the download, which was not
+  run, was followed as given, and led to the same result files as an intact index: for an NRG
+  index, and for NRG served by the 3- and 8-nt-flank PAM-less indexes, with a sub-index missing or
+  holding no `.bin`, with and without the fake-indel genome, and with and without the VCF folder;
+  and from `complete-test --chrom` for an NRG index, once its results folder is removed, as it
+  asks, but for those two differences. A run that succeeds does not reach the new stop. **No
+  published index is affected:** in the copies of the published indexes on the build machine, every
+  indel sub-index holds a `.bin`, except in the superseded `NRR_3_hg38+hg38_mega` archive (see its
+  entry above), whose own indel logs are empty, so a search skips those chromosomes as before.
+  **What to do:** nothing for an index built with 2.8.1, or for one built before whose fake-indel
+  genome is still in place; otherwise follow the ERROR. Covered by
   `PostProcess/test_indel_empty_chromosome.py`.
 - **A variant search with bulges no longer loses the indel off-targets of a chromosome whose indel
   sub-index is missing** (in 2.8.0 too). Such a chromosome was searched in its fake-indel genome
