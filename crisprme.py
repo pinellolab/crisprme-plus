@@ -2479,7 +2479,7 @@ def complete_search() -> None:
                     "build-index-only --samplesID." % ", ".join(_no_reg)
                 )
 
-    if population_level:
+    if population_level and variant:
         print(
             "[complete-search] POPULATION-LEVEL analysis: the SNP variant post-analysis "
             "reports one WORST-POSSIBLE off-target per variant window (no 2^k haplotype "
@@ -2490,15 +2490,16 @@ def complete_search() -> None:
             "**Per-sample carriers, CONFIRMED cis phasing and exact joint AF are NOT "
             "computed** -- re-run with --per-sample for that per-sample resolution on a genotyped "
             "panel (recommended for clinical validation). SNP+indel co-occurrence is UNCHANGED "
-            "(the indel cis-phasing pass is unaffected). See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
+            "(the indel cis-phasing pass is unaffected). See METHODS.md, 'Context-aware analysis mode'."
         )
-    else:
+    elif variant:
         print(
-            "[complete-search] PER-SAMPLE analysis (--per-sample): resolving per-sample genotypes "
+            "[complete-search] PER-SAMPLE analysis (%s): resolving per-sample genotypes "
             "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
             "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
             "-- the population-level analysis runs instead). Slower, and can be intractable on "
             "dense panels; pass --population-level for the fast worst-case screen."
+            % ("--per-sample" if _force_ps else "the default on this phased genotyped index")
         )
     # record the resolved search mode so generate-report can surface it (the report note).
     try:
@@ -3707,7 +3708,7 @@ def print_help_assembly_search() -> None:
         "\t--max-total-edits, cap the TOTAL edits (mismatches + bulges) per "
         "alignment [default: mm+bDNA+bRNA, i.e. no additional cap beyond what "
         "--mm/--bDNA/--bRNA already imply -- unlike complete-search, whose own "
-        "default of 6 would otherwise silently drop every alignment with more "
+        "default of 6 would otherwise drop every alignment with more "
         "edits whenever --mm/--bDNA/--bRNA allow more; set this explicitly to "
         "tighten it, e.g. for performance]\n"
         "\t--annotation, an hg38 BED annotation file (bgzipped, fourth column = "

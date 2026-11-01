@@ -93,7 +93,7 @@ chmod +x "${CONDA_PREFIX}/bin/crisprme.py"
 rm -f "${CONDA_PREFIX}"/lib/python*/site-packages/pyproject.toml
 
 # the legacy RandomForest scorer was retired in favor of CRISPR-Bulge; there is no 276 MB model to unzip here
-# anymore. CFD's tiny score pickles ship as plain files; the CRISPR-Bulge model is
+# anymore. CFD's JSON score tables ship as plain files in PostProcess/; the CRISPR-Bulge model is
 # provisioned into its own conda env below.
 
 # ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------

@@ -24,9 +24,9 @@ Two separate questions per archive:
 one of them is readable by any CRISPRme release, 2.8.0 included.** Wider PAM-less
 flanks are the only exception and live in a separate repo.
 
-Sizes are download sizes as the Hugging Face API reports them, in GB (10⁹ bytes); "Uploaded"
-is the date of the commit that last wrote the archive, so for the four 2.8.1 replacements it is
-the replacement's upload.
+Sizes are download sizes as the Hugging Face API reports them, in GB (10⁹ bytes);
+"Uploaded" is the date of the commit that last wrote the archive, so for the four
+2.8.1 replacements it is the replacement's upload.
 
 | Archive | Size | Uploaded | PAM | Readable by 2.8.0 | 2.9.1 builder content | `_INDELS` in the archive |
 |---|---|---|---|---|---|---|
@@ -46,9 +46,10 @@ the replacement's upload.
 | `genotypes_hg38_HPRC` | 0.6 GB | 2026-10-27 | — | yes | not an index | — |
 
 **2.8.1 replaced `NRR_3_hg38+hg38_mega`**, which shipped an empty indel index,
-**`NRR_3_hg38+hg38_HPRC`**, whose registry lacked the stamp that selects the per-sample
-default, and **both `NNN_3` archives**, rebuilt with the 2.9.1 builder (all below). The
-replacements were uploaded on 2026-10-30, each at its archive's existing path.
+**`NRR_3_hg38+hg38_HPRC`**, whose registry lacked the stamp that selects the
+per-sample default, and **both `NNN_3` archives**, rebuilt with the 2.9.1 builder (all
+below). The replacements were uploaded on 2026-10-30, each at its archive's existing
+path.
 
 An install replaces each `Dictionaries/` folder of its panel, so every replacement and
 the K = 8 archive were checked member by member (SHA-256) against what the published
@@ -156,9 +157,9 @@ differ only at a site whose PAM bases are assembly `N`.
 **Staged as searched.** The staged archives hold the build that was searched: rsync
 checked every transferred file against a whole-file checksum, every file is in the
 archive at its path with its exact size, and the gzip stream's CRC held on unpacking.
-After the upload every entry of `indexes/SHA256SUMS` equals the Hub's LFS SHA-256 for that
-archive, the post-upload check `docs/hf/README.md` prescribes for proving that the Hub holds
-what was staged.
+After the upload every entry of `indexes/SHA256SUMS` equals the Hub's LFS SHA-256 for
+that archive, the post-upload check `docs/hf/README.md` prescribes for proving that
+the Hub holds what was staged.
 
 ## `NRR_3_hg38+hg38_mega`: published with an empty indel index
 

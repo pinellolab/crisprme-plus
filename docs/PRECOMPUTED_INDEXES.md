@@ -99,7 +99,7 @@ indexes/
   NGG_3_hg38+hg38_HGDP1kGP.tar.gz           # NGG-only variant index
   NRR_3_hg38.tar.gz                              # NRR reference index
   NRR_3_hg38+hg38_{HGDP1kGP,HPRC,mega}.tar.gz    # NRR variant indexes
-  SHA256SUMS                                     # one SHA-256 per archive: `sha256sum -c SHA256SUMS` inside indexes/
+  SHA256SUMS                                     # one SHA-256 per archive: `sha256sum -c --ignore-missing SHA256SUMS` inside indexes/
 ```
 
 The two 8-nt-flank PAM-less indexes are in a second repo,
@@ -340,8 +340,8 @@ build/enrichment entirely.
 The prebuilt indexes above cover the **NRG**, **NGG** and **NRR** PAMs (not each on every
 panel) plus the PAM-less `NNN_3` / `NNNNNNNN_3` indexes, which serve other PAMs through
 `--prune-pam`. To screen a **different nuclease / PAM** with a dedicated index (SaCas9
-**NNGRRT**, Cas12a **TTTN**, any IUPAC motif, or NGG/NRR on a panel they are not published
-for) against the same re-phased **HGDP+1kGP** or sites-only **mega** variant data, you build
+**NNGRRT**, Cas12a **TTTN**, any IUPAC motif, or NGG on mega, the one of these two panels it
+is not published for) against the same re-phased **HGDP+1kGP** or sites-only **mega** variant data, you build
 that one index once and reuse it for every later search — you do **not** re-derive the
 variant data.
 

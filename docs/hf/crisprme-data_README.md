@@ -50,7 +50,7 @@ crisprme-data/
 │   ├── NGG_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # NGG PAM (cannot serve NAG off-targets)
 │   ├── NNN_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # PAM-LESS 3-nt flank — serves ANY 3-nt PAM
 │   ├── genotypes_hg38_{HGDP1kGP,HPRC}.tar.gz   # per-sample genotype companions
-│   └── SHA256SUMS                              # checksum per archive (sha256sum -c, inside indexes/)
+│   └── SHA256SUMS                              # checksum per archive (sha256sum -c --ignore-missing, inside indexes/)
 ├── build-inputs/                   # PRE-ENRICHED kits (fast rebuild / new PAM: download --what build-inputs)
 │   ├── hg38_HGDP1kGP.tar.gz (+ .SHA256SUMS)
 │   └── hg38_mega.tar.gz     (+ .SHA256SUMS)

@@ -29,7 +29,7 @@ inconsistency (`RELEASE_CHECKLIST.md` → "nothing on HF that is undocumented").
 
 ## `indexes/SHA256SUMS`
 
-Each repo carries one, so a user can `sha256sum -c SHA256SUMS` a download. The
+Each repo carries one, so a user can `sha256sum -c --ignore-missing SHA256SUMS` a download. The
 Hub already records every LFS file's SHA-256, so the file is generated from that
 metadata rather than by re-downloading the archives:
 

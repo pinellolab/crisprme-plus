@@ -98,7 +98,7 @@ dedicated `NRG_3` arm give **byte-identical** `integrated_results.tsv`
 ## Verifying a download
 
 ```bash
-sha256sum -c SHA256SUMS            # from inside indexes/
+sha256sum -c --ignore-missing SHA256SUMS   # from inside indexes/
 ```
 
 ## License & citation

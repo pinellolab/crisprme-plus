@@ -829,10 +829,11 @@ def _dir_size(path: str) -> int:
 
 
 def _fmt_size(n: float) -> str:
+    # decimal units (1 GB = 10^9 bytes), as the docs and Hugging Face give sizes
     for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024 or unit == "TB":
+        if n < 1000 or unit == "TB":
             return f"{int(n)} B" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1024
+        n /= 1000
     return f"{n:.1f} TB"
 
 

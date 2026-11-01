@@ -1620,11 +1620,11 @@ if [ "$emit_alt_alignments" = "1" ]; then
 	mv $final_res.bestmmblg.txt.trimmed.discarded_samples $final_res_alt.bestmmblg.txt
 	mv $final_res.bestCRISPR_BULGE.txt.trimmed.discarded_samples $final_res_alt.bestCRISPR_BULGE.txt
 else
-	# population-level default: DROP the non-best alignments (avoids the combinatorial altMerge
+	# population-level analysis: DROP the non-best alignments (avoids the combinatorial altMerge
 	# annotation/sort/integration blow-up). The header-only $final_res_alt.best* stubs created
 	# earlier remain, so the rest of the pipeline produces a valid EMPTY alt result -- exactly
 	# like a reference-only search -- and every downstream step and consumer works unchanged.
-	echo "Alternative alignments suppressed (population-level default); dropping non-best rows"
+	echo "Alternative alignments suppressed (population-level analysis); dropping non-best rows"
 	rm -f $final_res.bestCFD.txt.trimmed.discarded_samples \
 	      $final_res.bestmmblg.txt.trimmed.discarded_samples \
 	      $final_res.bestCRISPR_BULGE.txt.trimmed.discarded_samples
