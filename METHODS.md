@@ -1,7 +1,7 @@
 # CRISPRme+ — Methods
 
 This document describes the methods introduced in **CRISPRme+** (the 2.3 through
-2.7.x line; current shipped release 2.8.1), intended as a self-contained technical reference and as source material
+2.8.x line; current shipped release 2.8.1), intended as a self-contained technical reference and as source material
 for the Methods section of the manuscript. It focuses on what is **new or
 changed** relative to the original CRISPRme (Cancellieri, Zeng, Lin et al.,
 *Nature Genetics* 2023); the core enumeration of candidate off-targets by
@@ -43,7 +43,7 @@ off-target site.
   conservative min-AF bound with no carriers). See §4 for the three-rung model.
 - **worst-possible representative** — a single per-window off-target row that
   upper-bounds the score/severity of every realizable haplotype in that window, emitted
-  by the default population-level analysis instead of enumerating each haplotype (§5).
+  by the population-level analysis instead of enumerating each haplotype (§5).
 
 **Analysis-mode decision rule.** The **default** (no flag) is **context-aware**:
 per-sample (CONFIRMED cis phasing + named carriers + exact joint AF) on a
@@ -54,7 +54,7 @@ with **`--per-sample`** (mutually exclusive) — the latter is inert on a sites-
 index (`mega`). The genotyped+phased panels are `HGDP1kGP` — the recommended default,
 catalog name `NRG_3_hg38+hg38_HGDP1kGP`: 925 HGDP + 3,166 1000 Genomes = 4,091 samples,
 jointly SHAPEIT5 re-phased — or `HPRC`. See
-[§5, Search-space control for high-variant-density regions](#population-level-analysis-default-and---per-sample-genotype-resolution).
+[§5, Search-space control for high-variant-density regions](#context-aware-analysis-mode-per-sample-genotype-resolution-or-population-level-analysis).
 
 ---
 
@@ -478,7 +478,7 @@ for every genotyped / legacy install (the genotyped path is already lossless via
 observed enumerator). Set `CRISPRME_LOSSLESS_DENSE=0` to opt out. A per-sample union on
 the genotyped path is intentionally *not* done — it would risk trans-as-cis phantoms.
 
-### Population-level analysis (default) and `--per-sample` genotype resolution
+### Context-aware analysis mode: per-sample genotype resolution or population-level analysis
 
 The controls above bound any *single* window, but a **dense panel** (many merged
 sources) or a **sites-only aggregate panel** can present so many variant-dense windows
@@ -494,9 +494,9 @@ reference-only index it runs the two-pass population-level analysis by default (
 the whole post-analysis via the internal `CRISPRME_FAST_MODE` env var). **`--population-level`**
 forces the worst-possible screen (the opt-out from per-sample on a phased index); **`--per-sample`**
 forces the observed-haplotype enumeration (the two are mutually exclusive). The 2.5.4 two-pass
-population-level machinery is now the opt-out path. Instead of enumerating the 2ᵏ IUPAC haplotype
-lattice per window, the population-level analysis emits a small fixed set of
-**worst-possible representatives** per window:
+population-level machinery is now the opt-out path on a phased index and the default elsewhere.
+Instead of enumerating the 2ᵏ IUPAC haplotype lattice per window, the population-level analysis
+emits a small fixed set of **worst-possible representatives** per window:
 
 - **Pass 1 — score-free find.** The window's per-position IUPAC allele sets yield a
   **minimum-edit** representative whose edit distance `D` (the additive-per-column argmin)
@@ -510,70 +510,71 @@ lattice per window, the population-level analysis emits a small fixed set of
   *annotation* rather than a dependency, and rows are tagged **PUTATIVE** (a synthetic
   worst case, not an observed haplotype).
 
-The min-edit and max-CFD representatives are distinct because CFD is position-weighted
-(Section 8): the fewest-mismatch haplotype is often **not** the highest-scoring one, so
-both are emitted so the reported worst case is never understated. The population-level
-analysis is validated to be **lossless for locus detection and non-understating for the
-worst-case score** against the exact per-sample enumeration path on a real chr22
-1000G-2021+HGDP slice (0 CFD under-reports; it in fact surfaces *stronger* worst cases at
-182 loci that per-sample enumeration misses), and it emits ~1.9× fewer rows on that 1×
-slice, a factor that grows with density — turning the otherwise-intractable 4× panel into a
-tractable run. **The trade-off is that per-sample carriers, CONFIRMED cis phasing and exact joint
-allele frequency are not computed in the default mode** (rows are PUTATIVE worst cases); the
-launch-time message, the web **Analysis mode** control and the report's **Search mode** row
-all state this explicitly, so it is never silent. This yields a **two-tier workflow**: the
-default population-level analysis for routine, high-density, or aggregate-panel *screening*
-(and the only meaningful mode on sites-only panels), and `--per-sample` (byte-identical to
-the pre-2.5.3 enumeration path) for *confirmatory / pre-IND* runs on a genotyped panel where
-per-sample phased haplotype resolution is required. On sites-only (aggregate) panels there
-are no per-sample genotypes to recover — verified on the released **mega** index:
-`--per-sample` yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no
-genotype store to enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are
-**byte-identical** across modes. On a sites-only index `--per-sample` cannot resolve carriers
-(no genotypes), so the SNP post-analysis falls back to the registry-only worst-case emission —
-which emits *fewer* rows than the default two-pass population-level path (integrated 3,065 vs
-3,224 rows; SNP+SNP co-occurrence 4 vs 22 PUTATIVE rows), so the **default is the more complete
-screen** there. Because `--per-sample` buys nothing on a sites-only index (it changes the output
-without delivering carrier resolution), `complete-search` **warns** and the web form **disables**
-the per-sample option when a sites-only index is selected.
+The min-edit and max-CFD representatives are distinct because CFD is position-weighted (Section
+8): the fewest-mismatch haplotype is often **not** the highest-scoring one, so both are emitted
+so the reported worst case is never understated. The population-level analysis is validated to
+be **lossless for locus detection and non-understating for the worst-case score** against the
+exact per-sample enumeration path on a real chr22 1000G-2021+HGDP slice (0 CFD under-reports; it
+in fact surfaces *stronger* worst cases at 182 loci that per-sample enumeration misses), and it
+emits ~1.9× fewer rows on that 1× slice, a factor that grows with density — turning the
+otherwise-intractable 4× panel into a tractable run. **The trade-off is that per-sample
+carriers, CONFIRMED cis phasing and exact joint allele frequency are not computed in the
+population-level analysis** (rows are PUTATIVE worst cases); the launch-time message, the web
+**Analysis mode** control and the report's **Search mode** row all say which mode ran, so it is
+never silent. The default therefore follows the panel. On a genotyped+PHASED index (such as the
+default HGDP + 1000 Genomes one) it is per-sample, the phased haplotype resolution that
+*confirmatory / pre-IND* runs need, and `--population-level` is the fast *screen* for a very
+dense, high-edit or genome-wide search. On a sites-only, unphased, hybrid or reference-only
+index it is the population-level analysis (the only meaningful mode on sites-only panels), and
+`--per-sample` forces resolution on a genotyped one. On sites-only (aggregate) panels there are
+no per-sample genotypes to recover — verified on the released **mega** index: `--per-sample`
+yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no genotype store to
+enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are **byte-identical**
+across modes. On a sites-only index `--per-sample` cannot resolve carriers (no genotypes), so
+the SNP post-analysis falls back to the registry-only worst-case emission — which emits *fewer*
+rows than the default two-pass population-level path (integrated 3,065 vs 3,224 rows; SNP+SNP
+co-occurrence 4 vs 22 PUTATIVE rows), so the **default is the more complete screen** there.
+Because `--per-sample` buys nothing on a sites-only index (it changes the output without
+delivering carrier resolution), `complete-search` **warns** and the web form **disables** the
+per-sample option when a sites-only index is selected.
 
 **Measured population-level vs `--per-sample` behavior (adversarially verified).** Running both
 modes on the then-released 1000 Genomes 2021 + HGDP genotyped index for one guide (identical
-guide/PAM/thresholds; only `--per-sample` differs) makes the trade concrete and confirms the
-guarantees hold end-to-end:
+guide/PAM/thresholds; only `--per-sample` differs; population-level was then the default on every
+index) makes the trade concrete and confirms the guarantees hold end-to-end:
 
 - *Detection is lossless at the **window** level.* Every off-target window `--per-sample`
-  reports is present in the default analysis; the default in fact reports **more** loci
+  reports is present in the population-level analysis, which in fact reports **more** loci
   (3,287 vs 3,103) because it emits worst-possible representatives. A small number of windows
   are anchored a few bases apart between the two modes — `--per-sample` anchors each *observed*
-  haplotype, the default anchors its worst-possible representative — so a strict
+  haplotype, population-level its worst-possible representative — so a strict
   coordinate-equality comparison flags them as "per-sample-only" (24 loci here, all 1–10 bp
-  shifts of a window the default did detect). Compared by cluster they match exactly and the
-  default is a strict superset. Losslessness is therefore a **window/cluster** property, not
-  byte-exact coordinate identity.
+  shifts of a window population-level did detect). Compared by cluster they match exactly and
+  population-level is a strict superset. Losslessness is therefore a **window/cluster** property,
+  not byte-exact coordinate identity.
 - *The worst-case CFD bound holds exactly.* Across all 3,079 shared loci, the population-level
   CFD is **≥** the per-sample CFD with **zero** violations; it is strictly higher only where it
   assumes worst-possible co-occurrence (e.g. CFD 0.354 vs 0.113 at a 3-SNP window), never lower.
-- *`--per-sample` corrects — and **tightens** — the carrier sets.* The default lists a PUTATIVE
-  **union** of every sample carrying *any* contributing variant in the worst-possible window;
-  `--per-sample` prunes to the actually-observed cis haplotype's carriers. Counterintuitively
-  `--per-sample` therefore names **fewer** samples (1,447 vs 1,642 distinct here), not more — the
-  default list deliberately over-includes non-cis carriers (a conservative screening bias). The
-  SNP+SNP co-occurrence companion is all-PUTATIVE by default (0 CONFIRMED) and gains **106
-  CONFIRMED phased-cis rows** with exact joint AF and single named carriers under `--per-sample`
-  (e.g. a locus that is a 175-carrier PUTATIVE union by default resolves to a single confirmed
-  carrier under `--per-sample`).
-- *On a **genotyped** index the default does not blank carriers.* The `NA`-carrier behavior is
-  specific to sites-only panels; a genotyped panel still surfaces dataset-level carriers in the
-  default analysis, so the real trade is **PUTATIVE-union vs CONFIRMED-exact-cis**, not
+- *`--per-sample` corrects — and **tightens** — the carrier sets.* Population-level lists a
+  PUTATIVE **union** of every sample carrying *any* contributing variant in the worst-possible
+  window; `--per-sample` prunes to the actually-observed cis haplotype's carriers.
+  Counterintuitively `--per-sample` therefore names **fewer** samples (1,447 vs 1,642 distinct
+  here), not more — the population-level list deliberately over-includes non-cis carriers (a
+  conservative screening bias). The SNP+SNP co-occurrence companion is all-PUTATIVE at
+  population level (0 CONFIRMED) and gains **106 CONFIRMED phased-cis rows** with exact joint AF
+  and single named carriers under `--per-sample` (e.g. a locus that is a 175-carrier PUTATIVE
+  union at population level resolves to a single confirmed carrier under `--per-sample`).
+- *On a **genotyped** index population-level does not blank carriers.* The `NA`-carrier behavior
+  is specific to sites-only panels; a genotyped panel still surfaces dataset-level carriers in the
+  population-level analysis, so the real trade is **PUTATIVE-union vs CONFIRMED-exact-cis**, not
   named-vs-`NA`.
 - *For a single guide the two modes take essentially the same wall time* (~13–14 min) — the
-  modes differ in genotype resolution, not intrinsic speed; the default's advantage materializes
-  only on the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
+  modes differ in genotype resolution, not intrinsic speed; population-level's advantage
+  materializes only on the dense/aggregate-panel enumeration wall, not sparse single-guide runs.
 
 The measured numbers above, side by side (same guide/PAM/thresholds; only `--per-sample` differs):
 
-| Metric | Population-level (default) | `--per-sample` |
+| Metric | Population-level | `--per-sample` |
 |---|---|---|
 | **Genotyped index (1000G 2021 + HGDP), one guide** | | |
 | Off-target loci reported | 3,287 (superset; 3,079 shared) | 3,103 |
@@ -587,15 +588,15 @@ The measured numbers above, side by side (same guide/PAM/thresholds; only `--per
 | CONFIRMED rows / cis carriers | 0 / none (no genotype store) | 0 / none (no genotype store) |
 
 (On the sites-only mega, `--per-sample` cannot resolve carriers and emits *fewer* rows than the
-default, so the default is the more complete screen — which is why `complete-search` warns and the
-web form disables per-sample for a sites-only index.)
+default population-level analysis, so the default is the more complete screen there — which is why
+`complete-search` warns and the web form disables per-sample for a sites-only index.)
 
 **Scope of the analysis mode.** The mode toggles only the **SNP** post-analysis (`--per-sample`
-re-enables the 2^k IUPAC haplotype lattice / observed-haplotype enumeration that the default
-collapses). The **indel** post-analysis is single-threaded and ML-scoring-bound (CRISPR-Bulge), and is
-**unaffected by the mode** — a dense indel search pays the full indel cost regardless
-(parallelizing that path is a follow-up). Correspondingly, the `indel_snp_cooc.tsv` companion is
-**byte-identical** in both modes (§8).
+re-enables the 2^k IUPAC haplotype lattice / observed-haplotype enumeration that the
+population-level analysis collapses). The **indel** post-analysis is single-threaded and
+ML-scoring-bound (CRISPR-Bulge), and is **unaffected by the mode** — a dense indel search pays
+the full indel cost regardless (parallelizing that path is a follow-up). Correspondingly, the
+`indel_snp_cooc.tsv` companion is **byte-identical** in both modes (§8).
 
 ---
 
@@ -677,10 +678,11 @@ The report and all of its tables are built from the **best alignment per locus**
 (`bestMerge`). The exhaustive **alternative-alignments** file
 (`..._all_results_with_alternative_alignments.tsv`, the non-best alignments at each
 locus) is a separate, optional artifact whose size grows combinatorially with the
-edit budget; it is emitted by mode — **off** for the default population-level
-analysis, **on** under `--per-sample` — with `--alt-alignments` / `--no-alt-alignments`
-to force either way. (`assembly-search` reconciles its two haplotypes from each
-per-haplotype `integrated_results.tsv` alone, so it does not require this file.)
+edit budget; it is emitted by mode — **off** for a population-level analysis, **on**
+for a per-sample one (the default on a phased genotyped index, or forced with
+`--per-sample`) — with `--alt-alignments` / `--no-alt-alignments` to force either way.
+(`assembly-search` reconciles its two haplotypes from each per-haplotype
+`integrated_results.tsv` alone, so it does not require this file.)
 Suppressing it does not change the report or any reported number.
 
 A guide with **more than one perfect genomic match** (0 mismatch, 0 bulge) has no
@@ -861,7 +863,7 @@ found x86-64 vs aarch64 scores agree to a maximum absolute difference of
 `CONDA_CHANNEL_BASE` / `CRISPRME_CONDA_CHANNEL_BASE` (the Docker build exposes a
 `CONDA_CHANNEL_BASE` build argument).
 
-**Worst-case scoring in the population-level analysis.** In the default population-level
+**Worst-case scoring in the population-level analysis.** In the population-level
 analysis (§5), each window is represented by worst-possible rows rather than every haplotype,
 so the *scores* attached to those rows are defined as worst cases over the window's allele
 combinations. The two scores earn different trust:
@@ -1022,11 +1024,11 @@ width-26 window's 41,454,105, so **16.3%** were invisible to a wider index. Real
 were never affected. CRISPRitz now keeps a target whose stored PAM/flank region holds an
 `N` and lets the search PAM decide, exactly as a dedicated index does.
 
-**Cost.** A PAM-less index is much larger, because no site is excluded at build time:
-the reference index is 71 GB against 9 GB for a dedicated NRG index, and the HGDP + 1000
-Genomes variant index 110 GB against 28 GB (download sizes). Pruning happens at leaf time,
-so a PAM-less search is not faster than a dedicated one — the gain is that one index
-answers many PAMs.
+**Cost.** A PAM-less index is much larger, because no site is excluded at build time: the
+reference index is 71 GB against 9 GB for a dedicated NRG index, and the HGDP + 1000
+Genomes variant index 110 GB against 28 GB (download sizes, GB = 10⁹ bytes). Pruning
+happens at leaf time, so a PAM-less search is not faster than a dedicated one — the gain
+is that one index answers many PAMs.
 
 **Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
 interface never passes the flag. (Its PAM picker prefers a PAM whose geometry matches the
@@ -1040,7 +1042,7 @@ in a separate repository rather than alongside the standard ones.
 ---
 
 *Software: CRISPRme+ (`pinellolab/crisprme-plus`). This document tracks the
-methods as of the 2.7.x line (CRISPRme+ 2.8.1) (default SNP+indel co-occurrence, context-aware
+methods as of the 2.8.x line (CRISPRme+ 2.8.1) (default SNP+indel co-occurrence, context-aware
 analysis mode — per-sample on genotyped+PHASED indexes / population-level otherwise, with opt-out
 `--population-level` / forced `--per-sample`, and the CRISPR-Bulge ML off-target
 scorer in a dedicated conda environment with a `cpu|cuda|metal` compute backend); see the

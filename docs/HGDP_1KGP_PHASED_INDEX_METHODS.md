@@ -525,11 +525,13 @@ anti-chimera contract of §9c).
 Enumerating the lattice is 2^k in the number of co-located variants, so extreme-density windows are
 **capped**: `capped = _FAST_MODE OR (CRISPRME_IUPAC_CAP ≥ 0 AND #variants > CRISPRME_IUPAC_CAP)`.
 
-- **DEFAULT = population-level** (`CRISPRME_FAST_MODE=1`, the default search): **every** multi-variant
-  window emits ONE **worst-possible representative** off-target (greedy min-mismatch / max-CFD),
-  tagged **PUTATIVE**, phasing-independent. No 2^k enumeration; **no MISS** (the worst case covers the
-  window); bounded compute.
-- **`--per-sample`** (`CRISPRME_FAST_MODE=0`): enumerates the DISTINCT **observed** haplotypes real
+- **Population-level** (`CRISPRME_FAST_MODE=1`; `--population-level`, and the default on a
+  sites-only / unphased / hybrid / reference-only index): **every** multi-variant window emits ONE
+  **worst-possible representative** off-target (greedy min-mismatch / max-CFD), tagged **PUTATIVE**,
+  phasing-independent. No 2^k enumeration; **no MISS** (the worst case covers the window); bounded
+  compute.
+- **Per-sample** (`CRISPRME_FAST_MODE=0`; the default on a genotyped + phased index such as this one,
+  or forced with `--per-sample`): enumerates the DISTINCT **observed** haplotypes real
   individuals carry (bounded by the panel, not 2^k) → **CONFIRMED** cis for verified combos, PUTATIVE
   otherwise, each with its exact named carriers. **2.7.10 change:** in a capped dense window the
   per-sample path **no longer emits the cross-sample greedy worst-case representative.** That synthetic
@@ -548,11 +550,12 @@ Enumerating the lattice is 2^k in the number of co-located variants, so extreme-
 **"Never miss" is preserved without fabricating carriers:** the dense region is surfaced by the HVDR
 BED + the reference row + the dense-region flag column; what `--per-sample` trades away is a *synthetic
 worst-case* that no individual carries (correctly — per-sample reports only real-carrier off-targets).
-The **population-level default is unchanged**: it *should* report the conservative worst-case rep, so it
-still does. Only `--per-sample` drops the chimera.
+The **population-level analysis is unchanged**: it *should* report the conservative worst-case rep, so
+it still does. Only the per-sample path drops the chimera.
 
 **Implication for the HGDP+1kGP index (denser + singletons kept):** more windows are multi-variant.
-Population-level: worst-case rep as before. `--per-sample`: moderate-density windows are lossless via
-the ≥4-fixed observed enumeration; the densest windows emit their real observed haplotypes (no chimera)
-+ the HVDR-bed log + the observed_haplotypes companion. Net: no missed regions, and no over-stated
-carrier rosters; the CONFIRMED/PUTATIVE label + carrier count remain the reader's confidence signal.
+Population-level: worst-case rep as before. Per-sample (this index's default): moderate-density
+windows are lossless via the ≥4-fixed observed enumeration; the densest windows emit their real
+observed haplotypes (no chimera) + the HVDR-bed log + the observed_haplotypes companion. Net: no
+missed regions, and no over-stated carrier rosters; the CONFIRMED/PUTATIVE label + carrier count
+remain the reader's confidence signal.
