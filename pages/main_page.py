@@ -38,6 +38,7 @@ from .pages_utils import (
     variant_dataset_has_genotypes,
     variant_dataset_data_type,
     variant_dataset_sample_count,
+    samplesid_problem,
     build_active_annotation,
     get_pam_options,
     get_custom_VCF,
@@ -2137,6 +2138,18 @@ def check_input(
                 "or 'crisprme.py download --what index' / 'crisprme.py build-index-only')."
                 % (need, dna, rna)
             )
+    # A variant search reads each dataset's samplesIDs/<folder>.samplesID.txt only
+    # after the search and post-analysis, and fails there without it: refuse it now.
+    # The folder and the combined list a merged panel synthesizes are change_url's.
+    if genome_update is None and variant_choice not in (None, "", "ref"):
+        _genome = genome_selected.replace(" ", "_")
+        for _d in [v for v in str(variant_choice).split("+") if v]:
+            _folder = _resolve_vcf_folder(_genome, _d)
+            _ensure_samplesid(_genome, _folder)
+            _why = samplesid_problem(_folder, _d)
+            if _why:
+                update_style = True
+                miss_input_list.append(_why)
     miss_input = html.Div(
         [
             html.P("The following inputs are wrong or missing:"),

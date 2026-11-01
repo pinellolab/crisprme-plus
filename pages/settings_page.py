@@ -236,6 +236,10 @@ def _finalize_upload(
         os.makedirs(dest_dir, exist_ok=True)
         os.replace(part_path, os.path.join(dest_dir, name))
         _write_vcf_marker(dataset, genome)  # record the reference genome
+        try:
+            _write_dataset_samplesid(dataset)
+        except OSError:
+            pass  # a build of the dataset writes it, and says so when it cannot
         return dataset
     if target == "chain":
         if not name.endswith((".chain", ".chain.gz")):
@@ -782,6 +786,122 @@ def _write_vcf_marker(dataset: str, genome: str) -> None:
             fh.write(genome.replace(" ", "_"))
     except OSError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Sample list of a VCF dataset added here: samplesIDs/<dataset>.samplesID.txt
+# ---------------------------------------------------------------------------
+# A variant search reads it (the search form refuses one without it), and a build
+# given it (--samplesID) also writes the dict-less tiers, which per-sample analysis and
+# the data type the search form shows read. A dataset added on this page gets one
+# written from its VCF headers, in the 4-column layout of the shipped lists, with what
+# seq_script/merge_panels/hprc_build.sh gives a sample it has no metadata for: the
+# dataset as its population, superpopulation and sex unknown. It lists exactly the
+# samples the VCFs genotype: a listed sample a VCF does not genotype counts as
+# hom-ref in every allele number, and so deflates every allele frequency (#46).
+SAMPLESID_HEADER = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+
+
+def _vcf_header_samples(vcf_dir: str) -> Optional[List[str]]:
+    """The samples the .vcf.gz files of ``vcf_dir`` genotype: the sample columns of
+    their #CHROM header lines, each once, in the order first seen (files by name).
+    [] for a sites-only dataset; None when there is no .vcf.gz, or one has no
+    readable header."""
+    try:
+        files = sorted(f for f in os.listdir(vcf_dir) if f.endswith(".vcf.gz"))
+    except OSError:
+        return None
+    if not files:
+        return None
+    seen, samples = set(), []
+    for fname in files:
+        header = None
+        try:
+            with gzip.open(os.path.join(vcf_dir, fname), "rt", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("#CHROM"):
+                        header = line
+                        break
+                    if not line.startswith("##"):
+                        break  # a record before the header: not a VCF
+        except Exception:  # noqa: BLE001 - not gzip, cut short, unreadable
+            return None
+        if header is None:
+            return None
+        for sample in header.rstrip("\r\n").split("\t")[9:]:
+            if sample and sample not in seen:
+                seen.add(sample)
+                samples.append(sample)
+    return samples
+
+
+def _placeholder_samples(path: str, dataset: str) -> Optional[List[str]]:
+    """The samples of the list ``path`` when this page wrote it for ``dataset`` (the
+    header, then one ``<sample> <dataset> unknown unknown`` row a sample), else None."""
+    try:
+        with open(path) as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return None
+    if not lines or lines[0] + "\n" != SAMPLESID_HEADER:
+        return None
+    samples = []
+    for line in lines[1:]:
+        cols = line.split("\t")
+        if len(cols) != 4 or cols[1:] != [dataset, "unknown", "unknown"] or not cols[0]:
+            return None
+        samples.append(cols[0])
+    return samples
+
+
+def _write_dataset_samplesid(dataset: str) -> Optional[str]:
+    """Writes samplesIDs/<dataset>.samplesID.txt from the VCF headers of
+    VCFs/<dataset> (above) when there is none, or when the one there is a list this
+    page wrote for other samples (a file of the dataset added or replaced since). A
+    list from anywhere else (the command line, a download) is never changed. Returns
+    its path when there is one afterwards; None for a sites-only dataset, or one with
+    no readable VCF and no list. Raises OSError when it cannot write it."""
+    if not dataset or os.path.basename(dataset) != dataset or dataset.startswith("."):
+        return None  # (dropdown values are client data: a folder of VCFs/ only)
+    sdir = os.path.join(current_working_directory, "samplesIDs")
+    target = os.path.join(sdir, f"{dataset}.samplesID.txt")
+    exists = os.path.isfile(target)
+    ours = _placeholder_samples(target, dataset) if exists else None
+    if exists and ours is None:
+        return target
+    samples = _vcf_header_samples(os.path.join(current_working_directory, "VCFs", dataset))
+    if samples is None:
+        return target if exists else None
+    if not samples:  # sites-only now: a list of this page's would name samples it lacks
+        if exists:
+            os.remove(target)
+        return None
+    if samples == ours:
+        return target
+    os.makedirs(sdir, exist_ok=True)
+    # through a hidden temporary file renamed into place, as the search side writes a
+    # combined list (main_page._ensure_samplesid): never one cut short
+    tmp = os.path.join(sdir, f".{dataset}.samplesID.txt.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w") as out:
+            out.write(SAMPLESID_HEADER)
+            out.write("".join(f"{s}\t{dataset}\tunknown\tunknown\n" for s in samples))
+        os.replace(tmp, target)
+    finally:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
+    return target
+
+
+def _samplesid_listing(dataset: str) -> str:
+    """The --samplesID listing a build of ``dataset`` from this page passes: a hidden
+    file beside the list (samplesIDs/.<dataset>.samplesID.list) naming it, as
+    build-index-only reads a listing (one samplesID file name a line, resolved under
+    samplesIDs/)."""
+    path = os.path.join(current_working_directory, "samplesIDs", f".{dataset}.samplesID.list")
+    with open(path, "w") as fh:
+        fh.write(f"{dataset}.samplesID.txt\n")
+    return path
 
 
 
@@ -2296,6 +2416,14 @@ def build_index(n, genome, pam, bdna, brna, vcf, display_name):
     if vcf:  # pre-build a variant-aware index (enrichment + SNP/indels indexing)
         argv += ["--vcf", os.path.join(current_working_directory, "VCFs", vcf)]
         stage = "Build variant index"
+        # with the dataset's sample list (written from its VCF headers when it has
+        # none), so the build writes the dict-less tiers too: per-sample analysis and
+        # the data type the search form shows read them, as a search reads the list
+        try:
+            if _write_dataset_samplesid(vcf):
+                argv += ["--samplesID", _samplesid_listing(vcf)]
+        except OSError as e:
+            return no_update, no_update, f"Could not write the sample list of {vcf}: {e}"
     if display_name and display_name.strip():
         # optional human label; build_index_only writes it to a .display_label
         # sidecar so the index list / search form shows it instead of the
@@ -2366,6 +2494,10 @@ def add_vcf(n, name, source, path, hf_name, ref_genome):
             os.symlink(os.path.abspath(path), dest)
     except OSError as e:
         return no_update, no_update, f"Could not register folder: {e}", no_update, no_update
+    try:
+        _write_dataset_samplesid(name)  # its sample list, from the VCF headers
+    except OSError:
+        pass  # a build of the dataset writes it, and says so when it cannot
     # synchronous register -> refresh the installed tables + storage immediately
     return (
         no_update,

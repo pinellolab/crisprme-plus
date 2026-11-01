@@ -816,6 +816,208 @@ class TestGenomeTarUpload(unittest.TestCase):
         self.assertEqual(os.listdir(shared), ["chrS.fa"])
 
 
+# --- the sample list of a VCF dataset added in Settings (Gate B walk P3) -------------
+# A web variant search reads samplesIDs/<dataset>.samplesID.txt, and failed at its end
+# for a dataset added only in Settings: nothing wrote one, and the Settings build never
+# passed --samplesID, so the tiers per-sample analysis reads were never built either.
+_SID_NAMES = ["SAMPLESID_HEADER", "_vcf_header_samples", "_placeholder_samples",
+              "_write_dataset_samplesid", "_samplesid_listing"]
+_HEADER = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+
+
+def _write_vcf(path, samples, records=("chr1\t10\t.\tA\tG\t.\tPASS\t.",)):
+    """A gzipped VCF whose #CHROM header has these sample columns (none: sites-only)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    cols = ["#CHROM", "POS", "ID", "REF", "ALT", "QUAL", "FILTER", "INFO"]
+    if samples:
+        cols += ["FORMAT"] + list(samples)
+    with gzip.open(path, "wt") as fh:
+        fh.write("##fileformat=VCFv4.2\n##contig=<ID=chr1>\n" + "\t".join(cols) + "\n")
+        for rec in records:
+            fh.write(rec + ("\tGT" + "\t0|1" * len(samples) if samples else "") + "\n")
+
+
+class _SamplesIDCase(unittest.TestCase):
+    names = _SID_NAMES
+    stubs = {}
+
+    def setUp(self):
+        self.cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
+        for d in ("VCFs", "samplesIDs", "Genomes/hg38", "Settings/uploads"):
+            os.makedirs(os.path.join(self.cwd, d))
+        self.ns = _load_functions(self.names, current_working_directory=self.cwd + "/",
+                                  gzip=gzip, shutil=shutil, **self.stubs)
+
+    def vcf(self, dataset, fname, samples, **kw):
+        _write_vcf(os.path.join(self.cwd, "VCFs", dataset, fname), samples, **kw)
+
+    def sid(self, dataset):
+        return os.path.join(self.cwd, "samplesIDs", f"{dataset}.samplesID.txt")
+
+    def read(self, path):
+        with open(path) as fh:
+            return fh.read()
+
+
+class TestDatasetSamplesID(_SamplesIDCase):
+    def test_list_written_from_the_vcf_headers(self):
+        # the union of the files' samples, each once, in the order first seen (files
+        # by name), in the shipped 4-column layout; hprc_build.sh's values for a
+        # sample with no metadata: the dataset, unknown, unknown
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2", "S3"])
+        self.vcf("walk", "walk.chr2.vcf.gz", ["S1", "S2", "S3"])
+        self.vcf("walk", "walk.chrY.vcf.gz", ["S1", "S4"])
+        got = self.ns["_write_dataset_samplesid"]("walk")
+        self.assertEqual(got, self.sid("walk"))
+        self.assertEqual(self.read(got), _HEADER + "".join(
+            f"{s}\twalk\tunknown\tunknown\n" for s in ("S1", "S2", "S3", "S4")))
+
+    def test_never_more_samples_than_the_vcfs_genotype(self):
+        # a listed sample no VCF genotypes counts as hom-ref in every AN (#46)
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2"])
+        self.ns["_write_dataset_samplesid"]("walk")
+        rows = [ln.split("\t")[0] for ln in self.read(self.sid("walk")).splitlines()[1:]]
+        self.assertEqual(rows, ["S1", "S2"])
+
+    def test_sites_only_dataset_gets_no_list(self):
+        self.vcf("agg", "agg.vcf.gz", [])
+        self.assertIsNone(self.ns["_write_dataset_samplesid"]("agg"))
+        self.assertFalse(os.path.exists(self.sid("agg")))
+
+    def test_unreadable_or_empty_dataset_gets_no_list(self):
+        os.makedirs(os.path.join(self.cwd, "VCFs", "empty"))
+        bad = os.path.join(self.cwd, "VCFs", "bad", "bad.vcf.gz")
+        os.makedirs(os.path.dirname(bad))
+        with open(bad, "wb") as fh:
+            fh.write(b"not gzip at all")
+        for dataset in ("empty", "bad", "absent"):
+            with self.subTest(dataset):
+                self.assertIsNone(self.ns["_write_dataset_samplesid"](dataset))
+                self.assertFalse(os.path.exists(self.sid(dataset)))
+
+    def test_a_list_from_elsewhere_is_never_changed(self):
+        # a list the user wrote, or a download installed, carries real populations
+        mine = _HEADER + "S1\tGBR\tEUR\tmale\n"
+        with open(self.sid("walk"), "w") as fh:
+            fh.write(mine)
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2"])
+        self.assertEqual(self.ns["_write_dataset_samplesid"]("walk"), self.sid("walk"))
+        self.assertEqual(self.read(self.sid("walk")), mine)
+
+    def test_own_list_follows_the_dataset(self):
+        # a file of the dataset added after the list was written (the uploader takes
+        # one file at a time): the list this page wrote is written again
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1"])
+        self.ns["_write_dataset_samplesid"]("walk")
+        self.vcf("walk", "walk.chr2.vcf.gz", ["S1", "S2"])
+        self.ns["_write_dataset_samplesid"]("walk")
+        self.assertEqual(self.read(self.sid("walk")),
+                         _HEADER + "S1\twalk\tunknown\tunknown\nS2\twalk\tunknown\tunknown\n")
+        # unchanged samples: not written again
+        before = os.stat(self.sid("walk")).st_mtime_ns
+        time.sleep(0.01)
+        self.ns["_write_dataset_samplesid"]("walk")
+        self.assertEqual(os.stat(self.sid("walk")).st_mtime_ns, before)
+        # replaced by a sites-only file: its own list would name samples it lacks
+        shutil.rmtree(os.path.join(self.cwd, "VCFs", "walk"))
+        self.vcf("walk", "walk.vcf.gz", [])
+        self.assertIsNone(self.ns["_write_dataset_samplesid"]("walk"))
+        self.assertFalse(os.path.exists(self.sid("walk")))
+
+    def test_registered_server_folder(self):
+        # 'Register a server folder' links VCFs/<name> to the folder
+        server = os.path.join(self.cwd, "server")
+        _write_vcf(os.path.join(server, "cohort.chr1.vcf.gz"), ["A", "B"])
+        os.symlink(server, os.path.join(self.cwd, "VCFs", "cohort"))
+        self.assertEqual(self.ns["_write_dataset_samplesid"]("cohort"), self.sid("cohort"))
+        self.assertIn("B\tcohort\tunknown\tunknown\n", self.read(self.sid("cohort")))
+
+    def test_dataset_names_that_are_not_a_folder_of_vcfs_are_refused(self):
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1"])
+        for bad in ("../walk", "walk/..", ".hidden", "", None):
+            with self.subTest(bad=bad):
+                self.assertIsNone(self.ns["_write_dataset_samplesid"](bad))
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "samplesIDs")), [])
+
+    def test_listing_names_the_list_as_build_index_only_reads_one(self):
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1"])
+        self.ns["_write_dataset_samplesid"]("walk")
+        listing = self.ns["_samplesid_listing"]("walk")
+        self.assertEqual(listing, os.path.join(self.cwd + "/", "samplesIDs",
+                                               ".walk.samplesID.list"))
+        self.assertEqual(self.read(listing), "walk.samplesID.txt\n")
+
+
+class TestVcfUploadWritesItsSampleList(_SamplesIDCase):
+    names = _SID_NAMES + ["_validate_name", "_write_vcf_marker", "_finalize_upload"]
+
+    def test_uploaded_vcf_gets_its_marker_and_list(self):
+        part = os.path.join(self.cwd, "Settings", "uploads", "walk.chr1.vcf.gz.part")
+        _write_vcf(part, ["S1", "S2"])
+        got = self.ns["_finalize_upload"]("vcf", part, "walk.chr1.vcf.gz", "walkvcf", "hg38")
+        self.assertEqual(got, "walkvcf")
+        self.assertEqual(self.read(os.path.join(self.cwd, "VCFs", ".walkvcf.refgenome")), "hg38")
+        self.assertEqual(self.read(self.sid("walkvcf")), _HEADER
+                         + "S1\twalkvcf\tunknown\tunknown\nS2\twalkvcf\tunknown\tunknown\n")
+
+
+class TestSettingsBuildPassesSampleList(_SamplesIDCase):
+    """build_index, undecorated: the command a Settings build launches."""
+
+    names = _SID_NAMES + ["build_index"]
+
+    def setUp(self):
+        self.launched = []
+        self.stubs = {
+            "launch_settings_job":
+                lambda argv, stage: self.launched.append((argv, stage)) or "job",
+            "_start": lambda job: (job, False, "started"),
+            "ONLINE": False,
+            "PreventUpdate": _PreventUpdate,
+            "no_update": _NO_UPDATE,
+        }
+        super().setUp()
+
+    def argv(self, vcf, name=None):
+        self.ns["build_index"](1, "hg38", "20bp-NRG-SpCas9", 1, 1, vcf, name)
+        return self.launched[-1]
+
+    def base_argv(self):
+        return ["build-index-only", "--genome", os.path.join(self.cwd + "/", "Genomes", "hg38"),
+                "--pam", os.path.join(self.cwd + "/", "PAMs", "20bp-NRG-SpCas9.txt"),
+                "--bDNA", "1", "--bRNA", "1"]
+
+    def test_variant_build_passes_the_datasets_sample_list(self):
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2"])
+        argv, stage = self.argv("walk")
+        listing = os.path.join(self.cwd + "/", "samplesIDs", ".walk.samplesID.list")
+        self.assertEqual(stage, "Build variant index")
+        self.assertEqual(argv, self.base_argv() + [
+            "--vcf", os.path.join(self.cwd + "/", "VCFs", "walk"), "--samplesID", listing])
+        self.assertEqual(self.read(listing), "walk.samplesID.txt\n")
+        self.assertTrue(os.path.isfile(self.sid("walk")))
+
+    def test_a_list_from_elsewhere_is_passed_unchanged(self):
+        mine = _HEADER + "S1\tGBR\tEUR\tmale\nS2\tYRI\tAFR\tfemale\n"
+        with open(self.sid("walk"), "w") as fh:
+            fh.write(mine)
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2"])
+        argv, _stage = self.argv("walk")
+        self.assertIn("--samplesID", argv)
+        self.assertEqual(self.read(self.sid("walk")), mine)
+
+    def test_sites_only_dataset_built_without_one(self):
+        self.vcf("agg", "agg.vcf.gz", [])
+        argv, _stage = self.argv("agg")
+        self.assertEqual(argv, self.base_argv() + [
+            "--vcf", os.path.join(self.cwd + "/", "VCFs", "agg")])
+
+    def test_reference_build_command_unchanged(self):
+        self.assertEqual(self.argv("", "my index"),
+                         (self.base_argv() + ["--name", "my index"], "Build index"))
+
+
 # --- the false 'Samples degraded' alert after a build (final review FR#8) ------------
 class TestDegradedAlertOnlyForIndexDownloads(unittest.TestCase):
     """The detector matches crisprme_hf's own notes only, and refresh_settings_job runs

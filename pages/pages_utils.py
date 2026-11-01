@@ -1878,7 +1878,34 @@ _DATA_TYPE_LABEL = {
     "genotyped-phased": "genotyped, phased",
     "hybrid": "genotyped, mixed phasing",
     "genotyped": "genotyped",  # inference fallback (phasing unknown)
+    # no tiers, but its VCFs genotype samples: not built yet, or built without its
+    # sample list, so per-sample analysis has nothing to read
+    "genotyped-unindexed": "genotyped, samples not indexed",
 }
+
+
+def _vcf_dataset_has_samples(genome_norm: str, dnorm: str) -> bool:
+    """True when the VCF folder of a dataset (VCFs/<genome>_<dataset> or
+    VCFs/<dataset>) is there and the #CHROM header of its first .vcf.gz has sample
+    columns."""
+    for folder in (f"{genome_norm}_{dnorm}", dnorm):
+        vdir = os.path.join(current_working_directory, VCFS_DIR, folder)
+        try:
+            files = sorted(f for f in os.listdir(vdir) if f.endswith(".vcf.gz"))
+        except OSError:
+            continue
+        for fname in files[:1]:
+            try:
+                with gzip.open(os.path.join(vdir, fname), "rt", errors="replace") as fh:
+                    for line in fh:
+                        if line.startswith("#CHROM"):
+                            return len(line.rstrip("\r\n").split("\t")) > 9
+                        if not line.startswith("##"):
+                            break
+            except Exception:  # noqa: BLE001 - unreadable: no claim
+                pass
+        return False
+    return False
 
 
 def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
@@ -1887,8 +1914,10 @@ def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
     one of ``sites-only`` / ``genotyped-unphased`` / ``genotyped-phased`` / ``hybrid``.
 
     Falls back to genotype-store presence when the manifest predates the flag (older
-    shipped indices, pre-backfill): ``genotyped`` when a store exists, else
-    ``sites-only``. Returns None for reference-only / unknown selections."""
+    shipped indices, pre-backfill): ``genotyped`` when a store exists; with neither,
+    ``genotyped-unindexed`` when the dataset's VCFs have sample columns (a dataset not
+    built yet, or built without its sample list), else ``sites-only``. Returns None
+    for reference-only / unknown selections."""
     if not dataset_value or dataset_value in ("ref", "reference", "none"):
         return None
     genome_norm = (genome or "").replace(" ", "_")
@@ -1907,7 +1936,32 @@ def variant_dataset_data_type(genome: str, dataset_value: str) -> Optional[str]:
         except (OSError, ValueError):
             pass
     # manifest flag absent (pre-Phase-2.1 / pre-backfill index): infer coarsely.
-    return "genotyped" if variant_dataset_has_genotypes(genome, dataset_value) else "sites-only"
+    if variant_dataset_has_genotypes(genome, dataset_value):
+        return "genotyped"
+    if _vcf_dataset_has_samples(genome_norm, dnorm):
+        return "genotyped-unindexed"
+    return "sites-only"
+
+
+def samplesid_problem(vcf_folder: str, dataset: str) -> Optional[str]:
+    """Why the search form refuses a variant search of VCF folder ``vcf_folder``
+    (the dropdown's ``dataset``): its sample list samplesIDs/<vcf_folder>.samplesID.txt
+    is missing. The search reads it only once the search and post-analysis are done,
+    and then fails. None when the list is there."""
+    if os.path.isfile(
+        os.path.join(current_working_directory, "samplesIDs", f"{vcf_folder}.samplesID.txt")
+    ):
+        return None
+    if os.path.isdir(os.path.join(current_working_directory, VCFS_DIR, vcf_folder)):
+        how = ("Build its variant index in Settings, which writes the list from the VCF "
+               "header, or add the file yourself")
+    else:
+        how = "Download its index again, which installs the list, or add the file yourself"
+    return (
+        f"No sample list for the variant dataset '{dataset}': a search with it reads "
+        f"samplesIDs/{vcf_folder}.samplesID.txt (one row per sample its VCFs genotype) "
+        f"and fails at its end without it. {how}, then submit again."
+    )
 
 
 def variant_dataset_sample_count(genome: str, dataset_value: str) -> int:

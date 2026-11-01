@@ -72,6 +72,17 @@ jobs:
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_build_index_vcf_autosplit.py
 
+      # A VCF dataset added in Settings is built and searchable: its sample list is
+      # written from the VCF header and passed to the build (the tiers per-sample reads),
+      # the search form offers a dataset by its reference-genome marker and labels one
+      # with no tiers genotyped, and Submit refuses a search whose sample list is
+      # missing. The Settings page's helpers and the real build-index-only in the image.
+      - name: Settings VCF datasets (sample list, search form, Submit)
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            crisprme:web python -u /t/test_settings_vcf_datasets.py
+
       # Email-notification config: write/read round-trip (password never echoed,
       # kept on re-save), validation, 0600 perms, and send_mail resolving .email.json.
       - name: Email-config unit tests
