@@ -20,8 +20,9 @@ These tests pin:
     pipeline does, and records which sequence it searched): each haplotype is searched
     on its own sequence, and a result written by the colliding search is not reused;
   * the record of which genome an index holds (.genome_source): an index of the same
-    name built from other content is removed and built again, one that records nothing
-    (built by an earlier CRISPRme, or downloaded) is kept;
+    name built from another folder, or before the folder's FASTA files changed (names,
+    sizes and modification times are compared, not the sequence), is removed and built
+    again, one that records nothing (built by an earlier CRISPRme, or downloaded) is kept;
   * the pipeline keeps a linked genome's own name, picks only an index named for the
     genome itself (not one whose genome name merely ends in it), and its 0-bulge scan
     reads the genome folder it is given.

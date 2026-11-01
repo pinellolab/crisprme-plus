@@ -8,31 +8,36 @@
   reuses (`genome_library/<PAM>_<N>_<name>`), after the genome folder's name. A bundle assembly
   (fetched from HPRC, or imported in Settings) keeps each haplotype in
   `Assemblies/<individual>/<haplotype>/genome`, so every haplotype of every individual was searched
-  as `genome`: the paternal search built `NRG_2_genome`, the maternal search logged `Reference index
-  present (NRG_2_genome)` and searched the paternal sequence, and the reconciliation then reported
-  each site as found on both haplotypes. Haplotype-private off-targets were missed without a warning.
-  Two `--genome-paternal` / `--genome-maternal` folders with the same name collided the same way.
-  Reproduced with the real CLI on a synthetic bundle (4 mismatches + 1 DNA + 1 RNA bulge, the web
-  default): the two haplotypes' result files were byte-identical, and at chr1:35000 the maternal
-  results showed the paternal 2-mismatch protospacer instead of the maternal 4-mismatch one; a second
-  individual whose paternal haplotype carries that 4-mismatch sequence also got the 2-mismatch one.
-  Each haplotype is now searched through a link named after it,
-  `haplotype_genomes/<key>/<individual>_<haplotype>` in the working directory, so it builds and reuses
-  its own index (`NRG_2_HG01255_paternal`, `NRG_2_HG01255_maternal`); a genome folder that is not in
-  a bundle is named after the folder plus a short hash of its path. The per-haplotype result files
-  carry that name too (`<guide>+NRG_HG01255_paternal+__4+2_integrated_results.tsv` instead of
+  as `genome`: the paternal search built `NRG_2_genome`, the maternal search logged
+  `Reference index present (NRG_2_genome)` and searched the paternal sequence, and the
+  reconciliation then reported each site as found on both haplotypes. Haplotype-private off-targets
+  were missed without a warning. Two `--genome-paternal` / `--genome-maternal` folders with the same
+  name collided the same way. Reproduced with the real CLI on a synthetic bundle (4 mismatches + 1
+  DNA + 1 RNA bulge, the web default): the two haplotypes' result files were byte-identical, and at
+  chr1:35000 the maternal results showed the paternal 2-mismatch protospacer instead of the maternal
+  4-mismatch one; a second individual whose paternal haplotype carries that 4-mismatch sequence also
+  got the 2-mismatch one. Each haplotype is now searched through a link named after it,
+  `haplotype_genomes/<key>/<individual>_<haplotype>` in the working directory, so it builds and
+  reuses its own index (`NRG_2_HG01255_paternal`, `NRG_2_HG01255_maternal`); a genome folder that is
+  not in a bundle is named after the folder plus a short hash of its path. The per-haplotype result
+  files carry that name too (`<guide>+NRG_HG01255_paternal+__4+2_integrated_results.tsv` instead of
   `<guide>+NRG_genome+__4+2_integrated_results.tsv`). Each index a haplotype search builds records
-  which genome it holds (`.genome_source`, which CRISPRitz does not read), so an individual deleted
-  and imported again with other content gets its index rebuilt instead of reused; an index without
-  that record, built earlier or downloaded, is used as before. A haplotype result written by the
-  colliding search is not reused by a later run with the same `--output`: it is searched again. With the fix the paternal results are unchanged byte for byte,
-  the maternal haplotype reports its own sites, and a legacy `Genomes/<name>` pair (the layout before
-  2.6.0) runs exactly as before. **Affected:** every `assembly-search` with bulges on a bundle
-  assembly since 2.6.0, from the web or the CLI. The haplotype whose search built the shared index
-  (usually the first paternal haplotype searched) has correct results; every other haplotype
-  searched with that index does not. **What to do:** run those searches again. The index
+  the genome folder it was built from and the names, sizes and modification times of that folder's
+  FASTA files (`.genome_source`, which CRISPRitz does not read), and a later search of that
+  haplotype rebuilds the index when they have changed: a FASTA file added, removed, resized or
+  modified at another time, as when an individual is deleted and imported again with other files. A
+  FASTA file replaced by other content of the same size and modification time is not noticed. An
+  index without that record, built earlier or downloaded, is used as before. A haplotype result
+  written by the colliding search is not reused by a later run with the same `--output`: it is
+  searched again. With the fix the paternal results are unchanged byte for byte, the maternal
+  haplotype reports its own sites, and a legacy `Genomes/<name>` pair (the layout before 2.6.0) runs
+  exactly as before. **Affected:** every `assembly-search` with bulges on a bundle assembly since
+  2.6.0, from the web or the CLI. The haplotype whose search built the shared index (usually the
+  first paternal haplotype searched) has correct results; every other haplotype searched with that
+  index does not. **What to do:** run those searches again. The index
   `genome_library/<PAM>_<N>_genome` they left (in Settings > Installed indexes, e.g. `NRG_2_genome`)
-  is no longer used and can be deleted there. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+  is no longer used and can be deleted there. Covered by
+  `PostProcess/test_assembly_haplotype_genomes.py`.
 - **A search without bulges of a genome folder outside `Genomes/` came back empty, or scanned
   another genome.** The 0-bulge search reads the genome's FASTA files directly, and read them from
   `Genomes/<name of the --genome folder>/` instead of the folder it was given. Without such a folder

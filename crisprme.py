@@ -4822,8 +4822,9 @@ def _run_haplotype_search(
         f"--output {output_name} --thread {thread} {debug_flag}"
     )
     output_folder = os.path.join(current_working_directory, CRISPRMEDIRS[1], output_name)
-    # The search reuses any index named after this genome: first drop one that
-    # holds other content, then record which genome each index it built holds.
+    # The search reuses any index named after this genome: first drop one built
+    # from another folder, or before this folder's FASTA files changed, then
+    # record which genome each index it built holds.
     try:
         present = clear_stale_haplotype_indexes(current_working_directory, genomedir)
     except OSError as e:

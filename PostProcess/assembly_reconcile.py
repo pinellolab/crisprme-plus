@@ -498,10 +498,13 @@ def haplotype_genome_view(cwd: str, genome_dir: str, haplotype: str) -> str:
 
 def genome_fingerprint(genome_dir: str) -> str:
     """A fingerprint of a genome folder's FASTA files: their names, sizes and
-    modification times (whole seconds), hashed. Only file metadata is read.
-    Replacing the genome -- a bundle deleted and imported again under the same
-    name, a contig file swapped -- changes it. So does a copy that does not keep
-    the times (cp without -p), which costs an index rebuild, never a result."""
+    modification times (whole seconds), hashed. Only file metadata is read, not
+    the sequence: a FASTA file added, removed, resized or modified at another time
+    changes it -- a bundle deleted and imported again with other files, say -- but
+    a file replaced by other content of the same size and modification time (an
+    archive that restores the old times) does not. A copy that does not keep the
+    times (cp without -p) changes it too, which costs an index rebuild, never a
+    result."""
     real = os.path.realpath(genome_dir)
     lines = []
     for fname in sorted(os.listdir(real)):
@@ -539,11 +542,11 @@ def _read_index_source(index_dir: str) -> Optional[Dict]:
 def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
     """Run before a haplotype search. The search reuses any index of the genome's
     name, so remove each one whose `.genome_source` names another genome folder,
-    or other content in this one -- a bundle deleted and imported again under the
-    same name, a genome folder whose files were replaced -- and the search builds
-    it again from this genome. An index that records nothing (built by an earlier
-    CRISPRme, or downloaded) is left as it is, as is one still being built (it has
-    a `.lock`).
+    or another `genome_fingerprint` of this one (its FASTA files added, removed,
+    resized or modified since -- a bundle deleted and imported again with other
+    files, say), and the search builds it again from this genome. An index that
+    records nothing (built by an earlier CRISPRme, or downloaded) is left as it
+    is, as is one still being built (it has a `.lock`).
 
     Args:
         cwd: The working directory (its `genome_library/` is the one searched).
