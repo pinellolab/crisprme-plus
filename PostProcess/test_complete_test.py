@@ -592,6 +592,91 @@ class ChromView(unittest.TestCase):
         self.assertIsNotNone(cwd, "complete-search must run from the view")
         self.assertEqual(tree["Genomes/toy+toy_panel_INDELS/.building"], ("link", mark))
 
+    def _unfinished(self, marked, chrom="chr22"):
+        """The smoke for chrom with each of the working directory's folders marked
+        (relative paths): the ERROR lines on stderr and the exit code, having checked
+        that nothing was searched, and that neither a view nor a results folder was
+        left."""
+        for rel in marked:
+            os.makedirs(os.path.join(self.wd, rel, ".building"))
+        calls, err, code = self.smoke(chrom)
+        self.assertEqual(calls, [], "nothing may be searched")
+        self.assertEqual(_views(self.wd), [])
+        self.assertFalse(os.path.lexists(os.path.join(self.wd, "Results", ct.COMPLETETESTRESDIR)))
+        return [l for l in err.splitlines() if l.startswith("ERROR")], code
+
+    def test_a_part_marked_unfinished_is_refused_before_the_view_is_made(self):
+        """complete-search refuses a search with a dataset that build-index-only has
+        left a part of unfinished, but looks for the marks where it runs from: from the
+        view, which holds no Genomes/<ref>+<vcf>, the one-chromosome smoke passed where
+        every real search of the dataset is refused, and for the Dictionaries parts it
+        named their paths in the view, gone once the run ended, which its rm -rf then
+        pointed to. Each part is now looked at in the working directory first, and
+        named by its real path, before anything is searched or written."""
+        shutil.rmtree(os.path.join(self.wd, "genome_library", "NGG_2_toy+toy_panel_INDELS"))
+        self._fake_indel_genome("chr22")
+        rerun = "run build-index-only again with toy_panel"
+        cases = (
+            ("Genomes/toy+toy_panel", "the enrichment of toy_panel", f"{rerun}, which enriches "
+             "it again"),
+            ("Genomes/toy+toy_panel_INDELS", "the SNP codes of the toy_panel fake-indel genome",
+             f"{rerun}, which finishes them"),
+            ("Dictionaries/registry_toy_panel", "the dict-less tiers of toy_panel",
+             f"{rerun} and its --samplesID, which finishes them, or remove them to search "
+             f"without them (rm -rf '{self.wd}/Dictionaries/registry_toy_panel' "
+             f"'{self.wd}/Dictionaries/genotypes_toy_panel')"),
+            ("Dictionaries/indel_genotypes_toy_panel", "the phased indel genotype store of "
+             "toy_panel", f"{rerun}, which finishes it, or remove it to search without it "
+             f"(rm -rf '{self.wd}/Dictionaries/indel_genotypes_toy_panel')"),
+        )
+        for rel, what, then in cases:
+            with self.subTest(part=rel):
+                errors, code = self._unfinished([rel])
+                self.assertEqual(code, 1)
+                self.assertEqual(errors, [
+                    f"ERROR: {os.path.join(self.wd, rel)} is unfinished: a build-index-only run "
+                    f"is writing {what} there, or stopped before it was done, and the search "
+                    f"would use what is there as if it were whole. Let that run finish, or "
+                    f"{then}, then run complete-test again."])
+                shutil.rmtree(os.path.join(self.wd, rel, ".building"))
+        with self.subTest(part="all of them"):
+            errors, code = self._unfinished([rel for rel, _, _ in cases])
+            self.assertEqual((code, len(errors)), (1, 4), errors)
+        for rel, _, _ in cases:
+            shutil.rmtree(os.path.join(self.wd, rel, ".building"))
+        # a Dictionaries entry that is a symlink (as the view links each): its real path
+        real = os.path.join(self.wd, "elsewhere", "registry_toy_panel")
+        os.makedirs(os.path.dirname(real))
+        os.rename(os.path.join(self.wd, "Dictionaries", "registry_toy_panel"), real)
+        os.symlink(real, os.path.join(self.wd, "Dictionaries", "registry_toy_panel"))
+        os.makedirs(os.path.join(real, ".building"))
+        with self.subTest(part="a linked registry"):
+            calls, err, code = self.smoke("chr22")
+            self.assertEqual((calls, code), ([], 1))
+            self.assertIn(f"ERROR: {real} is unfinished: ", err)
+            self.assertIn(f"(rm -rf '{real}' '{self.wd}/Dictionaries/genotypes_toy_panel')", err)
+
+    def test_what_a_search_does_not_read_is_not_refused(self):
+        """With the SNP+indel co-occurrence off, a search does not read the indel
+        genotype store, and a reference smoke reads no part of a dataset: their marks do
+        not stop it, as they do not stop complete-search. (Nor does the fake-indel
+        genome's, with its INDELS index in place: test_the_fake_indel_genomes_mark_goes_
+        into_the_view_with_it.)"""
+        store = "Dictionaries/indel_genotypes_toy_panel"
+        for value in ("0", ""):
+            with self.subTest(part=store, CRISPRME_INDEL_SNP=value):
+                os.makedirs(os.path.join(self.wd, store, ".building"), exist_ok=True)
+                with mock.patch.dict(os.environ, {"CRISPRME_INDEL_SNP": value}):
+                    calls, err, code = self.smoke("chr22")
+                self.assertIsNone(code, err)
+                self.assertEqual(len(calls), 1)
+                shutil.rmtree(os.path.join(self.wd, "Results", ct.COMPLETETESTRESDIR))
+        with self.subTest(part="a reference smoke"):
+            os.remove(os.path.join(self.wd, "list_vcf.txt"))
+            calls, err, code = self.smoke("chr22")
+            self.assertIsNone(code, err)
+            self.assertEqual(len(calls), 1)
+
 
 # complete-search's stand-in for RealSignals: it and a child shell, as the real search
 # has a tree of processes, note their PIDs, and any SIGTERM or SIGHUP they get, with
@@ -834,7 +919,8 @@ class TheCliPassesTheRefusalOn(unittest.TestCase):
     """complete_test.py refuses a --chrom the genome or the index lacks with exit 2,
     having said why in one line; crisprme.py exits 2 too, without the OSError traceback
     (whose 'See Results/crisprme-test-out/log_error.txt' names a file no search wrote).
-    Any other failure still raises it."""
+    Any other failure ends with exit 1 and one line, which names the search's error log
+    only where one was written."""
 
     ARGV = ["crisprme.py", "complete-test", "--chrom", "chrQ"]
 
@@ -858,9 +944,38 @@ class TheCliPassesTheRefusalOn(unittest.TestCase):
             self._cli(2)
         self.assertEqual(cm.exception.code, 2)
 
-    def test_a_failed_test_still_raises(self):
-        with self.assertRaises(OSError):
-            self._cli(1)
+    def test_a_failed_test_ends_in_one_line_naming_the_log_it_left(self):
+        """It raised an OSError, a traceback ending in 'See
+        Results/crisprme-test-out/log_error.txt', which a search refused before it
+        starts never writes, and which the benchmark mode writes under another name."""
+        cases = (
+            ({}, "see the messages above"),
+            ({"Results/crisprme-test-out/log_error.txt": ""}, "see the messages above"),
+            ({"Results/crisprme-test-out/log_error.txt": "ERROR: x\n"},
+             "see Results/crisprme-test-out/log_error.txt for details"),
+            ({"Results/crisprme-test-out_cas9_sg1617/log_error_no_check.txt": "",
+              "Results/crisprme-test-out_cas12a_hbg/log_error.txt": "ERROR: y\n"},
+             "see Results/crisprme-test-out_cas12a_hbg/log_error.txt for details"),
+        )
+        for logs, says in cases:
+            with self.subTest(logs=sorted(logs)):
+                wd = tempfile.mkdtemp()
+                self.addCleanup(shutil.rmtree, wd)
+                for rel, text in logs.items():
+                    os.makedirs(os.path.dirname(os.path.join(wd, rel)), exist_ok=True)
+                    with open(os.path.join(wd, rel), "w") as fh:
+                        fh.write(text)
+                cwd = os.getcwd()
+                os.chdir(wd)
+                err = io.StringIO()
+                try:
+                    with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+                        self._cli(1)
+                finally:
+                    os.chdir(cwd)
+                self.assertEqual(cm.exception.code, 1)
+                self.assertEqual(err.getvalue(),
+                                 f"\nCRISPRme complete test encountered an error: {says}\n")
 
 
 if __name__ == "__main__":

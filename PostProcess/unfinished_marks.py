@@ -5,9 +5,12 @@ build-index-only writes some of a dataset's outputs in place, chromosome by chro
 FASTA by FASTA, and marks each meanwhile with a hidden ``.building`` directory that holds
 its owner record (crisprme.py _mark_unfinished): a run stopped there leaves a part that
 looks whole, which a search would use as if it were. complete-search refuses each part
-while it is marked (crisprme.py _refuse_unfinished), taking the parts from
-``dataset_parts``. (The search script the web runs has its own copy of these checks, in
-bash: STEP 1 and STEP 2.3 of submit_job_automated_new_multiple_vcfs.sh.)
+while it is marked (crisprme.py _refuse_unfinished), and so does complete-test's
+one-chromosome smoke, which runs complete-search from a view of the working directory
+that the marks are not in, so it looks at them in the working directory first. Both take
+the parts from ``dataset_parts``, so that they refuse the same ones. (The search script
+the web runs has its own copy of these checks, in bash: STEP 1 and STEP 2.3 of
+submit_job_automated_new_multiple_vcfs.sh.)
 """
 
 import os
@@ -17,6 +20,11 @@ def indel_snp_on() -> bool:
     """Whether the SNP+indel co-occurrence is on (CRISPRME_INDEL_SNP, on unless set to
     anything but 1, true, True or yes): the indel genotype store is read for it alone."""
     return os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
+
+
+def is_marked(directory: str) -> bool:
+    """Whether ``directory`` holds build-index-only's unfinished mark."""
+    return os.path.isdir(os.path.join(directory, ".building"))
 
 
 def _pam_serves(pam: str, motif: str, prune: bool, three_prime: bool) -> bool:
@@ -67,6 +75,13 @@ def indels_index_in_place(library: str, dataset: str, motif: str, n_want: int,
     return False
 
 
+def _real(path: str) -> str:
+    """``path``, or what it links to when it is a symlink: complete-test's view links
+    each Dictionaries entry, as a user may link one, and the path to remove is the
+    real one."""
+    return os.path.realpath(path) if os.path.islink(path) else path
+
+
 def dataset_parts(workdir: str, genome: str, vcf: str, indels_in_place: bool) -> list:
     """The parts of variant dataset ``vcf`` of genome ``genome``, in working directory
     ``workdir``, that a search refuses while build-index-only marks them unfinished, as
@@ -76,20 +91,20 @@ def dataset_parts(workdir: str, genome: str, vcf: str, indels_in_place: bool) ->
     reads it; the fake-indel genome only for a search without its INDELS index in place
     (``indels_in_place``: indels_index_in_place), which alone reads it."""
     dicts = os.path.join(workdir, "Dictionaries")
-    reg = os.path.join(dicts, f"registry_{vcf}")
-    gt = os.path.join(dicts, f"genotypes_{vcf}")
+    reg = _real(os.path.join(dicts, f"registry_{vcf}"))
+    gt = _real(os.path.join(dicts, f"genotypes_{vcf}"))
     rerun = f"Run build-index-only again with {vcf}"
     parts = [(reg, f"the dict-less tiers of {vcf}",
               f"{rerun} and its --samplesID, which finishes them, or remove them to "
               f"search without them (rm -rf '{reg}' '{gt}')")]
     if indel_snp_on():
-        igt = os.path.join(dicts, f"indel_genotypes_{vcf}")
+        igt = _real(os.path.join(dicts, f"indel_genotypes_{vcf}"))
         parts.append((igt, f"the phased indel genotype store of {vcf}",
                       f"{rerun}, which finishes it, or remove it to search without it "
                       f"(rm -rf '{igt}')"))
     enriched = os.path.join(workdir, "Genomes", f"{genome}+{vcf}")
-    parts.append((enriched, f"the enrichment of {vcf}", f"{rerun}, which enriches it again"))
+    parts.append((_real(enriched), f"the enrichment of {vcf}", f"{rerun}, which enriches it again"))
     if not indels_in_place:
-        parts.append((enriched + "_INDELS", f"the SNP codes of the {vcf} fake-indel genome",
+        parts.append((_real(enriched + "_INDELS"), f"the SNP codes of the {vcf} fake-indel genome",
                       f"{rerun}, which finishes them"))
     return parts

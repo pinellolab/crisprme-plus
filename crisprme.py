@@ -2447,7 +2447,8 @@ def complete_search() -> None:
         # The parts: the dict-less tiers, the indel genotype store (read for the SNP+indel
         # co-occurrence only), the enrichment, and the fake-indel genome, which a search
         # reads only to build the INDELS index it does not find (the search script
-        # refuses its mark there too, at STEP 2.3): unfinished_marks.dataset_parts.
+        # refuses its mark there too, at STEP 2.3): unfinished_marks.dataset_parts, which
+        # complete-test's one-chromosome smoke checks too.
         import unfinished_marks as _um
 
         _genome = os.path.basename(os.path.normpath(genomedir))
@@ -5547,8 +5548,8 @@ def complete_test_crisprme():
     by CRISPRme based on specified arguments.
 
     Raises:
-        OSError: If the CRISPRme test fails, indicating an issue with the testing
-            process.
+        SystemExit: With status 1 if the CRISPRme test fails (2 for a --chrom the
+            genome or the index lacks), having said why on stderr.
     """
 
     warn_low_memory()  # non-fatal low-memory warning (Docker Desktop, etc.)
@@ -5596,9 +5597,20 @@ def complete_test_crisprme():
         # and said so in one line before searching; a traceback would only bury it
         sys.exit(2)
     if code != 0:
-        raise OSError(
-            "\nCRISPRme complete test encountered an Error! See Results/crisprme-test-out/log_error.txt for details\n"
+        # complete_test.py, or the search it ran, has said why above; a traceback would
+        # only bury it. The search's error log is named where one was written: a search
+        # refused before it starts writes none, and the benchmark mode writes one per
+        # benchmark, in Results/crisprme-test-out_<name>.
+        from glob import glob as _glob
+
+        logs = [p for p in sorted(_glob(os.path.join(CRISPRMEDIRS[1], "crisprme-test-out*",
+                                                     "log_error.txt")))
+                if os.path.getsize(p)]
+        sys.stderr.write(
+            "\nCRISPRme complete test encountered an error: "
+            + (f"see {' and '.join(logs)} for details\n" if logs else "see the messages above\n")
         )
+        sys.exit(1)
     
 def print_help_validate_test() -> None:
     """

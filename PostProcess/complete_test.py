@@ -52,6 +52,8 @@ from utils import (
 
 from typing import Optional, Tuple
 
+import unfinished_marks
+
 import subprocess
 import contextlib
 import tempfile
@@ -817,6 +819,42 @@ def _log_chrom(fname: str):
     return chrom if chrom.startswith("chr") else f"chr{chrom}"
 
 
+def _vcf_names(vcf_list: Optional[str]) -> list:
+    """The dataset folder names (<vcf>) of the smoke's --vcf list, as the search reads
+    them; none for a reference smoke (no list)."""
+    if not vcf_list:
+        return []
+    with open(vcf_list) as fin:
+        return [os.path.basename(l.strip().rstrip("/")) for l in fin if l.strip()]
+
+
+def _refuse_unfinished(ref: str, vcf_names: list, pam: str) -> None:
+    """Refuse the one-chromosome smoke while build-index-only has marked unfinished a
+    part of a dataset it searches (unfinished_marks.dataset_parts, the parts
+    complete-search refuses), before its view is made: the view holds no
+    Genomes/<ref>+<vcf>, so the search run from it would not see that one's mark, and
+    it would name each part it refuses by its path in the view, gone once the run ends.
+    One line on stderr for each, then exit 1, with nothing searched and no results
+    folder made. The smoke searches with PAM ``pam``, one bulge of each type (an index
+    N of 2) and no --prune-pam."""
+    cwd = os.getcwd()
+    lib = os.path.join(cwd, "genome_library")
+    refused = []
+    for vcf in vcf_names:
+        in_place = unfinished_marks.indels_index_in_place(lib, f"{ref}+{vcf}", pam, 2)
+        for part, what, rerun in unfinished_marks.dataset_parts(cwd, ref, vcf, in_place):
+            if unfinished_marks.is_marked(part):
+                refused.append(
+                    f"ERROR: {part} is unfinished: a build-index-only run is writing {what} "
+                    "there, or stopped before it was done, and the search would use what is "
+                    f"there as if it were whole. Let that run finish, or {rerun[0].lower()}"
+                    f"{rerun[1:]}, then run complete-test again.\n"
+                )
+    if refused:
+        sys.stderr.write("".join(refused))
+        sys.exit(1)
+
+
 @contextlib.contextmanager
 def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
     """Yield a per-run view of the working directory in which ``chrom`` is the only
@@ -857,10 +895,7 @@ def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
     removes it but leaves the search running, to fail without it.
     """
     cwd = os.getcwd()
-    vcf_names = []
-    if vcf_list:
-        with open(vcf_list) as fin:  # as the search reads them
-            vcf_names = [os.path.basename(l.strip().rstrip("/")) for l in fin if l.strip()]
+    vcf_names = _vcf_names(vcf_list)
     # a signal ignored at entry stays so, and the search inherits it, for exec keeps an
     # ignored signal and resets a handled one to its default: nohup ignores SIGHUP
     saved = {
@@ -1038,7 +1073,10 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool, chrom: str = "all") -> 
     else:
         # the same search, from a view of the working directory where chrom is alone;
         # the --output path (the usual Results folder) given whole, so that the paths
-        # complete-search prints and logs are not the view's, gone once it is removed
+        # complete-search prints and logs are not the view's, gone once it is removed.
+        # The parts of its datasets it refuses while they are marked unfinished are
+        # looked at here first, as the view does not hold all of them.
+        _refuse_unfinished(ref, _vcf_names(vcf_list), pam_token)
         with _chrom_view(chrom, ref, vcf_list) as view:
             returncode = complete_search(
                 os.path.join(view, CRISPRME_DIRS[0], ref),
