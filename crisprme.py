@@ -3295,10 +3295,11 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
     .bin that is not whole (crispritz_bins: buildTST does not check its writes, so a
     full disk leaves one empty or cut short). buildTST does not check that a .bin
     opened either: with the disk's inode table or a file-count quota full, it
-    writes none for the contigs left and still exits 0. So the run fails the same
-    way when a contig that holds a target has no .bin (crispritz_bins.missing_bins),
-    and, where a contig has no .bin that missing_bins cannot read as buildTST does,
-    when a directory of the index cannot take a file more once the command has ended:
+    writes none for the contigs left, or for the parts left of a contig it writes
+    in several, and still exits 0. So the run fails the same way when a contig that
+    holds a target has no .bin, or lacks a part (crispritz_bins.missing_bins), and,
+    where such a contig is one missing_bins cannot read as buildTST does, when a
+    directory of the index cannot take a file more once the command has ended:
     ``indexed`` is ``(pam_file, max_bulges, [(genome_dir, subdir)...])``, what ``cmd``
     indexes, each genome into ``subdir`` of the index (None: no contig read). If a
     search holds the index's build lock by then, the run stops
@@ -3330,11 +3331,14 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
             missing, cannot = crispritz_bins.missing_bins(
                 os.path.join(built, subdir), genome_dir, indexed[0], indexed[1])
             if missing:
+                fasta, contig, written, wanted = missing[0]
+                fasta = os.path.join(genome_dir, fasta)
                 error(
-                    f"{failure}: the engine exited 0, but wrote no .bin for {missing[0][1]} "
-                    f"({os.path.join(genome_dir, missing[0][0])}), which holds a target, as "
-                    f"when the disk's inode table or a file-count quota is full: nothing "
-                    f"was put in place (expected {final})"
+                    f"{failure}: the engine exited 0, but "
+                    + (f"wrote {written} of the {wanted} .bin of {contig} ({fasta})" if written
+                       else f"wrote no .bin for {contig} ({fasta}), which holds a target")
+                    + ", as when the disk's inode table or a file-count quota is full: "
+                    f"nothing was put in place (expected {final})"
                 )
             unread = unread or bool(cannot)
         for top, _dirs, _files in os.walk(built) if unread else ():

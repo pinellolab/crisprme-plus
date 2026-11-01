@@ -500,36 +500,43 @@ and the `release-crisprme` skill.
   the same way, as is the one in `Dictionaries` that its dictionaries are put together in; the
   search's own `Genomes/run_*` directories are untouched.
 - **A full disk, inode table or file-count quota while `build-index-only` builds an index no longer
-  leaves that index in place, cut short or short of contigs.** `buildTST` (CRISPRitz 2.9.1 and
-  earlier) does not check its writes, so on a full disk it left a `.bin` empty or cut short and
-  still exited 0. `build-index-only` put that index in place (`Index built`, `Variant index
-  ready`) and, when the rest of the run fitted, exited 0 with empty stderr; every later run
-  printed `already present` and kept it, and every search failed on it (`is not a valid CRISPRitz
-  index (.bin) file (numLeaves=65535)`, `invalid TST node count (numNodes=0)`, or a crash) until
-  its directory was removed by hand. Before an index goes into place, each `.bin` the engine wrote
-  is now checked against what it records of itself (its number of targets, of tree nodes, and the
-  target its tree ends with), the INDELS index's chromosome by chromosome; one that is not whole
+  leaves that index in place, cut short or short of contigs or of their parts.** `buildTST`
+  (CRISPRitz 2.9.1 and earlier) does not check its writes, so on a full disk it left a `.bin` empty
+  or cut short and still exited 0. `build-index-only` put that index in place (`Index built`,
+  `Variant index ready`) and, when the rest of the run fitted, exited 0 with empty stderr; every
+  later run printed `already present` and kept it, and every search failed on it (`is not a valid
+  CRISPRitz index (.bin) file (numLeaves=65535)`, `invalid TST node count (numNodes=0)`, or a crash)
+  until its directory was removed by hand. Before an index goes into place, each `.bin` the engine
+  wrote is now checked against what it records of itself (its number of targets, of tree nodes, and
+  the target its tree ends with), the INDELS index's chromosome by chromosome; one that is not whole
   ends the run with an ERROR that names it and says the disk may be full, nothing goes into place,
   and the next run, once there is room, builds it again. A whole index goes into place as before;
-  the check reads each `.bin`'s targets, about half a second for every 5 million (one `.bin`), so
-  a few minutes for a genome-wide index. An index that a run of an earlier release put in place
-  cut short is not detected: if a search fails on an index with one of the messages above, remove
-  its directory and run `build-index-only` again. Nor does `buildTST` check that a `.bin` opened:
-  with the disk's inode table or a file-count quota full (as on many HPC file systems), it made no
-  `.bin` for the contigs left, wrote nothing for them and exited 0, every `.bin` there whole, so
-  that index went into place and every search lacked the off-targets of those contigs, with no
-  error (with the real engine, a ten-contig genome built with a few inodes free went into place
-  with 0 to 9 of its 10 `.bin`, and a search found a site that is on every contig on 3, 6 or 9 of
-  them). Once the engine has ended, `build-index-only` now reads each contig left without a `.bin`
-  (only those) for a target by `buildTST`'s own rule (its PAM on either strand, the window inside
-  the contig, no N in it outside the PAM): one that holds a target ends the run with an ERROR that
-  names it, nothing goes into place, and the next run, once there is room, builds it again. Where
-  it cannot read such a contig as `buildTST` does (a byte that is no IUPAC base, CRLF line ends),
-  it makes and removes a file in each directory of the index, and a disk or quota that cannot take
-  it fails the build the same way; with room left, such a contig is not told from one with no
-  target. A contig with no target gets no `.bin` and its index goes into place, as before, as does
-  a whole index whose build left the inode table full. The indexes a search builds itself, on
-  demand, are not checked, and CRISPRitz's own writes are still unchecked.
+  the check reads each `.bin`'s targets, about half a second for every 5 million (one `.bin`), so a
+  few minutes for a genome-wide index. An index that a run of an earlier release put in place cut
+  short is not detected: if a search fails on an index with one of the messages above, remove its
+  directory and run `build-index-only` again. Nor does `buildTST` check that a `.bin` opened: with
+  the disk's inode table or a file-count quota full (as on many HPC file systems), it made no `.bin`
+  for what it had left to save, the contigs after the one it was on and that contig's later parts
+  (it saves a contig's targets 5 million a `.bin`, each hg38 autosome in several), wrote nothing for
+  them and exited 0, every `.bin` there whole, so that index went into place and every search lacked
+  the off-targets left out, with no error (with the real engine, a ten-contig genome built with a
+  few inodes free went into place with 0 to 9 of its 10 `.bin`, and a search found a site that is on
+  every contig on 3, 6 or 9 of them; a genome whose last contig takes two `.bin` went into place
+  with the first one, and a search lost the site in the second). Once the engine has ended,
+  `build-index-only` now reads each contig left without a `.bin` for a target by `buildTST`'s own
+  rule (its PAM on either strand, the window inside the contig, no N in it outside the PAM), checks
+  that each other contig has its parts from 1 to the last one's number, and, where that last part
+  holds 5 million targets, as each part but the last does, counts the contig's targets by the same
+  rule. A contig with no `.bin` that holds a target, one that lacks a part, or one that holds more
+  targets than its parts ends the run with an ERROR that names it, nothing goes into place, and the
+  next run, once there is room, builds it again. Only the FASTAs of contigs without a `.bin` or with
+  a full last part are read whole, up to the first that fails. Where it cannot read such a contig as
+  `buildTST` does (a byte that is no IUPAC base, CRLF line ends), it makes and removes a file in
+  each directory of the index, and a disk or quota that cannot take it fails the build the same way;
+  with room left, such a contig is not told from a whole one. A contig with no target gets no `.bin`
+  and its index goes into place, as before, as does a whole index whose build left the inode table
+  full. The indexes a search builds itself, on demand, are not checked, and CRISPRitz's own writes
+  are still unchecked.
 
 ### Security
 - **The web Settings page could be pointed outside `Settings/` and made to re-run a recorded

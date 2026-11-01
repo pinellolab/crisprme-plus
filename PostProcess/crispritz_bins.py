@@ -30,7 +30,10 @@ in the byte order of the machine that wrote them, which is this one.
 buildTST does not check that a .bin opened either: with the disk's inode table or
 a file-count quota full, it writes nothing for the contigs left and exits 0, and
 every .bin there is whole. A contig with no target gets no .bin, so missing_bins
-tells which contigs without one hold a target, by buildTST's own rule for one.
+tells which contigs without one hold a target, by buildTST's own rule for one. A
+contig of more than TARGETS_A_TREE targets gets several, one a part, every part but
+the last one full: one cut off as its later parts were made has its first parts
+only, so missing_bins also counts the targets of a contig whose last part is full.
 """
 
 import array
@@ -109,6 +112,10 @@ def incomplete_bins(directory):
 _BITS = dict(zip("ACGTRYSWKMBDHV", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7)))
 _PAM_BITS = dict(_BITS, N=15)
 _REVERSE = str.maketrans("ACGTRYMKHDBV", "TGCAYRKMDHVB")  # reversenuc, less the reversal
+# buildTST's TARG_IN_GROUP: it saves a contig's targets, sorted, this many a tree,
+# <PAM>_<contig>_1.bin to _<n>.bin, n their count over this, rounded up
+TARGETS_A_TREE = 5000000
+_CHUNK = 1 << 20  # the positions count_targets has a regex scan at a time
 
 
 def holds_target(seq, pam, pam_len, at_start, max_bulges):
@@ -161,6 +168,57 @@ def holds_target(seq, pam, pam_len, at_start, max_bulges):
     return False
 
 
+def count_targets(seq, pam, pam_len, at_start, max_bulges):
+    """How many targets buildTST (CRISPRitz 2.9.1) indexes in contig ``seq``, by the
+    rule of holds_target: on each strand, each position where searchPAMonGenome
+    finds its PAM and keeps its window inside the contig, and whose window of
+    pam_len + max_bulges bases guideRegionHasN keeps, with no N outside its PAM (the
+    window at 0 tested as on the minus strand). None for a PAM file whose PAM takes
+    every base of a target."""
+    width, size, n = pam_len + max_bulges, len(pam), len(seq)
+    guide = width - size  # the bases of a window but its PAM
+    if guide < 1:
+        return None
+    if n < width:
+        return 0
+    scanned = n - (pam_len if at_start else size)  # where searchPAMonGenome looks
+    last = min(scanned - 1, n - width)
+    # Each strand's PAM, where its window starts from the position of that PAM, the
+    # first and last position searchPAMonGenome keeps for it, and the one whose
+    # window main tests as on the other strand, with where it then tests it
+    motif = pam.translate(_REVERSE)[::-1]
+    if at_start:
+        strands = ((pam, size, 0, last, 0, 0), (motif, -guide, guide, scanned - 1, None, 0))
+    else:
+        strands = ((pam, -guide, guide, scanned - 1, guide, size), (motif, size, 0, last, None, 0))
+    if all(_PAM_BITS[base] == 15 for base in pam):
+        finders = (None, None)  # every position is a PAM on both strands
+    else:
+        finders = tuple(re.compile("(?=%s)" % "".join(
+            "[%s]" % "".join(b for b in _BITS if _BITS[b] & _PAM_BITS[base])
+            for base in strand[0])) for strand in strands)
+
+    def found(finder, a, b):  # the positions a to b where finder's PAM is
+        if finder is None:
+            return max(0, b - a + 1)
+        return sum(len(finder.findall(seq, x, min(x + _CHUNK, b + 1) + size - 1))
+                   for x in range(a, b + 1, _CHUNK))
+
+    # A window is kept when it lies in an N-free run of the contig: count, run by run,
+    # the PAMs whose window it holds
+    total = 0
+    for run in re.finditer("[^N]+", seq):
+        for (_, at, first, end, odd, _), finder in zip(strands, finders):
+            a, b = max(first, run.start() - at), min(end, run.end() - at - guide)
+            total += found(finder, a, b)
+            if odd is not None and a <= odd <= b:
+                total -= found(finder, odd, odd)  # (its own window, below)
+    for (_, at, first, end, odd, odd_at), finder in zip(strands, finders):
+        if odd is not None and first <= odd <= end and seq.find("N", odd_at, odd_at + guide) < 0:
+            total += found(finder, odd, odd)
+    return total
+
+
 def _read_pam(pam_file):
     """(the PAM, pam_len, at_start) as buildTST reads them from the first line of
     ``pam_file``, or None where this module would read it otherwise."""
@@ -194,21 +252,39 @@ def _read_contig(fasta):
     return head[1:].decode("utf-8", "surrogateescape"), body.decode("ascii")
 
 
+def _leaves(path):
+    """numLeaves of the .bin ``path``, or None where it cannot be read."""
+    try:
+        with open(path, "rb") as fh:
+            return struct.unpack("=i", fh.read(4))[0]
+    except (OSError, struct.error):
+        return None
+
+
 def missing_bins(directory, genome_dir, pam_file, max_bulges):
-    """``([(FASTA, contig)], [FASTA])``, of the FASTAs of ``genome_dir`` that
-    index-genome indexed into ``directory`` (every ``*.fa``) with ``pam_file`` and
-    ``max_bulges`` and that have no ``<PAM>_<contig>_<part>.bin`` there: those whose
-    contig holds a target (holds_target), and those this module would read otherwise
+    """``([(FASTA, contig, written, wanted)], [FASTA])``, of the FASTAs of
+    ``genome_dir`` that index-genome indexed into ``directory`` (every ``*.fa``) with
+    ``pam_file`` and ``max_bulges``: the first found whose index there lacks a
+    ``<PAM>_<contig>_<part>.bin``, with how many .bin it has and how many it takes
+    (None: not counted); and, when none is, those this module would read otherwise
     than buildTST, which may (a byte other than an IUPAC base, CRLF line ends, a
-    first line that is no header, a PAM file it cannot read)."""
+    first line that is no header, a PAM file it cannot read). A contig lacks one when
+    it has none and holds a target (holds_target); when its parts are not 1 to the
+    last one's number (it takes that many, at least); or when that last part holds
+    TARGETS_A_TREE targets, as each part of a contig but its last does, and the
+    contig holds more (count_targets). It reads the first line of each FASTA and the
+    numLeaves of each contig's last part, then, whole, only the FASTAs of contigs
+    without a .bin and of those whose last part is full, up to the first found."""
     pam = _read_pam(pam_file)
     try:
         bins = os.listdir(directory)
     except OSError:
         bins = []
-    named = re.compile(r"%s_(.*)_[0-9]+\.bin\Z" % re.escape(pam[0]) if pam else r"\Z.")
-    have = {m.group(1) for m in map(named.match, bins) if m}  # the contigs with a .bin
-    found, unread = [], []
+    named = re.compile(r"%s_(.*)_([0-9]+)\.bin\Z" % re.escape(pam[0]) if pam else r"\Z.")
+    parts = {}  # the parts of each contig with a .bin
+    for m in filter(None, map(named.match, bins)):
+        parts.setdefault(m.group(1), set()).add(int(m.group(2)))
+    none, full, unread = [], [], []
     for name in sorted(os.listdir(genome_dir)):
         path = os.path.join(genome_dir, name)
         if name.strip().split(".")[-1] != "fa" or not os.path.isfile(path):
@@ -220,11 +296,25 @@ def missing_bins(directory, genome_dir, pam_file, max_bulges):
         except OSError:
             unread.append(name)
             continue
-        if head in have:
-            continue
-        contig = _read_contig(path) if pam is not None else None
+        have = parts.get(head)
+        if not have:
+            none.append((name, head))
+        elif len(have) < max(have):  # a part before the last one missing
+            return [(name, head, len(have), max(have))], unread
+        elif _leaves(os.path.join(directory, f"{pam[0]}_{head}_{max(have)}.bin")) in (
+                TARGETS_A_TREE, None):
+            full.append((name, head))
+    for name, head in none + full:
+        contig = _read_contig(os.path.join(genome_dir, name)) if pam is not None else None
         if contig is None:
             unread.append(name)
-        elif holds_target(contig[1], *pam, max_bulges):
-            found.append((name, contig[0]))
-    return found, unread
+        elif head not in parts:
+            if holds_target(contig[1], *pam, max_bulges):
+                return [(name, contig[0], 0, None)], unread
+        else:
+            count = count_targets(contig[1], *pam, max_bulges)
+            if count is None:
+                unread.append(name)
+            elif count > len(parts[head]) * TARGETS_A_TREE:
+                return [(name, contig[0], len(parts[head]), -(-count // TARGETS_A_TREE))], unread
+    return [], unread

@@ -227,7 +227,9 @@ for i, f in enumerate(files):
 # STUB_RENAME_HANG=<path>: it waits instead, once $STUB_MARK is made, until
 # $STUB_RELEASE exists. STUB_PROBE_FULL=<errno name>: the file build-index-only makes
 # and removes in each directory of an index it built cannot be made, with that errno,
-# as with the disk's inode table or a file-count quota full.
+# as with the disk's inode table or a file-count quota full. STUB_TARGETS_A_TREE=<n>:
+# crispritz_bins (the module $STUB_BINS) takes a tree of buildTST's to hold n targets,
+# not 5,000,000, so that the stub's .bin, of one target, is a full one at n=1.
 SHIM = r'''
 import builtins, errno, os, signal, time
 
@@ -344,6 +346,14 @@ if os.environ.get("STUB_PROBE_FULL"):
         return _os_open(path, flags, *args, **kwargs)
 
     os.open = _open_probe
+
+if os.environ.get("STUB_TARGETS_A_TREE"):
+    import importlib.util, sys
+    _spec = importlib.util.spec_from_file_location("crispritz_bins", os.environ["STUB_BINS"])
+    _bins = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_bins)
+    _bins.TARGETS_A_TREE = int(os.environ["STUB_TARGETS_A_TREE"])
+    sys.modules["crispritz_bins"] = _bins
 '''
 
 SHARED = None  # the stub Bio package and a warmed matplotlib cache, for every run
@@ -843,6 +853,36 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
         self.fresh()
         _write(self.path("Genomes", "hg38", "chr3.fa"), ">chr3\n" + "N" * 120 + "\n")
         rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.bins(REF), WHOLE[REF][2])
+
+    def test_a_contig_the_engine_left_short_of_its_later_parts_is_not_put_in_place(self):
+        """buildTST saves a contig of more than 5,000,000 targets (each hg38 autosome)
+        as a .bin a part, every part but the last one full. With the inode table or a
+        file-count quota full as it saved the later parts of the last contig it
+        indexed, it made the first ones only and exited 0, every .bin there whole: the
+        index went into place, every later run kept it, and a search lacked the
+        targets of the parts left out. A contig whose last part is full now has its
+        targets counted. (Here a tree holds one target, the stub's, as SHIM has it: a
+        contig of two takes two .bin, and the stub writes one.)"""
+        one, two = "T" * 22 + "TGGT", "C" + "T" * 21 + "TGGT"  # 1 and 2 targets at -bMax 2
+        self.assertEqual([buildtst_targets(s, "NRG", 23, False, 2) for s in (one, two)], [1, 2])
+        shim = dict(shim=True, STUB_TARGETS_A_TREE="1",
+                    STUB_BINS=os.path.join(HERE, "crispritz_bins.py"))
+        _write(self.path("Genomes", "hg38", "chr1.fa"), f">chr1\n{one}\n")
+        _write(self.path("Genomes", "hg38", "chr2.fa"), f">chr2\n{two}\n")
+        rc, out, err = self.run_bio(vcf=False, **shim)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(err, "Error: Reference genome indexing failed: the engine exited 0, but "
+                              "wrote 1 of the 2 .bin of chr2 "
+                              f"({self.path('Genomes', 'hg38', 'chr2.fa')}), as when the disk's "
+                              "inode table or a file-count quota is full: nothing was put in "
+                              f"place (expected {self.lib(REF)})\n")
+        self.assertFalse(os.path.lexists(self.lib(REF)))
+        self.assertEqual(self.leftovers(), [])
+        # one whose parts hold all its targets goes into place, its last part full
+        _write(self.path("Genomes", "hg38", "chr2.fa"), f">chr2\n{one}\n")
+        rc, out, err = self.run_bio(vcf=False, **shim)
         self.assertEqual(rc, 0, err)
         self.assertEqual(self.bins(REF), WHOLE[REF][2])
 
@@ -2248,7 +2288,33 @@ class TheContigCheckFindsATargetWhereBuildTSTDoes(unittest.TestCase):
         self.assertGreater(held, 500)
         self.assertLess(held, 2000)
 
-    def test_missing_bins_names_only_a_contig_that_holds_a_target(self):
+    def test_its_count_of_targets_agrees_with_buildtst_on_random_contigs(self):
+        """count_targets, which tells how many .bin a contig takes, on the contigs
+        above and longer ones, with its regex scanning one position to all at a time."""
+        import crispritz_bins
+
+        self.addCleanup(setattr, crispritz_bins, "_CHUNK", crispritz_bins._CHUNK)
+        r = random.Random(11)
+        counted = 0
+        for case in range(2500):
+            motif, limit = r.choice(self.PAMS).split()
+            limit = int(limit)
+            pam = motif[:-limit] if limit < 0 else motif[-limit:]
+            bulges = r.randint(0, 3)
+            n = r.choice((r.randint(0, 40), r.randint(20, 60), r.randint(40, 300), r.randint(300, 900)))
+            mix = r.choice(("ACGT", "ACGT" * 6 + "N", "ACGTN", "ACGTNNNNRYSWKMBDHV", "ACGTNRYSWKMBDHV"))
+            seq = "".join(r.choice(mix) for _ in range(n))
+            if n > 10 and r.random() < 0.3:
+                a = r.randrange(n)
+                seq = seq[:a] + "N" * min(n - a, r.randint(1, 30)) + seq[a + 30:]
+            crispritz_bins._CHUNK = r.choice((1, 2, 3, 7, 64, 1 << 20))
+            want = buildtst_targets(seq, pam, len(motif), limit < 0, bulges)
+            counted += want
+            self.assertEqual(crispritz_bins.count_targets(seq, pam, len(motif), limit < 0, bulges),
+                             want, (seq, motif, limit, bulges, crispritz_bins._CHUNK))
+        self.assertGreater(counted, 50000)
+
+    def test_missing_bins_names_the_first_contig_that_holds_a_target_and_has_no_bin(self):
         import crispritz_bins
 
         top = tempfile.mkdtemp(prefix="bio_contigs_")
@@ -2265,24 +2331,72 @@ class TheContigCheckFindsATargetWhereBuildTSTDoes(unittest.TestCase):
             "chr5.fa": ">chr5\n" + site,  # its only line has no end: buildTST drops it
             "chr6.fa": ">chr6\r\n" + site + "\r\n",  # read otherwise: unread, not missing
             "chr7.fa": ">chr7\n" + site + "U\n",  # as is a byte no IUPAC base
-            "chr8.fa": ">chr8\n" + site + "\n",  # its .bin of part 2 alone: still there
             "notes.txt": ">chr9\n" + site + "\n",  # not indexed
         }
         for name, text in contigs.items():
             _write(os.path.join(genome, name), text)
-        for name in ("NRG_chr1_1.bin", "NRG_chr8_2.bin", "NGG_chr2 desc here_1.bin"):
-            open(os.path.join(index, name), "w").close()
-        unread = ["chr6.fa", "chr7.fa"]
+
+        def bins(*names):  # the index: a .bin of one target for each
+            shutil.rmtree(index)
+            os.makedirs(index)
+            for name in names:
+                with open(os.path.join(index, name), "wb") as fh:
+                    fh.write(struct.pack("=ii", 1, 23))
+
+        bins("NRG_chr1_1.bin", "NGG_chr2 desc here_1.bin")
         self.assertEqual(crispritz_bins.missing_bins(index, genome, PAM, 2),
-                         ([("chr1_random.fa", "chr1_random"), ("chr2.fa", "chr2 desc here")], unread))
-        # with no index directory at all, every contig that holds a target
+                         ([("chr1_random.fa", "chr1_random", 0, None)], []))
+        bins("NRG_chr1_1.bin", "NRG_chr1_random_1.bin")
+        self.assertEqual(crispritz_bins.missing_bins(index, genome, PAM, 2),
+                         ([("chr2.fa", "chr2 desc here", 0, None)], []))
+        # none: then those it cannot read as buildTST does
+        bins("NRG_chr1_1.bin", "NRG_chr1_random_1.bin", "NRG_chr2 desc here_1.bin")
+        self.assertEqual(crispritz_bins.missing_bins(index, genome, PAM, 2),
+                         ([], ["chr6.fa", "chr7.fa"]))
+        # with no index directory at all, the first contig that holds a target
         self.assertEqual(crispritz_bins.missing_bins(os.path.join(top, "none"), genome, PAM, 2),
-                         ([("chr1.fa", "chr1"), ("chr1_random.fa", "chr1_random"),
-                           ("chr2.fa", "chr2 desc here"), ("chr8.fa", "chr8")], unread))
+                         ([("chr1.fa", "chr1", 0, None)], []))
         # and with a PAM file it cannot read, none is told: each without a .bin is unread
         pam = os.path.join(top, "pam.txt")
         _write(pam, "NNNNNNNNNNNNNNNNNNNNNRG\n")
         self.assertEqual(crispritz_bins.missing_bins(index, genome, pam, 2)[0], [])
+
+    def test_missing_bins_names_a_contig_short_of_a_part(self):
+        """buildTST saves a contig's targets, sorted, as a .bin a TARGETS_A_TREE of
+        them: with the inode table full as it saved its later parts, it made the first
+        ones only, every .bin there whole, and that contig was taken for indexed. (Here
+        a tree holds 2 targets.)"""
+        import crispritz_bins
+
+        self.addCleanup(setattr, crispritz_bins, "TARGETS_A_TREE", crispritz_bins.TARGETS_A_TREE)
+        crispritz_bins.TARGETS_A_TREE = 2
+        site = "ACGTTGCAAGACGTTGCAAGACGTAGG"
+        four, five = site + "TGG" * 3, site + "TGG" * 4
+        self.assertEqual([buildtst_targets(s, "NRG", 23, False, 2) for s in (four, five)], [4, 5])
+        top = tempfile.mkdtemp(prefix="bio_parts_")
+        self.addCleanup(shutil.rmtree, top, True)
+        genome, index = os.path.join(top, "genome"), os.path.join(top, "index")
+        for name, seq in (("chr1", site), ("chrA", five), ("chrB", four)):
+            _write(os.path.join(genome, name + ".fa"), f">{name}\n{seq}\n")
+        _write(os.path.join(genome, "chrC.fa"), f">chrC\r\n{five}\r\n")  # (read otherwise)
+        for parts, found in (
+                ({}, ([], [])),  # whole: chrB's two parts full, as it has four targets
+                ({"chrA": (2, 2)}, ([("chrA.fa", "chrA", 2, 3)], [])),  # its third left out
+                ({"chrB": (2,)}, ([("chrB.fa", "chrB", 1, 2)], [])),
+                ({"chrA": (2, None, 1)}, ([("chrA.fa", "chrA", 2, 3)], [])),  # its second
+                ({"chrA": (None, 2, 1)}, ([("chrA.fa", "chrA", 2, 3)], [])),  # its first
+                # one it cannot read as buildTST does, whose last part is full: unread
+                ({"chrC\r": (2, 2)}, ([], ["chrC.fa"]))):
+            with self.subTest(parts=parts):
+                shutil.rmtree(index, ignore_errors=True)
+                os.makedirs(index)
+                for name, leaves in dict({"chr1": (1,), "chrA": (2, 2, 1), "chrB": (2, 2),
+                                          "chrC\r": (2, 2, 1)}, **parts).items():
+                    for part, n in enumerate(leaves, 1):
+                        if n is not None:
+                            with open(os.path.join(index, f"NRG_{name}_{part}.bin"), "wb") as fh:
+                                fh.write(struct.pack("=ii", n, 23))
+                self.assertEqual(crispritz_bins.missing_bins(index, genome, PAM, 2), found)
 
 
 # What the code before this fix (379b5b0) did with the same stub and inputs, for
