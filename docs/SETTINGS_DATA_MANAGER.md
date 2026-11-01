@@ -44,8 +44,9 @@ Bulge-enabled searches need a genome **index**.
   CRISPRme enriches the genome with the variants and indexes it ahead of time, so
   your first variant-aware search is fast instead of slow. The build passes the
   dataset's sample list (`samplesIDs/<dataset>.samplesID.txt`, see *Add a VCF
-  dataset*; a sites-only VCF has none) as `--samplesID`, so it also emits the
-  dict-less Tier-0 registry + Tier-1 genotype tiers (and, for a merged panel, the
+  dataset*) as `--samplesID` when it names samples the VCFs genotype (a sites-only
+  VCF, such as the `hg38_mega` ones, has none and is built without it), so it also
+  emits the dict-less Tier-0 registry + Tier-1 genotype tiers (and, for a merged panel, the
   combined samplesID list): per-sample analysis and the dataset's data type on the
   search form need them, and the index is self-complete for fast post-analysis. (CLI
   equivalent:

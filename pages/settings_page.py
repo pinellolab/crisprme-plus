@@ -854,28 +854,46 @@ def _placeholder_samples(path: str, dataset: str) -> Optional[List[str]]:
     return samples
 
 
+def _listed_samples(path: str) -> List[str]:
+    """The samples the list ``path`` names: the first column of its rows, a header
+    line and blank lines skipped, as the tiers read one (tier0_compile.read_samplesid).
+    [] when it cannot be read."""
+    try:
+        with open(path, errors="replace") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return []
+    if lines and (lines[0].startswith("#") or "SAMPLE_ID" in lines[0].upper()):
+        lines = lines[1:]
+    return [s for s in (line.split("\t")[0].strip() for line in lines) if s]
+
+
 def _write_dataset_samplesid(dataset: str) -> Optional[str]:
     """Writes samplesIDs/<dataset>.samplesID.txt from the VCF headers of
     VCFs/<dataset> (above) when there is none, or when the one there is a list this
     page wrote for other samples (a file of the dataset added or replaced since). A
     list from anywhere else (the command line, a download) is never changed. Returns
-    its path when there is one afterwards; None for a sites-only dataset, or one with
-    no readable VCF and no list. Raises OSError when it cannot write it."""
+    its path when a build of the dataset is to pass it (--samplesID): when it names a
+    sample the VCFs genotype. None when the VCFs genotype no sample (a sites-only
+    dataset) or cannot be read, or the list names none of theirs: the tiers a build
+    emits from such a list hold no sample, and they replace a per-dataset AF registry
+    put there by hand (the mega index's, from the VCFs' INFO allele frequencies) with
+    one that has no allele frequency. Raises OSError when it cannot write it."""
     if not dataset or os.path.basename(dataset) != dataset or dataset.startswith("."):
         return None  # (dropdown values are client data: a folder of VCFs/ only)
     sdir = os.path.join(current_working_directory, "samplesIDs")
     target = os.path.join(sdir, f"{dataset}.samplesID.txt")
     exists = os.path.isfile(target)
     ours = _placeholder_samples(target, dataset) if exists else None
-    if exists and ours is None:
-        return target
     samples = _vcf_header_samples(os.path.join(current_working_directory, "VCFs", dataset))
-    if samples is None:
-        return target if exists else None
-    if not samples:  # sites-only now: a list of this page's would name samples it lacks
-        if exists:
+    if not samples:
+        # sites-only, or no VCF to read: no list is written or passed. A list of this
+        # page's goes, as it names samples the files no longer have; any other stays
+        if samples == [] and ours:
             os.remove(target)
         return None
+    if exists and ours is None:
+        return target if set(_listed_samples(target)) & set(samples) else None
     if samples == ours:
         return target
     os.makedirs(sdir, exist_ok=True)
@@ -2451,7 +2469,9 @@ def build_index(n, genome, pam, bdna, brna, vcf, display_name):
         stage = "Build variant index"
         # with the dataset's sample list (written from its VCF headers when it has
         # none), so the build writes the dict-less tiers too: per-sample analysis and
-        # the data type the search form shows read them, as a search reads the list
+        # the data type the search form shows read them, as a search reads the list.
+        # None for a sites-only dataset, built without one as the mega index is
+        # (docs/DESIGN_mega_index.md): its tiers would have no sample
         try:
             if _write_dataset_samplesid(vcf):
                 argv += ["--samplesID", _samplesid_listing(vcf)]

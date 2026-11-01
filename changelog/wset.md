@@ -14,15 +14,17 @@ CHANGELOG.md. All go under "### Fixed". -->
   dataset as their population and `unknown` superpopulation and sex. A list from anywhere else (one
   you wrote, or a download's) is never changed. The Settings build passes the list, so it also
   builds the dict-less tiers: the dataset reads `[genotyped, phased]` and per-sample analysis is
-  available. Checked in the browser on a phased 6-sample dataset uploaded and built only in
-  Settings, once per chromosome and once as a single multi-chromosome file named without the
-  genome: the per-sample search runs to its end and names the same carriers, with the same allele
-  frequencies, as the same panel built from the command line with `--samplesID`. Submit now
-  refuses a variant search whose sample list is missing, with a message that says how to get one,
-  rather than letting it fail at its end; and a genotyped dataset with no tiers yet reads
-  `[genotyped, samples not indexed]`, not sites-only. **If you added a dataset in Settings,** build
-  its variant index again there; to give its samples' populations and sex, put your own list at
-  `samplesIDs/<dataset>.samplesID.txt` first.
+  available. It passes a list only when it names samples the VCFs genotype: a sites-only dataset
+  (no sample columns, as the `hg38_mega` VCFs) is built without one, as before, so the
+  per-dataset allele-frequency registry put in place for it is left as it is. Checked in the
+  browser on a phased 6-sample dataset uploaded and built only in Settings, once per chromosome and
+  once as a single multi-chromosome file named without the genome: the per-sample search runs to
+  its end and names the same carriers, with the same allele frequencies, as the same panel built
+  from the command line with `--samplesID`. Submit now refuses a variant search whose sample list
+  is missing, with a message that says how to get one, rather than letting it fail at its end; and
+  a genotyped dataset with no tiers yet reads `[genotyped, samples not indexed]`, not sites-only.
+  **If you added a dataset in Settings,** build its variant index again there; to give its
+  samples' populations and sex, put your own list at `samplesIDs/<dataset>.samplesID.txt` first.
 - **The Settings VCF upload records the reference genome you pick, and the search form offers the
   dataset for it.** The chunked uploader looked the genome up with selectors Dash 2's dropdown does
   not have and sent none, so `VCFs/.<dataset>.refgenome` was never written; and the search form

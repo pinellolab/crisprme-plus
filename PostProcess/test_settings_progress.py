@@ -821,8 +821,13 @@ class TestGenomeTarUpload(unittest.TestCase):
 # for a dataset added only in Settings: nothing wrote one, and the Settings build never
 # passed --samplesID, so the tiers per-sample analysis reads were never built either.
 _SID_NAMES = ["SAMPLESID_HEADER", "_vcf_header_samples", "_placeholder_samples",
-              "_write_dataset_samplesid", "_samplesid_listing"]
+              "_listed_samples", "_write_dataset_samplesid", "_samplesid_listing"]
 _HEADER = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+# the list the shipped hg38_mega index installs: one pseudo-sample a source dataset. Its
+# VCFs are sites-only, and it is built without --samplesID (docs/DESIGN_mega_index.md):
+# its registry is made from their INFO allele frequencies (build_mega_registry.py)
+_MEGA_LIST = _HEADER + "".join(f"{d}\t{d}\t{d}\tNA\n"
+                               for d in ("1000G2021", "HGDP", "gnomAD", "TOPMed", "AoU"))
 
 
 def _write_vcf(path, samples, records=("chr1\t10\t.\tA\tG\t.\tPASS\t.",)):
@@ -904,6 +909,23 @@ class TestDatasetSamplesID(_SamplesIDCase):
         self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2"])
         self.assertEqual(self.ns["_write_dataset_samplesid"]("walk"), self.sid("walk"))
         self.assertEqual(self.read(self.sid("walk")), mine)
+
+    def test_sites_only_dataset_leaves_a_list_from_elsewhere_alone(self):
+        # the mega index's list names datasets, not samples its VCFs genotype
+        with open(self.sid("hg38_mega"), "w") as fh:
+            fh.write(_MEGA_LIST)
+        self.vcf("hg38_mega", "mega.chr1.vcf.gz", [])
+        self.assertIsNone(self.ns["_write_dataset_samplesid"]("hg38_mega"))
+        self.assertEqual(self.read(self.sid("hg38_mega")), _MEGA_LIST)
+
+    def test_a_list_naming_no_sample_the_vcfs_genotype_is_not_passed(self):
+        # tiers emitted from it would hold no sample, and so no allele frequency
+        other = _HEADER + "X1\tGBR\tEUR\tmale\n"
+        with open(self.sid("walk"), "w") as fh:
+            fh.write(other)
+        self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2"])
+        self.assertIsNone(self.ns["_write_dataset_samplesid"]("walk"))
+        self.assertEqual(self.read(self.sid("walk")), other)
 
     def test_own_list_follows_the_dataset(self):
         # a file of the dataset added after the list was written (the uploader takes
@@ -1012,6 +1034,21 @@ class TestSettingsBuildPassesSampleList(_SamplesIDCase):
         argv, _stage = self.argv("agg")
         self.assertEqual(argv, self.base_argv() + [
             "--vcf", os.path.join(self.cwd + "/", "VCFs", "agg")])
+
+    def test_sites_only_dataset_with_a_list_from_elsewhere_built_without_it(self):
+        # a Settings build of the mega index (final review round 1, F1): passed its
+        # list, the build emitted tiers from it in place of the registry made from the
+        # VCFs' INFO allele frequencies, and every variant off-target of a search was gone
+        with open(self.sid("hg38_mega"), "w") as fh:
+            fh.write(_MEGA_LIST)
+        self.vcf("hg38_mega", "mega.chr1.vcf.gz", [])
+        self.vcf("hg38_mega", "mega.chr2.vcf.gz", [])
+        argv, _stage = self.argv("hg38_mega")
+        self.assertEqual(argv, self.base_argv() + [
+            "--vcf", os.path.join(self.cwd + "/", "VCFs", "hg38_mega")])
+        self.assertEqual(self.read(self.sid("hg38_mega")), _MEGA_LIST)
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "samplesIDs")),
+                         ["hg38_mega.samplesID.txt"])
 
     def test_reference_build_command_unchanged(self):
         self.assertEqual(self.argv("", "my index"),

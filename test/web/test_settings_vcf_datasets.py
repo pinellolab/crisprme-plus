@@ -19,11 +19,16 @@ tabix, bcftools) on a small synthetic genome, run with the argv the page launche
    "genotyped, samples not indexed", not "sites-only".
 3. Submit refuses a variant search whose sample list is missing, instead of letting
    it fail at its end, and still runs one whose list is there.
+4. A sites-only dataset is built without a sample list, as the mega index is
+   (docs/DESIGN_mega_index.md): a list of its pseudo-samples there, and the registry
+   made from the VCFs' INFO allele frequencies (build_mega_registry.py), are left as
+   they are (final review round 1, F1).
 
 Standalone (no pytest); exits non-zero on failure:
 
     docker run --rm -v "$PWD/test/web:/t" crisprme:web python -u /t/test_settings_vcf_datasets.py
 """
+import hashlib
 import os
 import random
 import shutil
@@ -89,12 +94,12 @@ def upload_vcf(dataset, fname, records):
     return settings_page._finalize_upload("vcf", part, fname, dataset, "toyg")
 
 
-def settings_build(dataset):
+def settings_build(dataset, bulges=1):
     """The command the Settings 'Build' button launches for dataset, run as the
     Settings job runner runs it. Returns (argv, rc, stderr)."""
     launched = []
     settings_page.launch_settings_job = lambda argv, stage: launched.append(argv) or "set_TEST000000"
-    settings_page.build_index(1, "toyg", PAM, 1, 1, dataset, None)
+    settings_page.build_index(1, "toyg", PAM, bulges, bulges, dataset, None)
     argv = launched[-1]
     done = subprocess.run(["crisprme.py"] + argv + ["--path", D + "/"], cwd=D,
                           capture_output=True, text=True, timeout=900)
@@ -162,6 +167,67 @@ ok, msgs = submit("fresh")
 check(not ok and any("No sample list for the variant dataset 'fresh'" in m
                      and "samplesIDs/toyg_fresh.samplesID.txt" in m for m in msgs),
       f"Submit refuses one whose sample list is missing (got {msgs})")
+
+# ---- a sites-only dataset built as the mega index is ----------------------------------
+# build-index-only without --samplesID, the registry made from the VCFs' INFO allele
+# frequencies dropped in, and the list the shipped index installs: one pseudo-sample a
+# source dataset. A Settings build passed that list, its tier emission rewrote the
+# registry from genotypes the VCFs do not have, and every variant off-target and
+# allele frequency of a search was gone.
+MEGA = "toyg_mega"
+mdir = os.path.join(D, "VCFs", MEGA)
+os.makedirs(mdir)
+mheader = HEADER.replace("\tFORMAT\t" + "\t".join(SAMPLES), "").replace(
+    "##FORMAT", '##INFO=<ID=AF_1000G2021,Number=A,Type=Float,Description="AF">\n'
+    '##INFO=<ID=AF_HGDP,Number=A,Type=Float,Description="AF">\n'
+    '##INFO=<ID=AF_max,Number=A,Type=Float,Description="AF">\n##FORMAT')
+for c in GENOME:
+    rows = []
+    for rec in RECORDS[c]:
+        a, b = round(random.uniform(0.05, 0.45), 2), round(random.uniform(0.05, 0.45), 2)
+        rows.append("\t".join(rec.split("\t")[:7]
+                              + [f"AF_1000G2021={a};AF_HGDP={b};AF_max={max(a, b)}"]))
+    path = os.path.join(mdir, f"mega.{c}.vcf.gz")
+    bgzip(mheader + "\n".join(rows) + "\n", path)
+    subprocess.run(["tabix", "-p", "vcf", path], check=True)
+recipe = subprocess.run(["crisprme.py", "build-index-only", "--genome", os.path.join(D, "Genomes", "toyg"),
+                         "--pam", os.path.join(D, "PAMs", PAM + ".txt"), "--bDNA", "1", "--bRNA", "1",
+                         "--vcf", mdir, "--path", D + "/"], cwd=D, capture_output=True, text=True,
+                        timeout=900)
+check(recipe.returncode == 0, f"{MEGA}: built as the mega recipe does (rc {recipe.returncode}; "
+      f"stderr {recipe.stderr[-800:]!r})")
+reg = os.path.join(D, "Dictionaries", f"registry_{MEGA}")
+for c in GENOME:
+    subprocess.run([sys.executable, "/opt/conda/opt/crisprme/PostProcess/build_mega_registry.py",
+                    "--vcf", os.path.join(mdir, f"mega.{c}.vcf.gz"), "--chrom", c,
+                    "--out-dir", reg, "--datasets", "1000G2021,HGDP"],
+                   check=True, capture_output=True)
+MEGA_LIST = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n" + "".join(
+    f"{d}\t{d}\t{d}\tNA\n" for d in ("1000G2021", "HGDP", "gnomAD", "TOPMed", "AoU"))
+msid = os.path.join(D, "samplesIDs", f"{MEGA}.samplesID.txt")
+with open(msid, "w") as fh:
+    fh.write(MEGA_LIST)
+
+
+def md5s(folder):
+    return {f: hashlib.md5(open(os.path.join(folder, f), "rb").read()).hexdigest()
+            for f in sorted(os.listdir(folder))}
+
+
+before, dt_before = md5s(reg), pages_utils.variant_dataset_data_type("toyg", "mega")
+check(sorted(before) == sorted(f"reg_{c}.{e}" for c in GENOME for e in ("bin", "idx")),
+      f"{MEGA}: its INFO-AF registry is in place ({sorted(before)})")
+argv, rc, err = settings_build(MEGA, bulges=2)
+check("--samplesID" not in argv, f"{MEGA}: the Settings build passes no --samplesID ({argv})")
+check(rc == 0, f"{MEGA}: the Settings build succeeds (rc {rc}; stderr {err[-1500:]!r})")
+check(md5s(reg) == before, f"{MEGA}: its registry is left as it was ({md5s(reg)} != {before})")
+check(not os.path.exists(os.path.join(D, "Dictionaries", f"genotypes_{MEGA}")),
+      f"{MEGA}: no genotype store is made for it")
+check(open(msid).read() == MEGA_LIST, f"{MEGA}: its list is left as it was")
+dt = pages_utils.variant_dataset_data_type("toyg", "mega")
+check(dt == dt_before == "sites-only", f"{MEGA}: still reads sites-only ({dt_before} -> {dt})")
+check(not pages_utils.variant_dataset_has_genotypes("toyg", "mega"),
+      f"{MEGA}: no per-sample analysis is offered for it")
 
 shutil.rmtree(D, ignore_errors=True)
 print(f"\n{'FAILED' if _fails else 'OK'}: {len(_fails)} failure(s)")
