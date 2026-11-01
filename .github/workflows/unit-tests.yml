@@ -202,6 +202,18 @@ jobs:
           python test_indel_snp_cis.py
           python test_indel_snp_bruteforce.py
 
+      - name: "Indel+SNP per-haplotype resolution (2.8.1: each carrier's own SNP alleles, never another sample's; the PAM over every IUPAC code; the real analisi_indels_NNN.py on a phased fixture)"
+        # Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid
+        # fake-indel genome column by column, without genotypes: one sample's indel
+        # was reported with SNP alleles only other samples carry, and an R at NRG's
+        # last PAM base was shown as A. test_indel_haplotype_resolution pins the
+        # resolver (indel_snp_cis.resolve_target) over every IUPAC code at every PAM
+        # position and on table-driven phased cases; test_indel_overlaid_rows runs
+        # the shipped analyzer on a fixture with the repo's own Tier-0 / Tier-1 /
+        # indel-store writers (pandas + numpy; intervaltree is stubbed when absent).
+        working-directory: PostProcess
+        run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows -v
+
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
         run: python -m unittest test_bulge_cap -v
