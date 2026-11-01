@@ -270,9 +270,29 @@ and the `release-crisprme` skill.
   not an IUPAC nucleotide`, where an empty library builds `NNGRRT_2` and finds all three. 2.8.1,
   in the same layout, builds `NNGRRT_2` and returns the same three rows. The scans now share one
   resolver that takes a PAM-less stand-in only when its name is all `N` at the PAM's width (or,
-  under `--prune-pam` and for a 3′ PAM, wider), so a dedicated PAM that merely begins with `N`s,
-  such as the shipped `NNNRRT`, is never taken for one either. Covered by
-  `PostProcess/test_index_resolution.py`.
+  under `--prune-pam` and for a 3′ PAM, wider) and it was built for the PAM's side of the guide
+  (next entry), so a dedicated PAM that merely begins with `N`s, such as the shipped `NNNRRT`, is
+  never taken for one either. Covered by `PostProcess/test_index_resolution.py`.
+- **A PAM-less index built for the other side of the guide could answer a search, which then found
+  nothing.** An all-`N` index stores its flank where the PAM file it was built from puts the PAM,
+  and the engine reads the flank on the side the search's PAM file names. The resolver above took
+  an all-`N` index of the PAM's width (or wider, with `--prune-pam` and a 3′ PAM) whichever side
+  it was built for, as 2.8.0's `NNN_*` glob did, and the search then reported no off-targets and
+  exited 0. On a synthetic genome with three planted sites, reference-only, 2 mismatches + 1 DNA
+  + 1 RNA bulge, Cas12a's `TTTV` on an `NNNN_2` index built from an all-`N` 3′ PAM file returned
+  0 rows, with or without `--prune-pam` and with or without `--index-path`, where a dedicated
+  `TTTV_2` index finds the three; an 8-nt 5′ PAM on a 3′-built `NNNNNNNN_2`, and `NGG` on an
+  `NNN_2` or `NNNN_2` built from a 5′ all-`N` PAM file, returned 0 rows too. CRISPRme now reads
+  the side from the index's `.pam_build`, which `build-index-only` writes, and takes an index
+  without one for a 3′ build, as every published one is. With no index left for its side, a search
+  builds a dedicated one, as for any missing index, and under `--index-path` stops with `no
+  matching reference index`: in the cases above, without `--index-path`, it now builds the
+  dedicated index and reports its rows, byte-identical. A 3′ build serving a 3′ PAM, and a 5′
+  build serving a 5′ PAM of its width, are chosen as before. No published index searched with a
+  shipped PAM file reached this (the shipped 5′ PAMs are 4 nt, and the published PAM-less flanks
+  are 3 and 8 nt, all built for the 3′ side); a PAM-less index you built yourself could, and a
+  search of one with a PAM on the other side is worth running again. Covered by
+  `PostProcess/test_index_resolution.py` and `PostProcess/test_bulge_cap.py`.
 - **A PAM-less index searched without `--prune-pam` kept targets with a genomic `N` in their PAM,
   and the search then crashed.** With `NNN_3` serving an NRR (or NRG) search and no `--prune-pam`,
   the post-search PAM filter (`pam_filter.py`, in releases since 2.2.0) treated an `N` in a target's

@@ -1798,8 +1798,9 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     Index folders are named ``<motif>_<N>_<genome>`` (reference) or
     ``<motif>_<N>_<genome>+<enriched>`` (variant); the usable bulge count is N-1 (the +1
     covers alignments that start with a gap). A pamless all-N index of the same length
-    serves any PAM; a wider one serves only under ``prune`` (--prune-pam) and only a 3'
-    PAM (``three_prime``), exactly as the search shell decides.
+    serves any PAM on the side it was built for (its ``.pam_build``; 3' without one); a
+    wider one serves only under ``prune`` (--prune-pam) and only a 3' PAM
+    (``three_prime``), exactly as the search shell decides.
 
     The REFERENCE and VARIANT terms are ASYMMETRIC:
       * REFERENCE: the larger of the installed reference index depth and -- when the raw
@@ -1825,13 +1826,25 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         # the requested motif, or is all-N of the same width, or -- under --prune-pam
         # and for a 3' PAM only -- all-N and wider: a stored flank of width K serves a
         # shorter 3' PAM by N-padding it, and the engine refuses a shorter 5' PAM.
+        # An all-N index serves only a PAM on the side it was built for, which its
+        # .pam_build records ("<name> <seq_len> <pam_pos>", pam_pos < 0 for 5'); one
+        # without it is taken for a 3' build.
         # These are the search shell's rules (_resolve_index_dir in
         # PostProcess/submit_job_automated_new_multiple_vcfs.sh); the two must not
         # disagree about the same directory, or the derived default bulges come from
         # an index the search then does not use.
         suffix = f"_{genome}"
 
-        def _pam_serves(pam: str) -> bool:
+        def _built_three_prime(d: str) -> bool:
+            try:
+                with open(os.path.join(lib, d, ".pam_build")) as fh:
+                    return not int(fh.readline().split()[-1]) < 0
+            except (OSError, ValueError, IndexError):
+                return True
+
+        def _pam_serves(pam: str, d: str) -> bool:
+            if pam and set(pam) == {"N"} and _built_three_prime(d) != three_prime:
+                return False
             if pam == motif:
                 return True
             if not pam or set(pam) != {"N"}:
@@ -1853,7 +1866,7 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
                     continue
                 stem = base[: -len(suffix)]
                 pam, _sep, n_str = stem.partition("_")
-                if not _sep or not n_str.isdigit() or not _pam_serves(pam):
+                if not _sep or not n_str.isdigit() or not _pam_serves(pam, d):
                     continue
                 best = max(best, int(n_str))
             return max(0, best - 1)

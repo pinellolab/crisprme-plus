@@ -81,6 +81,25 @@ def resolve(libdir, pam_want, suffix, bmax, locale="C", prune=0, pos=1):
     return Path(chosen).name if chosen else ""
 
 
+def resolver_stderr(libdir, pam_want, suffix, bmax, prune=0, pos=1):
+    """What the shipped resolver writes to stderr, which fails the enclosing stage."""
+    script = (f"prune_pam={prune}\npos={pos}\n{RESOLVER}\n"
+              f"_resolve_index_dir \"$1\" \"$2\" \"$3\" \"$4\"\n")
+    return subprocess.run(
+        ["bash", "-c", script, "bash", str(libdir), pam_want, suffix, str(bmax)],
+        capture_output=True, text=True, env=dict(os.environ, LC_ALL="C", LANG="C"),
+    ).stderr
+
+
+def built_for(index_dir, pos):
+    """Record in <index_dir>/.pam_build, as build-index-only does, that the index was
+    built from an all-N PAM file of width |pos| after a 20-nt guide: a 3' PAM for
+    pos > 0, a 5' one for pos < 0."""
+    width = abs(pos)
+    Path(index_dir, ".pam_build").write_text(
+        f"{20 + width}bp-{'N' * width}-NO-PAM {20 + width} {pos}\n")
+
+
 class ResolverHarness(unittest.TestCase):
     def test_the_function_was_actually_found(self):
         self.assertIn("_resolve_index_dir() {", RESOLVER)
@@ -210,13 +229,98 @@ class PamLessStandIn(_Tree):
         """The engine refuses a shorter 5' PAM off a wider flank: the emitted sequence
         is trimmed at the end only, so a front pad lands inside the PAM region."""
         lib = self.lib("NNNNNNNN_3_hg38")
+        built_for(lib / "NNNNNNNN_3_hg38", -8)  # a 5' build: only its width refuses it
         self.assertEqual(resolve(lib, "TTTV", "hg38", 3, prune=1, pos=-4), "")
 
-    def test_equal_width_pamless_serves_either_orientation_without_prune(self):
-        lib = self.lib("NNN_3_hg38")
+    def test_equal_width_pamless_serves_its_own_side_without_prune(self):
+        lib = self.lib("NNN_3_hg38", "NNNN_3_hg38")
         self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=0), "NNN_3_hg38")
-        lib2 = self.lib("NNNN_3_hg38")
-        self.assertEqual(resolve(lib2, "TTTV", "hg38", 3, prune=0, pos=-4), "NNNN_3_hg38")
+        built_for(lib / "NNNN_3_hg38", -4)
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 3, prune=0, pos=-4), "NNNN_3_hg38")
+
+
+class APamLessIndexServesOnlyTheSideItWasBuiltFor(_Tree):
+    """An all-N index stores its flank on the side of the guide where the PAM file it
+    was built from puts the PAM, and the engine reads the flank on the side the search
+    PAM file names. Searched with a PAM on the other side it returns no target, and no
+    error: build-index-only with a 3' all-N PAM file of width 4 gives NNNN_2, on which
+    a TTTV (5') search reported 0 rows and exited 0, where a dedicated TTTV_2 index
+    finds 3 sites. The resolver took any all-N index of the PAM's width for either
+    side. It now reads the side from the index's .pam_build, and takes an index
+    without one for a 3' build, as every published one is."""
+
+    def test_a_3_prime_build_does_not_serve_a_5_prime_pam(self):
+        lib = self.lib("NNNN_3_hg38")
+        built_for(lib / "NNNN_3_hg38", 4)
+        for prune in (0, 1):
+            self.assertEqual(resolve(lib, "TTTV", "hg38", 3, prune=prune, pos=-4), "")
+
+    def test_a_5_prime_build_serves_a_5_prime_pam_of_its_width(self):
+        lib = self.lib("NNNN_3_hg38")
+        built_for(lib / "NNNN_3_hg38", -4)
+        for prune in (0, 1):
+            self.assertEqual(resolve(lib, "TTTV", "hg38", 3, prune=prune, pos=-4),
+                             "NNNN_3_hg38")
+
+    def test_an_index_without_a_record_is_a_3_prime_build(self):
+        lib = self.lib("NNNN_3_hg38")
+        for prune in (0, 1):
+            self.assertEqual(resolve(lib, "TTTV", "hg38", 3, prune=prune, pos=-4), "")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=1), "NNNN_3_hg38")
+
+    def test_a_5_prime_build_does_not_serve_a_3_prime_pam(self):
+        # at the PAM's width, and wider under --prune-pam: neither stores a 3' flank
+        lib = self.lib("NNN_3_hg38", "NNNNNNNN_3_hg38")
+        built_for(lib / "NNN_3_hg38", -3)
+        built_for(lib / "NNNNNNNN_3_hg38", -8)
+        for prune in (0, 1):
+            self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=prune), "")
+
+    def test_a_3_prime_build_still_serves_a_3_prime_pam(self):
+        lib = self.lib("NNN_3_hg38", "NNNNNNNN_3_hg38")
+        built_for(lib / "NNN_3_hg38", 3)
+        built_for(lib / "NNNNNNNN_3_hg38", 8)
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3, prune=1), "NNNNNNNN_3_hg38")
+
+    def test_an_all_n_search_pam_needs_its_side_too(self):
+        # an all-N search PAM names its index exactly, and is still read on its side
+        lib = self.lib("NNN_3_hg38")
+        built_for(lib / "NNN_3_hg38", 3)
+        self.assertEqual(resolve(lib, "NNN", "hg38", 3, pos=3), "NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NNN", "hg38", 3, pos=-3), "")
+
+    def test_a_dedicated_index_needs_no_record(self):
+        # a search builds a missing index itself and writes no .pam_build: the name
+        # of a dedicated index says what it serves
+        lib = self.lib("TTTV_3_hg38", "NRG_3_hg38")
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 3, pos=-4), "TTTV_3_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
+
+    def test_a_bad_record_is_a_3_prime_build_and_writes_nothing_to_stderr(self):
+        # the resolver's stderr fails the stage that runs it
+        lib = self.lib("NNNN_3_hg38")
+        rec = lib / "NNNN_3_hg38" / ".pam_build"
+        for text, served in (("", False), ("\n", False), ("garbage\n", False),
+                             ("27bp-NNNN-5p 27 four\n", False),
+                             ("27bp-NNNN-5p 27 -4", True),
+                             ("27bp-NNNN-5p 27 -4\r\n", True)):
+            with self.subTest(record=text):
+                rec.write_bytes(text.encode())
+                self.assertEqual(resolve(lib, "TTTV", "hg38", 3, pos=-4),
+                                 "NNNN_3_hg38" if served else "")
+                self.assertEqual(resolver_stderr(lib, "TTTV", "hg38", 3, pos=-4), "")
+        rec.unlink()
+        rec.mkdir()  # not a file
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 3, pos=-4), "")
+        self.assertEqual(resolver_stderr(lib, "TTTV", "hg38", 3, pos=-4), "")
+        rec.rmdir()
+        if os.geteuid() != 0:  # root reads it anyway
+            built_for(lib / "NNNN_3_hg38", -4)
+            rec.chmod(0)
+            self.addCleanup(rec.chmod, 0o644)
+            self.assertEqual(resolve(lib, "TTTV", "hg38", 3, pos=-4), "")
+            self.assertEqual(resolver_stderr(lib, "TTTV", "hg38", 3, pos=-4), "")
 
 
 class FlankMustBeWideEnough(_Tree):
@@ -484,7 +588,8 @@ class ADedicatedIndexIsTheFastPath(_Tree):
 
     def test_a_5_prime_pam_only_takes_an_equal_width_flank(self):
         # TTTV (Cas12a, PAM-file offset -4): a wider flank is refused by the
-        # engine, a narrower one never stored the PAM
+        # engine, a narrower one never stored the PAM. Every all-N index here is a
+        # 5' build, so its width alone decides.
         for installed, expected in (
             (("NNNNNNNN_3",), ""),
             (("NNN_3",), ""),
@@ -492,6 +597,10 @@ class ADedicatedIndexIsTheFastPath(_Tree):
             (("TTTV_3", "NNNN_3", "NNNNNNNN_3"), "TTTV_3"),
         ):
             lib = self.library(*installed)
+            for d in lib.iterdir():
+                flank = d.name.split("_")[0]
+                if set(flank) == {"N"}:
+                    built_for(d, -len(flank))
             for prune in (0, 1):
                 with self.subTest(installed=installed):
                     self.assertPicks(lib, "TTTV", expected, prune=prune, pos=-4)
@@ -863,8 +972,15 @@ class EveryScanInTheShippedScript(_ShippedScript):
         for prune in (0, 1):
             self.assertServedBy(self.run_pipeline(prune=prune), "NNN_3", prune)
 
+    def built_for(self, prefix, pos):
+        """Record the side <prefix>'s reference and variant indexes were built for."""
+        for d in self.library.glob(f"{prefix}_hg38*"):
+            if not d.name.endswith("_INDELS"):
+                built_for(d, pos)
+
     def test_a_5_prime_pam_with_a_wider_flank_only(self):
         self.install("NNNNNNNN_3")
+        self.built_for("NNNNNNNN_3", -8)  # a 5' build: only its width refuses it
         self.assertNoVariantIndex(self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=1))
         ref_only = self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=1, variant=False)
         self.assertIsNone(ref_only.searched(variant=False))
@@ -872,8 +988,23 @@ class EveryScanInTheShippedScript(_ShippedScript):
 
     def test_a_5_prime_pam_takes_the_equal_width_flank(self):
         self.install("NNNN_3", "NNNNNNNN_3")
+        self.built_for("NNNN_3", -4)
+        self.built_for("NNNNNNNN_3", -8)
         self.assertServedBy(self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=1),
                             "NNNN_3", prune=1)
+
+    def test_a_5_prime_pam_never_takes_a_3_prime_build(self):
+        # It used to, and the engine then found nothing, with exit 0.
+        self.install("NNNN_3")
+        self.built_for("NNNN_3", 4)
+        self.assertNoVariantIndex(self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=1))
+        ref_only = self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=1, variant=False)
+        self.assertIsNone(ref_only.searched(variant=False))
+        self.assertIn("no matching reference index", ref_only.stderr)
+        # without --index-path the search builds a dedicated index and searches it
+        plain = self.run_pipeline(pam="23bp-TTTV-Cas12a", prune=0, variant=False)
+        self.assertEqual([c[1] for c in plain.builds], ["hg38"])
+        self.assertEqual(plain.searched(variant=False), ("TTTV_2_hg38", False))
 
     def test_a_5_prime_pam_prefers_its_dedicated_index(self):
         self.install("TTTV_3", "NNNN_3", "NNNNNNNN_3")
@@ -2474,7 +2605,9 @@ class BuildLocksInTheShippedScript(_ShippedScript):
         # The resolver's own width rule, both ways: an all-N index serves at the PAM's
         # width, and a wider one only under --prune-pam with a 3' PAM. A dead run's lock
         # on one that could serve guards a partial index, which the error names; one on
-        # an index that could not is no part of the search.
+        # an index that could not is no part of the search. (The side it is built for
+        # is in its .pam_build, written once its build is over, so a lock is judged by
+        # width alone: the finished copy here is built for the search PAM's side.)
         for pam, prefix, prune, serves in (
                 ("20bp-NRG-SpCas9", "NNN_2", 0, True),
                 ("20bp-NRG-SpCas9", "NNNNNNNN_2", 0, False),
@@ -2493,6 +2626,8 @@ class BuildLocksInTheShippedScript(_ShippedScript):
                 seq, pos = (_PAMS / f"{pam}.txt").read_text().split()
                 pos = int(pos)
                 want = seq[-pos:] if pos > 0 else seq[:-pos]
+                flank = prefix.split("_")[0]
+                built_for(finished / index.name, len(flank) if pos > 0 else -len(flank))
                 self.assertEqual(resolve(finished, want, "hg38", 2, prune=prune, pos=pos),
                                  index.name if serves else "")
                 lock = Path(f"{index}.lock")

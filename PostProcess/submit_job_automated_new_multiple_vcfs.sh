@@ -735,9 +735,10 @@ while read vcf_f; do
 	# makes which index answers a search depend on the environment.
 	# A stand-in index must be ALL N. Globbing NNN* also matches a dedicated PAM --
 	# the shipped NNNRRT (SaCas9-KKH) among them -- which cannot serve another PAM.
+	# An all-N index must also have been built for a PAM on the search PAM's side.
 	_resolve_index_dir() {
 		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4"
-		local _d _b _pam _n _exact _better
+		local _d _b _pam _n _exact _better _side _line
 		local _best="" _best_n="" _best_pam_len="" _best_exact=""
 		for _d in "$_lib"/*_*_"$_suffix"; do
 			[ -d "$_d" ] || continue
@@ -774,8 +775,9 @@ while read vcf_f; do
 				_exact=1
 			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ] \
 				&& [ "${#_pam}" -eq "${#_pam_want}" ]; then
-				# all-N at EXACTLY the PAM width: the stored geometry is identical to a
-				# dedicated index for this PAM, so it serves with or without pruning.
+				# all-N at EXACTLY the PAM width: built for a PAM on the same side (checked
+				# below), the stored geometry is identical to a dedicated index for this
+				# PAM, so it serves with or without pruning.
 				_exact=0
 			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ] \
 				&& [ "${#_pam}" -gt "${#_pam_want}" ] \
@@ -793,6 +795,27 @@ while read vcf_f; do
 				_exact=0
 			else
 				continue            # a different dedicated PAM cannot stand in
+			fi
+			# An all-N index stores its flank on the side of the guide where the PAM file
+			# it was built from puts the PAM, and the engine reads the flank on the side
+			# the SEARCH PAM file names, so an index built for the other side gives no
+			# target at all, and no error. build-index-only records that file's geometry
+			# in .pam_build ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); an
+			# index without one is taken for a 3' build, as every published one is
+			# (PAMs/20bp-NNN-NO-PAM.txt).
+			if [ -z "${_pam//N/}" ]; then
+				_side=3
+				if [ -f "$_d/.pam_build" ]; then
+					_line=
+					{ read -r _line <"$_d/.pam_build"; } 2>/dev/null
+					_line=${_line%$'\r'}
+					[ "${_line##* }" -lt 0 ] 2>/dev/null && _side=5
+				fi
+				if [ "${pos:-1}" -gt 0 ]; then
+					[ "$_side" = 3 ] || continue
+				else
+					[ "$_side" = 5 ] || continue
+				fi
 			fi
 			_better=0
 			if [ -z "$_best" ]; then
@@ -990,7 +1013,8 @@ while read vcf_f; do
 	fi
 	# Reuse any installed index sufficient for the requested bulge budget (the caller
 	# passes bMax as max(bDNA,bRNA)+1), PAM-less ones included -- a PAM-less index
-	# serves any PAM no longer than its flank, and the requested PAM is enforced by
+	# serves a PAM no longer than its flank on the side it was built for (the rules
+	# are _resolve_index_dir's), and the requested PAM is enforced by
 	# --prune-pam at leaf time and by the post-search PAM filter. An NGG_3 index
 	# therefore serves any search with max(bDNA,bRNA)<=2, which is why a
 	# batteries-included index is reused instead of triggering a rebuild.

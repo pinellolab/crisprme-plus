@@ -244,15 +244,29 @@ class TestCliBulgeCap(unittest.TestCase):
         self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True), 3)
         self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True,
                              three_prime=False), 0)
+        # ... and only a 3' build: a 5' one stores no 3' flank
+        _mkfile(os.path.join(self.root, "genome_library", f"NNNNNNNN_4_{_REF}",
+                             ".pam_build"), "28bp-NNNNNNNN-5p 28 -8\n")
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True), 0)
 
-    def test_an_equal_width_pamless_index_counts_either_way(self):
-        _mkfile(os.path.join(self.root, "genome_library", f"NNN_4_{_REF}",
-                             "TSTgenome.NNN.bin"))
+    def test_an_equal_width_pamless_index_counts_for_the_side_it_was_built_for(self):
+        """The search shell takes an all-N index only for a PAM on the side its build's
+        PAM file put the PAM, as its .pam_build records, and one without it for a 3'
+        build: on the other side the engine finds nothing at all."""
+        idx = os.path.join(self.root, "genome_library", f"NNN_4_{_REF}")
+        _mkfile(os.path.join(idx, "TSTgenome.NNN.bin"))
         cap = crisprme._installed_index_bulge_cap
-        for prune in (False, True):
-            for three_prime in (True, False):
-                self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=prune,
-                                     three_prime=three_prime), 3, (prune, three_prime))
+        for record, built_three_prime in ((None, True), ("20bp-NNN-NO-PAM 23 3\n", True),
+                                          ("23bp-NNN-5p 23 -3\n", False)):
+            if record is not None:
+                _mkfile(os.path.join(idx, ".pam_build"), record)
+            for prune in (False, True):
+                for three_prime in (True, False):
+                    self.assertEqual(
+                        cap(_MOTIF, _REF, is_variant=False, prune=prune,
+                            three_prime=three_prime),
+                        3 if three_prime == built_three_prime else 0,
+                        (record, prune, three_prime))
 
     def test_a_dedicated_pam_starting_with_n_is_not_pamless(self):
         _mkfile(os.path.join(self.root, "genome_library", f"NNNRRT_4_{_REF}",
