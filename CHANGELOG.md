@@ -216,21 +216,30 @@ and the `release-crisprme` skill.
   replacement changes only `Dictionaries/`, taken from the published NRG HPRC archive; the registry
   data itself is unchanged. Passing `--per-sample` explicitly was never affected.
 - **Both `NNN_3` archives are republished, rebuilt with the CRISPRitz 2.9.1 builder.** The archives
-  uploaded on 2026-10-25 predate the genomic-`N` flank fix, so a search that used the unconstrained
-  `20bp-NNN-NO-PAM` as its *search* PAM missed sites whose PAM bases are assembly `N`. Any
-  constrained PAM was already exact: the downloaded `NNN_3_hg38+hg38_HGDP1kGP`, searched with NRG
-  `--prune-pam`, reproduced the dedicated NRG report byte-for-byte genome-wide. The rebuild uses the
-  old build's own inputs and changes the index only where the fix predicts: 1,222 of the reference
-  index's 1,628 bins (+145,540 B) and 1,221 of the variant index's (+106,849 B), on exactly the 66
-  contigs that contain `N` and on none of the other 389; and the whole indel index, whose 23 contigs
-  are cut by `N` every ~56 bases by construction (222 bins become 245, +2.1 GB). Built independently
-  on two nodes, the reference index is byte-identical. Searched genome-wide by 2.8.1 (NRG
-  `--prune-pam`, 4 mm + 1 DNA + 1 RNA bulge, per-sample), the rebuilt pair matches the gate's report
-  in every column but `Annotation_COSMIC` (189,950 rows, 0 unjustified indel rows), which differs
-  only because that run used freshly downloaded annotations, where COSMIC stays off until its licence
-  is attested. The released 2.8.0, searching chr22, gives byte-identical reports on the old and the
-  new reference index, with NRG and with NNN. The variant archive grows from 108.4 GB to 109.5 GB.
-  Nothing to do unless you search `NNN_3` with the unconstrained PAM; then remove
+  uploaded on 2026-10-25 predate the genomic-`N` flank fix, so they lack every target whose 3-nt
+  flank holds an assembly `N`. 2.8.1 never reports a target with an `N` inside its PAM (the
+  post-search PAM filter now drops it, and under `--prune-pam` the engine already does), so a 3-nt
+  PAM gives the same report on the old and the rebuilt archives: `NGG`, `NRG`, `NRR` and the
+  unconstrained `20bp-NNN-NO-PAM` alike. The 2026-10-25 `NNN_3_hg38+hg38_HGDP1kGP`, downloaded and
+  searched with NRG `--prune-pam`, reproduced the dedicated NRG report byte-for-byte genome-wide. A
+  shorter 3′ PAM under `--prune-pam`, such as `20bp-NG-SpCas9NG`, does change: the old archives miss
+  each site whose base just past the PAM is an `N` (at an assembly-gap edge, and in the indel index,
+  whose fake-indel genome has an `N` every ~56 bases), and the rebuilt ones report it, as a
+  dedicated index for that PAM does. On a synthetic genome with four gap-edge sites, an NG
+  `--prune-pam` search gave 1 row on an index from the old builder and 5 on one from the new
+  builder, byte-identical to a dedicated NG index. The rebuild uses the old build's own inputs and
+  changes the index only where the fix predicts: 1,222 of the reference index's 1,628 bins
+  (+145,540 B) and 1,221 of the variant index's (+106,849 B), on exactly the 66 contigs that contain
+  `N` and on none of the other 389; and the whole indel index, whose 23 contigs are cut by `N`
+  every ~56 bases by construction (222 bins become 245, +2.1 GB). Built independently on two nodes,
+  the reference index is byte-identical. Searched genome-wide by 2.8.1 (NRG `--prune-pam`, 4 mm + 1
+  DNA + 1 RNA bulge, per-sample), the rebuilt pair matches the gate's report in every column but
+  `Annotation_COSMIC` (189,950 rows, 0 unjustified indel rows), which differs only because that run
+  used freshly downloaded annotations, where COSMIC stays off until its licence is attested. The
+  released 2.8.0, searching chr22, gives byte-identical reports on the old and the new reference
+  index, with NRG and with NNN. The variant archive grows from 108.4 GB to 109.5 GB. Hugging Face
+  has served the rebuilt archives since 2026-10-30. Nothing to do unless you downloaded `NNN_3`
+  before then and search it with `--prune-pam` and a PAM shorter than 3 nt; then remove
   `genome_library/NNN_3_hg38`, `genome_library/NNN_3_hg38+hg38_HGDP1kGP` and its `_INDELS`, and
   download again (`download` skips an index that is already installed).
 - **A PAM of any length other than 3 could be handed the 3-nt PAM-less index.** The three scans
@@ -248,20 +257,25 @@ and the `release-crisprme` skill.
   such as the shipped `NNNRRT`, is never taken for one either. Covered by
   `PostProcess/test_index_resolution.py`.
 - **A PAM-less index searched without `--prune-pam` kept targets with a genomic `N` in their PAM,
-  and the per-sample search then crashed.** With `NNN_3` serving an NRR (or NRG) search and no
-  `--prune-pam`, the post-search PAM filter (`pam_filter.py`, in releases since 2.2.0) treated an `N`
-  in a target's PAM region as matching any base, so it kept targets a dedicated index never returns:
-  CRISPRitz stores a genomic `N` as a code that matches nothing, so neither a dedicated nor a
-  `--prune-pam` search reports one. Genome-wide, NRR, 4 mismatches + 1 + 1 bulge, HGDP+1kGP
-  per-sample, the filter kept 1 extra reference target, 1 extra variant target and 93,820 extra
-  indel targets (an assembly-gap edge, and the `N`s that separate the windows of the fake-indel
-  genome), exactly the targets with an `N` in their PAM region, and the SNP post-analysis then
-  failed on the `N` (`cluster.dict.py`: `ValueError: substring not found`, `ERROR: off-targets
-  post-analysis (snps) failed`). A target's `N` now matches nothing, at every position of the PAM.
-  The filter is unchanged for dedicated indexes and under `--prune-pam`, whose targets never carry
-  an `N` there (it dropped 0 in every such arm). With `--prune-pam`, `NNN_3` and `NNNNNNNN_3` were
-  already byte-identical to a dedicated NRR index on that search: 399,664 rows, the alternative
-  alignments and observed haplotypes included. Covered by `PostProcess/test_indel_header_injection.py`.
+  and the search then crashed.** With `NNN_3` serving an NRR (or NRG) search and no `--prune-pam`,
+  the post-search PAM filter (`pam_filter.py`, in releases since 2.2.0) treated an `N` in a target's
+  PAM region as matching any base, so it kept targets a dedicated index never returns: CRISPRitz
+  stores a genomic `N` as a code that matches nothing, so neither a dedicated nor a `--prune-pam`
+  search reports one. Genome-wide, NRR, 4 mismatches + 1 + 1 bulge, HGDP+1kGP per-sample, the
+  filter kept 1 extra reference target, 1 extra variant target and 93,820 extra indel targets (an
+  assembly-gap edge, and the `N`s that separate the windows of the fake-indel genome), exactly the
+  targets with an `N` in their PAM region, and the SNP post-analysis then failed on the `N`
+  (`cluster.dict.py`: `ValueError: substring not found`, `ERROR: off-targets post-analysis (snps)
+  failed`). A reference-only search failed the same way, in its reference post-analysis (`ERROR:
+  off-targets post-analysis (reference) failed`). Only an index that stores such targets reaches
+  this: a PAM-less one from the CRISPRitz 2.9.1 builder, such as the republished `NNN_3` (above);
+  the old builder dropped them. A target's `N` now matches nothing, at every position of the PAM,
+  even an unconstrained one, so an unconstrained `20bp-NNN-NO-PAM` search on such an index, which
+  kept these targets and failed the same way, now drops them too. The filter is unchanged for
+  dedicated indexes and under `--prune-pam`, whose targets never carry an `N` there (it dropped 0
+  in every such arm). With `--prune-pam`, `NNN_3` and `NNNNNNNN_3` were already byte-identical to
+  a dedicated NRR index on that search: 399,664 rows, the alternative alignments and observed
+  haplotypes included. Covered by `PostProcess/test_indel_header_injection.py`.
 - **`complete-test` passed a flag that did not exist.** The brute-force benchmark command included
   `--bmax`, which `complete-search` has never had — it recomputes bMax from the per-type budgets — so
   the argument was discarded unread. Harmless until unknown flags started being rejected, which then

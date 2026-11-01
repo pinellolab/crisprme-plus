@@ -107,14 +107,18 @@ ran population-level unless `--per-sample` was passed (and, installed next to
 it the same way to get the per-sample default back.
 
 **`NNN_3_hg38` and `NNN_3_hg38+hg38_HGDP1kGP` were rebuilt for CRISPRme+ 2.8.1**, with
-the genomic-`N` flank fix in CRISPRitz 2.9.1. For a **constrained** search PAM (`NGG`,
-`NRG`, `NRR`, i.e. every intended use of a PAM-less index) the archives uploaded on
-2026-10-25 already gave the same results as the rebuilt ones and as the dedicated PAM
-index (verified genome-wide, per-sample, byte-for-byte against
-`NRG_3_hg38+hg38_HGDP1kGP`), so those searches do not change. The rebuild matters only
-when the *search* PAM is the fully unconstrained `20bp-NNN-NO-PAM`: the old archives
-under-reported sites whose PAM bases are assembly `N`. If you search that way, remove
-`genome_library/NNN_3_hg38`, `genome_library/NNN_3_hg38+hg38_HGDP1kGP` and
+the genomic-`N` flank fix in CRISPRitz 2.9.1, and replaced here on 2026-10-30. The
+archives uploaded on 2026-10-25 lack every target whose 3-nt flank holds an assembly
+`N`. CRISPRme+ 2.8.1 never reports a target with an `N` inside its PAM, so a search
+with a **3-nt PAM** (`NGG`, `NRG`, `NRR`, or the unconstrained `20bp-NNN-NO-PAM`) gives
+the same report on the old and the rebuilt archives (for NRG verified genome-wide,
+per-sample, byte-for-byte against `NRG_3_hg38+hg38_HGDP1kGP`). A **shorter 3′ PAM**
+searched with `--prune-pam`, such as `20bp-NG-SpCas9NG`, does change: the old archives
+miss each site whose base just past the PAM is an `N` (at an assembly-gap edge, and in
+the indel index, whose windows are separated by `N`s), and the rebuilt ones report it,
+as a dedicated index for that PAM does. If you downloaded either archive before the
+replacement and search it that way, remove `genome_library/NNN_3_hg38`,
+`genome_library/NNN_3_hg38+hg38_HGDP1kGP` and
 `genome_library/NNN_3_hg38+hg38_HGDP1kGP_INDELS`, then download again.
 
 **Wider PAM-less flanks** (flank > 3, e.g. `NNNNNNNN_3`) are **not** readable by a

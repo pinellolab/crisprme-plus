@@ -97,7 +97,8 @@ A difference of **4,425 bytes in 1.8 GB (0.00025 %)** — the extra entries are
 targets whose 3-nt PAM region holds a genomic `N` while the 20-nt guide region
 does not, i.e. sites at the edge of an assembly gap.
 
-**Reachability**, measured on a genome with such a site planted on both strands
+**Reachability in the engine**, counted in CRISPRitz's own search output, before
+CRISPRme's post-search PAM filter, on a genome with such a site planted on both strands
 (the minus-strand case matters: a minus-strand 3′ PAM sits at the *front* of the
 extracted window):
 
@@ -106,16 +107,31 @@ extracted window):
 | `20bp-NNN-NO-PAM` (unconstrained) | 1 row | **3 rows** | the two extra rows are the planted `NNN`-PAM sites |
 | `20bp-NRG-SpCas9` (`--prune-pam`) | 1 row | 1 row | identical — genomic `N` satisfies neither `R` nor `G` |
 
-So for a **constrained** search PAM — every intended use of a PAM-less index — the
-2026-10-25 archives already behaved exactly like a fresh build. Confirmed at full
-scale: the published `NNN_3_hg38+hg38_HGDP1kGP`, downloaded from Hugging Face and
-searched with `NRG --prune-pam` genome-wide at 4 mismatches + 1 DNA + 1 RNA bulge
-with per-sample resolution, reproduces the dedicated-`NRG_3` report
-**byte-for-byte**: md5 `6af7a94e4a5f36c26e8c3a0871638ad0`, 189,950 rows, 13,253
-indel rows each justified by its own window, 0 unjustified. What they under-reported
-is the unconstrained search: with `20bp-NNN-NO-PAM` as the *search* PAM ("report
-off-targets regardless of PAM"), sites whose PAM bases are assembly `N`, i.e. sites
-whose PAM sequence is unknown.
+**What a CRISPRme 2.8.1 report shows.** 2.8.1 never reports a target with an `N`
+inside its PAM: the post-search PAM filter drops it, and under `--prune-pam` the
+engine already does. Measured through `complete-search` (reference-only, 2
+mismatches, 1 DNA and 1 RNA bulge, rows of `integrated_results.tsv`) on a synthetic
+genome with one control site and four gap-edge sites (PAM region `GNN` and `AGN` on
+the plus strand, `TGN` and `GNN` on the minus strand), with an `NNN_2` index from the
+pre-fix builder (CRISPRitz `5c612c0^`) and one from the 2.9.1 builder:
+
+| search PAM | pre-fix index | post-fix index | |
+|---|---|---|---|
+| `20bp-NNN-NO-PAM`, with or without `--prune-pam` | 3 rows | 3 rows | byte-identical; without `--prune-pam` the filter drops the post-fix index's 639 extra targets |
+| `20bp-NRG-SpCas9`, without `--prune-pam` | 2 rows | 2 rows | byte-identical |
+| `20bp-NG-SpCas9NG` (`--prune-pam`) | 1 row | **5 rows** | the pre-fix index misses the two sites whose PAM (`AG`, `TG`) is followed by an `N`, and a 1-bulge row at each of the other two; a dedicated `NG_2` index gives the same 5 rows, byte-identical |
+
+So in a 2.8.1 search with **any 3-nt PAM** the 2026-10-25 archives already behaved
+exactly like a fresh build. Confirmed at full scale: the published
+`NNN_3_hg38+hg38_HGDP1kGP`, downloaded from Hugging Face and searched with
+`NRG --prune-pam` genome-wide at 4 mismatches + 1 DNA + 1 RNA bulge with per-sample
+resolution, reproduces the dedicated-`NRG_3` report **byte-for-byte**: md5
+`6af7a94e4a5f36c26e8c3a0871638ad0`, 189,950 rows, 13,253 indel rows each justified by
+its own window, 0 unjustified. What they miss is a **shorter 3′ PAM** searched with
+`--prune-pam`: a site whose base just past that PAM is an assembly `N` is a real
+target there, since the engine tests the real PAM positions and not the pad
+([METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)), and a
+dedicated index of that PAM keeps it.
 
 **The rebuild.** Genome-wide, with the 2.9.1 `buildTST` (md5 `76febff1…`), from the
 2026-10-25 build's own inputs: the same hg38 FASTAs, the same enriched genome, the
@@ -135,7 +151,8 @@ The fix only adds a target whose PAM region overlaps assembly `N`, so it predict
 that no contig without an `N` changes. None did: 0 of the 389 `N`-free contigs
 changed, in the reference or the variant index. Every fake-indel contig is cut by an
 `N` roughly every 56 bases, so all of them change, and that is where nearly all the
-growth is; a constrained PAM such as NRG still filters those targets out.
+growth is; a 3-nt PAM such as NRG still filters those targets out, while a shorter
+3′ PAM under `--prune-pam` reports those whose `N` lies just past it.
 
 **Reproducible.** ml008 and ml007 each built the reference index independently, from
 the same binary and the same inputs: 1,628 of 1,628 bins byte-identical.
