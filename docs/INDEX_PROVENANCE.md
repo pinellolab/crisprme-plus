@@ -22,7 +22,9 @@ Two separate questions per archive:
 
 **Every index in `lucapinello/crisprme-data` stores a 3-nt PAM region, so every
 one of them is readable by any CRISPRme release, 2.8.0 included.** Wider PAM-less
-flanks are the only exception and live in a separate repo.
+flanks are the only exception and live in a separate repo. Readable is not enough
+for the rebuilt `NNN_3` archives: a 2.8.0 search can fail on them (*With 2.8.0*,
+below), so use them with 2.8.1 or later.
 
 Sizes are download sizes as the Hugging Face API reports them, in GB (10⁹ bytes);
 "Uploaded" is the date of the commit that last wrote the archive, so for the four
@@ -40,8 +42,8 @@ Sizes are download sizes as the Hugging Face API reports them, in GB (10⁹ byte
 | `NRR_3_hg38+hg38_mega` | 25.2 GB | 2026-10-30 | NRR | yes | bit-identical | 24, 67; **replaced** (the 2026-10-27 archive had 24, 0: empty) |
 | `NGG_3_hg38` | 3.7 GB | 2026-10-25 | NGG | yes | bit-identical | — |
 | `NGG_3_hg38+hg38_HGDP1kGP` | 21.5 GB | 2026-10-25 | NGG | yes | bit-identical | 23, 23 |
-| `NNN_3_hg38` | 71.5 GB | 2026-10-30 | none (all-N, width 3) | yes | **rebuilt with it, replaced** (the 2026-10-25 archive differs) | — |
-| `NNN_3_hg38+hg38_HGDP1kGP` | 109.5 GB | 2026-10-30 | none (all-N, width 3) | yes | **rebuilt with it, replaced** (the 2026-10-25 archive differs) | 23, 245 (the 2026-10-25 archive: 23, 222) |
+| `NNN_3_hg38` | 71.5 GB | 2026-10-30 | none (all-N, width 3) | yes, but a bulge search can fail (*With 2.8.0*) | **rebuilt with it, replaced** (the 2026-10-25 archive differs) | — |
+| `NNN_3_hg38+hg38_HGDP1kGP` | 109.5 GB | 2026-10-30 | none (all-N, width 3) | yes, but a bulge search can fail (*With 2.8.0*) | **rebuilt with it, replaced** (the 2026-10-25 archive differs) | 23, 245 (the 2026-10-25 archive: 23, 222) |
 | `genotypes_hg38_HGDP1kGP` | 5.7 GB | 2026-10-07 | — | yes | not an index | — |
 | `genotypes_hg38_HPRC` | 0.6 GB | 2026-10-27 | — | yes | not an index | — |
 
@@ -168,8 +170,26 @@ With that column removed, both reports have md5 `a02f03c5…`. For a user still 
 2.8.0, the released 2.8.0 image, unmodified, searching chr22 on the rebuilt reference
 index and on the published one gives **byte-identical** reports, both with NRG (the
 NNN index as a stand-in, how 2.8.0 serves a PAM it has no dedicated index for; 1,488
-rows) and with the unconstrained NNN PAM (8,108 rows). The second comparison can
-differ only at a site whose PAM bases are assembly `N`.
+rows) and with the unconstrained NNN PAM (8,108 rows). Both hold only because no
+hit there has an `N` in its PAM: one that does makes 2.8.0 fail.
+
+**With 2.8.0.** Use the rebuilt archives with 2.8.1 or later. 2.8.0 reads them, but it
+has no `--prune-pam` (it ignores the flag), and its post-search PAM filter treats a
+target's `N` as matching any base, so it keeps the targets with an `N` in their PAM
+that the rebuild adds; a bulge search that reaches one then fails in post-analysis
+(`cluster.dict.py`). Measured with 2.8.0's own code (`crisprme.py`, `PostProcess/`,
+`pages/`) on the CRISPRitz 2.9.1 engine, whose search without `--prune-pam` is
+2.9.0's, on the synthetic genome of the table above, reference-only, 2 mismatches +
+1 DNA + 1 RNA bulge:
+
+| search PAM | pre-fix index | post-fix index |
+|---|---|---|
+| `20bp-NRG-SpCas9` (with or without `--prune-pam`) | 2 rows | exit 1: `ValueError: substring not found`, `ERROR: off-targets post-analysis (reference) failed` |
+| `20bp-NNN-NO-PAM` | 3 rows | exit 1, the same error |
+
+Genome-wide, the NRR search behind 2.8.1's PAM-filter fix (CHANGELOG) meets 1 such
+reference target, 1 variant target and 93,820 indel targets, so a 2.8.0 variant
+search through the rebuilt `_INDELS` is likely to reach one.
 
 **Staged as searched.** The staged archives hold the build that was searched: rsync
 checked every transferred file against a whole-file checksum, every file is in the
