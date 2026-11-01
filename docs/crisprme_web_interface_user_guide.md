@@ -295,10 +295,16 @@ In Advanced mode a candidate must satisfy **each** per-type cap **and** the over
 max-total-edits budget. Bulges can be consecutive (e.g., `NN--NN`) or interleaved
 (e.g., `NN-N-NN`).
 
-The web interface uses only precomputed indexes and will **not** build one on the
-fly — if you request a PAM/bulge/genome combination with no installed index it
-blocks and asks you to install one first (see the Docker Quickstart, "Installing
-more indexes"). The variant selector is a dropdown pre-set to the recommended
+Bulge searches need a genome index. If no installed **reference** index supports the
+bulges you ask for, the search first builds one from the installed genome (once: about
+20 to 35 minutes for hg38), and later searches reuse it. A **variant** panel offers only
+the bulges its installed variant index supports: with no variant index yet, only a
+0-bulge search, and the first one prepares the variant genome and a 0-bulge index of it
+(this can take hours on a full genome). To search a panel with bulges, build its index
+first in **Settings**, under "Build an index locally" (the genome and the panel's VCF
+files must be installed), or download a prebuilt one (see the Docker Quickstart,
+"Installing more indexes"). The note under the bulge options in **Advanced options**
+says which of these applies. The variant selector is a dropdown pre-set to the recommended
 installed phased variant index (the **HGDP + 1000 Genomes** default if you downloaded it),
 with a **Reference only** option if you want a reference-genome search.
 

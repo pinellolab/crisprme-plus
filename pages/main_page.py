@@ -27,6 +27,7 @@ from .pages_utils import (
     get_available_PAM,
     get_available_CAS,
     index_max_bulges,
+    pam_motif,
     reference_bulge_capacity,
     read_enabled_annotations,
     cosmic_license_enabled,
@@ -2079,12 +2080,12 @@ def check_input(
                 "21bp, etc)"
             )
         )
-    # WEB-ONLY guard: never build a VARIANT/INDEL index on the fly (its source VCFs are
-    # not shipped dict-less, so it can't be rebuilt) -- but the REFERENCE index MAY be
-    # built from the shipped raw genome (the only index buildable without the source VCFs;
-    # the search shell already builds it under an mkdir lock). Block the web submit only
-    # when the requested bulge depth is UNreachable: unbuildable for the reference term
-    # AND uninstalled for every selected variant term.
+    # WEB-ONLY guard: a web search never builds a VARIANT/INDEL index deeper than the one
+    # installed (a dict-less install ships no source VCFs to rebuild it from; with them, a
+    # deeper one is built in Settings, ahead of time) -- but the REFERENCE index MAY be
+    # built from the installed raw genome (the search shell builds it under an mkdir
+    # lock). Block the web submit only when the requested bulge depth is UNreachable:
+    # unbuildable for the reference term or uninstalled for a selected variant term.
     #
     # This only withholds the browser launch (update_style=True -> submit-job returns None
     # below, so change_url never fires); the CLI complete-search build path in submit_job
@@ -2109,9 +2110,9 @@ def check_input(
             update_style = True
             miss_input_list.append(
                 "No index can supply %d bulge(s) (DNA %s / RNA %s) for this "
-                "genome / PAM / variant selection. The reference index is built on the "
-                "fly from the installed raw genome, but a VARIANT index cannot be built "
-                "here (its source VCFs are not installed) — reduce the DNA/RNA bulges, or "
+                "genome / PAM / variant selection. A search builds a missing reference "
+                "index from the installed genome, but not a variant index deeper than "
+                "the installed one: reduce the DNA/RNA bulges, or "
                 "download/build a matching variant index first (Settings → Data manager, "
                 "or 'crisprme.py download --what index' / 'crisprme.py build-index-only')."
                 % (need, dna, rna)
@@ -2439,78 +2440,212 @@ def update_search_mode_availability(dataset_value, genome_value, current_mode):
 
 
 # Limit the DNA/RNA bulge options to the bulge depth a search can REACH here.
-# Bulge searches need a per-PAM TST index; 0-bulge searches run index-free, so 0 is
-# always available. The cap is the min of the REFERENCE term and the VARIANT term, but
-# the two terms are ASYMMETRIC:
+# Bulge searches need a per-PAM TST index. The cap is the min of the REFERENCE term
+# and the VARIANT term, but the two terms are ASYMMETRIC:
 #   * REFERENCE: reference_bulge_capacity -- an already-built reference index OR, when the
-#     raw genome Genomes/<genome>/ is shipped, the app ceiling (the reference index is
-#     buildable on demand from the raw genome, exactly as the search shell does under an
-#     mkdir lock). This is the fix for the dict-less bug: a variant HF tarball ships NO
-#     reference index, so the old index_max_bulges(...,None) returned 0 and forced the
-#     dropdown (and the DNA/RNA=2 defaults) to 0 even though the raw genome IS shipped and
-#     a bmax=2 reference index is buildable.
-#   * VARIANT: index_max_bulges(...,dataset) -- STRICTLY the installed variant index; a
-#     variant/indel index can NOT be built dict-less (its source VCFs are not shipped), so
-#     this term must never be relaxed to a buildable ceiling.
-# Mismatches are never index-limited, so they are left untouched.
+#     raw genome Genomes/<genome>/ is installed, the app ceiling: a web search that finds
+#     no reference index deep enough builds one from the raw genome first (the search
+#     shell does, under an mkdir lock), and later searches reuse it.
+#   * VARIANT: index_max_bulges(...,dataset) -- STRICTLY the installed variant index. A
+#     search does build what a panel lacks (it adds the variants from VCFs/<dataset>/ to
+#     the genome and indexes it), but at the bulge depth asked for, which this cap keeps
+#     at the installed depth: 0 with no variant index, so its first search only prepares
+#     a 0-bulge one. A deeper one is built in Settings (or downloaded), ahead of time.
+# Mismatches are never index-limited, so they are left untouched. A value the cap lowers
+# is remembered (bulge-cap-memory) and given back, with the Max edits it pulled down, once
+# the cap allows it again -- unless the user has changed it in between.
 @app.callback(
     [
         Output("dna", "options"),
         Output("rna", "options"),
         Output("dna", "value", allow_duplicate=True),
         Output("rna", "value", allow_duplicate=True),
-        Output("bulge-guard-note", "children"),
+        Output("max-edits-slider", "value", allow_duplicate=True),
+        Output("bulge-cap-memory", "data"),
     ],
     [
         Input("available-genome", "value"),
         Input("available-pam", "value"),
         Input("variant-dataset", "value"),
     ],
-    [State("dna", "value"), State("rna", "value")],
+    [
+        State("dna", "value"),
+        State("rna", "value"),
+        State("mms", "value"),
+        State("max-edits-slider", "value"),
+        State("bulge-cap-memory", "data"),
+    ],
     prevent_initial_call=True,
 )
-def limit_bulges_to_index(genome, pam, variant_choice, cur_dna, cur_rna):
+def limit_bulges_to_index(
+    genome, pam, variant_choice, cur_dna, cur_rna, mms=None, cur_edits=None, held=None
+):
     if not genome or not pam:
-        return AV_BULGES, AV_BULGES, no_update, no_update, ""
-    # REFERENCE term: buildable-aware (raw genome shipped -> reference index buildable).
-    maxb = reference_bulge_capacity(genome, pam)
-    # Is the reference depth relying on an on-demand build (raw genome present but no
-    # reference index yet)? Then the first bulge search will build it once (and cache it).
-    ref_installed = index_max_bulges(genome, pam, None)
-    ref_needs_build = maxb > ref_installed
-    # scalar dropdown value -> list of datasets ("ref" -> none)
-    # ANY selected dataset (built-in OR a custom VCF registered via Settings) — not a
-    # hardcoded 1000G/HGDP whitelist, which previously skipped custom datasets and left
-    # their variant-index bulge ceiling unchecked (overstating the bulge dropdown).
-    selected = (
-        []
-        if variant_choice in (None, "", "ref")
-        else [v for v in str(variant_choice).split("+") if v]
-    )
-    # VARIANT term: strictly the SHIPPED variant index (never buildable dict-less).
-    for v in selected:  # a variant bulge search also needs the variant index
-        maxb = min(maxb, index_max_bulges(genome, pam, v))
+        return AV_BULGES, AV_BULGES, no_update, no_update, no_update, no_update
+    maxb = _bulge_cap(genome, pam, variant_choice)
     opts = [{"label": i, "value": i} for i in range(0, maxb + 1)]
+    held = held or {}
+    # What the cap lowered last time, unless DNA/RNA no longer show what it set them to
+    # (the user picked other values since: theirs stand).
+    if held and held.get("set") != [cur_dna, cur_rna]:
+        held = {}
+    want_dna = held.get("dna", cur_dna)
+    want_rna = held.get("rna", cur_rna)
     # Only shrink a value that genuinely EXCEEDS the reachable cap. With the reference
-    # term now buildable-aware, the shipped DNA/RNA=2 defaults survive on a dict-less
-    # install (cap = min(ref_buildable=2, var=2) = 2) instead of being clobbered to 0.
-    dna_v = cur_dna if (isinstance(cur_dna, int) and cur_dna <= maxb) else maxb
-    rna_v = cur_rna if (isinstance(cur_rna, int) and cur_rna <= maxb) else maxb
-    if maxb == 0:
-        note = (
-            "No bulge index for this genome/PAM"
-            + (" + selected variant set" if selected else "")
-            + " yet, and no raw genome to build one — only a fast 0-bulge search is "
-            "available. Build/download an index in Settings to enable bulges."
+    # term buildable-aware, the DNA/RNA defaults survive on a dict-less install
+    # (cap = min(ref_buildable=2, var=2) = 2) instead of being clobbered to 0.
+    dna_v = want_dna if (isinstance(want_dna, int) and want_dna <= maxb) else maxb
+    rna_v = want_rna if (isinstance(want_rna, int) and want_rna <= maxb) else maxb
+    if (dna_v, rna_v) != (want_dna, want_rna):
+        # lowered (still, or now): remember the values to give back, and the Max edits,
+        # which sync_max_edits_bound pulls down to mismatches + bulges in turn (unless
+        # the user has moved it since the last time: then theirs stands)
+        if held:
+            edits = held.get("edits") if cur_edits == held.get("edits_set") else None
+        else:
+            edits = cur_edits
+        try:
+            edits_set = min(int(cur_edits), max(1, int(mms) + dna_v + rna_v))
+            edits = int(edits) if edits is not None else None
+        except (TypeError, ValueError):
+            edits = edits_set = None
+        memory = {
+            "dna": want_dna, "rna": want_rna, "set": [dna_v, rna_v],
+            "edits": edits, "edits_set": edits_set,
+        }
+        return opts, opts, dna_v, rna_v, no_update, memory
+    edits_v = no_update
+    if held and held.get("edits") is not None and cur_edits == held.get("edits_set"):
+        edits_v = held["edits"]  # given back with the bulges, if left where it was put
+    return opts, opts, dna_v, rna_v, edits_v, {}
+
+
+def _selected_panels(variant_choice) -> List[str]:
+    """Variant dropdown value -> its datasets ("ref" -> none). ANY selected dataset
+    (built-in OR a custom VCF registered via Settings), not a 1000G/HGDP whitelist."""
+    if variant_choice in (None, "", "ref"):
+        return []
+    return [v for v in str(variant_choice).split("+") if v]
+
+
+def _bulge_cap(genome: str, pam: str, variant_choice) -> int:
+    """The bulges a web search can reach here: the reference term (installed, or
+    buildable from the raw genome) and, for each selected panel, its installed index."""
+    maxb = reference_bulge_capacity(genome, pam)
+    for v in _selected_panels(variant_choice):
+        maxb = min(maxb, index_max_bulges(genome, pam, v))
+    return maxb
+
+
+def _index_installed(genome: str, pam: str, panel: Optional[str] = None) -> bool:
+    """Whether genome_library holds an index of the genome (+ variant panel) that
+    index_max_bulges counts for this PAM, a 0-bulge one included: index_max_bulges
+    reports 0 for that and for none alike. A search that finds none builds one."""
+    motif = pam_motif(pam)
+    if not motif or not genome:
+        return False
+    genome = genome.replace(" ", "_")
+    lib = os.path.join(current_working_directory, "genome_library")
+    want = f"{genome}_{panel}" if panel else ""
+    try:
+        names = os.listdir(lib)
+    except OSError:
+        return False
+    for d in names:
+        base, _, enriched = d.partition("+")
+        if enriched != want or d.endswith("_INDELS") or not base.endswith(f"_{genome}"):
+            continue
+        pam_name, sep, n_str = base[: -len(genome) - 1].partition("_")
+        if not sep or not n_str.isdigit():
+            continue
+        if pam_name == motif or (set(pam_name) == {"N"} and len(pam_name) == len(motif)):
+            if os.path.isdir(os.path.join(lib, d)):
+                return True
+    return False
+
+
+def _has_files(folder: str, suffixes: Tuple[str, ...]) -> bool:
+    try:
+        return any(f.endswith(suffixes) for f in os.listdir(folder))
+    except OSError:
+        return False
+
+
+# The note under the Advanced bulge caps: how many bulges this genome, PAM and variant
+# panel allow, and what a search with the bulges selected builds first, if anything.
+@app.callback(
+    Output("bulge-guard-note", "children"),
+    [
+        Input("available-genome", "value"),
+        Input("available-pam", "value"),
+        Input("variant-dataset", "value"),
+        Input("dna", "value"),
+        Input("rna", "value"),
+    ],
+)
+def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
+    if not genome or not pam:
+        return ""
+    maxb = _bulge_cap(genome, pam, variant_choice)
+    ref_capacity = reference_bulge_capacity(genome, pam)
+    if maxb == 0 and ref_capacity == 0:
+        return (
+            "No index for this genome and PAM is installed, and the genome has no FASTA "
+            "files to build one from, so only a 0-bulge search is offered. Download or "
+            "build an index in Settings to search with bulges."
         )
-    else:
-        note = f"Up to {maxb} DNA/RNA bulge(s) available."
-        if ref_needs_build:
-            note += (
-                " The first bulge search will build the reference index once "
-                "(~20–35 min) from the installed raw genome, then reuse it."
+    if maxb == 0:
+        # a selected variant panel has no index that supports bulges
+        panel = next(
+            v for v in _selected_panels(variant_choice)
+            if index_max_bulges(genome, pam, v) == 0
+        )
+        if _index_installed(genome, pam, panel):
+            note = (
+                f"The installed {panel} variant index for this PAM supports no bulges, "
+                "so only a 0-bulge search is offered."
             )
-    return opts, opts, dna_v, rna_v, note
+        else:
+            note = (
+                f"No {panel} variant index for this PAM is installed yet, so only a "
+                "0-bulge search is offered, and the first one prepares the variant "
+                "genome and a 0-bulge index of it, once (this can take hours on a full "
+                "genome)."
+            )
+        can_build = _has_files(
+            os.path.join(current_working_directory, GENOMES_DIR, genome.replace(" ", "_")),
+            (".fa", ".fasta"),
+        ) and _has_files(
+            os.path.join(current_working_directory, "VCFs", _resolve_vcf_folder(genome, panel)),
+            (".vcf.gz", ".vcf"),
+        )
+        if can_build:
+            note += (
+                " To search with bulges, build its index in Settings (Build an index "
+                "locally) first: the genome and the VCF files are installed."
+            )
+        else:
+            note += " To search with bulges, download a variant index for it in Settings."
+        return note
+    note = f"Up to {maxb} DNA/RNA bulge(s) available."
+    try:
+        need = max(int(dna or 0), int(rna or 0))
+    except (TypeError, ValueError):
+        need = 0
+    ref_installed = index_max_bulges(genome, pam, None)
+    if not _index_installed(genome, pam):
+        note += (
+            " No reference index for this PAM is installed, so the search first builds "
+            "one from the installed genome (once: about 20 to 35 minutes for a human "
+            "genome), then reuses it."
+        )
+    elif need > ref_installed:
+        note += (
+            f" The installed reference index supports {ref_installed} bulge(s), so a "
+            f"search with {need} first builds a deeper one from the installed genome "
+            "(once: about 20 to 35 minutes for a human genome), then reuses it."
+        )
+    return note
 
 
 @app.callback(
@@ -3082,6 +3217,8 @@ def index_page() -> html.Div:
                                 "margin-top": "6px",
                             },
                         ),
+                        # bulge values the index cap lowered (limit_bulges_to_index)
+                        dcc.Store(id="bulge-cap-memory", data={}),
                     ],
                     style={"margin-top": "8px"},
                 ),

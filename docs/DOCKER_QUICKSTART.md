@@ -492,12 +492,16 @@ To see which indexes are published, browse the dataset repository
 in `lucapinello/crisprme-data-general-index`) — the names there are exactly what you
 pass to `--index-name`, and `download` picks the repo for you.
 
-If an index you need is **not** published, the web interface will **not** build it
-on the fly: it tells you no matching index is installed and asks you to install
-one first. Pre-build it from the command line with `crisprme.py build-index-only`
-(same `--genome`/`--pam`/`--bDNA`/`--bRNA` you plan to search with) — see
-[`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md) — then it is reused on every
-later search.
+If an index you need is **not** published, build it once: every later search reuses it.
+A web search builds a missing **reference** index itself, from the installed genome
+(about 20 to 35 minutes for hg38), before it searches. A **variant** index it does not
+build for bulges: the search form offers a variant panel only the bulges its installed
+index supports (0 when it has none yet, and that first 0-bulge search prepares the
+variant genome and a 0-bulge index of it, which can take hours on a full genome). Build
+it ahead of time in **Settings**, under "Build an index locally", or from the command
+line with `crisprme.py build-index-only` (the same `--genome`/`--pam`/`--bDNA`/`--bRNA`,
+and `--vcf`, you plan to search with); see
+[`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md).
 
 Or do all of this **from the browser**: the web interface has a **Settings /
 Data Manager** page (the button on the home page, or `/settings`) where you can

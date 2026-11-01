@@ -299,9 +299,10 @@ ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</cod
         <code>download</code> commands first.
         <strong>Need a different nuclease or PAM?</strong> Install its index the same way,
         using a published name from the <code>indexes/</code> folder of the
-        <code>lucapinello/crisprme-data</code> repo. If an index isn't published, the web
-        app will <em>not</em> build it on the fly &mdash; it tells you none is installed;
-        pre-build it once with <code>crisprme.py build-index-only</code>.
+        <code>lucapinello/crisprme-data</code> repo. If an index isn't published, build it
+        once in the app's Settings page or with <code>crisprme.py build-index-only</code>:
+        a search builds a missing reference index itself, but offers a variant panel only
+        the bulges its installed index supports.
       </p>
 
       <p class="cta-row">
