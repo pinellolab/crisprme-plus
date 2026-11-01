@@ -45,10 +45,12 @@
   confirmation names those indexes and counts their size. **Affected:** every `assembly-search` with
   bulges on a bundle assembly since 2.6.0, from the web or the CLI. The haplotype whose search built
   the shared index (usually the first paternal haplotype searched) has correct results; every other
-  haplotype searched with that index does not. **What to do:** run those searches again. The index
-  `genome_library/<PAM>_<N>_genome` they left (in Settings > Installed indexes, e.g. `NRG_2_genome`)
-  is no longer used and can be deleted there. Covered by
-  `PostProcess/test_assembly_haplotype_genomes.py`.
+  haplotype searched with that index does not. **What to do:** run those searches again, and delete
+  the index `genome_library/<PAM>_<N>_genome` they left (e.g. `NRG_2_genome`: Settings > Delete >
+  `Index: NRG_2_genome`). `assembly-search` no longer uses it, but a `complete-search` with bulges
+  of a folder named `genome` still finds it by that name: such a search of one haplotype of a bundle
+  is refused while it is there (see below), and a search of any other folder named `genome` takes
+  it. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
 - **A search without bulges of a genome folder outside `Genomes/` came back empty, or scanned
   another genome.** The 0-bulge search reads the genome's FASTA files directly, and read them from
   `Genomes/<name of the --genome folder>/` instead of the folder it was given. Without such a folder
@@ -80,30 +82,54 @@
   they were built from. With bulges, `--genome /data/projB/ref` took the index a search of
   `/data/projA/ref` had built and reported projA's sites (at chr1:35000 of the synthetic bundle,
   projA's 2-mismatch protospacer instead of projB's own 4-mismatch one), and `--genome other/hg38`
-  took the index of `Genomes/hg38` and reported its sites, while the same command without bulges
-  scanned `other/hg38` itself. Given no `--bDNA`/`--bRNA`, that search takes 1 + 1 bulges when
-  `Genomes/hg38` is there, so the plain command was hit too. The other way round, a search of
-  `Genomes/<name>` took the index that a search of a folder of that name outside `Genomes/` had
-  built. `complete-search` now refuses a search with bulges, or with `--vcf`, of a folder outside
-  `Genomes/` whose name a folder in `Genomes/` has, and of any genome folder whose name an index
-  recorded from another folder carries, with a message naming the folder or index in the way. An
-  index that `complete-search` builds of a folder outside `Genomes/` records that folder and its
-  FASTA files (`.genome_source`, as a personal-assembly haplotype's index does), and is built again
-  when those files change. A search of a genome in `Genomes/` runs exactly as before and its index
-  records nothing; an index that records nothing (built by an earlier CRISPRme, or downloaded) is
-  taken as before, and so are the indexes of a library given with `--index-path`. The reference and
-  variant search outputs of `Genomes/hg38` were compared byte for byte, with and without bulges. Two
-  cases are not caught: two first searches of two such folders that start together (one of them
-  searches the index the other builds), and a search from the web's Reference genome tab, which runs
-  the pipeline without this check, of a `Genomes/<name>` added after a folder of that name outside
-  `Genomes/` was searched with bulges. **Affected:** `complete-search` runs from the command line,
-  with bulges or with `--vcf`, of a folder outside `Genomes/` named like a folder in `Genomes/` or
-  like another folder searched with bulges in the same working directory, and searches, from the CLI
-  or the web, of that `Genomes/` folder made after them. **What to do:** run them again, with a name
-  of its own for each folder. An index built before 2.8.1 records no folder: where folders of one
-  name outside `Genomes/` were searched with bulges, remove the indexes of that name (Settings >
-  Installed indexes, or `genome_library/<PAM>_<N>_<name>`), so that each search builds its own.
-  Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+  took the index of `Genomes/hg38` and reported its sites, as the same command without bulges did by
+  scanning `Genomes/hg38` itself (previous entry). Given no `--bDNA`/`--bRNA`, that search takes 1 +
+  1 bulges when `Genomes/hg38` is there, so the plain command was hit too. The other way round, a
+  search of `Genomes/<name>` took the index that a search of a folder of that name outside
+  `Genomes/` had built. `complete-search` now refuses a search with bulges, or with `--vcf`, of a
+  folder outside `Genomes/` whose name a folder in `Genomes/` has, and of any genome folder whose
+  name an index recorded from another folder carries, with a message naming the folder or index in
+  the way. An index that `complete-search` builds of a folder outside `Genomes/` records that folder
+  and its FASTA files (`.genome_source`, as a personal-assembly haplotype's index does), and is
+  built again when those files change. The record names a folder of the machine that built the
+  index, so `publish-index` leaves it out of the archive and `download` drops it: a downloaded index
+  records no folder. A search of a genome in `Genomes/` runs exactly as before and its index records
+  nothing; an index that records nothing (built by an earlier CRISPRme, or downloaded) is taken as
+  before, except by a search of one haplotype of a personal assembly (next entry), and so are the
+  indexes of a library given with `--index-path` other than the working directory's
+  `genome_library/`. The reference and variant search outputs of `Genomes/hg38` were compared byte
+  for byte, with and without bulges. Two cases are not caught: two first searches of two such
+  folders that start together (one of them searches the index the other builds), and a search from
+  the web's Reference genome tab, which runs the pipeline without this check, of a `Genomes/<name>`
+  added after a folder of that name outside `Genomes/` was searched with bulges. **Affected:**
+  `complete-search` runs from the command line, with bulges or with `--vcf`, of a folder outside
+  `Genomes/` named like a folder in `Genomes/` or like another folder searched with bulges in the
+  same working directory, and searches, from the CLI or the web, of that `Genomes/` folder made
+  after them. **What to do:** run them again, with a name of its own for each folder. An index built
+  before 2.8.1 records no folder: where folders of one name outside `Genomes/` were searched with
+  bulges, remove the indexes of that name (Settings > Delete > `Index: <PAM>_<N>_<name>`, or the
+  folder `genome_library/<PAM>_<N>_<name>`), so that each search builds its own. Covered by
+  `PostProcess/test_assembly_haplotype_genomes.py`.
+- **A search with bulges of one haplotype of a personal assembly could search another haplotype's
+  sequence.** Searched on its own, `complete-search --genome
+  Assemblies/<individual>/<haplotype>/genome` names the genome, and its index, after that folder,
+  `genome` for every haplotype of every bundle (first entry), so with bulges it took any
+  `genome_library/<PAM>_<N>_genome` there: the one an `assembly-search` with bulges had left, or one
+  that a search like this one of another haplotype had built. Given no `--bDNA`/`--bRNA`, the search
+  takes 1 + 1 bulges when such an index is there, so the plain command was hit too. Reproduced on
+  the synthetic bundle after an `assembly-search` of it: the maternal haplotype logged `Reference
+  index present (NRG_2_genome)` and reported the paternal 2-mismatch protospacer at chr1:35000
+  instead of its own 4-mismatch one. Such a search is now refused before it starts while an index of
+  that name that it would take records no genome folder, as one built before 2.8.1 does, or while
+  one records another folder (as any search is: previous entry). The message names the index and
+  says to search the individual with `assembly-search`, which searches each haplotype on an index of
+  its own, or to remove the index, after which the search builds its own from the haplotype's
+  folder. A search without bulges scans the haplotype's folder and runs as before; `assembly-search`
+  and searches of any other folder are not affected. **Affected:** `complete-search` runs with
+  bulges, from the command line, of one haplotype folder of a bundle, in a data folder where another
+  haplotype had been searched with bulges. **What to do:** run them again with `assembly-search`, or
+  delete the index (e.g. `NRG_2_genome`) and run them again. Covered by
+  `PostProcess/test_assembly_haplotype_genomes.py`.
 - **A genome in `Genomes/` that is a link to a folder of another name failed in the post-analysis.**
   The pipeline resolved the link and named the genome after the link's target in one step and after
   the link in another, so a search of `Genomes/hg38lnk` -> `../shared/GRCh38_copy` stopped with
