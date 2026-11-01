@@ -149,6 +149,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_build_emit_tiers -v
 
+      - name: "The merge lists and counts each reference alignment once (the dict-less tiers give it again; each variant dataset gives it)"
+        working-directory: PostProcess
+        run: python -m unittest test_reference_rows_once -v
+
       - name: "Indel per-chrom subset regression (#172: fakechrom match)"
         working-directory: PostProcess
         run: python -m unittest test_indel_chrom_subset -v

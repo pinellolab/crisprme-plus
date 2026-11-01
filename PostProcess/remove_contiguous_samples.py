@@ -48,9 +48,19 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     if not cluster:
         return
     list_ref = []
+    seen_ref = set()
     dict_var = {}
     for ele in cluster:
         if ele[snp_info] == "n":
+            # list (and count in #Seq_in_cluster) each reference alignment once. The
+            # same row comes in more than once: every variant dataset's post-analysis
+            # carries all the rows of the one reference search, and on the dict-less
+            # tiers new_simple_analysis gives the reference alignment of each variant
+            # window again (_finalize_reference_entry). A row that differs in any
+            # column is another alignment and is kept.
+            if tuple(ele) in seen_ref:
+                continue
+            seen_ref.add(tuple(ele))
             list_ref.append(ele)
         else:
             # merge samples of identical targets (coming from different VCF datasets)
