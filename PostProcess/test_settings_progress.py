@@ -773,6 +773,48 @@ class TestGenomeTarUpload(unittest.TestCase):
         self.assertEqual(ns["_finalize_upload"]("genome", part, "chrM.fa", "", ""), "chrM")
         self.assert_one_file_a_sequence(cwd, "chrM", {"chrM.fa": b">chrM\nACGT\n"})
 
+    def test_single_sequence_upload_is_named_after_its_sequence(self):
+        # a one-chromosome subset or a bacterial genome, named otherwise: it went in as
+        # walkone.fa, and every search of it found its off-targets and then dropped them
+        # all, a search taking each file for the sequence it is named after (round 3
+        # review, F2); the build of its index said done
+        cases = [
+            ("walkone.fa", self.plain_upload, _FA1, {"chr1.fa": _FA1}),
+            ("walkone.fa.gz", self.plain_upload, gzip.compress(_FA1), {"chr1.fa": _FA1}),
+            ("walkone.tar.gz", self.upload, [("walkone/hg38_chr1.fa", "file", _FA1),
+                                             ("walkone/chr2.fa", "file", _FA2)],
+             {"chr1.fa": _FA1, "chr2.fa": _FA2}),
+        ]
+        for name, upload, data, want in cases:
+            with self.subTest(name):
+                root, cwd, _outside, ns = self.sandbox()
+                part = upload(cwd, name, data)
+                self.assertEqual(ns["_finalize_upload"]("genome", part, name, "", ""), "walkone")
+                self.assert_one_file_a_sequence(cwd, "walkone", want)
+        # a sequence id no file can be named after is refused, as a split refuses one
+        root, cwd, _outside, ns = self.sandbox()
+        part = self.plain_upload(cwd, "walkone.fa", b">chr1/a\nACGT\n")
+        with self.assertRaises(ValueError) as cm:
+            ns["_finalize_upload"]("genome", part, "walkone.fa", "", "")
+        self.assertIn("sequence id 'chr1/a' cannot be used as a file name", str(cm.exception))
+        self.assertEqual(os.listdir(os.path.join(cwd, "Genomes")), [])
+
+    def test_two_files_of_one_sequence_refused_installing_nothing(self):
+        # named after its sequence, one file would take the other's name
+        for label, entries in (
+                ("another file of its name", [("chr1.fa", "file", _FA1),
+                                              ("extra.fa", "file", b">chr1\nGGGG\n")]),
+                ("a split piece of its name", [("asm.fa", "file", _FA1 + _FA2),
+                                               ("more.fa", "file", b">chr2\nGGGG\n")])):
+            with self.subTest(label):
+                root, cwd, _outside, ns = self.sandbox()
+                part = self.upload(cwd, "asm.tar.gz", entries)
+                with self.assertRaises(ValueError) as cm:
+                    ns["_finalize_upload"]("genome", part, "asm.tar.gz", "", "")
+                self.assertRegex(str(cm.exception), r"^(extra|more)\.fa: cannot name it after "
+                                 r"its sequence -- chr[12]\.fa already exists$")
+                self.assertEqual(os.listdir(os.path.join(cwd, "Genomes")), [])
+
     def test_archive_member_with_several_sequences_is_split(self):
         root, cwd, _outside, ns = self.sandbox()
         part = self.upload(cwd, "asm.tar.gz", [("asm/asm.fa", "file", _FA1 + _FA2),

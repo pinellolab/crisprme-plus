@@ -28,14 +28,17 @@ Type an assembly name and pick a source:
   in chunks, so there is no browser size limit. It is laid out as every search needs
   it: every FASTA of an archive goes to the top of the genome folder (a UCSC
   `chromFa.tar.gz` holds them in `chroms/`) as a `.fa` file (`chr1.fasta` as
-  `chr1.fa`: an index is built from the `.fa` files only), and a FASTA holding several
-  sequences is split into one file per sequence. Hidden files are left out (the
+  `chr1.fa`: an index is built from the `.fa` files only), a FASTA holding several
+  sequences is split into one file per sequence, and a FASTA of one sequence is named
+  after it (`hg38_chr22.fa` holding `>chr22` goes in as `chr22.fa`: a search takes each
+  file for the sequence it is named after). Hidden files are left out (the
   `._chr1.fa` that macOS `tar` adds beside `chr1.fa` holds its file attributes, not a
   sequence). An archive with two FASTA files that would go in under one name
-  (`a/chr1.fa` and `b/chr1.fa`, or `chr1.fa` and `chr1.fasta`) is refused. An upload
-  with the name of an installed genome replaces it. It is refused while indexes or
-  variant genomes built on a genome of that name are installed: every search would go
-  on using them, with the sequences and positions of the genome they were built from.
+  (`a/chr1.fa` and `b/chr1.fa`, `chr1.fa` and `chr1.fasta`, or two files of one
+  sequence) is refused. An upload with the name of an installed genome replaces it.
+  It is refused while indexes or variant genomes built on a genome of that name are
+  installed: every search would go on using them, with the sequences and positions of
+  the genome they were built from.
   Remove them first (an index under *Remove installed data*, a
   `Genomes/<genome>+<dataset>` variant genome from your data folder), or upload the
   genome under another name.
@@ -62,7 +65,11 @@ Bulge-enabled searches need a genome **index**.
   `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt`.)
 - A build stops with an error, and puts no index in place, when the genome folder
   holds no `.fa` file at its top, holds a FASTA of several sequences, or gives an
-  index with no `.bin` file: every search would refuse such an index. It stops too
+  index with no `.bin` file: every search would refuse such an index. It stops as
+  well for a FASTA of one sequence not named after it (`hg38_chr22.fa` holding
+  `>chr22`), whose off-targets every search would find and then drop: rename it after
+  its sequence (`python PostProcess/genome_layout.py --split <genome folder>` renames
+  them all) and build again. It stops too
   when the reference index already there holds no `.bin` (one built before from such
   a folder): remove that index and build again.
 

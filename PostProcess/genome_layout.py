@@ -12,9 +12,14 @@ silently yields an EMPTY result: the whole genome is treated as one
 
 This module detects that layout and fixes it by splitting each multi-record
 file into one file per sequence (named after the record id, the way UCSC's own
-per-chromosome archives are). It is used by:
+per-chromosome archives are). A file of one sequence not named after it
+(``hg38_chr22.fa`` holding ``>chr22``, ``ecoli.fa`` holding ``>NC_000913.3``)
+fails the same way, and gets the same fix: it is named after its sequence. It is
+used by:
 
 * ``utils.download_reference_genome`` -- split right after a UCSC/URL download;
+* ``pages/settings_page.py`` -- the same, for a genome uploaded in the web Settings
+  page;
 * ``validate_inputs.check_genome_fasta`` -- fail fast (with the fix) before a
   ``complete-search`` starts;
 * ``submit_job_automated_new_multiple_vcfs.sh`` -- the same guard for the
@@ -24,7 +29,8 @@ Command line::
 
     python genome_layout.py <genome_dir>            # fast check; exit 1 if a file has >1 sequence
     python genome_layout.py --deep <genome_dir>     # same, reading every file completely
-    python genome_layout.py --split <genome_dir>    # split such files in place (implies --deep)
+    python genome_layout.py --split <genome_dir>    # split such files in place (implies --deep),
+                                                    # and name each file of one sequence after it
 """
 
 import mmap
@@ -124,12 +130,14 @@ def _validate_ids(fname: str, ids: List[str]) -> None:
 
 def split_multi_fasta(path: str, dest_dir: Optional[str] = None) -> List[str]:
     """Splits a multi-record FASTA into ``<record id>.fa`` files in ``dest_dir``
-    (default: the file's own directory) and removes the original.
+    (default: the file's own directory) and removes the original. A FASTA of one
+    record goes the same way: it is renamed after its record id.
 
     Lines are copied verbatim, so the concatenation of the pieces is byte-for-
     byte the original. Refuses (before writing anything) if two records share
     an id or an id is not a usable file name, and never overwrites an existing
-    file other than the original itself.
+    file other than the original itself (the same file under a name that differs
+    in case only, on a case-insensitive file system, is the original).
     """
     dest_dir = dest_dir or os.path.dirname(os.path.abspath(path))
     fname = os.path.basename(path)
@@ -138,9 +146,11 @@ def split_multi_fasta(path: str, dest_dir: Optional[str] = None) -> List[str]:
     original = os.path.abspath(path)
     targets = {rid: os.path.join(dest_dir, f"{rid}.fa") for rid in ids}
     for rid, target in targets.items():
-        if os.path.exists(target) and os.path.abspath(target) != original:
+        if (os.path.exists(target) and os.path.abspath(target) != original
+                and not os.path.samefile(target, original)):
             raise FileExistsError(
-                f"{fname}: cannot split -- {target} already exists"
+                f"{fname}: cannot split -- {target} already exists" if len(ids) > 1
+                else f"{fname}: cannot name it after its sequence -- {target} already exists"
             )
     written: List[str] = []
     out = None
@@ -175,11 +185,17 @@ def split_multi_fasta(path: str, dest_dir: Optional[str] = None) -> List[str]:
 
 
 def split_multi_record_fastas(genomedir: str, deep: bool = True) -> Dict[str, List[str]]:
-    """Splits every multi-record FASTA in ``genomedir`` in place. Returns
-    ``{original file name: [new file paths]}`` (empty if nothing needed
-    splitting). Deep by default: this is a one-off fix, not a per-search check."""
+    """Splits every multi-record FASTA in ``genomedir`` in place, then names each
+    FASTA of one sequence that is named otherwise after it (``walkone.fa`` holding
+    ``>chr1`` becomes ``chr1.fa``): CRISPRme takes a file for the sequence it is
+    named after, so every search of such a folder found its off-targets and then
+    dropped them all. Returns ``{original file name: [new file paths]}`` (empty if
+    nothing needed it). Deep by default: this is a one-off fix, not a per-search
+    check."""
     result: Dict[str, List[str]] = {}
     for fname in find_multi_record_fastas(genomedir, deep=deep):
+        result[fname] = split_multi_fasta(os.path.join(genomedir, fname), genomedir)
+    for fname in find_name_mismatched_fastas(genomedir):
         result[fname] = split_multi_fasta(os.path.join(genomedir, fname), genomedir)
     return result
 
@@ -204,16 +220,20 @@ def main(argv: List[str]) -> int:
         return 2
     genomedir = args[0]
     problems = find_multi_record_fastas(genomedir, deep=deep)
-    if not problems:
-        return 0
     if split:
         done = split_multi_record_fastas(genomedir)
         for fname, pieces in done.items():
-            print(f"Split {fname} into {len(pieces)} files in {genomedir}")
-        print(
-            "NOTE: any CRISPRitz index built from the old single-file layout must be "
-            "rebuilt (delete it and re-run build-index-only)."
-        )
+            if fname in problems:
+                print(f"Split {fname} into {len(pieces)} files in {genomedir}")
+            else:  # one sequence, named otherwise: an index built from it names it right
+                print(f"Renamed {fname} to {os.path.basename(pieces[0])} in {genomedir}")
+        if problems:
+            print(
+                "NOTE: any CRISPRitz index built from the old single-file layout must be "
+                "rebuilt (delete it and re-run build-index-only)."
+            )
+        return 0
+    if not problems:
         return 0
     for fname, ids in problems.items():
         sys.stderr.write("ERROR: " + describe_problem(genomedir, fname, ids) + "\n")

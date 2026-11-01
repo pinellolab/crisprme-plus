@@ -3152,8 +3152,11 @@ def _check_genome_layout(genomedir: str) -> None:
     ``*.fa`` files there only, so a folder that holds none (a UCSC chromFa archive
     unpacked with its chroms/ folder, FASTAs named .fasta or still gzipped) gave an
     index with no .bin, which every search refuses, and a file of several sequences
-    one that the search refuses to use."""
-    from genome_layout import describe_problem, find_multi_record_fastas
+    one that the search refuses to use. A file of one sequence named otherwise gave
+    an index of the sequence, but every search of the folder dropped all its
+    off-targets: a search takes each file for the sequence it is named after."""
+    from genome_layout import (describe_problem, find_multi_record_fastas,
+                               find_name_mismatched_fastas)
 
     names = sorted(os.listdir(genomedir))
     if not any(n.split(".")[-1] == "fa" and os.path.isfile(os.path.join(genomedir, n))
@@ -3190,6 +3193,27 @@ def _check_genome_layout(genomedir: str) -> None:
             "name of its first, and run build-index-only again. (A genome uploaded from "
             "the web Settings page is split this way: remove this one there, with the "
             "indexes built on it, and upload it again.)"
+        )
+    # one sequence, in a file not named after it (an upload of hg38_chr22.fa holding
+    # >chr22, or of a bacterial genome, was installed so): the search found its
+    # off-targets and dropped them all, its chromosome list being the file names. An
+    # index built from it is named after the sequence, and stays good once renamed.
+    misnamed = [(f, rid) for f, rid in find_name_mismatched_fastas(genomedir).items()
+                if f.split(".")[-1] == "fa"]
+    if misnamed:
+        (fname, rid), more = misnamed[0], len(misnamed) - 1
+        path = os.path.join(genomedir, fname)
+        error(
+            f"{path} holds the sequence {rid}, but a search takes each FASTA file for "
+            f"the sequence it is named after ({fname.rsplit('.', 1)[0]}), so every search "
+            f"of this folder finds the off-targets of {rid} and then drops them all"
+            + (f" ({more} more file(s) here are named so)" if more else "")
+            + f". Name each file after its sequence (mv '{path}' "
+            f"'{os.path.join(genomedir, rid + '.fa')}', or python "
+            f"PostProcess/genome_layout.py --split {genomedir}, which renames them all), "
+            "then run build-index-only again. (A genome uploaded from the web Settings "
+            "page is named this way: remove this one there, with the indexes built on "
+            "it, and upload it again.)"
         )
 
 

@@ -53,18 +53,26 @@ Settings page was before this release)". -->
   and a UCSC `chromFa.tar.gz` kept its `chroms/` folder and an archive of `.fasta` files their
   names, so their index held no `.bin`; all were listed as installed. An upload is now laid out as
   every search needs it: every FASTA of an archive goes to the top of the genome folder as a `.fa`
-  file (`chr1.fasta` as `chr1.fa`: an index is built from the `.fa` files only), and a FASTA of
-  several sequences is split into one file per sequence. Hidden files of an archive are left out:
+  file (`chr1.fasta` as `chr1.fa`: an index is built from the `.fa` files only), a FASTA of
+  several sequences is split into one file per sequence, and a FASTA of one sequence is named after
+  it: a one-chromosome subset (`hg38_chr22.fa` holding `>chr22`) or a bacterial genome went in as
+  `<genome>.fa`, and as a search takes each file for the sequence it is named after, every search
+  of it found its off-targets and then dropped them all (`none survived post-analysis`), though its
+  index build said done. (A genome downloaded by Direct URL or from UCSC as one FASTA of one
+  sequence is named after it the same way, and `PostProcess/genome_layout.py --split` renames such
+  a file too.) Hidden files of an archive are left out:
   the `._chr1.fa` that macOS `tar` adds beside `chr1.fa` (its file attributes) was installed too,
   and every search read it as a chromosome and failed, though the build said done. An archive with
-  two FASTA files that would go in under one name (`chr1.fa` and `chr1.fasta`) is refused. It is
+  two FASTA files that would go in under one name (`chr1.fa` and `chr1.fasta`, or two files of one
+  sequence) is refused. It is
   built in a hidden folder and replaces an installed genome of the same name only once whole (a
   genome folder that is a link to a shared copy is replaced and the copy left alone, where the
   upload used to write into it). An upload is refused, at its first chunk, while indexes or variant
   genomes built on a genome of that name are installed: every search and build of the new genome
   would go on using them, with the sequences and positions of the one they were built from.
   **A genome uploaded before** this fix that holds a multi-sequence FASTA, a `chroms/` folder, `.fasta`
-  files or `._` files: remove it in Settings with the indexes built on it (*Remove installed data*),
+  files, `._` files or a FASTA not named after its one sequence: remove it in Settings with the
+  indexes built on it (*Remove installed data*),
   and any `Genomes/<genome>+<dataset>` variant genome from your data folder, then upload it again.
   (An index built from a multi-sequence FASTA holds the sites of every sequence under the name of
   the first: kept, it gave a chr2 off-target as `chr1:37386` instead of `chr2:17381`.)
@@ -73,9 +81,12 @@ Settings page was before this release)". -->
   exits 0 with an empty index when there are none (a `chroms/` folder, `.fasta` names, gzipped
   FASTAs); `build-index-only` put that index in place, and the Settings page showed the build as
   done, though every search refuses an index with no `.bin`. It now ends with an ERROR (exit status
-  1) that says what to do, before it builds anything, for a folder with no `.fa` file at its top or
+  1) that says what to do, before it builds anything, for a folder with no `.fa` file at its top,
   with a FASTA of several sequences (which every search refuses too; the message says to remove the
-  indexes built from the folder while it held that file), and when the engine writes no `.bin` for
+  indexes built from the folder while it held that file) or with a FASTA of one sequence not named
+  after it (`walkone.fa` holding `>chr1`, whose off-targets every search found and then dropped; the
+  message gives the `mv`, or `genome_layout.py --split`, which renames them all), and when the
+  engine writes no `.bin` for
   the reference or the variant genome. A reference index with no `.bin` that an earlier run left is
   no longer taken for present (the run said `Reference index already present` and the Settings page
   showed the build done, though no search uses it): the run says to remove it. A genome of one

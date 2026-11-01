@@ -181,15 +181,19 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
     """Puts the genome of a finished upload into ``dest_dir`` (Genomes/<assembly>/) as
     a Direct URL download does (utils.download_reference_genome): every FASTA of the
     archive moved to the top of the folder (a UCSC chromFa.tar.gz holds them in
-    chroms/), and each file holding several sequences split into one file a sequence
-    (genome_layout.py: CRISPRme takes each FASTA file for one chromosome, and indexes
-    only those at the top of the folder). Each goes in as a .fa file, a .fasta one
-    renamed (chr1.fasta as chr1.fa), which that download does not do: index-genome
-    indexes the .fa files only, and a search lists a genome's chromosomes as its *.fa
-    (round 2 review, R2-1). It is built in a hidden folder of Genomes/, which no genome
-    listing shows, and replaces a genome of the same name only once whole. A .tar.gz
-    has had its members vetted (_unsafe_tar_member), and nothing is built on a genome
-    of this name (_genome_upload_problem)."""
+    chroms/), each file holding several sequences split into one file a sequence, and
+    one of a single sequence named after it (genome_layout.py: CRISPRme takes each
+    FASTA file for the chromosome it is named after, and indexes only those at the top
+    of the folder; an upload of hg38_chr22.fa holding >chr22 went in as <assembly>.fa,
+    and every search of it found its off-targets and dropped them all, round 3 review
+    F2). A sequence that would go in under the name of another file is refused. Each
+    goes in as a .fa file, a .fasta one renamed (chr1.fasta as chr1.fa), which that
+    download does not do: index-genome indexes the .fa files only, and a search lists
+    a genome's chromosomes as its *.fa (round 2 review, R2-1). It is built in a hidden
+    folder of Genomes/, which no genome listing shows, and replaces a genome of the
+    same name only once whole. A .tar.gz has had its members vetted
+    (_unsafe_tar_member), and nothing is built on a genome of this name
+    (_genome_upload_problem)."""
     from genome_layout import split_multi_record_fastas
 
     genomes = os.path.dirname(dest_dir)
@@ -233,7 +237,10 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
         os.makedirs(built)
         for fname, fa in seen.items():
             os.rename(fa, os.path.join(built, fname))
-        split_multi_record_fastas(built)
+        try:
+            split_multi_record_fastas(built)
+        except FileExistsError as e:  # (two sequences of one name; the message has no
+            raise ValueError(str(e).replace(built + os.sep, "")) from None  # stage path)
         # the genome it replaces is moved aside, never written through (a link to a
         # shared copy is only unlinked), and back if this one cannot go in
         old, link = os.path.join(stage, "replaced"), None

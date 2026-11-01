@@ -168,6 +168,50 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(_read(os.path.join(self.tmp, "chr2.fa")), ">chr2\nGG\n")
 
 
+class TestNameAfterSequence(unittest.TestCase):
+    """A FASTA of one sequence named otherwise (ecoli.fa holding >NC_000913.3, or a
+    one-chromosome subset hg38_chr22.fa): CRISPRme takes each file for the sequence it
+    is named after, so every search of it found its off-targets and then dropped them
+    all. split_multi_record_fastas, which every genome download and Settings upload
+    runs, names it after its sequence (round 3 review, F2)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_renamed_byte_for_byte_beside_a_split_and_a_named_file(self):
+        _write(os.path.join(self.tmp, "ecoli.fa"), ">NC_000913.3 E. coli K-12\nACGT\nAC\n")
+        _write(os.path.join(self.tmp, "asm.fa"), ">chr1\nAC\n>chr2\nGG\n")
+        _write(os.path.join(self.tmp, "chrM.fa"), ">chrM\nTT\n")
+        done = gl.split_multi_record_fastas(self.tmp)
+        self.assertEqual(sorted(done), ["asm.fa", "ecoli.fa"])
+        self.assertEqual(done["ecoli.fa"], [os.path.join(self.tmp, "NC_000913.3.fa")])
+        self.assertEqual(sorted(os.listdir(self.tmp)),
+                         ["NC_000913.3.fa", "chr1.fa", "chr2.fa", "chrM.fa"])
+        self.assertEqual(_read(os.path.join(self.tmp, "NC_000913.3.fa")),
+                         ">NC_000913.3 E. coli K-12\nACGT\nAC\n")
+        self.assertEqual(gl.find_name_mismatched_fastas(self.tmp), {})
+
+    def test_refuses_a_name_another_file_has(self):
+        _write(os.path.join(self.tmp, "chr1.fa"), ">chr1\nKEEP\n")
+        _write(os.path.join(self.tmp, "extra.fa"), ">chr1\nGG\n")
+        with self.assertRaises(FileExistsError) as cm:
+            gl.split_multi_record_fastas(self.tmp)
+        self.assertIn("extra.fa: cannot name it after its sequence", str(cm.exception))
+        self.assertEqual(_read(os.path.join(self.tmp, "chr1.fa")), ">chr1\nKEEP\n")
+        self.assertEqual(_read(os.path.join(self.tmp, "extra.fa")), ">chr1\nGG\n")
+
+    def test_a_name_that_differs_in_case_only_is_the_file_itself(self):
+        # on a case-insensitive file system (a macOS data folder), chr1.fa is CHR1.fa;
+        # on another, a second link to the file stands for that
+        _write(os.path.join(self.tmp, "CHR1.fa"), ">chr1\nAC\n")
+        if not os.path.exists(os.path.join(self.tmp, "chr1.fa")):
+            os.link(os.path.join(self.tmp, "CHR1.fa"), os.path.join(self.tmp, "chr1.fa"))
+        gl.split_multi_record_fastas(self.tmp)
+        self.assertEqual(os.listdir(self.tmp), ["chr1.fa"])
+        self.assertEqual(_read(os.path.join(self.tmp, "chr1.fa")), ">chr1\nAC\n")
+
+
 class TestCommandLine(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -193,6 +237,15 @@ class TestCommandLine(unittest.TestCase):
         self.assertEqual(r.returncode, 0)
         self.assertEqual(self._run(self.tmp).returncode, 0)
         self.assertEqual(sorted(os.listdir(self.tmp)), ["chr1.fa", "chr2.fa", "chrUn_x_random.fa"])
+
+    def test_split_flag_names_a_file_of_one_sequence_after_it(self):
+        _write(os.path.join(self.tmp, "ecoli.fa"), ">NC_000913.3\nAC\n")
+        # the check a search runs is the same as before: one sequence a file
+        self.assertEqual(self._run(self.tmp).returncode, 0)
+        r = self._run("--split", self.tmp)
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout, f"Renamed ecoli.fa to NC_000913.3.fa in {self.tmp}\n")
+        self.assertEqual(os.listdir(self.tmp), ["NC_000913.3.fa"])
 
     def test_bad_usage(self):
         self.assertEqual(self._run().returncode, 2)
@@ -224,6 +277,14 @@ class TestDownloadSplits(unittest.TestCase):
             sorted(os.listdir(dest)), ["chr1.fa", "chr2.fa", "chrUn_x_random.fa"]
         )
         self.assertEqual(gl.find_multi_record_fastas(dest, deep=True), {})
+
+    def test_single_sequence_url_download_is_named_after_it(self):
+        # it went in as <assembly>.fa, and every search of it dropped all its results
+        with mock.patch.object(utils, "download", self._fake_download(b">NC_000913.3\nACGT\n")):
+            dest = utils.download_reference_genome(
+                "ecoli", self.genomes, source="url", url="http://x/asm.fa.gz"
+            )
+        self.assertEqual(os.listdir(dest), ["NC_000913.3.fa"])
 
     def test_failed_split_leaves_no_half_built_genome_folder(self):
         dup = b">a\nAC\n>a\nGG\n"

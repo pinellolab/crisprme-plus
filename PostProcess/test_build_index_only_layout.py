@@ -6,10 +6,12 @@ index-genome indexes the ``*.fa`` files at the top of the genome folder only. A 
 chromFa archive unpacked with its chroms/ folder (as the web Settings genome upload
 left one) gave an index with no .bin, which build-index-only put in place, and the web
 showed as done, and every search then refused; a FASTA file of several sequences gave
-an index of a genome every search refuses to use (genome_layout.py). Now the run ends
-with an ERROR that says what to do, before the engine runs, and a reference or
-variant index the engine wrote no .bin into is never put in place; nor is one with no
-.bin that an earlier run left taken for present (final review round 1, F2).
+an index of a genome every search refuses to use (genome_layout.py), and a FASTA file of
+one sequence named otherwise one whose off-targets every search found and then dropped
+(round 3 review, F2). Now the run ends with an ERROR that says what to do, before the
+engine runs, and a reference or variant index the engine wrote no .bin into is never
+put in place; nor is one with no .bin that an earlier run left taken for present
+(final review round 1, F2).
 
 These run the real crisprme.py build-index-only against the stub engine of
 test_build_index_only_atomic (which writes a .bin for each contig that holds a site,
@@ -76,6 +78,29 @@ class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
                             "the variant genomes Genomes/hg38+*)",
                             "and run build-index-only again.",
                             "remove this one there, with the indexes built on it")
+
+    def test_fasta_file_not_named_after_its_sequence(self):
+        # one sequence in a file named otherwise (the web Settings upload of walkone.fa
+        # holding >chr1 kept it so): the index was built, and every search of the folder
+        # found its off-targets and then dropped them all, a search taking each file for
+        # the sequence it is named after (round 3 review, F2)
+        misnamed, named = self.genome("hg38_chr2.fa"), self.genome("chr2.fa")
+        os.rename(named, misnamed)
+        rc, out, err = self.run_bio(vcf=False)
+        self.assert_refused(rc, out, err,
+                            f"{misnamed} holds the sequence chr2, but a search takes each "
+                            "FASTA file for the sequence it is named after (hg38_chr2), so "
+                            "every search of this folder finds the off-targets of chr2 and "
+                            "then drops them all.",
+                            f"(mv '{misnamed}' '{named}', or python PostProcess/genome_layout.py "
+                            f"--split {self.genome()}, which renames them all)",
+                            "remove this one there, with the indexes built on it")
+        # named after its sequence, the folder builds
+        os.rename(misnamed, named)
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
+                         ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
 
     def test_an_index_with_no_bin_is_not_put_in_place(self):
         # no sequence holds a site (a contig of N alone): the engine writes no .bin
