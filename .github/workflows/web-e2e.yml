@@ -62,6 +62,16 @@ jobs:
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_annotation_manager.py
 
+      # build-index-only splits a single multi-chromosome .vcf.gz that has no .tbi (bgzip
+      # or plain gzip), with nothing on stderr and the dataset folder left readable, and
+      # refuses an unsorted one saying why. The real build-index-only in the image
+      # (CRISPRitz, tabix, bcftools).
+      - name: VCF auto-split without a .tbi
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            crisprme:web python -u /t/test_build_index_vcf_autosplit.py
+
       # Email-notification config: write/read round-trip (password never echoed,
       # kept on re-save), validation, 0600 perms, and send_mail resolving .email.json.
       - name: Email-config unit tests

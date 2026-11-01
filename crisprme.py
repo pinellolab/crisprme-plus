@@ -3194,6 +3194,13 @@ def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
     that isn't already named per-chromosome into ``<base>.<chrom>.vcf.gz`` (bgzip +
     tabix). A no-op when the folder is already per-chromosome (the shipped datasets),
     so it is safe to call on every variant build.
+
+    The split reads each file by region, through its index: one with no .tbi or .csi
+    beside it (the web Settings uploader takes one file at a time) is indexed first,
+    in a scratch folder, so the user's folder is never written to; a plain-gzip one,
+    which tabix cannot index, is recompressed with bgzip there first. What the tools
+    print goes to stdout, or into the error when one fails: to a pipeline that runs
+    build-index-only, any output on stderr fails the run.
     """
     import tempfile
 
@@ -3213,22 +3220,60 @@ def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
             "per chromosome for enrichment, but bcftools/tabix were not found to do "
             "it automatically. Provide per-chromosome '<name>.chr<N>.vcf.gz' files."
         )
+
+    def _run(cmd):
+        done = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        said = done.stderr.decode(errors="replace").strip()
+        if done.returncode != 0:
+            raise RuntimeError(
+                f"{os.path.basename(cmd[0])} {' '.join(cmd[1:])} failed: "
+                f"{said or f'exit status {done.returncode}'}"
+            )
+        if said:
+            print(said, flush=True)
+        return done.stdout.decode(errors="replace")
+
+    def _bgzf(path):
+        # a gzip member with the BGZF extra field (the SAM/BAM spec's BC subfield)
+        with open(path, "rb") as fh:
+            head = fh.read(18)
+        return head[:4] == b"\x1f\x8b\x08\x04" and head[12:14] == b"BC"
+
     realdir = os.path.realpath(vcfdir)
     tmp = tempfile.mkdtemp(prefix=".vcfsplit_", dir=os.path.dirname(os.path.abspath(vcfdir)))
+    # (inside tmp, so that a run killed meanwhile leaves no other folder than tmp)
+    work = os.path.join(tmp, ".index")
     try:
         for f in vcfs:
             src = os.path.join(realdir, f)
             base = f[: -len(".vcf.gz")]
-            chroms = subprocess.check_output([tabix, "-l", src]).decode().split()
+            if not (os.path.isfile(src + ".tbi") or os.path.isfile(src + ".csi")):
+                # tabix writes an index beside the name it is given: a link to the
+                # file, or the bgzip copy of a plain-gzip one
+                os.makedirs(work, exist_ok=True)
+                indexed = os.path.join(work, f)
+                if _bgzf(src):
+                    os.symlink(src, indexed)
+                else:
+                    _run([bcftools, "view", src, "-Oz", "-o", indexed])
+                _run([tabix, "-p", "vcf", indexed])
+                src = indexed
+            chroms = _run([tabix, "-l", src]).split()
             for chrom in chroms:
                 dst = os.path.join(tmp, f"{base}.{chrom}.vcf.gz")
-                subprocess.check_call(
-                    [bcftools, "view", "-r", chrom, src, "-Oz", "-o", dst]
-                )
-                subprocess.check_call([tabix, "-p", "vcf", dst])
+                _run([bcftools, "view", "-r", chrom, src, "-Oz", "-o", dst])
+                _run([tabix, "-p", "vcf", dst])
     except Exception as exc:  # noqa: BLE001
         shutil.rmtree(tmp, ignore_errors=True)
-        error(f"Auto-splitting the VCF dataset into per-chromosome files failed: {exc}")
+        hint = (". Sort it by position (bcftools sort -Oz -o <sorted>.vcf.gz <file>), "
+                "then add it again" if "nsorted positions" in str(exc) else "")
+        error(f"Auto-splitting the VCF dataset into per-chromosome files failed: {exc}{hint}")
+    shutil.rmtree(work, ignore_errors=True)
+    # mkdtemp makes a folder only its owner can enter: give it the mode any other
+    # folder made here gets (the umask's), as the uploaded dataset folder it replaces
+    umask = os.umask(0)
+    os.umask(umask)
+    os.chmod(tmp, (os.stat(tmp).st_mode & 0o7000) | (0o777 & ~umask))
     # Replace the registered folder (a symlink to the user's data, or a real dir)
     # with the normalized per-chromosome dir, atomically. The user's original files
     # are untouched (we only ever read them).
