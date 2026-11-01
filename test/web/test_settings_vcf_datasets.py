@@ -18,7 +18,8 @@ tabix, bcftools) on a small synthetic genome, run with the argv the page launche
    name, with the bulges of its index; a genotyped dataset with no tiers reads
    "genotyped, samples not indexed", not "sites-only".
 3. Submit refuses a variant search whose sample list is missing, instead of letting
-   it fail at its end, and still runs one whose list is there.
+   it fail at its end, and still runs one whose list is there; for a sites-only
+   dataset it says why there is no list, not to build one (final review round 1, F4).
 4. A sites-only dataset is built without a sample list, as the mega index is
    (docs/DESIGN_mega_index.md): a list of its pseudo-samples there, and the registry
    made from the VCFs' INFO allele frequencies (build_mega_registry.py), are left as
@@ -168,6 +169,13 @@ ok, msgs = submit("fresh")
 check(not ok and any("No sample list for the variant dataset 'fresh'" in m
                      and "samplesIDs/toyg_fresh.samplesID.txt" in m for m in msgs),
       f"Submit refuses one whose sample list is missing (got {msgs})")
+# a sites-only dataset: building it writes no list, so that is not the remedy
+ok, msgs = submit("agg")
+check(not ok and len(msgs) == 1 and msgs[0].startswith(
+          "The variant dataset 'agg' is sites-only: its VCFs have no sample columns, so it "
+          "has no sample list (samplesIDs/toyg_agg.samplesID.txt)")
+      and "per-dataset allele-frequency registry" in msgs[0] and "Build its" not in msgs[0],
+      f"Submit says why a sites-only dataset has no list (got {msgs})")
 
 # ---- a list of only its header, put there for a sites-only dataset ----------------------
 SITES = HEADER.replace("\tFORMAT\t" + "\t".join(SAMPLES), "")

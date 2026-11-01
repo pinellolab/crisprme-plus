@@ -1884,27 +1884,39 @@ _DATA_TYPE_LABEL = {
 }
 
 
+def _vcf_folder_has_samples(vdir: str) -> Optional[bool]:
+    """Whether the .vcf.gz files of the VCF folder ``vdir`` genotype samples: True when
+    the #CHROM header of one of them has sample columns, False when each one read has
+    none (a sites-only dataset), None when the folder holds no readable one."""
+    try:
+        files = sorted(f for f in os.listdir(vdir) if f.endswith(".vcf.gz"))
+    except OSError:
+        return None
+    found = None
+    for fname in files:
+        try:
+            with gzip.open(os.path.join(vdir, fname), "rt", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("#CHROM"):
+                        if len(line.rstrip("\r\n").split("\t")) > 9:
+                            return True
+                        found = False
+                        break
+                    if not line.startswith("##"):
+                        break
+        except Exception:  # noqa: BLE001 - unreadable: no claim
+            pass
+    return found
+
+
 def _vcf_dataset_has_samples(genome_norm: str, dnorm: str) -> bool:
     """True when the VCF folder of a dataset (VCFs/<genome>_<dataset> or
-    VCFs/<dataset>) is there and the #CHROM header of its first .vcf.gz has sample
+    VCFs/<dataset>) is there and the #CHROM header of one of its .vcf.gz has sample
     columns."""
     for folder in (f"{genome_norm}_{dnorm}", dnorm):
         vdir = os.path.join(current_working_directory, VCFS_DIR, folder)
-        try:
-            files = sorted(f for f in os.listdir(vdir) if f.endswith(".vcf.gz"))
-        except OSError:
-            continue
-        for fname in files[:1]:
-            try:
-                with gzip.open(os.path.join(vdir, fname), "rt", errors="replace") as fh:
-                    for line in fh:
-                        if line.startswith("#CHROM"):
-                            return len(line.rstrip("\r\n").split("\t")) > 9
-                        if not line.startswith("##"):
-                            break
-            except Exception:  # noqa: BLE001 - unreadable: no claim
-                pass
-        return False
+        if os.path.isdir(vdir):
+            return bool(_vcf_folder_has_samples(vdir))
     return False
 
 
@@ -1952,7 +1964,20 @@ def samplesid_problem(vcf_folder: str, dataset: str) -> Optional[str]:
         os.path.join(current_working_directory, "samplesIDs", f"{vcf_folder}.samplesID.txt")
     ):
         return None
-    if os.path.isdir(os.path.join(current_working_directory, VCFS_DIR, vcf_folder)):
+    vdir = os.path.join(current_working_directory, VCFS_DIR, vcf_folder)
+    if _vcf_folder_has_samples(vdir) is False:
+        # no list comes from a VCF that names no sample, and no build makes the
+        # registry its variants need (docs/DESIGN_mega_index.md)
+        return (
+            f"The variant dataset '{dataset}' is sites-only: its VCFs have no sample "
+            f"columns, so it has no sample list (samplesIDs/{vcf_folder}.samplesID.txt), "
+            "and a search with it fails at its end without one. A search reports the "
+            "variants of a sites-only VCF only through a per-dataset allele-frequency "
+            "registry, as the shipped hg38_mega index has (docs/DESIGN_mega_index.md); "
+            "building its index does not make one. Search the reference genome, or a "
+            "VCF dataset with samples."
+        )
+    if os.path.isdir(vdir):
         how = ("Build its variant index in Settings, which writes the list from the VCF "
                "header, or add the file yourself")
     else:

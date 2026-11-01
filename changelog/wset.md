@@ -21,8 +21,11 @@ CHANGELOG.md. All go under "### Fixed". -->
   once as a single multi-chromosome file named without the genome: the per-sample search runs to
   its end and names the same carriers, with the same allele frequencies, as the same panel built
   from the command line with `--samplesID`. Submit now refuses a variant search whose sample list
-  is missing, with a message that says how to get one, rather than letting it fail at its end; and
-  a genotyped dataset with no tiers yet reads `[genotyped, samples not indexed]`, not sites-only.
+  is missing, with a message that says how to get one, rather than letting it fail at its end (for
+  a sites-only dataset, which has no samples to list, it says so, and that a search reports such a
+  VCF's variants only through a per-dataset allele-frequency registry, as the shipped `hg38_mega`
+  index has); and a genotyped dataset with no tiers yet reads `[genotyped, samples not indexed]`,
+  not sites-only.
   **If you added a dataset in Settings,** build its variant index again there; to give its
   samples' populations and sex, put your own list at `samplesIDs/<dataset>.samplesID.txt` first.
 - **The Settings VCF upload records the reference genome you pick, and the search form offers the

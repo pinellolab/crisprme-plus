@@ -72,7 +72,9 @@ has none, adding it here writes one from the VCF header: exactly the samples the
 genotypes, with the dataset as their population and `unknown` superpopulation and
 sex. To give their populations and sex, put your own list there before you build
 the index; a list you put there is never changed. The search form refuses a variant
-search whose sample list is missing, rather than letting it fail at its end.
+search whose sample list is missing, rather than letting it fail at its end. A
+sites-only VCF (no sample columns) gets no list: a search reports its variants only
+through a per-dataset allele-frequency registry, as the shipped `hg38_mega` index has.
 
 ### Add an annotation
 Upload a `.bed` file (annotations are small), then enable it under *Manage
