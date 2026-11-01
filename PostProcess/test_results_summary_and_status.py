@@ -127,13 +127,13 @@ class TestNoHitsStatus(unittest.TestCase):
         refused = ("/data/Genomes/hg38+rv is unfinished: a build-index-only run is "
                    "writing it, or stopped before it was done. Let that run finish, or run "
                    "build-index-only again to its end, then run this search again")
-        # (and what a build from the web Settings page cannot do for the tiers)
+        # (and how to finish the tiers or search without them)
         tiers = ("/data/Dictionaries/registry_rv is unfinished: a build-index-only run is "
                  "writing it, or stopped before it was done. Let that run finish, or run "
-                 "build-index-only again to its end from the command line with rv and its "
-                 "--samplesID (a build from the web Settings page passes none), or remove it "
-                 "and /data/Dictionaries/genotypes_rv to search without them, then run this "
-                 "search again")
+                 "build-index-only again to its end with rv and its --samplesID (or build it "
+                 "again in the web Settings page, which passes the dataset's sample list), or "
+                 "remove it and /data/Dictionaries/genotypes_rv to search without them, then "
+                 "run this search again")
         for name, err, says in (
                 ("refused", f"ERROR: {refused}\n", f"The search was not run: {refused}."),
                 ("refused tiers", f"ERROR: {tiers}\n", f"The search was not run: {tiers}."),

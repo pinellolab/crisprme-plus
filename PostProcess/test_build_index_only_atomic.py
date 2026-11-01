@@ -2142,9 +2142,10 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
         indel genotype store (where) is still marked unfinished as it ends."""
         directory = self.path("Dictionaries", where)
         if where == "registry_ds":
-            do = (" and its --samplesID (a build from the web Settings page passes none), or "
-                  "remove the dict-less tiers to search without them (rm -rf "
-                  f"'{directory}' '{self.path('Dictionaries', 'genotypes_ds')}')")
+            do = (" and its --samplesID (or build it again in the web Settings page, which "
+                  "passes the dataset's sample list), or remove the dict-less tiers to search "
+                  f"without them (rm -rf '{directory}' "
+                  f"'{self.path('Dictionaries', 'genotypes_ds')}')")
         else:
             do = (", or remove the phased indel genotype store to search without it (rm -rf "
                   f"'{directory}')")
@@ -2206,10 +2207,12 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
         complete-search's checks, and that search used the part a stopped run left as
         if it were whole, with exit status 0. The script refuses it too: the job ends
         with the ERROR in its log_error.txt, which the results page shows. It names the
-        tiers' --samplesID, which a build from the web Settings page passes none of,
-        and how to search without the tiers or the indel genotype store."""
-        tiers = (" from the command line with ds and its --samplesID (a build from the web "
-                 "Settings page passes none), or remove it and {} to search without them,")
+        tiers' --samplesID, which a build from the web Settings page passes as the
+        dataset's sample list, and how to search without the tiers or the indel genotype
+        store."""
+        tiers = (" with ds and its --samplesID (or build it again in the web Settings page, "
+                 "which passes the dataset's sample list), or remove it and {} to search "
+                 "without them,")
         cases = [(step, where, dict(shim=True, STUB_WRITE_HANG=held, **workers),
                   tiers if step == "tiers" else ", or remove it to search without it,")
                  for step, held, where, workers in self.STEPS]
@@ -2242,19 +2245,19 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
 
     def test_a_run_without_samplesid_fails_while_the_tiers_stay_unfinished(self):
         """The tiers are written only by a run given --samplesID, which a build from the
-        web Settings page never passes: after a run with it was stopped while it wrote
-        them, such a build exited 0 (Done) and left them marked, and every web search
-        of the dataset was refused, saying to run build-index-only again to its end,
-        which such a build cannot do. That build now fails with an ERROR, and it and
-        the web search say what to do: run it with --samplesID, from the command line,
-        or remove the tiers."""
+        web Settings page passed none of before 2.8.1: after a run with it was stopped
+        while it wrote them, such a build exited 0 (Done) and left them marked, and
+        every web search of the dataset was refused, saying to run build-index-only
+        again to its end, which such a build cannot do. That build now fails with an
+        ERROR, and it and the web search say what to do: run it with --samplesID (as a
+        Settings build now passes the dataset's sample list), or remove the tiers."""
         step, held, where, workers = self.STEPS[0]
         proc = self.start(shim=True, STUB_WRITE_HANG=held, **workers)
         self.wait_for_mark(proc)
         self.kill_group(proc)
         settings = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
                     "--bDNA", "1", "--bRNA", "1", "--vcf", self.path("VCFs", "ds"),
-                    "--path", self.work]  # (as the Settings page runs it)
+                    "--path", self.work]  # (as the Settings page ran it before 2.8.1)
         rc, out, err = self.finish(self.start(command=settings))
         self.assertEqual(rc, 1, out + err)
         self.assertIn("WARNING: INCOMPLETE VARIANT INDEX", err)
@@ -2262,8 +2265,8 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
         rc, out, err = self.run_web_search()
         self.assertEqual(rc, 1, out + err)
         self.assertIn(f"{self.path('Dictionaries', where)} is unfinished: ", err)
-        self.assertIn(" from the command line with ds and its --samplesID (a build from the web "
-                      "Settings page passes none), or remove it and ", err)
+        self.assertIn(" with ds and its --samplesID (or build it again in the web Settings "
+                      "page, which passes the dataset's sample list), or remove it and ", err)
         rc, out, err = self.run_bio()  # (with it)
         self.assertEqual(rc, 0, err)
         self.assertIn("Variant index ready: ", out)

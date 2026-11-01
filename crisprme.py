@@ -4734,9 +4734,9 @@ def build_index_only() -> None:
     _redo = f"run build-index-only again to its end with {vcf_name}"
     _gt_dir = os.path.join(workdir, "Dictionaries", f"genotypes_{vcf_name}")
     _parts = [
-        (_reg_dir, f"{_redo} and its --samplesID (a build from the web Settings page passes "
-                   f"none), or remove the dict-less tiers to search without them (rm -rf "
-                   f"'{_reg_dir}' '{_gt_dir}')"),
+        (_reg_dir, f"{_redo} and its --samplesID (or build it again in the web Settings "
+                   f"page, which passes the dataset's sample list), or remove the dict-less "
+                   f"tiers to search without them (rm -rf '{_reg_dir}' '{_gt_dir}')"),
     ]
     # the indel genotype store is read, and its mark taken away (STEP 1c), only with the
     # SNP overlay on: under CRISPRME_INDEL_SNP=0 no search refuses its mark, and no run

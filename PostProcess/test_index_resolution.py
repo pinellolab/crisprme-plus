@@ -1235,9 +1235,9 @@ class AnUnfinishedBuildIsNotSearched(_ShippedScript):
         self.install("NRG_3")
         # (and how to search without the tiers, which only a run given --samplesID
         # writes, or without the indel genotype store)
-        then = {self.MARKED[0]: " from the command line with {} and its --samplesID (a build "
-                                "from the web Settings page passes none), or remove it and {} "
-                                "to search without them,",
+        then = {self.MARKED[0]: " with {} and its --samplesID (or build it again in the web "
+                                "Settings page, which passes the dataset's sample list), or "
+                                "remove it and {} to search without them,",
                 self.MARKED[1]: ", or remove it to search without it,"}
         for marked in self.MARKED:
             with self.subTest(marked=marked):

@@ -1,5 +1,16 @@
 <!-- [2.8.1] entries of the "wset" track (web Settings / data manager), to merge into
-CHANGELOG.md. All go under "### Fixed". -->
+CHANGELOG.md. All go under "### Fixed".
+For the docs track: a Settings variant build now passes the dataset's sample list as
+--samplesID (first entry below), so the build-index-only / search ERROR for unfinished
+tiers no longer says "a build from the web Settings page passes none": it says to run
+build-index-only again to its end "with <dataset> and its --samplesID (or build it again in
+the web Settings page, which passes the dataset's sample list)". The two places in
+CHANGELOG.md's existing [2.8.1] entry on unfinished parts that say a Settings build passes
+no --samplesID ("from the command line, with their `--samplesID`, which a build from the
+web Settings page passes none of" and "a run without it (a build from the web Settings
+page) does not write") should say the same: "(for the tiers, with their `--samplesID`, or
+built again in the web Settings page)" and "a run without it (as a build from the web
+Settings page was before this release)". -->
 
 ### Fixed
 - **A VCF dataset added in the web Settings page can be searched from the browser, per sample

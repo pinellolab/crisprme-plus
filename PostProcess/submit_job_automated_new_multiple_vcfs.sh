@@ -940,17 +940,17 @@ while read vcf_f; do
 	# run stopped there leaves a part that looks whole. complete-search refuses it
 	# first; a search the web launches runs this script straight, so refuse it here
 	# too. (The indel genotype store is read for the SNP+indel co-occurrence only.)
-	# The tiers are written only by a run given --samplesID, which the web Settings
-	# page never gives, and a search can do without them or the store. The fake-indel
-	# genome is read only to build an INDELS index that is not there: its mark is
-	# refused there (STEP 2.3), not here.
+	# The tiers are written only by a run given --samplesID (a build in the web
+	# Settings page passes the dataset's sample list, when it has one), and a search
+	# can do without them or the store. The fake-indel genome is read only to build an
+	# INDELS index that is not there: its mark is refused there (STEP 2.3), not here.
 	if [ "$vcf_name" != "_" ]; then
 		_unfinished=("Dictionaries/registry_${vcf_name}" "Genomes/${ref_name}+${vcf_name}")
 		case "${CRISPRME_INDEL_SNP-1}" in 1 | true | True | yes) _unfinished=("${_unfinished[0]}" "Dictionaries/indel_genotypes_${vcf_name}" "${_unfinished[@]:1}") ;; esac
 		for _u in "${_unfinished[@]}"; do
 			if [ -d "$current_working_directory/$_u/.building" ]; then
 				case "$_u" in
-					Dictionaries/registry_*) _do=" from the command line with ${vcf_name} and its --samplesID (a build from the web Settings page passes none), or remove it and $current_working_directory/Dictionaries/genotypes_${vcf_name} to search without them," ;;
+					Dictionaries/registry_*) _do=" with ${vcf_name} and its --samplesID (or build it again in the web Settings page, which passes the dataset's sample list), or remove it and $current_working_directory/Dictionaries/genotypes_${vcf_name} to search without them," ;;
 					Dictionaries/indel_genotypes_*) _do=", or remove it to search without it," ;;
 					*) _do="," ;;
 				esac
