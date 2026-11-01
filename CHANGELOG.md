@@ -303,8 +303,7 @@ and the `release-crisprme` skill.
   (223 extra sites) where it now ends `1 passed, 0 failed, 3 skipped`. Validation on chr22 is
   unchanged. Also in the README: §1.3 clones the `v2.8.1` tag rather than `main`, and §1.2 says
   the image is built from source (CRISPRitz v2.9.1 compiled in it) and gives its download and
-  on-disk sizes separately. Both `complete-test` modes are unchanged. Covered by
-  `PostProcess/test_validate_test.py`.
+  on-disk sizes separately. Covered by `PostProcess/test_validate_test.py`.
 - **An index still being built could be selected as if it were finished.** A build takes
   `<dir>.lock`, and `index-genome` then creates the index directory and writes one `.bin` per
   chromosome, so for the whole build a half-written index is indistinguishable from a complete one
