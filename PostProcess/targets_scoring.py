@@ -171,7 +171,8 @@ def crispr_bulge_for_sites(sites, device=None):
 
 
 def _find_registry_dir(index_path):
-    """Locate the registry_<vcf> dir under an index install's Dictionaries/."""
+    """Locate the registry_<vcf> dir under an index install's Dictionaries/. One that
+    build-index-only marks unfinished is refused with a ValueError."""
     cands = []
     for base in (index_path, os.path.join(index_path, "Dictionaries")):
         cands += glob.glob(os.path.join(base, "registry_*"))
@@ -182,7 +183,19 @@ def _find_registry_dir(index_path):
             "variant index via --index-path (the carrier overlay needs the "
             "registry tier)." % index_path
         )
-    return sorted(cands)[0]
+    reg = sorted(cands)[0]
+    # build-index-only marks the dict-less tiers unfinished (a hidden .building) while
+    # it writes them chromosome by chromosome (crisprme.py _mark_unfinished): a
+    # chromosome not written yet would read as one with no variant.
+    if os.path.isdir(os.path.join(reg, ".building")):
+        raise ValueError(
+            "%s is unfinished, or still being written: the build-index-only run that "
+            "writes the dict-less tiers there has not finished them, and the carrier "
+            "overlay would report no variant on the chromosomes not written yet. Let "
+            "that run finish, or run build-index-only again to its end with its "
+            "--samplesID, then run targets-scoring again." % reg
+        )
+    return reg
 
 
 class _RegistryOverlay(object):

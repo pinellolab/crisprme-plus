@@ -4,17 +4,22 @@
 Covers the CasOFFinder + generic-TSV parsers (both schemas, bulge-from-alignment
 inference, 0-vs-1-based positions), the CFD-per-site slicing (vs the clean-room
 cfd_score.cfd oracle, incl. the DNA-bulge front-trim convention), the CRISPR-Bulge
-null rules (stubbed scorer so the test is hermetic and needs no cbulge env), and the
+null rules (stubbed scorer so the test is hermetic and needs no cbulge env), the
 variant carrier overlay against a synthetic in-memory registry built with
-compile_registry.
+compile_registry, and its refusal of a registry build-index-only has not finished
+(through crisprme.py's targets-scoring command too, whose definitions it loads with
+Bio and the scientific stack stubbed where absent).
 
 STDLIB only (+ the repo's tier0_registry for the overlay fixture). Hermetic: no
 installed PAMs/index, no cbulge env.
 """
+import contextlib
+import io
 import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
@@ -236,6 +241,102 @@ class TestCarrierOverlay(unittest.TestCase):
         res = ov.overlay(s)
         ov.close()
         self.assertEqual(res["n_overlapping_variants"], 0)
+
+
+class TestUnfinishedRegistry(unittest.TestCase):
+    """build-index-only marks the dict-less tiers unfinished (a hidden .building in
+    registry_<vcf>/) while it writes them chromosome by chromosome. The carrier overlay
+    took such a registry as it found it, and reported 0 overlapping variants, with no
+    warning, for every site on a chromosome not written yet; complete-search, the
+    search script and publish-index refuse it."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.reg = os.path.join(self.d, "Dictionaries", "registry_ds")
+        os.makedirs(self.reg)
+        open(os.path.join(self.reg, "reg_chr8.idx"), "w").close()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_a_registry_still_being_written_is_refused(self):
+        os.makedirs(os.path.join(self.reg, ".building"))
+        with self.assertRaises(ValueError) as cm:
+            ts._find_registry_dir(self.d)
+        self.assertEqual(str(cm.exception), (
+            "%s is unfinished, or still being written: the build-index-only run that writes "
+            "the dict-less tiers there has not finished them, and the carrier overlay would "
+            "report no variant on the chromosomes not written yet. Let that run finish, or run "
+            "build-index-only again to its end with its --samplesID, then run targets-scoring "
+            "again." % self.reg))
+        os.rmdir(os.path.join(self.reg, ".building"))
+        self.assertEqual(ts._find_registry_dir(self.d), self.reg)
+
+    def test_the_command_says_so_in_one_line(self):
+        """crisprme.py targets-scoring turns it into its one-line Error, as it does a
+        missing registry, rather than a traceback, and writes nothing."""
+        import shutil
+        crisprme = _load_crisprme()
+        targets = _co_file([["g", "X", G + PAMGG, G + "AGG", "chr8", 1000, "+", 0, 0]])
+        self.addCleanup(os.unlink, targets)
+        output = os.path.join(self.d, "out.tsv")
+        argv = ["crisprme.py", "targets-scoring", "--targets", targets, "--output", output,
+                "--casoffinder", "--index-path", self.d]
+        os.makedirs(os.path.join(self.reg, ".building"))
+        for case in ("unfinished", "missing"):
+            with self.subTest(registry=case):
+                if case == "missing":
+                    shutil.rmtree(self.reg)
+                err = io.StringIO()
+                with mock.patch.object(crisprme, "input_args", argv), \
+                     contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+                    crisprme.targets_scoring_cmd()
+                self.assertEqual(cm.exception.code, 1)
+                lines = err.getvalue().splitlines()
+                self.assertEqual(len(lines), 1, err.getvalue())
+                self.assertTrue(lines[0].startswith(
+                    "Error: %s is unfinished, " % self.reg if case == "unfinished"
+                    else "Error: no Dictionaries/registry_<vcf> found under "), lines[0])
+                self.assertFalse(os.path.exists(output))
+
+
+def _load_crisprme():
+    """crisprme.py's definitions, without its command dispatch, with Bio.Seq and the
+    scientific stack stubbed where absent (as test_validate_test._load_crisprme)."""
+    import types
+    crisprme_py = os.path.join(os.path.dirname(_HERE), "crisprme.py")
+    with open(crisprme_py) as fh:
+        src = fh.read()
+    cut = src.index("\nif len(sys.argv) < 2:")
+    mod = types.ModuleType("crisprme_under_test_targets_scoring")
+    mod.__file__ = crisprme_py
+    code = compile(src[:cut], crisprme_py, "exec")
+    inserted = []
+    if "Bio.Seq" not in sys.modules:
+        bio, bio_seq = types.ModuleType("Bio"), types.ModuleType("Bio.Seq")
+        bio_seq.Seq = object
+        bio.Seq = bio_seq
+        if "Bio" not in sys.modules:
+            sys.modules["Bio"] = bio
+            inserted.append("Bio")
+        sys.modules["Bio.Seq"] = bio_seq
+        inserted.append("Bio.Seq")
+    for name in ("pandas", "scipy", "sklearn", "matplotlib", "seaborn", "statsmodels",
+                 "intervaltree", "CRISPR_BULGE_score"):
+        if name in sys.modules:
+            continue
+        try:
+            __import__(name)
+        except Exception:
+            sys.modules[name] = mock.MagicMock()
+            inserted.append(name)
+    try:
+        exec(code, mod.__dict__)
+    finally:
+        for name in inserted:
+            sys.modules.pop(name, None)
+    return mod
 
 
 class TestEndToEnd(unittest.TestCase):

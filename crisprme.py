@@ -5937,6 +5937,13 @@ def targets_scoring_cmd():
     sys.path.insert(0, script_path)
     import targets_scoring as _ts
 
+    if index_path is not None:
+        # the registry tier the carrier overlay reads: one missing, or one that
+        # build-index-only has not finished writing, is said in one line, not a traceback
+        try:
+            _ts._find_registry_dir(index_path)
+        except (FileNotFoundError, ValueError) as _reg_err:
+            error(str(_reg_err))
     n = _ts.run(
         targets, output, casoffinder=casoffinder, index_path=index_path,
         device=device, xlsx=xlsx, pam_len=pam_len, position_base=position_base,
