@@ -104,18 +104,21 @@
   name outside `Genomes/` were searched with bulges, remove the indexes of that name (Settings >
   Installed indexes, or `genome_library/<PAM>_<N>_<name>`), so that each search builds its own.
   Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
-- **A genome in `Genomes/` that is a link to a folder of another name failed in the
-  post-analysis.** The pipeline resolved the link and named the genome after the link's target in
-  one step and after the link in another, so a search of `Genomes/hg38lnk` -> `../shared/GRCh38_copy`
-  stopped with `grep: .../crispritz_targets/GRCh38_copy_..._targets.txt: No such file or directory`
-  and `ERROR: off-targets post-analysis (reference) failed` (exit 1), with or without bulges. The web
-  runs the same pipeline on `Genomes/<name>`, so its searches of such a genome failed the same way.
-  A link named like its target (`Genomes/hg38` -> `/shared/genomes/hg38`) was not affected. The
-  genome now keeps the name of the folder the search is given (each personal-assembly haplotype is
-  searched through such a link, named after the haplotype). The linked genome's results equal those
-  of the same sequence in `Genomes/hg38`, apart from the genome's name in the file names.
-  **Affected:** every search of such a link, from the CLI or the web. **What to do:** run them
-  again.
+- **A genome in `Genomes/` that is a link to a folder of another name failed in the post-analysis.**
+  The pipeline resolved the link and named the genome after the link's target in one step and after
+  the link in another, so a search of `Genomes/hg38lnk` -> `../shared/GRCh38_copy` stopped with
+  `grep: .../crispritz_targets/GRCh38_copy_..._targets.txt: No such file or directory` and `ERROR:
+  off-targets post-analysis (reference) failed` (exit 1), with or without bulges. The web runs the
+  same pipeline on `Genomes/<name>`, so its searches of such a genome failed the same way. A link
+  named like its target (`Genomes/hg38` -> `/shared/genomes/hg38`) was not affected. The genome now
+  keeps the name of the folder the search is given (each personal-assembly haplotype is searched
+  through such a link, named after the haplotype). The linked genome's results equal those of the
+  same sequence in `Genomes/hg38`, apart from the genome's name in the file names. **Affected:**
+  every reference search (no `--vcf`) of such a link, from the CLI or the web. **What to do:** run
+  them again. A variant-aware search (`--vcf`) of such a link still fails, as before, at the
+  enrichment (`mv: cannot stat '.../SNPs_genome/hg38lnk_enriched/'`, then `ERROR: Genome enrichment
+  failed on <dataset>`): for it, name the link like its target folder, or put the folder itself in
+  `Genomes/`.
 - **A personal-assembly search stopped before its combined report when a haplotype had no
   off-target.** When the guide had no off-target on one haplotype (or none there that lifted to
   hg38), or none on either, `assembly-search` wrote the combined table and then failed with
@@ -138,9 +141,13 @@
   same happened between two individuals of the `Genomes/<individual>_<haplotype>` layout (before
   2.6.0) whose names end alike: reproduced with `assembly-search` of `X_WALK01` first, after which
   both of `WALK01`'s haplotypes logged `Reference index present (NRG_2_X_WALK01_...)` and reported
-  `X_WALK01`'s sites. Only an index named for the genome itself is now taken. A library without
-  two such names picks the same index as before, and reference and variant search outputs were
-  compared byte for byte. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
+  `X_WALK01`'s sites. Only an index named for the genome itself is now taken. A library without two
+  such names picks the same index as before, and reference and variant search outputs were compared
+  byte for byte. **Affected:** searches with bulges, from the CLI or the web, of a genome `<name>`
+  while `genome_library/` held an index of a genome named `<prefix>_<name>` (`NRG_2_mini_hg38`
+  beside `hg38`; the legacy layout's `X_WALK01_*` beside `WALK01_*`). **What to do:** run them
+  again; for `assembly-search`, with a new `--output`, since a completed haplotype result of the
+  same `--output` is reused. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
 - **Two searches that started together on a data folder without `genome_library/` could fail.** The
   pipeline makes `Results/`, `Dictionaries/`, `Genomes/` and `genome_library/` when they are
   missing, after checking for each; two runs that started at the same moment (two web jobs, or two
