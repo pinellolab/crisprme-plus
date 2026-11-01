@@ -13,7 +13,8 @@ the tier path did not. ``resultIntegrator.seed_processing`` counts lower case (a
 '-') to fill Seed_/Non_seed_mismatches+bulges_REF, and CRISPRme_plots places the
 REF point of the fewest-mismatches plot from the same lower case, so on every tier-
 path SNP row Aligned_protospacer+PAM_REF had no lower case and the REF seed /
-non-seed counts left out the mismatches (they counted only the bulges).
+non-seed counts left out the mismatches (they counted only the bulges; the
+fewest_mm+b block, only the RNA bulges, see test_seed_counts_dna_bulge).
 
 FIX
 ---

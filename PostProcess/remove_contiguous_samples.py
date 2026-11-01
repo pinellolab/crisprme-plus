@@ -17,11 +17,12 @@ def _rep_tiebreak(x):
     alignments for the same cluster/carriers/CFD.
 
     This key is intrinsic to the row's own fields (aligned target DNA at col 2 -- unique
-    per alignment within a cluster -- plus the true genomic Position at col ``pos - 1``
-    as a secondary safety discriminator), never input order. Because it is consulted
-    only when all earlier key elements are exactly equal, it CANNOT reorder any cluster
-    whose best row is already unique: output stays byte-identical for those (~99.7%);
-    for the exactly-tied clusters it makes both paths converge on the same representative.
+    per alignment within a cluster, but for the 2.8.1 note below -- plus the true genomic
+    Position at col ``pos - 1`` as a secondary safety discriminator), never input order.
+    Because it is consulted only when all earlier key elements are exactly equal, it
+    CANNOT reorder any cluster whose best row is already unique: output stays byte-identical
+    for those (~99.7%); for the exactly-tied clusters it makes both paths converge on the
+    same representative.
 
     2.7.10: among rows that tie EXACTLY on CFD/severity/position, prefer the one carried
     by the MOST individuals ("highest CFD, ties -> most carriers"). This only ever
