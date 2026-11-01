@@ -70,6 +70,14 @@ jobs:
             -v "${GITHUB_WORKSPACE}/test/web:/t" \
             crisprme:web python -u /t/test_email_config.py
 
+      # Search-form, status-page and results-link web unit tests (a real Dash app import,
+      # as below): the search form's job reuse and bulge note, the status page, results
+      # links to a job without results, the results-page downloads and Risk Card plots.
+      - name: Search-form and results-link web unit tests
+        run: |
+          docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
+            python -m unittest test_web_results_links -v
+
       # Results-page web unit tests (need a real Dash app import, so they run here, not in
       # the hermetic unit-tests job). Run via -m unittest from the baked-in PostProcess dir
       # (the Dockerfile COPYs the whole tree into opt/crisprme/) so each test's

@@ -673,7 +673,7 @@ def load_page_assembly(job_link: str = "link") -> html.Div:
                 ),
                 html.Div(
                     [
-                        html.Div([view_results]),
+                        # View Results sits once, below this report (see load_page)
                         html.Div(id="assembly-no-directory-error"),
                         html.Div(
                             [
@@ -976,7 +976,9 @@ def load_page(job_link: str = "link") -> List:
                 ),
                 html.Div(
                     [
-                        html.Div([view_results]),  # hidden till analysis is completed
+                        # (the View Results button sits once, below this report: an id
+                        # placed twice in a page is not valid HTML, and the callback
+                        # only ever updated the second copy)
                         html.Div(id="no-directory-error"),
                         html.Div(
                             [
