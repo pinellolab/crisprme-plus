@@ -446,16 +446,21 @@ def haplotype_search_name(cwd: str, genome_dir: str, haplotype: str) -> str:
     """The name one haplotype's genome is searched, and so indexed, under.
 
     A bundle haplotype (`personal_assembly.bundle_haplotype`) is named
-    `<individual folder>_<haplotype>`, e.g. `HG01255_paternal`; any other folder
-    `<folder name>_<8 hex digits of its path>`. Two genome folders therefore never
-    share a name, whatever the folders themselves are called. Only letters,
-    digits, `_` and `-` are kept: the name becomes part of the index folder's
-    name and of every intermediate file name of the search."""
+    `<individual folder>_<haplotype>_<8 hex digits of its path>`, e.g.
+    `HG01255_paternal_5aeb0fc6`; any other folder `<folder name>_<8 hex digits of
+    its path>`. Two genome folders therefore never share a name, whatever the
+    folders themselves are called (`HG.002` and `HG_002` included), and the name
+    is none that CRISPRme gives a genome in `Genomes/`, or gave one before: the
+    layout before 2.6.0 kept the same haplotype as `Genomes/HG01255_paternal`,
+    and complete-search picks an index by the genome's name alone, so the two
+    would share `<PAM>_<N>_HG01255_paternal`. Only letters, digits, `_` and `-`
+    are kept: the name becomes part of the index folder's name and of every
+    intermediate file name of the search."""
+    digest = hashlib.sha1(_genome_identity(cwd, genome_dir).encode()).hexdigest()[:8]
     hap = personal_assembly.bundle_haplotype(genome_dir, haplotype)
     if hap is not None:
-        name = f"{hap['folder']}_{hap['haplotype']}"
+        name = f"{hap['folder']}_{hap['haplotype']}_{digest}"
     else:
-        digest = hashlib.sha1(_genome_identity(cwd, genome_dir).encode()).hexdigest()[:8]
         name = f"{os.path.basename(os.path.realpath(genome_dir))}_{digest}"
     return re.sub(r"[^A-Za-z0-9_-]", "_", name)
 
@@ -545,8 +550,12 @@ def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
     or another `genome_fingerprint` of this one (its FASTA files added, removed,
     resized or modified since -- a bundle deleted and imported again with other
     files, say), and the search builds it again from this genome. An index that
-    records nothing (built by an earlier CRISPRme, or downloaded) is left as it
-    is, as is one still being built (it has a `.lock`).
+    records nothing is left as it is: of a folder in `Genomes/`, one built by an
+    earlier CRISPRme or downloaded; of any other folder, whose name no earlier
+    index carries (`haplotype_search_name`), one a search of this haplotype
+    built and may still be using (the record is written when the search ends),
+    or one whose search was stopped before it ended. One still being built (it
+    has a `.lock`) is left too.
 
     Args:
         cwd: The working directory (its `genome_library/` is the one searched).

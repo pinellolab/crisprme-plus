@@ -14,7 +14,9 @@ These tests pin:
   * the name a haplotype genome is searched under (haplotype_search_name) and the
     folder it is searched with (haplotype_genome_view): unique per haplotype and per
     individual, for --assembly-individual and the explicit-folder form alike, stable
-    across runs, and left out for a legacy Genomes/<name> folder;
+    across runs, and left out for a legacy Genomes/<name> folder; never the name of
+    the legacy layout's Genomes/<individual>_<haplotype> folder, so neither one
+    takes the other's index;
   * assembly_search itself (crisprme.py run in-process; each haplotype's complete-search
     replaced by a stand-in that names, builds and reuses indexes by genome name as the
     pipeline does, and records which sequence it searched): each haplotype is searched
@@ -163,9 +165,29 @@ class EachHaplotypeHasItsOwnSearchName(_Workdir):
         self.assertIsNone(pa.bundle_haplotype(self.cwd))
 
     def test_names_differ_between_haplotypes_and_individuals(self):
-        names = {ar.haplotype_search_name(self.cwd, self.genome(i, h), h)
+        names = {(i, h): ar.haplotype_search_name(self.cwd, self.genome(i, h), h)
                  for i in ("W1", "W2") for h in pa.HAPLOTYPES}
-        self.assertEqual(names, {"W1_paternal", "W1_maternal", "W2_paternal", "W2_maternal"})
+        self.assertEqual(len(set(names.values())), 4)
+        for (ind, hap), name in names.items():
+            self.assertRegex(name, rf"^{ind}_{hap}_[0-9a-f]{{8}}$")
+
+    def test_no_name_is_that_of_the_legacy_layouts_folder(self):
+        # before 2.6.0 the same haplotype was kept as Genomes/W1_paternal, indexed as
+        # NRG_2_W1_paternal: a bundle searched as W1_paternal took that index, and
+        # handed its own to that folder's searches
+        for hap in pa.HAPLOTYPES:
+            name = ar.haplotype_search_name(self.cwd, self.genome("W1", hap), hap)
+            self.assertNotEqual(name, f"W1_{hap}")
+
+    def test_folders_whose_names_read_alike_get_different_names(self):
+        # both are written HG_002 in a file name
+        for ind in ("HG.002", "HG_002"):
+            _make_bundle(self.cwd, ind, {"paternal": "ACGT", "maternal": "TTTT"})
+        a = ar.haplotype_search_name(self.cwd, self.genome("HG.002", "paternal"), "paternal")
+        b = ar.haplotype_search_name(self.cwd, self.genome("HG_002", "paternal"), "paternal")
+        self.assertNotEqual(a, b)
+        self.assertRegex(a, r"^HG_002_paternal_[0-9a-f]{8}$")
+        self.assertRegex(b, r"^HG_002_paternal_[0-9a-f]{8}$")
 
     def test_other_folders_of_the_same_name_get_different_names(self):
         a = os.path.join(self.cwd, "elsewhere", "a", "genome")
@@ -180,15 +202,15 @@ class EachHaplotypeHasItsOwnSearchName(_Workdir):
 
     def test_name_keeps_only_characters_safe_in_file_names(self):
         _make_bundle(self.cwd, "odd name+v2", {"paternal": "A", "maternal": "C"})
-        self.assertEqual(
+        self.assertRegex(
             ar.haplotype_search_name(self.cwd, self.genome("odd name+v2", "paternal"), "paternal"),
-            "odd_name_v2_paternal")
+            r"^odd_name_v2_paternal_[0-9a-f]{8}$")
 
     def test_view_is_named_after_the_haplotype_and_reads_its_genome(self):
         for ind in ("W1", "W2"):
             for hap in pa.HAPLOTYPES:
                 view = ar.haplotype_genome_view(self.cwd, self.genome(ind, hap), hap)
-                self.assertEqual(os.path.basename(view), f"{ind}_{hap}")
+                self.assertRegex(os.path.basename(view), rf"^{ind}_{hap}_[0-9a-f]{{8}}$")
                 self.assertEqual(os.path.realpath(view), os.path.realpath(self.genome(ind, hap)))
                 self.assertTrue(view.startswith(os.path.join(self.cwd, ar.HAPLOTYPE_GENOMES_DIRNAME)))
 
@@ -230,6 +252,7 @@ class IndexRecordsTheGenomeItHolds(_Workdir):
         super().setUp()
         _make_bundle(self.cwd, "W1", {"paternal": "ACGT", "maternal": "TTTT"})
         self.view = ar.haplotype_genome_view(self.cwd, self.genome("W1", "paternal"), "paternal")
+        self.name = os.path.basename(self.view)
         self.lib = os.path.join(self.cwd, "genome_library")
 
     def index(self, name, stamp=None):
@@ -248,7 +271,7 @@ class IndexRecordsTheGenomeItHolds(_Workdir):
         return present, out.getvalue()
 
     def test_an_index_built_from_other_content_is_removed(self):
-        d = self.index("NRG_2_W1_paternal",
+        d = self.index(f"NRG_2_{self.name}",
                        {"genome": "Assemblies/W1/paternal/genome", "fingerprint": "0" * 40})
         present, said = self.clear()
         self.assertFalse(os.path.exists(d))
@@ -256,14 +279,16 @@ class IndexRecordsTheGenomeItHolds(_Workdir):
         self.assertIn("has changed since it was built", said)
 
     def test_an_index_that_records_nothing_is_kept(self):
-        d = self.index("NRG_2_W1_paternal")  # built by an earlier CRISPRme, or downloaded
+        # built by a search of this haplotype that has not ended yet (a run of another
+        # guide, say), or was stopped: removing it could pull it from under that search
+        d = self.index(f"NRG_2_{self.name}")
         present, said = self.clear()
         self.assertTrue(os.path.isdir(d))
         self.assertEqual(present, [d])
         self.assertEqual(said, "")
 
     def test_an_index_of_this_genome_is_kept(self):
-        d = self.index("NRG_2_W1_paternal",
+        d = self.index(f"NRG_2_{self.name}",
                        {"genome": os.path.join("Assemblies", "W1", "paternal", "genome"),
                         "fingerprint": ar.genome_fingerprint(self.view)})
         self.assertEqual(self.clear(), ([d], ""))
@@ -271,7 +296,7 @@ class IndexRecordsTheGenomeItHolds(_Workdir):
     def test_an_index_built_from_another_folder_is_removed(self):
         # the same file names, sizes and times -- the maternal genome of the same
         # bundle, say -- but another folder
-        d = self.index("NRG_2_W1_paternal",
+        d = self.index(f"NRG_2_{self.name}",
                        {"genome": os.path.join("Genomes", "W1_paternal"),
                         "fingerprint": ar.genome_fingerprint(self.view)})
         present, said = self.clear()
@@ -279,23 +304,25 @@ class IndexRecordsTheGenomeItHolds(_Workdir):
         self.assertIn("it was built from Genomes/W1_paternal, not Assemblies/W1/paternal/genome", said)
 
     def test_an_index_still_being_built_is_left_to_its_builder(self):
-        d = self.index("NRG_2_W1_paternal", {"genome": "x", "fingerprint": "0" * 40})
+        d = self.index(f"NRG_2_{self.name}", {"genome": "x", "fingerprint": "0" * 40})
         os.makedirs(d + ".lock")
         present, _ = self.clear()
         self.assertTrue(os.path.isdir(d))
         self.assertEqual(present, [])
 
     def test_other_genomes_indexes_are_never_touched(self):
+        # NRG_2_W1_paternal: the index of Genomes/W1_paternal, the layout before 2.6.0
         others = [self.index(n, {"genome": "x", "fingerprint": "0" * 40})
-                  for n in ("NRG_2_hg38", "NRG_2_X_W1_paternal", "NRG_2_W1_paternal+hg38_1000G")]
+                  for n in ("NRG_2_hg38", f"NRG_2_X_{self.name}", f"NRG_2_{self.name}+hg38_1000G",
+                            "NRG_2_W1_paternal")]
         self.clear()
         for d in others:
             self.assertTrue(os.path.isdir(d), d)
 
     def test_only_indexes_built_by_the_search_are_stamped(self):
-        kept = self.index("NRG_3_W1_paternal")
+        kept = self.index(f"NRG_3_{self.name}")
         present, _ = self.clear()
-        built = self.index("NRG_2_W1_paternal")
+        built = self.index(f"NRG_2_{self.name}")
         ar.stamp_built_haplotype_indexes(self.cwd, self.view, present)
         self.assertIsNone(ar._read_index_source(kept))
         record = ar._read_index_source(built)
@@ -417,7 +444,9 @@ class AssemblySearchSearchesEachHaplotypeOnItsOwnGenome(_Workdir):
     def test_each_haplotype_of_a_registered_individual(self):
         self.run_search("job", individual="W1")
         self.assertOwnSequences("job", "W1")
-        self.assertEqual([c[2] for c in self.engine.calls], ["NRG_2_W1_paternal", "NRG_2_W1_maternal"])
+        self.assertEqual(len(self.engine.calls), 2)
+        for (_, _, index), hap in zip(self.engine.calls, pa.HAPLOTYPES):
+            self.assertRegex(index, rf"^NRG_2_W1_{hap}_[0-9a-f]{{8}}$")
         # the reconciliation still reads the genome folders themselves
         self.assertEqual(self.reconciled[0], {h: self.genome("W1", h) for h in pa.HAPLOTYPES})
 
@@ -468,6 +497,32 @@ class AssemblySearchSearchesEachHaplotypeOnItsOwnGenome(_Workdir):
         self.assertEqual([c[1] for c in self.engine.calls], [pat, mat])
         self.assertEqual([c[2] for c in self.engine.calls], ["NRG_2_L_paternal", "NRG_2_L_maternal"])
 
+    def test_the_legacy_layouts_index_of_the_individual_is_not_used(self):
+        # what an earlier CRISPRme left for Genomes/W1_paternal and Genomes/W1_maternal
+        # (the layout before 2.6.0, or a custom upload): indexes of other content under
+        # those names, recording nothing
+        legacy = {hap: os.path.join(self.cwd, "genome_library", f"NRG_2_W1_{hap}")
+                  for hap in pa.HAPLOTYPES}
+        for hap, index in legacy.items():
+            os.makedirs(index)
+            with open(os.path.join(index, "NRG_chr1_1.bin"), "w") as fh:
+                fh.write(f"legacy {hap}")
+        self.run_search("job", individual="W1")
+        self.assertOwnSequences("job", "W1")
+        for hap, index in legacy.items():  # left to those folders
+            with open(os.path.join(index, "NRG_chr1_1.bin")) as fh:
+                self.assertEqual(fh.read(), f"legacy {hap}")
+
+    def test_the_legacy_layouts_folder_does_not_find_the_bundles_index(self):
+        # complete-search of Genomes/W1_paternal (from the Reference genome tab, say)
+        # picks an index by that name alone, reading no record
+        self.run_search("job", individual="W1")
+        lib = os.path.join(self.cwd, "genome_library")
+        for hap in pa.HAPLOTYPES:
+            own = ar.haplotype_search_name(self.cwd, self.genome("W1", hap), hap)
+            self.assertEqual(_shipped_resolve(lib, own, 2), f"NRG_2_{own}")
+            self.assertEqual(_shipped_resolve(lib, f"W1_{hap}", 2), "")
+
 
 # --------------------------------------------------------------------------- #
 # The pipeline: the name a linked genome keeps, and the 0-bulge scan
@@ -511,6 +566,15 @@ def _shipped_resolver():
     return "\n".join(ln[1:] if ln.startswith("\t") else ln for ln in text[start:end].splitlines())
 
 
+def _shipped_resolve(lib, suffix, bmax):
+    """The index the shipped `_resolve_index_dir` picks in `lib` for the genome named
+    `suffix` and the NRG PAM (its name, "" for none)."""
+    script = f"prune_pam=0\npos=3\n{_shipped_resolver()}\n_resolve_index_dir \"$1\" NRG \"$2\" \"$3\"\n"
+    out = subprocess.run(["bash", "-c", script, "bash", lib, suffix, str(bmax)],
+                         capture_output=True, text=True, env=dict(os.environ, LC_ALL="C"))
+    return os.path.basename(out.stdout.strip())
+
+
 class TheIndexOfAnotherGenomeIsNeverPicked(_Workdir):
     """An index is picked by the genome's name, and the scan globbed
     <PAM>_<N>_<name>: that also matches <PAM>_<N>_<prefix>_<name>, the index of a
@@ -522,10 +586,7 @@ class TheIndexOfAnotherGenomeIsNeverPicked(_Workdir):
         for name in names:
             os.makedirs(os.path.join(lib, name), exist_ok=True)
             open(os.path.join(lib, name, "chr1.bin"), "w").close()
-        script = f"prune_pam=0\npos=3\n{_shipped_resolver()}\n_resolve_index_dir \"$1\" NRG \"$2\" \"$3\"\n"
-        out = subprocess.run(["bash", "-c", script, "bash", lib, suffix, str(bmax)],
-                             capture_output=True, text=True, env=dict(os.environ, LC_ALL="C"))
-        return os.path.basename(out.stdout.strip())
+        return _shipped_resolve(lib, suffix, bmax)
 
     def test_the_genomes_own_index_wins(self):
         self.assertEqual(self.resolve("P1_paternal", 2, "NRG_2_trio_P1_paternal", "NRG_3_P1_paternal"),

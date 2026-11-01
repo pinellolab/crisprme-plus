@@ -16,20 +16,29 @@
   DNA + 1 RNA bulge, the web default): the two haplotypes' result files were byte-identical, and at
   chr1:35000 the maternal results showed the paternal 2-mismatch protospacer instead of the maternal
   4-mismatch one; a second individual whose paternal haplotype carries that 4-mismatch sequence also
-  got the 2-mismatch one. Each haplotype is now searched through a link named after it,
-  `haplotype_genomes/<key>/<individual>_<haplotype>` in the working directory, so it builds and
-  reuses its own index (`NRG_2_HG01255_paternal`, `NRG_2_HG01255_maternal`); a genome folder that is
-  not in a bundle is named after the folder plus a short hash of its path. The per-haplotype result
-  files carry that name too (`<guide>+NRG_HG01255_paternal+__4+2_integrated_results.tsv` instead of
+  got the 2-mismatch one. Each haplotype is now searched through a link named after it and its
+  folder, `haplotype_genomes/<key>/<individual>_<haplotype>_<hash>` in the working directory, where
+  `<hash>` is 8 hex digits of the folder's path, so it builds and reuses its own index
+  (`NRG_2_HG01255_paternal_5aeb0fc6`, `NRG_2_HG01255_maternal_067bdb25`); a genome folder that is
+  not in a bundle is named after the folder plus the same hash. The hash keeps these names apart
+  from every genome in `Genomes/`: a bundle search never takes the index of a
+  `Genomes/<individual>_<haplotype>` folder of the same individual (the layout before 2.6.0, or a
+  custom upload), a search of that folder never takes the bundle's, and two bundles whose folder
+  names differ only in characters a file name cannot keep (`HG.002`, `HG_002`) get an index each.
+  The per-haplotype result files carry that name too
+  (`<guide>+NRG_HG01255_paternal_5aeb0fc6+__4+2_integrated_results.tsv` instead of
   `<guide>+NRG_genome+__4+2_integrated_results.tsv`). Each index a haplotype search builds records
   the genome folder it was built from and the names, sizes and modification times of that folder's
   FASTA files (`.genome_source`, which CRISPRitz does not read), and a later search of that
   haplotype rebuilds the index when they have changed: a FASTA file added, removed, resized or
   modified at another time, as when an individual is deleted and imported again with other files. A
-  FASTA file replaced by other content of the same size and modification time is not noticed. An
-  index without that record, built earlier or downloaded, is used as before. A haplotype result
-  written by the colliding search is not reused by a later run with the same `--output`: it is
-  searched again. With the fix the paternal results are unchanged byte for byte, the maternal
+  FASTA file replaced by other content of the same size and modification time is not noticed, nor
+  is a change made after a search that was killed before it ended (its container stopped, say): the
+  record is written when the search ends, and an index without one is used as it is, as an index of
+  a legacy `Genomes/<name>` folder built by an earlier CRISPRme, or downloaded, is used as before. A
+  haplotype result written by the colliding search is not reused by a later run with the same
+  `--output`: it is searched again. With the fix the paternal results are unchanged byte for byte
+  apart from the genome's name (in file names, `.Params.txt` and `.command_line.txt`), the maternal
   haplotype reports its own sites, and a legacy `Genomes/<name>` pair (the layout before 2.6.0) runs
   exactly as before. **Affected:** every `assembly-search` with bulges on a bundle assembly since
   2.6.0, from the web or the CLI. The haplotype whose search built the shared index (usually the
