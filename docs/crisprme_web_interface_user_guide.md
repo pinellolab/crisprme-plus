@@ -274,7 +274,8 @@ your own VCFs in the local offline version, use **Settings → Add a VCF dataset
 the reference genome they are called against, then build their variant index there
 (*Add a precomputed index / build one*, with the dataset as *Variants*). The dataset
 is then offered here for that genome, with its sample list written from the VCF
-header (see [`SETTINGS_DATA_MANAGER.md`](SETTINGS_DATA_MANAGER.md)).
+header when the VCF has sample columns (see
+[`SETTINGS_DATA_MANAGER.md`](SETTINGS_DATA_MANAGER.md)).
 
 > **RNA-targeting strategies:** For RNA-targeting Cas proteins, you can either
 > provide a custom transcriptome genome or use a variant-enriched genome. Be aware
