@@ -233,8 +233,11 @@ jobs:
         # scorer_env: detect env manager, create-command shape, atomic state file,
         # health-check probe. scorer_runner: real stdin/stdout worker protocol against
         # a stdlib fake worker + graceful-degradation paths. Neither needs TensorFlow.
+        # test_crispr_bulge_fidelity, the CRISPR-Bulge fidelity gate, needs TensorFlow and
+        # the Refined_TrueOT dataset, so here it skips: what this checks is that it imports
+        # with no side effect (it once changed to a developer's folder at import, and failed).
         working-directory: PostProcess
-        run: python -m unittest test_scorer_env test_scorer_runner -v
+        run: python -m unittest test_scorer_env test_scorer_runner test_crispr_bulge_fidelity -v
 
       - name: "CFD clean-room bit-identity (golden fixture) + cosmic-license + info-af registry + synth-sites + change-headers + dash-output-props + complete-test wiring"
         # These stdlib-only suites previously ran in NO CI job. test_cfd_cleanroom_equiv is

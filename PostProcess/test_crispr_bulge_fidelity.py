@@ -3,23 +3,54 @@
 Phase-1 fidelity gate: our CRISPR_BULGE_predict_list must reproduce the upstream
 ensemble prediction (`pred_averege_ensemble`) bit-for-bit (within float tol).
 
-Runs in the cbulge env from the CRISPR-Bulge repo root:
-    CBULGE_REPO=/srv/local/lp698/cbulge_bench/CRISPR-Bulge \
-      mamba run -n cbulge_cpu python test_crispr_bulge_fidelity.py
-Exit 0 = match. Non-zero = drift.
+Runs in the cbulge env, against a CRISPR-Bulge checkout that holds the Refined_TrueOT
+dataset (CBULGE_REPO; default: the clone `crisprme.py scorer-env create` provisions):
+    CBULGE_REPO=/path/to/CRISPR-Bulge \
+      mamba run -n cbulge python test_crispr_bulge_fidelity.py
+Exit 0 = match. 1 = drift. 2 = it cannot run here (no TensorFlow, or no dataset).
+
+The provisioned clone holds no datasets: it is cloned with Git LFS smudge off, so its
+files/datasets.zip is only an LFS pointer. To fetch the one file this reads, in the
+clone: git lfs pull --include files/datasets.zip, then
+unzip files/datasets.zip 'datasets/Refined_TrueOT.csv' -d files.
+
+Under `python -m unittest` (CI, the main env, the image) it is one test, skipped with
+the reason wherever TensorFlow or the dataset is absent. Nothing runs at import.
 """
 import os
 import sys
-
-REPO = os.environ.get("CBULGE_REPO", "/srv/local/lp698/cbulge_bench/CRISPR-Bulge")
-sys.path.insert(0, REPO)
-os.chdir(REPO)
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+import unittest
 
 N = int(os.environ.get("FIDELITY_N", "500"))
+DATASET = os.path.join("files", "datasets", "Refined_TrueOT.csv")
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def main():
+def cbulge_repo():
+    """The CRISPR-Bulge checkout: $CBULGE_REPO, else where scorer_env provisions it."""
+    if HERE not in sys.path:
+        sys.path.insert(0, HERE)
+    import scorer_env
+    return scorer_env.default_cbulge_repo()
+
+
+def cannot_run(repo):
+    """Why the gate cannot run here, or None."""
+    import importlib.util
+    if importlib.util.find_spec("tensorflow") is None:
+        return "no TensorFlow here: run it in the cbulge env"
+    if not os.path.isfile(os.path.join(repo, DATASET)):
+        return f"no {DATASET} in {repo} (this module's docstring says how to fetch it)"
+    return None
+
+
+def fidelity(repo):
+    """Score a sample of Refined_TrueOT with upstream and with ours; True on a match.
+    Runs from the repo root, as upstream's code expects."""
+    sys.path.insert(0, repo)
+    os.chdir(repo)
+    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+
     import numpy as np
     import pandas as pd
     from OT_deep_score_src.general_utilities import OFF_TARGET, SG_RNA_SEQ
@@ -27,7 +58,7 @@ def main():
 
     import crispr_bulge_score as cb
 
-    df = pd.read_csv("files/datasets/Refined_TrueOT.csv").dropna(
+    df = pd.read_csv(DATASET).dropna(
         subset=[SG_RNA_SEQ, OFF_TARGET]
     ).head(N).reset_index(drop=True)
     # include a healthy number of bulge rows in the sample
@@ -49,7 +80,26 @@ def main():
     print(f"[fidelity] max|Δ| = {max_abs:.3e}  ->  {'MATCH' if ok else 'DRIFT'}")
     print(f"[fidelity] examples ref/ours: "
           f"{list(zip(np.round(ref_scores[:4],5), np.round(ours[:4],5)))}")
-    sys.exit(0 if ok else 1)
+    return bool(ok)
+
+
+class CrisprBulgeFidelity(unittest.TestCase):
+    def test_our_scorer_reproduces_the_upstream_ensemble(self):
+        repo = cbulge_repo()
+        why = cannot_run(repo)
+        if why:
+            self.skipTest(why)
+        self.addCleanup(os.chdir, os.getcwd())
+        self.assertTrue(fidelity(repo), "CRISPR_BULGE_predict_list drifted from upstream")
+
+
+def main():
+    repo = cbulge_repo()
+    why = cannot_run(repo)
+    if why:
+        print(f"[fidelity] cannot run: {why}", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(0 if fidelity(repo) else 1)
 
 
 if __name__ == "__main__":
