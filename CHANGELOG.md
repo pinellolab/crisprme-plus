@@ -34,10 +34,11 @@ and the `release-crisprme` skill.
   See [`METHODS.md` §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering).
 - **A second dataset repo for wide-flank PAM-less indexes.** A PAM-less index with a 3-nt flank
   stores a 3-nt PAM region, as a dedicated 3-nt PAM index does, so any release can read it and
-  `NNN_3` stays in `lucapinello/crisprme-data` (though 2.8.0 can fail searching the rebuilt `NNN_3`
-  archives: see Fixed). A wider flank cannot be read by a release predating `--prune-pam`, so
-  those are published to `lucapinello/crisprme-data-general-index`, which older defaults never point
-  at. `download` and `publish-index` route on the flank width parsed from the index name — not on a
+  `NNN_3` stays in `lucapinello/crisprme-data` (though a 2.8.0 search of the rebuilt `NNN_3`
+  archives can fail or report malformed rows: see Fixed). A wider flank cannot be read by a
+  release predating `--prune-pam`, so those are published to
+  `lucapinello/crisprme-data-general-index`, which older defaults never point at. `download` and
+  `publish-index` route on the flank width parsed from the index name — not on a
   list of names, so it cannot be forgotten at publish time — `download` falls back to the default
   repo when the routed one lacks the archive (and, if both lack it, says it looked in both), and the
   catalog listing merges both repos, taking each name's row from the copy `download` would fetch, so
@@ -263,15 +264,23 @@ and the `release-crisprme` skill.
   index, with NRG and with NNN, but only because no hit there has an `N` in its PAM: use the
   rebuilt archives with 2.8.1 or later. 2.8.0 keeps the targets with an `N` in their PAM that the
   rebuild adds (it has no `--prune-pam`, ignores the flag, and its post-search PAM filter lets the
-  `N` through), and a bulge search that reaches one fails in post-analysis (`ValueError: substring
-  not found`). On the synthetic gap-edge genome, 2.8.0 searching an index from the new builder exited
-  1 with NRG and with NNN, where one from the old builder gave 2 and 3 rows; genome-wide, the NRR
-  search in the post-search PAM filter entry below meets 1 such reference target, 1 variant target
-  and 93,820 indel targets. The variant archive grows from 108.4 GB to 109.5 GB. Hugging Face has
-  served the rebuilt archives since 2026-10-30. With 2.8.1 there is nothing to do unless you
-  downloaded `NNN_3` before then and search it with `--prune-pam` and a PAM shorter than 3 nt; then
-  remove `genome_library/NNN_3_hg38`, `genome_library/NNN_3_hg38+hg38_HGDP1kGP` and its `_INDELS`,
-  and download again (`download` skips an index that is already installed).
+  `N` through), and what a search that reaches one does depends on its CRISPRitz. On 2.9.1 it fails
+  in post-analysis (`ValueError: substring not found`). On 2.9.0, which the 2.8.0 image and
+  `install_from_source.sh` build, the engine writes such a target cut short at its `N`, so the
+  search fails in post-analysis (`IndexError: string index out of range`) or, with RNA bulges only,
+  finishes and reports the target as a 0-mismatch, 0-bulge off-target with a 21- or 22-nt
+  protospacer+PAM. On the synthetic gap-edge genome, reference-only, an index from the new builder
+  made 2.8.0 exit 1 at 2 mismatches + 1 DNA + 1 RNA bulge, with NRG and with NNN, on either engine
+  (one from the old builder gave 2 and 3 rows); on 2.9.0 with `--bDNA 0 --bRNA 1` it gave 4 NRG
+  rows where the old builder's index gave 2, three of them such short rows with CFD 0.259, one in
+  place of a real 1-bulge alignment. Genome-wide, the NRR search in the post-search PAM filter
+  entry below meets 1 such reference target, 1 variant target and 93,820 indel targets. If you
+  searched the rebuilt `NNN_3` with 2.8.0, run that search again with 2.8.1. The variant archive
+  grows from 108.4 GB to 109.5 GB. Hugging Face has served the rebuilt archives since 2026-10-30.
+  With 2.8.1 there is nothing to do unless you downloaded `NNN_3` before the replacement on
+  2026-10-30 and search it with `--prune-pam` and a PAM shorter than 3 nt; then remove
+  `genome_library/NNN_3_hg38`, `genome_library/NNN_3_hg38+hg38_HGDP1kGP` and its `_INDELS`, and
+  download again (`download` skips an index that is already installed).
 - **A PAM of any length other than 3 could be handed the 3-nt PAM-less index.** The three scans
   that pick an index (the reference scan, the variant scan and the precomputed-variant detection)
   globbed the requested PAM and then a literal `NNN_*`, whatever the PAM's length, and kept the

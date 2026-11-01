@@ -120,9 +120,11 @@ as a dedicated index for that PAM does. If you downloaded either archive before 
 replacement and search it that way, remove `genome_library/NNN_3_hg38`,
 `genome_library/NNN_3_hg38+hg38_HGDP1kGP` and
 `genome_library/NNN_3_hg38+hg38_HGDP1kGP_INDELS`, then download again.
-Use the rebuilt archives with CRISPRme+ 2.8.1 or later: 2.8.0 keeps the targets with
-an `N` in their PAM that the rebuild adds, and a bulge search that reaches one fails in
-post-analysis (`ValueError: substring not found`).
+Use the rebuilt archives with CRISPRme+ 2.8.1 or later. 2.8.0 keeps the targets with
+an `N` in their PAM that the rebuild adds, and a search that reaches one fails in
+post-analysis or, on the CRISPRitz 2.9.0 that the 2.8.0 image builds and with RNA
+bulges only, reports it as a 0-mismatch, 0-bulge off-target whose sequence stops at the
+`N`. If you searched them with 2.8.0, run that search again with 2.8.1.
 
 **Wider PAM-less flanks** (flank > 3, e.g. `NNNNNNNN_3`) are **not** readable by a
 CRISPRme release that predates `--prune-pam`, so they are published separately in

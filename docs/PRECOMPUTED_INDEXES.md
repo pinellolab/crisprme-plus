@@ -143,8 +143,9 @@ variant index. Choose one when you expect to search several PAMs over the same g
 > **Flank width and compatibility.** A 3-nt flank is readable by any CRISPRme version: the
 > stored geometry is the same as a dedicated 3-nt PAM index, which is why `NNN_3` ships in
 > this repo. (Use the rebuilt `NNN_3` archives, published on 2026-10-30, with 2.8.1 or later:
-> 2.8.0 keeps the targets with an `N` in their PAM that the rebuild adds, and a bulge search
-> that reaches one fails; see [`INDEX_PROVENANCE.md`](INDEX_PROVENANCE.md).) A **wider** flank is not — a release predating `--prune-pam` would mis-read it
+> 2.8.0 keeps the targets with an `N` in their PAM that the rebuild adds, and a search that
+> reaches one fails or, with RNA bulges only on CRISPRitz 2.9.0, reports it as a malformed
+> 0-mismatch, 0-bulge row; see [`INDEX_PROVENANCE.md`](INDEX_PROVENANCE.md).) A **wider** flank is not — a release predating `--prune-pam` would mis-read it
 > — so those indexes live in a separate dataset repo,
 > **`lucapinello/crisprme-data-general-index`**, which older defaults never point at.
 > `download` and `publish-index` route by the flank width in the index name, so a wide-flank
