@@ -135,6 +135,18 @@ jobs:
             mcr.microsoft.com/playwright/python:v1.47.0-jammy \
             bash -c 'pip install -q playwright==1.47.0 && python /t/test_web_e2e.py'
 
+      # Settings uploads in a real browser: the VCF uploader sends the reference genome
+      # picked (the search form then offers the dataset, labelled genotyped), a BED
+      # naming no genome can be enabled and a same-content re-upload is added, and the
+      # 'Started' message is neutral and goes once its job has ended.
+      - name: Playwright Settings uploads (Chromium)
+        run: |
+          docker run --rm --network host \
+            -v "${GITHUB_WORKSPACE}/test/web:/t" \
+            -e CRISPRME_WEB_URL=http://localhost:8090 \
+            mcr.microsoft.com/playwright/python:v1.47.0-jammy \
+            bash -c 'pip install -q playwright==1.47.0 && python /t/test_settings_upload_e2e.py'
+
       - name: Web app logs on failure
         if: failure()
         run: docker logs web || true
