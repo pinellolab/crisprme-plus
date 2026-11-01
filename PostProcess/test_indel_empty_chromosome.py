@@ -173,7 +173,8 @@ class SearchSide(_Fixture):
     """pool_search_indels.py, chromosomes taken from the indel logs (no VCF dir)."""
 
     def run_search(self, logs, bins, records=(), fakes=None, true_pam="NRG", pam=NRG,
-                   bulges=("1", "1"), vcfs=(), pam_files=None, pam_build=None, view=None):
+                   bulges=("1", "1"), vcfs=(), pam_files=None, pam_build=None, view=None,
+                   listed="ds"):
         """bins: chrom -> whether its sub-index holds a .bin (a chromosome left out has
         none); records: the chromosomes whose sub-index holds the record of a build with
         no target; fakes: chrom -> the sequence of its fake-indel contig, written where
@@ -181,7 +182,8 @@ class SearchSide(_Fixture):
         dataset's VCF folder, whence the search then takes them (else from the logs);
         pam_files: name -> line of a PAM file in the working directory's PAMs/; pam_build:
         what the variant index's .pam_build says; view: a chromosome, to search as
-        complete-test --chrom does, from complete_test's own view of the working directory."""
+        complete-test --chrom does, from complete_test's own view of the working directory;
+        listed: how the search's --vcf list spells the dataset."""
         cwd = self.work = os.path.join(self.tmp, "work")
         self.true_pam = true_pam
         logdir = os.path.join(cwd, "Dictionaries", "log_indels_ds")
@@ -222,7 +224,7 @@ class SearchSide(_Fixture):
             fh.write(pam + "\n")
 
         def search(root):  # from ``root``, as the search script calls it
-            args = [os.path.join(root, "Genomes", "ref"), os.path.join(root, "VCFs", "ds"), "ds",
+            args = [os.path.join(root, "Genomes", "ref"), os.path.join(root, "VCFs", listed), "ds",
                     os.path.join(self.tmp, "guide.txt"), os.path.join(self.tmp, "pam.txt"),
                     "3", "4", *bulges, out, true_pam, root + "/", "2", "-1", "0"]
             return subprocess.run([sys.executable, SEARCH, *args], env=self.env,
@@ -548,6 +550,25 @@ class SearchSide(_Fixture):
                 self.assertNotIn("build-index-only", res.stderr)
                 self.assertNotIn("Genomes/ref+ds'", res.stderr)
                 self.assertIsNone(lines)
+
+    def test_a_list_that_spells_the_folder_is_read_as_the_dataset(self):
+        # (--vcf list with VCFs/<dataset>, which the search's chromosomes survive: it takes
+        # them from the logs) the VCFs are found, and the command names their folder ...
+        for view in (None, "chrB"):
+            with self.subTest(view=view):
+                self.tearDown_dirs()
+                res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, vcfs=AB,
+                                         listed="VCFs/ds", view=view)
+                self.refused(res, self.empty(f"the fake-indel genome it was built from "
+                                             f"({self.fake('chrB')}) is not here to check it "
+                                             "against"), self.chain(enrich=True))
+                # ... and without them, it is that folder they go back in
+                self.tearDown_dirs()
+                res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, listed="VCFs/ds",
+                                         view=view)
+                self.refused(res, self.empty(f"the fake-indel genome it was built from "
+                                             f"({self.fake('chrB')}) is not here to check it "
+                                             "against"), self.download())
 
     def test_a_pamless_index_without_the_vcfs_needs_no_pam_file(self):
         res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, true_pam="NNN",

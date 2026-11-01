@@ -301,17 +301,19 @@ def _rebuild(raw_fakechrom, fasta):
     # in place)
     download = (f"rm -rf '{variant}' '{indels_index}' && crisprme.py download --what index "
                 f"--index-name {os.path.basename(variant)} --path '{cwd}'")
-    vcfs = _outside_view(vcf_dir)
-    with_vcfs = _holds_vcfs(vcfs)
+    # (where the search's --vcf list spells the dataset as VCFs/<name>, the search looks in
+    # VCFs/VCFs/<name>, and takes the chromosomes from the indel logs)
+    named = os.path.join(cwd, "VCFs", vcf_name)
+    vcfs = next((d for d in (_outside_view(vcf_dir), named) if _holds_vcfs(d)), None)
     own = _own_pam()
     pam = _pam_file_of(*own) if own else pam_file
-    if fasta and not (with_vcfs and pam):
+    if fasta and not (vcfs and pam):
         again = "complete-test without --chrom" if _in_chrom_view() else "this search again"
         return (f": remove the INDELS index with rm -rf '{indels_index}' and run {again}, which "
                 f"builds it anew from the fake-indel genome in {os.path.dirname(raw_fakechrom)}")
-    if not with_vcfs:
+    if not vcfs:
         return (f": for an index you downloaded, download it again: {download}; for one you "
-                f"built, put its VCFs back in '{vcfs}' and run this search again, which then "
+                f"built, put its VCFs back in '{named}' and run this search again, which then "
                 f"gives the command that rebuilds it")
     remove = [indels_index]
     again = ""
