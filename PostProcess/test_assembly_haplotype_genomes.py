@@ -38,7 +38,8 @@ These tests pin:
     and could serve the search, but not the link assembly-search searches it through;
     each refusal, followed as it says, runs the search with the bulges it was refused
     with (given none, a search takes the bulges the indexes installed allow), and
-    under --index-path, which the pipeline builds no index in, without it;
+    under --index-path, which the pipeline builds no index in, without it (and without
+    --prune-pam, which needs it);
   * the record names a folder of the machine that built the index: publish-index
     leaves it out of the archive, with and without pigz, and download drops it;
   * runs that start together: a stale index both find is taken away from its name in
@@ -851,17 +852,21 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
 
     def follow(self, advice, output, genome, bulges, *extra):
         """Runs a refused search again as its message, `advice`, says to: without
-        --index-path when it says so, with the --bDNA/--bRNA it gives, and otherwise
-        as it was run (`bulges`, `extra`). The sequence searched."""
-        again = re.search(r"run this search again( without --index-path)?(?: and)?"
+        --index-path, and without --prune-pam, when it says so, with the --bDNA/--bRNA
+        it gives, and otherwise as it was run (`bulges`, `extra`). The sequence
+        searched."""
+        again = re.search(r"run this search again( without --index-path"
+                          r"( and --prune-pam \(which needs it\))?)?(?: and)?"
                           r"(?: with --bDNA (\d+) --bRNA (\d+))?", advice)
         self.assertIsNotNone(again, f"no 'run this search again' in: {advice}")
         if again.group(1):
             at = extra.index("--index-path")
             extra = extra[:at] + extra[at + 2:]
-        if again.group(2) is not None:
-            self.assertEqual(again.group(2), again.group(3))  # (search() gives both alike)
-            bulges = int(again.group(2))
+        if again.group(2):
+            extra = tuple(a for a in extra if a != "--prune-pam")
+        if again.group(3) is not None:
+            self.assertEqual(again.group(3), again.group(4))  # (search() gives both alike)
+            bulges = int(again.group(3))
         return self.search(output, genome, bulges, *extra)
 
     def test_another_folder_of_the_same_name_is_refused(self):
@@ -951,7 +956,9 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
     # takes the bulges the indexes of its folder's name allow: refused with the 1 + 1
     # that an index in the way gave it, the same command run again once that index was
     # removed, or the folder renamed, took none. Under --index-path the pipeline builds
-    # no index, so the same command run again once the index was removed failed.
+    # no index, so the same command run again once the index was removed failed; under
+    # --prune-pam, which complete-search refuses without --index-path, the command run
+    # again without --index-path alone stopped at once.
 
     def test_followed_as_it_says_a_refused_search_keeps_its_bulges(self):
         self.search("a", "projA/ref")
@@ -985,6 +992,40 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
             self.assertIn("ERROR: no matching reference index under --index-path", fh.read())
         self.assertEqual(self.follow(advice, "b3", "projB/ref", 1, *ip), self.SEQ["maternal"])
         self.assertEqual(self.pipeline.bulges["b3"], (1, 1))
+
+    def test_under_prune_pam_it_says_to_run_again_without_it_too(self):
+        # without --index-path, the search builds the index of its name for the PAM
+        # itself, which --prune-pam would leave as it is
+        self.search("a", "projA/ref")
+        ip = ("--index-path", "genome_library", "--prune-pam")
+        with self.assertRaises(SystemExit):
+            self.search("b", "projB/ref", 1, *ip)
+        self.assertIn("Then run this search again without --index-path and --prune-pam (which "
+                      "needs it) and with --bDNA 1 --bRNA 1 (given no --bDNA/--bRNA, this search "
+                      "may then take no bulges): it builds the index of its name from this "
+                      "folder.", self.err)
+        advice = self.err
+        shutil.rmtree(os.path.join(self.lib, "NRG_2_ref"))
+        with self.assertRaises(SystemExit):  # without --index-path alone
+            self.search("b2", "projB/ref", 1, "--prune-pam")
+        self.assertIn("Error: --prune-pam requires --index-path", self.err)
+        self.assertEqual(self.follow(advice, "b3", "projB/ref", 1, *ip), self.SEQ["maternal"])
+        self.assertEqual(self.pipeline.bulges["b3"], (1, 1))
+        self.assertEqual(self.record("NRG_2_ref")["genome"], os.path.join("projB", "ref"))
+
+    def test_followed_as_it_says_a_renamed_folder_under_prune_pam_runs(self):
+        os.makedirs(self.lib)
+        ip = ("--index-path", "genome_library", "--prune-pam")
+        with self.assertRaises(SystemExit):
+            self.search("i", "other/hg38", 1, *ip)
+        self.assertIn(f"otherwise give this one a name no folder in {self.cwd}/Genomes has, and "
+                      f"run this search again without --index-path and --prune-pam (which needs "
+                      f"it) and with --bDNA 1 --bRNA 1 (given no --bDNA/--bRNA, this search may "
+                      f"then take no bulges).", self.err)
+        advice = self.err
+        os.rename(os.path.join(self.cwd, "other", "hg38"), os.path.join(self.cwd, "other", "hg38x"))
+        self.assertEqual(self.follow(advice, "i2", "other/hg38x", 1, *ip), self.SEQ["paternal"])
+        self.assertEqual(self.pipeline.bulges["i2"], (1, 1))
 
     def test_followed_as_it_says_a_renamed_folder_keeps_its_bulges(self):
         # under --index-path, it is to run without it: no index of the new name is there
@@ -1024,6 +1065,14 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
         self.assertIn("otherwise give this folder another name. Then run this search again: it "
                       "builds the index of its name from this folder.", err.getvalue())
         self.assertNotIn("--bDNA", err.getvalue())
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(err):
+            crisprme._check_genome_name_is_its_own(os.path.join(self.cwd, "projB", "ref"),
+                                                   self.lib, 0, "NRG", True)
+        self.assertIn("Then run this search again without --index-path and --prune-pam (which "
+                      "needs it): it builds the index of its name from this folder.",
+                      err.getvalue())
+        self.assertNotIn("--bDNA", err.getvalue())
 
     # One haplotype of a bundle searched by its own folder. Before 2.8.1 assembly-search
     # searched every haplotype under its folder's name, "genome", all on the index the
@@ -1047,10 +1096,13 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
         haps = self.bundle()
         self.old_index()
         # without bulge flags the search takes 1 + 1 bulges, an index being there; under
-        # --index-path the pipeline builds no index
+        # --index-path the pipeline builds no index, and --prune-pam needs --index-path
         for bulges, extra, again in ((1, (), "again with"), (None, (), "again with"),
                                      (1, ("--index-path", "genome_library"),
-                                      "again without --index-path and with")):
+                                      "again without --index-path and with"),
+                                     (1, ("--index-path", "genome_library", "--prune-pam"),
+                                      "again without --index-path and --prune-pam (which "
+                                      "needs it) and with")):
             with self.assertRaises(SystemExit):
                 self.search("m", haps["maternal"], bulges, *extra)
             self.assertIn(f"--genome {self.cwd}/{haps['maternal']} is the maternal haplotype of "
@@ -1076,6 +1128,18 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
         advice = self.err
         shutil.rmtree(index)
         self.assertEqual(self.follow(advice, "m2", haps["maternal"], None), self.SEQ["maternal"])
+        self.assertEqual(self.pipeline.bulges["m2"], (1, 1))
+        self.assertEqual(self.pipeline.built, ["NRG_2_genome"])
+
+    def test_followed_as_it_says_the_haplotypes_search_under_prune_pam_runs(self):
+        haps = self.bundle()
+        index = self.old_index()
+        ip = ("--index-path", "genome_library", "--prune-pam")
+        with self.assertRaises(SystemExit):
+            self.search("m", haps["maternal"], 1, *ip)
+        advice = self.err
+        shutil.rmtree(index)
+        self.assertEqual(self.follow(advice, "m2", haps["maternal"], 1, *ip), self.SEQ["maternal"])
         self.assertEqual(self.pipeline.bulges["m2"], (1, 1))
         self.assertEqual(self.pipeline.built, ["NRG_2_genome"])
 

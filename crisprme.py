@@ -1957,7 +1957,9 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     the installed indexes of the folder's name allow, or Genomes/<name>/ when it can
     build one from it (_installed_index_bulge_cap), so once such an index is removed, or
     the folder renamed, the same command may run with none. Under --index-path it says
-    to run without it: the pipeline builds no index there.
+    to run without it: the pipeline builds no index there. Under --prune-pam it says to
+    run without that too: complete-search refuses --prune-pam without --index-path, and
+    the index the search then builds is for the PAM itself, which pruning leaves as it is.
 
     Args:
         genomedir: The --genome folder, as an absolute path.
@@ -1966,7 +1968,8 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
             that takes no reference index.
         pam: The PAM motif; with `prune` (--prune-pam) and `three_prime` (a 3' PAM),
             which indexes of the genome's name the search could take
-            (_index_serves_search).
+            (_index_serves_search). With `prune` the messages also say to run the
+            search again without --prune-pam.
         bdna, brna: The search's DNA and RNA bulges, given or taken by default, for the
             messages; `bulges` each when not given.
 
@@ -1982,7 +1985,9 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     namesake = os.path.join(genomes, name)
     bdna = bulges if bdna is None else bdna
     brna = bulges if brna is None else brna
-    rerun = "run this search again" + (" without --index-path" if index_path != "_" else "")
+    rerun = "run this search again"
+    if index_path != "_":
+        rerun += " without --index-path" + (" and --prune-pam (which needs it)" if prune else "")
     note = ""
     if bdna or brna:
         rerun += f"{' and' if index_path != '_' else ''} with --bDNA {bdna} --bRNA {brna}"
