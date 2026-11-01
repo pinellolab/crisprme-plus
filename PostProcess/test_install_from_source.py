@@ -9,8 +9,11 @@ stops at once on Darwin, with one line pointing to Docker.
 Run with a stub `uname` on PATH and no conda env, so that without the guard the script
 stops at its next check (the activated env), never at the build; a stub `git` would
 fail loudly if it ever got that far.
+
+What the script leaves in the checkout is ignored by git.
 """
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -45,6 +48,34 @@ class TheSourceBuildRefusesMacOS(unittest.TestCase):
         self.assertNotEqual(out.returncode, 0)
         self.assertIn("CONDA_PREFIX", out.stderr)
         self.assertNotIn("Docker", out.stderr)
+
+
+@unittest.skipUnless(shutil.which("git"), "git is not installed here")
+class WhatTheInstallerLeavesInTheCheckoutIsIgnored(unittest.TestCase):
+    """The script runs `crisprme.py scorer-env create` and `check` in the checkout, and
+    they save their state to <checkout>/Annotations/.scorer_env.json. Annotations/ is
+    one of the data folders CRISPRme keeps in the folder it runs in, and the only one
+    the checkout's .gitignore left out, so `git status` showed it untracked after every
+    install. Checked against the repo's .gitignore, in a scratch repository."""
+
+    def ignored(self, *paths):
+        """Which of `paths` git ignores, created in a repository with that .gitignore."""
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run(["git", "init", "-q", d], check=True)
+            shutil.copy(SCRIPT.parent / ".gitignore", d)
+            for path in paths:
+                (Path(d) / path).parent.mkdir(parents=True, exist_ok=True)
+                (Path(d) / path).write_text("")
+            out = subprocess.run(["git", "-C", d, "check-ignore", *paths],
+                                 capture_output=True, text=True)
+        return out.stdout.split()
+
+    def test_the_scorer_env_state_is_ignored(self):
+        self.assertEqual(self.ignored("Annotations/.scorer_env.json"),
+                         ["Annotations/.scorer_env.json"])
+
+    def test_a_new_file_beside_the_tracked_test_annotations_is_not(self):
+        self.assertEqual(self.ignored("test/data/Annotations/new.bed.tar.gz"), [])
 
 
 if __name__ == "__main__":
