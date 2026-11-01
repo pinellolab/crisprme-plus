@@ -53,14 +53,20 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     for ele in cluster:
         if ele[snp_info] == "n":
             # list (and count in #Seq_in_cluster) each reference alignment once. The
-            # same row comes in more than once: every variant dataset's post-analysis
-            # carries all the rows of the one reference search, and on the dict-less
-            # tiers new_simple_analysis gives the reference alignment of each variant
-            # window again (_finalize_reference_entry). A row that differs in any
-            # column is another alignment and is kept.
-            if tuple(ele) in seen_ref:
+            # same alignment comes in more than once: every variant dataset's
+            # post-analysis carries all the rows of the one reference search, and on
+            # the dict-less tiers new_simple_analysis gives the reference alignment of
+            # each variant window again (_finalize_reference_entry). Copies are equal
+            # in every column but the count and the two scores: each dataset scores
+            # the rows itself, and CRISPR-Bulge can give one alignment two values.
+            # Keeping such a copy in that list alone would shift it against the other
+            # two, which the pipeline pastes by position (pr -m). The merge step's
+            # sort puts the higher score first, and the first copy is the one kept. A
+            # row that differs in any other column is another alignment and is kept.
+            ref_key = tuple(ele[: cfd - 1] + ele[cfd + 2 :])
+            if ref_key in seen_ref:
                 continue
-            seen_ref.add(tuple(ele))
+            seen_ref.add(ref_key)
             list_ref.append(ele)
         else:
             # merge samples of identical targets (coming from different VCF datasets)

@@ -31,7 +31,7 @@ write-loop transform and ``adjust_cols.py``'s reorder (helpers of
 ``test_reference_row_downstream``), then the REAL ``remove_contiguous_samples.py``
 runs on them with the indices ``merge_close_targets_cfd.sh`` passes.
 
-ASSERTS (the last three fail before the fix and pass after it; the first is their
+ASSERTS (all but the first fail before the fix and pass after it; the first is their
 premise and passes on both):
   * the tier path gives the reference search's row again, identical;
   * one variant window on the tiers: the reference alignment is listed once and the
@@ -39,7 +39,11 @@ premise and passes on both):
     and the fewest mismatches+bulges merges;
   * two variant datasets: each reference alignment is listed once, and the variant row
     both datasets give is still merged into one with the carriers of both;
-  * two reference rows that differ (two alignments) are both kept and counted.
+  * two reference rows that differ (two alignments) are both kept and counted;
+  * two copies of a reference alignment that differ only in the CRISPR-Bulge score (each
+    dataset's post-analysis scores the reference rows itself) are one alignment: the
+    three criteria's lists, which the pipeline pastes by position, stay the same length
+    and name the same sites in the same order.
 
 Run with:
     cd PostProcess && python3 -m unittest test_reference_rows_once -v
@@ -227,6 +231,81 @@ class ReferenceRowsListedOnce(unittest.TestCase):
         self.assertEqual([r[DNA_COL] for r in best + disc],
                          ["c" + "A" * 20 + "GG", "cc" + "A" * 19 + "GG"])
         self.assertEqual([r[SEQ_IN_CLUSTER_COL] for r in best + disc], ["1", "0"])
+
+    def _lists_of_two_datasets(self, position, cb_copies):
+        """The rows of one site in the three criteria's lists, as the merge step's sort
+        leaves them: the site's 1-mismatch alignment twice (each dataset's post-analysis
+        gives it), then a 2-mismatch alignment twice and a 3-mismatch alignment twice.
+        The CFD and the fewest lists' copies are equal. ``cb_copies`` gives the two
+        CRISPR-Bulge values of the 1-mismatch alignment, highest first, as the score and
+        the REF score of its two copies in the CRISPR-Bulge list."""
+        def row(n_mismatches, score):
+            r = _on_disk([_reference_search_row(n_mismatches)], position)[0]
+            r[CFD_COL], r[CFD_COL + 1] = score, score
+            return r
+
+        same = [row(1, "0.500"), row(1, "0.500"), row(2, "0.300"), row(2, "0.300"),
+                row(3, "0.100"), row(3, "0.100")]
+        cb = [row(1, cb_copies[0]), row(1, cb_copies[1]), row(2, "3e-24"), row(2, "3e-24"),
+              row(3, "1e-25"), row(3, "1e-25")]
+        return same, same, cb
+
+    def test_copies_scored_differently_are_one_alignment_in_the_three_lists(self):
+        """Each variant dataset's post-analysis scores the reference search's rows
+        itself, and CRISPR-Bulge can give one alignment two values (a real two-dataset
+        search: 4.3390600000000004e-23 and 4.33904e-23). Keeping the copy in that list
+        alone gives its discarded rows one row more, and as the pipeline pastes the
+        three lists of discarded rows by position (pr -m), every row from there on
+        pairs a CFD alignment with the next one's CRISPR-Bulge alignment, at the end of
+        a cluster with another site's."""
+        lists = [[], [], []]
+        for position, cb_copies in ((100, ("4.3390600000000004e-23", "4.33904e-23")),
+                                    (5000, ("2e-22", "2e-22"))):
+            for rows, site_rows in zip(lists, self._lists_of_two_datasets(position, cb_copies)):
+                rows.extend(site_rows)
+        (cfd_best, cfd_disc), (few_best, few_disc), (cb_best, cb_disc) = (
+            self._merge(lists[0], "score"),
+            self._merge(lists[1], "total"),
+            self._merge(lists[2], "score"),
+        )
+        self.assertEqual(len(cb_disc), len(cfd_disc),
+                         "the CRISPR-Bulge list keeps a copy the others drop")
+        self.assertEqual(len(few_disc), len(cfd_disc))
+        self.assertEqual([r[DNA_COL] for r in cb_disc], [r[DNA_COL] for r in cfd_disc],
+                         "row by row the lists must give the same alignment")
+
+        # the pipeline's own paste: every row's blocks at one site
+        paths = []
+        for name, disc in (("cfd", cfd_disc), ("few", few_disc), ("cb", cb_disc)):
+            paths.append(os.path.join(self.d, name + ".disc"))
+            with open(paths[-1], "w") as fh:
+                fh.write("".join("\t".join(r) + "\n" for r in disc))
+        pasted = subprocess.run(["pr", "-m", "-t", "-J"] + paths, capture_output=True,
+                                text=True, check=True).stdout.splitlines()
+        self.assertEqual(len(pasted), 4)
+        n = len(cfd_disc[0])
+        for line in pasted:
+            cols = line.split("\t")
+            self.assertEqual(len(cols), 3 * n, "a row lacks a block: %r" % line)
+            self.assertEqual(cols[5], cols[n + 5], "the fewest block is another site's")
+            self.assertEqual(cols[5], cols[2 * n + 5], "the CRISPR-Bulge block is another site's")
+
+        for best, disc in ((cfd_best, cfd_disc), (few_best, few_disc), (cb_best, cb_disc)):
+            self.assertEqual([r[SEQ_IN_CLUSTER_COL] for r in best], ["2", "2"],
+                             "each site's best row counts its two other alignments")
+            self.assertEqual([r[SEQ_IN_CLUSTER_COL] for r in disc], ["1"] * 4)
+        self.assertEqual(cb_best[0][CFD_COL], "4.3390600000000004e-23",
+                         "the copy kept is the one with the higher score")
+
+    def test_a_copy_of_another_alignment_is_still_another_alignment(self):
+        """Two rows with one score are two alignments when any other column differs:
+        leaving the scores out of the comparison merges nothing else."""
+        one = _on_disk([_reference_search_row(1)])[0]
+        other = list(one)
+        other[DNA_COL] = "g" + other[DNA_COL][1:]  # another base at the mismatch
+        best, disc = self._merge([one, other])
+        self.assertEqual(sorted(r[DNA_COL] for r in best + disc),
+                         sorted([one[DNA_COL], other[DNA_COL]]))
 
 
 if __name__ == "__main__":
