@@ -204,7 +204,11 @@ def compute_sites(targets: pd.DataFrame, crisprme: bool = False) -> List[str]:
     if crisprme:
         targets["site"] = targets.apply(lambda x: _compute_site(x[3], x[4], x[6]), axis=1)
     else:
-        targets["site"] = targets.apply(lambda x: _compute_site(x[0], x[4], x[3]), axis=1)
+        # the brute-force reference is headered (CHR RNA DNA Strand Start ...), so its
+        # columns are taken by position: x[0] on a name-labelled row warned on pandas 2
+        # and is a KeyError on pandas 3
+        targets["site"] = targets.apply(
+            lambda x: _compute_site(x.iloc[0], x.iloc[4], x.iloc[3]), axis=1)
     return targets["site"].tolist()
 
 

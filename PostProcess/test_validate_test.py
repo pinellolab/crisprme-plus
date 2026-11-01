@@ -15,6 +15,9 @@ both single-"n edits" ones cover chr22 only ("scope" in benchmarks.json): compar
 chr21, or on a whole genome, each site CRISPRme found off chr22 counted as extra and
 the benchmark FAILED. Such a benchmark is now skipped there.
 
+Where a benchmark is compared, its brute-force sites are read by position, with no
+pandas FutureWarning (and no KeyError on pandas 3).
+
 validate.py is run as a subprocess, as crisprme.py runs it, and its
 run_test_validation in-process with each comparison stubbed. crisprme.py's
 validate_test is exec'd without the CLI dispatch (the truncate-and-exec loader of
@@ -212,6 +215,27 @@ class ABenchmarkOffItsReferenceIsSkipped(unittest.TestCase):
         self.assertIn("[cas12a_hbg] SKIPPED: its brute-force reference covers chr22 only, "
                       "not chr21.", out.stderr.splitlines(), out.stderr)
         self.assertNotIn("FAILED", out.stderr)
+
+
+class TheBruteForceSitesAreReadByPosition(unittest.TestCase):
+    """The brute-force reference is headered (CHR RNA DNA Strand Start ...), and its
+    sites were read with x[0], x[4] and x[3] on rows labelled by column name: each
+    benchmark validate-test compared printed a pandas FutureWarning ("Series.__getitem__
+    treating keys as positions is deprecated"), and pandas 3 raises a KeyError there.
+    The committed Cas12a reference, read as validate-test reads it."""
+
+    def test_its_sites_are_chr_start_and_strand_with_no_warning(self):
+        import warnings
+        ref = os.path.join(os.path.dirname(HERE), "test", "benchmark",
+                           "brute-force-cas12-1000G", "brute_force_cas12_1000G.tsv")
+        targets = validate._load_targets(ref, "chr22")
+        expected = [f"{c}_{p}_{s}" for c, p, s in
+                    zip(targets["CHR"], targets["Start"], targets["Strand"])]
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            sites = validate.compute_sites(targets)
+        self.assertEqual(sites, expected)
+        self.assertGreater(len(set(sites)), 100)
 
 
 class TheCliCallerAddsNoTraceback(unittest.TestCase):
