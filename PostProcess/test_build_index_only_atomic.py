@@ -2039,6 +2039,22 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                     self.assertIn("Using precomputed variant index for hg38+ds; skipping "
                                   "genome enrichment", out)
 
+    def test_the_opt_out_does_not_fail_a_build_on_a_store_it_never_reads(self):
+        """Under CRISPRME_INDEL_SNP=0 the indel genotype store is neither read by a search
+        nor written (and so never unmarked) by build-index-only: a mark an earlier run
+        left there must not fail every build, as it did once the end check came in
+        (70dfbd7 exits 0 in the same flow). With the overlay on, the run finishes it."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        store = self.path("Dictionaries", "indel_genotypes_ds")
+        os.makedirs(os.path.join(store, ".building"))
+        rc, out, err = self.run_bio(CRISPRME_INDEL_SNP="0")
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn(" is still marked unfinished", err)
+        self.assertIn("Variant index ready: ", out)
+        rc, out, err = self.run_web_search(CRISPRME_INDEL_SNP="0")
+        self.assertNotIn(" is unfinished: ", err)
+
     def test_a_search_while_a_run_writes_them_is_told_to_wait_for_it(self):
         step, held, where, workers = self.STEPS[0]
         proc = self.start(shim=True, STUB_WRITE_HANG=held, **workers)

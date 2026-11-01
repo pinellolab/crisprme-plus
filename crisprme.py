@@ -4266,15 +4266,25 @@ def build_index_only() -> None:
     # to do
     _redo = f"run build-index-only again to its end with {vcf_name}"
     _gt_dir = os.path.join(workdir, "Dictionaries", f"genotypes_{vcf_name}")
-    for _part, _do in (
+    _parts = [
         (_reg_dir, f"{_redo} and its --samplesID (a build from the web Settings page passes "
                    f"none), or remove the dict-less tiers to search without them (rm -rf "
                    f"'{_reg_dir}' '{_gt_dir}')"),
-        (_igt_dir, f"{_redo}, or remove the phased indel genotype store to search without it "
-                   f"(rm -rf '{_igt_dir}')"),
+    ]
+    # the indel genotype store is read, and its mark taken away (STEP 1c), only with the
+    # SNP overlay on: under CRISPRME_INDEL_SNP=0 no search refuses its mark, and no run
+    # could clear it. The SNP codes of the fake-indel genome are refused either way, and
+    # only a run with the overlay on finishes them.
+    if _snp_overlay:
+        _parts.append(
+            (_igt_dir, f"{_redo}, or remove the phased indel genotype store to search without "
+                       f"it (rm -rf '{_igt_dir}')"))
+    _parts += [
         (enriched, _redo),
-        (indels_out, _redo),
-    ):
+        (indels_out, _redo if _snp_overlay else
+         f"{_redo} with CRISPRME_INDEL_SNP=1 (the default), which finishes its SNP codes"),
+    ]
+    for _part, _do in _parts:
         if os.path.isdir(os.path.join(_part, ".building")):
             error(
                 f"{_part} is still marked unfinished, and every search with {vcf_name} "
