@@ -262,6 +262,27 @@ class TestDocumentedCommandsPassTheFlagChecks(unittest.TestCase):
                                         "complete-search refuses: " + ", ".join(offenders))
 
 
+class TestNoDocumentedCommandIsABareCrisprme(unittest.TestCase):
+    """A bare ``crisprme.py`` prints its list of commands and exits 1, and first
+    creates the CRISPRme folders (``Genomes/``, ``Results/`` and five more) in the
+    directory it runs in. README §1.1.2 gave it to check an install, and §3.1 to
+    show the help; ``--version`` and ``--help`` create nothing."""
+
+    def test_no_code_block_runs_crisprme_py_alone(self):
+        paths = [pathlib.Path(REPO, "README.md"), pathlib.Path(REPO, "METHODS.md")]
+        paths += sorted(pathlib.Path(REPO, "docs").rglob("*.md"))
+        offenders = []
+        for path in paths:
+            fenced = False
+            for n, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
+                if line.lstrip().startswith("```"):
+                    fenced = not fenced
+                elif fenced and line.split(" #", 1)[0].strip().lstrip("$ ") == "crisprme.py":
+                    offenders.append(f"{path.relative_to(REPO)}:{n}")
+        self.assertEqual(offenders, [], "a bare crisprme.py, which exits 1 and creates "
+                                        "seven folders: " + ", ".join(offenders))
+
+
 class TestThePrunePamHelpSaysWhichSideItServes(unittest.TestCase):
     """The published PAM-less indexes store their flank on the 3' side, and a 5'
     search of one found nothing, exit 0. The --prune-pam help said a 5' PAM needed

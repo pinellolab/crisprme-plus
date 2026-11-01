@@ -157,8 +157,9 @@ and the `release-crisprme` skill.
   the index pages say that a PAM-less index serves a shorter PAM only when it is a 3′ PAM (the
   card listed Cas12a's `TTTV`), and the README, the index pages, METHODS and `complete-search
   --help` that the published ones serve no 5′ PAM at any width (they said an equal-width one
-  worked). README §1.1.2 checks an install with `crisprme.py --version` alone, since a bare
-  `crisprme.py` exits 1 and creates the CRISPRme folders where it runs.
+  worked). README §1.1.2 checks an install with `crisprme.py --version` alone, and §3.1 shows the
+  help with `crisprme.py --help`, since a bare `crisprme.py` exits 1 and creates the CRISPRme
+  folders where it runs.
   `RESUME.md`, a scratch file committed by accident in 2.5.4, is gone from the tree, so the Docker
   image no longer ships it.
 

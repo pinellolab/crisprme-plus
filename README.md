@@ -2175,7 +2175,7 @@ To explore the functionalities and input parameters of CRISPRme, use the
 `--help` flag:
 
   ```bash
-  crisprme.py
+  crisprme.py --help
   ```
 
 The help menu provides detailed descriptions of CRISPRme's features and usage 
