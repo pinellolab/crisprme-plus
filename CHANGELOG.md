@@ -16,19 +16,21 @@ and the `release-crisprme` skill.
 ### Added
 - **`--prune-pam`: one index can serve many PAMs.** A *PAM-less* index stores the raw genomic flank
   instead of a matched PAM, and `--prune-pam` applies the PAM you pass during the search, discarding
-  a leaf whose stored flank cannot match it. One index therefore answers any PAM no longer than its
-  flank, instead of one index per PAM. Verified genome-wide over HGDP + 1000 Genomes (4,091 samples,
-  NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index, an 8-nt-flank
-  PAM-less index, and a dedicated NRG index produce **byte-identical** reports — the same 189,950
-  rows, every indel row justified by its own variant window. Pruning changes only which leaves are
-  written out, never how a guide is aligned, so it cannot move an alignment or a score. The cost is
-  size, since nothing is excluded at build time: 110 GB against 28 GB for the HGDP + 1000 Genomes
-  variant index. Requires `--index-path`, and is command-line only — the web interface never passes
-  the flag. A shorter PAM off a wider flank is served for a 3' PAM only; a 5' PAM requires the
-  flank width to equal the PAM length, and the engine refuses any other width pairing rather
-  than mis-parsing the index. The `NNN_3` indexes are published alongside the dedicated
-  ones; a flank wider than 3 nt is not readable by earlier releases, so those live in a separate
-  repository. Needs a CRISPRitz build that supports `--prune-pam`.
+  a leaf whose stored flank cannot match it. One index therefore answers any 3′ PAM no longer than
+  its flank, instead of one index per PAM. Verified genome-wide over HGDP + 1000 Genomes (4,091
+  samples, NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index, an
+  8-nt-flank PAM-less index, and a dedicated NRG index produce **byte-identical** reports — the
+  same 189,950 rows, every indel row justified by its own variant window. Pruning changes only
+  which leaves are written out, never how a guide is aligned, so it cannot move an alignment or a
+  score. The cost is size, since nothing is excluded at build time: 110 GB against 28 GB for the
+  HGDP + 1000 Genomes variant index. Requires `--index-path`, and is command-line only — the web
+  interface never passes the flag. The published PAM-less indexes store the flank on the 3′ side of
+  the guide and serve no 5′ PAM, so a Cas12a (`TTTV`) search needs a dedicated index. A shorter PAM
+  off a wider flank is served for a 3′ PAM only; a 5′ PAM needs an index built from a 5′ all-`N`
+  PAM file at exactly its width, and the engine refuses any other width pairing rather than
+  mis-parsing the index. The `NNN_3` indexes are published alongside the dedicated ones; a flank
+  wider than 3 nt is not readable by earlier releases, so those live in a separate repository.
+  Needs a CRISPRitz build that supports `--prune-pam`.
   See [`METHODS.md` §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering).
 - **A second dataset repo for wide-flank PAM-less indexes.** A PAM-less index with a 3-nt flank
   stores what a dedicated 3-nt PAM index stores, so any release can read it and `NNN_3` stays in
@@ -153,8 +155,10 @@ and the `release-crisprme` skill.
   The general-index card's search example now runs: it lacked `--index-path`, which `--prune-pam`
   requires, and `--samplesID`, and named a `--vcf` file `download` does not write. The website and
   the index pages say that a PAM-less index serves a shorter PAM only when it is a 3′ PAM (the
-  card listed Cas12a's `TTTV`), and README §1.1.2 checks an install with `crisprme.py --version`
-  alone, since a bare `crisprme.py` exits 1 and creates the CRISPRme folders where it runs.
+  card listed Cas12a's `TTTV`), and the README, the index pages, METHODS and `complete-search
+  --help` that the published ones serve no 5′ PAM at any width (they said an equal-width one
+  worked). README §1.1.2 checks an install with `crisprme.py --version` alone, since a bare
+  `crisprme.py` exits 1 and creates the CRISPRme folders where it runs.
   `RESUME.md`, a scratch file committed by accident in 2.5.4, is gone from the tree, so the Docker
   image no longer ships it.
 

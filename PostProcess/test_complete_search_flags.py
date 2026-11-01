@@ -262,6 +262,25 @@ class TestDocumentedCommandsPassTheFlagChecks(unittest.TestCase):
                                         "complete-search refuses: " + ", ".join(offenders))
 
 
+class TestThePrunePamHelpSaysWhichSideItServes(unittest.TestCase):
+    """The published PAM-less indexes store their flank on the 3' side, and a 5'
+    search of one found nothing, exit 0. The --prune-pam help said a 5' PAM needed
+    only "equal" the flank width, and that the result is identical to a dedicated
+    index's."""
+
+    def _entry(self):
+        block = "\n".join(_block(_source_lines(), "def print_help_complete_search"))
+        text = "".join(re.findall(r'^\s*"(.*)"\s*$', block, flags=re.M))
+        start = text.index("\\t--prune-pam,")
+        return text[start:text.index("\\n", start)]
+
+    def test_it_says_a_5_prime_pam_needs_an_index_built_for_one(self):
+        entry = self._entry()
+        self.assertIn("A 5' PAM (Cas12a) needs an index built for a 5' PAM", entry)
+        self.assertIn("published PAM-less indexes store the flank on the 3' side", entry)
+        self.assertNotIn("a 5' PAM must equal it", entry)
+
+
 # Needs crisprme.py to be importable: these run it as a subprocess, and it imports
 # Bio.Seq at module scope. The static checks above parse the source instead and must
 # stay unguarded -- gating them on a dependency they do not use is how the --bmax

@@ -48,7 +48,7 @@ crisprme-data/
 │   ├── NRG_3_hg38+hg38_mega.tar.gz             # sites-only aggregate (worst-case fallback)
 │   ├── NRR_3_hg38{,+hg38_HGDP1kGP,+hg38_HPRC,+hg38_mega}.tar.gz   # NRR PAM
 │   ├── NGG_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # NGG PAM (cannot serve NAG off-targets)
-│   ├── NNN_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # PAM-LESS 3-nt flank — serves ANY 3-nt PAM
+│   ├── NNN_3_hg38{,+hg38_HGDP1kGP}.tar.gz      # PAM-LESS 3-nt flank — serves ANY 3-nt 3′ PAM
 │   ├── genotypes_hg38_{HGDP1kGP,HPRC}.tar.gz   # per-sample genotype companions
 │   └── SHA256SUMS                              # checksum per archive (sha256sum -c --ignore-missing, inside indexes/)
 ├── build-inputs/                   # PRE-ENRICHED kits (fast rebuild / new PAM: download --what build-inputs)
@@ -89,7 +89,7 @@ The two genotyped panels ship a `genotypes_hg38_*` companion that enables
 |---|---|---|
 | `NRR` | `NRR_3_hg38`, `+hg38_HGDP1kGP`, `+hg38_HPRC`, `+hg38_mega` | broader than NRG (`NAA`/`NAG`/`NGA`/`NGG`); a wider, more conservative screen |
 | `NGG` | `NGG_3_hg38`, `+hg38_HGDP1kGP` | canonical SpCas9 PAM only. **NGG cannot serve NAG off-targets**, so NRG is preferred for a safety screen |
-| `NNN` (PAM-less) | `NNN_3_hg38`, `+hg38_HGDP1kGP` | one index for ANY 3-nt PAM, selected at search time with `--prune-pam`. Larger (71 GB / 110 GB downloads, GB = 10⁹ bytes) but removes the per-PAM rebuild |
+| `NNN` (PAM-less) | `NNN_3_hg38`, `+hg38_HGDP1kGP` | one index for ANY 3-nt 3′ PAM, selected at search time with `--prune-pam`. Larger (71 GB / 110 GB downloads, GB = 10⁹ bytes) but removes the per-PAM rebuild |
 
 **`NRR_3_hg38+hg38_mega` was replaced for CRISPRme+ 2.8.1.** The archive uploaded on
 2026-10-27 shipped an empty indel index and empty indel logs, so no indel off-target

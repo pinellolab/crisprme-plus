@@ -93,7 +93,7 @@ indexes/
   NRG_3_hg38+hg38_HPRC.tar.gz                    # SpCas9 (NRG) HPRC pangenome variant index (232 phased assembly-derived genomes)
   genotypes_hg38_HPRC.tar.gz                          # SEPARATE Tier-1 genotype store companion for the HPRC index
   NRG_3_hg38+hg38_mega.tar.gz                    # SpCas9 (NRG) sites-only mega index (5 sources) — NO genotype companion (sites-only)
-  NNN_3_hg38.tar.gz                              # PAM-LESS reference index of hg38, 3-nt flank — serves ANY 3-nt PAM with `--prune-pam`
+  NNN_3_hg38.tar.gz                              # PAM-LESS reference index of hg38, 3-nt flank — serves ANY 3-nt 3′ PAM with `--prune-pam`
   NNN_3_hg38+hg38_HGDP1kGP.tar.gz           # PAM-LESS variant-aware index (HGDP + 1000 Genomes, same variant data as the NRG one)
   NGG_3_hg38.tar.gz                              # NGG-only reference index (NRG is the default; NGG cannot serve NAG off-targets)
   NGG_3_hg38+hg38_HGDP1kGP.tar.gz           # NGG-only variant index
@@ -129,9 +129,10 @@ is about 432 GB, so fetch single archives rather than the repo):
 | `NNNNNNNN_3_hg38`, `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | `crisprme-data-general-index` | 82.2 GB, 122.7 GB |
 
 **The PAM-less (`NNN_*`) indexes** store the raw genomic flank instead of a matched PAM,
-so one index answers any 3′ PAM no longer than that flank (a 5′ PAM only at the flank's
-full width) when the search passes `--prune-pam` (see
-[METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+so one index answers any 3′ PAM no longer than that flank when the search passes
+`--prune-pam` (see [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+A 5′ PAM (Cas12a) needs a dedicated index: these indexes store the flank on the 3′ side of
+the guide, so a 5′ search does not use them.
 They carry exactly the same variant data and `Dictionaries/` as the dedicated index for the
 same panel — those tiers are PAM-independent — and a `--prune-pam` run over one is
 byte-identical to the dedicated index for that PAM, verified genome-wide. They are

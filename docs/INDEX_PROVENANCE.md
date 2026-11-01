@@ -121,7 +121,7 @@ pre-fix builder (CRISPRitz `5c612c0^`) and one from the 2.9.1 builder:
 | `20bp-NRG-SpCas9`, without `--prune-pam` | 2 rows | 2 rows | byte-identical |
 | `20bp-NG-SpCas9NG` (`--prune-pam`) | 1 row | **5 rows** | the pre-fix index misses the two sites whose PAM (`AG`, `TG`) is followed by an `N`, and a 1-bulge row at each of the other two; a dedicated `NG_2` index gives the same 5 rows, byte-identical |
 
-So in a 2.8.1 search with **any 3-nt PAM** the 2026-10-25 archives already behaved
+So in a 2.8.1 search with **any 3-nt 3′ PAM** the 2026-10-25 archives already behaved
 exactly like a fresh build. Confirmed at full scale: the published
 `NNN_3_hg38+hg38_HGDP1kGP`, downloaded from Hugging Face and searched with
 `NRG --prune-pam` genome-wide at 4 mismatches + 1 DNA + 1 RNA bulge with per-sample

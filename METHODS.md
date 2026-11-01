@@ -997,12 +997,18 @@ discards a leaf whose stored flank cannot match it — at the moment the leaf is
 before it is written out.
 
 **Validity.** A search PAM of length *L* is served by a stored flank of width *K* when
-*L ≤ K*. The search PAM is widened to *K* with `N`s on the distal side (the end for a 3′
-PAM, the front for a 5′ PAM), and a leaf is rejected when, at any position the real PAM
-covers, the stored and requested IUPAC codes share no nucleotide. Pad positions are not
-tested at all: they state no requirement, and a stored genomic `N` intersects nothing, so
-testing one would reject a target that a dedicated index of the real width keeps. At
-*L = K* the pad is empty and the geometry is exactly a dedicated index's.
+*L ≤ K* and the flank is on the PAM's side of the guide. The flank lies where the PAM file
+the index was built from puts the PAM (the 3′ side for `PAMs/20bp-NNN-NO-PAM.txt` and every
+published PAM-less index), and the engine reads it on the side the search's PAM file names,
+so a 5′ search of a 3′-built index finds nothing at all. CRISPRme therefore takes a PAM-less
+index only for a PAM on the side recorded in the index's `.pam_build` (written by
+`build-index-only`), and takes an index without one for a 3′ build. The search PAM is
+widened to *K* with `N`s on the distal side (the end for a 3′ PAM, the front for a 5′ PAM),
+and a leaf is rejected when, at any position the real PAM covers, the stored and requested
+IUPAC codes share no nucleotide. Pad positions are not tested at all: they state no
+requirement, and a stored genomic `N` intersects nothing, so testing one would reject a
+target that a dedicated index of the real width keeps. At *L = K*, on the same side, the
+pad is empty and the geometry is exactly a dedicated index's.
 
 **Equivalence.** Pruning changes only which leaves are written out, never how a guide is
 aligned to the genome, so it cannot move an alignment or a score. Measured genome-wide
@@ -1033,9 +1039,12 @@ is that one index answers many PAMs.
 **Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
 interface never passes the flag. (Its PAM picker prefers a PAM whose geometry matches the
 installed index, but falls back to offering every PAM when none matches, so it does not
-itself prevent an unusable pairing — the engine refuses a width mismatch instead.) A
-shorter PAM off a wider flank is supported for a 3' PAM only; for a 5' PAM the engine
-requires the flank width to equal the PAM length. A flank wider than
+itself prevent an unusable pairing: the engine refuses a width mismatch, and the search
+does not take an index built for the other side.) A shorter PAM off a wider flank is
+supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
+PAM length, and the index must have been built from a 5′ all-`N` PAM file. The published
+PAM-less indexes are 3′ builds, so they serve no 5′ PAM: a Cas12a search needs a dedicated
+index. A flank wider than
 3 nt is not readable by CRISPRme versions before this one, so those indexes are published
 in a separate repository rather than alongside the standard ones.
 

@@ -17,8 +17,8 @@ viewer: false
 One index that serves **many PAMs**. A *general* index stores the raw genomic
 flank instead of a fixed PAM, so a single build answers searches for any 3′ PAM no
 longer than that flank — `NGG`, `NRG`, `NRR`, `NGA`, `NAG`, `NNGRRT` and so on —
-with the PAM applied at search time by `--prune-pam` (a 5′ PAM only at the flank's
-full width: see the orientation limit below).
+with the PAM applied at search time by `--prune-pam` (3′ PAMs only: see the
+orientation limit below).
 
 Pulled by `crisprme.py download --what index --index-name <name>`, which routes
 to this repo automatically for any flank wider than 3.
@@ -56,8 +56,8 @@ crisprme-data-general-index/
 
 | Index | Flank | Serves | Variants |
 |---|---|---|---|
-| `NNNNNNNN_3_hg38` | 8 nt | any 3′ PAM of length ≤ 8 (a 5′ PAM only at exactly 8) | none (reference-only) |
-| `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 8 nt | any 3′ PAM of length ≤ 8 (a 5′ PAM only at exactly 8) | HGDP + 1000 Genomes, genotyped-phased (SHAPEIT5 re-phased) |
+| `NNNNNNNN_3_hg38` | 8 nt | any 3′ PAM of length ≤ 8 | none (reference-only) |
+| `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 8 nt | any 3′ PAM of length ≤ 8 | HGDP + 1000 Genomes, genotyped-phased (SHAPEIT5 re-phased) |
 
 The variant archive bundles its `_INDELS` companion. Its per-sample genotype
 store, `genotypes_hg38_HGDP1kGP.tar.gz`, is published here as well, byte-identical
@@ -65,11 +65,9 @@ to the copy in the main repo: `download` fetches the genotype companion and the
 reference index from the repo the index itself came from, so without a copy here
 a per-sample search on this index would run with degraded Samples.
 
-**Orientation limit.** A wider flank currently serves a **3′** PAM only. For a 5′
-PAM (Cas12a-style) the engine refuses a *shorter* PAM off a wider flank, because
-the emitted sequence is trimmed at the end while a 5′ pad sits at the front — so
-the reported PAM region would carry pad bases. An equal-width 5′ PAM works. Use a
-dedicated index for a shorter 5′ PAM.
+**Orientation limit.** These indexes serve a **3′** PAM only. They store the flank
+on the 3′ side of the guide, so a 5′ PAM (Cas12a-style, such as `TTTV`) is not served
+at any width: use a dedicated index, which `crisprme.py build-index-only` builds.
 
 ## Usage
 
