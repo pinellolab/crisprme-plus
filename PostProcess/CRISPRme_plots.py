@@ -40,6 +40,34 @@ def reference_count_analysis(row):
     return row
 
 
+# Perfect matches (0 mismatches + bulges) are plotted like every other site and
+# also starred: the on-target is one of them, and any other one -- in the reference
+# or created by a variant -- is an off-target as strong as the on-target.
+PERFECT_MATCH_LABEL = "Perfect match (0 mismatches+bulges)"
+
+
+def mark_perfect_matches(ax, df, mmb_col, y_col):
+    """Star the plotted sites with 0 mismatches+bulges at y_col (their best score,
+    or their edit count). Returns the legend handle, or None when there are none."""
+    perfect = pd.to_numeric(df[mmb_col], errors="coerce") == 0
+    if not perfect.any():
+        return None
+    ax.scatter(
+        df.loc[perfect, "index"],
+        pd.to_numeric(df.loc[perfect, y_col], errors="coerce"),
+        marker="*",
+        s=45,
+        c="black",
+        linewidths=0,
+        zorder=3,
+        clip_on=False,  # a perfect match often scores 1.0, on the top edge
+    )
+    return mlines.Line2D(
+        [], [], marker="*", linestyle="None", markersize=6, color="black",
+        label=PERFECT_MATCH_LABEL,
+    )
+
+
 def plot_with_MMvBUL(df, out_folder, guide, tag="top_1000_log_for_main_text"):
     # compute analysis to reference_count_analysis
     df = df.apply(reference_count_analysis, axis=1)
@@ -182,10 +210,14 @@ def plot_with_MMvBUL(df, out_folder, guide, tag="top_1000_log_for_main_text"):
         plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
     )
 
+    # Perfect matches: starred at their (ALT) count, 0
+    star = mark_perfect_matches(
+        plt.gca(), df, "Mismatches+bulges_(fewest_mm+b)", "Mismatches+bulges_ALT_(fewest_mm+b)"
+    )
     # Color legend
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue])
+    plt.legend(handles=[red, blue] + ([star] if star else []))
 
     # Save
     plt.tight_layout()
@@ -331,10 +363,15 @@ def plot_with_CRISPR_BULGE_score(df, out_folder, guide, tag="top_1000_log_for_ma
         plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
     )
 
+    # Perfect matches: starred at their best score
+    star = mark_perfect_matches(
+        plt.gca(), df, "Mismatches+bulges_(highest_CRISPR_BULGE)",
+        "CRISPR_BULGE_score_(highest_CRISPR_BULGE)",
+    )
     # Color legend
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue])
+    plt.legend(handles=[red, blue] + ([star] if star else []))
 
     # Save
     plt.tight_layout()
@@ -485,10 +522,14 @@ def plot_with_CFD_score(df, out_folder, guide, tag="top_1000_log_for_main_text")
         plt.legend(handles=[s1, s01, s001], title="Allele frequency", ncol=3, loc=9)
     )
 
+    # Perfect matches: starred at their best score
+    star = mark_perfect_matches(
+        plt.gca(), df, "Mismatches+bulges_(highest_CFD)", "CFD_score_(highest_CFD)"
+    )
     # Color legend
     red = mpatches.Patch(color=transparent_red, label="Reference")
     blue = mpatches.Patch(color=transparent_blue, label="Alternative")
-    plt.legend(handles=[red, blue])
+    plt.legend(handles=[red, blue] + ([star] if star else []))
 
     # Save
     plt.tight_layout()
@@ -496,12 +537,6 @@ def plot_with_CFD_score(df, out_folder, guide, tag="top_1000_log_for_main_text")
     plt.savefig(out_folder + f"CRISPRme_CFD_{tag}_{guide}.pdf")
     plt.clf()
     plt.close()
-
-
-# Read file
-df = pd.read_csv(sys.argv[1], sep="\t", index_col=False, na_values=["n"])
-out_folder = sys.argv[2]
-# guide = sys.argv[3]
 
 
 def filter_table(df, plot_term, sort_by="score"):
@@ -524,10 +559,11 @@ def filter_table(df, plot_term, sort_by="score"):
             "CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)",
         ),
     }
-    # Remove targets with mm+bul<=1 since they are probably on-target introduced
-    # by variants
-    colname, sort_cname = score_mapping[plot_term]
-    df = df[df[colname] > 1]
+    # Every site is kept. The perfect matches and the 1-mismatch-or-bulge sites were
+    # dropped here ("probably on-target introduced by variants"), with nothing on the
+    # plot to say so -- the strongest off-targets, a variant-created perfect match
+    # among them. The plots star the perfect matches (mark_perfect_matches).
+    _mmb_col, sort_cname = score_mapping[plot_term]
     if sort_by == "delta":
         # Rank by the size of the variant-induced change |ALT - REF|, so the impactful
         # variants (which the score sort buries among many zero-effect ones) come first.
@@ -549,21 +585,28 @@ def filter_table(df, plot_term, sort_by="score"):
     return df_sorted.head(1000)  # keep top 1000 targets
 
 
-for guide in df["Spacer+PAM"].unique():
-    # reset df temp after every process to avoid memory problems
-    df_guide = df.loc[df["Spacer+PAM"] == guide]
-    plot_with_CFD_score(filter_table(df_guide, "cfd"), out_folder, guide)
-    plot_with_CRISPR_BULGE_score(filter_table(df_guide, "crispr_bulge"), out_folder, guide)
-    plot_with_MMvBUL(filter_table(df_guide, "mm+b"), out_folder, guide)
-    # Variant-effect-sorted companions for the SCORE plots (CFD, CRISPR-Bulge): rank the
-    # top-1000 by |ALT-REF| so the variants that actually change the score (buried among
-    # many zero-effect ones in the score-sorted plot) are foregrounded. The fewest-mm+b
-    # plot is score-only (its REF/ALT mm+b columns are derived inside the plot function,
-    # and a "change in edit count" delta is far less meaningful than a score delta).
-    _tag = "top_1000_by_variant_effect"
-    plot_with_CFD_score(
-        filter_table(df_guide, "cfd", sort_by="delta"), out_folder, guide, tag=_tag
-    )
-    plot_with_CRISPR_BULGE_score(
-        filter_table(df_guide, "crispr_bulge", sort_by="delta"), out_folder, guide, tag=_tag
-    )
+if __name__ == "__main__":
+    # Read file
+    df = pd.read_csv(sys.argv[1], sep="\t", index_col=False, na_values=["n"])
+    out_folder = sys.argv[2]
+    # guide = sys.argv[3]
+    for guide in df["Spacer+PAM"].unique():
+        # reset df temp after every process to avoid memory problems
+        df_guide = df.loc[df["Spacer+PAM"] == guide]
+        plot_with_CFD_score(filter_table(df_guide, "cfd"), out_folder, guide)
+        plot_with_CRISPR_BULGE_score(filter_table(df_guide, "crispr_bulge"), out_folder, guide)
+        plot_with_MMvBUL(filter_table(df_guide, "mm+b"), out_folder, guide)
+        # Variant-effect-sorted companions for the SCORE plots (CFD, CRISPR-Bulge): rank
+        # the top-1000 by |ALT-REF| so the variants that actually change the score (buried
+        # among many zero-effect ones in the score-sorted plot) are foregrounded. The
+        # fewest-mm+b plot is score-only (its REF/ALT mm+b columns are derived inside the
+        # plot function, and a "change in edit count" delta is far less meaningful than a
+        # score delta).
+        _tag = "top_1000_by_variant_effect"
+        plot_with_CFD_score(
+            filter_table(df_guide, "cfd", sort_by="delta"), out_folder, guide, tag=_tag
+        )
+        plot_with_CRISPR_BULGE_score(
+            filter_table(df_guide, "crispr_bulge", sort_by="delta"), out_folder, guide,
+            tag=_tag,
+        )

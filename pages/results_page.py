@@ -6098,18 +6098,21 @@ def generate_sample_card(
         crisprme_plots_personal = (
             f"python {app_directory}/PostProcess/CRISPRme_plots_personal.py"
         )
-        crisprme_plots_personal_cmd = (
-            f"{crisprme_plots_personal} {targets_personal_fname} {imgsdir}/"
-        )
         code = subprocess.call(
-            f"{crisprme_plots_personal_cmd} {guide}.{sample}.personal", shell=True
+            f"{crisprme_plots_personal} {targets_personal_fname} {imgsdir}/ "
+            f"{guide}.{sample}.personal",
+            shell=True,
         )
         if code != 0:
             raise subprocess.SubprocessError(
                 f"Failed personal targets plot generation on sample {sample}"
             )
+        # the private plot is drawn from the private targets: it was drawn from the
+        # personal ones, so "Top 100 Private Targets" showed the personal plot again
         code = subprocess.call(
-            f"{crisprme_plots_personal_cmd} {guide}.{sample}.private", shell=True
+            f"{crisprme_plots_personal} {targets_private_fname} {imgsdir}/ "
+            f"{guide}.{sample}.private",
+            shell=True,
         )
         if code != 0:
             raise subprocess.SubprocessError(
@@ -7248,6 +7251,13 @@ def update_content_tab(
         if _score_img is not None:
             _t1000_parts += [
                 html.H5("Top 1000 candidate off-targets (ranked by score)"),
+                html.P(
+                    "Every site found is ranked, the perfect matches (0 mismatches and "
+                    "bulges) included: they are drawn as black stars. The on-target is "
+                    "one of them; any other one, in the reference or created by a "
+                    "variant, is an off-target as strong as the on-target.",
+                    style={"font-size": "1.05rem", "color": "#555"},
+                ),
                 _score_img,
             ]
         if _delta_img is not None:

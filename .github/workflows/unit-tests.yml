@@ -210,6 +210,13 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_risk_card -v
 
+      - name: "Top-1000 and Personal Risk Card plots draw every site (perfect matches starred, 1-edit sites kept)"
+        # CRISPRme_plots.py / CRISPRme_plots_personal.py dropped every site with
+        # mismatches+bulges <= 1, the on-target and any variant-created perfect match
+        # among them, with nothing on the plot to say so. matplotlib + pandas only.
+        working-directory: PostProcess
+        run: python -m unittest test_top_plots -v
+
       - name: "Observed-haplotypes sidecar (make_oh_sidecar: alt-origin superset, byte-identical rows, safe degrade)"
         working-directory: PostProcess
         run: python -m unittest test_make_oh_sidecar -v

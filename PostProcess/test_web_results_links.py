@@ -7,6 +7,7 @@
   (no ``_<criterion>`` suffix), and the Show Targets download looked under
   ``Results/<job>/<job>/`` with a leading dot, so it said "Please wait" for ever;
   a "tsv" in the job name sent the Show Targets zip to a folder that does not exist;
+* the Personal Risk Card drew its "Private" plot from the personal targets;
 * the job status page held the "view-results" link twice (one id, two elements).
 
 Run with:
@@ -238,6 +239,38 @@ class TestDownloadLinks(_Tmp):
                     poll(30, "missing", f"?job={job}"),
                     ("Download link unavailable (the file could not be generated).", True),
                 )
+
+
+class TestRiskCardPlots(_Tmp):
+    def test_private_plot_is_drawn_from_the_private_targets(self):
+        job = "card_ABC"
+        d = self._job(job, log="Job\tDone\tFri\n")
+        os.makedirs(os.path.join(d, "imgs"))
+        calls = []
+
+        def _call(cmd, shell=False):  # record the commands; make the plots they would
+            calls.append(cmd)
+            parts = cmd.split()
+            if "CRISPRme_plots_personal.py" in cmd:
+                out, tag = parts[-2], parts[-1]
+                for kind in ("CFD", "CRISPR_BULGE", "fewest"):
+                    open(os.path.join(out, f"CRISPRme_{kind}_top_1000_log_for_main_text_{tag}.png"),
+                         "wb").close()
+            return 0
+
+        with patch.object(rp.subprocess, "call", _call):
+            rp.generate_sample_card(1, "CFD", "S1", [{"row": 0}], [{"Guide": GUIDE}], f"?job={job}")
+        plots = [c for c in calls if "CRISPRme_plots_personal.py" in c]
+        self.assertEqual(len(plots), 2)
+        personal = os.path.join(d, f"{job}.S1.{GUIDE}.personal_targets.tsv")
+        private = os.path.join(d, f"{job}.S1.{GUIDE}.private_targets.tsv")
+        self.assertIn(f" {personal} ", plots[0])
+        self.assertTrue(plots[0].endswith(f"{GUIDE}.S1.personal"))
+        self.assertIn(f" {private} ", plots[1])
+        self.assertTrue(plots[1].endswith(f"{GUIDE}.S1.private"))
+        # and the two files hold what their names say
+        self.assertEqual(len(pd.read_csv(personal, sep="\t")), 2)  # S1 carries 2 sites
+        self.assertEqual(len(pd.read_csv(private, sep="\t")), 1)   # 1 of them only S1
 
 
 class TestStatusPageIds(unittest.TestCase):
