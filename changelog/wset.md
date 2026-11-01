@@ -218,23 +218,24 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
 - **`Other_motifs` and the alternative alignments count and list each reference alignment once.**
   The merge step of a search, which keeps each site's best alignment and lists the others as
   alternative alignments, took a site's reference rows as they came, and two steps before it give it
-  the same row more than once: each variant dataset's post-analysis carries every row of the one
-  reference search, and on the dict-less tiers (searches of a `--samplesID` build, of a downloaded
-  index such as the default one, and of a variant index built in the web Settings page) the
-  post-analysis also gives the reference alignment of each variant window again. So a search that
-  read the tiers counted each reference alignment over a SNP twice in `Other_motifs` (`444` where
-  the dictionaries gave `222`), a search of two variant datasets counted every reference alignment
-  once per dataset (`491` where one dataset gave `245`), and a per-sample search's file of
+  the same alignment more than once: each variant dataset's post-analysis carries every row of the
+  one reference search, and on the dict-less tiers (searches of a `--samplesID` build, of a
+  downloaded index such as the default one, and of a variant index built in the web Settings page)
+  the post-analysis also gives the reference alignment of each variant window again. So a search
+  that read the tiers counted each reference alignment over a SNP twice in `Other_motifs` (`444`
+  where the dictionaries gave `222`), a search of two variant datasets counted every reference
+  alignment once per dataset (`491` where one dataset gave `245`), and a per-sample search's file of
   alternative alignments listed each of them as many times, a copy of the site's best alignment
   among them. On chr22 of the default index, a per-sample search gave 6152 rows for its 4941
   alternative alignments, and 280 of its 1940 sites a higher `Other_motifs` (280 of 2356 at
   population level); on a 6-sample panel searched with a second dataset, 3779 rows for 1887. Each
-  reference alignment is now kept once: `Other_motifs`, the `#Seq_in_cluster` columns of the
-  `bestMerge` table, the alternative alignments and the results page's table change with it; the
-  best alignment of each site, its scores, carriers and allele frequencies are as before, and a
-  search of one dataset on its dictionaries, or of the reference alone, is unchanged. In the table
-  of a site's haplotypes (`observed_haplotypes.tsv`, and the report's), a haplotype's CRISPR-Bulge
-  score is taken from the rows of the alternative alignments, which pair the three criteria's lists
-  by position, so it can change with them: it did not on chr22 of the default index, and in the
-  two-dataset search 2 of its 5 rows did, one to `NA`. Run a search again for these counts and
-  lists.
+  reference alignment is now kept once. Rows equal in every column but `#Seq_in_cluster` and the two
+  score columns are one alignment: each dataset scores the rows itself, and CRISPR-Bulge can give
+  one alignment two values (`4.3390600000000004e-23` and `4.33904e-23`), of which the higher stays.
+  What changes is `Other_motifs` in the integrated table and on the results page, the
+  `#Seq_in_cluster` columns of the `bestMerge` table, the file of alternative alignments and the
+  `observed_haplotypes_raw` file made from it. The best alignment of each site, its scores, carriers
+  and allele frequencies are as before, `observed_haplotypes.tsv` and the report do not change, and
+  a search of one dataset on its dictionaries, or of the reference alone, is unchanged (a search
+  with a sites-only dataset changes further: see the entry on those). Run a search again for these
+  counts and lists.
