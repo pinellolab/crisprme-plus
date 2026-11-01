@@ -1742,10 +1742,15 @@ def settings_page() -> List:
     vcf_card = _add_card(
         "Add a VCF dataset",
         "Variant datasets are large, so they are fetched server-side (from "
-        "HuggingFace, a URL, or an existing folder on this machine) or chunk-"
-        "uploaded. CRISPRme works with the files kept COMPRESSED — provide "
-        "bgzip-compressed, per-chromosome files (the chromosome in the file name, "
-        f"e.g. mydata.chr1.vcf.gz); no flat .vcf. Space: {_SIZE_HINTS['vcf']}.",
+        "HuggingFace, or an existing folder on this machine) or chunk-uploaded. "
+        "CRISPRme works with the files kept COMPRESSED — provide bgzip-compressed, "
+        "per-chromosome files (the chromosome in the file name, e.g. "
+        "mydata.chr1.vcf.gz); no flat .vcf. A single multi-chromosome .vcf.gz is "
+        "split per chromosome when you build an index from it (upload its .tbi too, "
+        "or CRISPRme indexes it). Searches read the dataset's samples from "
+        "samplesIDs/<name>.samplesID.txt, written from the VCF header when there is "
+        "none; to give their populations and sex, put your own 4-column list there "
+        f"before you build the index. Space: {_SIZE_HINTS['vcf']}.",
         [
             dbc.Row(
                 [
@@ -2295,9 +2300,22 @@ def _publish_index_section() -> List:
 # ---------------------------------------------------------------------------
 # Launch callbacks (all guarded against ONLINE mode)
 # ---------------------------------------------------------------------------
+_STARTED = "Started — progress is shown in the Activity panel on the right. ↗"
+
+
 def _start(job_id: str):
-    """Standard 3-tuple for a launched job: (store, interval-enabled, feedback)."""
-    return job_id, False, "Started — progress is shown in the Activity panel on the right. ↗"
+    """Standard 3-tuple for a launched job: (store, interval-enabled, feedback). The
+    feedback is in the page's neutral colour (the card's own colour is for errors),
+    and goes once the job has ended (_lock_buttons_while_busy)."""
+    return job_id, False, html.Span(_STARTED, style={"color": "#555"})
+
+
+def _shows_started(feedback) -> bool:
+    """Whether a card's feedback (a callback State: a string, or a component as JSON)
+    is _start's message."""
+    if isinstance(feedback, dict):
+        feedback = (feedback.get("props") or {}).get("children")
+    return feedback == _STARTED
 
 
 def _fb_refresh(msg, refresh: bool = False):
@@ -3042,13 +3060,23 @@ _LOCKABLE_BUTTON_IDS = [
 ]
 
 
+# The cards whose feedback _start's message goes into (each launches a job).
+_JOB_FEEDBACK_IDS = ["genome-feedback", "index-feedback", "vcf-feedback", "hprc-fetch-feedback"]
+
+
 @app.callback(
-    [Output(bid, "disabled") for bid in _LOCKABLE_BUTTON_IDS],
+    [Output(bid, "disabled") for bid in _LOCKABLE_BUTTON_IDS]
+    + [Output(fid, "children", allow_duplicate=True) for fid in _JOB_FEEDBACK_IDS],
     [Input("settings-active-job", "data")],
+    [State(fid, "children") for fid in _JOB_FEEDBACK_IDS],
     prevent_initial_call=True,
 )
-def _lock_buttons_while_busy(active_job):
-    return [bool(active_job)] * len(_LOCKABLE_BUTTON_IDS)
+def _lock_buttons_while_busy(active_job, *feedback):
+    """Disables the data-mutating buttons while a job is active; once it has ended
+    (refresh_settings_job clears the active job), clears the 'Started' message of the
+    card that launched it."""
+    cleared = [no_update if active_job or not _shows_started(f) else "" for f in feedback]
+    return [bool(active_job)] * len(_LOCKABLE_BUTTON_IDS) + cleared
 
 
 # ---------------------------------------------------------------------------

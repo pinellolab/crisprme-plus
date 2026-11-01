@@ -1216,6 +1216,30 @@ class TestAnnotationUploadResetsItsContents(unittest.TestCase):
         self.assertIn("'Manage annotations' for hg38", out[0].args[0])
 
 
+# --- the 'Started' message (walk P15 (2)) ---------------------------------------------
+class TestStartedFeedback(unittest.TestCase):
+    def setUp(self):
+        self.ns = _load_functions(
+            ["_STARTED", "_start", "_shows_started", "_LOCKABLE_BUTTON_IDS",
+             "_JOB_FEEDBACK_IDS", "_lock_buttons_while_busy"],
+            no_update=_NO_UPDATE,
+        )
+
+    def test_started_in_the_neutral_colour(self):
+        job, enabled, feedback = self.ns["_start"]("set_ABCDEFGH12")
+        self.assertEqual((job, enabled), ("set_ABCDEFGH12", False))
+        self.assertEqual(feedback.args, (self.ns["_STARTED"],))
+        self.assertEqual(feedback.kwargs["style"]["color"], "#555")
+
+    def test_cleared_once_the_job_has_ended(self):
+        started = {"props": {"children": self.ns["_STARTED"], "style": {"color": "#555"}},
+                   "type": "Span", "namespace": "dash_html_components"}
+        error = "Select an installed genome and PAM."
+        n = len(self.ns["_LOCKABLE_BUTTON_IDS"])
+        out = self.ns["_lock_buttons_while_busy"]("set_ABCDEFGH12", started, error, None, started)
+        self.assertEqual(out, [True] * n + [_NO_UPDATE] * 4)  # running: kept
+        out = self.ns["_lock_buttons_while_busy"](None, started, error, None, self.ns["_STARTED"])
+        self.assertEqual(out, [False] * n + ["", _NO_UPDATE, _NO_UPDATE, ""])
 
 
 if __name__ == "__main__":
