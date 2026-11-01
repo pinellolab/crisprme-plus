@@ -2672,7 +2672,18 @@ class BuildLocksInTheShippedScript(_ShippedScript):
                 _reap(run.proc)
                 continue
             os.killpg(run.proc.pid, signal.SIGINT)
-            run.proc.wait(timeout=30)
+            try:
+                run.proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                # Late (this test descheduled, under load): the takeover was over when
+                # the Ctrl-C came ("Stale lock" is out), and bash 5.2 can lose a trapped
+                # signal as it expands a $(...) -- the line after the takeover expands
+                # $(date), and the script's note on its traps says they stay best-effort
+                # there -- so the run went on to its build. Missed, as above.
+                if f"Stale lock {self.lock}: " not in (run.work / "stdout.txt").read_text():
+                    raise
+                _reap(run.proc)
+                continue
             self.assertEqual(run.proc.returncode, -signal.SIGINT)
             self.assertTrue((self.lock / "owner").is_file())  # the lock is left, not let go
             self.assertEqual(_wait_until_gone(run.proc.pid), [])
