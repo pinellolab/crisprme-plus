@@ -26,6 +26,10 @@ on:
       # must still run it.
       - "app.py"
       - "index.py"
+      # test_install_from_source runs the installer and checks that what it leaves in
+      # the checkout is ignored, so a PR touching only these two must still run it.
+      - "install_from_source.sh"
+      - ".gitignore"
       - ".github/workflows/unit-tests.yml"
   push:
     branches: [ "main", "python3.11", "2.2.0-dev" ]

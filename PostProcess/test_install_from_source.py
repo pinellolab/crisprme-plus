@@ -10,7 +10,8 @@ Run with a stub `uname` on PATH and no conda env, so that without the guard the 
 stops at its next check (the activated env), never at the build; a stub `git` would
 fail loudly if it ever got that far.
 
-What the script leaves in the checkout is ignored by git.
+What the script leaves in the checkout is ignored by git, and a pull request that
+changes only the script or the .gitignore still runs this module in CI.
 """
 import ast
 import os
@@ -21,6 +22,7 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "install_from_source.sh"
+WORKFLOW = SCRIPT.parent / ".github" / "workflows" / "unit-tests.yml"
 
 
 def search_data_folders():
@@ -33,6 +35,22 @@ def search_data_folders():
                 if isinstance(t, ast.Name) and t.id == "CRISPRMEDIRS":
                     return ast.literal_eval(node.value)
     raise AssertionError("CRISPRMEDIRS not found as a module-level literal in crisprme.py")
+
+
+def pull_request_paths():
+    """The `on: pull_request: paths:` entries of unit-tests.yml, read as text: the CI env
+    has no YAML parser (and YAML 1.1 reads the `on` key as true)."""
+    lines = WORKFLOW.read_text().splitlines()
+    i = lines.index("    paths:", lines.index("  pull_request:", lines.index("on:")))
+    paths = []
+    for line in lines[i + 1:]:
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        if not entry.startswith("- "):
+            break
+        paths.append(entry[2:].strip("\"'"))
+    return paths
 
 
 class TheSourceBuildRefusesMacOS(unittest.TestCase):
@@ -95,6 +113,19 @@ class WhatTheInstallerLeavesInTheCheckoutIsIgnored(unittest.TestCase):
 
     def test_a_new_file_beside_the_tracked_test_annotations_is_not(self):
         self.assertEqual(self.ignored("test/data/Annotations/new.bed.tar.gz"), [])
+
+
+@unittest.skipUnless(WORKFLOW.is_file(), "needs the checkout's unit-tests.yml beside the script")
+class APullRequestToWhatThisChecksRunsIt(unittest.TestCase):
+    """unit-tests.yml runs on a pull request only for the paths it lists, and none of
+    them covered the two files this module checks outside PostProcess/: a pull request
+    that changed only install_from_source.sh or the .gitignore (dropping /Annotations/,
+    say) did not run it before the merge."""
+
+    def test_the_installer_and_the_gitignore_are_pull_request_paths(self):
+        paths = pull_request_paths()
+        self.assertIn("install_from_source.sh", paths)
+        self.assertIn(".gitignore", paths)
 
 
 if __name__ == "__main__":
