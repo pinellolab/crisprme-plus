@@ -865,7 +865,8 @@ if _indel_snp and _gt is None:
 _snp_cache = {}    # pos1 -> {alt: {sample: genotype}} from the genotype source
 _igt_cache = {}    # indel token -> its carriers (indel_snp_cis.IndelCarriers)
 # how the overlaid targets were resolved (printed at the end, on stdout)
-_ovl_stats = {"targets": 0, "rows": 0, "dropped": 0, "putative": 0, "unmapped": 0}
+_ovl_stats = {"targets": 0, "rows": 0, "dropped": 0, "putative": 0, "unmapped": 0,
+              "second_indel": 0}
 
 
 def _snp_record(pos1):
@@ -1095,9 +1096,52 @@ def _overlaid_rows(line, final_result, indel_data, amb):
     return out
 
 
+def _second_indel_rows(line, final_result, indel_data):
+    """A target with no IUPAC code is the same sequence on every slot that carries
+    its indel -- except a slot that also carries a second indel inside the target,
+    which the one-indel fake-indel window cannot hold. With the phased indel store,
+    such carriers leave the row (the log's list, in its order); a row left with no
+    carrier is dropped. Without a second indel there (nearly always) the row is the
+    one the engine reported, unchanged."""
+    if _indelgt is None or not _indel_snp:
+        return [final_result]
+    _ipos, _iref, _ialt, _istart = _indel_window(indel_data)
+    real_of = _isc.build_offset_to_real(
+        line[2], int(line[4]), line[6], int(indel_data[5]), _istart, _iref, _ialt)
+    span = [r for r in real_of if r is not None]
+    others = _other_indels(min(span), max(span), _ipos, _iref, _ialt) if span else ()
+    if not others:
+        return [final_result]
+    key = indel_data[4]
+    carriers = _igt_cache.get(key)
+    if carriers is None:
+        if len(_igt_cache) > 2000:
+            _igt_cache.clear()
+        igt = _indelgt.carriers_dict(_ipos, _iref, _ialt)
+        carriers = _isc.IndelCarriers(igt) if igt else _isc.IndelCarriers(
+            {s: "0/1" for s in indel_data[1].split(",") if s}, phase_known=False)
+        _igt_cache[key] = carriers
+    exact, putative = _isc.resolve_carriers([], carriers, others=others)
+    kept = set().union(*[e[0] for e in exact.values()], *putative.values())
+    gone = set(carriers.parsed) - kept
+    if not gone:
+        return [final_result]
+    _ovl_stats["second_indel"] += 1
+    left = [s for s in final_result[12].split(",") if s and s not in gone]
+    if not left:
+        return []
+    fr = final_result.copy()
+    fr[12] = ",".join(left)
+    return [fr]
+
+
 def _report_overlaid():
     """One stdout line on how the overlaid targets were resolved (stdout only:
     the pipeline treats any stderr write as a fatal stage failure)."""
+    if _ovl_stats["second_indel"]:
+        print("indel-snp: %d target(s) without a SNP code lost the carriers whose "
+              "haplotype holds a second indel inside them"
+              % _ovl_stats["second_indel"], flush=True)
     if not _ovl_stats["targets"]:
         return
     print("indel-snp: %s overlaid target(s) resolved per carrier haplotype into %d "
@@ -1278,10 +1322,12 @@ for line in inResult:
     # fake-indel genome) stands for every combination of its SNP alleles at once:
     # resolve it per carrier haplotype, one row per sequence a carrier really has.
     # A target with no code is the same sequence for every carrier of the indel and is
-    # reported as the engine found it (the classic path, byte-identical).
+    # reported as the engine found it, less any carrier whose haplotype holds a second
+    # indel inside it (_second_indel_rows; a classic, non-overlaid build has no phased
+    # indel store, so its rows are untouched).
     _amb = _isc.ambiguous_columns(line[2])
     for _row in (_overlaid_rows(line, final_result, indel_data, _amb) if _amb
-                 else (final_result,)):
+                 else _second_indel_rows(line, final_result, indel_data)):
         _queue_row(_row)
 
     if len(cluster_to_save) >= 100000:
