@@ -15,9 +15,10 @@ viewer: false
 # CRISPRme+ general indexes — wide-flank, PAM-less
 
 One index that serves **many PAMs**. A *general* index stores the raw genomic
-flank instead of a fixed PAM, so a single build answers searches for any PAM no
-longer than that flank — `NGG`, `NRG`, `NRR`, `NGA`, `NAG`, `TTTV`, `NNGRRT` and
-so on — with the PAM applied at search time by `--prune-pam`.
+flank instead of a fixed PAM, so a single build answers searches for any 3′ PAM no
+longer than that flank — `NGG`, `NRG`, `NRR`, `NGA`, `NAG`, `NNGRRT` and so on —
+with the PAM applied at search time by `--prune-pam` (a 5′ PAM only at the flank's
+full width: see the orientation limit below).
 
 Pulled by `crisprme.py download --what index --index-name <name>`, which routes
 to this repo automatically for any flank wider than 3.
@@ -55,8 +56,8 @@ crisprme-data-general-index/
 
 | Index | Flank | Serves | Variants |
 |---|---|---|---|
-| `NNNNNNNN_3_hg38` | 8 nt | any PAM of length ≤ 8 | none (reference-only) |
-| `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 8 nt | any PAM of length ≤ 8 | HGDP + 1000 Genomes, genotyped-phased (SHAPEIT5 re-phased) |
+| `NNNNNNNN_3_hg38` | 8 nt | any 3′ PAM of length ≤ 8 (a 5′ PAM only at exactly 8) | none (reference-only) |
+| `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | 8 nt | any 3′ PAM of length ≤ 8 (a 5′ PAM only at exactly 8) | HGDP + 1000 Genomes, genotyped-phased (SHAPEIT5 re-phased) |
 
 The variant archive bundles its `_INDELS` companion. Its per-sample genotype
 store, `genotypes_hg38_HGDP1kGP.tar.gz`, is published here as well, byte-identical
@@ -98,7 +99,7 @@ index cannot be used from the web interface.
 
 ## Equivalence claim
 
-A PAM-less index of flank *K* searched with `--prune-pam` and a PAM of length
+A PAM-less index of flank *K* searched with `--prune-pam` and a 3′ PAM of length
 *L ≤ K* produces the **same report as a dedicated index built for that PAM**.
 Verified genome-wide at `NRG` 4 mismatches + 1 DNA bulge + 1 RNA bulge over HGDP +
 1000 Genomes with per-sample resolution: the flank-8 arm, the flank-3 arm and the

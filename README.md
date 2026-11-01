@@ -214,12 +214,13 @@ NGG cannot serve NAG off-targets, so NRG stays the recommended PAM for a safety 
 
 **One index for many PAMs.** Each index above is built for one PAM. A
 **PAM-less** index instead stores the raw genomic flank, and the PAM is applied during the
-search, so a single index answers any PAM no longer than that flank:
+search, so a single index answers any 3′ PAM no longer than that flank (a 5′ PAM only at the
+flank's full width):
 
 ```bash
 crisprme.py complete-search --prune-pam \
   --index-path ./genome_library \
-  --pam ./PAMs/20bp-NRG-SpCas9.txt  ...   # or NGG, NAG, any PAM up to the flank width
+  --pam ./PAMs/20bp-NRG-SpCas9.txt  ...   # or NGG, NAG, any 3′ PAM up to the flank width
 ```
 
 | Index (`--index-name`) | Flank | Serves | Download |

@@ -129,8 +129,9 @@ is about 432 GB, so fetch single archives rather than the repo):
 | `NNNNNNNN_3_hg38`, `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | `crisprme-data-general-index` | 82.2 GB, 122.7 GB |
 
 **The PAM-less (`NNN_*`) indexes** store the raw genomic flank instead of a matched PAM,
-so one index answers any PAM no longer than that flank when the search passes
-`--prune-pam` (see [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+so one index answers any 3′ PAM no longer than that flank (a 5′ PAM only at the flank's
+full width) when the search passes `--prune-pam` (see
+[METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
 They carry exactly the same variant data and `Dictionaries/` as the dedicated index for the
 same panel — those tiers are PAM-independent — and a `--prune-pam` run over one is
 byte-identical to the dedicated index for that PAM, verified genome-wide. They are
