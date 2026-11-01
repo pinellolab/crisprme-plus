@@ -7263,13 +7263,17 @@ def update_content_tab(
         )
         _t1000_parts = []
         if _score_img is not None:
+            # The plot is the image the search drew when it ran: one drawn by an older
+            # CRISPRme (its jobs stay in Results/) left these sites out, unstarred.
             _t1000_parts += [
                 html.H5("Top 1000 candidate off-targets (ranked by score)"),
                 html.P(
                     "Every site found is ranked, the perfect matches (0 mismatches and "
                     "bulges) included: they are drawn as black stars. The on-target is "
                     "one of them; any other one, in the reference or created by a "
-                    "variant, is an off-target as strong as the on-target.",
+                    "variant, is an off-target as strong as the on-target. A plot drawn "
+                    "before CRISPRme 2.8.1 leaves out every site with 0 or 1 mismatches "
+                    "and bulges: run the search again to draw them.",
                     style={"font-size": "1.05rem", "color": "#555"},
                 ),
                 _score_img,

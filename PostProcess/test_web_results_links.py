@@ -11,6 +11,8 @@
   ``Results/<job>/<job>/`` with a leading dot, so it said "Please wait" for ever;
   a "tsv" in the job name sent the Show Targets zip to a folder that does not exist;
 * the Personal Risk Card drew its "Private" plot from the personal targets;
+* the Graphical Reports caption said that the perfect matches are drawn as black
+  stars, also above a plot drawn before 2.8.1, which leaves them out;
 * the job status page held the "view-results" link twice (one id, two elements).
 
 Run with:
@@ -323,6 +325,33 @@ class TestRiskCardPlots(_Tmp):
         # and the two files hold what their names say
         self.assertEqual(len(pd.read_csv(personal, sep="\t")), 2)  # S1 carries 2 sites
         self.assertEqual(len(pd.read_csv(private, sep="\t")), 1)   # 1 of them only S1
+
+
+class TestGraphicalReportsCaption(_Tmp):
+    def _tab(self, job):
+        return _text(rp.update_content_tab(
+            "tab-summary-graphical", [{"row": 0}], "CFD", [{"Guide": GUIDE}],
+            f"?job={job}", "both",
+        ))
+
+    def test_caption_holds_for_a_plot_drawn_before_this_release(self):
+        # The tab shows the plot the search drew when it ran. A job run before 2.8.1
+        # (kept in Results/ across an upgrade) has a plot without the sites with 0 or
+        # 1 mismatches + bulges and without stars, under a caption that said the
+        # perfect matches are drawn as black stars: as if the guide had none.
+        job = "graph_ABC"
+        d = self._job(job, log="Job\tDone\tFri\n")
+        os.makedirs(os.path.join(d, "imgs"))
+        text = self._tab(job)
+        self.assertNotIn("Top 1000 candidate off-targets", text)  # no plot, no caption
+        open(os.path.join(d, "imgs", f"CRISPRme_CFD_top_1000_log_for_main_text_{GUIDE}.png"),
+             "wb").close()
+        text = self._tab(job)
+        self.assertIn("Top 1000 candidate off-targets (ranked by score)", text)
+        self.assertIn("perfect matches (0 mismatches and bulges) included: they are drawn as "
+                      "black stars", text)
+        self.assertIn("A plot drawn before CRISPRme 2.8.1 leaves out every site with 0 or 1 "
+                      "mismatches and bulges: run the search again to draw them.", text)
 
 
 class TestStatusPageIds(unittest.TestCase):

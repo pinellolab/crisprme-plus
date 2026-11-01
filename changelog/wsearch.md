@@ -25,28 +25,29 @@ was found by the 2.8.1 web walkthrough or its review and is older.
   job. **What to do:** for a web job that may have been answered
   by an earlier one, check its `.search_mode` and report against what you asked for, or submit
   it again with another job name. Covered by `PostProcess/test_web_search_reuse.py`.
-- **The "Top 1000 candidate off-targets" plots and the Personal Risk Card "Top 100" plots left
-  out every site with 0 or 1 mismatches + bulges**, with nothing on the plot to say so: every
+- **The "Top 1000 candidate off-targets" plots and the Personal Risk Card "Top 100" plots left out
+  every site with 0 or 1 mismatches + bulges**, with nothing on the plot to say so: every
   1-mismatch-or-bulge off-target and every perfect match, the on-target and any variant-created
-  perfect match among them, the strongest sites of all. In the walkthrough's variant search the
-  CFD plot showed 9 of the 18 sites found (the four perfect matches and the five 1-edit sites,
-  CFD 0.077 to 1.0, were missing), and sample S1's card plot 1 of its 3 personal targets. They are plotted now, the
-  perfect matches marked with a black star and a legend entry, and the Graphical Reports tab says
-  so under the plot. A plot of a single site without a variant is drawn too: it failed, and no
-  later plot was drawn, so a search whose only off-target with 2 or more mismatches + bulges was
-  a reference one got no top-1000 plots (the error was discarded). The
-  card's "Top 100 Private Targets" plot was drawn from the personal
-  targets, so it repeated the personal plot; it is drawn from the private ones now (an empty plot
-  for a sample with none). **What changes:** the plot images a search writes to its `imgs/`
-  folder (`CRISPRme_{CFD,CRISPR_BULGE,fewest}_top_1000_log_for_main_text_<guide>` and
+  perfect match among them, the strongest sites of all. In the walkthrough's variant search the CFD
+  plot showed 9 of the 18 sites found (the four perfect matches and the five 1-edit sites, CFD
+  0.077 to 1.0, were missing), and sample S1's card plot 1 of its 3 personal targets. They are
+  plotted now, the perfect matches marked with a black star and a legend entry, and the caption
+  above the plot on the Graphical Reports tab says so. A plot of a single site without a variant is
+  drawn too: it failed, and no later plot was drawn, so a search whose only off-target with 2 or
+  more mismatches + bulges was a reference one got no top-1000 plots (the error was discarded). The
+  card's "Top 100 Private Targets" plot was drawn from the personal targets, so it repeated the
+  personal plot; it is drawn from the private ones now (an empty plot for a sample with none).
+  **What changes:** the plot images a search writes to its `imgs/` folder
+  (`CRISPRme_{CFD,CRISPR_BULGE,fewest}_top_1000_log_for_main_text_<guide>` and
   `CRISPRme_{CFD,CRISPR_BULGE}_top_1000_by_variant_effect_<guide>`, `.png` and `.pdf`), from the
   web and from `complete-search`, as shown on the Graphical Reports tab, on the personal-assembly
-  results page and in the combined personal-assembly report; and the Personal Risk Card plots,
-  on the web and from `generate-personal-card`. Search results and every table are unchanged;
-  the shareable report draws its own plots and tables, and still leaves these sites out of them
-  (next entry). Plots made before this release stay as they are: run the search again for new
-  ones (a Risk Card made earlier shows its saved plots).
-  Covered by `PostProcess/test_top_plots.py` and `PostProcess/test_web_results_links.py`.
+  results page and in the combined personal-assembly report; and the Personal Risk Card plots, on
+  the web and from `generate-personal-card`. Search results and every table are unchanged; the
+  shareable report draws its own plots and tables, and still leaves these sites out of them (next
+  entry). Plots made before this release stay as they are, and that caption, shown above them too,
+  says that a plot drawn before 2.8.1 leaves these sites out: run the search again for new ones (a
+  Risk Card made earlier shows its saved plots). Covered by `PostProcess/test_top_plots.py` and
+  `PostProcess/test_web_results_links.py`.
 - **The shareable report did not say that its top-1000 plots and tables leave out the sites with
   0 or 1 mismatches + bulges.** Its Section 2 plots and its Section 6 tables, with their
   downloads `top1000.tsv` and `top1000_crispr_bulge.tsv` (and the Section 5 tables of the
