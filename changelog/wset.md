@@ -47,21 +47,26 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   built (or built again) in Settings now read them, as searches of a command-line `--samplesID`
   build and of a downloaded index do, where they read the dataset's dictionaries before. On a phased
   dataset a search now runs per-sample by default, as on the default index (*Population-level* on
-  the search form is the faster worst-possible screen). Measured on a phased 6-sample panel, with a
-  population-level search of one index on its dictionaries and then on its tiers, the tables change
-  as follows: an indel and a SNP that one haplotype carries are reported as one off-target, for the
-  samples that carry both (the dictionaries gave the SNP alone, aligned with a bulge, or, for the
-  fewest mismatches and bulges, the indel alone, for every sample that carries either); a SNP's
-  allele frequency is computed from the genotypes of the samples the list names, to six significant
-  digits (`0.333333`), where the dictionaries gave the VCF's `AF` (`0.3333`), and an indel's is
-  still the VCF's; `Other_motifs` counts the alignments the tiers give at a site: one more at the
-  site of that indel and SNP (their row), and one fewer at a site where the dictionaries also listed
-  the reference alignment as a variant one, for the carriers of a SNP that destroys its PAM; and
-  rows come in another order. The result folder also holds the SNP + indel and SNP + SNP
-  co-occurrence and phase-confirmation tables, and the shareable report gives the dataset's SNP and
-  indel counts and its SNP + indel cis co-occurrences. A dataset built in Settings before this
-  release has no tiers until its variant index is built again there, and its searches read its
-  dictionaries until then, as before.
+  the search form is the faster worst-possible screen), and a per-sample search names on each row
+  only the samples one of whose haplotypes carries all of the row's variants (of two samples with
+  the same two SNPs, one that carries both on one haplotype is named on the row of both SNPs, and
+  one that carries one on each haplotype is not, where a population-level search names both).
+  Measured on a phased 6-sample panel, with a population-level search of one index on its
+  dictionaries and then on its tiers, the tables change as follows: an indel and a SNP that one
+  haplotype carries are reported as one off-target, for the samples one of whose haplotypes carries
+  both (the dictionaries gave the SNP alone, aligned with a bulge, or, for the fewest mismatches and
+  bulges, the indel alone, for every sample that carries either; a sample that carries them on
+  different haplotypes is no longer named at that site, and the per-sample summary and the report's
+  threshold counts change with that row); a SNP's allele frequency is computed from the genotypes of
+  the samples the list names, to six significant digits (`0.333333`), where the dictionaries gave
+  the VCF's `AF` (`0.3333`), and an indel's is still the VCF's; `Other_motifs` counts the alignments
+  the tiers give at a site: one more at the site of that indel and SNP (their row), and one fewer at
+  a site where the dictionaries also listed the reference alignment as a variant one, for the
+  carriers of a SNP that destroys its PAM; and rows come in another order. The result folder also
+  holds the SNP + indel and SNP + SNP co-occurrence and phase-confirmation tables, and the shareable
+  report gives the dataset's SNP and indel counts and its SNP + indel cis co-occurrences. A dataset
+  built in Settings before this release has no tiers until its variant index is built again there,
+  and its searches read its dictionaries until then, as before.
 - **A genome uploaded in the web Settings page under the name of an installed genome replaces it,
   and is refused while indexes built on a genome of that name are installed.** The upload went into
   that genome's folder, beside the files already there (and so into the shared copy, when that
