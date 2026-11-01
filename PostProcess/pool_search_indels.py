@@ -46,7 +46,8 @@ def _logged_no_indels(log_dir: str, chrom: str) -> bool:
     2.9.1 the same state silently produced an empty result.
 
     A missing log returns False -- unknown, so the search runs, and an index that
-    is empty although its log lists indels still fails loudly.
+    is empty although its log lists indels still fails loudly, unless it is shown to
+    hold no target (``_empty_index``).
     """
     for name in (f"log{chrom}.txt.gz", f"log{chrom}.txt"):
         path = os.path.join(log_dir, name)
@@ -96,6 +97,39 @@ def _dataset_chroms(vcf_dir: str, log_indels_dir: str):
     )
 
 
+# What search_indels did with a chromosome.
+SEARCHED, SKIPPED, REFUSED = "searched", "skipped", "refused"
+
+# The record pool_index_indels.py writes into a chromosome's sub-index that buildTST
+# built with no target: its indels are there, but no window of one holds a site of
+# the PAM, so there is no .bin.
+NO_TARGETS = ".no_targets"
+
+
+def _holds_bin(index_dir: str) -> bool:
+    """Whether ``index_dir`` holds a tree, a regular file ``<name>.bin``: what
+    CRISPRitz 2.9.1's searchTST loads, which refuses a directory with none. True
+    where it cannot be listed: the engine then says what is wrong, as before."""
+    try:
+        names = os.listdir(index_dir)
+    except OSError:
+        return True
+    return any(
+        len(f) > 4 and f.endswith(".bin") and os.path.isfile(os.path.join(index_dir, f))
+        for f in names
+    )
+
+
+def _index_pam(pam_path: str) -> str:
+    """The PAM index-genome names an index by, read from a PAM file as crispritz.py
+    reads it: the first |n| bases of its sequence for a 5' PAM (n < 0), the last n
+    for a 3' one."""
+    with open(pam_path) as fh:
+        seq, size = fh.read().split()[:2]
+    size = int(size)
+    return seq[:-size] if size < 0 else seq[-size:]
+
+
 ref_folder = sys.argv[1]
 ref_name = os.path.basename(sys.argv[1])
 vcf_dir = sys.argv[2]
@@ -125,6 +159,69 @@ prune_pam = sys.argv[15] if len(sys.argv) > 15 else "0"
 prune_pam_flag = "--prune-pam" if prune_pam == "1" else ""
 
 
+def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
+    """``(True, why)`` when ``chrom``'s sub-index, which holds no .bin, holds no target
+    either, so no indel off-target is the answer there; else ``(False, error)``, an
+    ERROR that names how to rebuild it.
+
+    pool_index_indels.py records a build that found no target (NO_TARGETS). An index
+    built before it did has no record: there the fake-indel genome it was built from
+    tells, read by buildTST's own rule (crispritz_bins, as build-index-only checks a
+    build): when no contig of it holds a target of the search's PAM, a build for this
+    search holds no .bin. Anything else may be a broken or partial build, and the
+    search must not pass it off as an empty result.
+    """
+    if os.path.isfile(os.path.join(indexed_fakechrom, NO_TARGETS)):
+        return True, (f"No {true_pam} target in the indels of {chrom}: skipping its indel "
+                      f"search (its index was built with none)")
+    cwd = os.path.normpath(current_working_directory)
+    indels_index = os.path.dirname(os.path.normpath(indexed_fakechrom))
+    remove = [indels_index]
+    pam_arg = f"'{pam_file}'"
+    again = ""  # how to download it again, for one that came that way
+    try:
+        import crispritz_bins
+
+        search_pam = _index_pam(pam_file)
+        # (the FASTAs index-genome would index there)
+        fasta = os.path.isdir(raw_fakechrom) and any(
+            f.strip().split(".")[-1] == "fa" for f in os.listdir(raw_fakechrom))
+        if search_pam != true_pam:  # (a PAM-less index serving the search's PAM)
+            why = f"it is an index of {true_pam} searched for {search_pam}, which this cannot check"
+            pam_arg = f"<the PAM file of {true_pam}>"
+        elif not fasta:
+            why = (f"the fake-indel genome it was built from ({raw_fakechrom}) is not here to "
+                   f"check it against")
+            # build-index-only makes that genome as it enriches, and with an enriched
+            # genome in place it takes the dataset for one without indels
+            remove.append(os.path.join(cwd, "Genomes", f"{ref_name}+{vcf_name}"))
+            # (a downloaded index comes without it; download skips an index in place)
+            variant = indels_index[: -len("_INDELS")]
+            again = (f"; or, for an index you downloaded, download it again: rm -rf "
+                     f"'{variant}' '{indels_index}' && crisprme.py download --what index "
+                     f"--index-name {os.path.basename(variant)} --path '{cwd}'")
+        else:
+            missing, unread = crispritz_bins.missing_bins(
+                indexed_fakechrom, raw_fakechrom, pam_file, int(bMax))
+            if not missing and not unread:
+                return True, (f"No {true_pam} target in the indels of {chrom}: skipping its "
+                              f"indel search (its index holds no .bin, and {raw_fakechrom} "
+                              f"no target)")
+            why = (f"{os.path.join(raw_fakechrom, missing[0][0])} holds a target of "
+                   f"{true_pam}: the index is incomplete" if missing else
+                   f"{os.path.join(raw_fakechrom, unread[0])} cannot be read as buildTST reads it")
+    except (ImportError, OSError, ValueError, IndexError) as exc:
+        why = f"it could not be checked ({exc})"
+    # the bulges build-index-only builds the index's N from
+    n = int(bMax) - 1 if bMax.isdigit() and int(bMax) > 0 else bMax
+    removed = " ".join("'%s'" % p for p in remove)
+    rebuild = (f"rm -rf {removed} && crisprme.py build-index-only --genome '{ref_folder}' "
+               f"--pam {pam_arg} --bDNA {n} --bRNA {n} --vcf '{vcf_dir}' --path '{cwd}'")
+    return False, (f"ERROR: the indel index of {chrom} ({indexed_fakechrom}) holds no .bin "
+                   f"and no record that its build found no target there (an index built "
+                   f"before CRISPRme 2.8.1 has none), and {why}. Rebuild it: {rebuild}{again}")
+
+
 def search_indels(chrom):
     """Run the per-chromosome indel off-target search for one fake-indel chromosome.
 
@@ -145,13 +242,14 @@ def search_indels(chrom):
     calling shell guarantees the indexed ``_INDELS`` dir exists or errors out before this
     script runs).
 
-    Returns True when the chromosome was skipped because it has no indels (see
-    ``_logged_no_indels``); it then writes no part file, and the merge knows why.
+    Returns SKIPPED when the chromosome has no indels (see ``_logged_no_indels``),
+    or its sub-index no .bin and no target (``_empty_index``): it then writes no part
+    file, and the merge knows why. REFUSED when that sub-index may be broken: it has
+    said why on stderr, and nothing is merged.
     """
     if _logged_no_indels(log_indels_dir, chrom):
         print(f"No indels on {chrom}: skipping its indel search (no indel off-target possible)", flush=True)
-        return True
-    print("Searching for INDELs in", chrom)
+        return SKIPPED
     indexed_fakechrom = os.path.join(
         current_working_directory,
         "genome_library",
@@ -164,6 +262,15 @@ def search_indels(chrom):
         f"{ref_name}+{vcf_name}_INDELS",
         f"fake_{vcf_name}_{chrom}",
     )
+    if os.path.isdir(indexed_fakechrom) and not _holds_bin(indexed_fakechrom):
+        empty, said = _empty_index(chrom, indexed_fakechrom, raw_fakechrom)
+        if empty:
+            print(said, flush=True)
+            return SKIPPED
+        sys.stderr.write(said + "\n")
+        sys.stderr.flush()
+        return REFUSED
+    print("Searching for INDELs in", chrom)
     out_name = f"fake{chrom}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}"
     if os.path.isdir(indexed_fakechrom) or not os.path.isdir(raw_fakechrom):
         # Preferred / batteries path: indexed search (valid for 0 bulges too).
@@ -180,7 +287,7 @@ def search_indels(chrom):
             f"{out_name} -mm {mm} -t -th 1 >/dev/null"
         )
     print("Search ended for INDELs in", chrom)
-    return False
+    return SEARCHED
 
 
 log_indels_dir = os.path.join(current_working_directory, "Dictionaries", "log_indels_" + vcf_name)
@@ -198,15 +305,20 @@ chrs = _dataset_chroms(vcf_dir, log_indels_dir)
 os.chdir(output_folder)
 # with Pool(processes=t) as pool:
 with Pool(processes=threads) as pool:
-    skipped = {c for c, was_skipped in zip(chrs, pool.map(search_indels, chrs)) if was_skipped}
+    outcomes = pool.map(search_indels, chrs)
+if REFUSED in outcomes:
+    # (each said why on stderr, which fails the stage): no merged file, which would
+    # pass for a search of every chromosome
+    sys.exit(1)
+skipped = {c for c, outcome in zip(chrs, outcomes) if outcome == SKIPPED}
 
 
 header = ""
 merged = f"{output_folder}/indels_{ref_name}+{vcf_name}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}.targets.txt"
 for chrom in chrs:
-    # Only a chromosome skipped for having no indels may lack its part file. Any
-    # other missing part file still reaches tail/head/rm below, whose stderr fails
-    # the stage -- a search that produced nothing must not pass as an empty one.
+    # Only a chromosome skipped for having no indels, or no target, may lack its part
+    # file. Any other missing part file still reaches tail/head/rm below, whose stderr
+    # fails the stage -- a search that produced nothing must not pass as an empty one.
     if chrom in skipped:
         continue
     os.system(
