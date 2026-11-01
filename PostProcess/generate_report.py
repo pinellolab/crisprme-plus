@@ -60,8 +60,8 @@ Report structure (top -> bottom)
 5. DOWNLOADS: full RAW integrated_results.tsv.gz + curated top1000.tsv +
    panel_top100.tsv + every non-empty per-tier curated TSV.
 6. SCROLLABLE TOP-1000 TABLE (by CFD desc, mm+b<=1 excluded, as a caption above
-   it says) in the CURATED columns, including the annotation columns (gene, distance, GENCODE, ENCODE,
-   DHS) and CRISPR-Bulge when computed.
+   it says) in the CURATED columns, including the annotation columns (gene,
+   distance, GENCODE, ENCODE, DHS) and CRISPR-Bulge when computed.
 7. ANNOTATION LEGEND: plain-language meaning of every annotation column value
    (GENCODE / DHS / ENCODE SCREEN v4 cCREs / COSMIC Cancer Gene Census).
 FOOTER (unnumbered): CRISPRme version + provenance stamp + fixed research-only
