@@ -2,7 +2,10 @@
 
 * a results link to a job with no results (no such job, failed, refused for an
   unfinished build, found nothing, not finished) failed on the missing results file
-  with a server error and a blank page (``results_page._result_not_ready``);
+  with a server error and a blank page (``results_page._result_not_ready``), and so
+  did one to a job that failed, or was still running, at its last steps (results
+  integration, plots, database): it has its integrated results file, but not the
+  others the results pages read;
 * the Summary by Sample download looked for a file the pipeline does not write
   (no ``_<criterion>`` suffix), and the Show Targets download looked under
   ``Results/<job>/<job>/`` with a leading dot, so it said "Please wait" for ever;
@@ -183,13 +186,62 @@ class TestResultLinkWithoutResults(_Tmp):
                     links = [c.href for c in _walk(page) if getattr(c, "href", None)]
                     self.assertIn(f"/load?job={job}", links)
 
+    def test_job_that_failed_or_runs_at_its_last_steps(self):
+        # The last steps (submit_job_automated_new_multiple_vcfs.sh) write
+        # <job>.bestMerge.txt.integrated_results.tsv first, set it aside as *.partial
+        # when the integration fails, and write the database and the
+        # *_all_results_with_alternative_alignments* file the results page reads only
+        # after that. These jobs have an "integrated" file and were taken as finished:
+        # a server error and a blank page on every route.
+        general = "The selected result encountered some errors"
+        running = "has not finished yet"
+        cases = {
+            "intfail": ("Integrating results\tStart", "ERROR: results integration failed on "
+                        "primary results. ... renamed to *.partial.\n", ".partial", general),
+            "plotfail": ("Integrating results\tStart", "ERROR: score plots generation failed "
+                         "— results are PRESERVED (issue #143); removing only the "
+                         "incomplete imgs/.\n", "", general),
+            "dbfail": ("Creating database\tStart", "ERROR: database creation failed — "
+                       "results are PRESERVED (issue #143).\n", "", general),
+            "dbrunning": ("Creating database\tStart", "", "", running),
+        }
+        for job, (last, error, suffix, says) in cases.items():
+            d = self._job(job, finished=False, log=f"Job\tStart\tFri\n{last}\tFri\n",
+                          log_error=error)
+            for merge in ("bestMerge", "altMerge"):
+                tsv = os.path.join(d, f"{job}.{merge}.txt.integrated_results.tsv{suffix}")
+                with open(tsv, "w") as f:
+                    f.write(f"Spacer+PAM\tChromosome\n{GUIDE}\tchr1\n")
+            for route, page in self._pages(job).items():
+                with self.subTest(job=job, route=route):
+                    self.assertIn(says, _text(page))
+                    links = [c.href for c in _walk(page) if getattr(c, "href", None)]
+                    self.assertIn(f"/load?job={job}", links)
+
+    def test_finished_job_without_its_results_files(self):
+        d = self._job("gone", finished=False,
+                      log="Job\tStart\tFri\nCreating database\tEnd\tFri\nJob\tDone\tFri\n")
+        open(os.path.join(d, "log_error_no_check.txt"), "w").close()
+        for route, page in self._pages("gone").items():
+            with self.subTest(route=route):
+                self.assertIn("This search finished, but its results files are missing "
+                              "from its folder", _text(page))
+
     def test_finished_job_still_gets_its_results_page(self):
-        self._job("done", log="Job\tDone\tFri\n")
+        d = self._job("done", log="Job\tDone\tFri\n")
         with open(os.path.join(self.tmp, rp.RESULTS_DIR, "done", ".done.acfd_CFD.txt"), "w") as f:
             f.write(f"{GUIDE}\t99\t1\n")
         self.assertIsNone(rp._result_not_ready("done"))
         page = rp.guidePagev3("done", f"{GUIDE}newX00")
         self.assertIsNotNone(_by_id(page, "table-subset-target"))
+        # what a finished job keeps of its stderr (a warning of a later step) is set
+        # aside at the end, and a reused job's log says "Job Done" twice: still ready
+        with open(os.path.join(d, "log_error_no_check.txt"), "w") as f:
+            f.write("WARNING: observed-haplotypes sidecar failed\n")
+        with open(os.path.join(d, "log.txt"), "w") as f:
+            f.write("Job\tStart\tFri\nJob\tDone\tFri\nBuilding shareable report\tStart\tFri\n"
+                    "Job\tDone\tSat\n")
+        self.assertIsNone(rp._result_not_ready("done"))
 
 
 class TestDownloadLinks(_Tmp):

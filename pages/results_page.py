@@ -173,29 +173,43 @@ def _result_not_ready(job_id: str) -> Optional[html.Div]:
     """The page a results link shows when its job has no results to show, else None.
 
     A results link (saved, emailed, typed) can name a job that does not exist, that
-    failed or was refused, that found nothing, or that has not finished. None of
-    these has the integrated results file the results pages start from, and opening
-    one failed on it with a server error and a blank page. Say what happened instead,
-    in the words of the job's status page, with a link to that page. A job WITH its
-    integrated results is left to the results page, as before."""
+    failed or was refused, that found nothing, or that has not finished. Opening one
+    failed on a results file it does not have with a server error and a blank page.
+    Say what happened instead, in the words of the job's status page, with a link to
+    that page. The job's state is read first, as the status page reads it
+    (load_page.refresh_search): a job that failed at its last steps (results
+    integration, plots, database), or is still in them, already has its integrated
+    results file, but not the other files the results pages read. Only a finished job
+    (its log says "Job Done" and its log_error.txt is empty, or set aside at the end)
+    with its integrated results is left to the results pages, as before."""
     job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
     if not job_id or not os.path.isdir(job_directory):
         return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
-    if glob(os.path.join(job_directory, "*integrated*")):
-        return None
-    log_error = os.path.join(job_directory, "log_error.txt")
     try:
         with open(os.path.join(job_directory, "log.txt"), errors="replace") as fh:
             log = fh.read()
     except OSError:
         log = ""
-    if os.path.isfile(log_error) and os.path.getsize(log_error) > 0:
+    try:
+        failed = os.path.getsize(os.path.join(job_directory, "log_error.txt")) > 0
+    except OSError:  # none, or renamed log_error_no_check.txt when the job ended
+        failed = False
+    done = "Job\tDone" in log or "Job\nDone" in log
+    if done and not failed and glob(os.path.join(job_directory, "*integrated*")):
+        return None
+    if failed:
         message, color = _failure_text(job_directory), "danger"
     elif "No off-targets found" in log:
         message, color = (
             "Finished: no off-targets were found for the provided guide(s) with these "
             "parameters, so there are no results to view.",
             "info",
+        )
+    elif done:
+        message, color = (
+            "This search finished, but its results files are missing from its folder, "
+            "so there are no results to view.",
+            "danger",
         )
     else:
         message, color = (

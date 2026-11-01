@@ -85,10 +85,13 @@ was found by the 2.8.1 web walkthrough or its review and is older.
   `PostProcess/test_web_bulge_notes.py`.
 - **A results link to a job without results gave a server error and a blank page.**
   `/result?job=<id>` for a job that does not exist, failed, was refused (an unfinished index),
-  found no off-target or has not finished failed on the missing results file (HTTP 500 and only
-  the navigation bar), and so did its Show Targets, sample and region pages. A link saved or
-  emailed earlier could land there. These pages now say which it is, in the words of the job's
-  status page, with a link to that page; the pages of a finished job are unchanged. Covered by
+  found no off-target or has not finished failed on the missing results file (HTTP 500 and only the
+  navigation bar), and so did its Show Targets, sample and region pages. So did a job that failed
+  at its last steps (results integration, plots or database) or was still in them: it already has
+  its integrated results file, but not the other files these pages read. A link saved or emailed
+  earlier could land there. These pages now say which it is, in the words of the job's status page,
+  with a link to that page (a finished job whose results files were removed from its folder says
+  so); the pages of a finished job are unchanged. Covered by
   `PostProcess/test_web_results_links.py` and `test/web/test_web_e2e.py`.
 - **Results-page downloads that never became ready.** The Summary by Sample tab looked for
   `<job>.summary_by_samples.<guide>.txt`, but a search writes one file per criterion
