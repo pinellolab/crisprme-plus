@@ -20,6 +20,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parent.parent / "install_from_source.sh"
 WORKFLOW = SCRIPT.parent / ".github" / "workflows" / "unit-tests.yml"
@@ -92,15 +93,25 @@ class WhatTheInstallerLeavesInTheCheckoutIsIgnored(unittest.TestCase):
     .gitignore, in a scratch repository."""
 
     def ignored(self, *paths):
-        """Which of `paths` git ignores, created in a repository with that .gitignore."""
+        """Which of `paths` git ignores, created in a repository with that .gitignore.
+
+        git runs with a home of its own, no system configuration and none of the
+        caller's GIT_* variables, so that only that .gitignore decides: a global
+        excludes file of the developer's (core.excludesFile, or git's default
+        ~/.config/git/ignore) holding, say, *.tar.gz would change the answer."""
         with tempfile.TemporaryDirectory() as d:
-            subprocess.run(["git", "init", "-q", d], check=True)
-            shutil.copy(SCRIPT.parent / ".gitignore", d)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            env.update(HOME=d, XDG_CONFIG_HOME=d, GIT_CONFIG_NOSYSTEM="1")
+            repo = Path(d) / "checkout"
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+            shutil.copy(SCRIPT.parent / ".gitignore", repo)
             for path in paths:
-                (Path(d) / path).parent.mkdir(parents=True, exist_ok=True)
-                (Path(d) / path).write_text("")
-            out = subprocess.run(["git", "-C", d, "check-ignore", *paths],
-                                 capture_output=True, text=True)
+                (repo / path).parent.mkdir(parents=True, exist_ok=True)
+                (repo / path).write_text("")
+            out = subprocess.run(["git", "-C", str(repo), "check-ignore", *paths],
+                                 capture_output=True, text=True, env=env)
+        # 1 is "none of them": anything else but 0 is an error, not an answer
+        self.assertIn(out.returncode, (0, 1), out.stderr)
         return out.stdout.split()
 
     def test_the_scorer_env_state_is_ignored(self):
@@ -113,6 +124,26 @@ class WhatTheInstallerLeavesInTheCheckoutIsIgnored(unittest.TestCase):
 
     def test_a_new_file_beside_the_tracked_test_annotations_is_not(self):
         self.assertEqual(self.ignored("test/data/Annotations/new.bed.tar.gz"), [])
+
+    def test_the_answers_do_not_depend_on_the_developers_own_git_configuration(self):
+        # git configured, the ways a developer's machine can be, to ignore every *.tar.gz:
+        # core.excludesFile in ~/.gitconfig, git's default global excludes file, and the
+        # system configuration
+        with tempfile.TemporaryDirectory() as home:
+            excludes = Path(home, "excludes")
+            excludes.write_text("*.tar.gz\n")
+            config = f"[core]\n\texcludesFile = {excludes}\n"
+            Path(home, ".gitconfig").write_text(config)
+            Path(home, "gitconfig_system").write_text(config)
+            Path(home, ".config", "git").mkdir(parents=True)
+            Path(home, ".config", "git", "ignore").write_text("*.tar.gz\n")
+            with mock.patch.dict(os.environ, {
+                    "HOME": home, "XDG_CONFIG_HOME": str(Path(home, ".config")),
+                    "GIT_CONFIG_GLOBAL": str(Path(home, ".gitconfig")),
+                    "GIT_CONFIG_SYSTEM": str(Path(home, "gitconfig_system"))}):
+                self.assertEqual(self.ignored("test/data/Annotations/new.bed.tar.gz"), [])
+                self.assertEqual(self.ignored("Annotations/.scorer_env.json"),
+                                 ["Annotations/.scorer_env.json"])
 
 
 @unittest.skipUnless(WORKFLOW.is_file(), "needs the checkout's unit-tests.yml beside the script")
