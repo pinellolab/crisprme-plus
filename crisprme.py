@@ -5615,6 +5615,19 @@ def complete_test_crisprme():
             sys.stderr.write("Please input some value for flag --thread\n")
             sys.exit(1)
     debug = "--debug" in input_args  # run local or via conda/Docker
+    if "--vcf_dataset" in input_args and not os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
+        # --vcf_dataset is the benchmark mode's, which CRISPRME_ALLOW_ONDEMAND_BUILD alone
+        # selects: without it, the prebuilt-index smoke runs, which ignores it. Set on the
+        # host in front of `docker run`, the variable never reaches the container.
+        print(
+            "NOTE [complete-test]: --vcf_dataset is for the benchmark mode, whose output "
+            "validate-test checks, and that mode runs only with "
+            "CRISPRME_ALLOW_ONDEMAND_BUILD=1 set (Docker: pass it with -e, as in docker run "
+            "-e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -e CRISPRME_SKIP_HEAVY=1 ...). It is not set "
+            "here, so complete-test runs the example guide against a prebuilt index "
+            "instead.",
+            flush=True,
+        )
     # begin crisprme test
     script_test = os.path.join(script_path, "complete_test.py")
     code = subprocess.call(

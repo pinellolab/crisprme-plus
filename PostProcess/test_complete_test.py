@@ -928,8 +928,8 @@ class TheCliPassesTheRefusalOn(unittest.TestCase):
     def setUpClass(cls):
         cls.crisprme = _load_crisprme()
 
-    def _cli(self, code):
-        with mock.patch.object(self.crisprme, "input_args", self.ARGV), \
+    def _cli(self, code, argv=None, passed="chrQ 1000G 4 False"):
+        with mock.patch.object(self.crisprme, "input_args", argv or self.ARGV), \
              mock.patch.object(self.crisprme, "warn_low_memory", lambda *a, **k: None), \
              mock.patch.object(self.crisprme, "subprocess") as msub:
             msub.call.return_value = code
@@ -937,7 +937,7 @@ class TheCliPassesTheRefusalOn(unittest.TestCase):
                 self.crisprme.complete_test_crisprme()
             finally:
                 (cmd,), _ = msub.call.call_args
-                self.assertTrue(cmd.endswith("complete_test.py chrQ 1000G 4 False"), cmd)
+                self.assertTrue(cmd.endswith(f"complete_test.py {passed}"), cmd)
 
     def test_a_refused_chrom_exits_2_without_a_traceback(self):
         with self.assertRaises(SystemExit) as cm:
@@ -976,6 +976,32 @@ class TheCliPassesTheRefusalOn(unittest.TestCase):
                 self.assertEqual(cm.exception.code, 1)
                 self.assertEqual(err.getvalue(),
                                  f"\nCRISPRme complete test encountered an error: {says}\n")
+
+    def test_vcf_dataset_without_the_benchmark_switch_is_said_on_stdout(self):
+        """--vcf_dataset is the benchmark mode's, which CRISPRME_ALLOW_ONDEMAND_BUILD
+        alone selects: without it, complete-test ran the prebuilt-index smoke with no
+        word of it, as it does in Docker when the variable is set in front of `docker
+        run`, on the host. One line on stdout now says so; the run, and its exit status,
+        are as before."""
+        argv = ["crisprme.py", "complete-test", "--chrom", "chr22", "--vcf_dataset", "1000G"]
+        note = ("NOTE [complete-test]: --vcf_dataset is for the benchmark mode, whose output "
+                "validate-test checks, and that mode runs only with "
+                "CRISPRME_ALLOW_ONDEMAND_BUILD=1 set (Docker: pass it with -e, as in docker run "
+                "-e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -e CRISPRME_SKIP_HEAVY=1 ...). It is not "
+                "set here, so complete-test runs the example guide against a prebuilt index "
+                "instead.")
+        for switch, given, said in ((None, argv, [note]), ("1", argv, []),
+                                    (None, argv[:4], [])):
+            with self.subTest(CRISPRME_ALLOW_ONDEMAND_BUILD=switch, argv=given[2:]):
+                env = {k: v for k, v in os.environ.items()
+                       if k != "CRISPRME_ALLOW_ONDEMAND_BUILD"}
+                if switch:
+                    env["CRISPRME_ALLOW_ONDEMAND_BUILD"] = switch
+                out = io.StringIO()
+                with mock.patch.dict(os.environ, env, clear=True), \
+                     contextlib.redirect_stdout(out):
+                    self._cli(0, given, "chr22 1000G 4 False")
+                self.assertEqual(out.getvalue().splitlines(), said)
 
 
 if __name__ == "__main__":

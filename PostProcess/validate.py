@@ -100,14 +100,15 @@ def check_variant_dataset(chrom: str) -> None:
         # nothing to validate here: complete-test's benchmark mode writes this file, the
         # default prebuilt-index smoke does not. Say what to run, without a traceback:
         # for the chromosome asked for, and without --chrom ("all", a whole-genome run)
-        # the documented chr22 self-test.
+        # the documented chr22 self-test. The variables set in front of `docker run` stay
+        # on the host: in Docker they go with -e.
         run_chrom = "chr22" if chrom == "all" else chrom
         sys.stderr.write(
             f"ERROR: {vcf_config_file} not found in {os.getcwd()}: validate-test checks "
             "the output of complete-test's benchmark mode, so run that here first: "
             "CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py "
-            f"complete-test --chrom {run_chrom} --vcf_dataset 1000G, then crisprme.py "
-            f"validate-test --chrom {run_chrom}\n"
+            f"complete-test --chrom {run_chrom} --vcf_dataset 1000G (Docker: pass them "
+            f"with -e), then crisprme.py validate-test --chrom {run_chrom}\n"
         )
         sys.exit(1)
     with open(vcf_config_file, mode="r") as fin:

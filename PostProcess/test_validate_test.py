@@ -125,6 +125,13 @@ class ValidatePyWithoutBenchmarkOutput(unittest.TestCase):
         self.assertIn("complete-test --chrom chr22 --vcf_dataset 1000G", line)
         self.assertIn("then crisprme.py validate-test --chrom chr22", line)
 
+    def test_it_says_the_variables_go_with_minus_e_in_docker(self):
+        # set in front of `docker run`, they stay on the host: in the container
+        # complete-test then runs the prebuilt-index smoke, which leaves nothing to check
+        line = self.hint("chr22")
+        self.assertIn("--vcf_dataset 1000G (Docker: pass them with -e), then crisprme.py "
+                      "validate-test --chrom chr22", line)
+
 
 class ABenchmarkOffItsReferenceIsSkipped(unittest.TestCase):
     """After the `complete-test --chrom chr21 --vcf_dataset 1000G` that the line above
