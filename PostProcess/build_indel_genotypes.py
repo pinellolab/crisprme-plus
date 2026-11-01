@@ -244,6 +244,19 @@ class IndelGenotypeReader(object):
             out[s] = g
         return out
 
+    def indels(self):
+        """Every (pos, REF, ALT) the store holds, sorted by position."""
+        out = []
+        for key in self._by_key:
+            pos, _, rest = key.partition("_")
+            ref, _, alt = rest.partition("_")
+            try:
+                out.append((int(pos), ref, alt))
+            except ValueError:
+                continue
+        out.sort()
+        return out
+
 
 def _load_panel(samplesid_path):
     """Load the set of panel sample IDs from a samplesID file (skip header)."""

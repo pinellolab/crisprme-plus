@@ -21,6 +21,8 @@ final_res=${11}
 final_res_alt=${12}
 
 key=${13}
+# the search's cap on total edits (mismatches + bulges), -1 for none
+max_total_edits=${14:--1}
 
 # process indel targets on chromosome $key
 chrom=$key
@@ -98,7 +100,8 @@ targets_chrom_prefix="${output_folder}/${fakechrom}_${pam_name}_${guide_name}_${
     "$mm" "$bDNA" "$bRNA" \
     "$guide_file" \
     "$pam_file" \
-    "$output_folder"
+    "$output_folder" \
+    "$max_total_edits"
 
 # remove chrom-specific targets tsv files
 rm $targets_tsv_ref_chrom $targets_tsv_alt_chrom

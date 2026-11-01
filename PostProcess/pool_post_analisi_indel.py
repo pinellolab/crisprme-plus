@@ -70,13 +70,16 @@ dict_folder = sys.argv[10]
 final_res = sys.argv[11]
 final_res_alt = sys.argv[12]
 ncpus = int(sys.argv[13])
+# the search's cap on total edits (mismatches + bulges; -1: none), absent from older
+# callers
+max_total_edits = sys.argv[14] if len(sys.argv) > 14 else "-1"
 
 
 def start_analysis(chrom: str) -> None:
     code = subprocess.call(
         f"{POSTANALYSIS} {output_folder} {ref_folder} {vcf_folder} {guide_file} "
         f"{mm} {bDNA} {bRNA} {annotation_file} {pam_file} {dict_folder} "
-        f"{final_res} {final_res_alt} {chrom}",
+        f"{final_res} {final_res_alt} {chrom} {max_total_edits}",
         shell=True
     )
     if code != 0:

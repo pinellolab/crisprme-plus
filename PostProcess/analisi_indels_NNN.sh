@@ -33,6 +33,9 @@ bRNA=$9
 guide_file=${10}
 pam_file=${11}
 output_folder=${12}
+# the search's cap on total edits (mismatches + bulges), -1 for none: a target
+# resolved per carrier haplotype is dropped past it as past --mm
+max_total_edits=${13:--1}
 
 touch $REFtargets.corrected  # initialize reference targets out fname
 
@@ -94,7 +97,8 @@ rm "$jobid.total.txt"
     "$mm" \
     "$referencegenome" \
     "$guide_file" \
-    "$bDNA" "$bRNA" 
+    "$bDNA" "$bRNA" \
+    "$max_total_edits"
 rm "$jobid.total.cluster.txt"  # remove unnecessary files
 
 # sort and adjust processed targets 

@@ -88,49 +88,33 @@ def test_overlay_out_of_bounds_real_position():
     assert out == sub  # nothing overlaid (all downstream reals >= 95), no exception
 
 
-def _load_crispr_bulge_resolver():
-    """Extract _resolve_iupac_for_crispr_bulge from analisi_indels_NNN.py without
-    importing the module (its top level reads sys.argv + opens the fake genome).
-    The scorer's IUPAC-resolution guard is what keeps a SNP-overlaid indel window
-    from crashing CRISPR-Bulge's agct2numerals; regress it here."""
-    import os
+def test_crispr_bulge_never_sees_an_iupac_code():
+    """The target CRISPR-Bulge scores is the per-haplotype resolution of the overlaid
+    one (indel_snp_cis.resolve_target), and the model's agct2numerals KeyErrors on an
+    IUPAC code: no code may survive into a resolved row. A target with no code (the
+    classic, non-overlaid fake genome) is never resolved at all."""
+    import indel_snp_cis as isc
 
-    src = open(
-        os.path.join(os.path.dirname(__file__), "analisi_indels_NNN.py")
-    ).read()
-    start = src.index("def _resolve_overlaid_iupac")
-    end = src.index("# Whole-genome IUPAC", start)
-    ns = {
-        "iupac_code": {
-            "R": ("A", "G"), "Y": ("C", "T"), "S": ("G", "C"), "W": ("A", "T"),
-            "K": ("G", "T"), "M": ("A", "C"), "B": ("C", "G", "T"),
-            "D": ("A", "G", "T"), "H": ("A", "C", "T"), "V": ("A", "C", "G"),
-            "r": ("A", "G"), "y": ("C", "T"), "k": ("G", "T"), "m": ("A", "C"),
-            "N": ("A", "T", "C", "G"),
-        }
-    }
-    exec(src[start:end], ns)
-    return ns["_resolve_overlaid_iupac"]
-
-
-def test_crispr_bulge_resolver_is_classic_noop_and_kills_iupac():
-    R = _load_crispr_bulge_resolver()
-    # classic (plain fake genome) -> strict no-op: byte-identical scoring input
-    assert R("ACGTACGT-ACGT") == "ACGTACGT-ACGT"
-    # N is never resolved (the existing N-guard nulls those windows)
-    assert "N" in R("ACGNT")
-    # guide-matched: K={G,T}, guide G -> pick the matched (carrier) allele
-    assert R("K", "G") == "G"
-    # guide not in the ambiguity set -> deterministic first allele
-    assert R("K", "A") == "G"
-    # no guide / length-mismatched guide -> first allele
-    assert R("RYK") == "ACG"
-    assert R("RYK", "AC") == "ACG"  # len(guide)!=len(seq) -> ignored
-    # a realistic overlaid minus-strand window resolves to pure A/C/G/T
+    assert isc.ambiguous_columns("ACGTACGT-ACGT") == []  # classic: untouched
+    # a realistic overlaid minus-strand window: K at a spacer column, R in the PAM
     tgt = "-TAAKCAGTTGCTATTTTAAAGRG"
     gd = "CTAA-CAGTTGCTTTTATCACNNN"
-    out = R(tgt, gd)
-    assert set(out) <= set("ACGT-"), out  # no residual IUPAC reaches CRISPR-Bulge
+    amb = isc.ambiguous_columns(tgt)
+    assert amb == [4, 22]
+    cols = [isc.SnpColumn(4, 100, "A", {"C": {"S1": "1|0"}}, "K", "-"),
+            isc.SnpColumn(22, 83, "C", {"T": {"S2": "0|1"}}, "R", "-")]
+    rows = isc.resolve_target(
+        gd, tgt, cols, {"S1": "1|0", "S2": "1|1", "S3": "0|1"},
+        isc.pam_columns(len(tgt), "NRG"), range(len(tgt) - 3), 6, -1, 2)
+    assert rows
+    for r in rows:
+        assert set(r["seq"]) <= set("ACGTacgt-"), r["seq"]
+    # and so for the worst case of a sites-only panel (no genotypes)
+    cols = [isc.SnpColumn(c.col, c.real, c.ref_fwd, None, tgt[c.col], "-",
+                          known=False) for c in cols]
+    rows = isc.resolve_target(gd, tgt, cols, None, isc.pam_columns(len(tgt), "NRG"),
+                              range(len(tgt) - 3), 6, -1, 2)
+    assert len(rows) == 1 and set(rows[0]["seq"]) <= set("ACGTacgt-"), rows
 
 
 if __name__ == "__main__":

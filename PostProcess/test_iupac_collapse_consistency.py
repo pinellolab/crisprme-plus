@@ -1,24 +1,23 @@
 #!/usr/bin/env python3
-"""The two IUPAC-collapse implementations must not drift apart.
+"""The genome-string IUPAC collapse must mirror the code table, and be the only one.
 
-``analisi_indels_NNN.py`` collapses IUPAC ambiguity bases -- which reach the indel
-post-analysis only from the SNP-overlaid fake-indel genome (``CRISPRME_INDEL_SNP``,
-default on) -- in two places, by two different mechanisms:
+IUPAC ambiguity bases reach the indel post-analysis (``analisi_indels_NNN.py``) from
+the SNP-overlaid fake-indel genome (``CRISPRME_INDEL_SNP``, default on), in the DNA
+column of the engine's targets. Up to 2.8.0 that column was collapsed column by column
+too, by ``_resolve_overlaid_iupac`` (the guide's base when it was an allele, else
+``alleles[0]``), without any genotype: it reported one sample's indel with SNP alleles
+only other samples carry, and read an R at NRG's last PAM base as A. Since 2.8.1 the
+target is resolved per carrier haplotype (``indel_snp_cis.resolve_target``), so what
+is left here is ``_IUPAC_FIRST_ALLELE_TAB``: a ``str.maketrans`` table applied once to
+``genomeStr``, the PLAIN reference chromosome, where it is a no-op kept as a guard.
 
-* ``_resolve_overlaid_iupac(seq, guide_aligned)`` walks ``iupac_code`` and picks the
-  guide-matched allele when it can, else ``alleles[0]``;
-* ``_IUPAC_FIRST_ALLELE_TAB``, a ``str.maketrans`` table applied to the whole
-  genome string in one pass, which can only do the ``alleles[0]`` half.
-
-The table is a hand-written mirror of every ``iupac_code`` entry's first element.
-Nothing tied the two together, so adding a code to the dict, or reordering one
-entry's alleles, would silently leave the fast path disagreeing with the slow one
--- and the disagreement would show up as a wrong base in a report column
-(reference alignment, CRISPR-Bulge context, motif/radar counts), not as an error.
-
-These tests derive the expected table FROM ``iupac_code`` and compare, so the
-mirror cannot rot. Hermetic: the module is parsed, never imported -- it reads
-``sys.argv`` at import time and would exit.
+The table is a hand-written mirror of every ``iupac_code`` entry's first element, so
+adding a code to the dict, or reordering one entry's alleles, would silently leave a
+wrong base in a report column (reference alignment, CRISPR-Bulge context, motif/radar
+counts) should a code ever reach ``genomeStr``. These tests derive the expected table
+FROM ``iupac_code`` and compare, so the mirror cannot rot, and pin that no target
+column is collapsed by first allele again. Hermetic: the module is parsed, never
+imported -- it reads ``sys.argv`` at import time and would exit.
 """
 
 import ast
@@ -65,10 +64,9 @@ class TheTableMirrorsTheDict(unittest.TestCase):
         self.assertEqual(len(set(self.frm)), len(self.frm), "a source char repeats")
 
     def test_every_table_entry_matches_the_dicts_first_allele(self):
-        """iupac_code lists alleles in UPPERCASE even under a lowercase key, and
-        _resolve_overlaid_iupac re-cases its pick (`pick if c.isupper() else
-        pick.lower()`). The table has to bake that in, so compare against the
-        dict's first allele put back into the code's own case."""
+        """iupac_code lists alleles in UPPERCASE even under a lowercase key, while
+        the table must keep a lowercase code lowercase. Compare against the dict's
+        first allele put back into the code's own case."""
         for src, dst in zip(self.frm, self.to):
             self.assertIn(src, self.code, f"{src!r} is in the table but not iupac_code")
             first = self.code[src][0]
@@ -76,7 +74,7 @@ class TheTableMirrorsTheDict(unittest.TestCase):
             self.assertEqual(
                 dst, expected,
                 f"table maps {src!r}->{dst!r} but iupac_code's first allele, "
-                f"re-cased as _resolve_overlaid_iupac does, is {expected!r}",
+                f"in the code's own case, is {expected!r}",
             )
 
     def test_every_ambiguity_code_is_in_the_table(self):
@@ -118,12 +116,19 @@ class TheTableMirrorsTheDict(unittest.TestCase):
                 f"{src!r} is in the table but {src.swapcase()!r} is not",
             )
 
-    def test_the_docstring_claim_is_true(self):
-        """_resolve_overlaid_iupac's docstring states the fallback is alleles[0];
-        the table exists only to do that same thing faster."""
+    def test_the_table_comment_claim_is_true(self):
+        """The table's comment says it maps each code to its first-listed allele."""
         src = _SRC.read_text()
-        self.assertIn("pick = alleles[0]", src)
         self.assertIn("first-listed-allele", src)
+
+    def test_no_target_column_is_collapsed_by_first_allele(self):
+        """A target's DNA column is resolved per carrier haplotype, never by a
+        per-column pick that ignores the genotypes (the 2.5.0-2.8.0 resolver)."""
+        src = _SRC.read_text()
+        self.assertNotIn("_resolve_overlaid_iupac", src)
+        self.assertNotIn("pick = alleles[0]", src)
+        self.assertIn("_isc.resolve_target(", src)
+        self.assertNotIn("final_result[2].translate(", src)
 
     def test_the_collapse_is_a_no_op_on_plain_acgt(self):
         for base in "ACGTacgt":

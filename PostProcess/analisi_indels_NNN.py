@@ -27,7 +27,10 @@ NOTE: Verify if it is compatible with PAM at the beginning.
 # argv8: Guide file.
 # argv9: Maximum allowed DNA bulges.
 # argv10: Maximum allowed RNA bulges.
-# argv11: Absolute path of the sample file to load the dictionary mapping sample -> population.
+# argv11 (optional): the search's cap on total edits, mismatches + bulges (complete-search
+#     --max-total-edits; -1 or absent: none). A target resolved per carrier haplotype
+#     can carry more mismatches than the engine counted on the IUPAC-coded genome, and
+#     is dropped past this cap as past --mm.
 
 import pickle
 from typing import final  # to read CFD matrices
@@ -40,6 +43,7 @@ import pandas as pd
 import subprocess
 import concurrent.futures
 from intervaltree import Interval, IntervalTree
+import bisect
 import os
 import itertools
 import time
@@ -336,6 +340,7 @@ mm_pos = 7  # position of mismatch column
 bulge_pos = 8
 max_dna_bulges = int(sys.argv[9])
 max_rna_bulges = int(sys.argv[10])
+max_total_edits = int(sys.argv[11]) if len(sys.argv) > 11 else -1
 max_bulges = max_dna_bulges
 if max_rna_bulges > max_bulges:
     max_bulges = max_rna_bulges
@@ -641,43 +646,16 @@ iupac_code = {
 }
 
 
-def _resolve_overlaid_iupac(seq, guide_aligned=None):
-    """Resolve IUPAC ambiguity bases in an aligned sequence to a concrete A/C/G/T.
+# The IUPAC codes of an indel target's DNA column (the SNP overlay of the fake-indel
+# genome, CRISPRME_INDEL_SNP) are resolved per carrier haplotype by _overlaid_rows,
+# below: never column by column, which would pair one sample's indel with SNP alleles
+# only other samples carry.
 
-    IUPAC codes reach the indel post-analysis only from the SNP-overlaid fake-
-    indel genome (CRISPRME_INDEL_SNP). Every ACGT-only consumer trips on them:
-    CRISPR-Bulge's ``agct2numerals`` (bare dict lookup -> KeyError, aborts scoring) and
-    the radar/motif dict generator, ref-alignment, etc. (CFD alone tolerates them
-    via a try/except). When a position-aligned guide is supplied, pick the allele
-    the guide matches -- reconstructing the variant-carrier allele that actually
-    created the off-target; otherwise pick the first listed allele
-    (deterministic). 'N' is left untouched so the existing N-guard still nulls
-    those windows. On the classic, plain (non-overlaid) fake genome there are no
-    IUPAC bases, so this is a strict no-op and classic output stays byte-identical.
-    """
-    if guide_aligned is not None and len(guide_aligned) != len(seq):
-        guide_aligned = None  # can't position-map; fall back to first-allele
-    out = []
-    for i, c in enumerate(seq):
-        if c in ("N", "n") or c not in iupac_code:
-            out.append(c)  # plain A/C/G/T (or N) -- leave as-is
-            continue
-        alleles = iupac_code[c]
-        pick = None
-        if guide_aligned is not None:
-            g = guide_aligned[i].upper()
-            if g in alleles:
-                pick = g  # the allele the guide matched = carrier's base
-        if pick is None:
-            pick = alleles[0]
-        out.append(pick if c.isupper() else pick.lower())
-    return "".join(out)
-
-
-# Whole-genome IUPAC -> first-listed-allele map (fast str.translate), used to make
-# the SNP-overlaid fake-indel genomeStr concrete once at load. Mirrors iupac_code's
-# first entry: R->A Y->C S->G W->A K->G M->A B->C D->A H->A V->A. 'N' is absent, so
-# it survives for the existing N-guard. No-op on the classic (non-overlaid) genome.
+# Whole-genome IUPAC -> first-listed-allele map (fast str.translate), applied to
+# genomeStr once at load. Mirrors iupac_code's first entry: R->A Y->C S->G W->A K->G
+# M->A B->C D->A H->A V->A. 'N' is absent, so it survives for the existing N-guard.
+# genomeStr is the PLAIN reference chromosome (post_analisi_indel.sh passes
+# <ref>/<chrom>.fa), which holds no IUPAC code, so this is a no-op kept as a guard.
 _IUPAC_FIRST_ALLELE_TAB = str.maketrans(
     "RYSWKMBDHVryswkmbdhv", "ACGAGACAAAacgagacaaa"
 )
@@ -710,11 +688,9 @@ genomeStr = inFasta.readlines()  # lettura fasta del chr
 genomeStr = "".join(genomeStr).upper()
 # string of the whole chromosome on single line
 genomeStr = genomeStr.replace("\n", "")
-# [indel-snp] The SNP-overlaid fake-indel genome (CRISPRME_INDEL_SNP) carries IUPAC
-# ambiguity bases; collapse them to a concrete allele once here so every genome-
-# derived output column (ref alignment, CRISPR-Bulge context, motif/radar counts) is pure
-# A/C/G/T. Strict no-op on the classic plain fake genome (no IUPAC), so classic
-# output is byte-identical; 'N' is preserved for the existing N-guards.
+# Keep every genome-derived output column (ref alignment, CRISPR-Bulge context,
+# motif/radar counts) pure A/C/G/T should an IUPAC code ever reach genomeStr; a no-op
+# on the plain reference it is read from. 'N' is preserved for the existing N-guards.
 genomeStr = genomeStr.translate(_IUPAC_FIRST_ALLELE_TAB)
 
 
@@ -757,55 +733,60 @@ with (gzip.open(_logpath, "rt") if _logpath.endswith(".gz") else open(_logpath, 
         ]
 # datastore = datastore.to_dict(orient='index')
 
-# [indel-snp] SNP+indel co-occurrence annotation (feature/indel-snp, default-on).
-# GUARDED: any missing reader/import -> None and the feature degrades to a no-op;
-# the classic indel path is byte-identical when CRISPRME_INDEL_SNP=0. The SNP
-# registry/genotype tiers are SIBLINGS of the log_indels dir (sys.argv[4]) under
-# Dictionaries/, so no new CLI/shell args are needed. Emits SNP+indel co-occurring
-# off-targets to a companion TSV (never touches the fixed indel columns/scores).
+# [indel-snp] SNP+indel co-occurrence (default-on; CRISPRME_INDEL_SNP=0 opts out).
+# The SNP registry/genotype tiers are SIBLINGS of the log_indels dir (sys.argv[4])
+# under Dictionaries/, so no new CLI/shell args are needed. Each one is optional:
+#   * the phased indel genotype store and the Tier-1 SNP genotypes (or, on a classic
+#     dictionary install, the per-sample SNP dictionary) resolve an overlaid target
+#     per carrier haplotype (_overlaid_rows); without them each carrier gets the
+#     worst case its own alleles allow, or the code's alleles allow, PUTATIVE;
+#   * the Tier-0 registry names the SNPs (rsID, AF) and gives the panel size for the
+#     joint allele frequency of the SNP+indel co-occurrence companion TSV, which is
+#     written only with it.
+# A target with no IUPAC code (every target of a classic, non-overlaid fake-indel
+# genome) never reaches any of this: its row is the one the engine reported.
+import indel_snp_cis as _isc
+
 _indel_snp = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
-_isc = _reg = _gt = _indelgt = _cooc_out = None
+_reg = _gt = _indelgt = _cooc_out = _dict_snps = None
+_droot = os.path.dirname(os.path.realpath(sys.argv[4]))
+_vcf = os.path.basename(os.path.realpath(sys.argv[4]))[len("log_indels_"):]
 if _indel_snp:
     try:
-        import indel_snp_cis as _isc
-        _droot = os.path.dirname(os.path.realpath(sys.argv[4]))
-        _vcf = os.path.basename(os.path.realpath(sys.argv[4]))[len("log_indels_"):]
+        import tier0_registry as _t0
+        _rb = os.path.join(_droot, "registry_" + _vcf, "reg_" + current_chr + ".bin")
+        _ri = os.path.join(_droot, "registry_" + _vcf, "reg_" + current_chr + ".idx")
+        if os.path.isfile(_rb) and os.path.isfile(_ri):
+            _reg = _t0.RegistryReader(_rb, _ri)
+    except Exception:  # noqa: BLE001 - registry optional
+        _reg = None
+    try:
+        import tier1_genotypes as _t1
+        _gb = os.path.join(_droot, "genotypes_" + _vcf, "gt_" + current_chr + ".bin")
+        _gi = os.path.join(_droot, "genotypes_" + _vcf, "gt_" + current_chr + ".idx")
+        if os.path.isfile(_gb) and os.path.isfile(_gi):
+            _gt = _t1.GenotypeReader(_gb, _gi)
+    except Exception:  # noqa: BLE001 - genotype tier optional
+        _gt = None
+    try:
+        import build_indel_genotypes as _big
+        _ig = os.path.join(_droot, "indel_genotypes_" + _vcf,
+                           "gt_indel_" + current_chr + ".tsv.gz")
+        if os.path.isfile(_ig):
+            _indelgt = _big.IndelGenotypeReader(_ig)
+    except Exception:  # noqa: BLE001 - phased indel GT optional (-> PUTATIVE)
+        _indelgt = None
+    if _reg is not None:
         try:
-            import tier0_registry as _t0
-            _rb = os.path.join(_droot, "registry_" + _vcf, "reg_" + current_chr + ".bin")
-            _ri = os.path.join(_droot, "registry_" + _vcf, "reg_" + current_chr + ".idx")
-            if os.path.isfile(_rb) and os.path.isfile(_ri):
-                _reg = _t0.RegistryReader(_rb, _ri)
-        except Exception:  # noqa: BLE001 - registry optional
-            _reg = None
-        try:
-            import tier1_genotypes as _t1
-            _gb = os.path.join(_droot, "genotypes_" + _vcf, "gt_" + current_chr + ".bin")
-            _gi = os.path.join(_droot, "genotypes_" + _vcf, "gt_" + current_chr + ".idx")
-            if os.path.isfile(_gb) and os.path.isfile(_gi):
-                _gt = _t1.GenotypeReader(_gb, _gi)
-        except Exception:  # noqa: BLE001 - genotype tier optional
-            _gt = None
-        try:
-            import build_indel_genotypes as _big
-            _ig = os.path.join(_droot, "indel_genotypes_" + _vcf,
-                               "gt_indel_" + current_chr + ".tsv.gz")
-            if os.path.isfile(_ig):
-                _indelgt = _big.IndelGenotypeReader(_ig)
-        except Exception:  # noqa: BLE001 - phased indel GT optional (-> PUTATIVE)
-            _indelgt = None
-        if _reg is not None:
             _cooc_out = open(outputFile + ".indel_snp_cooc.tsv", "w")
             _cooc_out.write(
                 "chrom\tindel_pos\tindel_ref\tindel_alt\tofftarget_start\tstrand\t"
                 "snp_dictpos\tsnp_rsid\tphase\tjoint_af\tn_cis\tcis_samples\n"
             )
-        else:
-            _indel_snp = False  # no SNP tier for this chrom -> nothing to annotate
-    except Exception as _isp_err:  # noqa: BLE001 - never break the classic path
-        print(f"WARNING [indel-snp]: post-analysis annotation disabled ({_isp_err})",
-              flush=True)
-        _indel_snp = False
+        except Exception as _isp_err:  # noqa: BLE001 - the companion is optional
+            print(f"WARNING [indel-snp]: SNP+indel co-occurrence companion disabled "
+                  f"({_isp_err})", flush=True)
+            _cooc_out = None
 
 # [mega] sites-only INDEL per-dataset AF sidecar (INDEPENDENT of indel+SNP cooc):
 # a merged all-source "mega" index has no genotypes, so indel off-targets cannot get
@@ -830,6 +811,350 @@ try:
 except Exception as _iaf_err:  # noqa: BLE001 - never break the classic path
     print(f"WARNING [mega-indel-af]: sidecar disabled ({_iaf_err})", flush=True)
     _indel_af = _indel_af_out = None
+
+
+def _indel_window(indel_data):
+    """(pos, REF, ALT, real 0-based start of the fake window) of a log entry."""
+    _ip = indel_data[4].split("_")  # chrN_pos_REF_ALT
+    return (int(_ip[-3]), _ip[-2], _ip[-1],
+            int(indel_data[0].split("_")[1].split("-")[0]))
+
+
+def _overlaid_positions(path):
+    """The 1-based positions of every IUPAC code of this chromosome's overlaid indel
+    targets: the per-sample dictionary entries the per-haplotype resolution reads."""
+    out = set()
+    with open(path) as fh:
+        fh.readline()  # header
+        for raw in fh:
+            ln = raw.rstrip("\n").split("\t")
+            if len(ln) < 7 or ln[3] != "fake" + current_chr:
+                continue
+            amb = _isc.ambiguous_columns(ln[2])
+            if not amb:
+                continue
+            try:
+                idata = sorted(INDELS_tree[int(ln[4])])[0].data
+            except Exception:  # noqa: BLE001 - no indel here: skipped by the loop too
+                continue
+            _ipos, _iref, _ialt, _istart = _indel_window(idata)
+            real_of = _isc.build_offset_to_real(
+                ln[2], int(ln[4]), ln[6], int(idata[5]), _istart, _iref, _ialt)
+            for j in amb:
+                if real_of[j] is not None:
+                    out.add(real_of[j] + 1)
+    return out
+
+
+# A classic dictionary install (an index built without --samplesID) has no Tier-1
+# store: the per-sample genotypes live in the SNP dictionary, read here for the
+# positions the overlaid targets need.
+if _indel_snp and _gt is None:
+    _dict_path = os.path.join(_droot, "dictionaries_" + _vcf,
+                              "my_dict_" + current_chr + ".json")
+    if os.path.exists(_dict_path) or os.path.exists(_dict_path + ".gz"):
+        try:
+            _dict_snps = _isc.load_dict_snps(_dict_path, current_chr,
+                                             _overlaid_positions(resultsFile))
+        except Exception as _dict_err:  # noqa: BLE001 - resolve without genotypes
+            print(f"WARNING [indel-snp]: SNP dictionary {_dict_path} unreadable "
+                  f"({_dict_err}); overlaid indel targets are resolved without "
+                  "per-sample genotypes (PUTATIVE)", flush=True)
+            _dict_snps = None
+
+_snp_cache = {}    # pos1 -> {alt: {sample: genotype}} from the genotype source
+_igt_cache = {}    # indel token -> its carriers (indel_snp_cis.IndelCarriers)
+# how the overlaid targets were resolved (printed at the end, on stdout)
+_ovl_stats = {"targets": 0, "rows": 0, "dropped": 0, "putative": 0, "unmapped": 0}
+
+
+def _snp_record(pos1):
+    """{forward alt: {sample: genotype}} the genotype source records at ``pos1``
+    (Tier-1, else the per-sample dictionary; {} where it records none), or None when
+    there is no genotype source."""
+    rec = _snp_cache.get(pos1)
+    if rec is not None:
+        return rec
+    if _gt is not None:
+        rec = {}
+        for alt in _gt.alts_at(pos1):
+            if len(alt) == 1 and alt in "ACGT":
+                rec[alt] = dict(tok.partition(":")[::2]
+                                for tok in (_gt.carrier_tokens(pos1, alt) or []))
+    elif _dict_snps is not None:
+        rec = {alt: carriers for (_r, alt, _rs, _af, carriers) in _dict_snps.get(pos1, ())}
+    else:
+        return None
+    if len(_snp_cache) > 100000:
+        _snp_cache.clear()
+    _snp_cache[pos1] = rec
+    return rec
+
+
+def _snp_name(pos1, alt):
+    """(rsID, MAF) of a SNP alt, formatted as the SNP path writes them: the
+    registry's, else the per-sample dictionary's, else ('.', '0')."""
+    if _reg is not None:
+        rs = _reg.rsid(pos1, alt) or "."
+        try:
+            grp = _reg.lookup(pos1, alt)
+            af = grp["global"].allele_freq() if grp and "global" in grp else 0.0
+        except Exception:  # noqa: BLE001
+            af = 0.0
+        return rs, "%.6g" % af
+    if _dict_snps is not None:
+        for (_r, a, rs, af, _c) in _dict_snps.get(pos1, ()):
+            if a == alt:
+                try:
+                    return rs, "%.6g" % float(af)
+                except ValueError:
+                    return rs, "0"
+    return ".", "0"
+
+
+def _snp_global(pos1, alt):
+    """The registry's global group (Counts) of a SNP alt, or None."""
+    try:
+        grp = _reg.lookup(pos1, alt)
+        return grp["global"] if grp and "global" in grp else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+_indel_index = None  # [(pos, REF, ALT)] of the indel store, by position (built lazily)
+_indel_starts = []
+_indel_maxref = 0
+_jgt_cache = {}      # (pos, REF, ALT) -> {sample: genotype} of an indel of the store
+
+
+def _other_indels(lo, hi, ipos, iref, ialt):
+    """Carriers ({sample: genotype}) of each OTHER indel of the phased store that
+    changes the reference bases lo..hi (0-based) of a haplotype: a slot carrying one
+    of them does not have the fake-indel window's sequence there. An indel whose
+    REF overlaps this one's cannot share its haplotype and is skipped."""
+    global _indel_index, _indel_starts, _indel_maxref
+    if _indelgt is None:
+        return ()
+    if _indel_index is None:
+        _indel_index = _indelgt.indels()
+        _indel_starts = [p for p, _r, _a in _indel_index]
+        _indel_maxref = max((len(r) for _p, r, _a in _indel_index), default=1)
+    i0, i1 = ipos - 1, ipos - 1 + len(iref)  # this indel's REF, 0-based half-open
+    out = []
+    k = bisect.bisect_left(_indel_starts, lo - _indel_maxref)
+    while k < len(_indel_index) and _indel_index[k][0] - 1 <= hi:
+        p, r, a = _indel_index[k]
+        k += 1
+        if (p, r, a) == (ipos, iref, ialt) or (p - 1 < i1 and i0 < p - 1 + len(r)):
+            continue
+        if not _isc.changes_span(p, r, a, lo, hi):
+            continue
+        gts = _jgt_cache.get((p, r, a))
+        if gts is None:
+            if len(_jgt_cache) > 2000:
+                _jgt_cache.clear()
+            gts = _jgt_cache[(p, r, a)] = _indelgt.carriers_dict(p, r, a)
+        out.append(gts)
+    return out
+
+
+def _overlaid_rows(line, final_result, indel_data, amb):
+    """Resolve an overlaid indel target per carrier haplotype (indel_snp_cis).
+
+    ``amb`` holds the columns of the engine's DNA (line[2]) that carry an IUPAC code.
+    Each indel carrier slot gets its own allele there (the SNP alt it carries, else
+    the reference base), and one row is returned per resulting sequence that still
+    has the PAM and fits the search budget, listing only the carriers that have it
+    and naming the SNP alts it holds next to the indel (Variant info, rsID, MAF).
+    A carrier the genotypes cannot place on a slot gets the strongest target its own
+    alleles allow (PUTATIVE); with no genotypes at all, the indel log's carriers get
+    the strongest target the codes allow (PUTATIVE). With CRISPRME_INDEL_SNP=0 every
+    code reads as the reference base, as on a fake-indel genome without the overlay.
+    The SNP+indel co-occurrence companion gets one line per SNP set a row requires.
+    Returns [] when no carrier has a target here."""
+    _ipos, _iref, _ialt, _istart = _indel_window(indel_data)
+    strand = line[6]
+    real_of = _isc.build_offset_to_real(
+        line[2], int(line[4]), strand, int(indel_data[5]), _istart, _iref, _ialt)
+    have_gt = _indel_snp and (_gt is not None or _dict_snps is not None)
+    cols = []
+    for j in amb:
+        real = real_of[j]
+        code = line[2][j]
+        if real is None or not 0 <= real < len(genomeStr):
+            # never expected (the overlay codes only reference positions): read the
+            # code as its first allele, unresolved, and say so at the end
+            _ovl_stats["unmapped"] += 1
+            first = _isc._CODE[code.upper()][0]
+            ref_fwd = _isc.complement(first) if strand == "-" else first
+            cols.append(_isc.SnpColumn(j, -1, ref_fwd, None, code, strand, known=False))
+            continue
+        ref_fwd = genomeStr[real]
+        if not _indel_snp:
+            cols.append(_isc.SnpColumn(j, real, ref_fwd, None, ref_fwd if strand == "+"
+                                       else _isc.complement(ref_fwd), strand,
+                                       known=False))
+            continue
+        rec = _snp_record(real + 1) if have_gt else None
+        col = _isc.SnpColumn(j, real, ref_fwd, rec, code, strand, known=rec is not None)
+        if col.ref not in col.code:
+            _ovl_stats["unmapped"] += 1  # the code does not hold the reference base
+            col.known = False
+        cols.append(col)
+    carriers = None
+    others = ()
+    if have_gt:
+        # the indel's phased carriers (the store), else the log's, phase unknown
+        key = indel_data[4]
+        carriers = _igt_cache.get(key)
+        if carriers is None:
+            if len(_igt_cache) > 2000:
+                _igt_cache.clear()
+            igt = _indelgt.carriers_dict(_ipos, _iref, _ialt) if _indelgt is not None else {}
+            if igt:
+                carriers = _isc.IndelCarriers(igt)
+            else:
+                carriers = _isc.IndelCarriers(
+                    {s: "0/1" for s in indel_data[1].split(",") if s}, phase_known=False)
+            _igt_cache[key] = carriers
+        if carriers.phase_known:
+            _span = [r for r in real_of if r is not None]
+            if _span:
+                others = _other_indels(min(_span), max(_span), _ipos, _iref, _ialt)
+    if do_scores:
+        def score_fn(bases, _cols=cols):
+            return _cfd_from_alignment(line[1], _isc.realize(line[2], line[1], _cols, bases))
+    else:
+        score_fn = None
+    rows = _isc.resolve_target(
+        line[1], line[2], cols, carriers,
+        _isc.pam_columns(len(line[2]), pam, pam_at_beginning),
+        range(len(line[2]))[pos_beg:pos_end], allowed_mms, max_total_edits,
+        int(line[8]), score_fn=score_fn,
+        max_dna_bulges=max_dna_bulges, max_rna_bulges=max_rna_bulges, others=others)
+    _ovl_stats["targets"] += 1
+    _ovl_stats["rows"] += len(rows)
+    if not rows:
+        _ovl_stats["dropped"] += 1
+    cooc = {}  # (phase, SNP alts the row requires) -> [samples, slots]
+    out = []
+    for r in rows:
+        if r["phase"] == _isc.PUTATIVE:
+            _ovl_stats["putative"] += 1
+        fr = final_result.copy()
+        fr[2] = r["seq"]
+        fr[7] = str(r["mm"])
+        fr[9] = str(r["mm"] + int(line[8]))
+        if r["samples"] is not None:
+            fr[12] = ",".join(r["samples"])
+        # the SNP alts this haplotype holds, forward strand, by position; the indel
+        # token first (resultIntegrator strand-corrects each comma-separated token)
+        alts = sorted(
+            (c.pos1, c.ref_fwd, _isc.complement(b) if strand == "-" else b)
+            for c, b in zip(cols, r["bases"]) if b != c.ref and c.pos1 > 0)
+        if alts:
+            names = [_snp_name(p, a) for p, _rf, a in alts]
+            fr[17] = ",".join([indel_data[4]]
+                              + ["%s_%d_%s_%s" % (current_chr, p, rf, a) for p, rf, a in alts])
+            fr[15] = ",".join([indel_data[2]] + [n[0] for n in names])
+            fr[16] = ",".join([indel_data[3]] + [n[1] for n in names])
+        used = tuple(sorted(
+            (cols[k].pos1, _isc.complement(r["bases"][k]) if strand == "-" else r["bases"][k])
+            for k in r["enabling"] if cols[k].pos1 > 0))
+        if used and _cooc_out is not None:
+            ent = cooc.setdefault((r["phase"], used, r["samples"] is None), [set(), 0])
+            ent[0] |= set(r["samples"] or ())
+            ent[1] += r["slots"]
+        out.append(fr)
+    for (phase, used, sites_only), (samples, slots) in sorted(cooc.items()):
+        head = (current_chr + "\t" + str(_ipos) + "\t" + _iref + "\t" + _ialt + "\t"
+                + final_result[4] + "\t" + strand + "\t"
+                + ";".join(str(p) for p, _a in used) + "\t"
+                + ";".join(_snp_name(p, a)[0] for p, a in used) + "\t" + phase + "\t")
+        if sites_only:
+            # the 2.5.2 fallback: no genotypes to count cis carriers with, so the joint
+            # frequency is bounded by the rarest participating allele
+            _iaf = None
+            if _indel_af is not None:
+                try:
+                    _iar = _indel_af.lookup(_ipos, _iref, _ialt)
+                    _iaf = _iar.get("AF_max") if _iar else None
+                except Exception:  # noqa: BLE001
+                    _iaf = None
+            _snp_afs = []
+            for p, a in used:
+                g = _snp_global(p, a)
+                _snp_afs.append(g.allele_freq() if g is not None else None)
+            _cooc_out.write(head + ("%.6g" % _isc.putative_joint_af([_iaf] + _snp_afs))
+                            + "\tNA\tNA\n")
+            continue
+        g = _snp_global(*used[0])
+        _cooc_out.write(head + ("%.6g" % _isc.joint_af(slots, g.AN if g is not None else 0))
+                        + "\t" + str(len(samples)) + "\t" + ",".join(sorted(samples)[:50])
+                        + "\n")
+    return out
+
+
+def _report_overlaid():
+    """One stdout line on how the overlaid targets were resolved (stdout only:
+    the pipeline treats any stderr write as a fatal stage failure)."""
+    if not _ovl_stats["targets"]:
+        return
+    print("indel-snp: %s overlaid target(s) resolved per carrier haplotype into %d "
+          "row(s) (%d PUTATIVE); %d had no carrier with a target there"
+          % (_ovl_stats["targets"], _ovl_stats["rows"], _ovl_stats["putative"],
+             _ovl_stats["dropped"]), flush=True)
+    if _ovl_stats["unmapped"]:
+        print("WARNING [indel-snp]: %d IUPAC column(s) of %s did not map onto the "
+              "reference base they code; they were resolved without genotypes"
+              % (_ovl_stats["unmapped"], current_chr), flush=True)
+
+
+def _queue_row(final_result):
+    """Reference alignment, PAM creation and the scoring sentinels for one indel
+    row, then queue it for scoring."""
+    ref_aligned = alignRefFromVar(final_result)
+    # PAM creation on the INDEL path. Mirrors the SNP path's predicate in
+    # new_simple_analysis.py: if ANY reference base in the PAM window is
+    # incompatible with the PAM motif, the reference could not have carried a
+    # usable PAM at this locus, so the variant created it. The stored value is the
+    # ALT PAM string, exactly as the SNP path stores it.
+    #
+    # PAM_gen is index 10, the same slot as on the SNP path. The header that
+    # analisi_indels_NNN.sh seds into the cluster file lists an extra
+    # Chromosome_fake column at 10, which would put PAM_gen at 11 -- but that
+    # header is misaligned with the rows the analyzer actually reads. The rows
+    # here are 18 fields with no Chromosome_fake, which is also what this
+    # function's own assignments assume: [12] samples, [15] rsID, [16] MAF,
+    # [17] indel info all line up with the SNP layout and would each be off by
+    # one against the sed header. Do not re-derive this index from that header.
+    #
+    # pam_begin/pam_end already encode PAM orientation (trailing window for a 3'
+    # PAM, leading for a 5' one) and `pam` is the bare motif aligned with that
+    # window, so this is correct for both. Left as the existing placeholder when
+    # the window holds a character the IUPAC table does not define -- e.g. a '-'
+    # from a bulge falling inside the PAM -- so this can never raise where the
+    # column was previously simply unset.
+    # .upper(): iupac_code_set maps lowercase keys to LOWERCASE sets ("a": {"a"}),
+    # so a lowercase reference base would never intersect an uppercase motif set and
+    # would be scored as a creation event. In practice the PAM window is always
+    # uppercase (the guide carries N there, so those positions always "match" and
+    # alignRefFromVar leaves them uppercase), making this defensive only -- but it
+    # removes the false-positive class outright rather than relying on that.
+    ref_pam = ref_aligned[pam_begin:pam_end].upper()
+    if len(ref_pam) == len(pam) and all(c in iupac_code_set for c in ref_pam):
+        for pos_pam, pam_char in enumerate(ref_pam):
+            if not iupac_code_set[pam[pos_pam]] & iupac_code_set[pam_char]:
+                final_result[10] = final_result[2][pam_begin:pam_end].upper()
+                break
+    final_result.append(ref_aligned)
+    # number to activate ref score calculation (active if target is alternative)
+    final_result.append(33)
+    # position of tmp_mms (removed later after processing)
+    final_result.append(0)
+    cluster_to_save.append(final_result)
+
+
 print("Analysis of " + current_chr)
 
 save_cluster_targets = True
@@ -949,201 +1274,15 @@ for line in inResult:
                 print("WARNING [mega-indel-af]: emission error (further "
                       "occurrences suppressed): %s" % _iae, flush=True)
 
-    # [indel-snp] SNP+indel co-occurrence (gated companion output; never touches the
-    # classic indel row). The overlaid search reports IUPAC codes in line[2] at
-    # overlaid SNP columns; decode which alt(s) the guide USES, look up phased SNP +
-    # indel genotypes, and record the cis co-occurrence + joint AF to the companion.
-    if _indel_snp and _cooc_out is not None:
-        try:
-            _ip = indel_data[4].split("_")   # chrN_pos_REF_ALT
-            _ipos, _iref, _ialt = int(_ip[-3]), _ip[-2], _ip[-1]
-            _strand = line[6]
-            _real_of = _isc.build_offset_to_real(
-                line[2], int(line[4]), _strand, int(indel_data[5]),
-                int(indel_data[0].split("_")[1].split("-")[0]), _iref, _ialt)
-
-            def _snp_at(real, _s=_strand):
-                pos1 = real + 1  # registry/genotype tiers are 1-based (dict key = real+1)
-                alts = _reg.alts_at(pos1)
-                if not alts:
-                    return None
-                alt = alts[0]  # biallelic SNP position
-                refb = _reg.ref(pos1, alt) or (
-                    genomeStr[real] if 0 <= real < len(genomeStr) else "N")
-                rsid = _reg.rsid(pos1, alt) or "."
-                gts = {}
-                if _gt is not None:
-                    for tok in _gt.carrier_tokens(pos1, alt):
-                        _sm, _, _g = tok.partition(":")
-                        gts[_sm] = _g
-                if _s == "-":  # orient forward alleles to the target's strand
-                    refb, alt = _isc.complement(refb), _isc.complement(alt)
-                return (refb, alt, rsid, gts)
-
-            _used = _isc.used_snps_for_target(line[1], line[2], lambda j: _real_of[j], _snp_at)
-            if _used:
-                # CONFIRMED-cis needs phased indel GT (the store); else fall back to the
-                # log's UNPHASED carriers -> PUTATIVE.
-                if _indelgt is not None:
-                    _igt = _indelgt.carriers_dict(_ipos, _iref, _ialt)
-                else:
-                    _igt = {s: "0/1" for s in indel_data[1].split(",") if s}
-                _cis, _phase, _ac = _isc.cis_cooccurrence(_igt, [g for _, _, g in _used])
-                if _cis:
-                    _an = 0
-                    try:
-                        _grp = _reg.lookup(_used[0][0] + 1, _reg.alts_at(_used[0][0] + 1)[0])
-                        _an = _grp["global"].AN if _grp and "global" in _grp else 0
-                    except Exception:  # noqa: BLE001
-                        _an = 0
-                    _cooc_out.write(
-                        current_chr + "\t" + str(_ipos) + "\t" + _iref + "\t" + _ialt
-                        + "\t" + final_result[4] + "\t" + _strand + "\t"
-                        + ";".join(str(u[0] + 1) for u in _used) + "\t"
-                        + ";".join(u[1] for u in _used) + "\t" + _phase + "\t"
-                        + ("%.6g" % _isc.joint_af(_ac, _an)) + "\t" + str(len(_cis))
-                        + "\t" + ",".join(sorted(_cis)[:50]) + "\n")
-                    # [indel-snp] CONFIRMED-cis ENRICHMENT: merge the co-occurring
-                    # cis-phased SNP(s) into the row's variant columns so the Variant
-                    # column + observed_haplotypes companion report the FULL real
-                    # haplotype (indel + SNP(s)), not the indel alone. GUARD: only the
-                    # CONFIRMED (genotype-phased, same-slot) call enriches -- a PUTATIVE
-                    # phase (unphased GT, slot alignment unproven) stays sidecar-only so
-                    # we never assert a cis haplotype no individual is confirmed to carry
-                    # (the anti-chimera contract; the PUTATIVE fallback below is likewise
-                    # sidecar-only). Wrapped defensively: any failure leaves the row as
-                    # the plain indel-only row (the sidecar above is already written).
-                    if _phase == _isc.CONFIRMED:
-                        try:
-                            _snp_tok, _snp_rs, _snp_maf = _isc.forward_snp_tokens(
-                                _reg, current_chr, _used)
-                            if _snp_tok:
-                                # [17] Variant_info: indel token FIRST, then the SNP
-                                # tokens (resultIntegrator splits on ',' + strand-
-                                # corrects each token independently -- same as the
-                                # SNP path's comma-joined multi-token field).
-                                final_result[17] = (
-                                    indel_data[4] + "," + ",".join(_snp_tok))
-                                # [15] rsID + [16] MAF stay 1:1 token-aligned with [17]
-                                # (indel first, then SNPs); resultIntegrator/_min_maf
-                                # zip the MAF list against the variant tokens.
-                                final_result[15] = ",".join(
-                                    [indel_data[2]] + _snp_rs)
-                                final_result[16] = ",".join(
-                                    [indel_data[3]] + _snp_maf)
-                                # [12] Samples: narrow to the EXACT cis carriers (carry
-                                # the indel AND every cis SNP on the same phased slot) --
-                                # the real-haplotype carrier semantic; replaces the
-                                # indel-all-carriers value set above.
-                                final_result[12] = ",".join(sorted(_cis))
-                        except Exception:  # noqa: BLE001 - enrichment never breaks the row
-                            pass
-                elif _gt is None or _indelgt is None:
-                    # [indel-snp] PUTATIVE fallback (2.5.2): the indel + used SNP alt(s)
-                    # co-occur at this locus but we have NO per-sample genotypes to confirm
-                    # cis -- the sites-only / aggregate case (e.g. the mega, where _gt and
-                    # _indelgt are both absent). Rather than drop the co-occurrence, report
-                    # the SITE as a PUTATIVE haplotype with the conservative min-AF bound
-                    # (a cis haplotype can never be more frequent than its rarest allele);
-                    # n_cis / cis_samples are "NA" (uncountable without genotypes). Gated on
-                    # genotype ABSENCE so the genotyped path (present-but-empty _cis = a real
-                    # no-cis-carrier call) is never turned into a phantom PUTATIVE row.
-                    _snp_afs = []
-                    for (_sp, _rs, _g) in _used:
-                        try:
-                            _sgrp = _reg.lookup(_sp + 1, _reg.alts_at(_sp + 1)[0])
-                            _snp_afs.append(
-                                _sgrp["global"].allele_freq()
-                                if _sgrp and "global" in _sgrp else None)
-                        except Exception:  # noqa: BLE001
-                            _snp_afs.append(None)
-                    _iaf = None
-                    if _indel_af is not None:
-                        try:
-                            _iar = _indel_af.lookup(_ipos, _iref, _ialt)
-                            _iaf = _iar.get("AF_max") if _iar else None
-                        except Exception:  # noqa: BLE001
-                            _iaf = None
-                    _cooc_out.write(
-                        current_chr + "\t" + str(_ipos) + "\t" + _iref + "\t" + _ialt
-                        + "\t" + final_result[4] + "\t" + _strand + "\t"
-                        + ";".join(str(u[0] + 1) for u in _used) + "\t"
-                        + ";".join(u[1] for u in _used) + "\t" + _isc.PUTATIVE + "\t"
-                        + ("%.6g" % _isc.putative_joint_af([_iaf] + _snp_afs))
-                        + "\tNA\tNA\n")
-        except Exception:  # noqa: BLE001 - annotation must never break the indel row
-            pass
-
-    # [indel-snp] The overlaid search reports IUPAC codes in the DNA column at
-    # overlaid SNP positions. The cis-decode above needed them; from here on write
-    # the concrete carrier allele (the base the aligned guide matched) so the
-    # ref-alignment, scoring and radar/motif steps never see a non-ACGT base.
-    # Gated + a strict no-op on the classic path (no IUPAC in the DNA column).
-    if _indel_snp:
-        final_result[2] = _resolve_overlaid_iupac(final_result[2], final_result[1])
-
-    # real_target
-    # t = final_result[2]
-    # mm_new_t = 0
-    # tmp_pos_mms = None  # lista posizione dei mms
-    # guide_no_pam = line[1][pos_beg:pos_end]
-    # list_t = list(t)
-    # for position_t, char_t in enumerate(t[pos_beg:pos_end]):
-    #     if char_t.upper() != guide_no_pam[position_t]:
-    #         mm_new_t += 1
-    #         tmp_pos_mms = position_t
-    #         if guide_no_pam[position_t] != '-':
-    #             list_t[sum_for_mms + position_t] = char_t.lower()
-    # final_result[2] = ''.join(list_t)  # t
-
-    # print('target with no process', final_result[2])
-    # if tmp_pos_mms:
-    #     final_result.append(int(tmp_pos_mms))
-    # else:  # NO mms found
-    #     final_result.append(-1)
-
-    # print('results before calc and ref alignment', final_result)
-
-    ref_aligned = alignRefFromVar(final_result)
-    # PAM creation on the INDEL path. Mirrors the SNP path's predicate in
-    # new_simple_analysis.py: if ANY reference base in the PAM window is
-    # incompatible with the PAM motif, the reference could not have carried a
-    # usable PAM at this locus, so the variant created it. The stored value is the
-    # ALT PAM string, exactly as the SNP path stores it.
-    #
-    # PAM_gen is index 10, the same slot as on the SNP path. The header that
-    # analisi_indels_NNN.sh seds into the cluster file lists an extra
-    # Chromosome_fake column at 10, which would put PAM_gen at 11 -- but that
-    # header is misaligned with the rows the analyzer actually reads. The rows
-    # here are 18 fields with no Chromosome_fake, which is also what this
-    # function's own assignments assume: [12] samples, [15] rsID, [16] MAF,
-    # [17] indel info all line up with the SNP layout and would each be off by
-    # one against the sed header. Do not re-derive this index from that header.
-    #
-    # pam_begin/pam_end already encode PAM orientation (trailing window for a 3'
-    # PAM, leading for a 5' one) and `pam` is the bare motif aligned with that
-    # window, so this is correct for both. Left as the existing placeholder when
-    # the window holds a character the IUPAC table does not define -- e.g. a '-'
-    # from a bulge falling inside the PAM -- so this can never raise where the
-    # column was previously simply unset.
-    # .upper(): iupac_code_set maps lowercase keys to LOWERCASE sets ("a": {"a"}),
-    # so a lowercase reference base would never intersect an uppercase motif set and
-    # would be scored as a creation event. In practice the PAM window is always
-    # uppercase (the guide carries N there, so those positions always "match" and
-    # alignRefFromVar leaves them uppercase), making this defensive only -- but it
-    # removes the false-positive class outright rather than relying on that.
-    ref_pam = ref_aligned[pam_begin:pam_end].upper()
-    if len(ref_pam) == len(pam) and all(c in iupac_code_set for c in ref_pam):
-        for pos_pam, pam_char in enumerate(ref_pam):
-            if not iupac_code_set[pam[pos_pam]] & iupac_code_set[pam_char]:
-                final_result[10] = final_result[2][pam_begin:pam_end].upper()
-                break
-    final_result.append(ref_aligned)
-    # number to activate ref score calculation (active if target is alternative)
-    final_result.append(33)
-    # position of tmp_mms (removed later after processing)
-    final_result.append(0)
-    cluster_to_save.append(final_result)
+    # [indel-snp] An overlaid target (IUPAC codes in line[2], the SNP overlay of the
+    # fake-indel genome) stands for every combination of its SNP alleles at once:
+    # resolve it per carrier haplotype, one row per sequence a carrier really has.
+    # A target with no code is the same sequence for every carrier of the indel and is
+    # reported as the engine found it (the classic path, byte-identical).
+    _amb = _isc.ambiguous_columns(line[2])
+    for _row in (_overlaid_rows(line, final_result, indel_data, _amb) if _amb
+                 else (final_result,)):
+        _queue_row(_row)
 
     if len(cluster_to_save) >= 100000:
         # after reading 100k lines from file and creating the cluster, start processing it
@@ -1193,6 +1332,7 @@ else:
         + outputFile
         + ".bestmmblg_INDEL.txt"
     )
+    _report_overlaid()
     # print exit messagge and exit 0
     print("Done", current_chr, time.time() - start_time)
     print("ANALYSIS COMPLETE IN", time.time() - global_start)
@@ -1253,6 +1393,7 @@ if foreign_rows:
         "reported against %s indels they do not belong to."
         % (foreign_rows, current_chr, current_chr)
     )
+_report_overlaid()
 
 print("Done", current_chr, time.time() - start_time)
 
