@@ -23,7 +23,9 @@ and races whole runs. They read the process table from /proc, as the script does
 the image has no ps (``TheLockTestsNeedNoPs``). ``TheThreadGuardSizesTheIndexSearched``
 covers the RAM guard, which must size a search by the index the resolver picked.
 ``AFinishedRunRestoresOnlyRealAnnotations`` runs the script's last annotation step,
-which must leave the empty placeholder alone.
+which must leave the empty placeholder alone, and
+``TheSamplesPlaceholderIsNeverWritten`` runs the script with the empty samples
+placeholder, which it must leave alone too.
 """
 
 import os
@@ -666,11 +668,11 @@ class _ShippedScript(unittest.TestCase):
                 (library / f"{p}_hg38+{self.VCF}_INDELS").mkdir()
 
     def run_pipeline(self, pam="20bp-NRG-SpCas9", bulges=1, prune=0, variant=True,
-                     index_path=None, threads=1, env=None, timeout=300):
+                     index_path=None, threads=1, env=None, timeout=300, samples=None):
         """Run the script the way complete-search launches it, stopping at its last
         search."""
         return self.finish(self.launch(pam, bulges, prune, variant, index_path,
-                                       threads, env), timeout)
+                                       threads, env, samples=samples), timeout)
 
     def finish(self, run, timeout=300):
         """Wait for a launched run; a run still going after `timeout` is a failure."""
@@ -683,12 +685,13 @@ class _ShippedScript(unittest.TestCase):
         return _Run(run.stdout(), run.calls(), run.stderr())
 
     def launch(self, pam="20bp-NRG-SpCas9", bulges=1, prune=0, variant=True,
-               index_path=None, threads=1, env=None, wrap=()):
+               index_path=None, threads=1, env=None, wrap=(), samples=None):
         """Start the script the way complete-search launches it (argument order of
         crisprme.py's crisprme_run), in a session of its own, so that a test can
         signal the whole run as Ctrl-C or a container stop does. `env` adds to its
         environment; the RAM thread guard is off unless `env` turns it on. `wrap` is a
-        command that runs the script's bash as its child."""
+        command that runs the script's bash as its child. `samples` is the samplefile
+        to hand it in place of the run's own."""
         self.runs += 1
         work = self.root / f"run{self.runs}"
         out = work / "out"
@@ -699,11 +702,13 @@ class _ShippedScript(unittest.TestCase):
         guides.write_text("N" * len(pam_file.read_text().split()[0]) + "\n")
         empty = work / "empty.txt"
         empty.write_text("")
+        given = samples
         vcfs = samples = "_"
         if variant:
             vcfs, samples = work / "vcfs.txt", work / "samples.txt"
             vcfs.write_text(self.VCF + "\n")
             samples.write_text("")
+        samples = given or samples
         # complete-search refuses --prune-pam without --index-path; the usual value
         # is the working directory's own genome_library
         if index_path is None:
@@ -2932,6 +2937,66 @@ class AFinishedRunRestoresOnlyRealAnnotations(unittest.TestCase):
         for name, body in beds.items():
             self.assertEqual((self.tmp / name).read_text(), body)
             self.assertTrue((self.tmp / f"{name}.gz").is_file())  # -k: the .gz stays
+
+
+def _samplefile_blocks():
+    """The shipped blocks that add the samplefile's trailing newline as a run starts and
+    strip it as the run ends, verbatim: each from its comment to its fi."""
+    text = _SCRIPT.read_text()
+    blocks = []
+    for comment in ("# $6 is the samplefile.",
+                    "# Strip the trailing newline from the empirical/sample file"):
+        start = text.index(comment)
+        blocks.append(text[start:text.index("\nfi\n", start) + len("\nfi\n")])
+    return blocks
+
+
+class TheSamplesPlaceholderIsNeverWritten(_ShippedScript):
+    """A search with no samples -- reference-only, or variant-aware without --samplesID
+    -- is handed the install's shared empty placeholder PostProcess/vuoto.txt as its
+    samplefile. The script added a newline to it as the run started and stripped it only
+    at the run's very end, so every run that ended before -- no hits, an error, a Ctrl-C
+    -- left one more newline in it for good. The stub ends these runs at their last
+    search, before that end."""
+
+    def setUp(self):
+        super().setUp()
+        self.vuoto = self.root / "PostProcess" / "vuoto.txt"
+        self.vuoto.parent.mkdir()
+        self.vuoto.write_bytes(b"")
+
+    def test_a_reference_only_search_leaves_it_empty(self):
+        self.install("NRG_3", variant=False)
+        run = self.run_pipeline(variant=False, samples=self.vuoto)
+        self.assertEqual(run.searched(variant=False), ("NRG_3_hg38", False))
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed",
+                         run.stderr)
+        self.assertEqual(self.vuoto.read_bytes(), b"")
+
+    def test_a_variant_search_without_samples_leaves_it_empty(self):
+        self.install("NRG_3")
+        run = self.run_pipeline(samples=self.vuoto)
+        self.assertEqual(run.searched(variant=True), (f"NRG_3_hg38+{self.VCF}", False))
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed",
+                         run.stderr)
+        self.assertEqual(self.vuoto.read_bytes(), b"")
+
+    def test_a_real_samplefile_still_gets_its_newline_and_loses_it_again(self):
+        # the newline that `while read` needs for the last line, stripped as a finished
+        # run ends; the placeholder is left as it is by both, even one an older run left
+        # a newline in
+        add, strip = _samplefile_blocks()
+        samples = self.root / "samples.txt"
+        samples.write_text(f"{self.VCF}.samplesID.txt")
+        self.vuoto.write_bytes(b"\n")
+        for block, body in ((add, f"{self.VCF}.samplesID.txt\n"),
+                            (strip, f"{self.VCF}.samplesID.txt")):
+            for samplefile in (samples, self.vuoto):
+                out = subprocess.run(["bash", "-c", block, "bash", *["_"] * 5, str(samplefile)],
+                                     capture_output=True, text=True)
+                self.assertEqual((out.returncode, out.stderr), (0, ""))
+            self.assertEqual(samples.read_text(), body)
+            self.assertEqual(self.vuoto.read_bytes(), b"\n")
 
 
 class ShippedScriptCarriesTheFix(unittest.TestCase):
