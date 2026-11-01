@@ -73,15 +73,25 @@ dedicated index for a shorter 5′ PAM.
 ## Usage
 
 ```bash
+# the genome, annotations, PAMs and sample lists (plus the NRG_3_hg38 reference index)
+crisprme.py download --what all --path .
+
 # fetch the general index (routes here automatically on flank width)
 crisprme.py download --what index --index-name NNNNNNNN_3_hg38+hg38_HGDP1kGP --path .
 
 # then search with whatever PAM you need -- no rebuild
 crisprme.py complete-search --genome Genomes/hg38 \
-  --vcf vcf_config.txt --guide guide.txt --pam PAMs/20bp-NRG-SpCas9.txt \
-  --mm 4 --bDNA 1 --bRNA 1 --prune-pam \
-  --annotation ... --output my_search
+  --vcf list_vcf.txt --samplesID list_samplesID.txt \
+  --guide guide.txt --pam PAMs/20bp-NRG-SpCas9.txt \
+  --mm 4 --bDNA 1 --bRNA 1 --prune-pam --index-path genome_library \
+  --annotation Annotations/dhs+encode_screenv4+gencode+cosmic.hg38.bed.gz \
+  --output my_search
 ```
+
+Run the search from the folder you downloaded into: `download` writes
+`list_vcf.txt` and `list_samplesID.txt` there, and `--prune-pam` needs
+`--index-path`. `guide.txt` holds one spacer per line, padded with an `N` for each
+PAM position (`NNN` for a 3-nt PAM).
 
 `--prune-pam` is **CLI-only**: the web form does not pass the flag, so a general
 index cannot be used from the web interface.

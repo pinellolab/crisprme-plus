@@ -210,6 +210,58 @@ class TestCallersUseAcceptedFlags(unittest.TestCase):
             self.assertNotIn("--bmax", flags, f"{path} still passes --bmax")
 
 
+class TestDocumentedCommandsPassTheFlagChecks(unittest.TestCase):
+    """Every complete-search command the docs give must get past complete-search's own
+    checks of its flags, or a user who copies it gets an error and nothing else.
+
+    The general-index Hugging Face card's only example ran ``--prune-pam`` without
+    ``--index-path``, which complete-search refuses up front ("--prune-pam requires
+    --index-path"). The scan reads the fenced code blocks of the README, METHODS and
+    docs/ (the Hugging Face cards included) and follows backslash continuations.
+    """
+
+    IGNORE = frozenset({"--help"})
+
+    def _commands(self):
+        """Yield (path, flags) for every `crisprme.py complete-search` in a code block."""
+        paths = [pathlib.Path(REPO, "README.md"), pathlib.Path(REPO, "METHODS.md")]
+        paths += sorted(pathlib.Path(REPO, "docs").rglob("*.md"))
+        for path in paths:
+            lines = path.read_text(encoding="utf-8").split("\n")
+            fenced = False
+            for i, line in enumerate(lines):
+                if line.lstrip().startswith("```"):
+                    fenced = not fenced
+                    continue
+                if (not fenced or "crisprme.py complete-search" not in line
+                        or line.lstrip().startswith("#")):
+                    continue
+                cmd = [line.split(" #", 1)[0]]
+                while cmd[-1].rstrip().endswith("\\") and i + len(cmd) < len(lines):
+                    cmd.append(lines[i + len(cmd)].split(" #", 1)[0])
+                args = " ".join(cmd).split("crisprme.py complete-search", 1)[1]
+                yield path.relative_to(REPO), set(FLAG.findall(args)) - self.IGNORE
+
+    def test_scan_finds_the_general_index_example(self):
+        """Guard the scan itself: if it finds nothing it proves nothing."""
+        paths = {str(p) for p, _ in self._commands()}
+        self.assertIn("docs/hf/crisprme-data-general-index_README.md", paths,
+                      f"scan found only: {sorted(paths)}")
+
+    def test_no_documented_command_passes_a_flag_the_allowlist_rejects(self):
+        allowed = allowlist(_source_lines())
+        offenders = [f"{path}: {flag}" for path, flags in self._commands()
+                     for flag in sorted(flags - allowed)]
+        self.assertEqual(offenders, [], "documented complete-search flags no code "
+                                        "accepts: " + ", ".join(offenders))
+
+    def test_prune_pam_is_always_given_with_index_path(self):
+        offenders = sorted({str(path) for path, flags in self._commands()
+                            if "--prune-pam" in flags and "--index-path" not in flags})
+        self.assertEqual(offenders, [], "--prune-pam without --index-path, which "
+                                        "complete-search refuses: " + ", ".join(offenders))
+
+
 # Needs crisprme.py to be importable: these run it as a subprocess, and it imports
 # Bio.Seq at module scope. The static checks above parse the source instead and must
 # stay unguarded -- gating them on a dependency they do not use is how the --bmax
