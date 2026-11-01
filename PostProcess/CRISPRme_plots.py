@@ -164,7 +164,9 @@ def plot_with_MMvBUL(df, out_folder, guide, tag="top_1000_log_for_main_text"):
     df.plot.scatter(
         x="index",
         y="Mismatches+bulges_ALT_(fewest_mm+b)",
-        s="plot_AF",
+        # no ALT point for a site without a variant: size 0 (a NaN size drew none
+        # either, but savefig failed on a plot whose only site had one)
+        s=df["plot_AF"].fillna(0),
         c=transparent_blue,
         zorder=2,
         edgecolors="black",
@@ -318,7 +320,9 @@ def plot_with_CRISPR_BULGE_score(df, out_folder, guide, tag="top_1000_log_for_ma
     df.plot.scatter(
         x="index",
         y="CRISPR_BULGE_score_ALT_(highest_CRISPR_BULGE)",
-        s="plot_AF",
+        # no ALT point for a site without a variant: size 0 (a NaN size drew none
+        # either, but savefig failed on a plot whose only site had one)
+        s=df["plot_AF"].fillna(0),
         c=transparent_blue,
         zorder=2,
         edgecolors="black",
@@ -478,7 +482,9 @@ def plot_with_CFD_score(df, out_folder, guide, tag="top_1000_log_for_main_text")
     df.plot.scatter(
         x="index",
         y="CFD_score_ALT_(highest_CFD)",
-        s="plot_AF",
+        # no ALT point for a site without a variant: size 0 (a NaN size drew none
+        # either, but savefig failed on a plot whose only site had one)
+        s=df["plot_AF"].fillna(0),
         c=transparent_blue,
         zorder=2,
         edgecolors="black",

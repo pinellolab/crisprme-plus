@@ -169,6 +169,39 @@ class TestTopPlots(unittest.TestCase):
                 seen = _drawn(plot, empty, GUIDE)
                 self.assertEqual(seen["star_layers"], [])
 
+    def test_a_single_site_is_plotted(self):
+        # A search whose only site is the reference on-target (Reference only, 0
+        # mismatches, 0 bulges), or one reference off-target: a site without a variant
+        # has no ALT point (its size was NaN), and a plot of that one site alone failed
+        # in savefig ("need at least one array to concatenate"). The script stopped
+        # there without an image, and the shell dropped its error with warnings.txt.
+        sites = _sites()
+        for row in (0, 2, 4):  # 0, 1 and 2 mismatches+bulges, all reference
+            one = sites.iloc[[row]]
+            mmb = int(one["Mismatches+bulges_(highest_CFD)"].iloc[0])
+            with self.subTest(mmb=mmb), tempfile.TemporaryDirectory() as tmp:
+                tsv = os.path.join(tmp, "integrated.tsv")
+                one.to_csv(tsv, sep="\t", index=False, na_rep="NA")
+                out = os.path.join(tmp, "imgs") + os.sep
+                os.makedirs(out)
+                run = subprocess.run(
+                    [sys.executable, os.path.join(HERE, "CRISPRme_plots.py"), tsv, out],
+                    capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr[-600:])
+                made = sorted(f for f in os.listdir(out) if f.endswith(".png"))
+                self.assertEqual(len(made), 5, made)
+                run = subprocess.run(
+                    [sys.executable, os.path.join(HERE, "CRISPRme_plots_personal.py"), tsv,
+                     out, f"{GUIDE}.S1.personal"], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr[-600:])
+                self.assertEqual(
+                    len([f for f in os.listdir(out) if f.endswith(".personal.png")]), 3)
+                # drawn: its REF point, and a star if it is a perfect match
+                seen = _drawn(plots.plot_with_CFD_score, plots.filter_table(one, "cfd").copy(),
+                              GUIDE)
+                self.assertEqual(len(seen["layers"][0][0]), 1)
+                self.assertEqual(len(seen["star_layers"]), 1 if mmb == 0 else 0)
+
     def test_scripts_still_run_from_the_command_line(self):
         df = _sites()
         with tempfile.TemporaryDirectory() as tmp:
