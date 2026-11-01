@@ -124,10 +124,10 @@ at aa9c54b) with the text after it. All five entries are under `### Fixed`.
   partway, and for each chromosome not written yet it reported 0 overlapping variants, with no
   warning. It now refuses a registry marked unfinished (see the dict-less tiers entry), as
   `complete-search` and `publish-index` do: it stops with a one-line `Error:` saying to let that run
-  finish, or to run `build-index-only` again to its end with its `--samplesID`. A
-  registry that a run of an earlier release left partway carries no mark and is not detected. A
-  missing registry is now also reported in one line instead of a traceback. Output for a finished
-  registry is unchanged. Covered by `PostProcess/test_targets_scoring.py`.
+  finish, or to run `build-index-only` again to its end with its `--samplesID`. A registry that a
+  run of an earlier release left partway carries no mark and is not detected. A missing registry is
+  now also reported in one line instead of a traceback. Output for a finished registry is
+  unchanged. Covered by `PostProcess/test_targets_scoring.py`.
 
 ### Changed
 - **`--per-sample` on an index without the dict-less tiers now says what it reports.** An index
