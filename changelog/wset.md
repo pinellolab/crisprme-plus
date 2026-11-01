@@ -118,7 +118,11 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   `[genotyped, samples not indexed]`, not sites-only.
   **If you added a dataset in Settings,** build its variant index again there; to give its
   samples' populations and sex (the tiers count a sample of unknown sex as diploid on chrX and
-  chrY), put your own list at `samplesIDs/<dataset>.samplesID.txt` first.
+  chrY), put your own list at `samplesIDs/<dataset>.samplesID.txt` first. A list put there, or
+  written there again, once the variant index is built reaches its tiers only after you remove
+  `Dictionaries/registry_<dataset>` and `Dictionaries/genotypes_<dataset>` from your data folder
+  and build the index again: until then a build leaves the tiers as they are, from the list they
+  were built with, while a search's tables and report take the list that is there.
 - **The Settings VCF upload records the reference genome you pick, and the search form offers the
   dataset for it.** The chunked uploader looked the genome up with selectors Dash 2's dropdown does
   not have and sent none, so `VCFs/.<dataset>.refgenome` was never written; and the search form
