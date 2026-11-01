@@ -33,8 +33,8 @@ a Claude Code session opened at the repo root:
    the multi-arch image publishes on the release tag).
 2. **Invoke it:** type `/release-crisprme`, or just ask in plain language, e.g.
    *"release CRISPRme 2.1.13"*. The skill then walks the whole flow:
-   - pre-flight version-consistency check across `crisprme.py`, `Dockerfile`, the
-     git tag, and the Bioconda recipe;
+   - pre-flight version-consistency check across `crisprme.py`, the git tag and the
+     Bioconda recipe, plus the CRISPRitz pin in the `Dockerfile`;
    - move `CHANGELOG.md` `[Unreleased]` into the new version;
    - bump the version everywhere (`scripts/prepare_release.py X.Y.Z`);
    - create the GitHub release/tag `vX.Y.Z` — this triggers the multi-arch Docker
@@ -52,9 +52,11 @@ skill isn't available.
 ## The sync model
 
 There is one source of truth for a version — the number `X.Y.Z` — and it must be
-identical in four places. The Bioconda recipe additionally pins the **sha256 of the
-GitHub release tarball**, which is why the order of operations matters: you cannot
-compute that hash until the GitHub release (and therefore the tarball) exists.
+identical in three places: `crisprme.py`, the git tag and the Bioconda recipe. The
+`Dockerfile` carries no CRISPRme version, only the CRISPRitz pin. The Bioconda recipe
+additionally pins the **sha256 of the GitHub release tarball**, which is why the order of
+operations matters: you cannot compute that hash until the GitHub release (and therefore
+the tarball) exists.
 
 ```
                     ┌──────────────────────────────────────────────┐
@@ -85,7 +87,7 @@ typical timeline is:
 1. Bump in-repo files → 2. GitHub release/tag (the Docker image publishes from it)
 → 3. Bioconda recipe update (merged).
 
-## The four version-sync points
+## The version-sync points
 
 | Location | What to change |
 |---|---|
@@ -103,9 +105,8 @@ bumping `version` repoints it automatically.
 ### 1. Pre-flight consistency check
 
 Before starting, confirm the repo, the latest tag, and the live recipe all agree
-on the *current* (previous) version. If, for example, the Dockerfile lags behind
-`crisprme.py` (this has happened historically), fix that lag first so you start
-from a consistent state.
+on the *current* (previous) version. If they do not (for example, a recipe update
+was missed), fix that first so you start from a consistent state.
 
 ```bash
 grep -E '^version *= *' crisprme.py
@@ -117,12 +118,13 @@ curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/reci
 
 ### 2. Bump the in-repo version pins
 
-Use the helper script, which edits only `crisprme.py` and `Dockerfile`, is
-idempotent, and prints the Bioconda-recipe and changelog scaffolds for you:
+Use the helper script, which edits only `crisprme.py` (it looks for an
+`ARG crisprme_version` in the `Dockerfile`, finds none in the source-built image, and says
+so), is idempotent, and prints the Bioconda-recipe and changelog scaffolds for you:
 
 ```bash
 python scripts/prepare_release.py X.Y.Z --no-download
-git diff crisprme.py Dockerfile     # sanity-check the two-line change
+git diff crisprme.py     # sanity-check the one-line change
 ```
 
 (The `--no-download` flag skips the sha256 fetch, which cannot succeed until the
@@ -198,7 +200,8 @@ and tests the recipe automatically. Handy PR comments: `@BiocondaBot please upda
 ### 6. Verify everything matches
 
 After the Bioconda PR merges and the package publishes (this can take an hour or
-more), confirm all four sources report `X.Y.Z`:
+more), confirm that `crisprme.py`, the tag and Bioconda all report `X.Y.Z`, and that the
+`Dockerfile` pins the intended CRISPRitz:
 
 ```bash
 grep -E '^version *= *' crisprme.py
@@ -233,13 +236,17 @@ apptainer run crisprme_vX.Y.Z.sif crisprme.py scorer-env check
 ```
 
 `scorer-env check` must report `OK` **and** `compute self-test: OK` for every env. As a final
-end-to-end gate, run a tiny `complete-search` and confirm BOTH the CFD and CRISPR-Bulge score
-columns are populated (not `-1`) in the output — a `-1` CRISPR-Bulge column means the scorer env
-is missing/broken in the shipped artifact.
+end-to-end gate, run a tiny SpCas9 `complete-search` (a 20-nt guide, a 3-nt 3′ PAM such as NGG)
+and confirm that CFD is populated on every row and CRISPR-Bulge on every row with at most one
+bulge. Elsewhere `-1` is the designed value: CRISPR-Bulge scores an alignment with at most one
+1-bp bulge, so a 2-bulge row reads `-1` (535 of the 633 rows of the `cas9_sg1617` benchmark),
+and neither scorer runs for another guide/PAM geometry, so every row of the Cas12a benchmark
+reads `-1` for both. A `-1` CRISPR-Bulge score on a 0- or 1-bulge SpCas9 row means the scorer
+env is missing or broken in the shipped artifact.
 
 ## Rollback / troubleshooting
 
 - **Bad in-repo bump:** `git checkout crisprme.py Dockerfile CHANGELOG.md`.
 - **Premature/incorrect GitHub release:** `gh release delete vX.Y.Z --repo pinellolab/crisprme-plus --cleanup-tag`, then redo.
 - **sha256 mismatch in the Bioconda PR:** GitHub occasionally regenerates archive tarballs; recompute the hash from the live tarball and update `meta.yaml`.
-- **Version lag between files:** always run the step-1 pre-flight; the most common historical drift is the `Dockerfile` ARG trailing `crisprme.py`.
+- **Version lag between files:** always run the step-1 pre-flight. The `Dockerfile` has carried no CRISPRme version since the image was first built from source, so the drift to look for is between `crisprme.py`, the tag and the Bioconda recipe.
