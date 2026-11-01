@@ -281,10 +281,9 @@ class SearchSide(_Fixture):
         PAM file ``pam`` (the search's), and the enrichment and the download again when the
         fake-indel genome is not here."""
         gone = [self.idx] + ([f"{self.work}/Genomes/ref+ds"] if enrich else [])
-        again = (f"; or, for an index you downloaded, download it again: rm -rf "
-                 f"'{self.idx[: -len('_INDELS')]}' '{self.idx}' && crisprme.py download "
-                 f"--what index --index-name {self.true_pam}_3_ref+ds --path '{self.work}'"
-                 if enrich else "")
+        again = (f"; or, for an index you downloaded, download it again: rm -rf '{self.idx}' "
+                 f"&& crisprme.py download --what index --index-name {self.true_pam}_3_ref+ds "
+                 f"--path '{self.work}'" if enrich else "")
         return (": rm -rf " + " ".join("'%s'" % p for p in gone) + " && crisprme.py "
                 f"build-index-only --genome '{self.work}/Genomes/ref' --pam "
                 f"'{pam or self.tmp + '/pam.txt'}' --bDNA 2 --bRNA 2 --vcf '{self.vcf_dir}' "
@@ -461,8 +460,8 @@ class SearchSide(_Fixture):
                      "build-index-only with it as --pam, and --genome "
                      f"'{self.work}/Genomes/ref' --bDNA 2 --bRNA 2 --vcf '{self.vcf_dir}' "
                      f"--path '{self.work}'; or, for an index you downloaded, download it "
-                     f"again: rm -rf '{self.idx[: -len('_INDELS')]}' '{self.idx}' && crisprme.py "
-                     f"download --what index --index-name NNN_3_ref+ds --path '{self.work}'")
+                     f"again: rm -rf '{self.idx}' && crisprme.py download --what index "
+                     f"--index-name NNN_3_ref+ds --path '{self.work}'")
         self.assertNotIn(" && crisprme.py build-index-only", res.stderr)
 
     # A search with bulges whose chromosome has indels but no sub-index: the raw-genome
@@ -518,13 +517,13 @@ class SearchSide(_Fixture):
                 f"builds it anew from the fake-indel genome in {self.work}/Genomes/ref+ds_INDELS")
 
     def download(self):
-        """What an ERROR says to do with neither those VCFs nor that genome here: nothing
-        that removes what the download does not put back."""
-        return (f": for an index you downloaded, download it again: rm -rf "
-                f"'{self.idx[: -len('_INDELS')]}' '{self.idx}' && crisprme.py download --what "
-                f"index --index-name {self.true_pam}_3_ref+ds --path '{self.work}'; for one you "
-                f"built, put its VCFs back in '{self.vcf_dir}' and run this search again, which "
-                "then gives the command that rebuilds it")
+        """What an ERROR says to do with neither those VCFs nor that genome here: it removes
+        only the INDELS index, the one thing in the way of the download, which a failed
+        download then leaves as it was broken."""
+        return (f": for an index you downloaded, download it again: rm -rf '{self.idx}' && "
+                f"crisprme.py download --what index --index-name {self.true_pam}_3_ref+ds "
+                f"--path '{self.work}'; for one you built, put its VCFs back in '{self.vcf_dir}' "
+                "and run this search again, which then gives the command that rebuilds it")
 
     def test_without_the_vcfs_a_search_rebuilds_from_the_fake_genome(self):
         for bins, what in (({"chrA": True}, self.missing("chrB", "its indel log lists them")),
@@ -620,6 +619,12 @@ class SearchSide(_Fixture):
         self.refused(res, self.missing("chrB", "its indel log lists them"),
                      self.words("complete-test without --chrom, or a complete-search of this index,"))
         self.assertNotIn(ct.CHROMVIEWPREFIX, res.stderr)
+
+    def test_a_view_with_no_pam_file_of_a_stand_in_sends_the_user_there_too(self):
+        res, _ = self.run_search(LOGS_AB, {"chrA": True}, true_pam="NNN", vcfs=AB, view="chrB",
+                                 fakes={"chrA": WITH_NRG, "chrB": WITH_NRG})
+        self.refused(res, self.missing("chrB", "its indel log lists them"),
+                     self.words("complete-test without --chrom, or a complete-search of this index,"))
 
     def test_a_view_without_the_vcfs_or_the_fake_genome_gives_the_download(self):
         res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, view="chrB")

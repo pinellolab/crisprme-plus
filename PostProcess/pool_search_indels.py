@@ -297,11 +297,12 @@ def _rebuild(raw_fakechrom, fasta):
     cwd = os.path.normpath(_outside_view(current_working_directory))
     indels_index = os.path.join(cwd, "genome_library",
                                 f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS")
-    variant = indels_index[: -len("_INDELS")]
-    # (a downloaded index comes without the fake-indel genome; download skips an index
-    # in place)
-    download = (f"rm -rf '{variant}' '{indels_index}' && crisprme.py download --what index "
-                f"--index-name {os.path.basename(variant)} --path '{cwd}'")
+    # (a downloaded index comes without the fake-indel genome. download skips an index
+    # whose INDELS index is in place, and else swaps in both from one archive: a variant
+    # index left there survives a download that fails, as for an index that is not on
+    # the hub)
+    download = (f"rm -rf '{indels_index}' && crisprme.py download --what index --index-name "
+                f"{os.path.basename(indels_index)[: -len('_INDELS')]} --path '{cwd}'")
     # (where the search's --vcf list spells the dataset as VCFs/<name>, the search looks in
     # VCFs/VCFs/<name>, and takes the chromosomes from the indel logs)
     named = os.path.join(cwd, "VCFs", vcf_name)
