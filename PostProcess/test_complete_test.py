@@ -677,6 +677,41 @@ class ChromView(unittest.TestCase):
             self.assertIsNone(code, err)
             self.assertEqual(len(calls), 1)
 
+    def test_a_dataset_the_list_names_twice_gets_one_folder_in_the_view(self):
+        """A --vcf list may name a dataset twice, or as toy_panel, toy_panel/ and
+        VCFs/toy_panel, which the search reads as one. The view made the dataset's
+        fake-indel genome folder once a line, and the second one failed with a
+        FileExistsError traceback wherever Genomes/<ref>+<vcf>_INDELS is (any dataset
+        built here), and a part marked unfinished was refused once a line. The view,
+        and the refusal, are now those of the dataset named once."""
+        self._fake_indel_genome("chr22")
+        for case in ("its INDELS index in place", "no INDELS index"):
+            with self.subTest(case=case):
+                if case == "no INDELS index":
+                    shutil.rmtree(os.path.join(self.wd, "genome_library",
+                                               "NGG_2_toy+toy_panel_INDELS"))
+                trees = []
+                for listed in ("toy_panel\n", "toy_panel\ntoy_panel/\nVCFs/toy_panel\n"):
+                    with open(os.path.join(self.wd, "list_vcf.txt"), "w") as fh:
+                        fh.write(listed)
+                    calls, err, code = self.smoke("chr22")
+                    self.assertIsNone(code, err)
+                    self.assertEqual(len(calls), 1)
+                    trees.append(calls[0][2])
+                    shutil.rmtree(os.path.join(self.wd, "Results", ct.COMPLETETESTRESDIR))
+                self.assertEqual(trees[1], trees[0])
+                self.assertIn("Genomes/toy+toy_panel_INDELS/fake_toy_panel_chr22", trees[1])
+                self.assertEqual(_views(self.wd), [])
+        with self.subTest(case="a part marked unfinished"):
+            errors, code = self._unfinished(["Genomes/toy+toy_panel"])
+            self.assertEqual(code, 1)
+            self.assertEqual(errors, [
+                f"ERROR: {self.wd}/Genomes/toy+toy_panel is unfinished: a build-index-only run "
+                "is writing the enrichment of toy_panel there, or stopped before it was done, "
+                "and the search would use what is there as if it were whole. Let that run "
+                "finish, or run build-index-only again with toy_panel, which enriches it again, "
+                "then run complete-test again."])
+
 
 # complete-search's stand-in for RealSignals: it and a child shell, as the real search
 # has a tree of processes, note their PIDs, and any SIGTERM or SIGHUP they get, with

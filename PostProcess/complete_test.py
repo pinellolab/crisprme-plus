@@ -821,11 +821,14 @@ def _log_chrom(fname: str):
 
 def _vcf_names(vcf_list: Optional[str]) -> list:
     """The dataset folder names (<vcf>) of the smoke's --vcf list, as the search reads
-    them; none for a reference smoke (no list)."""
+    them, each once (a list may name one twice, or as rv, rv/ and VCFs/rv: the view
+    gets one folder for it, and a refusal one line); none for a reference smoke (no
+    list)."""
     if not vcf_list:
         return []
     with open(vcf_list) as fin:
-        return [os.path.basename(l.strip().rstrip("/")) for l in fin if l.strip()]
+        return list(dict.fromkeys(os.path.basename(l.strip().rstrip("/")) for l in fin
+                                  if l.strip()))
 
 
 def _refuse_unfinished(ref: str, vcf_names: list, pam: str) -> None:
