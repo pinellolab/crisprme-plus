@@ -101,13 +101,13 @@
   `genome_library/<PAM>_<N>_<name>`, but the pattern it matched also took
   `<PAM>_<N>_<prefix>_<name>`, the index of another genome: with `NRG_2_mini_hg38` installed, a
   search of `hg38` with bulges used it instead of building `hg38`'s own, and used it ahead of an
-  installed `NRG_3_hg38` too, as the smaller bulge budget won; nothing in the output said so. With
-  the per-haplotype index names above, the same happened between two individuals whose folder names
-  end alike: reproduced with `X_WALK01` searched first, after which both of `WALK01`'s haplotypes
-  logged `Reference index present (NRG_2_X_WALK01_...)` and reported `X_WALK01`'s sites. Only an
-  index named for the genome itself is now taken. A library without two such names picks the same
-  index as before, and reference and variant search outputs were compared byte for byte. Covered by
-  `PostProcess/test_assembly_haplotype_genomes.py`.
+  installed `NRG_3_hg38` too, as the smaller bulge budget won; nothing in the output said so. The
+  same happened between two individuals of the `Genomes/<individual>_<haplotype>` layout (before
+  2.6.0) whose names end alike: reproduced with `assembly-search` of `X_WALK01` first, after which
+  both of `WALK01`'s haplotypes logged `Reference index present (NRG_2_X_WALK01_...)` and reported
+  `X_WALK01`'s sites. Only an index named for the genome itself is now taken. A library without
+  two such names picks the same index as before, and reference and variant search outputs were
+  compared byte for byte. Covered by `PostProcess/test_assembly_haplotype_genomes.py`.
 - **The personal-assembly results header, History and combined report named both haplotypes
   "genome".** The header and History showed `Paternal genome: genome | Maternal genome: genome`, and
   the combined report (`report.html` in `<job>_combined_report.zip`) the same in its Paternal genome
