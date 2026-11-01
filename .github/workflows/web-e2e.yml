@@ -87,6 +87,14 @@ jobs:
           docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
             python -m unittest test_results_page_assembly test_results_summary_and_status -v
 
+      # The personal-assembly submit (pages/main_page.py submit_assembly_search_job), called
+      # the way Dash calls it: one "select an individual" warning when none is picked, the
+      # haplotypes' assembly names in the job's .Params.txt. A real Dash app import, as above.
+      - name: Personal-assembly submit web unit tests
+        run: |
+          docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
+            python -m unittest test_main_page_assembly -v
+
       - name: Start the web interface
         run: |
           docker run -d --name web -p 8090:8080 crisprme:web crisprme.py web-interface

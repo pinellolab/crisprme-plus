@@ -237,6 +237,22 @@ def bundle_haplotype(genome_dir: str, haplotype: Optional[str] = None) -> Option
         level = parent
 
 
+def haplotype_label(genome_dir: str, haplotype: Optional[str] = None) -> str:
+    """Display name of one haplotype's genome, for the ``Genome_paternal`` /
+    ``Genome_maternal`` lines of an assembly-search job's ``.Params.txt`` (the
+    results header and History show them): the bundle's ``assembly_name``
+    (``<individual>_<haplotype>`` when it records none), else the folder's own
+    name, as in the legacy ``Genomes/<name>_<hap>`` layout. A bundle keeps every
+    haplotype in a folder named ``genome``, so there the folder name says nothing."""
+    hap = bundle_haplotype(genome_dir, haplotype)
+    if hap is not None:
+        label = hap["assembly_name"] or f"{hap['individual']}_{hap['haplotype']}"
+    else:
+        label = os.path.basename(os.path.normpath(genome_dir))
+    # one field of a tab-separated file
+    return " ".join(str(label).split())
+
+
 def discover_bundles(cwd: str) -> List[Dict]:
     """All individuals under ``Assemblies/`` that carry a ``metadata.json``."""
     root = os.path.join(cwd, ASSEMBLIES_DIR)

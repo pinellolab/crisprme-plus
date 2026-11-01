@@ -8,6 +8,7 @@ Pure stdlib (no pandas / dash), so it runs anywhere:
     python -m unittest PostProcess.test_personal_assembly -v
 """
 import io
+import json
 import os
 import sys
 import tarfile
@@ -120,6 +121,34 @@ class TestDiscoverAndDelete(unittest.TestCase):
 
     def test_delete_target_none_for_non_bundle(self):
         self.assertIsNone(pa.delete_target(self.cwd, "NOPE"))
+
+
+class TestHaplotypeLabel(unittest.TestCase):
+    """The name a haplotype genome is shown under (results header, History): every
+    bundle haplotype's folder is named "genome", so the folder name says nothing."""
+
+    def setUp(self):
+        self.cwd = tempfile.mkdtemp()
+
+    def test_bundle_haplotype_is_its_assembly_name(self):
+        name = _make_haplotype(self.cwd, "HG01255", "paternal", "CM1")
+        gdir = os.path.join(pa.individual_dir(self.cwd, "HG01255"), "paternal", "genome")
+        self.assertEqual(pa.haplotype_label(gdir, "paternal"), name)
+        self.assertEqual(pa.haplotype_label(gdir + os.sep), name)
+
+    def test_bundle_without_assembly_name_is_individual_and_haplotype(self):
+        _make_haplotype(self.cwd, "HG02", "maternal", "CM2")
+        meta = pa.read_metadata(self.cwd, "HG02")
+        del meta["haplotypes"]["maternal"]["assembly_name"]
+        with open(pa.metadata_path(self.cwd, "HG02"), "w") as fh:
+            json.dump(meta, fh)
+        gdir = os.path.join(pa.individual_dir(self.cwd, "HG02"), "maternal", "genome")
+        self.assertEqual(pa.haplotype_label(gdir, "maternal"), "HG02_maternal")
+
+    def test_any_other_folder_is_its_name(self):
+        legacy = os.path.join(self.cwd, "Genomes", "HG01255_paternal")
+        os.makedirs(legacy)
+        self.assertEqual(pa.haplotype_label(legacy, "paternal"), "HG01255_paternal")
 
 
 class TestBundleImport(unittest.TestCase):

@@ -46,3 +46,14 @@
   of a genome in `Genomes/` are unchanged (the same folder); reference and variant search outputs
   were compared byte for byte, with and without bulges. Covered by
   `PostProcess/test_assembly_haplotype_genomes.py`.
+- **The personal-assembly results header and History named both haplotypes "genome".** They showed
+  `Paternal genome: genome | Maternal genome: genome`: the name of the folder every bundle haplotype
+  is kept in, which `assembly-search` wrote into the job's `.Params.txt` when it finished (the web
+  form's own label was overwritten). Both now show the bundle's assembly name, e.g.
+  `HG01255_paternal_<accession>` for an HPRC fetch, or `<individual>_<haplotype>` when the bundle
+  records none, from the CLI and the web alike; a legacy `Genomes/<name>` folder keeps its name.
+  Jobs that already finished keep the label they were written with.
+- **Submitting the Personal assembly tab with no individual selected listed six fields the form does
+  not show.** The warning listed "paternal genome", "maternal genome", the two chain files and the
+  two chromAlias files, which the Individual picker fills. It now says "select an individual on the
+  Personal assembly tab" once; any other missing input, such as the guide, is still listed.

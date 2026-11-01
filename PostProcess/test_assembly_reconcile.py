@@ -580,6 +580,30 @@ class TestWriteCombinedParamsFile(unittest.TestCase):
             params = self._read_back(combined_dir)
             self.assertEqual(params["Pam"], "?")
 
+    def test_bundle_haplotypes_are_labelled_by_their_assembly_name(self):
+        # A bundle keeps every haplotype in a folder named "genome": the results
+        # header and History showed "Paternal genome: genome | Maternal genome:
+        # genome". The label is the bundle's assembly_name, or <individual>_<hap>
+        # when the bundle records none.
+        import json
+        with tempfile.TemporaryDirectory() as cwd, \
+                tempfile.TemporaryDirectory() as paternal_dir:
+            haps = {}
+            for hap, name in (("paternal", "HG01255_paternal_CM086702.1"), ("maternal", None)):
+                os.makedirs(os.path.join(cwd, "Assemblies", "HG01255", hap, "genome"))
+                haps[hap] = {"genome_dir": f"{hap}/genome", "chain": "c", "chromalias": "a"}
+                if name:
+                    haps[hap]["assembly_name"] = name
+            with open(os.path.join(cwd, "Assemblies", "HG01255", "metadata.json"), "w") as f:
+                json.dump({"format": "crisprme-personal-assembly", "individual": "HG01255",
+                           "haplotypes": haps}, f)
+            genome = lambda hap: os.path.join(cwd, "Assemblies", "HG01255", hap, "genome")  # noqa: E731
+            self._write(cwd, paternal_dir, genome_paternal=genome("paternal"),
+                        genome_maternal=genome("maternal") + os.sep)
+            params = self._read_back(cwd)
+            self.assertEqual(params["Genome_paternal"], "HG01255_paternal_CM086702.1")
+            self.assertEqual(params["Genome_maternal"], "HG01255_maternal")
+
     def test_marks_job_as_assembly_type_for_is_assembly_job_style_checks(self):
         # index.py's _is_assembly_job() does `"Genome_type\tassembly" in
         # file_content` -- confirm the raw written line matches that substring

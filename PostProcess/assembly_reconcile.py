@@ -668,7 +668,9 @@ def write_combined_params_file(
         combined_dir: The `{output_base}_combined` output directory.
         output_base: The `--output` value the run was invoked with.
         genome_paternal, genome_maternal: Absolute paths to the two haplotype
-            genome folders.
+            genome folders, recorded by their display name
+            (`personal_assembly.haplotype_label`: the bundle's assembly name,
+            not the folder name "genome" every bundle haplotype has).
         chain_paternal, chain_maternal, chrom_alias_paternal,
             chrom_alias_maternal: Absolute paths to the liftOver/chromAlias
             files.
@@ -679,8 +681,8 @@ def write_combined_params_file(
     """
     params_lines = [
         ("Genome_type", "assembly"),
-        ("Genome_paternal", os.path.basename(genome_paternal.rstrip(os.sep))),
-        ("Genome_maternal", os.path.basename(genome_maternal.rstrip(os.sep))),
+        ("Genome_paternal", personal_assembly.haplotype_label(genome_paternal, "paternal")),
+        ("Genome_maternal", personal_assembly.haplotype_label(genome_maternal, "maternal")),
         ("Chain_paternal", chain_paternal),
         ("Chain_maternal", chain_maternal),
         ("ChromAlias_paternal", chrom_alias_paternal),

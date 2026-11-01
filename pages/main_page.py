@@ -45,7 +45,6 @@ from .pages_utils import (
     get_available_liftover_files,
     installed_assemblies,
     LIFTOVER_DIR,
-    ASSEMBLIES_DIR,
     get_custom_annotations,
     sort_annotation,
     compress_file,
@@ -84,6 +83,9 @@ import sys
 import string
 import threading
 import os
+
+# personal_assembly lives in PostProcess/, put on sys.path by pages_utils (imported above).
+import personal_assembly
 
 # memory_check lives in PostProcess/, put on sys.path by pages_utils (imported above).
 # Defensive fallback so the web form never fails to render if it is unavailable.
@@ -395,20 +397,15 @@ def _complete_assembly_options() -> List[Dict]:
     ]
 
 
-def _assembly_genome_label(genome_dir: str) -> str:
+def _assembly_genome_label(genome_dir: str, haplotype: str) -> str:
     """Human-friendly label for a haplotype's genome dir, for the run's
-    .Params.txt display (read back by the results/report pages). In the bundle
-    layout ``Assemblies/<individual>/<hap>/genome`` the per-contig folder is
-    literally named ``genome``, so show ``<individual> (<hap>)`` instead; the
-    legacy ``Genomes/<name>_<hap>`` layout keeps showing the folder name."""
-    parts = os.path.normpath(genome_dir).split(os.sep)
-    if ASSEMBLIES_DIR in parts:
-        i = parts.index(ASSEMBLIES_DIR)
-        individual = parts[i + 1] if i + 1 < len(parts) else ""
-        hap = parts[i + 2] if i + 2 < len(parts) else ""
-        if individual and hap:
-            return f"{individual} ({hap})"
-    return os.path.basename(genome_dir.rstrip(os.sep))
+    .Params.txt display (read back by the results/report pages and History).
+    In the bundle layout ``Assemblies/<individual>/<hap>/genome`` the per-contig
+    folder is literally named ``genome``, so show the bundle's assembly name;
+    the legacy ``Genomes/<name>_<hap>`` layout keeps showing the folder name.
+    The same label assembly-search writes when it finishes
+    (``personal_assembly.haplotype_label``), so it does not change mid-job."""
+    return personal_assembly.haplotype_label(genome_dir, haplotype)
 
 
 # Directory convention: the job id IS the `--output` value passed to
@@ -556,6 +553,7 @@ def populate_assembly_fields_from_individual(individual: str) -> Tuple:
         State("dna", "value"),
         State("rna", "value"),
         State("job-name", "value"),
+        State("assembly-individual", "value"),
     ],
     prevent_initial_call=True,
 )
@@ -573,6 +571,7 @@ def submit_assembly_search_job(
     dna: int,
     rna: int,
     job_name: str,
+    individual: str,
 ) -> Tuple:
     """Validates and launches a personal-assembly (paternal/maternal, no VCF)
     off-target search, submitted via `crisprme.py assembly-search`.
@@ -627,6 +626,11 @@ def submit_assembly_search_job(
         missing.append("paternal chromAlias file")
     if not chromalias_maternal or not os.path.isfile(chromalias_maternal):
         missing.append("maternal chromAlias file")
+    if not individual:
+        # These six fields are filled from the Individual picker, so with none
+        # picked all six are empty, and listing them names fields the form does
+        # not show. Say what to do instead, once.
+        missing = ["select an individual on the Personal assembly tab"]
     # Parity with check_input's own validation of these same shared fields --
     # they carry dropdown defaults so this rarely fires in practice, but
     # there's no reason assembly-search's checklist should be less defensive
@@ -691,8 +695,8 @@ def submit_assembly_search_job(
     # unmodified, since _combined lands as its own top-level Results/ entry.
     params_lines = [
         ("Genome_type", "assembly"),
-        ("Genome_paternal", _assembly_genome_label(genome_paternal_dir)),
-        ("Genome_maternal", _assembly_genome_label(genome_maternal_dir)),
+        ("Genome_paternal", _assembly_genome_label(genome_paternal_dir, "paternal")),
+        ("Genome_maternal", _assembly_genome_label(genome_maternal_dir, "maternal")),
         ("Chain_paternal", chain_paternal),
         ("Chain_maternal", chain_maternal),
         ("ChromAlias_paternal", chromalias_paternal),
