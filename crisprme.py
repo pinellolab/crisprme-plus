@@ -1919,7 +1919,8 @@ def _index_serves_search(index: str, genome: str, motif: str, want: int, prune: 
 
 def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int = 0,
                                   pam: str = "", prune: bool = False,
-                                  three_prime: bool = True) -> bool:
+                                  three_prime: bool = True, bdna: "Optional[int]" = None,
+                                  brna: "Optional[int]" = None) -> bool:
     """Refuses a search that would take another genome folder's index or variant
     genomes for this one's.
 
@@ -1951,6 +1952,13 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     --index-path other than genome_library/ is not looked at: no search builds an index
     there, and its records would name folders of another working directory.
 
+    Each message that says to rename a folder or remove an index and run the search
+    again gives the search's --bDNA/--bRNA: given none, a search takes the bulges that
+    the installed indexes of the folder's name allow, or Genomes/<name>/ when it can
+    build one from it (_installed_index_bulge_cap), so once such an index is removed, or
+    the folder renamed, the same command may run with none. Under --index-path it says
+    to run without it: the pipeline builds no index there.
+
     Args:
         genomedir: The --genome folder, as an absolute path.
         index_path: The --index-path library, or "_" for none.
@@ -1959,6 +1967,8 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
         pam: The PAM motif; with `prune` (--prune-pam) and `three_prime` (a 3' PAM),
             which indexes of the genome's name the search could take
             (_index_serves_search).
+        bdna, brna: The search's DNA and RNA bulges, given or taken by default, for the
+            messages; `bulges` each when not given.
 
     Returns:
         Whether to record, in the reference index this search builds, the folder it
@@ -1970,6 +1980,13 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     genomes = os.path.join(cwd, CRISPRMEDIRS[0])
     outside = os.path.realpath(os.path.dirname(genomedir)) != os.path.realpath(genomes)
     namesake = os.path.join(genomes, name)
+    bdna = bulges if bdna is None else bdna
+    brna = bulges if brna is None else brna
+    rerun = "run this search again" + (" without --index-path" if index_path != "_" else "")
+    note = ""
+    if bdna or brna:
+        rerun += f"{' and' if index_path != '_' else ''} with --bDNA {bdna} --bRNA {brna}"
+        note = " (given no --bDNA/--bRNA, this search may then take no bulges)"
     if outside and os.path.isdir(namesake) and os.path.realpath(namesake) != os.path.realpath(genomedir):
         error(
             f"--genome {genomedir} has the name of another genome folder, {namesake}. "
@@ -1978,7 +1995,8 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
             f"(Genomes/{name}+<dataset>) by that name alone, so this one would search "
             f"the sequence of {namesake}, or build its own under the names that searches "
             f"of {namesake} take. If the two folders hold the same genome, search "
-            f"{namesake}; otherwise give this one a name no folder in {genomes} has."
+            f"{namesake}; otherwise give this one a name no folder in {genomes} has, and "
+            f"{rerun}{note}."
         )
     if index_path != "_" and os.path.realpath(index_path) != os.path.realpath(
         os.path.join(cwd, "genome_library")
@@ -2004,22 +2022,27 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
                 if _index_serves_search(os.path.basename(index_dir), name, pam, bulges + 1,
                                         prune, three_prime)
             ]
-        again = "again" if index_path == "_" else "again without --index-path"
+        assembly_search = (
+            f"assembly-search --bDNA {bdna} --bRNA {brna}, which searches each haplotype "
+            f"on an index of its own (given no --bDNA/--bRNA, assembly-search takes no "
+            f"bulges)" if bdna or brna else
+            "assembly-search, which searches each haplotype on an index of its own"
+        )
         for index_dir, why in in_the_way:
             error(
                 f"--genome {genomedir} is the {hap['haplotype']} haplotype of the personal "
                 f"assembly {hap['individual']}, and {index_dir} {why}. Search the individual "
-                f"with assembly-search, which searches each haplotype on an index of its own. "
-                f"Or, when no search is using {index_dir}, remove it and run this search "
-                f"{again}: it then builds the index from {genomedir}."
+                f"with {assembly_search}. Or, when no search is using {index_dir}, remove it "
+                f"and {rerun}{note}: it then builds the index from {genomedir}."
             )
     for index_dir, held in foreign_index_sources(cwd, genomedir):
         error(
             f"{index_dir} holds the genome in {held}, not {genomedir}: the two folders "
             f"have the same name, and a search takes an index by that name alone, so this "
-            f"one would search {held}. Give one of the two folders another name. If {held} "
-            f"is this same folder under another path, or is no longer needed, remove "
-            f"{index_dir}: the next search builds it again."
+            f"one would search {held}. If {held} is this same folder under another path, "
+            f"is no longer needed, or gets another name, remove {index_dir} when no search "
+            f"is using it; otherwise give this folder another name. Then {rerun}{note}: it "
+            f"builds the index of its name from this folder."
         )
     if not outside or index_path != "_":
         return False
@@ -2028,8 +2051,8 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     except OSError as e:
         error(
             f"An index of {name} under genome_library/ was built before the FASTA files "
-            f"of {genomedir} changed, and could not be removed ({e}). Remove it and run "
-            f"again."
+            f"of {genomedir} changed, and could not be removed ({e}). Remove it and "
+            f"{rerun}{note}."
         )
     return True
 
@@ -2417,7 +2440,7 @@ def complete_search() -> None:
     # variant genomes by the genome folder's name alone: refuse one whose folder
     # shares its name with another genome folder (_check_genome_name_is_its_own).
     record_index_source = (search_index or variant) and _check_genome_name_is_its_own(
-        genomedir, index_path, bMax, pam_char, prune_pam, not pam_begin
+        genomedir, index_path, bMax, pam_char, prune_pam, not pam_begin, bDNA, bRNA
     )
     if variant:
         genome_idx_list = []
