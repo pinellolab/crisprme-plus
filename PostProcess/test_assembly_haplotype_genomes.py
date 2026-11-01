@@ -28,6 +28,11 @@ These tests pin:
   * the pipeline keeps a linked genome's own name, picks only an index named for the
     genome itself (not one whose genome name merely ends in it), and its 0-bulge scan
     reads the genome folder it is given;
+  * complete-search itself (run in-process as the CLI dispatch runs it, the pipeline
+    replaced by a stand-in that takes or builds the index by the genome's name as the
+    pipeline does): a search with bulges of a folder outside Genomes/ named like a
+    genome in Genomes/, or like another folder whose index is here, is refused, the
+    index it builds records its folder, and a genome in Genomes/ is searched as before;
   * runs that start together: a stale index both find is taken away from its name in
     one step.
 """
@@ -41,6 +46,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import types
 import unittest
@@ -660,6 +666,192 @@ class AssemblySearchSearchesEachHaplotypeOnItsOwnGenome(_Workdir):
 
 
 # --------------------------------------------------------------------------- #
+# complete-search, run in-process as the CLI dispatch runs it
+# --------------------------------------------------------------------------- #
+_DISPATCH_MARKER = "\nif len(sys.argv) < 2:"
+
+
+def _dispatch(subcommand):
+    """The statement crisprme.py's CLI dispatch runs for `subcommand`, verbatim (as
+    test_annotation_tmpdirs takes it)."""
+    with open(CRISPRME_PY) as fh:
+        tail = fh.read().split(_DISPATCH_MARKER, 1)[1]
+    m = re.search(rf'^elif sys\.argv\[1\] == "{re.escape(subcommand)}":[^\n]*\n'
+                  r'((?:    [^\n]*\n)+)', tail, re.M)
+    return textwrap.dedent(m.group(1))
+
+
+class _FakePipeline:
+    """Stands in for `subprocess.call` of submit_job_automated_new_multiple_vcfs.sh,
+    keeping what decides which sequence a reference search reads: with bulges, the
+    index of the genome's NAME (<PAM>_<N>_<name>, N at least the budget, in
+    --index-path or genome_library/), built from the folder only when there is none,
+    with the log line the pipeline prints then; without bulges, the folder itself."""
+
+    def __init__(self, cwd):
+        self.cwd = cwd
+        self.calls, self.built = [], []
+
+    def call(self, cmd, shell=True, stderr=None, stdout=None, **kwargs):
+        argv = cmd.split()
+        genome, want, bdna, out, lib = argv[1], int(argv[7]), int(argv[9]), argv[12], argv[25]
+        lib = lib if lib != "_" else os.path.join(self.cwd, "genome_library")
+        name = os.path.basename(genome)
+        os.makedirs(lib, exist_ok=True)
+        found = sorted(d for d in os.listdir(lib)
+                       if (m := re.fullmatch(r"NRG_([0-9]+)_" + re.escape(name), d)) and int(m.group(1)) >= want)
+        if found:
+            index = os.path.join(lib, found[0])
+            stdout.write(f"Reference index present ({found[0]})\n")
+        else:
+            index = os.path.join(lib, f"NRG_{want}_{name}")
+            stdout.write("Indexing reference genome\n")  # the pipeline's, checked in ZeroBulgeScan...
+            os.makedirs(index)
+            shutil.copy(os.path.join(genome, "chr1.fa"), os.path.join(index, "NRG_chr1_1.bin"))
+            self.built.append(os.path.basename(index))
+        stdout.flush()
+        source = os.path.join(index, "NRG_chr1_1.bin") if bdna else os.path.join(genome, "chr1.fa")
+        with open(source) as fh, open(os.path.join(out, "searched.txt"), "w") as dst:
+            dst.write(fh.read().split("\n")[1])
+        self.calls.append(os.path.basename(out))
+        return 0
+
+
+class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
+    """complete-search names a genome's index (genome_library/<PAM>_<N>_<name>) after
+    the genome folder's name, and takes any index of that name. Searched with
+    bulges, projB/ref took the index projA/ref's search had built and reported
+    projA/ref's sites; other/hg38 took Genomes/hg38's. The same command without
+    bulges scanned the folder itself, so the two searches of one folder disagreed."""
+
+    SEQ = {"paternal": "CTTACAGTTGCTTTTACCACTGG", "maternal": "CTTACTGTTGCCTTTACCACTGG",
+           "reference": "CTAACAGTTGCTTTTATCACTGG"}
+
+    def setUp(self):
+        super().setUp()
+        here = os.getcwd()
+        os.chdir(self.cwd)
+        self.addCleanup(os.chdir, here)
+        for folder, seq in (("projA/ref", "paternal"), ("projB/ref", "maternal"),
+                            ("Genomes/hg38", "reference"), ("other/hg38", "paternal")):
+            _write_genome(os.path.join(self.cwd, folder), self.SEQ[seq])
+        os.makedirs("PAMs")
+        shutil.copy(os.path.join(PAMS_DIR, "20bp-NRG-SpCas9.txt"), "PAMs")
+        with open("guide.txt", "w") as fh:
+            fh.write("CTAACAGTTGCTTTTATCACNNN\n")
+        self.lib = os.path.join(self.cwd, "genome_library")
+        self.pipeline = _FakePipeline(self.cwd)
+        env = dict(os.environ, CRISPRME_SKIP_SCORER_ENV="1", CRISPRME_SKIP_MEM_CHECK="1")
+        for patcher in (mock.patch.dict(os.environ, env, clear=True),
+                        mock.patch.object(crisprme, "current_working_directory", self.cwd + os.sep)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def search(self, output, genome, bulges=1, *extra):
+        """`crisprme.py complete-search ...` as the CLI dispatch runs it; the sequence
+        searched. Its stderr is kept as self.err."""
+        argv = ["crisprme.py", "complete-search", "--genome", genome, "--guide", "guide.txt",
+                "--pam", "PAMs/20bp-NRG-SpCas9.txt", "--mm", "4", "--bDNA", str(bulges),
+                "--bRNA", str(bulges), "--output", output, "--thread", "1", *extra]
+        err = io.StringIO()
+        try:
+            with mock.patch.object(crisprme, "input_args", argv), \
+                    mock.patch.object(crisprme.subprocess, "call", side_effect=self.pipeline.call), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                exec(_dispatch("complete-search"), crisprme.__dict__)
+        finally:
+            self.err = err.getvalue()
+        with open(os.path.join(self.cwd, "Results", output, "searched.txt")) as fh:
+            return fh.read()
+
+    def record(self, index):
+        return ar._read_index_source(os.path.join(self.lib, index))
+
+    def test_another_folder_of_the_same_name_is_refused(self):
+        self.assertEqual(self.search("a", "projA/ref"), self.SEQ["paternal"])
+        with self.assertRaises(SystemExit):
+            self.search("b", "projB/ref")
+        self.assertIn(f"{self.lib}/NRG_2_ref holds the genome in {self.cwd}/projA/ref, "
+                      f"not {self.cwd}/projB/ref", self.err)
+        self.assertEqual(self.pipeline.calls, ["a"])
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "Results", "b")), [])  # rerun as it is
+
+    def test_the_folder_it_was_built_from_takes_it_again(self):
+        self.search("a", "projA/ref")
+        self.assertEqual(self.record("NRG_2_ref"),
+                         {"genome": os.path.join("projA", "ref"),
+                          "fingerprint": ar.genome_fingerprint(os.path.join(self.cwd, "projA", "ref"))})
+        self.assertEqual(self.search("a2", "projA/ref"), self.SEQ["paternal"])
+        self.assertEqual(self.pipeline.built, ["NRG_2_ref"])
+
+    def test_a_folder_named_like_a_genome_in_genomes_is_refused(self):
+        # whether that genome's index is built yet or not: else this one would build
+        # it, for the searches of Genomes/hg38 (the web's too) to take
+        for _ in range(2):
+            with self.assertRaises(SystemExit):
+                self.search("o", "other/hg38")
+            self.assertIn(f"--genome {self.cwd}/other/hg38 has the name of another genome "
+                          f"folder, {self.cwd}/Genomes/hg38", self.err)
+            self.search(f"h{len(self.pipeline.calls)}", "Genomes/hg38")
+        self.assertEqual(self.pipeline.calls, ["h0", "h1"])
+
+    def test_without_bulges_such_a_folder_is_searched(self):
+        # (it reads the folder itself, and takes nothing by its name)
+        self.search("h", "Genomes/hg38")
+        self.assertEqual(self.search("o0", "other/hg38", 0), self.SEQ["paternal"])
+
+    def test_a_genome_in_genomes_is_searched_as_before(self):
+        self.assertEqual(self.search("h", "Genomes/hg38"), self.SEQ["reference"])
+        self.assertEqual(self.search("h2", "Genomes/hg38"), self.SEQ["reference"])
+        self.assertEqual(self.pipeline.built, ["NRG_2_hg38"])
+        self.assertEqual(os.listdir(os.path.join(self.lib, "NRG_2_hg38")), ["NRG_chr1_1.bin"])  # no record
+
+    def test_an_index_that_records_nothing_is_taken_as_before(self):
+        # (built by an earlier CRISPRme, or downloaded: which folder it holds is unknown)
+        os.makedirs(os.path.join(self.lib, "NRG_2_ref"))
+        shutil.copy(os.path.join(self.cwd, "projB", "ref", "chr1.fa"),
+                    os.path.join(self.lib, "NRG_2_ref", "NRG_chr1_1.bin"))
+        self.assertEqual(self.search("b", "projB/ref"), self.SEQ["maternal"])
+        self.assertIsNone(self.record("NRG_2_ref"))  # this run did not build it
+
+    def test_an_index_built_before_its_folder_changed_is_built_again(self):
+        self.search("a", "projA/ref")
+        _write_genome(os.path.join(self.cwd, "projA", "ref"), self.SEQ["maternal"],
+                      mtime=time.time() - 3600)
+        self.assertEqual(self.search("a2", "projA/ref"), self.SEQ["maternal"])
+        self.assertEqual(self.pipeline.built, ["NRG_2_ref", "NRG_2_ref"])
+
+    def test_a_genome_in_genomes_is_refused_an_index_built_from_another_folder(self):
+        # projA/ref was searched before a Genomes/ref was there
+        self.search("a", "projA/ref")
+        _write_genome(os.path.join(self.cwd, "Genomes", "ref"), self.SEQ["maternal"])
+        with self.assertRaises(SystemExit):
+            self.search("g", "Genomes/ref")
+        self.assertIn(f"holds the genome in {self.cwd}/projA/ref, not {self.cwd}/Genomes/ref", self.err)
+
+    def test_the_working_directorys_library_given_as_index_path_is_looked_at(self):
+        self.search("a", "projA/ref")
+        with self.assertRaises(SystemExit):
+            self.search("b", "projB/ref", 1, "--index-path", "genome_library")
+        self.assertIn("NRG_2_ref holds the genome in", self.err)
+        # and, the pipeline building no index under --index-path, none is removed either
+        _write_genome(os.path.join(self.cwd, "projA", "ref"), self.SEQ["maternal"],
+                      mtime=time.time() - 3600)
+        self.search("a2", "projA/ref", 1, "--index-path", "genome_library")
+        self.assertEqual(self.pipeline.built, ["NRG_2_ref"])
+
+    def test_another_index_path_is_not_looked_at(self):
+        # no search builds there, and its records name folders of another working directory
+        shared = os.path.join(self.cwd, "shared_library")
+        os.makedirs(os.path.join(shared, "NRG_2_ref"))
+        shutil.copy(os.path.join(self.cwd, "projB", "ref", "chr1.fa"),
+                    os.path.join(shared, "NRG_2_ref", "NRG_chr1_1.bin"))
+        with open(os.path.join(shared, "NRG_2_ref", ar.INDEX_SOURCE_FILENAME), "w") as fh:
+            json.dump({"genome": "projB/ref", "fingerprint": "0" * 40}, fh)
+        self.assertEqual(self.search("b", "projA/ref", 1, "--index-path", shared), self.SEQ["maternal"])
+
+
+# --------------------------------------------------------------------------- #
 # The pipeline: the name a linked genome keeps, and the 0-bulge scan
 # --------------------------------------------------------------------------- #
 class APipelineGenomeKeepsTheNameItIsGivenUnder(_Workdir):
@@ -789,9 +981,12 @@ class ZeroBulgeScanReadsTheGenomeItIsGiven(_Workdir):
                 "False", "PASS,.", "_", 6, 0]
         env = dict(os.environ, PATH=f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}",
                    STUB_LOG=log, LC_ALL="C", LANG="C", CRISPRME_NO_THREAD_GUARD="1")
-        with open(os.path.join(out, "log_error.txt"), "w") as err:
+        with open(os.path.join(out, "log_error.txt"), "w") as err, \
+                open(os.path.join(out, "log_verbose.txt"), "w") as verbose:
             subprocess.run(["bash", SHELL_SCRIPT, *map(str, args)], cwd=work, env=env,
-                           stdout=subprocess.DEVNULL, stderr=err, timeout=300)
+                           stdout=verbose, stderr=err, timeout=300)
+        with open(os.path.join(out, "log_verbose.txt")) as fh:
+            self.said = fh.read().splitlines()
         with open(log) as fh:
             return [line.split() for line in fh]
 
@@ -803,6 +998,8 @@ class ZeroBulgeScanReadsTheGenomeItIsGiven(_Workdir):
 
     def test_with_bulges_the_index_is_the_haplotypes_own(self):
         calls = self.calls(1)
+        # the line complete-search reads to know that this run built the index it records
+        self.assertIn(crisprme._BUILT_REFERENCE_INDEX_LINE, self.said)
         self.assertEqual([c[:2] for c in calls if c[0] == "index-genome"], [["index-genome", "W1_paternal"]])
         search = [c for c in calls if c[0] == "search"]
         self.assertEqual(os.path.basename(search[0][1].rstrip("/")), "NRG_2_W1_paternal")

@@ -424,7 +424,10 @@ def haplotype_params_match(
 # so both haplotypes of every individual shared one index: the first search built
 # it, and every later one searched that sequence instead of its own. So each
 # haplotype is searched through a link named after it (haplotype_genome_view), and
-# each index a haplotype search builds records which genome it holds.
+# each index a haplotype search builds records which genome it holds. So does an
+# index complete-search builds of any other folder outside Genomes/, and a search of
+# a folder whose name an index recorded from another folder carries is refused
+# (crisprme.py _check_genome_name_is_its_own).
 HAPLOTYPE_GENOMES_DIRNAME = "haplotype_genomes"
 GENOMES_DIRNAME = "Genomes"
 INDEX_LIBRARY_DIRNAME = "genome_library"
@@ -582,7 +585,8 @@ def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
     index carries (`haplotype_search_name`), one a search of this haplotype
     built and may still be using (the record is written when the search ends),
     or one whose search was killed before it ended. One still being built (it
-    has a `.lock`) is left too.
+    has a `.lock`) is left too. complete-search runs it too, for a genome folder
+    outside `Genomes/` (crisprme.py `_check_genome_name_is_its_own`).
 
     Runs that start together may both find an index stale: each takes it away
     from its name in one step before removing it (`_take_index_away`), and the
@@ -627,6 +631,24 @@ def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
     return [d for d in _haplotype_index_dirs(cwd, name) if not os.path.isdir(f"{d}.lock")]
 
 
+def _write_index_source(index_dir: str, record: Dict) -> None:
+    """Writes `record` as `index_dir`'s `.genome_source`, in one step.
+
+    Raises:
+        OSError: When it cannot be written.
+    """
+    # this call's own temporary file, as in haplotype_genome_view
+    tmp = os.path.join(index_dir, f"{INDEX_SOURCE_FILENAME}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(tmp, "w") as handle:
+            json.dump(record, handle)
+            handle.write("\n")
+        os.replace(tmp, os.path.join(index_dir, INDEX_SOURCE_FILENAME))
+    finally:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
+
+
 def stamp_built_haplotype_indexes(cwd: str, genome_view: str, present_before: List[str]) -> None:
     """Run after a haplotype search, whether it succeeded or not: write into each
     index of the genome's name that the search built -- one not in
@@ -653,18 +675,49 @@ def stamp_built_haplotype_indexes(cwd: str, genome_view: str, present_before: Li
         try:
             if not any(f.endswith(".bin") for f in os.listdir(index_dir)):
                 continue
-            # this call's own temporary file, as in haplotype_genome_view
-            tmp = os.path.join(index_dir, f"{INDEX_SOURCE_FILENAME}.{uuid.uuid4().hex}.tmp")
-            try:
-                with open(tmp, "w") as handle:
-                    json.dump(record, handle)
-                    handle.write("\n")
-                os.replace(tmp, os.path.join(index_dir, INDEX_SOURCE_FILENAME))
-            finally:
-                if os.path.lexists(tmp):
-                    os.remove(tmp)
+            _write_index_source(index_dir, record)
         except OSError as e:
             print(f"Note: could not record which genome {os.path.basename(index_dir)} holds ({e})")
+
+
+def stamp_index_source(cwd: str, genome_dir: str, index_dir: str) -> None:
+    """Writes into `index_dir`, an index a complete-search has just built from
+    `genome_dir`, which genome it holds (`.genome_source`, as
+    `stamp_built_haplotype_indexes` does), unless it records one already, is still
+    locked, or holds no `.bin` file. Never fails the run: without the record the
+    index is used as before."""
+    try:
+        if (os.path.isdir(f"{index_dir}.lock") or _read_index_source(index_dir) is not None
+                or not any(f.endswith(".bin") for f in os.listdir(index_dir))):
+            return
+        _write_index_source(index_dir, {
+            "genome": _genome_identity(cwd, genome_dir),
+            "fingerprint": genome_fingerprint(genome_dir),
+        })
+    except OSError as e:
+        print(f"Note: could not record which genome {os.path.basename(index_dir)} holds ({e})")
+
+
+def foreign_index_sources(cwd: str, genome_dir: str) -> List[Tuple[str, str]]:
+    """The indexes of the genome's name in `cwd`'s `genome_library/` that record
+    (`.genome_source`) another genome folder than `genome_dir`. A search takes an
+    index by the genome's name alone, so a search of `genome_dir` would take them
+    and search that other folder's sequence. An index that records nothing is none
+    of them: one built by an earlier CRISPRme, or downloaded.
+
+    Returns:
+        (index folder, the genome folder it records) pairs; the genome folder as
+        an absolute path.
+    """
+    name = os.path.basename(os.path.normpath(genome_dir))
+    identity = _genome_identity(cwd, genome_dir)
+    found = []
+    for index_dir in _haplotype_index_dirs(cwd, name):
+        held = (_read_index_source(index_dir) or {}).get("genome")
+        if held and held != identity:
+            found.append((index_dir, held if os.path.isabs(held)
+                          else os.path.join(os.path.realpath(cwd), held)))
+    return found
 
 
 def _read_haplotype_pam_label(haplotype_results_dir: str) -> str:

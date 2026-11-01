@@ -97,7 +97,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
     DEFAULT_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
-from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes  # noqa: E402
+from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes, stamp_index_source, foreign_index_sources  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
 from assembly_annotate import add_annotation_column, add_closest_gene_columns  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
@@ -1892,6 +1892,102 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         return 0
 
 
+# The pipeline prints this line just before it builds the reference index itself
+# (STEP 2.1 of submit_job_automated_new_multiple_vcfs.sh); a run that finds the index
+# built, by an earlier run or by one that started together, says "Reference index
+# present (<index>)" instead.
+_BUILT_REFERENCE_INDEX_LINE = "Indexing reference genome"
+
+
+def _check_genome_name_is_its_own(genomedir: str, index_path: str) -> bool:
+    """Refuses a search that would take another genome folder's index or variant
+    genomes for this one's.
+
+    The pipeline knows a genome's index (genome_library/<PAM>_<N>_<name>) and its
+    variant genomes (Genomes/<name>+<dataset>) by the genome folder's name alone,
+    and takes any it finds of that name, whatever folder they were built from. A
+    search with bulges, or a variant-aware one, of one folder then searched the
+    sequence of another folder of the same name, with no error, or built its own
+    under the names the other folder's searches take. Refused when:
+
+    * the folder is outside Genomes/ and Genomes/<name> is another folder;
+    * an index of that name in genome_library/ records (.genome_source) that it was
+      built from another folder: _record_built_index_source records it in an index a
+      search of a folder outside Genomes/ builds.
+
+    An index that records nothing -- of a folder in Genomes/, built by an earlier
+    CRISPRme, or downloaded -- is used as before. Of a folder outside Genomes/, an
+    index recorded from it before its FASTA files changed is removed, and the search
+    builds it again, as for an assembly-search haplotype (not with --index-path, under
+    which the pipeline builds none). Not called for a reference search without
+    bulges, which scans the folder it is given. A library given with --index-path
+    other than genome_library/ is not looked at: no search builds an index there, and
+    its records would name folders of another working directory.
+
+    Returns:
+        Whether to record, in the reference index this search builds, the folder it
+        holds: for a folder outside Genomes/, searched without --index-path. The
+        indexes of a genome in Genomes/ are left as before.
+    """
+    cwd = current_working_directory
+    name = os.path.basename(genomedir)
+    genomes = os.path.join(cwd, CRISPRMEDIRS[0])
+    outside = os.path.realpath(os.path.dirname(genomedir)) != os.path.realpath(genomes)
+    namesake = os.path.join(genomes, name)
+    if outside and os.path.isdir(namesake) and os.path.realpath(namesake) != os.path.realpath(genomedir):
+        error(
+            f"--genome {genomedir} has the name of another genome folder, {namesake}. "
+            f"A search with bulges, or with --vcf, takes the genome's index "
+            f"(genome_library/<PAM>_<N>_{name}) and its variant genomes "
+            f"(Genomes/{name}+<dataset>) by that name alone, so this one would search "
+            f"the sequence of {namesake}, or build its own under the names that searches "
+            f"of {namesake} take. If the two folders hold the same genome, search "
+            f"{namesake}; otherwise give this one a name no folder in {genomes} has."
+        )
+    if index_path != "_" and os.path.realpath(index_path) != os.path.realpath(
+        os.path.join(cwd, "genome_library")
+    ):
+        return False
+    for index_dir, held in foreign_index_sources(cwd, genomedir):
+        error(
+            f"{index_dir} holds the genome in {held}, not {genomedir}: the two folders "
+            f"have the same name, and a search takes an index by that name alone, so this "
+            f"one would search {held}. Give one of the two folders another name. If {held} "
+            f"is this same folder under another path, or is no longer needed, remove "
+            f"{index_dir}: the next search builds it again."
+        )
+    if not outside or index_path != "_":
+        return False
+    try:
+        clear_stale_haplotype_indexes(cwd, genomedir)
+    except OSError as e:
+        error(
+            f"An index of {name} under genome_library/ was built before the FASTA files "
+            f"of {genomedir} changed, and could not be removed ({e}). Remove it and run "
+            f"again."
+        )
+    return True
+
+
+def _record_built_index_source(outputfolder: str, genomedir: str, index_name: str) -> None:
+    """After a pipeline that ended on its own: if it built the reference index
+    itself (its log_verbose.txt has _BUILT_REFERENCE_INDEX_LINE), records in the
+    index the genome folder it was built from (assembly_reconcile.stamp_index_source),
+    which _check_genome_name_is_its_own reads. Only the run that built an index
+    records it: of two runs that started together, of two folders of the same name,
+    one built the index and the other searched it."""
+    try:
+        with open(os.path.join(outputfolder, "log_verbose.txt")) as log_verbose:
+            built = any(line.rstrip("\n") == _BUILT_REFERENCE_INDEX_LINE for line in log_verbose)
+    except OSError:
+        return
+    if built:
+        stamp_index_source(
+            current_working_directory, genomedir,
+            os.path.join(current_working_directory, "genome_library", index_name),
+        )
+
+
 def complete_search() -> None:
     warn_low_memory()  # non-fatal low-memory warning (Docker Desktop, etc.)
     args = input_args[2:]  # retrieve complete-search input arguments
@@ -2252,6 +2348,12 @@ def complete_search() -> None:
         search_index = True
     else:
         search_index = False
+    # A search with bulges, or a variant-aware one, takes the genome's index and its
+    # variant genomes by the genome folder's name alone: refuse one whose folder
+    # shares its name with another genome folder (_check_genome_name_is_its_own).
+    record_index_source = (search_index or variant) and _check_genome_name_is_its_own(
+        genomedir, index_path
+    )
     if variant:
         genome_idx_list = []
         with open(vcfdir, "r") as vcfs:
@@ -2615,6 +2717,10 @@ def complete_search() -> None:
             )
             if 0 <= code <= 128:
                 _ANNOTATION_TMPDIRS.extend(handed_over)
+                if record_index_source:  # the index it built, if any, is whole
+                    _record_built_index_source(
+                        outputfolder, genomedir, f"{pam_char}_{bMax + 1}_{genome_ref}"
+                    )
             if code != 0:
                 # surface WHERE it failed + the actual error, not just "failed"
                 sys.stderr.write(
