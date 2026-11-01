@@ -561,13 +561,13 @@ class _Fixture(unittest.TestCase):
     def run_bio(self, **kw):
         return self.finish(self.start(**kw))
 
-    def run_search(self, *options, pam=PAM, bulges="1"):
+    def run_search(self, *options, pam=PAM, bulges="1", vcfs="ds\n"):
         """complete-search --vcf here, as a user runs it next (CFD only, as no
         CRISPR-Bulge env is here), into an output folder of its own, with PAM file pam,
-        bulges of each type, and options."""
+        bulges of each type, the --vcf list vcfs, and options."""
         shutil.rmtree(self.path("Results", "search"), ignore_errors=True)
         _write(self.path("guides.txt"), GENOME["chr1"][:20] + "NNN\n")
-        _write(self.path("vcfs.txt"), "ds\n")
+        _write(self.path("vcfs.txt"), vcfs)
         command = ["complete-search", "--genome", self.path("Genomes", "hg38"),
                    "--vcf", self.path("vcfs.txt"), "--samplesID", self.path("samples.txt"),
                    "--guide", self.path("guides.txt"), "--pam", pam, "--mm", "4",
@@ -2414,20 +2414,24 @@ class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
         rc, out, err = self.finish(self.start(command=settings))
         self.assertEqual(rc, 0, err)
         self.assertFalse(os.path.lexists(self.path("Dictionaries", "registry_ds")))
-        rc, out, err = self.run_search("--per-sample")
-        self.assertIn("Launching job ", out)
-        self.assertNotIn("CONFIRMED cis phasing, named carrier samples and exact joint AF", out)
-        self.assertIn(
-            "[complete-search] PER-SAMPLE analysis (--per-sample): resolving per-sample "
-            "genotypes into named carrier samples only for ds, which has no dict-less tiers "
-            "(Dictionaries/registry_<vcf>/ and genotypes_<vcf>/), only the classic per-sample "
-            "dictionaries: the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and "
-            "the exact joint AF come from those tiers, and none of them is reported for its "
-            "variants, whose allele frequencies are the ones the VCF gives. To get them, "
-            "rebuild the index with build-index-only --samplesID, or download a prebuilt one "
-            "(crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP). "
-            "Slower, and can be intractable on dense panels; pass --population-level for the "
-            "fast worst-case screen.\n", out)
+        # (a --vcf list that names the dataset twice names it once here)
+        for vcfs in ("ds\n", "ds\nds/\n"):
+            with self.subTest(vcfs=vcfs):
+                rc, out, err = self.run_search("--per-sample", vcfs=vcfs)
+                self.assertIn("Launching job ", out)
+                self.assertNotIn("CONFIRMED cis phasing, named carrier samples and exact joint "
+                                 "AF", out)
+                self.assertIn(
+                    "[complete-search] PER-SAMPLE analysis (--per-sample): resolving per-sample "
+                    "genotypes into named carrier samples only for ds, which has no dict-less "
+                    "tiers (Dictionaries/registry_<vcf>/ and genotypes_<vcf>/), only the classic "
+                    "per-sample dictionaries: the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP "
+                    "co-occurrence and the exact joint AF come from those tiers, and none of them "
+                    "is reported for its variants, whose allele frequencies are the ones the VCF "
+                    "gives. To get them, rebuild the index with build-index-only --samplesID, or "
+                    "download a prebuilt one (crisprme.py download --what index --index-name "
+                    "NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on dense panels; "
+                    "pass --population-level for the fast worst-case screen.\n", out)
 
     def test_on_an_index_with_them_it_says_what_it_said(self):
         rc, out, err = self.run_bio()

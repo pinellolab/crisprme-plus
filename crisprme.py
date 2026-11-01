@@ -2538,9 +2538,11 @@ def complete_search() -> None:
         # without either -- built without --samplesID, as the benchmark complete-test
         # builds its own -- has only the classic per-sample dictionaries, which name the
         # carriers, each variant with the allele frequency its VCF gives, and no more.
+        # (each dataset once: a --vcf list may name one twice)
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
         _untiered = [
-            _vn for _vn in (os.path.basename(os.path.normpath(_v)) for _v in vcf_dataset_dirs)
+            _vn for _vn in dict.fromkeys(os.path.basename(os.path.normpath(_v))
+                                         for _v in vcf_dataset_dirs)
             if not any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
                        for _tier in ("registry", "genotypes"))
         ]
