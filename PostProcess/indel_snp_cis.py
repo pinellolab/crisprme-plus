@@ -373,18 +373,32 @@ def _gt_tokens(gt):
     return [gt], "haploid"
 
 
-def changes_span(pos1, ref, alt, lo, hi):
-    """True iff a variant (VCF POS / REF / ALT) changes the reference bases lo..hi
-    (0-based, inclusive) of a haplotype that carries it: a deleted or replaced base
-    inside, or bases inserted between two bases of it. The bases REF and ALT share
-    at the start (the VCF anchor base) are kept, so they change nothing."""
-    a = pos1 - 1
+def kept_bases(ref, alt):
+    """How many bases REF and ALT share at the start (the VCF anchor base): the REF
+    bases a haplotype carrying the variant keeps. The rest of REF is deleted or
+    replaced."""
     c = 0
     while c < min(len(ref), len(alt)) and ref[c].upper() == alt[c].upper():
         c += 1
+    return c
+
+
+def changes_span(pos1, ref, alt, lo, hi, gone=None):
+    """True iff a variant (VCF POS / REF / ALT) changes the reference bases lo..hi
+    (0-based, inclusive) of a haplotype that carries it: a deleted or replaced base
+    inside, or bases inserted between two bases of it. The bases REF and ALT share
+    at the start (the VCF anchor base) are kept, so they change nothing. ``gone``
+    (first, last; 0-based, inclusive): bases the haplotype has lost already, to the
+    indel of the window being read: losing them again changes nothing."""
+    a = pos1 - 1
+    c = kept_bases(ref, alt)
     if len(ref) > c:  # bases a+c .. a+len(ref)-1 are deleted or replaced
-        return a + c <= hi and a + len(ref) - 1 >= lo
-    if len(alt) > c:  # an insertion between a+c-1 and a+c
+        first, last = a + c, a + len(ref) - 1
+        parts = [(first, last)] if gone is None else [
+            (first, min(last, gone[0] - 1)), (max(first, gone[1] + 1), last)]
+        if any(f <= l and f <= hi and l >= lo for f, l in parts):
+            return True
+    if len(alt) > c:  # bases inserted between a+c-1 and a+c
         return lo <= a + c - 1 and a + c <= hi
     return False
 

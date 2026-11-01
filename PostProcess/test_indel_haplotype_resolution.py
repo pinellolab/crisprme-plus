@@ -329,6 +329,14 @@ class PerHaplotypeCases(unittest.TestCase):
         self.assertFalse(cs(101, "T", "TGG", 101, 110))   # starts after the gap
         self.assertFalse(cs(101, "T", "TGG", 90, 100))    # ends at the anchor
         self.assertFalse(cs(101, "A", "A", 0, 1000))      # no change
+        # bases the window's own indel has deleted already: 0-based 100..120
+        self.assertFalse(cs(106, "CGT", "C", 90, 130, (100, 120)))   # all inside
+        self.assertTrue(cs(119, "CGTA", "C", 90, 130, (100, 120)))   # 121 is outside
+        self.assertTrue(cs(99, "CGTA", "C", 90, 130, (100, 120)))    # 99 is outside
+        self.assertTrue(cs(106, "C", "CGT", 90, 130, (100, 120)))    # bases are added
+        self.assertEqual(isc.kept_bases("TAC", "T"), 1)
+        self.assertEqual(isc.kept_bases("T", "TGG"), 1)
+        self.assertEqual(isc.kept_bases("AT", "CG"), 0)
 
     def test_target_ref_span_takes_in_the_indel_place(self):
         """The ALT bases, anchor included, map to no reference position, so a target

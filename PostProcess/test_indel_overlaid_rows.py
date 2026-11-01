@@ -18,7 +18,8 @@ on them and its rows checked:
     and in trans, a chimera only another sample's SNP would complete, a cis spacer
     SNP, an unphased carrier, a minus-strand PAM SNP, a second variant on the same
     slot: an indel inside the target, inserted next to the indel's anchor or
-    overlapping the indel (one complex allele), a SNP on the indel's own anchor);
+    overlapping the indel (one complex allele), a SNP on the indel's anchor; and one
+    that changes nothing: a SNP or a nested indel on bases the indel deletes);
   * the SNP+indel co-occurrence companion names the SNPs a row requires, CONFIRMED
     or PUTATIVE, PAM-window SNPs included;
   * a classic dictionary install (no Tier-1 store: the per-sample SNP dictionary), a
@@ -102,7 +103,7 @@ class World(object):
 
     def __init__(self):
         rng = random.Random(28101)
-        self.seq = [rng.choice("ACGT") for _ in range(1700)]
+        self.seq = [rng.choice("ACGT") for _ in range(2000)]
         self.snps = []    # (pos1, ref, alt, rsid, {sample: gt})
         self.indels = []  # (pos1, ref, alt, rsid, {sample: gt})
         g = GUIDE
@@ -175,6 +176,18 @@ class World(object):
         self._put(r0, g + "T" * 30)
         self._indel("R", r0 + 20, g[19], g[19] + "TGG", {"S05": "1|0", "S06": "1|0"})
         self._snp("R", r0 + 20, g[19], "T", {"S05": "1|0", "S06": "0|1"})
+        # S (+): a deletion restores a perfect target; S03's slot also holds a SNP on a
+        # base it deletes, which is not in the window's sequence: S03 stays listed.
+        s0 = 1720
+        self._put(s0, g[:10] + "CAG" + g[10:] + "TGG" + "T" * 20)
+        self._indel("S", s0 + 10, g[9] + "CAG", g[9], {"S03": "1|0"})
+        self._snp("S", s0 + 12, "A", "T", {"S03": "1|0"})
+        # T (+): a longer deletion, and on S04's slot a shorter one nested in it (T2): the
+        # outer window is S04's sequence, the inner one is not.
+        t0 = 1830
+        self._put(t0, g[:10] + "CAGTA" + g[10:] + "TGG" + "T" * 20)
+        self._indel("T", t0 + 10, g[9] + "CAGTA", g[9], {"S04": "1|0"})
+        self._indel("T2", t0 + 12, "AGT", "A", {"S04": "1|0"})
         self.ref = "".join(self.seq)
 
     def _put(self, start0, s):
@@ -222,6 +235,8 @@ class World(object):
             seq, pos, i = [], [], 0
             for pos1, ref, alt in sorted(variants):
                 p0 = pos1 - 1
+                if p0 < i:
+                    continue  # inside a deletion already applied
                 seq.extend(self.ref[i:p0])
                 pos.extend(range(i, p0))
                 seq.extend(alt)
@@ -474,6 +489,12 @@ class FullTiers(_Base):
         self.assertFalse([r for r in site.get("Q2", ()) if "S12" in r["samples"].split(",")])
         # R: a SNP on the indel's own anchor, on the same slot in S05: S06 only
         self.assertEqual([(r["dna"], r["samples"]) for r in site["R"]], [(g + "TGG", "S06")])
+        # S: a SNP on a base the deletion removes changes nothing: S03 stays
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["S"]], [(g + "TGG", "S03")])
+        # T: the nested deletion is inside what the outer one removes: S04 stays there,
+        # and is never listed for the inner window
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["T"]], [(g + "TGG", "S04")])
+        self.assertFalse([r for r in site.get("T2", ()) if "S04" in r["samples"].split(",")])
         # every recomputed CFD and mismatch count agrees with its alignment
         for r in rows:
             self.assertAlmostEqual(cfd_score_bulge_aware(r["crRNA"], r["dna"]), r["cfd"],
