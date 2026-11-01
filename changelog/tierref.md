@@ -47,21 +47,23 @@ CTAACAGTTGCTTTTATCAC, each run on aa9c54b and on this fix.
   one mismatch. The tier path now writes these columns as the dictionary path does: each
   protospacer base that differs from the guide in lower case (`ACTGAAATCTGTAAGCAGGtGGG`, 1 / 0),
   except at a DNA-bulge column; the PAM stays in upper case. The pipeline breaks ties between
-  rows by their whole line, which includes this column, so two more things can change. Rows that
-  tie on both the CFD score and the mismatches and bulges count can come out in another order, in
-  the results, in the report's tables and figures and in the perfect-match banner (5,378 of the
-  189,949 rows above; 4,598 of 205,415 on a population-level search of the same index). And where
-  two candidate alignments of a site tie exactly on score, mismatches and bulges, carriers and
-  aligned sequence, mostly a SNP and an indel that give the same alignment, the other one of the
-  two can now be the one reported, with its own variant, rsID, allele frequency, carriers, PAM
-  creation and REF scores, the former one moving to the alternative alignments (which a
-  per-sample search lists): at 15 sites for `highest_CFD`, 17 for `fewest_mm+b` and 16 for
-  `highest_CRISPR_BULGE` on the per-sample search above, and at 4, 5 and 7 on the
-  population-level one. The counts that follow the carriers (`*.summary_by_samples.*`, the
-  population distribution plots, the report's population panel and, by one, a PAM-creation count
-  of `*.summary_by_guide.*`) move by a few accordingly. The set of alignments reported (best and
-  alternative), every score and every other column are otherwise unchanged, and the results of a
-  search of an index without the tiers, or of a reference-only search, are the same byte for
-  byte. To correct results made before, run the search again
+  rows by their whole line, which includes this column, so two more things can change. Rows with
+  the same CFD score can come out in another order among themselves, in the results, in the
+  report's tables and figures and in the perfect-match banner (on the per-sample search above,
+  5,383 of its 189,949 rows are at another place in the results and otherwise the same; 4,598 of
+  205,415 on a population-level search of the same index). And where two candidate alignments of
+  a site tie exactly on start, score, mismatches and bulges, number of carriers and aligned
+  sequence, the other one of the two can now be the one reported, with its own variant, rsID,
+  allele frequency, carriers, PAM creation and REF and risk scores, the former one moving to the
+  alternative alignments (which a per-sample search lists). That happened at 15 sites for
+  `highest_CFD`, 17 for `fewest_mm+b` and 16 for `highest_CRISPR_BULGE` on the per-sample search
+  above, and at 4, 5 and 7 on the population-level one; in every one of these cases the two were a
+  row of SNPs and a row with an indel (alone or with a SNP) that give the same alignment, and the
+  row with the indel is now the one reported. The counts made from the reported rows' carriers
+  (`*.summary_by_samples.*`, the population distribution plots and the report's population panel)
+  move by a few accordingly, and a PAM-creation count of `*.summary_by_guide.*` by one. The set of
+  alignments reported (best and alternative), every score and every other column are otherwise
+  unchanged, and the results of a search of an index without the tiers, or of a reference-only
+  search, are the same byte for byte. To correct results made before, run the search again
   (`generate-report` alone reads the table as it is). Covered by
   `PostProcess/test_tier_ref_columns.py`.
