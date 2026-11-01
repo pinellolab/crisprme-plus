@@ -474,14 +474,15 @@ and the `release-crisprme` skill.
   last step gunzipped the plain `.bed` back into them: with the shipped annotations about 280 MB
   plus 1.4 GB per search, and one benchmark-mode `complete-test` left four of them, 3.4 GB. They
   are now removed once the command that made them is over, whether it succeeded or failed (an
-  input error, a failed pipeline), and never another job's; `--keep-intermediates` keeps them.
-  They are kept, as before, whenever the pipeline may still be running on them: after a Ctrl-C,
-  on which `crisprme.py` kills only the `/bin/sh` it started the pipeline with (where `/bin/sh` is
-  dash, as in the Docker and Apptainer images, an interrupt sent to `crisprme.py` alone, such as
-  `kill -INT <pid>`, leaves the whole pipeline running to the end; where it is bash, as on
-  RHEL-family hosts, that shell is the pipeline's own, and the step then running finishes on its
-  own), and after a signal that killed the pipeline itself, whose workers may outlive it. Search
-  results are unchanged. Covered by `PostProcess/test_annotation_tmpdirs.py`.
+  input error, a failed pipeline), and never another job's; `--keep-intermediates` keeps them, as
+  its `complete-search --help` entry and the README now say. They are kept, as before, whenever
+  the pipeline may still be running on them: after a Ctrl-C, on which `crisprme.py` kills only
+  the `/bin/sh` it started the pipeline with (where `/bin/sh` is dash, as in the Docker and
+  Apptainer images, an interrupt sent to `crisprme.py` alone, such as `kill -INT <pid>`, leaves
+  the whole pipeline running to the end; where it is bash, as on RHEL-family hosts, that shell is
+  the pipeline's own, and the step then running finishes on its own), and after a signal that
+  killed the pipeline itself, whose workers may outlive it. Search results are unchanged. Covered
+  by `PostProcess/test_annotation_tmpdirs.py`.
 - **The default variant index could fail to download through Xet, and CRISPRme then gave up at
   once.** On 2026-10-31, `download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP` failed three
   times in a row over an hour, from two networks and with hf_xet 1.7.0 and 1.8.0, with `File

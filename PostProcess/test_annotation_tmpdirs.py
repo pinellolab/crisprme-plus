@@ -384,5 +384,33 @@ class TheDispatchRemovesThemForEveryCallerThatSortsAnnotations(unittest.TestCase
             {"complete_search", "assembly_search"})
 
 
+class TheHelpSaysWhatKeepIntermediatesKeeps(unittest.TestCase):
+    """complete-search --help is where a user looks for what --keep-intermediates keeps.
+    It listed the pipeline's working tables only, so nothing but the CHANGELOG said that
+    the flag also keeps the annotation temp folders, and it named the bestMerge table,
+    which the cleanup never removes, among the files removed."""
+
+    @staticmethod
+    def _entry():
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            try:
+                crisprme.print_help_complete_search()
+            except SystemExit:
+                pass
+        return next(ln for ln in err.getvalue().split("\n")
+                    if ln.lstrip().startswith("--keep-intermediates,"))
+
+    def test_it_names_both_folders_and_where_they_are(self):
+        entry = self._entry()
+        for name in ("crisprme_annot_*", "crisprme_pannot_*", "$CRISPRME_TMPDIR"):
+            self.assertIn(name, entry)
+
+    def test_it_lists_the_best_merge_table_among_the_kept_outputs(self):
+        removed, kept = self._entry().split("kept either way")[0].split("canonical outputs")
+        self.assertNotIn("bestMerge", removed)
+        self.assertIn("bestMerge", kept)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

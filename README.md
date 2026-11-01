@@ -1025,9 +1025,14 @@ its purpose and usage:
   <br>Keep the bulky pre-integration working files. By default, once the finalized
   `*.integrated_results.tsv` and the report are produced, `complete-search` removes the
   intermediate tables it no longer needs — the merged non-best `*.altMerge.txt`,
-  the raw `*_all_results_with_alternative_alignments.tsv` (the compressed `.zip` is kept),
-  and the per-chromosome `*.population_summary.tsv` — reclaiming on the order of ~15 GB on a
-  genome-wide run. **Always kept** (regardless of this flag): `*.integrated_results.tsv` and
+  the raw `*_all_results_with_alternative_alignments.tsv` and `*_observed_haplotypes_raw.tsv`
+  (the compressed `.zip` of each is kept), and the per-chromosome `*.population_summary.tsv` —
+  reclaiming on the order of ~15 GB on a genome-wide run. It also removes the sorted-annotation
+  temp folders it made, `crisprme_annot_*` (for `--annotation` / `--gene_annotation`) and
+  `crisprme_pannot_*` (for `--personal_annotation`), in `$CRISPRME_TMPDIR` if set, else the
+  working directory, once the run ends, even if it fails (a run stopped by Ctrl-C or a signal
+  leaves them, since the pipeline may still be reading them); this flag keeps them too.
+  **Always kept** (regardless of this flag): `*.integrated_results.tsv` and
   its `.zip`, the `*.bestMerge.txt` best-alignments table (the web results page greps it live
   for the per-position cluster drill-down, so it must persist for the job to stay browsable),
   the `*_report.zip`, the alternative-alignments `.zip`, the per-chromosome co-occurrence /
