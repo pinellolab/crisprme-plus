@@ -2444,35 +2444,21 @@ def complete_search() -> None:
         # (_mark_unfinished): a run stopped there leaves a part of it that looks whole,
         # and this search would use it as if it were, with no error. Refuse it until a
         # build-index-only run has finished it (with or without the override below).
-        _dict_root = os.path.join(current_working_directory, "Dictionaries")
-        _snp_on = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
+        # The parts: the dict-less tiers, the indel genotype store (read for the SNP+indel
+        # co-occurrence only), the enrichment, and the fake-indel genome, which a search
+        # reads only to build the INDELS index it does not find (the search script
+        # refuses its mark there too, at STEP 2.3): unfinished_marks.dataset_parts.
+        import unfinished_marks as _um
+
+        _genome = os.path.basename(os.path.normpath(genomedir))
         for _vdir in vcf_dataset_dirs:
             _vn = os.path.basename(os.path.normpath(_vdir))
-            _rerun = f"Run build-index-only again with {_vn}"
-            _reg = os.path.join(_dict_root, f"registry_{_vn}")
-            _gt = os.path.join(_dict_root, f"genotypes_{_vn}")
-            _refuse_unfinished(
-                _reg, f"the dict-less tiers of {_vn}",
-                f"{_rerun} and its --samplesID, which finishes them, or remove them to "
-                f"search without them (rm -rf '{_reg}' '{_gt}')",
-            )
-            if _snp_on:  # (the store is read for the SNP+indel co-occurrence only)
-                _igt = os.path.join(_dict_root, f"indel_genotypes_{_vn}")
-                _refuse_unfinished(
-                    _igt, f"the phased indel genotype store of {_vn}",
-                    f"{_rerun}, which finishes it, or remove it to search without it "
-                    f"(rm -rf '{_igt}')",
-                )
-            # (and the enrichment, and the fake-indel genome a search builds its INDELS
-            # index from)
-            _enriched = os.path.join(current_working_directory, "Genomes",
-                                     f"{os.path.basename(os.path.normpath(genomedir))}+{_vn}")
-            _refuse_unfinished(_enriched, f"the enrichment of {_vn}",
-                               f"{_rerun}, which enriches it again")
-            _refuse_unfinished(
-                _enriched + "_INDELS",
-                f"the SNP codes of the {_vn} fake-indel genome", f"{_rerun}, which finishes them",
-            )
+            _in_place = _um.indels_index_in_place(
+                os.path.join(current_working_directory, "genome_library"),
+                f"{_genome}+{_vn}", pam_char, bMax + 1, prune_pam, not pam_begin)
+            for _part, _what, _rerun in _um.dataset_parts(current_working_directory,
+                                                          _genome, _vn, _in_place):
+                _refuse_unfinished(_part, _what, _rerun)
     if variant and not os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
         _missing = []
@@ -3698,22 +3684,32 @@ def build_index_only() -> None:
         # rewritten whole or not at all (overlay_fake_chromosome), but a run stopped
         # partway leaves some overlaid and some not, from which a search would build an
         # INDELS index blind to the SNPs on the others, kept by every later run: so the
-        # fake-indel genome is marked unfinished meanwhile (_mark_unfinished), and
-        # complete-search refuses it. Under _with_cleanup, a SIGTERM or SIGHUP lets it
-        # remove its temporary file; one a SIGKILL leaves holds this run's owner record,
-        # for a later run to remove. What it prints is held for STEP 3.
+        # fake-indel genome is marked unfinished meanwhile (_mark_unfinished), and a
+        # search refuses to build an INDELS index from it. It is marked just before the
+        # first FASTA that changes, and one none of whose FASTAs changes (this release's
+        # own, as a second PAM or bulge budget is built on it) is neither marked nor
+        # rewritten: it holds up no search. A mark a stopped run left is taken away at
+        # the end either way. Under _with_cleanup, a SIGTERM or SIGHUP lets it remove its
+        # temporary file; one a SIGKILL leaves holds this run's owner record, for a later
+        # run to remove. What it prints is held for STEP 3.
         import contextlib
         import io
 
-        _said, _coded = io.StringIO(), []
+        _said, _coded, _marked = io.StringIO(), [], []
         _owner = "".join(f"{k}={v}\n" for k, v in _build_dir_owner().items())
-        _mark_unfinished(indels_out)
+
+        def _mark():
+            if not _marked:
+                _mark_unfinished(indels_out)
+                _marked.append(1)
+
         try:
             import overlay_indel_snps as _ois
             with contextlib.redirect_stdout(_said):
                 _n = _with_cleanup(
                     lambda: _ois.main(["overlay_indel_snps", indels_out, enriched,
-                                       indel_dict], owner=_owner, coded=_coded),
+                                       indel_dict], owner=_owner, coded=_coded,
+                                      before_write=_mark),
                     lambda: None,
                 )
         except Exception as _ois_err:
@@ -4302,6 +4298,21 @@ def build_index_only() -> None:
                 flush=True,
             )
         else:
+            # A fake-indel genome marked unfinished (a run puts the SNP codes on it in
+            # place, or stopped as it did) is not indexed: the INDELS index would be blind
+            # to the SNPs on the FASTAs not coded yet, and a search that finds an INDELS
+            # index in place does not look at the mark. With the overlay on, this run
+            # finishes the codes first (below); under CRISPRME_INDEL_SNP=0 it cannot.
+            if not _snp_overlay and os.path.isdir(os.path.join(indels_out, ".building")):
+                error(
+                    f"{indels_out} is marked unfinished: a build-index-only run is putting "
+                    f"the SNP codes on that fake-indel genome, or stopped before it was "
+                    f"done, so {os.path.basename(indels_idx)} is not built from it, as it "
+                    f"would be blind to the SNPs on the FASTAs not coded yet. Let that run "
+                    f"finish, or run build-index-only again to its end with {vcf_name} with "
+                    f"CRISPRME_INDEL_SNP=1 (the default), which finishes its SNP codes and "
+                    f"builds the index."
+                )
             print(f"Building indels index {os.path.basename(indels_idx)}...", flush=True)
             # [indel-snp] Overlay SNP IUPAC codes onto the fake-indel flanks BEFORE
             # indexing so this _INDELS index also finds SNP+indel co-occurring
@@ -4378,7 +4389,8 @@ def build_index_only() -> None:
     # the indel genotype store is read, and its mark taken away (STEP 1c), only with the
     # SNP overlay on: under CRISPRME_INDEL_SNP=0 no search refuses its mark, and no run
     # could clear it. The SNP codes of the fake-indel genome are refused either way, and
-    # only a run with the overlay on finishes them.
+    # only a run with the overlay on finishes them; a search reads that genome only to
+    # build an INDELS index it does not have yet.
     if _snp_overlay:
         _parts.append(
             (_igt_dir, f"{_redo}, or remove the phased indel genotype store to search without "
@@ -4390,9 +4402,11 @@ def build_index_only() -> None:
     ]
     for _part, _do in _parts:
         if os.path.isdir(os.path.join(_part, ".building")):
+            _who = f"every search with {vcf_name}" + (
+                " that builds an INDELS index from it" if _part == indels_out else "")
             error(
-                f"{_part} is still marked unfinished, and every search with {vcf_name} "
-                f"refuses it until a build-index-only run has finished it: {_do}."
+                f"{_part} is still marked unfinished, and {_who} refuses it until a "
+                f"build-index-only run has finished it: {_do}."
             )
     print(
         f"Variant index ready: {os.path.basename(snp_idx)} (+ _INDELS). A later "

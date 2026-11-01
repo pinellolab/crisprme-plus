@@ -931,9 +931,11 @@ while read vcf_f; do
 	# first; a search the web launches runs this script straight, so refuse it here
 	# too. (The indel genotype store is read for the SNP+indel co-occurrence only.)
 	# The tiers are written only by a run given --samplesID, which the web Settings
-	# page never gives, and a search can do without them or the store.
+	# page never gives, and a search can do without them or the store. The fake-indel
+	# genome is read only to build an INDELS index that is not there: its mark is
+	# refused there (STEP 2.3), not here.
 	if [ "$vcf_name" != "_" ]; then
-		_unfinished=("Dictionaries/registry_${vcf_name}" "Genomes/${ref_name}+${vcf_name}" "Genomes/${ref_name}+${vcf_name}_INDELS")
+		_unfinished=("Dictionaries/registry_${vcf_name}" "Genomes/${ref_name}+${vcf_name}")
 		case "${CRISPRME_INDEL_SNP-1}" in 1 | true | True | yes) _unfinished=("${_unfinished[0]}" "Dictionaries/indel_genotypes_${vcf_name}" "${_unfinished[@]:1}") ;; esac
 		for _u in "${_unfinished[@]}"; do
 			if [ -d "$current_working_directory/$_u/.building" ]; then
@@ -1228,6 +1230,14 @@ while read vcf_f; do
 			# use mkdir lock to prevent concurrent builds. pool_index_indels.py runs
 			# index-genome per chromosome, which removes and rewrites each one, so a dead
 			# run's half-written directory is rebuilt whole.
+			# Not while build-index-only puts the SNP codes on it in place, or after a run
+			# stopped as it did (its mark, crisprme.py _overlay_in_place): an INDELS index
+			# built from it would be blind to the SNPs on the FASTAs not coded yet, and
+			# every later run would keep it.
+			if [ -d "$indels_out/.building" ]; then
+				printf "ERROR: %s is unfinished: a build-index-only run is writing it, or stopped before it was done. Let that run finish, or run build-index-only again to its end, then run this search again\n" "$indels_out" >&2
+				exit 1
+			fi
 			_lock="${indels_index_dir}.lock"
 			_lock_take "$_lock" "indexing $indels_index_dir" "$indels_index_dir"
 			if [ $? != 1 ]; then

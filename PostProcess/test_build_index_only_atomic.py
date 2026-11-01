@@ -230,6 +230,8 @@ for i, f in enumerate(files):
 # as with the disk's inode table or a file-count quota full. STUB_TARGETS_A_TREE=<n>:
 # crispritz_bins (the module $STUB_BINS) takes a tree of buildTST's to hold n targets,
 # not 5,000,000, so that the stub's .bin, of one target, is a full one at n=1.
+# STUB_MARKS=<file>: each unfinished mark the run makes (a .building directory) is
+# noted in <file>, one path a line.
 SHIM = r'''
 import builtins, errno, os, signal, time
 
@@ -354,6 +356,17 @@ if os.environ.get("STUB_TARGETS_A_TREE"):
     _spec.loader.exec_module(_bins)
     _bins.TARGETS_A_TREE = int(os.environ["STUB_TARGETS_A_TREE"])
     sys.modules["crispritz_bins"] = _bins
+
+if os.environ.get("STUB_MARKS"):
+    _makedirs = os.makedirs
+
+    def _noting_marks(name, *args, **kwargs):
+        if os.path.basename(str(name)) == ".building":
+            with builtins.open(os.environ["STUB_MARKS"], "a") as fh:
+                fh.write(str(name) + "\n")
+        return _makedirs(name, *args, **kwargs)
+
+    os.makedirs = _noting_marks
 '''
 
 SHARED = None  # the stub Bio package and a warmed matplotlib cache, for every run
@@ -548,16 +561,18 @@ class _Fixture(unittest.TestCase):
     def run_bio(self, **kw):
         return self.finish(self.start(**kw))
 
-    def run_search(self):
+    def run_search(self, *options, pam=PAM, bulges="1"):
         """complete-search --vcf here, as a user runs it next (CFD only, as no
-        CRISPR-Bulge env is here), into an output folder of its own."""
+        CRISPR-Bulge env is here), into an output folder of its own, with PAM file pam,
+        bulges of each type, and options."""
         shutil.rmtree(self.path("Results", "search"), ignore_errors=True)
         _write(self.path("guides.txt"), GENOME["chr1"][:20] + "NNN\n")
         _write(self.path("vcfs.txt"), "ds\n")
         command = ["complete-search", "--genome", self.path("Genomes", "hg38"),
                    "--vcf", self.path("vcfs.txt"), "--samplesID", self.path("samples.txt"),
-                   "--guide", self.path("guides.txt"), "--pam", PAM, "--mm", "4",
-                   "--bDNA", "1", "--bRNA", "1", "--output", "search", "--thread", "2"]
+                   "--guide", self.path("guides.txt"), "--pam", pam, "--mm", "4",
+                   "--bDNA", bulges, "--bRNA", bulges, "--output", "search", "--thread", "2",
+                   *options]
         return self.finish(self.start(command=command, CRISPRME_SKIP_SCORER_ENV="1"))
 
     def run_web_search(self, **environ):
@@ -661,6 +676,20 @@ class _Fixture(unittest.TestCase):
             _write(self.path("Genomes", "hg38+ds_INDELS", f"fake_ds_{chrom}", f"fake{chrom}.fa"),
                    f">fake{chrom}\n{seq[:26]}T{seq[26:60]}{'N' * pad * (chrom == 'chr2')}\n")
         os.remove(self.log)
+
+    def search_builds_the_indels_index(self):
+        """What complete-search does when it finds the fake-indel genome but no
+        INDELS index: pool_index_indels.py, in the working directory, with the
+        variant index's PAM and N (without looking at the genome's mark, as a search
+        of an earlier release, or one that got past its check before the mark was
+        set)."""
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(("STUB_", "CRISPRME_"))}
+        env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
+                   STUB_LOG=self.log)
+        subprocess.run([sys.executable, os.path.join(HERE, "pool_index_indels.py"),
+                        self.path("Genomes", "hg38+ds_INDELS") + "/", PAM, "NRG", "hg38", "ds",
+                        "2", "2"], cwd=self.work, env=env, check=True, capture_output=True)
 
 
 # What each index looks like once built, and the step of the stub's that builds its
@@ -1547,6 +1576,42 @@ class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
             self.assertEqual(fh.read(), overlaid)
         self.assertEqual(os.listdir(os.path.dirname(store)), ["fakechr1.fa"])
 
+    def test_in_place_one_whose_codes_are_all_on_is_left_as_it_is(self):
+        """With before_write (the overlay in place: crisprme.py marks the fake-indel
+        genome unfinished from it), a FASTA none of whose bases changes is not
+        rewritten, and before_write is called only before one that changes is
+        replaced, once its new text is ready."""
+        sys.path.insert(0, HERE)
+        self.addCleanup(sys.path.remove, HERE)
+        import overlay_indel_snps
+
+        files, whole, overlaid = self.fixture()
+        seen = []
+
+        def before_write():
+            with open(files[0]) as fh:
+                seen.append(fh.read())
+
+        self.assertEqual(overlay_indel_snps.overlay_fake_chromosome(
+            *files, before_write=before_write), 1)
+        self.assertEqual(seen, [whole])  # (called before the FASTA is replaced)
+        with open(files[0]) as fh:
+            self.assertEqual(fh.read(), overlaid)
+        st = os.stat(files[0])
+        coded = []
+        self.assertEqual(overlay_indel_snps.overlay_fake_chromosome(
+            *files, coded=coded, before_write=before_write), 0)
+        self.assertEqual(seen, [whole])
+        self.assertEqual(coded, [1])
+        self.assertEqual((os.stat(files[0]).st_ino, os.stat(files[0]).st_mtime_ns),
+                         (st.st_ino, st.st_mtime_ns))
+        self.assertEqual(os.listdir(os.path.dirname(files[0])), ["fakechr1.fa"])
+        # without it (a fresh enrichment's, in its build directory) it is rewritten, as before
+        self.assertEqual(overlay_indel_snps.overlay_fake_chromosome(*files), 0)
+        self.assertNotEqual(os.stat(files[0]).st_ino, st.st_ino)
+        with open(files[0]) as fh:
+            self.assertEqual(fh.read(), overlaid)
+
     def test_a_failed_overlay_fails_the_build_and_indexes_nothing(self):
         """A write inside the overlay that fails (here past a file-size limit, as on
         a full disk): the run fails rather than index what is left. Of the enrichment
@@ -1651,13 +1716,8 @@ class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
             with self.subTest(enrichment="in place", indels_index_built_since=since):
                 self.fresh()
                 fake = self.path("Genomes", "hg38+ds_INDELS", "fake_ds_chr1")
-                if since:
-                    rc, out, err = self.run_bio()
-                    self.assertEqual(rc, 0, err)
-                    aside = os.path.join(self.root, "aside")
-                    os.rename(self.lib(INDELS), aside)
-                else:
-                    self.kit()
+                # (one without its codes: one that has them all is not rewritten)
+                self.kit()
                 proc = self.start(shim=True, STUB_OVERLAY_HANG="1")
                 self.wait_for_mark(proc)
                 self.kill_group(proc)
@@ -1666,7 +1726,7 @@ class TheSNPOverlayRewritesAFakeGenomeWholeOrNotAtAll(_Fixture):
                 with open(os.path.join(left[0], "owner")) as fh:
                     self.assertIn(f"\npid={proc.pid}\n", fh.read())
                 if since:
-                    os.rename(aside, self.lib(INDELS))
+                    self.search_builds_the_indels_index()
                 rc, out, err = self.run_bio()
                 self.assertEqual(rc, 0, err)
                 self.assertIn(f"Removing {left[0]}: the build-index-only run that made it "
@@ -1684,18 +1744,6 @@ class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
     that need both an indel and a nearby SNP were missing or scored too low, with no
     error. The codes now go on in the enrichment's build directory, before any of it
     is in place."""
-
-    def search_builds_the_indels_index(self):
-        """What complete-search does when it finds the fake-indel genome but no
-        INDELS index: pool_index_indels.py, in the working directory, with the
-        variant index's PAM and N."""
-        env = {k: v for k, v in os.environ.items()
-               if not k.startswith(("STUB_", "CRISPRME_"))}
-        env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
-                   STUB_LOG=self.log)
-        subprocess.run([sys.executable, os.path.join(HERE, "pool_index_indels.py"),
-                        self.path("Genomes", "hg38+ds_INDELS") + "/", PAM, "NRG", "hg38", "ds",
-                        "2", "2"], cwd=self.work, env=env, check=True, capture_output=True)
 
     def test_an_indels_index_a_search_builds_from_it_is_the_one_build_index_only_builds(self):
         rc, out, err = self.run_bio()
@@ -1865,6 +1913,151 @@ class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
                 self.assertFalse(os.path.lexists(self.path("Genomes", "hg38+ds_INDELS",
                                                            ".building")))
                 self.assertEqual(self.leftovers(), [])
+
+    def test_another_bulge_budget_built_on_it_marks_and_rewrites_none_of_it(self):
+        """A second PAM or bulge budget built on a dataset this release enriched finds
+        its fake-indel genome with every SNP code on, and its own INDELS index still to
+        build: the overlay in place changes no base. It marked the genome unfinished
+        all the same, and rewrote every FASTA, so that for as long as that took (minutes
+        genome-wide) every search of the dataset was refused. It now marks nothing and
+        leaves each FASTA as it is, and prints what it printed."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        indels = self.path("Genomes", "hg38+ds_INDELS")
+        fastas = [os.path.join(indels, f"fake_ds_{c}", f"fake{c}.fa") for c in GENOME]
+        before = [(os.stat(f).st_ino, os.stat(f).st_mtime_ns) for f in fastas]
+        marks = os.path.join(self.root, "marks")
+        command = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
+                   "--bDNA", "2", "--bRNA", "2", "--thread", "2", "--path", self.work,
+                   "--vcf", self.path("VCFs", "ds"), "--samplesID", self.path("samples.txt")]
+        rc, out, err = self.finish(self.start(command=command, shim=True, STUB_MARKS=marks))
+        self.assertEqual(rc, 0, err)
+        lines = out.splitlines()
+        at = lines.index("Building indels index NRG_3_hg38+ds_INDELS...")
+        self.assertEqual(lines[at + 1:at + 5], [
+            "overlay_indel_snps: chr1 -> 0 SNP overlays (1 already coded)",
+            "overlay_indel_snps: chr2 -> 0 SNP overlays (1 already coded)",
+            "overlay_indel_snps: 0 total SNP overlays (2 already coded)",
+            "[indel-snp] SNP-overlaid the fake-indel genome (0 flank bases IUPAC-coded; it "
+            "already carries its SNP codes, 2 of them).",
+        ])
+        noted = []
+        if os.path.exists(marks):
+            with open(marks) as fh:
+                noted = fh.read().splitlines()
+        self.assertNotIn(os.path.join(indels, ".building"), noted)
+        self.assertEqual([(os.stat(f).st_ino, os.stat(f).st_mtime_ns) for f in fastas], before)
+        self.assertEqual(self.bins("NRG_3_hg38+ds_INDELS"),
+                         ["NRG_3_fakechr1/NRG_fakechr1_1.bin", "NRG_3_fakechr2/NRG_fakechr2_1.bin"])
+
+    def test_a_search_whose_indels_index_is_in_place_is_not_held_up_by_its_mark(self):
+        """A search reads the fake-indel genome only to build the INDELS index it does
+        not find (the search script's STEP 2.3, which complete-search's check mirrors):
+        one whose INDELS index is in place now goes on while a run puts the SNP codes on
+        that genome, or after a run stopped as it did, from the command line and from
+        the web. Both refused it for as long as the mark was there."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        marker = self.path("Genomes", "hg38+ds_INDELS", ".building")
+        for case, record in (("a run writes it", owner_record(os.getpid())),
+                             ("a run stopped as it wrote it", owner_record(os.getpid(),
+                                                                           pid="999999"))):
+            with self.subTest(case=case):
+                _write(os.path.join(marker, "owner"), record)
+                self.assert_searched()
+                calls = len(self.calls())
+                rc, out, err = self.run_web_search()
+                self.assertNotIn(" is unfinished: ", err)
+                self.assertIn(f"Indels index present ({INDELS})", out)
+                self.assertNotIn("fakechr", " ".join(self.calls()[calls:]))
+                shutil.rmtree(marker)
+
+    def test_a_search_that_would_build_its_indels_index_from_it_is_refused(self):
+        """Another PAM's INDELS index, or a smaller bulge budget's, does not serve the
+        search: it would build its own from the marked genome, and is refused, by
+        complete-search up front, and by the search the web launches before it builds
+        anything there."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        indels = self.path("Genomes", "hg38+ds_INDELS")
+        ngg = os.path.join(REPO, "PAMs", "20bp-NGG-SpCas9.txt")
+        # the dataset's NRG INDELS index taken for an NGG one, beside an NGG variant index
+        shutil.copytree(self.lib(VAR), self.lib("NGG_2_hg38+ds"))
+        os.rename(self.lib(INDELS), self.lib("NGG_2_hg38+ds_INDELS"))
+        _write(os.path.join(indels, ".building", "owner"), owner_record(os.getpid()))
+        refused = (f"Error: {indels} is being written: a build-index-only run (pid "
+                   f"{os.getpid()} on {os.uname().nodename}, started 2026-10-31T01:02:03Z) is "
+                   "writing the SNP codes of the ds fake-indel genome there, and a search would "
+                   "use the part written so far as if it were whole. Wait for that run to "
+                   "finish, then run this search again.\n")
+        for case, options in (("another PAM's", {}), ("a smaller budget's", dict(bulges="2"))):
+            with self.subTest(case=case):
+                rc, out, err = self.run_search(**options)
+                self.assertEqual(rc, 1, out + err)
+                self.assertTrue(err.endswith(refused), err)
+                self.assertNotIn("Launching job ", out)
+        # (and the NGG search, whose INDELS index that is, goes on)
+        rc, out, err = self.run_search(pam=ngg)
+        self.assertNotIn(" is being written", err)
+        self.assertIn("Launching job ", out)
+        calls = len(self.calls())
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(err, f"ERROR: {indels} is unfinished: a build-index-only run is writing "
+                              "it, or stopped before it was done. Let that run finish, or run "
+                              "build-index-only again to its end, then run this search again\n")
+        self.assertEqual(self.calls()[calls:], [])  # nothing searched or built
+        self.assertFalse(os.path.lexists(self.lib(INDELS)))
+
+    def test_the_opt_out_does_not_index_one_a_stopped_run_left_half_coded(self):
+        """Under CRISPRME_INDEL_SNP=0 a run puts no SNP code on, so it cannot finish a
+        fake-indel genome that a run stopped as it coded it (its mark): it built the
+        INDELS index from it all the same, blind to the SNPs on the FASTAs not coded
+        yet, then failed at its end, saying that every search refuses it. A search that
+        finds an INDELS index in place does not look at the mark, so the run now builds
+        none and says how to finish the codes; one whose INDELS index was there already
+        says which searches refuse the mark."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = tree(self.lib(INDELS))
+        with self.subTest(indels_index="not built yet"):
+            self.fresh()
+            indels = self.path("Genomes", "hg38+ds_INDELS")
+            self.kit()
+            proc = self.start(shim=True, STUB_WRITE_HANG="fakechr2.fa.tmp")
+            self.wait_for_mark(proc)
+            self.kill_group(proc)
+            rc, out, err = self.run_bio(CRISPRME_INDEL_SNP="0")
+            self.assertEqual(rc, 1, out + err)
+            self.assertEqual(err, f"Error: {indels} is marked unfinished: a build-index-only run "
+                                  "is putting the SNP codes on that fake-indel genome, or stopped "
+                                  f"before it was done, so {INDELS} is not built from it, as it "
+                                  "would be blind to the SNPs on the FASTAs not coded yet. Let "
+                                  "that run finish, or run build-index-only again to its end "
+                                  "with ds with CRISPRME_INDEL_SNP=1 (the default), which "
+                                  "finishes its SNP codes and builds the index.\n")
+            self.assertFalse(os.path.lexists(self.lib(INDELS)))
+            self.assertEqual([c for c in self.calls() if "fakechr" in c], [])
+            rc, out, err = self.run_bio()
+            self.assertEqual(rc, 0, err)
+            self.assertFalse(os.path.lexists(os.path.join(indels, ".building")))
+            self.assertEqual(tree(self.lib(INDELS)), clean)
+        with self.subTest(indels_index="in place"):
+            self.fresh()
+            indels = self.path("Genomes", "hg38+ds_INDELS")
+            rc, out, err = self.run_bio()
+            self.assertEqual(rc, 0, err)
+            _write(os.path.join(indels, ".building", "owner"),
+                   owner_record(os.getpid(), pid="999999"))
+            rc, out, err = self.run_bio(CRISPRME_INDEL_SNP="0")
+            self.assertEqual(rc, 1, out + err)
+            self.assertEqual(err, f"Error: {indels} is still marked unfinished, and every search "
+                                  "with ds that builds an INDELS index from it refuses it until a "
+                                  "build-index-only run has finished it: run build-index-only "
+                                  "again to its end with ds with CRISPRME_INDEL_SNP=1 (the "
+                                  "default), which finishes its SNP codes.\n")
+            self.assertEqual(tree(self.lib(INDELS)), clean)
+            self.assert_searched()
 
 
 class AStoppedRunsTiersAreNotSearched(_Fixture):

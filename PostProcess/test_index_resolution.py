@@ -1212,10 +1212,11 @@ class AnUnfinishedBuildIsNotSearched(_ShippedScript):
     leaves a part that looks whole. complete-search refuses it in its pre-flight, but
     a search launched from the web runs this script straight, and used it as if it
     were whole, with exit status 0: so the script refuses it too, before it uses or
-    builds anything."""
+    builds anything. The fake-indel genome is read only to build an INDELS index the
+    search does not find, and is refused there."""
 
     MARKED = ("Dictionaries/registry_{}", "Dictionaries/indel_genotypes_{}",
-              "Genomes/hg38+{}", "Genomes/hg38+{}_INDELS")
+              "Genomes/hg38+{}")
 
     def run_marked(self, marked, env=None):
         """A run with the part `marked` marked unfinished by a run in another
@@ -1251,6 +1252,26 @@ class AnUnfinishedBuildIsNotSearched(_ShippedScript):
                 self.assertEqual(run.calls, [])
                 self.assertFalse(run.precomputed, run.stdout)
                 self.assertNotIn("Variants already added", run.stdout)
+
+    def test_the_fake_indel_genome_is_refused_only_where_an_indels_index_is_built_from_it(self):
+        """With its INDELS index in place the search goes on, as while build-index-only
+        builds a second PAM or bulge budget on the dataset (it used to be refused here
+        too, though it never reads the fake-indel genome); without it, it is refused at
+        STEP 2.3, before anything is built from it."""
+        self.install("NRG_3")
+        marked = "Genomes/hg38+{}_INDELS"
+        rc, run, where = self.run_marked(marked)
+        self.assertTrue(run.precomputed, run.stdout)
+        self.assertEqual(run.indels, f"NRG_3_hg38+{self.VCF}_INDELS")
+        self.assertEqual(run.searched(variant=True), (f"NRG_3_hg38+{self.VCF}", False))
+        shutil.rmtree(self.library / f"NRG_3_hg38+{self.VCF}_INDELS")
+        rc, run, where = self.run_marked(marked)
+        self.assertEqual(rc, 1, run.stdout)
+        self.assertEqual(run.stderr, f"ERROR: {where} is unfinished: a build-index-only run is "
+                                     "writing it, or stopped before it was done. Let that run "
+                                     "finish, or run build-index-only again to its end, then run "
+                                     "this search again\n")
+        self.assertEqual(run.calls, [])
 
     def test_the_indel_genotype_store_is_not_refused_when_it_is_not_read(self):
         # CRISPRME_INDEL_SNP=0: no SNP+indel co-occurrence, so the store is not read
