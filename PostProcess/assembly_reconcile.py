@@ -552,6 +552,25 @@ def _read_index_source(index_dir: str) -> Optional[Dict]:
     return record if isinstance(record, dict) else None
 
 
+def _take_index_away(index_dir: str) -> Optional[str]:
+    """Takes an index folder, or a link to one, away from its name in one step, so
+    no search finds it there half removed: a link is removed, a folder renamed to a
+    hidden name beside it, returned for removal (`None` for a link).
+
+    Raises:
+        FileNotFoundError: When it is gone already: a run that started together
+            took it away first.
+        OSError: When it cannot be taken away.
+    """
+    if os.path.islink(index_dir):
+        os.remove(index_dir)
+        return None
+    aside = os.path.join(os.path.dirname(index_dir),
+                         f".{os.path.basename(index_dir)}.stale.{uuid.uuid4().hex}")
+    os.rename(index_dir, aside)
+    return aside
+
+
 def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
     """Run before a haplotype search. The search reuses any index of the genome's
     name, so remove each one whose `.genome_source` names another genome folder,
@@ -565,6 +584,10 @@ def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
     or one whose search was killed before it ended. One still being built (it
     has a `.lock`) is left too.
 
+    Runs that start together may both find an index stale: each takes it away
+    from its name in one step before removing it (`_take_index_away`), and the
+    one that finds it gone already goes on.
+
     Args:
         cwd: The working directory (its `genome_library/` is the one searched).
         genome_view: The folder the haplotype is searched with
@@ -575,7 +598,7 @@ def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
         `stamp_built_haplotype_indexes` once the search has run.
 
     Raises:
-        OSError: When such an index cannot be removed.
+        OSError: When such an index cannot be taken away.
     """
     name = os.path.basename(os.path.normpath(genome_view))
     identity = _genome_identity(cwd, genome_view)
@@ -590,11 +613,17 @@ def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
             why = f"{identity} has changed since it was built"
         else:
             why = f"it was built from {record.get('genome', 'another genome')}, not {identity}"
+        try:
+            aside = _take_index_away(index_dir)
+        except FileNotFoundError:
+            continue  # a run that started together took it away first
         print(f"Removing index {os.path.basename(index_dir)}: {why}. This search builds it again.")
-        if os.path.islink(index_dir):
-            os.remove(index_dir)
-        else:
-            shutil.rmtree(index_dir)
+        if aside is not None:
+            try:
+                shutil.rmtree(aside)
+            except OSError as e:
+                # no search takes it under this name any more
+                print(f"Note: could not remove {aside} ({e}). Remove it by hand.")
     return [d for d in _haplotype_index_dirs(cwd, name) if not os.path.isdir(f"{d}.lock")]
 
 

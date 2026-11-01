@@ -27,7 +27,9 @@ These tests pin:
     again, one that records nothing (built by an earlier CRISPRme, or downloaded) is kept;
   * the pipeline keeps a linked genome's own name, picks only an index named for the
     genome itself (not one whose genome name merely ends in it), and its 0-bulge scan
-    reads the genome folder it is given.
+    reads the genome folder it is given;
+  * runs that start together: a stale index both find is taken away from its name in
+    one step.
 """
 import contextlib
 import io
@@ -343,7 +345,9 @@ class RunsStartingTogetherDoNotTripEachOtherUp(_Workdir):
     PID, which is 1 for crisprme.py in every container: one run removed or renamed
     the other's and stopped with FileNotFoundError. Here the other run starts at the
     worst moment, right after this one made its temporary file, with os.getpid() 1
-    in both."""
+    in both. After the individual's FASTA files change, they all find its recorded
+    index stale and remove it: the one that came second stopped with
+    FileNotFoundError, as the index was gone."""
 
     def setUp(self):
         super().setUp()
@@ -414,6 +418,57 @@ class RunsStartingTogetherDoNotTripEachOtherUp(_Workdir):
         self.assertEqual(out.getvalue(), "")  # no "Note: could not record ..."
         self.assertEqual(ar._read_index_source(index)["fingerprint"], ar.genome_fingerprint(view))
         self.assertEqual(sorted(os.listdir(index)), [ar.INDEX_SOURCE_FILENAME, "NRG_chr1_1.bin"])
+
+    def stale_index(self, view, bins=1):
+        """An index of the haplotype recorded before its FASTA files changed (an
+        individual imported again with other files): both runs find it stale."""
+        index = os.path.join(self.cwd, "genome_library", f"NRG_2_{os.path.basename(view)}")
+        os.makedirs(index)
+        for i in range(bins):
+            open(os.path.join(index, f"NRG_chr{i}_1.bin"), "w").close()
+        with open(os.path.join(index, ar.INDEX_SOURCE_FILENAME), "w") as fh:
+            json.dump({"genome": os.path.join("Assemblies", "W1", "paternal", "genome"),
+                       "fingerprint": "0" * 40}, fh)
+        return index
+
+    def test_a_stale_index_the_other_run_removed_first_is_no_failure(self):
+        # the second removal stopped the run with "An index of ... holds another
+        # genome and could not be removed (FileNotFoundError ...)", the index gone
+        view = self.view()
+        self.stale_index(view)
+        real_read, started = ar._read_index_source, []
+
+        def read(index_dir):
+            record = real_read(index_dir)
+            if not started:  # the other run, which found it stale too, removes it now
+                started.append(True)
+                ar.clear_stale_haplotype_indexes(self.cwd, view)
+            return record
+
+        with mock.patch.object(ar, "_read_index_source", read), \
+                contextlib.redirect_stdout(io.StringIO()):
+            present = ar.clear_stale_haplotype_indexes(self.cwd, view)
+        self.assertEqual(present, [])
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "genome_library")), [])
+
+    def test_a_stale_index_leaves_its_name_before_it_is_emptied(self):
+        # a search starting meanwhile finds no index of the haplotype, never part of one
+        view = self.view()
+        index = self.stale_index(view, bins=3)
+        real_rmtree, removing = shutil.rmtree, []
+
+        def rmtree(path, *args, **kwargs):
+            removing.append((path, os.path.lexists(index)))
+            real_rmtree(path, *args, **kwargs)
+
+        with mock.patch.object(ar.shutil, "rmtree", rmtree), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            ar.clear_stale_haplotype_indexes(self.cwd, view)
+        self.assertEqual(len(removing), 1)
+        self.assertNotEqual(removing[0][0], index)
+        self.assertFalse(removing[0][1], "the index was emptied under its own name")
+        self.assertEqual(os.listdir(os.path.join(self.cwd, "genome_library")), [])
+        self.assertIn(f"Removing index {os.path.basename(index)}", out.getvalue())
 
 
 # --------------------------------------------------------------------------- #
