@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 
 import os
+import shlex
+import shutil
 import sys
+import tempfile
 from multiprocessing import Pool
 from datetime import datetime
 
@@ -57,14 +60,54 @@ def _fake_genome_is_empty(fake_dir):
     return True
 
 
+def _pam_line(pam_file):
+    """The sequence and the number of a PAM file, as crispritz.py reads them."""
+    with open(pam_file) as fh:
+        seq, size = fh.read().split()[:2]
+    return seq, int(size)
+
+
 def _index_pam(pam_file):
     """The PAM index-genome names an index by, read from ``pam_file`` as crispritz.py
     reads it: the first |n| bases of its sequence for a 5' PAM (n < 0), the last n
     for a 3' one."""
-    with open(pam_file) as fh:
-        seq, size = fh.read().split()[:2]
-    size = int(size)
+    seq, size = _pam_line(pam_file)
     return seq[:-size] if size < 0 else seq[-size:]
+
+
+def _own_pam():
+    """``(line, name)`` when the PAM of ``pam_file`` is not ``true_pam``, the PAM of the
+    variant index this INDELS index goes with: the PAM line (``"<sequence> <n>"``) of the
+    PAM file that index was built with, and that file's name (None where the index does
+    not record it). Else None.
+
+    That variant index is then a PAM-less one standing in for the search's PAM (NNN_3
+    serving NRG, or NNNNNNNN_3 under --prune-pam, as complete-search resolves one), and
+    the search builds its INDELS index, when it is missing, with the PAM file of the
+    search. index-genome names an index by the PAM of its PAM file, so that build went
+    into <search PAM>_<N>_<ref>+<vcf>_INDELS, where the search does not look: finding no
+    sub-index in <true_pam>_<N>_<ref>+<vcf>_INDELS, it searched each chromosome's fake-indel
+    genome without bulges, and lost the bulged indel off-targets with no error.
+    build-index-only records the PAM file of a build in the variant index's .pam_build
+    (``<name> <length> <n>``); without that record, the line is the search PAM file's
+    guide around ``true_pam``."""
+    try:
+        seq, size = _pam_line(pam_file)
+    except (OSError, ValueError):
+        return None  # (index-genome says what is wrong with it)
+    if (seq[:-size] if size < 0 else seq[-size:]) == true_pam:
+        return None
+    k = len(true_pam)
+    guide, n, name = len(seq) - abs(size), (k if size > 0 else -k), None
+    try:
+        with open(os.path.join("genome_library", f"{true_pam}_{bMax}_{ref_name}+{vcf_name}",
+                               ".pam_build")) as fh:
+            built = fh.read().rsplit(None, 2)
+        if len(built) == 3 and abs(int(built[2])) == k and int(built[1]) > k:
+            name, guide, n = built[0], int(built[1]) - k, int(built[2])
+    except (OSError, ValueError):
+        pass
+    return ("N" * guide + true_pam if n > 0 else true_pam + "N" * guide) + f" {n}", name
 
 
 def _record_no_targets(chrom, fake_dir):
@@ -83,7 +126,7 @@ def _record_no_targets(chrom, fake_dir):
         # file, the sub-index the name given
         sub = os.path.join(
             "genome_library",
-            f"{_index_pam(pam_file)}_{bMax}_{ref_name}+{vcf_name}_INDELS",
+            f"{_index_pam(build_pam)}_{bMax}_{ref_name}+{vcf_name}_INDELS",
             f"{true_pam}_{bMax}_fake{chrom}",
         )
         if any(f.endswith(".bin") for f in os.listdir(sub)):
@@ -91,7 +134,7 @@ def _record_no_targets(chrom, fake_dir):
         # (index-genome indexes each .fa there, and none is not "no target")
         if not any(f.strip().split(".")[-1] == "fa" for f in os.listdir(fake_dir)):
             return 0
-        missing, unread = crispritz_bins.missing_bins(sub, fake_dir, pam_file, int(bMax))
+        missing, unread = crispritz_bins.missing_bins(sub, fake_dir, build_pam, int(bMax))
     except (ImportError, OSError, ValueError, IndexError):
         return 0
     if missing or unread:
@@ -101,7 +144,7 @@ def _record_no_targets(chrom, fake_dir):
         with open(record, "w") as fh:
             fh.write(
                 f"built, 0 targets: no window of {os.path.basename(os.path.normpath(fake_dir))} "
-                f"holds a target of {os.path.basename(pam_file)} with -bMax {bMax}, so "
+                f"holds a target of {os.path.basename(build_pam)} with -bMax {bMax}, so "
                 f"buildTST wrote no .bin\n"
             )
     except OSError as exc:
@@ -119,7 +162,7 @@ def index_indels(chrom):
         return
     print("Indexing INDELs in", chrom)
     status = os.system(
-        f"crispritz.py index-genome {ref_name}+{vcf_name}_INDELS/{true_pam}_{bMax}_fake{chrom} {indels_folder}/fake_{vcf_name}_{chrom} {pam_file} -bMax {bMax} -th 1  >/dev/null"
+        f"crispritz.py index-genome {ref_name}+{vcf_name}_INDELS/{true_pam}_{bMax}_fake{chrom} {indels_folder}/fake_{vcf_name}_{chrom} {build_pam_arg} -bMax {bMax} -th 1  >/dev/null"
     )  # {indels_folder}/fake_{vcf_name}_{chrom}
     if not status:
         status = _record_no_targets(chrom, fake_dir)
@@ -132,8 +175,37 @@ for f in os.listdir(indels_folder):
     if "chr" in f:
         chrs.append(f.split("_")[-1])
 
-with Pool(processes=int(ncpus)) as pool:
-    statuses = pool.map(index_indels, chrs)
+# The PAM file index-genome builds with: the one given, but for a PAM-less variant
+# index that stands in for its PAM, a file of the PAM that index was built with
+# (_own_pam), so that this INDELS index is the one build-index-only builds with it,
+# where the search looks for it.
+build_pam = build_pam_arg = pam_file
+own = _own_pam()
+own_dir = None
+if own:
+    try:
+        own_dir = tempfile.mkdtemp(prefix="crisprme_indels_pam_")
+        build_pam = os.path.join(own_dir, f"{true_pam}.txt")
+        with open(build_pam, "w") as fh:
+            fh.write(own[0] + "\n")
+    except OSError as exc:
+        # (stderr: the search fails this step on it, as on an engine error)
+        sys.stderr.write(f"ERROR: could not write the PAM file of {true_pam} to index the "
+                         f"INDELs with ({exc})\n")
+        if own_dir:
+            shutil.rmtree(own_dir, ignore_errors=True)
+        sys.exit(1)
+    build_pam_arg = shlex.quote(build_pam)
+    print(f"The variant index {true_pam}_{bMax}_{ref_name}+{vcf_name} is PAM-less and stands in "
+          f"for {_index_pam(pam_file)}: indexing the INDELs with its own PAM ({own[0]}"
+          + (f", as {own[1]}" if own[1] else "") + ")", flush=True)
+
+try:
+    with Pool(processes=int(ncpus)) as pool:
+        statuses = pool.map(index_indels, chrs)
+finally:
+    if own_dir:
+        shutil.rmtree(own_dir, ignore_errors=True)
 
 # A chromosome whose index-genome failed (a buildTST error, an OOM kill) leaves its
 # part of the _INDELS index absent or partial: say so by the exit status, which
