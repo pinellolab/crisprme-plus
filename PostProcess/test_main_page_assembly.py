@@ -7,6 +7,10 @@ submit_assembly_search_job), called the way Dash calls it.
 * The job's .Params.txt names each haplotype by the bundle's assembly name --
   the results header and History showed "Paternal genome: genome | Maternal
   genome: genome", the name of the folder every bundle haplotype is kept in.
+* The "Max edits" slider is passed on as --max-total-edits under the reference
+  tab's rule (Advanced closed: the slider is the cap; open: the per-type caps
+  govern). It was shown and ignored. A submission left at the defaults runs the
+  same assembly-search command as before.
 
 Needs a real (if minimal) Dash `app` import, same as the rest of
 pages/main_page.py, so it runs with the web image's tests (web-e2e.yml), with
@@ -82,9 +86,18 @@ class _SubmitHarness(unittest.TestCase):
                 rel("paternal", f"{individual}_paternal.chromAlias.txt"),
                 rel("maternal", f"{individual}_maternal.chromAlias.txt")]
 
-    def submit(self, individual="WALK01", guides=GUIDE, mms=4, dna=1, rna=1):
+    def submit(self, individual="WALK01", guides=GUIDE, mms=4, dna=1, rna=1,
+               max_edits=6, advanced_open=False):
+        # the form's defaults: 4 mismatches, 1 DNA + 1 RNA bulge, slider 6, Advanced closed
         return mp.submit_assembly_search_job(
-            1, *self.fields(individual), PAM, guides, mms, dna, rna, None, individual)
+            1, *self.fields(individual), PAM, guides, mms, dna, rna, None, individual,
+            max_edits, advanced_open)
+
+    def command(self, **kwargs):
+        """The assembly-search command line the submit hands to the job runner."""
+        self.assertIsNone(self.warnings(self.submit(**kwargs)))
+        cmd, combined_dir, note = self.jobs[-1]
+        return cmd.split()
 
     @staticmethod
     def warnings(result):
@@ -123,6 +136,31 @@ class HaplotypeLabels(_SubmitHarness):
                 params[fields[1]] = fields[2]
         self.assertEqual(params["Genome_paternal"], "WALK01_paternal_CM00.1")
         self.assertEqual(params["Genome_maternal"], "WALK01_maternal_CM01.1")
+
+
+class MaxEditsSlider(_SubmitHarness):
+    def cap(self, **kwargs):
+        argv = self.command(**kwargs)
+        return argv[argv.index("--max-total-edits") + 1] if "--max-total-edits" in argv else None
+
+    def test_the_slider_caps_the_total_edits(self):
+        self.assertEqual(self.cap(max_edits=3), "3")
+
+    def test_the_defaults_pass_no_cap(self):
+        # assembly-search's own default is mm + bDNA + bRNA = 6: the same search,
+        # by the same command, as before the slider was read
+        self.assertIsNone(self.cap())
+        argv = self.command()
+        self.assertEqual(argv[argv.index("--mm"):argv.index("--mm") + 8],
+                         ["--mm", "4", "--bDNA", "1", "--bRNA", "1", "--merge", "3"])
+
+    def test_with_advanced_open_the_per_type_caps_govern(self):
+        self.assertIsNone(self.cap(max_edits=3, advanced_open=True))
+
+    def test_a_slider_at_or_above_the_per_type_total_adds_nothing(self):
+        self.assertIsNone(self.cap(max_edits=6, mms=4, dna=1, rna=1))
+        self.assertIsNone(self.cap(max_edits=8, mms=4, dna=1, rna=1))
+        self.assertEqual(self.cap(max_edits=6, mms=6, dna=1, rna=1), "6")
 
 
 if __name__ == "__main__":

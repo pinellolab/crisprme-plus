@@ -554,6 +554,8 @@ def populate_assembly_fields_from_individual(individual: str) -> Tuple:
         State("rna", "value"),
         State("job-name", "value"),
         State("assembly-individual", "value"),
+        State("max-edits-slider", "value"),
+        State("advanced-thresholds-collapse", "is_open"),
     ],
     prevent_initial_call=True,
 )
@@ -572,13 +574,16 @@ def submit_assembly_search_job(
     rna: int,
     job_name: str,
     individual: str,
+    max_edits_val: int,
+    advanced_open: bool,
 ) -> Tuple:
     """Validates and launches a personal-assembly (paternal/maternal, no VCF)
     off-target search, submitted via `crisprme.py assembly-search`.
 
-    MVP scope: reuses the existing guide/PAM/mismatch/bulge form fields
-    (shared component ids with the complete-search form -- reading the same
-    `State` from two callbacks is fine in Dash), but does NOT yet replicate
+    MVP scope: reuses the existing guide/PAM/mismatch/bulge form fields and
+    the "Max edits" slider (shared component ids with the complete-search
+    form -- reading the same `State` from two callbacks is fine in Dash),
+    but does NOT yet replicate
     `change_url`'s PAM-derived N-padding convenience for the guide textbox
     -- guides typed here get the same automatic PAM-length N-padding
     complete-search's own form applies (see `_pad_guides_for_pam` below),
@@ -751,6 +756,16 @@ def submit_assembly_search_job(
         _gc = _gc if os.path.isfile(_gc) else (f"{_gc}.gz" if os.path.isfile(f"{_gc}.gz") else None)
         if _gc:
             gene_annotation_args = ["--gene_annotation", shlex.quote(_gc)]
+    # The "Max edits" slider, under the reference tab's rule (change_url): with
+    # Advanced closed it is the total-edits cap, with it open the per-type caps
+    # govern (the slider is greyed out). assembly-search's own default cap is
+    # mm+bDNA+bRNA, so the flag is passed only when the slider is lower: a search
+    # left at the defaults (slider 6 = 4 + 1 + 1) runs exactly as before.
+    max_total_edits_args = []
+    if not advanced_open and max_edits_val is not None:
+        _cap = max(1, int(max_edits_val))
+        if _cap < int(mms) + int(dna) + int(rna):
+            max_total_edits_args = ["--max-total-edits", str(_cap)]
     cmd = " ".join(
         [
             shlex.quote(sys.executable),
@@ -784,6 +799,7 @@ def submit_assembly_search_job(
             str(int(dna)),
             "--bRNA",
             str(int(rna)),
+            *max_total_edits_args,
             "--merge",
             "3",
             "--output",

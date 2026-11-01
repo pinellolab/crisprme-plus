@@ -57,3 +57,10 @@
   not show.** The warning listed "paternal genome", "maternal genome", the two chain files and the
   two chromAlias files, which the Individual picker fills. It now says "select an individual on the
   Personal assembly tab" once; any other missing input, such as the guide, is still listed.
+- **The Personal assembly tab ignored the "Maximum edits" slider.** The web form never passed it on,
+  so an assembly search always allowed mismatches + DNA + RNA bulges in total, whatever the slider
+  showed (with the slider at 3 and Advanced options closed, the results header said "Max total
+  edits: 6"). The slider now applies as on the Reference genome tab: with Advanced options closed it
+  caps the total edits (`assembly-search --max-total-edits`), with them open the per-type caps
+  govern. A search left at the defaults (slider 6 = 4 mismatches + 1 + 1 bulges) runs the same
+  command as before.
