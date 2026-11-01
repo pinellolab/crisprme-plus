@@ -208,11 +208,14 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
                 shutil.copyfileobj(fin, fout)
         else:
             os.replace(part_path, os.path.join(unpacked, f"{assembly}.fa"))
+        # not a hidden file: macOS tar puts each file's extended attributes in a
+        # ._<name> member beside it (._chr1.fa), which every search read as a chromosome
+        # and failed on (a search lists a genome's chromosomes as every .fa file there)
         fastas = sorted(
             os.path.join(root, f)
             for root, _dirs, files in os.walk(unpacked)
             for f in files
-            if f.endswith((".fa", ".fasta"))
+            if f.endswith((".fa", ".fasta")) and not f.startswith(".")
         )
         if not fastas:
             raise ValueError(f"no .fa or .fasta file in {name}")

@@ -54,18 +54,20 @@ Settings page was before this release)". -->
   names, so their index held no `.bin`; all were listed as installed. An upload is now laid out as
   every search needs it: every FASTA of an archive goes to the top of the genome folder as a `.fa`
   file (`chr1.fasta` as `chr1.fa`: an index is built from the `.fa` files only), and a FASTA of
-  several sequences is split into one file per sequence. An archive with two FASTA files that would
-  go in under one name (`chr1.fa` and `chr1.fasta`) is refused. It is built in a hidden folder and
-  replaces an installed genome of the same name only once whole (a genome folder that is a link to
-  a shared copy is replaced and the copy left alone, where the upload used to write into it). An
-  upload is refused, at its first chunk, while indexes or variant genomes built on a genome of that
-  name are installed: every search and build of the new genome would go on using them, with the
-  sequences and positions of the one they were built from. **A genome uploaded before** this fix
-  that holds a multi-sequence FASTA, a `chroms/` folder or `.fasta` files: remove it in Settings
-  with the indexes built on it (*Remove installed data*), and any `Genomes/<genome>+<dataset>`
-  variant genome from your data folder, then upload it again. (An index built from a
-  multi-sequence FASTA holds the sites of every sequence under the name of the first: kept, it gave
-  a chr2 off-target as `chr1:37386` instead of `chr2:17381`.)
+  several sequences is split into one file per sequence. Hidden files of an archive are left out:
+  the `._chr1.fa` that macOS `tar` adds beside `chr1.fa` (its file attributes) was installed too,
+  and every search read it as a chromosome and failed, though the build said done. An archive with
+  two FASTA files that would go in under one name (`chr1.fa` and `chr1.fasta`) is refused. It is
+  built in a hidden folder and replaces an installed genome of the same name only once whole (a
+  genome folder that is a link to a shared copy is replaced and the copy left alone, where the
+  upload used to write into it). An upload is refused, at its first chunk, while indexes or variant
+  genomes built on a genome of that name are installed: every search and build of the new genome
+  would go on using them, with the sequences and positions of the one they were built from.
+  **A genome uploaded before** this fix that holds a multi-sequence FASTA, a `chroms/` folder, `.fasta`
+  files or `._` files: remove it in Settings with the indexes built on it (*Remove installed data*),
+  and any `Genomes/<genome>+<dataset>` variant genome from your data folder, then upload it again.
+  (An index built from a multi-sequence FASTA holds the sites of every sequence under the name of
+  the first: kept, it gave a chr2 off-target as `chr1:37386` instead of `chr2:17381`.)
 - **`build-index-only` fails on a genome folder it cannot index, and never puts in place an index
   with no `.bin`.** `index-genome` indexes the `.fa` files at the top of the genome folder only and
   exits 0 with an empty index when there are none (a `chroms/` folder, `.fasta` names, gzipped

@@ -552,6 +552,8 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
 # member could plant a job-shaped Settings/<id>/cmd.json for Retry to run).
 _FA1 = b">chr1\nACGTACGTNNNN\n"
 _FA2 = b">chr2\nTTTTGGGG\n"
+# the start of a ._<name> member macOS tar writes (an AppleDouble file: not UTF-8)
+_APPLEDOUBLE = b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X        \x00\x02\x00\x00\x00\t\x8e\x00"
 
 
 def _write_tar_gz(path, entries):
@@ -799,9 +801,33 @@ class TestGenomeTarUpload(unittest.TestCase):
                 self.assert_one_file_a_sequence(cwd, "walkfs2",
                                                 {"chr1.fa": _FA1, "chr2.fa": _FA2})
 
+    def test_macos_tar_attribute_files_are_left_out(self):
+        # macOS tar writes each file's extended attributes as a ._<name> member beside
+        # it; installed, ._chr1.fa was read as a chromosome by every search, which
+        # failed (UnicodeDecodeError), though its build said done
+        cases = [
+            ("files at the top", [("._chr1.fa", "file", _APPLEDOUBLE), ("chr1.fa", "file", _FA1),
+                                  ("._chr2.fa", "file", _APPLEDOUBLE), ("chr2.fa", "file", _FA2)]),
+            ("chroms/ folder", [("._chroms", "file", _APPLEDOUBLE), ("chroms", "dir", None),
+                                ("chroms/._chr1.fa", "file", _APPLEDOUBLE),
+                                ("chroms/chr1.fa", "file", _FA1),
+                                ("chroms/._chr2.fasta", "file", _APPLEDOUBLE),
+                                ("chroms/chr2.fasta", "file", _FA2)]),
+        ]
+        for label, entries in cases:
+            with self.subTest(label):
+                root, cwd, _outside, ns = self.sandbox()
+                part = self.upload(cwd, "walkad.tar.gz", entries)
+                self.assertEqual(
+                    ns["_finalize_upload"]("genome", part, "walkad.tar.gz", "", ""), "walkad")
+                self.assert_one_file_a_sequence(cwd, "walkad",
+                                                {"chr1.fa": _FA1, "chr2.fa": _FA2})
+
     def test_unusable_upload_refused_installing_nothing(self):
         cases = [
             ("no FASTA in the archive", "asm.tar.gz", [("asm/README", "file", b"x\n")], None),
+            ("hidden FASTA files only", "asm.tar.gz", [("._chr1.fa", "file", _APPLEDOUBLE)],
+             "no .fa or .fasta file in asm.tar.gz"),
             ("two FASTA files of one name", "asm.tar.gz",
              [("a/chr1.fa", "file", _FA1), ("b/chr1.fa", "file", _FA1)],
              "would both be installed as chr1.fa (a/chr1.fa, b/chr1.fa)"),
