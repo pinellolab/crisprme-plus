@@ -687,6 +687,25 @@ class TestGenerateReport(unittest.TestCase):
                 h.write("NA20000\tTSI\tEUR\tmale\n")
             self.assertEqual(gr.load_sample_superpop(d).get("NA20000"), "EUR")
 
+    def test_load_sample_superpop_unknown_never_replaces_a_known_superpop(self):
+        """A list read later that gives a sample no superpopulation (the list the web
+        Settings page writes for a VCF dataset added there gives 'unknown' to a sample
+        no installed list named then) keeps the one another list gives: it turned a
+        panel's samples 'unknown' in the report of every search of that panel. Known
+        values still go by the last list, unknown ones as they were."""
+        import tempfile
+        header = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "hg38_walk.samplesID.txt"), "w") as h:
+                h.write(header + "S1\tPOPA\tSUPX\tmale\nS4\tPOPC\tSUPY\tfemale\n"
+                        "S5\tPOPC\tSUPY\tmale\nS7\tPOPE\tNA\tmale\n")
+            with open(os.path.join(d, "walkz.samplesID.txt"), "w") as h:  # read after it
+                h.write(header + "".join(f"{s}\twalkz\t{sp}\tunknown\n" for s, sp in (
+                    ("S1", "unknown"), ("S4", "NA"), ("S5", "SUPZ"), ("S7", "unknown"),
+                    ("S9", "unknown"))))
+            self.assertEqual(gr.load_sample_superpop(d), {
+                "S1": "SUPX", "S4": "SUPY", "S5": "SUPZ", "S7": "unknown", "S9": "unknown"})
+
     def test_genome_normalization_and_dataset_poison(self):
         """'_ref' suffix is stripped from the genome; a reference-only vcf token
         does not leak 'ref' as a dataset."""

@@ -1940,6 +1940,11 @@ def _samplesid_dataset_label(basename):
     return None
 
 
+def _unknown_superpop(value):
+    """True for a SUPERPOPULATION_ID that names none (``unknown``, ``NA``, empty)."""
+    return _is_na(value) or str(value).strip().lower() in ("unknown", "n/a", "-")
+
+
 def load_sample_superpop(samplesid_dir, datasets_hint=""):
     """sample_id -> SUPERPOPULATION_ID, loaded from any samplesID files present.
 
@@ -1947,6 +1952,13 @@ def load_sample_superpop(samplesid_dir, datasets_hint=""):
     ``#SAMPLE_ID\\tPOPULATION_ID\\tSUPERPOPULATION_ID\\tSEX``). Returns an empty
     dict when no samplesID files are resolvable; the caller then falls back to
     per-dataset (1000G vs HGDP) provenance.
+
+    A sample several files name takes the superpopulation of the last one (by file
+    name), except that one which gives none (``unknown``, ``NA``) never replaces one
+    that does: the list the web Settings page writes for a VCF dataset added there
+    gives ``unknown`` to a sample no other list names, and a list read later that
+    shared samples with an installed panel turned them unknown in the report of
+    every search of that panel.
     """
     mapping = {}
     for path in _iter_samplesid_files(samplesid_dir):
@@ -1957,6 +1969,10 @@ def load_sample_superpop(samplesid_dir, datasets_hint=""):
                         continue  # header (either #-prefixed or a blank first line)
                     parts = line.rstrip("\n").split("\t")
                     if len(parts) >= 3 and parts[0] and parts[0].upper() != "SAMPLE_ID":
+                        known = mapping.get(parts[0])
+                        if (known is not None and not _unknown_superpop(known)
+                                and _unknown_superpop(parts[2])):
+                            continue
                         mapping[parts[0]] = parts[2]
         except OSError:
             continue

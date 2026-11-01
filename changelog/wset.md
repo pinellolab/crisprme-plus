@@ -126,3 +126,10 @@ Settings page was before this release)". -->
   offer, and says that a single multi-chromosome file's `.tbi` is optional and where the dataset's
   sample list is; the web interface guide no longer says that custom VCFs and PAMs need the command
   line and a server restart.
+- **The shareable report's "By superpopulation" chart keeps a sample's superpopulation when a
+  sample list read after it gives none.** The report reads every list of `samplesIDs/` and took a
+  sample's superpopulation from the last list (by file name) that names it, so a list that gives
+  it as `unknown` or `NA` (one you wrote for your own dataset of some of a panel's samples, or one
+  the Settings page wrote before a panel naming them was installed) turned those samples unknown in
+  the reports of the panel's searches. A list that gives no superpopulation no longer replaces one
+  another list gives; where lists give two, the last one's is kept, as before.
