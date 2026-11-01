@@ -42,9 +42,9 @@
   failed on the empty set (`TypeError`), so `assembly-search` exited 1. `--bDNA` and `--bRNA` are
   optional and default to 0, so this was the documented minimal command
   (`assembly-search --assembly-individual <name> --guide ... --pam ... --mm ...`). The search now
-  scans the folder it is given; on the synthetic bundle each haplotype reports its 9 sites. Searches
-  of a genome in `Genomes/` are unchanged (the same folder); reference and variant search outputs
-  were compared byte for byte, with and without bulges. Covered by
+  scans the folder it is given: on the synthetic bundle each haplotype reports its 9 sites and the
+  run completes. Searches of a genome in `Genomes/` are unchanged (the same folder); reference and
+  variant search outputs were compared byte for byte, with and without bulges. Covered by
   `PostProcess/test_assembly_haplotype_genomes.py`.
 - **The personal-assembly results header and History named both haplotypes "genome".** They showed
   `Paternal genome: genome | Maternal genome: genome`: the name of the folder every bundle haplotype
