@@ -285,9 +285,9 @@ class TestNoDocumentedCommandIsABareCrisprme(unittest.TestCase):
 
 class TestThePrunePamHelpSaysWhichSideItServes(unittest.TestCase):
     """The published PAM-less indexes store their flank on the 3' side, and a 5'
-    search of one found nothing, exit 0. The --prune-pam help said a 5' PAM needed
-    only "equal" the flank width, and that the result is identical to a dedicated
-    index's."""
+    search of one found nothing, exit 0. The --prune-pam help said only that a 5'
+    PAM "must equal" the flank width, and that the result is identical to a
+    dedicated index's."""
 
     def _entry(self):
         block = "\n".join(_block(_source_lines(), "def print_help_complete_search"))
