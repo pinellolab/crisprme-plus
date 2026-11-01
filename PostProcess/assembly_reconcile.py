@@ -562,7 +562,7 @@ def clear_stale_haplotype_indexes(cwd: str, genome_view: str) -> List[str]:
     earlier CRISPRme or downloaded; of any other folder, whose name no earlier
     index carries (`haplotype_search_name`), one a search of this haplotype
     built and may still be using (the record is written when the search ends),
-    or one whose search was stopped before it ended. One still being built (it
+    or one whose search was killed before it ended. One still being built (it
     has a `.lock`) is left too.
 
     Args:
