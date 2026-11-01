@@ -191,8 +191,16 @@ def synthesize_combined_samplesid(workdir, vcf_name, ref="hg38"):
                     seen.add(key)
                     rows.append(line.rstrip("\n"))
     os.makedirs(sdir, exist_ok=True)
-    with open(target, "w") as out:
-        out.write("\n".join(rows) + "\n")
+    # Through a hidden temporary file renamed into place: one that a full disk or a kill
+    # cut short would be taken for whole by every later run (the guard above)
+    tmp = os.path.join(sdir, f".{os.path.basename(target)}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w") as out:
+            out.write("\n".join(rows) + "\n")
+        os.replace(tmp, target)
+    finally:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
     return target
 
 

@@ -544,6 +544,19 @@ and the `release-crisprme` skill.
   and its index goes into place, as before, as does a whole index whose build left the inode table
   full. The indexes a search builds itself, on demand, are not checked, and CRISPRitz's own writes
   are still unchecked.
+- **A full disk or a kill no longer leaves a samplesID list cut short for good.** A merged-panel
+  `build-index-only` (two or more datasets) ends by copying each dataset's samplesID list to
+  `samplesIDs/<genome>_<dataset>.samplesID.txt` and writing their union,
+  `samplesIDs/<vcf>.samplesID.txt`, which `download --what index` and a search launched from the web
+  also write when it is missing. Each was written in place, and every later run keeps one that is
+  there: one that a full disk or a kill cut short was kept for good, and every later search of that
+  dataset read it as the whole list, with no error, `build-index-only` exiting 0. Each is now
+  written to a hidden file beside it and renamed into place, whole or not at all, and a full disk or
+  quota, an I/O error or no memory left as `build-index-only` writes them ends the run with an
+  ERROR, for the next run to write them; any other failure there is still a WARNING. On success the
+  files and their contents are as before. A list that a run of an earlier release cut short is not
+  detected: if one stopped or failed as it wrote them, remove the lists it wrote and run
+  `build-index-only` again.
 
 ### Security
 - **The web Settings page could be pointed outside `Settings/` and made to re-run a recorded

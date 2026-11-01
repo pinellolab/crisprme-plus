@@ -2733,8 +2733,10 @@ def _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid):
     => no combined file is needed; the per-db list IS the search's samplesID) — the
     exact guard the synthesizer no-ops on. Fully guarded: any error is reported to
     STDOUT (stderr is fatal in the post-analysis context) and swallowed so a build
-    never aborts over this additive convenience file. Returns the written combined
-    path, or ``None`` (no-op / already present / a component missing).
+    never aborts over this additive convenience file -- but a full disk or quota, an
+    I/O error or no memory left, which fails the build (each file is written whole or
+    not at all). Returns the written combined path, or ``None`` (no-op / already
+    present / a component missing).
     """
     try:
         # Gate: only a MERGED panel (>= 2 datasets) needs a combined file. A single
@@ -2751,7 +2753,16 @@ def _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid):
         for db_label, src in db_to_samplesid.items():
             canonical = os.path.join(sdir, f"{genome_ref}_{db_label}.samplesID.txt")
             if not os.path.isfile(canonical) and os.path.isfile(src):
-                _shutil.copy2(src, canonical)
+                # through a hidden temporary file renamed into place, as the synthesizer
+                # writes: one that a full disk or a kill cut short would be taken for
+                # whole by every later run (the test above) and unioned
+                _tmp = os.path.join(sdir, f".{os.path.basename(canonical)}.{os.getpid()}.tmp")
+                try:
+                    _shutil.copy2(src, _tmp)
+                    os.replace(_tmp, canonical)
+                finally:
+                    if os.path.lexists(_tmp):
+                        os.remove(_tmp)
         # Single implementation of the union (header-less, dedup by SAMPLE_ID,
         # stable dataset order) — mirrors pages/main_page._ensure_samplesid.
         written = synthesize_combined_samplesid(workdir, vcf_name, ref=genome_ref)
@@ -2772,6 +2783,19 @@ def _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid):
             )
         return written
     except Exception as _sid_err:  # additive convenience -> never abort a build
+        # but for a full disk or quota, an I/O error or no memory left, which left
+        # nothing written (as the tiers' emitters have them, ends_the_build): the run
+        # fails, to be run again once that is fixed, rather than end as done without
+        # the files a merged search needs
+        import errno as _errno
+        if isinstance(_sid_err, MemoryError) or (isinstance(_sid_err, OSError) and _sid_err.errno
+                                                 in (_errno.ENOSPC, _errno.EDQUOT, _errno.EIO)):
+            error(
+                f"Writing the samplesID files of {vcf_name} into "
+                f"{os.path.join(workdir, 'samplesIDs')} failed "
+                f"({str(_sid_err) or type(_sid_err).__name__}): run build-index-only again "
+                f"once that is fixed, which writes them."
+            )
         print(
             f"WARNING [build-index-only]: could not emit combined samplesID for "
             f"{vcf_name} ({_sid_err}); the index/dicts are still built. Provide "
@@ -4231,7 +4255,8 @@ def build_index_only() -> None:
     # (the search's --samplesID listing wants that single combined file). Reuses the
     # already-computed db_to_samplesid map and the ONE union implementation; a strict
     # NO-OP for a single-dataset panel / when --samplesID was absent (empty map).
-    # Fully guarded (STDOUT-only; never aborts) — the index/dicts are already built.
+    # Fully guarded (STDOUT-only; aborts only on a full disk, an I/O error or no memory
+    # left) — the index/dicts are already built.
     _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid)
     # A part of the dataset still marked unfinished -- the tiers or the indel genotype
     # store a step above kept marked, as it skipped a chromosome with a WARNING, or a
