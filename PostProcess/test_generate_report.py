@@ -1830,6 +1830,28 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(cell("alt", "A,B,C,D,E", multi), "5 cis carriers")
         self.assertEqual(cell("alt", "A", "chr1;1;A;T"), "1 cis carrier")
 
+    def test_observed_cell_indel_rows_are_their_carriers_haplotypes(self):
+        """An indel row's roster is resolved per carrier haplotype in both modes (2.8.1:
+        indel_snp_cis.resolve_target), so a population-level indel+SNP row is not
+        flagged as a possible chimera of >=1 of its variants' carriers."""
+        cols = {"origin": "o", "samples": "s", "var_genome": "v"}
+        def cell(origin, samples, variants):
+            return gr._curated_cell("observed", {"o": origin, "s": samples, "v": variants}, cols)
+        self.addCleanup(setattr, gr, "_PER_SAMPLE", False)
+        gr._PER_SAMPLE = False
+        indel_snp = "chr2_53829114_TG_T,chr2_53829121_C_A"
+        self.assertEqual(cell("alt", "S1,S2", indel_snp), "2 carriers")
+        self.assertEqual(cell("alt", "S1", "chr18;12386299;TTTTC;T,chr18;12386296;T;A"),
+                         "1 carrier")
+        # a SNP-only worst-case union keeps its flag
+        self.assertEqual(cell("alt", "S1,S2", "chr2_53829121_C_A,chr2_53829125_G_T"),
+                         "2 carriers (>=1 of 2 vars, poss. chimera)")
+        self.assertTrue(gr._has_indel("chr1_100_A_AT"))
+        self.assertFalse(gr._has_indel("chr1_100_A_T,chr1;101;C;G"))
+        self.assertFalse(gr._has_indel("NA"))
+        gr._PER_SAMPLE = True
+        self.assertEqual(cell("alt", "S1,S2", indel_snp), "2 cis carriers")
+
     def test_hap_label_mode_aware(self):
         """The per-site modal noun is mode-aware: population-level = 'variant
         combination(s)' (worst-case, unphased reconstructions, not confirmed on any one

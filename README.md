@@ -1969,7 +1969,10 @@ is under `data/`). Reading top to bottom:
   | `putative` | A multi-variant combination whose cis co-occurrence cannot be confirmed | Any variant-aware run |
 
   Under **`--per-sample`** the carrier list is the exact cis carriers, so `putative`
-  cleanly marks reconstructions no one actually carries. On a sites-only panel (e.g.
+  cleanly marks reconstructions no one actually carries. (In a population-level run a
+  multi-variant SNP list is the union of each variant's carriers, flagged
+  `(>=1 of K vars, poss. chimera)`; an indel row lists its carriers' own haplotypes in
+  either mode.) On a sites-only panel (e.g.
   `mega`) the panel tie-break is inert but the column is still shown (values `observed`
   / `putative`); it is dropped only for a reference-only run.
 - **`Gene_region` column** — where the off-target sits relative to the nearest

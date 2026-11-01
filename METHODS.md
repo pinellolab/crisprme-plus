@@ -773,7 +773,10 @@ one real individual:
 On a genotyped index the carrier roster is
 populated in both analysis modes; under `--per-sample` it is pruned to the **exact
 cis carriers**, so `putative` cleanly marks reconstructions that no one actually
-carries — separating genuine haplotypes from worst-case combinations.
+carries — separating genuine haplotypes from worst-case combinations. In a
+population-level analysis a multi-variant SNP roster is the union of each variant's
+carriers and reads `N carriers (>=1 of K vars, poss. chimera)`; an indel row's roster is
+its carriers' own haplotypes in both modes (§4), so it reads `N carrier(s)`.
 
 The
 recommended validation panel uses this to **prioritize observed sites** among

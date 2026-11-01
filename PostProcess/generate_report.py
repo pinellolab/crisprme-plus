@@ -542,6 +542,21 @@ def _count_variants(raw) -> int:
     return n
 
 
+def _has_indel(raw) -> bool:
+    """True iff a comma-joined variant field holds an indel (a REF and an ALT of
+    different lengths), in any of the forms _norm_one_variant reads or the
+    ``chrom;pos;ref;alt`` form it returns."""
+    if _is_na(raw):
+        return False
+    for tok in str(raw).split(","):
+        tok = tok.strip()
+        coord = tok if tok.count(";") >= 3 else _norm_one_variant(tok)[0]
+        parts = coord.split(";") if coord else []
+        if len(parts) >= 4 and len(parts[2].split()[0]) != len(parts[3].split()[0]):
+            return True
+    return False
+
+
 def _norm_one_variant(tok):
     """Normalize ONE variant token to (``chrom;pos;ref;alt``, rsID_or_None).
 
@@ -851,11 +866,14 @@ def _curated_cell(kind, row, cols):
             if _PER_SAMPLE:
                 # --per-sample: the roster is the EXACT cis carriers (phased)
                 return f"{n} cis carrier{'' if n == 1 else 's'}"
-            if nvar >= 2:
+            if nvar >= 2 and not _has_indel(_get("var_genome")):
                 # population-level, multi-variant window: the roster is the worst-case
                 # UNION of samples carrying >=1 of the combination's variants, NOT cis
                 # carriers -- the stacked combination may exist on no one haplotype
                 # (possible chimera). --per-sample resolves the true cis carriers.
+                # An indel row's roster is resolved per carrier haplotype in both modes
+                # (indel_snp_cis.resolve_target): the individuals that carry the indel
+                # with the row's SNP alts, so it falls through to "N carriers".
                 # Plain ASCII: this cell is shared by the HTML table AND the TSV downloads.
                 return f"{n} carrier{'' if n == 1 else 's'} (>=1 of {nvar} vars, poss. chimera)"
             # population-level, single variant: carriers of that one variant
