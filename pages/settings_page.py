@@ -550,6 +550,7 @@ def _render_failure(stage: str, jobdir: str, job_id: str):
         [
             html.Div(f"{stage}: failed.", style={"color": "#b00", "fontWeight": "bold"}),
             html.Small(tail) if tail else None,
+            _build_dirs_left_warning(jobdir),
             html.Div(
                 [
                     html.Button(
@@ -612,6 +613,43 @@ def _genotypes_degraded_warning(jobdir: str):
         "Index installed but per-sample Samples degraded — the genotype store is "
         "missing. Off-target detection works, but named carriers / per-sample "
         "output are unavailable. Re-download this index to complete it.",
+        color="warning",
+        style={"margin-top": "0.5rem", "fontSize": "0.9em"},
+    )
+
+
+def _build_dirs_left_warning(jobdir: str):
+    """A warning naming the hidden build directories a build-index-only run of this
+    job left in place (its 'Leaving <dir>: ...' lines in log_verbose.txt), with the
+    size of each one still there, else None.
+
+    A build stopped with its container (docker stop) leaves its build directory,
+    holding a partial index or enrichment as large as the finished one. Every later
+    run is in another container, which cannot tell whether that build still runs
+    there, so it leaves it and says so on stdout (crisprme.py _reclaim_build_dirs):
+    a line the page shows only after a failure."""
+    try:
+        with open(os.path.join(jobdir, "log_verbose.txt"), errors="replace") as fh:
+            left = [line[len("Leaving "):].split(": ", 1)[0]
+                    for line in fh if line.startswith("Leaving ")]
+    except OSError:
+        return None
+    root = os.path.join(current_working_directory, "")
+    shown = []
+    for path in dict.fromkeys(left):
+        if os.path.isdir(path):
+            name = path[len(root):] if path.startswith(root) else path
+            shown.append(f"{name} ({_fmt_size(_dir_size(path))})")
+    if not shown:
+        return None
+    return dbc.Alert(
+        [
+            "A build that stopped before it ended (e.g. with its container: docker "
+            "stop) left unfinished build directories, which take disk space: ",
+            html.Code(", ".join(shown)),
+            ". If no other CRISPRme container is building an index or a variant "
+            "genome, delete them from your data folder.",
+        ],
         color="warning",
         style={"margin-top": "0.5rem", "fontSize": "0.9em"},
     )
@@ -2608,10 +2646,12 @@ def refresh_settings_job(n, job_id):
         # If an index download installed a variant index but its genotypes companion
         # fetch failed, the index detects off-targets but per-sample Samples are
         # degraded — surface that as a visible warning, not a quiet stdout NOTE.
-        # (A Retry keeps the stage cmd.json recorded.)
+        # (A Retry keeps the stage cmd.json recorded.) And the build directories a
+        # stopped build left, which this run could not reclaim.
         done = html.Div(f"{stage}: done.", style={"color": "green"})
         degraded = _genotypes_degraded_warning(jobdir) if stage == "Download index" else None
-        children = html.Div([done, degraded]) if degraded else done
+        notes = [w for w in (degraded, _build_dirs_left_warning(jobdir)) if w is not None]
+        children = html.Div([done] + notes) if notes else done
         return (
             children,
             True,

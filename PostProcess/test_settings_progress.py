@@ -428,6 +428,7 @@ class TestJobCallbacksRefuseBadIds(_JobDirCase):
     stubs = {
         "_render_failure": lambda stage, jobdir, job_id: ("failure", stage, jobdir, job_id),
         "_genotypes_degraded_warning": lambda jobdir: None,
+        "_build_dirs_left_warning": lambda jobdir: None,
         "_render_all_tables": lambda: "tables",
         "_render_storage": lambda: "storage",
         "_read_progress": lambda jobdir: None,
@@ -794,6 +795,75 @@ class TestDegradedAlertOnlyForIndexDownloads(unittest.TestCase):
         self.job("Build variant index", self.BUILD)
         children = self.ns["refresh_settings_job"](1, _GOOD_ID)[0]
         self.assertEqual(children.args, ("Build variant index: done.",))
+
+
+# --- build directories a stopped build left (final review FR#7) ----------------------
+class TestBuildDirsLeftWarning(unittest.TestCase):
+    def setUp(self):
+        self.cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
+        self.ns = _load_functions(
+            ["_JOB_ID_RE", "_settings_jobdir", "_dir_size", "_fmt_size",
+             "_build_dirs_left_warning", "refresh_settings_job"],
+            current_working_directory=self.cwd + "/",
+            _genotypes_degraded_warning=lambda jobdir: None,
+            _render_failure=lambda stage, jobdir, job_id: ("failure", stage),
+            _render_all_tables=lambda: "tables",
+            _render_storage=lambda: "storage",
+            PreventUpdate=_PreventUpdate,
+            no_update=_NO_UPDATE,
+        )
+        self.left = os.path.join(self.cwd, "genome_library", ".build-index-only-0ln00w08")
+        os.makedirs(self.left)
+        with open(os.path.join(self.left, "NRG_chr1_1.bin"), "wb") as fh:
+            fh.write(b"\0" * 1500)
+        self.jobdir = os.path.join(self.cwd, "Settings", _GOOD_ID)
+        os.makedirs(self.jobdir)
+
+    def verbose(self, text):
+        with open(os.path.join(self.jobdir, "log_verbose.txt"), "w") as fh:
+            fh.write(text)
+
+    def leaving(self, path):
+        # crisprme.py _reclaim_build_dirs, for an owner on another host/PID namespace
+        return (f"Leaving {path}: the build-index-only run that made it (pid 111 on "
+                f"c8d74a49b10d, started 2026-10-31T01:02:03Z) ran in another PID "
+                f"namespace (another container, or this one before a restart) or on "
+                f"another host, so this run cannot tell whether it still runs. If it "
+                f"does not, remove it: rm -rf '{path}'\n")
+
+    def test_names_each_directory_left_with_its_size(self):
+        self.verbose(self.leaving(self.left) + "Building reference index NRG_2_toyg...\n")
+        alert = self.ns["_build_dirs_left_warning"](self.jobdir)
+        self.assertIsNotNone(alert)
+        code = alert.args[0][1]
+        self.assertEqual(code.args, ("genome_library/.build-index-only-0ln00w08 (1.5 KB)",))
+
+    def test_nothing_to_say(self):
+        for label, text in (("no Leaving line", "Index built: x\n"),
+                            ("reclaimed since", self.leaving(self.left + "_gone"))):
+            with self.subTest(label):
+                self.verbose(text)
+                self.assertIsNone(self.ns["_build_dirs_left_warning"](self.jobdir))
+        os.remove(os.path.join(self.jobdir, "log_verbose.txt"))
+        self.assertIsNone(self.ns["_build_dirs_left_warning"](self.jobdir))
+
+    def test_done_banner_shows_it(self):
+        with open(os.path.join(self.jobdir, "log.txt"), "w") as fh:
+            fh.write("Build index\tQueued\nBuild index\tStart\nBuild index\tEnd\n")
+        self.verbose(self.leaving(self.left))
+        children = self.ns["refresh_settings_job"](1, _GOOD_ID)[0]
+        done, alert = children.args[0]
+        self.assertEqual(done.args, ("Build index: done.",))
+        self.assertIn("unfinished build directories", alert.args[0][0])
+
+
+class TestFailureBannerShowsBuildDirsLeft(unittest.TestCase):
+    def test_failed_banner_includes_the_warning(self):
+        ns = _load_functions(["_render_failure"], _error_tail=lambda path: "boom",
+                             _build_dirs_left_warning=lambda jobdir: "LEFT", dcc=_StubModule())
+        banner = ns["_render_failure"]("Build index", "/x", _GOOD_ID)
+        self.assertIn("LEFT", banner.args[0])
 
 
 

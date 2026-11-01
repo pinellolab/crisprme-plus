@@ -558,6 +558,13 @@ and deleting data you no longer need. See
   container is already using port 8080. Stop it (`docker ps`, then
   `docker stop <id>`), or map a different host port with `-p 8081:8080` and open
   http://127.0.0.1:8081.
+- **Hidden `.build-index-only-*` folders take disk space after a container stop** →
+  a `docker stop` (or quitting Docker Desktop) while a Settings build runs kills the
+  build before it can clean up, and a build in a new container cannot tell whether
+  that one still runs elsewhere, so it leaves its folder, which can be as large as
+  the finished index (the Settings page names such folders when a build ends). Once
+  no CRISPRme container is building, remove them from your data folder:
+  `rm -rf genome_library/.build-index-only-* Genomes/.build-index-only-enrich-* Dictionaries/.build-index-only-dicts-*`.
 - **Search finished but the results table is empty (or shows no variant
   off-targets)** →
   1. Thresholds too strict — raise **Maximum edits**, and if you opened Advanced

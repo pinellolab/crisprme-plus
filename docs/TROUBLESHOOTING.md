@@ -155,3 +155,22 @@ and can hurt.
 MIT `pyliftover` library (no external `liftOver` binary required). Pass explicit chain
 files with `--chain-paternal` / `--chain-maternal`; sites that do not map, or map
 ambiguously to more than one chain, are reported as unmapped.
+
+---
+
+## 10. Hidden build folders left after a container stop
+
+**Symptom.** Storage counts more under *Indexes* than the installed indexes hold, and
+the data folder has hidden `genome_library/.build-index-only-*` (or
+`Genomes/.build-index-only-enrich-*`, `Dictionaries/.build-index-only-dicts-*`)
+folders; the Settings page names them when a build ends.
+
+**Cause.** `build-index-only` builds in such a folder and removes it on every way
+out but a kill. A `docker stop` while a Settings build runs kills it. A later build
+removes the folder of a run that is gone, but one made in another container (each
+`docker run --rm` has a new host name) cannot be checked, so it is left in place,
+with a line on stdout that says so.
+
+**Fix.** Once no CRISPRme container is building, remove them:
+`rm -rf genome_library/.build-index-only-* Genomes/.build-index-only-enrich-* Dictionaries/.build-index-only-dicts-*`
+from your data folder.
