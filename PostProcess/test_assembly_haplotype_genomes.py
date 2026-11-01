@@ -36,6 +36,8 @@ These tests pin:
     one haplotype of a bundle searched by its own folder is refused the index of its
     folder's name that records no folder (the one assembly-search shared before 2.8.1)
     and could serve the search, but not the link assembly-search searches it through;
+  * the record names a folder of the machine that built the index: publish-index
+    leaves it out of the archive, with and without pigz, and download drops it;
   * runs that start together: a stale index both find is taken away from its name in
     one step, and the data folders the pipeline makes are made without an error;
   * deleting an individual in Settings removes its haplotypes' indexes and links too.
@@ -50,6 +52,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import textwrap
 import time
@@ -67,6 +70,7 @@ PAMS_DIR = os.path.join(os.path.dirname(HERE), "PAMs")
 sys.path.insert(0, HERE)
 
 import assembly_reconcile as ar  # noqa: E402
+import crisprme_hf as hf  # noqa: E402
 import personal_assembly as pa  # noqa: E402
 
 
@@ -1013,6 +1017,87 @@ class ACompleteSearchTakesOnlyTheIndexOfItsOwnFolder(_Workdir):
         self.old_index()
         self.search("o", "other/genome")
         self.assertEqual(self.pipeline.built, [])
+
+
+# --------------------------------------------------------------------------- #
+# A published index carries no record of the folder it was built from
+# --------------------------------------------------------------------------- #
+class APublishedIndexRecordsNoFolder(_Workdir):
+    """An index records the genome folder it was built from, a folder of the machine
+    that built it. publish-index put the record in the archive, and download installed
+    it: a search of the downloader's Genomes/hg38 with bulges was then refused, and
+    told to remove the index, naming a folder that is not there."""
+
+    NAME = "NRG_2_hg38"
+
+    def setUp(self):
+        super().setUp()
+        _write_genome(os.path.join(self.cwd, "ext", "hg38"), "ACGT")
+        self.index = os.path.join(self.cwd, "genome_library", self.NAME)
+        os.makedirs(self.index)
+        with open(os.path.join(self.index, "NRG_chr1_1.bin"), "w") as fh:
+            fh.write("bin")
+        # as a search with bulges of ext/hg38 leaves it
+        ar.stamp_index_source(self.cwd, os.path.join(self.cwd, "ext", "hg38"), self.index)
+        self.assertEqual(sorted(os.listdir(self.index)), [ar.INDEX_SOURCE_FILENAME, "NRG_chr1_1.bin"])
+
+    def archive(self, which):
+        """The members of the archive publish-index makes of the index, with
+        `shutil.which` answered by `which`, and what it wrote to stderr."""
+        tarball = os.path.join(self.cwd, f"{self.NAME}.tar.gz")
+        with mock.patch.object(hf.shutil, "which", side_effect=which), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            hf._make_index_tarball(tarball, self.index, self.NAME, self.index + "_INDELS",
+                                   {"name": self.NAME})
+        with tarfile.open(tarball) as tf:
+            return tf.getnames(), err.getvalue()
+
+    def assertNoRecord(self, names):
+        self.assertIn(f"{self.NAME}/NRG_chr1_1.bin", names)
+        self.assertIn("manifest.json", names)
+        self.assertEqual([n for n in names if os.path.basename(n) == ar.INDEX_SOURCE_FILENAME], [])
+
+    def test_the_name_is_the_records(self):
+        self.assertEqual(hf._INDEX_SOURCE_FILENAME, ar.INDEX_SOURCE_FILENAME)
+
+    def test_the_archive_made_without_pigz_has_no_record(self):
+        names, said = self.archive(lambda program: None)
+        self.assertIn("pigz/tar not found", said)  # the tarfile path
+        self.assertNoRecord(names)
+
+    @unittest.skipUnless(shutil.which("tar") and shutil.which("gzip"), "needs tar and gzip")
+    def test_the_archive_made_with_tar_and_pigz_has_no_record(self):
+        # gzip stands in for pigz: tar runs either as the compressor the same way
+        pigz = os.path.join(self.cwd, "bin", "pigz")
+        os.makedirs(os.path.dirname(pigz))
+        with open(pigz, "w") as fh:
+            fh.write('#!/bin/sh\nexec gzip "$@"\n')
+        os.chmod(pigz, 0o755)
+        which = shutil.which
+        names, said = self.archive(lambda program: pigz if program == "pigz" else which(program))
+        self.assertEqual(said, "")  # the tar path, with no fallback
+        self.assertNoRecord(names)
+
+    def test_a_downloaded_index_records_no_folder(self):
+        # an archive that carries the record, as publish-index made it before
+        tarball = os.path.join(self.cwd, f"{self.NAME}.tar.gz")
+        with tarfile.open(tarball, "w:gz") as tf:
+            tf.add(self.index, arcname=self.NAME)
+        workdir = os.path.join(self.cwd, "downloader")
+        _write_genome(os.path.join(workdir, "Genomes", "hg38"), "ACGT")
+
+        def fetch(repo, allow_patterns, local_dir, token=None, reporter=None, **_kw):
+            os.makedirs(os.path.join(local_dir, "indexes"), exist_ok=True)
+            shutil.copy(tarball, os.path.join(local_dir, "indexes", f"{self.NAME}.tar.gz"))
+            return local_dir
+
+        with mock.patch.object(hf, "_hf_snapshot", side_effect=fetch), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            installed = hf.download_component("index", workdir, repo="local/test",
+                                              index_name=self.NAME, token="x")
+        self.assertEqual(os.listdir(installed), ["NRG_chr1_1.bin"])
+        # so a search of the downloader's own genome of that name takes it, as any download
+        self.assertEqual(ar.foreign_index_sources(workdir, os.path.join(workdir, "Genomes", "hg38")), [])
 
 
 # --------------------------------------------------------------------------- #

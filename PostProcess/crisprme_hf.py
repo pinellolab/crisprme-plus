@@ -1377,6 +1377,14 @@ def _ensure_perdb_samplesids(
         )
 
 
+# The record of the genome folder an index was built from, which complete-search and
+# assembly-search keep inside the index folder (assembly_reconcile.INDEX_SOURCE_FILENAME).
+# It names a folder of the machine that built the index, so it is left out of a
+# published index and dropped from a downloaded one: a downloaded index records no
+# folder, and is taken as before by a search of a genome folder of its name.
+_INDEX_SOURCE_FILENAME = ".genome_source"
+
+
 def download_component(
     component: str,
     workdir: str,
@@ -1728,8 +1736,10 @@ def download_component(
             label = None
             with tarfile.open(tarball) as tf:
                 # surface the provenance manifest (if present) without unpacking it
-                # alongside the index; extract only the index folder members
-                members = [m for m in tf.getmembers() if m.name != "manifest.json"]
+                # alongside the index; extract only the index folder members, without a
+                # record of the folder the index was built from on another machine
+                members = [m for m in tf.getmembers() if m.name != "manifest.json"
+                           and os.path.basename(m.name) != _INDEX_SOURCE_FILENAME]
                 with _decompress_progress(
                     reporter, extract_tmp, phase="Extracting index"
                 ):
@@ -2030,6 +2040,8 @@ def _make_index_tarball(
     lists a MERGED variant search's ``--samplesID`` needs — bundling them makes
     ``download --what index`` self-complete, no separate ``--what samples``), and
     ``manifest.json`` at the archive root (see download_component's extractor).
+    Neither path stores an index's ``.genome_source`` record (``_INDEX_SOURCE_FILENAME``),
+    which names a folder of this machine.
 
     Both the samplesID files (small text) and manifest.json are staged into a
     single temp dir so the two code paths share ONE staging mechanism.
@@ -2070,8 +2082,10 @@ def _make_index_tarball(
                 for arc in staged_sids:
                     inputs += ["-C", tmpd, arc]
                 inputs += ["-C", tmpd, "manifest.json"]
+                # --exclude applies to the inputs after it
                 subprocess.check_call(
-                    [tar, "--use-compress-program", pigz, "-cf", tarball, *inputs]
+                    [tar, "--use-compress-program", pigz,
+                     f"--exclude={_INDEX_SOURCE_FILENAME}", "-cf", tarball, *inputs]
                 )
                 return
             except (subprocess.CalledProcessError, OSError) as exc:
@@ -2090,12 +2104,18 @@ def _make_index_tarball(
                 "(slow for large indexes). Install pigz for parallel compression.\n"
             )
         # fallback: single-threaded Python tarfile (identical layout)
+        def _no_source_record(info):  # as the --exclude above
+            return None if os.path.basename(info.name) == _INDEX_SOURCE_FILENAME else info
+
         with tarfile.open(tarball, "w:gz") as tf:
-            tf.add(index_dir, arcname=index_name)  # -> genome_library/<name>/ on unpack
+            # -> genome_library/<name>/ on unpack
+            tf.add(index_dir, arcname=index_name, filter=_no_source_record)
             if os.path.isdir(indels_dir):
-                tf.add(indels_dir, arcname=os.path.basename(indels_dir))
+                tf.add(indels_dir, arcname=os.path.basename(indels_dir),
+                       filter=_no_source_record)
             for dp in (dict_dirs or []):  # -> Dictionaries/<basename>/ on unpack
-                tf.add(dp, arcname=os.path.join("Dictionaries", os.path.basename(dp)))
+                tf.add(dp, arcname=os.path.join("Dictionaries", os.path.basename(dp)),
+                       filter=_no_source_record)
             for arc in staged_sids:  # -> samplesIDs/<basename> on unpack
                 tf.add(os.path.join(tmpd, arc), arcname=arc)
             info = tarfile.TarInfo(name="manifest.json")
