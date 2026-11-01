@@ -844,7 +844,7 @@ while read vcf_f; do
 	# too. (The indel genotype store is read for the SNP+indel co-occurrence only.)
 	if [ "$vcf_name" != "_" ]; then
 		_unfinished=("Dictionaries/registry_${vcf_name}" "Genomes/${ref_name}+${vcf_name}" "Genomes/${ref_name}+${vcf_name}_INDELS")
-		case "${CRISPRME_INDEL_SNP:-1}" in 1 | true | True | yes) _unfinished=("${_unfinished[0]}" "Dictionaries/indel_genotypes_${vcf_name}" "${_unfinished[@]:1}") ;; esac
+		case "${CRISPRME_INDEL_SNP-1}" in 1 | true | True | yes) _unfinished=("${_unfinished[0]}" "Dictionaries/indel_genotypes_${vcf_name}" "${_unfinished[@]:1}") ;; esac
 		for _u in "${_unfinished[@]}"; do
 			if [ -d "$current_working_directory/$_u/.building" ]; then
 				printf "ERROR: %s is unfinished: a build-index-only run is writing it, or stopped before it was done. Let that run finish, or run build-index-only again to its end, then run this search again\n" "$current_working_directory/$_u" >&2

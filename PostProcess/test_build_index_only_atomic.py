@@ -560,11 +560,11 @@ class _Fixture(unittest.TestCase):
                    "--bDNA", "1", "--bRNA", "1", "--output", "search", "--thread", "2"]
         return self.finish(self.start(command=command, CRISPRME_SKIP_SCORER_ENV="1"))
 
-    def run_web_search(self):
+    def run_web_search(self, **environ):
         """The search the web UI launches (pages/main_page.py): the search script run
         straight, not complete-search, with the job directory, environment and
-        arguments it gives it, into a job directory of its own. Returns its exit
-        status, stdout and log_error.txt."""
+        arguments it gives it (and environ), into a job directory of its own. Returns
+        its exit status, stdout and log_error.txt."""
         job = self.path("Results", "web")
         shutil.rmtree(job, ignore_errors=True)
         for name, text in ((".list_vcfs.txt", "ds\n"), (".samplesID.txt", "hg38_ds.samplesID.txt\n"),
@@ -579,7 +579,7 @@ class _Fixture(unittest.TestCase):
         env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
                    PYTHONPATH=os.path.join(SHARED, "py"), MPLCONFIGDIR=os.path.join(SHARED, "mpl"),
                    STUB_LOG=self.log, CRISPRME_FAST_MODE="1", CRISPRME_EMIT_ALT_ALIGNMENTS="0",
-                   CRISPRME_REPORT_FULL="False")
+                   CRISPRME_REPORT_FULL="False", **environ)
         with open(os.path.join(job, "log_verbose.txt"), "w") as out, \
                 open(os.path.join(job, "log_error.txt"), "w") as err:
             rc = subprocess.call(
@@ -1966,6 +1966,27 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                 self.assertIn("Using precomputed variant index for hg38+ds; skipping genome "
                               "enrichment", out)
                 self.assertNotIn(" is unfinished: ", err)
+
+    def test_a_search_launched_from_the_web_takes_an_empty_co_occurrence_setting_for_off(self):
+        """The indel genotype store is read for the SNP+indel co-occurrence alone, which
+        CRISPRME_INDEL_SNP set to anything but 1, true, True or yes turns off, as every
+        Python reader of it has it: set but empty, the search script took it for on,
+        and refused a search for a store it would not read."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        store = self.path("Dictionaries", "indel_genotypes_ds")
+        _write(os.path.join(store, ".building", "owner"), "host=otherhost\npid=4242\n")
+        for value, refused in ((None, True), ("1", True), ("", False), ("0", False)):
+            with self.subTest(CRISPRME_INDEL_SNP=value):
+                rc, out, err = self.run_web_search(
+                    **({} if value is None else {"CRISPRME_INDEL_SNP": value}))
+                if refused:
+                    self.assertEqual(rc, 1, out + err)
+                    self.assertTrue(err.startswith(f"ERROR: {store} is unfinished: "), err)
+                else:
+                    self.assertNotIn(" is unfinished: ", err)
+                    self.assertIn("Using precomputed variant index for hg38+ds; skipping "
+                                  "genome enrichment", out)
 
     def test_a_search_while_a_run_writes_them_is_told_to_wait_for_it(self):
         step, held, where, workers = self.STEPS[0]
