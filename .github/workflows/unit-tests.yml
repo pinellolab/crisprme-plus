@@ -235,7 +235,8 @@ jobs:
         # a stdlib fake worker + graceful-degradation paths. Neither needs TensorFlow.
         # test_crispr_bulge_fidelity, the CRISPR-Bulge fidelity gate, needs TensorFlow and
         # the Refined_TrueOT dataset, so here it skips: what this checks is that it imports
-        # with no side effect (it once changed to a developer's folder at import, and failed).
+        # with no side effect (it once changed to a developer's folder at import, and failed),
+        # and that its dataset-fetch steps clone the commit scorer_env provisions.
         working-directory: PostProcess
         run: python -m unittest test_scorer_env test_scorer_runner test_crispr_bulge_fidelity -v
 

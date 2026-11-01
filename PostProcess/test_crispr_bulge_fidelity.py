@@ -4,18 +4,31 @@ Phase-1 fidelity gate: our CRISPR_BULGE_predict_list must reproduce the upstream
 ensemble prediction (`pred_averege_ensemble`) bit-for-bit (within float tol).
 
 Runs in the cbulge env, against a CRISPR-Bulge checkout that holds the Refined_TrueOT
-dataset (CBULGE_REPO; default: the clone `crisprme.py scorer-env create` provisions):
+dataset (CBULGE_REPO, an absolute path; default: the copy `crisprme.py scorer-env
+create` provisions, <prefix>/opt/CRISPR-Bulge):
     CBULGE_REPO=/path/to/CRISPR-Bulge \
       mamba run -n cbulge python test_crispr_bulge_fidelity.py
-Exit 0 = match. 1 = drift. 2 = it cannot run here (no TensorFlow, or no dataset).
+(micromamba run in the Docker image). Exit 0 = match. 1 = drift. 2 = it cannot run
+here (no TensorFlow, or no dataset).
 
-The provisioned clone holds no datasets: it is cloned with Git LFS smudge off, so its
-files/datasets.zip is only an LFS pointer. To fetch the one file this reads, in the
-clone: git lfs pull --include files/datasets.zip, then
-unzip files/datasets.zip 'datasets/Refined_TrueOT.csv' -d files.
+The provisioned copy holds no datasets, and no git metadata to fetch them with: it is
+cloned with Git LFS smudge off, so its files/datasets.zip is only an LFS pointer, and
+its .git is then deleted. Fetch the one file this reads in a clone of your own at the
+same commit, with git-lfs installed (a 524 MB download):
+    GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/OrensteinLab/CRISPR-Bulge.git cb
+    git -C cb checkout 3eddcd5bfcaff00b2bdf29425116ec9756ace870
+    git -C cb lfs install --local
+    git -C cb lfs pull --include files/datasets.zip
+    unzip cb/files/datasets.zip 'datasets/Refined_TrueOT.csv' -d cb/files
+then run with CBULGE_REPO="$PWD/cb". Or unzip into the provisioned copy instead
+(-d <prefix>/opt/CRISPR-Bulge/files) and run with no CBULGE_REPO. Where `git lfs
+install` was never run, `git lfs pull` without the `lfs install` step above leaves the
+pointer in place and still exits 0.
 
-Under `python -m unittest` (CI, the main env, the image) it is one test, skipped with
-the reason wherever TensorFlow or the dataset is absent. Nothing runs at import.
+Under `python -m unittest` (CI, the main env, the image) the gate is one test, skipped
+with the reason wherever TensorFlow or the dataset is absent; a second checks that the
+steps above clone the repository and commit scorer-env provisions. Nothing runs at
+import.
 """
 import os
 import sys
@@ -91,6 +104,21 @@ class CrisprBulgeFidelity(unittest.TestCase):
             self.skipTest(why)
         self.addCleanup(os.chdir, os.getcwd())
         self.assertTrue(fidelity(repo), "CRISPR_BULGE_predict_list drifted from upstream")
+
+
+@unittest.skipIf(os.environ.get("CRISPRME_CBULGE_URL") or os.environ.get("CRISPRME_CBULGE_PIN"),
+                 "the CRISPR-Bulge source scorer-env provisions is overridden here")
+class TheDocumentedFetch(unittest.TestCase):
+    """The docstring's steps fetch the dataset into a clone of the repository and commit
+    that scorer-env provisions, so a bump of the pin cannot leave them on the old one."""
+
+    def test_clones_the_provisioned_repository_at_the_provisioned_commit(self):
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import scorer_env
+        doc = sys.modules[__name__].__doc__
+        self.assertIn(f"git clone {scorer_env.CBULGE_URL} cb\n", doc)
+        self.assertIn(f"git -C cb checkout {scorer_env.CBULGE_PIN}\n", doc)
 
 
 def main():
