@@ -76,6 +76,7 @@ import shlex
 import shutil
 import sys
 import string
+import threading
 import os
 
 # memory_check lives in PostProcess/, put on sys.path by pages_utils (imported above).
@@ -170,11 +171,21 @@ def _ensure_samplesid(genome_selected: str, vcf_folder: str) -> None:
                 if key not in seen:
                     seen.add(key)
                     rows.append(line.rstrip("\n"))
+    # through a hidden temporary file (this thread's) renamed into place: one that a
+    # full disk cut short would be taken for whole by every later search (the test above)
+    tmp = os.path.join(sdir, f".{os.path.basename(target)}.{os.getpid()}."
+                             f"{threading.get_ident()}.tmp")
     try:
-        with open(target, "w") as out:
+        with open(tmp, "w") as out:
             out.write("\n".join(rows) + "\n")
+        os.replace(tmp, target)
     except OSError:
         pass
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # MAX_BULGES (the app-wide bulge ceiling; usable bulges = MAX_BULGES - 1) is single-

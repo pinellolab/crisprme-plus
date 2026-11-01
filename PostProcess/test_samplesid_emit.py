@@ -27,13 +27,18 @@ HF client is stubbed. ``crisprme.py`` is loaded via importlib with ``Bio.Seq``
 stubbed (its only unavailable top-level import in the light CI), so the build-side
 helper is exercised as-shipped, not re-implemented.
 """
+import ast
+import errno
+import io
 import os
 import shutil
 import sys
 import tarfile
 import tempfile
+import threading
 import types
 import unittest
+from unittest import mock
 
 import crisprme_hf as hf
 
@@ -182,6 +187,135 @@ class TestBuildEmitCombinedSamplesID(unittest.TestCase):
         self.assertIsNone(written, "must not report a write when the file already exists")
         self.assertEqual(open(combined).read(), "PRESHIPPED\tX\tX\tX\n",
                          "shipped combined samplesID was clobbered")
+
+
+class _FullDisk:
+    """A file being written that takes half of what it is given, then fails, as a
+    file on a disk that has just filled up does."""
+
+    def __init__(self, fh):
+        self.fh = fh
+
+    def write(self, text):
+        self.fh.write(text[: len(text) // 2])
+        self.fh.flush()
+        raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.fh.close()
+
+
+def _load_ensure_samplesid(workdir):
+    """pages/main_page._ensure_samplesid, as shipped, with the web app's working
+    directory workdir (the page module needs Dash; this needs only its source)."""
+    page = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "pages", "main_page.py")
+    src = open(page).read()
+    node = next(n for n in ast.parse(src).body
+                if isinstance(n, ast.FunctionDef) and n.name == "_ensure_samplesid")
+    ns = {"os": os, "threading": threading, "current_working_directory": workdir}
+    exec(ast.get_source_segment(src, node), ns)  # noqa: S102 - trusted own source
+    return ns["_ensure_samplesid"]
+
+
+class TestSamplesIDWrittenWholeOrNotAtAll(unittest.TestCase):
+    """build-index-only (each per-dataset copy, then the union), the download
+    (synthesize_combined_samplesid) and a web search (pages/main_page
+    ._ensure_samplesid) wrote each samplesID file in place, and every later run skips
+    one that is there: a full disk or a kill as it was written left it cut short, kept
+    for good and searched with. Each is now written beside it, then renamed into
+    place, and a full disk fails the build."""
+
+    def setUp(self):
+        self.workdir = tempfile.mkdtemp(prefix="sid_whole_")
+        self.sdir = os.path.join(self.workdir, "samplesIDs")
+        self.src = os.path.join(self.workdir, "lists")
+        _mkfile(os.path.join(self.src, "1000G.txt"), _1000G_ROWS)
+        _mkfile(os.path.join(self.src, "HGDP.txt"), _HGDP_ROWS)
+        self.map = {"1000G": os.path.join(self.src, "1000G.txt"),
+                    "HGDP": os.path.join(self.src, "HGDP.txt")}
+        self.union = _1000G_ROWS + "S_AFR_1\tYRI\tAFR\tmale\n"
+        self.combined = os.path.join(self.sdir, "hg38_1000G_HGDP.samplesID.txt")
+
+    def tearDown(self):
+        shutil.rmtree(self.workdir, ignore_errors=True)
+
+    def full_disk(self):
+        """Every file opened for writing in samplesIDs/, and every copy into it,
+        takes half of its data, then fails as on a full disk."""
+        real_open, real_copy, sdir = open, shutil.copy2, self.sdir
+
+        def fake_open(path, mode="r", *args, **kwargs):
+            fh = real_open(path, mode, *args, **kwargs)
+            inside = os.path.dirname(os.path.abspath(str(path))) == sdir
+            return _FullDisk(fh) if inside and "w" in mode else fh
+
+        def fake_copy(src, dst, *args, **kwargs):
+            with real_open(src) as fh, real_open(dst, "w") as out:
+                _FullDisk(out).write(fh.read())
+
+        return mock.patch("builtins.open", fake_open), mock.patch("shutil.copy2", fake_copy)
+
+    def written(self):
+        """What samplesIDs/ holds: {name: text}, hidden files too."""
+        out = {}
+        for name in sorted(os.listdir(self.sdir)) if os.path.isdir(self.sdir) else ():
+            with open(os.path.join(self.sdir, name)) as fh:
+                out[name] = fh.read()
+        return out
+
+    def test_a_full_disk_leaves_no_file_of_the_build_cut_short(self):
+        for which in ("copy", "union"):
+            with self.subTest(which=which):
+                shutil.rmtree(self.sdir, ignore_errors=True)
+                if which == "union":  # (the copies there already)
+                    _mkfile(os.path.join(self.sdir, "hg38_1000G.samplesID.txt"), _1000G_ROWS)
+                    _mkfile(os.path.join(self.sdir, "hg38_HGDP.samplesID.txt"), _HGDP_ROWS)
+                before = self.written()
+                opened, copied = self.full_disk()
+                with opened, copied, mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+                    with self.assertRaises(SystemExit) as end:
+                        crisprme._emit_combined_samplesid(self.workdir, "hg38_1000G_HGDP",
+                                                          "hg38", self.map)
+                self.assertEqual(end.exception.code, 1)
+                self.assertTrue(err.getvalue().startswith(
+                    f"Error: Writing the samplesID files of hg38_1000G_HGDP into {self.sdir} "
+                    f"failed ([Errno {errno.ENOSPC}] {os.strerror(errno.ENOSPC)}"), err.getvalue())
+                self.assertTrue(err.getvalue().endswith(
+                    "): run build-index-only again once that is fixed, which writes them.\n"))
+                self.assertEqual(self.written(), before)  # nothing cut short, nothing left
+                # once there is room, the next run writes them whole
+                self.assertEqual(crisprme._emit_combined_samplesid(
+                    self.workdir, "hg38_1000G_HGDP", "hg38", self.map), self.combined)
+                self.assertEqual(self.written(), {"hg38_1000G.samplesID.txt": _1000G_ROWS,
+                                                  "hg38_HGDP.samplesID.txt": _HGDP_ROWS,
+                                                  "hg38_1000G_HGDP.samplesID.txt": self.union})
+
+    def test_a_full_disk_leaves_no_union_of_the_download_or_the_web_cut_short(self):
+        ensure = _load_ensure_samplesid(self.workdir)
+        for who, write in (
+                ("download", lambda: hf.synthesize_combined_samplesid(
+                    self.workdir, "hg38_1000G_HGDP", ref="hg38")),
+                ("web search", lambda: ensure("hg38", "hg38_1000G_HGDP"))):
+            with self.subTest(who=who):
+                shutil.rmtree(self.sdir, ignore_errors=True)
+                _mkfile(os.path.join(self.sdir, "hg38_1000G.samplesID.txt"), _1000G_ROWS)
+                _mkfile(os.path.join(self.sdir, "hg38_HGDP.samplesID.txt"), _HGDP_ROWS)
+                before = self.written()
+                opened, _ = self.full_disk()
+                with opened:
+                    if who == "download":  # (it says so, and goes on)
+                        with self.assertRaises(OSError):
+                            write()
+                    else:  # (best effort: the search then fails for want of it)
+                        write()
+                self.assertEqual(self.written(), before)
+                write()
+                self.assertEqual(self.written(), dict(before, **{
+                    "hg38_1000G_HGDP.samplesID.txt": self.union}))
 
 
 # --------------------------------------------------------------------------- #

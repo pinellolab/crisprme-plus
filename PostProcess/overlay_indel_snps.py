@@ -25,6 +25,9 @@ REF->ALT re.sub at offset 25, ``refseq``/``FAKEPOS`` = matched-length window,
 import os
 import sys
 import gzip
+import shutil
+import stat
+import tempfile
 
 # The 15 non-ACGT / non-N IUPAC ambiguity codes the enricher writes for SNPs. A
 # base is "SNP-carrying" in the enriched genome iff it is one of these.
@@ -97,6 +100,20 @@ def overlay_sub_fasta(sub_fasta, start_position, ref, alt, enriched, enriched_of
     return "".join(out)
 
 
+def count_coded(sub_fasta, start_position, ref, alt, enriched):
+    """The flank bases of ``sub_fasta`` that already carry the IUPAC code that
+    overlay_sub_fasta gives them: those of a fake-indel genome overlaid before."""
+    ref_len, alt_len = len(ref), len(alt)
+    coded = 0
+    for k, base in enumerate(sub_fasta):
+        if base not in _IUPAC_AMBIG:
+            continue
+        real = map_fake_offset_to_real(k, start_position, ref_len, alt_len)
+        if real is not None and 0 <= real < len(enriched) and enriched[real] == base:
+            coded += 1
+    return coded
+
+
 def _open_text(path):
     return gzip.open(path, "rt") if path.endswith(".gz") else open(path)
 
@@ -138,10 +155,19 @@ def parse_log_indels(log_path):
                 continue
 
 
-def overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=None):
+def overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=None, owner=None,
+                            coded=None):
     """Overlay SNP IUPAC codes onto one fake chromosome FASTA in place (or to
     ``out_fa``). Preserves the exact record/line structure and all lengths; only
-    substitutes flank base identities. Returns the number of bases changed."""
+    substitutes flank base identities. Returns the number of bases changed.
+
+    The FASTA is replaced whole or not at all: an interrupted or failed write leaves
+    it as it was, never cut short (an index built from a cut FASTA has no target
+    past the cut, and nothing tells it from a whole one). ``owner``, an owner record
+    (``key=value`` lines), goes into the hidden directory of the temporary file, for
+    a later run to remove one that a kill left (crisprme.py's _reclaim_build_dirs).
+    ``coded``, a list, gets the number of flank bases that already had their code
+    when none changed (a FASTA overlaid before), else 0."""
     enriched = read_enriched_chromosome(enriched_fa)
     records = list(parse_log_indels(log_path))
 
@@ -161,22 +187,55 @@ def overlay_fake_chromosome(fake_fa, enriched_fa, log_path, out_fa=None):
             if seq[fs + i] != ch:
                 seq[fs + i] = ch
                 changed += 1
+    if coded is not None:
+        coded.append(0 if changed else sum(
+            count_coded("".join(seq[fs:fe]), start_position, ref, alt, enriched)
+            for start_position, ref, alt, fs, fe in records))
 
-    out_fa = out_fa or fake_fa
-    with open(out_fa, "w") as out:
-        out.write(header + "\n")
-        # one base per position; write the whole sequence on a single line (CRISPRitz
-        # index strips newlines, so line wrapping is irrelevant to correctness)
-        out.write("".join(seq) + "\n")
+    # Written beside the FASTA, then renamed over it. The temporary file sits in a
+    # hidden directory of its own, so one a kill leaves is in no FASTA listing
+    # (index-genome's, a FASTA search's, pool_index_indels' empty-genome check). The
+    # file a symlink names is the one replaced, and its mode and owner are kept, as
+    # writing it in place did.
+    target = os.path.realpath(out_fa or fake_fa)
+    tmp_dir = tempfile.mkdtemp(prefix=".overlay-", dir=os.path.dirname(target))
+    tmp_fa = os.path.join(tmp_dir, os.path.basename(target) + ".tmp")
+    try:
+        if owner:
+            # through a rename, so a run reading the record meanwhile sees none or all
+            # of it -- never a torn PID it would find dead
+            record = os.path.join(tmp_dir, f"owner.{os.getpid()}")
+            with open(record, "w") as fh:
+                fh.write(owner)
+            os.replace(record, os.path.join(tmp_dir, "owner"))
+        with open(tmp_fa, "w") as out:
+            out.write(header + "\n")
+            # one base per position; write the whole sequence on a single line (CRISPRitz
+            # index strips newlines, so line wrapping is irrelevant to correctness)
+            out.write("".join(seq) + "\n")
+        if os.path.exists(target):
+            st, new = os.stat(target), os.stat(tmp_fa)
+            if (new.st_uid, new.st_gid) != (st.st_uid, st.st_gid):
+                try:
+                    os.chown(tmp_fa, st.st_uid, st.st_gid)
+                except OSError:
+                    pass
+            os.chmod(tmp_fa, stat.S_IMODE(st.st_mode))
+        os.replace(tmp_fa, target)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
     return changed
 
 
-def main(argv):
+def main(argv, owner=None, coded=None):
     """CLI: overlay_indel_snps.py <indels_genome_dir> <enriched_genome_dir> <log_indels_dir>
 
     Enabled by default (opt-out): no-op only if CRISPRME_INDEL_SNP=0. For each
     fake<chrom>.fa under <indels_genome_dir>/fake_<vcf>_<chrom>/, overlay using the
     matching enriched <chrom>.enriched.fa and log_indels/log<chrom>.txt[.gz].
+    ``owner`` goes to overlay_fake_chromosome. A chromosome none of whose bases
+    changed, as one overlaid before, is said to have its codes already; ``coded``, a
+    list, gets the number of such bases.
     """
     if os.environ.get("CRISPRME_INDEL_SNP", "1") not in ("1", "true", "True", "yes"):
         return 0
@@ -186,7 +245,7 @@ def main(argv):
         )
         return 2
     indels_dir, enriched_dir, log_dir = argv[1], argv[2], argv[3]
-    total = 0
+    total = already = 0
     # Progress goes to STDOUT: this runs inside the crisprme build where a subprocess
     # writing to stderr is treated as fatal (see crisprme.py build-index-only).
     for entry in sorted(os.listdir(indels_dir)):
@@ -205,10 +264,16 @@ def main(argv):
         if not (os.path.isfile(fake_fa) and os.path.isfile(enriched_fa) and log_path):
             print(f"overlay_indel_snps: skip {chrom} (missing inputs)", flush=True)
             continue
-        n = overlay_fake_chromosome(fake_fa, enriched_fa, log_path)
+        kept = []
+        n = overlay_fake_chromosome(fake_fa, enriched_fa, log_path, owner=owner, coded=kept)
         total += n
-        print(f"overlay_indel_snps: {chrom} -> {n} SNP overlays", flush=True)
-    print(f"overlay_indel_snps: {total} total SNP overlays", flush=True)
+        already += kept[0]
+        print(f"overlay_indel_snps: {chrom} -> {n} SNP overlays"
+              + (f" ({kept[0]} already coded)" if kept[0] else ""), flush=True)
+    print(f"overlay_indel_snps: {total} total SNP overlays"
+          + (f" ({already} already coded)" if already and not total else ""), flush=True)
+    if coded is not None:
+        coded.append(already)
     return total
 
 

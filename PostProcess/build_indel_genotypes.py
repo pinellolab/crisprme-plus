@@ -17,6 +17,7 @@ into a dict (indels are ~10x fewer than SNPs, so this is cheap). Gated behind
 CRISPRME_INDEL_SNP; classic build untouched.
 """
 
+import errno
 import os
 import sys
 import gzip
@@ -164,16 +165,35 @@ def compile_indel_genotypes(vcf_path, out_path, keep_samples=None):
     try:
         with open(marker, "w") as m:
             m.write(f"{n}\n")
-    except OSError:
-        pass
+    except OSError as err:
+        # a marker the disk could not take is no marker; on a full disk or an I/O
+        # error (ends_the_build) its store goes too, as the build ends on it, for the
+        # next run to write both again
+        for _p in (marker, out_path) if ends_the_build(err) else (marker,):
+            try:
+                os.remove(_p)
+            except OSError:
+                pass
+        if ends_the_build(err):
+            raise
     return n
+
+
+def ends_the_build(exc):
+    """True for a failure that every chromosome after this one would hit too: a full
+    disk or quota (ENOSPC, EDQUOT), an I/O error (EIO), no memory left. The guarded
+    writer raises it again rather than skip the chromosome, and build-index-only
+    ends with an ERROR on it, the store left marked unfinished."""
+    return isinstance(exc, MemoryError) or (
+        isinstance(exc, OSError) and exc.errno in (errno.ENOSPC, errno.EDQUOT, errno.EIO))
 
 
 def compile_indel_genotypes_safe(vcf_path, out_path, keep_samples=None):
     """Guarded ``compile_indel_genotypes`` for parallel fan-out: returns the record
-    count, or -1 on any failure (never raises) so one bad chromosome cannot sink the
-    whole store. The atomic writer already cleans up its temp file; here we also drop
-    any stale final/marker so a later resume re-attempts cleanly."""
+    count, or -1 on any other failure so one bad chromosome cannot sink the whole
+    store; it raises only a failure that ends the build (``ends_the_build``). The
+    atomic writer already cleans up its temp file; here we also drop any stale
+    final/marker so a later resume re-attempts cleanly."""
     try:
         return compile_indel_genotypes(vcf_path, out_path, keep_samples=keep_samples)
     except Exception as err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
@@ -183,6 +203,8 @@ def compile_indel_genotypes_safe(vcf_path, out_path, keep_samples=None):
                     os.remove(_p)
             except OSError:
                 pass
+        if ends_the_build(err):
+            raise
         print(
             f"WARNING [indel-snp]: compile_indel_genotypes failed for "
             f"{os.path.basename(vcf_path)} ({err})",

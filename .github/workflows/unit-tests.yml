@@ -287,6 +287,21 @@ jobs:
           test_iupac_collapse_consistency test_hf_sha256sums
           test_indel_empty_chromosome -v
 
+      - name: "build-index-only leaves no partial index or enriched genome, and stops at a search's build lock"
+        # A later run takes an index directory or an enriched genome that is there for
+        # a finished one. build-index-only builds each index in a hidden directory of
+        # genome_library and renames it into place once the engine has succeeded, and
+        # stages the enrichment (its dictionaries compressed) to move the enriched
+        # genome into place last, so a run that ends early (Ctrl-C, an OOM kill, a
+        # container stop, an engine error) leaves none; the SNP overlay rewrites each
+        # fake-indel FASTA whole or not at all, and the build directories of runs that
+        # are gone are reclaimed. While a search holds the build lock of an output it
+        # would use or build, it stops with an ERROR. The real crisprme.py,
+        # pool_index_indels.py and overlay_indel_snps.py run against a stub engine on
+        # PATH, and a successful build must leave the tree the code before the fix left.
+        working-directory: PostProcess
+        run: python -m unittest test_build_index_only_atomic -v
+
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import
         # env, array_module (numpy vs cupy), and configure_tf device placement via a fake
