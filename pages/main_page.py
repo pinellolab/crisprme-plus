@@ -28,6 +28,8 @@ from .pages_utils import (
     get_available_CAS,
     index_max_bulges,
     reference_bulge_capacity,
+    read_enabled_annotations,
+    cosmic_license_enabled,
     MAX_BULGES,
     variant_dataset_present,
     has_variant_index,
@@ -47,6 +49,8 @@ from .pages_utils import (
     sort_annotation,
     compress_file,
 )
+# the URL fragment a reused job's status page is opened with (the page says so)
+from .load_page import REUSED_HASH
 from app import (
     URL,
     app,
@@ -70,6 +74,7 @@ from dash import dcc
 import collections
 import subprocess
 import filecmp
+import json
 import random
 import re
 import shlex
@@ -101,6 +106,72 @@ def _sanitize_job_name(job_name: str) -> str:
     ``(`` when the results directory is created.
     """
     return re.sub(r"[^A-Za-z0-9._-]+", "_", job_name).strip("._-")
+
+
+# A web job records what decides its results besides .Params.txt and the guides
+# (_reuse_key), so change_url reuses an earlier job only when that matches too.
+REUSE_KEY_FILE = ".reuse_key.json"
+
+
+def _crisprme_version() -> str:
+    """The CRISPRme version this app is, from the crisprme.py next to it."""
+    try:
+        with open(os.path.join(app_directory, "crisprme.py")) as fh:
+            for line in fh:
+                found = re.match(r'version\s*=\s*"([^"]+)"', line)
+                if found:
+                    return found.group(1)
+    except OSError:
+        pass
+    return "unknown"
+
+
+def _reuse_key(
+    genome: str,
+    annotation_name: str,
+    gencode_name: str,
+    search_mode: str,
+    full_report: Optional[List[str]],
+    job_name: str,
+) -> Dict[str, object]:
+    """What decides a web search's results that .Params.txt and the guides do not
+    record: the analysis mode, the full-report option, the annotations (the beds
+    enabled for the genome, the COSMIC licence state, and the size and time of the
+    assembled bed and gene file: .Params.txt names only the assembled file) and the
+    CRISPRme version. Plus the job name typed: a new name asks for a new job, which is
+    also how a user runs an identical search again."""
+    files = []
+    for name in (annotation_name, gencode_name):
+        path = os.path.join(current_working_directory, ANNOTATIONS_DIR, name)
+        if not os.path.isfile(path) and os.path.isfile(f"{path}.gz"):
+            path = f"{path}.gz"
+        try:
+            st = os.stat(path)
+            files.append(f"{os.path.basename(path)}:{st.st_size}:{int(st.st_mtime)}")
+        except OSError:
+            files.append(name)  # "vuoto.txt": no annotation
+    return {
+        "search_mode": (
+            "per-sample" if str(search_mode) in ("per-sample", "full") else "population-level"
+        ),
+        "report_full": bool(full_report and "full" in full_report),
+        "annotations": sorted(read_enabled_annotations(genome)),
+        "cosmic": cosmic_license_enabled(),
+        "annotation_files": files,
+        "job_name": job_name,
+        "crisprme_version": _crisprme_version(),
+    }
+
+
+def _same_reuse_key(job_dir: str, key: Dict[str, object]) -> bool:
+    """True when the earlier job in job_dir recorded this reuse key. A job with none
+    (made before 2.8.1, or not by this form) never matches: what it ran with is not
+    known."""
+    try:
+        with open(os.path.join(job_dir, REUSE_KEY_FILE)) as fh:
+            return json.load(fh) == key
+    except (OSError, ValueError):
+        return False
 
 
 def _resolve_vcf_folder(genome_selected: str, tok: str) -> str:
@@ -809,7 +880,7 @@ def load_example_data(load_button_click: int) -> List[Union[str, List[str]]]:
 
 # Job submission and results URL definition
 @app.callback(
-    [Output("url", "pathname"), Output("url", "search")],
+    [Output("url", "pathname"), Output("url", "search"), Output("url", "hash")],
     [Input("submit-job", "n_clicks")],
     [
         State("url", "href"),
@@ -856,7 +927,7 @@ def change_url(
     advanced_open: bool,
     search_mode: str = "population-level",
     full_report: Optional[List[str]] = None,
-) -> Tuple[str, str]:
+) -> Tuple[str, str, str]:
     """Launch the targets search and generates the input files for
     post-processing operations, and results visualization.
 
@@ -879,7 +950,10 @@ def change_url(
     If the input parameters match those of an already processed search, the
     current job ID is modified to match that of the available analysis (even if
     completed/currently submitted/in queue). Update the email address associated
-    to the job and reset the 3 days availability of the results.
+    to the job and reset the 3 days availability of the results. The input matches
+    only when the analysis mode, the full-report option, the annotations, the
+    CRISPRme version and the job name do too (_reuse_key); the status page of a
+    reused job is opened with REUSED_HASH, so it says the search was not run again.
 
     The current policy of CRISPRme allows up to 2 jobs to run concurrently. The
     others are put in queue.
@@ -917,8 +991,8 @@ def change_url(
 
     Returns
     -------
-    Tuple[str, str]
-        URL to retrieve CRISPRme analysis results
+    Tuple[str, str, str]
+        URL to retrieve CRISPRme analysis results (path, query, fragment)
     """
 
     if n is not None:
@@ -1015,6 +1089,7 @@ def change_url(
             id_len += 1  # increase ID length
             if id_len > JOBID_MAXLEN:  # reached maximum length
                 break
+    safe_job_name = ""
     if job_name and job_name != "None":
         assert isinstance(job_name, str)
         # Sanitize the user-supplied job name before it becomes a directory
@@ -1338,8 +1413,22 @@ def change_url(
             handle_params.write(f"BE_stop\t{be_stop}\n")
     except OSError as e:
         raise e
+    # What decides the results that .Params.txt and the guides do not record (the
+    # analysis mode, the report option, the annotations, the version) and the job
+    # name. Without it a Population-level request was sent to an earlier per-sample
+    # job of the same input (and the reverse), a new job name was dropped, and a
+    # changed annotation set still got the old annotations.
+    reuse_key = _reuse_key(
+        genome_selected, annotation_name, gencode_name, search_mode, full_report,
+        safe_job_name,
+    )
+    try:
+        with open(os.path.join(result_dir, REUSE_KEY_FILE), mode="w") as handle_key:
+            json.dump(reuse_key, handle_key, sort_keys=True)
+    except OSError as e:
+        raise e
     # ---- Check if input parameters (mms, bulges, pam, guides, genome) match
-    # those of previous searches
+    # those of previous searches (and their reuse key: see above)
     computed_results_dirs = [
         d
         for d in os.listdir(os.path.join(current_working_directory, RESULTS_DIR))
@@ -1358,6 +1447,8 @@ def change_url(
                     current_working_directory, RESULTS_DIR, res_dir, PARAMS_FILE
                 ),
                 os.path.join(result_dir, PARAMS_FILE),
+            ) and _same_reuse_key(
+                os.path.join(current_working_directory, RESULTS_DIR, res_dir), reuse_key
             ):
                 try:
                     # old job guides
@@ -1470,7 +1561,7 @@ def change_url(
                                     ) as handle_email:
                                         handle_email.write(f"{dest_email}\n")
                                         handle_email.write(
-                                            f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
+                                            f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
                                         )
                                         handle_email.write(
                                             "".join(
@@ -1508,7 +1599,7 @@ def change_url(
                                         handle_email.write("--OTHEREMAIL--")
                                         handle_email.write(f"{dest_email}\n")
                                         handle_email.write(
-                                            f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
+                                            f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
                                         )
                                         handle_email.write(
                                             "".join(
@@ -1535,7 +1626,7 @@ def change_url(
                                     ) as handle_email:
                                         handle_email.write(f"{dest_email}\n")
                                         handle_email.write(
-                                            f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
+                                            f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
                                         )
                                         handle_email.write(
                                             "".join(
@@ -1556,7 +1647,7 @@ def change_url(
                         code = subprocess.call(cmd, shell=True)
                         if code != 0:
                             raise ValueError(f"An error occurred while running {cmd}")
-                        return "/load", f"?job={res_dir}"
+                        return "/load", f"?job={res_dir}", REUSED_HASH
                     else:
                         # log file not found
                         # we may have entered a job directory that was in queue
@@ -1590,7 +1681,7 @@ def change_url(
                                             handle_email.write("--OTHEREMAIL--")
                                             handle_email.write(f"{dest_email}\n")
                                             handle_email.write(
-                                                f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
+                                                f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
                                             )
                                             handle_email.write(
                                                 "".join(
@@ -1617,7 +1708,7 @@ def change_url(
                                         ) as handle_email:
                                             handle_email.write(f"{dest_email}\n")
                                             handle_email.write(
-                                                f"{''.join(href.split('/')[:-1])}/load?job={job_id}\n"
+                                                f"{''.join(href.split('/')[:-1])}/load?job={res_dir}\n"
                                             )
                                             handle_email.write(
                                                 "".join(
@@ -1631,7 +1722,11 @@ def change_url(
                                             )
                                     except OSError as e:
                                         raise e
-                            return ("/load", f"?job={res_dir}")
+                            # this job directory never runs: remove it, as above
+                            # (left behind, a later identical search could be sent
+                            # to it and wait for ever)
+                            shutil.rmtree(result_dir, ignore_errors=True)
+                            return ("/load", f"?job={res_dir}", REUSED_HASH)
     # merge default is 3 nt wide
     merge_default = 3
     print(
@@ -1724,7 +1819,7 @@ def change_url(
     cmd = f"CRISPRME_FAST_MODE={fast_env} CRISPRME_EMIT_ALT_ALIGNMENTS={alt_env} CRISPRME_REPORT_FULL={report_full_env} {run_job_sh} {genome} {vcfs} {guides_file} {pam_file} {annotation} {samples_ids} {max_bulges} {mms} {dna} {rna} {merge_default} {result_dir} {postprocess} {4} {current_working_directory} {gencode} {dest_email} {be_start} {be_stop} {be_nt} {sorting_criteria_scoring} {sorting_criteria} False PASS,. _ {max_total_edits} 1> {log_verbose} 2>{log_error}"
     # run job
     pool_executor.submit(subprocess.run, cmd, shell=True)
-    return ("/load", f"?job={job_id}")
+    return ("/load", f"?job={job_id}", "")
 
 
 # Check input presence

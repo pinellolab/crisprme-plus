@@ -25,6 +25,11 @@ import shutil
 import os
 
 
+# The URL fragment main_page.change_url opens a job's status page with when it did
+# not run the search submitted, because an identical earlier one is this job.
+REUSED_HASH = "#reused"
+
+
 def _failure_text(job_directory: str) -> str:
     """The banner of a job whose log_error.txt is not empty. A search the pipeline
     refused because build-index-only has not finished a part of its dataset (its
@@ -372,6 +377,24 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
         "",
         dbc.Alert("The selected result does not exist", color="danger"),
         True,
+    )
+
+
+# Say so when the search just submitted was not run: an identical earlier search
+# (main_page._reuse_key) is this job, so its status and results are shown instead.
+@app.callback(
+    Output("reused-search-note", "children"),
+    [Input("url", "hash")],
+)
+def show_reused_search_note(hash_value: Optional[str]):
+    if hash_value != REUSED_HASH:
+        return ""
+    return dbc.Alert(
+        "Your search was not run again: it is identical to this earlier search (the "
+        "same guides, genome, variants, PAM, thresholds, analysis mode, report option, "
+        "annotations and job name, on this version of CRISPRme), so that search and "
+        "its results are shown. To run it again, submit it with another job name.",
+        color="info",
     )
 
 
@@ -920,6 +943,8 @@ def load_page(job_link: str = "link") -> List:
             style={"text-align": "center"},
         )
     )
+    # says so when the search submitted was not run again (show_reused_search_note)
+    final_list.append(html.Div(id="reused-search-note", style={"margin": "1% 15%"}))
     # button to view results
     view_results = dcc.Link(
         html.Button(

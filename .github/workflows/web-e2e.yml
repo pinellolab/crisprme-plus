@@ -76,7 +76,7 @@ jobs:
       - name: Search-form and results-link web unit tests
         run: |
           docker run --rm -w /opt/conda/opt/crisprme/PostProcess crisprme:web \
-            python -m unittest test_web_results_links -v
+            python -m unittest test_web_search_reuse test_web_results_links -v
 
       # Results-page web unit tests (need a real Dash app import, so they run here, not in
       # the hermetic unit-tests job). Run via -m unittest from the baked-in PostProcess dir
