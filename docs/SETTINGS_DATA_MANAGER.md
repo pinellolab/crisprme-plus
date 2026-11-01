@@ -25,10 +25,13 @@ Type an assembly name and pick a source:
 - **HuggingFace** — pulls a genome we host on the CRISPRme data repo.
 - **Direct URL** — any `.fa.gz` / `.tar.gz` link.
 - **Upload** — pick a local genome file (`.fa`, `.fa.gz` or `.tar.gz`); it is sent
-  in chunks, so there is no browser size limit. It is laid out as a Direct URL
-  download is: every FASTA of an archive goes to the top of the genome folder (a UCSC
-  `chromFa.tar.gz` holds them in `chroms/`), and a FASTA holding several sequences is
-  split into one file per sequence. An upload with the name of an installed genome
+  in chunks, so there is no browser size limit. It is laid out as every search needs
+  it: every FASTA of an archive goes to the top of the genome folder (a UCSC
+  `chromFa.tar.gz` holds them in `chroms/`) as a `.fa` file (`chr1.fasta` as
+  `chr1.fa`: an index is built from the `.fa` files only), and a FASTA holding several
+  sequences is split into one file per sequence. An archive with two FASTA files that
+  would go in under one name (`a/chr1.fa` and `b/chr1.fa`, or `chr1.fa` and
+  `chr1.fasta`) is refused. An upload with the name of an installed genome
   replaces it. It is refused while indexes or variant genomes built on a genome of
   that name are installed: every search would go on using them, with the sequences
   and positions of the genome they were built from. Remove them first (an index

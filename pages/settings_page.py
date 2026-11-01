@@ -182,10 +182,13 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
     archive moved to the top of the folder (a UCSC chromFa.tar.gz holds them in
     chroms/), and each file holding several sequences split into one file a sequence
     (genome_layout.py: CRISPRme takes each FASTA file for one chromosome, and indexes
-    only those at the top of the folder). It is built in a hidden folder of Genomes/,
-    which no genome listing shows, and replaces a genome of the same name only once
-    whole. A .tar.gz has had its members vetted (_unsafe_tar_member), and nothing is
-    built on a genome of this name (_genome_upload_problem)."""
+    only those at the top of the folder). Each goes in as a .fa file, a .fasta one
+    renamed (chr1.fasta as chr1.fa), which that download does not do: index-genome
+    indexes the .fa files only, and a search lists a genome's chromosomes as its *.fa
+    (round 2 review, R2-1). It is built in a hidden folder of Genomes/, which no genome
+    listing shows, and replaces a genome of the same name only once whole. A .tar.gz
+    has had its members vetted (_unsafe_tar_member), and nothing is built on a genome
+    of this name (_genome_upload_problem)."""
     from genome_layout import split_multi_record_fastas
 
     genomes = os.path.dirname(dest_dir)
@@ -212,18 +215,20 @@ def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir:
         )
         if not fastas:
             raise ValueError(f"no .fa or .fasta file in {name}")
-        seen = {}
+        seen = {}  # the name each goes in under -> the file
         for fa in fastas:
-            other = seen.setdefault(os.path.basename(fa), fa)
-            if other != fa:
+            fname = os.path.splitext(os.path.basename(fa))[0] + ".fa"
+            other = seen.setdefault(fname, fa)
+            if other != fa:  # (a/chr1.fa and b/chr1.fa, or chr1.fa and chr1.fasta)
                 raise ValueError(
-                    f"{name} holds two FASTA files named {os.path.basename(fa)} "
-                    f"({os.path.relpath(other, unpacked)}, {os.path.relpath(fa, unpacked)})"
+                    f"{name} holds two FASTA files that would both be installed as "
+                    f"{fname} ({os.path.relpath(other, unpacked)}, "
+                    f"{os.path.relpath(fa, unpacked)})"
                 )
         built = os.path.join(stage, assembly)
         os.makedirs(built)
-        for fa in fastas:
-            os.rename(fa, os.path.join(built, os.path.basename(fa)))
+        for fname, fa in seen.items():
+            os.rename(fa, os.path.join(built, fname))
         split_multi_record_fastas(built)
         # the genome it replaces is moved aside, never written through (a link to a
         # shared copy is only unlinked), and back if this one cannot go in

@@ -777,19 +777,46 @@ class TestGenomeTarUpload(unittest.TestCase):
         self.assertEqual(ns["_finalize_upload"]("genome", part, "asm.tar.gz", "", ""), "asm")
         self.assert_one_file_a_sequence(cwd, "asm", {"chr1.fa": _FA1, "chr2.fa": _FA2})
 
+    def test_archive_of_fasta_files_installs_them_as_fa(self):
+        # index-genome indexes the .fa files only, and a search lists a genome's
+        # chromosomes as its *.fa: kept as chr1.fasta, an archive's genome was given an
+        # index with no .bin, and then a build that refused it said to upload it again,
+        # which laid it out the same (round 2 review, R2-1)
+        cases = [
+            ("files at the top", [("chr1.fasta", "file", _FA1), ("chr2.fasta", "file", _FA2)]),
+            ("chroms/ folder of .fasta and .fa", [("chroms", "dir", None),
+                                                  ("chroms/chr1.fasta", "file", _FA1),
+                                                  ("chroms/chr2.fa", "file", _FA2)]),
+            ("a .fasta of several sequences", [("asm/asm.fasta", "file", _FA1 + _FA2)]),
+        ]
+        for label, entries in cases:
+            with self.subTest(label):
+                root, cwd, _outside, ns = self.sandbox()
+                part = self.upload(cwd, "walkfs2.tar.gz", entries)
+                self.assertEqual(
+                    ns["_finalize_upload"]("genome", part, "walkfs2.tar.gz", "", ""), "walkfs2")
+                self.assert_one_file_a_sequence(cwd, "walkfs2",
+                                                {"chr1.fa": _FA1, "chr2.fa": _FA2})
+
     def test_unusable_upload_refused_installing_nothing(self):
         cases = [
-            ("no FASTA in the archive", "asm.tar.gz", [("asm/README", "file", b"x\n")]),
+            ("no FASTA in the archive", "asm.tar.gz", [("asm/README", "file", b"x\n")], None),
             ("two FASTA files of one name", "asm.tar.gz",
-             [("a/chr1.fa", "file", _FA1), ("b/chr1.fa", "file", _FA1)]),
-            ("two sequences of one id", "asm.tar.gz", [("asm.fa", "file", _FA1 + _FA1)]),
+             [("a/chr1.fa", "file", _FA1), ("b/chr1.fa", "file", _FA1)],
+             "would both be installed as chr1.fa (a/chr1.fa, b/chr1.fa)"),
+            ("a .fa and a .fasta of one name", "asm.tar.gz",
+             [("chr1.fa", "file", _FA1), ("chroms/chr1.fasta", "file", _FA1)],
+             "would both be installed as chr1.fa (chr1.fa, chroms/chr1.fasta)"),
+            ("two sequences of one id", "asm.tar.gz", [("asm.fa", "file", _FA1 + _FA1)], None),
         ]
-        for label, name, entries in cases:
+        for label, name, entries, want in cases:
             with self.subTest(label):
                 root, cwd, _outside, ns = self.sandbox()
                 part = self.upload(cwd, name, entries)
-                with self.assertRaises(ValueError):
+                with self.assertRaises(ValueError) as cm:
                     ns["_finalize_upload"]("genome", part, name, "", "")
+                if want:
+                    self.assertIn(want, str(cm.exception))
                 self.assertEqual(os.listdir(os.path.join(cwd, "Genomes")), [])
 
     def test_upload_replaces_a_genome_of_the_same_name_whole(self):
