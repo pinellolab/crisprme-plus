@@ -582,9 +582,9 @@ def submit_assembly_search_job(
 
     MVP scope: reuses the existing guide/PAM/mismatch/bulge form fields and
     the "Max edits" slider (shared component ids with the complete-search
-    form -- reading the same `State` from two callbacks is fine in Dash),
-    but does NOT yet replicate
-    `change_url`'s PAM-derived N-padding convenience for the guide textbox
+    form -- reading the same `State` from two callbacks is fine in Dash), but
+    does NOT yet replicate `change_url`'s PAM-derived N-padding convenience
+    for the guide textbox
     -- guides typed here get the same automatic PAM-length N-padding
     complete-search's own form applies (see `_pad_guides_for_pam` below),
     so there's no format difference between the two modes' guide boxes.
@@ -758,7 +758,7 @@ def submit_assembly_search_job(
             gene_annotation_args = ["--gene_annotation", shlex.quote(_gc)]
     # The "Max edits" slider, under the reference tab's rule (change_url): with
     # Advanced closed it is the total-edits cap, with it open the per-type caps
-    # govern (the slider is greyed out). assembly-search's own default cap is
+    # govern (the slider is grayed out). assembly-search's own default cap is
     # mm+bDNA+bRNA, so the flag is passed only when the slider is lower: a search
     # left at the defaults (slider 6 = 4 + 1 + 1) runs exactly as before.
     max_total_edits_args = []
