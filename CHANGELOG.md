@@ -150,6 +150,15 @@ and the `release-crisprme` skill.
   `RESUME.md`, a scratch file committed by accident in 2.5.4, is gone from the tree, so the Docker
   image no longer ships it.
 
+- **The web Settings page gives sizes in decimal GB, and `complete-search` prints its
+  analysis-mode banner only for a variant search.** Settings divided by 1024 while printing GB, so
+  every size it shows in GB now reads about 7% larger, as the docs and Hugging Face give it (GB =
+  10⁹ bytes): `NNN_3_hg38` goes from 66.6 to 71.5 GB, and the 50 GiB upload limit now reads
+  53.7 GB. A reference-only search printed the population-level banner, although it runs no
+  variant analysis; it now prints none. The per-sample banner says whether `--per-sample` or the
+  phased index's default chose it, and the population-level banner points at `METHODS.md` instead
+  of a design note removed in 2.6.0. Search results are unchanged.
+
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
   rsID, allele frequency and carrier samples.** Every CRISPRitz targets file carries a `#` header, and
