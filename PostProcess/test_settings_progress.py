@@ -927,6 +927,18 @@ class TestDatasetSamplesID(_SamplesIDCase):
         self.assertIsNone(self.ns["_write_dataset_samplesid"]("walk"))
         self.assertEqual(self.read(self.sid("walk")), other)
 
+    def test_a_list_of_its_header_alone_is_never_changed(self):
+        # the page never writes one: someone put it there (as the Submit refusal of a
+        # search said to), for a sites-only dataset or a genotyped one, and it stays
+        # (final review round 1, F3); it names no sample, so no build passes it
+        for dataset, samples in (("agg", []), ("walk", ["S1", "S2"])):
+            with self.subTest(dataset=dataset):
+                with open(self.sid(dataset), "w") as fh:
+                    fh.write(_HEADER)
+                self.vcf(dataset, f"{dataset}.chr1.vcf.gz", samples)
+                self.assertIsNone(self.ns["_write_dataset_samplesid"](dataset))
+                self.assertEqual(self.read(self.sid(dataset)), _HEADER)
+
     def test_own_list_follows_the_dataset(self):
         # a file of the dataset added after the list was written (the uploader takes
         # one file at a time): the list this page wrote is written again
@@ -982,6 +994,15 @@ class TestVcfUploadWritesItsSampleList(_SamplesIDCase):
         self.assertEqual(self.read(os.path.join(self.cwd, "VCFs", ".walkvcf.refgenome")), "hg38")
         self.assertEqual(self.read(self.sid("walkvcf")), _HEADER
                          + "S1\twalkvcf\tunknown\tunknown\nS2\twalkvcf\tunknown\tunknown\n")
+
+
+    def test_upload_keeps_a_list_of_its_header_alone(self):
+        with open(self.sid("walkagg"), "w") as fh:
+            fh.write(_HEADER)
+        part = os.path.join(self.cwd, "Settings", "uploads", "walkagg.vcf.gz.part")
+        _write_vcf(part, [])
+        self.ns["_finalize_upload"]("vcf", part, "walkagg.vcf.gz", "walkagg", "hg38")
+        self.assertEqual(self.read(self.sid("walkagg")), _HEADER)
 
 
 class TestSettingsBuildPassesSampleList(_SamplesIDCase):
@@ -1049,6 +1070,15 @@ class TestSettingsBuildPassesSampleList(_SamplesIDCase):
         self.assertEqual(self.read(self.sid("hg38_mega")), _MEGA_LIST)
         self.assertEqual(os.listdir(os.path.join(self.cwd, "samplesIDs")),
                          ["hg38_mega.samplesID.txt"])
+
+    def test_sites_only_dataset_keeps_a_list_of_its_header_alone(self):
+        with open(self.sid("agg"), "w") as fh:
+            fh.write(_HEADER)
+        self.vcf("agg", "agg.vcf.gz", [])
+        argv, _stage = self.argv("agg")
+        self.assertEqual(argv, self.base_argv() + [
+            "--vcf", os.path.join(self.cwd + "/", "VCFs", "agg")])
+        self.assertEqual(self.read(self.sid("agg")), _HEADER)
 
     def test_reference_build_command_unchanged(self):
         self.assertEqual(self.argv("", "my index"),

@@ -837,7 +837,9 @@ def _vcf_header_samples(vcf_dir: str) -> Optional[List[str]]:
 
 def _placeholder_samples(path: str, dataset: str) -> Optional[List[str]]:
     """The samples of the list ``path`` when this page wrote it for ``dataset`` (the
-    header, then one ``<sample> <dataset> unknown unknown`` row a sample), else None."""
+    header, then one ``<sample> <dataset> unknown unknown`` row a sample), else None;
+    None too for the header alone, which this page never writes (a list someone put
+    there, say for a search of a sites-only dataset)."""
     try:
         with open(path) as fh:
             lines = fh.read().splitlines()
@@ -851,7 +853,7 @@ def _placeholder_samples(path: str, dataset: str) -> Optional[List[str]]:
         if len(cols) != 4 or cols[1:] != [dataset, "unknown", "unknown"] or not cols[0]:
             return None
         samples.append(cols[0])
-    return samples
+    return samples or None
 
 
 def _listed_samples(path: str) -> List[str]:

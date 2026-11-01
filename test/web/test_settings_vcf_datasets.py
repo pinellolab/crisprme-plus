@@ -22,7 +22,8 @@ tabix, bcftools) on a small synthetic genome, run with the argv the page launche
 4. A sites-only dataset is built without a sample list, as the mega index is
    (docs/DESIGN_mega_index.md): a list of its pseudo-samples there, and the registry
    made from the VCFs' INFO allele frequencies (build_mega_registry.py), are left as
-   they are (final review round 1, F1).
+   they are (final review round 1, F1); and a list of only its header, which someone
+   put there, survives an upload and a build (F3).
 
 Standalone (no pytest); exits non-zero on failure:
 
@@ -86,11 +87,11 @@ def bgzip(text, path):
         subprocess.run(["bgzip", "-c"], input=text.encode(), stdout=out, check=True)
 
 
-def upload_vcf(dataset, fname, records):
+def upload_vcf(dataset, fname, records, header=HEADER):
     """The chunked uploader's finished file, handed to _finalize_upload as the
     upload route does, with the reference genome picked on the card."""
     part = os.path.join(D, "Settings", "uploads", fname + ".part")
-    bgzip(HEADER + "\n".join(records) + "\n", part)
+    bgzip(header + "\n".join(records) + "\n", part)
     return settings_page._finalize_upload("vcf", part, fname, dataset, "toyg")
 
 
@@ -167,6 +168,19 @@ ok, msgs = submit("fresh")
 check(not ok and any("No sample list for the variant dataset 'fresh'" in m
                      and "samplesIDs/toyg_fresh.samplesID.txt" in m for m in msgs),
       f"Submit refuses one whose sample list is missing (got {msgs})")
+
+# ---- a list of only its header, put there for a sites-only dataset ----------------------
+SITES = HEADER.replace("\tFORMAT\t" + "\t".join(SAMPLES), "")
+sid = os.path.join(D, "samplesIDs", "toyg_aggh.samplesID.txt")
+with open(sid, "w") as fh:
+    fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+upload_vcf("toyg_aggh", "aggh.vcf.gz", ["\t".join(r.split("\t")[:8]) for r in ALL], header=SITES)
+check(os.path.isfile(sid), "toyg_aggh: a list of only its header survives an upload of the dataset")
+argv, rc, err = settings_build("toyg_aggh")
+check("--samplesID" not in argv and rc == 0,
+      f"toyg_aggh: built without a sample list (rc {rc}; {argv})")
+check(os.path.isfile(sid) and open(sid).read() == "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n",
+      "toyg_aggh: and survives its build")
 
 # ---- a sites-only dataset built as the mega index is ----------------------------------
 # build-index-only without --samplesID, the registry made from the VCFs' INFO allele
