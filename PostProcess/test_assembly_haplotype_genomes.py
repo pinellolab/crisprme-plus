@@ -22,7 +22,9 @@ These tests pin:
   * the record of which genome an index holds (.genome_source): an index of the same
     name built from other content is removed and built again, one that records nothing
     (built by an earlier CRISPRme, or downloaded) is kept;
-  * the pipeline's 0-bulge scan reads the genome folder it is given.
+  * the pipeline keeps a linked genome's own name, picks only an index named for the
+    genome itself (not one whose genome name merely ends in it), and its 0-bulge scan
+    reads the genome folder it is given.
 """
 import contextlib
 import io
@@ -496,6 +498,46 @@ class APipelineGenomeKeepsTheNameItIsGivenUnder(_Workdir):
         _write_genome(genome, "ACGT")
         for given in (genome, genome + "/", os.path.join(self.cwd, "Genomes", ".", "hg38")):
             self.assertEqual(self.ref_folder(given), os.path.realpath(genome))
+
+
+def _shipped_resolver():
+    """`_resolve_index_dir`, extracted from the shipped script (not copied), as
+    test_index_resolution.py extracts it."""
+    with open(SHELL_SCRIPT) as fh:
+        text = fh.read()
+    start = text.index("\t_resolve_index_dir() {")
+    end = text.index("\n\t}\n", start) + len("\n\t}\n")
+    return "\n".join(ln[1:] if ln.startswith("\t") else ln for ln in text[start:end].splitlines())
+
+
+class TheIndexOfAnotherGenomeIsNeverPicked(_Workdir):
+    """An index is picked by the genome's name, and the scan globbed
+    <PAM>_<N>_<name>: that also matches <PAM>_<N>_<prefix>_<name>, the index of a
+    genome whose name merely ends in _<name> -- individual "trio_P1"'s haplotype for
+    "P1"'s, mini_hg38's for hg38 -- and a smaller budget won over the genome's own."""
+
+    def resolve(self, suffix, bmax, *names):
+        lib = os.path.join(self.cwd, "genome_library")
+        for name in names:
+            os.makedirs(os.path.join(lib, name), exist_ok=True)
+            open(os.path.join(lib, name, "chr1.bin"), "w").close()
+        script = f"prune_pam=0\npos=3\n{_shipped_resolver()}\n_resolve_index_dir \"$1\" NRG \"$2\" \"$3\"\n"
+        out = subprocess.run(["bash", "-c", script, "bash", lib, suffix, str(bmax)],
+                             capture_output=True, text=True, env=dict(os.environ, LC_ALL="C"))
+        return os.path.basename(out.stdout.strip())
+
+    def test_the_genomes_own_index_wins(self):
+        self.assertEqual(self.resolve("P1_paternal", 2, "NRG_2_trio_P1_paternal", "NRG_3_P1_paternal"),
+                         "NRG_3_P1_paternal")
+
+    def test_none_is_picked_when_the_genome_has_none(self):
+        self.assertEqual(self.resolve("hg38", 2, "NRG_2_mini_hg38"), "")
+
+    def test_a_variant_index_is_still_found(self):
+        self.assertEqual(self.resolve("hg38+hg38_1000G", 2, "NRG_2_hg38+hg38_1000G", "NRG_2_hg38"),
+                         "NRG_2_hg38+hg38_1000G")
+
+
 _STUB_ENGINE = r"""#!/bin/bash
 printf '%s\n' "$*" >> "$STUB_LOG"
 # the reference search is the last step a reference-only run needs here

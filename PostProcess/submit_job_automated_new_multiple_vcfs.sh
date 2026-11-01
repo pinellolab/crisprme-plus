@@ -803,6 +803,9 @@ while read vcf_f; do
 			_n=${_b#*_}
 			_n=${_n%%_*}
 			case "$_n" in '' | *[!0-9]*) continue ;; esac
+			# The glob also matches the index of a genome whose name merely ends in
+			# _<suffix> (NRG_2_mini_hg38 for hg38): that index holds another genome.
+			[ "${_b#"${_pam}_${_n}_"}" = "$_suffix" ] || continue
 			[ "$_n" -ge "$_want" ] || continue
 			if [ "$_pam" = "$_pam_want" ]; then
 				_exact=1
@@ -1100,6 +1103,7 @@ while read vcf_f; do
 			[ -d "$_l" ] || continue
 			_b=${_l##*/}; _b=${_b%.lock}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
 			case "$_n" in '' | *[!0-9]*) continue ;; esac
+			[ "${_b#"${_p}_${_n}_"}" = "$ref_name" ] || continue  # another genome's (see _resolve_index_dir)
 			[ "$_n" -ge "$bMax" ] || continue
 			if [ "$_p" != "$true_pam" ]; then
 				{ [ -n "$_p" ] && [ -z "${_p//N/}" ]; } || continue

@@ -46,6 +46,18 @@
   run completes. Searches of a genome in `Genomes/` are unchanged (the same folder); reference and
   variant search outputs were compared byte for byte, with and without bulges. Covered by
   `PostProcess/test_assembly_haplotype_genomes.py`.
+- **A search could run on the index of another genome whose name ends in the searched genome's
+  name.** The pipeline picks an installed index by the genome's name,
+  `genome_library/<PAM>_<N>_<name>`, but the pattern it matched also took
+  `<PAM>_<N>_<prefix>_<name>`, the index of another genome: with `NRG_2_mini_hg38` installed, a
+  search of `hg38` with bulges used it instead of building `hg38`'s own, and used it ahead of an
+  installed `NRG_3_hg38` too, as the smaller bulge budget won; nothing in the output said so. With
+  the per-haplotype index names above, the same happened between two individuals whose folder names
+  end alike: reproduced with `X_WALK01` searched first, after which both of `WALK01`'s haplotypes
+  logged `Reference index present (NRG_2_X_WALK01_...)` and reported `X_WALK01`'s sites. Only an
+  index named for the genome itself is now taken. A library without two such names picks the same
+  index as before, and reference and variant search outputs were compared byte for byte. Covered by
+  `PostProcess/test_assembly_haplotype_genomes.py`.
 - **The personal-assembly results header and History named both haplotypes "genome".** They showed
   `Paternal genome: genome | Maternal genome: genome`: the name of the folder every bundle haplotype
   is kept in, which `assembly-search` wrote into the job's `.Params.txt` when it finished (the web
