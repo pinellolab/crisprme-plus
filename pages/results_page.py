@@ -57,6 +57,7 @@ from .pages_utils import (
     generate_table,
     generate_table_samples,
 )
+from .load_page import _failure_text
 from app import (
     app,
     cache,
@@ -168,6 +169,52 @@ def _plot_token(criterion: str) -> str:
     return str(criterion).replace("-", "_")
 
 
+def _result_not_ready(job_id: str) -> Optional[html.Div]:
+    """The page a results link shows when its job has no results to show, else None.
+
+    A results link (saved, emailed, typed) can name a job that does not exist, that
+    failed or was refused, that found nothing, or that has not finished. None of
+    these has the integrated results file the results pages start from, and opening
+    one failed on it with a server error and a blank page. Say what happened instead,
+    in the words of the job's status page, with a link to that page. A job WITH its
+    integrated results is left to the results page, as before."""
+    job_directory = os.path.join(current_working_directory, RESULTS_DIR, job_id)
+    if not job_id or not os.path.isdir(job_directory):
+        return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
+    if glob(os.path.join(job_directory, "*integrated*")):
+        return None
+    log_error = os.path.join(job_directory, "log_error.txt")
+    try:
+        with open(os.path.join(job_directory, "log.txt"), errors="replace") as fh:
+            log = fh.read()
+    except OSError:
+        log = ""
+    if os.path.isfile(log_error) and os.path.getsize(log_error) > 0:
+        message, color = _failure_text(job_directory), "danger"
+    elif "No off-targets found" in log:
+        message, color = (
+            "Finished: no off-targets were found for the provided guide(s) with these "
+            "parameters, so there are no results to view.",
+            "info",
+        )
+    else:
+        message, color = (
+            "This search has not finished yet, so there are no results to view. Its "
+            "status page shows how far it has got.",
+            "info",
+        )
+    return html.Div(
+        [
+            dbc.Alert(message, color=color),
+            dcc.Link(
+                "Open the status page of this search",
+                href=f"{URL}/load?job={job_id}",
+            ),
+        ],
+        style={"margin": "1%"},
+    )
+
+
 def result_page(job_id: str) -> html.Div:
     """Print the results page layout (guides table + images).
     The guides table contains the research profile found during
@@ -195,6 +242,10 @@ def result_page(job_id: str) -> html.Div:
     # check input function arguments
     if not isinstance(job_id, str):
         raise TypeError(f"Expected {str.__name__}, got {type(job_id).__name__}")
+    # no results to show (no such job, failed, refused, nothing found, unfinished)
+    not_ready = _result_not_ready(job_id)
+    if not_ready is not None:
+        return not_ready
     # start result page creation code
     value = job_id
     job_directory = os.path.join(current_working_directory, "Results", f"{job_id}")
@@ -3185,8 +3236,10 @@ def cluster_page(job_id: str, hash_term: str) -> html.Div:
     chr_pos = hash_term[(hash_term.find("-Pos-") + 5) :]
     chromosome = chr_pos.split("-")[0]
     position = chr_pos.split("-")[1]
-    if not os.path.isdir(os.path.join(current_working_directory, RESULTS_DIR, job_id)):
-        return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
+    # no results to show (no such job, failed, refused, nothing found, unfinished)
+    not_ready = _result_not_ready(job_id)
+    if not_ready is not None:
+        return not_ready
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)
@@ -3732,8 +3785,10 @@ def sample_page(job_id: str, hash_term: str) -> html.Div:
         raise TypeError(f"Expected {str.__name__}, got {type(hash_term).__name__}")
     guide = hash_term[: hash_term.find("-Sample-")]
     sample = str(hash_term[(hash_term.rfind("-") + 1) :])
-    if not os.path.isdir(os.path.join(current_working_directory, RESULTS_DIR, job_id)):
-        return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
+    # no results to show (no such job, failed, refused, nothing found, unfinished)
+    not_ready = _result_not_ready(job_id)
+    if not_ready is not None:
+        return not_ready
     try:
         with open(
             os.path.join(current_working_directory, RESULTS_DIR, job_id, PARAMS_FILE)
@@ -4086,8 +4141,10 @@ def guidePagev3(job_id, hash):
     value = job_id
     print(job_id)
     print("------")
-    if not os.path.isdir(os.path.join(current_working_directory, "Results/", job_id)):
-        return html.Div(dbc.Alert("The selected result does not exist", color="danger"))
+    # no results to show (no such job, failed, refused, nothing found, unfinished)
+    not_ready = _result_not_ready(job_id)
+    if not_ready is not None:
+        return not_ready
     with open(os.path.join(current_working_directory, "Results/", job_id, ".Params.txt")) as p:
         all_params = p.read()
         genome_type_f = (

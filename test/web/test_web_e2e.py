@@ -75,7 +75,18 @@ def main():
         for path in PAGES:
             check_page(page, path, failures)
 
-        # 3. no uncaught JS errors anywhere in the walk
+        # 3. a results link to a job that does not exist (or failed, or has not
+        # finished) says so, instead of a server error and a blank page
+        server_errors = []
+        page.on("response", lambda r: server_errors.append(r.url) if r.status >= 500 else None)
+        check_page(page, "/result?job=NOSUCHJOB", failures)
+        content = page.inner_text("#page-content") if page.locator("#page-content").count() else ""
+        if "The selected result does not exist" not in content:
+            failures.append(f"/result?job=NOSUCHJOB: no 'does not exist' message ({content[:200]!r})")
+        if server_errors:
+            failures.append(f"/result?job=NOSUCHJOB: server error(s) on {server_errors}")
+
+        # 4. no uncaught JS errors anywhere in the walk
         if js_errors:
             failures.append(f"uncaught JS error(s): {js_errors}")
 
