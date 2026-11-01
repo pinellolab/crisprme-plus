@@ -210,10 +210,12 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_risk_card -v
 
-      - name: "Top-1000 and Personal Risk Card plots draw every site (perfect matches starred, 1-edit sites kept)"
+      - name: "Top-1000 and Personal Risk Card plots draw every site (perfect matches starred, 1-edit sites kept, one site too); the report says what its top-1000 views leave out"
         # CRISPRme_plots.py / CRISPRme_plots_personal.py dropped every site with
         # mismatches+bulges <= 1, the on-target and any variant-created perfect match
-        # among them, with nothing on the plot to say so. matplotlib + pandas only.
+        # among them, with nothing on the plot to say so. The shareable report still
+        # leaves them out of its own top-1000 plots and tables, now with a caption.
+        # matplotlib + pandas only.
         working-directory: PostProcess
         run: python -m unittest test_top_plots -v
 
