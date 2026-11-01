@@ -602,6 +602,24 @@ amd64, whose CRISPR-Bulge scorer env carries the CUDA build of TensorFlow.
 
 You are now ready to run CRISPRme using Docker.
 
+**Smoke-test the image** with the brute-force benchmark CI runs (the same self-test as a
+[source install](#13-install-crisprme-from-source-without-bioconda), in its Docker form). In an
+empty folder:
+
+```bash
+mkdir crisprme_test && cd crisprme_test
+docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -e CRISPRME_SKIP_HEAVY=1 \
+  -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py validate-test --chrom chr22   # expect: 2 passed, 0 failed, 2 skipped
+```
+
+Pass the two variables with `-e`, as above. Written in front of `docker run`
+(`CRISPRME_ALLOW_ONDEMAND_BUILD=1 docker run ...`) they are set on your machine only, never in
+the container, so `complete-test` looks for a prebuilt index, finds none, and exits 0 having
+tested nothing. The run took about 10 minutes at 8 threads on an Apple Silicon Mac in testing.
+
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
 Use this to run the CRISPRme+ line (Python 3.11 + Dash 2.x) from a checkout, for development or on a Linux system where you prefer not to use Bioconda. It installs the runtime dependencies into a conda environment, **builds CRISPRitz 2.9.1 from source**, and installs CRISPRme from the checkout — using the same layout the Bioconda/Docker builds use, so `crisprme.py` and `crispritz.py` end up on your `PATH` and resolve their support files correctly.

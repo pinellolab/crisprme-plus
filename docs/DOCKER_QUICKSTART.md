@@ -84,6 +84,25 @@ docker pull pinellolab/crisprme:latest
 > have — run `docker pull pinellolab/crisprme:latest` again to update. Skipping this makes an
 > old image error with `download is not an allowed command`.
 
+**Optional: check the image.** The self-test that CI runs downloads chromosome 22 with its
+1000 Genomes variants, builds small test indexes, searches them, and compares the off-targets
+with a brute-force ground truth. It took about 10 minutes at 8 threads on an Apple Silicon Mac in
+testing. Run it in an empty folder of its own, not the data folder of step 2:
+
+```bash
+mkdir -p ~/crisprme_test && cd ~/crisprme_test
+docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -e CRISPRME_SKIP_HEAVY=1 \
+  -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py validate-test --chrom chr22   # expect: 2 passed, 0 failed, 2 skipped
+```
+
+Pass both variables with `-e`, as above: written in front of `docker run` they are set on
+your computer only, not in the container, so `complete-test` finds no prebuilt index and exits
+having tested nothing. `CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode, and
+`CRISPRME_SKIP_HEAVY=1` skips the two benchmarks whose index builds need more than 16 GB of RAM.
+
 ## 2. Make a folder to hold your data and results
 
 Everything CRISPRme downloads and produces will live here (so it is kept between

@@ -313,9 +313,12 @@ and the `release-crisprme` skill.
   only`. It used to be compared there, with every CRISPRme site off chr22 counted as extra: after
   the chr21 run that line names, `validate-test --chrom chr21` reported `[cas12a_hbg] FAILED`
   (223 extra sites) where it now ends `1 passed, 0 failed, 3 skipped`. Validation on chr22 is
-  unchanged. Also in the README: §1.3 clones the `v2.8.1` tag rather than `main`, and §1.2 says
-  the image is built from source (CRISPRitz v2.9.1 compiled in it) and gives its download and
-  on-disk sizes separately. Covered by `PostProcess/test_validate_test.py`.
+  unchanged. In Docker, the only route on macOS, the two variables must be passed with `-e`: set
+  in front of `docker run` they stay on the host, and the run tests nothing. README §1.2 and
+  `docs/DOCKER_QUICKSTART.md` now give that form. Also in the README: §1.3 clones the `v2.8.1` tag
+  rather than `main`, and §1.2 says the image is built from source (CRISPRitz v2.9.1 compiled in
+  it) and gives its download and on-disk sizes separately. Covered by
+  `PostProcess/test_validate_test.py`.
 - **An index still being built could be selected as if it were finished.** A build takes
   `<dir>.lock`, and `index-genome` then creates the index directory and writes one `.bin` per
   chromosome, so for the whole build a half-written index is indistinguishable from a complete one
