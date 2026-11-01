@@ -19,7 +19,8 @@ on:
       # This job's tests read these too, so a PR touching only them must still run it:
       # pages/ (test_sanitize_job_name, test_bulge_cap and test_samplesid_emit read main_page.py,
       # test_dash_output_props the folder, via AST-extraction, no Dash needed), scripts/
-      # (test_hf_sha256sums, generate_cfd_tables.py --check), PAMs/ (test_index_resolution),
+      # (test_hf_sha256sums, generate_cfd_tables.py --check, test_check_alt_pam's release
+      # gate), PAMs/ (test_index_resolution),
       # test/benchmark/ (test_validate_test, test_complete_test, test_ci_workflows), and the
       # docs that test_complete_search_flags, test_install_from_source, test_hf_sha256sums and
       # test_ci_workflows scan.
@@ -202,7 +203,7 @@ jobs:
           python test_indel_snp_cis.py
           python test_indel_snp_bruteforce.py
 
-      - name: "Indel+SNP per-haplotype resolution (2.8.1: each carrier's own SNP alleles, never another sample's; the PAM over every IUPAC code; the real analisi_indels_NNN.py on a phased fixture)"
+      - name: "Indel+SNP per-haplotype resolution (2.8.1: each carrier's own SNP alleles, never another sample's; the PAM over every IUPAC code; the real analisi_indels_NNN.py on a phased fixture) + the ALT-PAM release gate"
         # Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid
         # fake-indel genome column by column, without genotypes: one sample's indel
         # was reported with SNP alleles only other samples carry, and an R at NRG's
@@ -210,9 +211,11 @@ jobs:
         # resolver (indel_snp_cis.resolve_target) over every IUPAC code at every PAM
         # position and on table-driven phased cases; test_indel_overlaid_rows runs
         # the shipped analyzer on a fixture with the repo's own Tier-0 / Tier-1 /
-        # indel-store writers (pandas + numpy; intervaltree is stubbed when absent).
+        # indel-store writers (pandas + numpy; intervaltree is stubbed when absent);
+        # test_check_alt_pam covers scripts/check_alt_pam.py, which
+        # validate-benchmarks runs on the chr22 outputs.
         working-directory: PostProcess
-        run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows -v
+        run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows test_check_alt_pam -v
 
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
