@@ -1,22 +1,43 @@
-<!-- [2.8.1] entries of the "wset" track (web Settings / data manager), to merge into
-CHANGELOG.md: the first two under "### Changed", the others under "### Fixed".
-For the docs track: a Settings variant build now passes the dataset's sample list as
---samplesID (first Fixed entry below), so the build-index-only / search ERROR for unfinished
-tiers no longer says "a build from the web Settings page passes none": it says to run
-build-index-only again to its end "with <dataset> and its --samplesID (or build it again in
-the web Settings page, which passes the dataset's sample list)". The two places in
-CHANGELOG.md's existing [2.8.1] entry on unfinished parts that say a Settings build passes
-no --samplesID ("from the command line, with their `--samplesID`, which a build from the
-web Settings page passes none of" and "a run without it (a build from the web Settings
-page) does not write") should say the same: "(for the tiers, with their `--samplesID`, or
-built again in the web Settings page)" and "a run without it (as a build from the web
-Settings page was before this release)".
-The first Changed entry gives the tables of a search that reads the tiers, as measured at
-this commit. It leaves out the REF columns of a SNP row there (no lowercase mismatches, so
-the REF seed and non-seed counts leave the mismatches out: round 4 review F3-tier-REF),
-which another track fixes in this release (PostProcess/new_simple_analysis.py); with an
-equivalent change in, those columns are as the dictionaries give them, and the rest of the
-entry holds as it stands. -->
+<!-- wset track (web Settings / data manager): [2.8.1] entries, merged by the docs track. -->
+
+**For the docs track: two amendments to an entry already in `## [2.8.1]`, then new entries.** A
+variant build in the web Settings page now passes the dataset's sample list as `--samplesID` (the
+first entry under Fixed below), and the ERROR that `build-index-only` and the search script give for
+tiers still marked unfinished now says so: run `build-index-only` again to its end "with <dataset>
+and its --samplesID (or build it again in the web Settings page, which passes the dataset's sample
+list)". The entry **"A `build-index-only --vcf` run stopped while it writes the dict-less tiers or
+the indel genotype store no longer leaves a part of them that searches use as the whole"** (under
+`### Fixed`, line 614 of `CHANGELOG.md` at aa9c54b) still says twice that a Settings build passes no
+`--samplesID`. Replace (line numbers are those of `CHANGELOG.md` at aa9c54b):
+
+1. lines 636-637:
+
+   > `build-index-only` again to its end (for the tiers, from the command line, with their
+   > `--samplesID`, which a build from the web Settings page passes none of) or, for the tiers and the
+
+   with
+
+   > `build-index-only` again to its end (for the tiers, with their `--samplesID`, or built again in
+   > the web Settings page) or, for the tiers and the
+
+2. lines 647-648:
+
+   > with `--samplesID` was stopped writing, which a run without it (a build from the web Settings
+   > page) does not write: it exited 0, which the Settings page showed as done, while every search of
+
+   with
+
+   > with `--samplesID` was stopped writing, which a run without it (as a build from the web
+   > Settings page was before this release) does not write: it exited 0, which the Settings page
+   > showed as done, while every search of
+
+The rest of that entry stays as it is. The new entries below go where their headings say: the first
+two under `### Changed`, the others under `### Fixed`. The first entry under Changed gives the
+tables as they are with the fix of the tier path's REF columns (the tierref track,
+`PostProcess/new_simple_analysis.py`), with which those columns are as the dictionaries give
+them. If that fix does not land in 2.8.1, add to that entry, after "and an indel's is still the
+VCF's;": "on a SNP row the reference alignment has no lower-case mismatches, so its REF seed and
+non-seed counts leave the mismatches out (they count only the row's bulges);".
 
 ### Changed
 - **A search of a VCF dataset built in the web Settings page reads its dict-less tiers, so its
