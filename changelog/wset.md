@@ -89,13 +89,13 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   labelled `[sites-only (allele frequencies)]` on the search form, and could not run per-sample.
   Adding a dataset in Settings (an upload, or a registered server folder), or building its variant
   index there, now writes that list from the VCF headers when there is none, in the 4-column layout
-  of the shipped lists: exactly the samples the VCFs genotype (a listed sample no VCF genotypes
-  would count as hom-ref and deflate every allele frequency), each with the population,
-  superpopulation and sex an installed sample list gives it (a downloaded panel's, or yours; of the
-  lists that give it a superpopulation, the last by file name), and with the dataset as its
-  population and `unknown` superpopulation and sex when no list gives it a superpopulation (the
-  shareable report reads every list for a sample's superpopulation, and a list that gave `unknown`
-  to a panel's samples turned them unknown in the reports of the panel's searches).
+  of the shipped lists: exactly the samples the VCFs genotype (a command-line search refuses a list
+  that names a sample no VCF genotypes, #46, or that leaves out one they genotype), each with the
+  population, superpopulation and sex an installed sample list gives it (a downloaded panel's, or
+  yours; of the lists that give it a superpopulation, the last by file name), and with the dataset
+  as its population and `unknown` superpopulation and sex when no list gives it a superpopulation
+  (the shareable report reads every list for a sample's superpopulation, and a list that gave
+  `unknown` to a panel's samples turned them unknown in the reports of the panel's searches).
   The list is written again when a file added to the dataset, or a build of its index, gives another
   one (a file with other samples, a sample list installed or removed since), and it goes when the
   dataset is removed in Settings. A list from anywhere else (one you wrote or edited, or a
