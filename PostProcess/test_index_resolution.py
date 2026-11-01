@@ -25,7 +25,8 @@ covers the RAM guard, which must size a search by the index the resolver picked.
 ``AFinishedRunRestoresOnlyRealAnnotations`` runs the script's last annotation step,
 which must leave the empty placeholder alone, and
 ``TheSamplesPlaceholderIsNeverWritten`` runs the script with the empty samples
-placeholder, which it must leave alone too.
+placeholder, which it must leave alone too, and its samples-list blocks with a list of
+the user's own that has the placeholder's name, which they must still read whole.
 """
 
 import os
@@ -668,11 +669,13 @@ class _ShippedScript(unittest.TestCase):
                 (library / f"{p}_hg38+{self.VCF}_INDELS").mkdir()
 
     def run_pipeline(self, pam="20bp-NRG-SpCas9", bulges=1, prune=0, variant=True,
-                     index_path=None, threads=1, env=None, timeout=300, samples=None):
+                     index_path=None, threads=1, env=None, timeout=300, samples=None,
+                     postprocess=None):
         """Run the script the way complete-search launches it, stopping at its last
         search."""
         return self.finish(self.launch(pam, bulges, prune, variant, index_path,
-                                       threads, env, samples=samples), timeout)
+                                       threads, env, samples=samples,
+                                       postprocess=postprocess), timeout)
 
     def finish(self, run, timeout=300):
         """Wait for a launched run; a run still going after `timeout` is a failure."""
@@ -685,13 +688,17 @@ class _ShippedScript(unittest.TestCase):
         return _Run(run.stdout(), run.calls(), run.stderr())
 
     def launch(self, pam="20bp-NRG-SpCas9", bulges=1, prune=0, variant=True,
-               index_path=None, threads=1, env=None, wrap=(), samples=None):
+               index_path=None, threads=1, env=None, wrap=(), samples=None,
+               postprocess=None):
         """Start the script the way complete-search launches it (argument order of
         crisprme.py's crisprme_run), in a session of its own, so that a test can
         signal the whole run as Ctrl-C or a container stop does. `env` adds to its
         environment; the RAM thread guard is off unless `env` turns it on. `wrap` is a
         command that runs the script's bash as its child. `samples` is the samplefile
-        to hand it in place of the run's own."""
+        to hand it in place of the run's own. `postprocess` is the PostProcess folder
+        to run it from, which complete-search also passes as its folder (the helpers
+        the script runs, and the samples placeholder); the shipped one by default."""
+        postprocess = Path(postprocess or _SCRIPT.parent)
         self.runs += 1
         work = self.root / f"run{self.runs}"
         out = work / "out"
@@ -714,7 +721,7 @@ class _ShippedScript(unittest.TestCase):
         if index_path is None:
             index_path = self.library if prune else "_"
         args = [self.home / "Genomes" / "hg38", vcfs, guides, pam_file, empty, samples,
-                bulges + 1, 4, bulges, bulges, 3, out, _SCRIPT.parent, threads, self.home,
+                bulges + 1, 4, bulges, bulges, 3, out, postprocess, threads, self.home,
                 empty, "_", 1, 0, "_", "mm+bulges", "mm+bulges,mm", "False", "PASS,.",
                 index_path, 6, prune]
         run_env = dict(os.environ, PATH=self.path, STUB_LOG=str(work / "engine_calls.txt"),
@@ -724,7 +731,8 @@ class _ShippedScript(unittest.TestCase):
         # stderr goes where complete-search sends it: the script fails a stage
         # whenever log_error.txt is non-empty
         with open(out / "log_error.txt", "w") as err, open(work / "stdout.txt", "w") as so:
-            proc = subprocess.Popen([*wrap, "bash", str(_SCRIPT), *map(str, args)], cwd=work,
+            proc = subprocess.Popen([*wrap, "bash", str(postprocess / _SCRIPT.name),
+                                     *map(str, args)], cwd=work,
                                     env=run_env, stdout=so, stderr=err, text=True,
                                     start_new_session=True)
         self.addCleanup(_reap, proc)
@@ -2940,14 +2948,18 @@ class AFinishedRunRestoresOnlyRealAnnotations(unittest.TestCase):
 
 
 def _samplefile_blocks():
-    """The shipped blocks that add the samplefile's trailing newline as a run starts and
-    strip it as the run ends, verbatim: each from its comment to its fi."""
+    """The shipped blocks that handle the samplefile ($6), verbatim: the one that adds
+    its trailing newline as a run starts (from its comment to its fi), the loop that
+    reads the datasets it lists, and the one that strips the newline as a finished run
+    ends (from its comment to its fi)."""
     text = _SCRIPT.read_text()
     blocks = []
-    for comment in ("# $6 is the samplefile.",
-                    "# Strip the trailing newline from the empirical/sample file"):
-        start = text.index(comment)
-        blocks.append(text[start:text.index("\nfi\n", start) + len("\nfi\n")])
+    for first, last in (("# $6 is the samplefile", "\nfi\n"),
+                        ("while read samples; do", "\ndone <$sampleID\n"),
+                        ("# Strip the trailing newline from the empirical/sample file",
+                         "\nfi\n")):
+        start = text.index(first)
+        blocks.append(text[start:text.index(last, start) + len(last)])
     return blocks
 
 
@@ -2957,17 +2969,36 @@ class TheSamplesPlaceholderIsNeverWritten(_ShippedScript):
     samplefile. The script added a newline to it as the run started and stripped it only
     at the run's very end, so every run that ended before -- no hits, an error, a Ctrl-C
     -- left one more newline in it for good. The stub ends these runs at their last
-    search, before that end."""
+    search, before that end. The script tells the placeholder apart as that very file,
+    the vuoto.txt of the PostProcess folder it is run from, so each test runs it from a
+    copy of that folder: a samples list of the user's own may be called vuoto.txt too,
+    and must still be read whole."""
 
     def setUp(self):
         super().setUp()
-        self.vuoto = self.root / "PostProcess" / "vuoto.txt"
-        self.vuoto.parent.mkdir()
+        self.postprocess = self.root / "PostProcess"
+        shutil.copytree(_SCRIPT.parent, self.postprocess,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        self.vuoto = self.postprocess / "vuoto.txt"
         self.vuoto.write_bytes(b"")
+
+    def run_blocks(self, samplefile, *blocks):
+        """Run shipped blocks in one bash with `samplefile` as $6 and the variables they
+        read set as the script sets them, for a run from this test's PostProcess copy."""
+        out = self.root / "blocks"
+        out.mkdir(exist_ok=True)
+        script = (f"starting_dir={shlex.quote(str(self.postprocess))}\n"
+                  'sampleID=$(realpath "$6")\n'
+                  f"current_working_directory={shlex.quote(str(self.home))}\n"
+                  f"output_folder={shlex.quote(str(out))}\n"
+                  "logerror=$output_folder/log_error.txt\n" + "".join(blocks))
+        return subprocess.run(["bash", "-c", script, "bash", *["_"] * 5, str(samplefile)],
+                              capture_output=True, text=True)
 
     def test_a_reference_only_search_leaves_it_empty(self):
         self.install("NRG_3", variant=False)
-        run = self.run_pipeline(variant=False, samples=self.vuoto)
+        run = self.run_pipeline(variant=False, samples=self.vuoto,
+                                postprocess=self.postprocess)
         self.assertEqual(run.searched(variant=False), ("NRG_3_hg38", False))
         self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed",
                          run.stderr)
@@ -2975,7 +3006,7 @@ class TheSamplesPlaceholderIsNeverWritten(_ShippedScript):
 
     def test_a_variant_search_without_samples_leaves_it_empty(self):
         self.install("NRG_3")
-        run = self.run_pipeline(samples=self.vuoto)
+        run = self.run_pipeline(samples=self.vuoto, postprocess=self.postprocess)
         self.assertEqual(run.searched(variant=True), (f"NRG_3_hg38+{self.VCF}", False))
         self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed",
                          run.stderr)
@@ -2985,18 +3016,37 @@ class TheSamplesPlaceholderIsNeverWritten(_ShippedScript):
         # the newline that `while read` needs for the last line, stripped as a finished
         # run ends; the placeholder is left as it is by both, even one an older run left
         # a newline in
-        add, strip = _samplefile_blocks()
+        add, _, strip = _samplefile_blocks()
         samples = self.root / "samples.txt"
         samples.write_text(f"{self.VCF}.samplesID.txt")
         self.vuoto.write_bytes(b"\n")
         for block, body in ((add, f"{self.VCF}.samplesID.txt\n"),
                             (strip, f"{self.VCF}.samplesID.txt")):
             for samplefile in (samples, self.vuoto):
-                out = subprocess.run(["bash", "-c", block, "bash", *["_"] * 5, str(samplefile)],
-                                     capture_output=True, text=True)
+                out = self.run_blocks(samplefile, block)
                 self.assertEqual((out.returncode, out.stderr), (0, ""))
             self.assertEqual(samples.read_text(), body)
             self.assertEqual(self.vuoto.read_bytes(), b"\n")
+
+    def test_a_samples_list_of_ones_own_called_vuoto_txt_is_read_whole(self):
+        # its one line has no newline, so `while read` reads it only with the one the
+        # script adds; a finished run leaves the list as it was, and the placeholder alone.
+        # Told apart by name, the list got no newline, its dataset was never read, and
+        # the run failed only at its end, on the samples its results name.
+        add, read, strip = _samplefile_blocks()
+        rows = "S1\tPOP1\tSUP1\tF\nS2\tPOP1\tSUP1\tM\n"
+        (self.home / "samplesIDs").mkdir()
+        (self.home / "samplesIDs" / f"{self.VCF}.samplesID.txt").write_text(
+            "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n" + rows)
+        mine = self.root / "lists" / "vuoto.txt"
+        mine.parent.mkdir()
+        mine.write_text(f"{self.VCF}.samplesID.txt")
+        out = self.run_blocks(mine, add, read, strip)
+        self.assertEqual((out.returncode, out.stderr), (0, ""))
+        read_in = self.root / "blocks" / ".sampleID.txt"
+        self.assertEqual(read_in.read_text() if read_in.exists() else "", rows)
+        self.assertEqual(mine.read_text(), f"{self.VCF}.samplesID.txt")
+        self.assertEqual(self.vuoto.read_bytes(), b"")
 
 
 class ShippedScriptCarriesTheFix(unittest.TestCase):

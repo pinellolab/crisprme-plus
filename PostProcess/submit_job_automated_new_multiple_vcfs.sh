@@ -139,14 +139,15 @@ if [ $2 == "_" ]; then
 	vcf_list=$output_folder/tmp_list_vcf.txt
 fi
 echo >>$vcf_list
-# $6 is the samplefile. A search with none (reference-only, or variant-aware without
-# --samplesID) is handed the install's shared empty placeholder PostProcess/vuoto.txt,
-# which is never written: the newline added here stayed in it for good whenever a run
-# ended before stripping it again (no hits, an error, a Ctrl-C), one more each time. Its
-# basename tells it apart, as for the annotation placeholder. A real samplefile gets
-# the trailing newline only when it is writable, so a read-only one does not die with
-# "Read-only file system".
-if [ $6 != "_" ] && [ "$(basename "$6")" != "vuoto.txt" ] && [ -w "$6" ]; then
+# $6 is the samplefile, read below with `while read`, which drops a last line with no
+# newline: hence the one added here. A search with none (reference-only, or variant-aware
+# without --samplesID) is handed the install's shared empty placeholder
+# $starting_dir/vuoto.txt, which is never written: a newline added to it stayed there for
+# good whenever a run ended before stripping it again (no hits, an error, a Ctrl-C), one
+# more each time. It is told apart as that very file (-ef), not by its name, which a
+# samples list of the user's own may share. A real samplefile gets the trailing newline
+# only when it is writable, so a read-only one does not die with "Read-only file system".
+if [ $6 != "_" ] && [ ! "$6" -ef "$starting_dir/vuoto.txt" ] && [ -w "$6" ]; then
 	echo >>$6
 fi
 
@@ -1910,10 +1911,10 @@ truncate -s -1 $guide_file
 truncate -s -1 $vcf_list
 # Strip the trailing newline from the empirical/sample file ONLY when it is a real,
 # non-empty, WRITABLE file. The "no empirical data" case passes the shipped read-only
-# placeholder (PostProcess/vuoto.txt), which got no newline; truncating it fails on a
-# read-only install (e.g. an Apptainer/Singularity SIF) and aborted assembly-search
-# there (issue #143).
-if [ "$6" != "_" ] && [ "$(basename "$6")" != "vuoto.txt" ] && [ -s "$6" ] && [ -w "$6" ]; then
+# placeholder ($starting_dir/vuoto.txt, told apart as that very file), which got no
+# newline; truncating it fails on a read-only install (e.g. an Apptainer/Singularity SIF)
+# and aborted assembly-search there (issue #143).
+if [ "$6" != "_" ] && [ ! "$6" -ef "$starting_dir/vuoto.txt" ] && [ -s "$6" ] && [ -w "$6" ]; then
 	truncate -s -1 "$6"
 fi
 # END STEP 8 - results integration
