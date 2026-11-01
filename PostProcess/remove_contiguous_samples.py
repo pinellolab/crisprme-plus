@@ -30,6 +30,17 @@ def _rep_tiebreak(x):
     the per-site ``observed_haplotypes`` companion lists every one regardless. The carrier
     count is read from the samples column (``true_guide - 2``); ref rows and empty/sentinel
     rosters count as 0, so this is inert for them and they fall through to the DNA/pos key.
+
+    2.8.1: aligned DNA is not quite unique within a cluster. A row of SNPs and a row with
+    an indel can give the same bases at the same position; on the dict-less tiers their
+    aligned DNA is then the same string (the dictionary path keeps the IUPAC codes of the
+    other variants in an indel row, so it rarely has such a tie). They fell through to
+    input order, which is the whole-line sort of the merge step, so the REF alignment's
+    letter case and then the sample IDs decided which row was reported. The last key
+    element settles it: the row of SNPs comes first. A variant token is
+    ``<contig>_<pos>_<ref>_<alt>``, split from the right because a contig name can hold
+    '_'; a REF or ALT longer than one base comes from the indel path. It is consulted only
+    after everything else ties, so no other choice of representative can change.
     """
     try:
         _samples = str(x[true_guide - 2])
@@ -39,8 +50,13 @@ def _rep_tiebreak(x):
         )
     except Exception:  # never let the tie-break break the sort
         _ncarriers = 0
-    # -_ncarriers => most carriers first; then the intrinsic deterministic discriminators.
-    return (-_ncarriers, str(x[2]), str(x[pos - 1]))
+    _has_indel = any(
+        len(_var) == 4 and (len(_var[2]) > 1 or len(_var[3]) > 1)
+        for _var in (_tok.rsplit("_", 3) for _tok in str(x[snp_info]).split(","))
+    )
+    # -_ncarriers => most carriers first; then the intrinsic deterministic discriminators;
+    # False sorts first => a row of SNPs before a row with an indel.
+    return (-_ncarriers, str(x[2]), str(x[pos - 1]), _has_indel)
 
 
 def _merged_list(kept, other):
