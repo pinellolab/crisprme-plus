@@ -29,7 +29,8 @@ ADDITIVE + GATED + GUARDED (see ``emit_dictless_tiers_guarded``):
     then falls back to the legacy dict path (its resolvers return None on absence).
   * GUARDED  -- ``emit_dictless_tiers_guarded`` wraps the emission in try/except and
     logs a clear WARNING to STDOUT (NEVER stderr -- stderr is fatal in this
-    pipeline's ``[ -s $logerror ]`` stage checks) and NEVER raises.
+    pipeline's ``[ -s $logerror ]`` stage checks) and NEVER raises, but for a
+    full disk or quota, an I/O error or no memory left (``ends_the_build``).
 
 gz DECISION: the emission reads whichever dict exists (plain or ``.json.gz``). Both
 compile functions ultimately stream via ``tier0_compile.iter_dict_records``, which
@@ -44,6 +45,7 @@ STDLIB ONLY (os) plus the two tier modules (import-guarded at the call site).
 
 from __future__ import annotations
 
+import errno
 import os
 
 
@@ -249,15 +251,25 @@ def emit_dictless_tiers(dict_path, db_to_samplesid, chrom, dictionaries_dir=None
     }
 
 
+def ends_the_build(exc):
+    """True for a failure that every chromosome after this one would hit too: a full
+    disk or quota (ENOSPC, EDQUOT), an I/O error (EIO), no memory left. The guarded
+    emitter raises it again rather than skip the chromosome, and build-index-only
+    ends with an ERROR on it, the tiers left marked unfinished."""
+    return isinstance(exc, MemoryError) or (
+        isinstance(exc, OSError) and exc.errno in (errno.ENOSPC, errno.EDQUOT, errno.EIO))
+
+
 def emit_dictless_tiers_guarded(dict_path, db_to_samplesid, chrom,
                                 dictionaries_dir=None, *,
                                 subpop_field="superpopulation"):
-    """GUARDED ``emit_dictless_tiers``: never raises; logs to STDOUT on failure.
+    """GUARDED ``emit_dictless_tiers``: logs to STDOUT on failure.
 
-    Returns the paths dict on success, or None on ANY failure (missing dict, missing
-    tier modules, compile error). A failure logs a clear WARNING to STDOUT (NEVER
-    stderr -- stderr writes fail the pipeline's ``[ -s $logerror ]`` stage checks)
-    and leaves the dict build untouched. This is the function build call sites use.
+    Returns the paths dict on success, or None on any other failure (missing dict,
+    missing tier modules, compile error). A failure logs a clear WARNING to STDOUT
+    (NEVER stderr -- stderr writes fail the pipeline's ``[ -s $logerror ]`` stage
+    checks) and leaves the dict build untouched. This is the function build call
+    sites use. It raises only a failure that ends the build (``ends_the_build``).
     """
     try:
         return emit_dictless_tiers(
@@ -265,6 +277,8 @@ def emit_dictless_tiers_guarded(dict_path, db_to_samplesid, chrom,
             subpop_field=subpop_field,
         )
     except Exception as exc:  # never let tier emission abort the dict build
+        if ends_the_build(exc):
+            raise
         print(
             "WARNING [build_dictless_tiers]: could not emit dictless tiers for "
             "%s (chrom %s): %s -- the per-sample dict is unaffected; the search "

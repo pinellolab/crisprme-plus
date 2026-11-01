@@ -471,11 +471,19 @@ and the `release-crisprme` skill.
   run `build-index-only` again to its end, and the results page shows it. The same goes for the
   enriched genome and the fake-indel genome marked unfinished (above). `publish-index` refuses
   such an index too. On success the files, their contents, stdout lines and exit status are as
-  before, and a chromosome whose tiers or indel genotypes fail to be written is still skipped with
-  a WARNING and searched without them, as before. Downloaded indexes carry no mark. A part that a
-  run of an earlier release left has no mark and is not detected: if such a run was stopped while
-  it emitted the tiers or the indel genotype store, run `build-index-only` again to its end before
-  you search with that dataset.
+  before. A chromosome whose tiers or indel genotypes fail to be written is still skipped with a
+  WARNING, but the mark now stays, as the next line says, since a search would take the part
+  written for the whole: run `build-index-only` again, which writes the rest, or remove them to
+  search without them. A full disk or quota, an I/O error or no memory left there, which every
+  chromosome after would hit too, ends the run with an ERROR, the mark kept: it was a WARNING, the
+  step took its mark away, and once space was freed a search used the part as whole (with the
+  real engine, a run that filled the disk in the indel genotype store failed later, at the variant
+  index, and the next `complete-search` exited 0 with that store on one or two of its three
+  chromosomes, a site losing one of its two rsIDs). So does a `.done` marker the disk could not
+  take beside a whole indel genotype store, which was left empty and taken for done for good.
+  Downloaded indexes carry no mark. A part that a run of an earlier release left has no mark and
+  is not detected: if such a run was stopped while it emitted the tiers or the indel genotype
+  store, run `build-index-only` again to its end before you search with that dataset.
 - **The build directories of killed runs are reclaimed.** A SIGKILL (an OOM kill, a container stop)
   leaves the build directory, holding a partial index or enrichment as large as the finished one,
   which nothing read or removed. Each build directory now holds an owner record (host, PID namespace,

@@ -3759,9 +3759,10 @@ def build_index_only() -> None:
     # store) per chromosome, FROM the per-sample dicts just produced -- WITHOUT
     # touching the dicts. The search side (new_simple_analysis.py) already CONSUMES
     # these as sibling registry_<vcf>/ + genotypes_<vcf>/ dirs; this is the build
-    # side that PRODUCES them. GATED on a usable --samplesID map; GUARDED so any
-    # failure logs a WARNING to STDOUT (stderr is fatal here) and never aborts the
-    # dict/index build. Path derivation MIRRORS the search resolvers exactly (the
+    # side that PRODUCES them. GATED on a usable --samplesID map; GUARDED so a
+    # failure logs a WARNING to STDOUT (stderr is fatal here) and does not abort the
+    # dict/index build, but for a full disk or quota, an I/O error or no memory left
+    # (ends_the_build). Path derivation MIRRORS the search resolvers exactly (the
     # helper swaps the dictionaries_ prefix), so a built install actually uses them.
     # NOTE (AF denominator, #117/#121): the panel denominator (AN) is built by
     # tier0_compile.build_sample_meta over EXACTLY the per-db samplesID files listed
@@ -3864,8 +3865,8 @@ def build_index_only() -> None:
             # rest: a run stopped here (an OOM kill, at ~150-180GB a chromosome) left a
             # part of them that every search used as if it were whole, with no error.
             # So they are marked unfinished (here, or as a fresh enrichment went into
-            # place) until this step ends, its guarded failures included, and
-            # complete-search refuses them meanwhile (_refuse_unfinished).
+            # place) until this step has emitted every chromosome, and a search refuses
+            # them meanwhile (_refuse_unfinished, and the search script's STEP 1).
             if _tier_jobs:
                 _mark_unfinished(_reg_dir)
             try:
@@ -3873,6 +3874,24 @@ def build_index_only() -> None:
             except ValueError:
                 _tier_workers = 4
             _tier_workers = max(1, min(_tier_workers, len(_tier_jobs) or 1))
+
+            def _tiers_failed(_err):
+                # a full disk or quota, an I/O error, no memory left: the only failures
+                # the emitter raises (ends_the_build), as every chromosome after would
+                # hit them too. The run ends, the tiers left marked unfinished.
+                error(
+                    f"Emitting the dict-less tiers of {vcf_name} failed "
+                    f"({str(_err) or type(_err).__name__}): {_reg_dir} stays marked "
+                    f"unfinished, and a search refuses it. Run build-index-only again "
+                    f"once that is fixed, which emits the rest."
+                )
+
+            def _emit_tiers(_job):
+                try:
+                    return _bdt.emit_dictless_tiers_guarded(*_job)
+                except (OSError, MemoryError) as _err:
+                    _tiers_failed(_err)
+
             _emitted = _tier_present
             if _tier_workers > 1:
                 print(f"  emitting tiers with {_tier_workers} parallel worker(s) "
@@ -3886,15 +3905,17 @@ def build_index_only() -> None:
                             if _r is not None:
                                 _emitted += 1
                 except Exception as _tperr:  # noqa: BLE001 - degrade to sequential
+                    if _bdt.ends_the_build(_tperr):  # (a worker's, raised again here)
+                        _tiers_failed(_tperr)
                     print(f"WARNING [tier-parallel]: pool failed ({_tperr}); "
                           "re-emitting sequentially.", flush=True)
-                    _emitted = 0
+                    _emitted = _tier_present
                     for _job in _tier_jobs:
-                        if _bdt.emit_dictless_tiers_guarded(*_job) is not None:
+                        if _emit_tiers(_job) is not None:
                             _emitted += 1
             else:
                 for _job in _tier_jobs:
-                    if _bdt.emit_dictless_tiers_guarded(*_job) is not None:
+                    if _emit_tiers(_job) is not None:
                         _emitted += 1
             print(
                 f"Dictless tier emission complete: {_emitted}/{len(_dict_files)} "
@@ -3902,7 +3923,20 @@ def build_index_only() -> None:
                 "of the dicts).",
                 flush=True,
             )
-            _unmark_unfinished(_reg_dir, _reg_made)
+            # A chromosome skipped with a WARNING above leaves a part of the tiers, which
+            # a search would use as if it were the whole: the mark stays
+            if _emitted < len(_dict_files):
+                print(
+                    f"WARNING [build-index-only]: the dict-less tiers of "
+                    f"{len(_dict_files) - _emitted} of {len(_dict_files)} chromosome(s) of "
+                    f"{vcf_name} were not emitted (above), so {_reg_dir} stays marked "
+                    f"unfinished and a search refuses it. Run build-index-only again with "
+                    f"{vcf_name} and its --samplesID, which emits them, or remove the tiers "
+                    f"to search without them (rm -rf '{_reg_dir}' '{_gt_dir}').",
+                    flush=True,
+                )
+            else:
+                _unmark_unfinished(_reg_dir, _reg_made)
             # Persist a tiny variant-count manifest so reports can state the
             # database size (SNP variants + genotyped panel sizes) with ZERO VCF
             # access -- summed from the per-chrom registry .idx headers just
@@ -3971,10 +4005,12 @@ def build_index_only() -> None:
     # [indel-snp] STEP 1c (ADDITIVE, gated): emit the PHASED indel genotype store so
     # the indel post-analysis can do CONFIRMED-cis SNP+indel co-occurrence. One
     # gt_indel_<chrom>.tsv.gz per chromosome under indel_genotypes_<vcf>/ (sibling of
-    # the SNP tiers). GUARDED (stdout warning, never abort); absent -> the post-
+    # the SNP tiers). GUARDED (stdout warning; only a full disk or quota, an I/O error
+    # or no memory left aborts); absent -> the post-
     # analysis degrades to PUTATIVE via the log's unphased carriers. Enabled by
     # default (opt-out): set CRISPRME_INDEL_SNP=0 to disable.
     if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+        _big, _ig_left = None, None  # (_ig_left: the chromosomes whose store is not built)
         try:
             import build_indel_genotypes as _big
             os.makedirs(_igt_dir, exist_ok=True)
@@ -4011,6 +4047,7 @@ def build_index_only() -> None:
                     _n_ig += 1  # already built (resume)
                     continue
                 _ig_jobs.append((_vf, _igt_out, _keep))
+            _ig_total = _n_ig + len(_ig_jobs)
             # compile_indel_genotypes streams the VCF (low RAM, I/O + gzip bound), so
             # fan out wide -- CRISPRME_INDELGT_WORKERS (default 8). Guarded worker so a
             # single bad chromosome cannot sink the store.
@@ -4023,7 +4060,7 @@ def build_index_only() -> None:
                 print(f"[indel-snp] building phased indel GT for {len(_ig_jobs)} "
                       f"chromosome(s) with {_igw} parallel worker(s)", flush=True)
                 # written in place too, a chromosome at a time: marked unfinished
-                # until this step ends, as the tiers above are
+                # until this step has built every chromosome's, as the tiers above are
                 _mark_unfinished(_igt_dir)
                 if _igw > 1:
                     import multiprocessing as _mp
@@ -4037,10 +4074,36 @@ def build_index_only() -> None:
                             _n_ig += 1
             print(f"[indel-snp] phased indel genotype store: {_n_ig} chromosome(s) "
                   f"-> {os.path.basename(_igt_dir)}", flush=True)
+            if _n_ig < _ig_total:  # (a chromosome skipped with a WARNING above)
+                _ig_left = f"{_ig_total - _n_ig} of {_ig_total} chromosome(s)"
         except Exception as _ig_err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
+            # a full disk or quota, an I/O error, no memory left (the only failures the
+            # guarded writer raises): every chromosome after would hit them too, so the
+            # run ends, the store left marked unfinished
+            if _big is not None and _big.ends_the_build(_ig_err):
+                error(
+                    f"Building the phased indel genotype store of {vcf_name} failed "
+                    f"({str(_ig_err) or type(_ig_err).__name__}): {_igt_dir} stays marked "
+                    f"unfinished, and a search refuses it. Run build-index-only again "
+                    f"once that is fixed, which builds the rest."
+                )
             print(f"WARNING [indel-snp]: phased indel genotype store not built "
                   f"({_ig_err}); indel post-analysis falls back to PUTATIVE.", flush=True)
-        _unmark_unfinished(_igt_dir)
+            if _glob(os.path.join(_igt_dir, "gt_indel_*")):  # (a part of it is there)
+                _ig_left = "some chromosome(s)"
+        # A part of the store, which a search would use as if it were the whole: the
+        # mark stays
+        if _ig_left and os.path.isdir(os.path.join(_igt_dir, ".building")):
+            print(
+                f"WARNING [indel-snp]: the phased indel genotype store of {_ig_left} of "
+                f"{vcf_name} was not built (above), so {_igt_dir} stays marked unfinished "
+                f"and a search refuses it. Run build-index-only again with {vcf_name}, "
+                f"which builds it, or remove it to search without it (rm -rf "
+                f"'{_igt_dir}').",
+                flush=True,
+            )
+        else:
+            _unmark_unfinished(_igt_dir)
     # STEP 2: index the enriched (SNP) genome
     _refuse_locked_build(snp_idx)
     if not os.path.isdir(snp_idx):

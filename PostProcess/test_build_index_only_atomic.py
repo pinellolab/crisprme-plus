@@ -210,7 +210,8 @@ for i, f in enumerate(files):
 # signal to when the one that runs Python has it blocked. STUB_WRITE_HANG=<text>: a
 # file opened for writing whose path holds <text> (a chromosome's dict-less tier or
 # indel genotype store) waits there, once $STUB_MARK is made, until $STUB_RELEASE
-# exists; STUB_WRITE_FAIL=<text>: that open fails, as on a full disk.
+# exists; STUB_WRITE_FAIL=<text>: that open fails, as on a full disk, or with the errno
+# $STUB_WRITE_FAIL_ERRNO names (MemoryError: with that).
 # STUB_SIGNAL_AT_RENAME=<path>: the first rename to <path>, or into it, is preceded by
 # a signal to the process itself, SIGTERM or the one $STUB_SIGNAL_AT_RENAME_SIG names;
 # STUB_RENAME_HANG=<path>: it waits instead, once $STUB_MARK is made, until
@@ -293,7 +294,10 @@ if os.environ.get("STUB_WRITE_HANG") or os.environ.get("STUB_WRITE_FAIL"):
             while not os.path.exists(os.environ["STUB_RELEASE"]):
                 time.sleep(0.02)
         if "w" in mode and os.environ.get("STUB_WRITE_FAIL", "\0") in str(file):
-            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), str(file))
+            why = os.environ.get("STUB_WRITE_FAIL_ERRNO", "ENOSPC")
+            if why == "MemoryError":
+                raise MemoryError()
+            raise OSError(getattr(errno, why), os.strerror(getattr(errno, why)), str(file))
         return _open_for(file, mode, *args, **kwargs)
 
     builtins.open = open
@@ -1851,19 +1855,83 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
         self.assertEqual(rc, 0, err)
         self.assert_searched()
 
-    def test_a_step_that_ends_with_a_guarded_failure_is_not_refused(self):
-        """A chromosome whose tiers or indel genotypes fail to be written (a full disk)
-        is skipped with a line on stdout, and the search falls back for it, as
-        before: the step has ended, so it is not marked unfinished."""
+    def test_a_step_that_ends_with_a_guarded_failure_leaves_them_refused(self):
+        """A chromosome whose tiers or indel genotypes failed to be written was skipped
+        with a WARNING on stdout, and the step took its mark away as it ended: a search
+        then used the part written as if it were whole, and after a full disk (the
+        run then failed at the variant index) once space was freed. The mark now stays,
+        and the line after the WARNING says so. A full disk or quota, an I/O error or no
+        memory left, which every chromosome after would hit too, ends the run with an
+        ERROR, the mark kept. Either way, the next run finishes them."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = self.outputs()
+        cases = [(why, True, why in ("EACCES", "ENOSPC"))  # (errno, one worker, then the rest)
+                 for why in ("EACCES", "ENOSPC", "EDQUOT", "EIO", "MemoryError")]
+        cases += [(why, False, False) for why in ("EACCES", "ENOSPC")]  # (a pool of two)
         for step, failed, where, workers in self.STEPS:
-            with self.subTest(step=step):
-                self.fresh()
-                rc, out, err = self.run_bio(shim=True, STUB_WRITE_FAIL=failed, **workers)
-                self.assertEqual(rc, 0, err)
-                self.assertIn("Dictless tier emission complete: 1/2 chromosome(s)" if step == "tiers"
-                              else "[indel-snp] phased indel genotype store: 1 chromosome(s)", out)
-                self.assertFalse(os.path.lexists(self.path("Dictionaries", where, ".building")))
-                self.assert_searched()
+            for why, alone, then in cases:
+                with self.subTest(step=step, why=why, alone=alone):
+                    self.fresh()
+                    directory = self.path("Dictionaries", where)
+                    rc, out, err = self.run_bio(shim=True, STUB_WRITE_FAIL=failed,
+                                                STUB_WRITE_FAIL_ERRNO=why, **(workers if alone else {}))
+                    self.assertTrue(os.path.isdir(os.path.join(directory, ".building")), out + err)
+                    if why == "EACCES":
+                        self.assertEqual(rc, 0, err)
+                        lines = out.splitlines()
+                        warned = [i for i, line in enumerate(lines) if line.startswith(
+                            ("WARNING [build_dictless_tiers]: could not emit dictless tiers for ",
+                             "WARNING [indel-snp]: compile_indel_genotypes failed for "))]
+                        self.assertEqual(len(warned), 1, out)
+                        if step == "tiers":
+                            kept = (f"WARNING [build-index-only]: the dict-less tiers of 1 of 2 "
+                                    f"chromosome(s) of ds were not emitted (above), so {directory} "
+                                    "stays marked unfinished and a search refuses it. Run "
+                                    "build-index-only again with ds and its --samplesID, which "
+                                    "emits them, or remove the tiers to search without them (rm -rf "
+                                    f"'{directory}' '{self.path('Dictionaries', 'genotypes_ds')}').")
+                        else:
+                            kept = (f"WARNING [indel-snp]: the phased indel genotype store of 1 of 2 "
+                                    f"chromosome(s) of ds was not built (above), so {directory} "
+                                    "stays marked unfinished and a search refuses it. Run "
+                                    "build-index-only again with ds, which builds it, or remove it to "
+                                    f"search without it (rm -rf '{directory}').")
+                        self.assertIn(kept, lines[warned[0] + 1:], out)
+                    else:
+                        self.assertEqual(rc, 1, out + err)
+                        what = ("Emitting the dict-less tiers" if step == "tiers"
+                                else "Building the phased indel genotype store")
+                        cause = ("MemoryError" if why == "MemoryError" else
+                                 f"[Errno {getattr(errno, why)}] {os.strerror(getattr(errno, why))}")
+                        self.assertTrue(err.startswith(f"Error: {what} of ds failed ({cause}"), err)
+                        self.assertTrue(err.endswith(
+                            f"): {directory} stays marked unfinished, and a search refuses it. "
+                            "Run build-index-only again once that is fixed, which "
+                            f"{'emits' if step == 'tiers' else 'builds'} the rest.\n"), err)
+                        self.assertEqual(err.count("\n"), 1, err)
+                    if then:
+                        rc, out, err = self.run_search()
+                        self.assertEqual(rc, 1, out + err)
+                        self.assertIn(f"Error: {directory} is unfinished: ", err)
+                        rc, out, err = self.run_bio()
+                        self.assertEqual(rc, 0, err)
+                        self.assertEqual(self.outputs(), clean)
+                        self.assert_searched()
+        # and a chromosome's indel genotypes whole, but not the .done marker after them:
+        # left empty by a full disk, it was taken for done, and no run wrote it again
+        self.fresh()
+        marker = self.path("Dictionaries", "indel_genotypes_ds", "gt_indel_chr2.tsv.gz.done")
+        rc, out, err = self.run_bio(shim=True, STUB_WRITE_FAIL=os.path.basename(marker),
+                                    CRISPRME_INDELGT_WORKERS="1")
+        self.assertEqual(rc, 1, out + err)
+        self.assertTrue(err.startswith("Error: Building the phased indel genotype store of ds "
+                                       f"failed ([Errno 28] No space left on device: '{marker}')"),
+                        err)
+        self.assertFalse(os.path.lexists(marker[: -len(".done")]))
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.outputs(), clean)
 
     def test_a_mark_whose_run_cannot_be_checked_is_refused_too(self):
         """One a run left as it wrote its owner record, and one made in another PID
