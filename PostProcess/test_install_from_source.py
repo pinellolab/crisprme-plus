@@ -12,6 +12,7 @@ fail loudly if it ever got that far.
 
 What the script leaves in the checkout is ignored by git.
 """
+import ast
 import os
 import shutil
 import subprocess
@@ -20,6 +21,18 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent.parent / "install_from_source.sh"
+
+
+def search_data_folders():
+    """crisprme.py's CRISPRMEDIRS, the data folders a search creates in the folder it
+    runs in. Read from the source: importing crisprme.py runs its command line."""
+    tree = ast.parse((SCRIPT.parent / "crisprme.py").read_text())
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "CRISPRMEDIRS":
+                    return ast.literal_eval(node.value)
+    raise AssertionError("CRISPRMEDIRS not found as a module-level literal in crisprme.py")
 
 
 class TheSourceBuildRefusesMacOS(unittest.TestCase):
@@ -55,9 +68,10 @@ class TheSourceBuildRefusesMacOS(unittest.TestCase):
 class WhatTheInstallerLeavesInTheCheckoutIsIgnored(unittest.TestCase):
     """The script runs `crisprme.py scorer-env create` and `check` in the checkout, and
     they save their state to <checkout>/Annotations/.scorer_env.json. Annotations/ is
-    one of the data folders CRISPRme keeps in the folder it runs in, and the only one
-    the checkout's .gitignore left out, so `git status` showed it untracked after every
-    install. Checked against the repo's .gitignore, in a scratch repository."""
+    one of the data folders a search creates in the folder it runs in (crisprme.py's
+    CRISPRMEDIRS), and the only one of them the checkout's .gitignore left out, so
+    `git status` showed it untracked after every install. Checked against the repo's
+    .gitignore, in a scratch repository."""
 
     def ignored(self, *paths):
         """Which of `paths` git ignores, created in a repository with that .gitignore."""
@@ -74,6 +88,10 @@ class WhatTheInstallerLeavesInTheCheckoutIsIgnored(unittest.TestCase):
     def test_the_scorer_env_state_is_ignored(self):
         self.assertEqual(self.ignored("Annotations/.scorer_env.json"),
                          ["Annotations/.scorer_env.json"])
+
+    def test_a_new_file_in_any_data_folder_a_search_creates_is_ignored(self):
+        new = [f"{d}/new.txt" for d in search_data_folders()]
+        self.assertEqual(sorted(self.ignored(*new)), sorted(new))
 
     def test_a_new_file_beside_the_tracked_test_annotations_is_not(self):
         self.assertEqual(self.ignored("test/data/Annotations/new.bed.tar.gz"), [])

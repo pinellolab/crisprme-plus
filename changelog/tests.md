@@ -41,10 +41,11 @@ All five go under **### Fixed** of `## [2.8.1]` in CHANGELOG.md.
 - **A source install no longer leaves an untracked `Annotations/` folder in the checkout.**
   `install_from_source.sh` runs `scorer-env create` and `scorer-env check` in the checkout,
   and they save the scorer env's state to `Annotations/.scorer_env.json` there. The
-  checkout's `.gitignore` covered every other data folder that CRISPRme creates in the folder
-  it runs in, but not `Annotations/`, so `git status` showed it after every install. It is now
-  ignored (the top-level one only: `test/data/Annotations/` holds tracked test files). Nothing
-  to do; the file is a diagnostic record. Covered by `PostProcess/test_install_from_source.py`.
+  checkout's `.gitignore` covered the other data folders a search creates in the folder it
+  runs in (`Genomes/`, `Results/`, `Dictionaries/`, `VCFs/`, `PAMs/`, `samplesIDs/`), but not
+  `Annotations/`, so `git status` showed it after every install. It is now ignored (the
+  top-level one only: `test/data/Annotations/` holds tracked test files). Nothing to do; the
+  file is a diagnostic record. Covered by `PostProcess/test_install_from_source.py`.
 - **The unit tests pass inside the shipped image.** The build-lock tests in
   `test_index_resolution.py` listed processes with `ps`, which the image does not have (no
   procps): run there, the module ended with 44 errors and 6 failures. They now read `/proc`,
