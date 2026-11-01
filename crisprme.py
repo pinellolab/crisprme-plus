@@ -97,7 +97,7 @@ from crisprme_hf import (  # noqa: E402  (huggingface_hub imported lazily inside
     DEFAULT_HF_REPO,
 )
 from utils import download_reference_genome  # noqa: E402
-from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file  # noqa: E402
+from assembly_reconcile import reconcile_haplotypes, check_liftover_available, check_impg_available, haplotype_search_complete, clean_incomplete_haplotype_output, haplotype_params_match, HAPLOTYPE_ALIGNMENTS_DIRNAME, write_combined_params_file, write_combined_guides_file, haplotype_genome_view, clear_stale_haplotype_indexes, stamp_built_haplotype_indexes  # noqa: E402
 from generate_report import build_combined_report  # noqa: E402
 from assembly_annotate import add_annotation_column, add_closest_gene_columns  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
@@ -4796,6 +4796,9 @@ def _run_haplotype_search(
     progress output during what can be a multi-hour run.
 
     Args:
+        genomedir: The folder the haplotype is searched with, its
+            `haplotype_genome_view` (named after the haplotype, so the search
+            builds and reuses that haplotype's own index).
         max_total_edits: The resolved total-edits cap to pass through as
             `complete-search`'s own `--max-total-edits` -- computed once by
             `assembly_search()` (an explicit `--max-total-edits` override if
@@ -4819,7 +4822,19 @@ def _run_haplotype_search(
         f"--output {output_name} --thread {thread} {debug_flag}"
     )
     output_folder = os.path.join(current_working_directory, CRISPRMEDIRS[1], output_name)
-    code = subprocess.call(cmd, shell=True, cwd=current_working_directory)
+    # The search reuses any index named after this genome: first drop one that
+    # holds other content, then record which genome each index it built holds.
+    try:
+        present = clear_stale_haplotype_indexes(current_working_directory, genomedir)
+    except OSError as e:
+        error(
+            f"An index of {os.path.basename(genomedir)} under genome_library/ holds "
+            f"another genome and could not be removed ({e}). Remove it and run again."
+        )
+    try:
+        code = subprocess.call(cmd, shell=True, cwd=current_working_directory)
+    finally:
+        stamp_built_haplotype_indexes(current_working_directory, genomedir, present)
     if code != 0:
         raise OSError(
             f"\nHaplotype search failed for --output {output_name}! See "
@@ -4953,12 +4968,23 @@ def assembly_search() -> None:
     paternal_output_dir = os.path.join(current_working_directory, CRISPRMEDIRS[1], paternal_output_name)
     maternal_output_dir = os.path.join(current_working_directory, CRISPRMEDIRS[1], maternal_output_name)
 
+    # complete-search names a genome, and finds or builds its index, by the
+    # genome folder's name, and a bundle keeps both haplotypes of every
+    # individual in folders named "genome": searched as they are, the maternal
+    # run would use the index the paternal run built. Each haplotype is searched
+    # through a folder named after it instead (haplotype_genome_view). The
+    # reconciliation below still reads the genome folders themselves.
+    paternal_search_genome = haplotype_genome_view(current_working_directory, genome_paternal, "paternal")
+    maternal_search_genome = haplotype_genome_view(current_working_directory, genome_maternal, "maternal")
+    for hap, search_genome in (("Paternal", paternal_search_genome), ("Maternal", maternal_search_genome)):
+        print(f"{hap} haplotype genome is searched as {os.path.basename(os.path.normpath(search_genome))}")
+
     # avoid re-running a multi-hour haplotype search if it already completed
     # successfully -- e.g. a retry after a failure that only affected
     # reconciliation (a chromAlias/liftOver issue, say), not the searches
     paternal_complete = haplotype_search_complete(paternal_output_dir)
     paternal_reusable = paternal_complete and haplotype_params_match(
-        paternal_output_dir, genome_paternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
+        paternal_output_dir, paternal_search_genome, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
         max_total_edits,
     )
     if paternal_reusable:
@@ -4973,13 +4999,13 @@ def assembly_search() -> None:
             clean_incomplete_haplotype_output(paternal_output_dir)
         print(f"Running paternal haplotype search -> Results/{paternal_output_name}")
         paternal_results = _run_haplotype_search(
-            genome_paternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
+            paternal_search_genome, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
             paternal_output_name, thread, debug, max_total_edits,
         )
 
     maternal_complete = haplotype_search_complete(maternal_output_dir)
     maternal_reusable = maternal_complete and haplotype_params_match(
-        maternal_output_dir, genome_maternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
+        maternal_output_dir, maternal_search_genome, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
         max_total_edits,
     )
     if maternal_reusable:
@@ -4994,7 +5020,7 @@ def assembly_search() -> None:
             clean_incomplete_haplotype_output(maternal_output_dir)
         print(f"Running maternal haplotype search -> Results/{maternal_output_name}")
         maternal_results = _run_haplotype_search(
-            genome_maternal, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
+            maternal_search_genome, guidefile, pamfile, mm, bDNA, bRNA, merge_t,
             maternal_output_name, thread, debug, max_total_edits,
         )
 

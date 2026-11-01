@@ -36,7 +36,12 @@
 #   Generates various output files including target lists, merged results, and a database.
 #   Sends an email notification upon completion if an email address is provided.
 
-ref_folder=$(realpath $1)  # reference genome folder
+# reference genome folder: its parent resolved, its own name kept. The genome's
+# files, index and results are named after that name ($ref_name below, and every
+# post-analysis step takes it from this path), so a genome handed over as a link --
+# an assembly-search haplotype, a link named after the haplotype to its bundle
+# folder "genome" -- must not be renamed to its target's name halfway through.
+ref_folder="$(realpath "$(dirname "$1")")/$(basename "$1")"
 vcf_list=$(realpath $2)  # vcf folders list
 guide_file=$(realpath $3)  # guide 
 pam_file=$(realpath $4)  # pam
@@ -1419,8 +1424,11 @@ while read vcf_f; do
 			idx_ref_view="$(_bin_only_view "$idx_ref")"
 			crispritz.py search "$idx_ref_view" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result --max-edits $max_total_edits $prune_pam_flag \
 				|| { echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
-		else  # no bulges: brute-force scan
-			crispritz.py search "$current_working_directory/Genomes/${ref_name}/" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
+		else  # no bulges: brute-force scan of the genome folder this run was given
+			# ($ref_folder, not Genomes/<its name>: a genome kept elsewhere -- an
+			# assembly-search haplotype -- has no folder there, and the engine then
+			# reports no target and exits 0, so the search came back empty)
+			crispritz.py search "$ref_folder/" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
 				|| { echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
 		fi
 		echo -e 'Search Reference completed'

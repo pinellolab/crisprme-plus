@@ -242,6 +242,15 @@ jobs:
           test_representative_tiebreak test_sanitize_job_name test_tier0_compaction
           test_history_page_assembly test_app_settings test_annotation -v
 
+      - name: "Assembly search: each haplotype is searched on its own sequence (own index name, index provenance, 0-bulge scan of the given folder)"
+        # A bundle keeps every haplotype in a folder named "genome", and complete-search
+        # names a genome's index after its folder: both haplotypes of every individual
+        # shared one index. assembly_search runs in-process with each haplotype's
+        # complete-search replaced by a stand-in that names, builds and reuses indexes
+        # as the pipeline does; the pipeline's own 0-bulge scan runs with a stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_assembly_haplotype_genomes -v
+
       - name: "Modular scorer env-manager + runner (env lifecycle/state + subprocess protocol; no TF)"
         # scorer_env: detect env manager, create-command shape, atomic state file,
         # health-check probe. scorer_runner: real stdin/stdout worker protocol against

@@ -194,6 +194,49 @@ def resolve(cwd: str, individual: str) -> Optional[Dict]:
     return out
 
 
+def bundle_haplotype(genome_dir: str, haplotype: Optional[str] = None) -> Optional[Dict]:
+    """The bundle haplotype whose genome folder is ``genome_dir``, found from the
+    folder alone, so it works for the explicit ``--genome-paternal`` /
+    ``--genome-maternal`` paths (the web passes those) as well as for
+    ``--assembly-individual``.
+
+    Looks for a bundle ``metadata.json`` in each folder above ``genome_dir`` (a
+    bundle may live outside this working directory's ``Assemblies/``) and returns
+    the haplotype whose ``genome_dir`` resolves to the same folder::
+
+        {"root": <bundle folder>, "folder": <its name>, "individual": ...,
+         "haplotype": "paternal"|"maternal", "assembly_name": ... or None}
+
+    When both haplotypes name that folder, ``haplotype`` wins. ``None`` when the
+    folder is no bundle haplotype's genome (a legacy ``Genomes/<name>`` folder, or
+    any other folder)."""
+    real = os.path.realpath(genome_dir)
+    level = os.path.dirname(real)
+    while True:
+        try:
+            with open(os.path.join(level, METADATA_NAME)) as fh:
+                meta = json.load(fh)
+        except (OSError, ValueError):
+            meta = None
+        if isinstance(meta, dict) and meta.get("format") == BUNDLE_FORMAT:
+            haps = meta.get("haplotypes") or {}
+            for hap in [haplotype] + [h for h in HAPLOTYPES if h != haplotype]:
+                hap_meta = haps.get(hap) if hap else None
+                rel = hap_meta.get("genome_dir") if isinstance(hap_meta, dict) else None
+                if rel and os.path.realpath(os.path.join(level, rel)) == real:
+                    return {
+                        "root": level,
+                        "folder": os.path.basename(level),
+                        "individual": meta.get("individual") or os.path.basename(level),
+                        "haplotype": hap,
+                        "assembly_name": hap_meta.get("assembly_name") or None,
+                    }
+        parent = os.path.dirname(level)
+        if parent == level:
+            return None
+        level = parent
+
+
 def discover_bundles(cwd: str) -> List[Dict]:
     """All individuals under ``Assemblies/`` that carry a ``metadata.json``."""
     root = os.path.join(cwd, ASSEMBLIES_DIR)
