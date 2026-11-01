@@ -24,8 +24,12 @@ Type an assembly name and pick a source:
   file per sequence, which is the layout every search requires.
 - **HuggingFace** — pulls a genome we host on the CRISPRme data repo.
 - **Direct URL** — any `.fa.gz` / `.tar.gz` link.
-- **Upload** — pick a local genome file; it is sent in chunks, so there is no
-  browser size limit.
+- **Upload** — pick a local genome file (`.fa`, `.fa.gz` or `.tar.gz`); it is sent
+  in chunks, so there is no browser size limit. It is laid out as a Direct URL
+  download is: every FASTA of an archive goes to the top of the genome folder (a UCSC
+  `chromFa.tar.gz` holds them in `chroms/`), and a FASTA holding several sequences is
+  split into one file per sequence. An upload with the name of an installed genome
+  replaces it.
 
 The same thing from the CLI:
 ```bash
@@ -38,22 +42,42 @@ Bulge-enabled searches need a genome **index**.
 - **Build locally** from an installed genome + PAM + bulge counts.
 - **Pre-build a variant-aware index**: pick a VCF dataset in the build panel and
   CRISPRme enriches the genome with the variants and indexes it ahead of time, so
-  your first variant-aware search is fast instead of slow. Adding `--samplesID`
-  also emits the dict-less Tier-0 registry + Tier-1 genotype tiers (and, for a
-  merged panel, the combined samplesID list), making the index self-complete for
-  fast post-analysis. (CLI equivalent:
+  your first variant-aware search is fast instead of slow. The build passes the
+  dataset's sample list (`samplesIDs/<dataset>.samplesID.txt`, see *Add a VCF
+  dataset*; a sites-only VCF has none) as `--samplesID`, so it also emits the
+  dict-less Tier-0 registry + Tier-1 genotype tiers (and, for a merged panel, the
+  combined samplesID list): per-sample analysis and the dataset's data type on the
+  search form need them, and the index is self-complete for fast post-analysis. (CLI
+  equivalent:
   `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt`.)
+- A build stops with an error, and puts no index in place, when the genome folder
+  holds no `.fa` file at its top, holds a FASTA of several sequences, or gives an
+  index with no `.bin` file: every search would refuse such an index.
 
 ### Add a VCF dataset
 Variant datasets are large, so they are **fetched server-side** rather than
 uploaded from the browser: from HuggingFace, an existing server folder already on
-the machine (registered in place), or a chunked upload for a local file. Your VCF
-does **not** need special preparation — a single multi-chromosome `.vcf.gz` is
-**auto-split per chromosome** when you build an index from it, and a SNP-only VCF
+the machine (registered in place), or a chunked upload for a local file. Pick the
+reference genome the VCF is called against on the card first: the search form
+offers the dataset for that genome, whatever the dataset's name. Your VCF does
+**not** need special preparation — a single multi-chromosome `.vcf.gz` is
+**auto-split per chromosome** when you build an index from it (its `.tbi` is
+optional: CRISPRme indexes a bgzip or plain-gzip file itself), and a SNP-only VCF
 (no indels) builds a complete SNP variant index.
 
+A search reads the dataset's samples from `samplesIDs/<dataset>.samplesID.txt`
+(tab-separated `#SAMPLE_ID POPULATION_ID SUPERPOPULATION_ID SEX`). When the dataset
+has none, adding it here writes one from the VCF header: exactly the samples the VCF
+genotypes, with the dataset as their population and `unknown` superpopulation and
+sex. To give their populations and sex, put your own list there before you build
+the index; a list you put there is never changed. The search form refuses a variant
+search whose sample list is missing, rather than letting it fail at its end.
+
 ### Add an annotation
-Upload a `.bed` file (annotations are small).
+Upload a `.bed` file (annotations are small), then enable it under *Manage
+annotations*. That card offers a BED for the genome its file name names (e.g.
+`mytrack.hg38.bed` for hg38), and a BED whose file name names no installed genome
+for every genome: enable it for the one its coordinates are on.
 
 ### Define a nuclease / PAM
 Fill in a short form — name, guide length, motif (e.g. `NGG`, `TTTV`), and whether

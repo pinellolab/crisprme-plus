@@ -251,8 +251,10 @@ used by SpCas9) and 5′ PAMs (such as the TTTV PAM used by Cas12a). The PAM is 
 short DNA sequence adjacent to the protospacer that is essential for Cas protein
 binding.
 
-If your nuclease is not listed, create a custom PAM file as described in Section 5
-of the CLI guide and restart the server to make it available in the dropdown.
+If your nuclease is not listed, define it in **Settings → Define a nuclease / PAM**
+(name, guide length, motif and 3′/5′ end), or create a PAM file as described in
+Section 5 of the CLI guide. It is in the dropdown the next time you open the search
+page; no restart is needed.
 
 ### Step 2: Genome selection and threshold configuration
 
@@ -266,9 +268,13 @@ from UCSC, including the default hg38 build (with mitochondrial DNA), custom
 transcriptomes, non-human genomes, and cancer genome assemblies.
 
 When variant datasets have been prepared (for example, 1000 Genomes Phase 3 or
-HGDP), the interface presents the option to incorporate them into the search. Adding
-personal variants from private VCFs is supported in the local offline version via
-the CLI; it is not configurable from this form.
+HGDP), the interface presents the option to incorporate them into the search. To add
+your own VCFs in the local offline version, use **Settings → Add a VCF dataset**
+(upload them, register a folder on the server, or download a hosted dataset), picking
+the reference genome they are called against, then build their variant index there
+(*Add a precomputed index / build one*, with the dataset as *Variants*). The dataset
+is then offered here for that genome, with its sample list written from the VCF
+header (see [`SETTINGS_DATA_MANAGER.md`](SETTINGS_DATA_MANAGER.md)).
 
 > **RNA-targeting strategies:** For RNA-targeting Cas proteins, you can either
 > provide a custom transcriptome genome or use a variant-enriched genome. Be aware
@@ -518,12 +524,14 @@ every search. This keeps searches reproducible — the same enabled set is used 
 all jobs until you change it.
 
 **Add an annotation (BED).** Under *Add an annotation*, drag-and-drop or select a
-`.bed`/`.bed.gz` file. Each uploaded file is validated before it is accepted: it
+`.bed` file. Each uploaded file is validated before it is accepted: it
 must have at least four tab-separated columns (`chrom`, `start`, `end`, `label`),
 integer coordinates with `start ≤ end`, a whitespace-free label, and be under the
 size cap. Malformed files are rejected with an explanatory message and nothing is
 written. Name files with the genome assembly token (e.g. `myenhancers.hg38.bed`)
-so they are offered for the matching genome.
+so they are offered for the matching genome only; a file whose name names no
+installed genome is offered for every genome, and you enable it for the one its
+coordinates are on.
 
 **Enable / disable annotations.** Under *Manage annotations (enable / disable)*,
 pick a genome to see a checklist of the available tracks — the built-in
