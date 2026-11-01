@@ -213,8 +213,10 @@ for i, f in enumerate(files):
 # cleanup starts, before it holds signals back (as it first replaces the build's
 # SIGTERM handler); =after: one comes just after that. STUB_OVERLAY_HANG=1: the SNP
 # overlay, about to write a FASTA's temporary file, waits there once $STUB_MARK is
-# made, until $STUB_RELEASE exists. STUB_SLOW_CLEANUP=<file>: the cleanup, about to
-# remove what a build directory holds, makes <file> and waits until $STUB_RELEASE
+# made, until $STUB_RELEASE exists; STUB_OVERLAY_READ_HANG=1: it waits so instead as it
+# first opens an indel log, before it has compared any FASTA (an overlay that changes
+# none writes none). STUB_SLOW_CLEANUP=<file>: the cleanup, about to remove what a
+# build directory holds, makes <file> and waits until $STUB_RELEASE
 # exists, as removing a large partial index takes a while. STUB_THREAD=1: a thread
 # that does nothing, as numpy's OpenBLAS starts at import, for the kernel to give a
 # signal to when the one that runs Python has it blocked. STUB_WRITE_HANG=<text>: a
@@ -280,6 +282,27 @@ if os.environ.get("STUB_OVERLAY_HANG"):
             while not os.path.exists(os.environ["STUB_RELEASE"]):
                 time.sleep(0.02)
         return _open(file, mode, *args, **kwargs)
+
+    builtins.open = open
+
+if os.environ.get("STUB_OVERLAY_READ_HANG"):
+    import sys
+    _open_log, _read_hung = builtins.open, []
+
+    def _in_overlay():
+        f = sys._getframe(2)
+        while f is not None and not f.f_code.co_filename.endswith("overlay_indel_snps.py"):
+            f = f.f_back
+        return f is not None
+
+    def open(file, mode="r", *args, **kwargs):
+        if (not _read_hung and "w" not in mode and "log_indels_" in str(file)
+                and _in_overlay()):
+            _read_hung.append(1)
+            _open_log(os.environ["STUB_MARK"], "w").close()
+            while not os.path.exists(os.environ["STUB_RELEASE"]):
+                time.sleep(0.02)
+        return _open_log(file, mode, *args, **kwargs)
 
     builtins.open = open
 
@@ -1912,6 +1935,42 @@ class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
                 self.assertEqual(tree(self.lib(INDELS)), clean)
                 self.assertFalse(os.path.lexists(self.path("Genomes", "hg38+ds_INDELS",
                                                            ".building")))
+                self.assertEqual(self.leftovers(), [])
+
+    def test_an_indels_index_built_while_the_overlay_changes_nothing_is_kept(self):
+        """Run again after a build that stopped before its INDELS index, the overlay of
+        this release's own fake-indel genome changes no FASTA and sets no mark, so a
+        search goes on meanwhile, and may build that INDELS index from it: from the
+        FASTAs the run indexes. The run took it for one built while the codes went on,
+        said it was blind, and removed it, under the search that had built it, to build
+        the same again. It now keeps it. With a mark there as the overlay ends (here,
+        another run's), it still removes it."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = tree(self.lib(INDELS))
+        marker = self.path("Genomes", "hg38+ds_INDELS", ".building")
+        for case in ("no mark", "another run's mark"):
+            with self.subTest(case=case):
+                shutil.rmtree(self.lib(INDELS))  # as a build stopped before its INDELS index
+                proc = self.start(shim=True, STUB_OVERLAY_READ_HANG="1")
+                self.wait_for_mark(proc)  # (in the overlay, before it compares a FASTA)
+                self.assertFalse(os.path.lexists(marker))
+                self.search_builds_the_indels_index()
+                built = os.stat(self.lib(INDELS)).st_ino
+                if case == "another run's mark":
+                    _write(os.path.join(marker, "owner"), owner_record(os.getpid()))
+                open(self.release, "w").close()
+                rc, out, err = self.finish(proc)
+                self.assertEqual(rc, 0, err)
+                if case == "no mark":
+                    self.assertNotIn("Removing ", out)
+                    self.assertIn(f"Indels index already present: {self.lib(INDELS)}\n", out)
+                    self.assertEqual(os.stat(self.lib(INDELS)).st_ino, built)
+                else:
+                    self.assertIn(f"Removing {self.lib(INDELS)}: it was built from the "
+                                  "fake-indel genome while its SNP codes were going on", out)
+                    self.assertIn(f"Building indels index {INDELS}...\n", out)
+                self.assertEqual(tree(self.lib(INDELS)), clean)
                 self.assertEqual(self.leftovers(), [])
 
     def test_another_bulge_budget_built_on_it_marks_and_rewrites_none_of_it(self):

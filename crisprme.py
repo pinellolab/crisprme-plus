@@ -3728,6 +3728,8 @@ def build_index_only() -> None:
 
         _said, _coded, _marked = io.StringIO(), [], []
         _owner = "".join(f"{k}={v}\n" for k, v in _build_dir_owner().items())
+        # (a mark there as it begins: a run stopped as it overlaid it, or one at it now)
+        _was_marked = os.path.isdir(os.path.join(indels_out, ".building"))
 
         def _mark():
             if not _marked:
@@ -3753,13 +3755,18 @@ def build_index_only() -> None:
             )
         # It runs only while no INDELS index is built from this genome, or after a run
         # stopped as it overlaid it (STEP 1, STEP 3). An INDELS index there now, or one a
-        # search is building, came from FASTAs not all overlaid yet -- built by a search
-        # that got past its check of the mark before this run set it, or by one that
-        # did not check it -- and is blind to the SNPs on the others, and every later
-        # run kept it. One a search still builds stops the run, the mark left for the
-        # next run; one built is removed, and built again at STEP 3.
+        # search is building, came from FASTAs not all overlaid yet where one changed
+        # meanwhile -- this run marked the genome, or a mark was there as it began or is
+        # there now -- built by a search that got past its check of the mark before it
+        # was set, or by one that did not check it: it is blind to the SNPs on the
+        # others, and every later run kept it. One a search still builds stops the run,
+        # the mark left for the next run; one built is removed, and built again at STEP
+        # 3. One built while no FASTA changed and no mark was there (a search goes on
+        # then: there is nothing to refuse) came from the FASTAs this run indexes, and
+        # is kept: the search that built it may be searching it.
         _refuse_locked_build(indels_idx)
-        if os.path.isdir(indels_idx):
+        if os.path.isdir(indels_idx) and (
+                _marked or _was_marked or os.path.isdir(os.path.join(indels_out, ".building"))):
             print(
                 f"Removing {indels_idx}: it was built from the fake-indel genome while its "
                 f"SNP codes were going on, blind to those not on yet. This run builds it "

@@ -49,16 +49,18 @@ at aa9c54b) with the text after it. All five entries are under `### Fixed`.
    > INDELS index of the PAM and bulge budget that the `build-index-only` run builds (one that got
    > past its check of the mark before the run set it), that index is removed once the overlay ends,
    > and built again; that search's own results come from it, with exit status 0, so run such a
-   > search again once the `build-index-only` run has finished. An INDELS index of another PAM or
-   > bulge budget that a search built that way is not removed: remove it
-   > (`genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`) once that run has finished, and the next
-   > search or `build-index-only` run with that PAM and budget builds it again. With
-   > `CRISPRME_INDEL_SNP=0`, which puts no SNP code on, `build-index-only` does not build an INDELS
-   > index from a fake-indel genome that a stopped run left marked: it stops with an ERROR saying to
-   > run it again with the overlay on (the default). On success the files, their contents, stdout
-   > lines (the overlay's still print just before the INDELS index is built) and exit status are as
-   > before, but for a re-run on a fake-indel genome that carries its codes already: its overlay
-   > changes no base and rewrites none of its FASTAs, and where its lines said
+   > search again once the `build-index-only` run has finished. One that a search built while the
+   > overlay changed no FASTA, with no mark there, came from the FASTAs the run indexes, and is kept
+   > (`Indels index already present`). An INDELS index of another PAM or bulge budget that a search
+   > built that way is not removed: remove it (`genome_library/<PAM>_<N>_<genome>+<vcf>_INDELS`)
+   > once that run has finished, and the next search or `build-index-only` run with that PAM and
+   > budget builds it again. With `CRISPRME_INDEL_SNP=0`, which puts no SNP code on,
+   > `build-index-only` does not build an INDELS index from a fake-indel genome that a stopped run
+   > left marked: it stops with an ERROR saying to run it again with the overlay on (the default).
+   > On success the files, their contents, stdout lines (the overlay's still print just before the
+   > INDELS index is built) and exit status are as before, but for a re-run on a fake-indel genome
+   > that carries its codes already: its overlay changes no base and rewrites none of its FASTAs,
+   > and where its lines said
 
    The rest of the entry stays as it is.
 
