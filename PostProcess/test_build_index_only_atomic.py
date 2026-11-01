@@ -2393,6 +2393,53 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                 shutil.rmtree(marker)
 
 
+class APerSampleSearchSaysWhatItsIndexGives(_Fixture):
+    """A --per-sample search names the carrier samples from the classic per-sample
+    dictionaries, and takes the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP
+    co-occurrence and the exact joint AF from the dict-less tiers, which a build without
+    --samplesID does not write (the benchmark complete-test's, a build from the web
+    Settings page). On such an index its banner promised them all the same."""
+
+    BANNER = ("[complete-search] PER-SAMPLE analysis ({}): resolving per-sample genotypes "
+              "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and "
+              "exact joint AF. Requires a genotyped index (sites-only panels have no genotypes "
+              "to resolve -- the population-level analysis runs instead). Slower, and can be "
+              "intractable on dense panels; pass --population-level for the fast worst-case "
+              "screen.\n")
+
+    def test_on_an_index_without_the_tiers_it_says_it_names_the_carriers_only(self):
+        settings = ["build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", PAM,
+                    "--bDNA", "1", "--bRNA", "1", "--vcf", self.path("VCFs", "ds"),
+                    "--path", self.work]  # (no --samplesID)
+        rc, out, err = self.finish(self.start(command=settings))
+        self.assertEqual(rc, 0, err)
+        self.assertFalse(os.path.lexists(self.path("Dictionaries", "registry_ds")))
+        rc, out, err = self.run_search("--per-sample")
+        self.assertIn("Launching job ", out)
+        self.assertNotIn("CONFIRMED cis phasing, named carrier samples and exact joint AF", out)
+        self.assertIn(
+            "[complete-search] PER-SAMPLE analysis (--per-sample): resolving per-sample "
+            "genotypes into named carrier samples only for ds, which has no dict-less tiers "
+            "(Dictionaries/registry_<vcf>/ and genotypes_<vcf>/), only the classic per-sample "
+            "dictionaries: the CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and "
+            "the exact joint AF come from those tiers, and none of them is reported for its "
+            "variants, whose allele frequencies are the ones the VCF gives. To get them, "
+            "rebuild the index with build-index-only --samplesID, or download a prebuilt one "
+            "(crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP). "
+            "Slower, and can be intractable on dense panels; pass --population-level for the "
+            "fast worst-case screen.\n", out)
+
+    def test_on_an_index_with_them_it_says_what_it_said(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        for options, why in ((("--per-sample",), "--per-sample"),
+                             ((), "the default on this phased genotyped index")):
+            with self.subTest(options=options):
+                rc, out, err = self.run_search(*options)
+                self.assertIn("Launching job ", out)
+                self.assertIn(self.BANNER.format(why), out)
+
+
 def save_tst(targets, guide_len=23):
     """A .bin as buildTST writes one (insall, insert, saveTST and serialize in
     CRISPRitz's mainParallel.cpp, ported): targets are (guideIndex, sequence, PAM),

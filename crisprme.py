@@ -2533,14 +2533,42 @@ def complete_search() -> None:
             "(the indel cis-phasing pass is unaffected). See METHODS.md, 'Context-aware analysis mode'."
         )
     elif variant:
-        print(
-            "[complete-search] PER-SAMPLE analysis (%s): resolving per-sample genotypes "
-            "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
-            "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
-            "-- the population-level analysis runs instead). Slower, and can be intractable on "
-            "dense panels; pass --population-level for the fast worst-case screen."
-            % ("--per-sample" if _force_ps else "the default on this phased genotyped index")
-        )
+        # The CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact joint
+        # AF come from the dict-less tiers (registry_<vcf>/, genotypes_<vcf>/). An index
+        # without either -- built without --samplesID, as the benchmark complete-test
+        # builds its own -- has only the classic per-sample dictionaries, which name the
+        # carriers, each variant with the allele frequency its VCF gives, and no more.
+        _dict_root = os.path.join(current_working_directory, "Dictionaries")
+        _untiered = [
+            _vn for _vn in (os.path.basename(os.path.normpath(_v)) for _v in vcf_dataset_dirs)
+            if not any(os.path.isdir(os.path.join(_dict_root, f"{_tier}_{_vn}"))
+                       for _tier in ("registry", "genotypes"))
+        ]
+        _why = "--per-sample" if _force_ps else "the default on this phased genotyped index"
+        if _untiered:
+            _one = len(_untiered) == 1
+            print(
+                f"[complete-search] PER-SAMPLE analysis ({_why}): resolving per-sample "
+                f"genotypes into named carrier samples only for {', '.join(_untiered)}, which "
+                f"{'has' if _one else 'have'} no dict-less tiers (Dictionaries/registry_<vcf>/ "
+                f"and genotypes_<vcf>/), only the classic per-sample dictionaries: the "
+                f"CONFIRMED/PUTATIVE cis phasing, the SNP+SNP co-occurrence and the exact "
+                f"joint AF come from those tiers, and none of them is reported for "
+                f"{'its' if _one else 'their'} variants, whose allele frequencies are the ones "
+                f"the VCF gives. To get them, rebuild the index with build-index-only "
+                f"--samplesID, or download a prebuilt one (crisprme.py download --what index "
+                f"--index-name NRG_3_hg38+hg38_HGDP1kGP). Slower, and can be intractable on "
+                f"dense panels; pass --population-level for the fast worst-case screen."
+            )
+        else:
+            print(
+                "[complete-search] PER-SAMPLE analysis (%s): resolving per-sample genotypes "
+                "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
+                "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
+                "-- the population-level analysis runs instead). Slower, and can be intractable on "
+                "dense panels; pass --population-level for the fast worst-case screen."
+                % _why
+            )
     # record the resolved search mode so generate-report can surface it (the report note).
     try:
         with open(os.path.join(outputfolder, ".search_mode"), "w") as _sm:
