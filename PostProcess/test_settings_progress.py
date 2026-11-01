@@ -725,6 +725,77 @@ class TestGenomeTarUpload(unittest.TestCase):
         self.assertEqual(ns["_finalize_upload"]("genome", part, "myasm.tar.gz", "", ""), "myasm")
         with open(os.path.join(volume, "myasm", "chroms", "chr1.fa"), "rb") as fh:
             self.assertEqual(fh.read(), _FA1)
+# --- the false 'Samples degraded' alert after a build (final review FR#8) ------------
+class TestDegradedAlertOnlyForIndexDownloads(unittest.TestCase):
+    """The detector matches crisprme_hf's own notes only, and refresh_settings_job runs
+    it for a 'Download index' job only: every Settings variant build printed
+    '[indel-snp] phased indel genotype store: ...' and got the alert."""
+
+    BUILD = ("[indel-snp] phased indel genotype store: 2 chromosome(s) -> "
+             "indel_genotypes_x\nVariant index ready: NRG_2_hg38+x (+ _INDELS).\n")
+    PUBLISH = "Published Tier-1 genotype store to lucapinello/crisprme-data:indexes/x\n"
+    FETCH_FAILED = ("NOTE: could not fetch Tier-1 genotype store 'genotypes_x.tar.gz' "
+                    "(timeout); continuing without it — off-target detection works, "
+                    "Samples degraded.\n")
+    ABSENT = ("NOTE: index 'NRG_3_hg38+x' has no genotypes_x.tar.gz companion in "
+              "repo (registry-only/detection publish); off-target detection works, "
+              "per-sample Samples degraded.\n")
+    SKIPPED = ("Skipping Tier-1 genotype store for 'NRG_3_hg38+x' (--no-genotypes): "
+               "off-target detection works, but per-sample Samples will be degraded "
+               "until genotypes_x/ is present.\n")
+
+    def setUp(self):
+        self.cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cwd, ignore_errors=True)
+        self.ns = _load_functions(
+            ["_JOB_ID_RE", "_settings_jobdir", "_genotypes_degraded_warning",
+             "refresh_settings_job"],
+            current_working_directory=self.cwd,
+            _build_dirs_left_warning=lambda jobdir: None,
+            _render_all_tables=lambda: "tables",
+            _render_storage=lambda: "storage",
+            PreventUpdate=_PreventUpdate,
+            no_update=_NO_UPDATE,
+        )
+
+    def job(self, stage, verbose):
+        jobdir = os.path.join(self.cwd, "Settings", _GOOD_ID)
+        os.makedirs(jobdir, exist_ok=True)
+        with open(os.path.join(jobdir, "log.txt"), "w") as fh:
+            fh.write(f"{stage}\tQueued\n{stage}\tStart\n{stage}\tEnd\n")
+        with open(os.path.join(jobdir, "log_verbose.txt"), "w") as fh:
+            fh.write(verbose)
+        return jobdir
+
+    def test_detector_matches_crisprme_hf_notes_only(self):
+        for label, text, alert in (
+                ("build-index-only's store line", self.BUILD, False),
+                ("publish-index's line", self.PUBLISH, False),
+                ("companion fetch failed", self.FETCH_FAILED, True),
+                ("companion absent", self.ABSENT, True),
+                ("--no-genotypes", self.SKIPPED, True),
+                ("installed after a failed try",
+                 self.FETCH_FAILED + "Installed Tier-1 genotype store genotypes_x/ into D\n",
+                 False)):
+            with self.subTest(label):
+                got = self.ns["_genotypes_degraded_warning"](self.job("Download index", text))
+                self.assertIs(got is not None, alert)
+
+    def test_only_an_index_download_is_checked(self):
+        for stage, alert in (("Download index", True), ("Build variant index", False),
+                             ("Publish index", False), ("Download VCF", False)):
+            with self.subTest(stage):
+                self.job(stage, self.FETCH_FAILED)
+                children = self.ns["refresh_settings_job"](1, _GOOD_ID)[0]
+                # done alone, or done with the alert
+                self.assertIs(children.args[0] != f"{stage}: done.", alert, children)
+
+    def test_variant_build_shows_a_plain_done(self):
+        self.job("Build variant index", self.BUILD)
+        children = self.ns["refresh_settings_job"](1, _GOOD_ID)[0]
+        self.assertEqual(children.args, ("Build variant index: done.",))
+
+
 
 
 if __name__ == "__main__":

@@ -588,7 +588,9 @@ def _genotypes_degraded_warning(jobdir: str):
     crisprme_hf emits a STDOUT NOTE ("... Samples degraded") to log_verbose.txt
     when the genotypes_<vcf>.tar.gz companion fetch fails or is absent; the user
     never saw it. Detect that marker on a successful install and surface it so the
-    user knows to re-download to complete the per-sample store."""
+    user knows to re-download to complete the per-sample store. Only a 'Download
+    index' job is checked (refresh_settings_job): a build or a publish prints other
+    lines that name the genotype store."""
     verb = os.path.join(jobdir, "log_verbose.txt")
     if not os.path.isfile(verb):
         return None
@@ -597,8 +599,10 @@ def _genotypes_degraded_warning(jobdir: str):
             text = fh.read()
     except OSError:
         return None
-    # the genotypes-companion NOTE / the skip NOTE both end in "Samples degraded"
-    if "Samples degraded" not in text and "genotype store" not in text:
+    # crisprme_hf's own notes: the companion failed to fetch or is absent ("...
+    # Samples degraded."), or --no-genotypes skipped it ("Skipping Tier-1 genotype
+    # store ... Samples will be degraded ...")
+    if "Samples degraded" not in text and "Skipping Tier-1 genotype store" not in text:
         return None
     # only warn if it was NOT installed (an "Installed Tier-1 genotype store" line
     # means it succeeded despite any earlier chatter)
@@ -2601,11 +2605,12 @@ def refresh_settings_job(n, job_id):
             break
     if f"{stage}\tEnd" in log:
         # success: stop polling, clear the active job, refresh tables + storage.
-        # If the download installed a variant index but its genotypes companion
+        # If an index download installed a variant index but its genotypes companion
         # fetch failed, the index detects off-targets but per-sample Samples are
-        # degraded — surface that as a visible warning, not a quiet stderr NOTE.
+        # degraded — surface that as a visible warning, not a quiet stdout NOTE.
+        # (A Retry keeps the stage cmd.json recorded.)
         done = html.Div(f"{stage}: done.", style={"color": "green"})
-        degraded = _genotypes_degraded_warning(jobdir)
+        degraded = _genotypes_degraded_warning(jobdir) if stage == "Download index" else None
         children = html.Div([done, degraded]) if degraded else done
         return (
             children,
