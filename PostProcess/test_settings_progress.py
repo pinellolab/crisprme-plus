@@ -15,6 +15,7 @@ archives the tests build.
 
 import ast
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -968,8 +969,10 @@ class TestGenomeTarUpload(unittest.TestCase):
 # A web variant search reads samplesIDs/<dataset>.samplesID.txt, and failed at its end
 # for a dataset added only in Settings: nothing wrote one, and the Settings build never
 # passed --samplesID, so the tiers per-sample analysis reads were never built either.
-_SID_NAMES = ["SAMPLESID_HEADER", "_vcf_header_samples", "_placeholder_samples",
-              "_listed_samples", "_write_dataset_samplesid", "_samplesid_listing"]
+_SID_NAMES = ["SAMPLESID_HEADER", "_UNKNOWN_SUPERPOPULATION", "_SAMPLESID_LOCK",
+              "_vcf_header_samples", "_own_lists_record", "_own_list", "_record_own_lists",
+              "_installed_sample_metadata", "_listed_samples", "_write_dataset_samplesid",
+              "_samplesid_listing"]
 _HEADER = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
 # the list the shipped hg38_mega index installs: one pseudo-sample a source dataset. Its
 # VCFs are sites-only, and it is built without --samplesID (docs/DESIGN_mega_index.md):
@@ -1000,7 +1003,7 @@ class _SamplesIDCase(unittest.TestCase):
         for d in ("VCFs", "samplesIDs", "Genomes/hg38", "Settings/uploads"):
             os.makedirs(os.path.join(self.cwd, d))
         self.ns = _load_functions(self.names, current_working_directory=self.cwd + "/",
-                                  gzip=gzip, shutil=shutil, threading=threading,
+                                  gzip=gzip, shutil=shutil, threading=threading, hashlib=hashlib,
                                   **self.stubs)
 
     def vcf(self, dataset, fname, samples, **kw):
@@ -1131,22 +1134,25 @@ class TestDatasetSamplesID(_SamplesIDCase):
                                                ".walk.samplesID.list"))
         self.assertEqual(self.read(listing), "walk.samplesID.txt\n")
 
-    def test_two_threads_writing_the_list_at_once_each_use_their_own_file(self):
+    def test_two_threads_writing_the_list_at_once_write_it_one_after_the_other(self):
         # the web server runs each request in a thread of one process, so two uploads
         # into one dataset that finish together write its list at once: through one
         # temporary file, one truncated the other's and its rename found nothing there
-        # (round 2 review, R2-2). Each thread holds its temporary file open until the
-        # other has opened its own.
+        # (round 2 review, R2-2), and the record of the list this page wrote could name
+        # the other's. One writes it at a time; the other then finds it written.
         self.vcf("walk", "walk.chr1.vcf.gz", ["S1", "S2"])
-        both_open = threading.Barrier(2, timeout=10)
-        opened, errors = [], []
+        inside, overlaps, errors = [], [], []
+        read_headers = self.ns["_vcf_header_samples"]
 
-        def open_(path, mode="r", *args, **kwargs):
-            fh = open(path, mode, *args, **kwargs)
-            if "w" in mode and os.path.basename(path).startswith(".walk.samplesID.txt."):
-                opened.append(path)
-                both_open.wait()
-            return fh
+        def slow_read(vcf_dir):  # (called by each call, while it decides what to write)
+            inside.append(1)
+            if len(inside) > 1:
+                overlaps.append(vcf_dir)
+            time.sleep(0.3)
+            try:
+                return read_headers(vcf_dir)
+            finally:
+                inside.pop()
 
         def write():
             try:
@@ -1154,18 +1160,147 @@ class TestDatasetSamplesID(_SamplesIDCase):
             except Exception as exc:  # noqa: BLE001 - reported below
                 errors.append(exc)
 
-        self.ns["open"] = open_
+        self.ns["_vcf_header_samples"] = slow_read
         threads = [threading.Thread(target=write) for _ in range(2)]
         for t in threads:
             t.start()
         for t in threads:
             t.join(30)
         self.assertEqual(errors, [])
-        self.assertEqual(len(set(opened)), 2, opened)
+        self.assertEqual(overlaps, [])
         self.assertEqual(self.read(self.sid("walk")), _HEADER
                          + "S1\twalk\tunknown\tunknown\nS2\twalk\tunknown\tunknown\n")
-        self.assertEqual(os.listdir(os.path.join(self.cwd, "samplesIDs")),
-                         ["walk.samplesID.txt"])
+        self.assertEqual(self.ns["_own_list"]("walk"), self.read(self.sid("walk")))
+        self.assertEqual(sorted(os.listdir(os.path.join(self.cwd, "samplesIDs"))),
+                         [".walk.samplesID.sha256", "walk.samplesID.txt"])
+
+
+# --- each sample with the metadata an installed list gives it (round 3 review, F1) ----
+# The shareable report reads every list of samplesIDs/, the last (by name) naming a
+# sample giving its superpopulation: a list written "<sample> <dataset> unknown unknown"
+# for every sample turned a panel's samples unknown in the report of every search of
+# that panel (S1..S6 SUPX/SUPY of hg38_walk, read before walkz).
+_PANEL = _HEADER + ("S1\tPOPA\tSUPX\tmale\nS2\tPOPA\tSUPX\tfemale\nS3\tPOPB\tSUPY\tmale\n")
+
+
+class TestSampleListTakesInstalledMetadata(_SamplesIDCase):
+    def put(self, name, text):
+        with open(os.path.join(self.cwd, "samplesIDs", name), "w") as fh:
+            fh.write(text)
+
+    def test_each_sample_takes_what_an_installed_list_gives_it(self):
+        self.put("hg38_walk.samplesID.txt", _PANEL)
+        # read after it: S3's row replaces the panel's, as the report reads them; S2's,
+        # which names no superpopulation, gives nothing
+        self.put("hg38_zz.samplesID.txt", "S3\tPOPZ\tSUPZ\tfemale\nS2\tzz\tunknown\tunknown\n")
+        self.put("samplesIDs.config.txt", "S1\tBAD\tBAD\tBAD\n")  # a config, not a list
+        self.vcf("walkz", "walkz.chr1.vcf.gz", ["S1", "S2", "S3", "S9"])
+        self.assertEqual(self.ns["_write_dataset_samplesid"]("walkz"), self.sid("walkz"))
+        self.assertEqual(self.read(self.sid("walkz")), _HEADER
+                         + "S1\tPOPA\tSUPX\tmale\nS2\tPOPA\tSUPX\tfemale\n"
+                         + "S3\tPOPZ\tSUPZ\tfemale\nS9\twalkz\tunknown\tunknown\n")
+
+    def test_the_report_keeps_the_superpopulation_a_panel_gives(self):
+        # the report's own reader, on what the page wrote before the panel was installed
+        # (its list then gives unknown) and once it writes it again (a build)
+        try:
+            import generate_report
+        except ImportError as exc:  # (pandas, matplotlib)
+            self.skipTest(f"generate_report not importable: {exc}")
+        self.vcf("walkz", "walkz.chr1.vcf.gz", ["S1", "S2", "S3", "S9"])
+        self.ns["_write_dataset_samplesid"]("walkz")
+        self.put("hg38_walk.samplesID.txt", _PANEL)  # read before walkz.samplesID.txt
+        sdir = os.path.join(self.cwd, "samplesIDs")
+        want = {"S1": "SUPX", "S2": "SUPX", "S3": "SUPY", "S9": "unknown"}
+        self.assertEqual(generate_report.load_sample_superpop(sdir), want)
+        self.ns["_write_dataset_samplesid"]("walkz")
+        self.assertEqual(self.read(self.sid("walkz")), _HEADER
+                         + "S1\tPOPA\tSUPX\tmale\nS2\tPOPA\tSUPX\tfemale\n"
+                         + "S3\tPOPB\tSUPY\tmale\nS9\twalkz\tunknown\tunknown\n")
+        self.assertEqual(generate_report.load_sample_superpop(sdir), want)
+
+    def test_own_list_follows_the_installed_lists(self):
+        self.vcf("walkz", "walkz.chr1.vcf.gz", ["S1", "S2"])
+        self.ns["_write_dataset_samplesid"]("walkz")
+        placeholders = _HEADER + "S1\twalkz\tunknown\tunknown\nS2\twalkz\tunknown\tunknown\n"
+        self.assertEqual(self.read(self.sid("walkz")), placeholders)
+        self.put("hg38_walk.samplesID.txt", _PANEL)  # a panel installed since
+        self.ns["_write_dataset_samplesid"]("walkz")
+        self.assertEqual(self.read(self.sid("walkz")),
+                         _HEADER + "S1\tPOPA\tSUPX\tmale\nS2\tPOPA\tSUPX\tfemale\n")
+        os.remove(os.path.join(self.cwd, "samplesIDs", "hg38_walk.samplesID.txt"))
+        self.ns["_write_dataset_samplesid"]("walkz")  # and removed
+        self.assertEqual(self.read(self.sid("walkz")), placeholders)
+
+    def test_a_list_edited_since_it_was_written_is_never_changed(self):
+        self.vcf("walkz", "walkz.chr1.vcf.gz", ["S1", "S2"])
+        self.ns["_write_dataset_samplesid"]("walkz")
+        mine = _HEADER + "S1\tGBR\tEUR\tmale\nS2\tYRI\tAFR\tfemale\n"
+        with open(self.sid("walkz"), "w") as fh:
+            fh.write(mine)  # the populations, as the Settings card says to give them
+        self.assertIsNone(self.ns["_own_list"]("walkz"))
+        self.put("hg38_walk.samplesID.txt", _PANEL)
+        self.vcf("walkz", "walkz.chr2.vcf.gz", ["S1", "S2", "S3"])
+        self.assertEqual(self.ns["_write_dataset_samplesid"]("walkz"), self.sid("walkz"))
+        self.assertEqual(self.read(self.sid("walkz")), mine)
+
+    def test_a_list_of_this_page_is_one_whatever_stops_its_writing(self):
+        # recorded as this page's before and after it goes in: stopped between the two,
+        # the list there, old or new, is still one this page wrote and may write again
+        self.vcf("walkz", "walkz.chr1.vcf.gz", ["S1"])
+        self.ns["_write_dataset_samplesid"]("walkz")
+        old = self.read(self.sid("walkz"))
+        self.vcf("walkz", "walkz.chr2.vcf.gz", ["S1", "S2"])
+        replace, stops = os.replace, []
+
+        def stopped_replace(src, dst):
+            if dst == self.sid("walkz"):
+                stops.append(dst)
+                raise OSError("stopped")
+            return replace(src, dst)
+
+        self.ns["os"] = type("os_", (), {"__getattr__": lambda _s, n: getattr(os, n),
+                                         "replace": staticmethod(stopped_replace)})()
+        with self.assertRaises(OSError):
+            self.ns["_write_dataset_samplesid"]("walkz")
+        self.ns["os"] = os
+        self.assertEqual(stops, [self.sid("walkz")])
+        self.assertEqual(self.read(self.sid("walkz")), old)
+        self.assertEqual(self.ns["_own_list"]("walkz"), old)
+        self.ns["_write_dataset_samplesid"]("walkz")
+        self.assertEqual(self.read(self.sid("walkz")), _HEADER
+                         + "S1\twalkz\tunknown\tunknown\nS2\twalkz\tunknown\tunknown\n")
+
+
+class TestRemovingADatasetRemovesItsOwnList(_SamplesIDCase):
+    """_delete_targets of 'vcf:<name>': the list this page wrote goes with the dataset,
+    which no longer genotypes its samples (it gave other datasets' reports their
+    superpopulations, round 3 review F1), with its record and a build's listing."""
+
+    names = _SID_NAMES + ["_delete_targets"]
+
+    def test_own_list_goes_with_the_dataset(self):
+        self.vcf("walkz", "walkz.chr1.vcf.gz", ["S1"])
+        self.ns["_write_dataset_samplesid"]("walkz")
+        self.ns["_samplesid_listing"]("walkz")
+        sdir = os.path.join(self.cwd + "/", "samplesIDs")
+        self.assertEqual(self.ns["_delete_targets"]("vcf", "walkz"), [
+            os.path.join(self.cwd + "/", "VCFs", "walkz"),
+            os.path.join(self.cwd + "/", "VCFs", ".walkz.refgenome"),
+            os.path.join(sdir, "walkz.samplesID.txt"),
+            os.path.join(sdir, ".walkz.samplesID.sha256"),
+            os.path.join(sdir, ".walkz.samplesID.list"),
+        ])
+
+    def test_a_list_from_elsewhere_stays(self):
+        self.vcf("walkz", "walkz.chr1.vcf.gz", ["S1"])
+        self.ns["_write_dataset_samplesid"]("walkz")
+        with open(self.sid("walkz"), "w") as fh:
+            fh.write(_HEADER + "S1\tGBR\tEUR\tmale\n")  # edited since: yours
+        targets = self.ns["_delete_targets"]("vcf", "walkz")
+        self.assertNotIn(os.path.join(self.cwd + "/", "samplesIDs", "walkz.samplesID.txt"),
+                         targets)
+        self.assertIn(os.path.join(self.cwd + "/", "VCFs", "walkz"), targets)
 
 
 class TestVcfUploadWritesItsSampleList(_SamplesIDCase):

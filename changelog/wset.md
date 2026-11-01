@@ -21,11 +21,16 @@ Settings page was before this release)". -->
   frequencies)]` on the search form, and could not run per-sample. Adding a dataset in Settings (an
   upload, or a registered server folder) now writes that list from the VCF headers when there is
   none, in the 4-column layout of the shipped lists: exactly the samples the VCFs genotype (a listed
-  sample no VCF genotypes would count as hom-ref and deflate every allele frequency), with the
-  dataset as their population and `unknown` superpopulation and sex. A list from anywhere else (one
-  you wrote, or a download's) is never changed. The Settings build passes the list, so it also
-  builds the dict-less tiers: the dataset reads `[genotyped, phased]` and per-sample analysis is
-  available. It passes a list only when it names samples the VCFs genotype: a sites-only dataset
+  sample no VCF genotypes would count as hom-ref and deflate every allele frequency), each with the
+  population, superpopulation and sex an installed sample list gives it (a downloaded panel's, or
+  yours), and with the dataset as its population and `unknown` superpopulation and sex when no list
+  names it. (The shareable report reads every list for a sample's superpopulation: a list that gave
+  `unknown` to samples a panel names turned them unknown in the reports of that panel's searches.)
+  The list is written again when a file added to the dataset, or a build of its index, gives another
+  one (a file with other samples, a sample list installed or removed since), and it goes when the
+  dataset is removed in Settings. A list from anywhere else (one you wrote or edited, or a
+  download's) is never changed. The Settings build passes the list, so it also builds the dict-less
+  tiers: the dataset reads `[genotyped, phased]` and per-sample analysis is available. It passes a list only when it names samples the VCFs genotype: a sites-only dataset
   (no sample columns, as the `hg38_mega` VCFs) is built without one, as before, so the
   per-dataset allele-frequency registry put in place for it is left as it is. Checked in the
   browser on a phased 6-sample dataset uploaded and built only in Settings, once per chromosome and

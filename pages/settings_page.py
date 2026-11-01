@@ -64,6 +64,7 @@ import string
 import random
 import re
 import base64
+import hashlib
 import shutil
 import gzip
 import os
@@ -869,12 +870,22 @@ def _write_vcf_marker(dataset: str, genome: str) -> None:
 # A variant search reads it (the search form refuses one without it), and a build
 # given it (--samplesID) also writes the dict-less tiers, which per-sample analysis and
 # the data type the search form shows read. A dataset added on this page gets one
-# written from its VCF headers, in the 4-column layout of the shipped lists, with what
-# seq_script/merge_panels/hprc_build.sh gives a sample it has no metadata for: the
-# dataset as its population, superpopulation and sex unknown. It lists exactly the
+# written from its VCF headers, in the 4-column layout of the shipped lists, as
+# seq_script/merge_panels/hprc_build.sh writes one: each sample with the population,
+# superpopulation and sex an installed list gives it, and, for a sample no list
+# names, the dataset as its population, superpopulation and sex unknown. The
+# shareable report reads every list of samplesIDs/ for a sample's superpopulation:
+# written "unknown" for a sample another list knows, the list turned it unknown in
+# the reports of that list's searches (round 3 review, F1). It lists exactly the
 # samples the VCFs genotype: a listed sample a VCF does not genotype counts as
 # hom-ref in every allele number, and so deflates every allele frequency (#46).
 SAMPLESID_HEADER = "#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+# what a list gives for a superpopulation it does not know (as the shareable report
+# reads one: generate_report._unknown_superpop)
+_UNKNOWN_SUPERPOPULATION = {"", "unknown", "na", "n/a", "n", ".", "-", "-1", "nan", "none"}
+# one list written at a time: the server runs each request in a thread of one
+# process, and two uploads into a dataset that finish together write its list at once
+_SAMPLESID_LOCK = threading.Lock()
 
 
 def _vcf_header_samples(vcf_dir: str) -> Optional[List[str]]:
@@ -910,25 +921,75 @@ def _vcf_header_samples(vcf_dir: str) -> Optional[List[str]]:
     return samples
 
 
-def _placeholder_samples(path: str, dataset: str) -> Optional[List[str]]:
-    """The samples of the list ``path`` when this page wrote it for ``dataset`` (the
-    header, then one ``<sample> <dataset> unknown unknown`` row a sample), else None;
-    None too for the header alone, which this page never writes (a list someone put
-    there, say for a search of a sites-only dataset)."""
+def _own_lists_record(dataset: str) -> str:
+    """samplesIDs/.<dataset>.samplesID.sha256: the SHA-256 of the list this page last
+    wrote for ``dataset`` (_write_dataset_samplesid), one a line."""
+    return os.path.join(current_working_directory, "samplesIDs", f".{dataset}.samplesID.sha256")
+
+
+def _own_list(dataset: str) -> Optional[str]:
+    """The text of samplesIDs/<dataset>.samplesID.txt when this page wrote it as it is
+    now (its SHA-256 is one _own_lists_record names), else None: for a list from
+    anywhere else (yours, a download's, one you have edited since), and when there is
+    none."""
     try:
-        with open(path) as fh:
-            lines = fh.read().splitlines()
+        with open(os.path.join(current_working_directory, "samplesIDs",
+                               f"{dataset}.samplesID.txt"), "rb") as fh:
+            data = fh.read()
+        with open(_own_lists_record(dataset)) as fh:
+            written = fh.read().split()
     except OSError:
         return None
-    if not lines or lines[0] + "\n" != SAMPLESID_HEADER:
+    if hashlib.sha256(data).hexdigest() not in written:
         return None
-    samples = []
-    for line in lines[1:]:
-        cols = line.split("\t")
-        if len(cols) != 4 or cols[1:] != [dataset, "unknown", "unknown"] or not cols[0]:
-            return None
-        samples.append(cols[0])
-    return samples or None
+    return data.decode("utf-8", errors="replace")
+
+
+def _record_own_lists(dataset: str, *texts: Optional[str]) -> None:
+    """Records ``texts`` (None skipped) as lists this page wrote for ``dataset``
+    (_own_lists_record), through a hidden temporary file renamed into place."""
+    path = _own_lists_record(dataset)
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        with open(tmp, "w") as out:
+            out.write("".join(hashlib.sha256(t.encode("utf-8")).hexdigest() + "\n"
+                              for t in texts if t is not None))
+        os.replace(tmp, path)
+    finally:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
+
+
+def _installed_sample_metadata(skip: str) -> dict:
+    """sample -> (population, superpopulation, sex), from the sample lists of
+    samplesIDs/ but ``skip`` (a download's, yours, another dataset's), read in the
+    order the shareable report reads them (generate_report._iter_samplesid_files, by
+    name), a later list's row for a sample replacing an earlier one's. A row that
+    gives no superpopulation (unknown, NA) gives nothing: it is what a list writes for
+    a sample it has no metadata for, as this page does."""
+    sdir = os.path.join(current_working_directory, "samplesIDs")
+    try:
+        names = sorted(
+            f for f in os.listdir(sdir)
+            if (f.endswith(".samplesID.txt") or (f.startswith("samplesID") and f.endswith(".txt")))
+            and ".config." not in f and os.path.join(sdir, f) != skip
+        )
+    except OSError:
+        return {}
+    meta = {}
+    for fname in names:
+        try:
+            with open(os.path.join(sdir, fname), errors="replace") as fh:
+                for line in fh:
+                    cols = line.rstrip("\r\n").split("\t")
+                    if (len(cols) < 3 or not cols[0] or cols[0].startswith("#")
+                            or cols[0].upper() == "SAMPLE_ID"
+                            or cols[2].strip().lower() in _UNKNOWN_SUPERPOPULATION):
+                        continue
+                    meta[cols[0]] = (cols[1], cols[2], cols[3] if len(cols) > 3 else "unknown")
+        except OSError:
+            continue
+    return meta
 
 
 def _listed_samples(path: str) -> List[str]:
@@ -947,47 +1008,57 @@ def _listed_samples(path: str) -> List[str]:
 
 def _write_dataset_samplesid(dataset: str) -> Optional[str]:
     """Writes samplesIDs/<dataset>.samplesID.txt from the VCF headers of
-    VCFs/<dataset> (above) when there is none, or when the one there is a list this
-    page wrote for other samples (a file of the dataset added or replaced since). A
-    list from anywhere else (the command line, a download) is never changed. Returns
-    its path when a build of the dataset is to pass it (--samplesID): when it names a
-    sample the VCFs genotype. None when the VCFs genotype no sample (a sites-only
-    dataset) or cannot be read, or the list names none of theirs: the tiers a build
-    emits from such a list hold no sample, and they replace a per-dataset AF registry
-    put there by hand (the mega index's, from the VCFs' INFO allele frequencies) with
-    one that has no allele frequency. Raises OSError when it cannot write it."""
+    VCFs/<dataset> (above) when there is none, or when the one there is the list this
+    page wrote (_own_list) and it would write it otherwise now: a file of the dataset
+    added or replaced since, or a list that names its samples installed or removed. A
+    list from anywhere else (the command line, a download, one you edited) is never
+    changed. Returns its path when a build of the dataset is to pass it
+    (--samplesID): when it names a sample the VCFs genotype. None when the VCFs
+    genotype no sample (a sites-only dataset) or cannot be read, or the list names
+    none of theirs: the tiers a build emits from such a list hold no sample, and they
+    replace a per-dataset AF registry put there by hand (the mega index's, from the
+    VCFs' INFO allele frequencies) with one that has no allele frequency. Raises
+    OSError when it cannot write it."""
     if not dataset or os.path.basename(dataset) != dataset or dataset.startswith("."):
         return None  # (dropdown values are client data: a folder of VCFs/ only)
     sdir = os.path.join(current_working_directory, "samplesIDs")
     target = os.path.join(sdir, f"{dataset}.samplesID.txt")
-    exists = os.path.isfile(target)
-    ours = _placeholder_samples(target, dataset) if exists else None
-    samples = _vcf_header_samples(os.path.join(current_working_directory, "VCFs", dataset))
-    if not samples:
-        # sites-only, or no VCF to read: no list is written or passed. A list of this
-        # page's goes, as it names samples the files no longer have; any other stays
-        if samples == [] and ours:
-            os.remove(target)
-        return None
-    if exists and ours is None:
-        return target if set(_listed_samples(target)) & set(samples) else None
-    if samples == ours:
-        return target
-    os.makedirs(sdir, exist_ok=True)
-    # through a hidden temporary file (this thread's) renamed into place, as the search
-    # side writes a combined list (main_page._ensure_samplesid): never one cut short, nor
-    # one two uploads into the dataset that finish together write at once (the server
-    # runs each request in a thread of one process)
-    tmp = os.path.join(sdir, f".{dataset}.samplesID.txt.{os.getpid()}."
-                             f"{threading.get_ident()}.tmp")
-    try:
-        with open(tmp, "w") as out:
-            out.write(SAMPLESID_HEADER)
-            out.write("".join(f"{s}\t{dataset}\tunknown\tunknown\n" for s in samples))
-        os.replace(tmp, target)
-    finally:
-        if os.path.lexists(tmp):
-            os.remove(tmp)
+    with _SAMPLESID_LOCK:
+        exists = os.path.isfile(target)
+        ours = _own_list(dataset) if exists else None
+        samples = _vcf_header_samples(os.path.join(current_working_directory, "VCFs", dataset))
+        if not samples:
+            # sites-only, or no VCF to read: no list is written or passed. A list of this
+            # page's goes, as it names samples the files no longer have; any other stays
+            if samples == [] and ours is not None:
+                os.remove(target)
+                os.remove(_own_lists_record(dataset))
+            return None
+        if exists and ours is None:
+            return target if set(_listed_samples(target)) & set(samples) else None
+        meta = _installed_sample_metadata(target)
+        text = SAMPLESID_HEADER + "".join(
+            "\t".join((s,) + meta.get(s, (dataset, "unknown", "unknown"))) + "\n"
+            for s in samples
+        )
+        if text == ours:
+            return target
+        os.makedirs(sdir, exist_ok=True)
+        # recorded as this page's before and after it goes in, so that the list there is
+        # one whatever stops this; through a hidden temporary file (this thread's) renamed
+        # into place, as the search side writes a combined list
+        # (main_page._ensure_samplesid): never one cut short
+        _record_own_lists(dataset, ours, text)
+        tmp = os.path.join(sdir, f".{dataset}.samplesID.txt.{os.getpid()}."
+                                 f"{threading.get_ident()}.tmp")
+        try:
+            with open(tmp, "wb") as out:
+                out.write(text.encode("utf-8"))
+            os.replace(tmp, target)
+        finally:
+            if os.path.lexists(tmp):
+                os.remove(tmp)
+        _record_own_lists(dataset, text)
     return target
 
 
@@ -1393,8 +1464,9 @@ def _delete_targets(kind: str, name: str) -> List[str]:
     Deleting an INDEX also removes its ``_INDELS`` indel-genome companion (which the
     UI hides but which can be many GB — e.g. ~15 GB for the pamless index) and any
     naming-alias symlinks that resolve into either, so no orphaned index is left
-    behind. Deleting a VCF dataset also drops its ``.refgenome`` marker. Names are
-    basename-guarded against path traversal.
+    behind. Deleting a VCF dataset also drops its ``.refgenome`` marker, and the
+    sample list this page wrote for it, with the files that go with that list (a list
+    from anywhere else stays). Names are basename-guarded against path traversal.
     """
     name = os.path.basename(name)  # never allow traversal
     cwd = current_working_directory
@@ -1415,10 +1487,19 @@ def _delete_targets(kind: str, name: str) -> List[str]:
             pass
         return targets
     if kind == "vcf":
-        return [
+        targets = [
             os.path.join(cwd, "VCFs", name),
             os.path.join(cwd, "VCFs", f".{name}.refgenome"),  # marker sidecar
         ]
+        # the list this page wrote names the samples of the VCFs that go (and gave
+        # the reports of other datasets' searches their superpopulations, round 3
+        # review F1); the record of it and the --samplesID listing a build here passed
+        # go with it
+        sdir = os.path.join(cwd, "samplesIDs")
+        if _own_list(name) is not None:
+            targets.append(os.path.join(sdir, f"{name}.samplesID.txt"))
+        return targets + [_own_lists_record(name),
+                          os.path.join(sdir, f".{name}.samplesID.list")]
     if kind == "annotation":
         return [os.path.join(cwd, "Annotations", name)]
     if kind == "pam":
@@ -1852,8 +1933,9 @@ def settings_page() -> List:
         "split per chromosome when you build an index from it (upload its .tbi too, "
         "or CRISPRme indexes it). Searches read the dataset's samples from "
         "samplesIDs/<name>.samplesID.txt, written from the VCF header when there is "
-        "none; to give their populations and sex, put your own 4-column list there "
-        f"before you build the index. Space: {_SIZE_HINTS['vcf']}.",
+        "none, with the populations an installed sample list gives them; to give "
+        "the others' populations and sex, put your own 4-column list there before "
+        f"you build the index. Space: {_SIZE_HINTS['vcf']}.",
         [
             dbc.Row(
                 [
