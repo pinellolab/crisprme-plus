@@ -9,8 +9,8 @@ Large data (multi-GB genomes/VCFs) never goes through an in-memory browser
 upload: it is fetched server-side (UCSC by assembly, HuggingFace by name, an
 explicit URL, or an already-staged server path). Only small files (annotations)
 use a direct upload. Long operations run as detached jobs on a dedicated
-single-slot executor so they never starve the two search slots, and their
-progress is polled from the browser exactly like a search.
+single-slot executor so they never starve the search slots (1-16, 2 by default),
+and their progress is polled from the browser exactly like a search.
 
 All mutations are local-mode only (disabled when app.ONLINE is True). Publishing
 an index to the shared HuggingFace repo is maintainer-only (app.MAINTAINER_MODE).
@@ -60,6 +60,7 @@ import subprocess
 import tarfile
 import string
 import random
+import re
 import base64
 import shutil
 import gzip
@@ -91,6 +92,35 @@ def _uploads_dir() -> str:
     return d
 
 
+def _unsafe_tar_member(tar: tarfile.TarFile, dest_dir: str) -> Optional[str]:
+    """Why an uploaded archive must not be extracted into ``dest_dir``, else None.
+
+    Every member is checked before anything is written, so a bad archive is
+    refused whole: an absolute name or any ``..`` component; anything but a
+    regular file or directory (a symlink or hardlink member can redirect a later
+    write out of dest_dir, and devices/FIFOs have no place in a genome); and any
+    member whose real path leaves dest_dir (e.g. through a symlink already in
+    it). The checks personal_assembly.import_archive makes, minus its single
+    top-folder rule (a UCSC chromFa archive holds many top-level chr*.fa). Does
+    not rely on tarfile's ``filter=``, which is absent before Python 3.11.4.
+    PostProcess/utils.py's _unsafe_tar_member is its twin for downloaded archives
+    (kept separate because the light-env tests AST-extract this page); change both.
+    """
+    dest_real = os.path.realpath(dest_dir)
+    for m in tar.getmembers():
+        if m.name.startswith("/") or ".." in m.name.split("/"):
+            return f"unsafe archive entry {m.name!r} (absolute or '..' path)"
+        if not (m.isreg() or m.isdir()):
+            return (
+                f"unsupported archive entry {m.name!r} "
+                "(only regular files and directories are allowed)"
+            )
+        target = os.path.realpath(os.path.join(dest_dir, m.name))
+        if target != dest_real and not target.startswith(dest_real + os.sep):
+            return f"archive member escapes the extraction directory: {m.name!r}"
+    return None
+
+
 def _finalize_upload(
     target: str, part_path: str, name: str, dataset: str, genome: str = ""
 ) -> str:
@@ -116,18 +146,25 @@ def _finalize_upload(
         if err:
             raise ValueError(err)
         dest_dir = os.path.join(current_working_directory, "Genomes", assembly)
-        os.makedirs(dest_dir, exist_ok=True)
         if name.endswith((".tar.gz", ".tgz")):
             with gzip.open(part_path, "rb") as fin, tarfile.open(fileobj=fin, mode="r") as tar:
+                # the member names are client data: vet them all first, so a bad
+                # archive is refused before anything (dest_dir too) is written
+                err = _unsafe_tar_member(tar, dest_dir)
+                if err:
+                    raise ValueError(err)
+                os.makedirs(dest_dir, exist_ok=True)
                 tar.extractall(dest_dir)
             os.remove(part_path)
         elif name.endswith(".gz"):
+            os.makedirs(dest_dir, exist_ok=True)
             with gzip.open(part_path, "rb") as fin, open(
                 os.path.join(dest_dir, f"{assembly}.fa"), "wb"
             ) as fout:
                 shutil.copyfileobj(fin, fout)
             os.remove(part_path)
         else:
+            os.makedirs(dest_dir, exist_ok=True)
             os.replace(part_path, os.path.join(dest_dir, f"{assembly}.fa"))
         return assembly
     if target == "vcf":
@@ -229,6 +266,28 @@ def _new_job_id(prefix: str = "set") -> str:
             return jid
 
 
+# Exactly the ids _new_job_id makes (its default "set" prefix is the only one in
+# use). Job ids come back from the browser as dcc.Store data, which a client can
+# set to anything, so _settings_jobdir checks them before any path is built.
+_JOB_ID_RE = re.compile(r"set_[A-Z0-9]{10}")
+
+
+def _settings_jobdir(job_id) -> Optional[str]:
+    """``<cwd>/Settings/<job_id>`` for an id `_new_job_id` could have made, else
+    None. Refuses a traversal (``../x``), an absolute path, a non-string, and a
+    job dir whose real path leaves Settings/ (a symlink), so the callbacks that
+    read a job's logs or re-run its cmd.json (Retry, shell=True) never act on a
+    directory outside Settings/."""
+    if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
+        return None
+    root = os.path.realpath(os.path.join(current_working_directory, SETTINGS_DIR))
+    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
+    real = os.path.realpath(jobdir)
+    if real == root or os.path.commonpath([root, real]) != root:
+        return None
+    return jobdir
+
+
 def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
     """Run a data-management shell command, recording stage markers.
 
@@ -245,8 +304,13 @@ def _run_settings_job(cmd: str, jobdir: str, stage: str) -> None:
         # submit time; the single-slot executor may hold it queued for a while).
         with open(logtxt, "a") as lt:
             lt.write(f"{stage}\tStart\n")
+        # Point the download's progress emitter (crisprme_hf._ProgressReporter) at
+        # this job's progress.json so refresh_settings_job can render a real % bar.
+        # Harmless for jobs that don't emit progress (they simply never write it).
+        env = dict(os.environ)
+        env["CRISPRME_PROGRESS_FILE"] = os.path.join(jobdir, "progress.json")
         with open(logverb, "w") as vout, open(logerr, "w") as eout:
-            proc = subprocess.Popen(cmd, shell=True, stdout=vout, stderr=eout)
+            proc = subprocess.Popen(cmd, shell=True, stdout=vout, stderr=eout, env=env)
             # heartbeat: bump log.txt's mtime every 60s while the subprocess runs
             # so refresh_settings_job's stale detector doesn't mistake a long,
             # output-quiet stage (e.g. a big extraction) for a dead worker.
@@ -283,6 +347,15 @@ def _launch_job_cmd(cmd: str, stage: str) -> str:
     # executor actually begins running it, so the banner can distinguish the two.
     with open(os.path.join(jobdir, "log.txt"), "w") as lt:
         lt.write(f"{stage}\tQueued\n")
+    # Persist the exact command + stage so a failed download can be RE-LAUNCHED
+    # verbatim from the web "Retry" button without the page having to reconstruct
+    # the argv (crisprme_hf resumes partial transfers, so a retry is cheap).
+    try:
+        import json
+        with open(os.path.join(jobdir, "cmd.json"), "w") as cf:
+            json.dump({"cmd": cmd, "stage": stage}, cf)
+    except OSError:
+        pass
     settings_executor.submit(_run_settings_job, cmd, jobdir, stage)
     return job_id
 
@@ -363,6 +436,225 @@ def _error_tail(logerr_path: str, n: int = 3) -> str:
         return ""
     meaningful = [ln for ln in lines if not any(p in ln for p in _BENIGN_ERR_PATTERNS)]
     return "  ".join((meaningful or lines)[-n:])
+
+
+# ---------------------------------------------------------------------------
+# Download progress (2.8.1): crisprme_hf writes <jobdir>/progress.json while a
+# download runs; refresh_settings_job renders it as a real dbc.Progress bar. The
+# file is absent on the current happy path / older code, so every reader here
+# degrades gracefully to the existing spinner.
+# ---------------------------------------------------------------------------
+# A progress file older than this (no update) is treated as stale -> fall back to
+# the spinner rather than showing a frozen bar.
+_PROGRESS_STALE_SECONDS = 120
+
+
+def _read_progress(jobdir: str) -> Optional[dict]:
+    """Parsed <jobdir>/progress.json, or None if absent / unreadable / stale."""
+    path = os.path.join(jobdir, "progress.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        import json
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    updated = data.get("updated")
+    if isinstance(updated, (int, float)) and (time.time() - updated) > _PROGRESS_STALE_SECONDS:
+        return None  # frozen -> let the stale/heartbeat logic take over
+    return data
+
+
+def _fmt_eta(seconds) -> str:
+    """'~N min left' / '~N sec left' for the progress line (…'' if unknown)."""
+    if not isinstance(seconds, (int, float)) or seconds <= 0:
+        return ""
+    if seconds < 90:
+        return f"~{int(seconds)} sec left"
+    return f"~{int(round(seconds / 60))} min left"
+
+
+def _render_progress_bar(stage: str, prog: dict):
+    """A dbc.Progress bar + 'X.X / Y.Y GB · ~N min left' + the phase label.
+
+    Falls back (returns None) if the payload has no usable total AND no bytes, so
+    the caller shows the plain spinner instead of an empty bar."""
+    try:
+        done = float(prog.get("bytes_done", 0) or 0)
+        total = float(prog.get("bytes_total", 0) or 0)
+        pct = float(prog.get("pct", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    phase = str(prog.get("phase") or stage)
+    detail = str(prog.get("detail") or "")
+    eta = _fmt_eta(prog.get("eta_seconds"))
+    if total > 0:
+        sizes = f"{_fmt_size(done)} / {_fmt_size(total)}"
+        bar = dbc.Progress(value=max(0, min(100, pct)), label=f"{pct:.0f}%",
+                           striped=True, animated=True, style={"height": "18px"})
+    elif done > 0:
+        # unknown total (size API offline): show bytes moved + an indeterminate bar
+        sizes = f"{_fmt_size(done)} downloaded"
+        bar = dbc.Progress(value=100, striped=True, animated=True,
+                           style={"height": "18px"})
+    else:
+        return None
+    line = "  ·  ".join([p for p in (sizes, eta) if p])
+    return html.Div(
+        [
+            html.Div(phase + (f" — {detail}" if detail else ""),
+                     style={"fontWeight": "bold", "fontSize": "0.9em"}),
+            bar,
+            html.Small(line, style={"color": "#367"}) if line else None,
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Failure relay (2.8.1 piece D): on a FAILED download, show a scrollable
+# full-log panel (log_error.txt + a verbose tail) plus a Retry button that
+# re-launches the same job — modelled on load_page.show_full_log.
+# ---------------------------------------------------------------------------
+def _full_job_log(jobdir: str, verbose_tail: int = 400) -> str:
+    """log_error.txt (full) + log_verbose.txt (tail) for the scrollable panel —
+    the same shape load_page.show_full_log uses for a failed search."""
+    sections: List[str] = []
+    for label, fname, tail in (
+        ("log_error.txt", "log_error.txt", None),
+        ("log_verbose.txt (tail)", "log_verbose.txt", verbose_tail),
+    ):
+        path = os.path.join(jobdir, fname)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", errors="replace") as fh:
+                lines = fh.readlines()
+        except OSError as exc:
+            sections.append(f"===== {label} =====\n(could not read: {exc})")
+            continue
+        if tail and len(lines) > tail:
+            lines = [f"... (showing last {tail} lines) ...\n"] + lines[-tail:]
+        body = "".join(lines).rstrip() or "(empty)"
+        sections.append(f"===== {label} =====\n{body}")
+    return "\n\n".join(sections) if sections else "No log files found for this job."
+
+
+def _render_failure(stage: str, jobdir: str, job_id: str):
+    """Failure banner: a short tail + a scrollable full-log textarea + Retry."""
+    tail = _error_tail(os.path.join(jobdir, "log_error.txt"))
+    return html.Div(
+        [
+            html.Div(f"{stage}: failed.", style={"color": "#b00", "fontWeight": "bold"}),
+            html.Small(tail) if tail else None,
+            html.Div(
+                [
+                    html.Button(
+                        "Retry", id="settings-retry-btn",
+                        style={"margin-right": "0.5rem"},
+                    ),
+                    html.Button("Show full log", id="settings-show-log-btn"),
+                ],
+                style={"margin": "0.4rem 0"},
+            ),
+            # the full log starts hidden; the button toggles the container
+            # (callback below) — same copy-pasteable panel as load_page.
+            html.Div(
+                dcc.Textarea(
+                    id="settings-full-log",
+                    value="",
+                    readOnly=True,
+                    style={"width": "100%", "height": "260px",
+                           "fontFamily": "monospace", "fontSize": "12px",
+                           "whiteSpace": "pre", "overflow": "auto"},
+                ),
+                id="settings-full-log-container",
+                hidden=True,
+                style={"marginTop": "6px"},
+            ),
+            # stash the failed job id so Retry / Show-log know which job to act on
+            dcc.Store(id="settings-failed-job", data=job_id),
+        ]
+    )
+
+
+def _genotypes_degraded_warning(jobdir: str):
+    """A visible DEGRADED warning when a variant index installed but its Tier-1
+    genotype store did NOT (per-sample Samples degraded), else None.
+
+    crisprme_hf emits a STDOUT NOTE ("... Samples degraded") to log_verbose.txt
+    when the genotypes_<vcf>.tar.gz companion fetch fails or is absent; the user
+    never saw it. Detect that marker on a successful install and surface it so the
+    user knows to re-download to complete the per-sample store."""
+    verb = os.path.join(jobdir, "log_verbose.txt")
+    if not os.path.isfile(verb):
+        return None
+    try:
+        with open(verb, "r", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        return None
+    # the genotypes-companion NOTE / the skip NOTE both end in "Samples degraded"
+    if "Samples degraded" not in text and "genotype store" not in text:
+        return None
+    # only warn if it was NOT installed (an "Installed Tier-1 genotype store" line
+    # means it succeeded despite any earlier chatter)
+    if "Installed Tier-1 genotype store" in text:
+        return None
+    return dbc.Alert(
+        "Index installed but per-sample Samples degraded — the genotype store is "
+        "missing. Off-target detection works, but named carriers / per-sample "
+        "output are unavailable. Re-download this index to complete it.",
+        color="warning",
+        style={"margin-top": "0.5rem", "fontSize": "0.9em"},
+    )
+
+
+def _job_failed(jobdir: str) -> bool:
+    """Whether the job's log.txt is in the state refresh_settings_job renders as
+    the FAILED banner (its first marker's stage FAILED, not End) -- the only
+    place the page offers Retry."""
+    try:
+        with open(os.path.join(jobdir, "log.txt")) as handle:
+            log = handle.read()
+    except (OSError, ValueError):
+        return False
+    stage = "Operation"
+    for line in log.splitlines():
+        if "\t" in line:
+            stage = line.split("\t")[0]
+            break
+    return f"{stage}\tEnd" not in log and f"{stage}\tFAILED" in log
+
+
+def _relaunch_job(job_id: str) -> Optional[str]:
+    """Re-launch the download recorded in <job_id>/cmd.json (the Retry action);
+    returns the NEW job id, or None if the original command can't be recovered
+    or may not be re-run. The id is client data, so the server re-checks what
+    the page implies: the job FAILED, and a maintainer-only 'Publish index' job
+    is never re-run outside MAINTAINER_MODE."""
+    jobdir = _settings_jobdir(job_id)
+    if not jobdir:  # not a Settings job id: never read or run that cmd.json
+        return None
+    if not _job_failed(jobdir):  # queued, running, done, or no log at all
+        return None
+    cmd_path = os.path.join(jobdir, "cmd.json")
+    if not os.path.isfile(cmd_path):
+        return None
+    try:
+        import json
+        with open(cmd_path) as cf:
+            rec = json.load(cf)
+    except (OSError, ValueError):
+        return None
+    cmd, stage = rec.get("cmd"), rec.get("stage") or "Retry download"
+    if not cmd:
+        return None
+    if stage == "Publish index" and not MAINTAINER_MODE:  # publish_index_cb's job
+        return None
+    return _launch_job_cmd(cmd, stage)
 
 
 def _write_vcf_marker(dataset: str, genome: str) -> None:
@@ -537,10 +829,11 @@ def _dir_size(path: str) -> int:
 
 
 def _fmt_size(n: float) -> str:
+    # decimal units (1 GB = 10^9 bytes), as the docs and Hugging Face give sizes
     for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024 or unit == "TB":
+        if n < 1000 or unit == "TB":
             return f"{int(n)} B" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1024
+        n /= 1000
     return f"{n:.1f} TB"
 
 
@@ -630,11 +923,12 @@ def _hf_options(component: str, installed: List[str]) -> List[dict]:
     return opts
 
 
-# Rough "space required" hints for the download actions (uncompressed on disk).
+# Rough "space required" hints for the download actions (disk space once installed).
 _SIZE_HINTS = {
     "genome": "a reference genome is typically ~1-3 GB",
-    "index": "a genome-wide bulge index is typically ~5-10 GB",
-    "vcf": "a population VCF set (e.g. 1000G) is typically ~15-20 GB",
+    "index": ("the download size shown in the list (from a few GB to over 100 GB) "
+              "plus room to unpack it"),
+    "vcf": "a hosted VCF set takes about 2-30 GB (the list shows each one's size)",
 }
 
 
@@ -1436,6 +1730,50 @@ def settings_page() -> List:
         ],
     )
 
+    # ---- Concurrent search jobs ------------------------------------------
+    try:
+        import app_settings as _appcfg  # app.py and pages_utils put PostProcess/ on sys.path
+        _cur_maxjobs, _maxjobs_cap = _appcfg.get_max_concurrent_jobs(), _appcfg.MAX_JOBS_CAP
+        _maxjobs_env = _appcfg.env_override()
+    except Exception:
+        _cur_maxjobs, _maxjobs_cap, _maxjobs_env = 2, 16, None
+    concurrency_card = _add_card(
+        "Concurrent search jobs",
+        "How many searches run at the same time. The default is 2 (conservative — each "
+        "genome-wide search is memory-heavy, ~tens of GB of RAM). Raise it only on a "
+        "machine with enough RAM and cores; extra jobs beyond this limit simply queue. "
+        "Takes effect after the app restarts."
+        + (
+            " CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, sets this "
+            f"to {_maxjobs_env} concurrent search job(s). To change it, set "
+            "CRISPRME_MAX_CONCURRENT_JOBS to another value, or unset it to use this "
+            "setting, and restart the app."
+            if _maxjobs_env is not None
+            else ""
+        ),
+        [
+            # While the env var pins the value, a value saved here would not
+            # apply, so the input and Save are disabled; the blurb says why.
+            dcc.Input(
+                id="max-jobs-input",
+                type="number",
+                min=1,
+                max=_maxjobs_cap,
+                step=1,
+                value=_cur_maxjobs,
+                disabled=_maxjobs_env is not None,
+                style={"width": "6rem", "margin-right": "0.5rem"},
+            ),
+            html.Button(
+                "Save", id="max-jobs-save-btn", disabled=_maxjobs_env is not None
+            ),
+            html.Div(
+                id="max-jobs-feedback",
+                style={"margin-top": "0.4rem", "color": "#555"},
+            ),
+        ],
+    )
+
     # ---- Email notifications (SMTP) ---------------------------------------
     _email_cfg = read_email_config()
     email_card = _add_card(
@@ -1636,6 +1974,7 @@ def settings_page() -> List:
                                 annotation_card,
                                 annotation_manage_card,
                                 cosmic_card,
+                                concurrency_card,
                                 email_card,
                                 pam_card,
                                 delete_card,
@@ -1661,7 +2000,10 @@ def settings_page() -> List:
                     ]
                 ),
                 dcc.Store(id="settings-active-job"),
-                dcc.Interval(id="settings-check", interval=3000, disabled=True),
+                # 1s poll (was 3s) so the download progress bar advances smoothly;
+                # the Interval is disabled unless a job is active, so this only
+                # fires while something is actually running.
+                dcc.Interval(id="settings-check", interval=1000, disabled=True),
             ],
             fluid=True,
             style={"margin-top": "1rem"},
@@ -2068,6 +2410,53 @@ def _cosmic_license_save(n, value):
 
 
 @app.callback(
+    Output("max-jobs-feedback", "children"),
+    [Input("max-jobs-save-btn", "n_clicks")],
+    [State("max-jobs-input", "value")],
+    prevent_initial_call=True,
+)
+def _max_jobs_save(n, value):
+    """Persist the max concurrent search jobs. The process pool is built at app
+    startup, so the new value applies on the next restart, unless
+    CRISPRME_MAX_CONCURRENT_JOBS pins it: then nothing is saved (the page shows
+    the input and Save disabled)."""
+    if n is None or ONLINE:
+        raise PreventUpdate
+    try:
+        import app_settings as _appcfg
+    except Exception:
+        return html.Span(
+            "Could not persist the setting (config helper unavailable).",
+            style={"color": "#b00"},
+        )
+    pinned = _appcfg.env_override()
+    if pinned is not None:  # a page rendered before a restart set the env var
+        return html.Span(
+            "Not saved: CRISPRME_MAX_CONCURRENT_JOBS, set when the app was launched, "
+            f"sets this to {pinned} concurrent search job(s). To change it, set "
+            "CRISPRME_MAX_CONCURRENT_JOBS to another value, or unset it to use this "
+            "setting, and restart the app.",
+            style={"color": "#b00"},
+        )
+    if value is None:
+        return html.Span(
+            f"Enter a number between 1 and {_appcfg.MAX_JOBS_CAP}.",
+            style={"color": "#b00"},
+        )
+    try:
+        stored = _appcfg.set_max_concurrent_jobs(value)
+    except Exception as e:  # e.g. a config dir it cannot write
+        return html.Span(
+            f"Could not persist the setting: {e}",
+            style={"color": "#b00"},
+        )
+    return html.Span(
+        f"Saved: up to {stored} concurrent search job(s). Restart the app to apply.",
+        style={"color": "green"},
+    )
+
+
+@app.callback(
     Output("email-save-feedback", "children"),
     [Input("email-save-btn", "n_clicks")],
     [
@@ -2189,9 +2578,9 @@ if MAINTAINER_MODE:
     prevent_initial_call=True,
 )
 def refresh_settings_job(n, job_id):
-    if not job_id:
+    jobdir = _settings_jobdir(job_id)
+    if not jobdir:  # no active job, or not a Settings job id
         raise PreventUpdate
-    jobdir = os.path.join(current_working_directory, SETTINGS_DIR, job_id)
     logtxt = os.path.join(jobdir, "log.txt")
     if not os.path.isfile(logtxt):
         raise PreventUpdate
@@ -2204,20 +2593,23 @@ def refresh_settings_job(n, job_id):
             stage = line.split("\t")[0]
             break
     if f"{stage}\tEnd" in log:
-        # success: stop polling, clear the active job, refresh tables + storage
+        # success: stop polling, clear the active job, refresh tables + storage.
+        # If the download installed a variant index but its genotypes companion
+        # fetch failed, the index detects off-targets but per-sample Samples are
+        # degraded — surface that as a visible warning, not a quiet stderr NOTE.
+        done = html.Div(f"{stage}: done.", style={"color": "green"})
+        degraded = _genotypes_degraded_warning(jobdir)
+        children = html.Div([done, degraded]) if degraded else done
         return (
-            html.Div(f"{stage}: done.", style={"color": "green"}),
+            children,
             True,
             _render_all_tables(),
             _render_storage(),
             None,
         )
     if f"{stage}\tFAILED" in log:
-        tail = _error_tail(os.path.join(jobdir, "log_error.txt"))
         return (
-            html.Div(
-                [html.Div(f"{stage}: failed.", style={"color": "#b00"}), html.Small(tail)]
-            ),
+            _render_failure(stage, jobdir, job_id),
             True,
             no_update,
             no_update,
@@ -2256,6 +2648,14 @@ def refresh_settings_job(n, job_id):
             no_update,
             None,
         )
+    # running: render the real progress bar when progress.json is present +
+    # fresh; otherwise fall back to the existing spinner (older code / non-
+    # download jobs / the brief window before the first progress write).
+    prog = _read_progress(jobdir)
+    if prog:
+        bar = _render_progress_bar(stage, prog)
+        if bar is not None:
+            return (bar, False, no_update, no_update, no_update)
     return (
         html.Div(
             [
@@ -2267,6 +2667,64 @@ def refresh_settings_job(n, job_id):
         no_update,
         no_update,
         no_update,
+    )
+
+
+# --- failure-relay callbacks (2.8.1 piece D) --------------------------------
+# These target components that only exist after refresh_settings_job renders a
+# FAILED banner (suppress_callback_exceptions=True allows that). Both are
+# prevent_initial_call so they never fire before a failure is shown.
+@app.callback(
+    [Output("settings-full-log-container", "hidden"),
+     Output("settings-full-log", "value")],
+    [Input("settings-show-log-btn", "n_clicks")],
+    [State("settings-full-log-container", "hidden"),
+     State("settings-failed-job", "data")],
+    prevent_initial_call=True,
+)
+def _toggle_settings_full_log(n, currently_hidden, failed_job):
+    """Show/hide the scrollable full job log (log_error.txt + verbose tail), the
+    same copy-pasteable panel the search page offers for a failed search."""
+    if not n:
+        raise PreventUpdate
+    if not currently_hidden:  # open -> collapse
+        return True, ""
+    jobdir = _settings_jobdir(failed_job)
+    if not jobdir:  # no failed job, or not a Settings job id
+        return False, "No job to show."
+    return False, _full_job_log(jobdir)
+
+
+@app.callback(
+    [
+        Output("settings-active-job", "data", allow_duplicate=True),
+        Output("settings-check", "disabled", allow_duplicate=True),
+        Output("settings-progress", "children", allow_duplicate=True),
+    ],
+    [Input("settings-retry-btn", "n_clicks")],
+    [State("settings-failed-job", "data")],
+    prevent_initial_call=True,
+)
+def _retry_settings_job(n, failed_job):
+    """Re-launch the failed download (same command, via cmd.json) and resume
+    polling. crisprme_hf resumes partial transfers, so a retry is cheap."""
+    if not n or ONLINE or not failed_job:
+        raise PreventUpdate
+    new_job = _relaunch_job(failed_job)
+    if not new_job:
+        return (
+            no_update,
+            no_update,
+            html.Div(
+                "Could not retry: the original download command was not found. "
+                "Please start the download again from its card above.",
+                style={"color": "#b00"},
+            ),
+        )
+    return (
+        new_job,
+        False,
+        html.Div([dbc.Spinner(size="sm"), html.Span("  Retrying download...")]),
     )
 
 

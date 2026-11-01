@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Install CRISPRme+ 2.8.0 FROM SOURCE, without the Bioconda crisprme/crispritz
-# packages. Builds CRISPRitz 2.9.0 from source and installs both CRISPRitz and
+# Install CRISPRme+ 2.8.1 FROM SOURCE, without the Bioconda crisprme/crispritz
+# packages. Builds CRISPRitz 2.9.1 from source and installs both CRISPRitz and
 # CRISPRme into the ACTIVE conda environment ($CONDA_PREFIX), using the same
 # bin/ + opt/ layout the Bioconda/Docker builds use (crisprme.py resolves
 # PostProcess as <dir-of-crisprme.py>[:-3] + opt/crisprme/PostProcess/).
@@ -12,11 +12,18 @@
 #   mamba activate crisprme
 #   bash install_from_source.sh
 #
-# Override the CRISPRitz tag with CRISPRITZ_REF (default v2.9.0).
+# Override the CRISPRitz tag with CRISPRITZ_REF (default v2.9.1).
 set -euo pipefail
 
+# Linux only: environment.yml has packages with no macOS build, and CRISPRitz's
+# buildTST needs GCC's parallel STL, which no macOS toolchain provides.
+if [ "$(uname -s)" = Darwin ]; then
+    echo "ERROR: the source build is Linux-only; on macOS use Docker (README 1.2)." >&2
+    exit 1
+fi
+
 : "${CONDA_PREFIX:?Activate the conda env first: 'mamba activate crisprme'}"
-CRISPRITZ_REF="${CRISPRITZ_REF:-v2.9.0}"
+CRISPRITZ_REF="${CRISPRITZ_REF:-v2.9.1}"
 CXX="${CXX:-g++}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # this crisprme checkout
 
@@ -57,8 +64,11 @@ cp -R sourceCode/Python_Scripts "${CONDA_PREFIX}/opt/crispritz/"
 # checks, in this order: PATH first, else same-directory as this install
 # (corrected_origin_path + "Python_Scripts/Enrichment/enricher"). Without a
 # compiled binary in either spot it silently falls back to the pure-Python
-# enricher.py -- no error, ~15x slower, see this commit's message for the
-# consequence. (add_variants.sh, a separate, not-actually-invoked script, has
+# enricher.py -- no error and correct, but slower: measured 1.75x on a real
+# add-variants run (full chr22, HGDP+1kGP, 4,091 samples). An earlier note here
+# said ~15x; that figure is not reproducible on a many-sample VCF, where
+# per-sample genotype scanning dominates both ports. Quote the measurement, not
+# the folklore. (add_variants.sh, a separate, not-actually-invoked script, has
 # its own unconditional hard-exit if 'enricher' isn't on PATH or beside it --
 # same two paths, so satisfied as a side effect regardless.)
 cp enricher "${CONDA_PREFIX}/bin/enricher"
@@ -83,7 +93,7 @@ chmod +x "${CONDA_PREFIX}/bin/crisprme.py"
 rm -f "${CONDA_PREFIX}"/lib/python*/site-packages/pyproject.toml
 
 # the legacy RandomForest scorer was retired in favor of CRISPR-Bulge; there is no 276 MB model to unzip here
-# anymore. CFD's tiny score pickles ship as plain files; the CRISPR-Bulge model is
+# anymore. CFD's JSON score tables ship as plain files in PostProcess/; the CRISPR-Bulge model is
 # provisioned into its own conda env below.
 
 # ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
@@ -120,4 +130,6 @@ fi
 echo ">> Installed:"
 echo "   crisprme.py  -> $(command -v crisprme.py)   ($(crisprme.py --version 2>/dev/null))"
 echo "   crispritz.py -> $(command -v crispritz.py)"
-echo ">> Done. Try:  crisprme.py complete-test --chrom chr22 --thread 4"
+echo ">> Done. Self-test it from an empty folder (README 1.3; downloads chromosome 22):"
+echo "     CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8"
+echo "     crisprme.py validate-test --chrom chr22"

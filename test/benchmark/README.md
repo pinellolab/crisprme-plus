@@ -10,8 +10,10 @@ alignment instead of CRISPRme's TST index search).
   guide `sg1617`, thresholds mm=4 / DNA-bulge=1 / RNA-bulge=1) on the hg38 +
   1000G variant-enriched genome.
 - `brute-force-cas12-1000G/brute_force_cas12_1000G.tsv` — Cas12a reference
-  (HBG1/HBG2 clinical guide, TTTV PAM). **Currently chr22-scoped** (953 off-targets);
-  run `validate-test --chrom chr22`. Regenerate genome-wide with the driver below.
+  (HBG1/HBG2 clinical guide, TTTV PAM). **Currently chr22-scoped** (953 off-targets;
+  `"scope": "chr22"` in `benchmarks.json`, so `validate-test` skips it on any other
+  chromosome and on a whole-genome run); run `validate-test --chrom chr22`. Regenerate
+  genome-wide with the driver below, and drop its `scope`.
 - `brute-force-simple/` — references for the two **default single-"n edits" web
   mode** cases (`cas9_sg1617_simple`, `cas12a_hbg_simple`): chr22, per-type caps
   wide open (mm=6/bDNA=2/bRNA=2) with a binding `--max-total-edits 3`, exactly the

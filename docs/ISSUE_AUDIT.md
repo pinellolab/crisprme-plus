@@ -45,10 +45,25 @@ false-positive filter `remove_bad_indel_targets.py` + #96 chr-assignment fix). C
 - **#84** missing InDel-file error — closed by the reporter; nominal cleanup remedy, no pinpointed guard. Low risk.
 
 ### Watch item
-- **#67/#77/#59** indel false-positives — the coordinate-overlap filter (`remove_bad_indel_targets.py:62-79`) is
-  present and active, and #96 fixed the indel chromosome-assignment bug (a major source), but the exact
-  *sequence-level* false positive #77 described isn't provably eliminated by an overlap test alone. Recommend a
-  targeted regression test on the #77 dataset.
+- **#67/#77/#59** indel false-positives — **a sequence-level source is now found and fixed.** The
+  coordinate-overlap filter (`remove_bad_indel_targets.py:62-79`) is present and active and #96 fixed the
+  indel chromosome-assignment bug, but neither catches this one: `pam_filter.py` read the 10-column
+  CRISPRitz header as a target and dropped it, so `post_analisi_indel.sh` prepended the merged file's
+  first *data* row to every per-chromosome subset. Because the fake-genome coordinate space is shared
+  across chromosomes, `analisi_indels_NNN.py` (tree keyed on the fake position alone) re-attributed that
+  row to each chromosome it ran, with that chromosome's real rsID, AF and carriers. One raw row became
+  1 correct + N phantom off-targets. Measured genome-wide at NRG 4+1+1 over HGDP+1kGP: 8 phantoms on a
+  dedicated NRG index, 11 on a K=8 pamless index, against an identical 13,253-row justified core.
+  Fixed in four places with `PostProcess/test_indel_header_injection.py` (14 tests) as the
+  sequence-level regression test this item asked for. Confirmed by an A/B on the real merged targets
+  through the real pipeline: headerless reproduces the fan-out, header-restored does not. Verified
+  end-to-end on three re-runs of the same genome-wide search over three different indices: every
+  phantom is gone, each of the 13,253 indel rows is justified by its own window, and the three
+  reports are byte-identical both to each other and to the one arm that had never shown a phantom,
+  so the fix is inert where there was nothing to fix. The injection also moved one legitimate row's
+  CRISPR-Bulge score by one unit in the last place, through batch composition in the scorer — so a
+  fan-out of this kind is not purely additive.
+  Still open: whether the exact #77 dataset is fully explained by this, an overlap gap, or both.
 - **#39** radar-chart `guide[count]` IndexError — legitimately closed (user error), but the code still lacks a
   guide-length guard; candidate for a future friendly-error check.
 

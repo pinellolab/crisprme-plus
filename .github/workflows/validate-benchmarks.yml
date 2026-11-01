@@ -120,8 +120,12 @@ jobs:
             if ! grep -qi "No off-targets found" Results/zh/log_verbose.txt; then
               echo "FAIL: empty-result message missing"; exit 1
             fi
-            if [ -s Results/zh/log_error.txt ]; then
-              echo "FAIL: log_error is non-empty"; cat Results/zh/log_error.txt; exit 1
+            # A zero-hit job ends before log_error.txt is renamed (and before the report),
+            # but check whichever log exists, as the read-only smoke below must.
+            err=Results/zh/log_error.txt
+            [ -e "$err" ] || err=Results/zh/log_error_no_check.txt
+            if [ ! -e "$err" ] || [ -s "$err" ]; then
+              echo "FAIL: $err is non-empty or missing"; cat "$err"; exit 1
             fi
             echo "zero-hit regression PASS"
           '
@@ -150,11 +154,17 @@ jobs:
             chmod -R a-w /opt/conda/opt/crisprme
             crisprme.py complete-search --genome Genomes/synth --pam PAMs/20bp-NGG-SpCas9.txt \
               --guide guide.txt --mm 1 --bDNA 0 --bRNA 0 --output ro
-            if [ -s Results/ro/log_error.txt ]; then
-              echo "FAIL: log_error non-empty (read-only regression?)"; cat Results/ro/log_error.txt; exit 1
+            # A job that runs to the end renames log_error.txt to log_error_no_check.txt, so a
+            # check of log_error.txt alone passed whatever the job wrote: check whichever exists.
+            err=Results/ro/log_error.txt
+            [ -e "$err" ] || err=Results/ro/log_error_no_check.txt
+            if [ ! -e "$err" ] || [ -s "$err" ]; then
+              echo "FAIL: $err non-empty or missing (read-only regression?)"; cat "$err"; exit 1
             fi
             ls Results/ro/*integrated_results.tsv >/dev/null 2>&1 \
               || { echo "FAIL: no integrated_results (read-only regression)"; exit 1; }
+            ls Results/ro/*_report.zip >/dev/null 2>&1 \
+              || { echo "FAIL: no report zip (Results/ro/report.log:)"; cat Results/ro/report.log; exit 1; }
             echo "read-only-container smoke PASS"
           '
 

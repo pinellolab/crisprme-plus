@@ -108,12 +108,55 @@ if ONLINE:
     DISPLAY_OFFLINE = "none"
 else:
     DISPLAY_ONLINE = "none"
-# set to execute multiple 2 jobs max at time
-pool_executor = concurrent.futures.ProcessPoolExecutor(max_workers=2)
+# Max concurrent search jobs. Configurable (env CRISPRME_MAX_CONCURRENT_JOBS or the
+# web Settings page), but the DEFAULT stays a conservative 2 so a laptop / the public
+# server is never oversubscribed; a search job is memory-heavy (~tens of GB each). The
+# pool is built once at startup, so a Settings change applies on the next restart.
+# app_settings lives in PostProcess/, which is NOT on sys.path yet: `crisprme.py
+# web-interface` starts index.py as a fresh subprocess (sys.path[0] is just this
+# directory), and index.py imports this module before pages/pages_utils.py inserts
+# PostProcess/. Insert it here, from this file's own location like pages_utils
+# does, so the setting is found whatever the cwd.
+_POSTPROCESS_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "PostProcess"
+)
+if _POSTPROCESS_PATH not in sys.path:
+    sys.path.insert(0, _POSTPROCESS_PATH)
+try:
+    import app_settings
+    _MAX_CONCURRENT_JOBS = app_settings.get_max_concurrent_jobs()
+except Exception as e:
+    _MAX_CONCURRENT_JOBS = 2
+    # ascii(): this runs at import, so the line must encode on any stdout (a
+    # latin-1 locale, say) or the app would not start; the warning below too. And
+    # print(), not sys.stdout.write: with fd 1 closed sys.stdout is None, which
+    # print() skips and .write() raises on.
+    print(
+        "WARNING: cannot read the concurrent search jobs setting (app_settings: "
+        f"{type(e).__name__}: {str(e)!a}); using the default of {_MAX_CONCURRENT_JOBS} "
+        "concurrent search jobs",
+        flush=True,
+    )
+else:
+    # app_settings ignores a CRISPRME_MAX_CONCURRENT_JOBS that is not a whole number
+    # in ASCII digits (e.g. "5" with the quotes `docker run --env-file` keeps) and
+    # clamps one into [1, MAX_JOBS_CAP]; say so rather than silently run another
+    # pool size. Compare as text, leading zeros aside: int() raises on some values
+    # (a superscript digit, over 4300 digits), and an exception here would stop
+    # the app from starting.
+    _env_jobs = os.environ.get("CRISPRME_MAX_CONCURRENT_JOBS", "").strip()
+    if _env_jobs and _env_jobs.lstrip("0") != str(_MAX_CONCURRENT_JOBS):
+        print(
+            f"WARNING: CRISPRME_MAX_CONCURRENT_JOBS={_env_jobs!a} is not a whole "
+            f"number from 1 to {app_settings.MAX_JOBS_CAP}; using "
+            f"{_MAX_CONCURRENT_JOBS} concurrent search job(s)",
+            flush=True,
+        )
+pool_executor = concurrent.futures.ProcessPoolExecutor(max_workers=_MAX_CONCURRENT_JOBS)
 # A separate single-slot executor for Settings / Data-Manager operations
 # (genome/index/VCF downloads and local index builds). Keeping these off the
 # search `pool_executor` means a long download or index build never starves the
-# 2 search slots.
+# search slots (_MAX_CONCURRENT_JOBS of them: 1-16, 2 by default).
 settings_executor = concurrent.futures.ProcessPoolExecutor(max_workers=1)
 # Maintainer-only actions (e.g. publishing an index to the shared HuggingFace
 # repo) are gated behind this flag: enabled only when a HuggingFace write token

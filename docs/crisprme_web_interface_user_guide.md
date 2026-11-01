@@ -71,15 +71,15 @@ legacy setup):
 mkdir -p ~/crisprme && cd ~/crisprme
 
 # reference genome, annotations, PAMs and sample lists
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
   crisprme.py download --what all --path /DATA
 
 # a ready-made SpCas9 NRG (NGG+NAG) reference index (skips a long index build)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
   crisprme.py download --what index --index-name NRG_3_hg38 --path /DATA
 
 # the recommended default variant-aware index (HGDP + 1000 Genomes, 4,091 samples, re-phased)
-docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.0 \
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:v2.8.1 \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 ```
 
@@ -90,7 +90,8 @@ pre-downloaded `NRG_3_hg38+hg38_HGDP1kGP` index (phased HGDP + 1000 Genomes,
 search variant-aware. Sample-level analyses / named carriers / personal risk cards
 come from the **genotype store bundled with that index** (fetched by `download --what
 index` unless you pass `--no-genotypes`), not from raw VCFs — so a single index
-download covers both. The default repo does not host raw per-dataset VCFs.
+download covers both. (The default repo also hosts the source VCFs, `hg38_HGDP1kGP`,
+`hg38_HPRC` and `hg38_mega`, which you need only to build an index yourself.)
 
 ### 2b. Start the local server
 
@@ -100,7 +101,7 @@ computer:
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
-  pinellolab/crisprme:v2.8.0 crisprme.py web-interface
+  pinellolab/crisprme:v2.8.1 crisprme.py web-interface
 ```
 
 Keep this terminal open for the session; press **Ctrl+C** to stop the server.
@@ -424,7 +425,7 @@ interface navigates automatically to the Job Status page.
 > tmux new -s crisprme
 > cd ~/crisprme      # your data folder
 > docker run --rm -v "${PWD}:/DATA" -w /DATA -p 8080:8080 -it \
->   pinellolab/crisprme:v2.8.0 crisprme.py web-interface
+>   pinellolab/crisprme:v2.8.1 crisprme.py web-interface
 > # Detach with Ctrl+B then D — the server continues running.
 > # (Conda users: mamba activate crisprme && crisprme.py web-interface)
 > ```
@@ -791,7 +792,9 @@ For the full scoring assumptions and limitations, see **METHODS §8**.
 This section covers issues specific to the local server environment and browser
 interaction. For problems with the CRISPRme search pipeline itself — such as
 unexpected output or missing results files — consult the `log_error.txt` file in
-the relevant results folder and refer to the
+the relevant results folder (`log_error_no_check.txt` once the job has run to the end,
+which renames it; a job that is still running, failed, or found no off-targets keeps
+`log_error.txt`) and refer to the
 [CRISPRme GitHub Issues page](https://github.com/pinellolab/crisprme-plus/issues).
 
 ---
@@ -834,8 +837,12 @@ variants.
 3. **Variant index not installed** — re-run
    `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
    (the recommended default panel).
-4. **Confirm success** — `Results/<name>/log_error.txt` is empty and
-   `*.integrated_results.tsv` is non-empty.
+4. **Confirm success** — `Results/<name>/log_error_no_check.txt` is empty and
+   `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its
+   `log_error.txt` to `log_error_no_check.txt`. A job that is still running, failed, or
+   found no off-targets keeps `log_error.txt`, so check whichever of the two exists. A job
+   that found no off-targets says `No off-targets found` in its `log.txt` and writes no
+   `*.integrated_results.tsv`.)
 
 ---
 
@@ -950,7 +957,9 @@ expires or you close the tab:
    `Cmd+Shift+R` (macOS).
 2. If the results folder still does not appear, confirm the search completed
    successfully by checking that `Results/<output-name>/` exists in your working
-   directory and that `log_error.txt` is empty.
+   directory and that its `log_error_no_check.txt` (the name `log_error.txt` takes
+   when a job runs to the end; a job that found no off-targets keeps `log_error.txt`)
+   is empty.
 
 ---
 

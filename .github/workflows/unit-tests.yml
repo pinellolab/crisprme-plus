@@ -16,10 +16,16 @@ on:
     paths:
       - "crisprme.py"
       - "PostProcess/**"
-      # Only this one pages/ file, not pages/** -- it's the one this
+      # Only these pages/ files, not pages/** -- they are the ones this
       # workflow's own tests cover (via AST-extraction, no Dash needed);
       # the rest of pages/ is covered by web-e2e.yml instead.
       - "pages/history_page.py"
+      - "pages/settings_page.py"
+      # app.py sizes the search pool from app_settings at import time and index.py
+      # imports it; test_app_settings guards that, so a PR touching only these two
+      # must still run it.
+      - "app.py"
+      - "index.py"
       - ".github/workflows/unit-tests.yml"
   push:
     branches: [ "main", "python3.11", "2.2.0-dev" ]
@@ -52,15 +58,20 @@ jobs:
         run: python -m pip install --upgrade pip requests numpy pandas matplotlib pysam pyliftover
 
       - name: Byte-compile the pipeline (syntax check)
-        # pages/history_page.py: syntax-only (py_compile doesn't execute
-        # imports), included here since test_history_page_assembly.py below
-        # exercises it via AST-extraction rather than a normal import (it
-        # needs a live Dash `app`, which this light CI doesn't set up).
-        run: python -m py_compile crisprme.py PostProcess/*.py pages/history_page.py
+        # pages/history_page.py + pages/settings_page.py: syntax-only (py_compile
+        # doesn't execute imports), included here since test_history_page_assembly.py
+        # and test_settings_progress.py below exercise them via AST-extraction rather
+        # than a normal import (they need a live Dash `app`, which this light CI
+        # doesn't set up).
+        run: python -m py_compile crisprme.py PostProcess/*.py pages/history_page.py pages/settings_page.py app.py
 
       - name: HuggingFace download/publish + index unit tests (network-free)
         working-directory: PostProcess
         run: python -m unittest test_crisprme_hf -v
+
+      - name: "Web Settings download progress + failure relay (2.8.1; AST-extracted, no Dash)"
+        working-directory: PostProcess
+        run: python -m unittest test_settings_progress -v
 
       - name: HF fallback contract (hf_fetch must raise so callers fall back)
         working-directory: PostProcess
@@ -203,9 +214,9 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_report_scorer_label -v
 
-      - name: "Intermediate cleanup guard (default-on rm keeps finalized outputs + web drill-down source; env/cicd guards)"
+      - name: "Intermediate cleanup guard (default-on rm keeps finalized outputs + web drill-down source; env/cicd guards) + annotation temp folders removed after every search"
         working-directory: PostProcess
-        run: python -m unittest test_clean_intermediates -v
+        run: python -m unittest test_clean_intermediates test_annotation_tmpdirs -v
 
       - name: "Additional coverage (tier0-compaction / greedy-cap / tiebreak / job-name / search-lists / registry-emit / assembly-reconcile / history-page assembly jobs)"
         # test_annotation: the retry / flock-fallback / BGZF-EOF-guard logic is mock-based
@@ -216,7 +227,7 @@ jobs:
           python -m unittest test_assembly_reconcile test_personal_assembly
           test_ensure_search_lists test_hvdr_greedy_cap test_registry_only_emit
           test_representative_tiebreak test_sanitize_job_name test_tier0_compaction
-          test_history_page_assembly test_annotation -v
+          test_history_page_assembly test_app_settings test_annotation -v
 
       - name: "Modular scorer env-manager + runner (env lifecycle/state + subprocess protocol; no TF)"
         # scorer_env: detect env manager, create-command shape, atomic state file,
@@ -236,9 +247,9 @@ jobs:
         working-directory: PostProcess
         run: >
           python -m unittest test_cfd_cleanroom_equiv test_cosmic_license
-          test_configure_tmpdir
+          test_configure_tmpdir test_install_from_source
           test_registry_from_info_af test_synth_sites_gt test_change_headers_bestmerge
-          test_dash_output_props test_complete_test -v
+          test_dash_output_props test_complete_test test_validate_test -v
 
       - name: "targets-scoring (score-a-list: CasOFFinder/TSV parsers, CFD slicing, CRISPR-Bulge null rules, carrier overlay vs synthetic registry)"
         # The score-a-list backend (crisprme.py targets-scoring). Hermetic: the
@@ -255,6 +266,41 @@ jobs:
 
       - name: "CFD score tables validation (JSON structure/counts/anchors; the committed tables are the source of truth)"
         run: python scripts/generate_cfd_tables.py --check
+
+      - name: "Indel report integrity (header injection) + complete-search flag gate + index resolution"
+        # The header-injection guards: a dropped CRISPRitz header made
+        # post_analisi_indel.sh prepend the merged file's first DATA row to every
+        # per-chromosome subset, so one search row was reported on ~23 chromosomes,
+        # each with that chromosome's real rsID/AF/carriers. Plus the unknown-flag
+        # rejector (a mistyped --prune-pams used to run genome-wide with pruning
+        # silently off), and the index resolver, whose choice must not depend on
+        # LC_COLLATE now that a second PAM-less flank width exists. Plus the
+        # indexes/SHA256SUMS writer (hermetic; it must never emit an empty file), and
+        # a chromosome with SNPs but no indels, which CRISPRitz 2.9.1's refusal of an
+        # index dir without a .bin turned into a whole-run abort. Plus legacy-index
+        # access: dedicated-PAM and NNN_3 indexes are still listed and downloaded from
+        # the default repo only, and the catalog offers each name's fetchable copy.
+        working-directory: PostProcess
+        run: >
+          python -m unittest test_indel_header_injection test_complete_search_flags
+          test_index_resolution test_index_repo_routing test_legacy_index_access
+          test_iupac_collapse_consistency test_hf_sha256sums
+          test_indel_empty_chromosome -v
+
+      - name: "build-index-only leaves no partial index or enriched genome, and stops at a search's build lock"
+        # A later run takes an index directory or an enriched genome that is there for
+        # a finished one. build-index-only builds each index in a hidden directory of
+        # genome_library and renames it into place once the engine has succeeded, and
+        # stages the enrichment (its dictionaries compressed) to move the enriched
+        # genome into place last, so a run that ends early (Ctrl-C, an OOM kill, a
+        # container stop, an engine error) leaves none; the SNP overlay rewrites each
+        # fake-indel FASTA whole or not at all, and the build directories of runs that
+        # are gone are reclaimed. While a search holds the build lock of an output it
+        # would use or build, it stops with an ERROR. The real crisprme.py,
+        # pool_index_indels.py and overlay_indel_snps.py run against a stub engine on
+        # PATH, and a successful build must leave the tree the code before the fix left.
+        working-directory: PostProcess
+        run: python -m unittest test_build_index_only_atomic -v
 
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import

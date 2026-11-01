@@ -79,9 +79,42 @@ vcf_filter_pass_values="${24:-PASS,.}"
 # rebuild. "_" (or empty) means "not provided".
 index_path="${25:-_}"
 # Optional cap on total edits (mismatches + bulges) per reported alignment
-# (complete-search --max-total-edits). Raw targets exceeding it are dropped
-# right after the search. "-1" (or unset) means no cap.
+# (complete-search --max-total-edits): pruned inside the search, and raw
+# targets exceeding it are dropped again right after it. Unset means 4. Both
+# callers always pass it: the CLI a non-negative integer (default 6; it rejects
+# negatives) and the web form a positive one. "-1", passed only by a direct
+# call of this script, turns the limit off.
 max_total_edits="${26:-4}"  # default cap on total edits (mm+bulges); pruned in-search (#107)
+
+# --prune-pam pass-through ($27, default "0"=off): when "1", the CRISPRitz -index
+# searches filter a PAM-less index down to $pam_file at leaf-emit (skip-before-write),
+# so one NNN index serves the requested PAM. OFF -> no flag added -> byte-identical
+# search. Needs a CRISPRitz build that supports --prune-pam.
+prune_pam="${27:-0}"
+prune_pam_flag=""
+[ "$prune_pam" = "1" ] && prune_pam_flag="--prune-pam"
+
+# Fail loudly if the installed CRISPRitz cannot prune. crispritz.py builds the
+# searchTST argv explicitly from the options it recognizes, so a build without
+# --prune-pam does not reject the flag -- it drops it, and the search runs
+# UNPRUNED. The post-search PAM filter still enforces the requested PAM, so the
+# report would come out right while the run read the whole PAM-less index: far
+# slower, with an enormous intermediate, and silently not what was asked for.
+# CRISPRme pins a CRISPRitz version that supports this, but the pin is
+# overridable (CRISPRITZ_REF / an engine already on PATH), so check rather than
+# assume. Grep the installed script instead of comparing versions: it is the
+# thing that would drop the flag.
+if [ "$prune_pam" = "1" ]; then
+	_cz_path=$(command -v crispritz.py 2>/dev/null)
+	if [ -n "$_cz_path" ] && ! grep -q -- "--prune-pam" "$_cz_path" 2>/dev/null; then
+		printf "ERROR: --prune-pam was requested, but the installed CRISPRitz does not support it\n" >&2
+		printf "       (%s has no --prune-pam handling, so the flag would be dropped and the\n" "$_cz_path" >&2
+		printf "       search would run unpruned over the whole PAM-less index).\n" >&2
+		printf "       Install a CRISPRitz build with --prune-pam, or drop the flag and use a\n" >&2
+		printf "       dedicated index for this PAM.\n" >&2
+		exit 1
+	fi
+fi
 
 # Whether to emit the alternative-alignments (altMerge / all_results_with_alternative_alignments)
 # output = the NON-best alignments per locus cluster. Inherited from crisprme.py via the env var
@@ -123,6 +156,474 @@ if ! python "$starting_dir/genome_layout.py" "$ref_folder" >&2; then
 	printf "ERROR: reference genome folder %s is not one FASTA file per sequence\n" "$ref_folder" >&2
 	exit 1
 fi
+
+# Build locks. A run that builds a shared output -- an enriched genome, a genome
+# index, an INDELS index -- holds "<output>.lock" (an atomic mkdir) while it writes
+# it. Every other run that needs that output waits for the lock to go, and
+# _resolve_index_dir never selects an index whose lock is still there. The lock holds
+# an owner record (host, PID namespace, PID, start time), so a lock left by a run
+# that died -- SIGKILL, OOM kill, container stop, reboot -- does not wedge every later
+# run: when the record names this host and PID namespace and that PID is gone, a
+# zombie (a run that died unreaped), or another process's by now (one that started at
+# another time), the next run takes the lock over and redoes the build. That very run
+# is waited for, however old its record: stopped (Ctrl-Z, kill -STOP, a SLURM
+# suspend), it does not refresh it (below). A run ended before its build is done --
+# Ctrl-C, a SIGTERM (SLURM's scancel or time limit), a hangup -- leaves its lock and
+# record the same way, for the same takeover: letting go would hand on what the lock
+# guards, half-written, as finished. From another host or container the PID cannot be
+# checked (PIDs and hostnames are not comparable across Docker containers; `--network
+# host` even shares the hostname), so the holder also refreshes its record every
+# minute, and a run there takes the lock over once the record has gone 15 minutes
+# without a refresh. So does a run on this host where /proc cannot tell the run from a
+# process given its PID since (hidepid, no /proc), as a reused PID answers kill -0. A
+# run stopped where no other run can see it -- in another container or on another host
+# (docker pause, a job suspended elsewhere) -- can thus lose its lock to a takeover
+# after 15 minutes. Resumed, it goes on with its build step until that step returns,
+# and only then ends with an ERROR, using and removing nothing that the lock guards
+# (_lock_lost). Its build step can meanwhile write into the taker's output:
+# index-genome removes and re-creates its directory as it starts, so one stopped before
+# that point removes and rebuilds the taker's index in place, and for the INDELS index
+# pool_index_indels.py removes and rebuilds per-chromosome directories inside it
+# throughout. So a library shared across hosts or containers must never have a build
+# suspended for 15 minutes or more. A lock with no record at all is never broken, however old: CRISPRme 2.8.0
+# takes its locks with a bare mkdir and may still be building under one. So a run that
+# ends in the moment between a free lock's mkdir and the write of its record leaves a
+# lock that someone must clear: the run waits for it and says every few minutes how
+# to. Every message goes to stdout -- a write to stderr fails the stage -- except the
+# ERROR of a run that ends in failure.
+_lock_me=$(printf 'host=%s\npidns=%s\npid=%s\nstarted=%s' "$(uname -n 2>/dev/null)" \
+	"$(readlink /proc/self/ns/pid 2>/dev/null)" "$$" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")
+_locks_held=()
+_lock_beats=()  # the PID of each held lock's refresh loop, at its index in _locks_held
+_lock_takeover=  # the ".takeover" this run has made, while it holds it (_lock_steal)
+# From here to the traps, nothing runs a command substitution: see the traps.
+
+# Set variable $1 to field $3 of owner record $2, or to "" when it has none (parameter
+# expansion and printf -v; a here-string would need a writable TMPDIR, and its failure
+# would land on stderr).
+_lock_field() {
+	local _rec=$'\n'"$2"$'\n'
+	local _v=${_rec#*$'\n'"$3"=}
+	if [ "$_v" = "$_rec" ]; then _v=; else _v=${_v%%$'\n'*}; fi
+	printf -v "$1" '%s' "$_v"
+}
+_lock_field _lock_me_host "$_lock_me" host
+_lock_field _lock_me_pidns "$_lock_me" pidns
+
+# Read lock $1's owner record into _lock_rec, "" when it has none.
+_lock_read() {
+	_lock_rec=
+	{ IFS= read -r -d '' _lock_rec <"$1/owner"; } 2>/dev/null
+	_lock_rec=${_lock_rec%$'\n'}
+}
+
+# 0 when lock $1's owner record is this run's.
+_lock_mine() {
+	local _lock_rec
+	_lock_read "$1"
+	[ "$_lock_rec" = "$_lock_me" ]
+}
+
+# Set _lock_st to the state of process $1 as /proc/<pid>/stat gives it -- R, S, D...;
+# T stopped, t traced, Z exited but not reaped -- _lock_pgid to its process group
+# (field 5) and _lock_pstart to its start time (field 22), or all to "" where /proc
+# cannot tell: no such process, one hidden from this run (hidepid), no /proc, or a
+# /proc that is not this PID namespace's (it shows this shell under another PID). Read
+# with the read builtin; the fields follow the last ") ", as the name before it may
+# hold either.
+_lock_state() {
+	local _s= _i=0
+	_lock_st= _lock_pgid= _lock_pstart=
+	case "$1" in '' | 0 | *[!0-9]*) return 0 ;; esac
+	{ IFS= read -r _s </proc/self/stat; } 2>/dev/null
+	[ "${_s%% *}" = "${BASHPID:-$$}" ] || return 0
+	_s=
+	{ IFS= read -r -d '' _s <"/proc/$1/stat"; } 2>/dev/null
+	case "$_s" in *") "*) ;; *) return 0 ;; esac
+	_s=${_s##*") "}
+	_lock_st=${_s%% *}
+	while [ "$_i" -lt 19 ]; do
+		_s=${_s#* }; _i=$((_i + 1))
+		[ "$_i" != 2 ] || _lock_pgid=${_s%% *}
+	done
+	_lock_pstart=${_s%% *}
+	return 0
+}
+# This run's start time goes into its record: on this host it tells this run from a
+# process given its PID once it is gone (_lock_stale).
+_lock_state "$$"
+[ -z "$_lock_pstart" ] || _lock_me="$_lock_me"$'\n'"pstart=$_lock_pstart"
+
+# 0 when lock $1 is stale: its owner record names this host and PID namespace and that
+# PID is gone, a zombie (it died unreaped) or another process's by now (it started at
+# another time than the record says), or the record has gone 15 minutes without a
+# refresh (_lock_hold) -- on this host too where /proc cannot tell the run from a
+# process given its PID since, or the record names no start time. That very run is
+# alive however old its record: stopped (Ctrl-Z, kill -STOP), its refresh is stopped
+# with it, and once resumed it refreshes only at its loop's next beat. Otherwise 1,
+# with the reason in _lock_why, and _lock_live=1 when the owner is known to be alive
+# (its PID here, or its refreshes), 2 when it is stopped (its process group then in
+# _lock_pgid), 0 when this run cannot tell. On 0, _lock_gone says what became of the
+# owner. Leaves the record read in _lock_rec, and its pid, host and start time in
+# _lock_pid, _lock_host and _lock_started.
+_lock_stale() {
+	local _pidns _pstart _where=
+	_lock_live=0
+	_lock_read "$1"
+	_lock_field _lock_pid "$_lock_rec" pid
+	_lock_field _lock_host "$_lock_rec" host
+	_lock_field _lock_started "$_lock_rec" started
+	_lock_field _pidns "$_lock_rec" pidns
+	_lock_field _pstart "$_lock_rec" pstart
+	if [ -z "$_lock_rec" ]; then
+		_lock_why="it has no owner record (an older CRISPRme writes none), so this run cannot check it"
+		return 1
+	fi
+	_lock_why="it is held by pid $_lock_pid on $_lock_host (a run started $_lock_started)"
+	if [ "$_lock_host" != "$_lock_me_host" ] || [ "$_pidns" != "$_lock_me_pidns" ]; then
+		_where=", on another host or in another container"
+	elif [ "$_lock_pid" != "$$" ]; then  # (this run's own PID: see below)
+		_lock_state "$_lock_pid"
+		# started at another time than the record says: not that run, but its PID reused
+		if [ -n "$_lock_st" ] && [ -n "$_pstart" ] && [ "$_lock_pstart" != "$_pstart" ]; then
+			_lock_st=X
+		fi
+		case "$_lock_st" in
+			Z | X)
+				_lock_gone="is gone"
+				_lock_why="$_lock_why, which is no longer running"
+				return 0 ;;
+			T | t)
+				_lock_live=2
+				_lock_why="$_lock_why, which is stopped"
+				return 1 ;;
+			?*)
+				if [ -n "$_pstart" ]; then  # the very run, however old its record
+					_lock_live=1
+					_lock_why="$_lock_why, which is still running"
+					return 1
+				fi ;;
+		esac
+	fi
+	# (find through a pipe: a test, not $(...))
+	if find "$1/owner" -mmin +15 2>/dev/null | grep -q .; then
+		_lock_gone="has not refreshed its lock for 15 minutes"
+		_lock_why="$_lock_why$_where, and not refreshed for 15 minutes"
+		return 0
+	fi
+	if [ -n "$_where" ]; then  # where this run cannot check the PID
+		_lock_live=1
+		_lock_why="$_lock_why$_where, which refreshed it in the last 15 minutes; this run takes it over once it goes 15 minutes without a refresh"
+		return 1
+	fi
+	case "$_lock_pid" in
+		'' | 0 | *[!0-9]*) _lock_why="$_lock_why, which is not a PID this run can check"; return 1 ;;
+	esac
+	if [ "$_lock_pid" != "$$" ]; then  # our own PID in a record we did not write: a dead run's, reused
+		if kill -0 "$_lock_pid" 2>/dev/null; then
+			_lock_live=1
+			_lock_why="$_lock_why, which is still running"
+			return 1
+		fi
+		# kill -0 fails on a live process this run may not signal, too: only "No such
+		# process" means gone. Asked through a pipe; /proc would not do, as it is absent
+		# on some hosts and hides other users' processes under hidepid. Refreshed in the
+		# last 15 minutes (above), such an owner is a live run.
+		if ! LC_ALL=C kill -0 "$_lock_pid" 2>&1 | grep -q "No such process"; then
+			_lock_live=1
+			_lock_why="$_lock_why, a process this run may not signal (another user's), which refreshed it in the last 15 minutes"
+			return 1
+		fi
+	fi
+	_lock_gone="is gone"
+	_lock_why="$_lock_why, which is no longer running"
+	return 0
+}
+
+# What to do about a lock _lock_stale found held, into _lock_tip, for a run that is to
+# be $1 (e.g. "indexing <dir>") with what the lock guards $2 (" '<lock>' '<output>'...").
+# Clearing it is offered only when this run cannot check the owner: a run known to be
+# alive would go on writing into what another run then rebuilds. A stopped one does
+# not finish until it is resumed with its build step and refresh loop, stopped with it:
+# kill -CONT of its PID resumes bash alone. So a run that leads its process group is
+# resumed, or ended, as a group -- ended with KILL, the one signal that ends a stopped
+# run at once. One that does not is offered no signal to that group, which may hold the
+# web server or a user's shell, nor a kill of bash alone, whose build step could go on
+# writing later.
+_lock_advice() {
+	if [ "$_lock_live" = 2 ] && [ "$_lock_pgid" = "$_lock_pid" ]; then
+		_lock_tip="Resume it with fg or kill -CONT -- -$_lock_pgid, or end it with kill -KILL -- -$_lock_pgid."
+	elif [ "$_lock_live" = 2 ]; then
+		_lock_tip="It must be resumed together with its stopped child processes, as fg does: kill -CONT $_lock_pid resumes the script alone."
+	elif [ "$_lock_live" = 1 ]; then
+		_lock_tip="Wait for that run to finish, or stop it."
+	else
+		_lock_tip="If no CRISPRme run is $1, clear the lock and what it left with: rm -rf$2"
+	fi
+}
+
+# Write this run's owner record into lock $1. Through a rename, so a run reading it
+# meanwhile sees no record or all of it -- never a torn PID it would find dead.
+_lock_sign() {
+	{ printf '%s\n' "$_lock_me" >"$1/owner.$$"; } 2>/dev/null \
+		&& mv -f "$1/owner.$$" "$1/owner" 2>/dev/null
+}
+
+# In a background subshell of this run: 0 while the run is alive. kill -0 "$$" is not
+# enough, as it answers for a run that died but was never reaped (a zombie: say its
+# parent was killed first, and the container's PID 1 does not reap). A run that dies,
+# reaped or not, hands its children to another parent at once, so ask /proc whose
+# child this subshell still is -- where /proc is this PID namespace's -- and fall back
+# to kill -0 elsewhere.
+_lock_run_alive() {
+	local _st
+	if { IFS= read -r _st </proc/self/stat; } 2>/dev/null && [ "${_st%% *}" = "$BASHPID" ]; then
+		_st=${_st##*") "}  # "<pid> (<name>) <state> <ppid> ..."
+		_st=${_st#* }
+		[ "${_st%% *}" = "$$" ]
+	else
+		kill -0 "$$" 2>/dev/null
+	fi
+}
+
+# Count lock $1, which this run has just signed, as this run's, and keep its record
+# fresh: a loop in the background touches it every minute, for runs that cannot check
+# this one's PID or tell it from a zombie (_lock_stale). The loop stops as soon as this
+# run is gone (killed outright, so no trap ran) or the record is no longer this run's;
+# _lock_release or _lock_abandon_all stops it otherwise. It writes nothing anywhere:
+# this script's stderr fails the stage. So its output goes to /dev/null before it is
+# forked: a loop stopped the moment it starts can run this script's traps (bash 5.2
+# does) before it reaches a redirection of its own. Stopped, it reaps its sleep, else
+# handed to PID 1 -- in the web container a server that never reaps it -- even one it
+# has forked but not yet noted in _s: $! then differs from _r, the last PID it dealt
+# with -- the run's, inherited, or a sleep it reaped -- which it never signals, but for
+# the instant between a reap and _r=, when a PID just freed names no process yet. With
+# KILL: a TERM to a sleep just forked can be lost, and the wait would last the whole
+# sleep.
+# It is forked with TERM untrapped, so a TERM that reaches it before it sets its own
+# trap ends it: caught by the run's trap, inherited, bash dropped it, and the loop went
+# on refreshing a lock the run then waited on for good. A TERM to the run in that
+# moment takes the default action: bash runs the EXIT trap and the run ends as if
+# killed, its locks left to the next run. One that arrives just as the trap is reset
+# stays pending with no trap set: bash re-sends it to itself once that command ends,
+# with two warnings on stderr (run_pending_traps), and the run still ends by it.
+_lock_hold() {
+	_locks_held+=("$1")
+	trap - TERM
+	{ (
+		_s= _r=$!
+		trap '[ -n "$_s" ] || [ "$!" = "$_r" ] || _s=$!; [ -z "$_s" ] || { kill -KILL "$_s"; wait "$_s"; }; exit 0' TERM
+		while _lock_run_alive && _lock_mine "$1"; do
+			touch -c "$1/owner"
+			sleep "${_lock_beat_s:-60}" &
+			_s=$!
+			wait "$_s"
+			_s= _r=$!
+		done
+	) & } </dev/null >/dev/null 2>&1
+	trap '_lock_on_signal TERM' TERM
+	_lock_beats+=("$!")
+}
+
+# Take over lock $1 from the dead owner whose record is $2, without the lock ever
+# going away: a waiter that saw it go would take the half-written output for a
+# finished one. ".takeover" admits one run at a time, and the record is re-read under
+# it, so two runs that both found the lock stale cannot both take it over. A takeover
+# takes milliseconds, so a ".takeover" more than a minute old was left by a run that
+# ended inside one: it is cleared, for a later poll to take the lock over. A run that
+# ends inside its own clears it (_lock_abandon_all), named in _lock_takeover from once
+# its mkdir has succeeded until just before its rmdir -- never outside that, or a run
+# whose mkdir failed, or whose rmdir has removed its own, would remove another run's.
+# Bash runs a trap as soon as a command it waits for returns, so a run that ends as
+# that mkdir returns, or just before that rmdir, leaves it, and the next run waits up
+# to a minute.
+# 0 = this run now holds the lock.
+_lock_steal() {
+	local _rc=1 _lock_rec
+	if ! mkdir "$1/.takeover" 2>/dev/null; then
+		# (find through a pipe: a test, not $(...))
+		find "$1/.takeover" -maxdepth 0 -mmin +1 2>/dev/null | grep -q . \
+			&& rmdir "$1/.takeover" 2>/dev/null
+		return 1
+	fi
+	_lock_takeover="$1/.takeover"
+	_lock_read "$1"
+	if [ "$_lock_rec" = "$2" ] && _lock_sign "$1"; then
+		_lock_hold "$1"
+		_rc=0
+	fi
+	rm -f "$1/owner.$$" 2>/dev/null
+	_lock_takeover=
+	rmdir "$1/.takeover" 2>/dev/null
+	return $_rc
+}
+
+# 0 when output $1 is in place: it exists, and with $2 = 1, a genome index directory,
+# it holds a .bin as _resolve_index_dir requires (index-genome creates the directory
+# before it writes one, and a directory with none is no index).
+_lock_built() {
+	[ -e "$1" ] || return 1
+	[ "$2" = 1 ] || return 0
+	find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null | grep -q .
+}
+
+# Take lock $1 before "$2" (e.g. "indexing <dir>", for the messages) writes output $3;
+# any further arguments are more outputs of the same build, named with $3 in the
+# how-to-clear message. With -bin first, $3 is a genome index (see _lock_built).
+# Returns 0 when this run took a free lock and 2 when it took over the lock of a run
+# that died: either way this run does the build, and on 2 the outputs may hold that
+# run's half-written work. Returns 1 when $3 is in place once the lock is free --
+# another run built it meanwhile -- or when mkdir failed with no lock in the way, as
+# the plain mkdir did, and the caller builds nothing.
+_lock_take() {
+	local _bin=0 _lock _what _out _clear
+	if [ "$1" = -bin ]; then _bin=1; shift; fi
+	_lock="$1" _what="$2" _out="$3"
+	shift 2
+	printf -v _clear " '%s'" "$_lock" "$@"
+	while :; do
+		if mkdir "$_lock" 2>/dev/null; then
+			_lock_sign "$_lock"
+			_lock_hold "$_lock"
+			# Free -- but maybe only since a moment ago: the run that held it may have
+			# finished $3 between the caller's look and this mkdir. A free lock means its
+			# last holder is done (a dead or interrupted one never frees it, a failed one
+			# removes its output first), so what is in place is final: leave it be.
+			if _lock_built "$_out" "$_bin"; then
+				_lock_release "$_lock"
+				return 1
+			fi
+			return 0
+		fi
+		[ -d "$_lock" ] || return 1
+		if ! { _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; }; then
+			echo "Another run is $_what — waiting..."
+			if _lock_wait "$_lock" "$_what" "$_clear" take; then
+				_lock_built "$_out" "$_bin" && return 1
+				# released without its output: the holder failed, or the lock was cleared
+				# by hand. Searching what is not there would come back empty, so build it.
+				echo "$_lock was released but $_out is not there; $_what here instead."
+				continue
+			fi
+		fi
+		echo "Stale lock $_lock: the run that held it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Taking it over and $_what from scratch."
+		return 2
+	done
+}
+
+# Wait while lock $1 is held by a live run or by one this run cannot check, saying how
+# it stands after the first poll and then every few minutes ($2 and $3 as for
+# _lock_advice). 0 once the lock is gone; 2 once its owner is dead or abandoned
+# (_lock_stale) -- with "take" as $4, once this run has taken it over, else with the
+# lock left as it is.
+_lock_wait() {
+	local _next=$SECONDS
+	while [ -d "$1" ]; do
+		sleep "${_lock_poll_s:-5}"
+		if _lock_stale "$1"; then
+			[ "$4" = take ] || return 2
+			_lock_steal "$1" "$_lock_rec" && return 2
+		fi
+		if [ "$SECONDS" -ge "$_next" ] && [ -d "$1" ]; then
+			_lock_advice "$2" "$3"
+			echo "Still waiting for $1: $_lock_why. $_lock_tip"
+			_next=$((SECONDS + ${_lock_notice_s:-300}))
+		fi
+	done
+	return 0
+}
+
+# 0 when this run has lost lock $1, which it took: the lock is gone, or its record now
+# names another run -- one that took it over while this run was stopped, or could not
+# refresh it, for 15 minutes (_lock_stale), and builds what it guards again. What this
+# run built under it is then neither to be used nor removed. Says so on stderr, for a
+# run that is to end in failure there and then. A lock with no record is still this
+# run's: its own record failed to write.
+_lock_lost() {
+	local _lock_rec _p _h _s
+	_lock_read "$1"
+	if [ -z "$_lock_rec" ]; then
+		[ -d "$1" ] && return 1
+		printf "ERROR: the lock on %s was taken over or cleared while this run held it; this run uses none of what it built. Re-run once no other run is building it.\n" "${1%.lock}" >&2
+		return 0
+	fi
+	[ "$_lock_rec" = "$_lock_me" ] && return 1
+	_lock_field _p "$_lock_rec" pid
+	_lock_field _h "$_lock_rec" host
+	_lock_field _s "$_lock_rec" started
+	printf "ERROR: the lock on %s was taken over by another run (pid %s on %s, started %s) while this run held it; that run builds it again, and this run uses none of what it built. Re-run once that run is done.\n" "${1%.lock}" "$_p" "$_h" "$_s" >&2
+	return 0
+}
+
+# Release lock $1 if this run took it and still holds it, and stop and reap its
+# refresh loop -- after the lock is gone, so that a loop that missed the signal still
+# ends at its next look. Called only once what the lock guards is final: built, removed
+# by a build that failed, or (_lock_take) found in place. A missing record is this
+# run's own failed write: no run takes over a lock that has none. 1 when this run has
+# lost the lock meanwhile (_lock_lost, which says so): the lock is left as it is, and
+# the caller is to end the run in failure.
+_lock_release() {
+	local _i _beat= _kept=() _beats=() _rc=0
+	for _i in "${!_locks_held[@]}"; do
+		if [ "${_locks_held[$_i]}" = "$1" ]; then
+			_beat=${_lock_beats[$_i]}
+		else
+			_kept+=("${_locks_held[$_i]}")
+			_beats+=("${_lock_beats[$_i]}")
+		fi
+	done
+	[ -n "$_beat" ] || return 0
+	_locks_held=("${_kept[@]}")
+	_lock_beats=("${_beats[@]}")
+	if _lock_lost "$1"; then
+		_rc=1
+	else
+		rm -rf "$1" 2>/dev/null || rm -rf "$1" 2>/dev/null
+	fi
+	kill "$_beat" 2>/dev/null
+	wait "$_beat" 2>/dev/null
+	return $_rc
+}
+
+# The run is ending while it still holds locks -- on a signal, or on an exit before
+# their release -- so their builds are not done: leave each lock and its record as
+# they are, for the next run to take over as a dead run's and build again, and stop
+# only the refresh loops, which must not outlive the run -- and clear a ".takeover"
+# this run is inside (_lock_steal), which would stop every takeover for a minute. Only
+# the run itself does: a child that runs this trap -- as bash 5.2 can, right after
+# forking it -- returns.
+_lock_abandon_all() {
+	local _b
+	[ "${BASHPID:-$$}" = "$$" ] || return 0
+	[ -z "$_lock_takeover" ] || rmdir "$_lock_takeover" 2>/dev/null
+	_lock_takeover=
+	for _b in "${_lock_beats[@]}"; do
+		kill "$_b" 2>/dev/null
+		wait "$_b" 2>/dev/null
+	done
+	_locks_held=() _lock_beats=()
+}
+
+# INT, TERM and HUP: abandon the locks held, then re-raise, so the run still ends by
+# the signal -- on the process that caught it, which in a child is not the run ($$).
+_lock_on_signal() {
+	_lock_abandon_all
+	trap - "$1"
+	kill -s "$1" "${BASHPID:-$$}"
+}
+# This script sets no other traps. Bash runs INT, TERM and HUP once the foreground
+# command returns, and EXIT at once on a fatal signal it does not trap. Each trap is
+# one call, and the helpers above run no command substitution: on bash 5.2 a trap that
+# fires while bash expands one can fail to parse ("trap: line 2: unexpected EOF while
+# looking for matching `)'"), and the signal is lost -- the run goes on, or even
+# abandons the loop it is in. So a run waiting on a lock always ends on INT, TERM or
+# HUP. Elsewhere this script expands $(...) throughout, and there the trap on INT, TERM
+# or HUP stays best-effort on bash 5.2; the EXIT trap still stops the refresh loops
+# when the run ends, and a lock left by a run killed outright is taken over.
+trap '_lock_abandon_all' EXIT
+trap '_lock_on_signal INT' INT
+trap '_lock_on_signal HUP' HUP
+trap '_lock_on_signal TERM' TERM
 
 # iterate over each variant dataset to compute the enriched genomes, index each
 # enriched genome, search off-targets, reconstruct haplotypes (if input VCFs are
@@ -213,6 +714,114 @@ while read vcf_f; do
 		true_pam=${fullseqpam:0:-$pos}
 	fi
 
+	# Pick which installed index serves this search.
+	#   $1 library dir   $2 requested PAM   $3 name suffix (<ref> or <ref>+<vcf>)
+	#   $4 requested bMax
+	# Writes the chosen directory to stdout, or nothing when none is sufficient.
+	#
+	# An index named <PAM>_<N>_<suffix> was built with -bMax N and so supports searches
+	# up to N-1 bulges of each type: any N >= bMax serves. Among those, in order:
+	#   1. the requested PAM itself, ahead of any PAM-less index -- it needs neither
+	#      N-padding nor the post-search PAM filter to be right;
+	#   2. the smallest sufficient N, so a tighter index beats a wider one;
+	#   3. the narrowest PAM-less flank, so --prune-pam pads as little as possible.
+	# Every tie is settled by a rule, because glob order is not one: it follows
+	# LC_COLLATE, and NNNNNNNN_3_hg38 sorts BEFORE NNN_3_hg38 under LC_ALL=C (as inside
+	# the container) but after it under en_US.UTF-8. Leaving the choice to the glob
+	# makes which index answers a search depend on the environment.
+	# A stand-in index must be ALL N. Globbing NNN* also matches a dedicated PAM --
+	# the shipped NNNRRT (SaCas9-KKH) among them -- which cannot serve another PAM.
+	_resolve_index_dir() {
+		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4"
+		local _d _b _pam _n _exact _better
+		local _best="" _best_n="" _best_pam_len="" _best_exact=""
+		for _d in "$_lib"/*_*_"$_suffix"; do
+			[ -d "$_d" ] || continue
+			case "$_d" in *_INDELS) continue ;; esac
+			# A concurrent `index-genome` holds "<dir>.lock" while it writes the
+			# directory one .bin at a time, so a half-written index is indistinguishable
+			# from a finished one by NAME. Selecting one searches a PARTIAL index:
+			# fewer off-targets, no error, exit 0. Skip it -- a lock whose builder died
+			# guards a half-written index too -- and let the build path below take the
+			# same lock: _lock_take waits for a live builder, and takes a dead one's over
+			# and rebuilds.
+			if [ -d "$_d.lock" ]; then
+				continue
+			fi
+			# No .bin at all cannot serve a search either: a build that has not written
+			# its first chromosome yet, or a leftover from one that was cleaned up.
+			# Treat it as absent rather than hand crispritz an index it refuses with
+			# "no .bin index files found" much further down the pipeline. -L: an index
+			# may be a symlink to a shared copy, and find does not follow a symlink
+			# given as its starting point, so without it every linked index looked
+			# unbuilt.
+			if [ -z "$(find -L "$_d" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)" ]; then
+				continue
+			fi
+			# (Both skips are silent on purpose: this function's STDOUT is its return
+			# value, and a write to stderr is fatal to the enclosing stage.)
+			_b=$(basename "$_d")
+			_pam=${_b%%_*}          # <PAM>_<N>_<suffix>
+			_n=${_b#*_}
+			_n=${_n%%_*}
+			case "$_n" in '' | *[!0-9]*) continue ;; esac
+			[ "$_n" -ge "$_want" ] || continue
+			if [ "$_pam" = "$_pam_want" ]; then
+				_exact=1
+			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ] \
+				&& [ "${#_pam}" -eq "${#_pam_want}" ]; then
+				# all-N at EXACTLY the PAM width: the stored geometry is identical to a
+				# dedicated index for this PAM, so it serves with or without pruning.
+				_exact=0
+			elif [ -z "${_pam//N/}" ] && [ -n "$_pam" ] \
+				&& [ "${#_pam}" -gt "${#_pam_want}" ] \
+				&& [ "${prune_pam:-0}" = "1" ] && [ "${pos:-1}" -gt 0 ]; then
+				# all-N and WIDER than the PAM. Only usable while pruning is on: the
+				# engine reads exactly as many stored PAM nibbles per leaf as the search
+				# PAM is long, and only the --prune-pam path reconciles that width (it
+				# N-pads the search PAM up to the stored flank). Selecting one for a
+				# non-pruned search would hand the engine an index it must refuse --
+				# and before --prune-pam existed the scan could not see these at all,
+				# so a run that used to build a dedicated index would start failing.
+				# Restricted to a 3' PAM ($pos > 0) because the engine refuses a
+				# shorter 5' PAM off a wider flank: the emitted sequence is trimmed at
+				# the end only, so a front pad lands inside the reported PAM region.
+				_exact=0
+			else
+				continue            # a different dedicated PAM cannot stand in
+			fi
+			_better=0
+			if [ -z "$_best" ]; then
+				_better=1
+			elif [ "$_exact" -gt "$_best_exact" ]; then
+				_better=1
+			elif [ "$_exact" -eq "$_best_exact" ]; then
+				if [ "$_n" -lt "$_best_n" ]; then
+					_better=1
+				elif [ "$_n" -eq "$_best_n" ] && [ "${#_pam}" -lt "$_best_pam_len" ]; then
+					_better=1
+				fi
+			fi
+			if [ "$_better" = 1 ]; then
+				_best="$_d"; _best_n="$_n"; _best_pam_len=${#_pam}; _best_exact="$_exact"
+			fi
+		done
+		[ -n "$_best" ] && printf '%s\n' "$_best"
+	}
+
+	# Count DATA rows in a CRISPRitz targets file: every line that is not the header.
+	# These files carry a '#'-prefixed header and pam_filter preserves it, so a plain
+	# `-s` or `wc -l` test reads an EMPTY result as one hit. That used to be
+	# equivalent only because a filter bug stripped the header, and the two bugs
+	# cancelled: the zero-hit short-circuit below saw a non-empty file and reported a
+	# search that found nothing as a failure.
+	_target_data_rows() {
+		[ -f "$1" ] || { echo 0; return; }
+		local _n
+		_n=$(grep -cv '^#' "$1" 2>/dev/null) || _n=0
+		echo "${_n:-0}"
+	}
+
 	# ensure that fundamental folders are available 
 	if ! [ -d "$current_working_directory/Results" ]; then
 		mkdir "$current_working_directory/Results"
@@ -231,6 +840,28 @@ while read vcf_f; do
 	fi
 
 	# START STEP 1 - Genome enrichment
+	# build-index-only marks each part of a dataset that it writes in place with a
+	# hidden .building until that part is whole (crisprme.py _mark_unfinished), and a
+	# run stopped there leaves a part that looks whole. complete-search refuses it
+	# first; a search the web launches runs this script straight, so refuse it here
+	# too. (The indel genotype store is read for the SNP+indel co-occurrence only.)
+	# The tiers are written only by a run given --samplesID, which the web Settings
+	# page never gives, and a search can do without them or the store.
+	if [ "$vcf_name" != "_" ]; then
+		_unfinished=("Dictionaries/registry_${vcf_name}" "Genomes/${ref_name}+${vcf_name}" "Genomes/${ref_name}+${vcf_name}_INDELS")
+		case "${CRISPRME_INDEL_SNP-1}" in 1 | true | True | yes) _unfinished=("${_unfinished[0]}" "Dictionaries/indel_genotypes_${vcf_name}" "${_unfinished[@]:1}") ;; esac
+		for _u in "${_unfinished[@]}"; do
+			if [ -d "$current_working_directory/$_u/.building" ]; then
+				case "$_u" in
+					Dictionaries/registry_*) _do=" from the command line with ${vcf_name} and its --samplesID (a build from the web Settings page passes none), or remove it and $current_working_directory/Dictionaries/genotypes_${vcf_name} to search without them," ;;
+					Dictionaries/indel_genotypes_*) _do=", or remove it to search without it," ;;
+					*) _do="," ;;
+				esac
+				printf "ERROR: %s is unfinished: a build-index-only run is writing it, or stopped before it was done. Let that run finish, or run build-index-only again to its end%s then run this search again\n" "$current_working_directory/$_u" "$_do" >&2
+				exit 1
+			fi
+		done
+	fi
 	# Detect a precomputed variant index shipped WITHOUT the raw VCFs (a batteries-
 	# included install: `download --what index` fetches genome_library/<name> +
 	# <name>_INDELS + the per-sample dictionaries, but not the multi-GB source VCFs).
@@ -244,19 +875,13 @@ while read vcf_f; do
 	# stem, so dict_folder may point at a dictionaries_<vcf>/ that does not exist.
 	precomputed_variant=0
 	if [ "$vcf_name" != "_" ]; then
-		for _d in "$current_working_directory/genome_library"/${true_pam}_*_"${ref_name}+${vcf_name}" "$current_working_directory/genome_library"/NNN_*_"${ref_name}+${vcf_name}"; do
-			[ -d "$_d" ] || continue
-			case "$_d" in *_INDELS) continue ;; esac
-			_b=$(basename "$_d"); _n=${_b#*_}; _n=${_n%%_*}
-			case "$_n" in '' | *[!0-9]*) continue ;; esac
-			if [ "$_n" -ge "$bMax" ] \
-				&& { [ -d "$current_working_directory/Dictionaries/dictionaries_${vcf_name}" ] \
-					|| [ -d "$current_working_directory/Dictionaries/registry_${vcf_name}" ]; } \
-				&& [ -d "$current_working_directory/Dictionaries/log_indels_${vcf_name}" ]; then
-				precomputed_variant=1
-				break
-			fi
-		done
+		# A PAM-less index of any width counts here -- see _resolve_index_dir.
+		if [ -n "$(_resolve_index_dir "$current_working_directory/genome_library" "$true_pam" "${ref_name}+${vcf_name}" "$bMax")" ] \
+			&& { [ -d "$current_working_directory/Dictionaries/dictionaries_${vcf_name}" ] \
+				|| [ -d "$current_working_directory/Dictionaries/registry_${vcf_name}" ]; } \
+			&& [ -d "$current_working_directory/Dictionaries/log_indels_${vcf_name}" ]; then
+			precomputed_variant=1
+		fi
 	fi
 	if [ "$vcf_name" != "_" ] && [ "$precomputed_variant" = 1 ]; then
 		echo -e "Using precomputed variant index for ${ref_name}+${vcf_name}; skipping genome enrichment (source VCFs not required)"
@@ -275,8 +900,22 @@ while read vcf_f; do
 		indels_out="$current_working_directory/Genomes/${ref_name}+${vcf_name}_INDELS"
 
 		_lock="$enriched_folder.lock"
-		if ! [ -d "$enriched_folder" ] && mkdir "$_lock" 2>/dev/null; then
+		_lock_rc=1  # 1 = nothing to build here
+		if [ -d "$enriched_folder" ] && ! [ -d "$_lock" ]; then
+			echo -e "Variants already added"
+		else
+			_lock_take "$_lock" "building $enriched_folder" "$enriched_folder" "$indels_out"
+			_lock_rc=$?
+		fi
+		if [ "$_lock_rc" != 1 ]; then
 			# only one process enters here; mkdir is atomic
+			if [ "$_lock_rc" = 2 ]; then
+				# taken over from a run that died, maybe after it had moved part of its
+				# output into place below: a move into an existing directory nests the
+				# new one inside it or fails, so start from none. No run reads them
+				# while this lock stands: each one that needs them waits on it first.
+				rm -rf "$enriched_folder" "$indels_out"
+			fi
 			echo -e 'Add-variants\tStart\t'$(date) >>$log
 			echo -e "Adding variants"
 
@@ -284,10 +923,16 @@ while read vcf_f; do
 			# fixed-name variants_genome/ output does not collide with concurrent runs)
 			cd "$_run_tmp"
 			crispritz.py add-variants "$vcf_folder/" "$ref_folder/" "true"
+			# Taken over meanwhile, the lock is another run's, and so is what it guards:
+			# move nothing into place, and remove only this run's own scratch (_lock_lost).
+			if _lock_lost "$_lock"; then
+				rm -rf "$_run_tmp"
+				exit 1
+			fi
 			if [ -s $logerror ]; then
 				printf "ERROR: Genome enrichment failed on %s\n" "$vcf_name" >&2
 				rm -rf "$_run_tmp"
-				rmdir "$_lock"
+				_lock_release "$_lock"
 				exit 1
 			fi
 
@@ -308,14 +953,9 @@ while read vcf_f; do
 			# remove unique temp dir (variants_genome lives inside it)
 			rm -rf "$_run_tmp"
 
-			rmdir "$_lock"
+			_lock_release "$_lock" || exit 1
 			echo -e 'Add-variants\tEnd\t'$(date) >>"$log"
-		elif [ -d "$_lock" ]; then
-			echo "Another run is building $enriched_folder — waiting..."
-			while [ -d "$_lock" ]; do sleep 5; done
-			rm -rf "$_run_tmp"
 		else
-			echo -e "Variants already added"
 			rm -rf "$_run_tmp"
 		fi
 
@@ -344,27 +984,46 @@ while read vcf_f; do
 	else
 		ref_lib="${current_working_directory}/genome_library"
 	fi
-	# Reuse ANY installed index whose encoded number N >= the requested bMax (which the
-	# caller passes as max(bDNA,bRNA)+1), preferring the smallest sufficient one; include
-	# pamless NNN indexes (which serve any PAM — the requested PAM is enforced by the
-	# post-search PAM filter). Folder N = the -bMax the index was built with, and it
-	# supports searches up to N-1 bulges of each type, so e.g. an NGG_3 index serves any
-	# search with max(bDNA,bRNA)<=2 — this is why a batteries-included NGG_3 index is
-	# reused for a smaller bulge request instead of triggering a rebuild.
+	# Reuse any installed index sufficient for the requested bulge budget (the caller
+	# passes bMax as max(bDNA,bRNA)+1), PAM-less ones included -- a PAM-less index
+	# serves any PAM no longer than its flank, and the requested PAM is enforced by
+	# --prune-pam at leaf time and by the post-search PAM filter. An NGG_3 index
+	# therefore serves any search with max(bDNA,bRNA)<=2, which is why a
+	# batteries-included index is reused instead of triggering a rebuild.
 	idx_folder1="${ref_lib}/${true_pam}_${bMax}_${ref_name}"  # exact-N name, used only for the auto-build path below
-	idx_ref=""
-	_best_n=""
-	for _d in "$ref_lib"/${true_pam}_*_"${ref_name}" "$ref_lib"/NNN_*_"${ref_name}"; do
-		[ -d "$_d" ] || continue
-		case "$_d" in *_INDELS) continue ;; esac
-		_b=$(basename "$_d")
-		_n=${_b#*_}
-		_n=${_n%%_*}
-		case "$_n" in '' | *[!0-9]*) continue ;; esac
-		if [ "$_n" -ge "$bMax" ] && { [ -z "$_best_n" ] || [ "$_n" -lt "$_best_n" ]; }; then
-			_best_n="$_n"
-			idx_ref="$_d"
-		fi
+	idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
+	# The scan skips an index whose build lock is there, and --index-path never builds
+	# one -- but another run may be building in that library (the working one, as
+	# usual). Wait for a lock whose owner is alive or cannot be checked, as a run that
+	# builds does, and look again. A dead or abandoned owner's lock guards a partial
+	# index, which the error below names. Only the lock of an index that could serve
+	# this search counts, by _resolve_index_dir's rule: a sufficient budget, and the
+	# requested PAM or an all-N one of its width -- or wider, under --prune-pam with a
+	# 3' PAM.
+	_dead_locks=()
+	while [ -z "$idx_ref" ] && [ "$index_path" != "_" ] && [ -n "$index_path" ]; do
+		_dead_locks=() _held=
+		for _l in "$ref_lib"/*_*_"$ref_name".lock; do
+			[ -d "$_l" ] || continue
+			_b=${_l##*/}; _b=${_b%.lock}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+			case "$_n" in '' | *[!0-9]*) continue ;; esac
+			[ "$_n" -ge "$bMax" ] || continue
+			if [ "$_p" != "$true_pam" ]; then
+				{ [ -n "$_p" ] && [ -z "${_p//N/}" ]; } || continue
+				[ "${#_p}" -eq "${#true_pam}" ] || { [ "${#_p}" -gt "${#true_pam}" ] \
+					&& [ "${prune_pam:-0}" = "1" ] && [ "${pos:-1}" -gt 0 ]; } || continue
+			fi
+			if _lock_stale "$_l"; then
+				_dead_locks+=("ERROR: ${_l%.lock} is a partial index: the run that was building it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Clear it, and its lock, with: rm -rf '$_l' '${_l%.lock}'")
+			else
+				_held=$_l
+				break
+			fi
+		done
+		[ -n "$_held" ] || break
+		echo "Another run is indexing ${_held%.lock} — waiting..."
+		_lock_wait "$_held" "indexing ${_held%.lock}" " '$_held' '${_held%.lock}'"
+		idx_ref=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax")
 	done
 
 	# use the existing (sufficient) index if the scan found one
@@ -377,28 +1036,33 @@ while read vcf_f; do
 		# index alongside it (crisprme_hf co-fetches <pam>_<N>_<ref>), so this should
 		# not happen from a normal `download`; fail loudly rather than silently
 		# rebuilding (extra compute) -- point the user at the one-download fix.
+		for _l in "${_dead_locks[@]}"; do printf '%s\n' "$_l" >&2; done
 		printf "ERROR: no matching reference index under --index-path '%s'\n" "$ref_lib" >&2
 		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s)\n" "$true_pam" "$ref_name" "$bMax" "$(basename "$idx_folder1")" >&2
 		printf "       re-run 'crisprme.py download --what index --index-name %s' (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$(basename "$idx_folder1")" >&2
 		exit 1
 	else
-		# no valid index found, compute it; use mkdir lock to prevent concurrent builds
+		# no valid index found, compute it; use mkdir lock to prevent concurrent builds.
+		# A lock taken over from a run that died guards a half-written directory, which
+		# needs nothing extra here: index-genome removes the directory it is about to
+		# write and builds it whole. -bin: a directory with no .bin, which the scan
+		# skipped, is no index yet, and is rebuilt the same way.
 		_lock="${idx_folder1}.lock"
-		if mkdir "$_lock" 2>/dev/null; then
+		_lock_take -bin "$_lock" "indexing $idx_folder1" "$idx_folder1"
+		if [ $? != 1 ]; then
 			echo -e 'Index-genome Reference\tStart\t'$(date) >>$log
 			echo -e "Indexing reference genome"
 			# index reference genome using crispritz
 			crispritz.py index-genome "$ref_name" "$ref_folder/" "$pam_file" -bMax $bMax -th $ncpus
+			# taken over meanwhile: neither search nor remove what that run builds now
+			_lock_lost "$_lock" && exit 1
 			if [ -s $logerror ]; then
 				printf "ERROR: reference genome indexing failed\n" >&2
 				[ -d "$idx_folder1" ] && rm -r "$idx_folder1"
-				rmdir "$_lock"
+				_lock_release "$_lock"
 				exit 1
 			fi
-			rmdir "$_lock"
-		elif [ -d "$_lock" ]; then
-			echo "Another run is indexing $idx_folder1 — waiting..."
-			while [ -d "$_lock" ]; do sleep 5; done
+			_lock_release "$_lock" || exit 1
 		fi
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>$log
 		idx_ref="$idx_folder1"
@@ -407,26 +1071,12 @@ while read vcf_f; do
 
 	# START STEP 2.2 Variant genome indexing
 	if [ "$vcf_name" != "_" ]; then  # index alternative genomes (snps only)
-		# Reuse ANY installed variant index whose encoded budget N >= requested bMax
-		# (smallest sufficient first), incl. pamless NNN — mirrors the reference scan,
-		# so a batteries-included NGG_3_<ref>+<vcf> index serves a smaller bulge
-		# request without a rebuild.
+		# Mirrors the reference scan: reuse any sufficient variant index, PAM-less
+		# ones included, so a batteries-included NGG_3_<ref>+<vcf> index serves a
+		# smaller bulge request without a rebuild.
 		basedir="${current_working_directory}/genome_library"
 		idx_folder1="${basedir}/${true_pam}_${bMax}_${ref_name}+${vcf_name}"  # exact-budget name, used only for the auto-build path below
-		idx_var=""
-		_best_n=""
-		for _d in "$basedir"/${true_pam}_*_"${ref_name}+${vcf_name}" "$basedir"/NNN_*_"${ref_name}+${vcf_name}"; do
-			[ -d "$_d" ] || continue
-			case "$_d" in *_INDELS) continue ;; esac
-			_b=$(basename "$_d")
-			_n=${_b#*_}
-			_n=${_n%%_*}
-			case "$_n" in '' | *[!0-9]*) continue ;; esac
-			if [ "$_n" -ge "$bMax" ] && { [ -z "$_best_n" ] || [ "$_n" -lt "$_best_n" ]; }; then
-				_best_n="$_n"
-				idx_var="$_d"
-			fi
-		done
+		idx_var=$(_resolve_index_dir "$basedir" "$true_pam" "${ref_name}+${vcf_name}" "$bMax")
 
 		# use the existing (sufficient) variant index if the scan found one
 		if [ -n "$idx_var" ]; then
@@ -434,8 +1084,10 @@ while read vcf_f; do
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
 		else
 			# no index found, compute it; use mkdir lock to prevent concurrent builds
+			# (a dead run's half-written directory is rebuilt whole, as for the reference)
 			_lock="${idx_folder1}.lock"
-			if mkdir "$_lock" 2>/dev/null; then
+			_lock_take -bin "$_lock" "indexing $idx_folder1" "$idx_folder1"
+			if [ $? != 1 ]; then
 				echo -e 'Index-genome Variant\tStart\t'$(date) >>$log
 				echo -e "Indexing variant genome"
 				# index alternative genome using crispritz
@@ -444,16 +1096,14 @@ while read vcf_f; do
 					"$current_working_directory/Genomes/${ref_name}+${vcf_name}/" \
 					"$pam_file" \
 					-bMax $bMax -th $ncpus
+				_lock_lost "$_lock" && exit 1  # taken over meanwhile, as for the reference
 				if [ -s "$logerror" ]; then
 					printf "ERROR: alternative genome indexing failed on %s\n" "$vcf_name" >&2
 					[ -d "$idx_folder1" ] && rm -r "$idx_folder1"
-					rmdir "$_lock"
+					_lock_release "$_lock"
 					exit 1
 				fi
-				rmdir "$_lock"
-			elif [ -d "$_lock" ]; then
-				echo "Another run is indexing $idx_folder1 — waiting..."
-				while [ -d "$_lock" ]; do sleep 5; done
+				_lock_release "$_lock" || exit 1
 			fi
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
 			idx_var="$idx_folder1"
@@ -473,14 +1123,20 @@ while read vcf_f; do
 		indels_index_dir="$current_working_directory/genome_library/${idx_var_base}_INDELS"
 		indels_out="$current_working_directory/Genomes/${ref_name}+${vcf_name}_INDELS"
 
-		if [ -d "$indels_index_dir" ]; then
+		# A locked INDELS directory is still being written -- or was, by a run that died --
+		# so it is not "present": like _resolve_index_dir above, wait for its lock
+		# instead, and take a dead run's over and rebuild.
+		if [ -d "$indels_index_dir" ] && ! [ -d "${indels_index_dir}.lock" ]; then
 			echo "Indels index present ($(basename "$indels_index_dir"))"
 			echo -e 'Indexing Indels\tEnd\t'$(date) >>"$log"
 		elif [ -d "$indels_out" ]; then
 			# source fake-chrom genome present (on-demand enrichment path) -> build it.
-			# use mkdir lock to prevent concurrent builds
+			# use mkdir lock to prevent concurrent builds. pool_index_indels.py runs
+			# index-genome per chromosome, which removes and rewrites each one, so a dead
+			# run's half-written directory is rebuilt whole.
 			_lock="${indels_index_dir}.lock"
-			if mkdir "$_lock" 2>/dev/null; then
+			_lock_take "$_lock" "indexing $indels_index_dir" "$indels_index_dir"
+			if [ $? != 1 ]; then
 				echo -e 'Indexing Indels\tStart\t'$(date) >>"$log"
 				"$starting_dir/pool_index_indels.py" \
 					"$indels_out/" \
@@ -490,25 +1146,32 @@ while read vcf_f; do
 					"$vcf_name" \
 					"$idx_n" \
 					"$ncpus"
+				_lock_lost "$_lock" && exit 1  # taken over meanwhile, as for the reference
 
 				if [ -s "$logerror" ]; then
 					printf "ERROR: indels indexing failed on %s\n" "$vcf_name" >&2
 					[ -d "$indels_index_dir" ] && rm -r "$indels_index_dir"
-					rmdir "$_lock"
+					_lock_release "$_lock"
 					exit 1
 				fi
 
-				rmdir "$_lock"
+				_lock_release "$_lock" || exit 1
 				echo -e 'Indexing Indels\tEnd\t'$(date) >>"$log"
-			elif [ -d "$_lock" ]; then
-				echo "Another run is indexing $indels_index_dir — waiting..."
-				while [ -d "$_lock" ]; do sleep 5; done
 			fi
 		else
 			# Precomputed/batteries variant index whose INDELS companion is absent AND whose
 			# source fake-chrom genome was not shipped: indels can neither be searched nor
 			# (re)built. Fail clearly instead of crashing inside pool_index_indels.py.
-			printf "ERROR: INDELS index '%s' is missing and cannot be built (source genome '%s' is not installed). The precomputed index looks incomplete — re-download it: crisprme.py download --what index --index-name %s\n" "$(basename "$indels_index_dir")" "$(basename "$indels_out")" "$idx_var_base" >&2
+			# With its lock there the companion is not missing but unfinished: say whose.
+			_l="${indels_index_dir}.lock"
+			if ! [ -d "$_l" ]; then
+				printf "ERROR: INDELS index '%s' is missing and cannot be built (source genome '%s' is not installed). The precomputed index looks incomplete — re-download it: crisprme.py download --what index --index-name %s\n" "$(basename "$indels_index_dir")" "$(basename "$indels_out")" "$idx_var_base" >&2
+			elif _lock_stale "$_l"; then
+				printf "ERROR: INDELS index '%s' is a partial build: the run that was building it (pid %s on %s, started %s) %s, and it cannot be rebuilt here (source genome '%s' is not installed). Clear it, and its lock, with rm -rf '%s' '%s', then re-download it: crisprme.py download --what index --index-name %s\n" "$indels_index_dir" "$_lock_pid" "$_lock_host" "$_lock_started" "$_lock_gone" "$(basename "$indels_out")" "$_l" "$indels_index_dir" "$idx_var_base" >&2
+			else
+				_lock_advice "indexing $indels_index_dir" " '$_l' '$indels_index_dir'"
+				printf "ERROR: INDELS index '%s' is locked, and it cannot be built here (source genome '%s' is not installed): %s. %s\n" "$indels_index_dir" "$(basename "$indels_out")" "$_lock_why" "$_lock_tip" >&2
+			fi
 			exit 1
 		fi
 		# END STEP 2.3 - indels indexing
@@ -549,6 +1212,23 @@ while read vcf_f; do
 				*[!Nn]*) pamless=0 ;;   # has a real PAM base -> constrained search
 				*)       pamless=1 ;;   # all-N PAM -> pamless (memory-heavy)
 			esac
+			kind="standard PAM"; [ "$pamless" -eq 1 ] && kind="pamless (memory-heavy) PAM"
+			# ... but a bulge search loads and walks the index _resolve_index_dir picked,
+			# not one built for the requested PAM. For a constrained PAM that can be a
+			# PAM-less stand-in (NNN_3, or under --prune-pam a wider NNNNNNNN_3), which
+			# holds every position, so size it as pamless. A no-bulge search scans the
+			# genome FASTA for the requested PAM and never opens an index.
+			if [ "$pamless" -eq 0 ] && { [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; }; then
+				_searched=("$idx_ref")
+				[ "$vcf_name" != "_" ] && _searched+=("$idx_var")
+				for _idx in "${_searched[@]}"; do
+					_idx_pam=$(basename "$_idx"); _idx_pam=${_idx_pam%%_*}
+					case "$_idx_pam" in
+						'' | *[!Nn]*) ;;
+						*) pamless=1; kind="pamless (memory-heavy) index $(basename "$_idx")" ;;
+					esac
+				done
+			fi
 			# per-thread + fixed (index-load) footprint estimates (MB)
 			if [ "$pamless" -eq 1 ]; then
 				per_thread_mb=2200; base_mb=12000
@@ -569,9 +1249,8 @@ while read vcf_f; do
 			fi
 			[ "$safe_ncpus" -lt 1 ] && safe_ncpus=1
 			if [ "$safe_ncpus" -lt "$ncpus" ]; then
-				kind="standard"; [ "$pamless" -eq 1 ] && kind="pamless (memory-heavy)"
-				echo -e "Thread guard\tCapping search threads $ncpus -> $safe_ncpus to fit available memory (~$((avail_mb/1024))GB free, $kind PAM)" >>$log
-				echo "NOTE: capping search threads $ncpus -> $safe_ncpus to fit ~$((avail_mb/1024))GB free RAM ($kind PAM). Override with CRISPRME_MAX_SEARCH_THREADS / CRISPRME_NO_THREAD_GUARD=1."
+				echo -e "Thread guard\tCapping search threads $ncpus -> $safe_ncpus to fit available memory (~$((avail_mb/1024))GB free, $kind)" >>$log
+				echo "NOTE: capping search threads $ncpus -> $safe_ncpus to fit ~$((avail_mb/1024))GB free RAM ($kind). Override with CRISPRME_MAX_SEARCH_THREADS / CRISPRME_NO_THREAD_GUARD=1."
 				ncpus=$safe_ncpus
 			fi
 		fi
@@ -634,7 +1313,7 @@ while read vcf_f; do
 		echo -e 'Search Reference Start'  # off-targets search on reference genome
 		if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # bulge-enabled: TST index search
 			idx_ref_view="$(_bin_only_view "$idx_ref")"
-			crispritz.py search "$idx_ref_view" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result --max-edits $max_total_edits \
+			crispritz.py search "$idx_ref_view" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result --max-edits $max_total_edits $prune_pam_flag \
 				|| { echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
 		else  # no bulges: brute-force scan
 			crispritz.py search "$current_working_directory/Genomes/${ref_name}/" "$pam_file" "$guide_file" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
@@ -651,7 +1330,7 @@ while read vcf_f; do
 			echo -e 'Search Variant Start'  # search off-targets on the variant-enriched genome (snps)
 			if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # bulge-enabled: TST index search
 				idx_var_view="$(_bin_only_view "$idx_var")"
-				crispritz.py search "$idx_var_view" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits \
+				crispritz.py search "$idx_var_view" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits $prune_pam_flag \
 					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
 			else  # no bulges: brute-force scan
 				crispritz.py search "$current_working_directory/Genomes/${ref_name}+${vcf_name}/" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -mm $mm -r -th $ceiling_result \
@@ -667,7 +1346,7 @@ while read vcf_f; do
 			echo -e "Search INDELs Start"
 			cd $starting_dir
 			# TODO: REMOVE POOL SCRIPT FROM PROCESSING
-			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits"
+			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits" "$prune_pam"
 			awk '($3 !~ "n") {print $0}' "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" >"$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp"
 			mv "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp" "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
 		else
@@ -695,12 +1374,15 @@ while read vcf_f; do
 	fi
 	# optional --max-total-edits cap (issue #107): drop raw targets whose TOTAL
 	# edits (column 10 = Mismatches + Bulge_Size) exceed the cap, BEFORE the
-	# expensive integration/scoring/post-analysis. The raw CRISPRitz targets have
-	# no header, so a plain numeric comparison on $10 is safe. -1 = disabled.
+	# expensive integration/scoring/post-analysis. -1 = disabled.
+	# Keep '#' lines: the merged indel targets file carries a header (restored by
+	# pool_search_indels.py), and a string compare of $10 ("Total") against the cap
+	# would drop it -- which makes post_analisi_indel.sh prepend a real data row to
+	# every chromosome's subset instead of a header.
 	if [ "$max_total_edits" != "-1" ] && [ -d "${output_folder}/crispritz_targets" ]; then
 		for _tgt in "${output_folder}"/crispritz_targets/*.targets.txt; do
 			[ -f "$_tgt" ] || continue
-			awk -v m="$max_total_edits" 'NF < 10 || $10 <= m' "$_tgt" >"${_tgt}.capped" \
+			awk -v m="$max_total_edits" '/^#/ || NF < 10 || $10 <= m' "$_tgt" >"${_tgt}.capped" \
 				&& mv "${_tgt}.capped" "$_tgt"
 		done
 		echo -e "Applied --max-total-edits cap ($max_total_edits) to raw targets" >>$log
@@ -773,7 +1455,7 @@ while read vcf_f; do
 		# The INDELs stage already guards this way; the concatenation below uses a
 		# touch-first pattern, so it safely yields an empty (but valid) result.
 		ref_targets_file="$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
-		if [ -s "$ref_targets_file" ]; then
+		if [ "$(_target_data_rows "$ref_targets_file")" -gt 0 ]; then
 			./pool_post_analisi_snp.py $output_folder $ref_folder "_" $guide_file $mm $bDNA $bRNA $annotation_file $pam_file "_" $final_res $final_res_alt $ncpus
 			if [ -s $logerror ]; then
 				printf "ERROR: off-targets post-analysis (reference) failed\n" >&2
@@ -813,7 +1495,7 @@ while read vcf_f; do
 		cd "$starting_dir"
 		echo -e 'Post-analysis INDELs\tStart\t'$(date) >>$log
 		#SKIP INDELS ANALYSIS IF NO RESULTS FOUND
-		if [ $(wc -l <"$output_folder/crispritz_targets/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt") -gt 1 ]; then
+		if [ "$(_target_data_rows "$output_folder/crispritz_targets/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt")" -gt 0 ]; then
 			./pool_post_analisi_indel.py $output_folder $ref_folder $vcf_folder $guide_file $mm $bDNA $bRNA $annotation_file $pam_file "$current_working_directory/Dictionaries/" $final_res $final_res_alt $ncpus
 			if [ -s $logerror ]; then
 				printf "ERROR: off-targets post-analysis (indels) failed on variants in %s\n" "$vcf_name" >&2
@@ -907,8 +1589,9 @@ if [ -z "$(tail -n +2 "$final_res.bestCFD.txt" 2>/dev/null | head -c 1)" ]; then
 	# genome that is not one FASTA file per sequence -- so fail loudly instead of
 	# reporting a clean, empty "success".
 	raw_ref_targets="$output_folder/crispritz_targets/${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
-	if [ -s "$raw_ref_targets" ]; then
-		printf "ERROR: the search found %s raw off-target(s) but none survived post-analysis, so the result would be silently empty. Check that the genome folder %s has one FASTA file per sequence (python PostProcess/genome_layout.py %s).\n" "$(wc -l <"$raw_ref_targets")" "$ref_folder" "$ref_folder" >&2
+	raw_ref_rows=$(_target_data_rows "$raw_ref_targets")
+	if [ "$raw_ref_rows" -gt 0 ]; then
+		printf "ERROR: the search found %s raw off-target(s) but none survived post-analysis, so the result would be silently empty. Check that the genome folder %s has one FASTA file per sequence (python PostProcess/genome_layout.py %s).\n" "$raw_ref_rows" "$ref_folder" "$ref_folder" >&2
 		exit 1
 	fi
 	echo "No off-targets found for the provided guide(s) with the given parameters."
@@ -959,11 +1642,11 @@ if [ "$emit_alt_alignments" = "1" ]; then
 	mv $final_res.bestmmblg.txt.trimmed.discarded_samples $final_res_alt.bestmmblg.txt
 	mv $final_res.bestCRISPR_BULGE.txt.trimmed.discarded_samples $final_res_alt.bestCRISPR_BULGE.txt
 else
-	# population-level default: DROP the non-best alignments (avoids the combinatorial altMerge
+	# population-level analysis: DROP the non-best alignments (avoids the combinatorial altMerge
 	# annotation/sort/integration blow-up). The header-only $final_res_alt.best* stubs created
 	# earlier remain, so the rest of the pipeline produces a valid EMPTY alt result -- exactly
 	# like a reference-only search -- and every downstream step and consumer works unchanged.
-	echo "Alternative alignments suppressed (population-level default); dropping non-best rows"
+	echo "Alternative alignments suppressed (population-level analysis); dropping non-best rows"
 	rm -f $final_res.bestCFD.txt.trimmed.discarded_samples \
 	      $final_res.bestmmblg.txt.trimmed.discarded_samples \
 	      $final_res.bestCRISPR_BULGE.txt.trimmed.discarded_samples
@@ -1331,12 +2014,14 @@ fi
 # restore an unzipped copy of the annotation files, but KEEP the .gz (-k): the
 # pipeline entry + input validation require the bgzipped .bed.gz, so consuming it
 # here (plain `gunzip -f` removes the .gz) broke every re-run that referenced the
-# same .bed.gz ("--annotation does not exist"). Keep both.
-if [ "$annotation_file" != "vuoto.txt" ]; then
+# same .bed.gz ("--annotation does not exist"). Keep both. Both variables are
+# realpaths, so compare the basename with the empty placeholder (as the annotation
+# step does), or the placeholder is gunzipped too and gzip complains on stderr.
+if [ "$(basename "$annotation_file")" != "vuoto.txt" ]; then
     gunzip -kf "$annotation_file"
 fi
 
-if [ "$gene_proximity" != "vuoto.txt" ]; then
+if [ "$(basename "$gene_proximity")" != "vuoto.txt" ]; then
 	gunzip -kf "$gene_proximity"
 fi
 

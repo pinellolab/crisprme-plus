@@ -33,20 +33,36 @@ Design notes
 from typing import Dict, List, Optional
 import os
 import sys
+import errno
 import io
 import json
 import gzip
+import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 # Default HuggingFace dataset repo. Overridable per-invocation with --hf-repo or
 # the CRISPRME_HF_REPO environment variable (e.g. switch to a pinellolab org
 # repo once it exists).
 DEFAULT_HF_REPO = "lucapinello/crisprme-data"
+
+# PAM-less indexes with a flank WIDER than 3 nt live in their own dataset repo.
+# A 3-nt flank is stored exactly like a dedicated 3-nt PAM index, so any CRISPRme
+# version can read it and NNN_3 ships in the default repo. A wider flank cannot be
+# read correctly by a release that predates --prune-pam, so keeping those out of the
+# repo older defaults point at is what stops an old client from downloading an index
+# it would misread. Routing is by flank width, not by name, so it cannot be forgotten
+# at publish time.
+GENERAL_INDEX_HF_REPO = "lucapinello/crisprme-data-general-index"
+
+# A flank of this width or narrower is readable by every release, so it stays in the
+# default repo.
+_COMPAT_FLANK_WIDTH = 3
 
 # Components understood by the download command and their remote sub-paths.
 # This layout is the single source of truth for the HF dataset tree; the
@@ -175,8 +191,16 @@ def synthesize_combined_samplesid(workdir, vcf_name, ref="hg38"):
                     seen.add(key)
                     rows.append(line.rstrip("\n"))
     os.makedirs(sdir, exist_ok=True)
-    with open(target, "w") as out:
-        out.write("\n".join(rows) + "\n")
+    # Through a hidden temporary file renamed into place: one that a full disk or a kill
+    # cut short would be taken for whole by every later run (the guard above)
+    tmp = os.path.join(sdir, f".{os.path.basename(target)}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w") as out:
+            out.write("\n".join(rows) + "\n")
+        os.replace(tmp, target)
+    finally:
+        if os.path.lexists(tmp):
+            os.remove(tmp)
     return target
 
 
@@ -185,6 +209,77 @@ def resolve_repo(cli_repo: Optional[str] = None) -> str:
     if cli_repo:
         return cli_repo
     return os.environ.get("CRISPRME_HF_REPO", DEFAULT_HF_REPO)
+
+
+def index_flank_width(index_name: str) -> Optional[int]:
+    """Stored flank width of a PAM-less index, or None if it is not PAM-less.
+
+    An index directory/archive is ``<PAM>_<N>_<ref>[+<ref>_<vcf>]``. A PAM-less
+    index declares an all-N PAM, and its width is that PAM's length.
+    """
+    if not index_name:
+        return None
+    pam = canonical_index_name(index_name).split("_", 1)[0]
+    if pam and set(pam) == {"N"}:
+        return len(pam)
+    return None
+
+
+def repo_overridden(cli_repo: Optional[str] = None) -> bool:
+    """True when the caller named a repo explicitly (flag or env var)."""
+    return bool(cli_repo) or bool(os.environ.get("CRISPRME_HF_REPO"))
+
+
+def _dictless_sibling(index_name: str) -> Optional[str]:
+    """The ``-dictless`` spelling of a BARE variant index name, else ``None``.
+
+    A variant index published dict-less carries the marker in its ref segment;
+    both spellings install to the same folder (:func:`canonical_index_name`), so
+    a download asked for the bare name may fetch this sibling instead.
+    """
+    if "+" in index_name and "-dictless" not in index_name:
+        return index_name.replace("+", "-dictless+", 1)
+    return None
+
+
+def _index_archive_exists(repo: str, index_name: str,
+                          token: Optional[str] = None) -> bool:
+    """Best-effort check that ``repo`` holds an index archive ``download`` would
+    fetch for ``index_name``: ``indexes/<index_name>.tar.gz`` verbatim or, for a
+    bare variant name, its ``-dictless`` sibling. download_component prefers the
+    sibling when the repo has it and otherwise fetches the verbatim name; either
+    one is enough here, so the order of the lookups does not matter.
+
+    Returns False on any error (offline, repo absent, dependency missing) so a
+    caller treats "cannot tell" the same as "not there" and falls back.
+    """
+    try:
+        api = _require_hf().HfApi()
+        prefix = _COMPONENT_PREFIXES["index"]
+        names = [index_name, _dictless_sibling(index_name)]
+        return any(
+            api.file_exists(
+                repo, f"{prefix}/{name}.tar.gz", repo_type="dataset", token=token
+            )
+            for name in names if name
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def resolve_index_repo(index_name: str, cli_repo: Optional[str] = None) -> str:
+    """Which repo holds (or should hold) this index.
+
+    An explicit ``--hf-repo`` / ``CRISPRME_HF_REPO`` always wins. Otherwise a
+    PAM-less index whose flank is wider than a dedicated 3-nt PAM index routes to
+    :data:`GENERAL_INDEX_HF_REPO`; everything else to :data:`DEFAULT_HF_REPO`.
+    """
+    if repo_overridden(cli_repo):
+        return resolve_repo(cli_repo)
+    width = index_flank_width(index_name)
+    if width is not None and width > _COMPAT_FLANK_WIDTH:
+        return GENERAL_INDEX_HF_REPO
+    return DEFAULT_HF_REPO
 
 
 def resolve_token(cli_token: Optional[str] = None) -> Optional[str]:
@@ -235,56 +330,108 @@ def list_available_downloads(
     ``vcfs/`` (size = sum of that folder's files); ``index`` -> the
     ``indexes/<name>.tar.gz`` archives. Returns ``[]`` on any error (offline,
     missing repo, dependency absent) so callers can fall back gracefully.
+
+    For ``index`` with no repo named, both the default repo and the wide-flank
+    PAM-less repo are listed and merged, each row taken from the copy ``download``
+    would fetch: every default-repo row (a legacy name is fetched only there, and a
+    wide-flank name falls back there), and a wide-flank-repo row only for a name
+    routed to that repo, where it replaces the default repo's copy. A legacy-named
+    archive that exists only in the wide-flank repo is therefore not offered, since
+    ``download`` would never look there for it. The wide-flank repo being
+    unreadable just drops its rows; the default repo being unreadable returns
+    ``[]``, the offline signal, rather than a catalog of only wide-flank indexes.
     """
+    if component == "index" and not repo_overridden(repo):
+        try:
+            default_rows = _list_available_downloads_raw("index", DEFAULT_HF_REPO)
+        except Exception:
+            return []
+        merged: Dict[str, Dict] = {row["name"]: row for row in default_rows}
+        for row in _list_available_downloads_one("index", GENERAL_INDEX_HF_REPO):
+            if resolve_index_repo(row["name"]) == GENERAL_INDEX_HF_REPO:
+                merged[row["name"]] = row
+        return sorted(merged.values(), key=lambda row: row["name"])
+    return _list_available_downloads_one(component, repo)
+
+
+def _list_available_downloads_one(
+    component: str, repo: Optional[str] = None
+) -> List[Dict]:
+    """One repo's listing (``[]`` if that repo cannot be read)."""
+    try:
+        return _list_available_downloads_raw(component, repo)
+    except Exception:
+        return []
+
+
+def _list_available_downloads_raw(
+    component: str, repo: Optional[str] = None
+) -> List[Dict]:
+    """One repo's listing; raises on any error, so a caller can tell a repo that
+    cannot be read from one that holds nothing."""
     if component not in ("genome", "vcf", "index"):
         return []
-    try:
-        hf = _require_hf()
-        repo = resolve_repo(repo)
-        api = hf.HfApi()
-        prefix = _COMPONENT_PREFIXES[component]
-        if component == "index":
-            items = []
-            gt_present = set()  # vcf names that have a genotypes_<vcf>.tar.gz companion
-            for entry in api.list_repo_tree(
-                repo, repo_type="dataset", path_in_repo=prefix
-            ):
-                size = getattr(entry, "size", None)
-                path = getattr(entry, "path", "")
-                if size is None or not path.endswith(".tar.gz"):
-                    continue
-                name = os.path.basename(path)[: -len(".tar.gz")]
-                # The separate Tier-1 genotype companions live under the SAME
-                # indexes/ prefix but are NOT selectable indexes themselves — they
-                # ride along with their index on download. Record which vcfs have
-                # one (so the index rows can advertise it) and skip them as rows.
-                if name.startswith("genotypes_"):
-                    gt_present.add(name[len("genotypes_"):])
-                    continue
-                items.append({"name": name, "size": size})
-            # ADDITIVE metadata: mark whether each variant index has a genotype
-            # companion available (has_genotypes). Consumers that only read
-            # name/size are unaffected (extra keys are ignored).
-            for it in items:
-                vcf = it["name"].partition("+")[2]
-                it["has_genotypes"] = bool(vcf) and vcf in gt_present
-            return sorted(items, key=lambda d: d["name"])
-        # genome / vcf: folders under prefix/, sum their files' sizes
-        sizes: Dict[str, int] = {}
+    hf = _require_hf()
+    repo = resolve_repo(repo)
+    api = hf.HfApi()
+    prefix = _COMPONENT_PREFIXES[component]
+    if component == "index":
+        items = []
+        gt_present = set()  # vcf names that have a genotypes_<vcf>.tar.gz companion
         for entry in api.list_repo_tree(
-            repo, repo_type="dataset", path_in_repo=prefix, recursive=True
+            repo, repo_type="dataset", path_in_repo=prefix
         ):
             size = getattr(entry, "size", None)
             path = getattr(entry, "path", "")
-            if size is None:  # a folder entry, not a file
+            if size is None or not path.endswith(".tar.gz"):
                 continue
-            rel = path[len(prefix) + 1 :]
-            top = rel.split("/")[0]
-            if top:
-                sizes[top] = sizes.get(top, 0) + size
-        return [{"name": k, "size": v} for k, v in sorted(sizes.items())]
-    except Exception:
-        return []
+            name = os.path.basename(path)[: -len(".tar.gz")]
+            # The separate Tier-1 genotype companions live under the SAME
+            # indexes/ prefix but are NOT selectable indexes themselves — they
+            # ride along with their index on download. Record which vcfs have
+            # one (so the index rows can advertise it) and skip them as rows.
+            if name.startswith("genotypes_"):
+                gt_present.add(name[len("genotypes_"):])
+                continue
+            items.append({"name": name, "size": size})
+        # ADDITIVE metadata: mark whether each variant index has a genotype
+        # companion available (has_genotypes). Consumers that only read
+        # name/size are unaffected (extra keys are ignored).
+        for it in items:
+            vcf = it["name"].partition("+")[2]
+            it["has_genotypes"] = bool(vcf) and vcf in gt_present
+        return sorted(items, key=lambda d: d["name"])
+    # genome / vcf: folders under prefix/, sum their files' sizes
+    sizes: Dict[str, int] = {}
+    for entry in api.list_repo_tree(
+        repo, repo_type="dataset", path_in_repo=prefix, recursive=True
+    ):
+        size = getattr(entry, "size", None)
+        path = getattr(entry, "path", "")
+        if size is None:  # a folder entry, not a file
+            continue
+        rel = path[len(prefix) + 1 :]
+        top = rel.split("/")[0]
+        if top:
+            sizes[top] = sizes.get(top, 0) + size
+    return [{"name": k, "size": v} for k, v in sorted(sizes.items())]
+
+
+def _catalog_component_size(
+    component: str, name: str, repo: Optional[str] = None
+) -> int:
+    """Best-effort download size (bytes) of a catalog item, 0 if unknown.
+
+    Reuses :func:`list_available_downloads` (which already returns per-item
+    sizes) so the progress bar has a denominator up-front. Any failure (offline,
+    missing item) -> 0, so the bar simply shows transferred bytes with no total."""
+    try:
+        for item in list_available_downloads(component, repo):
+            if item.get("name") == name:
+                return int(item.get("size", 0) or 0)
+    except Exception:  # noqa: BLE001 - sizing is best-effort
+        return 0
+    return 0
 
 
 def decompress_gz(path: str, remove_source: bool = True) -> str:
@@ -302,6 +449,388 @@ def decompress_gz(path: str, remove_source: bool = True) -> str:
     if remove_source:
         os.remove(path)
     return out
+
+
+# --- download progress -------------------------------------------------------
+# The web Settings download used to show only a spinner + a static "running..."
+# while a multi-GB fetch ran for minutes; the underlying huggingface_hub tqdm
+# progress goes to stderr (log_error.txt) and was never parsed. This emits a
+# small JSON progress file the web poller renders as a real bar. It is
+# ENV-GATED: without CRISPRME_PROGRESS_FILE set, every function here is a no-op
+# and the happy path is byte-for-byte unchanged. All failures are swallowed —
+# progress reporting must never break a download.
+
+
+class _ProgressReporter:
+    """Write a throttled JSON progress file for the web Settings poller.
+
+    The file path comes from the ``CRISPRME_PROGRESS_FILE`` environment variable
+    (set by the web launcher, see settings_page._run_settings_job). When it is
+    unset this is a pure no-op — there is zero behaviour change on the CLI / the
+    current happy path. The JSON schema the poller reads::
+
+        {"phase": str, "bytes_done": int, "bytes_total": int, "pct": float,
+         "eta_seconds": int|null, "detail": str, "updated": <epoch float>}
+
+    Writes are throttled (``min_interval`` seconds, default 1.0) and atomic
+    (write a temp sibling + ``os.replace``) so a concurrent reader never sees a
+    half-written file.
+    """
+
+    def __init__(self, path: Optional[str] = None, min_interval: float = 1.0):
+        if path is None:
+            path = os.environ.get("CRISPRME_PROGRESS_FILE") or None
+        self.path = path
+        self.min_interval = min_interval
+        self.phase = ""
+        self.detail = ""
+        self.bytes_total = 0
+        self.bytes_done = 0
+        self._base_done = 0  # bytes finished in PRIOR stages (multi-part index)
+        self._start = time.time()  # when the CURRENT stage's bytes started moving
+        self._last_write = 0.0
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.path)
+
+    def set_total(self, total: int) -> None:
+        """Set the known total byte size for the current stage (0 == unknown)."""
+        try:
+            self.bytes_total = int(total or 0)
+        except (TypeError, ValueError):
+            self.bytes_total = 0
+
+    def set_phase(self, phase: str, detail: str = "", carry_done: bool = False) -> None:
+        """Start a new phase. ``carry_done`` keeps the running byte total across
+        stages (a multi-part index: index 1/3 -> genotypes 2/3 -> reference 3/3);
+        otherwise the per-stage byte counter resets.
+
+        The ETA rate is this stage's bytes over this stage's elapsed time, so the
+        clock restarts with the byte counter — and, when bytes carry over, keeps
+        the time those bytes took so the rate stays consistent."""
+        self.phase = phase
+        self.detail = detail
+        if carry_done:
+            self._base_done = self.bytes_done
+        else:
+            self._base_done = 0
+            self.bytes_done = 0
+            self._start = time.time()
+        self.write(force=True)
+
+    def add_bytes(self, n: int) -> None:
+        """Accumulate ``n`` newly-transferred bytes and write (throttled)."""
+        try:
+            self.bytes_done += int(n or 0)
+        except (TypeError, ValueError):
+            return
+        self.write()
+
+    def set_done(self, done: int) -> None:
+        """Set the absolute bytes-done for the current stage (decompress poll)."""
+        try:
+            self.bytes_done = self._base_done + int(done or 0)
+        except (TypeError, ValueError):
+            return
+        self.write()
+
+    def write(self, force: bool = False) -> None:
+        if not self.path:
+            return
+        now = time.time()
+        if not force and (now - self._last_write) < self.min_interval:
+            return
+        self._last_write = now
+        total = self.bytes_total
+        done = min(self.bytes_done, total) if total else self.bytes_done
+        pct = (100.0 * done / total) if total else 0.0
+        eta = None
+        elapsed = now - self._start  # THIS stage's elapsed time (see set_phase)
+        if total and done > 0 and elapsed > 0:
+            rate = done / elapsed
+            if rate > 0:
+                eta = int(max(0, (total - done) / rate))
+        payload = {
+            "phase": self.phase,
+            "bytes_done": int(done),
+            "bytes_total": int(total),
+            "pct": round(pct, 1),
+            "eta_seconds": eta,
+            "detail": self.detail,
+            "updated": now,
+        }
+        try:
+            tmp = self.path + ".tmp"
+            with open(tmp, "w") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass  # progress reporting is best-effort; never raise
+
+
+def _make_progress_tqdm(reporter: "_ProgressReporter",
+                        failures: Optional[List[BaseException]] = None):
+    """Build a ``tqdm_class`` subclass that feeds a :class:`_ProgressReporter`.
+
+    ``huggingface_hub.snapshot_download`` accepts a ``tqdm_class`` and drives it
+    with per-file byte updates; we subclass tqdm so each ``update(n)`` also
+    accumulates into the reporter. Returns ``None`` when tqdm is unavailable so
+    the caller falls back to a plain (progress-free) download. ``failures``, if
+    given, collects every exception the bar ITSELF raises (building or advancing
+    a bar), so the caller can tell a failed bar from a failed download.
+
+    hf drives SEVERAL bars from this one class, so only the FIRST byte bar (the
+    ones it builds with ``unit="B"``) feeds the reporter: since hub 1.23.0 it
+    builds two of them — network transfer and reconstruction — each receiving the
+    full byte count, and the "Fetching N files" bar counts files, not bytes.
+
+    hf builds those bars with ITS OWN keyword arguments — ``name=`` reaches the
+    caller's class on huggingface_hub 1.1.0-1.9.2, and plain tqdm raises
+    TqdmKeyError on any keyword it does not know whenever the bar is live (stderr
+    a TTY, or TQDM_POSITION=-1; a disabled bar returns before that check).
+    huggingface_hub is unpinned, so the bar ACCEPTS AND DROPS whatever the base
+    tqdm cannot take: reporting is best-effort and must never fail the download it
+    reports on. Should the base's signature be unreadable, every keyword is passed
+    on unchanged.
+    """
+    try:
+        import inspect
+
+        from tqdm.auto import tqdm as _tqdm
+    except Exception:  # noqa: BLE001 - tqdm absent -> no custom bar, plain download
+        return None
+    try:
+        # Union over the MRO: tqdm.auto.tqdm is a thin subclass (tqdm_asyncio) whose
+        # own __init__ is (self, iterable=None, *args, **kwargs) and forwards the
+        # rest to tqdm.std.tqdm, which declares total/initial/unit/... So only the
+        # whole chain tells us which keywords are real; the immediate signature
+        # alone would drop every one of them. Each __init__ is read through the
+        # class (the bound descriptor), not its __dict__: since tqdm 4.66 std's is a
+        # functools.partialmethod (@envwrap), which inspect.signature rejects raw.
+        _known = set()
+        for _klass in inspect.getmro(_tqdm):
+            if "__init__" not in _klass.__dict__ or _klass is object:
+                continue
+            for _name, _p in inspect.signature(_klass.__init__).parameters.items():
+                if _name != "self" and _p.kind in (
+                    _p.POSITIONAL_OR_KEYWORD, _p.KEYWORD_ONLY
+                ):
+                    _known.add(_name)
+    except (TypeError, ValueError):  # unintrospectable base -> pass everything on
+        _known = None
+
+    if failures is None:
+        failures = []
+    counted = []  # the one byte bar whose updates reach the reporter
+
+    class _ProgressTqdm(_tqdm):  # pragma: no cover - exercised via a fake in tests
+        def __init__(self, *args, **kwargs):
+            self._feeds_reporter = kwargs.get("unit") == "B" and not counted
+            if self._feeds_reporter:
+                counted.append(self)
+            if _known is not None:
+                kwargs = {k: v for k, v in kwargs.items() if k in _known}
+            try:
+                super().__init__(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - the bar failed: record, re-raise
+                failures.append(exc)
+                raise
+
+        def update(self, n=1):
+            try:
+                if self._feeds_reporter:
+                    reporter.add_bytes(n or 0)
+            except Exception:  # noqa: BLE001 - never let reporting break the bar
+                pass
+            try:
+                return super().update(n)
+            except Exception as exc:  # noqa: BLE001 - the bar failed: record, re-raise
+                failures.append(exc)
+                raise
+
+    return _ProgressTqdm
+
+
+def _dir_bytes(path: str) -> int:
+    """Total bytes of regular files under ``path`` (no symlink following)."""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for fn in files:
+            fp = os.path.join(root, fn)
+            try:
+                if not os.path.islink(fp):
+                    total += os.path.getsize(fp)
+            except OSError:
+                pass
+    return total
+
+
+@contextmanager
+def _decompress_progress(
+    reporter: Optional["_ProgressReporter"], out_dir: str, phase: str
+):
+    """Context manager: while the body runs a local decompress/extract into
+    ``out_dir``, a background thread polls its growing on-disk size and pushes it
+    to ``reporter`` as phase=``phase``. A strict no-op when progress is disabled —
+    no thread is started, so the CLI path is unchanged. The byte total already
+    reflects the known download size (set by the caller), so the growing extracted
+    size is a reasonable denominator for the decompress stage too."""
+    if reporter is None or not reporter.enabled:
+        yield
+        return
+    import threading
+
+    reporter.set_phase(phase, carry_done=False)
+    stop_evt = threading.Event()
+
+    def _poll():
+        while not stop_evt.is_set():
+            reporter.set_done(_dir_bytes(out_dir))
+            stop_evt.wait(1.0)
+
+    th = threading.Thread(target=_poll, daemon=True)
+    th.start()
+    try:
+        yield
+    finally:
+        stop_evt.set()
+        th.join(timeout=2.0)
+        reporter.set_done(_dir_bytes(out_dir))
+
+
+# --- atomic directory install -----------------------------------------------
+# A download + decompress that writes straight into the final data-tree location
+# (Genomes/<ref>/, VCFs/<ds>/, ...) leaves a half-populated dir on any mid-way
+# failure (interrupt, disk-full, flaky mount) — the search then sees a
+# discoverable-but-incomplete genome/dataset and fails cryptically later. Build
+# into a hidden staging dir on the SAME filesystem, run the verifier, then
+# os.replace the whole dir into place as the LAST step. On ANY exception the
+# staging dir is discarded so the final location is never touched by a partial.
+
+
+def _atomic_install_dir(dest: str, build, verify=None) -> str:
+    """Populate ``dest`` atomically via a same-filesystem staging dir.
+
+    ``build(stage_dir)`` writes the component into a fresh hidden staging dir
+    (created as a sibling of ``dest`` so ``os.replace`` is an atomic rename, not a
+    cross-device copy). ``verify(stage_dir)`` — if given — may raise to reject a
+    bad staging dir BEFORE anything is swapped in. Only after a clean build+verify
+    is the staged dir swapped into ``dest`` (any pre-existing ``dest`` is moved
+    aside first and deleted after the swap; rolled-forward if a prior run died
+    mid-swap). On ANY exception the staging dir is removed and ``dest`` is left
+    exactly as it was — no partial is ever installed. Returns ``dest``.
+
+    A ``dest`` that is a symlink (e.g. Genomes/hg38 linked to a shared copy) is
+    replaced by the new real directory: the old link is removed with ``os.unlink``,
+    never rmtree'd through, and the shared target is never written to or deleted.
+    A ``dest`` that is a mount point (:func:`_is_mount_point`) is refused before
+    anything is built or moved (OSError EBUSY, saying what to do instead): Linux
+    will not rename one, and macOS renames it with the mount attached, so clearing
+    the moved-aside copy would delete the mounted folder's own files."""
+    if _is_mount_point(dest):
+        raise OSError(errno.EBUSY, _mount_point_message(dest))
+    parent = os.path.dirname(dest.rstrip("/")) or "."
+    os.makedirs(parent, exist_ok=True)
+    base = os.path.basename(dest.rstrip("/"))
+    stage = os.path.join(parent, f".{base}.staging")
+    backup = os.path.join(parent, f".{base}.replaced")
+    # roll forward an interrupted prior swap: a backup with no live dest means a
+    # previous run died between the two renames below -> restore it first.
+    if os.path.isdir(backup) and not os.path.lexists(dest):
+        os.rename(backup, dest)
+    _remove_moved_aside(backup)
+    shutil.rmtree(stage, ignore_errors=True)
+    os.makedirs(stage)
+    try:
+        build(stage)
+        if verify is not None:
+            verify(stage)
+        # clean build -> swap in as the last step (same-FS renames == atomic). Both
+        # renames are inside this try, so a failed swap still discards the stage.
+        link_target = os.readlink(dest) if os.path.islink(dest) else None
+        if os.path.lexists(dest):
+            try:
+                os.rename(dest, backup)
+            except OSError as exc:
+                if exc.errno != errno.EBUSY:
+                    raise
+                # a mount point _is_mount_point could not see: without a readable
+                # mount table, os.path.ismount misses a bind mount from the same
+                # filesystem
+                raise OSError(exc.errno, _mount_point_message(dest)) from exc
+        try:
+            os.rename(stage, dest)
+        except BaseException:
+            if os.path.lexists(backup) and not os.path.lexists(dest):
+                os.rename(backup, dest)  # restore on a failed final swap
+            raise
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)  # discard the partial; dest intact
+        raise
+    _remove_moved_aside(backup)
+    if link_target is not None:
+        sys.stdout.write(
+            f"NOTE: {dest} was a symbolic link to {link_target}; replaced the link "
+            f"with the downloaded copy and left {link_target} untouched.\n"
+        )
+    return dest
+
+
+def _remove_moved_aside(path: str) -> None:
+    """Delete a moved-aside ``dest``: rmtree a real directory, but only unlink a
+    symlink (or file), so a linked shared copy is never followed. Best-effort."""
+    if os.path.islink(path) or os.path.isfile(path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    else:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _mount_point_message(dest: str) -> str:
+    """Why a download cannot install into ``dest`` when it is a mount point (a
+    folder mounted on its own, e.g. ``docker run -v shared:/data/Genomes/hg38``):
+    :func:`_atomic_install_dir` swaps the new copy in by renaming ``dest`` aside,
+    which the kernel refuses for a mount point (EBUSY)."""
+    return (
+        f"{dest} is a mount point, so the download cannot replace it; mount its "
+        f"parent folder instead, or download into the mounted source folder."
+    )
+
+
+# Linux's table of this process's mounts: one line per mount, whose 5th field is
+# the mount point, with space, tab, newline and backslash written as octal escapes
+# (\040, \011, \012, \134). There is none on macOS.
+_MOUNTINFO = "/proc/self/mountinfo"
+_MOUNTINFO_ESCAPE = re.compile(rb"\\([0-7]{3})")
+
+
+def _is_mount_point(path: str) -> bool:
+    """Whether ``path`` is a mount point, for the check before a download and the
+    one in :func:`_atomic_install_dir`. ``os.path.ismount`` only compares the device
+    of ``path`` with its parent's, so it misses a bind mount whose source is on the
+    same filesystem (Docker Desktop host binds, Apptainer --bind, mount --bind).
+    On Linux ``path`` is therefore one when its real path is listed in the mount
+    table; where that table cannot be read (macOS), ``os.path.ismount`` decides. A
+    symlink is never one, as for ``os.path.ismount``: the install replaces the link
+    itself and never touches its target."""
+    if os.path.islink(path):
+        return False
+    try:
+        with open(_MOUNTINFO, "rb") as fh:
+            table = fh.read()
+    except OSError:
+        return os.path.ismount(path)
+    mount_points = {
+        _MOUNTINFO_ESCAPE.sub(lambda m: bytes([int(m.group(1), 8)]), fields[4])
+        # split on \n only: the kernel escapes newline, not \r, which splitlines()
+        # would also break on, cutting a mount point that contains one in two
+        for fields in (line.split(b" ") for line in table.split(b"\n"))
+        if len(fields) > 4
+    }
+    return os.fsencode(os.path.realpath(path)) in mount_points
 
 
 # --- download integrity -----------------------------------------------------
@@ -415,6 +944,20 @@ def _remote_sizes(hf, repo: str, rel_paths: List[str],
     return sizes
 
 
+def _remote_file_size(repo: str, rel_path: str, token: Optional[str] = None) -> int:
+    """Best-effort size (bytes) of ONE remote file, 0 if unknown.
+
+    The companion :func:`_catalog_component_size` reads the catalog, which cannot
+    answer for a file the catalog does not list (the ``genotypes_<vcf>.tar.gz``
+    companions are skipped as rows), so this asks HF for that one path instead.
+    Any failure -> 0, so the bar simply shows transferred bytes with no total."""
+    try:
+        hf = _require_hf()
+        return int(_remote_sizes(hf, repo, [rel_path], token).get(rel_path, 0) or 0)
+    except Exception:  # noqa: BLE001 - sizing is best-effort
+        return 0
+
+
 def _staged_files(local_dir: str) -> List[str]:
     """Relative paths of downloaded files under ``local_dir`` (skip hub cache)."""
     out: List[str] = []
@@ -430,22 +973,50 @@ def _staged_files(local_dir: str) -> List[str]:
 # HTTP statuses worth retrying: 429 (rate limit) + transient 5xx from the CDN.
 _HF_RETRY_STATUS = (429, 500, 502, 503, 504)
 
+# Transport failures a later attempt can get past: a dropped or reset connection, a
+# timeout, a response body cut short. Matched by exception class name anywhere in the
+# MRO (requests, httpx, urllib3 and the standard library name them so) and, for
+# hf_xet, whose Rust errors reach Python as a plain RuntimeError ("File
+# reconstruction error: CAS Client Error: ... error decoding response body"), by
+# message.
+_HF_TRANSIENT_TYPES = frozenset((
+    "ConnectionError", "ConnectTimeout", "ConnectError", "ReadTimeout", "ReadError",
+    "WriteError", "Timeout", "TimeoutError", "TimeoutException", "ChunkedEncodingError",
+    "ContentDecodingError", "IncompleteRead", "ProtocolError", "RemoteProtocolError",
+    "NetworkError",
+))
+_HF_TRANSIENT_MESSAGES = (
+    "cas client error", "file reconstruction error", "error decoding response body",
+    "connection reset", "connection closed", "connection aborted", "broken pipe",
+    "timed out", "incomplete read",
+)
+# An answer a retry would only repeat, even inside a transport-looking message.
+_HF_FINAL_MESSAGES = ("401", "403", "404", "unauthorized", "forbidden", "not found")
+
 
 def _hf_retryable(exc: BaseException) -> bool:
-    """True when ``exc`` is a transient HF HTTP error worth retrying — a 429
-    rate-limit or a 5xx. Prefers the structured ``response.status_code`` and
-    falls back to matching the status in the message (some hub errors don't
-    expose ``.response``)."""
+    """True when ``exc`` is a transient HF error worth retrying: a 429 rate-limit
+    or a 5xx, or a transport failure (``_HF_TRANSIENT_TYPES`` /
+    ``_HF_TRANSIENT_MESSAGES``) that carries no other HTTP status. Prefers the
+    structured ``response.status_code`` and falls back to matching the status in
+    the message (some hub errors don't expose ``.response``)."""
     status = getattr(getattr(exc, "response", None), "status_code", None)
     if status in _HF_RETRY_STATUS:
         return True
     msg = str(exc)
-    return (
+    if (
         "Too Many Requests" in msg
         or "rate limit" in msg.lower()
         or "Service Unavailable" in msg
         or any((" %d " % c) in (" %s " % msg) for c in _HF_RETRY_STATUS)
-    )
+    ):
+        return True
+    low = msg.lower()
+    if status is not None or any(s in low for s in _HF_FINAL_MESSAGES):
+        return False
+    if any(c.__name__ in _HF_TRANSIENT_TYPES for c in type(exc).__mro__):
+        return True
+    return any(s in low for s in _HF_TRANSIENT_MESSAGES)
 
 
 def _hf_retry_after(exc: BaseException) -> Optional[float]:
@@ -463,14 +1034,45 @@ def _hf_retry_after(exc: BaseException) -> Optional[float]:
     return secs if 0 < secs <= 300 else None
 
 
+# hf_xet's own transfer failures (its Rust errors reach Python as a RuntimeError)
+_HF_XET_MESSAGES = ("cas client error", "file reconstruction error")
+
+
+def _hf_fall_back_from_xet(exc: BaseException, what: str) -> None:
+    """After an hf_xet transfer failure, fetch over plain HTTPS from then on (HF
+    serves every Xet file through its xet-bridge as well). One archive failed this
+    way on every attempt, from two networks and two hf_xet versions, while plain
+    HTTPS delivered it whole; retrying through Xet would only repeat it. Sets the
+    constant huggingface_hub reads on every call (``is_xet_available()``), and the
+    environment variable for anything started later; no-op when Xet is already
+    off or the hub has no such switch."""
+    if not any(s in str(exc).lower() for s in _HF_XET_MESSAGES):
+        return
+    try:
+        from huggingface_hub import constants as hub_constants
+    except ImportError:
+        return
+    if getattr(hub_constants, "HF_HUB_DISABLE_XET", True):
+        return
+    hub_constants.HF_HUB_DISABLE_XET = True
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    sys.stderr.write(
+        f"HF {what}: the Xet transfer failed; fetching over plain HTTPS from now on "
+        f"(slower, but it does not depend on Xet).\n"
+    )
+    sys.stderr.flush()
+
+
 def _hf_call_with_retry(fn, *args, _what: str = "download",
                         _max_attempts: int = 6, **kwargs):
-    """Call ``fn(*args, **kwargs)``, retrying transient HF HTTP errors (429
-    rate-limit + 5xx) with exponential backoff. Anonymous downloads of the
-    many-small-file indices hit 429 easily; without this the whole download
-    aborts on the first rate-limit. ``snapshot_download`` resumes (already-present
-    files are skipped) so a retry is cheap. Honors CRISPRME_HF_MAX_RETRIES; set
-    it to 1 to disable retrying."""
+    """Call ``fn(*args, **kwargs)``, retrying transient HF errors (429 rate-limit,
+    5xx, and transport failures such as a reset connection or hf_xet's "error
+    decoding response body") with exponential backoff. Anonymous downloads of the
+    many-small-file indices hit 429 easily, and a multi-GB archive can lose its
+    connection part way; without this the whole download aborts on the first
+    one. ``snapshot_download`` resumes (already-present files are skipped) so a
+    retry is cheap. Honors CRISPRME_HF_MAX_RETRIES; set it to 1 to disable
+    retrying."""
     try:
         _max_attempts = max(
             1, int(os.environ.get("CRISPRME_HF_MAX_RETRIES", _max_attempts))
@@ -482,36 +1084,59 @@ def _hf_call_with_retry(fn, *args, _what: str = "download",
         try:
             return fn(*args, **kwargs)
         except Exception as e:  # noqa: BLE001 - re-raised below if not retryable
-            if attempt >= _max_attempts or not _hf_retryable(e):
+            retryable = _hf_retryable(e)
+            if attempt >= _max_attempts or not retryable:
+                if retryable and attempt > 1:
+                    sys.stderr.write(
+                        f"HF {_what}: still failing after {attempt} attempts. This "
+                        f"is usually a flaky network: re-run the same command.\n"
+                    )
+                    sys.stderr.flush()
                 raise
             wait = _hf_retry_after(e)
             if wait is None:
                 wait = delay
-            status = getattr(getattr(e, "response", None), "status_code", "?")
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            why = f"HTTP {status}" if status is not None else (
+                f"{type(e).__name__}: {str(e)[:160]}"
+            )
             sys.stderr.write(
-                f"HF {_what}: transient error (HTTP {status}); retry "
+                f"HF {_what}: transient error ({why}); retry "
                 f"{attempt}/{_max_attempts - 1} in {wait:.0f}s "
                 f"(set CRISPRME_HF_MAX_RETRIES=1 to disable, or authenticate "
                 f"with an HF token to avoid rate limits)...\n"
             )
             sys.stderr.flush()
+            _hf_fall_back_from_xet(e, _what)
             time.sleep(wait)
             delay = min(delay * 2, 60.0)
     raise RuntimeError("unreachable")  # pragma: no cover
 
 
 def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
-                 token: Optional[str] = None, retries: int = 2) -> str:
+                 token: Optional[str] = None, retries: int = 2,
+                 reporter: Optional["_ProgressReporter"] = None) -> str:
     """Download the files matching ``allow_patterns`` from ``repo`` into
     ``local_dir`` (flat, following the repo tree), VERIFY each one against HF's
     advertised size + a structural check, and re-fetch any truncated/corrupt file
     (up to ``retries`` extra passes) before returning. Raises
     ``DownloadIntegrityError`` if a file can't be made whole. Returns
-    ``local_dir``. Set CRISPRME_SKIP_VERIFY=1 to bypass (not recommended)."""
+    ``local_dir``. Set CRISPRME_SKIP_VERIFY=1 to bypass (not recommended).
+
+    When ``reporter`` is an enabled :class:`_ProgressReporter`, a custom
+    ``tqdm_class`` is passed to ``snapshot_download`` so transferred bytes feed
+    the web progress file — a fresh one on every retry attempt, so a download
+    retried after a 429/5xx keeps feeding it. The extra kwarg is omitted entirely
+    when progress is off (or tqdm is unavailable), keeping the happy path
+    byte-for-byte unchanged.
+    Should the bar ITSELF fail (an exception raised inside the progress class,
+    e.g. a keyword this tqdm rejects), the fetch runs once more without it
+    (degraded progress, STDOUT note) — reporting must never break a download.
+    Any other failure propagates exactly as it would without a bar.
+    """
     hf = _require_hf()
     os.makedirs(local_dir, exist_ok=True)
-    _hf_call_with_retry(
-        hf.snapshot_download,
+    fetch = dict(
         repo_id=repo,
         repo_type="dataset",
         allow_patterns=allow_patterns,
@@ -519,10 +1144,42 @@ def _hf_snapshot(repo: str, allow_patterns: List[str], local_dir: str,
         token=token,
         _what="snapshot",
     )
+    bar_failures: List[BaseException] = []  # what the progress bar ITSELF raised
+    with_bar = (reporter is not None and reporter.enabled
+                and _make_progress_tqdm(reporter) is not None)
+
+    def _snapshot_with_bar(**kwargs):
+        # a FRESH bar class for every attempt _hf_call_with_retry makes: hf builds
+        # new bars on each call, and a class feeds the reporter only from the first
+        # byte bar it built, so a reused one went silent after a 429/5xx retry
+        return hf.snapshot_download(
+            **kwargs, tqdm_class=_make_progress_tqdm(reporter, bar_failures)
+        )
+
+    try:
+        _hf_call_with_retry(
+            _snapshot_with_bar if with_bar else hf.snapshot_download, **fetch
+        )
+    except Exception as exc:  # noqa: BLE001 - re-raised unless the bar raised it
+        if not any(exc is failure for failure in bar_failures):
+            raise  # the download itself failed: exactly as without a bar
+        # the bar itself failed (e.g. an hf version that builds it with a keyword
+        # this tqdm rejects); fetch again plain so the data still lands.
+        sys.stdout.write(
+            f"NOTE: the download progress bar failed ({type(exc).__name__}: {exc}); "
+            f"fetching again without it, so progress shows per extraction stage "
+            f"only.\n"
+        )
+        _hf_call_with_retry(hf.snapshot_download, **fetch)
     if os.environ.get("CRISPRME_SKIP_VERIFY") == "1":
         return local_dir
 
     rels = _staged_files(local_dir)
+    # _remote_sizes returns {} when HF's size API fails (old hub / offline). That
+    # is NOT a reason to skip verification: when sizes.get(rel) is None below,
+    # verify_download_file skips ONLY the size comparison and STILL runs the
+    # BGZF-EOF / gzip-magic / tar structural checks. So a truncated bgzf is caught
+    # even with no advertised sizes.
     sizes = _hf_call_with_retry(
         _remote_sizes, hf, repo, rels, token, _what="size-check"
     )
@@ -574,6 +1231,7 @@ def _fetch_genotypes_companion(
     vcf_name: str,
     remote_prefix: str,
     token: Optional[str] = None,
+    reporter: Optional["_ProgressReporter"] = None,
 ) -> bool:
     """Fetch + extract the SEPARATE Tier-1 ``genotypes_<vcf>.tar.gz`` companion
     into ``<workdir>/Dictionaries/`` so ``genotypes_<vcf>/`` lands as a sibling of
@@ -588,7 +1246,7 @@ def _fetch_genotypes_companion(
     patterns = [f"{remote_prefix}/{remote_name}"]
     staging = os.path.join(workdir, ".hf_stage_genotypes")
     shutil.rmtree(staging, ignore_errors=True)
-    _hf_snapshot(repo, patterns, staging, token)
+    _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
     gt_tarball = os.path.join(staging, remote_prefix, remote_name)
     if not os.path.isfile(gt_tarball):
         shutil.rmtree(staging, ignore_errors=True)
@@ -599,7 +1257,9 @@ def _fetch_genotypes_companion(
     shutil.rmtree(extract_tmp, ignore_errors=True)
     os.makedirs(extract_tmp)
     try:
-        with tarfile.open(gt_tarball) as tf:
+        with _decompress_progress(
+            reporter, extract_tmp, phase="Extracting genotypes"
+        ), tarfile.open(gt_tarball) as tf:
             tf.extractall(extract_tmp)
         staged = os.path.join(extract_tmp, "Dictionaries")
         # tolerate an archive rooted at genotypes_<vcf>/ directly (no Dictionaries/
@@ -731,13 +1391,14 @@ def download_component(
     local layout under ``workdir``.
 
     Args:
-        component: one of genome|annotations|pams|samples|vcf|index.
+        component: one of genome|annotations|pams|samples|vcf|build-inputs|index.
         workdir: working directory the CRISPRme dir-tree lives under.
         repo: HF repo id (defaults via :func:`resolve_repo`).
         ref: reference-genome name (for ``genome``/``index``), e.g. "hg38".
-        dataset: variant dataset name for ``vcf`` (e.g. "1000G", "HGDP").
+        dataset: variant dataset name for ``vcf`` / ``build-inputs``
+            (e.g. "hg38_HGDP1kGP").
         index_name: precomputed index directory name for ``index``
-            (e.g. "NGG_2_hg38").
+            (e.g. "NRG_3_hg38").
 
     Returns:
         The local destination directory populated by the download.
@@ -747,14 +1408,37 @@ def download_component(
             f"Unknown component '{component}'. Expected one of: "
             f"{', '.join(sorted(_COMPONENT_PREFIXES))}."
         )
-    repo = resolve_repo(repo)
+    routed = component == "index" and bool(index_name) and not repo_overridden(repo)
+    routed_from = None  # the wide-flank repo an index fell back from, if it did
+    if routed:
+        # Same routing as publish; the fallback probe waits until the index is known
+        # not to be installed (below), so a complete install costs no network call.
+        repo = resolve_index_repo(index_name, repo)
+    else:
+        repo = resolve_repo(repo)
     remote_prefix = _COMPONENT_PREFIXES[component]
     local_dir = os.path.join(workdir, _COMPONENT_LOCALDIR[component])
+    # A genome / VCF dataset installs by swapping its whole folder in, which a mount
+    # point refuses (_atomic_install_dir): say so now, not after a multi-GB download.
+    _install_name = {"genome": ref, "vcf": dataset}.get(component)
+    if _install_name and _is_mount_point(os.path.join(local_dir, _install_name)):
+        raise ValueError(_mount_point_message(os.path.join(local_dir, _install_name)))
+
+    # Web progress (env-gated via CRISPRME_PROGRESS_FILE; a pure no-op on the CLI /
+    # the current happy path). Seed the known total up-front from the HF catalog so
+    # the bar has a denominator from byte one; refined per-stage for the multi-part
+    # index path below.
+    reporter = _ProgressReporter()
+    if reporter.enabled:
+        _name = {"genome": ref, "vcf": dataset, "index": index_name}.get(component)
+        if component in ("genome", "vcf", "index") and _name:
+            reporter.set_total(_catalog_component_size(component, _name, repo))
+        reporter.set_phase(f"Downloading {component}", _name or "", carry_done=False)
 
     if component == "genome":
         patterns = [f"{remote_prefix}/{ref}/*"]
         staging = os.path.join(workdir, ".hf_stage_genome")
-        _hf_snapshot(repo, patterns, staging, token)
+        _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
         src = os.path.join(staging, remote_prefix, ref)
         if not os.path.isdir(src):
             shutil.rmtree(staging, ignore_errors=True)
@@ -764,7 +1448,6 @@ def download_component(
                 f"may not have this genome uploaded yet."
             )
         dest = os.path.join(local_dir, ref)
-        os.makedirs(dest, exist_ok=True)
         files = sorted(os.listdir(src))
         # The move + gunzip below has no progress bar and, for a full genome
         # (~hundreds of per-contig FASTAs, several GB), runs silently for minutes
@@ -776,11 +1459,25 @@ def download_component(
             + f" into {dest} — no progress bar; a full genome can take a few minutes...\n"
         )
         sys.stderr.flush()
-        for fn in files:
-            moved = shutil.move(os.path.join(src, fn), os.path.join(dest, fn))
-            if moved.endswith(".gz"):
-                decompress_gz(moved)
-        shutil.rmtree(staging, ignore_errors=True)
+
+        def _build_genome(stage_dir):
+            # decompress into the hidden staging dir; it is swapped into Genomes/<ref>/
+            # only after this returns cleanly, so an interrupted/failed decompress
+            # never leaves a half-populated genome folder in place.
+            with _decompress_progress(
+                reporter, stage_dir, phase="Decompressing genome"
+            ):
+                for fn in files:
+                    moved = shutil.move(
+                        os.path.join(src, fn), os.path.join(stage_dir, fn)
+                    )
+                    if moved.endswith(".gz"):
+                        decompress_gz(moved)
+
+        try:
+            _atomic_install_dir(dest, _build_genome)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         return dest
 
     if component == "vcf":
@@ -788,26 +1485,31 @@ def download_component(
             raise ValueError("--dataset is required to download a 'vcf' component")
         patterns = [f"{remote_prefix}/{dataset}/*"]
         staging = os.path.join(workdir, ".hf_stage_vcf")
-        _hf_snapshot(repo, patterns, staging, token)
+        _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
         src = os.path.join(staging, remote_prefix, dataset)
         if not os.path.isdir(src):
             shutil.rmtree(staging, ignore_errors=True)
             raise ValueError(
                 f"No raw VCF dataset '{dataset}' found in HuggingFace repo '{repo}' "
-                f"(looked for '{remote_prefix}/{dataset}/'). The default repo hosts "
-                f"prebuilt variant-aware INDEXES (with their genotype stores for "
-                f"sample-level analysis), not raw per-dataset VCFs. For variant-aware "
-                f"search use:  crisprme.py download --what index --index-name "
-                f"NRG_3_hg38+hg38_HGDP1kGP  (the genotype store it ships covers carriers "
-                f"and per-sample output). To build your own index from raw VCFs, place "
-                f"them under VCFs/{dataset}/ yourself, or use --hf-repo to point at a "
-                f"repo that hosts '{remote_prefix}/{dataset}/'."
+                f"(looked for '{remote_prefix}/{dataset}/'). The default repo hosts the "
+                f"source VCFs of its prebuilt variant indexes as the datasets "
+                f"hg38_HGDP1kGP, hg38_HPRC and hg38_mega (e.g. --what vcf --dataset "
+                f"hg38_HGDP1kGP). A variant-aware search does not need them:  crisprme.py "
+                f"download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP  (the "
+                f"genotype store it ships covers carriers and per-sample output). To build "
+                f"an index from other VCFs, place them under VCFs/{dataset}/ yourself, or "
+                f"use --hf-repo to point at a repo that hosts '{remote_prefix}/{dataset}/'."
             )
         dest = os.path.join(local_dir, dataset)
-        os.makedirs(dest, exist_ok=True)
-        for fn in sorted(os.listdir(src)):
-            shutil.move(os.path.join(src, fn), os.path.join(dest, fn))  # keep bgzip
-        shutil.rmtree(staging, ignore_errors=True)
+
+        def _build_vcf(stage_dir):
+            for fn in sorted(os.listdir(src)):
+                shutil.move(os.path.join(src, fn), os.path.join(stage_dir, fn))  # keep bgzip
+
+        try:
+            _atomic_install_dir(dest, _build_vcf)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         return dest
 
     if component == "build-inputs":
@@ -940,6 +1642,12 @@ def download_component(
                 flush=True,
             )
             return installed_dir
+        # Fall back to the default repo if the routed one does not have it, so an
+        # index published before the split still resolves.
+        if routed and repo != DEFAULT_HF_REPO and not _index_archive_exists(
+            repo, index_name, token
+        ):
+            routed_from, repo = repo, DEFAULT_HF_REPO
         # Dict-less is the default in 2.4.0. If the caller asked for a VARIANT
         # index by its bare (legacy dict-based) name but a corrected `-dictless`
         # companion exists on the repo, prefer it: the `-dictless` marker is
@@ -948,8 +1656,8 @@ def download_component(
         # smaller, combined-AF one that 2.4.0 ships. Best-effort — any lookup
         # failure falls through to the requested name (legacy behaviour), so this
         # never makes a previously-working download fail.
-        if "+" in index_name and "-dictless" not in index_name:
-            dictless_name = index_name.replace("+", "-dictless+", 1)
+        dictless_name = _dictless_sibling(index_name)
+        if dictless_name:
             try:
                 if _require_hf().HfApi().file_exists(
                     repo,
@@ -967,15 +1675,37 @@ def download_component(
                 pass  # existence check failed — use the requested name as-is
         patterns = [f"{remote_prefix}/{index_name}.tar.gz"]
         staging = os.path.join(workdir, ".hf_stage_index")
-        _hf_snapshot(repo, patterns, staging, token)
+        # multi-part phase labels: a VARIANT index installs in 3 stages (main index
+        # tarball -> genotypes companion -> shared reference index); a reference-only
+        # index is a single download. Re-seed the total to the ACTUAL (possibly
+        # -dictless) tarball's size so the bar denominator matches what is fetched.
+        _is_variant = "+" in index_name
+        if reporter.enabled:
+            reporter.set_total(
+                _catalog_component_size("index", index_name, repo)
+                or reporter.bytes_total
+            )
+            reporter.set_phase(
+                "Downloading index 1/3" if _is_variant else "Downloading index",
+                index_name,
+                carry_done=False,
+            )
+        _hf_snapshot(repo, patterns, staging, token, reporter=reporter)
         tarball = os.path.join(staging, remote_prefix, f"{index_name}.tar.gz")
         if not os.path.isfile(tarball):
             shutil.rmtree(staging, ignore_errors=True)
+            where = (
+                f"neither in HuggingFace repo '{routed_from}' (where indexes with a "
+                f"flank wider than 3 nt are published) nor in the fallback '{repo}'"
+                if routed_from else f"in HuggingFace repo '{repo}'"
+            )
             raise ValueError(
-                f"No index '{index_name}' found in HuggingFace repo '{repo}' "
+                f"No index '{index_name}' found {where} "
                 f"(looked for '{remote_prefix}/{index_name}.tar.gz'). Check "
                 f"--index-name, or build it locally with 'crisprme.py "
                 f"build-index-only' — the repo may not have it uploaded yet."
+                + (f" If '{routed_from}' was only unreachable, retry, or name it "
+                   f"with --hf-repo {routed_from}." if routed_from else "")
             )
         os.makedirs(local_dir, exist_ok=True)
         # GAP 3: the remote tarball filename AND the archive's internal top-level
@@ -1000,7 +1730,10 @@ def download_component(
                 # surface the provenance manifest (if present) without unpacking it
                 # alongside the index; extract only the index folder members
                 members = [m for m in tf.getmembers() if m.name != "manifest.json"]
-                tf.extractall(extract_tmp, members=members)
+                with _decompress_progress(
+                    reporter, extract_tmp, phase="Extracting index"
+                ):
+                    tf.extractall(extract_tmp, members=members)
                 try:
                     mf = tf.extractfile("manifest.json")
                     if mf is not None:
@@ -1132,12 +1865,27 @@ def download_component(
                     f"Samples will be degraded until genotypes_{vcf_name}/ is present.\n"
                 )
             else:
+                if reporter.enabled:
+                    # the catalog skips the genotypes_* companions as rows, so size
+                    # this one by its remote path instead (0 -> indeterminate bar).
+                    reporter.set_total(
+                        _remote_file_size(
+                            repo,
+                            f"{remote_prefix}/genotypes_{vcf_name}.tar.gz",
+                            token,
+                        )
+                    )
+                    reporter.set_phase(
+                        "Downloading genotypes 2/3", f"genotypes_{vcf_name}",
+                        carry_done=False,
+                    )
                 try:
                     got = _fetch_genotypes_companion(
-                        repo, workdir, vcf_name, remote_prefix, token
+                        repo, workdir, vcf_name, remote_prefix, token,
+                        reporter=reporter,
                     )
                 except Exception as exc:  # network/extract error -> non-fatal
-                    got = False
+                    got = None  # None = errored and already reported below
                     sys.stdout.write(
                         f"NOTE: could not fetch Tier-1 genotype store "
                         f"'genotypes_{vcf_name}.tar.gz' ({exc}); continuing without "
@@ -1147,6 +1895,15 @@ def download_component(
                     sys.stdout.write(
                         f"Installed Tier-1 genotype store genotypes_{vcf_name}/ "
                         f"into {os.path.join(workdir, 'Dictionaries')}\n"
+                    )
+                elif got is False:
+                    # Genuinely absent (a registry-only publish), as distinct from a
+                    # fetch that errored -- that case reported itself above, and
+                    # saying "has no companion" for it would be wrong.
+                    sys.stdout.write(
+                        f"NOTE: index '{index_name}' has no genotypes_{vcf_name}.tar.gz "
+                        f"companion in {repo} (registry-only/detection publish); "
+                        f"off-target detection works, per-sample Samples degraded.\n"
                     )
             # ALWAYS-SHIP the shared reference index. A variant index tarball
             # (<pam>_<N>_<ref>+<vcf>) does NOT bundle the reference index
@@ -1160,7 +1917,17 @@ def download_component(
             if ref_index_name and not os.path.isdir(
                 os.path.join(local_dir, ref_index_name)
             ):
+                if reporter.enabled:
+                    reporter.set_total(
+                        _catalog_component_size("index", ref_index_name, repo)
+                    )
+                    reporter.set_phase(
+                        "Downloading reference 3/3", ref_index_name,
+                        carry_done=False,
+                    )
                 try:
+                    # the recursive call builds its own reporter from the same env
+                    # progress file, so it keeps updating the bar for this stage.
                     download_component(
                         "index", workdir, repo=repo, ref=ref,
                         index_name=ref_index_name, token=token, genotypes=False,
@@ -1174,12 +1941,6 @@ def download_component(
                         f"NOTE: could not fetch the reference index "
                         f"'{ref_index_name}' ({exc}); the search will build it on "
                         f"demand from the raw genome (a shared base component).\n"
-                    )
-                else:
-                    sys.stdout.write(
-                        f"NOTE: index '{index_name}' has no genotypes_{vcf_name}.tar.gz "
-                        f"companion in {repo} (registry-only/detection publish); "
-                        f"off-target detection works, per-sample Samples degraded.\n"
                     )
         # GAP 2: a merged variant index searches ONE vcf folder and the search
         # expects a single combined samplesIDs/<vcf_name>.samplesID.txt, but the
@@ -1429,7 +2190,22 @@ def publish_index(
     if not os.path.isdir(index_dir):
         raise ValueError(f"Index directory {index_dir} does not exist")
     index_name = os.path.basename(index_dir)
-    repo = resolve_repo(repo)
+    # build-index-only marks the dict-less tiers and the indel genotype store unfinished
+    # (a .building directory in each) while it writes them in place: a run stopped there
+    # leaves a part of them, which would be published as if whole.
+    if index_name.partition("+")[2]:
+        for sub in ("registry_", "indel_genotypes_"):
+            unfinished = os.path.join(os.path.dirname(os.path.dirname(index_dir)),
+                                      "Dictionaries", sub + index_name.partition("+")[2])
+            if os.path.isdir(os.path.join(unfinished, ".building")):
+                raise ValueError(
+                    f"{unfinished} is unfinished, or still being written: the "
+                    f"build-index-only run that writes it has not finished it. Run "
+                    f"build-index-only again to its end, then publish the index."
+                )
+    # Route a wide-flank PAM-less index to its own repo, so an older client that
+    # only knows the default repo cannot download an index it would misread.
+    repo = resolve_index_repo(index_name, repo)
     token = resolve_token(token)
     if not token:
         raise ValueError(

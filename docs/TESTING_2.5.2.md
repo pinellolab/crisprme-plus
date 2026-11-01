@@ -43,7 +43,7 @@ docker pull pinellolab/crisprme:v2.5.2
 git clone https://github.com/pinellolab/crisprme-plus && cd crisprme-plus
 mamba env create -f environment.yml
 mamba activate crisprme-2.5.2
-bash install_from_source.sh     # builds CRISPRitz 2.8.1 + puts crisprme.py on PATH
+bash install_from_source.sh     # builds CRISPRitz at the pinned tag + puts crisprme.py on PATH
 crisprme.py --version           # expect 2.5.2
 ```
 (See README §1.3 for details / troubleshooting.)
@@ -74,17 +74,17 @@ CTCTCAGCTGGTACACGGCANNN
 ```
 Run a genome-wide SpCas9 (NRG) search:
 ```bash
-printf "hg38_1000G2021_HGDP\n"               > vcf_1000G.txt
-printf "hg38_1000G2021_HGDP.samplesID.txt\n" > sid_1000G.txt
+printf "hg38_HGDP1kGP\n"               > vcf_HGDP1kGP.txt
+printf "hg38_HGDP1kGP.samplesID.txt\n" > sid_HGDP1kGP.txt
 
 crisprme.py complete-search \
   --genome Genomes/hg38 \
-  --vcf vcf_1000G.txt --samplesID sid_1000G.txt \
+  --vcf vcf_HGDP1kGP.txt --samplesID sid_HGDP1kGP.txt \
   --guide guides.txt --pam PAMs/20bp-NRG-SpCas9.txt \
   --annotation Annotations/dhs+encode+gencode.hg38.bed.gz \
   --gene_annotation Annotations/gencode.protein_coding.bed.gz \
   --mm 6 --bDNA 2 --bRNA 2 --max-total-edits 6 \
-  --output trac_1000G_HGDP --thread 16
+  --output trac_HGDP1kGP --thread 16
 ```
 (Substitute your actual annotation file names — `ls Annotations/` to see what downloaded.)
 

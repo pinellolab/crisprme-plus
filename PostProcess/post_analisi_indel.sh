@@ -64,8 +64,27 @@ if [ ! -s "$targets_tsv_alt_chrom" ]; then
 fi
 
 # adjust targets header
+#
+# Only ever prepend an actual header. If an upstream filter dropped the header
+# (it is a plain data-shaped line, so a filter that does not special-case it will
+# treat it as a target), `head -1` returns the first DATA row -- and prepending
+# that row injects one contig's target into EVERY chromosome's subset. It is not
+# rejected downstream: every chromosome's fake genome starts at coordinate 0 with
+# near-uniform windows, so analisi_indels_NNN.py resolves the foreign row against
+# THIS chromosome's indel tree (which is keyed on the fake position alone) and
+# reports it with this chromosome's rsID, AF and carrier samples.
+# Prepending nothing is safe: cluster.dict.py skips '#' lines on input and emits
+# its own header, which analisi_indels_NNN.sh then normalizes.
 header=$(head -1 "$targets_tsv_alt")
-sed -i 1i"$header" "$targets_tsv_alt_chrom"
+case "$header" in
+    \#*)
+        sed -i 1i"$header" "$targets_tsv_alt_chrom"
+        ;;
+    *)
+        # STDOUT only -- any stderr write fails the stage via `[ -s $logerror ]`.
+        echo "WARNING: $(basename "$targets_tsv_alt") has no header line; not prepending its first data row to the $chrom subset (that would misattribute one contig's target to every chromosome)."
+        ;;
+esac
 
 # perform targets analysis by chromosome (scores, annotation, etc.)
 targets_chrom_prefix="${output_folder}/${fakechrom}_${pam_name}_${guide_name}_${annotation_name}_${mm}_${bDNA}_${bRNA}"

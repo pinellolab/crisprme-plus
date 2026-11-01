@@ -93,7 +93,63 @@ indexes/
   NRG_3_hg38+hg38_HPRC.tar.gz                    # SpCas9 (NRG) HPRC pangenome variant index (232 phased assembly-derived genomes)
   genotypes_hg38_HPRC.tar.gz                          # SEPARATE Tier-1 genotype store companion for the HPRC index
   NRG_3_hg38+hg38_mega.tar.gz                    # SpCas9 (NRG) sites-only mega index (5 sources) — NO genotype companion (sites-only)
+  NNN_3_hg38.tar.gz                              # PAM-LESS reference index of hg38, 3-nt flank — serves ANY 3-nt PAM with `--prune-pam`
+  NNN_3_hg38+hg38_HGDP1kGP.tar.gz           # PAM-LESS variant-aware index (HGDP + 1000 Genomes, same variant data as the NRG one)
+  NGG_3_hg38.tar.gz                              # NGG-only reference index (NRG is the default; NGG cannot serve NAG off-targets)
+  NGG_3_hg38+hg38_HGDP1kGP.tar.gz           # NGG-only variant index
+  NRR_3_hg38.tar.gz                              # NRR reference index
+  NRR_3_hg38+hg38_{HGDP1kGP,HPRC,mega}.tar.gz    # NRR variant indexes
+  SHA256SUMS                                     # one SHA-256 per archive: `sha256sum -c --ignore-missing SHA256SUMS` inside indexes/
 ```
+
+The two 8-nt-flank PAM-less indexes are in a second repo,
+`lucapinello/crisprme-data-general-index` (see the flank-width note below), under the same
+`indexes/` layout:
+
+```
+indexes/
+  NNNNNNNN_3_hg38.tar.gz                         # PAM-LESS reference index of hg38, 8-nt flank
+  NNNNNNNN_3_hg38+hg38_HGDP1kGP.tar.gz           # PAM-LESS variant-aware index (HGDP + 1000 Genomes)
+  genotypes_hg38_HGDP1kGP.tar.gz                 # the same genotype companion as in the main repo (same SHA-256)
+  SHA256SUMS
+```
+
+Download sizes, as the Hugging Face API reports them (GB = 10⁹ bytes; the whole default repo
+is about 432 GB, so fetch single archives rather than the repo):
+
+| Archive | Repo | Download |
+|---|---|---|
+| `NRG_3_hg38` | default | 8.9 GB |
+| `NRG_3_hg38+hg38_HGDP1kGP` + `genotypes_hg38_HGDP1kGP` | default | 27.7 GB + 5.7 GB |
+| `NRG_3_hg38+hg38_HPRC` + `genotypes_hg38_HPRC` | default | 15.2 GB + 0.6 GB |
+| `NRG_3_hg38+hg38_mega` | default | 12.1 GB |
+| `NGG_3_hg38`, `NGG_3_hg38+hg38_HGDP1kGP` | default | 3.7 GB, 21.5 GB |
+| `NRR_3_hg38`, `+hg38_HGDP1kGP`, `+hg38_HPRC`, `+hg38_mega` | default | 20.1, 42.9, 30.7, 25.2 GB |
+| `NNN_3_hg38`, `NNN_3_hg38+hg38_HGDP1kGP` | default | 71.5 GB, 109.5 GB |
+| `NNNNNNNN_3_hg38`, `NNNNNNNN_3_hg38+hg38_HGDP1kGP` | `crisprme-data-general-index` | 82.2 GB, 122.7 GB |
+
+**The PAM-less (`NNN_*`) indexes** store the raw genomic flank instead of a matched PAM,
+so one index answers any PAM no longer than that flank when the search passes
+`--prune-pam` (see [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+They carry exactly the same variant data and `Dictionaries/` as the dedicated index for the
+same panel — those tiers are PAM-independent — and a `--prune-pam` run over one is
+byte-identical to the dedicated index for that PAM, verified genome-wide. They are
+correspondingly larger, because nothing is excluded at build time: 71 GB for the reference
+index against 9 GB for `NRG_3_hg38`, and 110 GB against 28 GB for the HGDP + 1000 Genomes
+variant index. Choose one when you expect to search several PAMs over the same genome.
+
+> **Flank width and compatibility.** A 3-nt flank is readable by any CRISPRme version: the
+> stored geometry is the same as a dedicated 3-nt PAM index, which is why `NNN_3` ships in
+> this repo. A **wider** flank is not — a release predating `--prune-pam` would mis-read it
+> — so those indexes live in a separate dataset repo,
+> **`lucapinello/crisprme-data-general-index`**, which older defaults never point at.
+> `download` and `publish-index` route by the flank width in the index name, so a wide-flank
+> index cannot be published to the default repo by accident, and the Settings catalog merges
+> both repos so what is listed is what can be fetched. An explicit `--hf-repo` or
+> `CRISPRME_HF_REPO` overrides the routing.
+
+> Per-archive provenance and validity, with the measurement behind each claim, is in
+> [`INDEX_PROVENANCE.md`](INDEX_PROVENANCE.md).
 
 Each variant index stamps its **`data_type`** (`sites-only` / `genotyped-unphased` /
 `genotyped-phased` / `hybrid`) and a `phased` flag in every `registry_<vcf>/reg_<chrom>.idx`
@@ -166,12 +222,14 @@ hand, so `publish-index` (below) ships a self-complete index.
 > is simply skipped (SNP+indel co-occurrence does not apply to an indel-free dataset).
 
 `--samplesID` is a listing file (one samplesID filename per line, resolved under
-`samplesIDs/`); a combined panel lists **both** the 1000G and HGDP files, e.g.:
+`samplesIDs/`). For `VCFs/hg38_HGDP1kGP` it names that panel's one samples file (the one
+`download --what samples` installs):
 
 ```
-hg38_1000G.samplesID.txt
-hg38_HGDP.samplesID.txt
+hg38_HGDP1kGP.samplesID.txt
 ```
+
+A panel merged from several datasets lists each dataset's file instead (next section).
 
 > **`--samplesID` is required for the dict-less / self-complete flow.** The
 > dicts still build without it, but you silently get a **dicts-only** index: no
@@ -279,10 +337,13 @@ build/enrichment entirely.
 
 ## Building a new-PAM index for a published dataset (HGDP+1kGP, mega)
 
-The prebuilt indexes above are all **SpCas9 NRG**. To screen a **different nuclease / PAM**
-(SpCas9 **NGG**, SaCas9 **NNGRRT**, Cas12a **TTTN**, or any IUPAC motif) against the same
-re-phased **HGDP+1kGP** or sites-only **mega** variant data, you build that one index once and
-reuse it for every later search — you do **not** re-derive the variant data.
+The prebuilt indexes above cover the **NRG**, **NGG** and **NRR** PAMs (not each on every
+panel) plus the PAM-less `NNN_3` / `NNNNNNNN_3` indexes, which serve other PAMs through
+`--prune-pam`. To screen a **different nuclease / PAM** with a dedicated index (SaCas9
+**NNGRRT**, Cas12a **TTTN**, any IUPAC motif, or NGG on mega, the one of these two panels it
+is not published for) against the same re-phased **HGDP+1kGP** or sites-only **mega** variant data, you build
+that one index once and reuse it for every later search — you do **not** re-derive the
+variant data.
 
 ### What's reusable vs. what you rebuild
 

@@ -1569,14 +1569,47 @@ class TestGenerateReport(unittest.TestCase):
         m = _json.load(open(self._dpath(extract, "run_manifest.json")))
         self.assertEqual(m["crisprme_version"] or "2.4.0", m["crisprme_version"] or "2.4.0")
         for k in ("guides", "pam", "genome", "variant_datasets", "search", "counts",
-                  "source_integrated_results", "crispritz_note"):
+                  "source_integrated_results", "crispritz_note", "crispritz_version"):
             self.assertIn(k, m)
         self.assertIn("max_total_edits", m["search"])
         self.assertIn("off_targets", m["counts"])
-        self.assertIn("v2.8.3", m["crispritz_note"])  # engine version recorded
         # report_generator tracks the crisprme version (not a stale hard-coded string)
         self.assertTrue(m.get("report_generator", "").startswith("v"))
-        self.assertNotIn("2.4", m["crispritz_note"])  # no stale v2.4.0-image reference
+        # The engine version must be RESOLVED, never baked into the prose. This
+        # assertion used to read `assertIn("v2.8.3", ...)`, which pinned the wrong
+        # value: that literal outlived three CRISPRitz pins while the test stayed
+        # green, so every shipped manifest named an engine the install never ran.
+        self.assertNotRegex(m["crispritz_note"], r"\bv?\d+\.\d+\.\d+\b")
+        # a version or null -- never a blank or placeholder string
+        if m["crispritz_version"] is not None:
+            self.assertRegex(m["crispritz_version"], r"^\d+\.\d+")
+
+    def test_crispritz_version_is_read_from_the_engine_on_path(self):
+        """It must come from the engine that would actually run, or be null."""
+        import shutil
+        import tempfile as _tf
+        import generate_report as gr
+
+        with _tf.TemporaryDirectory() as d:
+            fake = os.path.join(d, "crispritz.py")
+            with open(fake, "w") as fh:
+                fh.write('#!/usr/bin/env python3\nVERSION = "9.9.9"\n')
+            os.chmod(fake, 0o755)
+            old = os.environ.get("PATH", "")
+            os.environ["PATH"] = d + os.pathsep + old
+            try:
+                self.assertEqual(gr._crispritz_version(), "9.9.9")
+            finally:
+                os.environ["PATH"] = old
+
+        # not on PATH at all -> None, so the manifest names nothing rather than lying
+        old = os.environ.get("PATH", "")
+        os.environ["PATH"] = ""
+        try:
+            self.assertIsNone(gr._crispritz_version())
+        finally:
+            os.environ["PATH"] = old
+        self.assertIsNotNone(shutil.which, "sanity: shutil.which exists")
 
     def test_pipeline_no_readonly_or_bare_relative_writes(self):
         """Regression guard for the read-only-container bug: the search pipeline must
@@ -2350,6 +2383,56 @@ class TestGenerateReport(unittest.TestCase):
             body = fh.read()
         self.assertIn("chr5_400_T_A", body)
         self.assertIn("chr5_402_C_G", body)
+
+    # ------------------------------------------------------------------ #
+    # Reference-only run (no --vcf): no row carries a variant haplotype, so
+    # the observed-haplotypes companion has no observation to group. Its early
+    # exit returned a bare None, which build_report unpacked as a 3-tuple:
+    # every reference-only search failed to build its report.zip (TypeError).
+    # ------------------------------------------------------------------ #
+    def _reference_only_result_dir(self):
+        """A result dir holding only the fixture's on-target + REFERENCE rows,
+        under the name a reference-only search gives it (VCF name "_").
+        Returns (result_dir, integrated_tsv_path)."""
+        rd = tempfile.mkdtemp(prefix="ro_", dir=self.tmp)
+        itsv = os.path.join(rd, f"{_GUIDE}+NRG_hg38+__6+3_integrated_results.tsv")
+        with open(itsv, "w") as fh:
+            fh.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                if row[10] == "ref":  # REF/ALT_origin_(highest_CFD)
+                    fh.write("\t".join(row) + "\n")
+        return rd, itsv
+
+    def test_observed_haplotypes_companion_no_observations_returns_3_tuple(self):
+        import pandas as pd
+
+        from generate_report import build_observed_haplotypes_companion
+
+        rd, itsv = self._reference_only_result_dir()
+        df = pd.read_csv(itsv, sep="\t", dtype=str, na_filter=False)
+        staging = os.path.join(self.tmp, "ro_staging")
+        os.makedirs(staging)
+        self.assertEqual(
+            build_observed_haplotypes_companion(df, itsv, rd, staging, merge_window=3),
+            (None, [], {}),
+        )
+        self.assertFalse(os.path.exists(os.path.join(staging, "observed_haplotypes.tsv")))
+
+    def test_build_report_on_a_reference_only_result_dir(self):
+        """What the pipeline runs at the end of every search: generate_report.py
+        --result-dir <job>. A reference-only job must get its <job>_report.zip."""
+        rd, _itsv = self._reference_only_result_dir()
+        rc = gr.main(["--result-dir", rd, "--samplesID-dir", self.sid_dir])
+        self.assertEqual(rc, 0)
+        out_zip = os.path.join(rd, f"{os.path.basename(rd)}_report.zip")
+        self.assertTrue(os.path.isfile(out_zip))
+        with zipfile.ZipFile(out_zip) as zf:
+            names = zf.namelist()
+            top = zf.read("data/top1000.tsv").decode().strip().splitlines()
+        self.assertIn("report.html", names)
+        self.assertNotIn("data/observed_haplotypes.tsv", names)
+        self.assertEqual(len(top), 1 + 2)  # header + the two reference off-targets
+        self.assertFalse(os.path.exists(os.path.join(rd, "observed_haplotypes.tsv")))
 
 
 if __name__ == "__main__":

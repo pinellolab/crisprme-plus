@@ -18,7 +18,7 @@
       <img src="crisprme-logo.svg" alt="CRISPRme" class="logo">
     </h1>
     <p class="tagline">Variant-aware CRISPR off-target nomination</p>
-    <p class="tagline" style="font-size:0.9em;color:#2b6cb0">Latest: <strong>v2.8.0</strong> &mdash; context-aware analysis mode (per-sample by default on genotyped+phased indexes, population-level on sites-only). <a href="example-report.html">See an example report &rarr;</a></p>
+    <p class="tagline" style="font-size:0.9em;color:#2b6cb0">Latest: <strong>v2.8.1</strong> &mdash; one flexible PAM-less index serves any shorter PAM (<code>--prune-pam</code>), and a fix for indel off-targets that could be reported on the wrong chromosome. <a href="example-report.html">See an example report &rarr;</a></p>
   </header>
 
   <main>
@@ -313,24 +313,24 @@ ssh -N -L 8080:&lt;compute-node&gt;:8080 &lt;user&gt;@&lt;cluster-login&gt;</cod
         <summary><strong>Other ways to install</strong> (Conda/Mamba, or build everything from scratch)</summary>
 
         <h3>Install with Conda / Mamba</h3>
-        <p style="color:#b00;margin:0 0 .5rem;"><strong>Note:</strong> Bioconda installs the last
-        <em>stable</em> CRISPRme release (pre-2.2.0), <strong>not</strong> CRISPRme+ (the 2.8.x line).
-        Use the Docker quickstart above for CRISPRme+.</p>
-        <pre><code># Configure Bioconda channels (one-time)
-mamba config --add channels bioconda
-mamba config --add channels conda-forge
-mamba config --set channel_priority strict
+        <p>Bioconda's <code>crisprme</code> package is CRISPRme+ (Python 3.11, Linux); a release
+        reaches Bioconda shortly after it is tagged. Always name the version: given a bare
+        <code>crisprme</code>, the solver can silently fall back to a years-old release.</p>
+        <pre><code># Configure Bioconda channels (one-time; conda config even with Mamba 2)
+conda config --add channels bioconda
+conda config --add channels conda-forge
+conda config --set channel_priority strict
 
-# Create and activate the environment, then verify
-mamba create -n crisprme crisprme -y
-mamba activate crisprme
+# Create and activate the environment, set up the CRISPR-Bulge scorer, then verify
+conda create -n crisprme crisprme=2.8.1 python=3.11 -y
+conda activate crisprme
+crisprme.py scorer-env create
+crisprme.py scorer-env doctor
 crisprme.py --version</code></pre>
         <p>
-          This Bioconda package is the pre-2.2.0 stable CRISPRme, so its data setup uses the
-          legacy <code>crisprme.py setup</code> subcommand (it does <em>not</em> have the fast
-          <code>download</code> / <code>web-interface</code> commands). The fast CDN
-          <code>download</code> flow and the web interface shown above are <strong>CRISPRme+</strong>
-          features &mdash; use the Docker quickstart (or the build-from-source path below) for them.
+          It is the same <code>crisprme.py</code> as in the Docker image, with the fast
+          <code>download</code> flow and the <code>web-interface</code>. The Docker quickstart above
+          remains the simplest route: it ships the CRISPR-Bulge scorer pre-built.
         </p>
 
         <h3>Build the full reference database from the original sources</h3>

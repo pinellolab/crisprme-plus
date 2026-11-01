@@ -4371,6 +4371,32 @@ def _package_version():
     return None
 
 
+def _crispritz_version():
+    """Best-effort version of the search engine that actually ran, or None.
+
+    Read from the ``VERSION = "X"`` assignment in the ``crispritz.py`` on PATH --
+    the engine this install would invoke -- by parsing rather than executing, so
+    nothing can write to stderr (fatal to the enclosing stage) and the report
+    cannot be slowed by a subprocess. Returns None when the engine is not on PATH,
+    in which case the manifest names no version instead of guessing one.
+    """
+    try:
+        import re
+        import shutil
+
+        exe = shutil.which("crispritz.py")
+        if not exe:
+            return None
+        with open(exe, "r", errors="replace") as fh:
+            for line in fh:
+                m = re.match(r'VERSION\s*=\s*["\']([^"\']+)["\']', line)
+                if m:
+                    return m.group(1)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Observed-haplotypes companion (report-layer only)
 # --------------------------------------------------------------------------- #
@@ -4637,7 +4663,7 @@ def build_observed_haplotypes_companion(df, integrated_tsv, result_dir, staging,
                     })
 
         if not observations:
-            return None
+            return None, [], {}
 
         # ---- 3. group observations into SITES -------------------------------
         # group by (chrom, strand, spacer), sort by start, single-linkage cluster
@@ -5564,8 +5590,11 @@ def build_report(
         # the ZIP is self-sufficient for re-execution. Never break the report on it.
         try:
             _manifest = {
-                "crisprme_version": meta.get("version") or "2.8.0",
-                "report_generator": "v" + (meta.get("version") or "2.8.0"),
+                # never a hardcoded release number: this manifest is the IND
+                # traceability record, so stamping a plausible-but-wrong version is
+                # worse than admitting the run did not record one.
+                "crisprme_version": meta.get("version") or _package_version() or "unknown",
+                "report_generator": "v" + (meta.get("version") or _package_version() or "unknown"),
                 "generated_date": meta.get("date"),
                 "guides": meta.get("guides"),
                 "nuclease": meta.get("nuclease"),
@@ -5591,9 +5620,14 @@ def build_report(
                 },
                 "database": _reg_vc,  # {n_records SNPs, n_indels, databases} or None
                 "source_integrated_results": os.path.basename(integrated_tsv),
+                # Resolved from the engine on PATH, never hardcoded: the literal
+                # "v2.8.3" here outlived three CRISPRitz pins and shipped a wrong
+                # engine version in every report manifest.
+                "crispritz_version": _crispritz_version(),
                 "crispritz_note": (
-                    "search-engine (CRISPRitz v2.8.3) version is recorded in the build. "
-                    "See Params.txt for the exact run parameters."
+                    "search-engine (CRISPRitz) version is resolved from the engine on "
+                    "PATH; null when it could not be determined. See Params.txt for "
+                    "the exact run parameters."
                 ),
             }
             _man_path = os.path.join(staging, "run_manifest.json")

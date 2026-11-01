@@ -76,8 +76,17 @@ rm "$jobid.total.txt"
 #
 # The .CFDGraph.txt files can be summed to obtain the final CFD graph output.
 # -> Currently, this step is NOT required for this analysis, but the files SHOULD BE KEPT for consistency.
+# NOTE on the first argument: this read "$annotations", a variable this script
+# never sets, so it always expanded to the empty string. That is INERT, not a
+# bug: analisi_indels_NNN.py assigns argv[1] to `annotationFile` and never uses
+# it (its only other reference, the `open(annotationFile)` at :283, is commented
+# out) -- indel targets are annotated by a later stage. Measured on the
+# genome-wide 2.8.1 gate report: 13,622/13,622 indel-allele rows carry a closest
+# gene and 13,619 carry a functional annotation, the same rate as every other
+# row. Passing the real path removes a reviewer trap without changing behaviour:
+# the argument COUNT is unchanged either way, so nothing shifts position.
 ./analisi_indels_NNN.py \
-    "$annotations" \
+    "$annotationfile" \
     "$jobid.total.cluster.txt" \
     "$jobid" \
     "$dictionaries" \

@@ -30,6 +30,7 @@ _HISTORY_PAGE = os.path.join(
 
 _NAMES = [
     "count_guides",
+    "read_job_info",
     "_is_assembly_params",
     "_read_assembly_params_file",
     "_assembly_genome_display",
@@ -257,6 +258,39 @@ class TestMixedStartTimeColumnSortable(unittest.TestCase):
         mixed = ["2026-09-22 05:17:46", "Fri 28 Aug 2026 04:09:43 PM UTC"]
         with self.assertRaises(ValueError):
             pd.to_datetime(mixed)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TestReadJobInfoQueued(unittest.TestCase):
+    """A QUEUED job (one submitted while every search slot is busy: 2 by default,
+    configurable 1-16) has a log.txt but no 'Job\\tStart' line yet. read_job_info()
+    must return None (not raise StopIteration/IOError) so construct_history_summary
+    falls back to the Params mtime and the whole History table keeps rendering --
+    the bug Manuel reported."""
+
+    read_job_info = staticmethod(_NS["read_job_info"])
+
+    def test_started_job_returns_timestamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = os.path.join(tmp, "log.txt")
+            with open(log, "w") as f:
+                f.write("Job\tStart\tFri 28 Aug 2026 04:09:43 PM UTC\n")
+            self.assertEqual(
+                self.read_job_info(log, "job1"), "Fri 28 Aug 2026 04:09:43 PM UTC"
+            )
+
+    def test_queued_job_log_without_start_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = os.path.join(tmp, "log.txt")
+            with open(log, "w") as f:
+                f.write("Queued at\tFri 28 Aug 2026 04:00:00 PM UTC\n")  # queue note, no Start
+            self.assertIsNone(self.read_job_info(log, "queued_job"))
+
+    def test_missing_log_returns_none(self):
+        self.assertIsNone(self.read_job_info("/no/such/log.txt", "new_job"))
 
 
 if __name__ == "__main__":

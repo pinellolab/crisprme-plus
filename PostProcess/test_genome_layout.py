@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -232,6 +233,76 @@ class TestDownloadSplits(unittest.TestCase):
                     "badgenome", self.genomes, source="url", url="http://x/asm.fa.gz"
                 )
         self.assertFalse(os.path.exists(os.path.join(self.genomes, "badgenome")))
+
+
+class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
+    """--source url extracts an archive from a URL the web client chose: a member
+    that is absolute, has a '..' component, or is a link/device/FIFO refuses the
+    whole archive before anything is extracted; a chromFa archive still works."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.data = os.path.join(self.tmp, "data")
+        self.genomes = os.path.join(self.data, "Genomes")
+        os.makedirs(self.genomes)  # as in a real data dir (the function makes it anyway)
+        os.makedirs(os.path.join(self.data, "Settings"))
+
+    def _fake_download(self, members):
+        def fake(staging, http_url=None, **_kw):
+            path = os.path.join(staging, "asm.tar.gz")
+            with tarfile.open(path, "w:gz") as tar:
+                for info, payload in members:
+                    tar.addfile(info, io.BytesIO(payload) if payload else None)
+            return path
+        return fake
+
+    @staticmethod
+    def _file(name, data=b">chr1\nACGT\n"):
+        info = tarfile.TarInfo(name)
+        info.size = len(data)
+        return info, data
+
+    @staticmethod
+    def _special(name, kind, linkname=""):
+        info = tarfile.TarInfo(name)
+        info.type, info.linkname = kind, linkname
+        return info, None
+
+    def _snapshot(self):
+        return sorted(
+            os.path.relpath(os.path.join(d, n), self.tmp)
+            for d, dirs, files in os.walk(self.tmp) for n in dirs + files
+        )
+
+    def test_unsafe_member_refused_before_anything_is_extracted(self):
+        outside = os.path.join(self.tmp, "outside.txt")
+        secret = os.path.join(self.tmp, "secret.txt")  # a hardlink target in the sandbox
+        with open(secret, "w") as fh:
+            fh.write("ORIGINAL\n")
+        cases = {
+            "'..'": self._file("../../Settings/set_EVILJOB000/cmd.json", b"{}"),
+            "absolute": self._file(outside, b"x"),
+            "symlink": self._special("lnk", tarfile.SYMTYPE, self.tmp),
+            "hardlink": self._special("hl", tarfile.LNKTYPE, secret),
+            "fifo": self._special("pipe", tarfile.FIFOTYPE),
+        }
+        for label, bad in cases.items():
+            with self.subTest(label):
+                before = self._snapshot()
+                fake = self._fake_download([self._file("chr1.fa"), bad])
+                with mock.patch.object(utils, "download", fake):
+                    with self.assertRaises(ValueError):
+                        utils.download_reference_genome(
+                            "evil", self.genomes, source="url", url="http://x/asm.tar.gz")
+                self.assertEqual(self._snapshot(), before)
+
+    def test_chromfa_archive_still_installs(self):
+        members = [self._file("chroms/chr1.fa"), self._file("chroms/chr2.fa", b">chr2\nGG\n")]
+        with mock.patch.object(utils, "download", self._fake_download(members)):
+            dest = utils.download_reference_genome(
+                "myasm", self.genomes, source="url", url="http://x/asm.tar.gz")
+        self.assertEqual(sorted(os.listdir(dest)), ["chr1.fa", "chr2.fa"])
 
 
 class TestValidator(unittest.TestCase):

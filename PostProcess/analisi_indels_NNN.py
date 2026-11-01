@@ -699,8 +699,6 @@ targets_for_doench = dict()
 N_THR = multiprocessing.cpu_count() // 2
 refgenomedir = sys.argv[7]
 
-# with open( os.path.dirname(os.path.realpath(__file__)) + "/azimuth/saved_models/V3_model_nopos.pickle", 'rb') as f:
-#     model = pickle.load(f)
 max_doench = 0
 sum_cfd = 0
 cfd_scores = []
@@ -868,6 +866,9 @@ global_start = time.time()
 
 # list saving all the targets reported in chr##
 cluster_to_save = list()
+# rows carrying another contig's label (see the check in the loop); counted so the
+# run reports them instead of dropping them silently
+foreign_rows = 0
 
 for line in inResult:
     # print("line in INDEL analysis", line)
@@ -877,6 +878,16 @@ for line in inResult:
     guide_no_bulge = line[1].replace("-", "")
     # copy line to avoid problem with memory managament and intrisic pointers
     final_result = line.copy()
+    # The indel search runs per fake contig and post_analisi_indel.sh subsets the
+    # merged targets by "fake${chrom}", so every row reaching THIS invocation must
+    # carry THIS chromosome's contig label. Verify it before trusting the lookup
+    # below: the fake coordinate space is shared across chromosomes (each starts at
+    # 0 with near-uniform windows), so a row from another contig resolves to a REAL
+    # indel here and would be reported with that indel's rsID, AF and carrier
+    # samples rather than rejected.
+    if line[3] != "fake" + current_chr:
+        foreign_rows += 1
+        continue
     # extract indel data from the INDEL tree
     try:
         indel_data = sorted(INDELS_tree[int(line[4])])[0].data
@@ -1232,6 +1243,16 @@ os.system(
     + ".bestmmblg_INDEL.txt"
 )
 
+
+if foreign_rows:
+    # STDOUT only -- this pipeline treats any stderr write as a fatal stage
+    # failure (`[ -s $logerror ]`), so warning on stderr would abort the search.
+    print(
+        "WARNING: %d indel target row(s) in the %s subset carried another "
+        "contig's label and were dropped; they would otherwise have been "
+        "reported against %s indels they do not belong to."
+        % (foreign_rows, current_chr, current_chr)
+    )
 
 print("Done", current_chr, time.time() - start_time)
 

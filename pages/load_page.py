@@ -25,6 +25,25 @@ import shutil
 import os
 
 
+def _failure_text(job_directory: str) -> str:
+    """The banner of a job whose log_error.txt is not empty. A search the pipeline
+    refused because build-index-only has not finished a part of its dataset (its
+    "... is unfinished: ..." ERROR) says so, and what to do: submitted again, it
+    fails the same way until then. Any other failure gets the general text."""
+    try:
+        with open(os.path.join(job_directory, "log_error.txt"), errors="replace") as fh:
+            for line in fh:
+                if (line.startswith("ERROR: ") and " is unfinished: " in line
+                        and "build-index-only again to its end" in line):
+                    return f"The search was not run: {line[len('ERROR: '):].strip()}."
+    except OSError:
+        pass
+    return str(
+        "The selected result encountered some errors, "
+        "please remove it and try to submit again."
+    )
+
+
 # Check job completion
 @app.callback(
     [
@@ -256,10 +275,7 @@ def refresh_search(n: int, dir_name: str) -> Tuple:
                             html.P("Not available", style={"color": "red"}),
                             "",
                             dbc.Alert(
-                                str(
-                                    "The selected result encountered some errors, "
-                                    "please remove it and try to submit again."
-                                ),
+                                _failure_text(current_job_directory),
                                 color="danger",
                             ),
                             False,

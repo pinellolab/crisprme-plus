@@ -11,7 +11,13 @@ correct regardless of the index used, and is a no-op for PAM-specific and direct
 
 The match is IUPAC-aware (keep a target if *some* allele of its PAM region
 satisfies the requested PAM), so variants that CREATE the PAM on the enriched
-genome are preserved for the downstream PAM-creation analysis.
+genome are preserved for the downstream PAM-creation analysis. A genomic N is no
+allele: CRISPRitz stores it as a code that intersects no base, so a dedicated or
+--prune-pam search never returns a target with an N anywhere in its PAM region
+(an assembly-gap edge, or the N that separates the windows of the fake-indel
+genome). Such a target is dropped here too, at every position of the PAM, even
+an unconstrained one; otherwise a PAM-less index searched without --prune-pam
+reports targets, and N-bearing sequences, that the dedicated index never would.
 
 Usage: pam_filter.py <targets.txt> <pam_file>   (edits the targets file in place)
 """
@@ -25,15 +31,17 @@ _IUPAC = {
     "K": set("GT"), "M": set("AC"), "B": set("CGT"), "D": set("AGT"),
     "H": set("ACT"), "V": set("ACG"), "N": set("ACGT"),
 }
+# A target's own bases: the same, except that a genomic N matches nothing.
+_TARGET_IUPAC = dict(_IUPAC, N=set())
 
 
 def _pam_can_match(target_pam: str, requested_pam: str) -> bool:
     """True if the target PAM region can satisfy the requested PAM at every
-    position (IUPAC intersection non-empty)."""
+    position (IUPAC intersection non-empty; a target N never can)."""
     if len(target_pam) != len(requested_pam):
         return False
     for tc, rc in zip(target_pam.upper(), requested_pam.upper()):
-        if not (_IUPAC.get(tc, set()) & _IUPAC.get(rc, set())):
+        if not (_TARGET_IUPAC.get(tc, set()) & _IUPAC.get(rc, set())):
             return False
     return True
 
@@ -59,7 +67,16 @@ def main() -> None:
     with open(targets_file) as fin, open(tmp, "w") as fout:
         for row in fin:
             cols = row.rstrip("\n").split("\t")
-            if len(cols) < 3:  # header or malformed -> pass through untouched
+            # Pass headers and malformed rows through untouched. The column-count
+            # test alone does NOT catch a header: the CRISPRitz header carries all
+            # 10 columns, so without the "#" test it is read as a target, its "DNA"
+            # column is taken for a PAM region, and the header is dropped as a
+            # non-matching target. That matters because the merged indel targets
+            # file is the one file here that carries a header (restored by
+            # pool_search_indels.py), and post_analisi_indel.sh copies its first
+            # line as the per-chromosome header -- so losing the header makes that
+            # step inject a real target row into EVERY chromosome's subset.
+            if row.startswith("#") or len(cols) < 3:
                 fout.write(row)
                 continue
             target = cols[2]  # aligned protospacer+PAM (CRISPRitz column 3)

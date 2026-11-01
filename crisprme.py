@@ -21,9 +21,10 @@ import shutil
 import sys
 import os
 import re
+import difflib
 
 
-version = "2.8.0"  # CRISPRme version
+version = "2.8.1"  # CRISPRme version
 __version__ = version
 
 script_path = os.path.dirname(os.path.abspath(__file__))
@@ -432,6 +433,14 @@ def print_help_complete_search() -> None:
         "(e.g. one made with 'build-index-only' or downloaded ahead of time) "
         "instead of building the index under the working directory; a missing "
         "matching index is a hard error [OPTIONAL]\n"
+        "\t--prune-pam, serve the search from a PAM-less all-N index (e.g. an "
+        "'NNNNNNNN' index) by filtering it at search time to the PAM given in "
+        "--pam, so one flexible index answers any PAM up to its flank width "
+        "(a 3' PAM may be shorter than that width; a 5' PAM must equal it). "
+        "Requires --index-path. The result is identical to a dedicated index "
+        "built for that PAM, at the cost of a slower traversal, so a dedicated "
+        "index for the PAM, when installed, is still the one searched. Off by "
+        "default [OPTIONAL]\n"
         "\t--max-total-edits, cap the TOTAL edits (mismatches + bulges) per "
         "reported alignment, pruned INSIDE the TST search so excess alignments "
         "are never generated (much faster + smaller intermediates). E.g. with "
@@ -464,9 +473,10 @@ def print_help_complete_search() -> None:
         "reference-only]. --per-sample / --population-level override it.)\n"
         "\t--alt-alignments / --no-alt-alignments, emit (or skip) the exhaustive "
         "alternative-alignments file (*_all_results_with_alternative_alignments.tsv = the "
-        "non-best alignments per locus). Default follows the mode: OFF for the default "
+        "non-best alignments per locus). Default follows the mode: OFF for a "
         "population-level analysis (the report is built from the best alignment per locus, "
-        "so this only adds a large, slow-to-build companion file), ON under --per-sample. "
+        "so this only adds a large, slow-to-build companion file), ON for a per-sample one "
+        "(the default on a phased genotyped index, or forced with --per-sample). "
         "Use --alt-alignments to force it, --no-alt-alignments to suppress it [OPTIONAL]\n"
         "\t--keep-intermediates, keep the bulky pre-integration working files (the merged "
         "bestMerge/altMerge tables, the raw all_results_with_alternative_alignments.tsv, and "
@@ -499,6 +509,20 @@ def error(msg: str) -> NoReturn:
     sys.exit(1)
 
 
+def loud_warn(lines) -> None:
+    """Print a deliberately HARD-TO-MISS warning banner (bold red on a TTY, a plain
+    boxed banner otherwise so it is still obvious in a piped build log). ``lines`` is a
+    string or a list of strings (the banner body)."""
+    if isinstance(lines, str):
+        lines = [lines]
+    use_color = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+    red, rst = ("\033[1;31m", "\033[0m") if use_color else ("", "")
+    bar = "!" * 78
+    body = "\n".join("!! " + ln for ln in lines)
+    sys.stderr.write(f"\n{red}{bar}\n{body}\n{bar}{rst}\n\n")
+    sys.stderr.flush()
+
+
 def summarize_pipeline_failure(outputfolder: str) -> str:
     """Build a concise, actionable summary of a failed pipeline run.
 
@@ -516,7 +540,7 @@ def summarize_pipeline_failure(outputfolder: str) -> str:
     failing_stage = None
     try:
         started, ended = [], set()
-        with open(log_txt) as fh:
+        with open(log_txt, encoding="utf-8", errors="replace") as fh:
             for ln in fh:
                 parts = ln.rstrip("\n").split("\t")
                 if len(parts) >= 2 and parts[1] == "Start":
@@ -532,7 +556,7 @@ def summarize_pipeline_failure(outputfolder: str) -> str:
     if failing_stage:
         lines.append(f"  Failed during stage: {failing_stage}")
     try:
-        with open(log_err) as fh:
+        with open(log_err, encoding="utf-8", errors="replace") as fh:
             errlines = [ln.rstrip("\n") for ln in fh if ln.strip()]
         if errlines:
             lines.append("  Last lines of the error log:")
@@ -541,6 +565,52 @@ def summarize_pipeline_failure(outputfolder: str) -> str:
         pass
     lines.append(f"  Full error log: {log_err}")
     return "\n".join(lines)
+
+
+# Every flag complete-search recognizes. Parsing here is argparse-free, so a flag
+# nobody reads is silently ignored: `--prune-pams` would run a full genome-wide
+# search with pruning quietly OFF, and the run would look successful until its
+# results were compared against a dedicated index. Reject unknown flags up front
+# instead. Keep in sync with print_help_complete_search(); the twin test
+# PostProcess/test_complete_search_flags.py asserts every documented flag is here.
+_COMPLETE_SEARCH_FLAGS = frozenset(
+    {
+        # documented in print_help_complete_search()
+        "--alt-alignments", "--annotation", "--bDNA", "--bRNA", "--be-base",
+        "--be-window", "--compute-backend", "--full_input_validate",
+        "--gene_annotation", "--genome", "--guide", "--index-path",
+        "--keep-intermediates", "--max-total-edits", "--merge", "--mm",
+        "--no-alt-alignments", "--output", "--pam", "--per-sample",
+        "--personal_annotation", "--population-level", "--prune-pam",
+        "--report-full", "--samplesID", "--sequence", "--sorting-criteria",
+        "--sorting-criteria-scoring", "--thread", "--vcf",
+        # accepted, deliberately not advertised in the help
+        "--help",
+        "--vcf-filter-pass-values",
+        "--debug",  # read from sys.argv, so valid on any subcommand
+        "--ci-cd-test",  # ditto
+        # removed in 2.5.4: still recognized here so the explicit "was removed and
+        # is IGNORED" warning below fires instead of a bare unknown-flag error
+        "--fast", "--full",
+    }
+)
+
+
+def _check_unknown_flags(args: List[str]) -> None:
+    """Reject any complete-search flag we do not recognize, naming the nearest match."""
+    unknown = [a for a in args if a.startswith("--") and a not in _COMPLETE_SEARCH_FLAGS]
+    if not unknown:
+        return
+    described = []
+    for flag in unknown:
+        near = difflib.get_close_matches(
+            flag, sorted(_COMPLETE_SEARCH_FLAGS), n=1, cutoff=0.6
+        )
+        described.append(f"{flag} (did you mean {near[0]}?)" if near else flag)
+    error(
+        f"unrecognized complete-search flag(s): {'; '.join(described)}. "
+        "Run 'crisprme.py complete-search --help' for the supported flags."
+    )
 
 
 def _check_mandatory_args(args: List[str]) -> None:
@@ -958,6 +1028,7 @@ def _sort_annotation(annotationfile: str) -> str:
     import tempfile
 
     tmpdir = tempfile.mkdtemp(prefix="crisprme_annot_", dir=_writable_tmp_base())
+    _ANNOTATION_TMPDIRS.append(tmpdir)
     if annotationfile.endswith(".gz"):
         plain_path = os.path.join(tmpdir, "annotation.bed")
         _decompress_file(annotationfile, plain_path)  # gz -> temp plain
@@ -972,6 +1043,34 @@ def _sort_annotation(annotationfile: str) -> str:
         plain_path, os.path.join(tmpdir, "annotation.sorted.bed")
     )
     return _compress_file(annotationfile_sorted)  # temp annotation.sorted.bed.gz
+
+
+# The per-run annotation temp folders this process made (crisprme_annot_* by
+# _sort_annotation, crisprme_pannot_* by _process_personal_annotation), in the
+# working directory unless $CRISPRME_TMPDIR is set. The pipeline reads them, and
+# gunzips back into them, until it ends, so they are removed only once the subcommand
+# that made them is over: see _run_and_remove_annotation_tmpdirs. Never another job's,
+# and never one complete_search has handed to a pipeline that may still be running.
+_ANNOTATION_TMPDIRS = []
+
+
+def _run_and_remove_annotation_tmpdirs(subcommand) -> None:
+    """Runs a subcommand that sorts annotations (complete-search, assembly-search),
+    then removes the annotation temp folders it made, whether it returned or failed
+    (an error() exit, a failed pipeline's OSError). Left behind, they took ~1.7 GB
+    per annotated search with the shipped annotations. --keep-intermediates
+    (CRISPRME_KEEP_INTERMEDIATES=True) keeps them, like the pipeline's other working
+    files. So does a Ctrl-C or a signal that leaves the pipeline, or its workers,
+    running on them: complete_search lists them again only once it has ended.
+    """
+    try:
+        subcommand()
+    finally:
+        keep = ("--keep-intermediates" in input_args
+                or os.environ.get("CRISPRME_KEEP_INTERMEDIATES") == "True")
+        if not keep:
+            for tmpdir in _ANNOTATION_TMPDIRS:
+                shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 def _apply_cosmic_license(args: List[str], annotationfile: str) -> str:
@@ -1301,6 +1400,7 @@ def _process_personal_annotation(personal_annotationfile: str, annotationfile: s
     import tempfile
 
     tmpdir = tempfile.mkdtemp(prefix="crisprme_pannot_", dir=_writable_tmp_base())
+    _ANNOTATION_TMPDIRS.append(tmpdir)
     pannotation_tag = _tag_personal_annotation(
         personal_annotationfile, os.path.join(tmpdir, "personal.tag.bed")
     )
@@ -1348,8 +1448,9 @@ def _check_personal_annotation(args: List[str], annotationfile: str, personal_an
         error("Missing input for --personal_annotation. Annotation file must be specified")
     if not os.path.isfile(personal_annotationfile):
         error("The file specified for --personal_annotation does not exist")
-    if annotationfile.endswith(".gz"):
-        annotationfile = annotationfile[:-3]
+    if annotationfile.endswith(".gz"):  # the sorted --annotation, in its own temp dir:
+        # concatenated as plain text, and bgzip -f has removed the plain copy
+        annotationfile = _decompress_file(annotationfile, annotationfile[:-3])
     return _process_personal_annotation(personal_annotationfile, annotationfile)
 
 def _check_samples_ids(args: List[str], variant: bool) -> str:
@@ -1685,14 +1786,16 @@ def _check_threads(args: List[str], threads: bool) -> int:
 MAX_BULGES = 3
 
 
-def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int:
+def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
+                               prune: bool = False, three_prime: bool = True) -> int:
     """Bulge depth a search can REACH for this PAM motif + genome (mirrors the web's
     pages_utils.reference_bulge_capacity/index_max_bulges cap without web dependencies).
 
     Index folders are named ``<motif>_<N>_<genome>`` (reference) or
     ``<motif>_<N>_<genome>+<enriched>`` (variant); the usable bulge count is N-1 (the +1
     covers alignments that start with a gap). A pamless all-N index of the same length
-    serves any PAM.
+    serves any PAM; a wider one serves only under ``prune`` (--prune-pam) and only a 3'
+    PAM (``three_prime``), exactly as the search shell decides.
 
     The REFERENCE and VARIANT terms are ASYMMETRIC:
       * REFERENCE: the larger of the installed reference index depth and -- when the raw
@@ -1714,9 +1817,23 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int
         lib = os.path.join(current_working_directory, "genome_library")
         if not motif or not genome:
             return 0
-        pamless = "N" * len(motif)
-        prefixes = (f"{motif}_", f"{pamless}_")
+        # A directory is <PAM>_<N>_<genome>. It serves this search when its PAM is
+        # the requested motif, or is all-N of the same width, or -- under --prune-pam
+        # and for a 3' PAM only -- all-N and wider: a stored flank of width K serves a
+        # shorter 3' PAM by N-padding it, and the engine refuses a shorter 5' PAM.
+        # These are the search shell's rules (_resolve_index_dir in
+        # PostProcess/submit_job_automated_new_multiple_vcfs.sh); the two must not
+        # disagree about the same directory, or the derived default bulges come from
+        # an index the search then does not use.
         suffix = f"_{genome}"
+
+        def _pam_serves(pam: str) -> bool:
+            if pam == motif:
+                return True
+            if not pam or set(pam) != {"N"}:
+                return False
+            return len(pam) == len(motif) or (
+                prune and three_prime and len(pam) > len(motif))
 
         def _scan(want_plus: bool) -> int:
             if not os.path.isdir(lib):
@@ -1728,12 +1845,13 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool) -> int
                 base, plus, _enriched = d.partition("+")
                 if want_plus != bool(plus):
                     continue
-                pfx = next((p for p in prefixes if base.startswith(p)), None)
-                if pfx is None or not base.endswith(suffix):
+                if not base.endswith(suffix):
                     continue
-                n_str = base[len(pfx) : -len(suffix)]
-                if n_str.isdigit():
-                    best = max(best, int(n_str))
+                stem = base[: -len(suffix)]
+                pam, _sep, n_str = stem.partition("_")
+                if not _sep or not n_str.isdigit() or not _pam_serves(pam):
+                    continue
+                best = max(best, int(n_str))
             return max(0, best - 1)
 
         # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling.
@@ -1761,6 +1879,7 @@ def complete_search() -> None:
     args = input_args[2:]  # retrieve complete-search input arguments
     if "--help" in args or not args:  # print help
         print_help_complete_search()
+    _check_unknown_flags(args)  # fail on a typo'd flag before doing any work
     check_crisprme_dirtree()  # check crisprme directory tree structure
     _check_mandatory_args(args)  # check mandatory arguments
     genomedir = _check_genome(args)  # input genome folder
@@ -1850,7 +1969,8 @@ def complete_search() -> None:
                 f"WARNING [complete-search]: '{_retired}' was removed in 2.5.4 and is IGNORED. "
                 f"The analysis mode now auto-selects by index (per-sample on a phased genotyped "
                 f"index, population-level otherwise); force it with --per-sample / "
-                f"--population-level. '{_retired}' used to force per-sample.",
+                f"--population-level. '{_retired}' used to select the "
+                f"{'per-sample' if _retired == '--full' else 'population-level'} analysis.",
                 flush=True,
             )
     os.environ["CRISPRME_FAST_MODE"] = "0" if per_sample else "1"
@@ -1862,7 +1982,7 @@ def complete_search() -> None:
     # most expensive step on a large search -- yet nothing in the report reads it (the report,
     # summary tables, mm+b matrix and top-100 panel are all built from bestMerge ->
     # integrated_results). Its only real consumer is assembly-search's haplotype reconciliation.
-    # So it is EMITTED BY MODE: OFF for the default population-level analysis, ON for --per-sample
+    # So it is EMITTED BY MODE: OFF for a population-level analysis, ON for a per-sample one
     # (where the observed-haplotype detail is wanted and bounded). --alt-alignments /
     # --no-alt-alignments override explicitly. The default is purely MODE-driven here; the
     # sites-only refinement in the plan's matrix (a sites-only panel should stay alt-off even
@@ -1985,6 +2105,24 @@ def complete_search() -> None:
         if not os.path.isdir(index_path):
             error(f"The index path {index_path} does not exist or is not a directory")
 
+    # --prune-pam (opt-in): filter a PAM-less index (e.g. an all-N "NNN" index) down to
+    # the motif given with --pam, applied at CRISPRitz leaf-emit as a skip-before-write
+    # (one index serves many PAMs). It only *narrows* output -- it never changes a
+    # dedicated-index result -- so it is OFF by default and the normal search path is
+    # byte-identical without it. A dedicated index for --pam, when installed, is still
+    # the one searched, and pruning it is a no-op. Requires a prebuilt --index-path and
+    # a CRISPRitz build that supports --prune-pam. Against the stored flank width K, a
+    # PAM of length L > K is refused, a shorter 3' PAM is N-padded to K, and a shorter
+    # 5' PAM off a wider flank is refused.
+    prune_pam = "--prune-pam" in args
+    if prune_pam and index_path == "_":
+        error(
+            "--prune-pam requires --index-path (the prebuilt reference-index library). "
+            "Wherever a dedicated index for the --pam motif is installed it is used as-is "
+            "and pruning it is a no-op; otherwise a PAM-less (all-N) index is filtered "
+            "down to that motif."
+        )
+
     # cap on TOTAL edits per alignment (--max-total-edits, issue #107): prevents
     # combined-edit alignments (e.g. 6mm+2+2 bulges = 10) from bloating the
     # intermediate files, scoring and post-analysis. Enforced INSIDE the TST
@@ -2032,8 +2170,10 @@ def complete_search() -> None:
 
     # Issue #105 (odd-length partially-degenerate PAM + bulges crashing the CRISPRitz
     # C++ engine with a heap-corruption abort) was fixed in CRISPRitz, and CRISPRme+
-    # hard-pins CRISPRitz 2.9.0 on every install surface (Docker builds crispritz_ref
-    # v2.9.0, install_from_source.sh builds 2.9.0, Bioconda pins crispritz >=2.9.0).
+    # hard-pins a CRISPRitz >= 2.9.1 on every install surface (Docker and
+    # install_from_source.sh build the tag in crispritz_ref / CRISPRITZ_REF, and the
+    # 2.8.1 Bioconda recipe pins crispritz >=2.9.1). The pin moves with each release,
+    # so this says ">=" and not an exact version.
     # No supported install can therefore run a vulnerable engine, so the old runtime
     # warning here was removed: it fired on the DEFAULT PAM (NRG is odd-length and
     # carries the partially-degenerate "R"), crying wolf on essentially every default
@@ -2065,7 +2205,8 @@ def complete_search() -> None:
     # raw genome exists the search stays bulge-free (fast, safe).
     _SIMPLE_BULGE_CAP = 1
     if not _bdna_given and not _brna_given and max_total_edits > 0:
-        _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant)
+        _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant,
+                                              prune=prune_pam, three_prime=not pam_begin)
         _derived = min(max_total_edits, _idx_cap, _SIMPLE_BULGE_CAP)
         if _derived > 0:
             bDNA = bRNA = _derived
@@ -2279,6 +2420,41 @@ def complete_search() -> None:
     # the index, so a dict-less variant index cannot be built on demand -- download it, or
     # build-index-only first. Override for advanced / legacy on-demand builds with
     # CRISPRME_ALLOW_ONDEMAND_BUILD=1.
+    if variant:
+        # build-index-only writes some of a dataset's outputs in place, chromosome by
+        # chromosome, after its dictionaries are there, and marks each meanwhile
+        # (_mark_unfinished): a run stopped there leaves a part of it that looks whole,
+        # and this search would use it as if it were, with no error. Refuse it until a
+        # build-index-only run has finished it (with or without the override below).
+        _dict_root = os.path.join(current_working_directory, "Dictionaries")
+        _snp_on = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
+        for _vdir in vcf_dataset_dirs:
+            _vn = os.path.basename(os.path.normpath(_vdir))
+            _rerun = f"Run build-index-only again with {_vn}"
+            _reg = os.path.join(_dict_root, f"registry_{_vn}")
+            _gt = os.path.join(_dict_root, f"genotypes_{_vn}")
+            _refuse_unfinished(
+                _reg, f"the dict-less tiers of {_vn}",
+                f"{_rerun} and its --samplesID, which finishes them, or remove them to "
+                f"search without them (rm -rf '{_reg}' '{_gt}')",
+            )
+            if _snp_on:  # (the store is read for the SNP+indel co-occurrence only)
+                _igt = os.path.join(_dict_root, f"indel_genotypes_{_vn}")
+                _refuse_unfinished(
+                    _igt, f"the phased indel genotype store of {_vn}",
+                    f"{_rerun}, which finishes it, or remove it to search without it "
+                    f"(rm -rf '{_igt}')",
+                )
+            # (and the enrichment, and the fake-indel genome a search builds its INDELS
+            # index from)
+            _enriched = os.path.join(current_working_directory, "Genomes",
+                                     f"{os.path.basename(os.path.normpath(genomedir))}+{_vn}")
+            _refuse_unfinished(_enriched, f"the enrichment of {_vn}",
+                               f"{_rerun}, which enriches it again")
+            _refuse_unfinished(
+                _enriched + "_INDELS",
+                f"the SNP codes of the {_vn} fake-indel genome", f"{_rerun}, which finishes them",
+            )
     if variant and not os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
         _dict_root = os.path.join(current_working_directory, "Dictionaries")
         _missing = []
@@ -2338,7 +2514,7 @@ def complete_search() -> None:
                     "build-index-only --samplesID." % ", ".join(_no_reg)
                 )
 
-    if population_level:
+    if population_level and variant:
         print(
             "[complete-search] POPULATION-LEVEL analysis: the SNP variant post-analysis "
             "reports one WORST-POSSIBLE off-target per variant window (no 2^k haplotype "
@@ -2349,15 +2525,16 @@ def complete_search() -> None:
             "**Per-sample carriers, CONFIRMED cis phasing and exact joint AF are NOT "
             "computed** -- re-run with --per-sample for that per-sample resolution on a genotyped "
             "panel (recommended for clinical validation). SNP+indel co-occurrence is UNCHANGED "
-            "(the indel cis-phasing pass is unaffected). See docs/DESIGN_2.5.1_two_pass_fast_mode.md."
+            "(the indel cis-phasing pass is unaffected). See METHODS.md, 'Context-aware analysis mode'."
         )
-    else:
+    elif variant:
         print(
-            "[complete-search] PER-SAMPLE analysis (--per-sample): resolving per-sample genotypes "
+            "[complete-search] PER-SAMPLE analysis (%s): resolving per-sample genotypes "
             "into observed haplotypes -- CONFIRMED cis phasing, named carrier samples and exact "
             "joint AF. Requires a genotyped index (sites-only panels have no genotypes to resolve "
             "-- the population-level analysis runs instead). Slower, and can be intractable on "
             "dense panels; pass --population-level for the fast worst-case screen."
+            % ("--per-sample" if _force_ps else "the default on this phased genotyped index")
         )
     # record the resolved search mode so generate-report can surface it (the report note).
     try:
@@ -2385,11 +2562,24 @@ def complete_search() -> None:
                 f"{merge_t} {outputfolder} {script_path} {thread} {current_working_directory} "
                 f"{gene_annotation} {void_mail} {base_start} {base_end} {base_set} "
                 f"{sorting_criteria_scoring} {sorting_criteria} {cicd_test} "
-                f"{vcf_filter_pass_values} {index_path} {max_total_edits}"
+                f"{vcf_filter_pass_values} {index_path} {max_total_edits} "
+                f"{1 if prune_pam else 0}"
             )
+            # The pipeline reads the annotation temp folders until it ends, so they are
+            # not removed (_run_and_remove_annotation_tmpdirs) unless it is known to have
+            # ended: an exit of its own (0-128), which comes after it has waited for every
+            # worker. On a Ctrl-C subprocess.call kills only its /bin/sh: dash does not
+            # exec the pipeline, which runs on; bash does, so the kill ends the pipeline's
+            # own bash and the step it was running runs on. A signal that killed its bash
+            # (128 + N through dash, -N where /bin/sh is bash) or that sh (-N) can likewise
+            # leave it, or its workers, running on them.
+            handed_over = _ANNOTATION_TMPDIRS[:]
+            del _ANNOTATION_TMPDIRS[:]
             code = subprocess.call(
                 crisprme_run, shell=True, stderr=log_error, stdout=log_verbose
             )
+            if 0 <= code <= 128:
+                _ANNOTATION_TMPDIRS.extend(handed_over)
             if code != 0:
                 # surface WHERE it failed + the actual error, not just "failed"
                 sys.stderr.write(
@@ -2438,7 +2628,8 @@ def print_help_build_index() -> None:
         "\t--bRNA, number of RNA bulges the index must support [OPTIONAL, "
         "default 0]\n"
         "\t--thread, set number of threads to use [default: 8]\n"
-        "\t--vcf, a VCF dataset directory (e.g. VCFs/1000G) OR a config file "
+        "\t--vcf, a VCF dataset directory (e.g. VCFs/hg38_HGDP1kGP, which "
+        "'download --what vcf --dataset hg38_HGDP1kGP' fetches) OR a config file "
         "listing one VCF folder name under VCFs/ (the same --vcf form "
         "complete-search accepts; the listing must name exactly one dataset). "
         "When given, also pre-builds the variant-aware index: enriches the genome "
@@ -2446,7 +2637,9 @@ def print_help_build_index() -> None:
         "first variant-aware search does not pay the enrichment/indexing cost "
         "[OPTIONAL]\n"
         "\t--samplesID, a listing file (one samplesID filename per line, under "
-        "samplesIDs/; a combined panel lists both 1000G and HGDP). When given "
+        "samplesIDs/: for VCFs/hg38_HGDP1kGP the one line "
+        "hg38_HGDP1kGP.samplesID.txt; a panel merged from several datasets lists "
+        "each dataset's file). When given "
         "with --vcf, the build ALSO emits the additive dictless tiers (Tier-0 "
         "registry + Tier-1 genotype store) per chromosome alongside the dicts, so "
         "the built index carries the fast-post-analysis tiers; omit to build dicts "
@@ -2589,8 +2782,10 @@ def _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid):
     => no combined file is needed; the per-db list IS the search's samplesID) — the
     exact guard the synthesizer no-ops on. Fully guarded: any error is reported to
     STDOUT (stderr is fatal in the post-analysis context) and swallowed so a build
-    never aborts over this additive convenience file. Returns the written combined
-    path, or ``None`` (no-op / already present / a component missing).
+    never aborts over this additive convenience file -- but a full disk or quota, an
+    I/O error or no memory left, which fails the build (each file is written whole or
+    not at all). Returns the written combined path, or ``None`` (no-op / already
+    present / a component missing).
     """
     try:
         # Gate: only a MERGED panel (>= 2 datasets) needs a combined file. A single
@@ -2607,7 +2802,16 @@ def _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid):
         for db_label, src in db_to_samplesid.items():
             canonical = os.path.join(sdir, f"{genome_ref}_{db_label}.samplesID.txt")
             if not os.path.isfile(canonical) and os.path.isfile(src):
-                _shutil.copy2(src, canonical)
+                # through a hidden temporary file renamed into place, as the synthesizer
+                # writes: one that a full disk or a kill cut short would be taken for
+                # whole by every later run (the test above) and unioned
+                _tmp = os.path.join(sdir, f".{os.path.basename(canonical)}.{os.getpid()}.tmp")
+                try:
+                    _shutil.copy2(src, _tmp)
+                    os.replace(_tmp, canonical)
+                finally:
+                    if os.path.lexists(_tmp):
+                        os.remove(_tmp)
         # Single implementation of the union (header-less, dedup by SAMPLE_ID,
         # stable dataset order) — mirrors pages/main_page._ensure_samplesid.
         written = synthesize_combined_samplesid(workdir, vcf_name, ref=genome_ref)
@@ -2628,6 +2832,19 @@ def _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid):
             )
         return written
     except Exception as _sid_err:  # additive convenience -> never abort a build
+        # but for a full disk or quota, an I/O error or no memory left, which left
+        # nothing written (as the tiers' emitters have them, ends_the_build): the run
+        # fails, to be run again once that is fixed, rather than end as done without
+        # the files a merged search needs
+        import errno as _errno
+        if isinstance(_sid_err, MemoryError) or (isinstance(_sid_err, OSError) and _sid_err.errno
+                                                 in (_errno.ENOSPC, _errno.EDQUOT, _errno.EIO)):
+            error(
+                f"Writing the samplesID files of {vcf_name} into "
+                f"{os.path.join(workdir, 'samplesIDs')} failed "
+                f"({str(_sid_err) or type(_sid_err).__name__}): run build-index-only again "
+                f"once that is fixed, which writes them."
+            )
         print(
             f"WARNING [build-index-only]: could not emit combined samplesID for "
             f"{vcf_name} ({_sid_err}); the index/dicts are still built. Provide "
@@ -2720,6 +2937,514 @@ def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
     )
 
 
+def _build_index_vcfdir(args: List[str], workdir: str) -> str:
+    """Returns the VCF dataset directory build-index-only's --vcf names.
+
+    --vcf accepts EITHER a VCF dataset directory (build-index-only's original form)
+    OR a config file listing VCF folder names under VCFs/ (the SAME form
+    complete-search uses), so the two subcommands take --vcf consistently. A
+    directory is used as-is; a listing file must name exactly ONE dataset folder
+    (build-index-only builds a single dataset's index -- combined panels are made
+    by merging the source VCFs first, then building the merged folder).
+    """
+    _vcf_arg = os.path.abspath(args[args.index("--vcf") + 1])
+    if os.path.isdir(_vcf_arg):
+        vcfdir = _vcf_arg
+    elif os.path.isfile(_vcf_arg):
+        with open(_vcf_arg) as _vf:
+            _folders = [ln.strip() for ln in _vf if ln.strip() and not ln.startswith("#")]
+        if not _folders:
+            error(f"The --vcf config file {_vcf_arg} is empty (expected one VCF folder name)")
+        if len(_folders) > 1:
+            error(
+                "build-index-only builds ONE dataset's index, but the --vcf config file "
+                f"lists {len(_folders)} folders ({', '.join(_folders)}). Build each "
+                "separately, or merge the source VCFs into one folder first for a combined panel."
+            )
+        vcfdir = os.path.abspath(os.path.join(workdir, "VCFs", _folders[0]))
+        if not os.path.isdir(vcfdir):
+            error(f"VCF folder '{_folders[0]}' from {_vcf_arg} not found under {workdir}/VCFs/")
+    else:
+        error(
+            f"--vcf must be a VCF dataset directory or a config file listing VCF folder "
+            f"names under VCFs/ (got {_vcf_arg}, which is neither)"
+        )
+    return vcfdir
+
+
+def _refuse_locked_build(output: str, *guarded: str) -> None:
+    """Stops build-index-only while a search holds the build lock of ``output``.
+
+    complete-search holds ``<output>.lock`` while it enriches a genome or builds an
+    index: a directory whose ``owner`` record has host=, pid= and started= lines
+    (CRISPRme 2.8.0 writes none). What the lock guards -- ``output``, and the
+    ``guarded`` paths with it -- is unfinished meanwhile, and stays so after that
+    run dies, until a search takes the lock over and builds it again. So it is
+    neither used as present nor built here: the run ends with an ERROR on stderr
+    that names the lock, its owner and what to do, and exit status 1.
+    """
+    lock = output + ".lock"
+    if not os.path.isdir(lock):
+        return
+    owner = {}
+    try:
+        with open(os.path.join(lock, "owner")) as fh:
+            for line in fh:
+                key, _, value = line.rstrip("\n").partition("=")
+                owner.setdefault(key, value)
+    except OSError:
+        pass
+    # (not "run complete-search", which takes a dead run's lock over: an enrichment it
+    # makes has no SNP codes on its fake-indel genome, nor an INDELS index built from it)
+    clear = "".join(f" '{p}'" for p in (lock, output) + guarded)
+    if owner.get("pid"):
+        error(
+            f"{output} is locked by the run that builds it: {lock} is held by pid "
+            f"{owner['pid']} on {owner.get('host', '?')} (a run started "
+            f"{owner.get('started', '?')}). Wait for that run to finish, then run "
+            f"build-index-only again. If no run is building it, remove the lock and "
+            f"what it guards, then run build-index-only again: rm -rf{clear}"
+        )
+    error(
+        f"{output} is locked by the run that builds it: {lock} has no owner record "
+        f"(CRISPRme 2.8.0 writes none, and complete-search never takes such a lock "
+        f"over). Wait for that run to finish, then run build-index-only again. If no "
+        f"run is building it, remove the lock and what it guards, then run "
+        f"build-index-only again: rm -rf{clear}"
+    )
+
+
+class _BuildSignal(BaseException):
+    """A SIGTERM or SIGHUP that ends a build (see _in_build_dir)."""
+
+
+def _raise_build_signal(signum, frame):
+    raise _BuildSignal(signum)
+
+
+def _proc_stat(pid) -> Tuple[str, str]:
+    """The state of process ``pid`` -- R, S, D...; T stopped, t traced, Z exited but
+    not reaped -- and its start time: fields 3 and 22 of /proc/<pid>/stat, as the
+    search's _lock_state reads them (submit_job_automated_new_multiple_vcfs.sh). Two
+    empty strings where /proc cannot tell: no such process, one hidden from this run
+    (hidepid), no /proc, or a /proc that is not this PID namespace's (it shows this
+    run under another PID)."""
+    try:
+        with open("/proc/self/stat") as fh:
+            if fh.read().split(" ", 1)[0] != str(os.getpid()):
+                return "", ""
+        with open(f"/proc/{pid}/stat") as fh:
+            # the fields follow the last ") ", as the name before it may hold either
+            fields = fh.read().rpartition(") ")[2].split()
+    except OSError:
+        return "", ""
+    return (fields[0], fields[19]) if len(fields) > 19 else ("", "")
+
+
+_build_owner = {}  # this run's owner record (_build_dir_owner)
+
+
+def _build_dir_owner() -> dict:
+    """This run's owner record, which every build directory it makes holds
+    (_in_build_dir): the host, PID namespace, PID and start time that a search's
+    build lock records, with the same keys (_lock_me in
+    submit_job_automated_new_multiple_vcfs.sh)."""
+    import time
+
+    if not _build_owner:
+        try:
+            pidns = os.readlink("/proc/self/ns/pid")
+        except OSError:
+            pidns = ""
+        _build_owner.update(
+            host=os.uname().nodename,
+            pidns=pidns,
+            pid=str(os.getpid()),
+            started=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
+        pstart = _proc_stat(os.getpid())[1]
+        if pstart:
+            _build_owner["pstart"] = pstart
+    return _build_owner
+
+
+def _build_dir_gone(path: str) -> Tuple["bool | None", dict]:
+    """Whether the owner of build directory ``path`` is gone, and its owner record.
+    True when the record names this host and PID namespace and that PID is no longer
+    running, is a zombie (a run that died unreaped) or is another process's by now
+    (one that started at another time than the record says). None when the record
+    names another host or PID namespace, where the PID cannot be checked. Else
+    False: the owner is running or stopped (Ctrl-Z, a SLURM suspend), or is a
+    process this run may not signal, or there is no record. These are the rules of
+    the search's _lock_stale, but for its 15-minute refresh, which a build directory
+    does not have."""
+    record = {}
+    try:
+        with open(os.path.join(path, "owner")) as fh:
+            for line in fh:
+                key, sep, value = line.rstrip("\n").partition("=")
+                if sep:
+                    record.setdefault(key, value)
+    except OSError:
+        return False, record
+    me = _build_dir_owner()
+    if not record or record == me:
+        return False, record
+    if record.get("host") != me["host"] or record.get("pidns") != me["pidns"]:
+        return None, record
+    pid = record.get("pid", "")
+    if not pid.isdigit() or not 0 < int(pid) < 1 << 31:
+        return False, record
+    if pid != me["pid"]:  # (this run's own PID in a record it did not write: a dead run's, reused)
+        state, pstart = _proc_stat(pid)
+        if state and record.get("pstart") and pstart != record["pstart"]:
+            return True, record  # not that run, but its PID reused
+        if state:
+            return state in ("Z", "X"), record
+        # where /proc cannot tell: only "No such process" means gone
+        try:
+            os.kill(int(pid), 0)
+        except ProcessLookupError:
+            return True, record
+        except OSError:  # a process this run may not signal (another user's)
+            return False, record
+        return False, record
+    return True, record
+
+
+def _remove_build_dir(path: str) -> None:
+    """Removes build directory ``path``, its owner record last: a run ended while it
+    removes the directory, or an engine still writing into it, leaves the record,
+    and with it the directory for a later build to reclaim (_reclaim_build_dirs)."""
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return
+    for name in names:
+        entry = os.path.join(path, name)
+        if name == "owner":
+            continue
+        if os.path.isdir(entry) and not os.path.islink(entry):
+            shutil.rmtree(entry, ignore_errors=True)
+        else:
+            try:
+                os.remove(entry)
+            except OSError:
+                pass
+    try:
+        if os.listdir(path) == ["owner"]:
+            os.remove(os.path.join(path, "owner"))
+        os.rmdir(path)
+    except OSError:
+        pass
+
+
+_build_dirs_left = set()  # the ones _reclaim_build_dirs has said it leaves
+
+
+def _reclaim_build_dirs(parent: str, prefix: str) -> None:
+    """Removes the build directories ``<parent>/<prefix>*`` whose owner is gone
+    (_build_dir_gone), with a line on stdout for each. A run SIGKILLed (an OOM kill,
+    a container stop) leaves its build directory, holding a partial index or
+    enrichment that nothing else ever reclaims: as large as the index or enriched
+    genome itself, and hidden. One whose owner cannot be checked from here is left,
+    with a line on stdout (once a run) that says how to remove it once that run is
+    gone."""
+    try:
+        names = sorted(os.listdir(parent))
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(parent, name)
+        if not name.startswith(prefix) or os.path.islink(path) or not os.path.isdir(path):
+            continue
+        gone, record = _build_dir_gone(path)
+        owner = (
+            f"the build-index-only run that made it (pid {record.get('pid')} on "
+            f"{record.get('host')}, started {record.get('started', '?')})"
+        )
+        if gone:
+            print(f"Removing {path}: {owner} is gone.", flush=True)
+            _remove_build_dir(path)
+        elif gone is None and path not in _build_dirs_left:
+            _build_dirs_left.add(path)
+            print(
+                f"Leaving {path}: {owner} ran in another PID namespace (another "
+                f"container, or this one before a restart) or on another host, so this "
+                f"run cannot tell whether it still runs. If it does not, remove it: "
+                f"rm -rf '{path}'",
+                flush=True,
+            )
+
+
+def _mark_unfinished(directory: str) -> None:
+    """Marks ``directory`` as being written in place by this run: a hidden
+    ``<directory>/.building`` that holds this run's owner record (_build_dir_owner).
+    A step that writes its output into place file by file -- the dict-less tiers,
+    the indel genotype store, the SNP overlay of a fake-indel genome in place, an
+    enrichment going into place -- sets it before it starts and takes it away once
+    it has ended
+    (_unmark_unfinished): a part that a stop leaves looks like a whole one, and
+    complete-search refuses it while the mark is there (_refuse_unfinished). It
+    makes ``directory`` if need be."""
+    marker = os.path.join(directory, ".building")
+    try:
+        os.makedirs(marker, exist_ok=True)
+        # through a rename, as a build directory's record (_in_build_dir)
+        record = os.path.join(marker, f"owner.{os.getpid()}")
+        with open(record, "w") as fh:
+            fh.write("".join(f"{k}={v}\n" for k, v in _build_dir_owner().items()))
+        os.replace(record, os.path.join(marker, "owner"))
+    except OSError as exc:
+        error(f"Cannot mark {directory} as being written ({exc})")
+
+
+def _unmark_unfinished(directory: str, made: bool = False) -> None:
+    """Takes away the mark of _mark_unfinished, its owner record last; with ``made``
+    (``directory`` was made for the mark), ``directory`` too if nothing else is in
+    it."""
+    _remove_build_dir(os.path.join(directory, ".building"))
+    if made:
+        try:
+            os.rmdir(directory)
+        except OSError:
+            pass
+
+
+def _refuse_unfinished(directory: str, what: str, rerun: str) -> None:
+    """Ends complete-search with an ERROR while ``directory`` holds the mark of a
+    build-index-only run that writes ``what`` there in place (_mark_unfinished): a
+    search would take the part written so far for the whole of it, with no error.
+    ``rerun`` says what to do once that run has stopped."""
+    marker = os.path.join(directory, ".building")
+    if not os.path.isdir(marker):
+        return
+    gone, record = _build_dir_gone(marker)
+    who = (
+        f" (pid {record.get('pid', '?')} on {record.get('host', '?')}, started "
+        f"{record.get('started', '?')})" if record else ""
+    )
+    if gone or not record:
+        error(
+            f"{directory} is unfinished: the build-index-only run that wrote {what} "
+            f"there{who} stopped before it was done, and a search would use what is "
+            f"there as if it were whole. {rerun}, then run this search again."
+        )
+    if gone is None:
+        error(
+            f"{directory} is being written, or was left unfinished: the build-index-only "
+            f"run that writes {what} there{who} ran in another PID namespace (another "
+            f"container, or this one before a restart) or on another host, so this run "
+            f"cannot tell whether it still runs. Wait for it to finish, then run this "
+            f"search again. If it no longer runs: {rerun}, then run this search again."
+        )
+    error(
+        f"{directory} is being written: a build-index-only run{who} is writing {what} "
+        f"there, and a search would use the part written so far as if it were whole. "
+        f"Wait for that run to finish, then run this search again."
+    )
+
+
+def _end_cleanly(cleanup, handlers: dict) -> None:
+    """Calls ``cleanup()`` and puts the signal handlers in ``handlers`` back, then
+    ends the run by the first SIGINT, SIGTERM or SIGHUP that came meanwhile: until
+    then a handler only notes it, so that a second Ctrl-C cannot cut the cleanup
+    short. (A signal mask cannot hold it back: it does so for the thread that sets
+    it only, and the kernel then gives the signal to another thread -- numpy's
+    OpenBLAS starts them at import -- while its Python handler still runs in the
+    main thread.) The enrichment's last renames are held back the same way."""
+    import signal
+
+    came = []
+    # the handler each one gets back: the one from before _with_cleanup, else its own.
+    # SIGINT's goes back last: from then on a Ctrl-C raises KeyboardInterrupt.
+    back = {sig: handlers.get(sig, signal.getsignal(sig))
+            for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)}
+    try:
+        for sig, handler in back.items():
+            if handler not in (signal.SIG_IGN, None):  # (one ignored, as under nohup, stays so)
+                signal.signal(sig, lambda signum, frame: came.append(signum))
+        cleanup()
+    finally:
+        for sig, handler in back.items():
+            if handler is not None:
+                signal.signal(sig, handler)
+    if came:
+        os.kill(os.getpid(), came[0])
+        sys.exit(128 + came[0])  # (as PID 1, whom a signal's default action spares)
+
+
+def _with_cleanup(run, cleanup):
+    """Returns ``run()``, and calls ``cleanup()`` on every way out but SIGKILL:
+    success, failure, an exception, Ctrl-C, SIGTERM (scancel, docker stop) and
+    SIGHUP. Those two are handled for that while ``run`` runs only, and the run
+    still ends by the signal; one this run ignores (nohup) stays ignored. A signal
+    that comes during the cleanup waits for its end, then ends the run
+    (_end_cleanly)."""
+    import signal
+
+    handlers = {}
+    try:
+        try:
+            # SIGTERM and SIGHUP would end the run at once, with no cleanup: raise
+            # instead, for the cleanup below
+            for sig in (signal.SIGTERM, signal.SIGHUP):
+                if signal.getsignal(sig) == signal.SIG_DFL:
+                    handlers[sig] = signal.signal(sig, _raise_build_signal)
+            return run()
+        finally:
+            _end_cleanly(cleanup, handlers)
+    except KeyboardInterrupt:
+        # A Ctrl-C that came just as run ended, before the cleanup held signals back,
+        # can have cut it short too: finish it, then end the run by that Ctrl-C
+        _end_cleanly(cleanup, handlers)
+        raise
+    except _BuildSignal as stop:
+        # A signal that came just as run ended can have cut that cleanup short, with
+        # its handler still in place, which os.kill would raise into again
+        signal.signal(stop.args[0], signal.SIG_DFL)
+        _end_cleanly(cleanup, handlers)
+        # end the run by that signal, as it did before
+        os.kill(os.getpid(), stop.args[0])
+        sys.exit(128 + stop.args[0])
+
+
+def _in_build_dir(parent: str, prefix: str, build, stage=None):
+    """Returns ``build(tmp)``, called with ``tmp`` a fresh hidden directory
+    ``<parent>/<prefix>*`` to build in, under a name no index or genome listing
+    matches. It holds this run's owner record (_build_dir_owner), and is removed on
+    every way out but SIGKILL (_with_cleanup). The directories that SIGKILLed runs
+    left are removed first (_reclaim_build_dirs). With ``stage``, a ``(parent,
+    prefix)`` pair, ``build`` gets a second argument: a function that makes one more
+    such directory there, held and removed the same way, for a build that puts
+    outputs in place on another file system or mount too (the enrichment's
+    dictionaries, in Dictionaries/)."""
+    import tempfile
+
+    places = [(parent, prefix)] + ([stage] if stage else [])
+    for where, start in places:
+        _reclaim_build_dirs(where, start)
+    made = []
+
+    def make(where, start):
+        try:
+            made.append(tempfile.mkdtemp(prefix=start, dir=where))
+            # through a rename, so a run reading the record meanwhile sees none or all
+            # of it -- never a torn PID it would find dead
+            record = os.path.join(made[-1], f"owner.{os.getpid()}")
+            with open(record, "w") as fh:
+                fh.write("".join(f"{k}={v}\n" for k, v in _build_dir_owner().items()))
+            os.replace(record, os.path.join(made[-1], "owner"))
+        except OSError as exc:
+            error(f"Cannot make a build directory in {where} ({exc})")
+        return made[-1]
+
+    def run():
+        tmp = make(parent, prefix)
+        return build(tmp, lambda: make(*stage)) if stage else build(tmp)
+
+    def cleanup():
+        for tmp in made:
+            _remove_build_dir(tmp)
+
+    return _with_cleanup(run, cleanup)
+
+
+def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
+                     **kwargs) -> bool:
+    """Runs index command ``cmd``, which writes ``./genome_library/<name>`` under its
+    working directory, and puts that in ``<workdir>/genome_library/<name>`` only
+    once the command has succeeded.
+
+    Every later run takes an index directory that is there for a finished one, so
+    a build that ends early -- Ctrl-C, an OOM kill, a container stop, an engine
+    error -- must leave none. The command therefore runs in a hidden build
+    directory of genome_library itself (_in_build_dir), and its index is renamed
+    into place. A rename within one directory never crosses a file system or a
+    mount point (genome_library may be a bind mount of its own), and the index
+    takes genome_library's setgid group and default ACL, as one built in place
+    does. Every path ``cmd`` names is absolute, so it resolves from there.
+    ``failure`` is the error for a command that fails, or that exits 0 but leaves a
+    .bin that is not whole (crispritz_bins: buildTST does not check its writes, so a
+    full disk leaves one empty or cut short). buildTST does not check that a .bin
+    opened either: with the disk's inode table or a file-count quota full, it
+    writes none for the contigs left, or for the parts left of a contig it writes
+    in several, and still exits 0. So the run fails the same way when a contig that
+    holds a target has no .bin, or lacks a part (crispritz_bins.missing_bins), and,
+    where such a contig is one missing_bins cannot read as buildTST does, when a
+    directory of the index cannot take a file more once the command has ended:
+    ``indexed`` is ``(pam_file, max_bulges, [(genome_dir, subdir)...])``, what ``cmd``
+    indexes, each genome into ``subdir`` of the index (None: no contig read). If a
+    search holds the index's build lock by then, the run stops
+    (_refuse_locked_build); if another run has put the index in place meanwhile,
+    that one is kept and this build discarded. Returns True when this build went
+    into place.
+    """
+    import errno
+    import crispritz_bins
+
+    lib = os.path.join(workdir, "genome_library")
+    final = os.path.join(lib, name)
+    os.makedirs(lib, exist_ok=True)
+
+    def build(tmp):
+        built = os.path.join(tmp, "genome_library", name)
+        code = subprocess.call(cmd, cwd=tmp, **kwargs)
+        if code != 0 or not os.path.isdir(built):
+            error(f"{failure} (expected {final})")
+        cut = crispritz_bins.incomplete_bins(built)
+        if cut:
+            error(
+                f"{failure}: the engine exited 0, but {os.path.relpath(cut[0][0], built)} "
+                f"is {cut[0][1]}, as when the disk fills up: nothing was put in place "
+                f"(expected {final})"
+            )
+        unread = indexed is None
+        for genome_dir, subdir in indexed[2] if indexed else []:
+            missing, cannot = crispritz_bins.missing_bins(
+                os.path.join(built, subdir), genome_dir, indexed[0], indexed[1])
+            if missing:
+                fasta, contig, written, wanted = missing[0]
+                fasta = os.path.join(genome_dir, fasta)
+                error(
+                    f"{failure}: the engine exited 0, but "
+                    + (f"wrote {written} of the {wanted} .bin of {contig} ({fasta})" if written
+                       else f"wrote no .bin for {contig} ({fasta}), which holds a target")
+                    + ", as when the disk's inode table or a file-count quota is full: "
+                    f"nothing was put in place (expected {final})"
+                )
+            unread = unread or bool(cannot)
+        for top, _dirs, _files in os.walk(built) if unread else ():
+            probe = os.path.join(top, ".build-index-only-probe")
+            try:
+                os.close(os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL))
+            except OSError as exc:
+                if exc.errno in (errno.ENOSPC, errno.EDQUOT):
+                    error(
+                        f"{failure}: the engine exited 0, but the disk or its inode table "
+                        f"is full ({exc}), so it may have left out the .bin of a contig: "
+                        f"nothing was put in place (expected {final})"
+                    )
+                continue
+            os.remove(probe)
+        _refuse_locked_build(final)
+        if not os.path.isdir(final):
+            try:
+                os.rename(built, final)
+                return True
+            except OSError:
+                if not os.path.isdir(final):
+                    raise
+        print(
+            f"{final} appeared while this run was building it (another run built "
+            f"it): keeping that one, and discarding this run's build.",
+            flush=True,
+        )
+        return False
+
+    return _in_build_dir(lib, ".build-index-only-", build)
+
+
 def build_index_only() -> None:
     """Pre-builds the CRISPRitz reference index for a genome+PAM+bulge combo.
 
@@ -2776,26 +3501,68 @@ def build_index_only() -> None:
     index_name = f"{pam_char}_{bMax + 1}_{genome_ref}"
     idx_folder = os.path.join(workdir, "genome_library", index_name)
     vcf_given = "--vcf" in args
+    # Every output this run uses or builds, each with what its build lock guards
+    # besides it. While a search holds one of those locks, the run stops before it
+    # builds anything (_refuse_locked_build); each step looks again before it uses
+    # or builds its output, as a search may have started since.
+    _outputs = [(idx_folder,)]
+    if vcf_given:
+        vcfdir = _build_index_vcfdir(args, workdir)
+        vcf_name = os.path.basename(vcfdir.rstrip("/"))
+        enriched = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}")
+        indels_out = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}_INDELS")
+        dict_folder = os.path.join(workdir, "Dictionaries", f"dictionaries_{vcf_name}")
+        indel_dict = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
+        snp_idx = os.path.join(
+            workdir, "genome_library", f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}"
+        )
+        indels_idx = snp_idx + "_INDELS"
+        _outputs += [(enriched, indels_out), (snp_idx,), (indels_idx,)]
+    for _out in _outputs:
+        _refuse_locked_build(*_out)
+    # The build directories that killed runs left (_reclaim_build_dirs) are removed
+    # first, whatever this run goes on to build: a search may have built since what
+    # one of them was building, and then no build here would reclaim it.
+    _reclaim_build_dirs(os.path.join(workdir, "genome_library"), ".build-index-only-")
+    _reclaim_build_dirs(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-")
+    if vcf_given:
+        # and those the enrichment stages its dictionaries in (_in_build_dir's stage)
+        _reclaim_build_dirs(os.path.join(workdir, "Dictionaries"), ".build-index-only-dicts-")
+        # and the SNP overlay's, beside each fake-indel FASTA of this dataset
+        # (overlay_indel_snps.overlay_fake_chromosome)
+        try:
+            _fakes = sorted(os.listdir(indels_out))
+        except OSError:
+            _fakes = []
+        for _fake in _fakes:
+            if _fake.startswith("fake_"):
+                _reclaim_build_dirs(os.path.join(indels_out, _fake), ".overlay-")
     # ---- reference index ------------------------------------------------------
     if os.path.isdir(idx_folder):
         print(f"Reference index already present: {idx_folder}", flush=True)
     else:
-        os.makedirs(os.path.join(workdir, "genome_library"), exist_ok=True)
         print(
             f"Building reference index {index_name} (bMax {bMax + 1}, "
             f"{thread} thread(s))...",
             flush=True,
         )
-        # exactly the invocation complete-search uses, run from workdir so the
-        # index lands in <workdir>/genome_library/ under the expected name
+        # exactly the invocation complete-search uses; it writes the index under
+        # its working directory as genome_library/<index_name> (_build_index_dir).
+        # It runs through the shell, as every engine command here does: the engine
+        # gets the argv that shell builds from the paths a user gives, and a list
+        # could differ from it (a path with a space, a quote or a glob character).
+        # So a SIGTERM to this run alone ends the shell, not the engine under it,
+        # which runs on until its current step ends: nothing it writes goes into
+        # place, and a build directory it keeps from going is reclaimed later.
         index_cmd = (
             f"crispritz.py index-genome {genome_ref} {genomedir}/ {pamfile} "
             f"-bMax {bMax + 1} -th {thread}"
         )
-        code = subprocess.call(index_cmd, shell=True, cwd=workdir)
-        if code != 0 or not os.path.isdir(idx_folder):
-            error(f"Reference genome indexing failed (expected {idx_folder})")
-        print(f"Index built: {idx_folder}", flush=True)
+        if _build_index_dir(
+            index_cmd, workdir, index_name, "Reference genome indexing failed",
+            indexed=(pamfile, bMax + 1, [(genomedir, "")]), shell=True,
+        ):
+            print(f"Index built: {idx_folder}", flush=True)
     _write_pam_build(idx_folder, pamfile)
     if not vcf_given:
         _write_display_label(idx_folder, display_name)
@@ -2812,39 +3579,9 @@ def build_index_only() -> None:
     # pipeline (submit_job_automated_new_multiple_vcfs.sh) exactly, producing the
     # same folder names a later search looks for.
     import shutil
-    import tempfile
     import gzip
     from glob import glob as _glob
 
-    # --vcf accepts EITHER a VCF dataset directory (build-index-only's original form)
-    # OR a config file listing VCF folder names under VCFs/ (the SAME form
-    # complete-search uses), so the two subcommands take --vcf consistently. A
-    # directory is used as-is; a listing file must name exactly ONE dataset folder
-    # (build-index-only builds a single dataset's index -- combined panels are made
-    # by merging the source VCFs first, then building the merged folder).
-    _vcf_arg = os.path.abspath(args[args.index("--vcf") + 1])
-    if os.path.isdir(_vcf_arg):
-        vcfdir = _vcf_arg
-    elif os.path.isfile(_vcf_arg):
-        with open(_vcf_arg) as _vf:
-            _folders = [ln.strip() for ln in _vf if ln.strip() and not ln.startswith("#")]
-        if not _folders:
-            error(f"The --vcf config file {_vcf_arg} is empty (expected one VCF folder name)")
-        if len(_folders) > 1:
-            error(
-                "build-index-only builds ONE dataset's index, but the --vcf config file "
-                f"lists {len(_folders)} folders ({', '.join(_folders)}). Build each "
-                "separately, or merge the source VCFs into one folder first for a combined panel."
-            )
-        vcfdir = os.path.abspath(os.path.join(workdir, "VCFs", _folders[0]))
-        if not os.path.isdir(vcfdir):
-            error(f"VCF folder '{_folders[0]}' from {_vcf_arg} not found under {workdir}/VCFs/")
-    else:
-        error(
-            f"--vcf must be a VCF dataset directory or a config file listing VCF folder "
-            f"names under VCFs/ (got {_vcf_arg}, which is neither)"
-        )
-    vcf_name = os.path.basename(vcfdir.rstrip("/"))
     # crispritz add-variants needs per-chromosome VCF files; transparently split a
     # single multi-chromosome VCF so a user-provided dataset "just works" (no-op when
     # the folder is already per-chromosome, e.g. the shipped datasets).
@@ -2865,81 +3602,279 @@ def build_index_only() -> None:
         if not os.path.isfile(samples_listing):
             error(f"The file specified for --samplesID does not exist: "
                   f"{samples_listing}")
-    enriched = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}")
-    indels_out = os.path.join(workdir, "Genomes", f"{genome_ref}+{vcf_name}_INDELS")
-    dict_folder = os.path.join(workdir, "Dictionaries", f"dictionaries_{vcf_name}")
-    indel_dict = os.path.join(workdir, "Dictionaries", f"log_indels_{vcf_name}")
-    snp_idx = os.path.join(
-        workdir, "genome_library", f"{pam_char}_{bMax + 1}_{genome_ref}+{vcf_name}"
-    )
-    indels_idx = snp_idx + "_INDELS"
+
+    def _indel_bases(indels_dir):
+        # the bases of the fake-indel genome in indels_dir, up to the first FASTA that
+        # holds some: 0 for a variant dataset with no indels (STEP 3)
+        _bases = 0
+        for _fk in _glob(os.path.join(indels_dir, "fake_*", "*.fa")):
+            try:
+                with open(_fk) as _fh:
+                    for _ln in _fh:
+                        if not _ln.startswith(">"):
+                            _bases += len(_ln.strip())
+                if _bases:
+                    break
+            except OSError:
+                pass
+        return _bases
+
     # STEP 1: enrich the genome with the VCF (crispritz add-variants). add-variants
-    # writes a fixed-name variants_genome/ in its cwd, so run it in a throwaway
-    # temp dir to avoid collisions, then move the outputs into place.
-    if not os.path.isdir(enriched):
+    # writes a fixed-name variants_genome/ in its cwd, so run it in a hidden build
+    # directory of Genomes/ (_in_build_dir; never one of the search's run_*), then
+    # move the outputs into place.
+    _refuse_locked_build(enriched, indels_out)
+    # what the SNP overlay of the fake-indel genome printed, and the bases it coded
+    # (STEP 3 prints them)
+    _overlaid = []
+    _snp_overlay = os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes")
+    # where STEP 1b and 1c write the dict-less tiers and the indel genotype store, each
+    # marked unfinished meanwhile (_mark_unfinished); a fresh enrichment marks them as
+    # it goes into place, and _tiers_marked says it did so for the tiers
+    _reg_dir = os.path.join(workdir, "Dictionaries", f"registry_{vcf_name}")
+    _igt_dir = os.path.join(workdir, "Dictionaries", f"indel_genotypes_{vcf_name}")
+    _reg_made = not os.path.isdir(_reg_dir)
+    _tiers_marked = []
+
+    def _overlay_in_place():
+        # [indel-snp] The SNP overlay of a fake-indel genome already in place: one that
+        # came another way (a kit, an earlier release, a search's own enrichment), or
+        # this release's own, overlaid already, which it leaves as it is. Each FASTA is
+        # rewritten whole or not at all (overlay_fake_chromosome), but a run stopped
+        # partway leaves some overlaid and some not, from which a search would build an
+        # INDELS index blind to the SNPs on the others, kept by every later run: so the
+        # fake-indel genome is marked unfinished meanwhile (_mark_unfinished), and
+        # complete-search refuses it. Under _with_cleanup, a SIGTERM or SIGHUP lets it
+        # remove its temporary file; one a SIGKILL leaves holds this run's owner record,
+        # for a later run to remove. What it prints is held for STEP 3.
+        import contextlib
+        import io
+
+        _said, _coded = io.StringIO(), []
+        _owner = "".join(f"{k}={v}\n" for k, v in _build_dir_owner().items())
+        _mark_unfinished(indels_out)
+        try:
+            import overlay_indel_snps as _ois
+            with contextlib.redirect_stdout(_said):
+                _n = _with_cleanup(
+                    lambda: _ois.main(["overlay_indel_snps", indels_out, enriched,
+                                       indel_dict], owner=_owner, coded=_coded),
+                    lambda: None,
+                )
+        except Exception as _ois_err:
+            print(_said.getvalue(), end="", flush=True)
+            error(
+                f"The SNP overlay of the fake-indel genome {indels_out} failed "
+                f"({_ois_err}), so {os.path.basename(indels_idx)} is not built. "
+                f"Each fake-indel FASTA there is whole, overlaid or as it was: "
+                f"run build-index-only again once that is fixed."
+            )
+        # It runs only while no INDELS index is built from this genome, or after a run
+        # stopped as it overlaid it (STEP 1, STEP 3). An INDELS index there now, or one a
+        # search is building, came from FASTAs not all overlaid yet -- built by a search
+        # that got past its check of the mark before this run set it, or by one that
+        # did not check it -- and is blind to the SNPs on the others, and every later
+        # run kept it. One a search still builds stops the run, the mark left for the
+        # next run; one built is removed, and built again at STEP 3.
+        _refuse_locked_build(indels_idx)
+        if os.path.isdir(indels_idx):
+            print(
+                f"Removing {indels_idx}: it was built from the fake-indel genome while its "
+                f"SNP codes were going on, blind to those not on yet. This run builds it "
+                f"again.",
+                flush=True,
+            )
+            _in_build_dir(os.path.join(workdir, "genome_library"), ".build-index-only-",
+                          lambda tmp: os.rename(indels_idx, os.path.join(tmp, "removed")))
+        _unmark_unfinished(indels_out)
+        _overlaid.append((_said.getvalue(), _n, _coded[0]))
+
+    def _enriched_already():
+        # an enriched genome is there for a finished enrichment, but for one this command
+        # put in place marked unfinished, with the rest of it to go in after it (_place
+        # below), and a run stopped before that ended
+        return os.path.isdir(enriched) and not os.path.isdir(os.path.join(enriched, ".building"))
+
+    if not _enriched_already():
         print(f"Enriching {genome_ref} with {vcf_name} (add-variants)...", flush=True)
         # Ensure workdir/Genomes exists: the enriched genome lands here, but --genome
         # may point at a reference staged ELSEWHERE (not under workdir), so this dir
         # need not pre-exist. (It happened to exist when the reference was staged under
         # workdir/Genomes; don't rely on that.)
         os.makedirs(os.path.join(workdir, "Genomes"), exist_ok=True)
-        tmp = tempfile.mkdtemp(prefix="run_", dir=os.path.join(workdir, "Genomes"))
-        variants_tmp = os.path.join(tmp, "variants_genome")
-        code = subprocess.call(
-            f"crispritz.py add-variants {vcfdir}/ {genomedir}/ true",
-            shell=True,
-            cwd=tmp,
-        )
-        if code != 0:
-            shutil.rmtree(tmp, ignore_errors=True)
-            error(f"Genome enrichment (add-variants) failed on {vcf_name}")
-        # This block only runs on a FRESH enrichment (enriched was absent), so any
-        # pre-existing dataset-specific output dirs are stale/partial from a prior
-        # aborted build. Clear them first, else shutil.move onto an existing
-        # fake_chrN / dict raises "Destination path already exists" (issue #54).
-        for _d in (indels_out, dict_folder, indel_dict):
-            if os.path.isdir(_d):
-                shutil.rmtree(_d)
-        os.makedirs(indels_out, exist_ok=True)
-        shutil.move(
-            os.path.join(variants_tmp, "SNPs_genome", f"{genome_ref}_enriched"),
-            enriched,
-        )
-        for f in _glob(os.path.join(variants_tmp, "fake*")):
-            shutil.move(f, indels_out)
-        os.makedirs(dict_folder, exist_ok=True)
-        os.makedirs(indel_dict, exist_ok=True)
-        for f in _glob(os.path.join(variants_tmp, "SNPs_genome", "*.json")):
-            shutil.move(f, dict_folder)
-        for f in _glob(os.path.join(variants_tmp, "SNPs_genome", "log*.txt")):
-            shutil.move(f, indel_dict)
-        # Compress the per-chromosome dicts in place (my_dict_*.json -> .json.gz,
-        # log*.txt -> .txt.gz) so the published index ships them ~3.5x smaller
-        # (~40-50GB not ~152GB for 1000G+HGDP) and the variant post-analysis reads
-        # them gzipped on the fly (no 150GB decompress). pigz (parallel) when
-        # available, else Python gzip. Mirrors _make_index_tarball's pigz preference.
-        _pigz = shutil.which("pigz")
-        for _d, _pat in ((dict_folder, "*.json"), (indel_dict, "log*.txt")):
-            _files = _glob(os.path.join(_d, _pat))
-            if not _files:
-                continue
-            if _pigz:
-                subprocess.call([_pigz, "-f", "-p", str(thread), *_files])
-            else:
-                for _f in _files:
-                    with open(_f, "rb") as _src, gzip.open(_f + ".gz", "wb") as _dst:
-                        shutil.copyfileobj(_src, _dst)
-                    os.remove(_f)
-        shutil.rmtree(tmp, ignore_errors=True)
+
+        def _enrich(tmp, staging):
+            variants_tmp = os.path.join(tmp, "variants_genome")
+            snps_tmp = os.path.join(variants_tmp, "SNPs_genome")
+
+            def _taken():
+                # a search took this enrichment on while this run enriched (the run
+                # stops), or another run finished it: leave what it writes or wrote be
+                if not (os.path.isdir(enriched + ".lock") or _enriched_already()):
+                    return False
+                _refuse_locked_build(enriched, indels_out)
+                print(
+                    f"{enriched} appeared while this run was enriching it (another run "
+                    f"built it): keeping that one, and discarding this run's enrichment.",
+                    flush=True,
+                )
+                return True
+
+            code = subprocess.call(
+                f"crispritz.py add-variants {vcfdir}/ {genomedir}/ true",
+                shell=True,
+                cwd=tmp,
+            )
+            if code != 0:
+                error(f"Genome enrichment (add-variants) failed on {vcf_name}")
+            if _taken():
+                return
+            # Compress the per-chromosome dicts (my_dict_*.json -> .json.gz, log*.txt ->
+            # .txt.gz) so the published index ships them ~3.5x smaller (~40-50GB not
+            # ~152GB for 1000G+HGDP) and the variant post-analysis reads them gzipped on
+            # the fly (no 150GB decompress). pigz (parallel) when available, else Python
+            # gzip. Mirrors _make_index_tarball's pigz preference. That takes minutes at
+            # that scale, so it is done here, before anything goes into place: the
+            # dictionaries alone pass complete-search's pre-flight check for a prebuilt
+            # variant index. A compression that fails puts nothing in place.
+            _pigz = shutil.which("pigz")
+            _dicts = _glob(os.path.join(snps_tmp, "*.json"))
+            _logs = _glob(os.path.join(snps_tmp, "log*.txt"))
+            for _files in (_dicts, _logs):
+                if not _files:
+                    continue
+                _why = None
+                if _pigz:
+                    _code = subprocess.call([_pigz, "-f", "-p", str(thread), *_files])
+                    if _code != 0:
+                        _why = f"pigz exit status {_code}"
+                else:
+                    try:
+                        for _f in _files:
+                            with open(_f, "rb") as _src, gzip.open(_f + ".gz", "wb") as _dst:
+                                shutil.copyfileobj(_src, _dst)
+                            os.remove(_f)
+                    except Exception as _gz_err:  # noqa: BLE001 - any failure is fatal
+                        _why = str(_gz_err)
+                if _why:
+                    error(
+                        f"Compressing the {vcf_name} dictionaries failed ({_why}): "
+                        f"nothing of the enrichment was put in place."
+                    )
+            if _taken():  # (again: a search may have started while this run compressed)
+                return
+            # [indel-snp] The SNP codes go onto the fake-indel genome here, before any of
+            # it is in place, so that it never is without them: a complete-search that
+            # finds no INDELS index builds one from the fake-indel genome in place
+            # (pool_index_indels.py, which adds none), and every later run keeps that
+            # one. Added at STEP 3 only, they were missing from it after a run stopped in
+            # between, and it was blind to the SNPs beside an indel. STEP 3 prints what
+            # the overlay prints, as before; an enrichment that came another way (a kit,
+            # an older release) gets them in place (_overlay_in_place). An overlay that
+            # fails puts nothing in place.
+            _said = None
+            if _snp_overlay and _indel_bases(variants_tmp):
+                import contextlib
+                import io
+
+                _said, _coded = io.StringIO(), []
+                try:
+                    import overlay_indel_snps as _ois
+                    with contextlib.redirect_stdout(_said):
+                        _n = _ois.main(["overlay_indel_snps", variants_tmp,
+                                        os.path.join(snps_tmp, f"{genome_ref}_enriched"),
+                                        snps_tmp], coded=_coded)
+                except Exception as _ois_err:
+                    print(_said.getvalue(), end="", flush=True)
+                    error(
+                        f"The SNP overlay of the {vcf_name} fake-indel genome failed "
+                        f"({_ois_err}): nothing of the enrichment was put in place."
+                    )
+                if _taken():  # (and again: the overlay reads each enriched chromosome whole)
+                    return
+            # Each set of dictionaries is put together whole in a hidden directory of
+            # Dictionaries/ (_in_build_dir's stage), while nothing of the enrichment is in
+            # place: with Dictionaries on a file system or mount of its own, that copies
+            # them (40-50 GB at 1000 Genomes scale), and a search then refuses the dataset
+            # up front, as a later run enriches it again.
+            os.makedirs(os.path.dirname(dict_folder), exist_ok=True)
+            _stage = staging()
+            _staged = (os.path.join(_stage, os.path.basename(dict_folder)),
+                       os.path.join(_stage, os.path.basename(indel_dict)))
+            for _to, _files in zip(_staged, (_dicts, _logs)):
+                os.makedirs(_to)
+                for f in _files:
+                    shutil.move(f + ".gz", _to)
+            if _taken():  # (a copy takes a while)
+                return
+            # This block only runs on a FRESH enrichment (no finished one in place), so any
+            # pre-existing dataset-specific output dirs are stale/partial from a prior
+            # aborted build -- an enriched genome still marked unfinished too. Clear them
+            # first, else a move onto an existing fake_chrN / dict raises "Destination path
+            # already exists" (issue #54).
+            for _d in (indels_out, dict_folder, indel_dict, enriched):
+                if os.path.isdir(_d):
+                    shutil.rmtree(_d)
+
+            # Then only renames, within Genomes and within Dictionaries, done in moments:
+            # the fake-indel genomes, the enriched genome -- marked unfinished until the
+            # rest is in place (_enriched_already) -- the dictionaries, and the indel logs.
+            # A search needs both sets of dictionaries and refuses the marked genome, so a
+            # run that ends before the last rename leaves nothing that a search or a later
+            # run uses: the next run enriches again, clearing what this one renamed. (The
+            # dictionaries alone used to pass a search's check: that search enriched the
+            # genome itself and failed on the fake-indel genomes in its way, leaving its own
+            # dictionaries, uncompressed, which later runs kept.) A Ctrl-C, SIGTERM or
+            # SIGHUP meanwhile waits for the last rename (_end_cleanly).
+            _mark_unfinished(os.path.join(snps_tmp, f"{genome_ref}_enriched"))
+
+            def _place():
+                os.makedirs(indels_out, exist_ok=True)
+                for f in _glob(os.path.join(variants_tmp, "fake*")):
+                    shutil.move(f, indels_out)
+                shutil.move(os.path.join(snps_tmp, f"{genome_ref}_enriched"), enriched)
+                os.rename(_staged[0], dict_folder)
+                os.rename(_staged[1], indel_dict)
+                _unmark_unfinished(enriched)
+
+            # The tiers and the indel genotype store this run writes next (STEP 1b, 1c)
+            # are marked unfinished first: a run stopped once the enrichment is in place
+            # and before they are written (a signal during the renames ends the run right
+            # after them) left an enrichment that a search took for one built without
+            # them. Each step takes its mark away as it ends.
+            if samples_listing:
+                _mark_unfinished(_reg_dir)
+                _tiers_marked.append(1)
+            if _snp_overlay:
+                _mark_unfinished(_igt_dir)
+            _end_cleanly(_place, {})
+            if _said is not None:
+                _overlaid.append((_said.getvalue(), _n, _coded[0]))
+
+        _in_build_dir(os.path.join(workdir, "Genomes"), ".build-index-only-enrich-", _enrich,
+                      stage=(os.path.join(workdir, "Dictionaries"), ".build-index-only-dicts-"))
     else:
         print(f"Enriched genome already present: {enriched}", flush=True)
+        # One that came another way may lack the SNP codes. Overlaid only at STEP 3,
+        # after the hours of the steps between, it stayed without them after a run
+        # stopped in between, and a complete-search then built the INDELS index from it,
+        # blind to the SNPs beside an indel, which every later run kept. So it is
+        # overlaid now, whenever its INDELS index is still to be built (and no search
+        # holds that index's lock, building it from this genome), or a run stopped while
+        # it overlaid it (its mark).
+        if (_snp_overlay and not os.path.isdir(indels_idx + ".lock")
+                and (not os.path.isdir(indels_idx)
+                     or os.path.isdir(os.path.join(indels_out, ".building")))
+                and _indel_bases(indels_out)):
+            _overlay_in_place()
     # STEP 1b (ADDITIVE): emit the dictless tiers (Tier-0 registry + Tier-1 genotype
     # store) per chromosome, FROM the per-sample dicts just produced -- WITHOUT
     # touching the dicts. The search side (new_simple_analysis.py) already CONSUMES
     # these as sibling registry_<vcf>/ + genotypes_<vcf>/ dirs; this is the build
-    # side that PRODUCES them. GATED on a usable --samplesID map; GUARDED so any
-    # failure logs a WARNING to STDOUT (stderr is fatal here) and never aborts the
-    # dict/index build. Path derivation MIRRORS the search resolvers exactly (the
+    # side that PRODUCES them. GATED on a usable --samplesID map; GUARDED so a
+    # failure logs a WARNING to STDOUT (stderr is fatal here) and does not abort the
+    # dict/index build, but for a full disk or quota, an I/O error or no memory left
+    # (ends_the_build). Path derivation MIRRORS the search resolvers exactly (the
     # helper swaps the dictionaries_ prefix), so a built install actually uses them.
     # NOTE (AF denominator, #117/#121): the panel denominator (AN) is built by
     # tier0_compile.build_sample_meta over EXACTLY the per-db samplesID files listed
@@ -2948,20 +3883,20 @@ def build_index_only() -> None:
     # panel would over-count phantom hom-ref individuals and inflate AN.
     db_to_samplesid = _build_db_to_samplesid(samples_listing, workdir)
     if not db_to_samplesid:
-        if samples_listing:
-            print(
-                "build-index-only: no usable samplesID entries -> skipping dictless "
-                "tier emission (dicts unaffected; search falls back to the dict "
-                "path).",
-                flush=True,
-            )
-        else:
-            print(
-                "build-index-only: no --samplesID given -> skipping dictless tier "
-                "emission (dicts still built; pass --samplesID to also emit the "
-                "fast-post-analysis tiers).",
-                flush=True,
-            )
+        _why = ("no usable samplesID entries (check the --samplesID listing)"
+                if samples_listing else "no --samplesID was given")
+        loud_warn([
+            "WARNING: INCOMPLETE VARIANT INDEX -- the Tier-0 registry will NOT be built.",
+            f"Reason: {_why}.",
+            "This index is MISSING registry_<vcf>/ + genotypes_<vcf>/, so it will NOT support:",
+            "  - fast variant/indel post-analysis (falls back to the slow dict path),",
+            "  - the report's variant-count panel + the web dataset (data_type) labelling,",
+            "  - publishing to Hugging Face (publish-index needs the registry manifest).",
+            "The genome SEARCH still works. To build a COMPLETE, publishable variant index,",
+            "re-run build-index-only WITH --samplesID (the per-dataset genotyped sample lists).",
+        ])
+        if _tiers_marked:  # (as the enrichment went into place: no tiers come)
+            _unmark_unfinished(_reg_dir, _reg_made)
     else:
         try:
             import build_dictless_tiers as _bdt
@@ -2973,6 +3908,8 @@ def build_index_only() -> None:
                 "path.",
                 flush=True,
             )
+            if _tiers_marked:
+                _unmark_unfinished(_reg_dir, _reg_made)
         if _bdt is not None:
             # Enumerate the chromosomes from the dict files just written. A chromosome
             # normally has exactly ONE of my_dict_<chrom>.json / .json.gz (the gzip
@@ -3035,11 +3972,38 @@ def build_index_only() -> None:
             if _tier_present:
                 print(f"  {_tier_present} chromosome(s) already emitted; resuming "
                       f"{len(_tier_jobs)} remaining", flush=True)
+            # The tiers are written in place, chromosome by chromosome, and a search
+            # takes them chromosome by chromosome, falling back to the dicts for the
+            # rest: a run stopped here (an OOM kill, at ~150-180GB a chromosome) left a
+            # part of them that every search used as if it were whole, with no error.
+            # So they are marked unfinished (here, or as a fresh enrichment went into
+            # place) until this step has emitted every chromosome, and a search refuses
+            # them meanwhile (_refuse_unfinished, and the search script's STEP 1).
+            if _tier_jobs:
+                _mark_unfinished(_reg_dir)
             try:
                 _tier_workers = int(os.environ.get("CRISPRME_TIER_WORKERS", "4"))
             except ValueError:
                 _tier_workers = 4
             _tier_workers = max(1, min(_tier_workers, len(_tier_jobs) or 1))
+
+            def _tiers_failed(_err):
+                # a full disk or quota, an I/O error, no memory left: the only failures
+                # the emitter raises (ends_the_build), as every chromosome after would
+                # hit them too. The run ends, the tiers left marked unfinished.
+                error(
+                    f"Emitting the dict-less tiers of {vcf_name} failed "
+                    f"({str(_err) or type(_err).__name__}): {_reg_dir} stays marked "
+                    f"unfinished, and a search refuses it. Run build-index-only again "
+                    f"once that is fixed, which emits the rest."
+                )
+
+            def _emit_tiers(_job):
+                try:
+                    return _bdt.emit_dictless_tiers_guarded(*_job)
+                except (OSError, MemoryError) as _err:
+                    _tiers_failed(_err)
+
             _emitted = _tier_present
             if _tier_workers > 1:
                 print(f"  emitting tiers with {_tier_workers} parallel worker(s) "
@@ -3053,15 +4017,17 @@ def build_index_only() -> None:
                             if _r is not None:
                                 _emitted += 1
                 except Exception as _tperr:  # noqa: BLE001 - degrade to sequential
+                    if _bdt.ends_the_build(_tperr):  # (a worker's, raised again here)
+                        _tiers_failed(_tperr)
                     print(f"WARNING [tier-parallel]: pool failed ({_tperr}); "
                           "re-emitting sequentially.", flush=True)
-                    _emitted = 0
+                    _emitted = _tier_present
                     for _job in _tier_jobs:
-                        if _bdt.emit_dictless_tiers_guarded(*_job) is not None:
+                        if _emit_tiers(_job) is not None:
                             _emitted += 1
             else:
                 for _job in _tier_jobs:
-                    if _bdt.emit_dictless_tiers_guarded(*_job) is not None:
+                    if _emit_tiers(_job) is not None:
                         _emitted += 1
             print(
                 f"Dictless tier emission complete: {_emitted}/{len(_dict_files)} "
@@ -3069,6 +4035,20 @@ def build_index_only() -> None:
                 "of the dicts).",
                 flush=True,
             )
+            # A chromosome skipped with a WARNING above leaves a part of the tiers, which
+            # a search would use as if it were the whole: the mark stays
+            if _emitted < len(_dict_files):
+                print(
+                    f"WARNING [build-index-only]: the dict-less tiers of "
+                    f"{len(_dict_files) - _emitted} of {len(_dict_files)} chromosome(s) of "
+                    f"{vcf_name} were not emitted (above), so {_reg_dir} stays marked "
+                    f"unfinished and a search refuses it. Run build-index-only again with "
+                    f"{vcf_name} and its --samplesID, which emits them, or remove the tiers "
+                    f"to search without them (rm -rf '{_reg_dir}' '{_gt_dir}').",
+                    flush=True,
+                )
+            else:
+                _unmark_unfinished(_reg_dir, _reg_made)
             # Persist a tiny variant-count manifest so reports can state the
             # database size (SNP variants + genotyped panel sizes) with ZERO VCF
             # access -- summed from the per-chrom registry .idx headers just
@@ -3137,13 +4117,14 @@ def build_index_only() -> None:
     # [indel-snp] STEP 1c (ADDITIVE, gated): emit the PHASED indel genotype store so
     # the indel post-analysis can do CONFIRMED-cis SNP+indel co-occurrence. One
     # gt_indel_<chrom>.tsv.gz per chromosome under indel_genotypes_<vcf>/ (sibling of
-    # the SNP tiers). GUARDED (stdout warning, never abort); absent -> the post-
+    # the SNP tiers). GUARDED (stdout warning; only a full disk or quota, an I/O error
+    # or no memory left aborts); absent -> the post-
     # analysis degrades to PUTATIVE via the log's unphased carriers. Enabled by
     # default (opt-out): set CRISPRME_INDEL_SNP=0 to disable.
     if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
+        _big, _ig_left = None, None  # (_ig_left: the chromosomes whose store is not built)
         try:
             import build_indel_genotypes as _big
-            _igt_dir = os.path.join(workdir, "Dictionaries", f"indel_genotypes_{vcf_name}")
             os.makedirs(_igt_dir, exist_ok=True)
             _keep = None
             if db_to_samplesid:  # union of the per-db panels (match the SNP tiers)
@@ -3178,6 +4159,7 @@ def build_index_only() -> None:
                     _n_ig += 1  # already built (resume)
                     continue
                 _ig_jobs.append((_vf, _igt_out, _keep))
+            _ig_total = _n_ig + len(_ig_jobs)
             # compile_indel_genotypes streams the VCF (low RAM, I/O + gzip bound), so
             # fan out wide -- CRISPRME_INDELGT_WORKERS (default 8). Guarded worker so a
             # single bad chromosome cannot sink the store.
@@ -3189,6 +4171,9 @@ def build_index_only() -> None:
                 _igw = max(1, min(_igw, len(_ig_jobs)))
                 print(f"[indel-snp] building phased indel GT for {len(_ig_jobs)} "
                       f"chromosome(s) with {_igw} parallel worker(s)", flush=True)
+                # written in place too, a chromosome at a time: marked unfinished
+                # until this step has built every chromosome's, as the tiers above are
+                _mark_unfinished(_igt_dir)
                 if _igw > 1:
                     import multiprocessing as _mp
                     with _mp.get_context("fork").Pool(_igw) as _igpool:
@@ -3201,41 +4186,60 @@ def build_index_only() -> None:
                             _n_ig += 1
             print(f"[indel-snp] phased indel genotype store: {_n_ig} chromosome(s) "
                   f"-> {os.path.basename(_igt_dir)}", flush=True)
+            if _n_ig < _ig_total:  # (a chromosome skipped with a WARNING above)
+                _ig_left = f"{_ig_total - _n_ig} of {_ig_total} chromosome(s)"
         except Exception as _ig_err:  # noqa: BLE001 - store is optional (-> PUTATIVE)
+            # a full disk or quota, an I/O error, no memory left (the only failures the
+            # guarded writer raises): every chromosome after would hit them too, so the
+            # run ends, the store left marked unfinished
+            if _big is not None and _big.ends_the_build(_ig_err):
+                error(
+                    f"Building the phased indel genotype store of {vcf_name} failed "
+                    f"({str(_ig_err) or type(_ig_err).__name__}): {_igt_dir} stays marked "
+                    f"unfinished, and a search refuses it. Run build-index-only again "
+                    f"once that is fixed, which builds the rest."
+                )
             print(f"WARNING [indel-snp]: phased indel genotype store not built "
                   f"({_ig_err}); indel post-analysis falls back to PUTATIVE.", flush=True)
+            if _glob(os.path.join(_igt_dir, "gt_indel_*")):  # (a part of it is there)
+                _ig_left = "some chromosome(s)"
+        # A part of the store, which a search would use as if it were the whole: the
+        # mark stays
+        if _ig_left and os.path.isdir(os.path.join(_igt_dir, ".building")):
+            print(
+                f"WARNING [indel-snp]: the phased indel genotype store of {_ig_left} of "
+                f"{vcf_name} was not built (above), so {_igt_dir} stays marked unfinished "
+                f"and a search refuses it. Run build-index-only again with {vcf_name}, "
+                f"which builds it, or remove it to search without it (rm -rf "
+                f"'{_igt_dir}').",
+                flush=True,
+            )
+        else:
+            _unmark_unfinished(_igt_dir)
     # STEP 2: index the enriched (SNP) genome
+    _refuse_locked_build(snp_idx)
     if not os.path.isdir(snp_idx):
         print(f"Building variant index {os.path.basename(snp_idx)}...", flush=True)
-        code = subprocess.call(
+        _build_index_dir(
             f"crispritz.py index-genome {genome_ref}+{vcf_name} {enriched}/ "
             f"{pamfile} -bMax {bMax + 1} -th {thread}",
+            workdir,
+            os.path.basename(snp_idx),
+            "Variant genome indexing failed",
+            indexed=(pamfile, bMax + 1, [(enriched, "")]),
             shell=True,
-            cwd=workdir,
         )
-        if code != 0 or not os.path.isdir(snp_idx):
-            error(f"Variant genome indexing failed (expected {snp_idx})")
     else:
         print(f"Variant index already present: {snp_idx}", flush=True)
     # STEP 3: index the indels genome (pool_index_indels.py, as the pipeline does)
+    _refuse_locked_build(indels_idx)
     if not os.path.isdir(indels_idx):
         # A variant dataset with NO indels (e.g. a SNP-only VCF) yields empty
         # fake-indel contigs that pool_index_indels cannot index. Detect zero indels
         # and SKIP the indels index gracefully -- the SNP variant index is complete
         # on its own (SNP+indel co-occurrence simply does not apply to an indel-free
         # dataset) -- rather than aborting the whole build with "Indels indexing failed".
-        _indel_bases = 0
-        for _fk in _glob(os.path.join(indels_out, "fake_*", "*.fa")):
-            try:
-                with open(_fk) as _fh:
-                    for _ln in _fh:
-                        if not _ln.startswith(">"):
-                            _indel_bases += len(_ln.strip())
-                if _indel_bases:
-                    break
-            except OSError:
-                pass
-        if _indel_bases == 0:
+        if _indel_bases(indels_out) == 0:
             print(
                 f"No indels in {vcf_name} -> skipping the indels index; the SNP "
                 f"variant index is complete (SNP+indel co-occurrence N/A for an "
@@ -3247,25 +4251,28 @@ def build_index_only() -> None:
             # [indel-snp] Overlay SNP IUPAC codes onto the fake-indel flanks BEFORE
             # indexing so this _INDELS index also finds SNP+indel co-occurring
             # off-targets (searchTST matches IUPAC codes for free -- no -var needed).
-            # Enabled by default (opt-out): set CRISPRME_INDEL_SNP=0 to disable. GUARDED
-            # (stdout warning, never abort -- stderr is fatal here), mirroring the tiers above.
-            if os.environ.get("CRISPRME_INDEL_SNP", "1") in ("1", "true", "True", "yes"):
-                try:
-                    import overlay_indel_snps as _ois
-                    _n = _ois.main(["overlay_indel_snps", indels_out, enriched, indel_dict])
-                    print(
-                        f"[indel-snp] SNP-overlaid the fake-indel genome "
-                        f"({_n} flank bases IUPAC-coded).",
-                        flush=True,
-                    )
-                except Exception as _ois_err:
-                    print(
-                        f"WARNING [indel-snp]: fake-indel SNP overlay failed "
-                        f"({_ois_err}); this _INDELS index will be SNP-blind.",
-                        flush=True,
-                    )
+            # Enabled by default (opt-out): set CRISPRME_INDEL_SNP=0 to disable. A failed
+            # overlay fails the build: an index built after a failure would be SNP-blind
+            # where the overlay did not get to. This run's own enrichment was overlaid
+            # before it went into place, and one already in place as the run began
+            # (STEP 1): what that printed is printed here. One whose overlay did not run
+            # then (its INDELS index was there, or locked) is overlaid here, in place.
+            if _snp_overlay:
+                if not _overlaid:
+                    _overlay_in_place()
+                _said, _n, _coded = _overlaid[0]
+                print(_said, end="", flush=True)
+                # (one overlaid before -- this release's own, on a re-run -- changes no
+                # base: say it carries its codes, lest "0" read as a failed overlay)
+                print(
+                    f"[indel-snp] SNP-overlaid the fake-indel genome "
+                    f"({_n} flank bases IUPAC-coded"
+                    + (f"; it already carries its SNP codes, {_coded} of them"
+                       if _coded and not _n else "") + ").",
+                    flush=True,
+                )
             pool = os.path.join(script_path, "pool_index_indels.py")
-            code = subprocess.call(
+            _build_index_dir(
                 [
                     sys.executable,
                     pool,
@@ -3277,10 +4284,17 @@ def build_index_only() -> None:
                     str(bMax + 1),
                     str(thread),
                 ],
-                cwd=workdir,
+                workdir,
+                os.path.basename(indels_idx),
+                "Indels indexing failed",
+                # each chromosome's fake-indel genome, into its directory of the index,
+                # as pool_index_indels.py indexes them
+                indexed=(pamfile, bMax + 1, [
+                    (os.path.join(indels_out, _fk),
+                     f"{pam_char}_{bMax + 1}_fake{_fk.split('_')[-1]}")
+                    for _fk in sorted(os.listdir(indels_out)) if "chr" in _fk
+                    and os.path.isdir(os.path.join(indels_out, _fk))]),
             )
-            if code != 0 or not os.path.isdir(indels_idx):
-                error(f"Indels indexing failed (expected {indels_idx})")
     else:
         print(f"Indels index already present: {indels_idx}", flush=True)
     _write_pam_build(snp_idx, pamfile)
@@ -3290,8 +4304,41 @@ def build_index_only() -> None:
     # (the search's --samplesID listing wants that single combined file). Reuses the
     # already-computed db_to_samplesid map and the ONE union implementation; a strict
     # NO-OP for a single-dataset panel / when --samplesID was absent (empty map).
-    # Fully guarded (STDOUT-only; never aborts) — the index/dicts are already built.
+    # Fully guarded (STDOUT-only; aborts only on a full disk, an I/O error or no memory
+    # left) — the index/dicts are already built.
     _emit_combined_samplesid(workdir, vcf_name, genome_ref, db_to_samplesid)
+    # A part of the dataset still marked unfinished -- the tiers or the indel genotype
+    # store a step above kept marked, as it skipped a chromosome with a WARNING, or a
+    # mark another run left, such as one with --samplesID, whose tiers a run without it
+    # does not write -- is refused by every search: so this run fails, rather than end
+    # as done (the web Settings page shows a build that exits 0 as done), and says what
+    # to do
+    _redo = f"run build-index-only again to its end with {vcf_name}"
+    _gt_dir = os.path.join(workdir, "Dictionaries", f"genotypes_{vcf_name}")
+    _parts = [
+        (_reg_dir, f"{_redo} and its --samplesID (a build from the web Settings page passes "
+                   f"none), or remove the dict-less tiers to search without them (rm -rf "
+                   f"'{_reg_dir}' '{_gt_dir}')"),
+    ]
+    # the indel genotype store is read, and its mark taken away (STEP 1c), only with the
+    # SNP overlay on: under CRISPRME_INDEL_SNP=0 no search refuses its mark, and no run
+    # could clear it. The SNP codes of the fake-indel genome are refused either way, and
+    # only a run with the overlay on finishes them.
+    if _snp_overlay:
+        _parts.append(
+            (_igt_dir, f"{_redo}, or remove the phased indel genotype store to search without "
+                       f"it (rm -rf '{_igt_dir}')"))
+    _parts += [
+        (enriched, _redo),
+        (indels_out, _redo if _snp_overlay else
+         f"{_redo} with CRISPRME_INDEL_SNP=1 (the default), which finishes its SNP codes"),
+    ]
+    for _part, _do in _parts:
+        if os.path.isdir(os.path.join(_part, ".building")):
+            error(
+                f"{_part} is still marked unfinished, and every search with {vcf_name} "
+                f"refuses it until a build-index-only run has finished it: {_do}."
+            )
     print(
         f"Variant index ready: {os.path.basename(snp_idx)} (+ _INDELS). A later "
         f"variant-aware search on {genome_ref} with {vcf_name} reuses it.",
@@ -3552,8 +4599,9 @@ def print_help_assembly_search() -> None:
         "\t--max-total-edits, cap the TOTAL edits (mismatches + bulges) per "
         "alignment [default: mm+bDNA+bRNA, i.e. no additional cap beyond what "
         "--mm/--bDNA/--bRNA already imply -- unlike complete-search, whose own "
-        "bare default of 4 would otherwise silently drop most real off-targets "
-        "here; set this explicitly to tighten it, e.g. for performance]\n"
+        "default of 6 would otherwise drop every alignment with more "
+        "edits whenever --mm/--bDNA/--bRNA allow more; set this explicitly to "
+        "tighten it, e.g. for performance]\n"
         "\t--annotation, an hg38 BED annotation file (bgzipped, fourth column = "
         "feature name -- e.g. Annotations/dhs+encode_screenv4+gencode+cosmic."
         "hg38.bed.gz) to annotate the reconciled sites with [OPTIONAL]. Adds an "
@@ -3645,7 +4693,7 @@ def _run_haplotype_search(
             `complete-search`'s own `--max-total-edits` -- computed once by
             `assembly_search()` (an explicit `--max-total-edits` override if
             given, else `mm+bDNA+bRNA`; see its own comment for why the
-            latter differs from `complete-search`'s bare default of 4).
+            latter differs from `complete-search`'s bare default of 6).
 
     Returns:
         The absolute path to the haplotype's `complete-search` output folder.
@@ -3759,12 +4807,12 @@ def assembly_search() -> None:
         _check_gene_annotation(args, True) if "--gene_annotation" in args else None
     )
     # --max-total-edits: same flag `complete-search` accepts, but a different
-    # default when omitted. `complete-search`'s own bare default (4) was
-    # measured to silently drop the vast majority of real off-targets here --
-    # see `_run_haplotype_search()`'s docstring -- so `assembly_search()`
-    # defaults to the full mm+bDNA+bRNA budget instead, while still letting a
-    # user explicitly tighten (or further raise) it the same way they would
-    # for `complete-search`.
+    # default when omitted. `complete-search`'s own bare default (6; it was 4
+    # when this was measured to silently drop the vast majority of real
+    # off-targets here) prunes every alignment over it whenever mm+bDNA+bRNA
+    # is larger, so `assembly_search()` defaults to the full mm+bDNA+bRNA
+    # budget instead, while still letting a user explicitly tighten (or
+    # further raise) it the same way they would for `complete-search`.
     if "--max-total-edits" in args:
         try:
             max_total_edits = int(args[args.index("--max-total-edits") + 1])
@@ -4400,17 +5448,24 @@ def print_help_complete_test():
     # list functionality options
     sys.stderr.write(
         "Options:\n"
-        "\t--chrom, test the complete-search functionality on the specified "
-        "chromosome (e.g., chr22). By default, the test is conducted on all "
-        "chromosomes\n"
+        "\t--chrom, the chromosome to test, e.g. chr22 [default: all]. The "
+        "prebuilt-index smoke searches only that chromosome of the index's genome, and "
+        "refuses one the genome or the index lacks, naming those it has; with all it "
+        "searches every chromosome, which with a variant index such as "
+        "NRG_3_hg38+hg38_HGDP1kGP is a genome-wide variant search needing 64 GB+ of "
+        "RAM. The benchmark mode downloads and tests that chromosome\n"
         "\t--vcf_dataset, variant dataset for the LEGACY build-from-source test "
-        "(builds an index from raw VCFs): 1000G | HGDP | 1000G+HGDP = 1000 Genomes "
+        "(the benchmark mode: it builds small test indexes from raw VCFs for "
+        "validate-test, and runs only with CRISPRME_ALLOW_ONDEMAND_BUILD=1 set; this "
+        "flag does not select it): 1000G | HGDP | 1000G+HGDP = 1000 Genomes "
         "2019 (phased) and/or HGDP 2019 -- a build-pipeline test panel, NOT the "
         "shipped re-phased HGDP1kGP default and NOT the retired "
-        "NRG_3_hg38+hg38_1000G2021_HGDP index [default: 1000G]. The DEFAULT "
-        "complete-test (no --vcf_dataset) instead runs the example guide against "
+        "NRG_3_hg38+hg38_1000G2021_HGDP index [default: 1000G]. Without "
+        "CRISPRME_ALLOW_ONDEMAND_BUILD, complete-test instead runs the example guide against "
         "whichever index you downloaded (recommended: NRG_3_hg38+hg38_HGDP1kGP) -- "
-        "the modern smoke test.\n"
+        "the prebuilt-index smoke test. The self-test, as CI runs it: "
+        "CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test "
+        "--chrom chr22 --vcf_dataset 1000G, then crisprme.py validate-test --chrom chr22.\n"
         "\t--thread, number of threads.\n"
         "\t--debug, debug mode.\n"
     )
@@ -4467,6 +5522,10 @@ def complete_test_crisprme():
     code = subprocess.call(
         f"python {script_test} {chrom} {vcf_dataset} {threads} {debug}", shell=True
     )
+    if code == 2:
+        # complete_test.py refused --chrom, a chromosome the genome or the index lacks,
+        # and said so in one line before searching; a traceback would only bury it
+        sys.exit(2)
     if code != 0:
         raise OSError(
             "\nCRISPRme complete test encountered an Error! See Results/crisprme-test-out/log_error.txt for details\n"
@@ -4491,7 +5550,9 @@ def print_help_validate_test() -> None:
         "This functionality compares the off-targets identified by CRISPRme "
         "against results obtained via brute-force search and alignment.\n" 
         "Requirements:\n"
-        "\t- The `complete-test` functionality must have been executed beforehand\n"
+        "\t- The `complete-test` functionality must have been executed beforehand, "
+        "in its benchmark mode and in this folder: CRISPRME_ALLOW_ONDEMAND_BUILD=1 "
+        "CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G\n"
         "\t- Validation is supported only when complete-test was run using "
         "1000 Genomes variant data\n\n"
     )
@@ -4499,8 +5560,8 @@ def print_help_validate_test() -> None:
     sys.stderr.write(
         "Options:\n"
         "\t--chrom, Validate off-target sites on a specific chromosome "
-        "(e.g., chr22). If not provided, validation is performed across "
-        "all available chromosomes\n"
+        "(e.g., chr22); use the --chrom complete-test ran with. If not provided, "
+        "the whole-genome output of a complete-test run without --chrom is validated\n"
         "\t--debug, debug mode\n"
     )
     sys.exit(1)
@@ -4515,8 +5576,8 @@ def validate_test():
     against reference results on a specified chromosome or across all chromosomes.
 
     Raises:
-        OSError: If the validation script returns a non-zero exit code,
-            indicating that an error occurred during off-target validation.
+        SystemExit: With status 1 if the validation script returns a non-zero exit
+            code, indicating that an error occurred during off-target validation.
     """
     if "--help" in input_args or len(input_args) < 2:
         print_help_validate_test()
@@ -4537,7 +5598,9 @@ def validate_test():
         f"{sys.executable} {script_validation} {chrom}", shell=True
     )
     if code != 0:
-        raise OSError("CRISPRme off-target sites validation encountered an Error!")
+        # validate.py has already said why on stderr (a mismatch, or no complete-test
+        # benchmark output to check); a traceback here would only bury it
+        sys.exit(1)
     
 
 def print_help_setup_database_test() -> None:
@@ -4806,11 +5869,11 @@ if len(sys.argv) < 2:
     check_crisprme_dirtree()  # check crisprme directory tree structure
     crisprme_help()  # no arg? print help
 elif sys.argv[1] == "complete-search":  # run complete search
-    complete_search()
+    _run_and_remove_annotation_tmpdirs(complete_search)
 elif sys.argv[1] == "complete-test":  # run complete test
     complete_test_crisprme()
 elif sys.argv[1] == "assembly-search":  # run diploid assembly search
-    assembly_search()
+    _run_and_remove_annotation_tmpdirs(assembly_search)
 elif sys.argv[1] == "build-index-only":  # pre-build reusable reference index
     build_index_only()
 elif sys.argv[1] == "download":  # fast HuggingFace download of reference data

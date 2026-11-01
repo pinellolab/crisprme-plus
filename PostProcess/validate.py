@@ -93,13 +93,23 @@ def find_crispritz_targets(name: str, pam_name: str, mm: int, bdna: int, brna: i
     return None
 
 
-def check_variant_dataset() -> None:
+def check_variant_dataset(chrom: str) -> None:
     """Ensure complete-test used the 1000G dataset (required for validation)."""
     vcf_config_file = "vcf.config.test.txt"
     if not os.path.isfile(vcf_config_file):
-        raise FileNotFoundError(
-            f"Variant dataset configuration file not found: {vcf_config_file}"
+        # nothing to validate here: complete-test's benchmark mode writes this file, the
+        # default prebuilt-index smoke does not. Say what to run, without a traceback:
+        # for the chromosome asked for, and without --chrom ("all", a whole-genome run)
+        # the documented chr22 self-test.
+        run_chrom = "chr22" if chrom == "all" else chrom
+        sys.stderr.write(
+            f"ERROR: {vcf_config_file} not found in {os.getcwd()}: validate-test checks "
+            "the output of complete-test's benchmark mode, so run that here first: "
+            "CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py "
+            f"complete-test --chrom {run_chrom} --vcf_dataset 1000G, then crisprme.py "
+            f"validate-test --chrom {run_chrom}\n"
         )
+        sys.exit(1)
     with open(vcf_config_file, mode="r") as fin:
         datasets = [d for line in fin if (d := line.strip())]
     if len(datasets) != 1 or datasets[0] != "hg38_1000G":
@@ -220,8 +230,9 @@ def validate(name: str, crisprme_targets: pd.DataFrame, bf_targets: pd.DataFrame
 
 
 def run_test_validation(chrom: str) -> None:
-    """Validate every registered benchmark that has complete-test output present."""
-    check_variant_dataset()
+    """Validate every registered benchmark that has complete-test output present, on a
+    chromosome its brute-force reference covers."""
+    check_variant_dataset(chrom)
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     base_url = registry["reference_base_url"]
@@ -235,6 +246,16 @@ def run_test_validation(chrom: str) -> None:
         if skip_heavy and bench.get("heavy"):
             sys.stderr.write(f"[{name}] SKIPPED: heavy benchmark not run on this runner "
                              "(CRISPRME_SKIP_HEAVY=1).\n")
+            skipped += 1
+            continue
+        # A reference that covers one chromosome only ("scope": the chr22 Cas12a and
+        # single-"n edits" ones) cannot check another chromosome or a whole genome:
+        # every site CRISPRme finds outside it would count as "extra" and fail the case.
+        scope = bench.get("scope")
+        if scope and scope != chrom:
+            where = "the whole genome" if chrom == "all" else chrom
+            sys.stderr.write(f"[{name}] SKIPPED: its brute-force reference covers {scope} "
+                             f"only, not {where}.\n")
             skipped += 1
             continue
         # Per-case thresholds mirror complete_test.py, so the output-report filename

@@ -17,9 +17,10 @@ import os
 import json
 import gzip
 
-# personal_assembly lives in PostProcess/ (like assembly_reconcile), which
-# crisprme.py puts on sys.path at web-app boot. Insert it explicitly too so this
-# module-top import is robust regardless of import order.
+# personal_assembly lives in PostProcess/ (like assembly_reconcile). crisprme.py's
+# sys.path inserts never reach the web app (`crisprme.py web-interface` runs
+# index.py as a fresh subprocess), so app.py and this module each put PostProcess/
+# on sys.path from their own location, whatever the import order.
 _POSTPROCESS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "PostProcess"
 )
@@ -1606,12 +1607,20 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     lib = os.path.join(current_working_directory, "genome_library")
     if not os.path.isdir(lib):
         return 0
-    # Accept the exact PAM motif OR an all-N "pamless" index of the same length: a
-    # pamless index serves any same-length PAM (the requested PAM is enforced by the
-    # post-search PAM filter), exactly mirroring submit_job's "<pam>_* + NNN_*" scan.
-    pamless = "N" * len(motif)
-    prefixes = (f"{motif}_", f"{pamless}_")
+    # Accept the exact PAM motif OR an all-N "pamless" index of the SAME width. The
+    # search shell takes a wider all-N index only under --prune-pam, which the web
+    # never passes, so counting one here would offer bulges for an index the search
+    # will not use. Mirrors _resolve_index_dir in
+    # PostProcess/submit_job_automated_new_multiple_vcfs.sh -- the shell and this must
+    # not disagree about the same directory. The all-N test, rather than a fixed
+    # "N" * len(motif) prefix, keeps out a dedicated PAM that merely starts with N's
+    # (the shipped NNNRRT, SaCas9-KKH).
     base_suffix = f"_{genome}"  # base = "<motif>_<N>_<genome>"
+
+    def _pam_serves(pam: str) -> bool:
+        if pam == motif:
+            return True
+        return bool(pam) and set(pam) == {"N"} and len(pam) == len(motif)
     # A variant search needs an index whose enriched-genome name is EXACTLY
     # "<genome>_<dataset>" -- the same "+<ref>_<vcf>" folder submit_job resolves. So the
     # combined dropdown value "1000G_HGDP" matches "..._hg38_1000G_HGDP", and a single
@@ -1624,11 +1633,11 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
         base, _, enriched = d.partition("+")  # enriched="" for a reference index
         if enriched != want_enriched:
             continue
-        pfx = next((p for p in prefixes if base.startswith(p)), None)
-        if pfx is None or not base.endswith(base_suffix):
+        if not base.endswith(base_suffix):
             continue
-        n_str = base[len(pfx) : -len(base_suffix)]  # the "<N>"
-        if not n_str.isdigit():
+        stem = base[: -len(base_suffix)]
+        pam, sep, n_str = stem.partition("_")  # "<motif>" , "<N>"
+        if not sep or not n_str.isdigit() or not _pam_serves(pam):
             continue
         best = max(best, int(n_str))
     return max(0, best - 1)
@@ -2411,7 +2420,7 @@ def _cosmic_mod():
     (PostProcess/cosmic_license.py). Returns the module, or None if unavailable
     (in which case COSMIC is treated as NOT licensed -- the safe default)."""
     try:
-        import cosmic_license as _c  # PostProcess is on sys.path via crisprme.py
+        import cosmic_license as _c  # PostProcess/ is on sys.path via the insert at the top
         return _c
     except Exception:
         try:

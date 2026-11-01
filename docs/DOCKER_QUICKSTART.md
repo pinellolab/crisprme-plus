@@ -1,6 +1,6 @@
 # CRISPRme Docker Quickstart — run the web interface in a few commands
 
-> ℹ️ **CRISPRme+ (v2.8.0)** is the current release of the next-generation line
+> ℹ️ **CRISPRme+ (v2.8.1)** is the current release of the next-generation line
 > (Python 3.11 + Dash 2.x, variant-aware SNP+indel co-occurrence, context-aware analysis
 > mode — per-sample by default on genotyped+phased indexes, population-level on sites-only,
 > with opt-out `--population-level`). For a frozen
@@ -65,7 +65,7 @@ docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'
 > compact allele-frequency registry a few GB (shipped uncompressed for fast lookups),
 > and an optional per-genotype store (for per-sample carrier annotation) ~26 GB. The
 > genotyped **HGDP + 1000 Genomes** (HGDP1kGP) index is a ~28 GB download; the sites-only **mega**
-> (five-source) index ~15 GB. A reference-only setup is far smaller (~25 GB).
+> (five-source) index ~12 GB. A reference-only setup is far smaller (~25 GB).
 
 Check Docker works, then pull the CRISPRme+ image:
 
@@ -77,7 +77,7 @@ docker pull pinellolab/crisprme:latest
 ```
 
 > **Reproducibility:** `:latest` auto-updates to the newest release (and is the
-> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.8.0`
+> GPU-capable default). To pin an exact version instead, use `pinellolab/crisprme:v2.8.1`
 > everywhere below in place of `:latest`.
 
 > **Already have an older image?** Docker does **not** re-download a tag you already
@@ -116,9 +116,13 @@ Bulge-enabled searches need a genome **index**. Building it yourself takes ~10
 minutes of CPU; instead, download the ready-made SpCas9 NRG (NGG+NAG) index.
 
 > **On hg38 you already have this one** — `--what all` in step 3 downloads
-> `NRG_3_hg38` for you. Run the command below only to add a *different* index:
-> another PAM (e.g. `NGG_2_hg38`, or a Cas12a index), or an index for another
-> reference genome. Variant indexes are always a separate download (see below).
+> `NRG_3_hg38` for you. Change `--index-name` in the command below to add a
+> *different* index: another PAM's reference index (`NGG_3_hg38`, `NRR_3_hg38`), or a
+> PAM-less one that serves many PAMs from the command line with `--prune-pam`
+> (`NNN_3_hg38` with a 3-nt flank, `NNNNNNNN_3_hg38` with an 8-nt one). For any other
+> PAM (e.g. a Cas12a one) or reference genome, build the index yourself (see
+> **"Installing more indexes"** at the bottom). Variant indexes are always a separate
+> download (see below).
 
 ```bash
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
@@ -132,7 +136,8 @@ complementary production indexes — the recommended default is the fully phased
 ```bash
 # Recommended default — HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000 Genomes),
 # jointly SHAPEIT5-re-phased. CONFIRMED cis haplotypes with named per-sample carriers + exact
-# joint AF throughout, including HGDP's seven genetic regions (use --per-sample).
+# joint AF throughout, including HGDP's seven genetic regions (per-sample analysis is this
+# phased index's default).
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 
@@ -160,7 +165,7 @@ The web interface picks these up automatically — a search that uses the defaul
 > a genotyped+phased panel (e.g. a very dense / high-edit / genome-wide search). The shareable
 > report states which mode ran.
 
-## 5. (Optional, advanced) Add the raw 1000 Genomes VCFs
+## 5. (Optional, advanced) Add the raw source VCFs
 
 CRISPRme's superpower is finding off-targets created by genetic variants — and the
 `NRG_3_hg38+hg38_HGDP1kGP` index you downloaded in step 4 **already** makes the
@@ -169,9 +174,19 @@ default web search variant-aware. You do **not** need the raw VCFs for that.
 Sample-level analyses — named carriers, per-sample output, personal risk cards —
 come from the **genotype store that ships with the variant index** (`download --what
 index` fetches it alongside the index unless you pass `--no-genotypes`), not from raw
-VCFs. The default repo does not host raw per-dataset VCFs for the standard panels; the
-prebuilt index (above) already gives you both variant-aware search and sample-level
-resolution.
+VCFs. You need the VCFs only to build an index yourself, for example for another PAM.
+The default repo hosts the source VCFs of its three variant panels, `hg38_HGDP1kGP`
+(29 GB), `hg38_HPRC` and `hg38_mega` (about 2 GB each):
+
+```bash
+docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
+  crisprme.py download --what vcf --dataset hg38_HGDP1kGP --path /DATA
+```
+
+They land in `VCFs/hg38_HGDP1kGP/`; build from them with `build-index-only` (see
+[`PRECOMPUTED_INDEXES.md`](PRECOMPUTED_INDEXES.md)). For a new PAM on HGDP + 1000
+Genomes or mega, the pre-enriched kit (`download --what build-inputs --dataset
+hg38_HGDP1kGP`, about 1 GB) is the faster route.
 
 ## 6. Start the web interface
 
@@ -370,12 +385,12 @@ apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
 
 # Recommended default — HGDP + 1000 Genomes (4,091 samples = 925 HGDP + 3,166 1000
 # Genomes), jointly SHAPEIT5-re-phased: CONFIRMED cis haplotypes with named per-sample
-# carriers + exact joint AF (use --per-sample).
+# carriers + exact joint AF (per-sample analysis is this phased index's default).
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
   crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA
 # (The index above bundles its genotype store, so sample-level analyses / named
-#  carriers work too — no raw VCFs needed. The default repo does not host raw
-#  per-dataset VCFs; it ships the standard panels as prebuilt indexes.)
+#  carriers work too — no raw VCFs needed. The source VCFs are hosted too, for
+#  building an index yourself: --what vcf --dataset hg38_HGDP1kGP.)
 
 # 3. launch the web interface
 apptainer run --bind "${PWD}:/DATA" --pwd /DATA crisprme.sif \
@@ -454,8 +469,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest crisprme.p
 ```
 
 To see which indexes are published, browse the dataset repository
-(`lucapinello/crisprme-data`, folder `indexes/`) — the names there are exactly
-what you pass to `--index-name`.
+(`lucapinello/crisprme-data`, folder `indexes/`; the 8-nt-flank PAM-less indexes are
+in `lucapinello/crisprme-data-general-index`) — the names there are exactly what you
+pass to `--index-name`, and `download` picks the repo for you.
 
 If an index you need is **not** published, the web interface will **not** build it
 on the fly: it tells you no matching index is installed and asks you to install
@@ -528,8 +544,12 @@ and deleting data you no longer need. See
   3. Variant index not installed — re-run
      `crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP --path /DATA`
      (the recommended default panel).
-  4. Confirm success: `Results/<name>/log_error.txt` is empty and
-     `*.integrated_results.tsv` is non-empty.
+  4. Confirm success: `Results/<name>/log_error_no_check.txt` is empty and
+     `*.integrated_results.tsv` is non-empty. (A job that runs to the end renames its
+     `log_error.txt` to `log_error_no_check.txt`. A job that is still running, failed, or
+     found no off-targets keeps `log_error.txt`, so check whichever of the two exists. A job
+     that found no off-targets says `No off-targets found` in its `log.txt` and writes no
+     `*.integrated_results.tsv`.)
 
 For the full web-interface reference (every form field, all the result tabs),
 see [`crisprme_web_interface_user_guide.md`](crisprme_web_interface_user_guide.md).

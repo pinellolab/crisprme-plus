@@ -50,12 +50,19 @@ from utils import (
     MD5ANNOTATION,
 )
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import subprocess
+import contextlib
+import tempfile
+import shutil
+import signal
 import json
+import time
 import sys
 import os
+import re
+from fnmatch import fnmatchcase
 from glob import glob
 
 # benchmark registry (test/benchmark/benchmarks.json)
@@ -88,6 +95,13 @@ TESTDATAURL = os.environ.get(
 # define complete-test results folder name
 COMPLETETESTRESDIR = "crisprme-test-out"
 
+# name prefix of the per-run view a one-chromosome smoke searches from (_chrom_view)
+CHROMVIEWPREFIX = ".crisprme-test-view-"
+
+# seconds a one-chromosome search has to end on the SIGTERM or SIGHUP passed on to it
+# before it is killed (_stop_search)
+SEARCHSTOPWAIT = 10
+
 
 def require_prebuilt_index() -> str:
     """complete-test runs a variant search, which needs a prebuilt index.
@@ -117,7 +131,8 @@ def require_prebuilt_index() -> str:
             "  crisprme.py download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP\n"
             "  (the recommended default: phased HGDP + 1000 Genomes, 4,091 samples;\n"
             "   or --index-name NRG_3_hg38 for a reference-only scan)\n\n"
-            "then re-run:  crisprme.py complete-test --chrom chr22\n"
+            "then re-run:  crisprme.py complete-test --chrom chr22 --thread 4\n"
+            "  (chromosome 22 only; without --chrom it searches every chromosome)\n"
         )
         sys.exit(0)
     # prefer a variant index (name contains "+") so the smoke exercises the variant path
@@ -657,7 +672,274 @@ def _parse_index_name(index_name: str):
     return pam_token, ref, ("+" in rest)
 
 
-def _run_prebuilt_index_smoke(threads: int, debug: bool) -> None:
+def _natural_order(name: str) -> list:
+    """Sort key that puts chr2 before chr10."""
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name)]
+
+
+def _index_chroms(index_dir: str) -> set:
+    """Chromosomes an index holds: each is one or more ``<PAM>_<chrom>_<n>.bin`` trees."""
+    found = set()
+    for f in os.listdir(index_dir):
+        tree = re.fullmatch(r"[^_]+_(.+)_\d+\.bin", f)
+        if tree:
+            found.add(tree.group(1))
+    return found
+
+
+def _require_chrom(chrom: str, genome_dir: str, ref: str, index_name: str) -> None:
+    """Refuse a --chrom that Genomes/<ref> or the smoke's index does not have, in one
+    line naming the chromosomes both have, before anything is written or searched.
+    Exits 2, which crisprme.py passes on without a traceback."""
+    in_genome = {f[:-3] for f in os.listdir(genome_dir) if f.endswith(".fa")}
+    in_index = _index_chroms(os.path.join(os.getcwd(), "genome_library", index_name))
+    lacking = [
+        what
+        for what, chroms in (
+            (f"Genomes/{ref}", in_genome),
+            (f"the index '{index_name}'", in_index),
+        )
+        if chrom not in chroms
+    ]
+    if not lacking:
+        return
+    both = sorted(in_genome & in_index, key=_natural_order)
+    # hg38 has 455 sequences: past a screenful, name the primary ones
+    shown = both if len(both) <= 30 else [c for c in both if "_" not in c][:30] or both[:30]
+    more = f" and {len(both) - len(shown)} more" if len(both) > len(shown) else ""
+    sys.stderr.write(
+        f"ERROR: complete-test --chrom {chrom}: {' and '.join(lacking)} "
+        f"{'have' if len(lacking) > 1 else 'has'} no {chrom}; available: "
+        f"{', '.join(shown) + more if both else 'none, the two share no chromosome'}\n"
+    )
+    sys.exit(2)
+
+
+def _exit_on_signal(signum, _frame) -> None:
+    """SIGTERM / SIGHUP: leave through _search_in_view, which stops the search first, and
+    the finally that removes the per-run view."""
+    sys.exit(128 + signum)
+
+
+def _proc_stat(pid: int):
+    """(state, parent PID, start time) of process ``pid`` from /proc/<pid>/stat (Linux),
+    or None once it is gone. Its name, in parentheses, may hold spaces and parentheses,
+    so the fields are counted from the last ')'."""
+    try:
+        with open(f"/proc/{pid}/stat") as fin:
+            fields = fin.read().rsplit(")", 1)[1].split()
+        return fields[0], int(fields[1]), fields[19]
+    except (OSError, IndexError, ValueError):
+        return None
+
+
+def _stop_search(proc, signum: int) -> None:
+    """Pass the SIGTERM or SIGHUP ``signum`` complete_test.py got on to the search
+    ``proc`` and every process under it, wait for all of them to end, and SIGKILL those
+    still running after SEARCHSTOPWAIT seconds.
+
+    A ``kill`` of complete_test.py's PID reaches it alone: the shell under it,
+    complete-search, the search script and its children, which share its process
+    group, would go on, and fail on the view's paths once it is removed. They are found
+    in /proc before any of them ends, as the children of one that ends go to init;
+    without /proc (macOS) only ``proc`` is sent the signal. A signal sent to the whole
+    group (a hangup, ``kill -- -<pgid>``, ``timeout``) has reached them already, and
+    this second one changes nothing: they end on the first. A further SIGTERM or SIGHUP
+    (a hangup can bring two) does not cut the wait short; _chrom_view's finally puts
+    the handlers back.
+    """
+    for s in (signal.SIGTERM, signal.SIGHUP):
+        if signal.getsignal(s) is _exit_on_signal:
+            signal.signal(s, signal.SIG_IGN)
+    found = {}  # PID -> start time, of each process found under proc
+
+    def running(pid):
+        stat = _proc_stat(pid)
+        return stat is not None and stat[0] != "Z" and stat[2] == found[pid]
+
+    def send(sig):
+        # find the processes under proc, or under one found before that still runs (its
+        # own parent may have ended), then send sig to those still running
+        children = {}
+        with contextlib.suppress(OSError):
+            for name in os.listdir("/proc"):
+                stat = _proc_stat(int(name)) if name.isdigit() else None
+                if stat is not None:
+                    children.setdefault(stat[1], []).append((int(name), stat[2]))
+        todo = [pid for pid in found if running(pid)]
+        if proc.returncode is None:  # not reaped yet, so its PID is still its own
+            todo.append(proc.pid)
+        while todo:
+            for pid, start in children.get(todo.pop(), ()):
+                if pid not in found:
+                    found[pid] = start
+                    todo.append(pid)
+        proc.send_signal(sig)
+        for pid in found:
+            if running(pid):
+                with contextlib.suppress(OSError):
+                    os.kill(pid, sig)
+
+    send(signum)
+    deadline = time.monotonic() + SEARCHSTOPWAIT
+    while time.monotonic() < deadline and (
+        proc.poll() is None or any(running(pid) for pid in found)
+    ):
+        time.sleep(0.05)
+    send(signal.SIGKILL)
+    proc.wait()
+
+
+def _search_in_view(cmd: str, view: str) -> int:
+    """Run the one-chromosome search, the shell command ``cmd``, from ``view`` and return
+    its exit code, as subprocess.call does, but on a SIGTERM or SIGHUP stop the search
+    (_stop_search) before the view is removed. On a Ctrl-C, which the terminal sends
+    the search too, kill the shell and leave at once, as subprocess.call does: where
+    /bin/sh execs complete_test.py, crisprme.py kills it 0.25 s after a Ctrl-C."""
+    with subprocess.Popen(cmd, shell=True, cwd=view) as proc:
+        try:
+            return proc.wait()
+        except SystemExit as stop:  # _exit_on_signal's: 128 + the signal's number
+            _stop_search(proc, stop.code - 128)
+            raise
+        except BaseException:
+            proc.kill()
+            raise
+
+
+def _log_chrom(fname: str):
+    """Chromosome of an indel log ``log<chrom>.txt[.gz]``, chr-prefixed as
+    pool_search_indels.py reads it; None for any other file."""
+    stem = fname[:-3] if fname.endswith(".gz") else fname
+    if not (stem.startswith("log") and stem.endswith(".txt")):
+        return None
+    chrom = stem[len("log"):-len(".txt")]
+    return chrom if chrom.startswith("chr") else f"chr{chrom}"
+
+
+@contextlib.contextmanager
+def _chrom_view(chrom: str, ref: str, vcf_list: Optional[str]):
+    """Yield a per-run view of the working directory in which ``chrom`` is the only
+    chromosome, for complete-search to run from, and remove it when done. ``vcf_list``
+    is the smoke's --vcf list of dataset folder names (<vcf>), None for a reference one.
+
+    A hidden folder in the working directory that mirrors it with symlinks:
+    Genomes/<ref>/ holds only <chrom>.fa; every index the search could resolve
+    (genome_library/*_*_<ref> and *_*_<ref>+<vcf>, locked ones aside, as its
+    _resolve_index_dir has them) only its <PAM>_<chrom>_<n>.bin trees, and its _INDELS
+    companion only the <PAM>_<N>_fake<chrom> sub-index; Dictionaries/log_indels_<vcf>/,
+    from which the indel search and post-analysis take their chromosomes, only
+    <chrom>'s log (an empty one if the panel has none: no indel to search there).
+    Everything else in the working directory is linked as it is, but VCFs/, which
+    stays empty: a search of a prebuilt index never reads the source VCFs, which would
+    list the chromosomes in the logs' place. The index sidecars (.pam_build,
+    .display_label) are left out: only the web listings read them, and in their absence
+    the search reads these index folders as they are, rather than through a .binview in
+    the results whose links would outlive the view.
+
+    The search's results are the whole-genome search's on <chrom> but for one file: for
+    a chromosome with an indel log and no indel off-target, the whole-genome run, whose
+    indel post-analysis runs for the other chromosomes' indel off-targets, writes a
+    header-only fake<chrom>_*.indel_snp_cooc.tsv, which a run with no indel off-target
+    at all skips with its post-analysis. It holds no row, and the report leaves
+    header-only ones out.
+
+    Nothing is copied or written outside the view, and no listing or later run looks
+    for an index in it (they read genome_library/ and Genomes/ only). It is removed on
+    success, failure, Ctrl-C, SIGTERM and SIGHUP, the last two passed on to the search
+    and waited for first (_search_in_view); a signal ignored at entry, as nohup ignores
+    SIGHUP, stays ignored, here and in the search. A SIGKILL leaves the view behind,
+    which is harmless: a folder of symlinks that nothing reads. A SIGINT sent to
+    complete_test.py alone, not the Ctrl-C a terminal sends the whole process group,
+    removes it but leaves the search running, to fail without it.
+    """
+    cwd = os.getcwd()
+    vcf_names = []
+    if vcf_list:
+        with open(vcf_list) as fin:  # as the search reads them
+            vcf_names = [os.path.basename(l.strip().rstrip("/")) for l in fin if l.strip()]
+    # a signal ignored at entry stays so, and the search inherits it, for exec keeps an
+    # ignored signal and resets a handled one to its default: nohup ignores SIGHUP
+    saved = {
+        s: signal.signal(s, _exit_on_signal)
+        for s in (signal.SIGTERM, signal.SIGHUP)
+        if signal.getsignal(s) is not signal.SIG_IGN
+    }
+    view = None
+    try:
+        view = tempfile.mkdtemp(prefix=CHROMVIEWPREFIX, dir=cwd)
+
+        def link(*rel):
+            os.symlink(os.path.join(cwd, *rel), os.path.join(view, *rel))
+
+        genomes, dicts = CRISPRME_DIRS[0], CRISPRME_DIRS[2]
+        restricted = (genomes, "genome_library", dicts, CRISPRME_DIRS[3])
+        for name in os.listdir(cwd):
+            if name not in restricted and not name.startswith(CHROMVIEWPREFIX):
+                link(name)
+        for name in restricted:
+            os.mkdir(os.path.join(view, name))
+        os.mkdir(os.path.join(view, genomes, ref))
+        link(genomes, ref, f"{chrom}.fa")
+        lib = os.path.join(cwd, "genome_library")
+        tree = re.compile(r"[^_]+_" + re.escape(chrom) + r"_\d+\.bin")
+        suffixes = [ref] + [f"{ref}+{vcf}" for vcf in vcf_names]
+        for name in os.listdir(lib):
+            idx = os.path.join(lib, name)
+            if (
+                name.startswith(".")
+                or not os.path.isdir(idx)
+                or os.path.isdir(f"{idx}.lock")
+                or not any(fnmatchcase(name, f"*_*_{s}") for s in suffixes)
+            ):
+                continue
+            os.mkdir(os.path.join(view, "genome_library", name))
+            for f in os.listdir(idx):
+                if tree.fullmatch(f):
+                    link("genome_library", name, f)
+            indels = f"{name}_INDELS"
+            if os.path.isdir(os.path.join(lib, indels)) and not os.path.isdir(
+                os.path.join(lib, f"{indels}.lock")
+            ):
+                os.mkdir(os.path.join(view, "genome_library", indels))
+                fake = "_".join(name.split("_", 2)[:2]) + f"_fake{chrom}"  # <PAM>_<N>_
+                if os.path.isdir(os.path.join(lib, indels, fake)):
+                    link("genome_library", indels, fake)
+        logdirs = {f"log_indels_{vcf}" for vcf in vcf_names}
+        for name in os.listdir(os.path.join(cwd, dicts)):
+            if name not in logdirs:
+                link(dicts, name)
+                continue
+            os.mkdir(os.path.join(view, dicts, name))
+            logs = [
+                f
+                for f in os.listdir(os.path.join(cwd, dicts, name))
+                if _log_chrom(f) == chrom
+            ]
+            for f in logs:
+                link(dicts, name, f)
+            if not logs:
+                open(os.path.join(view, dicts, name, f"log{chrom}.txt"), "w").close()
+        yield view
+    finally:
+        if view is not None:
+            shutil.rmtree(view, ignore_errors=True)
+        for s, handler in saved.items():
+            signal.signal(s, handler)
+
+
+def _zero_hit(res_dir: str) -> bool:
+    """Whether the search into ``res_dir`` ended at complete-search's zero-hit
+    short-circuit (submit_job): exit 0 with no off-target, so no integrated_results
+    table, and its log.txt marked as the web status page reads it."""
+    try:
+        with open(os.path.join(res_dir, "log.txt")) as fin:
+            return "No off-targets found" in fin.read()
+    except OSError:
+        return False
+
+
+def _run_prebuilt_index_smoke(threads: int, debug: bool, chrom: str = "all") -> None:
     """Default (user) complete-test: run the built-in example guide against an index the
     user has DOWNLOADED (or built). CRISPRme never builds an index automatically here; if
     none is present, ``require_prebuilt_index`` prints how to download one and exits.
@@ -665,6 +947,9 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool) -> None:
     Args:
         threads (int): Number of threads for the search.
         debug (bool): Run complete-search in debug mode.
+        chrom (str): "all" searches every chromosome of the index's genome; any other
+            value only that chromosome, from a per-run view (``_chrom_view``), and one
+            that holds no off-target of the example guide passes with an empty result.
     """
     index_name = require_prebuilt_index()
     parsed = _parse_index_name(index_name)
@@ -682,16 +967,22 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool) -> None:
             f"(Genomes/{ref}) is not.\nCRISPRme does not build data automatically -- "
             "download the genome, e.g.:\n"
             f"  crisprme.py download --what genome --ref {ref}   (or --what all)\n\n"
-            "then re-run:  crisprme.py complete-test\n"
+            "then re-run:  crisprme.py complete-test --chrom chr22 --thread 4\n"
+            "  (chromosome 22 only; without --chrom it searches every chromosome)\n"
         )
         sys.exit(0)
+    if chrom != "all":
+        _require_chrom(chrom, genome_dir, ref, index_name)
     # PAM matching the index: 20 guide N's + the PAM token (e.g. NRG -> N*20 + 'NRG').
     pam = write_pamfile(f"20bp-{pam_token}-SpCas9.txt", "N" * 20 + pam_token + f" {len(pam_token)}")
     guide = write_sg1617_guidefile()  # the built-in example guide
-    # A variant index searches its variants (population-level default -- no --per-sample).
+    # A variant index searches its variants, in complete-search's context-aware default
+    # mode: per-sample on a phased genotyped index such as NRG_3_hg38+hg38_HGDP1kGP,
+    # population-level otherwise.
     # `download --what index` writes list_vcf.txt / list_samplesID.txt; a build/DATA dir
     # may instead use vcf_list.txt / samples_list.txt -- accept either.
     vcf_arg = sid_arg = ""
+    vcf_list = None
     if is_variant:
         vcf_list = next((f for f in ("list_vcf.txt", "vcf_list.txt") if os.path.isfile(f)), None)
         if vcf_list:
@@ -708,18 +999,36 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool) -> None:
     output_dir = COMPLETETESTRESDIR
     sys.stderr.write(
         f"Running complete-test smoke against prebuilt index '{index_name}' "
-        f"(PAM {pam_token}, genome {ref}, {'variant' if (is_variant and vcf_arg) else 'reference'}); "
+        f"(PAM {pam_token}, genome {ref}, {'variant' if (is_variant and vcf_arg) else 'reference'}"
+        f"{'' if chrom == 'all' else f', {chrom} only'}); "
         f"mm=2 bDNA=1 bRNA=1 -> Results/{output_dir}\n"
     )
-    # Population-level default (no --per-sample). complete-search will NOT build an index.
-    crisprme_cmd = (
-        f"crisprme.py complete-search --genome {genome_dir} "
-        f"--mm 2 --bDNA 1 --bRNA 1 --max-total-edits 4 "
-        f"--merge 3 --pam {pam} --guide {guide} {vcf_arg} {sid_arg} "
-        f"--index-path genome_library --output {output_dir} "
-        f"--thread {threads} {debug_arg} --ci-cd-test"
-    )
-    returncode = subprocess.call(crisprme_cmd, shell=True)
+
+    def complete_search(genome: str, output: str, view=None) -> int:
+        # complete-search will NOT build an index.
+        cmd = (
+            f"crisprme.py complete-search --genome {genome} "
+            f"--mm 2 --bDNA 1 --bRNA 1 --max-total-edits 4 "
+            f"--merge 3 --pam {pam} --guide {guide} {vcf_arg} {sid_arg} "
+            f"--index-path genome_library --output {output} "
+            f"--thread {threads} {debug_arg} --ci-cd-test"
+        )
+        if view is None:
+            return subprocess.call(cmd, shell=True)
+        return _search_in_view(cmd, view)
+
+    if chrom == "all":
+        returncode = complete_search(genome_dir, output_dir)
+    else:
+        # the same search, from a view of the working directory where chrom is alone;
+        # the --output path (the usual Results folder) given whole, so that the paths
+        # complete-search prints and logs are not the view's, gone once it is removed
+        with _chrom_view(chrom, ref, vcf_list) as view:
+            returncode = complete_search(
+                os.path.join(view, CRISPRME_DIRS[0], ref),
+                os.path.join(os.getcwd(), CRISPRME_DIRS[1], output_dir),
+                view,
+            )
     if returncode != 0:
         sys.stderr.write(
             f"ERROR: complete-test search failed (exit code {returncode}). See the log above.\n"
@@ -728,13 +1037,23 @@ def _run_prebuilt_index_smoke(threads: int, debug: bool) -> None:
     # confirm a report / integrated_results was produced
     res_dir = os.path.join(os.getcwd(), CRISPRME_DIRS[1], output_dir)
     produced = glob(os.path.join(res_dir, "*integrated_results.tsv"))
+    if not produced and chrom != "all" and _zero_hit(res_dir):
+        # the example guide has no off-target on chrom (chrM, most unplaced contigs), so
+        # the whole-genome test reports none there either: an empty result
+        sys.stderr.write(
+            f"\ncomplete-test PASSED: searched the example guide against '{index_name}' "
+            f"on {chrom}, which holds none of its off-targets (an empty result, so no "
+            "integrated_results.tsv).\n"
+        )
+        return
     if not produced:
         sys.stderr.write(
             f"ERROR: complete-test produced no integrated_results.tsv in {res_dir}.\n"
         )
         sys.exit(1)
     sys.stderr.write(
-        f"\ncomplete-test PASSED: searched the example guide against '{index_name}' and "
+        f"\ncomplete-test PASSED: searched the example guide against '{index_name}'"
+        f"{'' if chrom == 'all' else f' on {chrom}'} and "
         f"produced {os.path.basename(produced[0])} in Results/{output_dir}.\n"
     )
 
@@ -772,11 +1091,13 @@ def _run_benchmarks_ondemand(chrom: str, dataset: str, threads: int, debug: bool
             continue
         th = dict(global_th)
         th.update(bench.get("thresholds", {}))
-        # bMax = bDNA+bRNA (provenance; crisprme.py recomputes it). The binding knob is
-        # --max-total-edits: default mm+bDNA+bRNA (non-binding -> per-type mode) unless the
-        # case pins a smaller single-n value. The brute-force ground truth must be generated
-        # with the SAME per-type budgets AND --max-total-edits (see generate_references.py).
-        bmax = th["bDNA"] + th["bRNA"]
+        # bMax (= bDNA+bRNA) is NOT passed: complete-search has never had a --bmax flag,
+        # it recomputes bMax from the per-type budgets. It used to be passed anyway and was
+        # silently ignored until the unknown-flag check started rejecting it. The binding
+        # knob is --max-total-edits: default mm+bDNA+bRNA (non-binding -> per-type mode)
+        # unless the case pins a smaller single-n value. The brute-force ground truth must
+        # be generated with the SAME per-type budgets AND --max-total-edits (see
+        # generate_references.py).
         max_total_edits = th.get("max_total_edits", th["mm"] + th["bDNA"] + th["bRNA"])
         output_dir = f"{COMPLETETESTRESDIR}_{bench['name']}"
         pam = write_pamfile(bench["pam_name"], bench["pam_content"])
@@ -790,7 +1111,7 @@ def _run_benchmarks_ondemand(chrom: str, dataset: str, threads: int, debug: bool
         # because run_crisprme_test gated this branch on CRISPRME_ALLOW_ONDEMAND_BUILD).
         crisprme_cmd = (
             f"crisprme.py complete-search --genome {genome_dir} "
-            f"--bmax {bmax} --mm {th['mm']} --bDNA {th['bDNA']} --bRNA {th['bRNA']} "
+            f"--mm {th['mm']} --bDNA {th['bDNA']} --bRNA {th['bRNA']} "
             f"--max-total-edits {max_total_edits} "
             f"--merge 3 --pam {pam} --guide {guide} --vcf {vcf} "
             f"--samplesID {samplesids} --annotation {encode} "
@@ -810,7 +1131,8 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
     """complete-test entry point, with two modes:
 
     * DEFAULT (user): run the built-in example guide against an index the user DOWNLOADED
-      (or built). CRISPRme never builds an index automatically here.
+      (or built), on ``chrom`` alone, or on every chromosome for "all". CRISPRme never
+      builds an index automatically here.
     * CI / brute-force gate (env ``CRISPRME_ALLOW_ONDEMAND_BUILD`` set): download the test
       data for ``chrom``/``dataset`` and run every registered benchmark with on-demand index
       build, so ``validate-test`` can compare predictions to the committed brute-force ground
@@ -821,7 +1143,7 @@ def run_crisprme_test(chrom: str, dataset: str, threads: int, debug: bool) -> No
     if os.environ.get("CRISPRME_ALLOW_ONDEMAND_BUILD"):
         _run_benchmarks_ondemand(chrom, dataset, threads, debug)
     else:
-        _run_prebuilt_index_smoke(threads, debug)
+        _run_prebuilt_index_smoke(threads, debug, chrom)
 
 
 def main():
