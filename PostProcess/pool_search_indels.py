@@ -48,7 +48,8 @@ def _logged_no_indels(log_dir: str, chrom: str) -> bool:
 
     A missing log returns False -- unknown, so the search runs, and an index that
     is empty although its log lists indels still fails loudly, unless it is shown to
-    hold no target (``_empty_index``).
+    hold no target (``_empty_index``), as does a bulge search of one that is missing
+    (``_missing_index``).
     """
     for name in (f"log{chrom}.txt.gz", f"log{chrom}.txt"):
         path = os.path.join(log_dir, name)
@@ -134,6 +135,21 @@ def _index_pam(pam_path: str) -> str:
     for a 3' one."""
     seq, size = _pam_line(pam_path)
     return seq[:-size] if size < 0 else seq[-size:]
+
+
+def _fake_genome(fake_dir: str):
+    """What a chromosome's fake-indel genome holds, by pool_index_indels.py's test of it
+    (_fake_genome_is_empty): "sequence", "empty" (every FASTA header-only: no indel,
+    and no sub-index built for it), or None (no FASTA there, or one not read)."""
+    try:
+        fastas = [f for f in os.listdir(fake_dir) if f.endswith((".fa", ".fasta"))]
+        for f in fastas:
+            with open(os.path.join(fake_dir, f)) as fh:
+                if any(line.strip() and not line.startswith(">") for line in fh):
+                    return "sequence"
+    except (OSError, UnicodeDecodeError):
+        return None
+    return "empty" if fastas else None
 
 
 ref_folder = sys.argv[1]
@@ -325,6 +341,44 @@ def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
                    f"{_rebuild(raw_fakechrom, fasta)}")
 
 
+def _bulged():
+    """Whether this search allows a bulge."""
+    try:
+        return int(bDNA) > 0 or int(bRNA) > 0
+    except ValueError:
+        return True
+
+
+def _missing_index(chrom, indexed_fakechrom, raw_fakechrom):
+    """For a search with bulges: the ERROR for ``chrom``, which has indels (its log lists
+    them, or its fake-indel genome holds them) but no sub-index in the INDELS index,
+    saying how to rebuild the index; None where none is due.
+
+    Without its sub-index, a chromosome's search falls back to its fake-indel genome,
+    which it searches with no bulge: the bulged indel off-targets there were lost with
+    no error, after an INDELS index was copied in part, or after a search had built a
+    missing one for a PAM-less index under the search's PAM (as pool_index_indels.py
+    did before _own_pam). A sub-index is rightly absent where that genome is
+    header-only (pool_index_indels.py indexes none); where nothing shows that the
+    chromosome has indels, the search goes on as before (the engine then says what is
+    wrong)."""
+    held = _fake_genome(raw_fakechrom)
+    if held == "empty":
+        return None
+    logged = any(os.path.isfile(os.path.join(log_indels_dir, f"log{chrom}.txt{gz}"))
+                 for gz in (".gz", ""))
+    if held is None and not logged:
+        return None
+    try:  # (the FASTAs index-genome would index there)
+        fasta = any(f.strip().split(".")[-1] == "fa" for f in os.listdir(raw_fakechrom))
+    except OSError:
+        fasta = False
+    shown = "its indel log lists them" if logged else f"{raw_fakechrom} holds them"
+    return (f"ERROR: the indel index of {chrom} ({indexed_fakechrom}) is not there, though "
+            f"{chrom} has indels ({shown}): the INDELS index is incomplete, and a search with "
+            f"bulges cannot do without it. Rebuild it{_rebuild(raw_fakechrom, fasta)}")
+
+
 def search_indels(chrom):
     """Run the per-chromosome indel off-target search for one fake-indel chromosome.
 
@@ -339,16 +393,18 @@ def search_indels(chrom):
     ``fake<chrom>...targets.txt``, and post_analisi_indel.sh then choked on
     tail/head/rm/sed of the missing file.
 
-    The raw-genome brute-force command is kept ONLY as a fallback for a non-batteries
-    install that has the raw fake-indel genome but no indexed one (the indexed genome is
-    preferred whenever present, which it always is on batteries/dict-less installs; the
-    calling shell guarantees the indexed ``_INDELS`` dir exists or errors out before this
-    script runs).
+    The raw-genome brute-force command is kept ONLY as a fallback for a 0-bulge search
+    on a non-batteries install that has the raw fake-indel genome but no indexed one
+    (the indexed genome is preferred whenever present, which it always is on
+    batteries/dict-less installs; the calling shell guarantees the indexed ``_INDELS``
+    dir exists or errors out before this script runs). It cannot search with bulges, so
+    a search with bulges whose chromosome has indels but no sub-index stops there
+    instead (``_missing_index``).
 
     Returns SKIPPED when the chromosome has no indels (see ``_logged_no_indels``),
     or its sub-index no .bin and no target (``_empty_index``): it then writes no part
-    file, and the merge knows why. REFUSED when that sub-index may be broken: it has
-    said why on stderr, and nothing is merged.
+    file, and the merge knows why. REFUSED when that sub-index may be broken, or is
+    missing: it has said why on stderr, and nothing is merged.
     """
     if _logged_no_indels(log_indels_dir, chrom):
         print(f"No indels on {chrom}: skipping its indel search (no indel off-target possible)", flush=True)
@@ -373,6 +429,12 @@ def search_indels(chrom):
         sys.stderr.write(said + "\n")
         sys.stderr.flush()
         return REFUSED
+    if not os.path.isdir(indexed_fakechrom) and _bulged():
+        said = _missing_index(chrom, indexed_fakechrom, raw_fakechrom)
+        if said:
+            sys.stderr.write(said + "\n")
+            sys.stderr.flush()
+            return REFUSED
     print("Searching for INDELs in", chrom)
     out_name = f"fake{chrom}_{pam_name}_{guide_name}_{mm}_{bDNA}_{bRNA}"
     if os.path.isdir(indexed_fakechrom) or not os.path.isdir(raw_fakechrom):

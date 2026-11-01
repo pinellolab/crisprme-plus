@@ -22,9 +22,10 @@ A PAM-less index standing in for the search's PAM (NNN_3 serving NRG) holds the
 targets of its own PAM: an index of it without the record is told by that PAM (the
 PAM line its variant index's .pam_build records), and the search's own rebuild of a
 missing INDELS index for it builds it with that PAM. Built with the search's PAM file,
-that index went under NRG_3_..., where the search did not look, and each chromosome
-was searched in its fake-indel genome without bulges: exit 0, with the bulged indel
-off-targets lost (measured through the real CLI).
+that index went under NRG_3_..., where the search did not look, and a chromosome with
+indels but no sub-index was searched in its fake-indel genome without bulges: exit 0,
+with the bulged indel off-targets lost (measured through the real CLI). A search with
+bulges now refuses such a chromosome.
 
 Pinned here: the empty chromosome is skipped on BOTH sides (not indexed, not
 searched), the merge tolerates its missing part file and only its, an all-empty
@@ -33,8 +34,9 @@ recorded and skipped, an index without the record is skipped only where its
 fake-indel genome shows it holds no target of the index's own PAM, any other index
 that is empty although its log lists indels fails with an ERROR that says how to
 rebuild it (no traceback, no merged file, and no command with a blank to fill in), a
-PAM-less stand-in's INDELS index is built with its own PAM, and the normal path is
-unchanged.
+bulge search of a chromosome with indels but no sub-index fails the same way while a
+search without bulges still searches its fake-indel genome, a PAM-less stand-in's
+INDELS index is built with its own PAM, and the normal path is unchanged.
 
 Hermetic: a stub crispritz.py on PATH stands in for the engine and, like
 CRISPRitz 2.9.1, refuses an index directory with no .bin; its index-genome writes
@@ -232,6 +234,11 @@ class SearchSide(_Fixture):
         return ("holds no .bin and no record that its build found no target there (an index "
                 f"built before CRISPRme 2.8.1 has none), and {why}")
 
+    def missing(self, chrom, shown):
+        """What the ERROR says of a chromosome with indels and no sub-index."""
+        return (f"is not there, though {chrom} has indels ({shown}): the INDELS index is "
+                "incomplete, and a search with bulges cannot do without it")
+
     def chain(self, pam=None, enrich=False):
         """The rebuild command an ERROR gives, with the PAM file ``pam`` (the search's),
         and the enrichment and the download again when the fake-indel genome is not here."""
@@ -419,6 +426,49 @@ class SearchSide(_Fixture):
                      f"again: rm -rf '{self.idx[: -len('_INDELS')]}' '{self.idx}' && crisprme.py "
                      f"download --what index --index-name NNN_3_ref+ds --path '{self.work}'")
         self.assertNotIn(" && crisprme.py build-index-only", res.stderr)
+
+    # A search with bulges whose chromosome has indels but no sub-index: the raw-genome
+    # fallback takes no bulge, so it stops, where it lost those off-targets with no error.
+
+    def test_a_bulge_search_refuses_a_chromosome_without_its_sub_index(self):
+        res, lines = self.run_search(LOGS_AB, {"chrA": True}, fakes={"chrA": WITH_NRG, "chrB": WITH_NRG})
+        self.refused(res, self.missing("chrB", "its indel log lists them"), self.chain())
+        self.assertIsNone(lines)
+
+    def test_a_bulge_search_refuses_one_without_its_sub_index_or_fake_genome(self):
+        # (as from an index downloaded in part)
+        res, lines = self.run_search(LOGS_AB, {"chrA": True})
+        self.refused(res, self.missing("chrB", "its indel log lists them"), self.chain(enrich=True))
+        self.assertIsNone(lines)
+
+    def test_a_bulge_search_refuses_a_stand_in_without_its_sub_index(self):
+        # (a fake-indel genome that shows its indels, the log being gone)
+        res, _ = self.run_search({"chrA": LOGS_AB["chrA"]}, {"chrA": True}, true_pam="NNN",
+                                 vcfs=("chrA", "chrB"), fakes={"chrA": WITH_NRG, "chrB": WITH_NRG})
+        self.refused(res, self.missing("chrB", f"{self.fake('chrB')} holds them"),
+                     f": remove the INDELS index with rm -rf '{self.idx}' and run this search "
+                     f"again, which builds it anew from the fake-indel genome in "
+                     f"{self.work}/Genomes/ref+ds_INDELS")
+
+    def test_a_search_without_bulges_still_searches_the_fake_genome(self):
+        res, lines = self.run_search(LOGS_AB, {"chrA": True}, fakes={"chrA": WITH_NRG, "chrB": WITH_NRG},
+                                     bulges=("0", "0"))
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual((self.searched(), self.searched(index=False)), (["chrA"], ["chrB"]))
+        self.assertEqual([ln for ln in lines[1:] if ln], [ROW_A, ROW.format("chrB", 20, 20)])
+
+    def test_a_missing_sub_index_is_not_refused_where_nothing_shows_indels(self):
+        # chrB has no log: with a header-only fake-indel genome (pool_index_indels.py
+        # indexes none), its search goes on as before; with none, the engine says what is
+        # wrong, as before
+        res, _ = self.run_search({"chrA": LOGS_AB["chrA"]}, {"chrA": True}, vcfs=("chrA", "chrB"),
+                                 fakes={"chrA": WITH_NRG, "chrB": None})
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual((self.searched(), self.searched(index=False)), (["chrA"], ["chrB"]))
+        self.tearDown_dirs()
+        res, _ = self.run_search({"chrA": LOGS_AB["chrA"]}, {"chrA": True}, vcfs=("chrA", "chrB"))
+        self.assertNotIn("is not there", res.stderr)
+        self.assertIn(f"ERROR: no .bin index files found in '{self.idx}/NRG_3_fakechrB/'.\n", res.stderr)
 
     def test_a_record_is_not_read_where_the_index_holds_a_bin(self):
         res, lines = self.run_search({"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"],
