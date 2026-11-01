@@ -1158,6 +1158,64 @@ class TestFailureBannerShowsBuildDirsLeft(unittest.TestCase):
         self.assertIn("LEFT", banner.args[0])
 
 
+# --- a custom annotation BED the page accepts can always be enabled (walk P11) --------
+class TestAnnotationChoices(unittest.TestCase):
+    def choices(self, genome, beds, genomes=("hg38", "susScr11")):
+        ns = _load_functions(
+            ["_annotation_for_genome", "_annotation_choices"],
+            get_custom_annotations=lambda: [{"label": b, "value": b} for b in beds],
+            get_available_genomes=lambda: [{"label": g, "value": g} for g in genomes],
+            resolve_builtin_annotation=lambda: None,
+            read_enabled_annotations=lambda g: [],
+            BUILTIN_INTOGEN_HG38="intogen_drivers.hg38.bed.gz",
+        )
+        return [o["value"] for o in ns["_annotation_choices"](genome)[0]]
+
+    def test_bed_naming_no_genome_offered_for_every_genome(self):
+        beds = ["walk_regions.bed", "track.hg38.bed", "pig.susScr11.bed"]
+        self.assertEqual(self.choices("hg38", beds), ["walk_regions.bed", "track.hg38.bed"])
+        self.assertEqual(self.choices("susScr11", beds), ["walk_regions.bed", "pig.susScr11.bed"])
+
+    def test_genome_named_bed_still_offered_for_its_genome_only(self):
+        self.assertEqual(self.choices("hg38", ["pig.susScr11.bed"]), [])
+        # a genome with spaces in its dropdown value (get_available_genomes)
+        self.assertEqual(self.choices("hg38 chr22", ["x.hg38_chr22.bed"],
+                                      genomes=("hg38 chr22",)), ["x.hg38_chr22.bed"])
+
+
+class TestAnnotationUploadResetsItsContents(unittest.TestCase):
+    """dcc.Upload fires on a change of its contents: the callback empties them, so
+    a next file with the same bytes is added too."""
+
+    def test_contents_emptied_after_each_upload(self):
+        import base64
+
+        cwd = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cwd, ignore_errors=True)
+        ns = _load_functions(
+            ["_validate_name", "_fb_refresh", "_add_annotation", "add_annotation"],
+            current_working_directory=cwd,
+            base64=base64,
+            validate_annotation_bed=lambda path: None,
+            get_available_genomes=lambda: [{"label": "hg38", "value": "hg38"}],
+            _render_all_tables=lambda: "tables",
+            _render_storage=lambda: "storage",
+            ONLINE=False,
+            PreventUpdate=_PreventUpdate,
+            no_update=_NO_UPDATE,
+        )
+        bed = "data:text/plain;base64," + base64.b64encode(b"chr1\t1\t2\tx\n").decode()
+        for name in ("walk_regions.bed", "walk_regions_copy.bed"):
+            out = ns["add_annotation"](bed, name)
+            self.assertEqual(len(out), 4)
+            self.assertIsNone(out[3])
+            self.assertIn(name, out[0].args[0])
+            self.assertTrue(os.path.isfile(os.path.join(cwd, "Annotations", name)))
+        self.assertIn("so every genome offers it", out[0].args[0])
+        out = ns["add_annotation"](bed, "track.hg38.bed")
+        self.assertIn("'Manage annotations' for hg38", out[0].args[0])
+
+
 
 
 if __name__ == "__main__":

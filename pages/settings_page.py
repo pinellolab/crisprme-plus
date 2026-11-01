@@ -1478,12 +1478,24 @@ def _add_card(title: str, blurb: str, body: List) -> dbc.Card:
     )
 
 
+def _annotation_for_genome(name: str, genome: str, genomes: List[str]) -> bool:
+    """Whether the enable/disable checklist offers custom annotation ``name`` for
+    ``genome``: one whose file name holds this genome's name (mytrack.hg38.bed), and
+    one whose file name holds no installed genome's name (offered for every genome,
+    the user picking the one its coordinates are on), so an upload the page accepts
+    can always be enabled."""
+    if genome and genome in name:
+        return True
+    return not any(g and g in name for g in genomes)
+
+
 def _annotation_choices(genome: str):
     """(options, value) for the enable/disable checklist: the built-in bundle (hg38,
-    if installed) plus custom annotations carrying this genome's token; value = the
-    ones currently enabled (per the .enabled.json manifest)."""
+    if installed) plus the custom annotations for this genome (_annotation_for_genome);
+    value = the ones currently enabled (per the .enabled.json manifest)."""
     d = os.path.join(current_working_directory, "Annotations")
     norm = (genome or "").replace(" ", "_")
+    genomes = [g["value"].replace(" ", "_") for g in get_available_genomes()]
     options = []
     _builtin = resolve_builtin_annotation() if norm == "hg38" else None
     if _builtin is not None:
@@ -1498,7 +1510,7 @@ def _annotation_choices(genome: str):
         })
     for a in get_custom_annotations():
         name = a["value"]
-        if norm and norm in name and name != BUILTIN_INTOGEN_HG38:
+        if norm and name != BUILTIN_INTOGEN_HG38 and _annotation_for_genome(name, norm, genomes):
             options.append({"label": name, "value": name})
     valid = {o["value"] for o in options}
     value = [e for e in read_enabled_annotations(genome) if e in valid]
@@ -1869,7 +1881,10 @@ def settings_page() -> List:
     # ---- Annotations -------------------------------------------------------
     annotation_card = _add_card(
         "Add an annotation (BED)",
-        "Annotation BED files are small, so you can upload one directly.",
+        "Annotation BED files are small, so you can upload one directly. 'Manage "
+        "annotations' offers a BED for the genome its file name names (e.g. "
+        "mytrack.hg38.bed for hg38), and a BED whose file name names no installed "
+        "genome for every genome: enable it for the one its coordinates are on.",
         [
             dcc.Upload(
                 id="annotation-upload",
@@ -2570,14 +2585,22 @@ def fetch_from_hprc(n, sample_id):
         Output("annotation-feedback", "children"),
         Output("settings-tables-container", "children", allow_duplicate=True),
         Output("settings-storage", "children", allow_duplicate=True),
+        Output("annotation-upload", "contents"),
     ],
     [Input("annotation-upload", "contents")],
     [State("annotation-upload", "filename")],
     prevent_initial_call=True,
 )
 def add_annotation(contents, filename):
+    """Adds the uploaded BED, then empties the upload's contents: dcc.Upload fires
+    on a CHANGE of its contents, so the next file would otherwise do nothing when its
+    bytes are the same as this one's."""
     if contents is None or ONLINE:
         raise PreventUpdate
+    return _add_annotation(contents, filename) + (None,)
+
+
+def _add_annotation(contents, filename):
     if not filename or not filename.endswith(".bed"):
         return _fb_refresh("Please upload a .bed file.")
     err = _validate_name(filename[:-4])
@@ -2599,10 +2622,17 @@ def add_annotation(contents, filename):
         os.replace(tmp, dest)
     except Exception as e:
         return _fb_refresh(f"Upload failed: {e}")
+    genomes = [g["value"] for g in get_available_genomes()]
+    named = [g for g in genomes if g.replace(" ", "_") in filename]
+    where = (
+        f"for {', '.join(named)}" if named
+        else "for the genome its coordinates are on (its file name names no "
+        "installed genome, so every genome offers it)"
+    )
     return _fb_refresh(
         html.Span(
             f"Added annotation '{filename}'. Enable it under 'Manage annotations' "
-            f"to apply it in searches.",
+            f"{where} to apply it in searches.",
             style={"color": "green"},
         ),
         refresh=True,
