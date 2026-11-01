@@ -206,6 +206,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_reference_row_downstream -v
 
+      - name: "Tier-path SNP rows mark the REF mismatches as the dictionary path does (per-sample + population-level)"
+        working-directory: PostProcess
+        run: python -m unittest test_tier_ref_columns -v
+
       - name: "Deterministic dedup ordering (#46: sample/rsID/AF/annotation lists sorted, not PYTHONHASHSEED-random)"
         working-directory: PostProcess
         run: python test_determinism.py
