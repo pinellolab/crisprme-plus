@@ -448,7 +448,10 @@ haplotype** (`indel_snp_cis.resolve_target`):
   and its co-occurrence is rung 3 above (PUTATIVE, min-AF bound);
 - the fake-indel window holds **one indel**, so a haplotype that carries a second indel
   inside the target does not have the window's sequence and is not listed for it, on any
-  indel row (§8, residuals);
+  indel row (§8, residuals). That includes a second indel inserted right next to the
+  indel's anchor base, and one overlapping the indel on the same phased slot (one complex
+  allele the VCF splits into overlapping records); an unphased carrier of two overlapping
+  records is a multi-allelic heterozygote, one allele per haplotype, and stays listed;
 - a classic dictionary install (no Tier-1 store, e.g. an index built without `--samplesID`)
   reads the same genotypes from the per-sample SNP dictionary; with `CRISPRME_INDEL_SNP=0`
   at search time every code reads as the reference base, as on a fake-indel genome built
@@ -1004,18 +1007,22 @@ classic dict builds are byte-identical.) One **residual**: the indel search mate
 **one indel per fake contig**, so an off-target requiring **≥ 2 co-occurring cis indels
 within a single protospacer** is not generated as a candidate — a pre-existing
 single-indel-search property, independent of the analysis mode; since 2.8.1 an individual
-whose haplotype carries such a second indel inside a target is not listed for that target,
-whose sequence it does not have. Two SNP records at one position (a split multi-allelic
-site) keep only the last record's alt in the enriched genome and its dictionaries (a
-CRISPRitz `add-variants` property), so a carrier of an earlier record's alt is read as
-reference there, in the SNP and the indel post-analysis alike. This is a
-**low-frequency** case: raw multi-indel cis co-occurrence is dominated by STR/VNTR repeats
-(which off-target analysis should soft-mask), falling to **~1–2%** of indel loci after
+whose haplotype carries such a second indel inside a target (or overlapping the first, a
+complex allele split into overlapping records) is not listed for that target, whose
+sequence it does not have. This residual is **low-frequency**: raw multi-indel cis
+co-occurrence is dominated by STR/VNTR repeats (which off-target analysis should
+soft-mask), falling to **~1–2%** of indel loci after
 repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**
 of indel off-targets — all at the edit-budget ceiling (the weakest, ≈0-CFD tier). Windows
 carrying ≥ 2 cis indels **can** be flag-all'd for conservative (lossless over-reporting)
 treatment — a design option the min-edit primitive supports (proven lossless in
-`test_twopass_lynchpin_counterexamples`), **not yet wired into the production indel search**. The `Max_total_edits` value is a
+`test_twopass_lynchpin_counterexamples`), **not yet wired into the production indel search**.
+Two SNP records at one position (a split multi-allelic site) keep only the last record's
+alt in the enriched genome and its dictionaries (a CRISPRitz `add-variants` property), so
+a carrier of an earlier record's alt is read as reference there, in the SNP and the indel
+post-analysis alike, however common that alt: on the HGDP + 1000 Genomes panel
+chr8:4174067 T>C (8,170 copies) is read as reference because T>G (1 copy) is the later
+record. The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,
 recounted on its carriers' own sequence, is dropped past it as past `--mm` (§4). A reported MAF
