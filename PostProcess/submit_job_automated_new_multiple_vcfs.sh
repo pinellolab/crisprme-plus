@@ -837,6 +837,21 @@ while read vcf_f; do
 	fi
 
 	# START STEP 1 - Genome enrichment
+	# build-index-only marks each part of a dataset that it writes in place with a
+	# hidden .building until that part is whole (crisprme.py _mark_unfinished), and a
+	# run stopped there leaves a part that looks whole. complete-search refuses it
+	# first; a search the web launches runs this script straight, so refuse it here
+	# too. (The indel genotype store is read for the SNP+indel co-occurrence only.)
+	if [ "$vcf_name" != "_" ]; then
+		_unfinished=("Dictionaries/registry_${vcf_name}" "Genomes/${ref_name}+${vcf_name}" "Genomes/${ref_name}+${vcf_name}_INDELS")
+		case "${CRISPRME_INDEL_SNP:-1}" in 1 | true | True | yes) _unfinished=("${_unfinished[0]}" "Dictionaries/indel_genotypes_${vcf_name}" "${_unfinished[@]:1}") ;; esac
+		for _u in "${_unfinished[@]}"; do
+			if [ -d "$current_working_directory/$_u/.building" ]; then
+				printf "ERROR: %s is unfinished: a build-index-only run is writing it, or stopped before it was done. Let that run finish, or run build-index-only again to its end, then run this search again\n" "$current_working_directory/$_u" >&2
+				exit 1
+			fi
+		done
+	fi
 	# Detect a precomputed variant index shipped WITHOUT the raw VCFs (a batteries-
 	# included install: `download --what index` fetches genome_library/<name> +
 	# <name>_INDELS + the per-sample dictionaries, but not the multi-GB source VCFs).

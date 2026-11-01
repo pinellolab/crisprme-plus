@@ -865,6 +865,65 @@ class EveryScanInTheShippedScript(_ShippedScript):
                                 "TTTV_3", prune)
 
 
+class AnUnfinishedBuildIsNotSearched(_ShippedScript):
+    """build-index-only marks each part of a dataset that it writes in place -- the
+    dict-less tiers, the phased indel genotype store, the enriched genome as it goes
+    into place, the SNP codes of the fake-indel genome -- with a hidden .building
+    until that part is whole (crisprme.py _mark_unfinished). A run stopped there
+    leaves a part that looks whole. complete-search refuses it in its pre-flight, but
+    a search launched from the web runs this script straight, and used it as if it
+    were whole, with exit status 0: so the script refuses it too, before it uses or
+    builds anything."""
+
+    MARKED = ("Dictionaries/registry_{}", "Dictionaries/indel_genotypes_{}",
+              "Genomes/hg38+{}", "Genomes/hg38+{}_INDELS")
+
+    def run_marked(self, marked, env=None):
+        """A run with the part `marked` marked unfinished by a run in another
+        container; returns (exit status, the run, the marked directory)."""
+        where = self.home / marked.format(self.VCF)
+        made = not where.exists()
+        (where / ".building").mkdir(parents=True)
+        (where / ".building" / "owner").write_text(
+            "host=otherhost\npidns=pid:[1]\npid=4242\nstarted=2026-10-31T00:00:00Z\n")
+        launched = self.launch(env=env)
+        run = self.finish(launched)
+        shutil.rmtree(where if made else where / ".building")
+        return launched.proc.returncode, run, where
+
+    def test_each_part_marked_unfinished_is_refused_before_anything_is_used(self):
+        self.install("NRG_3")
+        for marked in self.MARKED:
+            with self.subTest(marked=marked):
+                rc, run, where = self.run_marked(marked)
+                self.assertEqual(rc, 1, run.stdout)
+                self.assertEqual(run.stderr, f"ERROR: {where} is unfinished: a build-index-only "
+                                             "run is writing it, or stopped before it was done. "
+                                             "Let that run finish, or run build-index-only "
+                                             "again to its end, then run this search again\n")
+                self.assertEqual(run.calls, [])
+                self.assertFalse(run.precomputed, run.stdout)
+                self.assertNotIn("Variants already added", run.stdout)
+
+    def test_the_indel_genotype_store_is_not_refused_when_it_is_not_read(self):
+        # CRISPRME_INDEL_SNP=0: no SNP+indel co-occurrence, so the store is not read
+        self.install("NRG_3")
+        rc, run, where = self.run_marked(self.MARKED[1], env={"CRISPRME_INDEL_SNP": "0"})
+        self.assertTrue(run.precomputed, run.stdout)
+        self.assertEqual(run.searched(variant=True), (f"NRG_3_hg38+{self.VCF}", False))
+
+    def test_a_finished_build_and_a_reference_search_are_as_before(self):
+        self.install("NRG_3")
+        run = self.run_pipeline()
+        self.assertTrue(run.precomputed, run.stdout)
+        self.assertEqual(run.searched(variant=True), (f"NRG_3_hg38+{self.VCF}", False))
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed")
+        # a reference search reads none of the dataset's parts
+        (self.home / "Dictionaries" / f"registry_{self.VCF}" / ".building").mkdir()
+        run = self.run_pipeline(variant=False)
+        self.assertEqual(run.searched(variant=False), ("NRG_3_hg38", False))
+
+
 def _lock_helpers():
     """The shipped build-lock block, verbatim: from its header comment to its last trap,
     the TERM one.

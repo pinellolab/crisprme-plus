@@ -523,6 +523,35 @@ class _Fixture(unittest.TestCase):
                    "--bDNA", "1", "--bRNA", "1", "--output", "search", "--thread", "2"]
         return self.finish(self.start(command=command, CRISPRME_SKIP_SCORER_ENV="1"))
 
+    def run_web_search(self):
+        """The search the web UI launches (pages/main_page.py): the search script run
+        straight, not complete-search, with the job directory, environment and
+        arguments it gives it, into a job directory of its own. Returns its exit
+        status, stdout and log_error.txt."""
+        job = self.path("Results", "web")
+        shutil.rmtree(job, ignore_errors=True)
+        for name, text in ((".list_vcfs.txt", "ds\n"), (".samplesID.txt", "hg38_ds.samplesID.txt\n"),
+                           (".guides.txt", GENOME["chr1"][:20] + "NNN\n"), ("vuoto.txt", "")):
+            _write(os.path.join(job, name), text)
+        empty = os.path.join(job, "vuoto.txt")
+        args = [self.path("Genomes", "hg38"), os.path.join(job, ".list_vcfs.txt"),
+                os.path.join(job, ".guides.txt"), PAM, empty, os.path.join(job, ".samplesID.txt"),
+                2, 4, 1, 1, 3, job, HERE, 4, self.work + os.sep, empty, "_", 1, 0, "none",
+                "mm+bulges", "mm+bulges,mm", "False", "PASS,.", "_", 6]
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("STUB_", "CRISPRME_"))}
+        env.update(PATH=os.pathsep.join([self.bin, os.environ.get("PATH", "")]),
+                   PYTHONPATH=os.path.join(SHARED, "py"), MPLCONFIGDIR=os.path.join(SHARED, "mpl"),
+                   STUB_LOG=self.log, CRISPRME_FAST_MODE="1", CRISPRME_EMIT_ALT_ALIGNMENTS="0",
+                   CRISPRME_REPORT_FULL="False")
+        with open(os.path.join(job, "log_verbose.txt"), "w") as out, \
+                open(os.path.join(job, "log_error.txt"), "w") as err:
+            rc = subprocess.call(
+                ["bash", os.path.join(HERE, "submit_job_automated_new_multiple_vcfs.sh"),
+                 *map(str, args)], cwd=self.work, env=env, stdout=out, stderr=err, timeout=120)
+        with open(os.path.join(job, "log_verbose.txt")) as out, \
+                open(os.path.join(job, "log_error.txt")) as err:
+            return rc, out.read(), err.read()
+
     def assert_searched(self):
         """complete-search goes past its checks of the variant index (the stub
         engine then fails it)."""
@@ -1653,6 +1682,57 @@ class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
         self.assertEqual(tree(self.lib(INDELS)), clean)
         self.assert_searched()
 
+    def test_an_indels_index_built_while_it_is_overlaid_in_place_is_built_again(self):
+        """A search that got past its check of the mark before the run set it, or one
+        that does not check it, builds the INDELS index from FASTAs not all overlaid
+        yet, blind to the SNPs on the others, and every later run kept it ('Indels
+        index already present'). The run removes it once its overlay ends, and builds
+        it again; while a search still builds it, the run stops, its mark left for the
+        next run to do so."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = tree(self.lib(INDELS))
+        for case in ("built as it overlays", "still being built as it ends",
+                     "built beside a stopped run's mark"):
+            with self.subTest(case=case):
+                self.fresh()
+                self.kit()
+                removing = (f"Removing {self.lib(INDELS)}: it was built from the fake-indel "
+                            "genome while its SNP codes were going on, blind to those not on "
+                            "yet. This run builds it again.\n")
+                if case == "built beside a stopped run's mark":
+                    proc = self.start(shim=True, STUB_WRITE_HANG="fakechr2.fa.tmp")
+                    self.wait_for_mark(proc)
+                    self.kill_group(proc)
+                    self.search_builds_the_indels_index()  # chr1's FASTA coded, chr2's not
+                    rc, out, err = self.run_bio()
+                else:
+                    proc = self.start(shim=True, STUB_OVERLAY_HANG="1")
+                    self.wait_for_mark(proc)  # (before the first FASTA is overlaid)
+                    if case == "built as it overlays":
+                        self.search_builds_the_indels_index()
+                    else:
+                        self.lock(self.lib(INDELS))
+                    open(self.release, "w").close()
+                    rc, out, err = self.finish(proc)
+                    if case == "still being built as it ends":
+                        self.assertEqual(rc, 1, out + err)
+                        self.assertIn(f"Error: {self.lib(INDELS)} is locked by the run that "
+                                      "builds it", err)
+                        self.assertTrue(os.path.isdir(self.path("Genomes", "hg38+ds_INDELS",
+                                                                ".building")))
+                        # that search ends, its INDELS index in place
+                        shutil.rmtree(self.lib(INDELS) + ".lock")
+                        self.search_builds_the_indels_index()
+                        rc, out, err = self.run_bio()
+                self.assertEqual(rc, 0, err)
+                self.assertIn(removing, out)
+                self.assertIn(f"Building indels index {INDELS}...\n", out)
+                self.assertEqual(tree(self.lib(INDELS)), clean)
+                self.assertFalse(os.path.lexists(self.path("Genomes", "hg38+ds_INDELS",
+                                                           ".building")))
+                self.assertEqual(self.leftovers(), [])
+
 
 class AStoppedRunsTiersAreNotSearched(_Fixture):
     """Once the enrichment is in place, build-index-only writes the dict-less tiers
@@ -1720,6 +1800,39 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
         self.assertIn(f"Enriched genome already present: {self.path('Genomes', 'hg38+ds')}\n", out)
         self.assertEqual(self.outputs(), clean)
         self.assert_searched()
+
+    def test_a_search_launched_from_the_web_refuses_what_a_stopped_run_left(self):
+        """The web UI runs the search script straight (pages/main_page.py), past
+        complete-search's checks, and that search used the part a stopped run left as
+        if it were whole, with exit status 0. The script refuses it too: the job ends
+        with the ERROR in its log_error.txt, which the results page shows."""
+        cases = [(step, where, dict(shim=True, STUB_WRITE_HANG=held, **workers))
+                 for step, held, where, workers in self.STEPS]
+        cases.append(("SNP codes of the fake-indel genome", "../Genomes/hg38+ds_INDELS",
+                      dict(shim=True, STUB_WRITE_HANG="fakechr2.fa.tmp")))
+        for step, where, stub in cases:
+            with self.subTest(step=step):
+                self.fresh()
+                if step.startswith("SNP codes"):
+                    self.kit()
+                proc = self.start(**stub)
+                self.wait_for_mark(proc)
+                self.kill_group(proc)
+                calls = len(self.calls())
+                rc, out, err = self.run_web_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertEqual(err, f"ERROR: {os.path.normpath(self.path('Dictionaries', where))} "
+                                      "is unfinished: a build-index-only run is writing it, or "
+                                      "stopped before it was done. Let that run finish, or run "
+                                      "build-index-only again to its end, then run this search "
+                                      "again\n")
+                self.assertEqual(self.calls()[calls:], [])  # nothing searched or built
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 0, err)
+                rc, out, err = self.run_web_search()
+                self.assertIn("Using precomputed variant index for hg38+ds; skipping genome "
+                              "enrichment", out)
+                self.assertNotIn(" is unfinished: ", err)
 
     def test_a_search_while_a_run_writes_them_is_told_to_wait_for_it(self):
         step, held, where, workers = self.STEPS[0]

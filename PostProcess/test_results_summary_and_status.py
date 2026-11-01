@@ -121,6 +121,26 @@ class TestNoHitsStatus(unittest.TestCase):
         self.assertEqual(out[0], {"visibility": "visible"})
         self.assertIn("result?job=finished", out[8])
 
+    def test_a_search_refused_for_an_unfinished_build_says_why(self):
+        # the search script refuses a dataset whose build-index-only run has not
+        # finished it: submitted again, the job fails the same way until it has
+        refused = ("/data/Dictionaries/registry_rv is unfinished: a build-index-only run is "
+                   "writing it, or stopped before it was done. Let that run finish, or run "
+                   "build-index-only again to its end, then run this search again")
+        for name, err, says in (
+                ("refused", f"ERROR: {refused}\n", f"The search was not run: {refused}."),
+                ("failed", "ERROR: Off-targets search Variant failed\n",
+                 "The selected result encountered some errors, please remove it and try "
+                 "to submit again.")):
+            with self.subTest(name=name):
+                d = self._job(name, "Job\tStart\tFri\n")
+                with open(os.path.join(d, "log_error.txt"), "w") as f:
+                    f.write(err)
+                out = self._status(name)
+                self.assertEqual(out[0], {"visibility": "hidden"})
+                self.assertEqual(out[9].children, says)
+                self.assertEqual(out[9].color, "danger")
+
 
 if __name__ == "__main__":
     unittest.main()

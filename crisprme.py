@@ -3557,6 +3557,23 @@ def build_index_only() -> None:
                 f"Each fake-indel FASTA there is whole, overlaid or as it was: "
                 f"run build-index-only again once that is fixed."
             )
+        # It runs only while no INDELS index is built from this genome, or after a run
+        # stopped as it overlaid it (STEP 1, STEP 3). An INDELS index there now, or one a
+        # search is building, came from FASTAs not all overlaid yet -- built by a search
+        # that got past its check of the mark before this run set it, or by one that
+        # did not check it -- and is blind to the SNPs on the others, and every later
+        # run kept it. One a search still builds stops the run, the mark left for the
+        # next run; one built is removed, and built again at STEP 3.
+        _refuse_locked_build(indels_idx)
+        if os.path.isdir(indels_idx):
+            print(
+                f"Removing {indels_idx}: it was built from the fake-indel genome while its "
+                f"SNP codes were going on, blind to those not on yet. This run builds it "
+                f"again.",
+                flush=True,
+            )
+            _in_build_dir(os.path.join(workdir, "genome_library"), ".build-index-only-",
+                          lambda tmp: os.rename(indels_idx, os.path.join(tmp, "removed")))
         _unmark_unfinished(indels_out)
         _overlaid.append((_said.getvalue(), _n, _coded[0]))
 

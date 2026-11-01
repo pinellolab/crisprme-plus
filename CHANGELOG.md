@@ -432,10 +432,12 @@ and the `release-crisprme` skill.
   earlier release, a search's own) got them only at that point too, so a run stopped before it left
   the same: it now gets them as the run begins, whenever its INDELS index is still to be built, and
   while they go on the fake-indel genome is marked unfinished, as the tiers are (next entry), so a
-  `complete-search` refuses it until a `build-index-only` run has finished them. On success the
-  files, their contents, stdout lines (the overlay's still print just before the INDELS index is
-  built) and exit status are as before, but for a re-run on a fake-indel genome that carries its
-  codes already: its overlay changes no base, and where its lines said `0 SNP overlays` and
+  search refuses it until a `build-index-only` run has finished them; an INDELS index that a search
+  built from it meanwhile (one that got past its check of the mark before the run set it) is
+  removed once they are on, and built again. On success the files, their contents, stdout lines
+  (the overlay's still print just before the INDELS index is built) and exit status are as
+  before, but for a re-run on a fake-indel genome that carries its codes already: its overlay
+  changes no base, and where its lines said `0 SNP overlays` and
   `0 flank bases IUPAC-coded`, as if it had found nothing, they now say how many bases were coded
   already. An INDELS index that `complete-search` builds from a genome it enriched itself (the
   on-demand build) still has no SNP codes, as before. If, with an earlier release, a
@@ -461,14 +463,19 @@ and the `release-crisprme` skill.
   began on them, left the same enrichment without them, which a search took for one built without
   `--samplesID`. Each of them is now marked unfinished (a hidden `.building` directory in it,
   holding the run's owner record) from before a fresh enrichment goes into place until it is
-  written, and `complete-search` ends with an ERROR while the mark is there: for a run that has
-  stopped, it says to run `build-index-only` again, which resumes them and removes the mark; for a
-  run still writing them, to wait for it. `publish-index` refuses such an index too. On success the
-  files, their contents, stdout lines and exit status are as before, and a chromosome whose tiers or
-  indel genotypes fail to be written is still skipped with a WARNING and searched without them, as
-  before. Downloaded indexes carry no mark. A part that a run of an earlier release left has no mark
-  and is not detected: if such a run was stopped while it emitted the tiers or the indel genotype
-  store, run `build-index-only` again to its end before you search with that dataset.
+  written, and every search ends with an ERROR while the mark is there. `complete-search` says, for
+  a run that has stopped, to run `build-index-only` again, which resumes them and removes the mark,
+  and for a run still writing them, to wait for it. A search launched from the web runs the
+  pipeline script itself, past those checks, and still used them as whole: it now fails with an
+  ERROR in its `log_error.txt` that names the unfinished part and says to let that run finish or
+  run `build-index-only` again to its end, and the results page shows it. The same goes for the
+  enriched genome and the fake-indel genome marked unfinished (above). `publish-index` refuses
+  such an index too. On success the files, their contents, stdout lines and exit status are as
+  before, and a chromosome whose tiers or indel genotypes fail to be written is still skipped with
+  a WARNING and searched without them, as before. Downloaded indexes carry no mark. A part that a
+  run of an earlier release left has no mark and is not detected: if such a run was stopped while
+  it emitted the tiers or the indel genotype store, run `build-index-only` again to its end before
+  you search with that dataset.
 - **The build directories of killed runs are reclaimed.** A SIGKILL (an OOM kill, a container stop)
   leaves the build directory, holding a partial index or enrichment as large as the finished one,
   which nothing read or removed. Each build directory now holds an owner record (host, PID namespace,
