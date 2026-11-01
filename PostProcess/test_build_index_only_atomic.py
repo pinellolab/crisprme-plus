@@ -1890,7 +1890,7 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
         indel genotype store (where) is still marked unfinished as it ends."""
         directory = self.path("Dictionaries", where)
         if where == "registry_ds":
-            do = ("and its --samplesID (a build from the web Settings page passes none), or "
+            do = (" and its --samplesID (a build from the web Settings page passes none), or "
                   "remove the dict-less tiers to search without them (rm -rf "
                   f"'{directory}' '{self.path('Dictionaries', 'genotypes_ds')}')")
         else:
@@ -1898,7 +1898,7 @@ class AStoppedRunsTiersAreNotSearched(_Fixture):
                   f"'{directory}')")
         return (f"Error: {directory} is still marked unfinished, and every search with ds "
                 "refuses it until a build-index-only run has finished it: run build-index-only "
-                f"again to its end with ds{' ' * (where == 'registry_ds')}{do}.\n")
+                f"again to its end with ds{do}.\n")
 
     def test_a_run_stopped_while_it_writes_them_leaves_them_refused_until_one_finishes_them(self):
         self.run_bio()
