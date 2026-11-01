@@ -21,12 +21,11 @@
   its own index (`NRG_2_HG01255_paternal`, `NRG_2_HG01255_maternal`); a genome folder that is not in
   a bundle is named after the folder plus a short hash of its path. The per-haplotype result files
   carry that name too (`<guide>+NRG_HG01255_paternal+__4+2_integrated_results.tsv` instead of
-  `<guide>+NRG_genome+__4+2_integrated_results.tsv`). Each index
-  a haplotype search builds records which genome it holds (`.genome_source`, which CRISPRitz does not
-  read), so an individual deleted and imported again with other content gets its index rebuilt
-  instead of reused; an index without that record, built earlier or downloaded, is used as before. A
-  haplotype result written by the colliding search is not reused by a later run with the same
-  `--output`: it is searched again. With the fix the paternal results are unchanged byte for byte,
+  `<guide>+NRG_genome+__4+2_integrated_results.tsv`). Each index a haplotype search builds records
+  which genome it holds (`.genome_source`, which CRISPRitz does not read), so an individual deleted
+  and imported again with other content gets its index rebuilt instead of reused; an index without
+  that record, built earlier or downloaded, is used as before. A haplotype result written by the
+  colliding search is not reused by a later run with the same `--output`: it is searched again. With the fix the paternal results are unchanged byte for byte,
   the maternal haplotype reports its own sites, and a legacy `Genomes/<name>` pair (the layout before
   2.6.0) runs exactly as before. **Affected:** every `assembly-search` with bulges on a bundle
   assembly since 2.6.0, from the web or the CLI. The haplotype whose search built the shared index
@@ -61,9 +60,10 @@
 - **The personal-assembly results header and History named both haplotypes "genome".** They showed
   `Paternal genome: genome | Maternal genome: genome`: the name of the folder every bundle haplotype
   is kept in, which `assembly-search` wrote into the job's `.Params.txt` when it finished (the web
-  form's own label was overwritten). Both now show the bundle's assembly name, e.g.
-  `HG01255_paternal_<accession>` for an HPRC fetch, or `<individual>_<haplotype>` when the bundle
-  records none, from the CLI and the web alike; a legacy `Genomes/<name>` folder keeps its name.
+  form's own label was overwritten). Both now show the bundle's assembly name (`assembly_name` in
+  its `metadata.json`; for an HPRC fetch, the HPRC assembly name), or `<individual>_<haplotype>` when
+  the bundle records none, from the CLI and the web alike; a legacy `Genomes/<name>` folder keeps its
+  name.
   Jobs that already finished keep the label they were written with.
 - **Submitting the Personal assembly tab with no individual selected listed six fields the form does
   not show.** The warning listed "paternal genome", "maternal genome", the two chain files and the
