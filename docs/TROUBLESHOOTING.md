@@ -49,8 +49,8 @@ A full install + one variant-aware genome-wide run is **tens of GB**:
 |---|---|
 | Reference genome (hg38) | ~3 GB |
 | Variant-aware index (e.g. `NRG_3_hg38+hg38_HGDP1kGP`) | ~40 GB |
-| Its genotype store + dictionaries (`--per-sample`) | ~50 GB |
-| Per-run results (grows with mismatches/bulges; `--per-sample` is larger) | GB–tens of GB |
+| Its genotype store + dictionaries (fetched by default; per-sample analysis, this index's default, reads the store) | ~50 GB |
+| Per-run results (grows with mismatches/bulges; larger for per-sample runs, the default on a phased index) | GB–tens of GB |
 
 Keep everything on a disk with **~150 GB free** before a first variant-aware run.
 Use `CRISPRME_TMPDIR` (Section 1) on the same roomy disk.
