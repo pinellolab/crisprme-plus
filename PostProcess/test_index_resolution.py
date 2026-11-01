@@ -19,8 +19,9 @@ the resolver are tested as called, not only the function they share.
 The resolver skips an index whose build lock is still there, so the locks are tested
 here too: ``ADeadRunsLockDoesNotWedgeTheNext`` and ``ARunThatEndsMidBuildLeavesItsLock``
 run the shipped lock helpers, and ``BuildLocksInTheShippedScript`` kills, interrupts
-and races whole runs. ``TheThreadGuardSizesTheIndexSearched`` covers the RAM guard,
-which must size a search by the index the resolver picked.
+and races whole runs. They read the process table from /proc, as the script does, for
+the image has no ps (``TheLockTestsNeedNoPs``). ``TheThreadGuardSizesTheIndexSearched``
+covers the RAM guard, which must size a search by the index the resolver picked.
 ``AFinishedRunRestoresOnlyRealAnnotations`` runs the script's last annotation step,
 which must leave the empty placeholder alone.
 """
@@ -36,6 +37,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _SCRIPT = Path(__file__).resolve().parent / "submit_job_automated_new_multiple_vcfs.sh"
 _PAMS = _SCRIPT.parent.parent / "PAMs"
@@ -997,24 +999,57 @@ def _age(path, minutes):
     os.utime(path, (then, then))
 
 
+# The process table is read from /proc, as the script reads it: the image has no ps
+# (no procps), and every test that asked ps failed there, each leaving its lock behind
+# for the next. ps is asked only where there is no /proc (macOS).
+_PROC = os.path.exists("/proc/self/stat")
+
+
+def _proc_table():
+    """(pid, ppid, pgid, state, command line) of every process, from /proc; the fields
+    follow the last ") " of /proc/<pid>/stat, as the name before it may hold either."""
+    table = []
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(errors="replace")
+            args = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except OSError:  # gone meanwhile
+            continue
+        state, ppid, group = stat[stat.rindex(")") + 2:].split()[:3]
+        table.append((int(pid), int(ppid), int(group), state,
+                      args.rstrip(b"\0").replace(b"\0", b" ").decode(errors="replace")))
+    return table
+
+
+def _ps_table():
+    """The same table as ps gives it."""
+    out = subprocess.run(["ps", "-ww", "-e", "-o", "pid=,ppid=,pgid=,stat=,args="],
+                         capture_output=True, text=True).stdout
+    table = []
+    for line in out.splitlines():
+        pid, ppid, group, stat, *args = line.split(None, 4)
+        table.append((int(pid), int(ppid), int(group), stat[:1], args[0] if args else ""))
+    return table
+
+
 def _processes(pgid):
     """(pid, ppid, command line) of every process still running -- zombies left out --
     in process group `pgid`."""
-    out = subprocess.run(["ps", "-ww", "-e", "-o", "pid=,ppid=,pgid=,stat=,args="],
-                         capture_output=True, text=True).stdout
-    procs = []
-    for line in out.splitlines():
-        pid, ppid, group, stat, *args = line.split(None, 4)
-        if int(group) == pgid and not stat.startswith("Z"):
-            procs.append((int(pid), int(ppid), args[0] if args else ""))
-    return procs
+    return [(pid, ppid, args) for pid, ppid, group, state, args in
+            (_proc_table() if _PROC else _ps_table()) if group == pgid and state != "Z"]
 
 
 def _state(pid):
-    """`pid`'s state as ps gives it ("Z": exited but not reaped), or "" once it is gone."""
-    out = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True,
-                         text=True).stdout
-    return out.strip()[:1]
+    """`pid`'s state ("Z": exited but not reaped), or "" once it is gone."""
+    if not _PROC:
+        out = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True,
+                             text=True).stdout
+        return out.strip()[:1]
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(errors="replace")
+    except OSError:
+        return ""
+    return stat[stat.rindex(")") + 2:][:1]
 
 
 def _subshells(pid):
@@ -1036,6 +1071,54 @@ def _wait_until_gone(pgid, timeout=10):
     while _processes(pgid) and time.monotonic() < deadline:
         time.sleep(0.05)
     return _processes(pgid)
+
+
+@unittest.skipUnless(_PROC, "the helpers read /proc where there is one")
+class TheLockTestsNeedNoPs(unittest.TestCase):
+    """In the shipped image, which has no ps, the lock tests below errored: 43 of them on
+    ps itself and the rest on the locks those left behind. The helpers that list and
+    check processes read /proc now, and are run here with no ps on PATH, as there."""
+
+    def sleeper(self):
+        """A `sleep 60` that leads a process group of its own, left unreaped once dead."""
+        proc = subprocess.Popen([shutil.which("sleep"), "60"], start_new_session=True)
+        self.addCleanup(_reap, proc)
+        return proc
+
+    def test_a_process_is_followed_until_it_is_gone_with_no_ps_on_path(self):
+        proc = self.sleeper()
+        row = (proc.pid, os.getpid(), f"{shutil.which('sleep')} 60")
+        with tempfile.TemporaryDirectory() as empty, \
+                mock.patch.dict(os.environ, {"PATH": empty}):
+            _wait_for(lambda: _state(proc.pid) == "S", 10, "it to sleep")
+            self.assertEqual(_processes(proc.pid), [row])
+            os.kill(proc.pid, signal.SIGSTOP)
+            _wait_for(lambda: _state(proc.pid) == "T", 10, "it to stop")
+            self.assertEqual(_processes(proc.pid), [row])
+            os.kill(proc.pid, signal.SIGKILL)  # and no wait(): left unreaped
+            _wait_for(lambda: _state(proc.pid) == "Z", 10, "it to die")
+            self.assertEqual(_processes(proc.pid), [])  # a zombie is left out
+            proc.wait()
+            self.assertEqual(_state(proc.pid), "")
+
+    @unittest.skipUnless(shutil.which("ps"), "no ps here to compare with, as in the image")
+    def test_where_there_is_ps_it_gives_the_same_answers(self):
+        proc = self.sleeper()
+
+        def both():
+            """What the helpers say through /proc, and what they say through ps."""
+            with mock.patch.object(sys.modules[__name__], "_PROC", False):
+                via_ps = (_processes(proc.pid), _state(proc.pid))
+            return (_processes(proc.pid), _state(proc.pid)), via_ps
+
+        for signum, state in ((None, "S"), (signal.SIGSTOP, "T"), (signal.SIGKILL, "Z")):
+            if signum is not None:
+                os.kill(proc.pid, signum)
+            _wait_for(lambda: _state(proc.pid) == state, 10, f"state {state}")
+            via_proc, via_ps = both()
+            self.assertEqual(via_proc, via_ps)
+        proc.wait()
+        self.assertEqual(both(), (([], ""), ([], "")))
 
 
 class _Locks(unittest.TestCase):
