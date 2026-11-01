@@ -239,3 +239,31 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   a search of one dataset on its dictionaries, or of the reference alone, is unchanged (a search
   with a sites-only dataset changes further: see the entry on those). Run a search again for these
   counts and lists.
+- **A search with a sites-only dataset lists each site once and loses none; a VCF with no `AF` keeps
+  a variant's best alignment.** The merge step of a search sorts each criterion's rows by guide,
+  chromosome, position and score before it makes one row of each site, and its sort counted columns
+  by blanks, so an empty column moved the later ones up. A row of a sites-only dataset (`hg38_mega`,
+  alone or beside another dataset, since 2.5.2) has an empty `Samples`, so it went by its rsID and
+  not its guide: such rows came before or after all the others, and the merge, which starts a new
+  site only when the position rises, took unrelated sites for one. A site was listed more than once;
+  a variant row was marked `Not_found_in_REF` (a `VARIANT` off-target in the report) though its site
+  has a reference row; a site could lose its row altogether; and in a per-sample search a row of
+  alternative alignments could pair the three criteria's alignments across sites, so
+  `observed_haplotypes.tsv` gave a site another site's variants. The sorts now read the
+  tab-separated columns, and a variant both datasets give is one row, with the genotyped dataset's
+  carriers and both allele frequencies. On chr22 (guide `CTAACAGTTGCTTTTATCACNNN`, 4 mismatches, 1+1
+  bulges), `hg38_mega` alone goes from 1621 rows to 1384, rows within 3 bp of another from 556 to 0,
+  `Not_found_in_REF` rows from 659 to 422, and it lists 50 sites it did not (the best at
+  chr22:50091459, CFD 0.022); the report's `REFERENCE` and `VARIANT` off-targets go from 766 and 659
+  to 962 and 422, and its CFD >= 0.05 net from 53 sites to 46. The default index with `hg38_mega`
+  goes at population level from 3015 rows to 2520 (within 3 bp 997 to 4, `Not_found_in_REF` 2053 to
+  1558, 21 sites more); per sample from 2406 rows to 2077 (671 to 2, 1444 to 1115, 16 sites more),
+  and its rows of alternative alignments with the fewest or the CRISPR-Bulge block more than 100 bp
+  from the CFD block go from 28 and 27 to 0, and its haplotypes with a variant more than 1 kb from
+  their site from 26 to 0. A row with only its `AF` empty (a VCF with no `AF`, which the input check
+  warns about: every variant on the dictionaries, every indel on the tiers) stayed at its site but
+  went by its REF score, so the merge could keep a lower-scoring alignment of a variant: on a
+  6-sample panel with no `AF`, the perfect match a deletion makes at chr2:10000 read CFD 0.9 with a
+  bulge and now reads 1.0 with none, and the report's perfect matches go from 3 to 4. A search whose
+  rows have no empty column (the default index alone, any VCF with `AF`, the reference alone) sorts
+  as before. **If you searched a sites-only dataset or a VCF with no `AF`,** run the search again.
