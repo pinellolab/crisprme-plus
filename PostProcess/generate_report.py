@@ -1203,12 +1203,22 @@ def _normalize_genome(genome):
     return g
 
 
+# What a multi-guide search writes in place of <guide> in its results file names
+# (submit_job_automated_new_multiple_vcfs.sh). It is not a guide, and its own '_' is not
+# the separator between <guide>+<pam> and <ref>.
+MULTI_GUIDE_TOKEN = "Multiple_spacers"
+
+
 def _parse_results_filename(tsv_path):
     """Fallback summary from ``<guide>+<pam>_<ref>+<vcf>_<mm>+<bmax>_integrated_results.tsv``.
 
     e.g. CTCTCAGCTGGTACACGGCANNN+NRG_hg38+hg38_1000G_HGDP_6+3_integrated_results.tsv
       -> guide=CTCTCAGCTGGTACACGGCANNN, pam=NRG, genome=hg38,
-         datasets=1000G+HGDP, mm=6, bMax=3
+         datasets=1000G+HGDP, vcf=hg38_1000G_HGDP, mm=6, bMax=3
+
+    A multi-guide search names <guide> ``Multiple_spacers`` (no guide is decoded;
+    the guides are read from the table). ``vcf`` is the VCF folder name as the
+    pipeline wrote it, which also names the run's ``Dictionaries/registry_<vcf>``.
     """
     info = {}
     base = os.path.basename(tsv_path)
@@ -1220,10 +1230,15 @@ def _parse_results_filename(tsv_path):
         if base.endswith(suffix):
             base = base[: -len(suffix)]
             break
+    multi_guide = base.startswith(MULTI_GUIDE_TOKEN + "+")
+    if multi_guide:
+        base = base[len(MULTI_GUIDE_TOKEN) + 1:]  # <pam>_<ref>+<vcf>_<mm>+<bmax>
     # <guide>+<pam>_<ref>+<vcf>_<mm>+<bmax>
     try:
         guide_pam, rest = base.split("_", 1)
-        if "+" in guide_pam:
+        if multi_guide:
+            info["pam"] = guide_pam
+        elif "+" in guide_pam:
             info["guide"], info["pam"] = guide_pam.split("+", 1)
         else:
             info["guide"] = guide_pam
@@ -1246,7 +1261,8 @@ def _parse_results_filename(tsv_path):
             ]
             if vcf_tokens:
                 info["datasets"] = "+".join(vcf_tokens)
-            # else: leave datasets unset -> build_summary_meta -> "reference only"
+                info["vcf"] = vcf
+            # else: leave datasets unset (a reference-only search names the vcf "_")
         else:
             info["genome"] = _normalize_genome(genome_vcf)
         if "+" in mm_b:
@@ -1392,6 +1408,8 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "pam": pam,
         "genome": genome,
         "datasets": datasets,
+        # the VCF folder name the results file carries (None when it names no dataset)
+        "vcf_name": fn.get("vcf"),
         "mm": str(mm),
         "mm_int": mm_int,
         "bdna": bdna,
@@ -2033,14 +2051,23 @@ def _registry_variant_count(result_dir, meta):
                     if os.path.isdir(d)]
         if not reg_dirs:
             return None
-        # pick the registry whose name carries the run's dataset tokens
-        tokens = [t for t in str(meta.get("datasets", "")).replace("+", "_").split("_") if t]
+        # the run's own registry first: the pipeline names it after the VCF folder the
+        # results file name carries (Dictionaries/registry_<vcf>). The token match below
+        # takes the first registry whose name holds every token, which with more than one
+        # installed can be another dataset's (registry_hg38_1000G_HGDP for hg38_HGDP).
         chosen = None
-        for d in reg_dirs:
-            name = os.path.basename(d).lower()
-            if tokens and all(t.lower() in name for t in tokens):
-                chosen = d
-                break
+        vcf = meta.get("vcf_name")
+        if vcf and os.path.isdir(os.path.join(dict_dir, f"registry_{vcf}")):
+            chosen = os.path.join(dict_dir, f"registry_{vcf}")
+        else:
+            # pick the registry whose name carries the run's dataset tokens
+            tokens = [t for t in str(meta.get("datasets", "")).replace("+", "_").split("_")
+                      if t]
+            for d in reg_dirs:
+                name = os.path.basename(d).lower()
+                if tokens and all(t.lower() in name for t in tokens):
+                    chosen = d
+                    break
         if chosen is None:
             chosen = reg_dirs[0] if len(reg_dirs) == 1 else None
         if chosen is None:

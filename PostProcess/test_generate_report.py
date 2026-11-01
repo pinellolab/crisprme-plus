@@ -2450,18 +2450,23 @@ class TestGenerateReport(unittest.TestCase):
         "Ref_comp": "False", "Scorer": "crispr-bulge", "Compute_backend": "cpu",
     }
 
+    def _install_registry(self, vcf, n_records, n_indels, databases):
+        """Dictionaries/registry_<vcf>/ with the build-time variant_count.json."""
+        import json as _json
+        reg = os.path.join(self.tmp, "Dictionaries", f"registry_{vcf}")
+        if not os.path.isdir(reg):
+            os.makedirs(reg)
+            with open(os.path.join(reg, "variant_count.json"), "w") as fh:
+                _json.dump({"n_records": n_records, "n_indels": n_indels,
+                            "databases": {k: {"sample_count": v}
+                                          for k, v in databases.items()}}, fh)
+
     def _install_job(self, name, tsv_name, params, variant_rows=False):
         """Results/<name>/ beside an install's Dictionaries/ holding ONE registry (a
         default install's layout), with the fixture rows under ``tsv_name`` (the
         reference rows only unless ``variant_rows``), ``params`` as its .Params.txt
         (none when None) and the .search_mode crisprme.py writes for every search."""
-        import json as _json
-        reg = os.path.join(self.tmp, "Dictionaries", "registry_hg38_1000G")
-        if not os.path.isdir(reg):
-            os.makedirs(reg)
-            with open(os.path.join(reg, "variant_count.json"), "w") as fh:
-                _json.dump({"n_records": 31130, "n_indels": 1744,
-                            "databases": {"1000G": {"sample_count": 2548}}}, fh)
+        self._install_registry("hg38_1000G", 31130, 1744, {"1000G": 2548})
         rd = os.path.join(self.tmp, "Results", name)
         os.makedirs(rd)
         with open(os.path.join(rd, tsv_name), "w") as fh:
@@ -2573,6 +2578,80 @@ class TestGenerateReport(unittest.TestCase):
                                                           "reference_only": True}))
         vc = gr._registry_variant_count(rd, {"datasets": "x", "reference_only": False})
         self.assertEqual(vc["n_records"], 31130)
+
+    # ------------------------------------------------------------------ #
+    # A multi-guide search names its results Multiple_spacers+<pam>_<ref>+<vcf>_...;
+    # the parser split it at the '_' inside Multiple_spacers, so the dataset label
+    # became "<PAM>+<ref>+<vcf tokens>" and matched no registry: right only through
+    # the single-registry fallback, and with 2+ installed the counts were dropped and
+    # the panel became every installed samplesID file. The token match could also
+    # pick a merged registry holding the run's name (hg38_1000G_hgdpx for hgdpx).
+    # ------------------------------------------------------------------ #
+    def test_multi_guide_results_name_parses_like_a_single_guide_one(self):
+        fn = gr._parse_results_filename(
+            "Multiple_spacers+NRG_hg38+hg38_HGDP1kGP_6+3_integrated_results.tsv")
+        self.assertEqual(
+            fn, {"pam": "NRG", "genome": "hg38", "datasets": "HGDP1kGP",
+                 "vcf": "hg38_HGDP1kGP", "mm": "6", "bmax": "3"})
+        single = gr._parse_results_filename(
+            f"{_GUIDE}+NRG_hg38+hg38_HGDP1kGP_6+3_integrated_results.tsv")
+        self.assertEqual(single, {**fn, "guide": _GUIDE})
+        # a reference-only multi-guide search names no dataset
+        ro = gr._parse_results_filename(
+            "Multiple_spacers+NGG_hg38+__4+2_integrated_results.tsv")
+        self.assertEqual(ro, {"pam": "NGG", "genome": "hg38", "mm": "4", "bmax": "2"})
+
+    def test_multi_guide_report_with_several_registries_installed(self):
+        """Three registries installed: the search's own, a disjoint one, and a merged
+        panel whose name holds the other's. Each report takes its search's registry."""
+        self._install_registry("hg38_1000G", 31130, 1744, {"1000G": 2548})
+        self._install_registry("hg38_hgdpx", 4624, 383, {"hgdpx": 500})
+        self._install_registry("hg38_1000G_hgdpx", 33435, 1800, {"1000G_hgdpx": 3048})
+        var = {**self._PARAMS, "Ref_comp": "True"}
+        cases = {
+            "mg_1000G": ("Multiple_spacers+NRG_hg38+hg38_1000G_6+3", "hg38_1000G",
+                         "1000G", 31130, {"1000G": 2548}),
+            "mg_hgdpx": ("Multiple_spacers+NRG_hg38+hg38_hgdpx_6+3", "hg38_hgdpx",
+                         "hgdpx", 4624, {"hgdpx": 500}),
+            # single guide: the merged registry sorts first and holds the name "hgdpx"
+            "sg_hgdpx": (f"{_GUIDE}+NRG_hg38+hg38_hgdpx_6+3", "hg38_hgdpx",
+                         "hgdpx", 4624, {"hgdpx": 500}),
+        }
+        for name, (stem, vcf, label, n_snp, dbs) in cases.items():
+            with self.subTest(name):
+                rd = self._install_job(name, f"{stem}_integrated_results.tsv",
+                                       {**var, "Genome_idx": f"NRG_4_hg38+{vcf}"},
+                                       variant_rows=True)
+                html, manifest, _keys = self._job_report(rd)
+                for present in (f'<td class="k">Variant dataset(s)</td><td>{label}<',
+                                f'<td class="k">Variant database(s)</td><td>{label}<',
+                                f"<strong>{n_snp:,}</strong> SNPs",
+                                f"here the merged {label} union panel"):
+                    self.assertTrue(present in html, f"{present!r} not in the {name} report")
+                self.assertFalse("NRG+hg38" in html, f"a garbled label in the {name} report")
+                self.assertEqual(manifest["variant_datasets"], label)
+                self.assertEqual(manifest["database"]["n_records"], n_snp)
+                self.assertEqual(manifest["database"]["databases"], dbs)
+        # and a reference-only multi-guide search beside them borrows none of them
+        html, manifest, keys = self._job_report(self._install_job(
+            "mg_ref", "Multiple_spacers+NRG_hg38+__6+3_integrated_results.tsv",
+            dict(self._PARAMS)))
+        self.assertEqual(keys, ["Variant database(s)", "Off-target search criteria"])
+        self.assertIsNone(manifest["variant_datasets"])
+        self.assertIsNone(manifest["database"])
+
+    def test_registry_lookup_prefers_the_runs_own_registry(self):
+        """registry_<vcf> is the search's registry; the token match is the fallback
+        (legacy names), and the single-registry fallback still serves a variant run."""
+        self._install_registry("hg38_1000G_HGDP", 300, 30, {"1000G_HGDP": 3477})
+        self._install_registry("hg38_HGDP", 100, 10, {"HGDP": 929})
+        rd = os.path.join(self.tmp, "Results", "job")
+        os.makedirs(rd)
+        vc = gr._registry_variant_count(rd, {"datasets": "HGDP", "vcf_name": "hg38_HGDP"})
+        self.assertEqual(vc["databases"], {"HGDP": 929})
+        # no file-name VCF (an older caller): the token match, as before
+        vc = gr._registry_variant_count(rd, {"datasets": "1000G+HGDP"})
+        self.assertEqual(vc["databases"], {"1000G_HGDP": 3477})
 
 
 if __name__ == "__main__":

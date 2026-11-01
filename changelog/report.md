@@ -24,3 +24,23 @@
   rebuild it with `crisprme.py generate-report --result-dir Results/<job>`. Search results are
   unchanged, and the report of a variant search is byte-identical. Covered by
   `PostProcess/test_generate_report.py`.
+
+- **A multi-guide report garbled its variant dataset, and a report could take another dataset's
+  registry.** A search with more than one guide names its results
+  `Multiple_spacers+<PAM>_<genome>+<dataset>_<mm>+<bulges>_integrated_results.tsv`, and the report
+  split that name at the `_` inside `Multiple_spacers`, so the dataset read `NGG+hg38+hg38+1000G`
+  instead of `1000G` in the header, the inputs card, the MAF notes and `run_manifest.json`. That
+  label matched no variant registry, so the panel size and variant counts were right only while a
+  single registry was installed; with more, the report dropped the SNP and indel counts and the
+  manifest's `database`, and counted the panel over every installed samplesID file
+  (`3,048 individuals (1000G n=2,548, hgdpx n=500)` for a search of a 2,548-sample 1000G panel).
+  Separately, the registry was the first whose name held every dataset token, so a search of
+  `hg38_hgdpx` installed beside a merged `hg38_1000G_hgdpx` was given the merged panel's size and
+  counts (3,048 individuals and 31,130 SNPs instead of 500 and 4,624). The report now reads the
+  multi-guide name as it reads a single-guide one, and takes the search's own registry,
+  `Dictionaries/registry_<dataset folder>`, before any match by name. Affected: every multi-guide
+  variant search (the label), and searches on an install with more than one registry (the counts).
+  Present since 2.4.0. To correct a report built earlier, rebuild it with
+  `crisprme.py generate-report --result-dir Results/<job>`. Search results are unchanged, and the
+  report of a single-guide search is byte-identical unless it had taken another dataset's registry.
+  Covered by `PostProcess/test_generate_report.py`.
