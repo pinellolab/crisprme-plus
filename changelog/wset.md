@@ -36,8 +36,8 @@ post-analysis both give the reference alignments of a variant window; that code 
   as follows: an indel and a SNP that one haplotype carries are reported as one off-target, for the
   samples that carry both (the dictionaries gave the SNP alone, aligned with a bulge, or, for the
   fewest mismatches and bulges, the indel alone, for every sample that carries either); a SNP's
-  allele frequency is computed from the genotypes of the samples the list names, with up to six
-  decimals (`0.333333`), where the dictionaries gave the VCF's `AF` (`0.3333`), and an indel's is
+  allele frequency is computed from the genotypes of the samples the list names, to six significant
+  digits (`0.333333`), where the dictionaries gave the VCF's `AF` (`0.3333`), and an indel's is
   still the VCF's; `Other_motifs` counts each reference alignment over a SNP twice (`444` where the
   dictionaries gave `222`), and the file of alternative alignments, which a per-sample search
   writes, lists each such alignment twice, as on every search that reads the tiers; and rows come
