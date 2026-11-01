@@ -730,6 +730,11 @@ class StopSearch(unittest.TestCase):
         self.assertGreaterEqual(took, 0.5)
         self.assertLess(took, 5)
         self.assertEqual(proc.returncode, -signal.SIGKILL)
+        # _stop_search waits for proc alone: a process under it that was just sent
+        # SIGKILL can still show as running for a moment, under load
+        deadline = time.time() + 5
+        while time.time() < deadline and any(_running(p) for p in tree):
+            time.sleep(0.05)
         self.assertEqual([p for p in tree if _running(p)], [])
 
 
