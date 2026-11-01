@@ -328,6 +328,14 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_build_index_only_atomic -v
 
+      - name: "build-index-only refuses a genome folder it cannot index (no top-level .fa, a multi-sequence FASTA) and an index with no .bin"
+        # index-genome indexes the *.fa files at the top of the genome folder only: a
+        # UCSC chromFa archive unpacked with its chroms/ folder gave an index with no
+        # .bin, put in place as done, which every search refused. The real crisprme.py
+        # against test_build_index_only_atomic's stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_build_index_only_layout -v
+
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import
         # env, array_module (numpy vs cupy), and configure_tf device placement via a fake

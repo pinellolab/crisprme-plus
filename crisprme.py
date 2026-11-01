@@ -3145,6 +3145,46 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
         )
 
 
+def _check_genome_layout(genomedir: str) -> None:
+    """Stops build-index-only, with an ERROR that says what to do, on a genome
+    folder it cannot index as a search reads it: one FASTA file a sequence, named
+    after it, at the top of the folder (genome_layout.py). index-genome indexes the
+    ``*.fa`` files there only, so a folder that holds none (a UCSC chromFa archive
+    unpacked with its chroms/ folder, FASTAs named .fasta or still gzipped) gave an
+    index with no .bin, which every search refuses, and a file of several sequences
+    one that the search refuses to use."""
+    from genome_layout import describe_problem, find_multi_record_fastas
+
+    names = sorted(os.listdir(genomedir))
+    if not any(n.split(".")[-1] == "fa" and os.path.isfile(os.path.join(genomedir, n))
+               for n in names):
+        found = sorted(
+            os.path.relpath(os.path.join(top, f), genomedir)
+            for top, _dirs, files in os.walk(genomedir)
+            for f in files if f.endswith((".fa", ".fasta", ".fa.gz", ".fasta.gz"))
+        )
+        shown = ", ".join(found[:3]) + (", ..." if len(found) > 3 else "")
+        error(
+            f"The genome folder {genomedir} holds no .fa file at its top, so there is "
+            f"nothing to index"
+            + (f" (it holds {shown})" if found else "")
+            + ". CRISPRme needs one decompressed FASTA file per sequence there, named "
+            "after it (chr1.fa, chr2.fa, ...): move the .fa files up out of their "
+            "folder, rename .fasta to .fa, or gunzip them, then run build-index-only "
+            "again. (A genome uploaded from the web Settings page is laid out this "
+            "way: remove this one there and upload it again.)"
+        )
+    multi = find_multi_record_fastas(genomedir)
+    if multi:
+        fname, ids = next(iter(multi.items()))
+        error(
+            describe_problem(genomedir, fname, ids)
+            + "\nThen run build-index-only again. (A genome uploaded from the web "
+            "Settings page is split this way: remove this one there and upload it "
+            "again.)"
+        )
+
+
 def _ensure_per_chromosome_vcfs(vcfdir: str) -> None:
     """Make a variant dataset usable by ``crispritz add-variants``, which requires
     the VCF folder to hold **per-chromosome** files and derives each chromosome from
@@ -3617,7 +3657,7 @@ def _in_build_dir(parent: str, prefix: str, build, stage=None):
 
 
 def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
-                     **kwargs) -> bool:
+                     need_bin=False, **kwargs) -> bool:
     """Runs index command ``cmd``, which writes ``./genome_library/<name>`` under its
     working directory, and puts that in ``<workdir>/genome_library/<name>`` only
     once the command has succeeded.
@@ -3643,8 +3683,10 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
     indexes, each genome into ``subdir`` of the index (None: no contig read). If a
     search holds the index's build lock by then, the run stops
     (_refuse_locked_build); if another run has put the index in place meanwhile,
-    that one is kept and this build discarded. Returns True when this build went
-    into place.
+    that one is kept and this build discarded. With ``need_bin`` (the index of a
+    genome, not of the fake-indel contigs, which may hold no site), it fails too
+    when the command has written no .bin at all: every search refuses such an index.
+    Returns True when this build went into place.
     """
     import errno
     import crispritz_bins
@@ -3680,6 +3722,14 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
                     f"nothing was put in place (expected {final})"
                 )
             unread = unread or bool(cannot)
+        if need_bin and not any(f.endswith(".bin") for _top, _dirs, files in os.walk(built)
+                                for f in files):
+            genomes = ", ".join(g for g, _sub in indexed[2]) if indexed else "the genome"
+            error(
+                f"{failure}: the engine exited 0 but wrote no .bin, as when no sequence "
+                f"of {genomes} holds a site of this PAM, and every search refuses an "
+                f"index with none: nothing was put in place (expected {final})"
+            )
         for top, _dirs, _files in os.walk(built) if unread else ():
             probe = os.path.join(top, ".build-index-only-probe")
             try:
@@ -3744,6 +3794,7 @@ def build_index_only() -> None:
             "the FASTA with no index.\n"
         )
         sys.exit(0)
+    _check_genome_layout(genomedir)  # before anything is built from it
     # working directory under which genome_library/ is created (mirrors the
     # current_working_directory complete-search uses to locate genome_library/)
     workdir = os.getcwd()
@@ -3831,7 +3882,7 @@ def build_index_only() -> None:
         )
         if _build_index_dir(
             index_cmd, workdir, index_name, "Reference genome indexing failed",
-            indexed=(pamfile, bMax + 1, [(genomedir, "")]), shell=True,
+            indexed=(pamfile, bMax + 1, [(genomedir, "")]), need_bin=True, shell=True,
         ):
             print(f"Index built: {idx_folder}", flush=True)
     _write_pam_build(idx_folder, pamfile)
@@ -4515,6 +4566,7 @@ def build_index_only() -> None:
             os.path.basename(snp_idx),
             "Variant genome indexing failed",
             indexed=(pamfile, bMax + 1, [(enriched, "")]),
+            need_bin=True,
             shell=True,
         )
     else:
