@@ -153,6 +153,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_reference_rows_once -v
 
+      - name: "A sites-only dataset's rows stay at their sites in the merge step (the sorts read tab-separated columns; no empty item in a merged list)"
+        working-directory: PostProcess
+        run: python -m unittest test_merge_sites_only_rows -v
+
       - name: "Indel per-chrom subset regression (#172: fakechrom match)"
         working-directory: PostProcess
         run: python -m unittest test_indel_chrom_subset -v

@@ -43,6 +43,13 @@ def _rep_tiebreak(x):
     return (-_ncarriers, str(x[2]), str(x[pos - 1]))
 
 
+def _merged_list(kept, other):
+    """One list column (samples, rsID, AF) of a variant row that two datasets give. A
+    sites-only dataset's row has no carriers and can have no allele frequency, which
+    adjust_cols.py leaves empty: it adds no empty item to the other dataset's list."""
+    return kept + "," + other if kept and other else kept or other
+
+
 def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     # avoid crush when cluster is empty in the first call
     if not cluster:
@@ -71,20 +78,17 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
         else:
             # merge samples of identical targets (coming from different VCF datasets)
             if (ele[pos], ele[snp_info]) in dict_var.keys():
-                dict_var[(ele[pos], ele[snp_info])][0][true_guide - 2] = (
-                    dict_var[(ele[pos], ele[snp_info])][0][true_guide - 2]
-                    + ","
-                    + ele[true_guide - 2]
+                dict_var[(ele[pos], ele[snp_info])][0][true_guide - 2] = _merged_list(
+                    dict_var[(ele[pos], ele[snp_info])][0][true_guide - 2],
+                    ele[true_guide - 2],
                 )  # true_guide - 2 points to samples column
-                dict_var[(ele[pos], ele[snp_info])][0][snp_info - 2] = (
-                    dict_var[(ele[pos], ele[snp_info])][0][snp_info - 2]
-                    + ","
-                    + ele[snp_info - 2]
+                dict_var[(ele[pos], ele[snp_info])][0][snp_info - 2] = _merged_list(
+                    dict_var[(ele[pos], ele[snp_info])][0][snp_info - 2],
+                    ele[snp_info - 2],
                 )  # snp_info - 2 points to rsID column
-                dict_var[(ele[pos], ele[snp_info])][0][snp_info - 1] = (
-                    dict_var[(ele[pos], ele[snp_info])][0][snp_info - 1]
-                    + ","
-                    + ele[snp_info - 1]
+                dict_var[(ele[pos], ele[snp_info])][0][snp_info - 1] = _merged_list(
+                    dict_var[(ele[pos], ele[snp_info])][0][snp_info - 1],
+                    ele[snp_info - 1],
                 )  # ttuesnp_info_guide - 2 points to AF column
             else:
                 dict_var[(ele[pos], ele[snp_info])] = [ele]

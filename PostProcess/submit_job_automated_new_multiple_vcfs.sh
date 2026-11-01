@@ -1723,15 +1723,17 @@ fi
 # START STEP 5 - targets merge
 # sort files to have chromosomes and positions in proximity -> simplify merge
 echo -e 'Merging Targets\tStart\t'$(date) >>$log
-# sort using guide_seq,chr,cluster_pos,score,total(mm+bul)
+# sort using guide_seq,chr,cluster_pos,score,total(mm+bul). The fields are the tab-separated
+# columns: sort's default (blanks) would take a row with an empty column, as adjust_cols.py
+# leaves the Samples of a sites-only dataset's row, for one with the later columns moved up
 head -1 $final_res.bestCFD.txt >$final_res.tmp
-tail -n +2 $final_res.bestCFD.txt | LC_ALL=C sort -k16,16 -k5,5 -k7,7n -k21,21rg -k11,11n -T $output_folder >>$final_res.tmp && mv $final_res.tmp $final_res.bestCFD.txt
+tail -n +2 $final_res.bestCFD.txt | LC_ALL=C sort -t $'\t' -k16,16 -k5,5 -k7,7n -k21,21rg -k11,11n -T $output_folder >>$final_res.tmp && mv $final_res.tmp $final_res.bestCFD.txt
 #sort using guide_seq,chr,cluster_pos,score,total(mm+bul)
 head -1 $final_res.bestCRISPR_BULGE.txt >$final_res.tmp
-tail -n +2 $final_res.bestCRISPR_BULGE.txt | LC_ALL=C sort -k16,16 -k5,5 -k7,7n -k21,21rg -k11,11n -T $output_folder >>$final_res.tmp && mv $final_res.tmp $final_res.bestCRISPR_BULGE.txt
+tail -n +2 $final_res.bestCRISPR_BULGE.txt | LC_ALL=C sort -t $'\t' -k16,16 -k5,5 -k7,7n -k21,21rg -k11,11n -T $output_folder >>$final_res.tmp && mv $final_res.tmp $final_res.bestCRISPR_BULGE.txt
 #sort using guide_seq,chr,cluster_pos,total(mm+bul)
 head -1 $final_res.bestmmblg.txt >$final_res.tmp
-tail -n +2 $final_res.bestmmblg.txt | LC_ALL=C sort -k16,16 -k5,5 -k7,7n -k11,11n -T $output_folder >>$final_res.tmp && mv $final_res.tmp $final_res.bestmmblg.txt
+tail -n +2 $final_res.bestmmblg.txt | LC_ALL=C sort -t $'\t' -k16,16 -k5,5 -k7,7n -k11,11n -T $output_folder >>$final_res.tmp && mv $final_res.tmp $final_res.bestmmblg.txt
 if [ -s $logerror ]; then 
 	printf "ERROR: results file preprocessing failed for targets merge step\n" >&2
 	rm $output_folder/*.bestCFD.txt $output_folder/*.bestmmblg.txt $output_folder/*.bestCRISPR_BULGE.txt $output_folder/*.bestMerge.txt $output_folder/*.altMerge.txt
