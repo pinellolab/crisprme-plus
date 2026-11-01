@@ -14,7 +14,9 @@ reference depth relied on the raw genome -- also with an installed index that se
 the bulges selected -- and "no raw genome to build one" for a panel whose genome and
 VCF files are installed. The cap set DNA/RNA to 0 (and so Max edits to 4), and lifting
 it did not give them back. They come back also when the browser runs the cap twice for
-one change, whatever the order of the two runs and their answers (_Form).
+one change, whatever the order of the two runs and their answers (_Form), and Max edits
+comes back as far as the bulges allow when a cap is lifted only partly (a panel with a
+1-bulge index after one with none): it stayed at the 4 of the 0-bulge cap.
 
 Run with:
 
@@ -206,12 +208,15 @@ class TestBulgeCap(_Install):
 
     def test_partly_lifted_cap(self):
         self.index("NRG_3_hg38")
-        *_, dna, rna, _e, held = self.limit("fresh", 2, 2, 8, {})
-        self.assertEqual((dna, rna), (0, 0))
-        *_, dna, rna, _e, held = self.limit("walk", dna, rna, 4, held)  # walk: 1 bulge
-        self.assertEqual((dna, rna), (1, 1))
-        self.assertEqual(held["dna"], 2)  # still owed
-        slider = mp.sync_max_edits_bound(4, dna, rna, 4)[2]  # 4 (it was pulled down to 4)
+        *_, dna, rna, edits, held = self.limit("fresh", 2, 2, 8, {})
+        self.assertEqual((dna, rna, edits), (0, 0, 4))
+        *_, dna, rna, edits, held = self.limit("walk", dna, rna, edits, held)  # walk: 1 bulge
+        # 1/1, and Max edits up to 4 + 1 + 1 = 6 again, not left at the 4 the first
+        # cap set; DNA/RNA 2 and Max edits 8 are still owed
+        self.assertEqual((dna, rna, edits), (1, 1, 6))
+        self.assertEqual((held["dna"], held["rna"], held["edits"]), (2, 2, 8))
+        slider = mp.sync_max_edits_bound(4, dna, rna, edits)[2]
+        self.assertEqual(slider, 6)
         *_, dna, rna, edits, held = self.limit("ref", dna, rna, slider, held)
         self.assertEqual((dna, rna, edits, held), (2, 2, 8, {}))
 
@@ -254,6 +259,46 @@ class TestBulgeCap(_Install):
                 form.v["edits"] = 3  # moved while the bulges are capped
                 form.change("zero", order)  # another panel capped at 0
                 self.assertEqual(form.change("ref", order), (1, 1, 3))
+
+    def test_a_partly_lifted_cap_gives_back_the_max_edits_it_allows(self):
+        # Reference only with DNA 2, then walk2 (no index: 0 bulges), then walk (a
+        # 1-bulge index): the cap gave back 1/1 but left Max edits at the 4 the 0-bulge
+        # cap had set, while walk straight from Reference only gave 6, so the same form
+        # ran a search with at most 4 or 6 mismatches + bulges (Advanced closed),
+        # depending on the way there. Both ways give 6 now, with the two runs of the
+        # cap for each change in any order.
+        self.index("NRG_2_hg38")
+        for capping in ORDERS:
+            for lifting in ORDERS:
+                with self.subTest(capping=capping, lifting=lifting):
+                    direct = _Form(dna=2)
+                    self.assertEqual(direct.change("walk", lifting), (1, 1, 6))
+                    form = _Form(dna=2)
+                    self.assertEqual(form.change("fresh", capping), (0, 0, 4))
+                    self.assertEqual(form.change("walk", lifting), (1, 1, 6))
+                    self.assertEqual(form.change("ref", lifting), (2, 1, 6))
+                    form = _Form(dna=2)  # walk, a panel with no index, walk again
+                    self.assertEqual(form.change("walk", capping), (1, 1, 6))
+                    self.assertEqual(form.change("fresh", capping), (0, 0, 4))
+                    self.assertEqual(form.change("walk", lifting), (1, 1, 6))
+                    self.assertEqual(form.change("ref", lifting), (2, 1, 6))
+
+    def test_a_partly_lifted_cap_keeps_a_lower_max_edits_and_one_moved_by_hand(self):
+        self.index("NRG_2_hg38")
+        for order in ORDERS:
+            with self.subTest(order=order):
+                # Max edits 5, below the 4 + 2 + 1 the bulges allow: 4 on the 0-bulge
+                # panel, 5 again on walk (4 + 1 + 1 = 6 allows it) and on Reference only
+                form = _Form(dna=2, edits=5)
+                self.assertEqual(form.change("fresh", order), (0, 0, 4))
+                self.assertEqual(form.change("walk", order), (1, 1, 5))
+                self.assertEqual(form.change("ref", order), (2, 1, 5))
+                # moved by hand on the 0-bulge panel: it stays where the user put it
+                form = _Form(dna=2)
+                form.change("fresh", order)
+                form.v["edits"] = 3
+                self.assertEqual(form.change("walk", order), (1, 1, 3))
+                self.assertEqual(form.change("ref", order), (2, 1, 3))
 
 
 if __name__ == "__main__":

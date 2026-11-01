@@ -2506,16 +2506,20 @@ def limit_bulges_to_index(
             # to give back.
             return opts, opts, dna_v, rna_v, no_update, held
         # lowered now: remember the values to give back, and the Max edits (unless the
-        # user has moved it since the cap last set it: then theirs stands). Max edits
-        # comes down to mismatches + bulges here, with the bulges and the memory, as
-        # sync_max_edits_bound then does too: a later run sees all three as they are.
+        # user has moved it since the cap last set it: then theirs stands). Max edits is
+        # set to that value, at most mismatches + bulges, with the bulges and the memory,
+        # as sync_max_edits_bound then does too: a later run sees all three as they are.
+        # A cap lifted only partly (a panel with a 1-bulge index after one with none)
+        # starts from the remembered value, not from the lower one the slider shows.
         if held:
             edits = held.get("edits") if cur_edits == held.get("edits_set") else None
         else:
             edits = cur_edits
         try:
-            edits_set = min(int(cur_edits), max(1, int(mms) + dna_v + rna_v))
             edits = int(edits) if edits is not None else None
+            edits_set = min(
+                int(cur_edits if edits is None else edits), max(1, int(mms) + dna_v + rna_v)
+            )
         except (TypeError, ValueError):
             edits = edits_set = None
         memory = {

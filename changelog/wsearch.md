@@ -68,19 +68,21 @@ was found by the 2.8.1 web walkthrough or its review and is older.
   reference index; for a variant panel whose genome and VCF files are installed but that has no
   index yet, it said there was "no raw genome to build one", although Settings can build it. That
   panel set the DNA and RNA bulges to 0, and with them Max edits to 4, and choosing Reference only
-  again did not give back 1, 1 and 6: a search submitted then ran with at most 4 mismatches +
-  bulges, unless the user noticed. The note now compares the bulges selected with the installed
-  reference index and says when the search will build a deeper one first (a web search does,
-  from the installed genome, once). For a panel with no variant index it says that only a 0-bulge
-  search is offered and that the first one prepares the variant genome and a 0-bulge index (hours
-  on a full genome), and to build the index in Settings ("Build an index locally") when the
-  genome and VCF files are installed, or to download one otherwise. The DNA and RNA bulges and
-  the Max edits that the cap lowered come back when the cap allows them again (1, 1 and 6 by
-  default, also after several panels in a row), unless they were changed by hand in between.
-  The web user
-  guide, the Docker quickstart, the website and the data setup guide now say what a web search
-  builds (a missing reference index; for a panel without a variant index, a 0-bulge one), as
-  does the message of the submit check. Covered by `PostProcess/test_web_bulge_notes.py`.
+  again, or a panel with a 1-bulge index, did not give back 1, 1 and 6: a search submitted then ran
+  with at most 4 mismatches + bulges, unless the user noticed (in the walkthrough data, a search on
+  the panel `walk`, chosen after `walk2`, which has no index, found 15 of the 18 sites it finds
+  with `walk` chosen straight away). The note now compares the bulges selected with the installed
+  reference index and says when the search will build a deeper one first (a web search does, from
+  the installed genome, once). For a panel with no variant index it says that only a 0-bulge search
+  is offered and that the first one prepares the variant genome and a 0-bulge index (hours on a
+  full genome), and to build the index in Settings ("Build an index locally") when the genome and
+  VCF files are installed, or to download one otherwise. The DNA and RNA bulges and the Max edits
+  that the cap lowered come back as far as the cap allows them again, unless they were changed by
+  hand in between: 1, 1 and 6 by default, on Reference only and on a panel with a 1-bulge index
+  alike, also after several panels in a row. The web user guide, the Docker quickstart, the website
+  and the data setup guide now say what a web search builds (a missing reference index; for a panel
+  without a variant index, a 0-bulge one), as does the message of the submit check. Covered by
+  `PostProcess/test_web_bulge_notes.py`.
 - **A results link to a job without results gave a server error and a blank page.**
   `/result?job=<id>` for a job that does not exist, failed, was refused (an unfinished index),
   found no off-target or has not finished failed on the missing results file (HTTP 500 and only
