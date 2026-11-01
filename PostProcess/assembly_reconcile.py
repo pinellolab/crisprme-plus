@@ -49,6 +49,7 @@ import re
 import shutil
 import subprocess
 import time
+import uuid
 
 from datetime import datetime
 
@@ -492,12 +493,19 @@ def haplotype_genome_view(cwd: str, genome_dir: str, haplotype: str) -> str:
     real = os.path.realpath(genome_dir)
     target = real if os.path.isabs(identity) else os.path.relpath(real, os.path.realpath(view_dir))
     if not (os.path.islink(view) and os.readlink(view) == target):
-        # replaced in one step, so a run starting meanwhile never sees it missing
-        tmp = f"{view}.{os.getpid()}.tmp"
-        if os.path.lexists(tmp):
-            os.remove(tmp)
+        # Replaced in one step, so a run starting meanwhile never sees it missing.
+        # The temporary link's name is this call's own: runs starting together
+        # each make one, and crisprme.py is PID 1 in every Docker container.
+        tmp = os.path.join(view_dir, f".{os.path.basename(view)}.{uuid.uuid4().hex}.tmp")
         os.symlink(target, tmp)
-        os.replace(tmp, view)
+        try:
+            os.replace(tmp, view)
+        except OSError:
+            if os.path.lexists(tmp):
+                os.remove(tmp)
+            # a run starting together may have made the same link meanwhile
+            if not (os.path.islink(view) and os.readlink(view) == target):
+                raise
     return view
 
 
@@ -616,11 +624,16 @@ def stamp_built_haplotype_indexes(cwd: str, genome_view: str, present_before: Li
         try:
             if not any(f.endswith(".bin") for f in os.listdir(index_dir)):
                 continue
-            tmp = os.path.join(index_dir, f"{INDEX_SOURCE_FILENAME}.{os.getpid()}.tmp")
-            with open(tmp, "w") as handle:
-                json.dump(record, handle)
-                handle.write("\n")
-            os.replace(tmp, os.path.join(index_dir, INDEX_SOURCE_FILENAME))
+            # this call's own temporary file, as in haplotype_genome_view
+            tmp = os.path.join(index_dir, f"{INDEX_SOURCE_FILENAME}.{uuid.uuid4().hex}.tmp")
+            try:
+                with open(tmp, "w") as handle:
+                    json.dump(record, handle)
+                    handle.write("\n")
+                os.replace(tmp, os.path.join(index_dir, INDEX_SOURCE_FILENAME))
+            finally:
+                if os.path.lexists(tmp):
+                    os.remove(tmp)
         except OSError as e:
             print(f"Note: could not record which genome {os.path.basename(index_dir)} holds ({e})")
 

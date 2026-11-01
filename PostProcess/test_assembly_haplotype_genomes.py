@@ -16,7 +16,7 @@ These tests pin:
     individual, for --assembly-individual and the explicit-folder form alike, stable
     across runs, and left out for a legacy Genomes/<name> folder; never the name of
     the legacy layout's Genomes/<individual>_<haplotype> folder, so neither one
-    takes the other's index;
+    takes the other's index; made without a hitch by runs that start together;
   * assembly_search itself (crisprme.py run in-process; each haplotype's complete-search
     replaced by a stand-in that names, builds and reuses indexes by genome name as the
     pipeline does, and records which sequence it searched): each haplotype is searched
@@ -334,6 +334,86 @@ class IndexRecordsTheGenomeItHolds(_Workdir):
         before = ar.genome_fingerprint(self.view)
         _write_genome(self.genome("W1", "paternal"), "ACGA", mtime=time.time() - 3600)
         self.assertNotEqual(ar.genome_fingerprint(self.view), before)
+
+
+class RunsStartingTogetherDoNotTripEachOtherUp(_Workdir):
+    """Searches that start together on one data folder (several guides launched at
+    once, each in its own `docker run`) all make the haplotype's link, and may all
+    record the index they found built. Their temporary files were named after the
+    PID, which is 1 for crisprme.py in every container: one run removed or renamed
+    the other's and stopped with FileNotFoundError. Here the other run starts at the
+    worst moment, right after this one made its temporary file, with os.getpid() 1
+    in both."""
+
+    def setUp(self):
+        super().setUp()
+        _make_bundle(self.cwd, "W1", {"paternal": "ACGT", "maternal": "TTTT"})
+        self.genome_dir = self.genome("W1", "paternal")
+        patcher = mock.patch.object(ar.os, "getpid", return_value=1)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def view(self):
+        return ar.haplotype_genome_view(self.cwd, self.genome_dir, "paternal")
+
+    def test_both_make_the_haplotypes_link(self):
+        real_symlink = os.symlink
+        started, other = [], []
+
+        def symlink(*args, **kwargs):
+            real_symlink(*args, **kwargs)
+            if not started:  # the other run starts now, and goes all the way
+                started.append(True)
+                other.append(self.view())
+
+        with mock.patch.object(ar.os, "symlink", symlink):
+            view = self.view()
+        self.assertEqual(other, [view])
+        self.assertEqual(os.path.realpath(view), os.path.realpath(self.genome_dir))
+        self.assertEqual(os.listdir(os.path.dirname(view)), [os.path.basename(view)])
+
+    def test_a_link_the_other_run_made_meanwhile_is_taken(self):
+        # on a file system that will not rename over the other run's link
+        view = self.view()
+        target = os.readlink(view)
+        os.remove(view)
+
+        def replace(src, dst):
+            os.symlink(target, dst)
+            raise FileExistsError(dst)
+
+        with mock.patch.object(ar.os, "replace", replace):
+            self.assertEqual(self.view(), view)
+        self.assertEqual(os.listdir(os.path.dirname(view)), [os.path.basename(view)])
+
+    def test_any_other_failure_still_stops_the_run(self):
+        view = self.view()
+        os.remove(view)
+        with mock.patch.object(ar.os, "replace", side_effect=PermissionError(view)):
+            with self.assertRaises(PermissionError):
+                self.view()
+        self.assertEqual(os.listdir(os.path.dirname(view)), [])  # no temporary link left
+
+    def test_both_record_the_index_they_found_built(self):
+        view = self.view()
+        index = os.path.join(self.cwd, "genome_library", f"NRG_2_{os.path.basename(view)}")
+        os.makedirs(index)
+        open(os.path.join(index, "NRG_chr1_1.bin"), "w").close()
+        real_dump = json.dump
+        started = []
+
+        def dump(*args, **kwargs):
+            real_dump(*args, **kwargs)
+            if not started:  # the other run records it now
+                started.append(True)
+                ar.stamp_built_haplotype_indexes(self.cwd, view, [])
+
+        with mock.patch.object(ar.json, "dump", dump), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            ar.stamp_built_haplotype_indexes(self.cwd, view, [])
+        self.assertEqual(out.getvalue(), "")  # no "Note: could not record ..."
+        self.assertEqual(ar._read_index_source(index)["fingerprint"], ar.genome_fingerprint(view))
+        self.assertEqual(sorted(os.listdir(index)), [ar.INDEX_SOURCE_FILENAME, "NRG_chr1_1.bin"])
 
 
 # --------------------------------------------------------------------------- #
