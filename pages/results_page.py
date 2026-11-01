@@ -2821,7 +2821,7 @@ def download_report(
     [Input("interval-sumbysample", "n_intervals")],
     [State("div-info-sumbysample-targets", "children"), State("url", "search")],
 )
-def download_link_sample(
+def download_link_sumbysample(  # a name of its own: as download_link_sample it hid the one above
     n: int, file_to_load: str, search: str
 ) -> Tuple[str, bool]:  # file to load = job_id.HG001.guide
     """Create the link to download CRISPRme results by sample table.
@@ -2857,6 +2857,13 @@ def download_link_sample(
                 href=os.path.join(URL, RESULTS_DIR, job_id, file_to_load),
                 target="_blank",
             ),
+            True,
+        )
+    # Polled every 5 s: stop after 30 polls, as the Summary by Sample link does,
+    # instead of saying "Please wait" forever for a file that is not coming.
+    if n >= 30:
+        return (
+            "Download link unavailable (the file could not be generated).",
             True,
         )
     return "Generating download link, Please wait...", False
@@ -2907,6 +2914,13 @@ def downloadLinkGuide(
                 href=os.path.join(URL, RESULTS_DIR, job_id, file_to_load),
                 target="_blank",
             ),
+            True,
+        )
+    # Polled every 5 s: stop after 30 polls, as the Summary by Sample link does,
+    # instead of saying "Please wait" forever for a file that is not coming.
+    if n >= 30:
+        return (
+            "Download link unavailable (the file could not be generated).",
             True,
         )
     return "Generating download link, Please wait...", False
@@ -3741,8 +3755,8 @@ def update_table_sample(
         integrated_sample_personal_fname, sep="\t", na_rep="NA", index=False
     )
     # personal targets report ZIP
-    integrated_sample_personal_zip_fname = integrated_sample_personal_fname.replace(
-        "tsv", "zip"
+    integrated_sample_personal_zip_fname = (  # the extension only, as for the guide's
+        os.path.splitext(integrated_sample_personal_fname)[0] + ".zip"
     )
     # zip operation, non blocking
     cmd = f"zip -j {integrated_sample_personal_zip_fname} {integrated_sample_personal_fname} &"
@@ -4110,8 +4124,9 @@ def update_table_subset(
     )
     # save df to tsv with filtered data
     result.to_csv(targets_with_mm_bul, sep="\t", na_rep="NA", index=False)
-    # change name to zip file
-    targets_with_mm_bul_zip = targets_with_mm_bul.replace("tsv", "zip")
+    # change name to zip file (the extension only: a "tsv" elsewhere in the path, in
+    # a job name say, must stay, or the zip lands in a folder that does not exist)
+    targets_with_mm_bul_zip = os.path.splitext(targets_with_mm_bul)[0] + ".zip"
     # zip operation, non blocking
     cmd = f"zip -j {targets_with_mm_bul_zip} {targets_with_mm_bul} &"
     code = subprocess.call(cmd, shell=True)
@@ -4228,18 +4243,11 @@ def guidePagev3(job_id, hash):
     )
     # put_header = 'head -1 ' + job_directory + job_id + file_to_grep + ' > ' + guide_grep_result + ' ; '
 
+    # the table's targets file, as update_table_subset writes and zips it:
+    # Results/<job>/<job>.<bulge type>.<mm>.<bulge size>.<guide>.targets.zip
     final_list.append(
         html.Div(
-            f"{job_id}/"
-            + "."
-            + str(bulge_t)
-            + "."
-            + str(mms)
-            + "."
-            + str(bulge_s)
-            + "."
-            + guide
-            + ".targets",
+            f"{job_id}.{bulge_t}.{mms}.{bulge_s}.{guide}.targets",
             style={"display": "none"},
             id="div-info-sumbyguide-targets",
         )
@@ -6578,9 +6586,12 @@ def update_content_tab(
         fl.append(
             html.Div(
                 [
+                    # the file the table above is read from: one per criterion
+                    # (<job>.summary_by_samples.<guide>_<criterion>.txt)
                     html.Div(
                         os.path.join(
-                            job_directory, f"{job_id}.summary_by_samples.{guide}"
+                            job_directory,
+                            f"{job_id}.summary_by_samples.{guide}_{filter_criterion}",
                         ),
                         style={"display": "none"},
                         id="div-info-summary_by_sample",

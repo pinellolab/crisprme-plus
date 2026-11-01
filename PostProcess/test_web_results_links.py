@@ -3,6 +3,10 @@
 * a results link to a job with no results (no such job, failed, refused for an
   unfinished build, found nothing, not finished) failed on the missing results file
   with a server error and a blank page (``results_page._result_not_ready``);
+* the Summary by Sample download looked for a file the pipeline does not write
+  (no ``_<criterion>`` suffix), and the Show Targets download looked under
+  ``Results/<job>/<job>/`` with a leading dot, so it said "Please wait" for ever;
+  a "tsv" in the job name sent the Show Targets zip to a folder that does not exist;
 * the job status page held the "view-results" link twice (one id, two elements).
 
 Run with:
@@ -185,6 +189,55 @@ class TestResultLinkWithoutResults(_Tmp):
         self.assertIsNone(rp._result_not_ready("done"))
         page = rp.guidePagev3("done", f"{GUIDE}newX00")
         self.assertIsNotNone(_by_id(page, "table-subset-target"))
+
+
+class TestDownloadLinks(_Tmp):
+    def test_summary_by_sample_links_the_file_of_the_selected_criterion(self):
+        job = "sbs_ABC"
+        self._job(job, log="Job\tDone\tFri\n")
+        for crit in ("CFD", "CRISPR-Bulge", "fewest"):
+            with self.subTest(criterion=crit):
+                tab = rp.update_content_tab(
+                    "tab-summary-by-sample", [{"row": 0}], crit, [{"Guide": GUIDE}],
+                    f"?job={job}", "both",
+                )
+                info = _by_id(tab, "div-info-summary_by_sample").children
+                link, done = rp.download_link_sample(1, info, f"?job={job}")
+                self.assertTrue(done)
+                self.assertEqual(
+                    link.href,
+                    f"Results/{job}/{job}.summary_by_samples.{GUIDE}_{crit}.txt",
+                )
+
+    def test_show_targets_links_the_zip_the_table_writes(self):
+        job = "tsvjob_ABC"  # a "tsv" in the job name must stay in the zip's path
+        self._job(job, log="Job\tDone\tFri\n")
+        page = rp.guidePagev3(job, f"{GUIDE}newX00")
+        info = _by_id(page, "div-info-sumbyguide-targets").children
+        self.assertEqual(info, f"{job}.X.0.0.{GUIDE}.targets")
+        # the table callback writes the shown rows and zips them (in the background)
+        data, _cols = rp.update_table_subset(0, 10, [], None, [], f"?job={job}", f"#{GUIDE}newX00")
+        self.assertEqual(len(data), 2)
+        zipped = os.path.join(self.tmp, rp.RESULTS_DIR, job, f"{info}.zip")
+        for _ in range(50):
+            if os.path.isfile(zipped):
+                break
+            time.sleep(0.1)
+        link, done = rp.downloadLinkGuide(1, info, f"?job={job}")
+        self.assertTrue(done)
+        self.assertEqual(link.href, f"Results/{job}/{info}.zip")
+
+    def test_show_targets_polls_stop(self):
+        job = "nozip_ABC"
+        self._job(job, log="Job\tDone\tFri\n")
+        for poll in (rp.downloadLinkGuide, rp.download_link_sumbysample):
+            with self.subTest(poll=poll.__name__):
+                self.assertEqual(poll(1, "missing", f"?job={job}"),
+                                 ("Generating download link, Please wait...", False))
+                self.assertEqual(
+                    poll(30, "missing", f"?job={job}"),
+                    ("Download link unavailable (the file could not be generated).", True),
+                )
 
 
 class TestStatusPageIds(unittest.TestCase):
