@@ -517,9 +517,9 @@ class SearchSide(_Fixture):
                 f"builds it anew from the fake-indel genome in {self.work}/Genomes/ref+ds_INDELS")
 
     def download(self):
-        """What an ERROR says to do with neither those VCFs nor that genome here: it removes
-        only the INDELS index, the one thing in the way of the download, which a failed
-        download then leaves as it was broken."""
+        """What an ERROR says to do with neither those VCFs nor that genome here. It removes
+        only the INDELS index, the one thing in the way of the download, so a download that
+        fails (an index that is not on the hub) takes nothing more."""
         return (f": for an index you downloaded, download it again: rm -rf '{self.idx}' && "
                 f"crisprme.py download --what index --index-name {self.true_pam}_3_ref+ds "
                 f"--path '{self.work}'; for one you built, put its VCFs back in '{self.vcf_dir}' "

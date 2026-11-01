@@ -54,14 +54,14 @@
   for an NRG index, and for NRG served by the 3- and 8-nt-flank PAM-less indexes, with a sub-index
   missing or holding no `.bin`, with and without the fake-indel genome, and with and without the
   VCF folder; and from `complete-test --chrom` for an NRG index, once its results folder is
-  removed, as it asks, but for those two differences. The download command was run for an NRG index
-  only, and with its archive served from a local folder, not from the hub. A run that succeeds does
-  not reach the new stop. **No published index is affected:** in the copies of the published
-  indexes on the build machine, every indel sub-index holds a `.bin`, except in the superseded
-  `NRR_3_hg38+hg38_mega` archive (see its entry above), whose own indel logs are empty, so a search
-  skips those chromosomes as before. **What to do:** nothing for an index built with 2.8.1, or for
-  one built before whose fake-indel genome is still in place; otherwise follow the ERROR. Covered
-  by `PostProcess/test_indel_empty_chromosome.py`.
+  removed, as it asks, but for those two differences. The download command and putting the VCFs
+  back were followed for an NRG index only, the download with its archive served from a local
+  folder, not from the hub. A run that succeeds does not reach the new stop. **No published index
+  is affected:** in the copies of the published indexes on the build machine, every indel sub-index
+  holds a `.bin`, except in the superseded `NRR_3_hg38+hg38_mega` archive (see its entry above),
+  whose own indel logs are empty, so a search skips those chromosomes as before. **What to do:**
+  nothing for an index built with 2.8.1, or for one built before whose fake-indel genome is still
+  in place; otherwise follow the ERROR. Covered by `PostProcess/test_indel_empty_chromosome.py`.
 - **A variant search with bulges no longer loses the indel off-targets of a chromosome whose indel
   sub-index is missing** (in 2.8.0 too). Such a chromosome was searched in its fake-indel genome
   without bulges, a fallback meant for searches without bulges: the run exited 0 with no message,
