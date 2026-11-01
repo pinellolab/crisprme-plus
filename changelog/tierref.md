@@ -1,13 +1,25 @@
-<!-- tierref track: [2.8.1] entry for CHANGELOG.md, to be merged by the docs track under
-"### Fixed". It is the change that the header note of changelog/wset.md calls "an equivalent
-change" for the REF columns of a SNP row on the tier path (round 4 review F3-tier-REF); with
-it in, those columns are as the dictionaries give them, so that note's REF caveat needs no
-text in CHANGELOG.md. The clause "and, in this release, every index built or built again in
-the web Settings page" depends on the wset track's Settings change (a Settings variant build
-passes --samplesID); drop it if that change does not ship. Numbers: the default index
-NRG_3_hg38+hg38_HGDP1kGP as downloaded, NRG, 4 mismatches, 1 DNA and 1 RNA bulge; per-sample
-with guide ACTGAAATCTGTAAGCAGGC and population-level with guide CTAACAGTTGCTTTTATCAC, each
-run on aa9c54b and on this fix. -->
+<!-- tierref track: [2.8.1] entry, merged by the docs track. -->
+
+**For the docs track: one entry, under `### Fixed`; one clause in it holds only if the wset
+track's Settings change ships.** The clause "and, in this release, every index built or built
+again in the web Settings page" (in the sentence after the bold title) is true because the wset
+track makes a variant build in the web Settings page pass the dataset's sample list as
+`--samplesID` (the first entry under Fixed in `changelog/wset.md`). If that change does not ship
+in 2.8.1, replace these two lines of the entry
+
+> `NRG_3_hg38+hg38_HGDP1kGP` among them), every index built with `build-index-only --samplesID`,
+> and, in this release, every index built or built again in the web Settings page. A sites-only
+
+with
+
+> `NRG_3_hg38+hg38_HGDP1kGP` among them) and every index built with `build-index-only --samplesID`.
+> A sites-only
+
+With this entry in, the text that the preamble of `changelog/wset.md` says to add if this fix does
+not land is not needed. The numbers in the entry are from the default index
+`NRG_3_hg38+hg38_HGDP1kGP` as downloaded, NRG, 4 mismatches, 1 DNA and 1 RNA bulge: a per-sample
+search with guide ACTGAAATCTGTAAGCAGGC and a population-level one with guide
+CTAACAGTTGCTTTTATCAC, each run on aa9c54b and on this fix.
 
 ### Fixed
 
