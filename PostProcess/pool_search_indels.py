@@ -107,6 +107,10 @@ SEARCHED, SKIPPED, REFUSED = "searched", "skipped", "refused"
 # the PAM, so there is no .bin.
 NO_TARGETS = ".no_targets"
 
+# The prefix of the folder complete-test --chrom runs its search from
+# (complete_test.CHROMVIEWPREFIX): see _outside_view.
+CHROMVIEWPREFIX = ".crisprme-test-view-"
+
 
 def _holds_bin(index_dir: str) -> bool:
     """Whether ``index_dir`` holds a tree, a regular file ``<name>.bin``: what
@@ -181,6 +185,27 @@ prune_pam = sys.argv[15] if len(sys.argv) > 15 else "0"
 prune_pam_flag = "--prune-pam" if prune_pam == "1" else ""
 
 
+def _in_chrom_view():
+    """Whether this search runs from complete-test --chrom's view of the working directory
+    (complete_test._chrom_view), a folder in it that the run removes when it ends."""
+    return os.path.basename(os.path.normpath(current_working_directory)).startswith(CHROMVIEWPREFIX)
+
+
+def _outside_view(path):
+    """``path`` as the user knows it: where it lies in complete-test --chrom's view, the
+    same path in the working directory that view mirrors. The search reads the view,
+    which holds this chromosome alone. But what a message names must outlast the run,
+    and what tells of an index is read in the working directory too: the view leaves out
+    an index's .pam_build, and need not hold the fake-indel genome."""
+    if not _in_chrom_view():
+        return path
+    view = os.path.normpath(current_working_directory)
+    inside = os.path.relpath(path, view)
+    if inside == os.pardir or inside.startswith(os.pardir + os.sep):
+        return path
+    return os.path.normpath(os.path.join(os.path.dirname(view), inside))
+
+
 def _own_pam():
     """``(line, name)`` when the PAM of the search's PAM file is not ``true_pam``, the PAM
     of the index: the PAM line (``"<sequence> <n>"``) of the PAM file the index was built
@@ -199,7 +224,7 @@ def _own_pam():
         return None
     k = len(true_pam)
     guide, n, name = len(seq) - abs(size), (k if size > 0 else -k), None
-    built = os.path.join(current_working_directory, "genome_library",
+    built = os.path.join(_outside_view(current_working_directory), "genome_library",
                          f"{true_pam}_{bMax}_{ref_name}+{vcf_name}", ".pam_build")
     try:
         with open(built) as fh:
@@ -215,7 +240,7 @@ def _pam_dirs():
     """Where a PAM file is looked for: the working directory's PAMs/, and the folder of
     the search's."""
     dirs = []
-    for d in (os.path.join(current_working_directory, "PAMs"),
+    for d in (os.path.join(_outside_view(current_working_directory), "PAMs"),
               os.path.dirname(os.path.abspath(pam_file))):
         d = os.path.normpath(d)
         if d not in dirs:
@@ -255,7 +280,7 @@ def _rebuild(raw_fakechrom, fasta):
     built with one that is not in _pam_dirs), the steps are said in words, never as a
     command with a blank to fill in: with the fake-indel genome here, the search builds
     a missing INDELS index from it with the index's own PAM, so removing it is enough."""
-    cwd = os.path.normpath(current_working_directory)
+    cwd = os.path.normpath(_outside_view(current_working_directory))
     indels_index = os.path.join(cwd, "genome_library",
                                 f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS")
     remove = [indels_index]
@@ -271,13 +296,13 @@ def _rebuild(raw_fakechrom, fasta):
                  f"--index-name {os.path.basename(variant)} --path '{cwd}'")
     # the bulges build-index-only builds the index's N from
     n = int(bMax) - 1 if bMax.isdigit() and int(bMax) > 0 else bMax
-    rest = f"--bDNA {n} --bRNA {n} --vcf '{vcf_dir}' --path '{cwd}'"
+    rest = f"--bDNA {n} --bRNA {n} --vcf '{_outside_view(vcf_dir)}' --path '{cwd}'"
     own = _own_pam()
     pam = _pam_file_of(*own) if own else pam_file
     if pam:
         removed = " ".join("'%s'" % p for p in remove)
-        return (f": rm -rf {removed} && crisprme.py build-index-only --genome '{ref_folder}' "
-                f"--pam '{pam}' {rest}{again}")
+        return (f": rm -rf {removed} && crisprme.py build-index-only --genome "
+                f"'{_outside_view(ref_folder)}' --pam '{pam}' {rest}{again}")
     if fasta:
         return (f": remove the INDELS index with rm -rf '{indels_index}' and run this search "
                 f"again, which builds it anew from the fake-indel genome in "
@@ -287,7 +312,7 @@ def _rebuild(raw_fakechrom, fasta):
             f"line '{own[0]}'), which is not in {' or '.join(_pam_dirs())}: remove "
             + " and ".join("'%s'" % p for p in remove)
             + f", write that PAM file, and run crisprme.py build-index-only with it as --pam, "
-              f"and --genome '{ref_folder}' {rest}{again}")
+              f"and --genome '{_outside_view(ref_folder)}' {rest}{again}")
 
 
 def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
@@ -335,9 +360,9 @@ def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
                    f"{os.path.join(raw_fakechrom, unread[0])} cannot be read as buildTST reads it")
     except (ImportError, OSError, ValueError, IndexError) as exc:
         why = f"it could not be checked ({exc})"
-    return False, (f"ERROR: the indel index of {chrom} ({indexed_fakechrom}) holds no .bin "
-                   f"and no record that its build found no target there (an index built "
-                   f"before CRISPRme 2.8.1 has none), and {why}. Rebuild it"
+    return False, (f"ERROR: the indel index of {chrom} ({_outside_view(indexed_fakechrom)}) "
+                   f"holds no .bin and no record that its build found no target there (an "
+                   f"index built before CRISPRme 2.8.1 has none), and {why}. Rebuild it"
                    f"{_rebuild(raw_fakechrom, fasta)}")
 
 
@@ -374,9 +399,10 @@ def _missing_index(chrom, indexed_fakechrom, raw_fakechrom):
     except OSError:
         fasta = False
     shown = "its indel log lists them" if logged else f"{raw_fakechrom} holds them"
-    return (f"ERROR: the indel index of {chrom} ({indexed_fakechrom}) is not there, though "
-            f"{chrom} has indels ({shown}): the INDELS index is incomplete, and a search with "
-            f"bulges cannot do without it. Rebuild it{_rebuild(raw_fakechrom, fasta)}")
+    return (f"ERROR: the indel index of {chrom} ({_outside_view(indexed_fakechrom)}) is not "
+            f"there, though {chrom} has indels ({shown}): the INDELS index is incomplete, and "
+            f"a search with bulges cannot do without it. Rebuild it"
+            f"{_rebuild(raw_fakechrom, fasta)}")
 
 
 def search_indels(chrom):
@@ -422,7 +448,7 @@ def search_indels(chrom):
         f"fake_{vcf_name}_{chrom}",
     )
     if os.path.isdir(indexed_fakechrom) and not _holds_bin(indexed_fakechrom):
-        empty, said = _empty_index(chrom, indexed_fakechrom, raw_fakechrom)
+        empty, said = _empty_index(chrom, indexed_fakechrom, _outside_view(raw_fakechrom))
         if empty:
             print(said, flush=True)
             return SKIPPED
@@ -430,7 +456,7 @@ def search_indels(chrom):
         sys.stderr.flush()
         return REFUSED
     if not os.path.isdir(indexed_fakechrom) and _bulged():
-        said = _missing_index(chrom, indexed_fakechrom, raw_fakechrom)
+        said = _missing_index(chrom, indexed_fakechrom, _outside_view(raw_fakechrom))
         if said:
             sys.stderr.write(said + "\n")
             sys.stderr.flush()

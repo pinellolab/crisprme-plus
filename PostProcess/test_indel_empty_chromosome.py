@@ -27,6 +27,11 @@ indels but no sub-index was searched in its fake-indel genome without bulges: ex
 with the bulged indel off-targets lost (measured through the real CLI). A search with
 bulges now refuses such a chromosome.
 
+complete-test --chrom runs its search from a per-run view of the working directory
+(complete_test._chrom_view), gone once the run ends: an ERROR printed there gave the
+view's paths, so that its command could not work, and the check of an index built
+before the record read a fake-indel genome the view does not hold.
+
 Pinned here: the empty chromosome is skipped on BOTH sides (not indexed, not
 searched), the merge tolerates its missing part file and only its, an all-empty
 dataset still yields a well-formed targets file, a build with no target is
@@ -36,7 +41,9 @@ that is empty although its log lists indels fails with an ERROR that says how to
 rebuild it (no traceback, no merged file, and no command with a blank to fill in), a
 bulge search of a chromosome with indels but no sub-index fails the same way while a
 search without bulges still searches its fake-indel genome, a PAM-less stand-in's
-INDELS index is built with its own PAM, and the normal path is unchanged.
+INDELS index is built with its own PAM, a search from complete-test --chrom's view (the
+real one) names and reads the working directory's paths, and the normal path is
+unchanged.
 
 Hermetic: a stub crispritz.py on PATH stands in for the engine and, like
 CRISPRitz 2.9.1, refuses an index directory with no .bin; its index-genome writes
@@ -52,6 +59,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+import complete_test as ct
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SEARCH = os.path.join(HERE, "pool_search_indels.py")
@@ -139,7 +148,7 @@ def _write_log(path, records):
 
 class _Fixture(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="indel_empty_")
+        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="indel_empty_"))
         self.addCleanup(shutil.rmtree, self.tmp)
         self.bin = os.path.join(self.tmp, "bin")
         os.makedirs(self.bin)
@@ -162,14 +171,15 @@ class SearchSide(_Fixture):
     """pool_search_indels.py, chromosomes taken from the indel logs (no VCF dir)."""
 
     def run_search(self, logs, bins, records=(), fakes=None, true_pam="NRG", pam=NRG,
-                   bulges=("1", "1"), vcfs=(), pam_files=None, pam_build=None):
+                   bulges=("1", "1"), vcfs=(), pam_files=None, pam_build=None, view=None):
         """bins: chrom -> whether its sub-index holds a .bin (a chromosome left out has
         none); records: the chromosomes whose sub-index holds the record of a build with
         no target; fakes: chrom -> the sequence of its fake-indel contig, written where
-        build-index-only leaves it (None: a header-only one); vcfs: the chromosomes of a
-        VCF folder, whence the search then takes them (else from the logs); pam_files:
-        name -> line of a PAM file in the working directory's PAMs/; pam_build: what the
-        variant index's .pam_build says."""
+        build-index-only leaves it (None: a header-only one); vcfs: the chromosomes of the
+        dataset's VCF folder, whence the search then takes them (else from the logs);
+        pam_files: name -> line of a PAM file in the working directory's PAMs/; pam_build:
+        what the variant index's .pam_build says; view: a chromosome, to search as
+        complete-test --chrom does, from complete_test's own view of the working directory."""
         cwd = self.work = os.path.join(self.tmp, "work")
         self.true_pam = true_pam
         logdir = os.path.join(cwd, "Dictionaries", "log_indels_ds")
@@ -198,7 +208,7 @@ class SearchSide(_Fixture):
             os.makedirs(os.path.join(cwd, "PAMs"), exist_ok=True)
             with open(os.path.join(cwd, "PAMs", name), "w") as fh:
                 fh.write(line + "\n")
-        self.vcf_dir = os.path.join(self.tmp, "vcfs" if vcfs else "no_vcfs")
+        self.vcf_dir = os.path.join(cwd, "VCFs", "ds")
         for chrom in vcfs:
             os.makedirs(self.vcf_dir, exist_ok=True)
             with gzip.open(os.path.join(self.vcf_dir, f"ds.{chrom}.vcf.gz"), "wt") as fh:
@@ -208,17 +218,40 @@ class SearchSide(_Fixture):
         open(os.path.join(self.tmp, "guide.txt"), "w").close()
         with open(os.path.join(self.tmp, "pam.txt"), "w") as fh:
             fh.write(pam + "\n")
-        args = [os.path.join(cwd, "Genomes", "ref"), self.vcf_dir, "ds",
-                os.path.join(self.tmp, "guide.txt"), os.path.join(self.tmp, "pam.txt"),
-                "3", "4", *bulges, out, true_pam, cwd + "/", "2", "-1", "0"]
-        res = subprocess.run([sys.executable, SEARCH, *args], env=self.env,
-                             capture_output=True, text=True)
+
+        def search(root):  # from ``root``, as the search script calls it
+            args = [os.path.join(root, "Genomes", "ref"), os.path.join(root, "VCFs", "ds"), "ds",
+                    os.path.join(self.tmp, "guide.txt"), os.path.join(self.tmp, "pam.txt"),
+                    "3", "4", *bulges, out, true_pam, root + "/", "2", "-1", "0"]
+            return subprocess.run([sys.executable, SEARCH, *args], env=self.env,
+                                  capture_output=True, text=True)
+
+        if view:
+            res = self.from_view(view, search)
+        else:
+            res = search(cwd)
         merged = os.path.join(out, f"indels_ref+ds_pam.txt_guide.txt_4_{bulges[0]}_{bulges[1]}.targets.txt")
         lines = None
         if os.path.isfile(merged):
             with open(merged) as fh:
                 lines = fh.read().split("\n")
         return res, lines
+
+    def from_view(self, chrom, search):
+        """``search`` from complete_test's view of the working directory for ``chrom``,
+        which is gone once it has returned, as it is when complete-test --chrom ends."""
+        os.makedirs(os.path.join(self.work, "Genomes", "ref"), exist_ok=True)
+        os.makedirs(self.idx[: -len("_INDELS")], exist_ok=True)
+        vcf_list = os.path.join(self.tmp, "list_vcf.txt")
+        with open(vcf_list, "w") as fh:
+            fh.write("ds\n")
+        here = os.getcwd()
+        os.chdir(self.work)
+        try:
+            with ct._chrom_view(chrom, "ref", vcf_list) as view:
+                return search(view)
+        finally:
+            os.chdir(here)
 
     def searched(self, index=True):
         """The chromosomes searched through their sub-index, or (index false) through
@@ -393,7 +426,7 @@ class SearchSide(_Fixture):
                     self.assertIn("No NNN target in the indels of chrB", res.stdout)
 
     def tearDown_dirs(self):
-        for d in ("work", "out", "vcfs"):
+        for d in ("work", "out"):
             shutil.rmtree(os.path.join(self.tmp, d), ignore_errors=True)
         open(self.stub_log, "w").close()
 
@@ -469,6 +502,72 @@ class SearchSide(_Fixture):
         res, _ = self.run_search({"chrA": LOGS_AB["chrA"]}, {"chrA": True}, vcfs=("chrA", "chrB"))
         self.assertNotIn("is not there", res.stderr)
         self.assertIn(f"ERROR: no .bin index files found in '{self.idx}/NRG_3_fakechrB/'.\n", res.stderr)
+
+    # complete-test --chrom searches from a view of the working directory, gone once the
+    # run ends: an ERROR gives the working directory's paths, or its command cannot work,
+    # and what tells of an index is read there, for the view leaves it out.
+
+    def test_a_view_refuses_with_the_working_directorys_paths(self):
+        res, lines = self.run_search(LOGS_AB, {"chrA": True}, vcfs=("chrA", "chrB"), view="chrB",
+                                     fakes={"chrA": WITH_NRG, "chrB": WITH_NRG})
+        self.refused(res, self.missing("chrB", "its indel log lists them"), self.chain())
+        self.assertNotIn(ct.CHROMVIEWPREFIX, res.stderr)
+        self.assertIsNone(lines)
+
+    def test_a_view_refuses_with_the_enrichment_when_the_fake_genome_is_not_there(self):
+        for bins, what in (({"chrA": True}, self.missing("chrB", "its indel log lists them")),
+                           ({"chrA": True, "chrB": False},
+                            "holds no .bin and no record that its build found no target there "
+                            "(an index built before CRISPRme 2.8.1 has none), and the fake-indel "
+                            "genome it was built from ({}) is not here to check it against")):
+            with self.subTest(what=what):
+                self.tearDown_dirs()
+                res, _ = self.run_search(LOGS_AB, bins, vcfs=("chrA", "chrB"), view="chrB")
+                self.refused(res, what.format(self.fake("chrB")), self.chain(enrich=True))
+                self.assertNotIn(ct.CHROMVIEWPREFIX, res.stderr)
+
+    def test_a_view_reads_the_fake_genome_in_the_working_directory(self):
+        # an index built before the record whose genome holds no target: as outside a view
+        res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, view="chrB",
+                                     fakes={"chrA": WITH_NRG, "chrB": NO_NRG})
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.searched(), [])
+        self.assertIn(f"No NRG target in the indels of chrB: skipping its indel search (its "
+                      f"index holds no .bin, and {self.fake('chrB')} no target)\n", res.stdout)
+        self.assertNotIn(ct.CHROMVIEWPREFIX, res.stdout)
+        self.assertEqual(lines, [HEADER, ""])
+
+    def test_a_view_refuses_an_index_its_fake_genome_shows_incomplete(self):
+        res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, vcfs=("chrA", "chrB"),
+                                 fakes={"chrA": WITH_NRG, "chrB": WITH_NRG}, view="chrB")
+        self.refused(res, self.empty(f"{self.fake('chrB')}/fakechrB.fa holds a target of NRG: "
+                                     "the index is incomplete"), self.chain())
+
+    def test_a_view_reads_the_record_of_a_build_with_no_target(self):
+        res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, records={"chrB"}, view="chrB")
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertIn("No NRG target in the indels of chrB: skipping its indel search (its index "
+                      "was built with none)\n", res.stdout)
+        self.assertEqual(lines, [HEADER, ""])
+
+    def test_a_view_reads_the_pam_build_in_the_working_directory(self):
+        # (the view leaves out that sidecar) the guide of a 21-nt build, and the PAM file it
+        # names, in the working directory's PAMs/
+        res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, true_pam="NNN",
+                                 vcfs=("chrA", "chrB"), view="chrB",
+                                 fakes={"chrA": WITH_NRG, "chrB": SHORT + "A" * 17},
+                                 pam_files={"20bp-NNN-NO-PAM.txt": NNN,
+                                            "21bp-NNN-NO-PAM.txt": "N" * 24 + " 3"},
+                                 pam_build="21bp-NNN-NO-PAM 24 3\n")
+        self.refused(res, self.empty(f"{self.fake('chrB')}/fakechrB.fa holds a target of NNN: "
+                                     "the index is incomplete"),
+                     self.chain(pam=f"{self.work}/PAMs/21bp-NNN-NO-PAM.txt"))
+
+    def test_a_view_searches_a_whole_sub_index(self):
+        res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": True}, view="chrB")
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.searched(), ["chrB"])
+        self.assertEqual([ln for ln in lines[1:] if ln], [ROW.format("chrB", 10, 10)])
 
     def test_a_record_is_not_read_where_the_index_holds_a_bin(self):
         res, lines = self.run_search({"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"],
@@ -729,6 +828,13 @@ class TheRecordsName(unittest.TestCase):
             names = [n.value.value for n in tree.body if isinstance(n, ast.Assign)
                      and [t.id for t in n.targets if isinstance(t, ast.Name)] == ["NO_TARGETS"]]
             self.assertEqual(names, [NO_TARGETS], script)
+
+    def test_the_search_knows_complete_tests_view_by_its_name(self):
+        with open(SEARCH) as fh:
+            tree = ast.parse(fh.read())
+        names = [n.value.value for n in tree.body if isinstance(n, ast.Assign)
+                 and [t.id for t in n.targets if isinstance(t, ast.Name)] == ["CHROMVIEWPREFIX"]]
+        self.assertEqual(names, [ct.CHROMVIEWPREFIX])
 
 
 class LogCriterion(unittest.TestCase):
