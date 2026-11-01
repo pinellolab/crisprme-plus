@@ -18,21 +18,23 @@ pool_index_indels.py records that build (.no_targets) and pool_search_indels.py
 skips it; an index built before has no record, and the fake-indel genome it was
 built from then tells, by buildTST's own rule (crispritz_bins).
 
-The search's own rebuild of a missing INDELS index for a PAM-less index standing in
-for its PAM (NNN_3 serving NRG) builds it with the index's own PAM (the PAM line its
-variant index's .pam_build records). Built with the search's PAM file, that index went
-under NRG_3_..., where the search did not look, and each chromosome was searched in its
-fake-indel genome without bulges: exit 0, with the bulged indel off-targets lost
-(measured through the real CLI).
+A PAM-less index standing in for the search's PAM (NNN_3 serving NRG) holds the
+targets of its own PAM: an index of it without the record is told by that PAM (the
+PAM line its variant index's .pam_build records), and the search's own rebuild of a
+missing INDELS index for it builds it with that PAM. Built with the search's PAM file,
+that index went under NRG_3_..., where the search did not look, and each chromosome
+was searched in its fake-indel genome without bulges: exit 0, with the bulged indel
+off-targets lost (measured through the real CLI).
 
 Pinned here: the empty chromosome is skipped on BOTH sides (not indexed, not
 searched), the merge tolerates its missing part file and only its, an all-empty
 dataset still yields a well-formed targets file, a build with no target is
 recorded and skipped, an index without the record is skipped only where its
-fake-indel genome shows it holds no target, any other index that is empty although
-its log lists indels fails with an ERROR that names how to rebuild it (no
-traceback, no merged file), a PAM-less stand-in's INDELS index is built with its
-own PAM, and the normal path is unchanged.
+fake-indel genome shows it holds no target of the index's own PAM, any other index
+that is empty although its log lists indels fails with an ERROR that says how to
+rebuild it (no traceback, no merged file, and no command with a blank to fill in), a
+PAM-less stand-in's INDELS index is built with its own PAM, and the normal path is
+unchanged.
 
 Hermetic: a stub crispritz.py on PATH stands in for the engine and, like
 CRISPRitz 2.9.1, refuses an index directory with no .bin; its index-genome writes
@@ -42,6 +44,7 @@ the layout the real one writes.
 import ast
 import gzip
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -61,14 +64,19 @@ with open(os.environ["STUB_LOG"], "a") as fh:
     fh.write(" ".join(sys.argv[1:]) + "\n")
 if sys.argv[1] == "search":
     index_dir, out_name = sys.argv[2], sys.argv[5]
-    bins = [f for f in os.listdir(index_dir) if f.endswith(".bin")] if os.path.isdir(index_dir) else []
-    if not bins:
-        sys.stderr.write(f"ERROR: no .bin index files found in '{index_dir}'.\n")
-        sys.exit(1)
-    chrom = os.path.basename(os.path.normpath(index_dir)).split("_fake")[-1]
+    chrom = out_name.split("_", 1)[0][len("fake"):]
+    if "-index" in sys.argv:
+        bins = [f for f in os.listdir(index_dir) if f.endswith(".bin")] if os.path.isdir(index_dir) else []
+        if not bins:
+            sys.stderr.write(f"ERROR: no .bin index files found in '{index_dir}'.\n")
+            sys.exit(1)
+        row = f"X\tACGT\tACGT\tfake{chrom}\t10\t10\t+\t1\t0\t1"
+    else:
+        # a search of the fake-indel genome itself, which takes no bulge (its row at 20)
+        row = f"X\tACGT\tACGT\tfake{chrom}\t20\t20\t+\t1\t0\t1"
     with open(out_name + ".targets.txt", "w") as fh:
         fh.write(HEADER + "\n")
-        fh.write(f"X\tACGT\tACGT\tfake{chrom}\t10\t10\t+\t1\t0\t1\n")
+        fh.write(row + "\n")
 elif sys.argv[1] == "index-genome":
     # What crispritz.py index-genome writes: genome_library/<PAM>_<bMax>_<name>, made
     # anew, the PAM read from the PAM file, a .bin for each contig of a .fa there but
@@ -105,7 +113,8 @@ WITH_NRG = "ACGTTGCAAG" * 6  # NAG at 27 (a window of 23 + 3 bases before it)
 NO_NRG = "AT" * 30  # no G, no C: no NRG on either strand
 SHORT = "ACGTACGTAC"  # shorter than a window (23 + 3 bases): no target of any PAM
 NO_TARGETS = ".no_targets"
-# what the stub's search writes for a chromosome through its sub-index
+# what the stub's search writes for a chromosome through its sub-index, and through its
+# fake-indel genome itself (a search without bulges)
 ROW_A = "X\tACGT\tACGT\tfakechrA\t10\t10\t+\t1\t0\t1"
 ROW = "X\tACGT\tACGT\tfake{}\t{}\t{}\t+\t1\t0\t1"
 # the two indels the tests' logs list
@@ -150,11 +159,17 @@ class _Fixture(unittest.TestCase):
 class SearchSide(_Fixture):
     """pool_search_indels.py, chromosomes taken from the indel logs (no VCF dir)."""
 
-    def run_search(self, logs, bins, records=(), fakes=None, true_pam="NRG", pam=NRG):
-        """bins: chrom -> whether its sub-index holds a .bin; records: the chromosomes
-        whose sub-index holds the record of a build with no target; fakes: chrom -> the
-        sequence of its fake-indel contig, written where build-index-only leaves it."""
+    def run_search(self, logs, bins, records=(), fakes=None, true_pam="NRG", pam=NRG,
+                   bulges=("1", "1"), vcfs=(), pam_files=None, pam_build=None):
+        """bins: chrom -> whether its sub-index holds a .bin (a chromosome left out has
+        none); records: the chromosomes whose sub-index holds the record of a build with
+        no target; fakes: chrom -> the sequence of its fake-indel contig, written where
+        build-index-only leaves it (None: a header-only one); vcfs: the chromosomes of a
+        VCF folder, whence the search then takes them (else from the logs); pam_files:
+        name -> line of a PAM file in the working directory's PAMs/; pam_build: what the
+        variant index's .pam_build says."""
         cwd = self.work = os.path.join(self.tmp, "work")
+        self.true_pam = true_pam
         logdir = os.path.join(cwd, "Dictionaries", "log_indels_ds")
         os.makedirs(logdir)
         for chrom, records_ in logs.items():
@@ -168,45 +183,81 @@ class SearchSide(_Fixture):
             if chrom in records:
                 with open(os.path.join(d, NO_TARGETS), "w") as fh:
                     fh.write("built, 0 targets\n")
+        if pam_build is not None:
+            os.makedirs(os.path.join(cwd, "genome_library", f"{true_pam}_3_ref+ds"))
+            with open(os.path.join(cwd, "genome_library", f"{true_pam}_3_ref+ds", ".pam_build"), "w") as fh:
+                fh.write(pam_build)
         for chrom, seq in (fakes or {}).items():
             d = os.path.join(cwd, "Genomes", "ref+ds_INDELS", f"fake_ds_{chrom}")
             os.makedirs(d)
             with open(os.path.join(d, f"fake{chrom}.fa"), "w") as fh:
-                fh.write(f">fake{chrom}\n{seq}N\n")
+                fh.write(f">fake{chrom}\n{seq}N\n" if seq is not None else f">fake{chrom}\n")
+        for name, line in (pam_files or {}).items():
+            os.makedirs(os.path.join(cwd, "PAMs"), exist_ok=True)
+            with open(os.path.join(cwd, "PAMs", name), "w") as fh:
+                fh.write(line + "\n")
+        self.vcf_dir = os.path.join(self.tmp, "vcfs" if vcfs else "no_vcfs")
+        for chrom in vcfs:
+            os.makedirs(self.vcf_dir, exist_ok=True)
+            with gzip.open(os.path.join(self.vcf_dir, f"ds.{chrom}.vcf.gz"), "wt") as fh:
+                fh.write(f"##fileformat=VCFv4.2\n#CHROM\tPOS\n{chrom}\t5\n")
         out = os.path.join(self.tmp, "out")
         os.makedirs(out)
         open(os.path.join(self.tmp, "guide.txt"), "w").close()
         with open(os.path.join(self.tmp, "pam.txt"), "w") as fh:
             fh.write(pam + "\n")
-        args = [os.path.join(cwd, "Genomes", "ref"), os.path.join(self.tmp, "no_vcfs"), "ds",
+        args = [os.path.join(cwd, "Genomes", "ref"), self.vcf_dir, "ds",
                 os.path.join(self.tmp, "guide.txt"), os.path.join(self.tmp, "pam.txt"),
-                "3", "4", "1", "1", out, true_pam, cwd + "/", "2", "-1", "0"]
+                "3", "4", *bulges, out, true_pam, cwd + "/", "2", "-1", "0"]
         res = subprocess.run([sys.executable, SEARCH, *args], env=self.env,
                              capture_output=True, text=True)
-        merged = os.path.join(out, "indels_ref+ds_pam.txt_guide.txt_4_1_1.targets.txt")
+        merged = os.path.join(out, f"indels_ref+ds_pam.txt_guide.txt_4_{bulges[0]}_{bulges[1]}.targets.txt")
         lines = None
         if os.path.isfile(merged):
             with open(merged) as fh:
                 lines = fh.read().split("\n")
         return res, lines
 
-    def searched(self):
-        return sorted(c[1].rstrip("/").rsplit("_fake", 1)[-1] for c in self.calls() if c[0] == "search")
+    def searched(self, index=True):
+        """The chromosomes searched through their sub-index, or (index false) through
+        their fake-indel genome itself."""
+        return sorted(c[4].split("_", 1)[0][len("fake"):] for c in self.calls()
+                      if c[0] == "search" and ("-index" in c) == index)
 
-    def refused(self, res, why, removed=(), again=""):
-        """An ERROR for chrB that says why and names the rebuild, with nothing merged."""
+    def fake(self, chrom):
+        return f"{self.work}/Genomes/ref+ds_INDELS/fake_ds_{chrom}"
+
+    def empty(self, why):
+        """What the ERROR says of a sub-index with no .bin and no record."""
+        return ("holds no .bin and no record that its build found no target there (an index "
+                f"built before CRISPRme 2.8.1 has none), and {why}")
+
+    def chain(self, pam=None, enrich=False):
+        """The rebuild command an ERROR gives, with the PAM file ``pam`` (the search's),
+        and the enrichment and the download again when the fake-indel genome is not here."""
+        gone = [self.idx] + ([f"{self.work}/Genomes/ref+ds"] if enrich else [])
+        again = (f"; or, for an index you downloaded, download it again: rm -rf "
+                 f"'{self.idx[: -len('_INDELS')]}' '{self.idx}' && crisprme.py download "
+                 f"--what index --index-name {self.true_pam}_3_ref+ds --path '{self.work}'"
+                 if enrich else "")
+        return (": rm -rf " + " ".join("'%s'" % p for p in gone) + " && crisprme.py "
+                f"build-index-only --genome '{self.work}/Genomes/ref' --pam "
+                f"'{pam or self.tmp + '/pam.txt'}' --bDNA 2 --bRNA 2 --vcf '{self.vcf_dir}' "
+                f"--path '{self.work}'{again}")
+
+    def refused(self, res, what, advice, chrom="chrB"):
+        """An ERROR for ``chrom`` that says ``what`` of its index, and how to rebuild it
+        (``advice``, after "Rebuild it"), with nothing searched there and nothing merged."""
         self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
         self.assertNotIn("Traceback", res.stderr)
-        gone = " ".join("'%s'" % p for p in (self.idx, *removed))
-        rebuild = (f"rm -rf {gone} && crisprme.py "
-                   f"build-index-only --genome '{self.work}/Genomes/ref' --pam "
-                   f"'{self.tmp}/pam.txt' --bDNA 2 --bRNA 2 --vcf '{self.tmp}/no_vcfs' "
-                   f"--path '{self.work}'")
-        self.assertEqual(res.stderr, (
-            f"ERROR: the indel index of chrB ({self.idx}/NRG_3_fakechrB) holds no .bin and no "
-            "record that its build found no target there (an index built before CRISPRme "
-            f"2.8.1 has none), and {why}. Rebuild it: {rebuild}{again}\n"))
-        self.assertEqual(self.searched(), ["chrA"])  # (and nothing searched in chrB)
+        self.assertEqual(res.stderr, (f"ERROR: the indel index of {chrom} ({self.idx}/"
+                                      f"{self.true_pam}_3_fake{chrom}) {what}. Rebuild it{advice}\n"))
+        # every command it gives runs as given: no blank to fill in, and the PAM file a
+        # rebuild names is there
+        self.assertNotIn("<", res.stderr)
+        for named in re.findall(r"--pam '([^']*)'", res.stderr):
+            self.assertTrue(os.path.isfile(named), named)
+        self.assertNotIn(chrom, self.searched() + self.searched(index=False))
 
     def test_snp_only_chromosome_is_skipped_not_fatal(self):
         res, lines = self.run_search({"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"], "chrB": []},
@@ -229,16 +280,10 @@ class SearchSide(_Fixture):
         # downloaded one: the superseded NRR_3_hg38+hg38_mega archive holds no .bin), it
         # fails, and says how to rebuild it, with the enrichment that makes that genome,
         # or to download it again
-        res, lines = self.run_search({"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"],
-                                      "chrB": ["chrB\t\trs2\t0.2\tC>CG\t5\tACGT"]},
-                                     {"chrA": True, "chrB": False})
-        variant = self.idx[: -len("_INDELS")]
-        self.refused(res, "the fake-indel genome it was built from "
-                          f"({self.work}/Genomes/ref+ds_INDELS/fake_ds_chrB) is not here to check "
-                          "it against", removed=[f"{self.work}/Genomes/ref+ds"],
-                     again=(f"; or, for an index you downloaded, download it again: rm -rf "
-                            f"'{variant}' '{self.idx}' && crisprme.py download --what index "
-                            f"--index-name NRG_3_ref+ds --path '{self.work}'"))
+        res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": False})
+        self.refused(res, self.empty(f"the fake-indel genome it was built from "
+                                     f"({self.fake('chrB')}) is not here to check it against"),
+                     self.chain(enrich=True))
         self.assertIsNone(lines)
 
     def test_a_build_with_no_target_is_skipped(self):
@@ -278,30 +323,102 @@ class SearchSide(_Fixture):
         self.assertEqual([ln for ln in lines[1:] if ln], ["X\tACGT\tACGT\tfakechrA\t10\t10\t+\t1\t0\t1"])
 
     def test_an_index_built_before_the_record_whose_genome_holds_a_target_fails(self):
-        res, lines = self.run_search({"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"],
-                                      "chrB": ["chrB\t\trs2\t0.2\tC>CG\t5\tACGT"]},
-                                     {"chrA": True, "chrB": False},
+        res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": False},
                                      fakes={"chrA": WITH_NRG, "chrB": WITH_NRG})
-        self.refused(res, f"{self.work}/Genomes/ref+ds_INDELS/fake_ds_chrB/fakechrB.fa holds a "
-                          "target of NRG: the index is incomplete")
+        self.refused(res, self.empty(f"{self.fake('chrB')}/fakechrB.fa holds a target of NRG: "
+                                     "the index is incomplete"), self.chain())
         self.assertIsNone(lines)
 
-    def test_a_pamless_index_searched_for_another_pam_is_not_checked(self):
-        # a PAM-less index serving NRG (--prune-pam): the search's PAM does not tell
-        # whether a build with the index's own holds a target
-        res, lines = self.run_search({"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"],
-                                      "chrB": ["chrB\t\trs2\t0.2\tC>CG\t5\tACGT"]},
-                                     {"chrA": True, "chrB": False}, true_pam="NNN",
-                                     fakes={"chrA": WITH_NRG, "chrB": NO_NRG})
-        self.assertEqual(res.returncode, 1, res.stderr)
-        self.assertNotIn("Traceback", res.stderr)
-        self.assertIn(f"ERROR: the indel index of chrB ({self.idx}/NNN_3_fakechrB) holds no .bin",
-                      res.stderr)
-        self.assertIn("and it is an index of NNN searched for NRG, which this cannot check. "
-                      f"Rebuild it: rm -rf '{self.idx}' && crisprme.py build-index-only "
-                      f"--genome '{self.work}/Genomes/ref' --pam <the PAM file of NNN> ",
-                      res.stderr)
+    # A PAM-less index standing in for the search's PAM (NNN_3 serving NRG; NNNNNNNN_3
+    # under --prune-pam): a build of it holds the targets of its own PAM, which the
+    # search's does not tell, so its sub-index is checked with the PAM line it was built
+    # with (from the variant index's .pam_build, else the search's guide around NNN).
+
+    def test_a_pamless_index_standing_in_is_told_by_its_own_pam(self):
+        # its windows on chrB are too short for a target of any PAM
+        res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, true_pam="NNN",
+                                     fakes={"chrA": WITH_NRG, "chrB": SHORT})
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.searched(), ["chrA"])
+        self.assertIn(f"No NNN target in the indels of chrB: skipping its indel search (its "
+                      f"index holds no .bin, and {self.fake('chrB')} no target)\n", res.stdout)
+        self.assertEqual([ln for ln in lines[1:] if ln], [ROW_A])
+
+    def test_a_pamless_index_standing_in_is_not_told_by_the_searchs_pam(self):
+        # chrB's windows hold no NRG site but targets of NNN, so a build of the index
+        # holds a .bin there: this one is incomplete, and the ERROR names the PAM file it
+        # was built with, the one .pam_build names before any other of that line
+        res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, true_pam="NNN",
+                                     fakes={"chrA": WITH_NRG, "chrB": NO_NRG},
+                                     pam_files={"0-other.txt": NNN, "20bp-NNN-NO-PAM.txt": NNN},
+                                     pam_build="20bp-NNN-NO-PAM 23 3\n")
+        self.refused(res, self.empty(f"{self.fake('chrB')}/fakechrB.fa holds a target of NNN: "
+                                     "the index is incomplete"),
+                     self.chain(pam=f"{self.work}/PAMs/20bp-NNN-NO-PAM.txt"))
         self.assertIsNone(lines)
+
+    def test_a_pamless_index_standing_in_names_any_pam_file_of_its_line(self):
+        # (no .pam_build: the line of the search's guide around NNN, in a file of any name)
+        res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, true_pam="NNN",
+                                 fakes={"chrA": WITH_NRG, "chrB": NO_NRG},
+                                 pam_files={"mine.txt": NNN, "x.txt": NRG})
+        self.refused(res, self.empty(f"{self.fake('chrB')}/fakechrB.fa holds a target of NNN: "
+                                     "the index is incomplete"),
+                     self.chain(pam=f"{self.work}/PAMs/mine.txt"))
+
+    def test_a_pamless_index_standing_in_takes_the_geometry_of_its_pam_build(self):
+        # built for a 21-nt guide: a window of 24 + 3 bases, where the search's 20-nt guide
+        # takes 23 + 3 (so a run of 26 bases holds a target of the one, not the other)
+        for seq, refused in ((SHORT + "A" * 17, True), (SHORT + "A" * 16, False)):
+            with self.subTest(run=len(seq)):
+                self.tearDown_dirs()
+                res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, true_pam="NNN",
+                                         fakes={"chrA": WITH_NRG, "chrB": seq},
+                                         pam_files={"20bp-NNN-NO-PAM.txt": NNN,
+                                                    "21bp-NNN-NO-PAM.txt": "N" * 24 + " 3"},
+                                         pam_build="21bp-NNN-NO-PAM 24 3\n")
+                if refused:
+                    self.refused(res, self.empty(f"{self.fake('chrB')}/fakechrB.fa holds a "
+                                                 "target of NNN: the index is incomplete"),
+                                 self.chain(pam=f"{self.work}/PAMs/21bp-NNN-NO-PAM.txt"))
+                else:
+                    self.assertEqual((res.returncode, res.stderr), (0, ""))
+                    self.assertIn("No NNN target in the indels of chrB", res.stdout)
+
+    def tearDown_dirs(self):
+        for d in ("work", "out", "vcfs"):
+            shutil.rmtree(os.path.join(self.tmp, d), ignore_errors=True)
+        open(self.stub_log, "w").close()
+
+    def test_a_pamless_index_standing_in_with_no_pam_file_of_its_line(self):
+        # (none here: the one .pam_build names holds another line) with the fake-indel
+        # genome here, a search rebuilds the INDELS index from it, once it is removed
+        res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, true_pam="NNN",
+                                 fakes={"chrA": WITH_NRG, "chrB": NO_NRG},
+                                 pam_files={"20bp-NNN-NO-PAM.txt": NRG},
+                                 pam_build="20bp-NNN-NO-PAM 23 3\n")
+        self.refused(res, self.empty(f"{self.fake('chrB')}/fakechrB.fa holds a target of NNN: "
+                                     "the index is incomplete"),
+                     f": remove the INDELS index with rm -rf '{self.idx}' and run this search "
+                     f"again, which builds it anew from the fake-indel genome in "
+                     f"{self.work}/Genomes/ref+ds_INDELS")
+
+    def test_a_pamless_index_standing_in_with_no_pam_file_and_no_fake_genome(self):
+        # the steps in words, with the PAM line to write into a PAM file
+        res, _ = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, true_pam="NNN",
+                                 pam_build="20bp-NNN-NO-PAM 23 3\n")
+        self.refused(res, self.empty(f"the fake-indel genome it was built from "
+                                     f"({self.fake('chrB')}) is not here to check it against"),
+                     " with build-index-only and a PAM file of the PAM it was built with "
+                     f"(20bp-NNN-NO-PAM.txt, the line '{NNN}'), which is not in "
+                     f"{self.work}/PAMs or {self.tmp}: remove '{self.idx}' and "
+                     f"'{self.work}/Genomes/ref+ds', write that PAM file, and run crisprme.py "
+                     "build-index-only with it as --pam, and --genome "
+                     f"'{self.work}/Genomes/ref' --bDNA 2 --bRNA 2 --vcf '{self.vcf_dir}' "
+                     f"--path '{self.work}'; or, for an index you downloaded, download it "
+                     f"again: rm -rf '{self.idx[: -len('_INDELS')]}' '{self.idx}' && crisprme.py "
+                     f"download --what index --index-name NNN_3_ref+ds --path '{self.work}'")
+        self.assertNotIn(" && crisprme.py build-index-only", res.stderr)
 
     def test_a_record_is_not_read_where_the_index_holds_a_bin(self):
         res, lines = self.run_search({"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"],

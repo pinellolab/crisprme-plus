@@ -3,6 +3,7 @@
 import gzip
 import os
 import sys
+import tempfile
 from multiprocessing import Pool
 from datetime import datetime
 
@@ -120,13 +121,18 @@ def _holds_bin(index_dir: str) -> bool:
     )
 
 
+def _pam_line(pam_path: str):
+    """The sequence and the number of a PAM file, as crispritz.py reads them."""
+    with open(pam_path) as fh:
+        seq, size = fh.read().split()[:2]
+    return seq, int(size)
+
+
 def _index_pam(pam_path: str) -> str:
     """The PAM index-genome names an index by, read from a PAM file as crispritz.py
     reads it: the first |n| bases of its sequence for a 5' PAM (n < 0), the last n
     for a 3' one."""
-    with open(pam_path) as fh:
-        seq, size = fh.read().split()[:2]
-    size = int(size)
+    seq, size = _pam_line(pam_path)
     return seq[:-size] if size < 0 else seq[-size:]
 
 
@@ -159,50 +165,151 @@ prune_pam = sys.argv[15] if len(sys.argv) > 15 else "0"
 prune_pam_flag = "--prune-pam" if prune_pam == "1" else ""
 
 
+def _own_pam():
+    """``(line, name)`` when the PAM of the search's PAM file is not ``true_pam``, the PAM
+    of the index: the PAM line (``"<sequence> <n>"``) of the PAM file the index was built
+    with, and that file's name (None where the index does not record it). Else None.
+
+    The index is then a PAM-less one standing in for the search's PAM (NNN_3 serving
+    NRG, or NNNNNNNN_3 under --prune-pam, as the search resolves one), whose INDELS index
+    was built with its own PAM (pool_index_indels._own_pam): build-index-only records the
+    PAM file of a build in the variant index's .pam_build (``<name> <length> <n>``);
+    without that record, the line is the search PAM file's guide around ``true_pam``."""
+    try:
+        seq, size = _pam_line(pam_file)
+    except (OSError, ValueError):
+        return None
+    if (seq[:-size] if size < 0 else seq[-size:]) == true_pam:
+        return None
+    k = len(true_pam)
+    guide, n, name = len(seq) - abs(size), (k if size > 0 else -k), None
+    built = os.path.join(current_working_directory, "genome_library",
+                         f"{true_pam}_{bMax}_{ref_name}+{vcf_name}", ".pam_build")
+    try:
+        with open(built) as fh:
+            got = fh.read().rsplit(None, 2)
+        if len(got) == 3 and abs(int(got[2])) == k and int(got[1]) > k:
+            name, guide, n = got[0], int(got[1]) - k, int(got[2])
+    except (OSError, ValueError):
+        pass
+    return ("N" * guide + true_pam if n > 0 else true_pam + "N" * guide) + f" {n}", name
+
+
+def _pam_dirs():
+    """Where a PAM file is looked for: the working directory's PAMs/, and the folder of
+    the search's."""
+    dirs = []
+    for d in (os.path.join(current_working_directory, "PAMs"),
+              os.path.dirname(os.path.abspath(pam_file))):
+        d = os.path.normpath(d)
+        if d not in dirs:
+            dirs.append(d)
+    return dirs
+
+
+def _pam_file_of(line, name):
+    """A PAM file whose first line is ``line``, in _pam_dirs: the one named ``name``
+    first, then any other there; None when there is none."""
+    want = line.split()
+    for named in (True, False):
+        for d in _pam_dirs():
+            try:
+                names = sorted(f for f in os.listdir(d) if f.endswith(".txt"))
+            except OSError:
+                continue
+            for f in names:
+                if (f == f"{name}.txt") != named:
+                    continue
+                path = os.path.join(d, f)
+                try:
+                    with open(path) as fh:
+                        if fh.readline().split() == want:
+                            return path
+                except (OSError, UnicodeDecodeError):
+                    continue
+    return None
+
+
+def _rebuild(raw_fakechrom, fasta):
+    """How to rebuild the INDELS index this search reads, the end of "Rebuild it": the
+    build-index-only command, with the PAM file the index was built with, that does it,
+    with the enrichment that makes the fake-indel genome too when that genome is not
+    here (``fasta`` false), or else the download, for an index that came that way.
+    Where no such PAM file is to be found (a PAM-less index searched for another PAM,
+    built with one that is not in _pam_dirs), the steps are said in words, never as a
+    command with a blank to fill in: with the fake-indel genome here, the search builds
+    a missing INDELS index from it with the index's own PAM, so removing it is enough."""
+    cwd = os.path.normpath(current_working_directory)
+    indels_index = os.path.join(cwd, "genome_library",
+                                f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS")
+    remove = [indels_index]
+    again = ""
+    if not fasta:
+        # build-index-only makes that genome as it enriches, and with an enriched
+        # genome in place it takes the dataset for one without indels
+        remove.append(os.path.join(cwd, "Genomes", f"{ref_name}+{vcf_name}"))
+        # (a downloaded index comes without it; download skips an index in place)
+        variant = indels_index[: -len("_INDELS")]
+        again = (f"; or, for an index you downloaded, download it again: rm -rf "
+                 f"'{variant}' '{indels_index}' && crisprme.py download --what index "
+                 f"--index-name {os.path.basename(variant)} --path '{cwd}'")
+    # the bulges build-index-only builds the index's N from
+    n = int(bMax) - 1 if bMax.isdigit() and int(bMax) > 0 else bMax
+    rest = f"--bDNA {n} --bRNA {n} --vcf '{vcf_dir}' --path '{cwd}'"
+    own = _own_pam()
+    pam = _pam_file_of(*own) if own else pam_file
+    if pam:
+        removed = " ".join("'%s'" % p for p in remove)
+        return (f": rm -rf {removed} && crisprme.py build-index-only --genome '{ref_folder}' "
+                f"--pam '{pam}' {rest}{again}")
+    if fasta:
+        return (f": remove the INDELS index with rm -rf '{indels_index}' and run this search "
+                f"again, which builds it anew from the fake-indel genome in "
+                f"{os.path.dirname(raw_fakechrom)}")
+    named = f"{own[1]}.txt, " if own[1] else ""
+    return (f" with build-index-only and a PAM file of the PAM it was built with ({named}the "
+            f"line '{own[0]}'), which is not in {' or '.join(_pam_dirs())}: remove "
+            + " and ".join("'%s'" % p for p in remove)
+            + f", write that PAM file, and run crisprme.py build-index-only with it as --pam, "
+              f"and --genome '{ref_folder}' {rest}{again}")
+
+
 def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
     """``(True, why)`` when ``chrom``'s sub-index, which holds no .bin, holds no target
     either, so no indel off-target is the answer there; else ``(False, error)``, an
-    ERROR that names how to rebuild it.
+    ERROR that says how to rebuild it.
 
     pool_index_indels.py records a build that found no target (NO_TARGETS). An index
     built before it did has no record: there the fake-indel genome it was built from
     tells, read by buildTST's own rule (crispritz_bins, as build-index-only checks a
-    build): when no contig of it holds a target of the search's PAM, a build for this
-    search holds no .bin. Anything else may be a broken or partial build, and the
-    search must not pass it off as an empty result.
+    build): when no contig of it holds a target of the index's own PAM (the search's,
+    or the one a PAM-less index standing in for it was built with: _own_pam), a build
+    holds no .bin. Anything else may be a broken or partial build, and the search must
+    not pass it off as an empty result.
     """
     if os.path.isfile(os.path.join(indexed_fakechrom, NO_TARGETS)):
         return True, (f"No {true_pam} target in the indels of {chrom}: skipping its indel "
                       f"search (its index was built with none)")
-    cwd = os.path.normpath(current_working_directory)
-    indels_index = os.path.dirname(os.path.normpath(indexed_fakechrom))
-    remove = [indels_index]
-    pam_arg = f"'{pam_file}'"
-    again = ""  # how to download it again, for one that came that way
+    fasta = False
     try:
         import crispritz_bins
 
-        search_pam = _index_pam(pam_file)
         # (the FASTAs index-genome would index there)
         fasta = os.path.isdir(raw_fakechrom) and any(
             f.strip().split(".")[-1] == "fa" for f in os.listdir(raw_fakechrom))
-        if search_pam != true_pam:  # (a PAM-less index serving the search's PAM)
-            why = f"it is an index of {true_pam} searched for {search_pam}, which this cannot check"
-            pam_arg = f"<the PAM file of {true_pam}>"
-        elif not fasta:
+        if not fasta:
             why = (f"the fake-indel genome it was built from ({raw_fakechrom}) is not here to "
                    f"check it against")
-            # build-index-only makes that genome as it enriches, and with an enriched
-            # genome in place it takes the dataset for one without indels
-            remove.append(os.path.join(cwd, "Genomes", f"{ref_name}+{vcf_name}"))
-            # (a downloaded index comes without it; download skips an index in place)
-            variant = indels_index[: -len("_INDELS")]
-            again = (f"; or, for an index you downloaded, download it again: rm -rf "
-                     f"'{variant}' '{indels_index}' && crisprme.py download --what index "
-                     f"--index-name {os.path.basename(variant)} --path '{cwd}'")
         else:
-            missing, unread = crispritz_bins.missing_bins(
-                indexed_fakechrom, raw_fakechrom, pam_file, int(bMax))
+            own = _own_pam()
+            with tempfile.TemporaryDirectory(prefix="crisprme_indels_pam_") as tmp:
+                built_with = pam_file
+                if own:
+                    built_with = os.path.join(tmp, f"{true_pam}.txt")
+                    with open(built_with, "w") as fh:
+                        fh.write(own[0] + "\n")
+                missing, unread = crispritz_bins.missing_bins(
+                    indexed_fakechrom, raw_fakechrom, built_with, int(bMax))
             if not missing and not unread:
                 return True, (f"No {true_pam} target in the indels of {chrom}: skipping its "
                               f"indel search (its index holds no .bin, and {raw_fakechrom} "
@@ -212,14 +319,10 @@ def _empty_index(chrom, indexed_fakechrom, raw_fakechrom):
                    f"{os.path.join(raw_fakechrom, unread[0])} cannot be read as buildTST reads it")
     except (ImportError, OSError, ValueError, IndexError) as exc:
         why = f"it could not be checked ({exc})"
-    # the bulges build-index-only builds the index's N from
-    n = int(bMax) - 1 if bMax.isdigit() and int(bMax) > 0 else bMax
-    removed = " ".join("'%s'" % p for p in remove)
-    rebuild = (f"rm -rf {removed} && crisprme.py build-index-only --genome '{ref_folder}' "
-               f"--pam {pam_arg} --bDNA {n} --bRNA {n} --vcf '{vcf_dir}' --path '{cwd}'")
     return False, (f"ERROR: the indel index of {chrom} ({indexed_fakechrom}) holds no .bin "
                    f"and no record that its build found no target there (an index built "
-                   f"before CRISPRme 2.8.1 has none), and {why}. Rebuild it: {rebuild}{again}")
+                   f"before CRISPRme 2.8.1 has none), and {why}. Rebuild it"
+                   f"{_rebuild(raw_fakechrom, fasta)}")
 
 
 def search_indels(chrom):
