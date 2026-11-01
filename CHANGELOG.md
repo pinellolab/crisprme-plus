@@ -150,6 +150,11 @@ and the `release-crisprme` skill.
   datasets or stale values are corrected too: `build-index-only --help` now uses `hg38_HGDP1kGP`,
   `assembly-search --help` gives complete-search's `--max-total-edits` default as 6 (it said 4),
   and the warning for the retired `--fast` no longer says it used to force per-sample.
+  The general-index card's search example now runs: it lacked `--index-path`, which `--prune-pam`
+  requires, and `--samplesID`, and named a `--vcf` file `download` does not write. The website and
+  the index pages say that a PAM-less index serves a shorter PAM only when it is a 3′ PAM (the
+  card listed Cas12a's `TTTV`), and README §1.1.2 checks an install with `crisprme.py --version`
+  alone, since a bare `crisprme.py` exits 1 and creates the CRISPRme folders where it runs.
   `RESUME.md`, a scratch file committed by accident in 2.5.4, is gone from the tree, so the Docker
   image no longer ships it.
 
