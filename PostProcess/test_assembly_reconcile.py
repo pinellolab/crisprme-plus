@@ -26,11 +26,14 @@ honest about the real file format and about liftOver's own per-end strand
 flipping, which is what ``resolve_lifted_endpoints`` reads orientation from.
 """
 
+import contextlib
+import io
 import os
 import shutil
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 import pandas as pd
@@ -2828,3 +2831,118 @@ class TestReconcileOutputColumns(unittest.TestCase):
             other = combined[combined["hg38_start"] == 60000].iloc[0]
             self.assertEqual(other["n_copies_paternal"], 1)
             self.assertEqual(other["copy_loci_paternal"], "")
+
+
+class TestCombinedTableWhenAHaplotypeHasNoSite(unittest.TestCase):
+    """A haplotype without off-targets, or with none that lift to hg38, still
+    brings its columns to the combined table -- blank, as on a row found on the
+    other haplotype only. Without them assembly-search wrote the combined TSV
+    and then stopped in the combined report with a TypeError (exit 1, and no
+    combined report on the web), for a guide with no off-target at all as for
+    one whose off-targets are all on one haplotype."""
+
+    L = 23
+
+    def _combine(self, a_rows, b_rows):
+        preds = {
+            "a": pd.DataFrame(a_rows, columns=_HG38_ROW_COLS),
+            "b": pd.DataFrame(b_rows, columns=_HG38_ROW_COLS),
+        }
+        return ar._combine_across_haplotypes(preds, ["a", "b"], 3)
+
+    def test_an_empty_haplotype_keeps_the_columns_of_a_two_sided_table(self):
+        two_sided = list(self._combine(
+            [_hg38_row("a1", "chr1", 1000)], [_hg38_row("b1", "chr1", 1000)],
+        ).columns)
+        a_only = self._combine([_hg38_row("a1", "chr1", 1000, cfd=0.7)], [])
+        b_only = self._combine([], [_hg38_row("b1", "chr2", 2000, strand="-", cfd=0.3)])
+        neither = self._combine([], [])
+        for out in (a_only, b_only, neither):
+            self.assertEqual(list(out.columns), two_sided)
+        self.assertEqual(len(neither), 0)
+        # the haplotype with the site keeps its values; the other's are blank
+        row = a_only.iloc[0]
+        self.assertEqual(
+            (row["origin"], row["off_target_id_a"], row["hg38_chr"], row["hg38_start"]),
+            ("a_only", "a1", "chr1", 1000),
+        )
+        self.assertAlmostEqual(row["CFD_score_(fewest_mm+b)_a"], 0.7)
+        self.assertTrue(a_only[[c for c in two_sided if c.endswith("_b")]].isna().all().all())
+        row = b_only.iloc[0]
+        self.assertEqual(
+            (row["origin"], row["off_target_id_b"], row["hg38_chr"], row["hg38_start"],
+             row["Strand_(fewest_mm+b)"]),
+            ("b_only", "b1", "chr2", 2000, "-"),
+        )
+        self.assertAlmostEqual(row["CFD_score_(fewest_mm+b)_b"], 0.3)
+        self.assertTrue(b_only[[c for c in two_sided if c.endswith("_a")]].isna().all().all())
+
+    def _row(self, pos, cfd, mm):
+        return {
+            "Spacer+PAM": "A" * self.L, "Chromosome": "chr1",
+            "Start_coordinate_(fewest_mm+b)": pos, "Strand_(fewest_mm+b)": "+",
+            "Aligned_spacer+PAM_(fewest_mm+b)": "A" * self.L,
+            "Aligned_protospacer+PAM_REF_(fewest_mm+b)": "A" * self.L,
+            "Aligned_protospacer+PAM_ALT_(fewest_mm+b)": "A" * self.L,
+            "Mismatches_(fewest_mm+b)": mm, "Bulges_(fewest_mm+b)": 0,
+            "CFD_score_(fewest_mm+b)": cfd,
+        }
+
+    def test_combined_report_is_built_when_a_haplotype_has_no_offtarget(self):
+        try:  # the report's own dependencies (matplotlib), as test_generate_report
+            import generate_report
+        except Exception as exc:  # noqa: BLE001 - any import failure => skip, not fail
+            self.skipTest(f"generate_report not importable: {exc}")
+        sites = [self._row(1000, cfd=0.4, mm=3), self._row(5000, cfd=0.6, mm=2)]
+        for pat_rows, mat_rows in (([], []), (sites, []), ([], sites)):
+            with self.subTest(paternal=len(pat_rows), maternal=len(mat_rows)), \
+                    tempfile.TemporaryDirectory() as cwd:
+                # the layout assembly_search() leaves under Results/
+                results = os.path.join(cwd, "Results")
+                haplotypes = {}
+                for hap, rows in (("paternal", pat_rows), ("maternal", mat_rows)):
+                    hap_dir = os.path.join(results, f"job_{hap}")
+                    os.makedirs(hap_dir)
+                    if rows:  # a search without off-targets leaves no integrated results
+                        pd.DataFrame(rows, columns=ar.PRED_COLS).to_csv(
+                            os.path.join(hap_dir, f"guide_PAM_{hap}_mm4_bMax2_integrated_results.tsv"),
+                            sep="\t", index=False,
+                        )
+                    alias = os.path.join(cwd, f"{hap}.chromAlias.txt")
+                    with open(alias, "w") as f:
+                        f.write("# assembly\tucsc\tgenbank\nchr1_asm\tchr1\tCM000001.1\n")
+                    haplotypes[hap] = {"chrom_alias_file": alias, "chain_file": "unused.chain",
+                                       "results_dir": hap_dir}
+                combined_dir = os.path.join(results, "job_combined")
+                os.makedirs(combined_dir)
+                ar.write_combined_params_file(
+                    combined_dir, "job", os.path.join(cwd, "pat"), os.path.join(cwd, "mat"),
+                    "pat.chain", "mat.chain", haplotypes["paternal"]["chrom_alias_file"],
+                    haplotypes["maternal"]["chrom_alias_file"], haplotypes["paternal"]["results_dir"],
+                    4, 0, 0,
+                )
+                fake = _fake_liftover({1000: 50000, 5000: 60000})
+                with patch.object(ar, "run_liftover", side_effect=fake):
+                    combined, summary = ar.reconcile_haplotypes(haplotypes, workdir=combined_dir, merge_bp=3)
+                tsv = os.path.join(combined_dir, "job_combined_hg38.tsv")
+                combined.to_csv(tsv, sep="\t", index=False)  # as assembly_search() writes it
+
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    report = generate_report.build_combined_report(
+                        combined_dir, "job", tsv, summary,
+                        os.path.join(results, "job_paternal", "job_paternal_report.zip"),
+                        os.path.join(results, "job_maternal", "job_maternal_report.zip"),
+                    )
+                found = pat_rows or mat_rows
+                with zipfile.ZipFile(report) as zf:
+                    page = zf.read("report.html").decode()
+                    top = zf.read("data/job_combined_top1000.tsv").decode() if found else ""
+                self.assertNotIn("unavailable", stderr.getvalue())
+                self.assertNotIn("Validation panel unavailable", page)
+                if found:
+                    # the haplotype's sites, each in the pooled top-1000 table
+                    self.assertEqual(len(pd.read_csv(io.StringIO(top), sep="\t")), len(found))
+                else:
+                    self.assertIn("No off-targets in this run.", page)
+                    self.assertIn("No off-targets to show.", page)

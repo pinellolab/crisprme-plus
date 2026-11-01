@@ -1858,26 +1858,30 @@ def _combine_across_haplotypes(
     left = hg38_predictions[a].sort_values(_MERGE_ASOF_SORT_COLS).reset_index(drop=True)
     right = hg38_predictions[b].sort_values(_MERGE_ASOF_SORT_COLS).reset_index(drop=True).copy()
 
-    # an entirely non-mappable haplotype leaves an empty frame here (e.g.
-    # every prediction failed to lift over) -- pandas infers an `object`
-    # dtype for an empty column, which merge_asof rejects when the other
-    # side is a real int64 `hg38_start` ("incompatible merge keys" error).
-    # Short-circuit rather than coerce dtypes into a merge that has nothing
-    # to actually match against either way.
-    if left.empty and right.empty:
-        return pd.DataFrame(columns=list(left.columns) + ["origin"])
-    if right.empty:
-        out = left.rename(columns={
-            col: f"{col}_{a}" for col in left.columns if col not in _SHARED_KEY_COLS
+    # a haplotype without off-targets, or an entirely non-mappable one (e.g.
+    # every prediction failed to lift over), leaves an empty frame here --
+    # pandas infers an `object` dtype for an empty column, which merge_asof
+    # rejects when the other side is a real int64 `hg38_start` ("incompatible
+    # merge keys" error). Short-circuit rather than coerce dtypes into a merge
+    # that has nothing to actually match against either way, but keep the
+    # columns the merge gives (both haplotypes' own, suffixed, the shared keys
+    # once, then origin): the empty haplotype's columns are left blank, as on
+    # any "<a>_only" row of a merge, not missing. The combined report reads
+    # both haplotypes' columns, and stopped with a TypeError without them.
+    if left.empty or right.empty:
+        columns = (
+            [col if col in _SHARED_KEY_COLS else f"{col}_{a}" for col in left.columns]
+            + [f"{col}_{b}" for col in right.columns if col not in _SHARED_KEY_COLS]
+            + ["origin"]
+        )
+        if left.empty and right.empty:
+            return pd.DataFrame(columns=columns)
+        name, found = (a, left) if right.empty else (b, right)
+        out = found.rename(columns={
+            col: f"{col}_{name}" for col in found.columns if col not in _SHARED_KEY_COLS
         })
-        out["origin"] = f"{a}_only"
-        return out
-    if left.empty:
-        out = right.rename(columns={
-            col: f"{col}_{b}" for col in right.columns if col not in _SHARED_KEY_COLS
-        })
-        out["origin"] = f"{b}_only"
-        return out
+        out["origin"] = f"{name}_only"
+        return out.reindex(columns=columns)
 
     # merge_asof collapses the "on" column to a single (left's) value, so
     # keep a copy of the right side's own position to compute the true gap

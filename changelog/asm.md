@@ -45,6 +45,20 @@
   run completes. Searches of a genome in `Genomes/` are unchanged (the same folder); reference and
   variant search outputs were compared byte for byte, with and without bulges. Covered by
   `PostProcess/test_assembly_haplotype_genomes.py`.
+- **A personal-assembly search stopped before its combined report when a haplotype had no
+  off-target.** When the guide had no off-target on one haplotype (or none there that lifted to
+  hg38), or none on either, `assembly-search` wrote the combined table and then failed with
+  `TypeError: cannot concatenate object of type '<class 'numpy.float64'>'; only Series and
+  DataFrame objs are valid` (exit 1); on the web the job finished without a combined report. The
+  combined table (`<job>_combined_hg38.tsv`) left out the columns of a haplotype without
+  off-targets (19 columns instead of 34), and the report reads both haplotypes' columns. The table
+  now always has both haplotypes' columns, blank for a haplotype without off-targets as on any row
+  found on one haplotype only, and the combined report is built (with no off-target on either
+  haplotype it says "No off-targets in this run."). A search with off-targets on both haplotypes
+  writes the same table and report as before (compared byte for byte, apart from the report's
+  generation time). **Affected:** such searches, from the CLI or the web, e.g. `--mm 0` with a
+  guide that matches one haplotype only. **What to do:** run them again for the combined report.
+  Covered by `PostProcess/test_assembly_reconcile.py`.
 - **A search could run on the index of another genome whose name ends in the searched genome's
   name.** The pipeline picks an installed index by the genome's name,
   `genome_library/<PAM>_<N>_<name>`, but the pattern it matched also took
