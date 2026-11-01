@@ -512,9 +512,9 @@ class SearchSide(_Fixture):
     # No VCFs of the dataset here (as for an index downloaded, or copied from where it was
     # built): build-index-only stops at its --vcf, after the rm -rf it was chained to.
 
-    def words(self, again="this search again"):
+    def words(self, search="this search again,"):
         """What an ERROR says to do with the fake-indel genome here."""
-        return (f": remove the INDELS index with rm -rf '{self.idx}' and run {again}, which "
+        return (f": remove the INDELS index with rm -rf '{self.idx}' and run {search} which "
                 f"builds it anew from the fake-indel genome in {self.work}/Genomes/ref+ds_INDELS")
 
     def download(self):
@@ -618,7 +618,7 @@ class SearchSide(_Fixture):
         res, _ = self.run_search(LOGS_AB, {"chrA": True}, fakes={"chrA": WITH_NRG, "chrB": WITH_NRG},
                                  view="chrB")
         self.refused(res, self.missing("chrB", "its indel log lists them"),
-                     self.words(again="complete-test without --chrom"))
+                     self.words("complete-test without --chrom, or a complete-search of this index,"))
         self.assertNotIn(ct.CHROMVIEWPREFIX, res.stderr)
 
     def test_a_view_without_the_vcfs_or_the_fake_genome_gives_the_download(self):

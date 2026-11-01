@@ -291,8 +291,8 @@ def _rebuild(raw_fakechrom, fasta):
     download. So too where no such PAM file is to be found (a PAM-less index searched for
     another PAM, built with one that is not in _pam_dirs): the steps are said in words,
     never as a command with a blank to fill in. complete-test --chrom's view may not hold
-    that genome, and an INDELS index built there would go with it, so that run sends the
-    user to the one that does build it."""
+    that genome, and an INDELS index built there would go with the view, so that run sends
+    the user to a run that does build it."""
     cwd = os.path.normpath(_outside_view(current_working_directory))
     indels_index = os.path.join(cwd, "genome_library",
                                 f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS")
@@ -308,8 +308,9 @@ def _rebuild(raw_fakechrom, fasta):
     own = _own_pam()
     pam = _pam_file_of(*own) if own else pam_file
     if fasta and not (vcfs and pam):
-        again = "complete-test without --chrom" if _in_chrom_view() else "this search again"
-        return (f": remove the INDELS index with rm -rf '{indels_index}' and run {again}, which "
+        search = ("complete-test without --chrom, or a complete-search of this index,"
+                  if _in_chrom_view() else "this search again,")
+        return (f": remove the INDELS index with rm -rf '{indels_index}' and run {search} which "
                 f"builds it anew from the fake-indel genome in {os.path.dirname(raw_fakechrom)}")
     if not vcfs:
         return (f": for an index you downloaded, download it again: {download}; for one you "
