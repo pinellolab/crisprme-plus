@@ -16,17 +16,12 @@ this commit. It leaves out the REF columns of a SNP row there (no lowercase mism
 the REF seed and non-seed counts leave the mismatches out: round 4 review F3-tier-REF),
 which another track fixes in this release (PostProcess/new_simple_analysis.py); with an
 equivalent change in, those columns are as the dictionaries give them, and the rest of the
-entry holds as it stands. Its clause "`Other_motifs` counts each reference alignment over a
-SNP twice (...), and the file of alternative alignments, which a per-sample search writes,
-lists each such alignment twice, as on every search that reads the tiers;" is a defect of
-every search that reads the tiers, already in aa9c54b (the reference search and the tier
-post-analysis both give the reference alignments of a variant window; that code is as in
-2.8.0): if its fix lands in 2.8.1, drop that clause. -->
+entry holds as it stands. -->
 
 ### Changed
 - **A search of a VCF dataset built in the web Settings page reads its dict-less tiers, so its
-  tables change.** A variant build in Settings now passes the dataset's sample list as
-  `--samplesID` when its VCFs have samples (see Fixed), so it also writes the dict-less tiers
+  tables change.** A variant build in Settings now passes the dataset's sample list as `--samplesID`
+  when its VCFs have samples (see Fixed), so it also writes the dict-less tiers
   (`Dictionaries/registry_<dataset>/` and `Dictionaries/genotypes_<dataset>/`). Searches of an index
   built (or built again) in Settings now read them, as searches of a command-line `--samplesID`
   build and of a downloaded index do, where they read the dataset's dictionaries before. On a phased
@@ -38,14 +33,14 @@ post-analysis both give the reference alignments of a variant window; that code 
   fewest mismatches and bulges, the indel alone, for every sample that carries either); a SNP's
   allele frequency is computed from the genotypes of the samples the list names, to six significant
   digits (`0.333333`), where the dictionaries gave the VCF's `AF` (`0.3333`), and an indel's is
-  still the VCF's; `Other_motifs` counts each reference alignment over a SNP twice (`444` where the
-  dictionaries gave `222`), and the file of alternative alignments, which a per-sample search
-  writes, lists each such alignment twice, as on every search that reads the tiers; and rows come
-  in another order. The result folder also holds the SNP + indel and SNP + SNP co-occurrence and
-  phase-confirmation tables, and the shareable report gives the dataset's SNP and indel counts and
-  its SNP + indel cis co-occurrences. A dataset built in Settings before this release has no tiers
-  until its variant index is built again there, and its searches read its dictionaries until then,
-  as before.
+  still the VCF's; `Other_motifs` counts the alignments the tiers give at a site: one more at the
+  site of that indel and SNP (their row), and one fewer at a site where the dictionaries also listed
+  the reference alignment as a variant one, for the carriers of a SNP that destroys its PAM; and
+  rows come in another order. The result folder also holds the SNP + indel and SNP + SNP
+  co-occurrence and phase-confirmation tables, and the shareable report gives the dataset's SNP and
+  indel counts and its SNP + indel cis co-occurrences. A dataset built in Settings before this
+  release has no tiers until its variant index is built again there, and its searches read its
+  dictionaries until then, as before.
 - **A genome uploaded in the web Settings page under the name of an installed genome replaces it,
   and is refused while indexes built on a genome of that name are installed.** The upload went into
   that genome's folder, beside the files already there (and so into the shared copy, when that
@@ -188,3 +183,24 @@ post-analysis both give the reference alignments of a variant window; that code 
   the Settings page wrote before a panel naming them was installed) turned those samples unknown in
   the reports of the panel's searches. A list that gives no superpopulation no longer replaces one
   another list gives; where lists give two, the last one's is kept, as before.
+- **`Other_motifs` and the alternative alignments count and list each reference alignment once.**
+  The merge step of a search, which keeps each site's best alignment and lists the others as
+  alternative alignments, took a site's reference rows as they came, and two steps before it give it
+  the same row more than once: each variant dataset's post-analysis carries every row of the one
+  reference search, and on the dict-less tiers (searches of a `--samplesID` build, of a downloaded
+  index such as the default one, and of a variant index built in the web Settings page) the
+  post-analysis also gives the reference alignment of each variant window again. So a search that
+  read the tiers counted each reference alignment over a SNP twice in `Other_motifs` (`444` where
+  the dictionaries gave `222`), a search of two variant datasets counted every reference alignment
+  once per dataset (`491` where one dataset gave `245`), and a per-sample search's file of
+  alternative alignments listed each of them as many times, a copy of the site's best alignment
+  among them (on a 6-sample panel, 2446 rows for 1888 alternative alignments on the tiers, and 3779
+  rows for the panel's 1887 when a second dataset was searched with it). Each reference alignment
+  is now kept once: `Other_motifs`, the `#Seq_in_cluster` columns of the `bestMerge` table, the
+  alternative alignments and the results page's table change with it; the best alignment of each
+  site, its scores, carriers and allele frequencies are as before, and a search of one dataset on
+  its dictionaries, or of the reference alone, is unchanged. In the table of a site's haplotypes
+  (`observed_haplotypes.tsv`, and the report's), a haplotype's CRISPR-Bulge score is taken from the
+  rows of the alternative alignments, which pair the three criteria's lists by position, so it can
+  change with them: in the two-dataset search, 2 of its 5 rows did. Run a search again for these
+  counts and lists.
