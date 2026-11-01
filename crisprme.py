@@ -3172,16 +3172,24 @@ def _check_genome_layout(genomedir: str) -> None:
             "after it (chr1.fa, chr2.fa, ...): move the .fa files up out of their "
             "folder, rename .fasta to .fa, or gunzip them, then run build-index-only "
             "again. (A genome uploaded from the web Settings page is laid out this "
-            "way: remove this one there and upload it again.)"
+            "way: remove this one there, with the indexes built on it, and upload it "
+            "again.)"
         )
     multi = find_multi_record_fastas(genomedir)
     if multi:
         fname, ids = next(iter(multi.items()))
+        # an index built from the folder as it is gives the sites of every sequence of
+        # the file under the name of its first, and every later search and build would
+        # take it as it is
+        genome = os.path.basename(os.path.normpath(genomedir))
         error(
             describe_problem(genomedir, fname, ids)
-            + "\nThen run build-index-only again. (A genome uploaded from the web "
-            "Settings page is split this way: remove this one there and upload it "
-            "again.)"
+            + "\nThen remove each index built from the folder while it held that file "
+            f"(genome_library/*_{genome}, genome_library/*_{genome}+*, and the variant "
+            f"genomes Genomes/{genome}+*), which gives every sequence's sites under the "
+            "name of its first, and run build-index-only again. (A genome uploaded from "
+            "the web Settings page is split this way: remove this one there, with the "
+            "indexes built on it, and upload it again.)"
         )
 
 
@@ -3906,6 +3914,16 @@ def build_index_only() -> None:
                 _reclaim_build_dirs(os.path.join(indels_out, _fake), ".overlay-")
     # ---- reference index ------------------------------------------------------
     if os.path.isdir(idx_folder):
+        # one with no .bin (as one built from a folder with no .fa at its top was,
+        # before _check_genome_layout) is no index: every search skips it and builds
+        # its own, so this run would end done with none
+        if not any(f.endswith(".bin") for f in os.listdir(idx_folder)):
+            error(
+                f"The reference index {idx_folder} holds no .bin file, as one built from "
+                f"a genome folder with no .fa file at its top does, and no search uses "
+                f"it: remove it (rm -rf '{idx_folder}', or remove the index in the web "
+                f"Settings page) and run build-index-only again."
+            )
         print(f"Reference index already present: {idx_folder}", flush=True)
     else:
         print(

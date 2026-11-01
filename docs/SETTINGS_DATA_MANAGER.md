@@ -57,7 +57,9 @@ Bulge-enabled searches need a genome **index**.
   `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt`.)
 - A build stops with an error, and puts no index in place, when the genome folder
   holds no `.fa` file at its top, holds a FASTA of several sequences, or gives an
-  index with no `.bin` file: every search would refuse such an index.
+  index with no `.bin` file: every search would refuse such an index. It stops too
+  when the reference index already there holds no `.bin` (one built before from such
+  a folder): remove that index and build again.
 
 ### Add a VCF dataset
 Variant datasets are large, so they are **fetched server-side** rather than

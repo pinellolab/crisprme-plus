@@ -58,9 +58,12 @@ CHANGELOG.md. All go under "### Fixed". -->
   FASTAs); `build-index-only` put that index in place, and the Settings page showed the build as
   done, though every search refuses an index with no `.bin`. It now ends with an ERROR (exit status
   1) that says what to do, before it builds anything, for a folder with no `.fa` file at its top or
-  with a FASTA of several sequences (which every search refuses too), and when the engine writes no
-  `.bin` for the reference or the variant genome. A genome of one FASTA per sequence builds exactly
-  as before.
+  with a FASTA of several sequences (which every search refuses too; the message says to remove the
+  indexes built from the folder while it held that file), and when the engine writes no `.bin` for
+  the reference or the variant genome. A reference index with no `.bin` that an earlier run left is
+  no longer taken for present (the run said `Reference index already present` and the Settings page
+  showed the build done, though no search uses it): the run says to remove it. A genome of one
+  FASTA per sequence builds exactly as before.
 - **A single multi-chromosome `.vcf.gz` without its `.tbi` builds a variant index.** The
   documented auto-split read the file by region through its index, so a file uploaded alone (the
   Settings uploader takes one file at a time) failed with `Could not load .tbi index ...

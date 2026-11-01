@@ -8,7 +8,8 @@ left one) gave an index with no .bin, which build-index-only put in place, and t
 showed as done, and every search then refused; a FASTA file of several sequences gave
 an index of a genome every search refuses to use (genome_layout.py). Now the run ends
 with an ERROR that says what to do, before the engine runs, and a reference or
-variant index the engine wrote no .bin into is never put in place.
+variant index the engine wrote no .bin into is never put in place; nor is one with no
+.bin that an earlier run left taken for present (final review round 1, F2).
 
 These run the real crisprme.py build-index-only against the stub engine of
 test_build_index_only_atomic (which writes a .bin for each contig that holds a site,
@@ -66,9 +67,15 @@ class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
                     out.write(fh.read())
                 os.remove(self.genome(name))
         rc, out, err = self.run_bio(vcf=False)
+        # and to remove an index built from it before: it holds the sites of chr2 under
+        # chr1's name, and a later run would take it as it is (final review round 1, F2)
         self.assert_refused(rc, out, err, "hg38.fa: holds 2 sequences (chr1, chr2)",
                             "python PostProcess/genome_layout.py --split",
-                            "Then run build-index-only again.")
+                            "\nThen remove each index built from the folder while it held "
+                            "that file (genome_library/*_hg38, genome_library/*_hg38+*, and "
+                            "the variant genomes Genomes/hg38+*)",
+                            "and run build-index-only again.",
+                            "remove this one there, with the indexes built on it")
 
     def test_an_index_with_no_bin_is_not_put_in_place(self):
         # no sequence holds a site (a contig of N alone): the engine writes no .bin
@@ -83,6 +90,30 @@ class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
         self.assertIn(f"nothing was put in place (expected {self.lib(bio.REF)})", err)
         self.assertFalse(os.path.exists(self.lib(bio.REF)))
         self.assertEqual(self.leftovers(), [])
+
+    def test_a_reference_index_with_no_bin_is_not_taken_for_present(self):
+        # one built from a folder with no .fa at its top before it was refused (an
+        # upload of a chromFa archive kept chroms/): the run said 'Reference index
+        # already present' and the web showed it done, though no search uses it
+        os.makedirs(self.lib(bio.REF))
+        with open(os.path.join(self.lib(bio.REF), ".pam_build"), "w") as fh:
+            fh.write("20bp-NRG-SpCas9.txt\n")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(err, f"Error: The reference index {self.lib(bio.REF)} holds no .bin "
+                         "file, as one built from a genome folder with no .fa file at its "
+                         "top does, and no search uses it: remove it (rm -rf "
+                         f"'{self.lib(bio.REF)}', or remove the index in the web Settings "
+                         "page) and run build-index-only again.\n")
+        self.assertNotIn("already present", out)
+        self.assertEqual(self.calls(), [])  # the engine never ran
+        self.assertEqual(os.listdir(self.lib(bio.REF)), [".pam_build"])
+        # removed, it is built
+        os.remove(os.path.join(self.lib(bio.REF), ".pam_build"))
+        os.rmdir(self.lib(bio.REF))
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(any(f.endswith(".bin") for f in os.listdir(self.lib(bio.REF))))
 
     def test_a_genome_of_one_fasta_a_sequence_builds_as_before(self):
         rc, out, err = self.run_bio(vcf=False)
