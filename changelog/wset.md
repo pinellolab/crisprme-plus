@@ -10,7 +10,13 @@ no --samplesID ("from the command line, with their `--samplesID`, which a build 
 web Settings page passes none of" and "a run without it (a build from the web Settings
 page) does not write") should say the same: "(for the tiers, with their `--samplesID`, or
 built again in the web Settings page)" and "a run without it (as a build from the web
-Settings page was before this release)". -->
+Settings page was before this release)".
+The first entry's last sentence describes the tables of a search that reads the tiers as
+they are at this commit: if the fix of their REF columns (round 3 review F3:
+PostProcess/new_simple_analysis.py writes the REF alignment of an observed or fast-mode row
+without lowercase mismatches, so its REF seed and non-seed counts read 0) lands in 2.8.1,
+drop its clause "and on a SNP row the reference alignment has no lowercase mismatches and
+its REF seed and non-seed counts read 0, as on every search that reads the tiers". -->
 
 ### Fixed
 - **A VCF dataset added in the web Settings page can be searched from the browser, per sample too.**
