@@ -210,6 +210,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_tier_ref_columns -v
 
+      - name: "fewest_mm+b seed and non-seed counts include the DNA bulge, as the other two criteria do"
+        working-directory: PostProcess
+        run: python -m unittest test_seed_counts_dna_bulge -v
+
       - name: "Deterministic dedup ordering (#46: sample/rsID/AF/annotation lists sorted, not PYTHONHASHSEED-random)"
         working-directory: PostProcess
         run: python test_determinism.py
