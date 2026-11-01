@@ -43,8 +43,12 @@ Because it is a normal host directory, you have full read/write access to it at 
 at them. They are the large part (the indexes under `genome_library/` are the biggest — tens of GB).
 
 Searches add to them, once: a search builds the index it needs in `genome_library/` when it is
-missing, and a variant-aware search of a dataset that has no index installed enriches the genome
-with it (`Genomes/<genome>+<dataset>/`) and builds its dictionaries and index. A personal-assembly
+missing (not one run with `--index-path`, which only reads that library). A variant dataset's
+dictionaries (`Dictionaries/`) come with its index download (`download --what index`), or are built
+with its enriched genome (`Genomes/<genome>+<dataset>/`) and its index by `build-index-only --vcf`;
+`complete-search --vcf` refuses a dataset that has none yet and says how to get them. From the web,
+a search without bulges of a dataset that has only its VCFs (the form then offers no bulges)
+enriches the genome and builds the dictionaries and index itself. A personal-assembly
 search (`assembly-search`) builds an index for each haplotype, named after the individual and the
 haplotype plus a hash of the haplotype's folder (e.g. `genome_library/NRG_2_HG01255_paternal_5aeb0fc6`
 and `NRG_2_HG01255_maternal_067bdb25`, each the size of a reference index), searches each haplotype
@@ -62,10 +66,10 @@ never touches your shared inputs.
 
 | A search **READS** (shared inputs) | A search **WRITES** |
 |---|---|
-| a genome (`Genomes/`) + its matching index (`genome_library/`), a PAM (`PAMs/`), and — for a variant-aware search — a dataset (`VCFs/` + `Dictionaries/` + `samplesIDs/`) and annotations (`Annotations/`). For a personal-genome search: an individual (`Assemblies/` + `LiftoverFiles/`). | its outputs **only** under `Results/<job>/`; and, once, the shared inputs it needs that are missing: the index (`genome_library/`), for a variant-aware search the enriched genome and dictionaries (`Genomes/`, `Dictionaries/`), for a personal-genome search each haplotype's index, link and alignments (`genome_library/`, `haplotype_genomes/`, `haplotype_alignments/`). |
+| a genome (`Genomes/`) + its matching index (`genome_library/`), a PAM (`PAMs/`), and — for a variant-aware search — a dataset (`VCFs/` + `Dictionaries/` + `samplesIDs/`) and annotations (`Annotations/`). For a personal-genome search: an individual (`Assemblies/` + `LiftoverFiles/`). | its outputs **only** under `Results/<job>/`; and, once, the shared inputs it needs that are missing: the index (`genome_library/`), and for a personal-genome search each haplotype's index, link and alignments (`genome_library/`, `haplotype_genomes/`, `haplotype_alignments/`). A variant dataset's dictionaries come from its download or from `build-index-only` before its first `complete-search --vcf` (a web search can build them: see above). |
 
-So the rule is simple: **inputs are shared and reused (a search builds the ones it is missing, once);
-every run's outputs go under `Results/`.**
+So the rule is simple: **inputs are shared and reused (a search adds to them only what it is
+missing, once: see above); every run's outputs go under `Results/`.**
 
 ## Managing the folder
 - **Move everything:** move the whole data folder; nothing is stored elsewhere.
