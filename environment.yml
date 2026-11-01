@@ -15,7 +15,7 @@
 #   * scikit-learn is REMOVED -- nothing in the main env imports it anymore (the only
 #     remaining use is the dev-only bench_cbulge.py, which runs in the cbulge env).
 #   * numpy / scipy / pandas / matplotlib are MODERNIZED (2-year jump, current maintained
-#     lines). CFD uses tiny version-agnostic lookup pickles, so the scoring is unaffected.
+#     lines). CFD reads its own small JSON lookup tables, so the scoring is unaffected.
 # numpy is capped < 2 as a deliberate guard: the pysam / CRISPRitz C-extensions in this
 # env are built against the numpy 1.x C-ABI, and a numpy-2 ABI mismatch could silently
 # corrupt results in a clinical tool. numpy 2.x is a validated fast-follow, not this pass.

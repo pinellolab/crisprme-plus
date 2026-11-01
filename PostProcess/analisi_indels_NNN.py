@@ -699,8 +699,6 @@ targets_for_doench = dict()
 N_THR = multiprocessing.cpu_count() // 2
 refgenomedir = sys.argv[7]
 
-# with open( os.path.dirname(os.path.realpath(__file__)) + "/azimuth/saved_models/V3_model_nopos.pickle", 'rb') as f:
-#     model = pickle.load(f)
 max_doench = 0
 sum_cfd = 0
 cfd_scores = []

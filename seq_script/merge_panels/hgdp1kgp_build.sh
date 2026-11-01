@@ -1,11 +1,11 @@
 #!/bin/bash
 # gnomAD HGDP+1kGP RE-PHASED single-source, PHASED variant-index build (as-run, resumable) —
-# the candidate NEW DEFAULT "real-haplotypes" index NRG_3_hg38+hg38_HGDP1kGP.
+# the DEFAULT "real-haplotypes" variant index NRG_3_hg38+hg38_HGDP1kGP.
 #
 # WHAT THIS IS: a standard CRISPRme variant-aware index built by ENRICHING hg38 with the gnomAD
 # v3.1.2 HGDP+1kGP jointly-called callset, RE-PHASED by us with SHAPEIT5 (phase_common scaffold
 # + phase_rare) to KEEP SINGLETONS (the public phased_haplotypes_v2 release drops them at MAC>=2).
-# 4,091 samples (929 HGDP + 3,162 1kGP post-QC), GRCh38, chr-prefixed, chr1..22 + chrX (NO chrY/chrM
+# 4,091 samples (925 HGDP + 3,166 1kGP post-QC), GRCh38, chr-prefixed, chr1..22 + chrX (NO chrY/chrM
 # -> chrY is reference-only in the index, as in every 1000G/HGDP index). Because BOTH cohorts are
 # co-phased, the whole panel is genotyped-phased: HGDP off-targets now flip PUTATIVE -> CONFIRMED
 # cis with named per-sample carriers + exact joint AF (the old NRG_3_hg38+hg38_1000G2021_HGDP mixed

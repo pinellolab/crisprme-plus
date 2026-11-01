@@ -79,8 +79,11 @@ vcf_filter_pass_values="${24:-PASS,.}"
 # rebuild. "_" (or empty) means "not provided".
 index_path="${25:-_}"
 # Optional cap on total edits (mismatches + bulges) per reported alignment
-# (complete-search --max-total-edits). Raw targets exceeding it are dropped
-# right after the search. "-1" (or unset) means no cap.
+# (complete-search --max-total-edits): pruned inside the search, and raw
+# targets exceeding it are dropped again right after it. Unset means 4. Both
+# callers always pass it: the CLI a non-negative integer (default 6; it rejects
+# negatives) and the web form a positive one. "-1", passed only by a direct
+# call of this script, turns the limit off.
 max_total_edits="${26:-4}"  # default cap on total edits (mm+bulges); pruned in-search (#107)
 
 # --prune-pam pass-through ($27, default "0"=off): when "1", the CRISPRitz -index

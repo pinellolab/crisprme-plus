@@ -17,7 +17,7 @@
 #     SOLELY because the vendored legacy-scorer + azimuth pickles needed that combo. CRISPR-Bulge (the
 #     replacement) runs in its own conda env (cbulge) and azimuth is gone, so: scikit-learn is DROPPED (nothing in the main
 #     env imports it), and numpy/scipy/pandas/matplotlib move to current maintained lines.
-#     CFD uses version-agnostic lookup pickles, so scoring is unaffected. numpy is capped
+#     CFD reads its own JSON lookup tables, so scoring is unaffected. numpy is capped
 #     < 2 on purpose: pysam/CRISPRitz C-extensions here are built against the numpy 1.x
 #     C-ABI; a numpy-2 ABI mismatch could silently corrupt results. numpy 2.x is a
 #     separately-validated fast-follow.
@@ -128,7 +128,7 @@ RUN cp ${PREFIX}/opt/crisprme/crisprme.py ${PREFIX}/bin/crisprme.py \
     && rm -f ${PREFIX}/lib/python3.11/site-packages/pyproject.toml
 # The legacy RandomForest scorer was retired in favor of CRISPR-Bulge (its 276 MB model + its unzip step are
 # gone). The CRISPR-Bulge model is provisioned into its own conda env by scorer_env
-# (build_scorer_envs, below); CFD's tiny score pickles ship as plain files in PostProcess/.
+# (build_scorer_envs, below); CFD's JSON score tables ship as plain files in PostProcess/.
 
 # ---- Dedicated conda env for the ML off-target scorer (CRISPR-Bulge) --------
 # Built in its OWN micromamba env so its TensorFlow/numpy pins never touch the

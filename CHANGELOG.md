@@ -132,6 +132,24 @@ and the `release-crisprme` skill.
   release; `scorer-env create` and `doctor` are part of it. macOS is Docker-only: Bioconda has no
   macOS CRISPRitz, and the source build needs GCC (`buildTST` uses GCC's parallel-mode STL).
 
+- **Docs and help text now match what ships and what is on Hugging Face.** The raw source VCFs are
+  hosted (`vcfs/hg38_HGDP1kGP`, `vcfs/hg38_HPRC`, `vcfs/hg38_mega`, fetched with
+  `download --what vcf --dataset <name>`), although the README's `download` reference, six pages
+  under `docs/` and the error `--what vcf` gives for a missing dataset said they were not.
+  METHODS, the HGDP + 1000 Genomes methods page and the troubleshooting page described
+  population-level as the default analysis; they now describe the context-aware default the code
+  has applied since 2.8.0 (per-sample on a phased genotyped index such as the default one,
+  population-level otherwise), so on the default index it is `--population-level`, not leaving out
+  `--per-sample`, that gives the lighter screen. The index tables now name the NGG, NRR and
+  8-nt-flank PAM-less archives with their download sizes, all in GB (10⁹ bytes), and
+  `docs/INDEX_PROVENANCE.md` records both dataset repos as they stand after the 2026-10-30 upload
+  (the four replacements, `indexes/SHA256SUMS`). Help and warning texts that named unhosted
+  datasets or stale values are corrected too: `build-index-only --help` now uses `hg38_HGDP1kGP`,
+  `assembly-search --help` gives complete-search's `--max-total-edits` default as 6 (it said 4),
+  and the warning for the retired `--fast` no longer says it used to force per-sample.
+  `RESUME.md`, a scratch file committed by accident in 2.5.4, is gone from the tree, so the Docker
+  image no longer ships it.
+
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
   rsID, allele frequency and carrier samples.** Every CRISPRitz targets file carries a `#` header, and
