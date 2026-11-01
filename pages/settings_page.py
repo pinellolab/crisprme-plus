@@ -291,6 +291,16 @@ def _settings_upload_chunk():
         verr = _validate_name(dataset)
         if verr:
             return (f"invalid dataset name: {verr}", 400)
+        # the reference genome the dataset is called against: the search form offers
+        # the dataset for that genome only, so one the dataset has no marker for yet
+        # must be named (the card's dropdown), and must be installed
+        ref = genome.replace(" ", "_")
+        if ref:
+            if (ref.startswith(".") or os.path.basename(ref) != ref or not os.path.isdir(
+                    os.path.join(current_working_directory, "Genomes", ref))):
+                return (f"reference genome {genome!r} is not installed", 400)
+        elif not os.path.isfile(os.path.join(current_working_directory, "VCFs", f".{dataset}.refgenome")):
+            return ("select the reference genome this VCF is called against first", 400)
     part = os.path.join(_uploads_dir(), name + ".part")
     with open(part, "wb" if idx == 0 else "ab") as fout:
         fout.write(request.get_data())
@@ -1672,8 +1682,12 @@ def settings_page() -> List:
                     "data-target": "vcf",
                     "data-dataset-input": "vcf-name",
                     "data-genome-input": "vcf-ref-genome",
+                    "data-genome-value": "vcf-ref-genome-value",
                 },
             ),
+            # the reference-genome dropdown's value, which a clientside callback
+            # (after add_vcf) mirrors here for the uploader to send
+            html.Span(id="vcf-ref-genome-value", hidden=True),
             html.Div(id="vcf-feedback", style={"color": "#b00", "margin-top": "0.4rem"}),
         ],
     )
@@ -2360,6 +2374,18 @@ def add_vcf(n, name, source, path, hf_name, ref_genome):
         _render_all_tables(),
         _render_storage(),
     )
+
+
+# The chunked uploader (assets/chunked_upload.js) is plain JavaScript outside Dash,
+# and a dcc.Dropdown keeps its value in React state, not in an element of the page:
+# mirror the value into a hidden element that the uploader reads and sends as the
+# dataset's reference genome. In the browser, so it is there as soon as a genome is
+# picked, before an Upload click can come.
+app.clientside_callback(
+    "function (value) { return value || ''; }",
+    Output("vcf-ref-genome-value", "children"),
+    Input("vcf-ref-genome", "value"),
+)
 
 
 @app.callback(

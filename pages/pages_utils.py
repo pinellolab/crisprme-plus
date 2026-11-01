@@ -1626,6 +1626,13 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     # combined dropdown value "1000G_HGDP" matches "..._hg38_1000G_HGDP", and a single
     # "1000G" query does NOT resolve a combined-only index (the search wouldn't either).
     want_enriched = f"{genome}_{vcf}" if vcf else ""  # "" => reference-only (no "+")
+    # A dataset whose VCFs/ folder does not repeat the genome's name (one added in
+    # Settings, named like its card's example) is searched as that folder
+    # (main_page._resolve_vcf_folder), so its index is "...+<dataset>".
+    _vdir = os.path.join(current_working_directory, VCFS_DIR)
+    if vcf and not os.path.isdir(os.path.join(_vdir, want_enriched)) and os.path.isdir(
+            os.path.join(_vdir, vcf)):
+        want_enriched = vcf
     best = 0
     for d in os.listdir(lib):
         if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
@@ -1789,12 +1796,20 @@ def get_variant_dataset_options(genome: str) -> List:
         if variant_dataset_present(genome_norm, ds):
             options.append({"label": labels.get(ds, ds) + _pam_note(ds), "value": ds})
     # any additional installed dataset folder for this genome (e.g. a merged panel or
-    # a custom VCF registered via Settings), matched by the genome token in its name
+    # a custom VCF added in Settings): one whose reference-genome marker (written when
+    # it is added in Settings) names this genome; and one with no marker whose name
+    # holds the genome token, or that vcf_reference_genome otherwise finds this genome
+    # for (an enriched genome built from it)
     seen = {o["value"] for o in options}
     for ds in get_all_vcf_datasets():
         val = ds["value"] if isinstance(ds, dict) else ds
         core = val[len(genome_norm) + 1:] if val.startswith(genome_norm + "_") else val
-        if genome_norm and genome_norm in val and core not in seen:
+        ref = vcf_reference_genome(val)
+        if os.path.isfile(os.path.join(current_working_directory, VCFS_DIR, f".{val}.refgenome")):
+            ours = ref == genome_norm
+        else:
+            ours = genome_norm in val or ref == genome_norm
+        if genome_norm and ours and core not in seen:
             options.append({"label": core + _pam_note(core), "value": core})
             seen.add(core)
     # BATTERIES-INCLUDED: a prebuilt variant INDEX ships WITHOUT the raw VCFs folder
