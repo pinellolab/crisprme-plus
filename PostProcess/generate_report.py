@@ -1256,12 +1256,18 @@ def _parse_results_filename(tsv_path):
     return info
 
 
+# The "Variant dataset(s)" label of a reference-only search, which searched no variant
+# dataset (build_summary_meta then also sets meta["reference_only"]).
+REFERENCE_ONLY_DATASETS = "none (reference genome only)"
+
+
 def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     """Collect summary metadata used by the header card and matrix.
 
     Returns a dict with resolved guide list, nuclease, pam, genome, datasets, mm,
     bdna, brna, bmax, max_edits, date, version, and the canonical partition
-    counts (n_total, n_variant, n_reference, n_ontarget, n_offtarget).
+    counts (n_total, n_variant, n_reference, n_ontarget, n_offtarget), and
+    reference_only (True when the search used no variant dataset).
     """
     params = {}
     version = None
@@ -1319,11 +1325,32 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         or fn.get("genome")
         or ""
     ) or "n/a"
+
+    variant, reference, ontarget = partition_masks(df, cols)
+    n_total = len(df)
+    n_variant = int(variant.sum())
+    n_reference = int(reference.sum())
+    n_ontarget = int(ontarget.sum())
+    n_offtarget = n_total - n_ontarget
+
     datasets = fn.get("datasets")
-    if not datasets:
+    # A reference-only search (no --vcf; "reference only" on the web form) searched no
+    # variant dataset. Both .Params.txt writers (crisprme.py and the web) record
+    # Ref_comp False exactly then. A folder without that key falls back to the names:
+    # no dataset in the results file name and no "+<dataset>" in Genome_idx, whose
+    # reference index name (e.g. NGG_2_hg38) must not be read as a dataset. A run with
+    # a variant-created off-target is never reference-only.
+    ref_comp = str(params.get("Ref_comp", "")).strip()
+    if ref_comp:
+        reference_only = "False" in ref_comp
+    else:
+        reference_only = not datasets and "+" not in str(params.get("Genome_idx", ""))
+    reference_only = reference_only and n_variant == 0
+    if reference_only:
+        datasets = REFERENCE_ONLY_DATASETS
+    elif not datasets:
         idx = params.get("Genome_idx", "")
-        ref_comp = params.get("Ref_comp", "")
-        if "True" in str(ref_comp):
+        if "True" in ref_comp:
             datasets = "reference + variants"
         elif idx and idx != "None":
             datasets = idx
@@ -1343,13 +1370,6 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
     bmax = params.get("Max_bulges") or fn.get("bmax") or "n/a"
     bmax_int = _int_or_none(bmax)
     max_edits = params.get("Max_total_edits") or "n/a"
-
-    variant, reference, ontarget = partition_masks(df, cols)
-    n_total = len(df)
-    n_variant = int(variant.sum())
-    n_reference = int(reference.sum())
-    n_ontarget = int(ontarget.sum())
-    n_offtarget = n_total - n_ontarget
 
     # observed max mismatches+bulges on the FEWEST-mm+b (score-neutral) alignment --
     # the basis the off-target matrix uses. A site can still exceed the search cap
@@ -1388,6 +1408,7 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
         "n_offtarget": n_offtarget,
         "obs_max_mmb": obs_max_mmb,
         "search_mode": search_mode,
+        "reference_only": reference_only,
     }
 
 
@@ -1551,7 +1572,18 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     ``variant_count`` (``{'n_records', 'databases'}`` from the Tier-0 registry) add
     the panel size + database SNP-variant count to the inclusion row when known
     (registry sample counts preferred -- they match the AC/AN denominator).
+    A reference-only search (``meta["reference_only"]``) gets only the database row
+    ("none") and its search criteria against the reference genome.
     """
+    def _card(rows, caption=""):
+        body = "".join(f'<tr><td class="k">{k}</td><td>{v}</td></tr>' for k, v in rows)
+        return (
+            '<div class="inputs-card" style="margin-top:1em;padding:14px 18px;'
+            'background:#f7fafc;border:1px solid #cbd5e0;border-radius:10px">'
+            '<div class="matrix-title">Analysis inputs &amp; criteria</div>'
+            f'<table class="summary-table"><tbody>{body}</tbody></table>{caption}</div>'
+        )
+
     # bare <code>name</code>; _linkify_bundled_filenames makes every inline mention
     # of a bundled file (this one included) clickable in one uniform pass.
     vc_html = (
@@ -1572,6 +1604,16 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     bdna, brna = meta.get("bdna"), meta.get("brna")
     bulges = f"{bdna if bdna is not None else 'n/a'} / {brna if brna is not None else 'n/a'}"
     max_edits = meta.get("max_edits", "n/a")
+    if meta.get("reference_only"):
+        # no variant database, analysis mode, panel or allele frequency to state, and
+        # no variant-contributed site: the criteria are the reference genome's alone
+        return _card([
+            ("Variant database(s)", _esc(REFERENCE_ONLY_DATASETS)),
+            ("Off-target search criteria",
+             f"Sites in the reference genome that differ from the guide by up to "
+             f"{_esc(mm)} mismatches and DNA/RNA bulges up to {_esc(bulges)} (max "
+             f"total edits {_esc(max_edits)})."),
+        ])
     if meta.get("search_mode") == "per-sample":
         sm_note = (
             "<strong>Per-sample</strong> (<code>--per-sample</code>) &mdash; per-sample genotypes "
@@ -1615,16 +1657,12 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
         ("Variant-contributed sites",
          "Flagged by REF/ALT origin and <code>PAM_creation</code>; " + vc_note),
     ]
-    body = "".join(f'<tr><td class="k">{k}</td><td>{v}</td></tr>' for k, v in rows)
-    return (
-        '<div class="inputs-card" style="margin-top:1em;padding:14px 18px;'
-        'background:#f7fafc;border:1px solid #cbd5e0;border-radius:10px">'
-        '<div class="matrix-title">Analysis inputs &amp; criteria</div>'
-        f'<table class="summary-table"><tbody>{body}</tbody></table>'
+    return _card(
+        rows,
         '<p class="caption">Provided to support an off-target analysis accounting '
         "for human genetic variation. The scientific justification for the database "
         "choice, any allele-frequency threshold, and any population stratification "
-        "is the sponsor&rsquo;s to provide.</p></div>"
+        "is the sponsor&rsquo;s to provide.</p>",
     )
 
 
@@ -1974,9 +2012,11 @@ def _registry_variant_count(result_dir, meta):
     The registry ``sample_count`` is the GENOTYPED panel behind AC/AN (e.g. 3,477
     for 1000G+HGDP), which is authoritative over the samplesID-derived count (that
     can over-list individuals relative to the AC/AN denominator). ``n_records`` is
-    the search-usable SNP-variant count (indels / no-carrier records excluded)."""
+    the search-usable SNP-variant count (indels / no-carrier records excluded).
+    ``None`` for a reference-only search, which searched no registry: the single
+    installed one picked below must not be credited to it."""
     try:
-        if not result_dir:
+        if not result_dir or meta.get("reference_only"):
             return None
         dict_dir = None
         for cand in (
@@ -3189,8 +3229,15 @@ def _linkify_bundled_filenames(html, names):
 
 # MAF footnote (report v2.4): explains every blank / em-dash MAF cell in the table
 # and the curated download files. The panel name is READ FROM THE RUN (meta
-# datasets), never hardcoded, so it stays correct for any variant database(s).
-def maf_footnote(datasets=None):
+# datasets), never hardcoded, so it stays correct for any variant database(s). A
+# reference-only search has no panel: every MAF is blank, and the note says why.
+def maf_footnote(datasets=None, reference_only=False):
+    if reference_only:
+        return (
+            "MAF = minor/alternate allele frequency of the variant behind an off-target. "
+            "MAF blank (&mdash;) = reference off-target (no variant). This search used "
+            "the reference genome only, with no variant dataset, so every MAF is blank."
+        )
     ds = datasets or "the variant panel"
     return (
         "MAF = combined-panel minor/alternate allele frequency. "
@@ -3331,7 +3378,8 @@ def build_observed_haplotypes_modals_html(oh_modals):
 
 
 def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
-                     oh_modals=None, oh_download_name=None, oh_omitted_note=""):
+                     oh_modals=None, oh_download_name=None, oh_omitted_note="",
+                     reference_only=False):
     """Scrollable inline top-N table, sorted by CFD desc (opens offline).
 
     The ONLY interactivity is the per-site observed-haplotype modal: when ``site_map``
@@ -3348,7 +3396,8 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
     (Gene, Gene_distance_kb, GENCODE, ENCODE, DHS) and CRISPR-Bulge when computed. Cells
     come from ``build_curated_frame`` (values resolved by name; missing -> "-").
     The aligned protospacer+PAM cell is wrapped in <code>; the MAF em-dash keeps
-    its footnote. Extra columns don't break the scroll box / sticky header.
+    its footnote (``reference_only`` gives the footnote of a search with no variant
+    dataset). Extra columns don't break the scroll box / sticky header.
     """
     curated = build_curated_frame(top_df, cols, has_crispr_bulge, start_rank=1)
     headers = list(curated.columns)
@@ -3405,7 +3454,7 @@ def build_table_html(top_df, cols, has_crispr_bulge, datasets="", site_map=None,
 
     footnote = ""
     if maf_missing_seen:
-        footnote = f'<p class="caption">{maf_footnote(datasets)}</p>'
+        footnote = f'<p class="caption">{maf_footnote(datasets, reference_only)}</p>'
 
     table = (
         '<div class="ottable-wrap"><table class="ottable">'
@@ -5198,6 +5247,7 @@ def build_report(
             site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
             oh_download_name=observed_haplotypes_bundle_name,
             oh_omitted_note=observed_haplotypes_omitted_note,
+            reference_only=meta.get("reference_only", False),
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"generate-report: table unavailable: {exc}\n")
@@ -5215,6 +5265,7 @@ def build_report(
                     site_map=observed_haplotypes_site_map, oh_modals=oh_modals,
                     oh_download_name=observed_haplotypes_bundle_name,
                     oh_omitted_note=observed_haplotypes_omitted_note,
+                    reference_only=meta.get("reference_only", False),
                 )
                 # (the CRISPR-Bulge top-1000 is surfaced in the Section-5 top-1000 row next
                 # to the CFD one by render_html, not appended to the per-tier list here.)
@@ -5600,7 +5651,9 @@ def build_report(
                 "nuclease": meta.get("nuclease"),
                 "pam": meta.get("pam"),
                 "genome": meta.get("genome"),
-                "variant_datasets": meta.get("datasets"),
+                # null for a reference-only search: it searched no variant dataset
+                "variant_datasets": (
+                    None if meta.get("reference_only") else meta.get("datasets")),
                 "search": {
                     "mismatches": meta.get("mm"),
                     "bulges_dna": meta.get("bdna"),

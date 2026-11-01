@@ -2434,6 +2434,146 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(len(top), 1 + 2)  # header + the two reference off-targets
         self.assertFalse(os.path.exists(os.path.join(rd, "observed_haplotypes.tsv")))
 
+    # ------------------------------------------------------------------ #
+    # A reference-only report must say that no variant dataset was searched. Its
+    # .Params.txt records Ref_comp False, and Genome_idx is the REFERENCE index
+    # (<pam>_<bmax>_<genome> for a bulge search, None for a 0-bulge one). The report
+    # used to print that index name as the variant dataset, with the inputs card,
+    # MAF note and run manifest of a variant search, and credited the one installed
+    # registry as "searched".
+    # ------------------------------------------------------------------ #
+    # What crisprme.py complete-search writes (the web adds Threshold_mode + BE_*).
+    _PARAMS = {
+        "Genome_selected": "hg38", "Genome_ref": "hg38", "Genome_idx": "NRG_4_hg38",
+        "Pam": "NRG", "Max_bulges": "3", "Mismatches": "6", "DNA": "3", "RNA": "3",
+        "Max_total_edits": "6", "Annotation": "vuoto.txt", "Nuclease": "SpCas9",
+        "Ref_comp": "False", "Scorer": "crispr-bulge", "Compute_backend": "cpu",
+    }
+
+    def _install_job(self, name, tsv_name, params, variant_rows=False):
+        """Results/<name>/ beside an install's Dictionaries/ holding ONE registry (a
+        default install's layout), with the fixture rows under ``tsv_name`` (the
+        reference rows only unless ``variant_rows``), ``params`` as its .Params.txt
+        (none when None) and the .search_mode crisprme.py writes for every search."""
+        import json as _json
+        reg = os.path.join(self.tmp, "Dictionaries", "registry_hg38_1000G")
+        if not os.path.isdir(reg):
+            os.makedirs(reg)
+            with open(os.path.join(reg, "variant_count.json"), "w") as fh:
+                _json.dump({"n_records": 31130, "n_indels": 1744,
+                            "databases": {"1000G": {"sample_count": 2548}}}, fh)
+        rd = os.path.join(self.tmp, "Results", name)
+        os.makedirs(rd)
+        with open(os.path.join(rd, tsv_name), "w") as fh:
+            fh.write("\t".join(_HEADER) + "\n")
+            for row in _ROWS:
+                if variant_rows or row[10] == "ref":
+                    fh.write("\t".join(row) + "\n")
+        if params is not None:
+            with open(os.path.join(rd, ".Params.txt"), "w") as fh:
+                fh.write("".join(f"{k}\t{v}\n" for k, v in params.items()))
+        with open(os.path.join(rd, ".search_mode"), "w") as fh:
+            fh.write("population-level")
+        return rd
+
+    def _job_report(self, rd):
+        """(report.html, run_manifest dict, inputs-card row labels) of ``rd``'s report,
+        built the way the pipeline builds it (generate_report.py --result-dir)."""
+        import json as _json
+        self.assertEqual(gr.main(["--result-dir", rd, "--samplesID-dir", self.sid_dir]), 0)
+        with zipfile.ZipFile(os.path.join(rd, f"{os.path.basename(rd)}_report.zip")) as zf:
+            html = zf.read("report.html").decode("utf-8")
+            manifest = _json.loads(zf.read("data/run_manifest.json"))
+        card = re.search(r'<div class="inputs-card".*?</tbody></table>', html, flags=re.S)
+        self.assertIsNotNone(card)
+        keys = re.findall(r'<td class="k">(.*?)</td>', card.group(0))
+        return html, manifest, keys
+
+    def test_reference_only_report_names_no_variant_dataset(self):
+        ro_tsv = f"{_GUIDE}+NRG_hg38+__6+3_integrated_results.tsv"
+        cases = {
+            # bulge search: Genome_idx is the reference index
+            "ref_bulges": (ro_tsv, dict(self._PARAMS)),
+            # web-launched: Genome_idx <pam>_<bmax>_<genome>, plus the web-only keys
+            "ref_web": (ro_tsv, {**self._PARAMS, "Genome_idx": "NRG_3_hg38",
+                                 "Threshold_mode": "advanced", "BE_nucleotide": "none",
+                                 "BE_start": "0", "BE_stop": "0"}),
+            # 0-bulge search: no index, Genome_idx None
+            "ref_nobulge": (ro_tsv, {**self._PARAMS, "Genome_idx": "None",
+                                     "Max_bulges": "0", "DNA": "0", "RNA": "0"}),
+            # multi-guide search: the results file is named Multiple_spacers+...
+            "ref_multi": ("Multiple_spacers+NRG_hg38+__6+3_integrated_results.tsv",
+                          dict(self._PARAMS)),
+            # an older folder with no .Params.txt: decided from the file name alone
+            "ref_noparams": (ro_tsv, None),
+        }
+        for name, (tsv_name, params) in cases.items():
+            with self.subTest(name):
+                html, manifest, keys = self._job_report(
+                    self._install_job(name, tsv_name, params))
+                self.assertEqual(keys, ["Variant database(s)", "Off-target search criteria"])
+                for present in (
+                    # the header row and the inputs card
+                    '<td class="k">Variant dataset(s)</td><td>none (reference genome only)<',
+                    '<td class="k">Variant database(s)</td><td>none (reference genome only)<',
+                    "Sites in the reference genome that differ from the guide by up to 6 "
+                    "mismatches",
+                    # every MAF is blank; the note says why instead of naming a panel
+                    "This search used the reference genome only",
+                ):
+                    self.assertTrue(present in html, f"{present!r} not in the {name} report")
+                for absent in ("Search mode", "Population-level", "NOT computed",
+                               "Variants included", "Panel:", "all searched",
+                               "Allele-frequency basis", "union panel",
+                               "Variant-contributed sites", "accounting for human genetic",
+                               "NRG_4_hg38", "NRG_3_hg38", "NRG+hg38", "reference only<"):
+                    self.assertFalse(absent in html, f"{absent!r} in the {name} report")
+                self.assertIsNone(manifest["variant_datasets"])
+                self.assertIsNone(manifest["database"])  # not the installed registry
+
+    def test_variant_report_keeps_its_dataset_and_registry(self):
+        """The same install, a variant search: Ref_comp True, the dataset from the
+        file name, every inputs-card row, and the installed registry's counts."""
+        rd = self._install_job(
+            "var", f"{_GUIDE}+NRG_hg38+hg38_1000G_6+3_integrated_results.tsv",
+            {**self._PARAMS, "Genome_idx": "NRG_4_hg38+hg38_1000G", "Ref_comp": "True"},
+            variant_rows=True)
+        html, manifest, keys = self._job_report(rd)
+        self.assertEqual(keys, ["Variant database(s)", "Search mode", "Variants included",
+                                "Allele-frequency basis", "Off-target search criteria",
+                                "Variant-contributed sites"])
+        for present in ('<td class="k">Variant dataset(s)</td><td>1000G<',
+                        "<strong>31,130</strong> SNPs and <strong>1,744</strong> indels, "
+                        "all searched",
+                        "here the merged 1000G union panel"):
+            self.assertTrue(present in html, f"{present!r} not in the report")
+        self.assertFalse("reference genome only" in html)
+        self.assertEqual(manifest["variant_datasets"], "1000G")
+        self.assertEqual(manifest["database"]["databases"], {"1000G": 2548})
+
+    def test_variant_rows_are_never_reference_only(self):
+        """No Params and a file name that gives no dataset: a table with a variant-created
+        off-target is still not described as a reference-only search."""
+        import shutil
+        import pandas as pd
+        tsv = os.path.join(self.tmp, "exported_integrated_results.tsv")
+        shutil.copyfile(self.tsv, tsv)
+        df = pd.read_csv(tsv, sep="\t", dtype=str, na_filter=False)
+        cols = gr._resolve(df.columns, list(gr._COLS.keys()))
+        meta = gr.build_summary_meta(None, tsv, df, cols)
+        self.assertFalse(meta["reference_only"])
+        self.assertIn("Variants included", gr.render_inputs_criteria(meta))
+
+    def test_registry_count_is_not_credited_to_a_reference_only_search(self):
+        """The single-registry fallback serves a variant search whose name carries no
+        matching token; a reference-only search searched no registry at all."""
+        rd = self._install_job("ro_reg", f"{_GUIDE}+NRG_hg38+__6+3_integrated_results.tsv",
+                               dict(self._PARAMS))
+        self.assertIsNone(gr._registry_variant_count(rd, {"datasets": "x",
+                                                          "reference_only": True}))
+        vc = gr._registry_variant_count(rd, {"datasets": "x", "reference_only": False})
+        self.assertEqual(vc["n_records"], 31130)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
