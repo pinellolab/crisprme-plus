@@ -44,8 +44,14 @@ CHANGELOG.md. All go under "### Fixed". -->
   archive goes to the top of the genome folder, and a FASTA of several sequences is split into one
   file per sequence. It is built in a hidden folder and replaces an installed genome of the same name
   only once whole (a genome folder that is a link to a shared copy is replaced and the copy left
-  alone, where the upload used to write into it). **A genome uploaded before** this fix that holds a
-  multi-sequence FASTA or a `chroms/` folder: remove it in Settings and upload it again.
+  alone, where the upload used to write into it). An upload is refused, at its first chunk, while
+  indexes or variant genomes built on a genome of that name are installed: every search and build
+  of the new genome would go on using them, with the sequences and positions of the one they were
+  built from. **A genome uploaded before** this fix that holds a multi-sequence FASTA or a `chroms/`
+  folder: remove it in Settings with the indexes built on it (*Remove installed data*), and any
+  `Genomes/<genome>+<dataset>` variant genome from your data folder, then upload it again. (An index
+  built from a multi-sequence FASTA holds the sites of every sequence under the name of the first:
+  kept, it gave a chr2 off-target as `chr1:37386` instead of `chr2:17381`.)
 - **`build-index-only` fails on a genome folder it cannot index, and never puts in place an index
   with no `.bin`.** `index-genome` indexes the `.fa` files at the top of the genome folder only and
   exits 0 with an empty index when there are none (a `chroms/` folder, `.fasta` names, gzipped

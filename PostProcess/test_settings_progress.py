@@ -658,7 +658,8 @@ class TestGenomeTarUpload(unittest.TestCase):
         with open(os.path.join(outside, "secret.txt"), "w") as fh:
             fh.write("ORIGINAL\n")
         ns = _load_functions(
-            ["_validate_name", "_unsafe_tar_member", "_install_uploaded_genome",
+            ["_validate_name", "_unsafe_tar_member", "_genome_upload_assembly",
+             "_built_on_genome", "_genome_upload_problem", "_install_uploaded_genome",
              "_finalize_upload"],
             current_working_directory=cwd,
             gzip=gzip,
@@ -800,6 +801,57 @@ class TestGenomeTarUpload(unittest.TestCase):
         part = self.plain_upload(cwd, "asm.fa", _FA1 + _FA2)
         ns["_finalize_upload"]("genome", part, "asm.fa", "", "")
         self.assert_one_file_a_sequence(cwd, "asm", {"chr1.fa": _FA1, "chr2.fa": _FA2})
+
+    # --- never under the name of a genome something installed was built on -----------
+    # (final review round 1, F2): an index or a variant genome holds that genome's
+    # sequences and positions, and searches and builds of the new one took it as it was
+    BUILT_ON = [
+        ("its index", ["genome_library/NRG_2_asm"]),
+        ("a variant index of it", ["genome_library/NRG_3_asm+walk",
+                                   "genome_library/NRG_3_asm+walk_INDELS"]),
+        ("a variant genome of it", ["Genomes/asm+walk", "Genomes/asm+walk_INDELS"]),
+    ]
+
+    def test_upload_refused_while_something_is_built_on_a_genome_of_its_name(self):
+        for label, built in self.BUILT_ON:
+            # the genome there (replaced), or removed before as the 2.8.1 notes say to
+            # do with one uploaded before (its index of the one FASTA it was is still
+            # there, and gave chr2's sites at chr1)
+            for there in (True, False):
+                with self.subTest(label, genome_there=there):
+                    root, cwd, _outside, ns = self.sandbox()
+                    if there:
+                        os.makedirs(os.path.join(cwd, "Genomes", "asm"))
+                        with open(os.path.join(cwd, "Genomes", "asm", "asm.fa"), "wb") as fh:
+                            fh.write(_FA1 + _FA2)
+                    for d in built:
+                        os.makedirs(os.path.join(cwd, d))
+                        with open(os.path.join(cwd, d, "NRG_chr1_1.bin"), "wb") as fh:
+                            fh.write(b"x")
+                    part = self.plain_upload(cwd, "asm.fa", _FA2 + _FA1)
+                    before = _tree(cwd)
+                    with self.assertRaises(ValueError) as cm:
+                        ns["_finalize_upload"]("genome", part, "asm.fa", "", "")
+                    self.assertTrue(str(cm.exception).startswith(
+                        "Indexes or variant genomes built on a genome named 'asm' are "
+                        f"installed ({', '.join(built)}): "), cm.exception)
+                    self.assertIn("Remove them first (an index under 'Remove installed "
+                                  "data'; a Genomes/asm+<dataset> folder from your data "
+                                  "folder), or upload this genome under another name.",
+                                  str(cm.exception))
+                    self.assertEqual(_tree(cwd), before)  # nothing changed
+
+    def test_what_is_built_on_other_genomes_does_not_refuse_it(self):
+        root, cwd, _outside, ns = self.sandbox()
+        for d in ("genome_library/NRG_2_asm2", "genome_library/NRG_2_hg38+asm",
+                  "genome_library/NRG_2_myasm", "genome_library/.build-index-only-NRG_2_asm",
+                  "Genomes/asm2+walk", "Genomes/hg38+asm"):
+            os.makedirs(os.path.join(cwd, d))
+        self.assertIsNone(ns["_genome_upload_problem"]("asm"))
+        part = self.plain_upload(cwd, "asm.fa", _FA1 + _FA2)
+        self.assertEqual(ns["_finalize_upload"]("genome", part, "asm.fa", "", ""), "asm")
+        self.assertEqual(sorted(os.listdir(os.path.join(cwd, "Genomes", "asm"))),
+                         ["chr1.fa", "chr2.fa"])
 
     def test_genome_linked_to_a_shared_copy_is_not_written_through(self):
         root, cwd, _outside, ns = self.sandbox()

@@ -29,7 +29,11 @@ Type an assembly name and pick a source:
   download is: every FASTA of an archive goes to the top of the genome folder (a UCSC
   `chromFa.tar.gz` holds them in `chroms/`), and a FASTA holding several sequences is
   split into one file per sequence. An upload with the name of an installed genome
-  replaces it.
+  replaces it. It is refused while indexes or variant genomes built on a genome of
+  that name are installed: every search would go on using them, with the sequences
+  and positions of the genome they were built from. Remove them first (an index
+  under *Remove installed data*, a `Genomes/<genome>+<dataset>` variant genome from
+  your data folder), or upload the genome under another name.
 
 The same thing from the CLI:
 ```bash

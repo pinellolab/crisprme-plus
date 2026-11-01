@@ -13,6 +13,10 @@ P4, P5, P11, P15) against a running web app, driven like a user in Chromium.
    annotations', and a second upload whose bytes equal the first is still added.
 4. 'Started' shows in the neutral colour, and goes once the job has ended; a
    reference build ends with a plain 'done.'.
+5. A genome uploaded again under that name (its sequences swapped) is refused while
+   the index built on it is installed, as searches of it would go on using that
+   index with the old positions; once the index is removed under 'Remove installed
+   data', it goes in (final review round 1, F2).
 
 Standalone (no pytest); exits non-zero on failure. The web app must already be
 serving at CRISPRME_WEB_URL (default http://localhost:8080), on a data folder this
@@ -186,6 +190,27 @@ def main():
         check(done.strip() == "Build index: done.", f"the build ends with a plain done ({done!r})")
         text, _colour = feedback(page, "#index-feedback")
         check(text == "", f"'Started' goes once the job has ended ({text!r})")
+
+        # 5. the genome uploaded again, its sequences swapped, while its index is there
+        swapped = f">chrA\n{seqs['chrB']}\n>chrB\n{seqs['chrA']}\n".encode()
+        goto(page, "/settings")
+        got = chunk_upload(page, "genome", f"{GENOME}.fa", swapped)
+        index = [o[len("Index: "):] for o in options(page, "delete-item")
+                 if o.startswith("Index: ") and o.endswith(f"_{GENOME}")]
+        check(len(index) == 1 and got.startswith(
+                  f"Error: Indexes or variant genomes built on a genome named '{GENOME}' are "
+                  f"installed (genome_library/{index[0]})"),
+              f"an upload is refused while an index of a genome of its name is there "
+              f"({index}, {got!r})")
+        page.on("dialog", lambda d: d.accept())
+        pick(page, "delete-item", rf"^Index: .*_{GENOME}$")
+        page.click("#delete-btn")
+        page.wait_for_timeout(2000)
+        gone = page.locator("#delete-feedback").inner_text()
+        check(gone.startswith("Deleted index:"), f"the index is removed ({gone!r})")
+        goto(page, "/settings")
+        got = chunk_upload(page, "genome", f"{GENOME}.fa", swapped)
+        check(got.startswith("Upload complete"), f"then the upload goes in ({got!r})")
 
         if js_errors:
             check(False, f"uncaught JS error(s): {js_errors}")
