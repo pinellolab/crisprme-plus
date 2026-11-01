@@ -46,10 +46,13 @@ and the `release-crisprme` skill.
   carries its own copy of `genotypes_hg38_HGDP1kGP.tar.gz`, byte-identical to the main repo's.
 - **`indexes/SHA256SUMS` in both dataset repos**, written by `scripts/hf_sha256sums.py` from the
   checksums the Hub already records (a Git LFS object is addressed by its SHA-256; the oids match
-  the independently computed `build-inputs/*.SHA256SUMS`), so `sha256sum -c SHA256SUMS` verifies a
-  download without anyone re-hashing 400 GB. `--staged` folds in the checksums of archives about to
-  be uploaded; regenerating after the upload and diffing proves the Hub holds exactly what was
-  staged. It refuses to write an empty file, which would verify nothing and read as a pass.
+  the independently computed `build-inputs/*.SHA256SUMS`), so, inside `indexes/`,
+  `sha256sum -c --ignore-missing SHA256SUMS` verifies a download without anyone re-hashing 400 GB
+  (`--ignore-missing` skips the archives you did not download; without it, a one-archive download
+  reports every other archive as `FAILED open or read` and exits 1). `--staged` folds in the
+  checksums of archives about to be uploaded; regenerating after the upload and diffing proves the
+  Hub holds exactly what was staged. It refuses to write an empty file, which would verify nothing
+  and read as a pass.
 
 - **Unrecognized `complete-search` flags are now rejected.** `complete-search` parses `sys.argv` by
   hand, so a flag nothing reads was simply ignored: `--prune-pams` instead of `--prune-pam` ran a

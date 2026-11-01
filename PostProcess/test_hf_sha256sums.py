@@ -161,5 +161,47 @@ class Sha256sumAcceptsIt(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
 
 
+class TheDocumentedCheckPassesOnAOneArchiveDownload(unittest.TestCase):
+    """A user downloads one archive and SHA256SUMS. Plain ``sha256sum -c SHA256SUMS``
+    then reports every other listed archive as "FAILED open or read" and exits 1, so
+    the docs give ``sha256sum -c --ignore-missing SHA256SUMS``. That fix reached four
+    of the six places that gave the command, not the release notes or this script's
+    docstring."""
+
+    _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def test_ignore_missing_passes_where_plain_check_fails(self):
+        try:
+            subprocess.run(["sha256sum", "--version"], capture_output=True, check=True)
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("GNU sha256sum not available")
+        with tempfile.TemporaryDirectory() as d:
+            sums = {"present.tar.gz": hashlib.sha256(b"one").hexdigest(), "absent.tar.gz": C}
+            with open(os.path.join(d, "present.tar.gz"), "wb") as fh:
+                fh.write(b"one")
+            with open(os.path.join(d, "SHA256SUMS"), "w") as fh:
+                fh.write(sums_mod.render(sums))
+            plain = subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=d, capture_output=True)
+            ignore = subprocess.run(["sha256sum", "-c", "--ignore-missing", "SHA256SUMS"],
+                                    cwd=d, capture_output=True, text=True)
+        self.assertEqual(plain.returncode, 1)
+        self.assertEqual(ignore.returncode, 0, ignore.stdout + ignore.stderr)
+
+    def test_no_doc_gives_the_plain_check(self):
+        paths = [os.path.join(self._REPO, n) for n in ("README.md", "METHODS.md", "CHANGELOG.md")]
+        for top in ("docs", "scripts"):
+            for root, _dirs, files in os.walk(os.path.join(self._REPO, top)):
+                paths += [os.path.join(root, f) for f in files
+                          if f.endswith((".md", ".html", ".py", ".sh"))]
+        offenders = []
+        for path in paths:
+            with open(path, encoding="utf-8") as fh:
+                for n, line in enumerate(fh, 1):
+                    if "sha256sum -c SHA256SUMS" in line:
+                        offenders.append(f"{os.path.relpath(path, self._REPO)}:{n}")
+        self.assertEqual(offenders, [], "plain `sha256sum -c SHA256SUMS` (fails on a "
+                                        "one-archive download): " + ", ".join(offenders))
+
+
 if __name__ == "__main__":
     unittest.main()

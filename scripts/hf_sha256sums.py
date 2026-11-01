@@ -7,10 +7,11 @@ no download. This prints them in ``sha256sum`` format, one line per ``.tar.gz``
 directly under the folder, sorted by name, so that from inside a downloaded
 ``indexes/``::
 
-    sha256sum -c SHA256SUMS
+    sha256sum -c --ignore-missing SHA256SUMS
 
-verifies each archive. (Checked on ``build-inputs/``, whose ``.SHA256SUMS`` were
-computed from the tarballs themselves: the oids match them.)
+verifies each archive there (``--ignore-missing`` skips the archives not downloaded,
+which plain ``-c`` reports as failures). (Checked on ``build-inputs/``, whose
+``.SHA256SUMS`` were computed from the tarballs themselves: the oids match them.)
 
 ``--staged`` takes a ``sha256sum``-format file for archives about to be uploaded
 (computed where they were built) and lets each of its lines replace or add an
