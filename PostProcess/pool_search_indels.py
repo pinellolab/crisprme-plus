@@ -188,7 +188,8 @@ prune_pam_flag = "--prune-pam" if prune_pam == "1" else ""
 def _in_chrom_view():
     """Whether this search runs from complete-test --chrom's view of the working directory
     (complete_test._chrom_view), a folder in it that the run removes when it ends."""
-    return os.path.basename(os.path.normpath(current_working_directory)).startswith(CHROMVIEWPREFIX)
+    folder = os.path.basename(os.path.normpath(current_working_directory))
+    return folder.startswith(CHROMVIEWPREFIX)
 
 
 def _outside_view(path):
