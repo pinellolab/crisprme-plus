@@ -11,24 +11,41 @@ web Settings page passes none of" and "a run without it (a build from the web Se
 page) does not write") should say the same: "(for the tiers, with their `--samplesID`, or
 built again in the web Settings page)" and "a run without it (as a build from the web
 Settings page was before this release)".
-The first Changed entry gives the tables of a search that reads the tiers. It leaves out
-the REF columns of a SNP row there (no lowercase mismatches, so the REF seed and non-seed
-counts leave the mismatches out: round 4 review F3-tier-REF), which another track fixes in
-this release (PostProcess/new_simple_analysis.py). -->
+The first Changed entry gives the tables of a search that reads the tiers, as measured at
+this commit. It leaves out the REF columns of a SNP row there (no lowercase mismatches, so
+the REF seed and non-seed counts leave the mismatches out: round 4 review F3-tier-REF),
+which another track fixes in this release (PostProcess/new_simple_analysis.py); with an
+equivalent change in, those columns are as the dictionaries give them, and the rest of the
+entry holds as it stands. Its clause "`Other_motifs` counts each reference alignment over a
+SNP twice (...), and the file of alternative alignments, which a per-sample search writes,
+lists each such alignment twice, as on every search that reads the tiers;" is a defect of
+every search that reads the tiers, already in aa9c54b (the reference search and the tier
+post-analysis both give the reference alignments of a variant window; that code is as in
+2.8.0): if its fix lands in 2.8.1, drop that clause. -->
 
 ### Changed
 - **A search of a VCF dataset built in the web Settings page reads its dict-less tiers, so its
   tables change.** A variant build in Settings now passes the dataset's sample list as
-  `--samplesID` (see Fixed), so it also writes the dict-less tiers (`Dictionaries/registry_<dataset>/`
-  and `Dictionaries/genotypes_<dataset>/`). Searches of an index built (or built again) in Settings
-  now read them, as searches of a command-line `--samplesID` build and of a downloaded index do,
-  where they read the dataset's dictionaries before, so their tables change: an indel and a SNP that
-  one haplotype carries are reported as one off-target, for the samples that carry both (the
-  dictionary path reported the SNP alone, aligned with a bulge, for every carrier of the SNP),
-  allele frequencies have six decimals, and rows come in another order. On a phased dataset a
-  search now runs per-sample by default, as on the default index. A dataset built in Settings
-  before this release is searched from its dictionaries, as before, until its variant index is
-  built again there.
+  `--samplesID` when its VCFs have samples (see Fixed), so it also writes the dict-less tiers
+  (`Dictionaries/registry_<dataset>/` and `Dictionaries/genotypes_<dataset>/`). Searches of an index
+  built (or built again) in Settings now read them, as searches of a command-line `--samplesID`
+  build and of a downloaded index do, where they read the dataset's dictionaries before. On a phased
+  dataset a search now runs per-sample by default, as on the default index (*Population-level* on
+  the search form is the faster worst-possible screen). Measured on a phased 6-sample panel, with a
+  population-level search of one index on its dictionaries and then on its tiers, the tables change
+  as follows: an indel and a SNP that one haplotype carries are reported as one off-target, for the
+  samples that carry both (the dictionaries gave the SNP alone, aligned with a bulge, or, for the
+  fewest mismatches and bulges, the indel alone, for every sample that carries either); a SNP's
+  allele frequency is computed from the genotypes of the samples the list names, with up to six
+  decimals (`0.333333`), where the dictionaries gave the VCF's `AF` (`0.3333`), and an indel's is
+  still the VCF's; `Other_motifs` counts each reference alignment over a SNP twice (`444` where the
+  dictionaries gave `222`), and the file of alternative alignments, which a per-sample search
+  writes, lists each such alignment twice, as on every search that reads the tiers; and rows come
+  in another order. The result folder also holds the SNP + indel and SNP + SNP co-occurrence and
+  phase-confirmation tables, and the shareable report gives the dataset's SNP and indel counts and
+  its SNP + indel cis co-occurrences. A dataset built in Settings before this release has no tiers
+  until its variant index is built again there, and its searches read its dictionaries until then,
+  as before.
 - **A genome uploaded in the web Settings page under the name of an installed genome replaces it,
   and is refused while indexes built on a genome of that name are installed.** The upload went into
   that genome's folder, beside the files already there (and so into the shared copy, when that
