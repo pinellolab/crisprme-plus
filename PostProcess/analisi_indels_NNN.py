@@ -864,6 +864,22 @@ if _indel_snp and _gt is None:
 
 _snp_cache = {}    # pos1 -> {alt: {sample: genotype}} from the genotype source
 _igt_cache = {}    # indel token -> its carriers (indel_snp_cis.IndelCarriers)
+# A common variant has thousands of carriers, so each cache is bounded by the carriers
+# it holds, not by its entries: once over the bound it is emptied and refilled.
+_CACHE_CARRIERS = 1000000
+_cache_held = {}
+
+
+def _cache_put(cache, key, value, n):
+    """Store ``value`` (``n`` carriers) in ``cache``, emptying it first when it would
+    hold more than _CACHE_CARRIERS carriers."""
+    held = _cache_held.get(id(cache), 0)
+    if held + n > _CACHE_CARRIERS:
+        cache.clear()
+        held = 0
+    cache[key] = value
+    _cache_held[id(cache)] = held + n
+    return value
 # how the overlaid targets were resolved (printed at the end, on stdout)
 _ovl_stats = {"targets": 0, "rows": 0, "dropped": 0, "putative": 0, "unmapped": 0,
               "second_indel": 0}
@@ -886,10 +902,7 @@ def _snp_record(pos1):
         rec = {alt: carriers for (_r, alt, _rs, _af, carriers) in _dict_snps.get(pos1, ())}
     else:
         return None
-    if len(_snp_cache) > 100000:
-        _snp_cache.clear()
-    _snp_cache[pos1] = rec
-    return rec
+    return _cache_put(_snp_cache, pos1, rec, 1 + sum(len(c) for c in rec.values()))
 
 
 def _snp_name(pos1, alt):
@@ -952,11 +965,26 @@ def _other_indels(lo, hi, ipos, iref, ialt):
             continue
         gts = _jgt_cache.get((p, r, a))
         if gts is None:
-            if len(_jgt_cache) > 2000:
-                _jgt_cache.clear()
-            gts = _jgt_cache[(p, r, a)] = _indelgt.carriers_dict(p, r, a)
+            gts = _indelgt.carriers_dict(p, r, a)
+            _cache_put(_jgt_cache, (p, r, a), gts, 1 + len(gts))
         out.append(gts)
     return out
+
+
+def _indel_carriers(indel_data, ipos, iref, ialt):
+    """The indel's carriers (indel_snp_cis.IndelCarriers): its phased genotypes from
+    the indel store, else the indel log's carriers with their phase unknown."""
+    key = indel_data[4]
+    carriers = _igt_cache.get(key)
+    if carriers is None:
+        igt = _indelgt.carriers_dict(ipos, iref, ialt) if _indelgt is not None else {}
+        if igt:
+            carriers = _isc.IndelCarriers(igt)
+        else:
+            carriers = _isc.IndelCarriers(
+                {s: "0/1" for s in indel_data[1].split(",") if s}, phase_known=False)
+        _cache_put(_igt_cache, key, carriers, 1 + len(carriers.parsed))
+    return carriers
 
 
 def _overlaid_rows(line, final_result, indel_data, amb):
@@ -1006,18 +1034,7 @@ def _overlaid_rows(line, final_result, indel_data, amb):
     others = ()
     if have_gt:
         # the indel's phased carriers (the store), else the log's, phase unknown
-        key = indel_data[4]
-        carriers = _igt_cache.get(key)
-        if carriers is None:
-            if len(_igt_cache) > 2000:
-                _igt_cache.clear()
-            igt = _indelgt.carriers_dict(_ipos, _iref, _ialt) if _indelgt is not None else {}
-            if igt:
-                carriers = _isc.IndelCarriers(igt)
-            else:
-                carriers = _isc.IndelCarriers(
-                    {s: "0/1" for s in indel_data[1].split(",") if s}, phase_known=False)
-            _igt_cache[key] = carriers
+        carriers = _indel_carriers(indel_data, _ipos, _iref, _ialt)
         if carriers.phase_known:
             _span = [r for r in real_of if r is not None]
             if _span:
@@ -1112,15 +1129,7 @@ def _second_indel_rows(line, final_result, indel_data):
     others = _other_indels(min(span), max(span), _ipos, _iref, _ialt) if span else ()
     if not others:
         return [final_result]
-    key = indel_data[4]
-    carriers = _igt_cache.get(key)
-    if carriers is None:
-        if len(_igt_cache) > 2000:
-            _igt_cache.clear()
-        igt = _indelgt.carriers_dict(_ipos, _iref, _ialt)
-        carriers = _isc.IndelCarriers(igt) if igt else _isc.IndelCarriers(
-            {s: "0/1" for s in indel_data[1].split(",") if s}, phase_known=False)
-        _igt_cache[key] = carriers
+    carriers = _indel_carriers(indel_data, _ipos, _iref, _ialt)
     exact, putative = _isc.resolve_carriers([], carriers, others=others)
     kept = set().union(*[e[0] for e in exact.values()], *putative.values())
     gone = set(carriers.parsed) - kept
