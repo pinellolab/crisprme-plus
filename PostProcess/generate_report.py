@@ -44,7 +44,8 @@ Report structure (top -> bottom)
    top site rsID-annotated), in up to FOUR panels: by CFD, by variant effect
    (CFD ALT-REF delta), by CRISPR-Bulge, and by variant effect (CRISPR-Bulge ALT-REF delta).
    The two CRISPR-Bulge panels appear only when CRISPR-Bulge was computed -> 4 panels with
-   CRISPR-Bulge, 2 without.
+   CRISPR-Bulge, 2 without. Sites with mm+b<=1 are not plotted; a caption says how many
+   and where they are (top_exclusion_note).
 3. SIMPLIFIED reference-vs-population plot (v1 single view).
 4. RECOMMENDED VALIDATION PANEL: the full threshold table (candidate counts at
    CFD>= {0.5,0.2,0.05}, mm+b<= {1,2,3,4}, variant-created counts) PLUS the
@@ -58,8 +59,8 @@ Report structure (top -> bottom)
    and each non-empty threshold tier are exported (curated columns) and linked.
 5. DOWNLOADS: full RAW integrated_results.tsv.gz + curated top1000.tsv +
    panel_top100.tsv + every non-empty per-tier curated TSV.
-6. SCROLLABLE TOP-1000 TABLE (by CFD desc, mm+b<=1 excluded) in the CURATED
-   columns, including the annotation columns (gene, distance, GENCODE, ENCODE,
+6. SCROLLABLE TOP-1000 TABLE (by CFD desc, mm+b<=1 excluded, as a caption above
+   it says) in the CURATED columns, including the annotation columns (gene, distance, GENCODE, ENCODE,
    DHS) and CRISPR-Bulge when computed.
 7. ANNOTATION LEGEND: plain-language meaning of every annotation column value
    (GENCODE / DHS / ENCODE SCREEN v4 cCREs / COSMIC Cancer Gene Census).
@@ -2361,6 +2362,7 @@ def plot_scatter_panels(df, cols, n=1000, include_crispr_bulge=False):
     panels = []
 
     # candidate frame: drop on-/near-on-target rows (mm+b<=1), same as the table
+    # (build_report says so under the plots: top_exclusion_note)
     base = df
     if "mmb" in cols:
         base = base[_to_int_series(base[cols["mmb"]]) > 1]
@@ -3185,8 +3187,11 @@ def render_validation_panel(
 def select_top(df, cols, n=1000):
     """Top-N off-targets by CFD desc, dropping on-/near-on-target rows.
 
-    Filter mm+b > 1 to drop the on-target and near-on-target rows, matching
-    CRISPRme_plots.py:527-530 filter_table.
+    Filter mm+b > 1: the perfect matches (the on-target among them) and the 1-edit
+    off-targets are left out of the top-N table, its TSV and the Section-2 plots
+    (plot_scatter_panels), and the report says so under each (top_exclusion_note):
+    they are all in the validation panel. (CRISPRme_plots.py, the results page's
+    top-1000 plots, no longer filters them since 2.8.1.)
     """
     work = df.copy()
     if "mmb" in cols:
@@ -3215,6 +3220,53 @@ def select_top_crispr_bulge(df, cols, n=1000):
         _cr=pd.to_numeric(work[cols["crispr_bulge"]], errors="coerce").fillna(-1.0)
     ).sort_values("_cr", ascending=False).drop(columns=["_cr"])
     return work.head(n)
+
+
+def top_exclusion_note(df, cols, view, panel_name=None, panel_section=4,
+                       mmb_le_1_name=None):
+    """Caption for a top-N view that leaves out the sites with 0 or 1 mismatches +
+    bulges (select_top, select_top_crispr_bulge, plot_scatter_panels): how many this
+    run has, and where they are. The validation panel holds every one of them (the
+    perfect matches first, the 1-edit sites among its hard-includes), and the mm+b
+    <= 1 tier file the 1-edit off-targets. ``view`` names what leaves them out
+    ("these plots"); ``panel_name`` / ``mmb_le_1_name`` are the bundled files (None
+    when not bundled). Empty when the run has no such site, as nothing is left out.
+    """
+    if "mmb" not in cols:
+        return ""
+    mmb = _to_int_series(df[cols["mmb"]])
+    n_perfect, n_one = int((mmb == 0).sum()), int((mmb == 1).sum())
+    if not (n_perfect or n_one):
+        return ""
+    found = []
+    if n_perfect:
+        found.append(f"{n_perfect:,} perfect match{'' if n_perfect == 1 else 'es'} "
+                     "(0 mismatches and bulges)")
+    if n_one:
+        found.append(f"{n_one:,} off-target{'' if n_one == 1 else 's'} with 1 "
+                     "mismatch or bulge")
+    note = (f"Not in {view}: the sites with 0 or 1 mismatches + bulges, here "
+            + " and ".join(found) + ".")
+    where = []
+    if panel_name:
+        total = n_perfect + n_one
+        where.append(
+            (f"All {total:,} are" if total > 1 else "It is")
+            + f" in the recommended validation panel (Section {panel_section}, "
+            f"<code>{_esc(panel_name)}</code>)"
+            + (f", the perfect match{'' if n_perfect == 1 else 'es'} first"
+               if n_perfect and n_one else "")
+        )
+    if n_one and mmb_le_1_name:
+        which = ("The one with 1 mismatch or bulge is" if n_one == 1
+                 else f"The {n_one:,} with 1 mismatch or bulge are")
+        if where:
+            which = which[0].lower() + which[1:]
+        where.append(
+            f"{which}{' also' if panel_name else ''} in <code>{_esc(mmb_le_1_name)}</code>")
+    if where:
+        note += " " + "; ".join(where) + "."
+    return f'<p class="caption">{note}</p>'
 
 
 def _esc(value):
@@ -4012,8 +4064,10 @@ def render_html(
     indel_af_bundle_name=None, indel_af_n_rows=0,
     observed_haplotypes_bundle_name=None, observed_haplotypes_modals="",
     table_crispr_bulge_html="", inputs_criteria_html="", legend_html=None,
-    next_steps_html="",
+    next_steps_html="", plots_exclusion_note="", table_exclusion_note="",
 ):
+    # ``plots_exclusion_note`` / ``table_exclusion_note``: the top_exclusion_note
+    # captions of Section 2 and Section 6 (empty when nothing is left out)
     scatter_html = []
     for title, caption, uri in scatter_panels:
         scatter_html.append(
@@ -4278,6 +4332,7 @@ for human genetic variation</p>
 candidates. The same scatter is shown under multiple
 rankings so the highest-scoring sites and the highest-variant-effect sites are
 both foregrounded.</p>
+{plots_exclusion_note}
 {scatter_block}
 
 <h2>3. Reference vs population origin</h2>
@@ -4314,6 +4369,7 @@ run analyses against a <strong>custom personal genome assembly</strong>. Launch 
 locally with <code>crisprme.py web-interface</code>.</p>
 
 <h2>6. Top 1000 putative off-targets</h2>
+{table_exclusion_note}
 {observed_haplotypes_table_note}
 <h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>
 <p style="margin:0 0 0.5em"><a class="download" href="{_dl_href(top1000_name)}" download>&#11015; Download this table &mdash; top-1000 by CFD (curated TSV)</a></p>
@@ -5555,6 +5611,20 @@ def build_report(
     # script, so the report stays self-contained)
     if risk_modal_html:
         observed_haplotypes_modals_html += risk_modal_html
+    # the Section-2 plots and the Section-6 tables leave out the sites with mm+b <= 1:
+    # say so under each, and where they are
+    _shown_tables = (
+        f"these tables or their downloads (<code>{_esc(top1000_name)}</code>, "
+        "<code>top1000_crispr_bulge.tsv</code>)"
+        if top_crispr_bulge_df is not None and len(top_crispr_bulge_df)
+        else f"this table or its download (<code>{_esc(top1000_name)}</code>)"
+    )
+    plots_exclusion_note = top_exclusion_note(
+        df, cols, "these plots", panel_top100_name, mmb_le_1_name=tier_links.get("mmb_1")
+    )
+    table_exclusion_note = top_exclusion_note(
+        df, cols, _shown_tables, panel_top100_name, mmb_le_1_name=tier_links.get("mmb_1")
+    )
     html_doc = render_html(
         job_id, summary_matrix_html, scatter_panels, pop_uri, validation_html,
         table_html, (tsv_gz_name if report_full else None), top1000_name, footer_html,
@@ -5576,6 +5646,8 @@ def build_report(
         next_steps_html=render_next_steps_box(vp),
         table_crispr_bulge_html=table_crispr_bulge_html,
         inputs_criteria_html=inputs_criteria_html,
+        plots_exclusion_note=plots_exclusion_note,
+        table_exclusion_note=table_exclusion_note,
         legend_html=(
             '<h3 style="margin:0.6em 0 0.3em">Scores &amp; columns</h3>'
             + build_score_legend_html()
@@ -7441,6 +7513,18 @@ def build_combined_report(
                         )
                     )
                 )
+    # select_top leaves out the sites with mm+b <= 1: say so, and where they are
+    top_exclusion_html = ""
+    if pooled_vp is not None:
+        _mmb_le_1_name = _tier_filename("mmb_1")
+        top_exclusion_html = top_exclusion_note(
+            _pooled_df, _pooled_cols,
+            ("these tables" if top1000_crispr_bulge_html else "this table")
+            + f" or the <code>{_esc(top_tsv_name)}</code> download",
+            PANEL_TOP100_NAME if PANEL_TOP100_NAME in _staged_by_arcname else None,
+            panel_section=3,
+            mmb_le_1_name=_mmb_le_1_name if _mmb_le_1_name in _staged_by_arcname else None,
+        )
 
     combined_html = f"""<!DOCTYPE html>
 <html lang="en"><head>
@@ -7526,6 +7610,7 @@ has interactive sorting/filtering by site category and genomic region (the
 (reconciled/hg38 + each haplotype's own non-mappable sites) -- not
 reconciled-only -- same pooled frame as the validation panel above, tagged
 with <code>Site_category</code>.</p>
+{top_exclusion_html}
 <h3 style="margin:0.6em 0 0.3em 0">Ranked by CFD score</h3>
 {top1000_html}
 {top1000_crispr_bulge_html}
