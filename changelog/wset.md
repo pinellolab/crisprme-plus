@@ -232,5 +232,5 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   its dictionaries, or of the reference alone, is unchanged. In the table of a site's haplotypes
   (`observed_haplotypes.tsv`, and the report's), a haplotype's CRISPR-Bulge score is taken from the
   rows of the alternative alignments, which pair the three criteria's lists by position, so it can
-  change with them: in the two-dataset search, 2 of its 5 rows did. Run a search again for these
-  counts and lists.
+  change with them: in the two-dataset search, 2 of its 5 rows did, one to `NA`. Run a search again
+  for these counts and lists.
