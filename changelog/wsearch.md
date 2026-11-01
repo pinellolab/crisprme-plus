@@ -1,7 +1,7 @@
 # [2.8.1] entries from the wsearch track (web search form, job status and results pages)
 
-All six go under **### Fixed** of `## [2.8.1]` in CHANGELOG.md. None is new in 2.8.1: each
-was found by the 2.8.1 web walkthrough and is older.
+All seven go under **### Fixed** of `## [2.8.1]` in CHANGELOG.md. None is new in 2.8.1: each
+was found by the 2.8.1 web walkthrough or its review and is older.
 
 ### Fixed
 
@@ -32,17 +32,36 @@ was found by the 2.8.1 web walkthrough and is older.
   CFD plot showed 9 of the 18 sites found (the four perfect matches and the five 1-edit sites,
   CFD 0.077 to 1.0, were missing), and sample S1's card plot 1 of its 3 personal targets. They are plotted now, the
   perfect matches marked with a black star and a legend entry, and the Graphical Reports tab says
-  so under the plot. The card's "Top 100 Private Targets" plot was drawn from the personal
+  so under the plot. A plot of a single site without a variant is drawn too: it failed, and no
+  later plot was drawn, so a search whose only off-target with 2 or more mismatches + bulges was
+  a reference one got no top-1000 plots (the error was discarded). The
+  card's "Top 100 Private Targets" plot was drawn from the personal
   targets, so it repeated the personal plot; it is drawn from the private ones now (an empty plot
   for a sample with none). **What changes:** the plot images a search writes to its `imgs/`
   folder (`CRISPRme_{CFD,CRISPR_BULGE,fewest}_top_1000_log_for_main_text_<guide>` and
   `CRISPRme_{CFD,CRISPR_BULGE}_top_1000_by_variant_effect_<guide>`, `.png` and `.pdf`), from the
   web and from `complete-search`, as shown on the Graphical Reports tab, on the personal-assembly
   results page and in the combined personal-assembly report; and the Personal Risk Card plots,
-  on the web and from `generate-personal-card`. Search results, every table and the shareable
-  report (which draws its own plots) are unchanged. Plots made before this release stay as they
-  are: run the search again for new ones (a Risk Card made earlier shows its saved plots).
+  on the web and from `generate-personal-card`. Search results and every table are unchanged;
+  the shareable report draws its own plots and tables, and still leaves these sites out of them
+  (next entry). Plots made before this release stay as they are: run the search again for new
+  ones (a Risk Card made earlier shows its saved plots).
   Covered by `PostProcess/test_top_plots.py` and `PostProcess/test_web_results_links.py`.
+- **The shareable report did not say that its top-1000 plots and tables leave out the sites with
+  0 or 1 mismatches + bulges.** Its Section 2 plots and its Section 6 tables, with their
+  downloads `top1000.tsv` and `top1000_crispr_bulge.tsv` (and the Section 5 tables of the
+  personal-assembly report, with `<name>_combined_top1000.tsv`), leave out the perfect matches
+  and the off-targets with 1 mismatch or bulge, as before, with nothing on the page to say so. In
+  the walkthrough's per-sample search that is 9 of its 18 sites: the four perfect matches and
+  the five 1-edit off-targets, CFD 0.077 to 0.636. Each of these views now has a caption that
+  says how many sites it leaves out and where they are: all in the recommended validation panel
+  (`panel_top100.tsv`), the perfect matches first, and the 1-edit off-targets also in
+  `mmb_le_1.tsv`. The tables and files themselves are unchanged. **Affected:** every report of a
+  search that found a perfect match or a 1-edit site, from the web, `complete-search`,
+  `generate-report` and `assembly-search`. **What to do:** take these sites from the validation
+  panel or `mmb_le_1.tsv`, not from the top-1000 files; for a report made before,
+  `crisprme.py generate-report --result-dir Results/<job>` writes one with the captions. Covered
+  by `PostProcess/test_top_plots.py`.
 - **The search form's bulge note and defaults did not match the installed indexes, and the docs
   said the web interface never builds an index.** With the reference index installed and 1 bulge
   selected, the note under Advanced options said that the first bulge search would build the
@@ -55,8 +74,10 @@ was found by the 2.8.1 web walkthrough and is older.
   from the installed genome, once). For a panel with no variant index it says that only a 0-bulge
   search is offered and that the first one prepares the variant genome and a 0-bulge index (hours
   on a full genome), and to build the index in Settings ("Build an index locally") when the
-  genome and VCF files are installed, or to download one otherwise. Values the cap lowered come
-  back when the cap allows them again, unless they were changed by hand in between. The web user
+  genome and VCF files are installed, or to download one otherwise. The DNA and RNA bulges and
+  the Max edits that the cap lowered come back when the cap allows them again (1, 1 and 6 by
+  default, also after several panels in a row), unless they were changed by hand in between.
+  The web user
   guide, the Docker quickstart, the website and the data setup guide now say what a web search
   builds (a missing reference index; for a panel without a variant index, a 0-bulge one), as
   does the message of the submit check. Covered by `PostProcess/test_web_bulge_notes.py`.
