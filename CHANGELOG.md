@@ -266,7 +266,7 @@ and the `release-crisprme` skill.
   rebuilt archives with 2.8.1 or later. 2.8.0 keeps the targets with an `N` in their PAM that the
   rebuild adds (it has no `--prune-pam`, ignores the flag, and its post-search PAM filter lets the
   `N` through), and what a search that reaches one does depends on its CRISPRitz. On 2.9.1 it fails
-  in post-analysis (`ValueError: substring not found`). On 2.9.0, which the 2.8.0 image and
+  in post-analysis (`ValueError: substring not found`). On 2.9.0, which 2.8.0's image and its
   `install_from_source.sh` build, the engine writes such a target cut short at its `N`, so the
   search fails in post-analysis (`IndexError: string index out of range`) or, with RNA bulges only,
   finishes and reports the target as a 0-mismatch, 0-bulge off-target with a 21- or 22-nt

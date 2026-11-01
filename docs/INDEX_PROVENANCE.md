@@ -178,7 +178,7 @@ has no `--prune-pam` (it ignores the flag), and its post-search PAM filter treat
 target's `N` as matching any base, so it keeps the targets with an `N` in their PAM
 that the rebuild adds. What a search that reaches one does then depends on the
 CRISPRitz under 2.8.0. On 2.9.1 the post-analysis fails on the `N` (`cluster.dict.py`).
-On 2.9.0, which the 2.8.0 image and `install_from_source.sh` build, `loadTST` leaves
+On 2.9.0, which 2.8.0's image and its `install_from_source.sh` build, `loadTST` leaves
 the character of a stored `N` unset (2.9.1 writes `N`), and the engine writes the
 target cut short at its `N`: 21 or 22 nt where the others have 23 or 24. A search with
 DNA bulges then fails in post-analysis (`IndexError: string index out of range`, then

@@ -15,6 +15,7 @@ changes only the script or the .gitignore still runs this module in CI.
 """
 import ast
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -23,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parent.parent / "install_from_source.sh"
+REPO = SCRIPT.parent
 WORKFLOW = SCRIPT.parent / ".github" / "workflows" / "unit-tests.yml"
 
 
@@ -157,6 +159,52 @@ class APullRequestToWhatThisChecksRunsIt(unittest.TestCase):
         paths = pull_request_paths()
         self.assertIn("install_from_source.sh", paths)
         self.assertIn(".gitignore", paths)
+
+
+class TheDocsNameTheCRISPRitzThisScriptBuilds(unittest.TestCase):
+    """A bare `install_from_source.sh` in the docs is this script, which builds the
+    CRISPRitz tag CRISPRITZ_REF defaults to. The 2.8.1 notes and INDEX_PROVENANCE said
+    2.9.0 is what "the 2.8.0 image and `install_from_source.sh`" build: 2.8.0's script
+    does, this one builds v2.9.1. The scan joins the wrapped lines of README, METHODS,
+    docs/ and the CHANGELOG down to its newest release into sentences. One in which the
+    script builds something may name another CRISPRitz of the same line only when it
+    says whose script that is ("its", "2.8.0's")."""
+
+    BUILDS = re.compile(r"`install_from_source\.sh`(?: script)? (?:build|builds|built|compiles)\b")
+    OWNED = re.compile(r"(?:\bits|\b\d+\.\d+\.\d+['’]s|\bthe \d+\.\d+\.\d+)"
+                       r" `install_from_source\.sh`")
+
+    @staticmethod
+    def _sentences():
+        """Yield (path, sentence) for every sentence that names the script."""
+        paths = [REPO / "README.md", REPO / "METHODS.md", *sorted((REPO / "docs").rglob("*.md"))]
+        texts = [(p, p.read_text(encoding="utf-8")) for p in paths]
+        log = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+        releases = [m.start() for m in re.finditer(r"^## \[\d", log, flags=re.M)]
+        texts.append((REPO / "CHANGELOG.md", log[:releases[1]]))
+        for path, text in texts:
+            for block in re.split(r"\n\s*\n|\n(?=\s*(?:[-*|#]|\d+\.)\s)", text):
+                for sentence in re.split(r"(?<=[.;!?])\s+(?=[A-Z`*(])", " ".join(block.split())):
+                    if "install_from_source.sh" in sentence:
+                        yield str(path.relative_to(REPO)), sentence
+
+    def test_scan_finds_the_sentence_on_what_2_8_0_builds(self):
+        """Guard the scan itself: if it finds nothing it proves nothing."""
+        paths = {path for path, sentence in self._sentences() if self.BUILDS.search(sentence)}
+        self.assertIn("docs/INDEX_PROVENANCE.md", paths, f"scan found only: {sorted(paths)}")
+
+    def test_a_sentence_on_what_the_script_builds_names_its_default(self):
+        default = re.search(r'^CRISPRITZ_REF="\$\{CRISPRITZ_REF:-v(\d+\.\d+\.\d+)\}"',
+                            SCRIPT.read_text(), flags=re.M).group(1)
+        same_line = re.compile(rf"\bv?({re.escape(default.rsplit('.', 1)[0])}\.\d+)\b")
+        offenders = []
+        for path, sentence in self._sentences():
+            bare = self.OWNED.sub("", sentence)
+            if self.BUILDS.search(bare) and set(same_line.findall(bare)) - {default}:
+                offenders.append(f"{path}: {sentence[:80]}")
+        self.assertEqual(offenders, [], f"this script builds CRISPRitz {default}; a sentence "
+                                        "that has it build another must say whose script "
+                                        "that is: " + "; ".join(offenders))
 
 
 if __name__ == "__main__":
