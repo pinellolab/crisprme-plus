@@ -50,7 +50,8 @@ class TheSourceBuildRefusesMacOS(unittest.TestCase):
         self.assertNotIn("Docker", out.stderr)
 
 
-@unittest.skipUnless(shutil.which("git"), "git is not installed here")
+@unittest.skipUnless(shutil.which("git") and (SCRIPT.parent / ".gitignore").is_file(),
+                     "needs git, and the checkout's .gitignore beside the script")
 class WhatTheInstallerLeavesInTheCheckoutIsIgnored(unittest.TestCase):
     """The script runs `crisprme.py scorer-env create` and `check` in the checkout, and
     they save their state to <checkout>/Annotations/.scorer_env.json. Annotations/ is
