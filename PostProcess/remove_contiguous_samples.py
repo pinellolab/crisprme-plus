@@ -69,6 +69,29 @@ def _merged_list(kept, other):
     return kept + "," + other if kept and other else kept or other
 
 
+def _holds_indel_token(variants):
+    """True iff a row's variant list (chrN_pos_REF_ALT,...) names an indel."""
+    for tok in variants.split(","):
+        p = tok.split("_")
+        if len(p) >= 4 and len(p[-2]) != len(p[-1]):
+            return True
+    return False
+
+
+def _merge_row(kept, ele, snp_info):
+    """Add a merged row's samples, rsIDs and AFs to the row that stays (_merged_list: a
+    sites-only dataset's empty lists add no empty item)."""
+    kept[true_guide - 2] = _merged_list(
+        kept[true_guide - 2], ele[true_guide - 2]
+    )  # true_guide - 2 points to samples column
+    kept[snp_info - 2] = _merged_list(
+        kept[snp_info - 2], ele[snp_info - 2]
+    )  # snp_info - 2 points to rsID column
+    kept[snp_info - 1] = _merged_list(
+        kept[snp_info - 1], ele[snp_info - 1]
+    )  # snp_info - 1 points to AF column
+
+
 def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     # avoid crush when cluster is empty in the first call
     if not cluster:
@@ -97,21 +120,32 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
             list_ref.append(ele)
         else:
             # merge samples of identical targets (coming from different VCF datasets)
-            if (ele[pos], ele[snp_info]) in dict_var.keys():
-                dict_var[(ele[pos], ele[snp_info])][0][true_guide - 2] = _merged_list(
-                    dict_var[(ele[pos], ele[snp_info])][0][true_guide - 2],
-                    ele[true_guide - 2],
-                )  # true_guide - 2 points to samples column
-                dict_var[(ele[pos], ele[snp_info])][0][snp_info - 2] = _merged_list(
-                    dict_var[(ele[pos], ele[snp_info])][0][snp_info - 2],
-                    ele[snp_info - 2],
-                )  # snp_info - 2 points to rsID column
-                dict_var[(ele[pos], ele[snp_info])][0][snp_info - 1] = _merged_list(
-                    dict_var[(ele[pos], ele[snp_info])][0][snp_info - 1],
-                    ele[snp_info - 1],
-                )  # ttuesnp_info_guide - 2 points to AF column
+            key = (ele[pos], ele[snp_info])
+            # An indel row lists the carriers of its own sequence (each carrier haplotype
+            # resolved on its own, analisi_indels_NNN.py), and two alignments at one site
+            # can name the same variants with different carriers: an RNA-bulge alignment
+            # does not reach the base a SNP sits on, so it holds carriers of that SNP
+            # that the full alignment does not. So only rows with one sequence merge here.
+            if _holds_indel_token(ele[snp_info]):
+                key += (ele[2].upper(),)
+            if key in dict_var.keys():
+                _merge_row(dict_var[key][0], ele, snp_info)
             else:
-                dict_var[(ele[pos], ele[snp_info])] = [ele]
+                dict_var[key] = [ele]
+    # Alignments of one site naming the same variants with the same carriers are one
+    # entry, the first (the best, by this file's sort), as for every other row. The
+    # carrier sets do not depend on the sort, so the three files keep one row count per
+    # cluster and their alternative alignments stay aligned line by line.
+    same_carriers = {}
+    for key in list(dict_var.keys()):
+        if len(key) == 3:
+            row = dict_var[key][0]
+            ident = (key[0], key[1], frozenset(row[true_guide - 2].split(",")))
+            if ident in same_carriers:
+                _merge_row(same_carriers[ident], row, snp_info)
+                del dict_var[key]
+            else:
+                same_carriers[ident] = row
 
     final_list_best_ref = list()
     var_only = False
