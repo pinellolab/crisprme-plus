@@ -76,12 +76,13 @@
   way 2 lost 3 rows with alternative alignments, and the integrated results changed with both. Now
   (1) that rebuild uses the PAM the index was built with (from its `.pam_build`, else of the
   search's guide length), and is byte-identical to the INDELS index build-index-only builds, so the
-  search's result files are those of an intact index; and (2) a search with bulges stops at a
-  chromosome whose indel log, or fake-indel genome, shows indels but which has no sub-index, with
-  an ERROR that says how to rebuild the INDELS index (as above). A search without bulges still
-  searches the fake-indel genome, and a chromosome without indels is skipped as before. Normal runs
-  are unchanged: a build gives every chromosome with indels its sub-index, as it does in each of
-  the 50 INDELS indexes on the build machine that have their indel logs beside them. **Affected:**
+  search's result files are those of an intact index; and (2) a search with bulges stops at a chromosome whose indel log, or fake-indel genome, shows indels but
+  which has no sub-index, with an ERROR that says how to rebuild the INDELS index (as above), but
+  for a contig with an underscore in its name, which no build gives one (next entry). A search
+  without bulges still searches the fake-indel genome, and a chromosome without indels is skipped as
+  before. Normal runs are unchanged: a build gives every other chromosome with indels its sub-index,
+  as it does in each of the 50 INDELS indexes on the build machine that have their indel logs beside
+  them. **Affected:**
   searches with bulges through a PAM-less index serving another PAM whose INDELS index was missing,
   and searches with an INDELS index copied in part. **What to do:** a job was affected by (1) when
   it allowed bulges and its `log_verbose.txt` shows `Variant index present (NNN_...)` (or
@@ -90,4 +91,29 @@
   `NNNNNNNN_<N>_fake<chr>`) directories in `genome_library/<that PAM>_<N>_<genome>+<dataset>_INDELS`,
   with that directory when nothing else is in it. For (2), a search now says which index is
   incomplete; once it is rebuilt, run again the searches made with it. Covered by
+  `PostProcess/test_indel_empty_chromosome.py`.
+- **A contig with an underscore in its name (`chrUn_KI270302v1`, `chr1_KI270706v1_random`) gets no
+  INDELS sub-index, so the indel off-targets there that need a bulge are not searched; a build now
+  says so.** This is so on every release, and `docs/INPUT_FORMATS.md` (section 6) does not list such
+  contigs as supported: `pool_index_indels.py` takes what follows the last underscore for the
+  chromosome, finds no fake-indel genome of that name, and indexes nothing. `build-index-only`, and
+  a search that rebuilds a missing INDELS index (in its `log_verbose.txt`), now print one line that
+  names the contigs with indels: `No INDELS sub-index for chrUn_KI270302v1: a contig with an
+  underscore in its name gets none, so a search does not find the indel off-targets there that need
+  a bulge`. Neither fails for want of that sub-index: `build-index-only` exits 0 (a dataset whose
+  only indels are on such contigs gets an INDELS index that holds no sub-index) and a search goes on,
+  as on 2.8.0. What a search then does there, measured through the real CLI on a test genome with a
+  carried deletion on the contig (NRG, 4 mismatches, 1 DNA and 1 RNA bulge), the same on 2.8.0: it
+  searches the contig's fake-indel genome without bulges, so a site that aligns with the guide only
+  through a bulge on the carried allele is missing from the report, with exit 0 and no message. An
+  indel off-target found there without a bulge stops the search at "Post-analysis INDELs", with
+  `ValueError: invalid literal for int() with base 10: 'KI270302v1'`. Where that fake-indel genome is
+  not there (an index copied without `Genomes/<genome>+<dataset>_INDELS/`), the search stops at
+  "Post-analysis SNPs", with `tail: cannot open ...`. Off-targets on the contig that need no indel
+  are reported as usual; a contig with SNPs only gets no such line and is not affected. **Affected:**
+  variant datasets with indels on such contigs. No published index is: the indel logs of the 50
+  INDELS indexes on the build machine that have them beside them name no such contig. **What to do:**
+  to have a contig's indels searched, rename it without the underscore in its FASTA (file and header)
+  and its VCF (file and records) and build the index again: renamed `chrUnKI270302v1`, that contig
+  got its sub-index, and the search reported the bulged site. Covered by
   `PostProcess/test_indel_empty_chromosome.py`.
