@@ -19,11 +19,16 @@ With these entries in, the text that the preamble of `changelog/wset.md` says to
 does not land is not needed. The paragraph "Verified" of `docs/INDEX_PROVENANCE.md` says that a
 search "by 2.8.1" matches the gate's report in every column but `Annotation_COSMIC` and gives its
 md5: that search ran before these two fixes, so it should say a release candidate; a search by
-2.8.1 as released differs from that report in what these entries name. The numbers in the
-entries are from the default index `NRG_3_hg38+hg38_HGDP1kGP` as downloaded, NRG, 4 mismatches, 1
-DNA and 1 RNA bulge: a per-sample search with guide ACTGAAATCTGTAAGCAGGC, a population-level one
-with guide CTAACAGTTGCTTTTATCAC, and one of each with guide CTCTCAGCTGGTACACGGCA, each run on
-aa9c54b and on these fixes.
+2.8.1 as released differs from that report in what these entries name. So does this section's
+entry on the rebuilt `NNN_3` archives of `CHANGELOG.md`, in its sentence "Searched genome-wide by
+2.8.1 (NRG `--prune-pam`, 4 mm + 1 DNA + 1 RNA bulge, per-sample), the rebuilt pair matches the
+gate's report in every column but `Annotation_COSMIC`": it should say a release candidate too. The
+numbers in the entries are from the default index `NRG_3_hg38+hg38_HGDP1kGP` as downloaded, NRG, 4
+mismatches, 1 DNA and 1 RNA bulge: a per-sample search with guide ACTGAAATCTGTAAGCAGGC, a
+population-level one with guide CTAACAGTTGCTTTTATCAC, and one of each with guide
+CTCTCAGCTGGTACACGGCA, each run on aa9c54b and on these fixes alone: the fixes of the merge step
+(`changelog/wset.md`) and of indel rows (`changelog/indel.md`) came after them, and the second gives
+another count of indel rows for the same search. Their counts are not of the release as a whole.
 
 ### Fixed
 
@@ -62,8 +67,11 @@ aa9c54b and on these fixes.
   CTCTCAGCTGGTACACGGCA, 1,549 of 128,730 per-sample and 2,199 of 150,103 population-level. What
   reads the rows in file order follows. The report's tables can list tied rows in another order
   (`data/cfd_ge_0.05.tsv` on all four searches; `data/cfd_ge_0.20.tsv`, `data/mmb_le_4.tsv`,
-  `data/top1000.tsv` and `data/top1000_crispr_bulge.tsv` on some; no row of them changed), and so
-  can the perfect-match banner. Any top-1000 plot can draw tied points in another order:
+  `data/top1000.tsv` and `data/top1000_crispr_bulge.tsv` on some; `data/panel_top100.tsv` and
+  `data/crispr_bulge_gt_0.tsv` on a fifth, per-sample with guide GAGTCCGAGCAGAAGAAGAA; no row of them
+  changed), and so can `observed_haplotypes.tsv` (61 lines at another place on that fifth search,
+  where no site reports another row) and the perfect-match banner. Any top-1000 plot can draw tied
+  points in another order:
   `imgs/CRISPRme_CFD_top_1000_by_variant_effect_<guide>` on all four,
   `imgs/CRISPRme_CFD_top_1000_log_for_main_text_<guide>` and
   `imgs/CRISPRme_CRISPR_BULGE_top_1000_*_<guide>` on some, and the report's figures from the same
@@ -85,13 +93,15 @@ aa9c54b and on these fixes.
   search of the dictionaries reports at these sites, but for `fewest_mm+b` and
   `highest_CRISPR_BULGE` at chr14:43078564. The counts made from the reported rows' carriers move by
   one accordingly (`*.summary_by_samples.*`, `.<job>.PopulationDistribution_*`, on these searches one
-  population distribution plot, and the report's population figure), and `observed_haplotypes.tsv`
-  can list the lines of such a site in another order or, at population level, other lines. On the
-  dictionary path an indel row keeps the IUPAC codes of the other variants, so such a tie is rare:
-  none on chr21 and chr22 of the default index with these three guides, where no row moved. The rows
-  of a sites-only index have no carriers and keep the order they had. A search of an index without
-  the tiers, or of the reference alone, gives the same results byte for byte but for the columns of
-  the next entry.
+  population distribution plot, and the report's population figure), and at population level
+  `observed_haplotypes.tsv` can give other lines for such a site. On the dictionary path such a tie
+  is rare: none on chr21 and chr22 of the default index with these three guides, where no row moved.
+  The rows of a sites-only index have no carriers and keep the order they had. A search of the
+  reference alone gives the same results byte for byte but for the columns of the next entry, and so
+  does a search of an index without the tiers, except where a row of SNPs and a row with an indel tie
+  as described: in a search of two such datasets, one of which gives the SNPs and the other the
+  indels (47 of 1,837 rows on a panel with such ties planted), and, with the fix of indel rows in
+  this release, in any search of one.
 
   The set of alignments reported (best and alternative), the scores and every other column are
   otherwise unchanged. To correct results made before, run the search again (`generate-report` alone

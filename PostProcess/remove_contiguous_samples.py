@@ -33,9 +33,9 @@ def _rep_tiebreak(x):
     rosters count as 0, so this is inert for them and they fall through to the DNA/pos key.
 
     2.8.1: aligned DNA is not quite unique within a cluster. A row of SNPs and a row with
-    an indel can give the same bases at the same position; on the dict-less tiers their
-    aligned DNA is then the same string (the dictionary path keeps the IUPAC codes of the
-    other variants in an indel row, so it rarely has such a tie). They fell through to
+    an indel can give the same bases at the same position, and their aligned DNA is then
+    the same string (rarely on the dictionary path: on chr21 and chr22 of the default
+    index with three guides, no such tie). They fell through to
     input order, which is the whole-line sort of the merge step, so the REF alignment's
     letter case and then the sample IDs decided which row was reported. The last key
     element settles it: the row of SNPs comes first. A variant token is
