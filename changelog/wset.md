@@ -267,3 +267,16 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   bulge and now reads 1.0 with none, and the report's perfect matches go from 3 to 4. A search whose
   rows have no empty column (the default index alone, any VCF with `AF`, the reference alone) sorts
   as before. **If you searched a sites-only dataset or a VCF with no `AF`,** run the search again.
+- **A command-line search of two datasets is no longer refused because only one has its VCFs on
+  disk.** The input check of `complete-search` compared the samples of all the `--samplesID` lists
+  with the VCFs on disk (#46). With `hg38_walk`'s VCFs there and `hg38_walkB` installed as an index
+  (or as a sites-only dataset, whose VCFs have no sample columns, or whose list names `1000G2021`
+  and `HGDP`), it stopped with `--samplesID lists 3 sample(s) genotyped in no VCF (B4, B5, B6)`, and
+  told you to filter a list that was right; each step that leads there is documented (`download
+  --what vcf` for one dataset, several indexes in one list, your own cohort beside a dataset). Each
+  list is now compared on its own: up to as many lists as the search names such datasets, those
+  that name no sample of the VCFs on disk, are left out. A list that names some of them and others
+  they lack still stops the search, with those others named; so does a list of no dataset when
+  every dataset's VCFs are there. Measured on a 6-sample panel, the search that was refused gives
+  the same table as with both datasets' VCFs on disk, and as with neither. A web search does not
+  run this check and is not affected.

@@ -908,7 +908,19 @@ def _read_samples_file(
         The union of column-0 sample IDs across all resolvable referenced
         association files. Empty if none could be resolved.
     """
-    sample_ids: List[str] = []
+    return [
+        sample
+        for samples in _read_samples_lists(samplesfile, current_working_directory)
+        for sample in samples
+    ]
+
+
+def _read_samples_lists(
+    samplesfile: str, current_working_directory: Optional[str] = None
+) -> List[List[str]]:
+    """The column-0 sample IDs of each association file that a `--samplesID`
+    config lists, one list per resolvable file (see `_read_samples_file`)."""
+    sample_lists: List[List[str]] = []
     config_dir = os.path.dirname(os.path.abspath(samplesfile))
     with open(samplesfile, "r") as fin:
         for line in fin:
@@ -927,8 +939,8 @@ def _read_samples_file(
                 # than treat the filename itself as a sample ID (that was the
                 # #112 false-positive). The pipeline reports a missing file.
                 continue
-            sample_ids.extend(_read_sample_ids_from_association_file(assoc_path))
-    return sample_ids
+            sample_lists.append(_read_sample_ids_from_association_file(assoc_path))
+    return sample_lists
 
 
 def check_samplesid_columns(
@@ -1047,8 +1059,24 @@ def check_samples_in_vcf_header(vcf_path: str, sample_ids: List[str]) -> List[Is
     ]
 
 
+def _vcf_header_samples(vcf_path: str) -> List[str]:
+    """The sample names on a VCF's #CHROM line: none for a sites-only VCF, or for
+    one that cannot be read (which check_vcf_content reports)."""
+    try:
+        with gzip.open(vcf_path, "rt") as fin:
+            for line in fin:
+                if "#CHROM" in line:
+                    return line.strip().split("\t")[9:]
+    except (OSError, EOFError, ValueError):
+        pass
+    return []
+
+
 def check_samplesid_overlisting(
-    vcf_files: List[str], sample_ids: List[str]
+    vcf_files: List[str],
+    sample_ids: List[str],
+    sample_lists: Optional[List[List[str]]] = None,
+    unseen_datasets: int = 0,
 ) -> List[Issue]:
     """Reject (ERROR) when --samplesID lists samples genotyped in NONE of the VCFs (#46).
 
@@ -1062,22 +1090,29 @@ def check_samplesid_overlisting(
     every VCF's #CHROM header keeps this correct for multi-dataset runs: a
     legitimately genotyped sample appears in some dataset's VCF, so only
     truly-absent samples are flagged.
+
+    A search can name datasets whose VCFs say nothing here: one downloaded as an
+    index, with no VCF folder, or a sites-only one, with no sample columns
+    (``unseen_datasets``, how many). The list of such a dataset names none of the
+    samples of the VCFs that are here, and was refused as all phantoms, though the
+    index it goes with is fine. So the lists are compared one by one
+    (``sample_lists``, the samples of each list file): up to that many lists none of
+    whose samples any VCF here genotypes are taken for those datasets' and left out.
+    A list that partly overlaps the VCFs still fails, on the samples they lack.
     """
     if not sample_ids or not vcf_files:
         return []
     genotyped = set()
     for vf in vcf_files:
-        try:
-            with gzip.open(vf, "rt") as fin:
-                for line in fin:
-                    if "#CHROM" in line:
-                        genotyped.update(line.strip().split("\t")[9:])
-                        break
-        except OSError:
-            continue  # header-read failures are reported by check_vcf_content
+        genotyped.update(_vcf_header_samples(vf))
     if not genotyped:
         return []
-    panel = set(sample_ids)
+    panel = set()
+    for samples in sample_lists if sample_lists is not None else [sample_ids]:
+        if unseen_datasets > 0 and samples and genotyped.isdisjoint(samples):
+            unseen_datasets -= 1
+            continue
+        panel.update(samples)
     phantom = sorted(panel - genotyped)
     if not phantom:
         return []
@@ -1151,11 +1186,12 @@ def run_lightweight(
     )
 
     has_samplesfile = bool(samplesfile) and os.path.basename(samplesfile) != MOCK_FILENAME
-    sample_ids = (
-        _read_samples_file(samplesfile, current_working_directory)
+    sample_lists = (
+        _read_samples_lists(samplesfile, current_working_directory)
         if has_samplesfile
         else []
     )
+    sample_ids = [sample for samples in sample_lists for sample in samples]
 
     if has_samplesfile:
         report.add(
@@ -1164,6 +1200,7 @@ def run_lightweight(
         )
 
     all_vcf_files: List[str] = []
+    unseen_datasets = 0  # no VCF folder, or VCFs with no sample columns
     for vcf_dir in vcf_dataset_dirs:
         if not os.path.isdir(vcf_dir):
             # Batteries-included install: `download --what index` fetches a
@@ -1186,6 +1223,7 @@ def run_lightweight(
                     f"{dataset}: precomputed variant index + {kind} present; "
                     "source VCFs not required (batteries-included install)"
                 )
+                unseen_datasets += 1
                 continue
             report.add([Issue(ERROR, f"VCF dataset directory does not exist: {vcf_dir}")])
             continue
@@ -1200,6 +1238,8 @@ def run_lightweight(
                 [Issue(ERROR, f"No .vcf.gz files found in VCF dataset directory: {vcf_dir}")]
             )
             continue
+        if not any(_vcf_header_samples(vf) for vf in vcf_files):
+            unseen_datasets += 1
 
         chrom_issues, chrom_by_file = check_vcf_filename_chrom(vcf_files)
         report.add(
@@ -1225,7 +1265,9 @@ def run_lightweight(
 
     if has_samplesfile and sample_ids:
         report.add(
-            check_samplesid_overlisting(all_vcf_files, sample_ids),
+            check_samplesid_overlisting(
+                all_vcf_files, sample_ids, sample_lists, unseen_datasets
+            ),
             ok_message="--samplesID: no phantom samples (all genotyped in a VCF)",
         )
 
