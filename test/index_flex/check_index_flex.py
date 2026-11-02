@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Which index serves which search, through the real CLI and the real engine.
 
-    check_index_flex.py <empty work dir> [<cell> ...]
+    check_index_flex.py <work dir, which it creates>
 
 A synthetic phased genome (3 x 30 kb) with sites planted for the example guide, built with
 build-index-only, and the layouts people actually have: a download, a library the run cannot
@@ -10,12 +10,16 @@ search with the one on an index dedicated to it, byte for byte, or checks that i
 clearly. test_index_resolution.py and friends pin the same decisions with a stub engine: this
 runs the engine, which answers what it cannot do on stdout with exit 0. Run inside an image
 with the tree under test in place. A few minutes on 2 threads. Exits non-zero on any failure.
+
+CI runs it on the published image, which until a release is out can hold an engine older than
+--prune-pam. Those K=8 cells then check the search refuses, saying so, as it must on that engine.
 """
 
 import glob
 import gzip
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -94,25 +98,40 @@ def make_seed(seed):
         os.makedirs(os.path.join(seed, d), exist_ok=True)
 
 
-def cli(work, *args, user=None):
+def cli(work, *args, user=None, env=None):
     """Run crisprme.py in ``work``; (exit status, stdout + stderr)."""
     cmd = ["crisprme.py", *args]
     if user is not None:
         cmd = ["setpriv", f"--reuid={user}", f"--regid={user}", "--clear-groups", *cmd]
     done = subprocess.run(cmd, cwd=work, capture_output=True, text=True,
-                          env=dict(os.environ, HOME=work))
+                          env=dict(os.environ, HOME=work, **(env or {})))
     return done.returncode, done.stdout + done.stderr
 
 
+def engine_prunes():
+    """Whether the installed CRISPRitz has --prune-pam, read as the search script reads it."""
+    with open(shutil.which("crispritz.py")) as fh:
+        return "--prune-pam" in fh.read()
+
+
 def search(work, output, guide="g20.txt", pam="20bp-NRG-SpCas9.txt", bulges=(1, 1), variant=True,
-           extra=(), samples=True, user=None):
+           extra=(), samples=True, user=None, env=None):
     args = ["complete-search", "--genome", "Genomes/gx", "--guide", guide, "--pam", f"PAMs/{pam}",
             "--mm", "4", "--output", output, "--thread", THREADS]
     if bulges is not None:
         args += ["--bDNA", str(bulges[0]), "--bRNA", str(bulges[1])]
     if variant:
         args += ["--vcf", "list_vcf.txt"] + (["--samplesID", "list_samplesID.txt"] if samples else [])
-    return cli(work, *args, *extra, user=user)
+    return cli(work, *args, *extra, user=user, env=env)
+
+
+def result_log(work, output):
+    """What a run wrote to its error log."""
+    try:
+        with open(os.path.join(work, "Results", output, "log_error.txt")) as fh:
+            return fh.read()
+    except OSError:
+        return ""
 
 
 def table(work, output):
@@ -206,8 +225,12 @@ def main(root):
     say("K=8 without --prune-pam: refused, naming the flags",
         rc != 0 and "--prune-pam --index-path genome_library" in out, out[-800:])
     rc, out = search(w, "o2", extra=("--prune-pam", "--index-path", "genome_library"))
-    say("K=8 with --prune-pam: same results as a dedicated index",
-        rc == 0 and identical(table(w, "o2"), b11), out[-600:])
+    if engine_prunes():
+        say("K=8 with --prune-pam: same results as a dedicated index",
+            rc == 0 and identical(table(w, "o2"), b11), out[-600:])
+    else:
+        say("K=8 with --prune-pam on an engine without it: refused, saying so", rc != 0
+            and "does not support it" in result_log(w, "o2"), out[-600:])
 
     # a search that enriches a dataset itself codes the fake-indel genome
     w = copy_of(root, ngg2, "on_demand")
@@ -216,6 +239,16 @@ def main(root):
     rc, out = search(w, "o")
     say("on-demand enrichment: same results as a built index",
         rc == 0 and identical(table(w, "o"), b11), out[-600:])
+
+    # the first search of a dataset that has only its VCFs, as the web's first 0-bulge one, which
+    # enriches it: it finds the target that needs the indel and the SNP, with the SNP's code at
+    # it, or the carrier's base where the indel post-analysis resolves the code with no registry
+    w = copy_of(root, seed, "first_search")
+    rc, out = search(w, "o", bulges=(0, 0), env={"CRISPRME_ALLOW_ONDEMAND_BUILD": "1"})
+    say("first search of a dataset with only its VCFs: the cis SNP+indel site, and the genotype store",
+        rc == 0 and re.search("CTAcCAGTTGCTTT[TY]ATCACTGG", table(w, "o") or "") is not None
+        and os.path.isfile(os.path.join(w, "Dictionaries", "indel_genotypes_gx_ds",
+                                        "gt_indel_chr3.tsv.gz")), out[-600:])
 
     # the guide length: served inside the rule, refused or built outside it
     dedicated = copy_of(root, g21, "g21_truth")
@@ -247,9 +280,14 @@ def main(root):
     k8_table = table(w, "crisprme-test-out")
     n = as_download(copy_of(root, nrg2, "complete_test_nrg"))
     rc2, out2 = cli(n, "complete-test", "--thread", THREADS)
-    say("complete-test on K=8: same results as on NRG, and no PAM file left",
-        rc == 0 and rc2 == 0 and identical(k8_table, table(n, "crisprme-test-out"))
-        and sorted(os.listdir(os.path.join(w, "PAMs"))) == pams, out[-800:])
+    if engine_prunes():
+        say("complete-test on K=8: same results as on NRG, and no PAM file left",
+            rc == 0 and rc2 == 0 and identical(k8_table, table(n, "crisprme-test-out"))
+            and sorted(os.listdir(os.path.join(w, "PAMs"))) == pams, out[-800:])
+    else:
+        say("complete-test on K=8 on an engine without --prune-pam: refused, saying so, and no "
+            "PAM file left", rc != 0 and "does not support it" in result_log(w, "crisprme-test-out")
+            and sorted(os.listdir(os.path.join(w, "PAMs"))) == pams, out[-800:])
     both = as_download(copy_of(root, k8, "complete_test_k8_and_nrg"))
     for name in os.listdir(os.path.join(nrg2, "genome_library")):
         shutil.copytree(os.path.join(nrg2, "genome_library", name),
