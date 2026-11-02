@@ -41,12 +41,14 @@ who has which target:
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid fake-indel
 genome column by column, without genotypes: on aa9c54b (the 2.8.1 release candidate)
-the check fails at every site but L2 (at C, I and J only the REF check fails). Before
-the merge kept an MNV row's carriers on its sequence (d4730a0), it fails at K and K2 in
-both modes: S48 and S50 are listed on the perfect row. Before the fix of an
-RNA-bulge row's start (3520eeb), the REF check fails on 68 row blocks: every RNA-bulge
-row on the + strand, which started one base early, and every RNA,DNA row, whose REF text
-had no gap and one base too many.
+the check fails at every site but L2 (at C, I, J and P only the REF check fails). On
+3520eeb, before the fix of an RNA-bulge row's start, the REF check fails on 71 row
+blocks: every RNA-bulge row on the + strand, which started one base early, and every
+RNA,DNA row, whose REF text had no gap and one base too many; and S50 is listed on K2's
+perfect row, in both modes. On d4730a0, which has that fix but not the merge keeping an
+MNV row's carriers on its sequence, it fails at K and K2 in both modes: S48 and S50 are
+listed on the perfect row (K's RNA-bulge row, no longer one base early, now meets the
+site's other alignments).
 
 Not covered: split multi-allelic SNP records at one position. CRISPRitz add-variants
 keeps only the last of them in the enriched genome and in the dictionary, so the other

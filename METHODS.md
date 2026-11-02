@@ -1005,7 +1005,8 @@ on the complete genome-wide matrix (2021 panel, same guide, default vs `--per-sa
 per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
 carries the indel and SNP together — is preserved identically in both analysis modes. Measured
 again with 2.8.1, whose companion holds only the SNPs a reported row requires, on the HGDP + 1000
-Genomes index: the two modes give the same lines for each of two guides (336 and 351, all CONFIRMED).
+Genomes index: the two modes give the same lines for each of two guides (339 and 363 distinct
+lines, all CONFIRMED).
 
 **Two co-occurrence companions.** Alongside `indel_snp_cooc.tsv` (SNP+indel),
 `snp_snp_cooc.tsv` reports **SNP+SNP** co-occurrences — off-targets that require ≥2

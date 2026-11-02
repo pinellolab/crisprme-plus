@@ -46,8 +46,9 @@
   genotype store) reads the genotypes from the per-sample SNP dictionary: there, the codes used to
   stay in the rows unresolved, scoring CFD 0, so the real SNP+indel targets were lost. With
   `CRISPRME_INDEL_SNP=0` at search time each code reads as the reference base, as on a fake-indel
-  genome built without the overlay. A target with no code, every target of a fake-indel genome built
-  without the overlay, that holds its indel (the last entry) is reported as before. **Affected:**
+  genome built without the overlay. A target with no code (every target of a fake-indel genome built
+  without the overlay) that holds its indel, as the entry "An indel row could hold no base of its
+  indel" defines it, is not changed by this fix. **Affected:**
   every search since 2.5.0 on an index that carries the overlay, which every published variant index
   and every index `build-index-only` builds do: from the web or the command line, per-sample and
   population-level (the indel post-analysis does not depend on the mode), with any PAM. A search that
@@ -57,18 +58,19 @@
   last position) the PAM stayed legal while the CFD collapsed, so nothing showed. Reference and
   SNP-only off-targets are not affected, though a cluster whose indel candidate goes away shows its
   next best in the results and its `Other_motifs` count changes. Measured on the search above, rerun
-  genome-wide with the fixes of these three entries: its highest-CFD indel rows went from 13,622 to
-  5,047, of which 5,037 hold their sequence on a listed carrier's real haplotype, read literally
-  from the phased VCF, and every one of those spans its indel; the other 10 hold a SNP at a split
-  multi-allelic site, which the enriched genome and its dictionaries read as reference (METHODS §8),
-  as does one of the 103 carriers of one more row; no ALT row shows a PAM NRG does not allow (3,581
-  over the table's three blocks before); chr18:12386282 is now the SNP row of its real carrier,
-  NA20541, at CFD 0.14, out of the top-1000 table and the panel; that table lost 66 indel rows and
-  gained 2 (chr5:170503088 and chr10:103001704), from 88 to 24, the recommended panel went from
-  259 to 234 sites, the CFD >= 0.5 tier from 67 to 57, the CRISPR-Bulge sensitive tier from 162 to
-  156 and the <= 2 mismatches + bulges tier from 9 to 7; the SNP+indel companion went from 590 to
-  336 lines, all CONFIRMED and the same in both analysis modes; all 755,576 reference and SNP-only
-  candidates are unchanged, and so are the two perfect matches and the multiple-perfect-match banner.
+  genome-wide with the fixes of this entry and the next two: its highest-CFD indel rows went from
+  13,622 to 5,047, of which 5,037 hold their sequence on a listed carrier's real haplotype, read
+  literally from the phased VCF, and every one of those spans its indel; the other 10 hold a SNP at
+  a split multi-allelic site, which the enriched genome and its dictionaries read as reference
+  (METHODS §8), as does one of the 103 carriers of one more row; no ALT row shows a PAM NRG does
+  not allow (3,581 over the table's three blocks before); chr18:12386282 is now the SNP row of its
+  real carrier, NA20541, at CFD 0.14, out of the top-1000 table and the panel; that table lost 66
+  indel rows and gained 2 (chr5:170503088 and chr10:103001704), from 88 to 24, the recommended
+  panel went from 259 to 234 sites, the CFD >= 0.5 tier from 67 to 57, the CRISPR-Bulge sensitive
+  tier from 162 to 156 and the <= 2 mismatches + bulges tier from 9 to 7; the SNP+indel companion
+  went from 590 to 336 lines, all CONFIRMED and the same in both analysis modes; all 755,576
+  reference and SNP-only candidates are unchanged, and so are the two perfect matches and the
+  multiple-perfect-match banner.
   HPRC is the only published index with MNVs (chr22: 9,079 of its 195,813 indel-search records);
   the search above on HPRC's chr22 lists 8 MNV row blocks per block, and the MNV part of the merge
   fix changes none of their carriers.
@@ -145,7 +147,12 @@
   their `Other_motifs` count. The report's tiers keep their sites, some one base later, except for
   those CFD >= 0.05 rows, the CFD >= 0.05 table gaining the two new rows and chr2:33157279 (whose
   REF now scores 0.1), and one tie at the top-1000 table's cut-off (CFD 0.188), now broken the other
-  way. The SNP+indel companion keeps its lines, the off-target start one base later on those rows.
+  way. The SNP+indel companion keeps its 1,618 lines, one per alignment, the off-target start one
+  base later on those rows; counted once each, as in the first entry and in the report, it went
+  from 336 to 339 lines, all CONFIRMED, as some of those rows no longer share their line with
+  another alignment of their site. The same search of the README's example guide,
+  `CTAACAGTTGCTTTTATCAC` (the README search), keeps its 1,672 lines, 351 counted once each
+  before and 363 now.
   Apart from `Other_motifs` counts and those four rows of SNPs, no reference or SNP-only row
   changes, nor do the perfect matches and the banner. The search takes as long as before, with the
   same peak memory. **Affected:** every search that allows RNA bulges (`--bRNA` 1 or more; the
