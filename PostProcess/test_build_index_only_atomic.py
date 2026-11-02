@@ -3120,10 +3120,12 @@ class AnAllNIndexInPlaceKeepsItsSide(_Fixture):
         self.assertEqual(self.calls(), [])
 
     def built_for_guide(self, name, guide):
-        """An index in place whose trees record the guide length ``guide``."""
+        """An index in place whose trees, one a chromosome, record the guide length
+        ``guide``."""
         os.makedirs(self.lib(name), exist_ok=True)
-        with open(os.path.join(self.lib(name), "NGG_chr1_1.bin"), "wb") as fh:
-            fh.write(struct.pack("=ii", 1, guide) + b"\0" * 16)
+        for chrom in GENOME:
+            with open(os.path.join(self.lib(name), f"NGG_{chrom}_1.bin"), "wb") as fh:
+                fh.write(struct.pack("=ii", 1, guide) + b"\0" * 16)
 
     def test_a_pam_file_of_a_longer_guide_is_refused_and_the_record_kept(self):
         # "already present", and the 23-nt file recorded over a 20-nt index: the web then
@@ -3182,6 +3184,38 @@ class AnAllNIndexInPlaceKeepsItsSide(_Fixture):
                       "for a PAM on the 5' side of the guide", err)
         self.assertEqual(self.calls(), [])
         self.assertFalse(os.path.exists(self.lib("NNN_2_hg38")))
+
+    def test_a_dedicated_index_recorded_for_the_other_side_is_refused_too(self):
+        # a PAM file of either side names a dedicated index alike (cli5 D2): the 3' file
+        # was recorded over a 5' build, and its bins kept
+        _write(os.path.join(self.lib("TTTV_2_hg38"), "TTTV_chr1_1.bin"), "")
+        _write(os.path.join(self.lib("TTTV_2_hg38"), ".pam_build"), "23bp-TTTV-Cas12a 24 -4\n")
+        pam_3p = self.path("PAMs", "20bp-TTTV-3p.txt")
+        _write(pam_3p, "N" * 20 + "TTTV 4\n")
+        rc, out, err = self.build(pam_3p)
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"Error: {self.lib('TTTV_2_hg38')} is already there, an index for a PAM "
+                      "on the 5' side of the guide (as its .pam_build records)", err)
+        self.assertEqual(self.record("TTTV_2_hg38"), "23bp-TTTV-Cas12a 24 -4\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_a_3_prime_file_over_an_unrecorded_all_n_index_of_another_width_is_refused(self):
+        # flows OF-8: a search before 2.8.1 built NNNN_2 from a 5' PAM file with no record;
+        # a 3' record on it made every 3' search of that width take it
+        self.in_place("NNNN_2_hg38", None)
+        pam_3p = self.path("PAMs", "24bp-NNNN-3p.txt")
+        _write(pam_3p, "N" * 24 + " 4\n")
+        rc, out, err = self.build(pam_3p)
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"Error: {self.lib('NNNN_2_hg38')} is already there, a PAM-less index "
+                      "that records no side of the guide (.pam_build)", err)
+        self.assertFalse(os.path.exists(os.path.join(self.lib("NNNN_2_hg38"), ".pam_build")))
+        # the 5' file a search tells its user to run is recorded
+        pam_5p = self.path("PAMs", "24bp-NNNN-5p.txt")
+        _write(pam_5p, "N" * 24 + " -4\n")
+        rc, out, err = self.build(pam_5p)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(self.record("NNNN_2_hg38"), "24bp-NNNN-5p 24 -4\n")
 
     def test_the_same_side_or_no_record_is_recorded_as_before(self):
         self.in_place("NNN_2_hg38", "20bp-NNN-NO-PAM 23 3\n")

@@ -1855,6 +1855,32 @@ def _built_three_prime(index_dir: str) -> bool:
         return True
 
 
+def _recorded_three_prime(index_dir: str) -> "Optional[bool]":
+    """Whether index ``index_dir`` was built for a 3' PAM, as its .pam_build records it
+    ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); None without a usable one."""
+    try:
+        with open(os.path.join(index_dir, ".pam_build")) as fh:
+            pos = int(fh.readline().split()[-1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None if pos == 0 else pos > 0
+
+
+def _side_serves(index_dir: str, pam: str, motif: str, three_prime: bool) -> bool:
+    """Whether index ``index_dir``, of PAM ``pam``, was built for the side of the guide where
+    a search for ``motif`` (a 3' PAM with ``three_prime``) puts its PAM, as the search
+    script's _resolve_index_dir takes it: as its .pam_build records; without one, any side
+    for a dedicated index, and 3' for an all-N one, at the published widths, 3 and 8, or
+    under the search PAM's own name only (a search before 2.8.1 built one of another width
+    from a 5' PAM file with no record)."""
+    recorded = _recorded_three_prime(index_dir)
+    if recorded is not None:
+        return recorded == three_prime
+    if not pam or set(pam) != {"N"}:
+        return True
+    return three_prime and (pam == motif or len(pam) in (3, 8))
+
+
 def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
                                prune: bool = False, three_prime: bool = True,
                                guide_len: int = 0, index_path: str = "_",
@@ -1899,9 +1925,10 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         # the requested motif, or is all-N of the same width, or -- under --prune-pam
         # and for a 3' PAM only -- all-N and wider: a stored flank of width K serves a
         # shorter 3' PAM by N-padding it, and the engine refuses a shorter 5' PAM.
-        # An all-N index serves only a PAM on the side it was built for, which its
-        # .pam_build records ("<name> <seq_len> <pam_pos>", pam_pos < 0 for 5'); one
-        # without it is taken for a 3' build.
+        # An index serves only a PAM on the side it was built for, which its .pam_build
+        # records ("<name> <seq_len> <pam_pos>", pam_pos < 0 for 5'); without one, a
+        # dedicated index any, and an all-N one a 3' PAM at widths 3 and 8 or of its own
+        # name (_side_serves).
         # These are the search shell's rules (_resolve_index_dir in
         # PostProcess/submit_job_automated_new_multiple_vcfs.sh); the two must not
         # disagree about the same directory, or the derived default bulges come from
@@ -1909,7 +1936,7 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         suffix = f"_{genome}"
 
         def _pam_serves(pam: str, index_dir: str) -> bool:
-            if pam and set(pam) == {"N"} and _built_three_prime(index_dir) != three_prime:
+            if not _side_serves(index_dir, pam, motif, three_prime):
                 return False
             if pam == motif:
                 return True
@@ -2012,7 +2039,7 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
             return (_index_serves_search(name, dataset, motif, want, wide, three_prime)
                     and not os.path.isdir(index + ".lock")
                     and any(f.endswith(".bin") for f in _listdir(index))
-                    and (not set(pam) == {"N"} or _built_three_prime(index) == three_prime)
+                    and _side_serves(index, pam, motif, three_prime)
                     and index_fit.fits(index_fit.built_guide_len(index),
                                        int(name.split("_")[1]), guide_len, bdna, brna))
 
@@ -3353,32 +3380,50 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
 
 
 def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
-    """Stops build-index-only when ``index_dir`` is an all-N index already in place
-    whose ``.pam_build`` records a PAM on the other side of the guide from ``pamfile``.
+    """Stops build-index-only when ``index_dir``, an index already in place, was built for
+    the other side of the guide from ``pamfile``, as its ``.pam_build`` records it.
 
-    An all-N index stores its flank on the side where the PAM file it was built from
-    puts the PAM, and its name does not say which. build-index-only keeps an index it
-    finds in place and records ``pamfile`` on it (_write_pam_build), so recording a 5'
-    file on a 3' build, or the reverse, would make a search on its real side refuse it
-    and one on the other side find nothing. The index ``pamfile`` asks for has the
-    same name, so it needs another working directory. An index with no usable
-    ``.pam_build`` records no side to contradict, and is recorded as before.
+    An index stores its targets on the side where the PAM file it was built from puts the
+    PAM, and its name does not say which: of an all-N index, nor of a dedicated one, which
+    PAM files of both sides name alike. build-index-only keeps an index it finds in place
+    and records ``pamfile`` on it (_write_pam_build), so recording a 5' file on a 3' build,
+    or the reverse, would make a search on its real side refuse it and one on the other
+    side search it wrong. The index ``pamfile`` asks for has the same name, so it needs
+    another working directory. An index with no usable ``.pam_build`` records no side to
+    contradict, and is recorded as before -- but for an all-N one of a width but 3 and 8
+    (the published ones, 3' builds), which a search before 2.8.1 built from a 5' PAM file
+    as well as from a 3' one: a 3' file is not recorded on it (a 5' one is, which is what
+    a search tells its user to run).
     """
     motif = os.path.basename(index_dir).split("_")[0]
-    if not motif or set(motif) != {"N"} or not os.path.isdir(index_dir):
+    if not motif or not os.path.isdir(index_dir):
         return
     try:
-        with open(os.path.join(index_dir, ".pam_build")) as fh:
-            built = int(fh.readline().split()[-1])
         with open(pamfile) as fh:
             wanted = int(fh.readline().split()[-1])
     except (OSError, ValueError, IndexError):
         return
-    if built and wanted and (built < 0) != (wanted < 0):
+    try:
+        with open(os.path.join(index_dir, ".pam_build")) as fh:
+            built = int(fh.readline().split()[-1])
+    except (OSError, ValueError, IndexError):
+        built = 0
+    all_n = set(motif) == {"N"}
+    if not built:
+        if all_n and len(motif) not in (3, 8) and wanted > 0:
+            error(
+                f"{index_dir} is already there, a PAM-less index that records no side of the "
+                f"guide (.pam_build): a search before 2.8.1 built one of that width from a 5' "
+                f"PAM file as well as from a 3' one, so {pamfile}, a 3' PAM file, is not "
+                f"recorded on it. If it was built from a 5' PAM file, run this with that file; "
+                f"otherwise build this index in another working directory (--path)."
+            )
+        return
+    if wanted and (built < 0) != (wanted < 0):
         side = {True: "5'", False: "3'"}
         error(
-            f"{index_dir} is already there, a PAM-less index for a PAM on the "
-            f"{side[built < 0]} side of the guide (as its .pam_build records), and "
+            f"{index_dir} is already there, {'a PAM-less index' if all_n else 'an index'} for "
+            f"a PAM on the {side[built < 0]} side of the guide (as its .pam_build records), and "
             f"{pamfile} puts the PAM on the {side[wanted < 0]} side. The index for that "
             f"PAM file has the same name: build it in another working directory (--path)."
         )

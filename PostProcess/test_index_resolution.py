@@ -278,10 +278,31 @@ class APamLessIndexServesOnlyTheSideItWasBuiltFor(_Tree):
                              "NNNN_3_hg38")
 
     def test_an_index_without_a_record_is_a_3_prime_build(self):
-        lib = self.lib("NNNN_3_hg38")
+        # at the widths of the published ones, 3 and 8 (the K=8 archive has no .pam_build)
+        lib = self.lib("NNN_3_hg38", "NNNNNNNN_3_hg38")
         for prune in (0, 1):
+            self.assertEqual(resolve(lib, "TTT", "hg38", 3, prune=prune, pos=-3), "")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=1), "NNN_3_hg38")
+        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3, prune=1), "NNNNNNNN_3_hg38")
+
+    def test_one_of_another_width_without_a_record_is_taken_for_neither_side(self):
+        # A search before 2.8.1 built NNNN_2 from a 5' PAM file (23bp-NNNN-NO-PAM) with no
+        # record; a 3' NGCG search then took it, and reported a site that is in no
+        # chromosome, where 2.8.0 built NGCG_2 and found 2 (flows OF-8, new in 2.8.1).
+        lib = self.lib("NNNN_3_hg38", "NNNNNN_3_hg38", "NN_3_hg38")
+        for prune in (0, 1):
+            self.assertEqual(resolve(lib, "NGCG", "hg38", 3, prune=prune), "")
+            self.assertEqual(resolve(lib, "NNGRRT", "hg38", 3, prune=prune), "")
+            self.assertEqual(resolve(lib, "NG", "hg38", 3, prune=prune), "")
             self.assertEqual(resolve(lib, "TTTV", "hg38", 3, prune=prune, pos=-4), "")
-        self.assertEqual(resolve(lib, "NRG", "hg38", 3, prune=1), "NNNN_3_hg38")
+        # ... but under the search PAM's own name, as 2.8.0 took it
+        self.assertEqual(resolve(lib, "NNNN", "hg38", 3), "NNNN_3_hg38")
+        # and with its record, on the side it records
+        built_for(lib / "NNNN_3_hg38", 4)
+        self.assertEqual(resolve(lib, "NGCG", "hg38", 3), "NNNN_3_hg38")
+        built_for(lib / "NNNN_3_hg38", -4)
+        self.assertEqual(resolve(lib, "NGCG", "hg38", 3), "")
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 3, pos=-4), "NNNN_3_hg38")
 
     def test_a_5_prime_build_does_not_serve_a_3_prime_pam(self):
         # at the PAM's width, and wider under --prune-pam: neither stores a 3' flank
@@ -348,6 +369,43 @@ class APamLessIndexServesOnlyTheSideItWasBuiltFor(_Tree):
             self.addCleanup(rec.chmod, 0o644)
             self.assertEqual(resolve(lib, "TTTV", "hg38", 3, pos=-4), "")
             self.assertEqual(resolver_stderr(lib, "TTTV", "hg38", 3, pos=-4), "")
+
+
+class ADedicatedIndexServesOnlyTheSideItRecords(_Tree):
+    """A dedicated index is named after its PAM alone, and a PAM file of either side names
+    it alike: 'NNNNNNNNNNNNNNNNNNNNTTTV 4' builds the TTTV_<N>_<genome> the 5' Cas12a file
+    does. The side check covered all-N indexes only, so a 5' TTTV search took a 3' build
+    and reported one site that is in no chromosome instead of 20 (cli5 D2). It now reads
+    the side any index records; one with no record has no side to contradict."""
+
+    def record(self, lib, name, pos):
+        Path(lib, name, ".pam_build").write_text(f"x {20 + abs(pos)} {pos}\n")
+
+    def test_a_dedicated_index_recorded_for_the_other_side_does_not_serve(self):
+        lib = self.lib("TTTV_2_hg38")
+        self.record(lib, "TTTV_2_hg38", 4)
+        for prune in (0, 1):
+            self.assertEqual(resolve(lib, "TTTV", "hg38", 2, prune=prune, pos=-4), "")
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 2, pos=4), "TTTV_2_hg38")
+
+    def test_the_one_of_its_side_is_taken_beside_it(self):
+        # (the smaller budget of the wrong side used to win)
+        lib = self.lib("TTTV_2_hg38", "TTTV_3_hg38")
+        self.record(lib, "TTTV_2_hg38", 4)
+        self.record(lib, "TTTV_3_hg38", -4)
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 2, pos=-4), "TTTV_3_hg38")
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 2, pos=4), "TTTV_2_hg38")
+
+    def test_one_with_no_record_serves_as_before(self):
+        lib = self.lib("TTTV_2_hg38", "NRG_3_hg38")
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 2, pos=-4), "TTTV_2_hg38")
+        self.assertEqual(resolve(lib, "NRG", "hg38", 3), "NRG_3_hg38")
+
+    def test_any_side_still_finds_it_to_say_why(self):
+        lib = self.lib("TTTV_2_hg38")
+        self.record(lib, "TTTV_2_hg38", 4)
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 2, pos=-4, any_side="any"),
+                         "TTTV_2_hg38")
 
 
 class FlankMustBeWideEnough(_Tree):
@@ -1282,12 +1340,12 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
             self.assertEqual(run.searched(variant=False), ("NNNN_2_hg38", bool(prune)))
             self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Reference failed")
 
-    def test_a_3_prime_all_n_build_records_its_side_and_a_dedicated_one_none(self):
+    def test_a_3_prime_all_n_build_records_its_side_and_a_dedicated_one_too(self):
+        # (a dedicated index is named alike by PAM files of both sides: cli5 D2)
         run = self.run_pipeline(pam="20bp-NRG-SpCas9", variant=False,
                                 env={"STUB_BUILD_WRITES": "1"})
         self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
-        self.assertEqual(sorted(p.name for p in (self.library / "NRG_2_hg38").iterdir()),
-                         ["chr1.bin"])
+        self.assertEqual(self.pam_build("NRG_2_hg38"), "20bp-NRG-SpCas9 23 3\n")
         run = self.run_pipeline(pam="20bp-NNN-NO-PAM", variant=False,
                                 env={"STUB_BUILD_WRITES": "1"})
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
@@ -1402,6 +1460,33 @@ class APamLessIndexKeepsTheSideItWasBuiltFor(_ShippedScript):
             "       if it was built from a 5' PAM file, record that by running "
             "'crisprme.py build-index-only' with that file, the same --genome (and --vcf) "
             "and --bDNA 1\n", "TTTV")
+
+    def test_a_dedicated_index_of_the_other_side_in_the_way_is_refused(self):
+        # a 3' build of TTTV under the name a 5' TTTV search builds: it was searched, and
+        # reported a site that is in no chromosome, at exit 0 (cli5 D2)
+        self.install("TTTV_2", variant=False)
+        Path(self.library, "TTTV_2_hg38", ".pam_build").write_text("20bp-TTTV-3p 24 4\n")
+        run = self.run_pipeline(pam="23bp-TTTV-Cas12a", variant=False)
+        self.assertIsNone(run.searched(variant=False))
+        self.assertEqual(run.builds, [])
+        self.assertIn(f"ERROR: {self.library}/TTTV_2_hg38 is in the way: this search builds its "
+                      "index under that name\n"
+                      "       TTTV_2_hg38 is an index for a PAM on the 3' side of the guide (as "
+                      "its .pam_build records), and 23bp-TTTV-Cas12a.txt puts the PAM on the 5' "
+                      "side, so a search of it would report sites that are not there and miss "
+                      "the real ones\n", run.stderr)
+
+    def test_an_unrecorded_all_n_index_of_another_width_is_not_taken_for_a_3_prime_pam(self):
+        # flows OF-8: the NNNN_2 a 5' search of 2.8.0 left, then a 3' NGCG search
+        self.install("NNNN_2", variant=False)
+        plain = self.run_pipeline(pam="20bp-NGCG-SpCas9VRER", variant=False)
+        self.assertEqual([c[1] for c in plain.builds], ["hg38"])
+        self.assertEqual(plain.searched(variant=False), ("NGCG_2_hg38", False))
+        self.assertNoMatchSaysWhy(
+            self.run_pipeline(pam="20bp-NGCG-SpCas9VRER", prune=1, variant=False),
+            "       NNNN_2_hg38 is a PAM-less index that records no side of the guide in a "
+            ".pam_build, and a search before 2.8.1 built one of that width from a 5' PAM file as "
+            "well as from a 3' one, so it is not taken for a 3' PAM\n", "NGCG")
 
     def test_a_plain_miss_says_what_it_said(self):
         self.install("NGG_3", variant=False)

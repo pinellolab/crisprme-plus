@@ -742,15 +742,18 @@ while read vcf_f; do
 		true_pam=${fullseqpam:0:-$pos}
 	fi
 
-	# The side of the guide all-N index $1 was built for, on stdout: 3 or 5. An all-N
-	# index stores its flank where the PAM file it was built from puts the PAM, and the
-	# engine reads the flank on the side the SEARCH PAM file names, so an index built for
-	# the other side gives no target at all, and no error. build-index-only and this
-	# script's own builds record that file's geometry in .pam_build ("<name> <seq_len>
-	# <pam_pos>", pam_pos < 0 for a 5' PAM). An index without one -- built by a search
-	# before 2.8.1, or by crispritz.py itself -- is taken for a 3' build, as every
-	# published one is (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. Silent on
-	# stderr, which is fatal to the stage.
+	# The side of the guide index $1 was built for, on stdout: 3 or 5. An index stores its
+	# targets where the PAM file it was built from puts the PAM, and the engine reads them
+	# on the side the SEARCH PAM file names, so an index built for the other side gives
+	# wrong targets, or none, and no error: an all-N one, whose name says nothing of the
+	# side, and a dedicated one too, which a PAM file of the other side names alike
+	# (N*20+TTTV 4 and the 5' TTTV-Cas12a both build TTTV_<N>_<genome>). build-index-only
+	# and this script's own builds record that file's geometry in .pam_build ("<name>
+	# <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM). An index without one -- built by a
+	# search before 2.8.1, by crispritz.py itself, or downloaded (the published K=8
+	# archive has none) -- is taken for a 3' build, as every published one is
+	# (PAMs/20bp-NNN-NO-PAM.txt), and the status is then 1. Silent on stderr, which is
+	# fatal to the stage.
 	_index_side() {
 		local _line=
 		if [ -f "$1/.pam_build" ]; then
@@ -824,10 +827,10 @@ while read vcf_f; do
 	# makes which index answers a search depend on the environment.
 	# A stand-in index must be ALL N. Globbing NNN* also matches a dedicated PAM --
 	# the shipped NNNRRT (SaCas9-KKH) among them -- which cannot serve another PAM.
-	# An all-N index must also have been built for a PAM on the search PAM's side.
+	# An index must also have been built for a PAM on the search PAM's side (below).
 	_resolve_index_dir() {
 		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4" _any_side="$5"
-		local _d _b _pam _n _exact _better _side _len _g
+		local _d _b _pam _n _exact _better _side _rec _len _g
 		local _best="" _best_n="" _best_pam_len="" _best_exact="" _best_len=""
 		for _d in "$_lib"/*_*_"$_suffix"; do
 			[ -d "$_d" ] || continue
@@ -888,13 +891,24 @@ while read vcf_f; do
 			else
 				continue            # a different dedicated PAM cannot stand in
 			fi
-			# An all-N index serves only a PAM on the side it was built for (_index_side).
-			if [ -z "${_pam//N/}" ] && [ -z "$_any_side" ]; then
-				_side=$(_index_side "$_d")
-				if [ "${pos:-1}" -gt 0 ]; then
-					[ "$_side" = 3 ] || continue
-				else
-					[ "$_side" = 5 ] || continue
+			# An index serves only a PAM on the side it was built for, as its .pam_build
+			# records it (_index_side). Without a record a dedicated index has no side to
+			# contradict, and an all-N one is a 3' build at the published widths, 3 and 8
+			# (the K=8 archive has no .pam_build), or under the search PAM's own name, as
+			# 2.8.0 took it; at any other width a search before 2.8.1 may have built it
+			# from a 5' PAM file, and the search builds its dedicated index instead.
+			if [ -z "$_any_side" ]; then
+				_rec=0
+				_side=$(_index_side "$_d") || _rec=1
+				if [ "$_rec" = 0 ] || [ -z "${_pam//N/}" ]; then
+					if [ "${pos:-1}" -gt 0 ]; then
+						[ "$_side" = 3 ] || continue
+						if [ "$_rec" = 1 ] && [ "$_pam" != "$_pam_want" ]; then
+							case "${#_pam}" in 3 | 8) ;; *) continue ;; esac
+						fi
+					else
+						[ "$_side" = 5 ] || continue
+					fi
 				fi
 			fi
 			[ -n "$_any_side" ] || _index_fits_guide "$_d" "$_n" || continue
@@ -925,37 +939,55 @@ while read vcf_f; do
 		[ -n "$_best" ] && printf '%s\n' "$_best"
 	}
 
-	# Record on all-N index $1, which this run has just built, the side of the guide its
-	# PAM file puts the PAM, as build-index-only does: without it, _index_side takes a
-	# 5' build for a 3' one. A dedicated index needs no record. Silent on stderr.
+	# Record on index $1, which this run has just built, the side of the guide its PAM
+	# file puts the PAM, as build-index-only does: without it, _index_side takes a 5' build
+	# for a 3' one, and a dedicated index has no side a search of the other side could be
+	# refused by. Silent on stderr.
 	_record_index_side() {
-		{ [ -z "${true_pam//N/}" ] && [ -d "$1" ]; } || return 0
+		[ -d "$1" ] || return 0
 		{ printf '%s %s %s\n' "${pam_name%.*}" "${#fullseqpam}" "$pos" >"$1/.pam_build"; } 2>/dev/null
 		return 0
 	}
 
-	# Say on stderr why all-N index $1 cannot serve this search, when it was built for
-	# the other side of the guide.
+	# Say on stderr why index $1 cannot serve this search, when it was built for the other
+	# side of the guide.
 	_say_other_side() {
-		local _have _want=3 _why="as its .pam_build records" _n
+		local _have _want=3 _why="as its .pam_build records" _n _p=${1##*/}
 		_have=$(_index_side "$1") \
 			|| _why="it records no side in a .pam_build, and an index that does not is taken for a 3' build"
 		[ "${pos:-1}" -gt 0 ] || _want=5
-		[ "$_have" = "$_want" ] && return 0
-		printf "       %s is a PAM-less index for a PAM on the %s' side of the guide (%s), and %s puts the PAM on the %s' side, so a search of it would find nothing\n" \
-			"$(basename "$1")" "$_have" "$_why" "$pam_name" "$_want" >&2
+		_p=${_p%%_*}
+		if [ "$_have" = "$_want" ]; then
+			# (nor, for a 3' PAM, a PAM-less one of a width but 3 and 8 that records no side)
+			{ _index_side "$1" >/dev/null || [ -n "${_p//N/}" ] || [ "$_p" = "$true_pam" ]; } \
+				&& return 0
+			case "${#_p}" in 3 | 8) return 0 ;; esac
+			printf "       %s is a PAM-less index that records no side of the guide in a .pam_build, and a search before 2.8.1 built one of that width from a 5' PAM file as well as from a 3' one, so it is not taken for a 3' PAM\n" \
+				"$(basename "$1")" >&2
+			return 0
+		fi
+		if [ -z "${_p//N/}" ]; then
+			printf "       %s is a PAM-less index for a PAM on the %s' side of the guide (%s), and %s puts the PAM on the %s' side, so a search of it would find nothing\n" \
+				"$(basename "$1")" "$_have" "$_why" "$pam_name" "$_want" >&2
+		else
+			printf "       %s is an index for a PAM on the %s' side of the guide (%s), and %s puts the PAM on the %s' side, so a search of it would report sites that are not there and miss the real ones\n" \
+				"$(basename "$1")" "$_have" "$_why" "$pam_name" "$_want" >&2
+		fi
 		_index_side "$1" >/dev/null && return 0
 		_n=$(basename "$1"); _n=${_n#*_}; _n=${_n%%_*}
 		printf "       if it was built from a %s' PAM file, record that by running 'crisprme.py build-index-only' with that file, the same --genome (and --vcf) and --bDNA %s\n" \
 			"$_want" "$((_n - 1))" >&2
 	}
 
-	# An all-N search PAM builds its index under an all-N name, so all-N index $1 in
-	# place under that name, which the scan refused, was built for the other side of the
-	# guide: a search of it would find nothing, and exit 0. Stop instead. $2 is its
-	# _INDELS companion, for a variant index.
+	# A search builds its index under the name <PAM>_<bMax>_<suffix>, which says nothing of
+	# the side of the guide, so index $1 in place under that name, which the scan refused,
+	# may have been built for the other side: a search of it would find wrong targets, or
+	# none, and exit 0. Stop instead. A dedicated index with no record has no side to
+	# contradict (an all-N one is taken for a 3' build). $2 is its _INDELS companion, for
+	# a variant index.
 	_refuse_other_side() {
-		{ [ -z "${true_pam//N/}" ] && _lock_built "$1" 1; } || return 0
+		_lock_built "$1" 1 || return 0
+		{ [ -z "${true_pam//N/}" ] || _index_side "$1" >/dev/null; } || return 0
 		local _want=3 _also=
 		[ "${pos:-1}" -gt 0 ] || _want=5
 		[ "$(_index_side "$1")" = "$_want" ] && return 0

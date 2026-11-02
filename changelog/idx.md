@@ -220,3 +220,29 @@ registry. -->
   the carrier columns. A full install, and one with the classic dictionaries, are unchanged. The
   download help, the README, docs/PRECOMPUTED_INDEXES.md and docs/TROUBLESHOOTING.md say what such
   an install runs.
+- **An index is taken only for a search on the side of the guide it was built for, a dedicated
+  one too, and an all-N index that records no side is taken for a 3' PAM only at the published
+  widths.** 2.8.1 takes an all-N index of a 3' PAM's width, and one with no `.pam_build` for a 3'
+  build. A search before 2.8.1 records no side, so after a 5' all-N search (`23bp-NNNN-NO-PAM`,
+  which builds `NNNN_2_<genome>`) a 3' search of that width (`NGCG`) read the 5' index: on the
+  synthetic genome it found no site against 2 on a dedicated index, which 2.8.0 built. This is new
+  in 2.8.1. The side check also covered all-N indexes alone, while a dedicated index is named
+  after its PAM by PAM files of both sides (`N...NTTTV 4` and the 5' `TTTV-Cas12a` both build
+  `TTTV_<N>_<genome>`): a 5' TTTV search of a 3' build reported nothing, or a site that is in no
+  chromosome, at exit 0, as in 2.8.0, and `build-index-only` with the other side's file recorded
+  that side over it. **Affected:** a search beside an all-N index of a width other than 3 and 8
+  that a search before 2.8.1 built, and a search beside a dedicated index built from the other
+  side's PAM file; no published index and no shipped PAM file. **What to do:** run those searches
+  again. Now every index's recorded side must be the search's side, and a search records the side
+  of every index it builds, dedicated ones too (build-index-only always did). An all-N index with no
+  record serves a 3' PAM at widths 3 and 8 (the published `NNN_3` and the K=8 archive, which has
+  no `.pam_build`) or under the search PAM's own name, as before; at any other width the search
+  builds its dedicated index, as 2.8.0 did, and under `--index-path` it stops and says why. A
+  dedicated index with no record is used as before. Where the index of the build name is in the
+  way the search stops with a message, and `build-index-only` refuses another side's PAM file over
+  a recorded index, and a 3' file over an unrecorded all-N index of another width (a 5' file is
+  recorded, as the messages say to do). Measured on the synthetic genome: the NGCG search after the
+  5' NNNN search, and the 5' TTTV search beside a 3' `TTTV_2` and a 5' `TTTV_3`, now equal a
+  dedicated index; NRG on an unrecorded `NNN_3`, and on an unrecorded K=8 with `--prune-pam`, is
+  unchanged. A dedicated index built for the other side's PAM by a search before 2.8.1 records
+  nothing and cannot be told apart: remove it if you built one from such a PAM file.
