@@ -151,7 +151,16 @@ class TestNoHitsStatus(unittest.TestCase):
                       "neither its VCFs (VCFs/ds) nor its enriched genome (Genomes/hg38+ds) is "
                       "installed. Variant indexes installed for ds: NRG_3_hg38+ds (up to 2 "
                       "bulge(s) of each type)")
+        # (an index that lacks a chromosome's trees: index_coverage.py)
+        partial = ("index 'NRG_2_hg38' (/data/genome_library/NRG_2_hg38) lacks trees of FASTAs "
+                   "that hold sites of its PAM: chr2.fa (no tree): a search of it would lose "
+                   "them with no error. It is a partial copy, or a build stopped partway, or the "
+                   "genome folder has changed since it was built. Remove it (rm -rf "
+                   "'/data/genome_library/NRG_2_hg38') and run this search again, which builds "
+                   "it anew where it can, or download it again or build it with crisprme.py "
+                   "build-index-only")
         for name, err, says in (
+                ("partial", f"ERROR: {partial}\n", f"The search was not run: {partial}."),
                 ("no variant", f"ERROR: {no_variant}\n", f"The search was not run: {no_variant}."),
                 ("refused", f"ERROR: {refused}\n", f"The search was not run: {refused}."),
                 ("refused tiers", f"ERROR: {tiers}\n", f"The search was not run: {tiers}."),
