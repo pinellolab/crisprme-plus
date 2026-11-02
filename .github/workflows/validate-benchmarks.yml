@@ -45,11 +45,9 @@ on:
 jobs:
   validate-benchmarks:
     runs-on: ubuntu-latest
-    # The hosted runner runs the LIGHT (bulge-1) benchmarks via CRISPRME_SKIP_HEAVY=1
-    # (passed into the container on the complete-test/validate-test steps). The "heavy"
-    # single-n cases build a bulge-2 index over the variant-enriched genome, which OOMs a
-    # 16GB runner (and is too slow under swap) -- they are validated locally / on a larger
-    # runner. 120 min is plenty for the light suite.
+    # Every registered benchmark runs here, the "heavy" single-n cases included: they build
+    # a bulge-2 index over the variant-enriched genome, which fits a 16 GiB, 4-CPU runner
+    # with no swap (measured on arm64: the whole set peaks at 3.66 GB of RAM). 120 min is plenty.
     timeout-minutes: 120
     env:
       IMG: pinellolab/crisprme
@@ -172,7 +170,7 @@ jobs:
         run: |
           mkdir -p work
           n=0
-          until docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          until docker run --rm $BRANCH_MOUNT -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
                   set -e
                   cp /branch/crisprme.py /opt/conda/bin/crisprme.py
                   cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
@@ -189,7 +187,7 @@ jobs:
 
       - name: validate-test (chr22) — assert all benchmarks match the ground truth
         run: |
-          docker run --rm $BRANCH_MOUNT -e CRISPRME_SKIP_HEAVY=1 -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
+          docker run --rm $BRANCH_MOUNT -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/

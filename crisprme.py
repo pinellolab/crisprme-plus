@@ -5936,7 +5936,7 @@ def print_help_complete_test():
         "CRISPRME_ALLOW_ONDEMAND_BUILD, complete-test instead runs the example guide against "
         "whichever index you downloaded (recommended: NRG_3_hg38+hg38_HGDP1kGP) -- "
         "the prebuilt-index smoke test. The self-test, as CI runs it: "
-        "CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test "
+        "CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py complete-test "
         "--chrom chr22 --vcf_dataset 1000G, then crisprme.py validate-test --chrom chr22.\n"
         "\t--thread, number of threads.\n"
         "\t--debug, debug mode.\n"
@@ -5997,7 +5997,7 @@ def complete_test_crisprme():
             "NOTE [complete-test]: --vcf_dataset is for the benchmark mode, whose output "
             "validate-test checks, and that mode runs only with "
             "CRISPRME_ALLOW_ONDEMAND_BUILD=1 set (Docker: pass it with -e, as in docker run "
-            "-e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -e CRISPRME_SKIP_HEAVY=1 ...). It is not set "
+            "-e CRISPRME_ALLOW_ONDEMAND_BUILD=1 ...). It is not set "
             "here, so complete-test runs the example guide against a prebuilt index "
             "instead.",
             flush=True,
@@ -6048,7 +6048,7 @@ def print_help_validate_test() -> None:
         "Requirements:\n"
         "\t- The `complete-test` functionality must have been executed beforehand, "
         "in its benchmark mode and in this folder: CRISPRME_ALLOW_ONDEMAND_BUILD=1 "
-        "CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G\n"
+        "crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G\n"
         "\t- Validation is supported only when complete-test was run using "
         "1000 Genomes variant data\n\n"
     )

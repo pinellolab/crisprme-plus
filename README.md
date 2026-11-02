@@ -612,15 +612,15 @@ empty folder:
 
 ```bash
 mkdir crisprme_test && cd crisprme_test
-docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -e CRISPRME_SKIP_HEAVY=1 \
+docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py validate-test --chrom chr22   # expect: 2 passed, 0 failed, 2 skipped
+  crisprme.py validate-test --chrom chr22   # expect: 4 passed, 0 failed, 0 skipped
 ```
 
-Pass the two variables with `-e`, as above. Written in front of `docker run`
-(`CRISPRME_ALLOW_ONDEMAND_BUILD=1 docker run ...`) they are set on your machine only, never in
+Pass the variable with `-e`, as above. Written in front of `docker run`
+(`CRISPRME_ALLOW_ONDEMAND_BUILD=1 docker run ...`) it is set on your machine only, never in
 the container, so `complete-test` looks for a prebuilt index, finds none, and exits 0 having
 tested nothing. The run took about 10 minutes at 8 threads on an Apple Silicon Mac in testing.
 
@@ -659,12 +659,12 @@ The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then co
 
 ```bash
 mkdir crisprme_test && cd crisprme_test
-CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 \
+CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
-crisprme.py validate-test --chrom chr22   # expect: 2 passed, 0 failed, 2 skipped
+crisprme.py validate-test --chrom chr22   # expect: 4 passed, 0 failed, 0 skipped
 ```
 
-`CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode: without it, `complete-test` runs the prebuilt-index smoke ([§2.2.2](#222-complete-test)), which needs an index you have downloaded and gives `validate-test` nothing to check. `CRISPRME_SKIP_HEAVY=1` skips the two bulge-2 benchmarks, whose index builds need more than 16 GB of RAM. The run took 10 to 20 minutes at 8 threads in testing.
+`CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode: without it, `complete-test` runs the prebuilt-index smoke ([§2.2.2](#222-complete-test)), which needs an index you have downloaded and gives `validate-test` nothing to check. The run took 10 to 20 minutes at 8 threads in testing.
 
 Notes:
 - This is exactly the recipe the project `Dockerfile` automates — if you prefer full isolation, build the image instead (Section 1.2).
@@ -1310,12 +1310,12 @@ function, including detailed explanations and default behaviors:
 > ([§2.2.3](#223-off-target-sites-validation-test)) checks, for a **1000 Genomes** run only.
 > `--vcf_dataset` on its own does not select this mode. The self-test, as CI runs it:
 > ```bash
-> CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 \
+> CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
 >   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G
 > crisprme.py validate-test --chrom chr22
 > ```
-> `CRISPRME_SKIP_HEAVY=1` skips the two bulge-2 benchmarks, whose index builds need more than
-> 16 GB of RAM.
+> It fits in 16 GB of RAM (measured peak 3.66 GB). On a very small machine,
+> `CRISPRME_SKIP_HEAVY=1` leaves out the bulge-2 benchmarks.
 
 ##### Output Data Overview
 ---
@@ -1363,7 +1363,7 @@ pipeline, particularly when working with large-scale population variant data.
 >
 > * `complete-test` **must have been run beforehand, in its benchmark mode and in the same
 >   folder** (see [§2.2.2](#222-complete-test)):
->   `CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G`.
+>   `CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G`.
 >   Anywhere else, including after the prebuilt-index smoke, `validate-test` finds nothing to
 >   check, says so in one line and exits 1
 > * Validation is **supported only** when `complete-test` was run using
@@ -2260,9 +2260,9 @@ test indexes, runs every registered benchmark, and `validate-test` compares the 
 with the committed brute-force ground truth. Run it from an empty folder; it fits in 16 GB
 of RAM and took 10 to 20 minutes at 8 threads in testing:
 ```bash
-CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 \
+CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
-crisprme.py validate-test --chrom chr22   # expect: 2 passed, 0 failed, 2 skipped
+crisprme.py validate-test --chrom chr22   # expect: 4 passed, 0 failed, 0 skipped
 ```
 
 #### 3.2.2 Full Genome Test

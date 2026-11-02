@@ -125,12 +125,16 @@ class ValidatePyWithoutBenchmarkOutput(unittest.TestCase):
         self.assertIn("complete-test --chrom chr22 --vcf_dataset 1000G", line)
         self.assertIn("then crisprme.py validate-test --chrom chr22", line)
 
-    def test_it_says_the_variables_go_with_minus_e_in_docker(self):
-        # set in front of `docker run`, they stay on the host: in the container
+    def test_it_says_the_variable_goes_with_minus_e_in_docker(self):
+        # set in front of `docker run`, it stays on the host: in the container
         # complete-test then runs the prebuilt-index smoke, which leaves nothing to check
         line = self.hint("chr22")
-        self.assertIn("--vcf_dataset 1000G (Docker: pass them with -e), then crisprme.py "
+        self.assertIn("--vcf_dataset 1000G (Docker: pass it with -e), then crisprme.py "
                       "validate-test --chrom chr22", line)
+
+    def test_it_runs_every_benchmark(self):
+        # no CRISPRME_SKIP_HEAVY: the set fits 16 GiB, and a skipped benchmark checks nothing
+        self.assertNotIn("CRISPRME_SKIP_HEAVY", self.hint("chr22"))
 
 
 class ABenchmarkOffItsReferenceIsSkipped(unittest.TestCase):
@@ -140,18 +144,20 @@ class ABenchmarkOffItsReferenceIsSkipped(unittest.TestCase):
     only, so every chr21 site counted as extra. A benchmark is now compared only on
     the chromosome its reference covers, and skipped elsewhere."""
 
-    # what the benchmark mode runs with CRISPRME_SKIP_HEAVY=1, as that line has it
+    # what the benchmark mode runs with the CRISPRME_SKIP_HEAVY=1 opt-out
     LIGHT = ["cas9_sg1617", "cas12a_hbg"]
 
-    def run_validation(self, chrom, ran):
+    def run_validation(self, chrom, ran, skip_heavy=False):
         """run_test_validation(chrom) on the shipped registry, with CRISPRME_SKIP_HEAVY
-        unset as in the validate-test that line names, where the benchmarks in `ran`
-        left their output, each comparison stubbed to a match. Returns (exit code,
-        stderr lines, the benchmarks compared)."""
+        unset as in the validate-test that line names (or set, the opt-out), where the
+        benchmarks in `ran` left their output, each comparison stubbed to a match. Returns
+        (exit code, stderr lines, the benchmarks compared)."""
         compared = []
         err = io.StringIO()
         env = dict(os.environ)
         env.pop("CRISPRME_SKIP_HEAVY", None)
+        if skip_heavy:
+            env["CRISPRME_SKIP_HEAVY"] = "1"
 
         def found(name, *_a):
             return (f"{name}.ref.txt", f"{name}.alt.txt") if name in ran else None
@@ -171,33 +177,53 @@ class ABenchmarkOffItsReferenceIsSkipped(unittest.TestCase):
                 validate.run_test_validation(chrom)
         return cm.exception.code, err.getvalue().splitlines(), compared
 
+    def every(self):
+        return [b["name"] for b in validate.load_benchmarks()["benchmarks"]]
+
     def test_chr21_compares_only_what_the_references_cover(self):
-        code, lines, compared = self.run_validation("chr21", self.LIGHT)
+        every = self.every()
+        code, lines, compared = self.run_validation("chr21", every)
         self.assertEqual(compared, ["cas9_sg1617"])
         self.assertIn("[cas12a_hbg] SKIPPED: its brute-force reference covers chr22 only, "
                       "not chr21.", lines)
-        self.assertIn("Validation summary: 1 passed, 0 failed, 3 skipped.", lines)
+        self.assertIn(f"Validation summary: 1 passed, 0 failed, {len(every) - 1} skipped.", lines)
         self.assertEqual(code, 0)
 
     def test_so_does_a_whole_genome_run(self):
         # validate-test without --chrom
-        code, lines, compared = self.run_validation("all", self.LIGHT)
+        every = self.every()
+        code, lines, compared = self.run_validation("all", every)
         self.assertEqual(compared, ["cas9_sg1617"])
         self.assertIn("[cas12a_hbg] SKIPPED: its brute-force reference covers chr22 only, "
                       "not the whole genome.", lines)
-        self.assertIn("Validation summary: 1 passed, 0 failed, 3 skipped.", lines)
+        self.assertIn(f"Validation summary: 1 passed, 0 failed, {len(every) - 1} skipped.", lines)
         self.assertEqual(code, 0)
 
-    def test_chr22_still_compares_every_benchmark_that_ran(self):
-        # the documented self-test ("expect: 2 passed, 0 failed, 2 skipped")
-        code, lines, compared = self.run_validation("chr22", self.LIGHT)
-        self.assertEqual(compared, self.LIGHT)
-        self.assertIn("Validation summary: 2 passed, 0 failed, 2 skipped.", lines)
-        self.assertEqual(code, 0)
-        # and a run of all four, the heavy ones included
-        every = [b["name"] for b in validate.load_benchmarks()["benchmarks"]]
+    def test_chr22_compares_every_benchmark(self):
+        # the documented self-test: every benchmark passed, none failed, none skipped
+        every = self.every()
         code, lines, compared = self.run_validation("chr22", every)
         self.assertEqual(compared, every)
+        self.assertIn(f"Validation summary: {len(every)} passed, 0 failed, 0 skipped.", lines)
+        self.assertEqual(code, 0)
+
+    def test_the_opt_out_leaves_out_the_bulge_2_benchmarks_saying_so(self):
+        # CRISPRME_SKIP_HEAVY=1, for a very small machine, on complete-test and validate-test
+        code, lines, compared = self.run_validation("chr22", self.LIGHT, skip_heavy=True)
+        self.assertEqual(compared, self.LIGHT)
+        heavy = [n for n in self.every() if n not in self.LIGHT]
+        for name in heavy:
+            self.assertIn(f"[{name}] SKIPPED: bulge-2 benchmark, left out by "
+                          "CRISPRME_SKIP_HEAVY=1.", lines)
+        self.assertIn(f"Validation summary: 2 passed, 0 failed, {len(heavy)} skipped.", lines)
+        self.assertEqual(code, 0)
+
+    def test_an_opt_out_on_complete_test_alone_is_said_too(self):
+        # complete-test with it, validate-test without: what did not run is not a failure
+        every = self.every()
+        code, lines, compared = self.run_validation("chr22", self.LIGHT)
+        self.assertEqual(compared, self.LIGHT)
+        self.assertIn(f"Validation summary: 2 passed, 0 failed, {len(every) - 2} skipped.", lines)
         self.assertEqual(code, 0)
 
     def test_validate_py_no_longer_fails_chr21_sites_against_the_chr22_reference(self):

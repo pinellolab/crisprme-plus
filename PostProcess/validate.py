@@ -100,14 +100,14 @@ def check_variant_dataset(chrom: str) -> None:
         # nothing to validate here: complete-test's benchmark mode writes this file, the
         # default prebuilt-index smoke does not. Say what to run, without a traceback:
         # for the chromosome asked for, and without --chrom ("all", a whole-genome run)
-        # the documented chr22 self-test. The variables set in front of `docker run` stay
-        # on the host: in Docker they go with -e.
+        # the documented chr22 self-test. The variable set in front of `docker run` stays
+        # on the host: in Docker it goes with -e.
         run_chrom = "chr22" if chrom == "all" else chrom
         sys.stderr.write(
             f"ERROR: {vcf_config_file} not found in {os.getcwd()}: validate-test checks "
             "the output of complete-test's benchmark mode, so run that here first: "
-            "CRISPRME_ALLOW_ONDEMAND_BUILD=1 CRISPRME_SKIP_HEAVY=1 crisprme.py "
-            f"complete-test --chrom {run_chrom} --vcf_dataset 1000G (Docker: pass them "
+            "CRISPRME_ALLOW_ONDEMAND_BUILD=1 crisprme.py "
+            f"complete-test --chrom {run_chrom} --vcf_dataset 1000G (Docker: pass it "
             f"with -e), then crisprme.py validate-test --chrom {run_chrom}\n"
         )
         sys.exit(1)
@@ -241,16 +241,16 @@ def run_test_validation(chrom: str) -> None:
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
     base_url = registry["reference_base_url"]
-    # Mirror complete_test.py: on a hosted CI runner (CRISPRME_SKIP_HEAVY=1) the "heavy"
-    # bulge-2 benchmarks are not run, so don't try to validate them (avoids a misleading
-    # "targets not found" skip). Locally (env unset) all cases validate.
+    # Mirror complete_test.py: with CRISPRME_SKIP_HEAVY=1, the opt-out for a very small
+    # machine, the "heavy" bulge-2 benchmarks are not run, so don't try to validate them
+    # (avoids a misleading "targets not found" skip). Unset, all cases validate.
     skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     validated = failed = skipped = 0
     for bench in registry["benchmarks"]:
         name = bench["name"]
         if skip_heavy and bench.get("heavy"):
-            sys.stderr.write(f"[{name}] SKIPPED: heavy benchmark not run on this runner "
-                             "(CRISPRME_SKIP_HEAVY=1).\n")
+            sys.stderr.write(f"[{name}] SKIPPED: bulge-2 benchmark, left out by "
+                             "CRISPRME_SKIP_HEAVY=1.\n")
             skipped += 1
             continue
         # A reference that covers one chromosome only ("scope": the chr22 Cas12a and

@@ -64,7 +64,7 @@ _REGISTRY = {
 
 
 class DispatchContract(unittest.TestCase):
-    def _run(self, allow_ondemand, chrom="chr22"):
+    def _run(self, allow_ondemand, chrom="chr22", skip_heavy=False, registry=_REGISTRY):
         """Run run_crisprme_test with every side-effecting dependency mocked; return the
         list of complete-search command strings + a flag of whether require_prebuilt_index
         was consulted. The keyword arguments of each call are kept in self.kwargs."""
@@ -75,6 +75,8 @@ class DispatchContract(unittest.TestCase):
         env.pop("CRISPRME_SKIP_HEAVY", None)
         if allow_ondemand:
             env["CRISPRME_ALLOW_ONDEMAND_BUILD"] = "1"
+        if skip_heavy:
+            env["CRISPRME_SKIP_HEAVY"] = "1"
         with mock.patch.dict(os.environ, env, clear=True), \
              mock.patch.object(ct, "check_crisprme_directory_tree", lambda *_a, **_k: None), \
              mock.patch.object(ct, "check_output", lambda *_a, **_k: None), \
@@ -86,7 +88,7 @@ class DispatchContract(unittest.TestCase):
              mock.patch.object(ct, "download_samples_ids_data", lambda *_a, **_k: None), \
              mock.patch.object(ct, "write_samplesids_config", return_value="samples.config.txt"), \
              mock.patch.object(ct, "download_annotation_data", return_value=("gencode.bed", "encode.bed")), \
-             mock.patch.object(ct, "load_benchmarks", return_value=_REGISTRY), \
+             mock.patch.object(ct, "load_benchmarks", return_value=registry), \
              mock.patch.object(ct, "write_pamfile", side_effect=lambda name, *_a, **_k: name), \
              mock.patch.object(ct, "write_guidefile", side_effect=lambda name, *_a, **_k: name), \
              mock.patch.object(ct, "write_sg1617_guidefile", return_value="sg1617.guide.txt"), \
@@ -117,6 +119,20 @@ class DispatchContract(unittest.TestCase):
         for bench in _REGISTRY["benchmarks"]:
             self.assertTrue(any(f"{ct.COMPLETETESTRESDIR}_{bench['name']}" in c for c in calls),
                             f"missing per-benchmark output dir for {bench['name']}")
+
+    def test_a_heavy_benchmark_runs_unless_the_opt_out_is_set(self):
+        """A "heavy" (bulge-2) benchmark is part of the self-test: the whole set fits a
+        16 GiB, 4-CPU runner. CRISPRME_SKIP_HEAVY=1 leaves it out on a very small machine,
+        and only it."""
+        registry = dict(_REGISTRY, benchmarks=[
+            _REGISTRY["benchmarks"][0], dict(_REGISTRY["benchmarks"][1], heavy=True)])
+        heavy_dir = f"{ct.COMPLETETESTRESDIR}_{registry['benchmarks'][1]['name']}"
+        calls, _, _ = self._run(allow_ondemand=True, registry=registry)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(any(heavy_dir in c for c in calls))
+        calls, _, _ = self._run(allow_ondemand=True, registry=registry, skip_heavy=True)
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(any(heavy_dir in c for c in calls))
 
     def test_user_mode_requires_prebuilt_index_and_never_builds(self):
         """Flag unset -> require a prebuilt index + a single smoke via --index-path; NEVER
@@ -1022,7 +1038,7 @@ class TheCliPassesTheRefusalOn(unittest.TestCase):
         note = ("NOTE [complete-test]: --vcf_dataset is for the benchmark mode, whose output "
                 "validate-test checks, and that mode runs only with "
                 "CRISPRME_ALLOW_ONDEMAND_BUILD=1 set (Docker: pass it with -e, as in docker run "
-                "-e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -e CRISPRME_SKIP_HEAVY=1 ...). It is not "
+                "-e CRISPRME_ALLOW_ONDEMAND_BUILD=1 ...). It is not "
                 "set here, so complete-test runs the example guide against a prebuilt index "
                 "instead.")
         for switch, given, said in ((None, argv, [note]), ("1", argv, []),

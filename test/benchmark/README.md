@@ -17,11 +17,10 @@ alignment instead of CRISPRme's TST index search).
 - `brute-force-simple/` — references for the two **default single-"n edits" web
   mode** cases (`cas9_sg1617_simple`, `cas12a_hbg_simple`): chr22, per-type caps
   wide open (mm=6/bDNA=2/bRNA=2) with a binding `--max-total-edits 3`, exactly the
-  default search slider. Validated locally (`validate-test` = 4/4). These are marked
-  `"heavy": true`: they build a bulge-2 (NGG_3/TTTV_3) index over the variant-enriched
-  genome, which OOMs a standard 16 GB hosted CI runner, so the CI job sets
-  `CRISPRME_SKIP_HEAVY=1` and runs only the light bulge-1 cases; run these two locally
-  (env unset) or on a larger runner. Their brute-force TSVs are committed for reproduction.
+  default search slider. These are marked `"heavy": true`: they build a bulge-2
+  (NGG_3/TTTV_3) index over the variant-enriched genome. They run by default, locally and
+  in CI: the whole set fits a 16 GiB, 4-CPU runner with no swap (measured peak 3.66 GB of
+  RAM). `CRISPRME_SKIP_HEAVY=1` leaves them out, an opt-out for very small machines.
 - `generate_brute_force.py` — the ground-truth generator (see credit below).
 - `generate_references.py` — registry-driven driver (regenerates any benchmark).
 

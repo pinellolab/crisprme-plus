@@ -1136,14 +1136,15 @@ def _run_benchmarks_ondemand(chrom: str, dataset: str, threads: int, debug: bool
     # looks in each.
     registry = load_benchmarks()
     global_th = registry.get("thresholds", {"mm": 4, "bDNA": 1, "bRNA": 1})
-    # "heavy" benchmarks build a bulge-2 variant index that OOMs a 16GB hosted runner; the
-    # hosted CI sets CRISPRME_SKIP_HEAVY=1 to skip them (locally, unset -> all run).
+    # "heavy" benchmarks build a bulge-2 variant index. They run by default: the whole set
+    # fits a 16 GiB, 4-CPU hosted runner. CRISPRME_SKIP_HEAVY=1 leaves them out on a very
+    # small machine.
     skip_heavy = os.environ.get("CRISPRME_SKIP_HEAVY") == "1"
     for bench in registry["benchmarks"]:
         if skip_heavy and bench.get("heavy"):
             sys.stderr.write(
                 f"Skipping heavy benchmark '{bench['name']}' (CRISPRME_SKIP_HEAVY=1; "
-                "its bulge-2 variant index build is too large for this runner)\n"
+                "unset it to run this bulge-2 benchmark too)\n"
             )
             continue
         th = dict(global_th)

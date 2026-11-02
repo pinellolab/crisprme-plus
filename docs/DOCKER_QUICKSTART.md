@@ -91,17 +91,16 @@ testing. Run it in an empty folder of its own, not the data folder of step 2:
 
 ```bash
 mkdir -p ~/crisprme_test && cd ~/crisprme_test
-docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -e CRISPRME_SKIP_HEAVY=1 \
+docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py validate-test --chrom chr22   # expect: 2 passed, 0 failed, 2 skipped
+  crisprme.py validate-test --chrom chr22   # expect: 4 passed, 0 failed, 0 skipped
 ```
 
-Pass both variables with `-e`, as above: written in front of `docker run` they are set on
-your computer only, not in the container, so `complete-test` finds no prebuilt index and exits
-having tested nothing. `CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode, and
-`CRISPRME_SKIP_HEAVY=1` skips the two benchmarks whose index builds need more than 16 GB of RAM.
+Pass the variable with `-e`, as above: written in front of `docker run` it is set on your
+computer only, not in the container, so `complete-test` finds no prebuilt index and exits
+having tested nothing. `CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode.
 
 ## 2. Make a folder to hold your data and results
 
