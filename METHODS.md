@@ -478,14 +478,15 @@ the target **requires** — the guide's own base at a spacer column, or a base t
 the PAM where the reference does not — with that row's carriers: CONFIRMED when every
 carrier was resolved exactly, PUTATIVE otherwise. The resolution does not depend on the
 analysis mode (§5). A target with no code (every target of a classic, non-overlaid
-fake-indel genome) that holds the indel is reported as the engine found it. A row's carriers
-belong to its sequence: two alignments of one site can name the same variants with different
-carriers (an RNA-bulge alignment does not reach the base a SNP sits on, so it lists that SNP's
-carriers under the indel alone), and the merge of a cluster's rows, which otherwise keeps one
-row per position and variant list, keeps one per carrier set there, so that no carrier is
-added to a sequence it does not have; of the alignments with one carrier set it keeps the
-best by the order that picks each block's representative (the score first in the CFD and
-CRISPR-Bulge blocks, then `--sorting-criteria`). An MNV row is merged as an indel row is.
+fake-indel genome) that holds the indel needs no resolution: its sequence is the one the
+engine found. A row's carriers belong to its sequence: two alignments of one site can name
+the same variants with different carriers (an RNA-bulge alignment does not reach the base a
+SNP sits on, so it lists that SNP's carriers under the indel alone), and the merge of a
+cluster's rows, which otherwise keeps one row per position and variant list, keeps one per
+carrier set there, so that no carrier is added to a sequence it does not have; of the
+alignments with one carrier set it keeps the best by the order that picks each block's
+representative (the score first in the CFD and CRISPR-Bulge blocks, then
+`--sorting-criteria`). An MNV row is merged as an indel row is.
 
 An indel row is placed as the reference and SNP rows of the same alignment are: it starts at
 its target's first aligned base, the leftmost on either strand, carried from the window to
@@ -1036,8 +1037,12 @@ each resolved on its carriers' own haplotypes (§4; since 2.8.1) and tagged CONF
 (phased) / PUTATIVE (unphased) with per-sample carriers and joint allele frequency. (The
 pre-2.5.0 behavior — two independent passes, SNPs on the IUPAC-enriched genome and indels
 on a plain-reference fake-indel genome — remains available by disabling the integration;
-classic dict builds are byte-identical, but for the rows of §4 whose target holds no base of
-their indel, which no build reports since 2.8.1.) One **residual**: the indel search materializes
+classic dict builds are byte-identical, and searches run the two passes with the fixes of 2.8.1
+that apply to every search, so their results can differ from an earlier release's; three of
+those fixes change indel rows (§4): a target that holds no base of its indel gives no row, an
+indel row with an RNA bulge starts at its first aligned base with its REF gapped as its target,
+and of the alignments of one site that name the same variants with the same carriers the merge
+keeps the best, not the first it reads.) One **residual**: the indel search materializes
 **one indel per fake contig**, so an off-target requiring **≥ 2 co-occurring cis indels
 within a single protospacer** is not generated as a candidate — a pre-existing
 single-indel-search property, independent of the analysis mode; since 2.8.1 an individual

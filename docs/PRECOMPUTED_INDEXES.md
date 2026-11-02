@@ -649,9 +649,15 @@ classic two-independent-passes search could not see: SNPs on the IUPAC-enriched 
 indels on a fake-indel genome cut from the *plain* reference).
 
 To reproduce the classic two-independent-passes behavior, set `CRISPRME_INDEL_SNP=0`
-**before both the build and the search**. With the gate off, builds and searches are
-byte-identical to classic CRISPRme, but for the indel rows whose target holds no base of
-their indel, which no build reports since 2.8.1 (METHODS §4).
+**before both the build and the search**. With the gate off, builds are byte-identical to
+classic CRISPRme, and searches run its two independent passes with the fixes of 2.8.1 that
+apply to every search, so their results can differ from an earlier release's. Three of those
+fixes change indel rows (METHODS §4): a target that holds no base of its indel gives no row;
+an indel row with an RNA bulge starts at its first aligned base and shows as REF the reference
+its target covers from there, gapped as its target; and of the alignments of one site that name
+the same variants with the same carriers, the merge keeps the best by the order that picks each
+block's representative, not the first it reads (the `Other_motifs` counts of their clusters
+follow).
 
 ```bash
 # default (co-occurrence ON) — nothing to set:

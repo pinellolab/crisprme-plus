@@ -149,11 +149,13 @@
   Apart from `Other_motifs` counts and those four rows of SNPs, no reference or SNP-only row
   changes, nor do the perfect matches and the banner. The search takes as long as before, with the
   same peak memory. **Affected:** every search that allows RNA bulges (`--bRNA` 1 or more; the
-  recommended default allows one) with a variant dataset that has indels, in every release; with a
-  5' PAM, every indel row with an RNA bulge. **What to do:** run such searches again. Covered by
+  recommended default allows one) with a variant dataset that has indels, in every release, with or
+  without the overlay and with `CRISPRME_INDEL_SNP=0` too; with a 5' PAM, every indel row with an
+  RNA bulge. **What to do:** run such searches again. Covered by
   `PostProcess/test_indel_row_coordinates.py` (one and two RNA bulges, both bulge types, a DNA bulge
-  and none, on both strands, with an NRG and a TTTV PAM) and the SNP+indel oracle, which now checks
-  every indel row's REF sequence against the reference at its start.
+  and none, on both strands, with an NRG and a TTTV PAM, with `CRISPRME_INDEL_SNP=0` too) and the
+  SNP+indel oracle, which now checks every indel row's REF sequence against the reference at its
+  start.
 - **Of the alignments of one site that name the same variants with the same carriers, the merge
   reported the first it read, not the best.** The merge of a cluster's rows lists such alignments of
   an indel row once and drops the others from both tables. It kept the first of them in the order
@@ -181,7 +183,8 @@
   report's tables keep their sites (one row of the <= 4 mismatches + bulges table now starts
   elsewhere); no carrier, rsID, AF, row count, reference or SNP-only row changes, the SNP+indel
   companion is the same, and the summaries and the raw observed-haplotypes sidecar follow the
-  tables. **Affected:** every search with a variant dataset that has indels, in every release
-  (until the previous entry's fix a + strand indel row with RNA bulges had a cluster position of
-  its own and did not meet the site's other alignments). **What to do:** run such searches again.
+  tables. **Affected:** every search with a variant dataset that has indels, in every release, with
+  or without the overlay and with `CRISPRME_INDEL_SNP=0` too (until the previous entry's fix a +
+  strand indel row with RNA bulges had a cluster position of its own and did not meet the site's
+  other alignments). **What to do:** run such searches again.
   Covered by `PostProcess/test_representative_tiebreak.py`.
