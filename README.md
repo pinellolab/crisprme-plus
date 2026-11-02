@@ -248,10 +248,10 @@ index for the same PAM (verified genome-wide — see
 [methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)). Two things to know:
 `--prune-pam` needs `--index-path` and is **command-line only** — the web interface never
 passes the flag, so it serves a PAM-less index only for a PAM of exactly its width (`NNN_3`
-for a 3-nt PAM), and a wider one must be searched from the CLI — and because nothing is excluded at build
-time these indexes are several times larger than a dedicated one — so choose one when you
-expect to search several PAMs over the same genome, and a dedicated index when you only
-ever need one.
+for a 3-nt PAM), and a wider one must be searched from the CLI — and because nothing is
+excluded at build time these indexes are several times larger than a dedicated one — so choose
+one when you expect to search several PAMs over the same genome, and a dedicated index when you
+only ever need one.
 
 **Full step-by-step (with variants, more indexes, troubleshooting):
 [`docs/DOCKER_QUICKSTART.md`](docs/DOCKER_QUICKSTART.md).**

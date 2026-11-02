@@ -1056,10 +1056,11 @@ dedicated index and the 110 outside it all differ, up to an empty result. Anothe
 variant searches (SNP and indel rows, with no bulges too, through the index) and of a 5′ PAM,
 fall on the same side of the rule. So a published 20-nt N = 3 index serves a 21-nt guide at up
 to 1 bulge of each type, a 22-nt guide with one bulge of one type, a 23-nt guide with no bulge
-through the index, and no longer guide. An index built for this very guide is preferred to one that merely fits. With
-none that fits, a search builds its own under the name `<PAM>_<N>_<genome>`, or stops with an
-ERROR that names both lengths when an index of that name, built for another guide, is in the
-way; `build-index-only` does the same and leaves that index and its `.pam_build` as they are.
+through the index, and no longer guide. An index built for this very guide is preferred to one
+that merely fits. With none that fits, a search builds its own under the name
+`<PAM>_<N>_<genome>`, or stops with an ERROR that names both lengths when an index of that
+name, built for another guide, is in the way; `build-index-only` does the same and leaves that
+index and its `.pam_build` as they are.
 A longer build serves a shorter guide, but, like any deeper index, it does not hold a site
 next to an N run or a contig end that a shallower one does.
 
@@ -1069,8 +1070,8 @@ installed index, but falls back to offering every PAM when none matches, so it d
 itself prevent an unusable pairing: the search does not take an all-`N` index of another
 width without the flag, or one built for the other side, and when no index serves it and
 neither the dataset's VCFs nor its enriched genome are there to build one, it stops with an
-ERROR that names what was asked, the variant indexes installed and what to do.) A shorter PAM off a wider flank is
-supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
+ERROR that names what was asked, the variant indexes installed and what to do.) A shorter PAM
+off a wider flank is supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
 PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its
 `.pam_build` records (above). The published
 PAM-less indexes are 3′ builds, so they serve no 5′ PAM: a Cas12a search needs a dedicated
