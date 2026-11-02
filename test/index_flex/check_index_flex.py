@@ -31,6 +31,8 @@ PAMS = {
     "21bp-NGG-X.txt": "N" * 21 + "NGG 3\n",
     "23bp-NGG-X.txt": "N" * 23 + "NGG 3\n",
     "20bp-NNNNNNNN-NO-PAM.txt": "N" * 28 + " 8\n",
+    "20bp-NGCG-SpCas9VRER.txt": "N" * 20 + "NGCG 4\n",
+    "24bp-NNNN-5p.txt": "N" * 24 + " -4\n",
 }
 SAMPLES = ["S1", "S2", "S3", "S4", "S5", "S6"]
 THREADS = "2"
@@ -56,6 +58,7 @@ def make_seed(seed):
     plant("chr1", 10000, G[:6] + "T" + G[7:] + "CGG")                 # a SNP makes it perfect
     plant("chr2", 12000, G + "TCA")                                   # a SNP makes its PAM
     plant("chr3", 20000, "CTACCAGTTGCATTTCATCACTGG")                  # an indel and a SNP in cis
+    plant("chr1", 25000, G + "TGCG")                                  # the on-target of NGCG
     fold = os.path.join(seed, "Genomes", "gx")
     os.makedirs(fold)
     for name, seq in chroms.items():
@@ -91,7 +94,8 @@ def make_seed(seed):
             fh.write(line)
     for name, text in (("list_vcf.txt", "gx_ds\n"), ("list_samplesID.txt", "gx_ds.samplesID.txt\n"),
                        ("g20.txt", G + "NNN\n"), ("g21.txt", "A" + G + "NNN\n"),
-                       ("g23.txt", "ATA" + G + "NNN\n")):
+                       ("g23.txt", "ATA" + G + "NNN\n"), ("g20_4.txt", G + "NNNN\n"),
+                       ("g20_5p.txt", "NNNN" + G + "\n")):
         with open(os.path.join(seed, name), "w") as fh:
             fh.write(text)
     for d in ("Results", "Dictionaries", "Annotations", "genome_library"):
@@ -324,6 +328,58 @@ def main(root):
         rc == 0 and identical(table(ro, "no_bulges"), table(w, "o")), out[-600:])
     for d, _, _files in os.walk(os.path.join(ro, "genome_library")):
         os.chmod(d, 0o755)
+
+    # a variant index in the --index-path library, the dataset's dictionaries here: read there
+    w = as_download(copy_of(root, nrg2, "variant_library_elsewhere"))
+    shutil.move(os.path.join(w, "genome_library"), os.path.join(w, "shared"))
+    os.makedirs(os.path.join(w, "genome_library"))
+    rc, out = search(w, "o", extra=("--index-path", "shared"))
+    say("a variant index at --index-path: same results, nothing built here",
+        rc == 0 and identical(table(w, "o"), b11)
+        and os.listdir(os.path.join(w, "genome_library")) == [], out[-600:])
+
+    # an index that lacks a chromosome's trees: refused, not searched as a whole one
+    w = copy_of(root, nrg2, "index_lacking_a_chromosome")
+    os.remove(os.path.join(w, "genome_library", "NRG_2_gx", "NRG_chr2_1.bin"))
+    rc, out = search(w, "o", variant=False)
+    say("a reference index lacking chr2's trees, with bulges: refused, naming it",
+        rc != 0 and "lacks trees of FASTAs that hold sites of its PAM: chr2.fa" in out, out[-600:])
+
+    # an install without the genotype store runs population-level, with no site lost
+    w = as_download(copy_of(root, nrg2, "no_genotype_store"))
+    for d in ("genotypes_gx_ds", "dictionaries_gx_ds"):
+        shutil.rmtree(os.path.join(w, "Dictionaries", d), ignore_errors=True)
+    rc, out = search(w, "o")
+    rc2, out2 = search(w, "p", extra=("--population-level",))
+    with open(os.path.join(w, "Results", "o", ".search_mode")) as fh:
+        mode = fh.read()
+    say("no genotype store: population-level, as --population-level gives it",
+        rc == 0 and mode == "population-level" and identical(table(w, "o"), table(w, "p"))
+        and "no genotype store" in out, out[-600:])
+
+    # the NNNN_2 a 5' search of an earlier release leaves, with no record: not taken for NGCG
+    truth = copy_of(root, seed, "ngcg_truth")
+    search(truth, "o", guide="g20_4.txt", pam="20bp-NGCG-SpCas9VRER.txt", variant=False)
+    w = copy_of(root, seed, "unrecorded_5_prime_all_n")
+    rc, out = search(w, "a", guide="g20_5p.txt", pam="24bp-NNNN-5p.txt", variant=False)
+    os.remove(os.path.join(w, "genome_library", "NNNN_2_gx", ".pam_build"))
+    rc, out = search(w, "o", guide="g20_4.txt", pam="20bp-NGCG-SpCas9VRER.txt", variant=False)
+    say("an unrecorded 5' all-N index of width 4: an NGCG search builds its own, same results",
+        rc == 0 and identical(table(w, "o"), table(truth, "o"))
+        and os.path.isdir(os.path.join(w, "genome_library", "NGCG_2_gx")), out[-600:])
+
+    # build-index-only of a folder outside Genomes/ records it: another folder of its name is refused
+    w = copy_of(root, seed, "outside_genomes")
+    shutil.copytree(os.path.join(w, "Genomes", "gx"), os.path.join(w, "projA", "ref"))
+    shutil.copytree(os.path.join(w, "Genomes", "gx"), os.path.join(w, "projB", "ref"))
+    rc, out = cli(w, "build-index-only", "--genome", "projA/ref", "--pam", "PAMs/20bp-NRG-SpCas9.txt",
+                  "--bDNA", "1", "--bRNA", "1", "--thread", THREADS)
+    rc2, out2 = cli(w, "complete-search", "--genome", "projB/ref", "--guide", "g20.txt", "--pam",
+                    "PAMs/20bp-NRG-SpCas9.txt", "--mm", "4", "--bDNA", "1", "--bRNA", "1",
+                    "--output", "o", "--thread", THREADS)
+    say("build-index-only of a folder outside Genomes/: recorded, and another folder of its name refused",
+        rc == 0 and os.path.isfile(os.path.join(w, "genome_library", "NRG_2_ref", ".genome_source"))
+        and rc2 != 0 and "holds the genome in" in out2, out2[-600:])
 
     print(f"{len(failed)} cell(s) failed" if failed else "INDEX FLEX PASS", flush=True)
     return 1 if failed else 0
