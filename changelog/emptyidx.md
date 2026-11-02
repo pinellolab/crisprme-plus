@@ -119,7 +119,25 @@
   variant datasets with indels on such contigs, or with SNPs there that an off-target carries. No
   published index is: the indel logs of the 50 INDELS indexes on the build machine that have them
   beside them name no such contig, nor do the dictionaries in their working directories.
-  **What to do:** to have a contig's indels searched, rename it without the underscore in its FASTA
-  (file and header) and its VCF (file and records) and build the index again: renamed
-  `chrUnKI270302v1`, that contig got its sub-index, and the search reported the bulged site. Covered
-  by `PostProcess/test_indel_empty_chromosome.py`.
+  **What to do:** to have such a contig's indels searched, and the off-targets that carry its SNPs
+  reported, rename it without the underscore in its FASTA (file and header), in the VCF of each
+  dataset with records on it (file and records) and in any annotation BED that names it. What was
+  built under the old name is then out of date, and build-index-only keeps what it finds: remove each
+  reference index of that genome (`genome_library/<PAM>_<N>_<genome>`) and what was built of each
+  such dataset (`rm -rf genome_library/<PAM>_<N>_<genome>+<dataset>
+  genome_library/<PAM>_<N>_<genome>+<dataset>_INDELS Genomes/<genome>+<dataset>
+  Genomes/<genome>+<dataset>_INDELS Dictionaries/dictionaries_<dataset>
+  Dictionaries/log_indels_<dataset> Dictionaries/registry_<dataset> Dictionaries/genotypes_<dataset>
+  Dictionaries/indel_genotypes_<dataset>`), then build them again with build-index-only, with
+  `--vcf` for each such dataset. A dataset without records on the contig needs nothing more.
+  Measured on the test genome, the contig renamed `chrUnKI270302v1`: it got its sub-index, the
+  search reported the bulged site and the off-target that carries its SNP, and the searches with that
+  dataset, with another without records on the contig and without `--vcf` gave the same result files
+  as on a build that named the contig so from the start (the other dataset's index keeps the old
+  name, which shows only in the name of one link under `.binview/` in its search folder). With
+  nothing removed, build-index-only kept everything (`... already present`) and the search stopped at
+  "Post-analysis SNPs", with `tail: cannot open ...`. With the reference index kept, the searches
+  without `--vcf` or with the other dataset missed the contig's off-targets, with exit 0; with the
+  dictionaries kept, the report counted the contig's SNPs twice; with the annotation BED unchanged,
+  the contig's off-targets got no annotation from it. Covered by
+  `PostProcess/test_indel_empty_chromosome.py`.
