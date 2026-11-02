@@ -22,6 +22,7 @@ on:
       - "test/data/**"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
+      - "test/index_flex/**"
   # ALSO run on direct pushes to main that touch the pipeline. Releases here fast-forward
   # dev -> main (NOT via PRs), so the pull_request trigger above would MISS them — exactly
   # how the complete-test rewrite silently broke this brute-force gate until the weekly cron
@@ -34,6 +35,7 @@ on:
       - "test/data/**"
       - "crisprme.py"
       - ".github/workflows/validate-benchmarks.yml"
+      - "test/index_flex/**"
   # Weekly run so the benchmark gate also catches DATA-side drift (e.g. a change to
   # the HuggingFace reference data the complete-test downloads) that the code-path
   # PR filter above cannot see — this is how the sample-ID fast-path regression went
@@ -130,6 +132,23 @@ jobs:
               echo "FAIL: $err is non-empty or missing"; cat "$err"; exit 1
             fi
             echo "zero-hit regression PASS"
+          '
+
+      - name: "Which index serves which search (synthetic phased genome, real CLI and engine)"
+        run: |
+          # The layouts people have: a download (no VCFs, no enriched genome), a library the
+          # run cannot write to, an index for another PAM, budget or guide length, a K=8 one.
+          # Each search is compared with one on an index dedicated to it, byte for byte, or
+          # must refuse clearly, because the engine answers what it cannot do on stdout with
+          # exit 0 (test/index_flex). Up to 2.8.0: a 0-bulge search of a download lost its
+          # SNP rows, a read-only library gave a clean empty result, a guide no index fits
+          # gave wrong rows, all at exit 0. In the container's own file system, so a folder's
+          # permissions hold. About 10 minutes on 2 threads.
+          docker run --rm $BRANCH_MOUNT "$IMG" bash -c '
+            set -e
+            cp /branch/crisprme.py /opt/conda/bin/crisprme.py
+            cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
+            python3 /branch/test/index_flex/check_index_flex.py /tmp/index_flex
           '
 
       - name: read-only-container smoke (reference-only search, code dir read-only)

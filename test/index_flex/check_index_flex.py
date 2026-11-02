@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""Which index serves which search, through the real CLI and the real engine.
+
+    check_index_flex.py <empty work dir> [<cell> ...]
+
+A synthetic phased genome (3 x 30 kb) with sites planted for the example guide, built with
+build-index-only, and the layouts people actually have: a download, a library the run cannot
+write to, an index for another PAM, budget or guide length, a K=8 one. Each cell compares a
+search with the one on an index dedicated to it, byte for byte, or checks that it refuses
+clearly. test_index_resolution.py and friends pin the same decisions with a stub engine: this
+runs the engine, which answers what it cannot do on stdout with exit 0. Run inside an image
+with the tree under test in place. A few minutes on 2 threads. Exits non-zero on any failure.
+"""
+
+import glob
+import gzip
+import os
+import random
+import shutil
+import subprocess
+import sys
+
+G = "CTAACAGTTGCTTTTATCAC"
+PAMS = {
+    "20bp-NRG-SpCas9.txt": "N" * 20 + "NRG 3\n",
+    "20bp-NGG-SpCas9.txt": "N" * 20 + "NGG 3\n",
+    "21bp-NGG-X.txt": "N" * 21 + "NGG 3\n",
+    "23bp-NGG-X.txt": "N" * 23 + "NGG 3\n",
+    "20bp-NNNNNNNN-NO-PAM.txt": "N" * 28 + " 8\n",
+}
+SAMPLES = ["S1", "S2", "S3", "S4", "S5", "S6"]
+THREADS = "2"
+failed = []
+
+
+def say(cell, ok, why=""):
+    print(f"{'PASS' if ok else 'FAIL'}  {cell}{': ' + why if why and not ok else ''}", flush=True)
+    if not ok:
+        failed.append(cell)
+
+
+def make_seed(seed):
+    """The genome, VCFs, sample list, PAM files and guides of a working directory."""
+    r = random.Random(20261102)
+    chroms = {c: [r.choice("ACGT") for _ in range(30000)] for c in ("chr1", "chr2", "chr3")}
+
+    def plant(chrom, at, site):
+        chroms[chrom][at:at + len(site)] = list(site)
+
+    plant("chr1", 2000, G + "TGG")                                    # the on-target
+    plant("chr1", 6000, G[:9] + "A" + G[9:] + "AGG")                  # a DNA bulge
+    plant("chr1", 10000, G[:6] + "T" + G[7:] + "CGG")                 # a SNP makes it perfect
+    plant("chr2", 12000, G + "TCA")                                   # a SNP makes its PAM
+    plant("chr3", 20000, "CTACCAGTTGCATTTCATCACTGG")                  # an indel and a SNP in cis
+    fold = os.path.join(seed, "Genomes", "gx")
+    os.makedirs(fold)
+    for name, seq in chroms.items():
+        with open(os.path.join(fold, f"{name}.fa"), "w") as fh:
+            fh.write(f">{name}\n{''.join(seq)}\n")
+    rows = {  # (POS, REF, ALT, the six genotypes)
+        "chr1": [(10007, chroms["chr1"][10006], "G", "1|0 0|0 1|1 0|0 0|1 0|0")],
+        "chr2": [(12023, chroms["chr2"][12022], "G", "0|0 1|0 0|0 0|1 0|0 0|0")],
+        "chr3": [(20011, "CA", "C", "0|0 0|0 0|0 1|0 1|0 0|0"),
+                 (20016, "C", "T", "0|0 0|0 0|0 1|0 0|1 0|0")],
+    }
+    vcfs = os.path.join(seed, "VCFs", "gx_ds")
+    os.makedirs(vcfs)
+    for name, recs in rows.items():
+        with gzip.open(os.path.join(vcfs, f"ds.{name}.vcf.gz"), "wt") as fh:
+            fh.write("##fileformat=VCFv4.2\n"
+                     f"##contig=<ID={name},length=30000>\n"
+                     '##INFO=<ID=AF,Number=A,Type=Float,Description="AF">\n'
+                     '##FORMAT=<ID=GT,Number=1,Type=String,Description="GT">\n'
+                     "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t"
+                     + "\t".join(SAMPLES) + "\n")
+            for pos, ref, alt, gts in recs:
+                fh.write(f"{name}\t{pos}\trs{pos}\t{ref}\t{alt}\t.\tPASS\tAF=0.25\tGT\t"
+                         + "\t".join(gts.split()) + "\n")
+    os.makedirs(os.path.join(seed, "samplesIDs"))
+    with open(os.path.join(seed, "samplesIDs", "gx_ds.samplesID.txt"), "w") as fh:
+        fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n")
+        for s in SAMPLES:
+            fh.write(f"{s}\tP1\tS1\tmale\n")
+    os.makedirs(os.path.join(seed, "PAMs"))
+    for name, line in PAMS.items():
+        with open(os.path.join(seed, "PAMs", name), "w") as fh:
+            fh.write(line)
+    for name, text in (("list_vcf.txt", "gx_ds\n"), ("list_samplesID.txt", "gx_ds.samplesID.txt\n"),
+                       ("g20.txt", G + "NNN\n"), ("g21.txt", "A" + G + "NNN\n"),
+                       ("g23.txt", "ATA" + G + "NNN\n")):
+        with open(os.path.join(seed, name), "w") as fh:
+            fh.write(text)
+    for d in ("Results", "Dictionaries", "Annotations", "genome_library"):
+        os.makedirs(os.path.join(seed, d), exist_ok=True)
+
+
+def cli(work, *args, user=None):
+    """Run crisprme.py in ``work``; (exit status, stdout + stderr)."""
+    cmd = ["crisprme.py", *args]
+    if user is not None:
+        cmd = ["setpriv", f"--reuid={user}", f"--regid={user}", "--clear-groups", *cmd]
+    done = subprocess.run(cmd, cwd=work, capture_output=True, text=True,
+                          env=dict(os.environ, HOME=work))
+    return done.returncode, done.stdout + done.stderr
+
+
+def search(work, output, guide="g20.txt", pam="20bp-NRG-SpCas9.txt", bulges=(1, 1), variant=True,
+           extra=(), samples=True, user=None):
+    args = ["complete-search", "--genome", "Genomes/gx", "--guide", guide, "--pam", f"PAMs/{pam}",
+            "--mm", "4", "--output", output, "--thread", THREADS]
+    if bulges is not None:
+        args += ["--bDNA", str(bulges[0]), "--bRNA", str(bulges[1])]
+    if variant:
+        args += ["--vcf", "list_vcf.txt"] + (["--samplesID", "list_samplesID.txt"] if samples else [])
+    return cli(work, *args, *extra, user=user)
+
+
+def table(work, output):
+    """The integrated results of a run, or None."""
+    found = glob.glob(os.path.join(work, "Results", output, "*integrated_results.tsv"))
+    if not found:
+        return None
+    with open(found[0]) as fh:
+        return fh.read()
+
+
+def build(root, seed, name, pam, bulges, variant=True):
+    work = os.path.join(root, "lib", name)
+    shutil.copytree(seed, work, symlinks=True)
+    args = ["build-index-only", "--genome", "Genomes/gx", "--pam", f"PAMs/{pam}", "--bDNA",
+            str(bulges), "--bRNA", str(bulges), "--thread", THREADS]
+    if variant:
+        args += ["--vcf", "list_vcf.txt", "--samplesID", "list_samplesID.txt"]
+    rc, out = cli(work, *args)
+    if rc:
+        sys.exit(f"build-index-only {name} failed:\n{out}")
+    return work
+
+
+def copy_of(root, work, cell):
+    to = os.path.join(root, "cell", cell)
+    shutil.copytree(work, to, symlinks=True)
+    return to
+
+
+def as_download(work):
+    """What `download --what index` leaves: no VCFs, no enriched genome."""
+    for d in ("VCFs/gx_ds", "Genomes/gx+gx_ds", "Genomes/gx+gx_ds_INDELS",
+              "Dictionaries/dictionaries_gx_ds"):
+        shutil.rmtree(os.path.join(work, d), ignore_errors=True)
+    return work
+
+
+def identical(a, b):
+    return a is not None and a == b
+
+
+def main(root):
+    seed = os.path.join(root, "seed")
+    make_seed(seed)
+    nrg2 = build(root, seed, "NRG_2", "20bp-NRG-SpCas9.txt", 1)
+    ngg2 = build(root, seed, "NGG_2", "20bp-NGG-SpCas9.txt", 1)
+    k8 = build(root, seed, "K8_3", "20bp-NNNNNNNN-NO-PAM.txt", 2)
+    g21 = build(root, seed, "g21_N2", "21bp-NGG-X.txt", 1, variant=False)
+    ref3 = build(root, seed, "ref_NGG_3", "20bp-NGG-SpCas9.txt", 2, variant=False)
+
+    # the truths: dedicated indexes, with everything in place
+    full = copy_of(root, nrg2, "truth")
+    search(full, "b11")
+    search(full, "b00", bulges=(0, 0))
+    b11, b00 = table(full, "b11"), table(full, "b00")
+    say("truth: the example finds its off-targets at 1/1 and 0/0",
+        bool(b11 and b00) and b11.count("\n") > b00.count("\n"))
+    say("truth: the cis SNP+indel site is one mismatch, CFD 0.353",
+        "CTAcCAGTTGCTTTTATCACTGG" in (b11 or ""))
+
+    # a 0-bulge variant search of a download serves from the installed index
+    w = as_download(copy_of(root, nrg2, "download_0_bulges"))
+    rc, out = search(w, "o", bulges=(0, 0))
+    say("0 bulges, no enriched genome: same results", rc == 0 and identical(table(w, "o"), b00), out[-600:])
+
+    # a search with bulges of the same download is what it was
+    w = as_download(copy_of(root, nrg2, "download_1_bulge"))
+    rc, out = search(w, "o")
+    say("1/1 on a download: same results", rc == 0 and identical(table(w, "o"), b11), out[-600:])
+
+    # no --samplesID: the list the download installed is taken
+    w = as_download(copy_of(root, nrg2, "no_samples_flag"))
+    rc, out = search(w, "o", samples=False)
+    say("no --samplesID: same results", rc == 0 and identical(table(w, "o"), b11), out[-600:])
+    os.remove(os.path.join(w, "samplesIDs", "gx_ds.samplesID.txt"))
+    rc, out = search(w, "o2", samples=False)
+    say("no --samplesID and no list: same results, no KeyError",
+        rc == 0 and identical(table(w, "o2"), b11), out[-600:])
+
+    # another PAM or budget than the download holds: one clear ERROR, and nothing made
+    w = as_download(copy_of(root, nrg2, "download_other_pam"))
+    before = sorted(os.listdir(os.path.join(w, "Genomes")))
+    rc, out = search(w, "o", pam="20bp-NGG-SpCas9.txt")
+    say("another PAM: refused, naming the PAM and the indexes there",
+        rc != 0 and "no variant index here serves this search" in out and "PAM NGG" in out
+        and "NRG_2_gx+gx_ds" in out and "cannot stat" not in out and "[OK] gx_ds:" not in out, out[-800:])
+    say("another PAM: nothing made", sorted(os.listdir(os.path.join(w, "Genomes"))) == before)
+    w = as_download(copy_of(root, k8, "download_k8"))
+    rc, out = search(w, "o")
+    say("K=8 without --prune-pam: refused, naming the flags",
+        rc != 0 and "--prune-pam --index-path genome_library" in out, out[-800:])
+    rc, out = search(w, "o2", extra=("--prune-pam", "--index-path", "genome_library"))
+    say("K=8 with --prune-pam: same results as a dedicated index",
+        rc == 0 and identical(table(w, "o2"), b11), out[-600:])
+
+    # a search that enriches a dataset itself codes the fake-indel genome
+    w = copy_of(root, ngg2, "on_demand")
+    for d in ("Genomes/gx+gx_ds", "Genomes/gx+gx_ds_INDELS"):
+        shutil.rmtree(os.path.join(w, d))
+    rc, out = search(w, "o")
+    say("on-demand enrichment: same results as a built index",
+        rc == 0 and identical(table(w, "o"), b11), out[-600:])
+
+    # the guide length: served inside the rule, refused or built outside it
+    dedicated = copy_of(root, g21, "g21_truth")
+    search(dedicated, "o", guide="g21.txt", pam="21bp-NGG-X.txt", variant=False)
+    w = copy_of(root, ref3, "g21_on_N3")
+    rc, out = search(w, "o", guide="g21.txt", pam="21bp-NGG-X.txt", variant=False)
+    say("a 21-nt guide at 1/1 on a 20-nt N=3 index: same results as a dedicated one",
+        rc == 0 and identical(table(w, "o"), table(dedicated, "o")), out[-600:])
+    w = copy_of(root, ngg2, "g23_on_N2")
+    rc, out = search(w, "o", guide="g23.txt", pam="23bp-NGG-X.txt", variant=False)
+    say("a 23-nt guide with a 20-nt index of the name it builds: refused, naming both lengths",
+        rc != 0 and "NGG_2_gx was built for a 20-nt guide" in out and "a 23-nt guide" in out, out[-800:])
+    record = os.path.join(w, "genome_library", "NGG_2_gx", ".pam_build")
+    with open(record) as fh:
+        before = fh.read()
+    rc, out = cli(w, "build-index-only", "--genome", "Genomes/gx", "--pam", "PAMs/23bp-NGG-X.txt",
+                  "--bDNA", "1", "--bRNA", "1", "--thread", THREADS)
+    with open(record) as fh:
+        say("build-index-only over it: refused, its record kept",
+            rc != 0 and "already present" not in out and fh.read() == before, out[-600:])
+    w = copy_of(root, seed, "g23_guide_on_20_pam")
+    rc, out = search(w, "o", guide="g23.txt", pam="20bp-NGG-SpCas9.txt", variant=False)
+    say("a guide longer than its PAM file's spacer: refused", rc != 0 and "silently drop" in out, out[-600:])
+
+    # complete-test on a K=8 index, alone and beside the default
+    w = as_download(copy_of(root, k8, "complete_test_k8"))
+    pams = sorted(os.listdir(os.path.join(w, "PAMs")))
+    rc, out = cli(w, "complete-test", "--thread", THREADS)
+    k8_table = table(w, "crisprme-test-out")
+    n = as_download(copy_of(root, nrg2, "complete_test_nrg"))
+    rc2, out2 = cli(n, "complete-test", "--thread", THREADS)
+    say("complete-test on K=8: same results as on NRG, and no PAM file left",
+        rc == 0 and rc2 == 0 and identical(k8_table, table(n, "crisprme-test-out"))
+        and sorted(os.listdir(os.path.join(w, "PAMs"))) == pams, out[-800:])
+    both = as_download(copy_of(root, k8, "complete_test_k8_and_nrg"))
+    for name in os.listdir(os.path.join(nrg2, "genome_library")):
+        shutil.copytree(os.path.join(nrg2, "genome_library", name),
+                        os.path.join(both, "genome_library", name), symlinks=True)
+    rc, out = cli(both, "complete-test", "--chrom", "chr1", "--thread", THREADS)
+    say("complete-test with K=8 beside NRG takes NRG", rc == 0 and "'NRG_2_gx+gx_ds'" in out, out[-600:])
+
+    # a library the run cannot write to, as a user who may not write there
+    ro = copy_of(root, ngg2, "read_only")
+    for d, _, files in os.walk(ro):
+        os.chmod(d, 0o755)
+        for f in files:
+            os.chmod(os.path.join(d, f), 0o644)
+    uid = 65534
+    subprocess.run(["chown", "-R", f"{uid}:{uid}", ro], check=True)
+    os.chmod(os.path.dirname(ro), 0o755)
+    os.chmod(os.path.dirname(os.path.dirname(ro)), 0o755)
+    for d, _, _files in os.walk(os.path.join(ro, "genome_library")):
+        os.chmod(d, 0o555)
+    rc, out = search(ro, "other_pam", variant=False, user=uid)
+    say("read-only library lacking the index, with bulges: refused, not an empty result",
+        rc != 0 and "is not installed, and this run cannot build it" in out, out[-800:])
+    rc, out = search(ro, "same_pam", pam="20bp-NGG-SpCas9.txt", user=uid)
+    w = copy_of(root, ngg2, "read_only_truth")
+    search(w, "o", pam="20bp-NGG-SpCas9.txt")
+    say("read-only library holding the index: same results",
+        rc == 0 and identical(table(ro, "same_pam"), table(w, "o")), out[-600:])
+    rc, out = search(ro, "no_bulges", bulges=(0, 0), variant=False, user=uid)
+    w = copy_of(root, seed, "read_only_b0_truth")
+    search(w, "o", bulges=(0, 0), variant=False)
+    say("read-only library with no bulges: same results",
+        rc == 0 and identical(table(ro, "no_bulges"), table(w, "o")), out[-600:])
+    for d, _, _files in os.walk(os.path.join(ro, "genome_library")):
+        os.chmod(d, 0o755)
+
+    print(f"{len(failed)} cell(s) failed" if failed else "INDEX FLEX PASS", flush=True)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    work_root = os.path.abspath(sys.argv[1])
+    os.makedirs(work_root)
+    sys.exit(main(work_root))
