@@ -3668,7 +3668,8 @@ def _check_genome_layout(genomedir: str) -> None:
     looked for in the whole of each file, which the build reads anyway: lines that end
     in CR past the first ones (which a search's check, two lines a file, does not
     read) built, with thousands of warnings on stderr, and every search of that index
-    found nothing."""
+    found nothing. A CR that only ends a file, with no sequence after it, costs no
+    result and is let through (genome_layout._unclean_reason)."""
     from genome_layout import (describe_header_problems, describe_problem,
                                find_multi_record_fastas, find_name_mismatched_fastas)
 

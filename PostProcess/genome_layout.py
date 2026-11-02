@@ -152,13 +152,27 @@ def find_name_mismatched_fastas(genomedir: str) -> Dict[str, str]:
     return out
 
 
+def _only_line_ends_left(handle) -> bool:
+    """True iff all that is left to read in ``handle`` is CR and LF bytes, or nothing."""
+    while True:
+        chunk = handle.read(1 << 16)
+        if not chunk:
+            return True
+        if chunk.strip(b"\r\n"):
+            return False
+
+
 def _unclean_reason(path: str, deep: bool = False) -> Optional[str]:
     """Why a FASTA of one sequence is not as the pipeline needs it, or None: its first
     line is more than ``>id``, or its lines end in CR (the first two lines tell; ``deep``
-    looks for a CR in the whole file)."""
+    looks for a CR in the whole file). A CR counts only with more sequence after it: one
+    that only ends the file (the CRLF of its last line, a lone CR after its last LF)
+    costs no result, and such a file built and searched as it does without it."""
     with open(path, "rb") as handle:
         head = handle.readline(HEADER_LIMIT)
         first = handle.readline(HEADER_LIMIT)
+        if b"\r" in first and _only_line_ends_left(handle):
+            first = first.rstrip(b"\r\n")  # the file's last line, whose CR ends the file
     if not head.startswith(b">"):
         return None  # no header there: check_genome_fasta reports it
     line = head[1:].rstrip(b"\n")
@@ -169,7 +183,10 @@ def _unclean_reason(path: str, deep: bool = False) -> Optional[str]:
     if deep and os.path.getsize(path):
         with open(path, "rb") as handle:
             with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                if mm.find(b"\r") != -1:
+                end = len(mm)
+                while end and mm[end - 1] in b"\r\n":
+                    end -= 1  # the CR and LF that only end the file
+                if mm.find(b"\r", 0, end) != -1:
                     return "its lines end in CR"
     return None
 

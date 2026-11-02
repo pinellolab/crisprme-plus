@@ -552,11 +552,34 @@ class TestCommandLine(unittest.TestCase):
 
     def test_deep_check_finds_a_cr_past_the_first_lines(self):
         with open(os.path.join(self.tmp, "chr1.fa"), "wb") as f:
-            f.write(b">chr1\nAC\nGT\r\n")
+            f.write(b">chr1\nAC\nGT\r\nAC\n")
         self.assertEqual(self._run(self.tmp).returncode, 0)
         r = self._run("--deep", self.tmp)
         self.assertEqual(r.returncode, 1)
         self.assertIn("ERROR: chr1.fa: its lines end in CR", r.stderr)
+
+    def test_a_cr_that_only_ends_the_file_is_no_problem(self):
+        # the CRLF of its last line, or a lone CR after it, has no sequence after it: such a
+        # genome built with an empty stderr and searched as it does without it (finB round 4
+        # review), so neither check refuses it; a CR with more sequence after it still is
+        path = os.path.join(self.tmp, "chr1.fa")
+        # (the file, refused by the two-line check, refused by --deep)
+        for text, fast, deep in ((b">chr1\nAC\nGT\r\n", False, False),
+                                 (b">chr1\nAC\nGT\n\r", False, False),
+                                 (b">chr1\nACGT\r\n", False, False),
+                                 (b">chr1\nAC\nGT\r\n\r\n", False, False),
+                                 (b">chr1\nACGT\r\nAC\n", True, True),
+                                 (b">chr1\nAC\nGT\r\n\nAC\n", False, True)):
+            with open(path, "wb") as f:
+                f.write(text)
+            for options, refused in (((), fast), (("--deep",), deep)):
+                with self.subTest(text=text, options=options):
+                    r = self._run(*options, self.tmp)
+                    if refused:
+                        self.assertEqual(r.returncode, 1, r.stderr)
+                        self.assertIn("ERROR: chr1.fa: its lines end in CR", r.stderr)
+                    else:
+                        self.assertEqual((r.returncode, r.stderr), (0, ""))
 
     def test_the_check_of_a_genome_finds_an_index_left_from_its_old_headers(self):
         # the web search's guard: a data folder, its Genomes/<genome>, its genome_library

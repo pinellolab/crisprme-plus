@@ -172,6 +172,42 @@ class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
         self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
                          ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
 
+    def test_fasta_whose_only_cr_ends_the_file(self):
+        # a CR that only ends a file -- the CRLF of its last line, a lone CR after its last
+        # LF, the CRLF of the one line of sequence of a file of two -- built with an empty
+        # stderr and searched as the file does without it before the whole-file check, which
+        # refused it (finB round 4 review): it is let through, and a CR with more sequence
+        # after it is still refused
+        lines = [">chr1"] + [bio.GENOME["chr1"]] * 150
+        plain = "".join(line + "\n" for line in lines)
+        one_line = ">chr1\n" + bio.GENOME["chr1"] * 150 + "\n"
+        for name, text in (("last line in CRLF", plain[:-1] + "\r\n"),
+                           ("a lone CR after the last LF", plain + "\r"),
+                           ("CRLF and an empty line in CRLF at the end", plain[:-1] + "\r\n\r\n"),
+                           ("one line of sequence, in CRLF", one_line[:-1] + "\r\n")):
+            with self.subTest(name):
+                self.fresh()
+                with open(self.genome("chr1.fa"), "wb") as fh:
+                    fh.write(text.encode())
+                rc, out, err = self.run_bio(vcf=False)
+                self.assertEqual((rc, err), (0, ""), out)
+                self.assertNotIn("its lines end in CR", out)
+                self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF))
+                                        if f.endswith(".bin")),
+                                 ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+        before_last = "".join(line + ("\r\n" if n == len(lines) - 2 else "\n")
+                              for n, line in enumerate(lines))
+        for name, text in (("CRLF on the line before the last", before_last),
+                           ("an empty line in CRLF, then more sequence",
+                            plain + "\r\n" + bio.GENOME["chr1"] + "\n")):
+            with self.subTest(name):
+                self.fresh()
+                with open(self.genome("chr1.fa"), "wb") as fh:
+                    fh.write(text.encode())
+                self.assertEqual(text.count("\r"), 1)
+                rc, out, err = self.run_bio(vcf=False)
+                self.assert_refused(rc, out, err, "Error: chr1.fa: its lines end in CR.")
+
     def test_fasta_id_the_pipeline_cannot_take(self):
         with open(self.genome("chr1.fa")) as fh:
             seq = fh.read().split("\n", 1)[1]

@@ -99,9 +99,11 @@ Bulge-enabled searches need a genome **index**.
   `>chr22`), whose off-targets every search would find and then drop: rename it after
   its sequence (`python PostProcess/genome_layout.py --split <genome folder>` renames
   them all) and build again. It stops as well for a header that is more than `>id`, or
-  lines that end in a carriage return anywhere in a file, in a folder put there by hand or
-  installed before 2.8.1 (a search stops too, for a header, or carriage returns in a file's
-  first two lines): every search would lose results, often all of them. The
+  lines that end in a carriage return anywhere in a file with more sequence after them, in a
+  folder put there by hand or installed before 2.8.1 (a search stops too, for a header, or
+  carriage returns in a file's first two lines): every search would lose results, often all
+  of them. A carriage return that only ends a file (on its last line, or after it) costs no
+  result, and goes through. The
   same command writes them as `>id`; then remove each index built from the folder as it
   was. It stops as well, and so does a search, for a sequence id that holds `*`, `?` or
   `[` and, read as a shell pattern, matches the name of another sequence of the folder

@@ -363,7 +363,9 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   `build-index-only`, which reads the whole genome anyway, in the whole file: one whose first 100
   lines end in LF and the rest in CRLF built at exit status 0, with 402 KB of warnings on stderr,
   and every search of that index found nothing (a search that built its own failed, on those
-  warnings); its build is refused now. Such an index is refused as well, where its `.bin` names
+  warnings); its build is refused now. A CR counts only with more sequence after it: one that only
+  ends a file, on its last line or after its last LF, built with an empty stderr and searched as
+  the file does without it (13 rows, the plain genome's table), and both checks let it through. Such an index is refused as well, where its `.bin` names
   show it: it holds the old names once the FASTA is written as it should be, and every search of it
   went on losing results, and a build took it as present. An index built from a FASTA with a clean
   header line and CRLF after it has `.bin` names that do not show it, so it is not caught: remove it
