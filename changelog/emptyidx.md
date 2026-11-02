@@ -83,15 +83,14 @@
   without bulges still searches the fake-indel genome, and a chromosome without indels is skipped as
   before. Normal runs are unchanged: a build gives every other chromosome with indels its sub-index,
   as it does in each of the 50 INDELS indexes on the build machine that have their indel logs beside
-  them. **Affected:**
-  searches with bulges through a PAM-less index serving another PAM whose INDELS index was missing,
-  and searches with an INDELS index copied in part. **What to do:** a job was affected by (1) when
-  it allowed bulges, its `log_verbose.txt` shows `Variant index present (NNN_...)` (or
-  `NNNNNNNN_...`) for another PAM, and its `log.txt` shows `Indexing Indels` `Start` (its
-  `log_verbose.txt` then has no `Indels index present` line; the `Indexing INDELs in ...` lines tell
-  nothing, as they may be missing from it): run it again with 2.8.1, and remove what it left under
-  the other PAM's name, the `NNN_<N>_fake<chr>` (or `NNNNNNNN_<N>_fake<chr>`) directories in
-  `genome_library/<that PAM>_<N>_<genome>+<dataset>_INDELS`,
+  them. **Affected:** searches with bulges through a PAM-less index serving another PAM whose INDELS
+  index was missing, and searches with an INDELS index copied in part. **What to do:** a job of an
+  earlier release was affected by (1) when it allowed bulges, its `log_verbose.txt` shows `Variant
+  index present (NNN_...)` (or `NNNNNNNN_...`) for another PAM, and its `log.txt` shows `Indexing
+  Indels` `Start` (its `log_verbose.txt` then has no `Indels index present` line; the `Indexing
+  INDELs in ...` lines tell nothing, as they may be missing from it): run it again with 2.8.1, and
+  remove what it left under the other PAM's name, the `NNN_<N>_fake<chr>` (or
+  `NNNNNNNN_<N>_fake<chr>`) directories in `genome_library/<that PAM>_<N>_<genome>+<dataset>_INDELS`,
   with that directory when nothing else is in it. For (2), a search now says which index is
   incomplete; once it is rebuilt, run again the searches made with it. Covered by
   `PostProcess/test_indel_empty_chromosome.py`.
