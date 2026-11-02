@@ -74,7 +74,8 @@
   by such a search stays blind until it is rebuilt. Run `build-index-only` with the dataset's VCFs and
   your PAM: it now codes a fake-indel genome it finds without codes, removes the INDELS indexes of
   every PAM and budget of that dataset built before the codes, says which, and builds its own (a
-  later search rebuilds the others).
+  later search rebuilds the others). A genotyped dataset with no `Dictionaries/indel_genotypes_<vcf>/`
+  (an index built before 2.5.0) now gets a `WARNING` that says so and what to run.
 - **A downloaded variant index asked for a PAM or bulge budget it does not hold now says so.**
   The search tried to enrich a dataset with no VCFs, and failed in `mv: cannot stat ...` four times
   and `Genome enrichment failed`, after a pre-flight that printed `[OK] ... precomputed variant index

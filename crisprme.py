@@ -2813,7 +2813,7 @@ def complete_search() -> None:
         if _missing:
             error(
                 "No prebuilt variant index found for: %s.\n\n"
-                "`complete-search --vcf` does NOT build a variant index on demand -- the "
+                "`complete-search --vcf` needs a dataset's dictionaries first -- the "
                 "dict-less tiers (registry/genotype) and the indel coordinate map are "
                 "produced only at build time, and the source VCFs are not shipped with the "
                 "index. Build or download the index FIRST, then re-run complete-search:\n\n"
@@ -2848,6 +2848,30 @@ def complete_search() -> None:
                     )
                 )
             ]
+            # A genotyped dataset's phased indel genotype store has been written since 2.5.0,
+            # by build-index-only and now by a search that enriches a dataset itself. Without
+            # it the index, and the fake-indel genome it was built from, are older than the
+            # SNP overlay: it can be blind to a SNP beside an indel, with no other sign.
+            _no_store = [
+                _vn for _vn in (os.path.basename(os.path.normpath(_v)) for _v in vcf_dataset_dirs)
+                if not os.path.isdir(os.path.join(_dict_root, f"indel_genotypes_{_vn}"))
+                and (os.path.isdir(os.path.join(_dict_root, f"genotypes_{_vn}"))
+                     or not os.path.isdir(os.path.join(_dict_root, f"registry_{_vn}")))
+                and (os.path.isdir(os.path.join(current_working_directory, "Genomes",
+                                                f"{genome_ref}+{_vn}"))
+                     or not any(f.endswith(".vcf.gz") for f in _listdir(
+                         os.path.join(current_working_directory, "VCFs", _vn))))
+            ]
+            if _no_store:
+                print(
+                    "WARNING [complete-search]: no phased indel genotype store (Dictionaries/"
+                    "indel_genotypes_<vcf>/) for: %s. The carriers of an off-target that needs "
+                    "an indel and a SNP beside it are not phased, and an index built before "
+                    "2.5.0 may miss such off-targets altogether. To cover them, run "
+                    "build-index-only with the dataset's VCFs: it adds the SNP codes, and builds "
+                    "the INDELS index again if it needs them." % ", ".join(_no_store),
+                    flush=True,
+                )
             if _no_reg:
                 print(
                     "WARNING [complete-search]: SNP+indel co-occurrence is ON but the "

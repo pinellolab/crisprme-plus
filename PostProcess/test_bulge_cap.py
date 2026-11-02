@@ -371,6 +371,104 @@ class TestSamplesListForSearch(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
+# The pre-flight's refusal of a variant search nothing here can serve or build
+# --------------------------------------------------------------------------- #
+class TestPreflightNoVariantIndex(unittest.TestCase):
+    """The search script stops there too, for the web; this stops a CLI search before the
+    pre-flight prints '[OK] ... source VCFs not required' and the run writes anything. The
+    rules are the script's (test_index_resolution runs those)."""
+
+    DS = _VCF
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="novariant_")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self._orig_cwd = crisprme.current_working_directory
+        crisprme.current_working_directory = self.root + "/"
+        self.addCleanup(setattr, crisprme, "current_working_directory", self._orig_cwd)
+        for d in (f"registry_{self.DS}", f"log_indels_{self.DS}"):
+            os.makedirs(os.path.join(self.root, "Dictionaries", d))
+        self.vdir = os.path.join(self.root, "VCFs", self.DS)
+
+    def index(self, name, record=None, guide=None):
+        folder = os.path.join(self.root, "genome_library", name)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "X_chr1_1.bin"), "wb") as fh:
+            fh.write(struct.pack("=ii", 7, guide) if guide else b"")
+        if record:
+            _mkfile(os.path.join(folder, ".pam_build"), record)
+
+    def check(self, motif="NGG", b=(1, 1), prune=False, three_prime=True, guide=20, path="_"):
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                crisprme._refuse_no_variant_index([self.vdir], _REF, motif, b[0], b[1], prune,
+                                                  three_prime, guide, path)
+        except SystemExit as stop:
+            self.assertEqual(stop.code, 1)
+            return err.getvalue()
+        return None
+
+    def test_another_pam_is_refused_naming_what_is_there_and_what_to_do(self):
+        self.index(f"NRG_3_{_REF}+{self.DS}", guide=20)
+        said = self.check()
+        self.assertIn(f"no variant index here serves this search (genome {_REF}, dataset "
+                      f"{self.DS}, PAM NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide)", said)
+        self.assertIn(f"NRG_3_{_REF}+{self.DS} (up to 2 bulge(s) of each type, built for a 20-nt "
+                      "guide)", said)
+        self.assertIn(f"--index-name NGG_3_{_REF}+{self.DS} if it is published", said)
+        self.assertEqual(len(said.splitlines()), 1)
+
+    def test_a_deeper_budget_is_told_the_bulges_there(self):
+        self.index(f"NGG_2_{_REF}+{self.DS}")
+        self.assertIn("up to 1 bulge(s) of each type: search with no more",
+                      self.check(b=(2, 2)))
+
+    def test_a_wider_pam_less_index_is_named_with_its_flags(self):
+        self.index(f"NNNNNNNN_3_{_REF}+{self.DS}")
+        self.assertIn("--prune-pam --index-path genome_library", self.check())
+
+    def test_under_index_path_it_says_what_that_serves(self):
+        self.assertIn("--index-path supplies the reference index only",
+                      self.check(path="/elsewhere"))
+
+    def test_an_index_that_serves_goes_on(self):
+        self.index(f"NGG_2_{_REF}+{self.DS}", guide=20)
+        self.assertIsNone(self.check())
+
+    def test_a_wider_pam_less_index_goes_on_under_prune(self):
+        self.index(f"NNNNNNNN_3_{_REF}+{self.DS}")
+        self.assertIsNone(self.check(prune=True))
+
+    def test_an_index_for_another_guide_does_not_serve(self):
+        self.index(f"NGG_2_{_REF}+{self.DS}", guide=20)
+        self.assertIn("a 23-nt guide", self.check(guide=23))
+        self.assertIsNone(self.check(guide=21, b=(1, 0)))
+
+    def test_an_index_of_the_other_side_does_not_serve(self):
+        self.index(f"NNN_3_{_REF}+{self.DS}", "23bp-NNN-5p 23 -3\n")
+        self.assertIsNotNone(self.check())
+        self.assertIsNone(self.check(three_prime=False))
+
+    def test_an_index_a_run_holds_the_lock_of_does_not_serve(self):
+        self.index(f"NGG_2_{_REF}+{self.DS}")
+        os.makedirs(os.path.join(self.root, "genome_library", f"NGG_2_{_REF}+{self.DS}.lock"))
+        self.assertIsNotNone(self.check())
+
+    def test_the_vcfs_can_build_it(self):
+        _mkfile(os.path.join(self.vdir, "x.chr1.vcf.gz"))
+        self.assertIsNone(self.check())
+
+    def test_the_enriched_genome_can_build_it(self):
+        os.makedirs(os.path.join(self.root, "Genomes", f"{_REF}+{self.DS}"))
+        self.assertIsNone(self.check())
+
+    def test_no_dictionaries_is_left_to_the_check_that_names_them(self):
+        shutil.rmtree(os.path.join(self.root, "Dictionaries", f"registry_{self.DS}"))
+        self.assertIsNone(self.check())
+
+
+# --------------------------------------------------------------------------- #
 # (1) BULGE-CAP -- web pages_utils.reference_bulge_capacity
 # --------------------------------------------------------------------------- #
 class TestWebReferenceBulgeCapacity(unittest.TestCase):
