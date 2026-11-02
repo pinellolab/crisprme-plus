@@ -103,3 +103,21 @@
   the search runs with none, and what to pass. A variant index at `--index-path` is still read from
   `genome_library/` alone: with the dataset's VCFs the search rebuilds it there, as it does with
   explicit flags, and without them it stops and says so.
+- **`complete-test` works on any index you installed, and no longer breaks when the K=8 index sits
+  beside the default.** Its smoke wrote the example guide and a 3' PAM from the index's name, so on
+  a PAM wider than 3 nt it stopped with `guide ... is 23 nt but the PAM expects 28 ... Fix: append 8
+  'N'`, about a file it rewrites each run; it took the first name in sorted order, so
+  `NNNNNNNN_3_hg38` shadowed `NRG_3_hg38`, on the install `DOCKER_QUICKSTART` describes; and on a 5'
+  index it searched the wrong side, which under `--chrom` read `PASSED ... holds none of its
+  off-targets` with sites there. Each failed run also left a PAM file such as
+  `PAMs/20bp-TTTV-SpCas9.txt`, which the web then offered as a nuclease. **Affected:** the
+  documented self-test on a K=8, SaCas9, Cas12a or other non-SpCas9-class index, in 2.8.0 too; a
+  leftover `PAMs/20bp-<motif>-SpCas9.txt` of such a motif can be removed. It now takes a 3' index of
+  a 3-nt PAM first, and an all-N index wider than 3 nt last; searches a wider 3' all-N index for NRG
+  with `--prune-pam`, byte-identical to a dedicated NRG index (measured on the synthetic genome,
+  and on the published K=8 indexes on chr22); and searches any other for its own PAM, on the side
+  its `.pam_build` records (3' without one; for a dedicated index, what the PAM files of its motif
+  in `PAMs/` say), with the example guide padded for it. It writes nothing into `PAMs/`: it uses the
+  file there that holds the line it needs, or a hidden one for the run. With another nuclease's PAM
+  an empty result on the whole genome passes too, as it does on one chromosome. An index whose side
+  cannot be told stops in one line. Results on NGG, NRG, NNN and a 2-nt PAM are unchanged.

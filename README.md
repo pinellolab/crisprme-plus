@@ -1234,10 +1234,15 @@ exits cleanly.
 Once an index is available, `complete-test` runs the example search end-to-end 
 and produces the same set of outputs as Complete Search, confirming that the 
 installed tool works as expected. It searches the example guide (up to 2 mismatches
-plus one DNA and one RNA bulge) against the first variant index it finds in
-`genome_library/` (else the reference one), in the analysis mode Complete Search picks
-for that index (per-sample on a phased genotyped index such as
-`NRG_3_hg38+hg38_HGDP1kGP`).
+plus one DNA and one RNA bulge) against a variant index in `genome_library/` (else a
+reference one), in the analysis mode Complete Search picks for that index (per-sample on a
+phased genotyped index such as `NRG_3_hg38+hg38_HGDP1kGP`). Of several it takes a 3′ index
+of a 3-nt PAM first (NGG, NRG, NRR), then `NNN`, then any other PAM, and an all-`N` index
+wider than 3 nt last. It searches each in its own geometry: an all-`N` index wider than 3 nt
+(the published `NNNNNNNN_3`) for NRG with `--prune-pam`, and any other for its own PAM, with
+the example guide padded for it, on the side of the guide its `.pam_build` records (the 3′
+side without one). With another nuclease's PAM the example guide may have no off-target in
+the genome, which passes as an empty result.
 
 With `--chrom` (e.g. `--chrom chr22`) it searches that chromosome only. It runs from a
 per-run view of the working directory in which that chromosome is the only one: a hidden

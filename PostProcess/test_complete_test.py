@@ -37,6 +37,7 @@ import io
 import os
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,9 @@ class DispatchContract(unittest.TestCase):
         was consulted. The keyword arguments of each call are kept in self.kwargs."""
         calls = []
         self.kwargs = []
+        pam_file = mock.patch.object(ct, "_smoke_pam_file", side_effect=lambda _line, name: name)
+        pam_file.start()
+        self.addCleanup(pam_file.stop)
         env = dict(os.environ)
         env.pop("CRISPRME_ALLOW_ONDEMAND_BUILD", None)
         env.pop("CRISPRME_SKIP_HEAVY", None)
@@ -151,7 +155,7 @@ class DispatchContract(unittest.TestCase):
         genome = os.path.join(os.getcwd(), "Genomes", "hg38_HGDP1kGP")
         self.assertEqual(calls, [
             f"crisprme.py complete-search --genome {genome} --mm 2 --bDNA 1 --bRNA 1 "
-            "--max-total-edits 4 --merge 3 --pam 20bp-NRG-SpCas9.txt --guide "
+            "--max-total-edits 4 --merge 3 --pam 20bp-NRG-smoke.txt --guide "
             "sg1617.guide.txt --vcf list_vcf.txt --samplesID list_samplesID.txt "
             "--index-path genome_library --output crisprme-test-out --thread 4  --ci-cd-test"
         ])
@@ -202,6 +206,7 @@ _FILES = {
     "samplesIDs/toy.samplesID.txt": "#SAMPLE_ID\n",
     "Annotations/genes.bed": "",
     "PAMs/.keep": "",
+    "PAMs/20bp-NGG-SpCas9.txt": "NNNNNNNNNNNNNNNNNNNNNGG 3\n",
     "Results/.keep": "",
     "list_vcf.txt": "toy_panel\n",
     "list_samplesID.txt": "toy.samplesID.txt\n",
@@ -266,6 +271,243 @@ def _tree(root):
 
 def _views(wd):
     return [n for n in os.listdir(wd) if n.startswith(ct.CHROMVIEWPREFIX)]
+
+
+class _SmokeDir(unittest.TestCase):
+    """A working directory with the shipped PAM files, and indexes by name."""
+
+    def setUp(self):
+        self._cwd = os.getcwd()
+        self.wd = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.wd, ignore_errors=True)
+        os.makedirs(os.path.join(self.wd, "genome_library"))
+        shutil.copytree(os.path.join(os.path.dirname(HERE), "PAMs"), os.path.join(self.wd, "PAMs"))
+        os.chdir(self.wd)
+        self.addCleanup(os.chdir, self._cwd)
+        self.addCleanup(ct._smoke_pam_dir.clear)
+
+    def index(self, name, record=None, guide=None):
+        folder = os.path.join(self.wd, "genome_library", name)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "X_chr1_1.bin"), "wb") as fh:
+            fh.write(struct.pack("=ii", 7, guide) if guide else b"t")
+        if record:
+            with open(os.path.join(folder, ".pam_build"), "w") as fh:
+                fh.write(record)
+
+
+class WhichIndexTheSmokeTakes(_SmokeDir):
+    """It took the first name in sorted order: NNNNNNNN_3 and NNGRRT_2 sort before NRG_3,
+    so that installing the published K=8 index beside the default broke the smoke."""
+
+    def taken(self, *names):
+        for name in names:
+            self.index(name)
+        return ct.require_prebuilt_index()
+
+    def test_a_dedicated_3_nt_index_before_a_wider_pam_less_one(self):
+        self.assertEqual(self.taken("NNNNNNNN_3_hg38", "NRG_3_hg38"), "NRG_3_hg38")
+
+    def test_before_a_dedicated_wider_one(self):
+        self.assertEqual(self.taken("NNGRRT_2_hg38", "NRG_3_hg38"), "NRG_3_hg38")
+
+    def test_before_a_3_nt_pam_less_one(self):
+        self.assertEqual(self.taken("NNN_3_hg38", "NRG_3_hg38"), "NRG_3_hg38")
+
+    def test_a_3_nt_pam_less_one_before_a_wider_one(self):
+        self.assertEqual(self.taken("NNNNNNNN_3_hg38", "NNN_3_hg38"), "NNN_3_hg38")
+
+    def test_a_variant_index_comes_first_still(self):
+        self.assertEqual(self.taken("NRG_3_hg38", "NNNNNNNN_3_hg38+ds"), "NNNNNNNN_3_hg38+ds")
+        shutil.rmtree(os.path.join(self.wd, "genome_library", "NRG_3_hg38"))
+        self.index("NRG_3_hg38+ds")
+        self.assertEqual(ct.require_prebuilt_index(), "NRG_3_hg38+ds")
+
+    def test_a_5_prime_3_nt_index_after_a_3_prime_one(self):
+        self.index("ATT_3_hg38", "23bp-ATT-X 26 -3\n")
+        self.index("NRG_3_hg38")
+        self.assertEqual(ct.require_prebuilt_index(), "NRG_3_hg38")
+
+    def test_one_with_no_bulges_last(self):
+        # the first web search's: the smoke searches with one bulge of each type
+        self.assertEqual(self.taken("NGG_1_hg38", "NNNNNNNN_3_hg38"), "NNNNNNNN_3_hg38")
+
+    def test_the_only_one_is_taken_whatever_it_is(self):
+        self.assertEqual(self.taken("NNNNNNNN_3_hg38"), "NNNNNNNN_3_hg38")
+
+
+class WhatTheSmokeSearchesWith(_SmokeDir):
+    """The smoke wrote 'N'*20 + the name's PAM on the 3' side, and the 23-nt guide, whatever
+    the index: 'guide is 23 nt but the PAM expects 28', a fix the user cannot apply, on any
+    PAM wider than 3 nt, and a search on the wrong side of a 5' index, which finds nothing
+    and passed under --chrom. The failed run also left that PAM file in PAMs/."""
+
+    def inputs(self, name, record=None, guide=None):
+        self.index(name, record, guide)
+        pam, guide_file, search, prune, five = ct._smoke_inputs(name, name.split("_")[0])
+        with open(pam) as fh:
+            line = fh.read().strip()
+        with open(guide_file) as fh:
+            seq = fh.read().strip()
+        return line, seq, search, prune, five, pam
+
+    def assertNoPamWritten(self):
+        shipped = os.listdir(os.path.join(os.path.dirname(HERE), "PAMs"))
+        self.assertEqual(sorted(os.listdir(os.path.join(self.wd, "PAMs"))), sorted(shipped))
+
+    def test_the_published_wider_pam_less_index_is_searched_for_nrg_with_prune(self):
+        # it has no .pam_build, as the published archives have none
+        line, seq, search, prune, five, pam = self.inputs("NNNNNNNN_3_hg38")
+        self.assertEqual(line, "N" * 20 + "NRG 3")
+        self.assertEqual(seq, "CTAACAGTTGCTTTTATCACNNN")
+        self.assertEqual((search, prune, five), ("NRG", " --prune-pam", False))
+        self.assertEqual(pam, os.path.join(self.wd, "PAMs", "20bp-NRG-SpCas9.txt"))
+        self.assertNoPamWritten()
+
+    def test_a_3_nt_index_keeps_the_shipped_file_and_the_guide(self):
+        for name in ("NRG_3_hg38", "NGG_3_hg38"):
+            line, seq, search, prune, five, pam = self.inputs(name)
+            token = name[:3]
+            self.assertEqual(line, "N" * 20 + f"{token} 3")
+            self.assertEqual(seq, "CTAACAGTTGCTTTTATCACNNN")
+            self.assertEqual((search, prune, five), (token, "", False))
+            self.assertEqual(pam, os.path.join(self.wd, "PAMs", f"20bp-{token}-SpCas9.txt"))
+        self.assertNoPamWritten()
+
+    def test_a_3_nt_pam_less_index_is_searched_as_it_was(self):
+        line, seq, search, prune, five, pam = self.inputs("NNN_3_hg38")
+        self.assertEqual((line, seq, prune), ("N" * 23 + " 3", "CTAACAGTTGCTTTTATCACNNN", ""))
+        self.assertEqual(pam, os.path.join(self.wd, "PAMs", "20bp-NNN-NO-PAM.txt"))
+
+    def test_a_wider_3_prime_pam_pads_the_guide_to_it(self):
+        line, seq, search, prune, five, pam = self.inputs("NNGRRT_3_hg38")
+        self.assertEqual(line, "N" * 20 + "NNGRRT 6")
+        self.assertEqual(seq, "CTAACAGTTGCTTTTATCACNNNNNN")
+        self.assertEqual((search, prune, five), ("NNGRRT", "", False))
+        self.assertTrue(os.path.basename(pam).endswith("-smoke.txt"))
+        self.assertNoPamWritten()
+
+    def test_a_2_nt_pam_pads_two(self):
+        line, seq, *_ = self.inputs("NG_2_hg38")
+        self.assertEqual((line, seq), ("N" * 20 + "NG 2", "CTAACAGTTGCTTTTATCACNN"))
+
+    def test_a_5_prime_index_is_searched_on_its_own_side(self):
+        line, seq, search, prune, five, pam = self.inputs("TTTV_2_hg38", "23bp-TTTV-Cas12a 27 -4\n",
+                                                          guide=23)
+        self.assertEqual(line, "TTTV" + "N" * 20 + " -4")
+        self.assertEqual(seq, "NNNNCTAACAGTTGCTTTTATCAC")
+        self.assertEqual((search, prune, five), ("TTTV", "", True))
+        self.assertNoPamWritten()
+
+    def test_a_short_5_prime_index_too(self):
+        line, seq, _, _, five, _ = self.inputs("TTN_2_hg38", "23bp-TTN-X 26 -3\n")
+        self.assertEqual((line, seq, five), ("TTN" + "N" * 20 + " -3", "NNNCTAACAGTTGCTTTTATCAC", True))
+
+    def test_a_5_prime_pam_less_index_is_not_pruned(self):
+        line, seq, search, prune, five, _ = self.inputs("NNNNNNNN_3_hg38", "28bp-N-5p 28 -8\n")
+        self.assertEqual(line, "N" * 28 + " -8")
+        self.assertEqual(seq, "NNNNNNNNCTAACAGTTGCTTTTATCAC")
+        self.assertEqual((search, prune, five), ("NNNNNNNN", "", True))
+
+    def test_a_dedicated_index_with_no_record_takes_its_side_from_the_pam_files(self):
+        # a search builds a dedicated index and records nothing on it
+        line, _, _, _, five, _ = self.inputs("TTTV_2_hg38")
+        self.assertEqual((line, five), ("TTTV" + "N" * 20 + " -4", True))
+
+    def test_one_a_failed_run_left_a_3_prime_file_for_does_not_turn_it_round(self):
+        with open(os.path.join(self.wd, "PAMs", "20bp-TTTV-SpCas9.txt"), "w") as fh:
+            fh.write("N" * 20 + "TTTV 4\n")
+        _, _, _, _, five, _ = self.inputs("TTTV_2_hg38")
+        self.assertTrue(five)
+
+    def test_a_wider_dedicated_index_of_unknown_side_is_refused_in_one_line(self):
+        self.index("GGTT_2_hg38")
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as stop:
+            ct._smoke_inputs("GGTT_2_hg38", "GGTT")
+        self.assertEqual(stop.exception.code, 2)
+        self.assertIn("cannot tell which side of the guide the PAM of index 'GGTT_2_hg38'",
+                      stderr.getvalue())
+        self.assertEqual(len(stderr.getvalue().splitlines()), 1)
+
+    def test_a_shorter_3_nt_index_with_no_record_is_taken_for_3_prime(self):
+        # NRR_3_hg38 has none, and the shipped PAM files hold no NRR
+        line, _, _, _, five, _ = self.inputs("NRR_3_hg38")
+        self.assertEqual((line, five), ("N" * 20 + "NRR 3", False))
+        self.assertNoPamWritten()
+
+    def test_an_index_built_for_a_shorter_guide_gets_the_guide_it_fits(self):
+        line, seq, *_ = self.inputs("NGG_3_hg38", guide=18)
+        self.assertEqual((line, seq), ("N" * 18 + "NGG 3", "AACAGTTGCTTTTATCACNNN"))
+
+    def test_one_built_for_a_longer_guide_gets_the_20_nt_example(self):
+        line, seq, *_ = self.inputs("NGG_2_hg38", guide=23)
+        self.assertEqual((line, seq), ("N" * 20 + "NGG 3", "CTAACAGTTGCTTTTATCACNNN"))
+
+    def test_a_pam_file_of_the_users_is_used_not_overwritten(self):
+        mine = os.path.join(self.wd, "PAMs", "20bp-NRG-Mine.txt")
+        os.remove(os.path.join(self.wd, "PAMs", "20bp-NRG-SpCas9.txt"))
+        with open(mine, "w") as fh:
+            fh.write("N" * 20 + "NRG 3\n")
+        *_, pam = self.inputs("NRG_3_hg38")
+        self.assertEqual(pam, mine)
+
+    def test_a_file_it_writes_is_gone_when_the_smoke_ends(self):
+        # as complete-test runs it, through the whole smoke, with the search mocked
+        self.index("NNGRRT_3_hg38")
+        os.makedirs(os.path.join(self.wd, "Genomes", "hg38"))
+        seen = []
+        with mock.patch.object(ct, "_search_in_smoke",
+                               side_effect=lambda *a, **k: seen.append(a[5])), \
+                contextlib.redirect_stderr(io.StringIO()):
+            ct._run_prebuilt_index_smoke(2, False)
+        self.assertTrue(seen[0].endswith("20bp-NNGRRT-smoke.txt"), seen)
+        self.assertFalse(os.path.exists(seen[0]))
+        self.assertEqual([n for n in os.listdir(self.wd) if n.startswith(ct.SMOKEPAMPREFIX)], [])
+
+
+class ZeroHitWithTheIndexsOwnGeometry(unittest.TestCase):
+    """An SpCas9 guide can have no off-target in a whole genome with another nuclease's PAM,
+    on its index's own geometry: an empty result, and a pass. With an SpCas9-class PAM it is
+    still a failure of the smoke, which always finds the example's off-targets."""
+
+    def smoke(self, *inputs, chrom="all"):
+        wd = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, wd, ignore_errors=True)
+        cwd = os.getcwd()
+        os.chdir(wd)
+        self.addCleanup(os.chdir, cwd)
+        res = os.path.join(wd, "Results", ct.COMPLETETESTRESDIR)
+        os.makedirs(res)
+        with open(os.path.join(res, "log.txt"), "w") as fh:
+            fh.write("No off-targets found\n")
+        stderr = io.StringIO()
+        with mock.patch.object(ct.subprocess, "call", return_value=0), \
+                contextlib.redirect_stderr(stderr):
+            ct._search_in_smoke(*inputs, 2, False, chrom)
+        return stderr.getvalue()
+
+    def inputs(self, name, token, search, prune, five):
+        return (name, token, "hg38", False, "Genomes/hg38", "p.txt", "g.txt", search, prune, five)
+
+    def test_a_5_prime_index_passes(self):
+        out = self.smoke(*self.inputs("TTTV_2_hg38", "TTTV", "TTTV", "", True))
+        self.assertIn("complete-test PASSED", out)
+        self.assertIn("holds none of its off-targets with PAM TTTV", out)
+
+    def test_a_wider_3_prime_pam_passes(self):
+        self.assertIn("complete-test PASSED",
+                      self.smoke(*self.inputs("NNGRRT_2_hg38", "NNGRRT", "NNGRRT", "", False)))
+
+    def test_nrg_on_a_whole_genome_does_not(self):
+        with self.assertRaises(SystemExit) as stop:
+            self.smoke(*self.inputs("NRG_3_hg38", "NRG", "NRG", "", False))
+        self.assertEqual(stop.exception.code, 1)
+
+    def test_nor_nrg_under_prune(self):
+        with self.assertRaises(SystemExit) as stop:
+            self.smoke(*self.inputs("NNNNNNNN_3_hg38", "NNNNNNNN", "NRG", " --prune-pam", False))
+        self.assertEqual(stop.exception.code, 1)
 
 
 class ChromView(unittest.TestCase):
@@ -400,11 +642,41 @@ class ChromView(unittest.TestCase):
         self.assertFalse(os.path.lexists(calls[0][1]))
         self.assertEqual(_views(self.wd), [])
         after = _tree(self.wd)
-        written = {"sg1617_test_guide.txt", "PAMs/20bp-NGG-SpCas9.txt",
+        written = {"sg1617_test_guide.txt",
                    "Results/crisprme-test-out",
                    "Results/crisprme-test-out/x_integrated_results.tsv"}
         self.assertEqual(set(after) - set(before), written)
         self.assertEqual({r: after[r] for r in before}, before)
+
+    def test_a_5_prime_pam_less_index_keeps_its_record_in_the_view(self):
+        # The search takes an all-N index with no record for a 3' build, and refuses it for
+        # a 5' PAM: an index built for one failed under --chrom ("Genome enrichment failed"),
+        # and passed on a 3-nt PAM with the search on the wrong side. Its .binview, which the
+        # record brings, goes with the view.
+        for name in ("NGG_2_toy", "NGG_2_toy+toy_panel", "NRG_3_toy"):
+            shutil.rmtree(name.join(("genome_library/", "")))
+        shutil.rmtree("genome_library/NGG_2_toy+toy_panel_INDELS")
+        os.makedirs("genome_library/NNN_2_toy")
+        with open("genome_library/NNN_2_toy/NNN_chr22_1.bin", "w") as fh:
+            fh.write("t")
+        with open("genome_library/NNN_2_toy/.pam_build", "w") as fh:
+            fh.write("23bp-NNN-5p 23 -3\n")
+        os.makedirs("genome_library/NNN_3_toy")
+        with open("genome_library/NNN_3_toy/NNN_chr22_1.bin", "w") as fh:
+            fh.write("t")
+        with open("genome_library/NNN_3_toy/.pam_build", "w") as fh:
+            fh.write("20bp-NNN-NO-PAM 23 3\n")
+
+        def search(cmd, cwd):
+            os.makedirs(os.path.join(self.wd, "Results", "crisprme-test-out", ".binview"))
+            return self._result(cmd, cwd)
+
+        calls, _, code = self.smoke("chr22", search)
+        self.assertIsNone(code)
+        tree = calls[0][2]
+        self.assertIn("genome_library/NNN_2_toy/.pam_build", tree)
+        self.assertNotIn("genome_library/NNN_3_toy/.pam_build", tree)  # 3': as without it
+        self.assertFalse(os.path.exists(os.path.join("Results", "crisprme-test-out", ".binview")))
 
     def _assert_removed_on(self, search, want_code=None, want_exc=None):
         seen = []
@@ -535,7 +807,7 @@ class ChromView(unittest.TestCase):
         self.assertEqual(len(lines), 1, err)
         self.assertTrue(lines[0].startswith(f"ERROR: complete-test --chrom {chrom}: "), lines[0])
         self.assertEqual(_views(self.wd), [])
-        for written in ("sg1617_test_guide.txt", os.path.join("PAMs", "20bp-NGG-SpCas9.txt")):
+        for written in ("sg1617_test_guide.txt",):
             self.assertFalse(os.path.exists(written), written)
         return lines[0]
 
