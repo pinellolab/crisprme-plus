@@ -130,15 +130,28 @@ The third entry's are with the merge step's fix, before that of indel rows.
   the letters of the plus strand.** For a variant window on the minus strand the tier path also
   wrote the window's reference alignment, from the plus-strand letters. They usually fail its
   mismatch and PAM checks, and no row came of it, but on a near-palindromic guide they pass: a row
-  went out with strand `-`, those letters and a CFD of 0, in the alternative alignments, and one
-  more in `Other_motifs`. The reference search holds the true alignment of such a window (of every
-  one on the search below), so no row is written for a window on the minus strand now. Measured on
-  the default index, guide CTCTCAGCTGGTACACGGCA, per-sample, genome-wide: 5 of 309,218 rows of
-  alternative alignments go (chr1:147073620, chr16:12583323, chr16:85966126, chr6:5506134,
-  chrX:150119503, none of them ever a site's best); `Other_motifs` goes down by one on the 5 rows of
-  those sites in the table and the database, of 128,730, and on 76 rows of alternative alignments,
-  one of which, at chr16:12583323, reads strand `+` for its CRISPR-Bulge block, where it paired the
-  wrong row (`*_observed_haplotypes_raw` follows); nothing else changes in the table, in
-  `observed_haplotypes.tsv` or in the tables of the report. A search of the dictionaries, or of the
-  reference alone, had no such row and is unchanged. Covered by
+  went out with strand `-`, those letters and the scores they get, and one more in `Other_motifs`.
+  The reference search holds the true alignment of such a window when it is within the search's
+  mismatches and bulges, so no row is written for a window on the minus strand now. Measured on the
+  default index, guide CTCTCAGCTGGTACACGGCA, 4 mismatches, 1 DNA and 1 RNA bulge, genome-wide: per
+  sample, 5 of 309,218 rows of alternative alignments go (chr1:147073620, chr16:12583323,
+  chr16:85966126, chr6:5506134, chrX:150119503, none of them a site's best); `Other_motifs` goes
+  down by one on the 5 rows of those sites in the table and the database, of 128,730, and on 76 rows
+  of alternative alignments, one of which, at chr16:12583323, reads strand `+` for its CRISPR-Bulge
+  block, where it paired the wrong row (`*_observed_haplotypes_raw` follows); nothing else changes
+  in the table, in `observed_haplotypes.tsv` or in the tables of the report. At population level
+  `Other_motifs` goes down by one on the same 5 rows, of 150,103, and one row's CRISPR-Bulge score
+  moves in its last digit (chr16:1434667, `3.58341e-18` to `3.58338e-18`, as the scorer's batches
+  shift); nothing else changes. With more mismatches and bulges such a row can be a site's best, and
+  a site can have several. On chr19 and chr21 with 5 mismatches, 2 DNA and 2 RNA bulges, this guide
+  and CTAACAGTTGCTTTTATCAC, per sample, 6 of 46,829 sites reported one as their best:
+  chr19:28563886, with a CFD of 0.007, now reports a variant alignment with 0.006, and
+  chr19:44589953, chr19:50205996, chr21:14062304, chr21:36964620 and chr21:45983672, with a CFD of
+  0, now report a variant alignment and `Not_found_in_REF` `y`, as no reference alignment is left at
+  the site (chr21:45983672 on strand `+`). `Other_motifs` goes down at 20 sites, by 1 to 10; 58 of
+  316,189 rows of alternative alignments go, and at the sites that lost one the others pair
+  differently across the three criteria; and the CRISPR-Bulge scores of 24 rows move in their last
+  digit. At population level, with `hg38_mega` beside the default index, 5 sites change a best
+  alignment so (4 for `highest_CFD`), and a sixth reads `y` for `Not_found_in_REF`. A search of the
+  dictionaries, or of the reference alone, had no such row and is unchanged. Covered by
   `PostProcess/test_tier_ref_columns.py`.
