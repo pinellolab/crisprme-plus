@@ -263,10 +263,12 @@ def main(root):
         os.chmod(d, 0o755)
         for f in files:
             os.chmod(os.path.join(d, f), 0o644)
-    uid = 65534
-    subprocess.run(["chown", "-R", f"{uid}:{uid}", ro], check=True)
-    os.chmod(os.path.dirname(ro), 0o755)
-    os.chmod(os.path.dirname(os.path.dirname(ro)), 0o755)
+    uid = None
+    if os.geteuid() == 0:  # root writes anywhere: the cells run as another user
+        uid = 65534
+        subprocess.run(["chown", "-R", f"{uid}:{uid}", ro], check=True)
+        os.chmod(os.path.dirname(ro), 0o755)
+        os.chmod(os.path.dirname(os.path.dirname(ro)), 0o755)
     for d, _, _files in os.walk(os.path.join(ro, "genome_library")):
         os.chmod(d, 0o555)
     rc, out = search(ro, "other_pam", variant=False, user=uid)
