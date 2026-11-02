@@ -967,8 +967,8 @@ while read vcf_f; do
 		exit 1
 	}
 
-	# Say on stderr why index $1 cannot serve this search, when it stores too little for
-	# this guide (_index_fits_guide): to one line of what follows it.
+	# Say on stderr, with no end of line, why index $1 cannot serve this search, when it
+	# stores too little for this guide (_index_fits_guide).
 	_say_short_index() {
 		local _n _b=${1##*/}
 		_n=${_b#*_}; _n=${_n%%_*}
@@ -999,6 +999,42 @@ while read vcf_f; do
 	_indel_snp_on() {
 		case "${CRISPRME_INDEL_SNP-1}" in 1 | true | True | yes) return 0 ;; esac
 		return 1
+	}
+
+	# No installed variant index serves this search, and nothing here can build one: no
+	# VCFs, no enriched genome. Stop, before anything is made, with one ERROR that says what
+	# was asked, what is installed, and what to do. (add-variants would say on stdout that
+	# the VCF folder is not there and exit 0, leaving 'mv: cannot stat' lines and empty
+	# folders behind.) The web launches this script straight, so the check is here, as
+	# well as in complete-search's pre-flight (crisprme.py _refuse_no_variant_index).
+	_refuse_no_variant_index() {
+		local _lib="$current_working_directory/genome_library" _set="${ref_name}+${vcf_name}"
+		local _d _b _p _n _g _have= _fewer= _wider= _todo= _other=
+		for _d in "$_lib"/*_*_"$_set"; do
+			[ -d "$_d" ] || continue
+			_b=${_d##*/}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+			case "$_n" in '' | *[!0-9]*) continue ;; esac
+			[ "${_b#"${_p}_${_n}_"}" = "$_set" ] || continue  # another genome's (see _resolve_index_dir)
+			_g=$(_index_guide_len "$_d")
+			_have="$_have${_have:+, }$_b (up to $((_n - 1)) bulge(s) of each type${_g:+, built for a $_g-nt guide})"
+			[ "$_p" = "$true_pam" ] && [ "$_n" -gt 1 ] && [ "$_n" -lt "$bMax" ] \
+				&& _fewer="$_b holds this PAM with up to $((_n - 1)) bulge(s) of each type: search with no more. "
+		done
+		if [ -n "$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")" ]; then
+			_todo="Its dictionaries are not installed (Dictionaries/registry_${vcf_name} or dictionaries_${vcf_name}, and log_indels_${vcf_name}): download the index again. "
+		elif [ "${prune_pam:-0}" != 1 ]; then
+			_wider=$(prune_pam=1; _resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")
+			[ -z "$_wider" ] || _todo="${_wider##*/} can serve it from the command line: run this search again with --prune-pam --index-path genome_library. "
+		fi
+		# (the indexes published are of N = 3)
+		printf "ERROR: no variant index here serves this search (genome %s, dataset %s, PAM %s, %s DNA and %s RNA bulge(s), a %s-nt guide), and none can be built: neither its VCFs (VCFs/%s) nor its enriched genome (Genomes/%s) is installed. Variant indexes installed for %s: %s. %s%sTo install one: crisprme.py download --what index --index-name %s if it is published, or crisprme.py build-index-only with the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)%s\n" \
+			"$ref_name" "$vcf_name" "$true_pam" "$bDNA" "$bRNA" "$(( ${#fullseqpam} - ${pos#-} ))" \
+			"$vcf_name" "$_set" "$vcf_name" "${_have:-none}" "$_fewer" "$_todo" \
+			"${true_pam}_$(( bMax > 3 ? bMax : 3 ))_${_set}" \
+			"$( { [ "$index_path" = "_" ] || [ -z "$index_path" ]; } || echo ". --index-path supplies the reference index only: a variant index is read from genome_library/ in the working directory")" >&2
+		_other=$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax" any)
+		[ -z "$_other" ] || _say_other_side "$_other"
+		exit 1
 	}
 
 	# Count DATA rows in a CRISPRitz targets file: every line that is not the header.
@@ -1093,6 +1129,11 @@ while read vcf_f; do
 			&& [ -d "$current_working_directory/Dictionaries/log_indels_${vcf_name}" ]; then
 			precomputed_variant=1
 		fi
+	fi
+	if [ "$vcf_name" != "_" ] && [ "$precomputed_variant" = 0 ] \
+		&& ! [ -d "$current_working_directory/Genomes/${ref_name}+${vcf_name}" ] \
+		&& ! [ -e "${_vcf_glob[0]}" ]; then
+		_refuse_no_variant_index
 	fi
 	if [ "$vcf_name" != "_" ] && [ "$precomputed_variant" = 1 ]; then
 		echo -e "Using precomputed variant index for ${ref_name}+${vcf_name}; skipping genome enrichment (source VCFs not required)"

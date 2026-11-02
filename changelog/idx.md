@@ -75,3 +75,19 @@
   your PAM: it now codes a fake-indel genome it finds without codes, removes the INDELS indexes of
   every PAM and budget of that dataset built before the codes, says which, and builds its own (a
   later search rebuilds the others).
+- **A downloaded variant index asked for a PAM or bulge budget it does not hold now says so.**
+  The search tried to enrich a dataset with no VCFs, and failed in `mv: cannot stat ...` four times
+  and `Genome enrichment failed`, after a pre-flight that printed `[OK] ... precomputed variant index
+  ... present`, leaving empty folders; the web form promised that a first search would prepare the
+  genome, and its job ended "please remove it and try to submit again". This is likely the first
+  slip on the default index (searching `NRG_3_hg38+hg38_HGDP1kGP` with NGG), and on a K=8 index
+  without `--prune-pam`. **Affected:** a search with no index for its PAM or bulges and neither the
+  dataset's VCFs nor its enriched genome installed, in 2.8.0 too. It now stops before it does
+  anything, on the CLI before the pre-flight's `[OK]` and on the web job's banner, with one ERROR that
+  names the genome, dataset, PAM, bulges and guide length asked for, the variant indexes installed,
+  and what to do: search with the bulges an index of this PAM holds, `--prune-pam --index-path
+  genome_library` where a wider all-N index serves it, or `download` or `build-index-only` another
+  index. Web serving of a wider all-N index is not new here: the web still needs an all-N index of
+  exactly the PAM's width. An install with the enriched genome (the build-inputs kit) or the VCFs
+  still builds the index and is byte-identical to a dedicated one. The README no longer says a
+  PAM-less index must be searched from the CLI: only a wider one must.

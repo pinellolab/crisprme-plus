@@ -69,7 +69,11 @@ def store(vcf_dir, store_dir, scratch_dir, threads):
     if not jobs:
         return
     os.makedirs(scratch_dir, exist_ok=True)
-    workers = max(1, min(threads, int(os.environ.get("CRISPRME_INDELGT_WORKERS", "8")), len(jobs)))
+    try:
+        workers = int(os.environ.get("CRISPRME_INDELGT_WORKERS", "8"))
+    except ValueError:
+        workers = 8
+    workers = max(1, min(threads, workers, len(jobs)))
     if workers > 1:
         with multiprocessing.get_context("fork").Pool(workers) as pool:
             pool.starmap(build_indel_genotypes.compile_indel_genotypes_safe, jobs)

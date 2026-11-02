@@ -2652,12 +2652,24 @@ def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
                 f"The installed {panel} variant index for this PAM supports no bulges, "
                 "so only a 0-bulge search is offered."
             )
-        else:
+        elif _has_files(os.path.join(current_working_directory, "VCFs",
+                                     _resolve_vcf_folder(genome, panel)), (".vcf.gz",)) or (
+                _has_files(os.path.join(
+                    current_working_directory, GENOMES_DIR,
+                    f"{genome.replace(' ', '_')}+{_resolve_vcf_folder(genome, panel)}"),
+                    (".fa", ".fasta"))):
             note = (
                 f"No {panel} variant index for this PAM is installed yet, so only a "
                 "0-bulge search is offered, and the first one prepares the variant "
                 "genome and a 0-bulge index of it, once (this can take hours on a full "
                 "genome)."
+            )
+        else:
+            # the search script refuses it (_refuse_no_variant_index), with what to do
+            note = (
+                f"No {panel} variant index for this PAM is installed, and neither the panel's "
+                "VCF files nor its enriched genome are here to build one: a search of it stops "
+                "and says what to do."
             )
         can_build = _has_files(
             os.path.join(current_working_directory, GENOMES_DIR, genome.replace(" ", "_")),

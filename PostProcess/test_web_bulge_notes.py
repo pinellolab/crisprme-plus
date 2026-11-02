@@ -114,6 +114,23 @@ class TestBulgeNote(_Install):
         note = self.note("shipped", 0, 0)  # no VCF files to build one from
         self.assertIn("download a variant index for it in Settings", note)
 
+    def test_panel_with_no_index_for_this_pam_and_nothing_to_build_one(self):
+        # a wider PAM-less index and no VCF files: the search script refuses it, so the note
+        # does not promise that a first search prepares anything
+        self.index("NRG_2_hg38")
+        self.index("NNNNNNNN_3_hg38+hg38_k8")
+        note = self.note("k8", 0, 0)
+        self.assertNotIn("prepares", note)
+        self.assertIn("neither the panel's VCF files nor its enriched genome are here", note)
+        self.assertIn("download a variant index for it in Settings", note)
+
+    def test_panel_with_its_enriched_genome_can_still_build_one(self):
+        self.index("NRG_2_hg38")
+        self.index("NNNNNNNN_3_hg38+hg38_k8")
+        os.makedirs(os.path.join(self.tmp, "Genomes", "hg38+hg38_k8"))
+        open(os.path.join(self.tmp, "Genomes", "hg38+hg38_k8", "chr1.enriched.fa"), "w").close()
+        self.assertIn("the first one prepares", self.note("k8", 0, 0))
+
     def test_no_index_and_no_genome_files(self):
         os.remove(os.path.join(self.tmp, "Genomes", "hg38", "chr1.fa"))
         self.assertIn("no FASTA files", self.note("ref", 0, 0))

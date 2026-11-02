@@ -1066,8 +1066,10 @@ next to an N run or a contig end that a shallower one does.
 **Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
 interface never passes the flag. (Its PAM picker prefers a PAM whose geometry matches the
 installed index, but falls back to offering every PAM when none matches, so it does not
-itself prevent an unusable pairing: the engine refuses a width mismatch, and the search
-does not take an index built for the other side.) A shorter PAM off a wider flank is
+itself prevent an unusable pairing: the search does not take an all-`N` index of another
+width without the flag, or one built for the other side, and when no index serves it and
+neither the dataset's VCFs nor its enriched genome are there to build one, it stops with an
+ERROR that names what was asked, the variant indexes installed and what to do.) A shorter PAM off a wider flank is
 supported for a 3′ PAM only; for a 5′ PAM the engine requires the flank width to equal the
 PAM length, and the index must have been built from a 5′ all-`N` PAM file, as its
 `.pam_build` records (above). The published

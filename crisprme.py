@@ -1793,6 +1793,17 @@ def _check_threads(args: List[str], threads: bool) -> int:
 MAX_BULGES = 3
 
 
+def _built_three_prime(index_dir: str) -> bool:
+    """Whether index ``index_dir`` was built for a 3' PAM, as its .pam_build records
+    ("<name> <seq_len> <pam_pos>", pam_pos < 0 for a 5' PAM); one without it is taken for a
+    3' build, as the search shell's _index_side does."""
+    try:
+        with open(os.path.join(index_dir, ".pam_build")) as fh:
+            return not int(fh.readline().split()[-1]) < 0
+    except (OSError, ValueError, IndexError):
+        return True
+
+
 def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
                                prune: bool = False, three_prime: bool = True,
                                guide_len: int = 0) -> int:
@@ -1841,15 +1852,8 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         # an index the search then does not use.
         suffix = f"_{genome}"
 
-        def _built_three_prime(d: str) -> bool:
-            try:
-                with open(os.path.join(lib, d, ".pam_build")) as fh:
-                    return not int(fh.readline().split()[-1]) < 0
-            except (OSError, ValueError, IndexError):
-                return True
-
         def _pam_serves(pam: str, d: str) -> bool:
-            if pam and set(pam) == {"N"} and _built_three_prime(d) != three_prime:
+            if pam and set(pam) == {"N"} and _built_three_prime(os.path.join(lib, d)) != three_prime:
                 return False
             if pam == motif:
                 return True
@@ -1920,6 +1924,80 @@ def _index_serves_search(index: str, genome: str, motif: str, want: int, prune: 
         return True
     return bool(pam) and set(pam) == {"N"} and (
         len(pam) == len(motif) or (prune and three_prime and len(pam) > len(motif)))
+
+
+def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna: int, brna: int,
+                             prune: bool, three_prime: bool, guide_len: int,
+                             index_path: str) -> None:
+    """Stops a variant search when, for a dataset whose dictionaries are installed (the
+    check below says what to do about those), no installed variant index serves it and
+    nothing here can build one: no VCFs, no enriched genome. The search script stops there
+    too, for a search the web launches (_refuse_no_variant_index in
+    submit_job_automated_new_multiple_vcfs.sh, with the same words): here it stops before
+    the pre-flight's '[OK] source VCFs not required', and the run writes nothing.
+    """
+    lib = os.path.join(current_working_directory, "genome_library")
+    dicts = os.path.join(current_working_directory, "Dictionaries")
+    want = max(bdna, brna) + 1
+    for vdir in vcf_dirs:
+        vcf = os.path.basename(os.path.normpath(vdir))
+        dataset = f"{genome}+{vcf}"
+        if (os.path.isdir(os.path.join(current_working_directory, "Genomes", dataset))
+                or any(f.endswith(".vcf.gz") for f in _listdir(vdir))
+                or not (os.path.isdir(os.path.join(dicts, f"dictionaries_{vcf}"))
+                        or os.path.isdir(os.path.join(dicts, f"registry_{vcf}")))
+                or not os.path.isdir(os.path.join(dicts, f"log_indels_{vcf}"))):
+            continue
+        have, fewer, wider = [], "", ""
+
+        def _serves(name: str, wide: bool) -> bool:
+            index = os.path.join(lib, name)
+            pam = name.split("_")[0]
+            return (_index_serves_search(name, dataset, motif, want, wide, three_prime)
+                    and not os.path.isdir(index + ".lock")
+                    and any(f.endswith(".bin") for f in _listdir(index))
+                    and (not set(pam) == {"N"} or _built_three_prime(index) == three_prime)
+                    and index_fit.fits(index_fit.built_guide_len(index),
+                                       int(name.split("_")[1]), guide_len, bdna, brna))
+
+        names = [d for d in sorted(_listdir(lib))
+                 if d.endswith(f"_{dataset}") and os.path.isdir(os.path.join(lib, d))]
+        if any(_serves(name, prune) for name in names):
+            continue
+        for name in names:
+            pam, _, rest = name.partition("_")
+            n, _, held = rest.partition("_")
+            if not n.isdigit() or held != dataset:
+                continue
+            built = index_fit.built_guide_len(os.path.join(lib, name))
+            have.append(f"{name} (up to {int(n) - 1} bulge(s) of each type"
+                        + (f", built for a {built}-nt guide" if built else "") + ")")
+            if pam == motif and 1 < int(n) < want:
+                fewer = (f"{name} holds this PAM with up to {int(n) - 1} bulge(s) of each type: "
+                         f"search with no more. ")
+        served = [] if prune else [name for name in names if _serves(name, True)]
+        if served:
+            wider = (f"{served[0]} can serve it from the command line: run this search again "
+                     f"with --prune-pam --index-path genome_library. ")
+        error(
+            f"no variant index here serves this search (genome {genome}, dataset {vcf}, PAM "
+            f"{motif}, {bdna} DNA and {brna} RNA bulge(s), a {guide_len}-nt guide), and none can "
+            f"be built: neither its VCFs (VCFs/{vcf}) nor its enriched genome (Genomes/{dataset}) "
+            f"is installed. Variant indexes installed for {vcf}: {', '.join(have) or 'none'}. "
+            f"{fewer}{wider}To install one: crisprme.py download --what index --index-name "
+            f"{motif}_{max(want, 3)}_{dataset} if it is published, or crisprme.py build-index-only with "
+            f"the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)"
+            + (". --index-path supplies the reference index only: a variant index is read from "
+               "genome_library/ in the working directory" if index_path != "_" else "") + "."
+        )
+
+
+def _listdir(folder: str) -> List[str]:
+    """The names in ``folder``, none where it cannot be listed."""
+    try:
+        return os.listdir(folder)
+    except OSError:
+        return []
 
 
 def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int = 0,
@@ -2434,6 +2512,10 @@ def complete_search() -> None:
                 f"bulge(s) of each type (single-bulge domain; reachable index bulge depth "
                 f"{_idx_cap}). Pass explicit --bDNA/--bRNA for a deeper search."
             )
+    if variant:
+        _refuse_no_variant_index(
+            resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
+            bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
     # [max-total-edits] Surface the silent combined-edit prune (issue #107): when the
     # requested mm + bulges exceed the cap, any alignment stacking more than
     # max_total_edits edits is PRUNED inside the TST search -- the exact reason a deep

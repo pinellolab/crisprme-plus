@@ -145,7 +145,14 @@ class TestNoHitsStatus(unittest.TestCase):
                  "of it would report wrong alignments and lose off-targets. This search builds "
                  "its index under that name: move it out of /data/genome_library, or run this "
                  "search from another working directory")
+        # (no variant index serves it, nor VCFs or an enriched genome to build one)
+        no_variant = ("no variant index here serves this search (genome hg38, dataset ds, PAM "
+                      "NGG, 1 DNA and 1 RNA bulge(s), a 20-nt guide), and none can be built: "
+                      "neither its VCFs (VCFs/ds) nor its enriched genome (Genomes/hg38+ds) is "
+                      "installed. Variant indexes installed for ds: NRG_3_hg38+ds (up to 2 "
+                      "bulge(s) of each type)")
         for name, err, says in (
+                ("no variant", f"ERROR: {no_variant}\n", f"The search was not run: {no_variant}."),
                 ("refused", f"ERROR: {refused}\n", f"The search was not run: {refused}."),
                 ("refused tiers", f"ERROR: {tiers}\n", f"The search was not run: {tiers}."),
                 ("no index", f"ERROR: {no_index}\n", f"The search was not run: {no_index}."),
