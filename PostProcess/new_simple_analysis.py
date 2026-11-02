@@ -511,9 +511,19 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     variant haplotypes (``enumerate_observed_haplotypes`` never yields the empty set),
     so a candidate with NO productive / in-budget observed haplotype lost its entire
     locus -- both its reference AND its alt off-targets. This helper restores the
-    reference off-target for EVERY candidate, exactly as the SEPARATE reference-genome
-    CRISPRitz search would (a pure ``n`` / sentinel-``55`` reference row), so the
-    dict-less LOCUS coverage matches the stable reports.
+    reference off-target for a candidate on the plus strand, exactly as the SEPARATE
+    reference-genome CRISPRitz search would (a pure ``n`` / sentinel-``55`` reference
+    row), so the dict-less LOCUS coverage matches the stable reports.
+
+    A candidate on the minus strand gets no row: that search holds its alignment too
+    (TRAC guide, genome-wide: not one reference alignment of this path on the minus
+    strand is missing from it), and the merge step keeps one copy of an alignment. This
+    used to reverse-complement ``refSeq_prerevert``, which is strand-corrected already, so
+    it judged the plus-strand letters: they usually fail the gates below, but on a
+    near-palindromic guide they pass, and a row went out with strand ``-`` and those
+    letters (5 sites on TRAC), one more in ``Other_motifs``. With the right letters the
+    row is a copy for the merge to drop, whose CRISPR-Bulge score, of another batch, can
+    differ in its last digit from the reference search's and replace it (28 sites on TRAC).
 
     The row is a PURE reference alignment (no alt substituted). It carries the SAME
     column writes (2/7/9/10) and PAM check as ``_finalize_observed_entry``, but its
@@ -543,12 +553,12 @@ def _finalize_reference_entry(split, realTarget, refSeq_prerevert,
     ``_collect_variant_off_target`` -- the reference is not a variant off-target, so it
     must never populate the phase-confirmation or population-summary companions.
     """
+    if revert:
+        return
+
     final_line = split.copy()
 
-    if revert:
-        seq_joined = reverse_complement_table("".join(refSeq_prerevert))
-    else:
-        seq_joined = "".join(refSeq_prerevert)
+    seq_joined = "".join(refSeq_prerevert)
     target_to_list = list(seq_joined)
     for pos, char in enumerate(realTarget):
         if char == "-":
@@ -834,7 +844,8 @@ def _iupac_decomposition_observed(split, guide_no_pam, cluster_to_save):
     refSeq_final = reverse_complement_table(refSeq) if revert else refSeq
     refSeq_with_bulges = _ref_with_bulges(refSeq_final, realTarget, guide_no_pam)
 
-    # 3a) Emit the candidate's REFERENCE off-target ONCE (LOCUS-COVERAGE FIX). This is
+    # 3a) Emit the candidate's REFERENCE off-target ONCE (LOCUS-COVERAGE FIX; on the plus
+    #     strand: see the helper). This is
     #     emitted whether or not any observed variant haplotype survived, mirroring the
     #     legacy path (which always represents the reference via its alt rows' embedded
     #     refSeq). It is a pure reference alignment (no alt), origin=ref, in-budget/PAM

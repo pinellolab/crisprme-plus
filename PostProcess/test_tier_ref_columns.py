@@ -273,5 +273,38 @@ class TierRefColumnMatchesDictionaryPath(unittest.TestCase):
         self.assertEqual(refs[0][-3], "n")
 
 
+class AMinusStrandCandidateGetsNoReferenceRow(unittest.TestCase):
+    """The reference search holds its alignment. _finalize_reference_entry judged the
+    plus-strand letters (a strand-corrected string reverse-complemented again), and on a
+    near-palindromic guide they pass its gates: a row with strand '-' and the '+' letters,
+    in the alternative alignments and one more in Other_motifs (TRAC guide, genome-wide,
+    5 sites: round 5 review, RV3-A). The candidate is chr1:147073620 of that search."""
+
+    WINDOW = "CTCTCCTCTGGTGCAGCTGAGAG"  # the forward strand there
+    CRRNA = "CTCTCAGCTGGTACA-CGGCANNN"
+    # a SNP G>A on the last forward base: the first base of the minus-strand target
+    DNA = "YTCTCAGCTGcacCAGaGG-AGAG"
+
+    def cluster(self, population_level, strand="-", dna=None):
+        ns = _load_pure_functions(dict(
+            genomeStr=self.WINDOW, current_chr="chrT", mydict={"chrT,23": "S1:1|0;G,A;rsX;0.25"},
+            myreg=None, mygt=_GtSentinel(), haplotype_check=True, IUPAC_CAP=10,
+            hvdr_bed=io.StringIO(), allowed_mms=4, **GEOM_3P))
+        ns["_FAST_MODE"] = population_level
+        split = ["RNA,DNA", self.CRRNA, dna or self.DNA, "chrT", "0", "0", strand, "4", "2", "6",
+                 "NA", "y", "NA", "NA", "NA", "NA", "NA", "NA"]
+        out = []
+        ns["iupac_decomposition"](list(split), self.CRRNA.replace("-", ""), self.CRRNA[:-3], out)
+        return out
+
+    def test_in_either_mode(self):
+        for population_level in (False, True):
+            with self.subTest(population_level=population_level):
+                rows = self.cluster(population_level)
+                # (the plus-strand letters read CTCTCctCTGGTgCAGCtG-AGAG, within budget)
+                self.assertEqual([r[2] for r in rows if r[-2] == 55], [])
+                self.assertEqual({r[6] for r in rows} - {"-"}, set())
+
+
 if __name__ == "__main__":
     unittest.main()

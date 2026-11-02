@@ -1,6 +1,6 @@
 <!-- tierref track: [2.8.1] entries, merged by the docs track. -->
 
-**For the docs track: two entries, both under `### Fixed`; one clause in the first holds only if
+**For the docs track: three entries, all under `### Fixed`; one clause in the first holds only if
 the wset track's Settings change ships.** The clause "and, in this release, every index built or
 built again in the web Settings page" (in the sentence after the bold title) is true because the
 wset track makes a variant build in the web Settings page pass the dataset's sample list as
@@ -124,3 +124,20 @@ another count of indel rows for the same search. Their counts are not of the rel
   such as Query Genomic Region with the fewest criterion selected, and a Personal Risk Card's
   targets file); no plot or report table reads them. To correct results made before, run the search
   again. Covered by `PostProcess/test_seed_counts_dna_bulge.py`.
+
+- **A search that reads the dict-less tiers no longer lists a minus-strand reference alignment with
+  the letters of the plus strand.** For a variant window on the minus strand the tier path also
+  wrote the window's reference alignment, from the plus-strand letters. They usually fail its
+  mismatch and PAM checks, and no row came of it, but on a near-palindromic guide they pass: a row
+  went out with strand `-`, those letters and a CFD of 0, in the alternative alignments, and one more
+  in `Other_motifs`. The reference search holds the true alignment of such a window (of every one on
+  the search below), so no row is written for a window on the minus strand now. Measured on the
+  default index, guide
+  CTCTCAGCTGGTACACGGCA, per-sample, genome-wide: 5 of 309,218 rows of alternative alignments go
+  (chr1:147073620, chr16:12583323, chr16:85966126, chr6:5506134, chrX:150119503, none of them ever
+  a site's best); `Other_motifs` goes down by one on the 5 rows of those sites in the table and the
+  database, of 128,730, and on 76 rows of alternative alignments, one of which, at chr16:12583323,
+  reads strand `+` for its CRISPR-Bulge block, where it paired the wrong row (`*_observed_haplotypes_raw`
+  follows); nothing else changes in the table, in `observed_haplotypes.tsv` or in the tables of the
+  report. A search of the dictionaries, or of the reference alone, had no such row and is unchanged.
+  Covered by `PostProcess/test_tier_ref_columns.py`.
