@@ -960,8 +960,9 @@ validate-test`. This is a one-time correctness check, not a per-search step:
 - **enAsCas12a (HBG1/HBG2 clinical guide, TTTV 5′ PAM)** on chr22 — **953
   off-targets**, matched against the brute-force reference.
 - The registered benchmarks pass end-to-end (`complete-test` → `validate-test`),
-  including the default single-`--max-total-edits` web-mode cases (4/4 locally);
-  `validate-test` exits non-zero on any mismatch, and the round-trip runs in CI.
+  including the single-`--max-total-edits` web-mode cases at 3 and at 5 total edits
+  (all six on chr22); `validate-test` exits non-zero on any mismatch, and the whole
+  round-trip runs in CI.
 - Separately, the high-variant-density greedy decomposition (§5) was validated as
   provably exact against brute-force argmin on **4,000/4,000 random cases** (both
   strands, with/without bulges), with PAM-creating-variant cases reproducing full

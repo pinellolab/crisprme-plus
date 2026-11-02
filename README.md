@@ -616,7 +616,7 @@ docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py validate-test --chrom chr22   # expect: 4 passed, 0 failed, 0 skipped
+  crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
 ```
 
 Pass the variable with `-e`, as above. Written in front of `docker run`
@@ -661,7 +661,7 @@ The `install_from_source.sh` script compiles the CRISPRitz C++ binaries, then co
 mkdir crisprme_test && cd crisprme_test
 CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
-crisprme.py validate-test --chrom chr22   # expect: 4 passed, 0 failed, 0 skipped
+crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
 ```
 
 `CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode: without it, `complete-test` runs the prebuilt-index smoke ([§2.2.2](#222-complete-test)), which needs an index you have downloaded and gives `validate-test` nothing to check. The run took 10 to 20 minutes at 8 threads in testing.
@@ -2262,7 +2262,7 @@ of RAM and took 10 to 20 minutes at 8 threads in testing:
 ```bash
 CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
-crisprme.py validate-test --chrom chr22   # expect: 4 passed, 0 failed, 0 skipped
+crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
 ```
 
 #### 3.2.2 Full Genome Test

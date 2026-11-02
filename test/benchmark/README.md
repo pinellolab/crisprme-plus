@@ -21,6 +21,17 @@ alignment instead of CRISPRme's TST index search).
   (NGG_3/TTTV_3) index over the variant-enriched genome. They run by default, locally and
   in CI: the whole set fits a 16 GiB, 4-CPU runner with no swap (measured peak 3.66 GB of
   RAM). `CRISPRME_SKIP_HEAVY=1` leaves them out, an opt-out for very small machines.
+- `max-edits-5/` — references for the same two guides at **5 total edits**
+  (`cas9_sg1617_n5`, `cas12a_hbg_n5`, also `"heavy": true`): chr22, the same bulge-2
+  indexes, a binding `--max-total-edits 5`, with **381 and 92 sites**. They are there
+  because the two cases above can hardly catch a lost site: `cas12a_hbg_simple`'s
+  reference is a header with no rows and `cas9_sg1617_simple`'s holds 3 rows at 2 sites,
+  so a search that lost its sites still passed them. One lost site fails these. The
+  folder is deliberately not named `brute-force-*`: the Bioconda recipe leaves those
+  folders out of its package (`validate.py` then downloads them from `reference_base_url`,
+  the main branch), where a reference that lands with a release is not there until that
+  release is merged. These ship in every install, Docker, source and Bioconda, and need
+  no network.
 - `generate_brute_force.py` — the ground-truth generator (see credit below).
 - `generate_references.py` — registry-driven driver (regenerates any benchmark).
 

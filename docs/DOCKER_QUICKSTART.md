@@ -95,7 +95,7 @@ docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
 docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
-  crisprme.py validate-test --chrom chr22   # expect: 4 passed, 0 failed, 0 skipped
+  crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
 ```
 
 Pass the variable with `-e`, as above: written in front of `docker run` it is set on your

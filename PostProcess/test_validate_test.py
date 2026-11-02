@@ -11,7 +11,7 @@ tracebacks: validate.py's FileNotFoundError, then crisprme.py's OSError. It now 
 in one line what to run first, and exits 1.
 
 That line names the pair for the chromosome asked for, but the Cas12a reference and
-both single-"n edits" ones cover chr22 only ("scope" in benchmarks.json): compared on
+the single-"n edits" ones cover chr22 only ("scope" in benchmarks.json): compared on
 chr21, or on a whole genome, each site CRISPRme found off chr22 counted as extra and
 the benchmark FAILED. Such a benchmark is now skipped there.
 
@@ -26,6 +26,7 @@ test_bulge_cap), with its subprocess call stubbed.
 import contextlib
 import io
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -248,6 +249,186 @@ class ABenchmarkOffItsReferenceIsSkipped(unittest.TestCase):
         self.assertIn("[cas12a_hbg] SKIPPED: its brute-force reference covers chr22 only, "
                       "not chr21.", out.stderr.splitlines(), out.stderr)
         self.assertNotIn("FAILED", out.stderr)
+
+
+REFERENCES = os.path.join(os.path.dirname(HERE), "test", "benchmark")
+
+
+def registered(name):
+    """A benchmark of the shipped registry, its thresholds resolved as complete-test does."""
+    registry = validate.load_benchmarks()
+    bench = next(b for b in registry["benchmarks"] if b["name"] == name)
+    return bench, dict(registry["thresholds"], **bench.get("thresholds", {}))
+
+
+class TheFiveEditBenchmarksCatchALostSite(unittest.TestCase):
+    """cas12a_hbg_simple's reference is a header with no rows, and cas9_sg1617_simple's holds
+    3 rows at 2 sites: a search that lost its sites still passed them. At 5 total edits the
+    same guides, on the same bulge-2 indexes, have 381 and 92 sites. validate.py as
+    crisprme.py runs it, on these committed references, with a complete-test output made
+    from the reference itself, less what a test takes out."""
+
+    SITES = {"cas9_sg1617_n5": 381, "cas12a_hbg_n5": 92}
+
+    def rows(self, name):
+        with open(os.path.join(REFERENCES, registered(name)[0]["reference"])) as fin:
+            fin.readline()
+            return [line.rstrip("\n").split("\t") for line in fin]
+
+    def validate_py(self, lose=(), gain=()):
+        """(exit status, stderr lines) of `validate.py chr22` where these two benchmarks ran,
+        each site of `lose` missing from the search's output and each of `gain` added."""
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "vcf.config.test.txt"), "w") as fout:
+                fout.write("hg38_1000G\n")
+            for name in self.SITES:
+                bench, th = registered(name)
+                tdir = os.path.join(d, validate.targets_dir(name))
+                os.makedirs(tdir)
+                ref, alt = validate.target_report_names(bench["pam_name"], th["mm"], th["bDNA"],
+                                                        th["bRNA"], "chr22")
+                open(os.path.join(tdir, ref), "w").close()  # all in the variant report
+                with open(os.path.join(tdir, alt), "w") as fout:
+                    for chrom, rna, dna, strand, start, *_ in self.rows(name) + list(gain):
+                        if (chrom, start, strand) not in lose:
+                            fout.write(f"X\t{rna}\t{dna}\t{chrom}\t{start}\t{start}\t{strand}\t0\t0\t0\n")
+            out = subprocess.run([sys.executable, VALIDATE, "chr22"], cwd=d, capture_output=True,
+                                 text=True)
+        return out.returncode, out.stderr.splitlines()
+
+    def test_they_hold_what_they_are_there_for(self):
+        for name, sites in self.SITES.items():
+            with self.subTest(benchmark=name):
+                rows = self.rows(name)
+                self.assertEqual(len({(r[0], r[4], r[3]) for r in rows}), sites)
+                self.assertEqual({r[0] for r in rows}, {"chr22"})
+                bench, th = registered(name)
+                self.assertEqual(th["max_total_edits"], 5)
+                self.assertEqual(bench["scope"], "chr22")
+                self.assertTrue(bench["heavy"])  # they search the bulge-2 index
+
+    def test_every_site_found_passes(self):
+        code, lines = self.validate_py()
+        self.assertEqual(code, 0, lines)
+        for name in self.SITES:
+            self.assertIn(f"[{name}] PASSED: CRISPRme and brute-force off-target sets match.", lines)
+        self.assertIn("Validation summary: 2 passed, 0 failed, 4 skipped.", lines)
+
+    def test_one_lost_site_fails_it(self):
+        for name in self.SITES:
+            with self.subTest(benchmark=name):
+                row = self.rows(name)[len(self.rows(name)) // 2]
+                code, lines = self.validate_py(lose={(row[0], row[4], row[3])})
+                self.assertEqual(code, 1, lines)
+                self.assertIn(f"[{name}] FAILED: mismatch.", lines)
+                self.assertIn("  Missing in CRISPRme: 1  Extra in CRISPRme: 0", lines)
+                self.assertIn("Validation summary: 1 passed, 1 failed, 4 skipped.", lines)
+
+    def test_one_extra_site_fails_it_too(self):
+        extra = ("chr22", "CTAACAGTTGCTTTTATCACNGG", "CTAACAGTTGCTTTTATCACAGG", "+", "20000000")
+        code, lines = self.validate_py(gain=[extra])
+        self.assertEqual(code, 1, lines)
+        self.assertIn("  Missing in CRISPRme: 0  Extra in CRISPRme: 1", lines)
+        self.assertIn("Validation summary: 0 passed, 2 failed, 4 skipped.", lines)
+
+
+class EveryInstallFindsTheFiveEditReferences(unittest.TestCase):
+    """benchmarks.json's reference_base_url is the main branch, and validate.py goes there
+    for a reference the install does not hold. Docker and source installs hold test/ whole,
+    and CI copies the branch's over the image, so a reference committed with a change is found
+    before that change is merged. The Bioconda recipe leaves test/benchmark/brute-force-* out
+    of its package: a new reference there would be a 404 on a Bioconda build of a release
+    until that release is on main, so these two live outside it."""
+
+    # the recipe's own line (recipes/crisprme/build.sh in bioconda-recipes)
+    RECIPE_LEAVES_OUT = "brute-force-*"
+
+    def in_the_bioconda_layout(self, reference, md5, download):
+        """download_brute_force_targets on a tree with what the recipe packages under
+        test/benchmark, in a results folder of its own, `download` stubbed."""
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copytree(REFERENCES, os.path.join(d, "test", "benchmark"),
+                            ignore=shutil.ignore_patterns(self.RECIPE_LEAVES_OUT))
+            os.makedirs(os.path.join(d, "PostProcess"))
+            cwd = os.getcwd()
+            os.chdir(d)  # BFDIR is relative to the working folder
+            try:
+                with mock.patch.object(validate, "__file__", os.path.join(d, "PostProcess", "validate.py")), \
+                     mock.patch.object(validate, "download", side_effect=download) as fetched, \
+                     contextlib.redirect_stderr(io.StringIO()):
+                    path = validate.download_brute_force_targets("https://main.example/", reference, md5)
+                return os.path.relpath(path, d) if path.startswith(d) else path, fetched.call_args
+            finally:
+                os.chdir(cwd)
+
+    def test_they_need_no_network_there(self):
+        def no_network(*_a, **_k):
+            raise AssertionError("downloaded")
+        for name in TheFiveEditBenchmarksCatchALostSite.SITES:
+            with self.subTest(benchmark=name):
+                bench, _ = registered(name)
+                path, fetched = self.in_the_bioconda_layout(bench["reference"], bench["md5"], no_network)
+                self.assertEqual(os.path.normpath(path),
+                                 os.path.join("test", "benchmark", bench["reference"]))
+                self.assertIsNone(fetched)
+
+    def test_a_reference_in_a_brute_force_folder_is_downloaded_from_main_there(self):
+        # what the recipe's line does to the others, so what a new one must stay out of
+        bench, _ = registered("cas12a_hbg_simple")
+        ref = os.path.join(REFERENCES, bench["reference"])
+
+        def from_main(dest, http_url):
+            copy = os.path.join(dest, os.path.basename(http_url))
+            shutil.copyfile(ref, copy)
+            return copy
+        path, fetched = self.in_the_bioconda_layout(bench["reference"], bench["md5"], from_main)
+        self.assertEqual(fetched.kwargs["http_url"], "https://main.example/" + bench["reference"])
+        self.assertTrue(path.endswith(os.path.basename(bench["reference"])))
+
+    def test_every_committed_reference_has_its_registered_md5(self):
+        # a wrong one would send validate.py past the committed copy to the network
+        for bench in validate.load_benchmarks()["benchmarks"]:
+            with self.subTest(benchmark=bench["name"]):
+                path = os.path.join(REFERENCES, bench["reference"])
+                self.assertEqual(validate.compute_md5(path), bench["md5"])
+
+
+class TheDriverRegeneratesThemWithTheirOwnBudgets(unittest.TestCase):
+    """generate_references.py makes a benchmark's reference from its registry entry. It must
+    ask the generator for what complete-test asks the search: a 5-edit cap binding over the
+    wide-open per-type budgets. Run with a generator that records what it was asked."""
+
+    STUB = ("import sys\n"
+            "open(sys.argv[sys.argv.index('--output') + 1], 'w').write('CHR\\n')\n"
+            "open(sys.argv[0] + '.args', 'a').write(' '.join(sys.argv[1:]) + '\\n')\n")
+
+    def asked(self, name):
+        with tempfile.TemporaryDirectory() as d:
+            stub = os.path.join(d, "generator.py")
+            with open(stub, "w") as fout:
+                fout.write(self.STUB)
+            subprocess.run([sys.executable, os.path.join(REFERENCES, "generate_references.py"),
+                            "--enriched-fasta", "chr22.enriched.fa", "--chrom", "chr22",
+                            "--only", name, "--generator", stub, "--out-dir", d],
+                           capture_output=True, text=True, check=True)
+            with open(stub + ".args") as fin:
+                line = fin.read()
+        return line
+
+    def test_cas9(self):
+        args = self.asked("cas9_sg1617_n5")
+        for part in ("--rna CTAACAGTTGCTTTTATCACNGG", "--max-mismatches 5", "--max-dna-gaps 2",
+                     "--max-rna-gaps 2", "--chrom chr22", "--pam GG", "--max-total-edits 5",
+                     "cas9_sg1617_n5.chr22.tsv"):
+            self.assertIn(part, args)
+        self.assertNotIn("--pam-5prime", args)
+
+    def test_cas12a(self):
+        args = self.asked("cas12a_hbg_n5")
+        for part in ("--rna TTTVCCTTGTCAAGGCTATTGGTC", "--max-mismatches 5", "--max-dna-gaps 2",
+                     "--max-rna-gaps 2", "--chrom chr22", "--pam TTTV", "--max-total-edits 5",
+                     "--pam-5prime", "cas12a_hbg_n5.chr22.tsv"):
+            self.assertIn(part, args)
 
 
 class TheBruteForceSitesAreReadByPosition(unittest.TestCase):
