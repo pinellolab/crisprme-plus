@@ -10,12 +10,14 @@ if absent.
 Run with:
     <env>/bin/python3 -m unittest discover -s PostProcess -p 'test_post_process_tempdir.py' -v
 """
+import errno
 import os
 import shutil
 import stat
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 PP = os.path.dirname(os.path.abspath(__file__))
 
@@ -36,8 +38,11 @@ class PostProcessTempDir(unittest.TestCase):
                 fh.write("\t".join(["x","x","GGGG","x","chr1","x","1000"]) + "\n")
             # Run only the annotation-prep prefix of post_process.sh (through the
             # sort-bed of the annotation) with $2 = vuoto.txt, PostProcess/ read-only.
+            # On a read-only code directory (a SIF) it already is, and chmod raises EROFS.
             mode = os.stat(PP).st_mode
-            os.chmod(PP, mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
+            writable = os.access(PP, os.W_OK)
+            if writable:
+                os.chmod(PP, mode & ~stat.S_IWUSR & ~stat.S_IWGRP & ~stat.S_IWOTH)
             try:
                 script = (
                     'set -e; dir=$(dirname "$1"); annot_tmp="$dir/$(basename "$2")"; '
@@ -49,13 +54,27 @@ class PostProcessTempDir(unittest.TestCase):
                                    capture_output=True, text=True)
                 self.assertEqual(r.returncode, 0, r.stderr)
             finally:
-                os.chmod(PP, mode)
+                if writable:
+                    os.chmod(PP, mode)
             # temp landed under the output dir, NOT in PostProcess/
             self.assertTrue(os.path.isfile(os.path.join(out, "vuoto.txt.tmp.sorted.bed")))
             self.assertFalse(os.path.exists(os.path.join(PP, "vuoto.txt.tmp.bed")))
             self.assertFalse(os.path.exists(os.path.join(PP, "vuoto.txt.tmp.sorted.bed")))
         finally:
             shutil.rmtree(out, ignore_errors=True)
+
+    @unittest.skipUnless(shutil.which("sort-bed") and shutil.which("closest-features"),
+                         "bedops (sort-bed/closest-features) not on PATH")
+    def test_it_runs_on_a_code_directory_already_read_only(self):
+        """chmod on a read-only file system, as in a SIF: the test above stopped there,
+        with the state it sets up already in place."""
+        case = type(self)("test_no_annotation_temps_go_to_output_dir")
+        result = unittest.TestResult()
+        with mock.patch("os.access", return_value=False), \
+             mock.patch("os.chmod", side_effect=OSError(errno.EROFS, "Read-only file system")):
+            case.run(result)
+        self.assertEqual(result.errors + result.failures, [])
+        self.assertEqual(result.skipped, [])
 
 
 if __name__ == "__main__":

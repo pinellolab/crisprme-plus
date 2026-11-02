@@ -28,6 +28,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -311,12 +312,23 @@ class TestRejectionBehaviour(unittest.TestCase):
     """End to end: the gate runs before any other validation, so these need no data."""
 
     def _run(self, *flags):
-        return subprocess.run(
-            [sys.executable, CRISPRME, "complete-search", *flags],
-            capture_output=True,
-            text=True,
-            cwd=REPO,
-        )
+        # From a folder of its own: past the gate crisprme.py makes its data folders in the
+        # current one, which on a read-only code directory (a SIF) is a traceback before
+        # "--genome is required", and on a writable one leaves them beside the code.
+        with tempfile.TemporaryDirectory() as tmp:
+            return subprocess.run(
+                [sys.executable, CRISPRME, "complete-search", *flags],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+            )
+
+    def test_it_leaves_no_data_folder_beside_the_code(self):
+        """What a run of this class from the code directory did to an install, and what
+        stopped it on a read-only one."""
+        before = set(os.listdir(REPO))
+        self._run("--prune-pam")
+        self.assertEqual(set(os.listdir(REPO)) - before, set())
 
     def test_typo_is_rejected_with_a_suggestion(self):
         r = self._run("--prune-pams")
