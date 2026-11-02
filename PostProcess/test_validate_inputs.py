@@ -695,6 +695,52 @@ class TestCheckGuidePamConsistency(unittest.TestCase):
             )
             self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
 
+    def test_guide_longer_than_the_spacer_is_refused(self):
+        # POSITIVE: a 23-nt spacer with the 20-nt PAM file. The search kept its first 20
+        # nt and reported a shortened guide's off-targets under its name, at exit 0.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.SPCAS9_PAM, "TGACTAACAGTTGCTTTTATCACNNN\n"
+            )
+            issues = vi.check_guide_pam_consistency(guidefile, pamfile)
+            self.assertEqual(len(issues), 1)
+            self.assertEqual(issues[0].severity, vi.ERROR)
+            self.assertIn("drop 'CAC'", issues[0].message)
+            self.assertIn("is 26 nt", issues[0].message)
+            self.assertIn("spacer is 23 nt", issues[0].message)
+
+    def test_guide_longer_than_the_spacer_is_refused_for_a_5_prime_pam(self):
+        # POSITIVE: for a 5' PAM the search keeps the bases after the PAM padding, and
+        # the ones it drops are the PAM-distal ones.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, "TTTVNNNNNNNNNNNNNNNNNNNNNNN -4\n", "NNNNACGTACGTACGTACGTACGTACGTACG\n"
+            )
+            issues = vi.check_guide_pam_consistency(guidefile, pamfile)
+            self.assertEqual(len(issues), 1)
+            self.assertEqual(issues[0].severity, vi.ERROR)
+            self.assertIn("drop 'TACG'", issues[0].message)
+
+    def test_extra_n_padding_drops_nothing(self):
+        # NEGATIVE: over-padding with N's is harmless (byte-identical results, measured),
+        # on either side of the guide, in either case.
+        with tempfile.TemporaryDirectory() as tmp:
+            for pam, guide in ((self.SPCAS9_PAM, "CTAACAGTTGCTTTTATCACNNNNNNNN\n"),
+                               (self.SPCAS9_PAM, "CTAACAGTTGCTTTTATCACnnnnnnnn\n"),
+                               ("TTTVNNNNNNNNNNNNNNNNNNNNNNN -4\n",
+                                "NNNNACGTACGTACGTACGTACGTACGNNN\n")):
+                with self.subTest(guide=guide):
+                    guidefile, pamfile = self._write(tmp, pam, guide)
+                    self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
+
+    def test_a_longer_guide_with_a_spacer_that_fits_is_not_flagged(self):
+        # NEGATIVE: the discarded window is N's, whatever the padding beyond it holds.
+        with tempfile.TemporaryDirectory() as tmp:
+            guidefile, pamfile = self._write(
+                tmp, self.SPCAS9_PAM, "CTAACAGTTGCTTTTATCACNNTGG\n"
+            )
+            self.assertEqual(vi.check_guide_pam_consistency(guidefile, pamfile), [])
+
     def test_empty_lines_ignored(self):
         # NEGATIVE: blank lines between padded guides are ignored.
         with tempfile.TemporaryDirectory() as tmp:

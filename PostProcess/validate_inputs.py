@@ -745,17 +745,22 @@ def check_guide_pam_consistency(guidefile: str, pamfile: str) -> List[Issue]:
     caught here, up front, with an exact fix, instead of crashing deep in the
     run.
 
-    Severity rationale: an ERROR is raised ONLY for guides strictly SHORTER
-    than the PAM motif's total length. That is precisely (and only) the case
-    that triggers the `IndexError` above -- a guide of the correct length (with
-    or without literal-PAM bases in the PAM positions) does not, and a guide
-    LONGER than the motif is left to `check_guide_file`'s length-consistency
-    check. This keeps the check from false-positiving on: correctly-padded 3'
-    guides (`...NNN`), correctly-padded 5' guides (`NNNN...`), the `--sequence`
-    extracted+padded guides, guides with a lowercase `n` or a literal PAM in
-    the PAM positions, short-form PAM files (motif == bare PAM, e.g. `NGG 3`)
-    whose guides are legitimately longer than the motif, and empty/malformed
-    PAM files (skipped entirely).
+    Severity rationale: an ERROR is raised for guides strictly SHORTER than
+    the PAM motif's total length, which triggers the `IndexError` above, and
+    for guides LONGER than it whose spacer does not fit the PAM file's: the
+    search keeps `spacer_len` bases of a guide and silently drops the rest
+    (searchTST: `line.substr(0, pamlen - pamlimit)`), and reports off-targets
+    of the shortened guide under the guide's name. Only a non-N base in that
+    window counts, as padding with extra N's drops nothing. A guide of the
+    correct length (with or without literal-PAM bases in the PAM positions)
+    is accepted: a bare longer spacer of exactly the motif's length cannot be
+    told from a spacer + literal PAM. This keeps the check from
+    false-positiving on: correctly-padded 3' guides (`...NNN`),
+    correctly-padded 5' guides (`NNNN...`), the `--sequence` extracted+padded
+    guides, guides with a lowercase `n` or a literal PAM in the PAM positions,
+    short-form PAM files (motif == bare PAM, e.g. `NGG 3`, no spacer to fit)
+    whose guides are longer than the motif, and empty/malformed PAM files
+    (skipped entirely).
 
     Args:
         guidefile: Path to the guide RNA file (the copied-verbatim
@@ -779,8 +784,27 @@ def check_guide_pam_consistency(guidefile: str, pamfile: str) -> List[Issue]:
         return []  # already reported by check_guide_file
     where = "prepend" if pam_begin else "append"
     fixed_hint = (("N" * pam_len) + "...") if pam_begin else ("..." + ("N" * pam_len))
+    spacer_len = total_len - pam_len
     issues: List[Issue] = []
     for guide in guides:
+        if len(guide) > total_len and spacer_len > 0:
+            # what the search does not keep of the guide: past the spacer, up to its PAM
+            # padding for a 3' PAM, and to its end for a 5' PAM
+            dropped = (guide[pam_len + spacer_len:] if pam_begin
+                       else guide[spacer_len:len(guide) - pam_len])
+            if dropped.strip("Nn"):
+                issues.append(
+                    Issue(
+                        ERROR,
+                        f"{fname}: guide '{guide}' is {len(guide)} nt but the PAM "
+                        f"'{os.path.basename(pamfile)}' expects a padded length of "
+                        f"{total_len} nt ({spacer_len} nt spacer + {pam_len} nt PAM). The "
+                        f"search would silently drop '{dropped}' from it and report "
+                        f"off-targets of the shortened guide. Fix: use a PAM file whose "
+                        f"spacer is {len(guide) - pam_len} nt, or shorten the guide.",
+                    )
+                )
+                continue
         if len(guide) < total_len:
             issues.append(
                 Issue(

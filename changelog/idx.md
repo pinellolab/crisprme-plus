@@ -31,3 +31,8 @@
   such search, in 2.8.0 too. It now stops with one ERROR that names the index and the library and
   says what to do, shown on the web job's banner. A library that holds the right index still serves
   the search, byte-identically, and a 0-bulge search, which opens no index there, still runs.
+- **A guide longer than its PAM file's spacer is refused.** The search kept the spacer's length of
+  it and dropped the rest with no message: a 23-nt guide with `20bp-NGG` was searched without its
+  last 3 nt (2 rows against 35, and none at 0 bulges, at exit 0), under the full guide's name. The
+  pre-flight now says which bases would go and what to do. Padding with extra `N`s drops nothing
+  and stays accepted. CLI `--guide` only: the web form and `--sequence` never pass such a guide.
