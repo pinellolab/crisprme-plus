@@ -138,6 +138,22 @@ def _importable():
     )
 
 
+def scanned_files():
+    """Yield every file the caller scan below reads: each .py, .sh, .yml and .yaml
+    file in the checkout, wherever it is, but the tests and crisprme.py.
+
+    test_ci_workflows checks that a pull request changing any of them starts the
+    job that runs this scan.
+    """
+    for path in sorted(pathlib.Path(REPO).rglob("*")):
+        if path.suffix not in (".py", ".sh", ".yml", ".yaml") or not path.is_file():
+            continue
+        if (path.name.startswith("test_") or ".git" in path.parts
+                or path.resolve() == pathlib.Path(CRISPRME).resolve()):
+            continue
+        yield path
+
+
 class TestCallersUseAcceptedFlags(unittest.TestCase):
     """Every complete-search flag the project itself passes must be accepted.
 
@@ -162,12 +178,7 @@ class TestCallersUseAcceptedFlags(unittest.TestCase):
         string pieces. crisprme.py itself is excluded -- it defines the flags, and
         its help text is covered by test_every_documented_flag_is_accepted.
         """
-        for path in sorted(pathlib.Path(REPO).rglob("*")):
-            if path.suffix not in (".py", ".sh", ".yml", ".yaml"):
-                continue
-            if (path.name.startswith("test_") or ".git" in path.parts
-                    or path.resolve() == pathlib.Path(CRISPRME).resolve()):
-                continue
+        for path in scanned_files():
             try:
                 lines = path.read_text(encoding="utf-8").split("\n")
             except (OSError, UnicodeDecodeError):

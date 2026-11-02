@@ -7,7 +7,6 @@ what it is there to test, passes for nothing, and the release rule is all-green 
 Read as text: the CI env has no YAML parser (and YAML 1.1 reads the `on` key as true).
 """
 import ast
-import fnmatch
 import json
 import os
 import re
@@ -43,6 +42,18 @@ def pull_request_paths(name):
     return paths
 
 
+def listed(path, patterns):
+    """Whether a path filter matches `path` as GitHub matches it: * stops at a slash, ** does
+    not, and **/ may match nothing (fnmatch's * crosses slashes). The filters here use no
+    other wildcard."""
+    for pattern in patterns:
+        rx = "".join({"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*"}.get(part, re.escape(part))
+                     for part in re.split(r"(\*\*/|\*\*|\*)", pattern))
+        if re.fullmatch(rx, path):
+            return True
+    return False
+
+
 def function_based_modules():
     """The test modules whose tests are plain functions run by their own __main__."""
     found = []
@@ -71,7 +82,20 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
     PostProcess/, though it runs test_web_* and test_results_* from there, on code the pages
     import. unit-tests.yml listed two pages/ files, though its tests read main_page.py and
     the whole folder, and missed scripts/, test/benchmark/ and the docs its tests scan. The
-    release PR touches everything, so this bit later PRs: green with the job never started."""
+    release PR touches everything, so this bit later PRs: green with the job never started.
+    A replay of both workflows' steps, logging each file read, found more: the report tests
+    read assets/ and test/data/samplesIDs/, test_complete_search_flags reads every script in
+    the repository, seq_script/ and the paper's included, for a complete-search caller, and
+    the web pages import seq_script/ and download_hprc_assembly.py."""
+
+    # read in that replay, by a test the workflow runs, and matched by none of its filters before
+    SEEN = {"unit-tests.yml": ("assets/crisprme-logo.svg", "assets/crisprme_bg_report.jpg",
+                               "test/data/samplesIDs/samplesIDs.1000G.txt", "environment.yml",
+                               "seq_script/merge_panels/build_combined_panel.sh",
+                               "download_hprc_assembly.py", "plot_generation_paper/plot_generation.sh",
+                               "paper/reproducibility/variant-datasets/hg38_AoU/csv_to_vcf.py"),
+            "web-e2e.yml": ("seq_script/convert_pam.py", "seq_script/extract_seq.py",
+                            "download_hprc_assembly.py", "PAMs/20bp-NRG-SpCas9.txt")}
 
     def test_web_e2e_runs_on_postprocess(self):
         self.assertIn("PostProcess/**", pull_request_paths("web-e2e.yml"))
@@ -79,7 +103,8 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
     def test_unit_tests_runs_on_what_its_tests_read(self):
         paths = pull_request_paths("unit-tests.yml")
         for path in ("pages/**", "scripts/**", "docs/**", "README.md", "METHODS.md",
-                     "test/benchmark/**", "PAMs/**", "CHANGELOG.md", ".github/workflows/**"):
+                     "test/benchmark/**", "PAMs/**", "CHANGELOG.md", ".github/workflows/**",
+                     "assets/**", "test/data/**", "**.py", "**.sh", "**.yml", "**.yaml"):
             with self.subTest(path=path):
                 self.assertIn(path, paths)
 
@@ -88,6 +113,15 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
         self.assertNotIn("pages/history_page.py", paths)
         self.assertNotIn("pages/settings_page.py", paths)
 
+    def test_the_match_is_githubs(self):
+        # with fnmatch's, "*.py" would pass for a script in a folder
+        self.assertTrue(listed("seq_script/merge_panels/hprc_build.sh", ["**.sh"]))
+        self.assertFalse(listed("seq_script/convert_pam.py", ["*.py"]))
+        self.assertTrue(listed("docs/hf/card.md", ["docs/**"]))
+        self.assertFalse(listed("docs/hf/card.md", ["docs/*"]))
+        self.assertFalse(listed("READMEXmd", ["README.md"]))
+        self.assertTrue(listed("README.md", ["**/README.md"]))
+
     def test_a_path_this_module_reads_is_listed_for_it(self):
         # this module reads them, so it must run on a change to any
         paths = pull_request_paths("unit-tests.yml")
@@ -95,7 +129,40 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
                      "install_from_source.sh", "test/benchmark/benchmarks.json",
                      ".github/workflows/web-e2e.yml", "crisprme.py", "PostProcess/validate.py"):
             with self.subTest(path=read):
-                self.assertTrue(any(fnmatch.fnmatch(read, p.replace("**", "*")) for p in paths))
+                self.assertTrue(listed(read, paths))
+
+    def test_a_file_its_steps_were_seen_to_read_is_listed(self):
+        for name, files in self.SEEN.items():
+            paths = pull_request_paths(name)
+            for read in files:
+                with self.subTest(workflow=name, path=read):
+                    self.assertTrue(listed(read, paths))
+
+    def test_every_file_the_flag_gate_scans_is_listed(self):
+        # a pull request adding a complete-search call with a dead flag anywhere must start it
+        import test_complete_search_flags as flag_gate
+        paths = pull_request_paths("unit-tests.yml")
+        scanned = [os.path.relpath(p, flag_gate.REPO) for p in flag_gate.scanned_files()]
+        self.assertIn("PostProcess/complete_test.py", scanned)
+        self.assertEqual([p for p in scanned if not listed(p, paths)], [])
+
+    def test_web_e2e_runs_on_every_repository_module_the_pages_import(self):
+        # the web unit tests and the browser tests load the pages, and so all they import
+        paths = pull_request_paths("web-e2e.yml")
+        files = set()
+        for src in sorted(REPO.glob("pages/*.py")) + [REPO / "app.py", REPO / "index.py"]:
+            for node in ast.walk(ast.parse(read(src))):
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                    names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+                else:
+                    continue
+                for name in names:
+                    stem = name.replace(".", "/")
+                    files |= {f for f in (f"{stem}.py", f"{stem}/__init__.py") if (REPO / f).is_file()}
+        self.assertIn("seq_script/convert_pam.py", files)
+        self.assertEqual(sorted(f for f in files if not listed(f, paths)), [])
 
 
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")

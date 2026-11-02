@@ -42,6 +42,17 @@ on:
       - ".gitignore"
       # test_ci_workflows reads all of them
       - ".github/workflows/**"
+      # generate_report.py, which the report tests run, puts assets/'s logo and background
+      # into each report, and falls back to test/data/samplesIDs/ for the sample lists.
+      - "assets/**"
+      - "test/data/**"
+      # test_complete_search_flags reads every .py, .sh, .yml and .yaml file in the
+      # repository, seq_script/ and the paper's scripts too, for a complete-search command
+      # with a flag complete-search rejects.
+      - "**.py"
+      - "**.sh"
+      - "**.yml"
+      - "**.yaml"
   push:
     branches: [ "main", "python3.11", "2.2.0-dev" ]
   workflow_dispatch:

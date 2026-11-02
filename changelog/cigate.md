@@ -69,10 +69,13 @@ entry, whose "their variables go" then becomes "its variable goes".
   the impg truth tests, the flag-gate behaviour tests, the `post_process.sh` test, whose own step in
   the light job tested nothing, and `test_index_resolution` (368 tests, about 100 s). It fails on any
   skip but the two the image cannot help. `validate-benchmarks.yml`'s smoke step runs the real
-  Hugging Face download test, which no job ran. The path filters list what the tests read: a pull
-  request that changed only `pages/`, `scripts/`, `docs/`, the README or `test/benchmark/` did not
-  start `unit-tests`, and one that changed only `PostProcess/` did not start `web-e2e`. Covered by
-  `PostProcess/test_ci_workflows.py`, which `unit-tests.yml` runs.
+  Hugging Face download test, which no job ran. The path filters of `unit-tests` and `web-e2e` list
+  every file their tests read, as found by replaying each step with every file read logged: a pull
+  request that changed only `pages/`, `scripts/`, `docs/`, the README, `test/benchmark/`,
+  `test/data/`, `assets/`, or a script outside `PostProcess/` such as one in `seq_script/`, did not
+  start `unit-tests`, and one that changed only `PostProcess/`, `seq_script/`, `PAMs/` or
+  `download_hprc_assembly.py` did not start `web-e2e`. Covered by `PostProcess/test_ci_workflows.py`,
+  which `unit-tests.yml` runs.
 - **`docs/RELEASE_CHECKLIST.md` Gate B gives the local gate** (maintainers): the exact commands that
   leave nothing skipped, on the release image, amd64 and arm64, with the three skips it allows
   named. The six function-based test modules run as scripts there, since `python -m unittest` alone

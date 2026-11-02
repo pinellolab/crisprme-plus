@@ -6,8 +6,9 @@ name: web e2e (playwright)
 # Chromium via Playwright asserting every routed page renders non-blank with the
 # navbar and no uncaught JS errors (test/web/test_web_e2e.py).
 #
-# Runs on web-affecting changes (and on demand), and on PostProcess/, which the pages
-# import and whose test modules the steps below run. It builds the image from source
+# Runs on web-affecting changes (and on demand), on PostProcess/, which the pages
+# import and whose test modules the steps below run, and on the other files the pages
+# import or its tests read. It builds the image from source
 # because the app requires the PR's Dash-2.x code AND a Dash-2.x runtime — the
 # released bioconda image still ships Dash 1.x, so overlaying code onto it would
 # not exercise the migration.
@@ -23,6 +24,11 @@ on:
       - "Dockerfile"
       - "test/web/**"
       - "PostProcess/**"
+      # main_page.py imports seq_script/ and the Settings page download_hprc_assembly.py;
+      # test_main_page_assembly copies its PAM from PAMs/
+      - "seq_script/**"
+      - "download_hprc_assembly.py"
+      - "PAMs/**"
       - ".github/workflows/web-e2e.yml"
   workflow_dispatch:
 
