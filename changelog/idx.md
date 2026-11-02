@@ -7,7 +7,11 @@ byte-identical reports to a dedicated NRG index: that was measured for one guide
 a contig's end, and a flank wider than the PAM does not index a PAM at a contig's very end or
 start: add that, as the first "Changed" entry below words it. changelog/asm.md's entry on the
 genome folder an index records says `complete-search` records it: `build-index-only` now does
-too (the entry below on `build-index-only`'s record). -->
+too (the entry below on `build-index-only`'s record). In the [2.8.1] entry on a PAM-less index
+taken only for a PAM on the side it was built for, the line that starts "+ 1 RNA bulge, Cas12a's
+`TTTV`" renders as a nested bullet, as any line that starts with "+ " does: end the line before
+with "+" and start this one with "1 RNA bulge". -->
+
 
 ### Fixed
 
