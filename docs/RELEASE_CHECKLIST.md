@@ -32,7 +32,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
   `indexes/` in both dataset repos.
 - [ ] **Every published variant archive can find indels — checked in the ARCHIVE** (T-40). For
   each `indexes/*+*.tar.gz` (download it, or stage it before upload), list its members and
-  confirm: every `<index>_INDELS/<sub-index>/` holds at least one `.bin` unless that chromosome's
+  confirm: every `<index>_INDELS/<sub-index>/` holds at least one `.bin`, or the `.no_targets` record of a build that found no target, unless that chromosome's
   `Dictionaries/log_indels_<vcf>/log<chr>.txt.gz` is header-only (a SNP-only chromosome), and the
   `log_indels_<vcf>` logs are not all header-only. A present-but-empty `_INDELS` is always a broken
   build: a dataset with no indels gets no `_INDELS` at all. Also confirm every archive built on a
