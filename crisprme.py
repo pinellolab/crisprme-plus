@@ -104,6 +104,7 @@ import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layou
 import index_fit  # noqa: E402  (which guide lengths an index can answer)
 import genome_in_use  # noqa: E402  (what is built on a genome's name)
 import index_coverage  # noqa: E402  (whether an index holds every chromosome)
+import prune_flank  # noqa: E402  (an all-N index built before the N-flank fix)
 
 cicd_test = False
 if "--ci-cd-test" in input_args:
@@ -2076,6 +2077,91 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
         )
 
 
+def _index_the_search_takes(libs: List[str], motif: str, suffix: str, want: int, prune: bool,
+                            three_prime: bool, guide_len: int, bdna: int, brna: int,
+                            variant: bool) -> "Optional[str]":
+    """The index the search script's _resolve_index_dir takes for this search from the first
+    of ``libs`` that holds one (the variant index is read from two: _variant_libraries), or
+    None: of <PAM>_<N>_<suffix> with N >= ``want``, the search's PAM ahead of an all-N one,
+    then one built for this very guide, then the smallest N, then the narrowest flank; an
+    all-N one of the PAM's width, or wider under --prune-pam for a 3' PAM; of the search's
+    side (_side_serves); not locked, with a .bin; and fitting the guide (index_fit; any
+    fits a reference search with no bulges, which opens none). Best-effort: None on error."""
+    try:
+        for lib in libs:
+            best, best_key = None, None
+            for d in _listdir(lib):
+                index = os.path.join(lib, d)
+                pam, _, rest = d.partition("_")
+                n, _, held = rest.partition("_")
+                if (held != suffix or not n.isdigit() or int(n) < want or d.endswith("_INDELS")
+                        or not os.path.isdir(index) or os.path.isdir(index + ".lock")
+                        or not any(f.endswith(".bin") for f in _listdir(index))):
+                    continue
+                all_n = bool(pam) and set(pam) == {"N"}
+                if pam == motif:
+                    exact = 1
+                elif all_n and (len(pam) == len(motif)
+                                or (prune and three_prime and len(pam) > len(motif))):
+                    exact = 0
+                else:
+                    continue
+                built = index_fit.built_guide_len(index)
+                if not _side_serves(index, pam, motif, three_prime) or (
+                        (variant or bdna or brna)
+                        and not index_fit.fits(built, int(n), guide_len, bdna, brna)):
+                    continue
+                key = (exact, int(not built or built == guide_len), -int(n), -len(pam))
+                if best_key is None or key > best_key:
+                    best, best_key = index, key
+            if best:
+                return best
+    except Exception:
+        return None
+    return None
+
+
+def _wider_flank_notes(indexes: List[str], motif: str, genomedir: str) -> List[str]:
+    """What a search under --prune-pam should say of the all-N indexes ``indexes`` it reads,
+    whose stored flank is wider than the PAM ``motif`` (the others: nothing), one line each:
+    the sites such a flank cannot index (METHODS section 9), and, for an index built before
+    the engine kept a target whose flank holds an N (prune_flank), the sites it misses."""
+    notes, seen = [], set()
+    for index in indexes:
+        pam = os.path.basename(index).split("_")[0]
+        if not index or not pam or set(pam) != {"N"} or len(pam) <= len(motif) or index in seen:
+            continue
+        seen.add(index)
+        if not notes:
+            d = len(pam) - len(motif)
+            notes.append(
+                f"NOTE [complete-search]: --prune-pam serves the {len(motif)}-nt PAM {motif} from "
+                f"{os.path.basename(index)}, whose stored flank is {len(pam)} nt: a + strand PAM "
+                f"with 1 to {d} nt after it to the end of a contig, and a - strand PAM in the first "
+                f"{d} nt of a contig, are not indexed, and one {d} nt from the start is reported on "
+                f"the + strand at another position (METHODS section 9). An index whose flank is "
+                f"the PAM's width, or a dedicated one, has no such limit.")
+        try:
+            if os.path.basename(index).count("+"):
+                before = prune_flank.indels_built_before_n_fix(index + "_INDELS") \
+                    if os.path.isdir(index + "_INDELS") else None
+                if before is None:
+                    before = prune_flank.built_before_n_fix(index, genomedir)
+            else:
+                before = prune_flank.built_before_n_fix(index, genomedir)
+        except OSError:
+            before = None
+        if before:
+            notes.append(
+                f"WARNING [complete-search]: {os.path.basename(index)} stores no N in the flank of "
+                f"any target where its genome has one: it was built before CRISPRitz 2.9.1 "
+                f"(CRISPRme 2.8.0 or earlier), which dropped such targets, and searched for the "
+                f"shorter PAM {motif} it misses the sites whose flank holds an N. Remove it and "
+                f"build it again with build-index-only (which keeps an index it finds in place), "
+                f"or search without --prune-pam and --index-path, which builds a dedicated index.")
+    return notes
+
+
 def _variant_libraries(index_path: str) -> List[str]:
     """The libraries a search reads a variant index from, in the order it reads them: the
     --index-path library (``index_path``, "_" for none), then the working directory's
@@ -2681,6 +2767,23 @@ def complete_search() -> None:
         genomedir, index_path, bMax, pam_char, prune_pam, not pam_begin, bDNA, bRNA,
         total_pam_len - pam_len
     )
+    # A search that reads an all-N index whose flank is wider than its PAM says so, and what
+    # that costs (_wider_flank_notes): on stdout, and into the run's Params.txt
+    prune_notes = []
+    if prune_pam:
+        _three = not pam_begin
+        _guide = total_pam_len - pam_len
+        _taken = [_index_the_search_takes([index_path], pam_char, genome_ref, bMax + 1, True,
+                                          _three, _guide, bDNA, bRNA, False)] if bMax else []
+        if variant:
+            for _vdir in resolve_vcf_dataset_dirs(vcfdir, current_working_directory):
+                _taken.append(_index_the_search_takes(
+                    _variant_libraries(index_path), pam_char,
+                    f"{genome_ref}+{os.path.basename(os.path.normpath(_vdir))}", bMax + 1, True,
+                    _three, _guide, bDNA, bRNA, True))
+        prune_notes = _wider_flank_notes([t for t in _taken if t], pam_char, genomedir)
+        for _note in prune_notes:
+            print(_note, flush=True)
     if variant:
         genome_idx_list = []
         with open(vcfdir, "r") as vcfs:
@@ -2748,6 +2851,8 @@ def complete_search() -> None:
                 )
                 + "\n"
             )
+        if prune_notes:  # (a single physical line, as Pruning_note)
+            p.write("Prune_pam_note\t" + " ".join(prune_notes) + "\n")
         p.write("Annotation\t" + str(annotation_name) + "\n")
         p.write("Nuclease\t" + str(nuclease) + "\n")
         # p.write('Gecko\t' + str(gecko_comp) + '\n')

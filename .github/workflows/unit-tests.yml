@@ -345,6 +345,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_index_coverage -v
 
+      - name: "Prune flank (an all-N index built before the N-flank fix, and a wider flank, are said)"
+        working-directory: PostProcess
+        run: python -m unittest test_prune_flank -v
+
       - name: "Indel report integrity (header injection) + complete-search flag gate + index resolution"
         # The header-injection guards: a dropped CRISPRitz header made
         # post_analisi_indel.sh prepend the merged file's first DATA row to every

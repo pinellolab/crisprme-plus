@@ -246,3 +246,21 @@ registry. -->
   dedicated index; NRG on an unrecorded `NNN_3`, and on an unrecorded K=8 with `--prune-pam`, is
   unchanged. A dedicated index built for the other side's PAM by a search before 2.8.1 records
   nothing and cannot be told apart: remove it if you built one from such a PAM file.
+- **A search under `--prune-pam` warns of an all-N index built by CRISPRme 2.8.0 or earlier.**
+  CRISPRitz before 2.9.1 dropped every target whose stored PAM/flank region held an `N`. Searched
+  for a PAM narrower than its flank, which 2.8.1 newly allows, such an index misses the sites
+  whose flank holds an `N` past the bases the PAM covers, at exit 0 (the review measured 3 of 36
+  rows on its synthetic genome, and 2.6% of the indel rows on chr22, none above CFD 0.2; on 2.8.0
+  such an index could serve only an all-`N` search of its own width, where nothing is lost). The
+  index records nothing of the engine that built it, but its trees do: an index built since stores
+  an `N` in the flank of a target beside one, and no earlier build does. Measured on the lab's
+  hg38 indexes: the `NNN_3` variant and INDELS indexes of the 2.8.0 install hold none, and the
+  rebuilt `NNN_3`, the published K=8 and the final K=8 builds do. **Affected:** a K=8 or `NNN_3`
+  index you built or downloaded before 2.8.1 (the published replacements are not), searched with
+  `--prune-pam` for a narrower PAM. **What to do:** remove such an index and build it again, or
+  download it again; `build-index-only` keeps an index it finds in place. The search now reads the
+  trees of the index it takes when its flank is wider than the PAM (the smallest tree of a contig
+  whose sequence holds an `N`, and of the INDELS index the smallest one of several indel windows)
+  and prints a `WARNING` on stdout, also written to the run's `Params.txt`, when it finds no
+  `N`; it does not stop the search. An index of the PAM's width is not read, and nothing else
+  changes.
