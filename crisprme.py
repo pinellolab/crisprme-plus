@@ -416,7 +416,8 @@ def _datasets_without_genotypes(vcf_list: str) -> List[str]:
     registry (Dictionaries/registry_<vcf>/) and neither a genotype store with something in
     it (genotypes_<vcf>/) nor the classic per-sample dictionaries (dictionaries_<vcf>/). A
     dataset with no registry is left out: its search builds the dictionaries from its VCFs,
-    or stops for want of them."""
+    or stops for want of them. complete-search leaves out a sites-only one too, which has no
+    genotypes to install: its post-analysis is the population-level one in any mode."""
     dicts = os.path.join(current_working_directory, "Dictionaries")
     found = []
     for vdir in resolve_vcf_dataset_dirs(vcf_list, current_working_directory):
@@ -2482,13 +2483,6 @@ def complete_search() -> None:
     if _force_ps and _force_pop:
         error("--per-sample and --population-level are mutually exclusive; omit both to "
               "auto-select by index type (per-sample on a phased genotyped index).")
-    # A per-sample analysis resolves each sample's genotypes, read from the dataset's
-    # genotype store (Dictionaries/genotypes_<vcf>/) or its classic per-sample dictionaries.
-    # An install with neither -- download --what index --no-genotypes, or a genotype tar that
-    # did not come -- has the registry alone: a per-sample analysis there joins no two SNPs of
-    # a site and drops what only such a pair reaches, while the population-level one reports
-    # each site's worst case. So it runs population-level, and says why.
-    _no_store = _datasets_without_genotypes(vcfdir) if variant else []
     # The datasets the search names whose registry says sites-only: no genotypes to resolve,
     # so their post-analysis is population-level whatever the mode (new_simple_analysis.py).
     # --per-sample on such datasets alone is then the population-level analysis, as said.
@@ -2499,6 +2493,17 @@ def complete_search() -> None:
         if _registry_data_type(os.path.join(current_working_directory, "Dictionaries",
                                             f"registry_{_n}")) == "sites-only"
     ]
+    # A per-sample analysis resolves each sample's genotypes, read from the dataset's
+    # genotype store (Dictionaries/genotypes_<vcf>/) or its classic per-sample dictionaries.
+    # An install with neither -- download --what index --no-genotypes, or a genotype tar that
+    # did not come -- has the registry alone: a per-sample analysis there joins no two SNPs of
+    # a site and drops what only such a pair reaches, while the population-level one reports
+    # each site's worst case. So it runs population-level, and says why. A sites-only dataset
+    # has no store to install and is not one of these: its own post-analysis is the
+    # population-level one whatever the mode (above), so it leaves the mode of the datasets
+    # beside it as it is.
+    _no_store = [_vn for _vn in (_datasets_without_genotypes(vcfdir) if variant else [])
+                 if _vn not in _sites_only]
     if _force_ps and _sites_only and set(_sites_only) == set(_named):
         print(
             f"WARNING [complete-search]: --per-sample has nothing to resolve here, as what "
@@ -2516,37 +2521,16 @@ def complete_search() -> None:
         per_sample = _dt == "genotyped-phased"
     if per_sample and _no_store:
         per_sample = False
-        # A sites-only panel (the mega one) has no genotypes at all: no store to install.
-        _sites_only = [_vn for _vn in _no_store if _registry_data_type(os.path.join(
-            current_working_directory, "Dictionaries", f"registry_{_vn}")) == "sites-only"]
-        _unstored = [_vn for _vn in _no_store if _vn not in _sites_only]
-        if _sites_only:
-            _one = len(_sites_only) == 1
-            _it, _its = ("it", "its") if _one else ("them", "their")
-            if _force_ps:
-                _what = ("--per-sample runs the POPULATION-LEVEL analysis, the same as without "
-                         f"it, which reports each site's worst case, with no carriers for {_it}.")
-            else:
-                _what = ("running the POPULATION-LEVEL analysis, which reports each site's worst "
-                         f"case, with no carriers for {_it}; a per-sample one would lose the "
-                         f"off-targets that need two of {_its} variants together.")
-            print(
-                f"WARNING [complete-search]: {', '.join(_sites_only)} "
-                f"{'is a sites-only panel' if _one else 'are sites-only panels'}, with no "
-                f"genotypes to resolve: {_what}",
-                flush=True,
-            )
-        if _unstored:
-            print(
-                f"WARNING [complete-search]: no genotype store (Dictionaries/genotypes_<vcf>/) "
-                f"and no per-sample dictionaries for {', '.join(_unstored)}: running the "
-                f"POPULATION-LEVEL analysis{' instead of --per-sample' if _force_ps else ''}, "
-                f"which reports each site's worst case with no carriers; a per-sample one would "
-                f"lose the off-targets that need two SNPs of a sample together. To get carriers "
-                f"and CONFIRMED cis phasing, install the store: crisprme.py download --what "
-                f"index --index-name <the index> (without --no-genotypes).",
-                flush=True,
-            )
+        print(
+            f"WARNING [complete-search]: no genotype store (Dictionaries/genotypes_<vcf>/) "
+            f"and no per-sample dictionaries for {', '.join(_no_store)}: running the "
+            f"POPULATION-LEVEL analysis{' instead of --per-sample' if _force_ps else ''}, "
+            f"which reports each site's worst case with no carriers; a per-sample one would "
+            f"lose the off-targets that need two SNPs of a sample together. To get carriers "
+            f"and CONFIRMED cis phasing, install the store: crisprme.py download --what "
+            f"index --index-name <the index> (without --no-genotypes).",
+            flush=True,
+        )
     elif per_sample and not _force_ps:
         print(
             "[complete-search] genotyped + PHASED index detected -> PER-SAMPLE analysis "

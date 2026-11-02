@@ -120,23 +120,35 @@ def engine_prunes():
 
 
 def search(work, output, guide="g20.txt", pam="20bp-NRG-SpCas9.txt", bulges=(1, 1), variant=True,
-           extra=(), samples=True, user=None, env=None):
+           extra=(), samples=True, user=None, env=None, vcf="list_vcf.txt"):
     args = ["complete-search", "--genome", "Genomes/gx", "--guide", guide, "--pam", f"PAMs/{pam}",
             "--mm", "4", "--output", output, "--thread", THREADS]
     if bulges is not None:
         args += ["--bDNA", str(bulges[0]), "--bRNA", str(bulges[1])]
     if variant:
-        args += ["--vcf", "list_vcf.txt"] + (["--samplesID", "list_samplesID.txt"] if samples else [])
+        args += ["--vcf", vcf] + (["--samplesID", "list_samplesID.txt"] if samples else [])
     return cli(work, *args, *extra, user=user, env=env)
 
 
-def result_log(work, output):
-    """What a run wrote to its error log."""
+def result_log(work, output, name="log_error.txt"):
+    """What a run wrote to its error log (or to another log of its folder)."""
     try:
-        with open(os.path.join(work, "Results", output, "log_error.txt")) as fh:
+        with open(os.path.join(work, "Results", output, name)) as fh:
             return fh.read()
     except OSError:
         return ""
+
+
+def sites_only(work, dataset):
+    """Stamp a dataset's registry sites-only, as the published mega panel's is."""
+    registry = os.path.join(work, "Dictionaries", f"registry_{dataset}")
+    for name in os.listdir(registry):
+        if name.startswith("reg_") and name.endswith(".idx"):
+            with open(os.path.join(registry, name)) as fh:
+                manifest = json.load(fh)
+            manifest["data_type"] = "sites-only"
+            with open(os.path.join(registry, name), "w") as fh:
+                json.dump(manifest, fh)
 
 
 def table(work, output):
@@ -146,6 +158,33 @@ def table(work, output):
         return None
     with open(found[0]) as fh:
         return fh.read()
+
+
+def rows_at(text, chrom, start, block="highest_CFD"):
+    """The rows of an integrated results table at chrom:start (its ``block`` columns), as
+    dicts of the block's column names without the block suffix."""
+    if not text:
+        return []
+    lines = text.rstrip("\n").split("\n")
+    head = lines[0].split("\t")
+    suffix = f"_({block})"
+    found = []
+    for line in lines[1:]:
+        row = dict(zip(head, line.split("\t")))
+        if row.get("Chromosome") == chrom and row.get(f"Start_coordinate{suffix}") == str(start):
+            found.append({k[:-len(suffix)] if k.endswith(suffix) else k: v for k, v in row.items()})
+    return found
+
+
+def the_cis_site(text):
+    """Whether the cis SNP+indel site at chr3:20000 is the row the truth gives: one mismatch
+    with the deletion and the SNP on one haplotype, CFD 0.353, carrier S4 alone (S5 has the
+    deletion and the SNP on its two haplotypes, in trans)."""
+    rows = rows_at(text, "chr3", 20000)
+    return len(rows) == 1 and (
+        rows[0]["Aligned_protospacer+PAM_ALT"] == "CTAcCAGTTGCTTTTATCACTGG"
+        and rows[0]["CFD_score"] == "0.353" and rows[0]["Variant_samples"] == "S4"
+        and rows[0]["Variant_rsID"] == "rs20011,rs20016")
 
 
 def build(root, seed, name, pam, bulges, variant=True):
@@ -371,21 +410,50 @@ def main(root):
     w = as_download(copy_of(root, nrg2, "sites_only"))
     for d in ("genotypes_gx_ds", "dictionaries_gx_ds"):
         shutil.rmtree(os.path.join(w, "Dictionaries", d), ignore_errors=True)
-    registry = os.path.join(w, "Dictionaries", "registry_gx_ds")
-    for name in os.listdir(registry):
-        if name.startswith("reg_") and name.endswith(".idx"):
-            with open(os.path.join(registry, name)) as fh:
-                manifest = json.load(fh)
-            manifest["data_type"] = "sites-only"
-            with open(os.path.join(registry, name), "w") as fh:
-                json.dump(manifest, fh)
+    sites_only(w, "gx_ds")
     rc, out = search(w, "o", extra=("--per-sample",))
     rc2, out2 = search(w, "p")
     say("sites-only: --per-sample gives the results without it, saying the panel has no genotypes",
         rc == 0 and rc2 == 0 and identical(table(w, "o"), table(w, "p"))
-        and "gx_ds is a sites-only panel, with no genotypes to resolve: --per-sample runs the "
-            "POPULATION-LEVEL analysis, the same as without it" in out
+        and "--per-sample has nothing to resolve here, as what it searches is sites-only, with no "
+            "genotypes (gx_ds): the population-level analysis runs instead." in out
         and "install the store" not in out, out[-600:])
+
+    # a sites-only copy of the panel beside it, with no store and no dictionaries, as mega beside
+    # the default index: the phased dataset keeps its per-sample default, with the cis site's own
+    # carrier, and the sites-only one's post-analysis is the population-level one
+    w = as_download(copy_of(root, nrg2, "sites_only_beside_phased"))
+    for t in ("registry", "log_indels"):
+        shutil.copytree(os.path.join(w, "Dictionaries", f"{t}_gx_ds"),
+                        os.path.join(w, "Dictionaries", f"{t}_gx_mega"))
+    for suffix in ("", "_INDELS"):
+        shutil.copytree(os.path.join(w, "genome_library", f"NRG_2_gx+gx_ds{suffix}"),
+                        os.path.join(w, "genome_library", f"NRG_2_gx+gx_mega{suffix}"), symlinks=True)
+    sites_only(w, "gx_mega")
+    # its indel map names no carrier, as a sites-only VCF's (mega's) does
+    logs = os.path.join(w, "Dictionaries", "log_indels_gx_mega")
+    for name in os.listdir(logs):
+        with gzip.open(os.path.join(logs, name), "rt") as fh:
+            lines = fh.read().splitlines()
+        with gzip.open(os.path.join(logs, name), "wt") as fh:
+            for n, line in enumerate(lines):
+                cells = line.split("\t")
+                if n and len(cells) > 1:
+                    cells[1] = ""
+                fh.write("\t".join(cells) + "\n")
+    with open(os.path.join(w, "list_vcf2.txt"), "w") as fh:
+        fh.write("gx_ds\ngx_mega\n")
+    rc, out = search(w, "o", vcf="list_vcf2.txt")
+    mode = result_log(w, "o", ".search_mode")
+    say("a sites-only panel beside the phased one: per-sample, the cis site's own carrier, and the "
+        "sites-only panel's rows population-level",
+        rc == 0 and mode == "per-sample" and result_log(w, "o", ".alt_mode") == "alt-alignments"
+        and the_cis_site(table(w, "o"))
+        and "Sites-only, with no genotypes to resolve: gx_mega." in out
+        and "no genotype store" not in out
+        and "Sites-only dataset on chr3: population-level post-analysis."
+            in result_log(w, "o", "log_verbose.txt"),
+        f"mode {mode}: {rows_at(table(w, 'o'), 'chr3', 20000)} " + out[-600:])
 
     # the NNNN_2 a 5' search of an earlier release leaves, with no record: not taken for NGCG
     truth = copy_of(root, seed, "ngcg_truth")
