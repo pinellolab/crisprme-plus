@@ -23,7 +23,10 @@ or Ensembl header (``>NC_000913.3 Escherichia coli ...``, ``>chr1 1``, ``>1 dna:
 ...``), or CRLF line ends, indexed as done, and every search of it then lost results,
 often all of them with no error. The same fix writes such a file as ``>id`` with no
 carriage return. An id the pipeline cannot take (``gi|49175990|ref|...``, a PanSN
-``HG01255#1#CM086702.1``) is refused: it is for the user to rename.
+``HG01255#1#CM086702.1``) is refused: it is for the user to rename. So is a folder where
+an id that holds ``*``, ``?`` or ``[`` matches, read as a shell pattern, the name of
+another of its files (``HLA-A*02:10`` and ``HLA-A*24:02:10`` of the GATK GRCh38 FASTA):
+a search of it failed, or lost the off-targets of one of them with no error.
 
 This module is used by:
 
@@ -38,13 +41,15 @@ This module is used by:
 Command line::
 
     python genome_layout.py <genome_dir>            # fast check; exit 1 if a file has >1 sequence,
-                                                    # a header that is not >id, or CR line ends
+                                                    # a header that is not >id, CR line ends, or
+                                                    # an id a search cannot take
     python genome_layout.py --deep <genome_dir>     # same, reading every file completely
     python genome_layout.py --split <genome_dir>    # split such files in place (implies --deep),
                                                     # name each file of one sequence after it, and
                                                     # write every header as >id, with no CR
 """
 
+import fnmatch
 import mmap
 import os
 import re
@@ -56,6 +61,11 @@ FASTA_EXTENSIONS = (".fa", ".fasta")
 # '#', makes the tables that hold it lose its rows). Measured through the real CLI, with
 # ":", "." and "_" among those that work.
 UNUSABLE_IN_ID = "|;'\"$()&<>`#"
+# In a sequence id, what makes the shell read it as a pattern: the search script and its
+# post-analysis take each name into commands unquoted, where it stands for every file
+# name it matches. An id that matches no other name works (measured through the real
+# CLI); one that does made a search fail, or drop its off-targets with no error.
+PATTERN_CHARS = "*?["
 HEADER_LIMIT = 1 << 16  # (the most of a line read to judge it; no id comes near this)
 
 
@@ -166,6 +176,30 @@ def find_unclean_fastas(genomedir: str, deep: bool = False) -> Dict[str, str]:
             reason = _unclean_reason(os.path.join(genomedir, fname), deep)
             if reason:
                 found[fname] = reason
+    return found
+
+
+def find_pattern_clashes(genomedir: str) -> Dict[str, List[str]]:
+    """Maps each ``.fa`` file of ``genomedir`` whose name, read as a shell pattern (it
+    holds ``*``, ``?`` or ``[``), matches the names of other ``.fa`` files there to those
+    names: ``HLA-A*02:10.fa`` to ``['HLA-A*24:02:10.fa']``. The search script lists the
+    chromosomes as ``basename $file``, and its post-analysis names each chromosome's
+    files so: with ``c[12].fa`` beside ``c1.fa`` it took c1 twice and c[12] never, so
+    a search with ``--thread 1`` ended with no c[12] off-target and no error, and with
+    more threads the chromosomes' steps removed or read each other's files and it
+    failed. Hidden files are left out, as the shell leaves them out of a match."""
+    names = sorted(f for f in os.listdir(genomedir)
+                   if f.split(".")[-1] == "fa" and not f.startswith("."))
+    found: Dict[str, List[str]] = {}
+    for fname in names:
+        if not any(c in fname for c in PATTERN_CHARS):
+            continue
+        # (the shell's [^...] is fnmatch's [!...]; a class such as [[:digit:]], fnmatch
+        # does not read as the shell does)
+        pattern = fname.replace("[^", "[!")
+        others = [o for o in names if o != fname and fnmatch.fnmatchcase(o, pattern)]
+        if others:
+            found[fname] = others
     return found
 
 
@@ -292,8 +326,9 @@ def describe_header_problems(genomedir: str, deep: bool = False, reported=()) ->
     """Human-readable errors, each with its fix, for the ``.fa`` files of ``genomedir``
     (those a search reads) that the search cannot use though they hold one sequence named
     after it: a header that is not exactly ``>id``, CR line ends, an id the pipeline
-    cannot take. One message per kind, whatever the number of files; none for the files
-    in ``reported``, as holding several sequences, whose fix is the same."""
+    cannot take, an id that matches, read as a shell pattern, another of their names. One
+    message per kind, whatever the number of files; none for the files in ``reported``,
+    as holding several sequences, whose fix is the same."""
     genome = os.path.basename(os.path.normpath(genomedir))
     errors: List[str] = []
     unclean = {f: why for f, why in find_unclean_fastas(genomedir, deep).items()
@@ -326,6 +361,24 @@ def describe_header_problems(genomedir: str, deep: bool = False, reported=()) ->
                 f"folder and run build-index-only again."
             )
             break
+    clashes = {f: o for f, o in find_pattern_clashes(genomedir).items() if f not in reported}
+    if clashes:
+        fname, others = next(iter(clashes.items()))
+        shown = ", ".join(others[:3]) + (", ..." if len(others) > 3 else "")
+        every = list(clashes)
+        also = (f"; {len(every)} files here hold such an id ({', '.join(every[:10])}"
+                f"{', ...' if len(every) > 10 else ''})" if len(every) > 1 else "")
+        errors.append(
+            f"{fname}: its sequence id {_stem(fname)!r}, read as a shell pattern, matches "
+            f"{shown}{also}. A search takes each sequence's name into shell commands as it "
+            f"is, where '*', '?' and '[' make it such a pattern: a search of this folder "
+            f"fails, or leaves out the off-targets of such a sequence with no error. Rename "
+            f"each such sequence in its FASTA header and its file after it, with none of "
+            f"those characters (or remove its file), then remove each index built from the "
+            f"folder and run build-index-only again. (A genome uploaded from the web "
+            f"Settings page: remove it there, rename the sequences in your FASTA and upload "
+            f"it again.)"
+        )
     return errors
 
 

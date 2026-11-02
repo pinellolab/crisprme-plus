@@ -96,7 +96,13 @@ Bulge-enabled searches need a genome **index**.
   lines that end in a carriage return, in a folder put there by hand or installed before
   2.8.1 (a search stops too): every search would lose results, often all of them. The
   same command writes them as `>id`; then remove each index built from the folder as it
-  was. It stops too
+  was. It stops as well, and so does a search, for a sequence id that holds `*`, `?` or
+  `[` and, read as a shell pattern, matches the name of another sequence of the folder
+  (`HLA-A*02:10` matches `HLA-A*24:02:10`, as 10 of the HLA sequences of the GATK GRCh38
+  FASTA match others): a search, which takes each name into shell commands as it is, would
+  fail or lose that sequence's off-targets. Rename such a sequence, its header and its
+  file, with none of those characters, or remove it; then remove each index built from the
+  folder and build again. It stops too
   when the reference index already there holds no `.bin` (one built before from such
   a folder), or a `.bin` named after more than an id: remove that index and build again.
 

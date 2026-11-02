@@ -155,6 +155,40 @@ class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
         self.assert_refused(rc, out, err, f"sequence id {rid!r} holds '|', which the pipeline "
                             "cannot take", "Rename the sequence in the FASTA header")
 
+    def test_fasta_ids_one_of_which_matches_the_other_as_a_shell_pattern(self):
+        # the search script took the first as the second, and with --thread 1 a search
+        # ended with exit status 0 and none of the first's off-targets; with more threads
+        # it failed (finB round 2 review)
+        def name(old, rid):
+            with open(self.genome(old + ".fa")) as fh:
+                seq = fh.read().split("\n", 1)[1]
+            os.remove(self.genome(old + ".fa"))
+            with open(self.genome(rid + ".fa"), "w") as fh:
+                fh.write(f">{rid}\n{seq}")
+
+        name("chr1", "HLA-X*03:01:01")
+        name("chr2", "HLA-X*01:03:01:01")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assert_refused(rc, out, err, "HLA-X*03:01:01.fa: its sequence id 'HLA-X*03:01:01', "
+                            "read as a shell pattern, matches HLA-X*01:03:01:01.fa. ",
+                            "Rename each such sequence in its FASTA header and its file after it")
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("[ERROR] HLA-X*03:01:01.fa: its sequence id 'HLA-X*03:01:01', read as a "
+                      "shell pattern, matches HLA-X*01:03:01:01.fa. ", err)
+        self.assertNotIn("Launching job ", out)
+        rc, out, err = self.run_web_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("ERROR: HLA-X*03:01:01.fa: its sequence id 'HLA-X*03:01:01', read as a "
+                      "shell pattern, matches HLA-X*01:03:01:01.fa. ", err)
+        self.assertEqual(self.calls(), [])  # the engine never ran
+        # renamed with no '*', the folder builds; an id with one that matches nothing too
+        name("HLA-X*03:01:01", "HLA-X_03:01:01")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
+                         ["NRG_HLA-X*01:03:01:01_1.bin", "NRG_HLA-X_03:01:01_1.bin"])
+
     def test_an_index_built_from_such_a_header_is_not_taken_for_present(self):
         # the headers are written as >id since; the index keeps the old names: a run said
         # 'Reference index already present', and every search of it went on losing results

@@ -366,11 +366,36 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   id that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or `#` is refused too,
   at an upload, a download, `--split`, a build and a search (`gi|49175990|ref|NC_000913.2|`, a PanSN
   `HG01255#1#CM086702.1`; measured character by character through the real command line, `.`, `:`,
-  `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~`, `!`, `*`, `?` and brackets work): a search of one
-  failed in a shell command (`/bin/sh: Syntax error`), or, for `#`, with `none survived
-  post-analysis`. A file whose lines end in CR alone is refused by `--split`, which says to convert
-  it, as its first line holds the whole file. **If you have such a genome,** run `python
+  `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~` and `!` work, and so do `*`, `?` and brackets in an
+  id that matches no other name of its folder: see the next entry): a search of one failed in a
+  shell command (`/bin/sh: Syntax error`), or, for `#`, with `none survived post-analysis`. A file
+  whose lines end in CR alone is refused by `--split`, which says to convert it, as its first line
+  holds the whole file. **If you have such a genome,** run `python
   PostProcess/genome_layout.py --split <genome folder>`, remove the indexes it names, and build
   again, or remove it in Settings and upload it again. A search of a genome of plain headers is
   unchanged. Covered by `PostProcess/test_genome_layout.py` and
   `PostProcess/test_build_index_only_layout.py`.
+- **A genome folder in which a sequence id, read as a shell pattern, matches the name of another
+  sequence is refused; a search of it failed, or lost that sequence's off-targets.** The search
+  script and its post-analysis take each sequence's name into shell commands as it is, where an id
+  that holds `*`, `?` or `[` is a pattern that stands for every file name it matches. In a folder
+  where it matches the name of another sequence (`HLA-A*02:10` matches `HLA-A*24:02:10`, `c[12]`
+  matches `c1`, `seq?1` matches `seq01`), a search failed, at its start (`basename: extra operand`)
+  or in its post-analysis, whose steps for the two sequences removed, read or wrote each other's
+  files; or, depending on the names and on the order those steps ran in, it ended with exit status
+  0 and none of that sequence's off-targets: with `--thread 1`, all 7 rows of `HLA-X*03:01:01`
+  beside `HLA-X*01:03:01:01`, its on-target among them, and so for `c[12]` beside `c1` and `seq?1`
+  beside `seq01`. The HLA sequences of the GATK GRCh38 FASTA (`Homo_sapiens_assembly38.fasta`),
+  whose headers this release writes as `>id` (see the entry above), are such a folder: 10 of their
+  525 ids match others, and, downloaded by Direct URL, they indexed as done and every search of
+  them failed at its start. `build-index-only`, `complete-search` and a web search now refuse such
+  a folder before anything is built or searched (a build in the web Settings page reads `failed`),
+  with an ERROR that names each file whose id matches another's and says to rename those
+  sequences, header and file, with none of those characters, or to remove them. With those 10
+  renamed (`HLA-A_02:10`), the HLA sequences build and search, and the guide `CCAGGCAGTGACAGTGCCCA`
+  finds its perfect match in each of the 135 HLA-A sequences. An id that holds one of those
+  characters and matches no other name is taken as before (`HLA-X*03:01:01` beside
+  `HLA-Y_01:03:01:01` gives the same table), and a search of a genome with no such id is
+  unchanged. **If you have such a genome,** rename or remove the sequences the ERROR names, remove
+  the indexes built from the folder, and build again. Covered by `PostProcess/test_genome_layout.py`
+  and `PostProcess/test_build_index_only_layout.py`.

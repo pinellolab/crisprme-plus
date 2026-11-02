@@ -347,14 +347,87 @@ class TestHeaderIsExactlyTheId(unittest.TestCase):
                 self.assertEqual(os.listdir(self.tmp), ["asm.fa"])
 
     def test_ids_the_pipeline_takes_are_not_refused(self):
-        # measured through the real CLI, as these with a build and a search
+        # each alone in its folder, measured so through the real CLI with a build and a
+        # search; one that holds '*', '?' or '[' as long as it matches no other name there
         for rid in ("NC_000913.3", "chr1_KI270706v1_random", "chr1:1-50000", "1", "HLA-A*01:01",
-                    "seq=1,2", "X@y%z^~!+"):
+                    "seq=1,2", "X@y%z^~!+", "c[12]", "seq?1"):
             with self.subTest(rid):
                 self._fresh()
                 self._writeb(f"{rid}.fa", f">{rid}\nACGT\n")
                 self.assertEqual(gl.describe_header_problems(self.tmp), [])
                 self.assertEqual(vi.check_genome_fasta(self.tmp)[0], [])
+
+    def test_an_id_that_matches_another_name_as_a_shell_pattern_is_refused(self):
+        # the search script and its post-analysis take each name into shell commands
+        # unquoted: measured through the real CLI, each of these searches failed, or with
+        # --thread 1 ended with exit status 0 and none of the first one's off-targets (all
+        # but the second pair; the third is the case of HLA-C*02:11 and HLA-C*01:02:11, and
+        # of HLA-DQA1*03:01:01 and HLA-DQA1*01:03:01:01, in the GATK GRCh38 FASTA)
+        for ids in (("c[12]", "c1"), ("seq?1", "seqA1"), ("HLA-X*03:01:01", "HLA-X*01:03:01:01"),
+                    ("seq?1", "seq01"), ("HLA-A*02:10", "HLA-A*24:02:10"), ("x[^a]", "xb")):
+            with self.subTest(ids):
+                self._fresh()
+                for rid in ids:
+                    self._writeb(f"{rid}.fa", f">{rid}\nACGT\n")
+                self.assertEqual(gl.find_pattern_clashes(self.tmp), {f"{ids[0]}.fa": [f"{ids[1]}.fa"]})
+                problems = gl.describe_header_problems(self.tmp)
+                self.assertEqual(len(problems), 1)
+                self.assertTrue(problems[0].startswith(
+                    f"{ids[0]}.fa: its sequence id {ids[0]!r}, read as a shell pattern, matches "
+                    f"{ids[1]}.fa. "), problems[0])
+                self.assertIn("a search of this folder fails, or leaves out the off-targets of "
+                              "such a sequence with no error", problems[0])
+                self.assertIn("then remove each index built from the folder", problems[0])
+                issues, _ = vi.check_genome_fasta(self.tmp)
+                self.assertEqual([(i.severity, i.message) for i in issues], [(vi.ERROR, problems[0])])
+                # renamed with none of those characters, the folder is as a search needs it
+                os.remove(os.path.join(self.tmp, f"{ids[0]}.fa"))
+                self._writeb("renamed.fa", ">renamed\nACGT\n")
+                self.assertEqual(gl.describe_header_problems(self.tmp), [])
+
+    def test_an_id_that_matches_no_other_name_is_taken(self):
+        # (c[12] matches neither cA nor itself; a '[' with no ']' is a character; [!a]
+        # does not match xa; a hidden file is never a match)
+        for ids in (("c[12]", "cA"), ("HLA-A*01:01", "chr1"), ("HLA-A*01:01:01:01", "HLA-A*02:01:01:01"),
+                    ("c[12", "c1"), ("x[!a]", "xa")):
+            with self.subTest(ids):
+                self._fresh()
+                for rid in ids:
+                    self._writeb(f"{rid}.fa", f">{rid}\nACGT\n")
+                self.assertEqual(gl.find_pattern_clashes(self.tmp), {})
+                self.assertEqual(gl.describe_header_problems(self.tmp), [])
+                self.assertEqual(vi.check_genome_fasta(self.tmp)[0], [])
+        self._fresh()
+        self._writeb("a*.fa", ">a*\nACGT\n")
+        self._writeb("._ab.fa", "\0\5\26\7")  # (macOS's file attributes of ab.fa)
+        self.assertEqual(gl.find_pattern_clashes(self.tmp), {})
+        self._writeb("ab.fasta", ">ab\nACGT\n")  # (which no search reads)
+        self.assertEqual(gl.find_pattern_clashes(self.tmp), {})
+
+    def test_each_file_of_such_an_id_is_named(self):
+        # HLA ids of the GATK GRCh38 FASTA, 10 of whose 525 match another's name so
+        for rid in ("HLA-A*01:02", "HLA-A*29:02:01:02", "HLA-A*30:02:01:02", "HLA-A*31:01:02",
+                    "HLA-A*68:01:01:02", "HLA-A*02:10", "HLA-A*24:02:10", "HLA-A*01:01:01:01"):
+            self._writeb(f"{rid}.fa", f">{rid}\nACGT\n")
+        self.assertEqual(gl.find_pattern_clashes(self.tmp), {
+            "HLA-A*01:02.fa": ["HLA-A*29:02:01:02.fa", "HLA-A*30:02:01:02.fa", "HLA-A*31:01:02.fa",
+                               "HLA-A*68:01:01:02.fa"],
+            "HLA-A*02:10.fa": ["HLA-A*24:02:10.fa"]})
+        problems = gl.describe_header_problems(self.tmp)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("HLA-A*01:02.fa: its sequence id 'HLA-A*01:02', read as a shell pattern, "
+                      "matches HLA-A*29:02:01:02.fa, HLA-A*30:02:01:02.fa, HLA-A*31:01:02.fa, ...; "
+                      "2 files here hold such an id (HLA-A*01:02.fa, HLA-A*02:10.fa). ", problems[0])
+
+    def test_a_file_of_several_sequences_is_left_to_its_split(self):
+        # its split names the files after its sequences, and it is reported as such
+        self._writeb("a*.fa", ">chr1\nACGT\n>chr2\nGG\n")
+        self._writeb("ab.fa", ">ab\nACGT\n")
+        self.assertEqual(list(gl.find_pattern_clashes(self.tmp)), ["a*.fa"])
+        self.assertEqual(gl.describe_header_problems(self.tmp, reported={"a*.fa": ["chr1", "chr2"]}), [])
+        issues, _ = vi.check_genome_fasta(self.tmp)
+        self.assertEqual([i.severity for i in issues], [vi.ERROR])
+        self.assertIn("a*.fa: holds 2 sequences", issues[0].message)
 
     def test_an_index_built_from_such_a_header_is_found(self):
         # it holds those names once the FASTA reads >id: every search of it would still
@@ -471,6 +544,20 @@ class TestCommandLine(unittest.TestCase):
                          "'|', which the pipeline cannot take; rename the sequence in the FASTA "
                          "header and retry\n")
         self.assertEqual(os.listdir(self.tmp), ["asm.fa"])
+
+    def test_an_id_that_matches_another_name_as_a_shell_pattern_exits_one(self):
+        # what a web search runs (the search script), which has no validator
+        for rid in ("HLA-A*02:10", "HLA-A*24:02:10"):
+            _write(os.path.join(self.tmp, f"{rid}.fa"), f">{rid}\nAC\n")
+        r = self._run(self.tmp)
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue(r.stderr.startswith(
+            "ERROR: HLA-A*02:10.fa: its sequence id 'HLA-A*02:10', read as a shell pattern, "
+            "matches HLA-A*24:02:10.fa. "), r.stderr)
+        os.rename(os.path.join(self.tmp, "HLA-A*24:02:10.fa"), os.path.join(self.tmp, "chr1.fa"))
+        _write(os.path.join(self.tmp, "chr1.fa"), ">chr1\nAC\n")
+        r = self._run(self.tmp)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
 
     def test_bad_usage(self):
         self.assertEqual(self._run().returncode, 2)
