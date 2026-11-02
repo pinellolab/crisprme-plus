@@ -4239,10 +4239,12 @@ def _worker_ends_with_run(run: int) -> None:
 def _in_forked_workers(function, jobs, workers: int) -> list:
     """Returns ``[function(*job) for job in jobs]``, at most ``workers`` of them at a
     time, each in a forked process. A worker that dies, as one the OOM killer picks does,
-    raises BrokenProcessPool here, the workers left stopped. A multiprocessing.Pool sees
-    no such thing: it starts an idle worker in its place and waits for the result for
-    good, so the run, and the web Settings job it is, never ended. What a job raises is
-    raised here too, once the jobs under way have ended, and no other job starts."""
+    raises BrokenProcessPool here. A multiprocessing.Pool sees no such thing: it starts an
+    idle worker in its place and waits for the result for good, so the run, and the web
+    Settings job it is, never ended. What a job raises is raised here too. Either way, or
+    on a Ctrl-C, no other job starts and the workers are stopped, as a Pool's exit stops
+    them (what they leave counts for nothing: each output's last, atomic write says it is
+    whole)."""
     import multiprocessing
     from concurrent.futures import ProcessPoolExecutor
 
@@ -4253,8 +4255,13 @@ def _in_forked_workers(function, jobs, workers: int) -> list:
                                initializer=_worker_ends_with_run, initargs=(os.getpid(),))
     try:
         return list(pool.map(function, *zip(*jobs)))
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        for worker in multiprocessing.active_children():
+            worker.terminate()
+        raise
     finally:
-        pool.shutdown(cancel_futures=True)
+        pool.shutdown()
 
 
 def _in_build_dir(parent: str, prefix: str, build, stage=None):

@@ -151,6 +151,26 @@ class AWorkerThatDies(bio._Fixture):
                 self.assertFalse(os.path.exists(self.path("Dictionaries", where, ".building")))
                 self.assert_searched()
 
+    def test_a_job_that_fails_stops_the_others_and_ends_the_run(self):
+        # a full disk on chr1, with chr2 held: the worker that holds does not keep the run
+        rc, out, err = self.run_within_bound(STUB_WRITE_FAIL="/registry_ds/reg_chr1.bin",
+                                             STUB_WRITE_HANG="/registry_ds/reg_chr2.bin",
+                                             CRISPRME_TIER_WORKERS="2")
+        self.assertEqual(rc, 1, out + err)
+        self.assertTrue(err.startswith("Error: Emitting the dict-less tiers of ds failed ([Errno 28] "
+                                       "No space left on device"), err)
+
+    def test_a_ctrl_c_stops_the_workers(self):
+        # to the run alone, and with a job held: it does not wait for that job
+        if not os.path.exists("/proc/self/stat"):
+            self.skipTest("no /proc here")
+        proc = self.start(shim=True, STUB_WRITE_HANG="/registry_ds/reg_chr2.bin",
+                          CRISPRME_TIER_WORKERS="2")
+        self.wait_for_mark(proc)
+        os.kill(proc.pid, signal.SIGINT)
+        proc.wait(timeout=BOUND)
+        self.assertEqual(group_members(proc.pid), [])
+
     def test_no_worker_outlives_a_run_killed_outright(self):
         # one worker writes chr1, ends it and waits for its next job; the other holds at
         # its write of chr2 (a run killed by SIGKILL, or by a SIGTERM with no handler)
