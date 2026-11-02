@@ -107,3 +107,45 @@
   1,566 distinct rows this removes has a reference or SNP row at its site that holds its sequence
   (1,560) or names the same SNP alts (6). **What to do:** run such searches again. Covered by the
   same tests.
+- **An indel off-target with an RNA bulge was reported one base early, and the reference sequence
+  shown for one with both bulge types was a base off.** For an indel row whose bulges are all RNA
+  bulges, the indel post-analysis took the search engine's cluster position for the row's start on
+  the + strand (on the - strand with a 5' PAM such as Cas12a's), so its `Start_coordinate` was one
+  base per RNA bulge before its first aligned base, where the reference and SNP rows of the same
+  alignment start, and its variant's position in `Variant_info_spacer+PAM` was off by as much. The
+  reference sequence of an indel row (`Aligned_protospacer+PAM_REF`) was read with one base too many
+  per RNA bulge and was given its gaps only on a row whose bulges are all RNA bulges: a row with an
+  RNA and a DNA bulge (`RNA,DNA`) showed it without the gap and one base too long, out of register
+  with the guide from the RNA bulge on, and with a 5' PAM an RNA-bulge row's lost its first PAM
+  base. The columns computed from it followed: the REF seed and non-seed mismatches + bulges,
+  `CFD_score_REF`, the CFD risk score, `PAM_creation`, and `CFD_score`, which is the higher of the
+  REF and ALT scores. Each indel row now starts at its first aligned base and shows as REF the
+  reference bases its target covers from there, gapped as its target. Its cluster position, which
+  the merge of a cluster's rows sorts and groups on, moves with its start: an RNA-bulge indel row on
+  the + strand no longer comes first among rows that tie exactly, and, as for SNP rows, the merge
+  lists once the alignments of a site that name the same variants with the same carriers. Measured
+  on the search above, rerun genome-wide with this fix alone: before it, 238 of the 5,047 indel rows
+  of the highest-CFD block started one base early and 4,467 showed a REF sequence that is not the
+  reference at their start; now each of the 5,045 shows the reference at its start. On those rows
+  `PAM_creation` is now set on 815 and no longer set on 240 (all on the + strand, where the old
+  REF's PAM was read one base off), `CFD_score_REF` changed on 785, and `CFD_score` went down on 218
+  and up on 16 (chrX:42118270, 0.149 -> 0.017: the old value was the misaligned REF's, so the row
+  left the report's CFD >= 0.05 table, as did 5 others). Four clusters now report the row of SNPs
+  that has the same sequence, CFD and carriers as their indel row; at four sites the merge's single
+  entry is an alignment with one mismatch more and one bulge fewer than the one reported before, at
+  the same CFD and mismatches + bulges, for the same variant and carriers; and two indel off-targets
+  that sat in a reference off-target's cluster because of their early start are rows of their own
+  (chr3:55057499, CFD 0.087, 20 cis carriers; chr16:12067029, CFD 0.069, 1). The alternative
+  alignments went from 722,564 to 722,347 rows, and 39 rows of the integrated results changed only
+  their `Other_motifs` count. The report's tiers keep their sites, some one base later, except for
+  those CFD >= 0.05 rows, the CFD >= 0.05 table gaining the two new rows and chr2:33157279 (whose
+  REF now scores 0.1), and one tie at the top-1000 table's cut-off (CFD 0.188), now broken the other
+  way. The SNP+indel companion keeps its lines, the off-target start one base later on those rows.
+  Apart from `Other_motifs` counts and those four rows of SNPs, no reference or SNP-only row
+  changes, nor do the perfect matches and the banner. The search takes as long as before, with the
+  same peak memory. **Affected:** every search that allows RNA bulges (`--bRNA` 1 or more; the
+  recommended default allows one) with a variant dataset that has indels, in every release; with a
+  5' PAM, every indel row with an RNA bulge. **What to do:** run such searches again. Covered by
+  `PostProcess/test_indel_row_coordinates.py` (one and two RNA bulges, both bulge types, a DNA bulge
+  and none, on both strands, with an NRG and a TTTV PAM) and the SNP+indel oracle, which now checks
+  every indel row's REF sequence against the reference at its start.

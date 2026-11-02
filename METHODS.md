@@ -482,6 +482,14 @@ carriers under the indel alone), and the merge of a cluster's rows, which otherw
 row per position and variant list, keeps one per carrier set there, so that no carrier is
 added to a sequence it does not have.
 
+An indel row is placed as the reference and SNP rows of the same alignment are: it starts at
+its target's first aligned base, the leftmost on either strand, carried from the window to
+the chromosome, and its REF alignment holds the reference bases the target covers from
+there, in the target's orientation and gapped as the target (an RNA bulge is a gap, so the
+REF covers one base fewer per RNA bulge). Up to 2.8.0 an indel row with only RNA bulges
+started one base per bulge early on the + strand (on the - strand with a 5' PAM), and the
+REF alignment of an indel row with both bulge types had no gap and one base too many.
+
 From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
 the guide's base when it was an allele, else the code's first allele. That reported one
 individual's indel together with SNP alleles that only other individuals carry, scored as
