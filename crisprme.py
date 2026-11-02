@@ -5388,7 +5388,7 @@ def download_data() -> None:
         # and a build would take with it, by that name alone (genome_in_use; the web
         # Settings page refuses an upload the same way)
         if comp == "genome" and source == "url":
-            problem = genome_in_use.replace_problem(workdir, ref, "download")
+            problem = genome_in_use.replace_problem(workdir, ref, "download", web=False)
             if problem:
                 error(problem)
         try:

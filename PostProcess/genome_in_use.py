@@ -39,18 +39,19 @@ def built_on(cwd: str, name: str) -> List[str]:
     return found
 
 
-def replace_problem(cwd: str, name: str, how: str = "upload") -> Optional[str]:
-    """Why a genome must not be put in as ``Genomes/<name>`` (``how``: "upload", for the
-    Settings page, or "download", for a Direct URL download): what is listed by
-    ``built_on``. None when nothing is built on it."""
+def replace_problem(cwd: str, name: str, how: str = "upload",
+                    web: bool = True) -> Optional[str]:
+    """Why a genome must not be put in as ``Genomes/<name>`` (``how``: "upload", or
+    "download" for a Direct URL download; ``web``: said on the Settings page, else by
+    crisprme.py download): what is listed by ``built_on``. None when nothing is built on it."""
     built = built_on(cwd, name)
     if not built:
         return None
     shown = ", ".join(built[:4]) + (", ..." if len(built) > 4 else "")
-    if how == "upload":
+    if web:
         remove = (f"an index under 'Remove installed data'; a Genomes/{name}+<dataset> folder "
                   "from your data folder")
-        again = "upload this genome under another name"
+        again = f"{how} this genome under another name"
     else:
         remove = (f"each of them from {cwd.rstrip(os.sep) or os.sep}, or an index under 'Remove "
                   "installed data' in the web Settings page")

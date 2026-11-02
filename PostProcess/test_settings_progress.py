@@ -950,7 +950,10 @@ class TestGenomeTarUpload(unittest.TestCase):
             "Indexes or variant genomes built on a genome named 'asm' are installed "
             "(genome_library/NRG_2_asm): searches of a genome downloaded under that name "
             "would go on using them"), said)
-        self.assertTrue(said.endswith("or download it under another name (--ref)."), said)
+        self.assertTrue(said.endswith("Remove them first (an index under 'Remove installed "
+                                      "data'; a Genomes/asm+<dataset> folder from your data "
+                                      "folder), or download this genome under another name."),
+                        said)
         self.assertIsNone(ns["_genome_upload_problem"]("asm2", "download"))
 
     def test_what_is_built_on_other_genomes_does_not_refuse_it(self):
