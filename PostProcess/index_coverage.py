@@ -27,7 +27,8 @@ Command line, for the search script (nothing on stdout or stderr when the index 
 the ERROR on stderr and exit 1 when it is not; a note on stdout and exit 0 where it cannot
 tell)::
 
-    python index_coverage.py <index dir> <PAM position of the search's PAM file> <genome dir> [chromosome ...]
+    python index_coverage.py <index dir> <PAM position of the search's PAM file> <genome dir> \
+        [chromosome ...]
 """
 
 import os

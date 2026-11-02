@@ -252,10 +252,9 @@ class TheSearchScript(unittest.TestCase):
         args = [self.genome, "_", guides, pam, empty, "_", bulges + 1, 4, bulges, bulges, 3,
                 out, HERE, 1, self.home, empty, "_", 1, 0, "_", "mm+bulges", "mm+bulges,mm",
                 "False", "PASS,.", "_", 6, 0]
+        script = os.path.join(HERE, "submit_job_automated_new_multiple_vcfs.sh")
         with open(os.path.join(out, "log_error.txt"), "w") as err:
-            done = subprocess.run(["bash", os.path.join(HERE,
-                                                        "submit_job_automated_new_multiple_vcfs.sh"),
-                                   *map(str, args)], cwd=self.root, env=self.env,
+            done = subprocess.run(["bash", script, *map(str, args)], cwd=self.root, env=self.env,
                                   stdout=subprocess.PIPE, stderr=err, text=True, timeout=300)
         with open(os.path.join(out, "log_error.txt")) as fh:
             return done.returncode, done.stdout, fh.read()
