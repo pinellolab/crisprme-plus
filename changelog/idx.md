@@ -84,8 +84,10 @@ too (the entry below on `build-index-only`'s record). -->
   is byte-identical to a search of a built index, in all 41 result files. The first web search gets
   the same row, carrier and scores (it needs the indel track's fix, in this release, to resolve the
   codes without tiers); it has no registry, so its report says no co-occurrence table is written
-  rather than "unaffected", and the CLI warning says the same. **What to do:** an INDELS index built
-  by such a search stays blind until it is rebuilt. Run `build-index-only` with the dataset's VCFs and
+  rather than "unaffected", and the CLI warning says the same (a report made again from a copy of
+  the results away from the install, where that cannot be told, keeps "unaffected" for a
+  population-level run, as before). **What to do:** an INDELS index built by such a search stays
+  blind until it is rebuilt. Run `build-index-only` with the dataset's VCFs and
   your PAM: it now codes a fake-indel genome it finds without codes, removes the INDELS indexes of
   every PAM and budget of that dataset built before the codes, says which, and builds its own (a
   later search rebuilds the others). A genotyped dataset with no `Dictionaries/indel_genotypes_<vcf>/`

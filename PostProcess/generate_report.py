@@ -1577,7 +1577,7 @@ def build_mmb_matrix(df, cols, meta):
 
 
 def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
-                           variant_count=None):
+                           variant_count=None, no_registry=False):
     """'Analysis inputs & criteria' box (FDA off-target guidance VII.F.i / F.ii).
 
     States, in one place, the variant database(s), the variant inclusion policy
@@ -1591,6 +1591,9 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
     ``variant_count`` (``{'n_records', 'databases'}`` from the Tier-0 registry) add
     the panel size + database SNP-variant count to the inclusion row when known
     (registry sample counts preferred -- they match the AC/AN denominator).
+    ``no_registry`` (_run_lacks_registry) says the run's index has no Tier-0 registry,
+    so that no SNP+indel co-occurrence table was written; a registry this report does
+    not find (results read away from their install) is not that.
     A reference-only search (``meta["reference_only"]``) gets only the database row
     ("none") and its search criteria against the reference genome.
     """
@@ -1651,10 +1654,10 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "(recommended for clinical validation). For sites-only (aggregate) panels there are no "
             "per-sample genotypes, so this loses nothing (<code>--per-sample</code> is a no-op "
             "there). " + (
-                "SNP+indel co-occurrence is unaffected by the analysis mode." if variant_count else
                 "An off-target that needs an indel and a SNP beside it is reported in either mode, "
                 "but this index has no Tier-0 registry, so no SNP+indel co-occurrence table is "
-                "written.")
+                "written." if no_registry else
+                "SNP+indel co-occurrence is unaffected by the analysis mode.")
         )
     rows = [
         ("Variant database(s)", _esc(ds)),
@@ -2130,6 +2133,28 @@ def _registry_variant_count(result_dir, meta):
                 if total > 0 else None)
     except Exception:  # noqa: BLE001 - a count is optional; never break the report
         return None
+
+
+def _run_lacks_registry(result_dir, meta):
+    """Whether the run's index has no Tier-0 registry, so that its indel post-analysis
+    wrote no SNP+indel co-occurrence table: told from the run's results and the install
+    it ran in, never from a registry this report does not find. False when the result
+    folder holds a ``*indel_snp_cooc.tsv`` (the post-analysis writes one per chromosome,
+    its header at least, whenever the registry is there), and when the folder is not in
+    an install holding the run's indel map (``Dictionaries/log_indels_<vcf>`` beside
+    ``Results/``): a copy of the results read elsewhere, whose report then keeps the
+    neutral wording. True when that install holds no ``registry_<vcf>``."""
+    try:
+        vcf = meta.get("vcf_name")
+        if not result_dir or not vcf or meta.get("reference_only"):
+            return False
+        if glob.glob(os.path.join(result_dir, "*indel_snp_cooc.tsv")):
+            return False
+        dict_dir = os.path.join(result_dir, "..", "..", "Dictionaries")
+        return (os.path.isdir(os.path.join(dict_dir, f"log_indels_{vcf}"))
+                and not os.path.isdir(os.path.join(dict_dir, f"registry_{vcf}")))
+    except Exception:  # noqa: BLE001 - a sentence is optional; never break the report
+        return False
 
 
 def panel_and_variants_note(dataset_counts, variant_count=None):
@@ -5621,6 +5646,7 @@ def build_report(
         meta, tier_links.get("variant_created"),
         dataset_counts=_ds_counts,
         variant_count=_reg_vc,
+        no_registry=_run_lacks_registry(result_dir, meta),
     )
     # Assemble the per-site observed-haplotype modals (built as a side effect of the
     # top-1000 table renders) into a single backdrop + modal set + one self-contained

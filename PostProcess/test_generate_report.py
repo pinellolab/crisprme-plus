@@ -590,6 +590,63 @@ class TestGenerateReport(unittest.TestCase):
         self.assertIn("2 confirmed-cis", html)
         self.assertIn("of 3 candidate", html)
 
+    def test_cooc_sentence_follows_the_run_not_a_registry_the_report_misses(self):
+        # A population-level report says the index has no Tier-0 registry only when the
+        # run wrote no *indel_snp_cooc.tsv and the install it ran in (Dictionaries/ beside
+        # Results/, holding the run's indel map) has no registry_<vcf>. generate-report on
+        # a copy of a registry run's results elsewhere said it had none, beside the tables.
+        import shutil
+        vcf = "hg38_1000G_HGDP"   # the dataset the fixture's file name carries
+        unaffected = "SNP+indel co-occurrence is unaffected by the analysis mode"
+        none_here = "this index has no Tier-0 registry, so no SNP+indel co-occurrence table"
+
+        def run(name, dicts=(), tables=False):
+            root = os.path.join(self.tmp, name)
+            rd = os.path.join(root, "Results", "job")
+            os.makedirs(rd)
+            shutil.copy(self.tsv, rd)
+            for d in dicts:
+                os.makedirs(os.path.join(root, "Dictionaries", d))
+            if tables:  # what the indel post-analysis writes with a registry: a header
+                with open(os.path.join(rd, f"fakechr3_{vcf}.indel_snp_cooc.tsv"), "w") as h:
+                    h.write("chrom\tindel_pos\tindel_ref\tindel_alt\tofftarget_start\tstrand\t"
+                            "snp_dictpos\tsnp_rsid\tphase\tjoint_af\tn_cis\tcis_samples\n")
+            return rd
+
+        def report(rd, name):
+            out = gr.build_report(result_dir=rd, samplesid_dir=self.sid_dir,
+                                  out_zip=os.path.join(self.tmp, name + "_report.zip"))
+            with zipfile.ZipFile(out) as zf:
+                return zf.read("report.html").decode("utf-8")
+
+        def moved(rd, name):  # the results folder alone, copied elsewhere
+            to = os.path.join(self.tmp, name, "Results", "job")
+            shutil.copytree(rd, to)
+            return to
+
+        reg = run("reg", (f"registry_{vcf}", f"log_indels_{vcf}"), tables=True)
+        noreg = run("noreg", (f"dictionaries_{vcf}", f"log_indels_{vcf}"))
+        cases = {
+            # (results folder, whether the report may say the index has no registry)
+            "registry run, in place": (reg, False),
+            "registry run, no indel off-target (no table)":
+                (run("reg0", (f"registry_{vcf}", f"log_indels_{vcf}")), False),
+            "registry-less run, in place": (noreg, True),
+            "registry run's results copied elsewhere": (moved(reg, "reg_moved"), False),
+            "registry-less run's results copied elsewhere": (moved(noreg, "noreg_moved"), False),
+            "an install of another dataset":
+                (run("other", ("dictionaries_hg38_other", "log_indels_hg38_other")), False),
+        }
+        for i, (case, (rd, says_none)) in enumerate(cases.items()):
+            with self.subTest(case=case):
+                html = report(rd, f"c{i}")
+                self.assertEqual(none_here in html, says_none)
+                self.assertEqual(unaffected in html, not says_none)
+        meta = {"vcf_name": vcf}
+        self.assertFalse(gr._run_lacks_registry(None, meta))
+        self.assertFalse(gr._run_lacks_registry(noreg, {"vcf_name": None}))
+        self.assertFalse(gr._run_lacks_registry(noreg, {**meta, "reference_only": True}))
+
     def test_snp_snp_cooc_bundled_and_surfaced(self):
         # per-chromosome *.snp_snp_cooc.tsv sidecars (comment banner + #Chromosome
         # header + rows): merged (single header), bundled, linked, CONFIRMED counted.
@@ -821,14 +878,19 @@ class TestGenerateReport(unittest.TestCase):
         points to the result directory + --report-full."""
         base = {"datasets": "1000G+HGDP", "mm": "6", "bdna": 2, "brna": 2,
                 "max_edits": "4", "search_mode": "population-level"}
-        # slim (not bundled): no false "bundled as" claim
-        # a population-level run of an index with no registry has no co-occurrence table
-        html_noreg = gr.render_inputs_criteria({**base, "search_mode": "population-level"})
+        # a population-level run of an index with no registry has no co-occurrence table;
+        # a registry the report does not find (no variant_count) is not that
+        html_noreg = gr.render_inputs_criteria({**base, "search_mode": "population-level"},
+                                               no_registry=True)
         self.assertIn("no SNP+indel co-occurrence table is written", html_noreg)
         self.assertNotIn("co-occurrence is unaffected", html_noreg)
-        html_reg = gr.render_inputs_criteria({**base, "search_mode": "population-level"},
-                                             variant_count={"n_records": 1, "databases": {}})
-        self.assertIn("SNP+indel co-occurrence is unaffected by the analysis mode", html_reg)
+        for html_reg in (
+                gr.render_inputs_criteria({**base, "search_mode": "population-level"}),
+                gr.render_inputs_criteria({**base, "search_mode": "population-level"},
+                                          variant_count={"n_records": 1, "databases": {}})):
+            self.assertIn("SNP+indel co-occurrence is unaffected by the analysis mode", html_reg)
+            self.assertNotIn("no Tier-0 registry", html_reg)
+        # slim (not bundled): no false "bundled as" claim
         html_slim = gr.render_inputs_criteria({**base})
         self.assertIn("written to <code>variant_created.tsv</code> in the result", html_slim)
         self.assertIn("--report-full", html_slim)
