@@ -221,8 +221,9 @@ too (the entry below on `build-index-only`'s record). -->
   population-level, by default and under `--per-sample`, with one `WARNING` on stdout that names
   the dataset and the download. On the synthetic genome the no-store default is then byte-identical
   to its `--population-level` run and reports that site at 1 mismatch, CFD 0.6, with no carriers; it
-  lists the same sites with the same scores as a full install's `--population-level` run, without
-  the carrier columns. A full install, and one with the classic dictionaries, are unchanged. The
+  lists the same sites, at the same CFD, as a full install's `--population-level` run, with empty
+  carrier columns, and names the indel alone where an indel and a SNP make a site together. A full
+  install, and one with the classic dictionaries, are unchanged. The
   download help, the README, docs/PRECOMPUTED_INDEXES.md and docs/TROUBLESHOOTING.md say what such
   an install runs.
 - **An index is taken only for a search on the side of the guide it was built for, a dedicated
