@@ -17,6 +17,7 @@ CI runs it on the published image, which until a release is out can hold an engi
 
 import glob
 import gzip
+import json
 import os
 import random
 import re
@@ -364,6 +365,27 @@ def main(root):
     say("no genotype store: population-level, as --population-level gives it",
         rc == 0 and mode == "population-level" and identical(table(w, "o"), table(w, "p"))
         and "no genotype store" in out, out[-600:])
+
+    # a sites-only panel, as mega (its registry says so): --per-sample is the run without it,
+    # and the WARNING says the panel has no genotypes, not to install a store it does not have
+    w = as_download(copy_of(root, nrg2, "sites_only"))
+    for d in ("genotypes_gx_ds", "dictionaries_gx_ds"):
+        shutil.rmtree(os.path.join(w, "Dictionaries", d), ignore_errors=True)
+    registry = os.path.join(w, "Dictionaries", "registry_gx_ds")
+    for name in os.listdir(registry):
+        if name.startswith("reg_") and name.endswith(".idx"):
+            with open(os.path.join(registry, name)) as fh:
+                manifest = json.load(fh)
+            manifest["data_type"] = "sites-only"
+            with open(os.path.join(registry, name), "w") as fh:
+                json.dump(manifest, fh)
+    rc, out = search(w, "o", extra=("--per-sample",))
+    rc2, out2 = search(w, "p")
+    say("sites-only: --per-sample gives the results without it, saying the panel has no genotypes",
+        rc == 0 and rc2 == 0 and identical(table(w, "o"), table(w, "p"))
+        and "gx_ds is a sites-only panel, with no genotypes to resolve: --per-sample runs the "
+            "POPULATION-LEVEL analysis, the same as without it" in out
+        and "install the store" not in out, out[-600:])
 
     # the NNNN_2 a 5' search of an earlier release leaves, with no record: not taken for NGCG
     truth = copy_of(root, seed, "ngcg_truth")

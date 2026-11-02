@@ -389,6 +389,26 @@ def _registry_data_type_for_search(args):
     return None
 
 
+def _registry_data_type(regdir):
+    """The ``data_type`` of a registry folder's manifest (dataset-wide, so one manifest
+    read suffices), or None when it holds no readable one. A registry built before the
+    manifest had one (a mega index built locally) is sites-only by its aggregation, as
+    tier0_registry._classify_data_type has it."""
+    import json
+    try:
+        for f in sorted(os.listdir(regdir)):
+            if f.startswith("reg_") and f.endswith(".idx"):
+                with open(os.path.join(regdir, f)) as fh:
+                    manifest = json.load(fh)
+                dt = manifest.get("data_type") or (
+                    "sites-only" if manifest.get("aggregation") == "info_af" else None)
+                if dt:
+                    return dt
+    except (OSError, ValueError):
+        pass
+    return None
+
+
 def _datasets_without_genotypes(vcf_list: str) -> List[str]:
     """The datasets of the --vcf list that a per-sample analysis cannot resolve here: a
     registry (Dictionaries/registry_<vcf>/) and neither a genotype store with something in
@@ -2476,16 +2496,37 @@ def complete_search() -> None:
         per_sample = _dt == "genotyped-phased"
     if per_sample and _no_store:
         per_sample = False
-        print(
-            f"WARNING [complete-search]: no genotype store (Dictionaries/genotypes_<vcf>/) and no "
-            f"per-sample dictionaries for {', '.join(_no_store)}: running the POPULATION-LEVEL "
-            f"analysis{' instead of --per-sample' if _force_ps else ''}, which reports each "
-            f"site's worst case with no carriers; a per-sample one would lose the off-targets "
-            f"that need two SNPs of a sample together. To get carriers and CONFIRMED cis "
-            f"phasing, install the store: crisprme.py download --what index --index-name "
-            f"<the index> (without --no-genotypes).",
-            flush=True,
-        )
+        # A sites-only panel (the mega one) has no genotypes at all: no store to install.
+        _sites_only = [_vn for _vn in _no_store if _registry_data_type(os.path.join(
+            current_working_directory, "Dictionaries", f"registry_{_vn}")) == "sites-only"]
+        _unstored = [_vn for _vn in _no_store if _vn not in _sites_only]
+        if _sites_only:
+            _one = len(_sites_only) == 1
+            _it, _its = ("it", "its") if _one else ("them", "their")
+            if _force_ps:
+                _what = ("--per-sample runs the POPULATION-LEVEL analysis, the same as without "
+                         f"it, which reports each site's worst case, with no carriers for {_it}.")
+            else:
+                _what = ("running the POPULATION-LEVEL analysis, which reports each site's worst "
+                         f"case, with no carriers for {_it}; a per-sample one would lose the "
+                         f"off-targets that need two of {_its} variants together.")
+            print(
+                f"WARNING [complete-search]: {', '.join(_sites_only)} "
+                f"{'is a sites-only panel' if _one else 'are sites-only panels'}, with no "
+                f"genotypes to resolve: {_what}",
+                flush=True,
+            )
+        if _unstored:
+            print(
+                f"WARNING [complete-search]: no genotype store (Dictionaries/genotypes_<vcf>/) "
+                f"and no per-sample dictionaries for {', '.join(_unstored)}: running the "
+                f"POPULATION-LEVEL analysis{' instead of --per-sample' if _force_ps else ''}, "
+                f"which reports each site's worst case with no carriers; a per-sample one would "
+                f"lose the off-targets that need two SNPs of a sample together. To get carriers "
+                f"and CONFIRMED cis phasing, install the store: crisprme.py download --what "
+                f"index --index-name <the index> (without --no-genotypes).",
+                flush=True,
+            )
     elif per_sample and not _force_ps:
         print(
             "[complete-search] genotyped + PHASED index detected -> PER-SAMPLE analysis "

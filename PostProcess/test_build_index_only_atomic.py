@@ -3435,6 +3435,86 @@ class AnInstallWithoutGenotypesRunsPopulationLevel(_Fixture):
         rc, out, err = self.run_search()
         self.assertEqual(self.mode(), "population-level")
 
+    def sites_only(self, name, copy_of=None):
+        """Dataset name's registry says sites-only, as the published mega panel's does, and
+        it has neither a genotype store nor dictionaries; copy_of: a copy of that dataset's
+        registry, indel coordinate map and variant indexes."""
+        if copy_of:
+            for tier in ("registry", "log_indels"):
+                shutil.copytree(self.path("Dictionaries", f"{tier}_{copy_of}"),
+                                self.path("Dictionaries", f"{tier}_{name}"))
+            for suffix in ("", "_INDELS"):
+                shutil.copytree(self.lib(f"NRG_2_hg38+{copy_of}{suffix}"),
+                                self.lib(f"NRG_2_hg38+{name}{suffix}"))
+        for tier in ("genotypes", "dictionaries"):
+            shutil.rmtree(self.path("Dictionaries", f"{tier}_{name}"), ignore_errors=True)
+        registry = self.path("Dictionaries", f"registry_{name}")
+        for f in os.listdir(registry):
+            if f.startswith("reg_") and f.endswith(".idx"):
+                with open(os.path.join(registry, f)) as fh:
+                    manifest = json.load(fh)
+                manifest["data_type"] = "sites-only"
+                with open(os.path.join(registry, f), "w") as fh:
+                    json.dump(manifest, fh)
+
+    def test_a_sites_only_panel_is_said_to_have_no_genotypes_not_a_store_to_install(self):
+        """A sites-only panel, such as the published mega one, has no genotypes at all. The
+        WARNING told its --per-sample search to install a genotype store, which it does not
+        have. It now says the panel is sites-only, and that --per-sample runs the
+        population-level analysis, the same as without it."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.sites_only("ds")
+        rc, out, err = self.run_search("--per-sample")
+        self.assertEqual(self.mode(), "population-level")
+        self.assertIn("WARNING [complete-search]: ds is a sites-only panel, with no genotypes to "
+                      "resolve: --per-sample runs the POPULATION-LEVEL analysis, the same as "
+                      "without it, which reports each site's worst case, with no carriers for "
+                      "it.\n", out)
+        self.assertNotIn("install the store", out)
+        self.assertNotIn("--no-genotypes", out)
+        self.assertNotIn("PER-SAMPLE analysis", out)
+        rc, out, err = self.run_search()  # (without it: its registry says sites-only)
+        self.assertEqual(self.mode(), "population-level")
+        self.assertNotIn("WARNING [complete-search]: ds", out)
+
+    def test_beside_a_phased_dataset_the_sites_only_ones_are_named_with_no_store_to_install(self):
+        """A phased dataset with its store runs per-sample by default; beside a sites-only
+        one the search runs population-level, which the WARNING says without a store to
+        install for it; beside a dataset of no store as well, that one gets its own."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.sites_only("mega", copy_of="ds")
+        rc, out, err = self.run_search(vcfs="ds\nmega\n")
+        self.assertEqual(self.mode(), "population-level")
+        self.assertIn("WARNING [complete-search]: mega is a sites-only panel, with no genotypes "
+                      "to resolve: running the POPULATION-LEVEL analysis, which reports each "
+                      "site's worst case, with no carriers for it; a per-sample one would lose "
+                      "the off-targets that need two of its variants together.\n", out)
+        self.assertNotIn("install the store", out)
+        rc, out, err = self.run_search("--per-sample", vcfs="ds\nmega\n")
+        self.assertEqual(self.mode(), "population-level")
+        self.assertIn("WARNING [complete-search]: mega is a sites-only panel, with no genotypes "
+                      "to resolve: --per-sample runs the POPULATION-LEVEL analysis, the same as "
+                      "without it", out)
+        # two sites-only panels, and a dataset of no store (its genotypes not installed)
+        self.sites_only("mega2", copy_of="ds")
+        for suffix in ("", "_INDELS"):
+            shutil.copytree(self.lib(f"{VAR}{suffix}"), self.lib(f"NRG_2_hg38+ds2{suffix}"))
+        for tier in ("registry", "log_indels"):
+            shutil.copytree(self.path("Dictionaries", f"{tier}_ds"),
+                            self.path("Dictionaries", f"{tier}_ds2"))
+        rc, out, err = self.run_search(vcfs="ds\nmega\nmega2\nds2\n")
+        self.assertEqual(self.mode(), "population-level")
+        self.assertIn("WARNING [complete-search]: mega, mega2 are sites-only panels, with no "
+                      "genotypes to resolve: running the POPULATION-LEVEL analysis, which "
+                      "reports each site's worst case, with no carriers for them; a per-sample "
+                      "one would lose the off-targets that need two of their variants "
+                      "together.\n", out)
+        self.assertIn("WARNING [complete-search]: no genotype store (Dictionaries/"
+                      "genotypes_<vcf>/) and no per-sample dictionaries for ds2: running the "
+                      "POPULATION-LEVEL analysis", out)
+
 
 class ARefusedSearchWithoutSamplesIDLeavesItsOutputFolderEmpty(_Fixture):
     """A variant search given no --samplesID takes samplesIDs/<dataset>.samplesID.txt, and
