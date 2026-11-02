@@ -86,6 +86,7 @@ class AWorkerThatDies(bio._Fixture):
                                                          **{knob: workers})
                     self.assertEqual(rc, 1, out + err)
                     self.assertTrue(err.startswith(f"Error: {says}"), err)
+                    self.assertEqual(err.count("\n"), 1, err)  # that line, and no traceback
                     self.assertIn("most likely killed for want of memory", err)
                     self.assertIn(knob, err)
                     directory = self.path("Dictionaries", where)
@@ -159,6 +160,7 @@ class AWorkerThatDies(bio._Fixture):
         self.assertEqual(rc, 1, out + err)
         self.assertTrue(err.startswith("Error: Emitting the dict-less tiers of ds failed ([Errno 28] "
                                        "No space left on device"), err)
+        self.assertEqual(err.count("\n"), 1, err)  # that line, and no traceback
 
     def test_a_ctrl_c_stops_the_workers(self):
         # to the run alone, and with a job held: it does not wait for that job

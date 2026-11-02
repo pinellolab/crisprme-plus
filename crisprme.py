@@ -2492,7 +2492,7 @@ def complete_search() -> None:
     # The datasets the search names whose registry says sites-only: no genotypes to resolve,
     # so their post-analysis is population-level whatever the mode (new_simple_analysis.py).
     # --per-sample on such datasets alone is then the population-level analysis, as said.
-    _named = [os.path.basename(_v) for _v in (
+    _named = [os.path.basename(os.path.normpath(_v)) for _v in (
         resolve_vcf_dataset_dirs(vcfdir, current_working_directory) if variant else [])]
     _sites_only = [
         _n for _n in dict.fromkeys(_named)
@@ -4256,12 +4256,11 @@ def _in_forked_workers(function, jobs, workers: int) -> list:
     try:
         return list(pool.map(function, *zip(*jobs)))
     except BaseException:
-        pool.shutdown(wait=False, cancel_futures=True)
         for worker in multiprocessing.active_children():
             worker.terminate()
         raise
     finally:
-        pool.shutdown()
+        pool.shutdown(cancel_futures=True)
 
 
 def _in_build_dir(parent: str, prefix: str, build, stage=None):
