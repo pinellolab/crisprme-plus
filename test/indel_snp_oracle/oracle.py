@@ -6,12 +6,12 @@
       samplesID file, the NRG PAM, the guide and spec.json, with SpCas9 sites that
       need an indel, a SNP, or both, planted in cis, in trans, unphased, as two
       indels on one haplotype, as a multi-allelic SNP on one VCF line, with a SNP at
-      the far end of the target, and with a target in an indel's flank that does not
-      hold the indel.
+      the far end of the target, with a target in an indel's flank that does not
+      hold the indel, and with an equal-length multi-base record (an MNV).
   oracle.py check <workdir> <PostProcess dir> <results dir> [<results dir> ...]
       Builds every sample's two haplotypes from the VCF (a brute-force truth that
       shares no code with CRISPRme's resolution) and checks every row whose variant
-      list holds an indel, in each results dir's integrated results AND its
+      list holds an indel or an MNV, in each results dir's integrated results AND its
       alternative alignments, all three blocks:
         * the PAM is a concrete NRG and no IUPAC code is left;
         * CFD, recomputed from the row's own alignment, is the reported CFD;
@@ -47,7 +47,7 @@ import zipfile
 G = "ACTGAAATCTGTAAGCAGGC"  # the guide
 COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 CODES = set("RYSWKMBDHVryswkmbdhv")
-NSAMPLES = 46
+NSAMPLES = 50
 
 
 def rc(s):
@@ -303,10 +303,33 @@ def generate(wd):
     var("P", "snp", p0 + 10, G[9], other(G[9]), {"S45": "1|0"})
     expect["P"] = {"perfect": ["S45", "S46"]}
 
+    # K (+), K2 (-): an equal-length multi-base record (an MNV, AC>TG on the guide's
+    # strand) restores a perfect target; CRISPRitz puts it in a fake-indel window, as it
+    # does an indel. S48's and S50's slots both hold a SNP at the target's far-end base,
+    # so their MNV haplotype has one mismatch there, whatever the MNV's phase. An
+    # RNA-bulge alignment at the same site does not reach that base and lists them under
+    # the MNV alone: the merge step must not put them on the perfect row.
+    k0 = 13900
+    put(k0, G[:9] + "AC" + G[11:] + "TGG")
+    var("K", "mnv", k0 + 10, "AC", G[9:11], {"S47": "1|0", "S48": "1|0"})
+    var("K", "farsnp", k0 + 1, G[0], other(G[0]), {"S48": "1|1"})
+    expect["K"] = {"perfect": ["S47"], "never_perfect": ["S48"], "one_mm": ["S48"]}
+    k2 = 14200
+    fwd = rc(G[:9] + "AC" + G[11:] + "TGG")
+    put(k2, fwd)
+    var("K2", "mnv", k2 + 13, fwd[12:14], rc(G[9:11]), {"S49": "1|0", "S50": "1|0"})
+    var("K2", "farsnp", k2 + 23, fwd[22], "G", {"S50": "1|1"})  # a CFD below 1 there
+    # (no one-mismatch row is expected for S50: that alignment of its haplotype ties on
+    # mismatches + bulges with a DNA-bulge one with none, which each file keeps)
+    expect["K2"] = {"perfect": ["S49"], "never_perfect": ["S50"]}
+
     # (No split multi-allelic SNP records here: CRISPRitz add-variants keeps only the
     # last of two records at one position in the enriched genome and the dictionary,
     # so the other alt is invisible to every stage. PostProcess/
-    # test_indel_haplotype_resolution.py covers a position whose source knows both.)
+    # test_indel_haplotype_resolution.py covers a position whose source knows both.
+    # No MNV carrier heterozygous for a SNP its target covers either: the phased indel
+    # store holds only records whose REF and ALT differ in length, so an MNV's phase is
+    # unknown to the post-analysis and such a carrier gets its PUTATIVE worst case.)
 
     variants.sort(key=lambda v: (v["pos1"], len(v["ref"]), v["alt"]))
     for d in ("Genomes/synth", "VCFs/synth_vcf", "samplesIDs", "PAMs"):
@@ -484,8 +507,11 @@ BLOCKS = ("highest_CFD", "fewest_mm+b", "highest_CRISPR_BULGE")
 
 
 def _is_indel_token(tok):
-    p = tok.split("_")
-    return len(p) >= 4 and len(p[-2]) != len(p[-1])
+    """A variant of the indel path: a REF or ALT longer than one base (an indel, or an
+    equal-length multi-base record, an MNV, which CRISPRitz also puts in a fake-indel
+    window)."""
+    p = tok.rsplit("_", 3)
+    return len(p) == 4 and (len(p[2]) > 1 or len(p[3]) > 1)
 
 
 def _open_table(path):

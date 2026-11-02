@@ -1,14 +1,14 @@
 # SNP+indel oracle (synthetic, real CLI)
 
 `run_oracle.sh <empty work dir>` runs inside a CRISPRme image. It generates a 16 kb
-reference chromosome and a phased VCF of 46 samples (`oracle.py generate`), builds the
+reference chromosome and a phased VCF of 50 samples (`oracle.py generate`), builds the
 indexes and dictionaries with `build-index-only`, runs `complete-search` with
 `--per-sample` and with `--population-level`, then checks every row whose variant list
-holds an indel (`oracle.py check`) against each sample's two haplotypes built from the
-VCF, and runs the ALT-PAM release gate (`scripts/check_alt_pam.py`) on both results.
-It exits non-zero on any failure; CI runs it in `validate-benchmarks.yml`.
+holds an indel or an MNV (`oracle.py check`) against each sample's two haplotypes
+built from the VCF, and runs the ALT-PAM release gate (`scripts/check_alt_pam.py`) on
+both results. It exits non-zero on any failure; CI runs it in `validate-benchmarks.yml`.
 
-Every indel row of the integrated results and of the alternative alignments, in all
+Every such row of the integrated results and of the alternative alignments, in all
 three blocks, must show a concrete NRG PAM; its CFD must be the CFD of its own
 alignment; its mismatch count must be the alignment's and its mismatches + bulges their
 sum; its REF text must be the reference at its start, the bases its target holds,
@@ -37,10 +37,13 @@ who has which target:
 | J | a carrier homozygous for the deletion and for the SNP the target needs | S43 CFD 1; joint frequency 2 / AN |
 | I | a long insertion holding a whole perfect target | S44 CFD 1 |
 | P | an insertion, and on S45's slot another insertion and a SNP at its POS and anchor | S45 (a phasing artefact) and S46 CFD 1 |
+| K, K2 | an equal-length multi-base record, an MNV (+, -), and on both of S48's, S50's slots a SNP at the target's far-end base | S47, S49 CFD 1 alone; S48, S50 off the perfect row (an RNA-bulge alignment that does not reach that base lists them under the MNV alone); S48 on a one-mismatch row |
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid fake-indel
 genome column by column, without genotypes: on aa9c54b (the 2.8.1 release candidate)
-the check fails at every site but the control C, I, J and L2. Before the fix of an
+the check fails at every site but L2 (at C, I and J only the REF check fails). Before
+the merge kept an MNV row's carriers on its sequence (d4730a0), it fails at K and K2 in
+both modes: S48 and S50 are listed on the perfect row. Before the fix of an
 RNA-bulge row's start (3520eeb), the REF check fails on 68 row blocks: every RNA-bulge
 row on the + strand, which started one base early, and every RNA,DNA row, whose REF text
 had no gap and one base too many.
@@ -49,4 +52,7 @@ Not covered: split multi-allelic SNP records at one position. CRISPRitz add-vari
 keeps only the last of them in the enriched genome and in the dictionary, so the other
 alt is invisible to every stage; `PostProcess/test_indel_haplotype_resolution.py` covers
 a position whose genotype source knows both alts. (Several alts on one VCF line reach
-every stage: sites N and N2.)
+every stage: sites N and N2.) Nor an MNV carrier heterozygous for a SNP its target
+covers: the phased indel genotype store holds only records whose REF and ALT differ in
+length, so an MNV's phase is unknown to the post-analysis, and such a carrier gets the
+strongest target its own alleles allow, PUTATIVE, as an unphased carrier does (site U).
