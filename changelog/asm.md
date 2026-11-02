@@ -38,11 +38,13 @@
   a legacy `Genomes/<name>` folder built by an earlier CRISPRme, or downloaded, is used as before. A
   haplotype result written by the colliding search is not reused by a later run with the same
   `--output`: it is searched again. With the fix the paternal results are unchanged byte for byte
-  apart from the genome's name (in file names, `.Params.txt` and `.command_line.txt`), the maternal
-  haplotype reports its own sites, and a legacy `Genomes/<name>` pair (the layout before 2.6.0) runs
-  exactly as before. Each haplotype's index is the size of a reference index; Settings > Delete >
-  Personal assembly removes the individual's haplotype indexes and links with its folder, and its
-  confirmation names those indexes and counts their size. **Affected:** every `assembly-search` with
+  apart from the genome's name (in file names, `.Params.txt`, `.command_line.txt` and the
+  haplotype's own report: its `report.html`, `data/Params.txt` and `data/run_manifest.json`, also
+  bundled in the combined report), the maternal haplotype reports its own sites, and a legacy
+  `Genomes/<name>` pair (the layout before 2.6.0) runs exactly as before. Each haplotype's index is
+  the size of a reference index; Settings > Delete > Personal assembly removes the individual's
+  haplotype indexes and links with its folder, and its confirmation names those indexes and counts
+  their size. **Affected:** every `assembly-search` with
   bulges on a bundle assembly since 2.6.0, from the web or the CLI. The haplotype whose search built
   the shared index (usually the first paternal haplotype searched) has correct results; every other
   haplotype searched with that index does not. **What to do:** run those searches again, and delete
@@ -94,9 +96,10 @@
   site that needs one), and, under `--index-path`, without it, since the pipeline builds no index
   there (and so without `--prune-pam`, which needs `--index-path`). An index that `complete-search`
   builds of a folder outside `Genomes/` records that folder and its FASTA files (`.genome_source`,
-  as a personal-assembly haplotype's index does), and is built again when those files change. The
-  record names a folder of the machine that built the index, so `publish-index` leaves it out of the
-  archive and `download` drops it: a downloaded index records no folder. A search of a genome in
+  as a personal-assembly haplotype's index does), and is built again when those files change (not
+  under `--index-path`, which builds no index and takes it as it is). The record names a folder of
+  the machine that built the index, so `publish-index` leaves it out of the archive and `download`
+  drops it: a downloaded index records no folder. A search of a genome in
   `Genomes/` runs exactly as before and its index records nothing; an index that records nothing
   (built by an earlier CRISPRme, or downloaded) is taken as before, except by a search of one
   haplotype of a personal assembly (next entry), and so are the indexes of a library given with
