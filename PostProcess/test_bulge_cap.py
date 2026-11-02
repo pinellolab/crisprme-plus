@@ -801,5 +801,55 @@ class TestIndelZeroBulgeRouting(unittest.TestCase):
         self.assertIn("-index", cmd)
 
 
+
+# --------------------------------------------------------------------------- #
+# A working folder the run cannot write to (skip audit D10)
+# --------------------------------------------------------------------------- #
+class TestUnwritableWorkingFolder(unittest.TestCase):
+    """complete-search, assembly-search and build-index-only ended in a raw OSError traceback
+    when a folder of the working directory, or the output folder, could not be created (a
+    read-only mount, no write permission); now one line says so and what to do. crisprme.py
+    with no arguments still prints its help there."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="unwritable_")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self._orig_cwd = crisprme.current_working_directory
+        crisprme.current_working_directory = self.root + "/"
+        self.addCleanup(setattr, crisprme, "current_working_directory", self._orig_cwd)
+        self._orig_makedirs = crisprme.os.makedirs
+
+        def refuse(path, *args, **kwargs):
+            raise OSError(30, "Read-only file system", path)
+
+        crisprme.os.makedirs = refuse
+        self.addCleanup(setattr, crisprme.os, "makedirs", self._orig_makedirs)
+
+    def stops(self, call):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as stop:
+            call()
+        self.assertEqual(stop.exception.code, 1)
+        return err.getvalue()
+
+    def test_a_folder_of_the_tree_that_cannot_be_made_stops_in_one_line(self):
+        said = self.stops(crisprme.check_crisprme_dirtree)
+        self.assertEqual(said, f"Error: cannot create {self.root}/Genomes: Read-only file "
+                               "system. Run CRISPRme from a working folder you can write to.\n")
+
+    def test_the_output_folder_too(self):
+        said = self.stops(lambda: crisprme._check_output(["--output", "job"]))
+        self.assertEqual(said, f"Error: cannot create {self.root}/Results/job: Read-only file "
+                               "system. Run CRISPRme from a working folder you can write to.\n")
+
+    def test_the_help_is_not_stopped(self):
+        crisprme.check_crisprme_dirtree(strict=False)  # (no SystemExit)
+
+    def test_a_tree_in_place_needs_nothing_made(self):
+        # the read-only use that works: every folder there, an --output elsewhere
+        for d in crisprme.CRISPRMEDIRS:
+            self._orig_makedirs(os.path.join(self.root, d))
+        crisprme.check_crisprme_dirtree()
+
 if __name__ == "__main__":
     unittest.main()

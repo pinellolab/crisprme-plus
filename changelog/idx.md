@@ -264,3 +264,11 @@ registry. -->
   and prints a `WARNING` on stdout, also written to the run's `Params.txt`, when it finds no
   `N`; it does not stop the search. An index of the PAM's width is not read, and nothing else
   changes.
+- **A working folder the run cannot write to stops it in one line, not a traceback.** Run from a
+  read-only folder (a `:ro` mount, no write permission), `complete-search`, `assembly-search` and
+  `build-index-only` ended in a raw `OSError` traceback from creating `Genomes/`, the output
+  folder or `genome_library/`, and `crisprme.py` with no arguments printed one instead of its help.
+  **Affected:** those runs only, in 2.8.0 too; nothing was written or lost. They now stop with
+  `Error: cannot create <folder>: <reason>. Run CRISPRme from a working folder you can write to.`,
+  and the help prints. A read-only folder that already holds every CRISPRme folder, searched with
+  an `--output` elsewhere, runs as before.

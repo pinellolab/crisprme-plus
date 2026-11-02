@@ -300,12 +300,15 @@ def getGuides(extracted_seq, pam, len_guide, pam_begin):
     # return guides for when adding to app.py
 
 
-def check_crisprme_dirtree() -> None:
+def check_crisprme_dirtree(strict: bool = True) -> None:
     """Ensures that the working directory contains the required CRISPRme folder 
     structure.
     
     Checks for the existence of each expected directory and creates any that are 
-    missing.
+    missing. One that cannot be created (a read-only working folder, no write permission)
+    stops the run with one line that says to run from a folder you can write to, rather
+    than a traceback; with ``strict`` False (crisprme.py with no arguments, which prints
+    the help) it is left as it is.
     """
     # check that working folder respect crisprme's directory tree structure
     for directory in CRISPRMEDIRS:
@@ -313,7 +316,17 @@ def check_crisprme_dirtree() -> None:
             # expected folder not found, create it (a run that started together
             # may have made it meanwhile)
             crisprmedir = os.path.join(current_working_directory, directory)
-            os.makedirs(crisprmedir, exist_ok=True)
+            try:
+                os.makedirs(crisprmedir, exist_ok=True)
+            except OSError as e:
+                if strict:
+                    _unwritable(crisprmedir, e)
+
+def _unwritable(path: str, exc: OSError) -> NoReturn:
+    """Stops a run that cannot create ``path`` in the working directory, in one line."""
+    error(f"cannot create {path}: {exc.strerror or exc}. Run CRISPRme from a working folder "
+          f"you can write to.")
+
 
 def _registry_data_type_for_search(args):
     """Best-effort read of the variant index ``data_type`` (Phase-2.1 registry manifest
@@ -1808,7 +1821,10 @@ def _check_output(args: List[str]) -> str:
                 f"{outputfolder} before running a new CRISPRme search."
             )
     else:  # old folder doesn't exist, create it
-        os.makedirs(outputfolder)    
+        try:
+            os.makedirs(outputfolder)
+        except OSError as e:
+            _unwritable(outputfolder, e)
     if not os.path.isdir(outputfolder):
         error("The folder specified for --output does not exist")
     return outputfolder
@@ -4182,7 +4198,10 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
 
     lib = os.path.join(workdir, "genome_library")
     final = os.path.join(lib, name)
-    os.makedirs(lib, exist_ok=True)
+    try:
+        os.makedirs(lib, exist_ok=True)
+    except OSError as e:
+        _unwritable(lib, e)
 
     def build(tmp):
         built = os.path.join(tmp, "genome_library", name)
@@ -6830,7 +6849,7 @@ def targets_scoring_cmd():
 
 _configure_tmpdir()  # honor $CRISPRME_TMPDIR for all temp before any command runs
 if len(sys.argv) < 2:
-    check_crisprme_dirtree()  # check crisprme directory tree structure
+    check_crisprme_dirtree(strict=False)  # check crisprme directory tree structure
     crisprme_help()  # no arg? print help
 elif sys.argv[1] == "complete-search":  # run complete search
     _run_and_remove_annotation_tmpdirs(complete_search)
