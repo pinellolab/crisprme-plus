@@ -81,7 +81,7 @@ docker run --rm -e CRISPRME_RUN_HF_TESTS=1 -v "$GATE:/gate" -w /opt/conda/opt/cr
   done
   exit $fail' || echo GATE_FAILED
 # Must print nothing: any other skip is a test that did not run.
-grep -h "skipped '" "$GATE"/test_*.log | grep -vE "no TensorFlow here|en_US.UTF-8 is not installed|no ps here to compare"
+grep -hE "skipped ['\"]" "$GATE"/test_*.log | grep -vE "no TensorFlow here|en_US.UTF-8 is not installed|no ps here to compare"
 
 # 2. The en_US arm of the locale tests.
 docker run --rm -w /opt/conda/opt/crisprme/PostProcess "$IMG" bash -c '(apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq locales) >/dev/null 2>&1; localedef -i en_US -f UTF-8 en_US.UTF-8; python -m unittest test_index_resolution.ChoiceIsLocaleIndependent -v' 2>&1 | tee "$GATE/en_us.log"

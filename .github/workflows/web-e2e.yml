@@ -132,7 +132,7 @@ jobs:
             python -m unittest test_assembly_annotate test_assembly_reconcile \
               test_complete_search_flags test_post_process_tempdir test_index_resolution -v \
             2>&1 | tee in-image-tests.log
-          if grep "skipped '" in-image-tests.log \
+          if grep -E "skipped ['\"]" in-image-tests.log \
               | grep -vE "en_US.UTF-8 is not installed|no ps here to compare"; then
             echo "FAIL: a test that must run in the image skipped"; exit 1
           fi

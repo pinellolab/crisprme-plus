@@ -9,7 +9,10 @@ Read as text: the CI env has no YAML parser (and YAML 1.1 reads the `on` key as 
 import ast
 import fnmatch
 import json
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -113,13 +116,33 @@ class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
         modules = re.search(r"python -m unittest ((?:[\w.]+\s*\\?\s*)+?) -v", step)
         self.assertEqual(sorted(modules.group(1).replace("\\", " ").split()), sorted(self.MODULES))
 
-    def test_a_skip_there_fails_the_step(self):
-        # bash -e alone would not see the tests fail through the tee, and a test the image
-        # no longer has the tool for would skip, and pass, as they did in the light job
+    def guard(self, log):
+        """The exit status of the step's check of its log, run as the step runs it."""
         step = self.in_image_step()
-        self.assertIn("set -o pipefail", step)
-        self.assertRegex(step, r"""if grep "skipped '" \S+ \\\n\s+\| grep -vE "en_US[^"]*\|no ps here[^"]*"; then""")
-        self.assertRegex(step, r"FAIL: .*\n?.*exit 1")
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "in-image-tests.log").write_text(log)
+            return subprocess.run(
+                ["bash", "-e", "-c", step[step.index("if grep"):]], cwd=d, capture_output=True,
+                text=True).returncode
+
+    def test_a_failed_test_fails_the_step(self):
+        # bash -e alone would not see it through the tee
+        self.assertIn("set -o pipefail", self.in_image_step())
+
+    def test_a_skip_there_fails_the_step(self):
+        # a test whose tool has gone from the image skips, and would pass as in the light job.
+        # unittest gives a reason holding an apostrophe in double quotes.
+        for line in ("test_a (m.C.test_a) ... skipped 'bedops (sort-bed/closest-features) not on PATH'",
+                     'test_b (m.C.test_b) ... skipped "needs the checkout\'s .github/workflows"',
+                     "setUpClass (m.C) ... skipped 'crisprme.py dependencies not installed'"):
+            with self.subTest(line=line):
+                self.assertEqual(self.guard(f"test_c (m.C.test_c) ... ok\n{line}\n"), 1)
+
+    def test_but_the_two_the_image_cannot_help(self):
+        log = ("test_c (m.C.test_c) ... ok\n"
+               "test_d (m.C.test_d) ... skipped 'en_US.UTF-8 is not installed here, or collates like C'\n"
+               "test_e (m.C.test_e) ... skipped 'no ps here to compare with, as in the image'\n")
+        self.assertEqual(self.guard(log), 0)
 
     def test_every_test_module_is_named_in_a_workflow(self):
         text = "\n".join(p.read_text() for p in WORKFLOWS.glob("*.yml"))
@@ -207,7 +230,8 @@ class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
 
     def test_the_skips_it_allows_are_the_skips_the_tests_print(self):
         text = self.checklist()
-        allowed = re.search(r'grep -vE "([^"]+)"', text).group(1).split("|")
+        allowed = re.search(r"""grep -hE "skipped \['\\"\]" \S+ \| grep -vE "([^"]+)"$""", text,
+                            re.M).group(1).split("|")
         self.assertEqual(len(allowed), 3, allowed)
         sources = {"no TensorFlow here": "test_crispr_bulge_fidelity.py",
                    "en_US.UTF-8 is not installed": "test_index_resolution.py",
@@ -221,6 +245,22 @@ class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
         self.assertIn("no group to give genome_library",
                       (REPO / "PostProcess/test_build_index_only_atomic.py").read_text())
         self.assertIn("`no group to give genome_library`", text)
+
+    def test_its_grep_catches_any_other_skip(self):
+        line = next(ln for ln in self.checklist().splitlines() if ln.startswith('grep -hE "skipped'))
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "test_x.log"
+            log.write_text("test_a (m.C.test_a) ... skipped 'no ps here to compare with, as in the image'\n"
+                           "test_b (m.C.test_b) ... skipped 'no TensorFlow here: run it in the cbulge env'\n"
+                           "test_c (m.C.test_c) ... skipped 'en_US.UTF-8 is not installed here, or...'\n")
+            said = subprocess.run(["bash", "-c", line], env={"GATE": d, "PATH": os.environ["PATH"]},
+                                  capture_output=True, text=True).stdout
+            self.assertEqual(said, "")
+            log.write_text('test_d (m.C.test_d) ... skipped "no group to give it but this user\'s own"\n'
+                           "test_e (m.C.test_e) ... skipped 'bedops not on PATH'\n")
+            said = subprocess.run(["bash", "-c", line], env={"GATE": d, "PATH": os.environ["PATH"]},
+                                  capture_output=True, text=True).stdout
+            self.assertEqual(len(said.splitlines()), 2, said)
 
     def test_it_runs_the_function_based_modules_as_scripts(self):
         text = self.checklist()
