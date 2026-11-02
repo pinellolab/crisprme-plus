@@ -514,16 +514,21 @@ cis/trans/unphased mix).
 
 **Report surfacing — the haplotype's variant set.** An indel row whose haplotype holds SNP alts next
 to the indel lists, in the report's `Variant` column (and the `observed_haplotypes` companion, which
-reads the same field), the indel followed by each SNP alt as a forward-strand `chrom_pos_ref_alt`
-token (same format the SNP path emits, so `resultIntegrator` parses and strand-corrects them
-identically), with the `rsID` / `MAF` lists kept 1:1 token-aligned, and its `Samples` column is the
-individuals whose own haplotype has that sequence. A slot whose phase cannot be read (unphased, a
-missing allele, no phased indel genotype) gets the strongest target its own alleles allow, and a
-sites-only panel (mega) the strongest target the codes allow, listing the indel log's carriers; the
-`*.indel_snp_cooc.tsv` sidecar marks those PUTATIVE (the anti-chimera contract of §9c: no individual
-is listed for an allele it does not carry). Up to 2.8.0 the indel row's sequence was instead resolved
-column by column without genotypes, and a PUTATIVE call stayed in the sidecar while the row kept that
-guide-optimistic sequence and every indel carrier.
+reads the same field), the indel and each SNP alt as a forward-strand `chrom_pos_ref_alt` token
+(same format the SNP path emits, so `resultIntegrator` parses and strand-corrects them
+identically), and its `Samples` column is the individuals whose own haplotype has that sequence.
+The indel post-analysis writes the indel first, with the `rsID` / `MAF` lists 1:1 with the tokens,
+but the merge of a cluster's rows (`remove_contiguous_samples.py`), as on SNP rows, sorts and
+deduplicates the token, `rsID` and `MAF` lists each on its own, so the results tables and the
+report keep neither the order nor that pairing: a SNP token can come before the indel's, and equal
+values show once, so a list can be shorter than the token list (two variants with one MAF give one
+MAF). A slot whose phase cannot be read (unphased, a missing allele, no phased indel genotype) gets
+the strongest target its own alleles allow, and a sites-only panel (mega) the strongest target the
+codes allow, listing the indel log's carriers; the `*.indel_snp_cooc.tsv` sidecar marks those
+PUTATIVE (the anti-chimera contract of §9c: no individual is listed for an allele it does not
+carry). Up to 2.8.0 the indel row's sequence was instead resolved column by column without
+genotypes, and a PUTATIVE call stayed in the sidecar while the row kept that guide-optimistic
+sequence and every indel carrier.
 
 ### 9c. The dense-window APPROXIMATION (the greedy cap) + FLAGS + DEFAULT behaviour
 Enumerating the lattice is 2^k in the number of co-located variants, so extreme-density windows are
