@@ -23,10 +23,11 @@ Type an assembly name and pick a source:
   single multi-FASTA) automatically: a single multi-FASTA download is split into one
   file per sequence, which is the layout every search requires.
 - **HuggingFace** — pulls a genome we host on the CRISPRme data repo.
-- **Direct URL** — any `.fa.gz` / `.tar.gz` link. Like an upload (below), it is refused
-  while indexes or variant genomes built on a genome of that name are installed, and
-  the page says so before anything is fetched: the link can hold another genome than
-  the one they were built from. Download it under another name, or remove them first.
+- **Direct URL** — any `.fa.gz` / `.tar.gz` link. It is laid out as an upload is, and
+  each header written as `>id` (below). Like an upload, it is refused while indexes or
+  variant genomes built on a genome of that name are installed, and the page says so
+  before anything is fetched: the link can hold another genome than the one they were
+  built from. Download it under another name, or remove them first.
 - **Upload** — pick a local genome file (`.fa`, `.fa.gz` or `.tar.gz`); it is sent
   in chunks, so there is no browser size limit. It is laid out as every search needs
   it: every FASTA of an archive goes to the top of the genome folder (a UCSC
@@ -34,7 +35,13 @@ Type an assembly name and pick a source:
   `chr1.fa`: an index is built from the `.fa` files only), a FASTA holding several
   sequences is split into one file per sequence, and a FASTA of one sequence is named
   after it (`hg38_chr22.fa` holding `>chr22` goes in as `chr22.fa`: a search takes each
-  file for the sequence it is named after). Hidden files are left out (the
+  file for the sequence it is named after). Each header is written as `>id`, with no
+  description, and every line with no carriage return: an NCBI, GENCODE or Ensembl FASTA
+  (`>NC_000913.3 Escherichia coli ...`, `>chr1 1`) goes in as `>NC_000913.3`, `>chr1`. An
+  id the pipeline cannot take (one that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`,
+  `>`, a backquote or `#`, as `>gi|49175990|ref|NC_000913.2|` does) is refused: rename the
+  sequence and upload it again.
+  Hidden files are left out (the
   `._chr1.fa` that macOS `tar` adds beside `chr1.fa` holds its file attributes, not a
   sequence). An archive with two FASTA files that would go in under one name
   (`a/chr1.fa` and `b/chr1.fa`, `chr1.fa` and `chr1.fasta`, or two files of one
@@ -79,9 +86,13 @@ Bulge-enabled searches need a genome **index**.
   well for a FASTA of one sequence not named after it (`hg38_chr22.fa` holding
   `>chr22`), whose off-targets every search would find and then drop: rename it after
   its sequence (`python PostProcess/genome_layout.py --split <genome folder>` renames
-  them all) and build again. It stops too
+  them all) and build again. It stops as well for a header that is more than `>id`, or
+  lines that end in a carriage return, in a folder put there by hand or installed before
+  2.8.1 (a search stops too): every search would lose results, often all of them. The
+  same command writes them as `>id`; then remove each index built from the folder as it
+  was. It stops too
   when the reference index already there holds no `.bin` (one built before from such
-  a folder): remove that index and build again.
+  a folder), or a `.bin` named after more than an id: remove that index and build again.
 
 ### Add a VCF dataset
 Variant datasets are large, so they are **fetched server-side** rather than

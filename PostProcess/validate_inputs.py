@@ -25,12 +25,16 @@ import sys
 
 try:  # PostProcess/ on sys.path (crisprme.py, the pipeline) ...
     from genome_layout import (
+        describe_header_problems,
+        describe_index_problems,
         describe_problem,
         find_multi_record_fastas,
         find_name_mismatched_fastas,
     )
 except ImportError:  # ... or imported as PostProcess.validate_inputs (tests)
     from PostProcess.genome_layout import (
+        describe_header_problems,
+        describe_index_problems,
         describe_problem,
         find_multi_record_fastas,
         find_name_mismatched_fastas,
@@ -304,12 +308,16 @@ def check_genome_fasta(genomedir: str) -> Tuple[List[Issue], List[str]]:
     # post-analysis) by file name, so a multi-sequence file makes the search run
     # and then silently drop every result. Fast check (first header vs file name;
     # see genome_layout.find_multi_record_fastas) so it is cheap on every search.
+    # And a header must be >id alone, on lines that end in LF: CRISPRitz names the
+    # chromosome after the whole line, and the search then loses results, often all
+    # of them with no error (genome_layout.describe_header_problems, two lines a file).
     try:
         multi = find_multi_record_fastas(genomedir)
         mismatched = find_name_mismatched_fastas(genomedir)
+        header_problems = describe_header_problems(genomedir, reported=multi)
     except OSError as e:
         issues.append(Issue(WARN, f"could not check the genome file layout ({e})"))
-        multi, mismatched = {}, {}
+        multi, mismatched, header_problems = {}, {}, []
     for fname, ids in multi.items():
         issues.append(Issue(ERROR, describe_problem(genomedir, fname, ids)))
     for fname, rid in mismatched.items():
@@ -323,6 +331,8 @@ def check_genome_fasta(genomedir: str) -> Tuple[List[Issue], List[str]]:
                 f"file after its sequence (e.g. {rid}.fa) or results may be dropped.",
             )
         )
+    for problem in header_problems:
+        issues.append(Issue(ERROR, problem))
     return issues, chrom_names
 
 
@@ -1184,6 +1194,16 @@ def run_lightweight(
         genome_issues,
         ok_message=f"Genome directory: {len(genome_chroms)} FASTA file(s), all start with '>'",
     )
+    if current_working_directory:
+        report.add(
+            [
+                Issue(ERROR, problem)
+                for problem in describe_index_problems(
+                    os.path.join(current_working_directory, "genome_library"),
+                    os.path.basename(os.path.normpath(genomedir)),
+                )
+            ]
+        )
 
     has_samplesfile = bool(samplesfile) and os.path.basename(samplesfile) != MOCK_FILENAME
     sample_lists = (

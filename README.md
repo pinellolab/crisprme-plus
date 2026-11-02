@@ -911,7 +911,10 @@ its purpose and usage:
 
 - `--genome` (*Required*)
   <br>Path to the directory containing the reference genome in FASTA format. 
-  Each chromosome must be in a separate file (e.g., `chr1.fa`, `chr2.fa`, etc.). 
+  Each chromosome must be in a separate file named after it (e.g., `chr1.fa`, `chr2.fa`, 
+  etc.), whose header line is the name alone (`>chr1`). `python PostProcess/genome_layout.py 
+  --split <folder>` lays out a folder so, and a search or index build that finds otherwise 
+  says so. 
 
 - `--vcf` (*Optional*)
   <br>Path to text config file listing the directories containing VCF files to 

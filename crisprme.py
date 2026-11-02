@@ -3653,9 +3653,11 @@ def _check_genome_layout(genomedir: str) -> None:
     index with no .bin, which every search refuses, and a file of several sequences
     one that the search refuses to use. A file of one sequence named otherwise gave
     an index of the sequence, but every search of the folder dropped all its
-    off-targets: a search takes each file for the sequence it is named after."""
-    from genome_layout import (describe_problem, find_multi_record_fastas,
-                               find_name_mismatched_fastas)
+    off-targets: a search takes each file for the sequence it is named after. A header
+    that is more than >id, or CR line ends, gave an index named after the whole line,
+    and every search of it lost results, often all of them with no error."""
+    from genome_layout import (describe_header_problems, describe_problem,
+                               find_multi_record_fastas, find_name_mismatched_fastas)
 
     names = sorted(os.listdir(genomedir))
     if not any(n.split(".")[-1] == "fa" and os.path.isfile(os.path.join(genomedir, n))
@@ -3693,6 +3695,9 @@ def _check_genome_layout(genomedir: str) -> None:
             "the web Settings page is split this way: remove this one there, with the "
             "indexes built on it, and upload it again.)"
         )
+    # (before the next: its --split fixes a file that also has the wrong name, its mv not)
+    for _problem in describe_header_problems(genomedir):
+        error(_problem)
     # one sequence, in a file not named after it (an upload of hg38_chr22.fa holding
     # >chr22, or of a bacterial genome, was installed so): the search found its
     # off-targets and dropped them all, its chromosome list being the file names. An
@@ -4417,6 +4422,12 @@ def build_index_only() -> None:
         workdir = os.path.abspath(args[args.index("--path") + 1])
         if not os.path.isdir(workdir):
             error(f"The working directory {workdir} does not exist")
+    # an index built before the headers were written as >id would be taken as present
+    from genome_layout import describe_index_problems
+
+    for _problem in describe_index_problems(os.path.join(workdir, "genome_library"),
+                                            os.path.basename(genomedir)):
+        error(_problem)
     # derive the true PAM string exactly as complete-search does (see the PAM
     # parsing block in complete_search), so the index folder name matches the
     # one a later search will look for

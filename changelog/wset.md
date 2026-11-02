@@ -150,7 +150,8 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   it found its off-targets and then dropped them all (`none survived post-analysis`), though its
   index build said done. (A genome downloaded by Direct URL or from UCSC as one FASTA of one
   sequence is named after it the same way, and `PostProcess/genome_layout.py --split` renames such a
-  file too.) Hidden files of an archive are left out: the `._chr1.fa` that macOS `tar` adds beside
+  file too.) Each header is written as `>id` (see the entry on those). Hidden files of an archive
+  are left out: the `._chr1.fa` that macOS `tar` adds beside
   `chr1.fa` (its file attributes) was installed too, and every search read it as a chromosome and
   failed, though the build said done. An archive with two FASTA files that would go in under one
   name (`chr1.fa` and `chr1.fasta`, or two files of one sequence) is refused. (An upload under the
@@ -175,7 +176,7 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   reference index with no `.bin` that an earlier run left is no longer taken for present (the run
   said `Reference index already present` and the Settings page showed the build done, though no
   search uses it): the run says to remove it. A genome of one FASTA per sequence, each named after
-  its sequence, builds exactly as before.
+  its sequence and with a header of `>id` (see the entry on those), builds exactly as before.
 - **A single multi-chromosome `.vcf.gz` without its `.tbi` builds a variant index.** The
   documented auto-split read the file by region through its index, so a file uploaded alone (the
   Settings uploader takes one file at a time) failed with `Could not load .tbi index ...
@@ -304,3 +305,34 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   Settings build reads `failed` with the message after 5 s, and with 6 GB, where three workers at
   once are too many, the build finishes one chromosome at a time. A build with memory enough writes
   the same files as before, byte for byte, and so does that one.
+- **A genome whose FASTA headers carry a description, or whose lines end in CRLF, no longer indexes
+  as done and then loses every search's results.** CRISPRitz names a chromosome after the whole
+  header line, and the pipeline splits on blanks, so the FASTAs NCBI, GENCODE, Ensembl and GATK
+  ship went wrong, each in its own way, with the same sequence that gives 7 sites under a plain
+  `>chr1`. An NCBI `>NC_000913.3 Escherichia coli str. K-12 substr. MG1655, complete genome` or a
+  GATK header: exit status 0, `No off-targets found` (in the browser, `Finished: no off-targets were
+  found`). GENCODE `>chr1 1`: 7 sites, but with `chr1 1` for a chromosome and `NA` for every
+  annotation. Ensembl `>1 dna:chromosome ...`: the search fails at integration (`Start coordinate is
+  too large ... BEDOPS`). CRLF: 451 KB of warnings on stderr at exit status 0, and `No off-targets
+  found`. A variant build on `>chr1 1` failed with `Indels indexing failed`. An upload in Settings, a
+  Direct URL or UCSC download and `genome_layout.py --split` now write each header as `>id`, and
+  every line with no CR, also for a FASTA already named after its sequence; a file that needs none
+  of this is not touched. Each of those genomes then gives the sites and table of the same sequence
+  under a plain header, through the browser and the command line, and a variant build on one gives
+  the same table too. A folder left with such a file is refused before anything is built or
+  searched: `build-index-only`, `complete-search` and a web search end with an ERROR that gives the
+  `--split` command and says to remove the indexes built from the folder as it was (`--split` lists
+  them). Such an index is refused as well, where its `.bin` names show it: it holds the old names
+  once the FASTA is written as it should be, and every search of it went on losing results, and a
+  build took it as present. An index built from a FASTA with a clean header line and CRLF after it
+  has `.bin` names that do not show it, so it is not caught: remove it as the ERROR says. A sequence
+  id that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or `#` is refused too,
+  at an upload, a download, `--split`, a build and a search (`gi|49175990|ref|NC_000913.2|`, a PanSN
+  `HG01255#1#CM086702.1`; measured character by character through the real command line, `.`, `:`,
+  `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~`, `!`, `*`, `?` and brackets work): a search of one
+  failed with `/bin/sh: Syntax error`, or, for `#`, `none survived post-analysis`. A file whose lines
+  end in CR alone is refused by `--split`, which says to convert it, as its first line holds the
+  whole file. **If you have such a genome,** run `python PostProcess/genome_layout.py --split
+  <genome folder>`, remove the indexes it names, and build again, or remove it in Settings and upload
+  it again. A search of a genome of plain headers is unchanged. Covered by
+  `PostProcess/test_genome_layout.py` and `PostProcess/test_build_index_only_layout.py`.

@@ -159,10 +159,11 @@ fi
 # Genome layout guard: CRISPRme keys its chromosome list (and so all post-analysis)
 # by FASTA FILE NAME, one sequence per file. A genome delivered as one multi-sequence
 # file (e.g. UCSC's susScr11.fa) indexes and searches fine but then silently yields an
-# EMPTY result, so refuse it up front, with the fix (see genome_layout.py). Fast: one
-# header line per file. Covers the web-launched path, which does not run the validator.
+# EMPTY result, so refuse it up front, with the fix (see genome_layout.py), as a header
+# of more than >id or CR line ends. Fast: two lines per file. Covers the web-launched
+# path, which does not run the validator.
 if ! python "$starting_dir/genome_layout.py" "$ref_folder" >&2; then
-	printf "ERROR: reference genome folder %s is not one FASTA file per sequence\n" "$ref_folder" >&2
+	printf "ERROR: reference genome folder %s is not as a search needs it (see above)\n" "$ref_folder" >&2
 	exit 1
 fi
 

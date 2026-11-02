@@ -803,6 +803,37 @@ class TestGenomeTarUpload(unittest.TestCase):
         self.assertIn("sequence id 'chr1/a' cannot be used as a file name", str(cm.exception))
         self.assertEqual(os.listdir(os.path.join(cwd, "Genomes")), [])
 
+    def test_header_of_more_than_its_id_upload_goes_in_as_the_id(self):
+        # an NCBI, GENCODE or Ensembl FASTA, or CRLF line ends, a file already named after
+        # its sequence among them: it went in as it was, with an index built as done, and
+        # every search of it lost results, often all of them (round 5 review, F1)
+        for name, data, want in (
+                ("ecoli.fa", b">NC_000913.3 Escherichia coli K-12\nACGT\nAC\n",
+                 {"NC_000913.3.fa": b">NC_000913.3\nACGT\nAC\n"}),
+                ("gencode.fa.gz", gzip.compress(b">chr1 1\nACGT\n>chr2 2\nGG\n"),
+                 {"chr1.fa": b">chr1\nACGT\n", "chr2.fa": b">chr2\nGG\n"}),
+                ("chr1.fa", b">chr1 1\nACGT\n", {"chr1.fa": b">chr1\nACGT\n"}),
+                ("chr1.fa", b">chr1\r\nACGT\r\nAC\r\n", {"chr1.fa": b">chr1\nACGT\nAC\n"})):
+            with self.subTest(name, data=data):
+                root, cwd, _outside, ns = self.sandbox()
+                part = self.plain_upload(cwd, name, data)
+                assembly = name.split(".")[0]
+                self.assertEqual(ns["_finalize_upload"]("genome", part, name, "", ""), assembly)
+                self.assert_one_file_a_sequence(cwd, assembly, want)
+        # in an archive, a file already named after its sequence too
+        root, cwd, _outside, ns = self.sandbox()
+        part = self.upload(cwd, "asm.tar.gz", [("chroms/chr1.fa", "file", b">chr1 1\nACGT\n"),
+                                               ("chroms/chr2.fa", "file", _FA2)])
+        self.assertEqual(ns["_finalize_upload"]("genome", part, "asm.tar.gz", "", ""), "asm")
+        self.assert_one_file_a_sequence(cwd, "asm", {"chr1.fa": b">chr1\nACGT\n", "chr2.fa": _FA2})
+        # an id the pipeline cannot take is refused, with nothing installed
+        root, cwd, _outside, ns = self.sandbox()
+        part = self.plain_upload(cwd, "ecoli.fa", b">gi|49175990|ref|NC_000913.2| E. coli\nACGT\n")
+        with self.assertRaises(ValueError) as cm:
+            ns["_finalize_upload"]("genome", part, "ecoli.fa", "", "")
+        self.assertIn("sequence id 'gi|49175990|ref|NC_000913.2|' holds '|'", str(cm.exception))
+        self.assertEqual(os.listdir(os.path.join(cwd, "Genomes")), [])
+
     def test_two_files_of_one_sequence_refused_installing_nothing(self):
         # named after its sequence, one file would take the other's name
         for label, entries in (

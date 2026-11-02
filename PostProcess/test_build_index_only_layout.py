@@ -19,12 +19,15 @@ none for a contig of N alone), the way its own tests do.
 """
 
 import os
+import subprocess
+import sys
 import unittest
 
 import test_build_index_only_atomic as bio
 
 setUpModule = bio.setUpModule
 tearDownModule = bio.tearDownModule
+LAYOUT = os.path.join(bio.HERE, "genome_layout.py")
 
 
 class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
@@ -101,6 +104,76 @@ class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
                          ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+
+    def test_fasta_header_of_more_than_its_id(self):
+        # NCBI, GENCODE, Ensembl headers and CRLF line ends: the index was built, named
+        # after the whole line, and every search of it lost results, often all with no
+        # error (round 5 review, F1). chr2 goes as it should; chr1 is refused.
+        with open(self.genome("chr1.fa")) as fh:
+            seq = fh.read().split("\n", 1)[1]
+        for label, header, sequence in (("NCBI", ">chr1 Homo sapiens chromosome 1, GRCh38\n", seq),
+                                        ("GENCODE", ">chr1 1\n", seq),
+                                        ("Ensembl", ">chr1 dna:chromosome chromosome:GRCh38:1\n", seq),
+                                        ("CRLF", ">chr1\r\n", seq.replace("\n", "\r\n"))):
+            with self.subTest(label):
+                self.fresh()
+                with open(self.genome("chr1.fa"), "wb") as fh:
+                    fh.write((header + sequence).encode())
+                rc, out, err = self.run_bio(vcf=False)
+                self.assert_refused(rc, out, err, "chr1.fa: its ",
+                                    "A header must be >id and nothing else",
+                                    f"python PostProcess/genome_layout.py --split {self.genome()}",
+                                    "Then remove each index built from the folder as it was "
+                                    "(genome_library/*_hg38, genome_library/*_hg38+*, and the "
+                                    "variant genomes Genomes/hg38+*)",
+                                    "remove this one there, with the indexes built on it")
+                # a search of it too, before the engine runs
+                rc, out, err = self.run_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("[ERROR] chr1.fa: its ", err)
+                self.assertIn(f"python PostProcess/genome_layout.py --split {self.genome()}", err)
+                self.assertNotIn("Launching job ", out)
+                self.assertEqual(self.calls(), [])
+                # written as the id, the folder builds, each .bin named after it
+                done = subprocess.run([sys.executable, LAYOUT, "--split", self.genome()],
+                                      capture_output=True, text=True)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                rc, out, err = self.run_bio(vcf=False)
+                self.assertEqual(rc, 0, out + err)
+                self.assertEqual(err, "")
+                self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
+                                 ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+
+    def test_fasta_id_the_pipeline_cannot_take(self):
+        with open(self.genome("chr1.fa")) as fh:
+            seq = fh.read().split("\n", 1)[1]
+        os.remove(self.genome("chr1.fa"))
+        rid = "gi|49175990|ref|NC_000913.2|"
+        with open(self.genome(rid + ".fa"), "w") as fh:
+            fh.write(f">{rid}\n{seq}")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assert_refused(rc, out, err, f"sequence id {rid!r} holds '|', which the pipeline "
+                            "cannot take", "Rename the sequence in the FASTA header")
+
+    def test_an_index_built_from_such_a_header_is_not_taken_for_present(self):
+        # the headers are written as >id since; the index keeps the old names: a run said
+        # 'Reference index already present', and every search of it went on losing results
+        os.makedirs(self.lib(bio.REF))
+        stale = "NRG_chr1 Homo sapiens chromosome 1_1.bin"
+        with open(os.path.join(self.lib(bio.REF), stale), "wb") as fh:
+            fh.write(b"\0" * 8)
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual(err, f"Error: The index {self.lib(bio.REF)} holds {stale!r}: it was built "
+                         "from a FASTA header of more than >id, or with CR line ends, and every "
+                         f"search of it loses results. Remove it (rm -rf '{self.lib(bio.REF)}', or "
+                         "remove the index in the web Settings page) and run build-index-only "
+                         "again.\n")
+        self.assertEqual(self.calls(), [])
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"[ERROR] The index {self.lib(bio.REF)} holds", err)
+        self.assertNotIn("Launching job ", out)
 
     def test_an_index_with_no_bin_is_not_put_in_place(self):
         # no sequence holds a site (a contig of N alone): the engine writes no .bin
