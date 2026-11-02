@@ -375,6 +375,24 @@ def _registry_data_type_for_search(args):
     return None
 
 
+def _datasets_without_genotypes(vcf_list: str) -> List[str]:
+    """The datasets of the --vcf list that a per-sample analysis cannot resolve here: a
+    registry (Dictionaries/registry_<vcf>/) and neither a genotype store with something in
+    it (genotypes_<vcf>/) nor the classic per-sample dictionaries (dictionaries_<vcf>/). A
+    dataset with no registry is left out: its search builds the dictionaries from its VCFs,
+    or stops for want of them."""
+    dicts = os.path.join(current_working_directory, "Dictionaries")
+    found = []
+    for vdir in resolve_vcf_dataset_dirs(vcf_list, current_working_directory):
+        vcf = os.path.basename(os.path.normpath(vdir))
+        if (os.path.isdir(os.path.join(dicts, f"registry_{vcf}"))
+                and not _listdir(os.path.join(dicts, f"genotypes_{vcf}"))
+                and not os.path.isdir(os.path.join(dicts, f"dictionaries_{vcf}"))
+                and vcf not in found):
+            found.append(vcf)
+    return found
+
+
 def print_help_complete_search() -> None:
     """Prints detailed help information for the complete-search functionality.
 
@@ -2299,6 +2317,13 @@ def complete_search() -> None:
     if _force_ps and _force_pop:
         error("--per-sample and --population-level are mutually exclusive; omit both to "
               "auto-select by index type (per-sample on a phased genotyped index).")
+    # A per-sample analysis resolves each sample's genotypes, read from the dataset's
+    # genotype store (Dictionaries/genotypes_<vcf>/) or its classic per-sample dictionaries.
+    # An install with neither -- download --what index --no-genotypes, or a genotype tar that
+    # did not come -- has the registry alone: a per-sample analysis there joins no two SNPs of
+    # a site and drops what only such a pair reaches, while the population-level one reports
+    # each site's worst case. So it runs population-level, and says why.
+    _no_store = _datasets_without_genotypes(vcfdir) if variant else []
     if _force_ps:
         per_sample = True
     elif _force_pop:
@@ -2306,15 +2331,27 @@ def complete_search() -> None:
     else:
         _dt = _registry_data_type_for_search(args)
         per_sample = _dt == "genotyped-phased"
-        if per_sample:
-            print(
-                "[complete-search] genotyped + PHASED index detected -> PER-SAMPLE analysis "
-                "by DEFAULT: CONFIRMED cis phasing + named carrier samples + exact joint "
-                "allele frequency. Pass --population-level for the fast worst-case screen "
-                "(recommended on a very dense / high-edit / genome-wide search, where "
-                "per-sample resolution can be slow).",
-                flush=True,
-            )
+    if per_sample and _no_store:
+        per_sample = False
+        print(
+            f"WARNING [complete-search]: no genotype store (Dictionaries/genotypes_<vcf>/) and no "
+            f"per-sample dictionaries for {', '.join(_no_store)}: running the POPULATION-LEVEL "
+            f"analysis{' instead of --per-sample' if _force_ps else ''}, which reports each "
+            f"site's worst case with no carriers; a per-sample one would lose the off-targets "
+            f"that need two SNPs of a sample together. To get carriers and CONFIRMED cis "
+            f"phasing, install the store: crisprme.py download --what index --index-name "
+            f"<the index> (without --no-genotypes).",
+            flush=True,
+        )
+    elif per_sample and not _force_ps:
+        print(
+            "[complete-search] genotyped + PHASED index detected -> PER-SAMPLE analysis "
+            "by DEFAULT: CONFIRMED cis phasing + named carrier samples + exact joint "
+            "allele frequency. Pass --population-level for the fast worst-case screen "
+            "(recommended on a very dense / high-edit / genome-wide search, where "
+            "per-sample resolution can be slow).",
+            flush=True,
+        )
     # The pre-2.5.4 --fast / --full flags were removed (no aliases). argparse-free parsing
     # here means an unknown flag is silently ignored, so a saved stock/2.5.3 script passing
     # --full would quietly run with NO explicit mode and no error. Warn loudly and point at
@@ -5097,9 +5134,11 @@ def print_help_download() -> None:
         "(explicit --url link) [OPTIONAL]\n"
         "\t--url, explicit genome download URL when --source url [OPTIONAL]\n"
         "\t--no-genotypes, for --what index: skip fetching the separate Tier-1 "
-        "genotype store (genotypes_<vcf>.tar.gz). Off-target detection still "
-        "works via the bundled Tier-0 registry, but per-sample Samples are "
-        "degraded until the store is present [OPTIONAL, default: fetch it]\n"
+        "genotype store (genotypes_<vcf>.tar.gz). A search then runs the "
+        "population-level analysis from the bundled Tier-0 registry (each site's "
+        "worst case, with no carriers and no CONFIRMED cis phasing; --per-sample falls "
+        "back to it with a warning) until the store is present [OPTIONAL, default: "
+        "fetch it]\n"
         "\t--path, working directory the CRISPRme dir-tree lives under "
         "[OPTIONAL, default: current directory]\n"
     )

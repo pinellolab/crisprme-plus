@@ -201,3 +201,22 @@ registry. -->
   trees too; a chromosome's last trees lost after a tree that is not full cannot be told from the
   files. The check reads the first line of each FASTA, and a FASTA in full only where it has no
   tree or a full last tree: under a second on hg38.
+- **An install without the genotype store runs the population-level analysis, rather than a
+  per-sample one that loses off-targets.** On a phased dataset the CLI chose the per-sample
+  analysis from the registry's data type alone, so after `download --what index --no-genotypes`,
+  or a download whose genotype store did not come, it ran per-sample with no genotypes to read:
+  it joined no two SNPs of one site, dropped the off-targets that only two SNPs of a sample
+  together reach, and still printed "CONFIRMED cis phasing + named carrier samples". `--per-sample`
+  did the same. Measured on the synthetic genome with a site whose PAM only two cis SNPs make (1
+  mismatch, CFD 0.6, carrier S4 on a full install): the no-store default reported it at a 2-mismatch
+  bulged alignment, CFD 0.095. **Affected:** CLI searches of such an install, in 2.8.0 too; the web
+  already offers population-level alone there. **What to do:** run them again, or install the store
+  (`download --what index` without `--no-genotypes`) for carriers. A dataset with a registry and
+  neither a genotype store with anything in it nor the classic per-sample dictionaries now runs
+  population-level, by default and under `--per-sample`, with one `WARNING` on stdout that names
+  the dataset and the download. On the synthetic genome the no-store default is then byte-identical
+  to its `--population-level` run and reports that site at 1 mismatch, CFD 0.6, with no carriers; it
+  lists the same sites with the same scores as a full install's `--population-level` run, without
+  the carrier columns. A full install, and one with the classic dictionaries, are unchanged. The
+  download help, the README, docs/PRECOMPUTED_INDEXES.md and docs/TROUBLESHOOTING.md say what such
+  an install runs.

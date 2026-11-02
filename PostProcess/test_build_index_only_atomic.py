@@ -3364,6 +3364,39 @@ class AnIndexInPlaceLackingAChromosomeIsNotTakenForWhole(_Fixture):
         self.assertNotIn("Variant index already present", out)
 
 
+class AnInstallWithoutGenotypesRunsPopulationLevel(_Fixture):
+    """A registry-only install (download --what index --no-genotypes, or a genotype tar
+    that did not come) defaulted to the per-sample analysis on a phased dataset, which
+    joins no two SNPs of a site without the genotypes and lost the off-targets only such a
+    pair reaches (flows OF-7), and --per-sample did the same. Both now run population-level,
+    which reports each site's worst case, and say why on stdout."""
+
+    def mode(self):
+        with open(self.path("Results", "search", ".search_mode")) as fh:
+            return fh.read()
+
+    def test_the_default_and_per_sample_run_population_level_and_say_why(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.run_search()
+        self.assertEqual(self.mode(), "per-sample")  # (a phased dataset, its store there)
+        shutil.rmtree(self.path("Dictionaries", "genotypes_ds"))
+        self.run_search()
+        self.assertEqual(self.mode(), "per-sample")  # (its dictionaries name the carriers)
+        shutil.rmtree(self.path("Dictionaries", "dictionaries_ds"))
+        for options, instead in (((), ""), (("--per-sample",), " instead of --per-sample")):
+            rc, out, err = self.run_search(*options)
+            self.assertEqual(self.mode(), "population-level")
+            self.assertIn("WARNING [complete-search]: no genotype store (Dictionaries/"
+                          "genotypes_<vcf>/) and no per-sample dictionaries for ds: running the "
+                          f"POPULATION-LEVEL analysis{instead}", out)
+            self.assertNotIn("PER-SAMPLE analysis", out)
+        # an empty store is none
+        os.makedirs(self.path("Dictionaries", "genotypes_ds"))
+        rc, out, err = self.run_search()
+        self.assertEqual(self.mode(), "population-level")
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix."""
