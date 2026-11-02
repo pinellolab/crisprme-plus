@@ -482,10 +482,12 @@ _lock_built() {
 # Returns 0 when this run took a free lock and 2 when it took over the lock of a run
 # that died: either way this run does the build, and on 2 the outputs may hold that
 # run's half-written work. Returns 1 when $3 is in place once the lock is free --
-# another run built it meanwhile -- or when mkdir failed with no lock in the way, as
-# the plain mkdir did, and the caller builds nothing.
+# another run built it meanwhile -- or when mkdir fails with no lock in the way, here
+# and on a second try (the first may have come just as a holder let go): nothing can be
+# created there, and the caller builds nothing. A caller that needs $3 then looks at
+# what is there (_lock_built, _no_index_here).
 _lock_take() {
-	local _bin=0 _lock _what _out _clear
+	local _bin=0 _lock _what _out _clear _retried=
 	if [ "$1" = -bin ]; then _bin=1; shift; fi
 	_lock="$1" _what="$2" _out="$3"
 	shift 2
@@ -504,7 +506,12 @@ _lock_take() {
 			fi
 			return 0
 		fi
-		[ -d "$_lock" ] || return 1
+		if ! [ -d "$_lock" ]; then
+			_lock_built "$_out" "$_bin" && return 1
+			[ -z "$_retried" ] || return 1
+			_retried=1
+			continue
+		fi
 		if ! { _lock_stale "$_lock" && _lock_steal "$_lock" "$_lock_rec"; }; then
 			echo "Another run is $_what — waiting..."
 			if _lock_wait "$_lock" "$_what" "$_clear" take; then
@@ -518,6 +525,18 @@ _lock_take() {
 		echo "Stale lock $_lock: the run that held it (pid $_lock_pid on $_lock_host, started $_lock_started) $_lock_gone. Taking it over and $_what from scratch."
 		return 2
 	done
+}
+
+# Index $1 is not installed and this run could not build it: its library takes no lock
+# (_lock_take). A 0-bulge search goes on: it scans the FASTA and opens no index. One with
+# bulges would search a folder that is not there, which the engine answers on stdout
+# with exit 0, so that it ended as a clean empty result, or lost the variant rows. $2 is
+# what else to offer: --index-path serves the reference index alone.
+_no_index_here() {
+	[ "$bDNA" -eq 0 ] && [ "$bRNA" -eq 0 ] && return 0
+	printf "ERROR: index '%s' is not installed, and this run cannot build it: nothing can be created in '%s' (a read-only mount, no write permission, or a full disk). Make that folder writable, or install the index there (crisprme.py download --what index if it is published, or crisprme.py build-index-only run where the library is writable)%s, then run this search again\n" \
+		"${1##*/}" "${1%/*}" "$2" >&2
+	exit 1
 }
 
 # Wait while lock $1 is held by a live run or by one this run cannot check, saying how
@@ -1181,6 +1200,7 @@ while read vcf_f; do
 			_lock_release "$_lock" || exit 1
 		else
 			_refuse_other_side "$idx_folder1"  # in place, and not this run's build
+			_lock_built "$idx_folder1" 1 || _no_index_here "$idx_folder1" ", or point --index-path at a library that holds it"
 		fi
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>$log
 		idx_ref="$idx_folder1"
@@ -1225,6 +1245,7 @@ while read vcf_f; do
 				_lock_release "$_lock" || exit 1
 			else
 				_refuse_other_side "$idx_folder1" "${idx_folder1}_INDELS"
+				_lock_built "$idx_folder1" 1 || _no_index_here "$idx_folder1"
 			fi
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
 			idx_var="$idx_folder1"
@@ -1286,6 +1307,8 @@ while read vcf_f; do
 
 				_lock_release "$_lock" || exit 1
 				echo -e 'Indexing Indels\tEnd\t'$(date) >>"$log"
+			else
+				_lock_built "$indels_index_dir" 0 || _no_index_here "$indels_index_dir"
 			fi
 		else
 			# Precomputed/batteries variant index whose INDELS companion is absent AND whose

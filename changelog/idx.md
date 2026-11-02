@@ -22,3 +22,12 @@
   After each reference and variant search, the run now stops with an ERROR when the targets file is
   missing. A search that finds nothing writes a file with its header alone, and still ends in an
   empty result with exit 0.
+- **A search with bulges no longer ends empty when its library cannot be written to and lacks the
+  index it needs.** On a read-only mount, without write permission or with no inode left, the failed
+  lock read as "another run built it", so the search went on with a folder that is not there: the
+  engine said so on stdout and exited 0, and the run ended `No off-targets found ... completed
+  successfully` (web: "Finished: no off-targets were found"), or, with the reference index in place
+  and the variant index short, reported the reference and indel rows alone. **Affected:** every
+  such search, in 2.8.0 too. It now stops with one ERROR that names the index and the library and
+  says what to do, shown on the web job's banner. A library that holds the right index still serves
+  the search, byte-identically, and a 0-bulge search, which opens no index there, still runs.

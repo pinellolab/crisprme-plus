@@ -134,9 +134,15 @@ class TestNoHitsStatus(unittest.TestCase):
                  "again in the web Settings page, which passes the dataset's sample list), or "
                  "remove it and /data/Dictionaries/genotypes_rv to search without them, then "
                  "run this search again")
+        # (no index here serves the search, and this run cannot build one)
+        no_index = ("index 'NRG_2_hg38' is not installed, and this run cannot build it: "
+                    "nothing can be created in '/data/genome_library' (a read-only mount, no "
+                    "write permission, or a full disk). Make that folder writable, or install "
+                    "the index there, then run this search again")
         for name, err, says in (
                 ("refused", f"ERROR: {refused}\n", f"The search was not run: {refused}."),
                 ("refused tiers", f"ERROR: {tiers}\n", f"The search was not run: {tiers}."),
+                ("no index", f"ERROR: {no_index}\n", f"The search was not run: {no_index}."),
                 ("failed", "ERROR: Off-targets search Variant failed\n",
                  "The selected result encountered some errors, please remove it and try "
                  "to submit again.")):

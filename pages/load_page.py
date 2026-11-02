@@ -30,16 +30,26 @@ import os
 REUSED_HASH = "#reused"
 
 
+# What the search script's ERROR says when no index here can serve the search, and the
+# run cannot build one: each is one line that says what to do.
+_NO_INDEX_REFUSALS = (
+    " is not installed, and this run cannot build it: ",  # a library that takes no lock
+)
+
+
 def _failure_text(job_directory: str) -> str:
     """The banner of a job whose log_error.txt is not empty. A search the pipeline
     refused because build-index-only has not finished a part of its dataset (its
-    "... is unfinished: ..." ERROR) says so, and what to do: submitted again, it
-    fails the same way until then. Any other failure gets the general text."""
+    "... is unfinished: ..." ERROR), or because no index here can serve it
+    (_NO_INDEX_REFUSALS), says so, and what to do: submitted again, it fails the same
+    way until then. Any other failure gets the general text."""
     try:
         with open(os.path.join(job_directory, "log_error.txt"), errors="replace") as fh:
             for line in fh:
-                if (line.startswith("ERROR: ") and " is unfinished: " in line
-                        and "build-index-only again to its end" in line):
+                if line.startswith("ERROR: ") and (
+                        (" is unfinished: " in line
+                         and "build-index-only again to its end" in line)
+                        or any(said in line for said in _NO_INDEX_REFUSALS)):
                     return f"The search was not run: {line[len('ERROR: '):].strip()}."
     except OSError:
         pass

@@ -3290,6 +3290,100 @@ class AnEngineThatStopsBeforeItSearchesFailsTheRun(_ShippedScript):
         self.assertIn("Start post-analysis", run.stdout)
 
 
+class ALibraryTheRunCannotWriteTo(_ShippedScript):
+    """A library that takes no lock -- a read-only mount, no write permission, no inode
+    left -- and lacks the index a search needs. The failed mkdir read as "another run
+    built it", so the search went on with a folder that is not there: the engine says
+    that on stdout and exits 0, and the run ended "No off-targets found", or without its
+    variant rows. A stub mkdir stands in for such a mount, as these tests also run as
+    root, for whom a folder's permissions change nothing."""
+
+    def setUp(self):
+        super().setUp()
+        # (fails each mkdir of a lock; STUB_MKDIR_ONCE=<file>: only the first)
+        stub = self.root / "bin" / "mkdir"
+        stub.write_text(
+            '#!/bin/bash\n'
+            'real=$(PATH=/usr/bin:/bin command -v mkdir)\n'
+            'for a in "$@"; do\n'
+            '  case "$a" in *.lock)\n'
+            '    if [ -n "$STUB_MKDIR_ONCE" ]; then\n'
+            '      [ -e "$STUB_MKDIR_ONCE" ] && exec "$real" "$@"\n'
+            '      : >"$STUB_MKDIR_ONCE"\n'
+            '    fi\n'
+            '    echo "mkdir: cannot create directory: Read-only file system" >&2\n'
+            '    exit 1 ;;\n'
+            '  esac\n'
+            'done\n'
+            'exec "$real" "$@"\n')
+        stub.chmod(0o755)
+
+    def assertRefused(self, run, index):
+        self.assertRegex(run.stderr, rf"^ERROR: index '{re.escape(index)}' is not installed, "
+                                     r"and this run cannot build it: nothing can be created in ")
+        self.assertIn(str(self.library), run.stderr)
+        self.assertEqual(len(run.stderr.splitlines()), 1, run.stderr)  # the web shows one line
+        self.assertEqual(run.builds, [])
+        self.assertFalse([c for c in run.calls if c[0] == "search"], run.calls)
+
+    def test_a_reference_search_with_bulges_stops(self):
+        self.assertRefused(self.run_pipeline(variant=False), "NRG_2_hg38")
+        self.assertIn("--index-path", self.run_pipeline(variant=False).stderr)
+
+    def test_a_variant_search_stops_at_the_missing_variant_index(self):
+        # the worse shape: the reference index is there, so only the variant rows went
+        self.install("NRG_2", variant=False)
+        folder = self.home / "Genomes" / f"hg38+{self.VCF}"
+        folder.mkdir()
+        (folder / "chr1.enriched.fa").write_text(">chr1\nACGT\n")
+        run = self.run_pipeline()
+        self.assertRefused(run, f"NRG_2_hg38+{self.VCF}")
+        # --index-path does not serve a variant index
+        self.assertNotIn("--index-path", run.stderr)
+
+    def test_a_variant_search_stops_at_the_missing_indels_index(self):
+        # (it fell back to a bulge-less scan of the fake-indel genome)
+        self.install("NRG_2")
+        shutil.rmtree(self.library / f"NRG_2_hg38+{self.VCF}_INDELS")
+        fakes = self.home / "Genomes" / f"hg38+{self.VCF}_INDELS"
+        (fakes / f"fake_{self.VCF}_chr1").mkdir(parents=True)
+        self.assertRefused(self.run_pipeline(), f"NRG_2_hg38+{self.VCF}_INDELS")
+
+    def test_a_search_of_an_index_in_place_needs_no_lock(self):
+        self.install("NRG_2", variant=False)
+        run = self.run_pipeline(variant=False)
+        self.assertEqual(run.reference, "NRG_2_hg38")
+        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+        self.assertNotIn("is not installed", run.stderr)
+
+    def test_a_0_bulge_search_opens_no_index_and_goes_on(self):
+        run = self.run_pipeline(bulges=0, variant=False)
+        self.assertNotIn("is not installed", run.stderr)
+        calls = [c for c in run.calls if c[0] == "search"]
+        self.assertEqual(len(calls), 1, run.calls)
+        self.assertEqual(Path(calls[0][1]).name, "hg38")
+
+    def test_a_0_bulge_variant_search_of_the_enriched_genome_goes_on(self):
+        self.install("NRG_2", variant=False)
+        folder = self.home / "Genomes" / f"hg38+{self.VCF}"
+        folder.mkdir()
+        (folder / "chr1.enriched.fa").write_text(">chr1\nACGT\n")
+        (self.home / "Genomes" / f"hg38+{self.VCF}_INDELS").mkdir()
+        run = self.run_pipeline(bulges=0)
+        self.assertNotIn("is not installed", run.stderr)
+        self.assertEqual([Path(c[1]).name for c in run.calls if c[0] == "search"],
+                         ["hg38", f"hg38+{self.VCF}"])
+
+    def test_a_lock_a_holder_lets_go_of_as_this_run_looks_is_taken_on_the_second_try(self):
+        # mkdir fails on a lock that is gone by the next look: its holder failed and let
+        # go, and the build is this run's. Not a library that takes no lock.
+        run = self.run_pipeline(variant=False, env={
+            "STUB_MKDIR_ONCE": str(self.root / "once"), "STUB_BUILD_WRITES": "1"})
+        self.assertNotIn("is not installed", run.stderr)
+        self.assertEqual([c[1] for c in run.builds], ["hg38"])
+        self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+
+
 class TheThreadGuardSizesTheIndexSearched(_ShippedScript):
     """The RAM guard caps the search threads to what MemAvailable can hold: ~12 GB per
     loaded index + 2.2 GB a thread for a pamless search, ~4 GB + 0.8 GB for a
