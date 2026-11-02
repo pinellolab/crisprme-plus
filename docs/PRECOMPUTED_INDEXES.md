@@ -367,6 +367,10 @@ Only the genome index itself is PAM-specific; everything derived from the varian
 > **`build-inputs/<dataset>.tar.gz`** in the same repo (`lucapinello/crisprme-data`). Download it and you
 > skip straight to indexing the new PAM. If instead you want to **reproduce the kit** (or build one
 > for a **different VCF**), the full source-to-kit workflow is documented below.
+>
+> A search of the index itself needs no enriched genome, with no bulges either: a 0-bulge variant
+> search scans the enriched genome when every chromosome of it is in place, and otherwise searches
+> the installed variant index, with the same results.
 
 ### Prerequisites
 

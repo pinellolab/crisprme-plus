@@ -915,6 +915,20 @@ while read vcf_f; do
 		echo "${_n:-0}"
 	}
 
+	# 0 when the enriched genome holds a FASTA of every chromosome of the reference: what
+	# a 0-bulge variant search can scan. A download ships the variant index and no
+	# enriched genome (docs/PRECOMPUTED_INDEXES.md), and a scan of a folder that is not
+	# there, or lacks a chromosome, loses those chromosomes' variant-only targets: the
+	# engine says so on stdout and exits 0. The index then answers the search instead.
+	_enriched_genome_whole() {
+		local _c _g="$current_working_directory/Genomes/${ref_name}+${vcf_name}"
+		for _c in "${real_chroms[@]}"; do
+			[ -e "$_g/$_c.enriched.fa" ] || [ -e "$_g/$_c.enriched.fasta" ] \
+				|| [ -e "$_g/$_c.fa" ] || return 1
+		done
+		return 0
+	}
+
 	# ensure that fundamental folders are available (-p: a run that started
 	# together may make one between the test and the mkdir, and the "File exists"
 	# a plain mkdir writes to stderr then fails this run)
@@ -1332,10 +1346,16 @@ while read vcf_f; do
 			# not one built for the requested PAM. For a constrained PAM that can be a
 			# PAM-less stand-in (NNN_3, or under --prune-pam a wider NNNNNNNN_3), which
 			# holds every position, so size it as pamless. A no-bulge search scans the
-			# genome FASTA for the requested PAM and never opens an index.
-			if [ "$pamless" -eq 0 ] && { [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; }; then
-				_searched=("$idx_ref")
-				[ "$vcf_name" != "_" ] && _searched+=("$idx_var")
+			# genome FASTA for the requested PAM and never opens an index, but for a
+			# variant search with no whole enriched genome to scan, which searches its index.
+			if [ "$pamless" -eq 0 ]; then
+				_searched=()
+				if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then
+					_searched=("$idx_ref")
+					[ "$vcf_name" != "_" ] && _searched+=("$idx_var")
+				elif [ "$vcf_name" != "_" ] && ! _enriched_genome_whole; then
+					_searched=("$idx_var")
+				fi
 				for _idx in "${_searched[@]}"; do
 					_idx_pam=$(basename "$_idx"); _idx_pam=${_idx_pam%%_*}
 					case "$_idx_pam" in
@@ -1395,11 +1415,20 @@ while read vcf_f; do
 	echo -e 'Off-targets search\tStart\t'$(date) >>$log
 
 	# A foreground search "fails" if it returned non-zero (handled inline with ||) or
-	# wrote to the error log (stderr). Call right after each search completes.
-	_search_end_or_fail() {  # $1 = human-readable search name
+	# wrote to the error log (stderr), or if it wrote no targets file: crispritz.py says
+	# what stops it before it searches on stdout ("ERROR! ...", "ATTENTION! ...") and
+	# exits 0, while a search that finds nothing writes a file with its header alone.
+	# Call right after each search completes, from the folder the search wrote into.
+	_search_end_or_fail() {  # $1 = human-readable search name, $2 = the name given to the search
 		if [ -s $logerror ]; then
 			echo "ERROR: off-targets search ${1} failed\n" >&2
 			rm -f $output_folder/*.targets.txt $output_folder/*profile*  # delete partial results
+			exit 1
+		fi
+		if ! [ -f "$output_folder/$2.targets.txt" ]; then
+			printf "ERROR: off-targets search %s stopped before it searched and wrote no targets file (%s.targets.txt). The engine says why in %s\n" \
+				"$1" "$2" "$output_folder/log_verbose.txt" >&2
+			rm -f $output_folder/*.targets.txt $output_folder/*profile*
 			exit 1
 		fi
 		echo -e "Off-targets search ${1}\tEnd\t"$(date) >>$log
@@ -1438,7 +1467,7 @@ while read vcf_f; do
 				|| { echo "ERROR: Off-targets search Reference failed" >&2; exit 1; }
 		fi
 		echo -e 'Search Reference completed'
-		_search_end_or_fail "Reference"
+		_search_end_or_fail "Reference" "${ref_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}"
 	else
 		echo -e "Search for reference already done"
 	fi
@@ -1446,7 +1475,9 @@ while read vcf_f; do
 	if [ "$vcf_name" != "_" ]; then
 		if ! [ -f "$output_folder/crispritz_targets/${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" ]; then
 			echo -e 'Search Variant Start'  # search off-targets on the variant-enriched genome (snps)
-			if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then  # bulge-enabled: TST index search
+			# bulge-enabled, or no enriched genome to scan (_enriched_genome_whole): TST
+			# index search, which serves 0 bulges too, as for the indels below
+			if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ] || ! _enriched_genome_whole; then
 				idx_var_view="$(_bin_only_view "$idx_var")"
 				crispritz.py search "$idx_var_view" "$pam_file" "$guide_file" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}" -index -mm $mm -bDNA $bDNA -bRNA $bRNA -t -th $ceiling_result -var --max-edits $max_total_edits $prune_pam_flag \
 					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
@@ -1455,7 +1486,7 @@ while read vcf_f; do
 					|| { echo "ERROR: Off-targets search Variant failed" >&2; exit 1; }
 			fi
 			echo -e 'Search Variant completed'
-			_search_end_or_fail "Variant"
+			_search_end_or_fail "Variant" "${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}"
 		else
 			echo -e "Search for variant already done"
 		fi

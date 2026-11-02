@@ -675,10 +675,25 @@ if [ "$1" = add-variants ] && [ "$STUB_ENRICH" = 1 ]; then
 	printf '>fakechr1\nACGTACGTACGTACGTACGTACGTACGT\n' >"variants_genome/fake_${_vcf}_chr1/fakechr1.fa"
 fi
 if [ "$1" = search ]; then
+	# STUB_ENGINE_STOPS=reference|variant: that search says what stops it on stdout and
+	# exits 0, with no targets file, as crispritz.py does for a folder that is not there.
+	_which=reference
+	case "$2" in *+*) _which=variant ;; esac  # (an index of <ref>+<vcf>, or that enriched genome)
+	if [ "$STUB_ENGINE_STOPS" = "$_which" ]; then
+		echo "ERROR! $2 is not a directory."
+		exit 0
+	fi
+	# STUB_FINDS_NOTHING=1: every search writes the targets file of one that found
+	# nothing, the header alone, and the run goes on past them.
+	if [ "$STUB_FINDS_NOTHING" = 1 ]; then
+		printf '#Bulge type\tcrRNA\n' >"$5.targets.txt"
+		exit 0
+	fi
 	# Stop at the last search: the variant one, or the reference one in a
 	# reference-only run. Every index decision has been made by then.
-	for _a in "$@"; do [ "$_a" = -var ] && exit 1; done
+	[ "$_which" = variant ] && exit 1
 	[ "$STUB_LAST" = reference ] && exit 1
+	printf '#Bulge type\tcrRNA\n' >"$5.targets.txt"
 fi
 exit 0
 """
@@ -3178,6 +3193,103 @@ def _mem_available_mb():
 
 @unittest.skipUnless(_mem_available_mb() > 0,
                      "the RAM thread guard sizes a search from MemAvailable in /proc/meminfo")
+class AVariantSearchWithNoBulges(_ShippedScript):
+    """With no bulges the variant search scans the enriched genome. A download ships no
+    enriched genome (Genomes/<ref>+<vcf>): crispritz.py said so on stdout and exited 0, and
+    every variant-only target was lost, with no error. The installed index answers it now,
+    as a search with bulges does; a whole enriched genome is still scanned."""
+
+    def assertSearchedIndex(self, run, prefix="NRG_3", prune=False):
+        call = next(c for c in run.calls if c[0] == "search" and "-var" in c)
+        self.assertEqual(Path(call[1]).name, f"{prefix}_hg38+{self.VCF}")
+        self.assertIn("-index", call)
+        self.assertNotIn("-r", call)
+        self.assertEqual(call[call.index("-bDNA") + 1], "0")
+        self.assertEqual(call[call.index("-bRNA") + 1], "0")
+        self.assertEqual(call[call.index("--max-edits") + 1], "6")
+        self.assertEqual("--prune-pam" in call, prune)
+
+    def enriched(self, *fastas):
+        folder = self.home / "Genomes" / f"hg38+{self.VCF}"
+        folder.mkdir(parents=True, exist_ok=True)
+        for name in fastas:
+            (folder / name).write_text(">chr\nACGT\n")
+        return folder
+
+    def test_with_no_enriched_genome_it_searches_the_installed_index(self):
+        self.install("NRG_3")
+        self.assertSearchedIndex(self.run_pipeline(bulges=0))
+
+    def test_a_pam_less_stand_in_answers_it_too(self):
+        self.install("NNN_3")
+        self.assertSearchedIndex(self.run_pipeline(bulges=0), "NNN_3")
+
+    def test_a_wider_flank_answers_it_under_prune(self):
+        self.install("NNNNNNNN_3")
+        self.assertSearchedIndex(self.run_pipeline(bulges=0, prune=1), "NNNNNNNN_3", prune=True)
+
+    def test_an_empty_enriched_genome_is_no_genome_to_scan(self):
+        self.install("NRG_3")
+        self.enriched()
+        self.assertSearchedIndex(self.run_pipeline(bulges=0))
+
+    def test_an_enriched_genome_lacking_a_chromosome_is_not_scanned(self):
+        (self.home / "Genomes" / "hg38" / "chr2.fa").write_text(">chr2\nACGT\n")
+        self.install("NRG_3")
+        self.enriched("chr1.enriched.fa")
+        self.assertSearchedIndex(self.run_pipeline(bulges=0))
+
+    def test_a_whole_enriched_genome_is_still_scanned(self):
+        self.install("NRG_3")
+        folder = self.enriched("chr1.enriched.fa")
+        run = self.run_pipeline(bulges=0)
+        calls = [c for c in run.calls if c[0] == "search"]
+        self.assertEqual(calls[1][1].rstrip("/"), str(folder))
+        self.assertIn("-r", calls[1])
+        self.assertNotIn("-index", calls[1])
+
+    def test_a_search_with_bulges_goes_on_taking_the_index(self):
+        self.install("NRG_3")
+        self.enriched("chr1.enriched.fa")
+        run = self.run_pipeline(bulges=1)
+        call = next(c for c in run.calls if c[0] == "search" and "-var" in c)
+        self.assertEqual(Path(call[1]).name, f"NRG_3_hg38+{self.VCF}")
+        self.assertIn("-index", call)
+
+
+class AnEngineThatStopsBeforeItSearchesFailsTheRun(_ShippedScript):
+    """crispritz.py says what stops it before it searches on stdout and exits 0, so a
+    search that never ran looked like one that found nothing: the run went on with the
+    other search's rows alone, or ended 'No off-targets found'. It writes a targets file
+    with its header alone when it does find nothing."""
+
+    def ran_past_the_searches(self, run):
+        return any("Search INDELs Start" == line or line == "Start post-analysis"
+                   for line in run.stdout.splitlines())
+
+    def test_the_reference_search_stopped(self):
+        self.install("NRG_3", variant=False)
+        run = self.run_pipeline(variant=False, env={"STUB_ENGINE_STOPS": "reference"})
+        self.assertIn("ERROR: off-targets search Reference stopped before it searched",
+                      run.stderr)
+        self.assertIn("log_verbose.txt", run.stderr)
+        self.assertFalse(self.ran_past_the_searches(run), run.stdout)
+
+    def test_the_variant_search_stopped(self):
+        self.install("NRG_3")
+        run = self.run_pipeline(env={"STUB_ENGINE_STOPS": "variant"})
+        self.assertIn("ERROR: off-targets search Variant stopped before it searched",
+                      run.stderr)
+        self.assertFalse(self.ran_past_the_searches(run), run.stdout)
+
+    def test_a_search_that_finds_nothing_goes_on(self):
+        self.install("NRG_3", variant=False)
+        run = self.run_pipeline(variant=False, env={"STUB_FINDS_NOTHING": "1"})
+        self.assertNotIn("stopped before it searched", run.stderr)
+        self.assertIn("Search Reference completed", run.stdout)
+        self.assertIn("Start post-analysis", run.stdout)
+
+
 class TheThreadGuardSizesTheIndexSearched(_ShippedScript):
     """The RAM guard caps the search threads to what MemAvailable can hold: ~12 GB per
     loaded index + 2.2 GB a thread for a pamless search, ~4 GB + 0.8 GB for a
@@ -3243,6 +3355,23 @@ class TheThreadGuardSizesTheIndexSearched(_ShippedScript):
         threads, kind = self.capped(bulges=0, variant=False)
         self.assertEqual(kind, "standard PAM")
         self.assertSized(threads, 800, 4000, searches=1)
+
+    def test_a_no_bulge_variant_search_with_no_enriched_genome_opens_the_index(self):
+        # it has no FASTA of the variant genome to scan, so it walks the stand-in
+        self.install("NNN_3")
+        threads, kind = self.capped(bulges=0)
+        self.assertTrue(kind.startswith(f"pamless (memory-heavy) index NNN_3_hg38+{self.VCF}"),
+                        kind)
+        self.assertSized(threads, 2200, 12000, searches=2)
+
+    def test_a_no_bulge_variant_search_of_a_whole_enriched_genome_does_not(self):
+        self.install("NNN_3")
+        folder = self.home / "Genomes" / f"hg38+{self.VCF}"
+        folder.mkdir()
+        (folder / "chr1.enriched.fa").write_text(">chr1\nACGT\n")
+        threads, kind = self.capped(bulges=0)
+        self.assertEqual(kind, "standard PAM")
+        self.assertSized(threads, 800, 4000, searches=2)
 
 
 def _annotation_restore_block():
