@@ -349,6 +349,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_prune_flank -v
 
+      - name: "Markdown wrap (no line of the README, METHODS, docs/ or a changelog fragment opens a '+' bullet)"
+        working-directory: PostProcess
+        run: python -m unittest test_markdown_wrap -v
+
       - name: "Indel report integrity (header injection) + complete-search flag gate + index resolution"
         # The header-injection guards: a dropped CRISPRitz header made
         # post_analisi_indel.sh prepend the merged file's first DATA row to every
