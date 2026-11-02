@@ -20,8 +20,12 @@ REPO = Path(__file__).resolve().parent.parent
 WORKFLOWS = REPO / ".github" / "workflows"
 
 
+def read(path):
+    return Path(path).read_text(encoding="utf-8")
+
+
 def workflow(name):
-    return (WORKFLOWS / name).read_text()
+    return read(WORKFLOWS / name)
 
 
 def pull_request_paths(name):
@@ -43,7 +47,7 @@ def function_based_modules():
     """The test modules whose tests are plain functions run by their own __main__."""
     found = []
     for path in sorted((REPO / "PostProcess").glob("test_*.py")):
-        body = ast.parse(path.read_text()).body
+        body = ast.parse(read(path)).body
         if any(isinstance(n, ast.FunctionDef) and n.name.startswith("test_") for n in body):
             found.append(path.stem)
     return found
@@ -145,14 +149,14 @@ class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
         self.assertEqual(self.guard(log), 0)
 
     def test_every_test_module_is_named_in_a_workflow(self):
-        text = "\n".join(p.read_text() for p in WORKFLOWS.glob("*.yml"))
+        text = "\n".join(read(p) for p in WORKFLOWS.glob("*.yml"))
         unnamed = [p.stem for p in sorted((REPO / "PostProcess").glob("test_*.py"))
                    if not re.search(rf"\b{p.stem}\b", text)]
         self.assertEqual(unnamed, [])
 
     def test_a_function_based_module_runs_as_a_script(self):
         # `python -m unittest` finds no test in these, and says OK: 0 tests, a false pass
-        text = "\n".join(p.read_text() for p in WORKFLOWS.glob("*.yml"))
+        text = "\n".join(read(p) for p in WORKFLOWS.glob("*.yml"))
         modules = function_based_modules()
         self.assertTrue(modules)
         for name in modules:
@@ -183,7 +187,7 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
                            r"|too large for this runner")
 
     def text(self, name):
-        return (REPO / name).read_text()
+        return read(REPO / name)
 
     def benchmarks(self):
         return json.loads(self.text("test/benchmark/benchmarks.json"))["benchmarks"]
@@ -219,10 +223,10 @@ class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
     they look for has to stay what the tests and validate-test print."""
 
     def checklist(self):
-        return (REPO / "docs" / "RELEASE_CHECKLIST.md").read_text()
+        return read(REPO / "docs" / "RELEASE_CHECKLIST.md")
 
     def test_it_expects_every_benchmark(self):
-        count = len(json.loads((REPO / "test/benchmark/benchmarks.json").read_text())["benchmarks"])
+        count = len(json.loads(read(REPO / "test/benchmark/benchmarks.json"))["benchmarks"])
         self.assertIn(f"Validation summary: {count} passed, 0 failed, 0 skipped", self.checklist())
 
     def test_it_sets_no_opt_out(self):
@@ -239,11 +243,11 @@ class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
         self.assertEqual(sorted(allowed), sorted(sources))
         for reason, module in sources.items():
             with self.subTest(skip=reason):
-                self.assertIn(reason, (REPO / "PostProcess" / module).read_text())
+                self.assertIn(reason, read(REPO / "PostProcess" / module))
                 self.assertIn(f"`{reason}`", text)
         # the one more an Apptainer run allows
         self.assertIn("no group to give genome_library",
-                      (REPO / "PostProcess/test_build_index_only_atomic.py").read_text())
+                      read(REPO / "PostProcess/test_build_index_only_atomic.py"))
         self.assertIn("`no group to give genome_library`", text)
 
     def test_its_grep_catches_any_other_skip(self):

@@ -120,16 +120,16 @@ Nothing above may print `GATE_FAILED` or `FAIL`.
 ```bash
 apptainer build --sandbox sb crisprme.sif && mkdir -p "sb$PWD" gate/heavy tmp locale hf
 # step 1: save its loop as gate_step1.sh with /gate replaced by $PWD/gate, then
-apptainer exec --writable --no-home --bind "$PWD" --pwd /opt/conda/opt/crisprme/PostProcess --env TMPDIR="$PWD/tmp" sb /usr/local/bin/_entrypoint.sh bash "$PWD/gate_step1.sh"
-# the HF test (home bound, HF_HOME on scratch):
-apptainer exec --env CRISPRME_RUN_HF_TESTS=1 --env HF_HOME="$PWD/hf" --bind "$PWD" --pwd /opt/conda/opt/crisprme/PostProcess sb /usr/local/bin/_entrypoint.sh python -m unittest test_hf_downloads -v
+apptainer exec --writable --no-home --bind "$PWD" --pwd /opt/conda/opt/crisprme/PostProcess --env TMPDIR="$PWD/tmp" --env CRISPRME_RUN_HF_TESTS=1 --env HF_HOME="$PWD/hf" sb /usr/local/bin/_entrypoint.sh bash "$PWD/gate_step1.sh"
+grep -hE "skipped ['\"]" gate/test_*.log | grep -vE "no TensorFlow here|en_US.UTF-8 is not installed|no ps here to compare|no group to give genome_library"
 # step 2 (needs the host's /usr/share/i18n):
 apptainer exec --bind /usr/share/i18n:/usr/share/i18n --bind "$PWD" sb /usr/local/bin/_entrypoint.sh localedef -i en_US -f UTF-8 --no-archive "$PWD/locale/en_US.UTF-8"
 apptainer exec --env LOCPATH="$PWD/locale" --bind "$PWD" --pwd /opt/conda/opt/crisprme/PostProcess sb /usr/local/bin/_entrypoint.sh python -m unittest test_index_resolution.ChoiceIsLocaleIndependent -v
-# step 3 (home bound: micromamba writes ~/.cache/mamba), with the clone of step 3 above:
+# step 3 (home bound: micromamba writes ~/.cache/mamba), after the clone of step 3 above, with
+PIN=$(apptainer exec --pwd /opt/conda/opt/crisprme/PostProcess sb /usr/local/bin/_entrypoint.sh python -c 'import scorer_env; print(scorer_env.CBULGE_PIN)')
 apptainer exec --env CBULGE_REPO="$PWD/cb" --bind "$PWD" --pwd /opt/conda/opt/crisprme/PostProcess sb /usr/local/bin/_entrypoint.sh micromamba run -n cbulge python -m unittest test_crispr_bulge_fidelity -v
 # step 4:
-apptainer run --bind "$PWD/gate/heavy:/DATA" --pwd /DATA --env CRISPRME_ALLOW_ONDEMAND_BUILD=1 sb crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 16
+apptainer run --bind "$PWD/gate/heavy:/DATA" --pwd /DATA --env CRISPRME_ALLOW_ONDEMAND_BUILD=1 sb crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
 apptainer run --bind "$PWD/gate/heavy:/DATA" --pwd /DATA sb crisprme.py validate-test --chrom chr22
 ```
 
