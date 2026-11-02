@@ -96,6 +96,31 @@ def _merge_row(kept, ele, snp_info):
     )  # snp_info - 1 points to AF column
 
 
+def _fold_same_carriers(rows, fold_of, snp_info):
+    """Alignments of one site naming the same variants with the same carriers are one
+    entry, as for every other row: the first of them in ``rows``, which is sorted by the
+    file's own criterion, so the entry is the best by it. It takes the rsIDs and AFs of
+    the others. ``fold_of`` maps a row (by id) to its (position, variants, carriers);
+    other rows stay as they are. The carrier sets do not depend on the sort, so the
+    three files keep one row count per cluster and their alternative alignments stay
+    aligned line by line."""
+    kept = {}
+    out = []
+    for row in rows:
+        ident = fold_of.get(id(row))
+        if ident is None:
+            out.append(row)
+        elif ident in kept:
+            _merge_row(kept[ident], row, snp_info)
+        else:
+            kept[ident] = row
+            out.append(row)
+    for row in kept.values():
+        for col in (true_guide - 2, snp_info - 2, snp_info - 1):
+            row[col] = ",".join(sorted(set(row[col].split(","))))
+    return out
+
+
 def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
     # avoid crush when cluster is empty in the first call
     if not cluster:
@@ -136,20 +161,13 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                 _merge_row(dict_var[key][0], ele, snp_info)
             else:
                 dict_var[key] = [ele]
-    # Alignments of one site naming the same variants with the same carriers are one
-    # entry, the first (the best, by this file's sort), as for every other row. The
-    # carrier sets do not depend on the sort, so the three files keep one row count per
-    # cluster and their alternative alignments stay aligned line by line.
-    same_carriers = {}
-    for key in list(dict_var.keys()):
+    # Alignments of one site naming the same variants with the same carriers are folded
+    # into one entry once the variant rows are sorted (_fold_same_carriers).
+    fold_of = {}
+    for key in dict_var.keys():
         if len(key) == 3:
             row = dict_var[key][0]
-            ident = (key[0], key[1], frozenset(row[true_guide - 2].split(",")))
-            if ident in same_carriers:
-                _merge_row(same_carriers[ident], row, snp_info)
-                del dict_var[key]
-            else:
-                same_carriers[ident] = row
+            fold_of[id(row)] = (key[0], key[1], frozenset(row[true_guide - 2].split(",")))
 
     final_list_best_ref = list()
     var_only = False
@@ -513,6 +531,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         *_rep_tiebreak(x),
                     ),
                 )
+            final_list_best_var = _fold_same_carriers(final_list_best_var, fold_of, snp_info)
 
         if var_only:  # no ref found
             # count the residual targets in the list
@@ -788,6 +807,7 @@ def get_best_targets(cluster, fileOut, fileOut_disc, cfd, snp_info):
                         *_rep_tiebreak(x),
                     ),
                 )
+            final_list_best_var = _fold_same_carriers(final_list_best_var, fold_of, snp_info)
 
         if var_only:  # no ref found
             # count the residual targets in the list

@@ -343,7 +343,7 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
         r[16], r[17] = rsid, af
         return r
 
-    def _merge(self, rows):
+    def _merge(self, rows, sort_order="score", criteria="mm+bulges"):
         infile = os.path.join(self.d, "in.txt")
         outfile = os.path.join(self.d, "out.txt")
         with open(infile, "w") as fh:
@@ -352,7 +352,7 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
                 fh.write("\t".join(r) + "\n")
         cmd = [sys.executable, os.path.join(PP, "remove_contiguous_samples.py"),
                infile, outfile, "3", "5", "7", "11", "16", "19", "21",
-               "score", "mm+bulges"]
+               sort_order, criteria]
         res = subprocess.run(cmd, cwd=PP, capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
         out = []
@@ -426,6 +426,31 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
                                  self._row(self.RNA, "0.900", 1, "S23,S24", snp=snp)])
         self.assertEqual((best[0][DNA_COL], best[0][13]), (self.X, "S23,S24"))
         self.assertEqual(alt, [])
+
+    def _tied(self, bulge_type, dna, mm, bulges, rsid="rs1", af="0.1"):
+        r = self._row(dna, "0.001", mm + bulges, "S1,S2,S3", rsid=rsid, af=af)
+        r[0], r[8], r[9] = bulge_type, str(mm), str(bulges)
+        return r
+
+    def test_the_folded_entry_is_the_best_by_the_criteria(self):
+        """Two alignments of one site with the same variants and carriers, tied on CFD
+        and on mismatches + bulges. The input is in the merge step's file order, where
+        'RNA<tab>' sorts before 'RNA,DNA'. The entry kept is the one the file's sort
+        ranks first, in the score files and in the mismatches + bulges file alike, and
+        it takes the other's rsID and AF."""
+        rna = self._tied("RNA", "tCTGAAActTGTAAtCAGG-AAG", 4, 1, rsid=".", af="0.2")
+        rna_dna = self._tied("RNA,DNA", "ATCTGAAActTGTAAtCAGG-AAG", 3, 2)
+        for criteria, want in (("mm+bulges,mm", rna_dna), ("mm+bulges,bulges", rna),
+                               ("mm", rna_dna), ("bulges", rna)):
+            for sort_order in ("score", "total"):
+                best, alt = self._merge([list(rna), list(rna_dna)], sort_order, criteria)
+                self.assertEqual((best[0][0], best[0][DNA_COL], best[0][8], best[0][9]),
+                                 (want[0], want[DNA_COL], want[8], want[9]),
+                                 (criteria, sort_order))
+                self.assertEqual((best[0][13], best[0][16], best[0][17]),
+                                 ("S1,S2,S3", ".,rs1", "0.1,0.2"), (criteria, sort_order))
+                self.assertEqual(alt, [], (criteria, sort_order))
+                self.assertEqual(best[0][19], "0")
 
     def test_the_row_count_does_not_depend_on_the_sort(self):
         """The three files of a search hold the same rows, each sorted by its own
