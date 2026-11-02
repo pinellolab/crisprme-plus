@@ -60,10 +60,10 @@ aa9c54b and on these fixes.
   otherwise the same (1,285 of 732,270 in the alternative alignments); 4,598 of 205,415 on a
   population-level search of the same index (guide CTAACAGTTGCTTTTATCAC); and with guide
   CTCTCAGCTGGTACACGGCA, 1,549 of 128,730 per-sample and 2,199 of 150,103 population-level. What
-  reads the rows in file order follows. The report's tables can list tied rows in another order,
-  with no row changed (`data/cfd_ge_0.05.tsv` on all four searches; `data/cfd_ge_0.20.tsv`,
-  `data/mmb_le_4.tsv`, `data/top1000.tsv` and `data/top1000_crispr_bulge.tsv` on some), and so can
-  the perfect-match banner. Any top-1000 plot can draw tied points in another order:
+  reads the rows in file order follows. The report's tables can list tied rows in another order
+  (`data/cfd_ge_0.05.tsv` on all four searches; `data/cfd_ge_0.20.tsv`, `data/mmb_le_4.tsv`,
+  `data/top1000.tsv` and `data/top1000_crispr_bulge.tsv` on some; no row of them changed), and so
+  can the perfect-match banner. Any top-1000 plot can draw tied points in another order:
   `imgs/CRISPRme_CFD_top_1000_by_variant_effect_<guide>` on all four,
   `imgs/CRISPRme_CFD_top_1000_log_for_main_text_<guide>` and
   `imgs/CRISPRme_CRISPR_BULGE_top_1000_*_<guide>` on some, and the report's figures from the same
