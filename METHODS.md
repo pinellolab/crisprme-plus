@@ -447,7 +447,10 @@ haplotype** (`indel_snp_cis.resolve_target`):
   gets the **strongest target its own alleles allow** (the guide's base wherever it carries
   it; elsewhere, and at the PAM jointly, the alleles that maximize CFD among those the motif
   allows), PUTATIVE in the co-occurrence companion: it is never listed for an allele it
-  does not carry. With **no genotypes at all** (a sites-only panel such as `mega`) the row
+  does not carry. The carriers of an equal-length multi-base record (an MNV, AC>TG), which
+  CRISPRitz puts in a fake-indel window as it does an indel, are always in this case: the
+  phased indel genotype store keeps only records whose REF and ALT differ in length. With
+  **no genotypes at all** (a sites-only panel such as `mega`) the row
   holds that worst case over the code's alleles, keeps the carriers the indel log lists,
   and its co-occurrence is rung 3 above (PUTATIVE, min-AF bound);
 - the fake-indel window holds **one indel**, so a haplotype that carries a second indel
@@ -480,7 +483,9 @@ belong to its sequence: two alignments of one site can name the same variants wi
 carriers (an RNA-bulge alignment does not reach the base a SNP sits on, so it lists that SNP's
 carriers under the indel alone), and the merge of a cluster's rows, which otherwise keeps one
 row per position and variant list, keeps one per carrier set there, so that no carrier is
-added to a sequence it does not have.
+added to a sequence it does not have; of the alignments with one carrier set it keeps the
+best by the order that picks each block's representative (the score first in the CFD and
+CRISPR-Bulge blocks, then `--sorting-criteria`). An MNV row is merged as an indel row is.
 
 An indel row is placed as the reference and SNP rows of the same alignment are: it starts at
 its target's first aligned base, the leftmost on either strand, carried from the window to
@@ -804,8 +809,8 @@ populated in both analysis modes; under `--per-sample` it is pruned to the **exa
 cis carriers**, so `putative` cleanly marks reconstructions that no one actually
 carries — separating genuine haplotypes from worst-case combinations. In a
 population-level analysis a multi-variant SNP roster is the union of each variant's
-carriers and reads `N carriers (>=1 of K vars, poss. chimera)`; an indel row's roster is
-its carriers' own haplotypes in both modes (§4), so it reads `N carrier(s)`.
+carriers and reads `N carriers (>=1 of K vars, poss. chimera)`; an indel (or MNV) row's
+roster is resolved per carrier in both modes (§4), so it reads `N carrier(s)`.
 
 The
 recommended validation panel uses this to **prioritize observed sites** among
@@ -1051,7 +1056,10 @@ alt in the enriched genome and its dictionaries (a CRISPRitz `add-variants` prop
 a carrier of an earlier record's alt is read as reference there, in the SNP and the indel
 post-analysis alike, however common that alt: on the HGDP + 1000 Genomes panel
 chr8:4174067 T>C (8,170 copies) is read as reference because T>G (1 copy) is the later
-record. The `Max_total_edits` value is a
+record. The phased indel genotype store leaves out equal-length multi-base records (MNVs),
+so their carriers are resolved with the phase unknown, PUTATIVE (§4): the HGDP + 1000
+Genomes index has none, HPRC's chr22 has 9,079 among its 195,813 indel-search records.
+The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,
 recounted on its carriers' own sequence, is dropped past it as past `--mm` (§4). A reported MAF

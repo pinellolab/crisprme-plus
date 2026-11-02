@@ -30,11 +30,14 @@
   does not satisfy the searched motif, or that is past `--mm` or `--max-total-edits` (now passed to
   the indel post-analysis), is dropped, so a raw target no individual has gives no row. A row's
   carriers stay on its sequence through the merge of a cluster's rows, which would otherwise add
-  those of another alignment of the site naming the same variants. An individual whose genotypes
-  cannot put an allele on the indel's haplotype (an unphased call, a missing allele, no phased indel genotype, a haploid call against a
-  diploid one) gets the strongest target its own alleles allow, and is never listed for an allele it
-  does not carry; with no genotypes at all (a sites-only panel, `hg38_mega`), the row holds the
-  strongest target the codes allow (its PAM always one the motif allows) under the carriers the
+  those of another alignment of the site naming the same variants; so do those of a row of an
+  equal-length multi-base record (an MNV, such as AC>TG), which the search treats as an indel. An
+  individual whose genotypes cannot put an allele on the indel's haplotype (an unphased call, a
+  missing allele, no phased indel genotype, a haploid call against a diploid one; every carrier of
+  an MNV, which the phased indel genotype store leaves out) gets the strongest target its own
+  alleles allow, and is never listed for an allele it does not carry; with no genotypes at all (a
+  sites-only panel, `hg38_mega`), the row holds the strongest target the codes allow (its PAM
+  always one the motif allows) under the carriers the
   indel log lists, as before. Both are PUTATIVE in the SNP+indel co-occurrence companion
   (`*.indel_snp_cooc.tsv`), which now lists, per reported row, the SNP alts it requires, a SNP that
   creates the PAM included, with that row's carriers (CONFIRMED when each was resolved on its phased
@@ -66,6 +69,9 @@
   156 and the <= 2 mismatches + bulges tier from 9 to 7; the SNP+indel companion went from 590 to
   336 lines, all CONFIRMED and the same in both analysis modes; all 755,576 reference and SNP-only
   candidates are unchanged, and so are the two perfect matches and the multiple-perfect-match banner.
+  HPRC is the only published index with MNVs (chr22: 9,079 of its 195,813 indel-search records);
+  the search above on HPRC's chr22 lists 8 MNV row blocks per block, and the MNV part of the merge
+  fix changes none of their carriers.
   The search takes as long as before and peaks at the same memory, its search stage's; an indel
   post-analysis worker holds about 2% more. **What to do:** run such searches again; results of
   earlier releases are corrected only by running the search again. Covered by
@@ -123,7 +129,8 @@
   reference bases its target covers from there, gapped as its target. Its cluster position, which
   the merge of a cluster's rows sorts and groups on, moves with its start: an RNA-bulge indel row on
   the + strand no longer comes first among rows that tie exactly, and, as for SNP rows, the merge
-  lists once the alignments of a site that name the same variants with the same carriers. Measured
+  lists once the alignments of a site that name the same variants with the same carriers (the best
+  of them: the next entry). Measured
   on the search above, rerun genome-wide with this fix alone: before it, 238 of the 5,047 indel rows
   of the highest-CFD block started one base early and 4,467 showed a REF sequence that is not the
   reference at their start; now each of the 5,045 shows the reference at its start. On those rows
@@ -131,9 +138,7 @@
   REF's PAM was read one base off), `CFD_score_REF` changed on 785, and `CFD_score` went down on 218
   and up on 16 (chrX:42118270, 0.149 -> 0.017: the old value was the misaligned REF's, so the row
   left the report's CFD >= 0.05 table, as did 5 others). Four clusters now report the row of SNPs
-  that has the same sequence, CFD and carriers as their indel row; at four sites the merge's single
-  entry is an alignment with one mismatch more and one bulge fewer than the one reported before, at
-  the same CFD and mismatches + bulges, for the same variant and carriers; and two indel off-targets
+  that has the same sequence, CFD and carriers as their indel row, and two indel off-targets
   that sat in a reference off-target's cluster because of their early start are rows of their own
   (chr3:55057499, CFD 0.087, 20 cis carriers; chr16:12067029, CFD 0.069, 1). The alternative
   alignments went from 722,564 to 722,347 rows, and 39 rows of the integrated results changed only
@@ -149,3 +154,34 @@
   `PostProcess/test_indel_row_coordinates.py` (one and two RNA bulges, both bulge types, a DNA bulge
   and none, on both strands, with an NRG and a TTTV PAM) and the SNP+indel oracle, which now checks
   every indel row's REF sequence against the reference at its start.
+- **Of the alignments of one site that name the same variants with the same carriers, the merge
+  reported the first it read, not the best.** The merge of a cluster's rows lists such alignments of
+  an indel row once and drops the others from both tables. It kept the first of them in the order
+  its input is sorted, where alignments tied on score and on mismatches + bulges come in text order
+  (an `RNA` alignment before an `RNA,DNA` one), so with the default `--sorting-criteria`
+  (mismatches + bulges, then mismatches) the alignment reported could have one mismatch more and one
+  bulge fewer than a dropped one, and in the fewest mismatches + bulges block another CFD. It now
+  keeps the best of them by the order that picks each block's representative; among alignments
+  that tie exactly there, the one that order's last tie-break puts first (the aligned sequence first
+  in text order), whatever order they came in. Measured on the search above, this fix against the
+  code before it: of its 182,367 integrated rows, 243 show another alignment of the same site,
+  variants and carriers. In the highest-CFD block that is 56 rows, 12 with one mismatch fewer and
+  one bulge more at the same CFD and 44 an alignment of equal rank; in the fewest mismatches +
+  bulges block 232, 94 with one mismatch fewer and one bulge more (47 at another CFD) and 138 of
+  equal rank (88 at another CFD, as that block's order does not look at CFD), and in 4 clusters the
+  better indel alignment now comes before the cluster's SNP row, which moves unchanged to the
+  alternative alignments; in the CRISPR-Bulge block 135 of equal rank. The alternative alignments
+  keep their 722,347 rows, 191 of them changed in the same ways. Against the run before the
+  previous entry's fix, no reported alignment has more mismatches: the 4 rows of the highest-CFD
+  block and 18 of the fewest block that fix had moved to the worse alignment show the one reported
+  before it again. The README search changes 323 of its 170,657 integrated rows the same way (of
+  the 3 + 15 rows that fix had made worse, 16 show the alignment of before and 2 one of equal rank
+  to it), and the search above at population level 241 of 211,830 (with no alternative alignments
+  there, the 5 SNP rows that give the fewest block to a better indel alignment leave it). The
+  report's tables keep their sites (one row of the <= 4 mismatches + bulges table now starts
+  elsewhere); no carrier, rsID, AF, row count, reference or SNP-only row changes, the SNP+indel
+  companion is the same, and the summaries and the raw observed-haplotypes sidecar follow the
+  tables. **Affected:** every search with a variant dataset that has indels, in every release
+  (until the previous entry's fix a + strand indel row with RNA bulges had a cluster position of
+  its own and did not meet the site's other alignments). **What to do:** run such searches again.
+  Covered by `PostProcess/test_representative_tiebreak.py`.

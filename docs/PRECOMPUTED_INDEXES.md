@@ -666,12 +666,17 @@ genotype store** (`Dictionaries/indel_genotypes_<vcf>/`) and (b) **overlays SNP 
 codes** onto the fake-indel genome flanks before indexing the `_INDELS` companion, so
 the indel search can match SNP+indel haplotypes. Post-analysis resolves each indel
 target on its carriers' own haplotypes (each gets the SNP alleles it carries, so a row
-lists only the individuals that have its sequence, and one no individual has is dropped;
-since 2.8.1), then emits, per co-occurring off-target, a **CONFIRMED-cis** call (all
-covered variants phased on one haplotype) or **PUTATIVE** (unphased / can't prove cis),
-with the per-sample carriers and the joint allele frequency (`AC_cis / AN` over the
-VCF-genotyped panel). On a sites-only panel it falls back to a PUTATIVE min-AF bound with
-no carriers (see METHODS §4/§8).
+lists only the individuals that have its sequence, or, where the phase is unknown, those
+whose own alleles allow it, PUTATIVE, split multi-allelic SNP sites aside (METHODS §8);
+a sequence no individual has is dropped; since 2.8.1), then emits, per co-occurring
+off-target, a **CONFIRMED-cis** call (all covered variants phased on one haplotype) or
+**PUTATIVE** (unphased / can't prove cis), with the per-sample carriers and the joint
+allele frequency (`AC_cis / AN` over the VCF-genotyped panel). On a sites-only panel it
+falls back to a PUTATIVE min-AF bound with no carriers (see METHODS §4/§8). The indel
+genotype store keeps only records whose REF and ALT differ in length, so an equal-length
+multi-base record (an MNV, such as AC>TG), which the indel search covers too, has its
+carriers resolved with the phase unknown, PUTATIVE: the HGDP + 1000 Genomes index has
+none, HPRC's chr22 has 9,079 among its 195,813 indel-search records.
 
 > **Note.** With `mm` at its maximum, raise `--max-total-edits` (e.g. `--max-total-edits
 > 6`) so the extra alignment budget for the indel bulge isn't consumed by mismatches,
