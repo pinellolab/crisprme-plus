@@ -467,6 +467,60 @@ class IndelCarriers(object):
                 self.total_slots += len(islots)
 
 
+def _for_alt(gt, token):
+    """A genotype as "this alt or not": ``token``, the allele index of the alt, becomes
+    "1", any other allele "0"; a missing allele stays "."."""
+    toks, kind = _gt_tokens(gt)
+    norm = ["1" if t == token else ("." if t == "." else "0") for t in toks]
+    if kind == "haploid":
+        return norm[0]
+    return ("|" if kind == "phased" else "/").join(norm)
+
+
+def biallelic_site(rec):
+    """{alt: {sample: genotype}} at one position, each genotype read against its own alt.
+
+    The resolution reads "1" as "this slot holds this alt". That is what a split VCF
+    record holds, but a record with several alts on one line (C>A,T) keeps its raw
+    genotype under every alt its sample carries: S:2|1 is listed under A and under T.
+    The allele index of an alt is the token all its carriers share, and when that
+    leaves more than one (a single carrier, 2|1), the one no other alt of the position
+    needs; the record's own alt then reads "1", any other allele "0": 2|1 is 0|1 under
+    A, 1|0 under T. Where the genotypes cannot say which index is the alt (every carrier
+    of two alts is 1|2) no slot can be tied to it: "1/0", one copy on an unknown slot,
+    so the carrier is resolved PUTATIVE on the alleles it does carry. A position with
+    no foreign index (split or biallelic records) comes back as it is."""
+    plain = ("0", "1", ".")
+    if all(t in plain for carriers in rec.values() for g in carriers.values()
+           for t in _gt_tokens(g)[0]):
+        return rec
+    shared = {}
+    for alt, carriers in rec.items():
+        common = None
+        for g in carriers.values():
+            toks = {t for t in _gt_tokens(g)[0] if t not in ("0", ".")}
+            common = toks if common is None else common & toks
+        shared[alt] = common or set()
+    settled = True
+    while settled:
+        settled = False
+        taken = {next(iter(c)) for c in shared.values() if len(c) == 1}
+        for alt, c in shared.items():
+            if len(c) > 1 and c & taken:
+                shared[alt] = c - taken
+                settled = True
+    out = {}
+    for alt, carriers in rec.items():
+        c = shared[alt]
+        if len(c) == 1:
+            token = next(iter(c))
+            out[alt] = {s: _for_alt(g, token) for s, g in carriers.items()}
+        else:
+            out[alt] = {s: "/".join(["1"] + ["0"] * (len(_gt_tokens(g)[0]) - 1))
+                        for s, g in carriers.items()}
+    return out
+
+
 def resolve_carriers(columns, indel_gts, phase_known=True, others=()):
     """Split the indel's carriers into exactly resolved slots and PUTATIVE samples.
 

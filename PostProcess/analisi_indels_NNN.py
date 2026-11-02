@@ -899,8 +899,9 @@ _ovl_stats = {"targets": 0, "rows": 0, "dropped": 0, "putative": 0, "unmapped": 
 
 def _snp_record(pos1):
     """{forward alt: {sample: genotype}} the genotype source records at ``pos1``
-    (Tier-1, else the per-sample dictionary; {} where it records none), or None when
-    there is no genotype source."""
+    (Tier-1, else the per-sample dictionary; {} where it records none), each genotype
+    read against its own alt (indel_snp_cis.biallelic_site), or None when there is no
+    genotype source."""
     rec = _snp_cache.get(pos1)
     if rec is not None:
         return rec
@@ -914,6 +915,7 @@ def _snp_record(pos1):
         rec = {alt: carriers for (_r, alt, _rs, _af, carriers) in _dict_snps.get(pos1, ())}
     else:
         return None
+    rec = _isc.biallelic_site(rec)
     return _cache_put(_snp_cache, pos1, rec, 1 + sum(len(c) for c in rec.values()))
 
 
