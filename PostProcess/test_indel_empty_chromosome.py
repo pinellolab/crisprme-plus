@@ -32,6 +32,11 @@ complete-test --chrom runs its search from a per-run view of the working directo
 view's paths, so that its command could not work, and the check of an index built
 before the record read a fake-indel genome the view does not hold.
 
+A contig with an underscore in its name (chrUn_KI270302v1) has never had a sub-index:
+pool_index_indels.py takes what follows the last underscore for its chromosome. With an
+indel on it, that refusal stopped every search with bulges, for good, with a rebuild
+command that could not help (reproduced through the real CLI). The search goes on.
+
 Pinned here: the empty chromosome is skipped on BOTH sides (not indexed, not
 searched), the merge tolerates its missing part file and only its, an all-empty
 dataset still yields a well-formed targets file, a build with no target is
@@ -43,7 +48,8 @@ bulge search of a chromosome with indels but no sub-index fails the same way whi
 search without bulges still searches its fake-indel genome, a PAM-less stand-in's
 INDELS index is built with its own PAM, a search from complete-test --chrom's view (the
 real one) names and reads the working directory's paths, a refusal ends the run at its
-own stage, and the normal path is unchanged.
+own stage, a contig with an underscore in its name is refused by no search, and the
+normal path is unchanged.
 
 Hermetic: a stub crispritz.py on PATH stands in for the engine and, like
 CRISPRitz 2.9.1, refuses an index directory with no .bin; its index-genome writes
@@ -76,7 +82,7 @@ with open(os.environ["STUB_LOG"], "a") as fh:
     fh.write(" ".join(sys.argv[1:]) + "\n")
 if sys.argv[1] == "search":
     index_dir, out_name = sys.argv[2], sys.argv[5]
-    chrom = out_name.split("_", 1)[0][len("fake"):]
+    chrom = out_name.split("_pam.txt", 1)[0][len("fake"):]
     if "-index" in sys.argv:
         bins = [f for f in os.listdir(index_dir) if f.endswith(".bin")] if os.path.isdir(index_dir) else []
         if not bins:
@@ -132,6 +138,8 @@ ROW = "X\tACGT\tACGT\tfake{}\t{}\t{}\t+\t1\t0\t1"
 # the two indels the tests' logs list, and the chromosomes of their dataset's VCFs
 LOGS_AB = {"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"], "chrB": ["chrB\t\trs2\t0.2\tC>CG\t5\tACGT"]}
 AB = ("chrA", "chrB")
+# contigs with an underscore in their name, which pool_index_indels.py does not index
+UNPLACED, RANDOM = "chrUn_KI270302v1", "chr1_KI270706v1_random"
 
 
 def _gnu_sed():
@@ -260,7 +268,7 @@ class SearchSide(_Fixture):
     def searched(self, index=True):
         """The chromosomes searched through their sub-index, or (index false) through
         their fake-indel genome itself."""
-        return sorted(c[4].split("_", 1)[0][len("fake"):] for c in self.calls()
+        return sorted(c[4].split("_pam.txt", 1)[0][len("fake"):] for c in self.calls()
                       if c[0] == "search" and ("-index" in c) == index)
 
     def fake(self, chrom):
@@ -507,6 +515,47 @@ class SearchSide(_Fixture):
         res, _ = self.run_search({"chrA": LOGS_AB["chrA"]}, {"chrA": True}, vcfs=("chrA", "chrB"))
         self.assertNotIn("is not there", res.stderr)
         self.assertIn(f"ERROR: no .bin index files found in '{self.idx}/NRG_3_fakechrB/'.\n", res.stderr)
+
+    # A contig with an underscore in its name: no build gives it a sub-index, so no rebuild
+    # would help. Its search goes on, through its fake-indel genome and without bulges, as
+    # on every release before the refusal, which took it for an index copied in part and
+    # stopped each search with bulges for good.
+
+    def contig_logs(self, contig):
+        return dict(LOGS_AB, **{contig: [f"{contig}\t\trs3\t0.3\tA>AT\t5\tACGT"]})
+
+    def test_a_bulge_search_goes_on_for_a_contig_no_build_gives_a_sub_index(self):
+        for contig in (UNPLACED, RANDOM):
+            for vcfs in ((), AB + (contig,)):  # (its chromosomes from the logs, or the VCFs)
+                with self.subTest(contig=contig, vcfs=vcfs):
+                    self.tearDown_dirs()
+                    res, lines = self.run_search(
+                        self.contig_logs(contig), {"chrA": True, "chrB": True}, vcfs=vcfs,
+                        fakes={"chrA": WITH_NRG, "chrB": WITH_NRG, contig: WITH_NRG})
+                    self.assertEqual((res.returncode, res.stderr), (0, ""))
+                    self.assertEqual((self.searched(), self.searched(index=False)),
+                                     (["chrA", "chrB"], [contig]))
+                    self.assertEqual(sorted(ln for ln in lines[1:] if ln),
+                                     sorted([ROW_A, ROW.format("chrB", 10, 10),
+                                             ROW.format(contig, 20, 20)]))
+
+    def test_a_bulge_search_leaves_such_a_contig_without_its_fake_genome_to_the_engine(self):
+        # (as on every release before the refusal: there is nothing to search it in)
+        res, _ = self.run_search(self.contig_logs(UNPLACED), {"chrA": True, "chrB": True})
+        self.assertNotIn("is not there", res.stderr)
+        self.assertNotIn("Rebuild it", res.stderr)
+        self.assertEqual(self.searched(), ["chrA", "chrB", UNPLACED])
+        self.assertIn(f"ERROR: no .bin index files found in '{self.idx}/NRG_3_fake{UNPLACED}/'.\n",
+                      res.stderr)
+
+    def test_a_chromosome_beside_such_a_contig_is_still_refused(self):
+        # chrB is one a build gives a sub-index: this index was copied in part, and the ERROR
+        # names it alone
+        res, lines = self.run_search(self.contig_logs(UNPLACED), {"chrA": True},
+                                     vcfs=AB + (UNPLACED,),
+                                     fakes={"chrA": WITH_NRG, "chrB": WITH_NRG, UNPLACED: WITH_NRG})
+        self.refused(res, self.missing("chrB", "its indel log lists them"), self.chain())
+        self.assertIsNone(lines)
 
     # No VCFs of the dataset here (as for an index downloaded, or copied from where it was
     # built): build-index-only stops at its --vcf, after the rm -rf it was chained to.
@@ -984,6 +1033,18 @@ exit 0
         self.assertIn(["Post-analysis SNPs", "Start"], stages)
         self.assertEqual(len(targets), 1)
         self.assertNotIn("ERROR: the indel index", run.stderr)
+
+    def test_a_contig_no_build_gives_a_sub_index_goes_on_past_its_stage(self):
+        # (it stopped every search with bulges of the dataset, for good)
+        self.sub.mkdir()
+        (self.sub / "NRG_fakechr1_1.bin").write_bytes(b"")
+        (self.home / "Dictionaries" / f"log_indels_{self.VCF}" / f"log{UNPLACED}.txt").write_text(
+            f"{LOG_HEADER}\n{UNPLACED}\t\trs1\t0.1\tA>AT\t5\tACGT\n")
+        _, run, stages, targets = self.run_it()
+        self.assertNotIn("ERROR: the indel index", run.stderr)
+        self.assertIn("Search INDELs completed", run.stdout)
+        self.assertIn(["Off-targets search", "End"], stages)
+        self.assertEqual(len(targets), 1)
 
 
 class TheRecordsName(unittest.TestCase):

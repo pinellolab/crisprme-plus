@@ -409,9 +409,13 @@ def _missing_index(chrom, indexed_fakechrom, raw_fakechrom):
     no error, after an INDELS index was copied in part, or after a search had built a
     missing one for a PAM-less index under the search's PAM (as pool_index_indels.py
     did before _own_pam). A sub-index is rightly absent where that genome is
-    header-only (pool_index_indels.py indexes none); where nothing shows that the
-    chromosome has indels, the search goes on as before (the engine then says what is
-    wrong)."""
+    header-only (pool_index_indels.py indexes none), and for a contig with an underscore
+    in its name, which no build gives one (pool_index_indels.py says so as it builds),
+    so that no rebuild would help: its search goes on, as on every release before this
+    check. Where nothing shows that the chromosome has indels, the search goes on as
+    before (the engine then says what is wrong)."""
+    if "_" in chrom:
+        return None
     held = _fake_genome(raw_fakechrom)
     if held == "empty":
         return None
