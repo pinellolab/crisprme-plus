@@ -941,6 +941,16 @@ class IndexSide(_Fixture):
         self.assertEqual(indexed, ["chrA"])
         self.assertEqual(os.listdir(self.sub("chrA")), ["NRG_fakechrA_1.bin"])
 
+    def test_another_datasets_directory_is_named_by_no_line(self):
+        # (it is no contig of this dataset, whatever its name holds past this one's prefix)
+        d = os.path.join(self.tmp, "Genomes", "ref+ds_INDELS", "fake_other_set_chrB")
+        os.makedirs(d)
+        with open(os.path.join(d, "fakechrB.fa"), "w") as fh:
+            fh.write(f">fakechrB\n{WITH_NRG}\n")
+        res, _ = self.run_index({"chrA": f">fakechrA\n{WITH_NRG}\n"})
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.left_out(res), [])
+
     def test_a_contig_read_otherwise_is_named_and_does_not_stop_the_build(self):
         # (a genome that could not be read may hold indels, and naming it is all this does)
         res, _ = self.run_index({"chrA": f">fakechrA\n{WITH_NRG}\n", UNPLACED: b"\xff\xfe\n"})
