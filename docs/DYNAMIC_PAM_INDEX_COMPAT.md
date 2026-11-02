@@ -6,8 +6,8 @@ here changes existing indexes, commands, or results — it is strictly additive 
 
 ## 1. The feature
 A pam-less index built with an all-N PAM of width **K** stores, per leaf, the concrete K
-flanking bases of the whole-genome protospacer space (PAM-independent k-mer tree + variants
-+ bulges). At search time a restrictive PAM is applied as a **leaf-time skip-before-write**
+flanking bases of the whole-genome protospacer space (PAM-independent k-mer tree + variants +
+bulges). At search time a restrictive PAM is applied as a **leaf-time skip-before-write**
 filter (`--prune-pam`), so one index serves ANY 3' PAM of length `L ≤ K` via N-padding — no
 per-PAM rebuilds. A 5' PAM needs an index built for the 5' side; the published ones are 3'
 builds.

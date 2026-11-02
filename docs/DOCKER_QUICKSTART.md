@@ -227,8 +227,8 @@ running, and open:
 2. Choose the **PAM** — the default **`20bp-NRG-SpCas9`** (NGG + NAG) matches the
    shipped index and the **Load Example** button — and the **genome** (`hg38`).
 3. Leave the default **Maximum edits** slider (6) for a quick search — it caps the
-   total mismatches + DNA/RNA bulges (the default resolves to 4 mismatches + 1 DNA
-   + 1 RNA bulge) — or open **Advanced options** to set
+   total mismatches + DNA/RNA bulges (the default resolves to 4 mismatches + 1 DNA +
+   1 RNA bulge) — or open **Advanced options** to set
    mismatches / DNA bulges / RNA bulges individually (e.g. 4 / 1 / 1). The recommended
    default variant index (**HGDP + 1000 Genomes**, `NRG_3_hg38+hg38_HGDP1kGP` — the one you
    downloaded in step 4) is pre-selected, so the search is variant-aware out of the box.

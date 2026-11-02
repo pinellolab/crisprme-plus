@@ -31,8 +31,8 @@ Legend for action: **MUST-FIX** = in 2.1.12 · **2.1.13** = deferred · **doc** 
 
 All 58 verified. Correctly-closed-and-fixed (code confirmed in `main`) include: **#103** (tabix flock/mtime
 reindex, `annotation.py:63-75`), **#98** (`bMax` auto-computed `crisprme.py:1179`; annotation optional), **#81/#54**
-(rsID-in-AF cleaned in the converter + GT guards `resultIntegrator.py:144-146`), **#64/#73** (gnomAD v4.1 joint
-+ exome handling in `convert_gnomAD_vcfs.py`), **#74/#68** (contiguous-merge leftmost/sample-priority), **#80**
+(rsID-in-AF cleaned in the converter + GT guards `resultIntegrator.py:144-146`), **#64/#73** (gnomAD v4.1 joint +
+exome handling in `convert_gnomAD_vcfs.py`), **#74/#68** (contiguous-merge leftmost/sample-priority), **#80**
 (dropped `python` prefix in `complete_test.py`), **#72** (stderr→log_error tracing), **#77/#67/#59** (indel
 false-positive filter `remove_bad_indel_targets.py` + #96 chr-assignment fix). Correctly-closed WAI: **#93**
 (CFD is NGG-calibrated — a perfect NG on-target legitimately scores ~0.016), **#100** (Azimuth is dead code),

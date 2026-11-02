@@ -394,8 +394,8 @@ allowed budget.
 
 Search cost grows **combinatorially** with mismatches and DNA/RNA bulges, and
 again with local variant density. Allowing **more than one bulge in both DNA and
-RNA simultaneously** is especially expensive: a single chromosome at mm6 + 2 DNA
-+ 2 RNA bulges has produced **~207 GB of intermediate files and OOMed** the
+RNA simultaneously** is especially expensive: a single chromosome at mm6 + 2 DNA +
+2 RNA bulges has produced **~207 GB of intermediate files and OOMed** the
 analysis (see the header of `PostProcess/search_budget.py`).
 
 **Estimate before you launch.** A dependency-light heuristic ships in the repo:
