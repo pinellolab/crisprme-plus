@@ -16,11 +16,21 @@ on:
     paths:
       - "crisprme.py"
       - "PostProcess/**"
-      # Only these pages/ files, not pages/** -- they are the ones this
-      # workflow's own tests cover (via AST-extraction, no Dash needed);
-      # the rest of pages/ is covered by web-e2e.yml instead.
-      - "pages/history_page.py"
-      - "pages/settings_page.py"
+      # This job's tests read these too, so a PR touching only them must still run it:
+      # pages/ (test_sanitize_job_name, test_bulge_cap and test_samplesid_emit read main_page.py,
+      # test_dash_output_props the folder, via AST-extraction, no Dash needed), scripts/
+      # (test_hf_sha256sums, generate_cfd_tables.py --check), PAMs/ (test_index_resolution),
+      # test/benchmark/ (test_validate_test, test_complete_test, test_ci_workflows), and the
+      # docs that test_complete_search_flags, test_install_from_source, test_hf_sha256sums and
+      # test_ci_workflows scan.
+      - "pages/**"
+      - "scripts/**"
+      - "PAMs/**"
+      - "test/benchmark/**"
+      - "docs/**"
+      - "README.md"
+      - "METHODS.md"
+      - "CHANGELOG.md"
       # app.py sizes the search pool from app_settings at import time and index.py
       # imports it; test_app_settings guards that, so a PR touching only these two
       # must still run it.
@@ -30,7 +40,8 @@ on:
       # the checkout is ignored, so a PR touching only these two must still run it.
       - "install_from_source.sh"
       - ".gitignore"
-      - ".github/workflows/unit-tests.yml"
+      # test_ci_workflows reads all of them
+      - ".github/workflows/**"
   push:
     branches: [ "main", "python3.11", "2.2.0-dev" ]
   workflow_dispatch:

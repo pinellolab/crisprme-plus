@@ -7,6 +7,7 @@ what it is there to test, passes for nothing, and the release rule is all-green 
 Read as text: the CI env has no YAML parser (and YAML 1.1 reads the `on` key as true).
 """
 import ast
+import fnmatch
 import json
 import re
 import unittest
@@ -18,6 +19,21 @@ WORKFLOWS = REPO / ".github" / "workflows"
 
 def workflow(name):
     return (WORKFLOWS / name).read_text()
+
+
+def pull_request_paths(name):
+    """The `on: pull_request: paths:` entries of a workflow."""
+    lines = workflow(name).splitlines()
+    i = lines.index("    paths:", lines.index("  pull_request:", lines.index("on:")))
+    paths = []
+    for line in lines[i + 1:]:
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        if not entry.startswith("- "):
+            break
+        paths.append(entry[2:].strip("\"'"))
+    return paths
 
 
 def function_based_modules():
@@ -40,6 +56,39 @@ class TheUnitTestsJobHasTheTimeToFinish(unittest.TestCase):
     def test_its_limit_is_at_least_twenty_minutes(self):
         limit = re.search(r"^\s*timeout-minutes:\s*(\d+)\s*$", workflow("unit-tests.yml"), re.M)
         self.assertGreaterEqual(int(limit.group(1)), 20)
+
+
+@unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
+    """A pull request starts a workflow only for the paths it lists. web-e2e.yml did not list
+    PostProcess/, though it runs test_web_* and test_results_* from there, on code the pages
+    import. unit-tests.yml listed two pages/ files, though its tests read main_page.py and
+    the whole folder, and missed scripts/, test/benchmark/ and the docs its tests scan. The
+    release PR touches everything, so this bit later PRs: green with the job never started."""
+
+    def test_web_e2e_runs_on_postprocess(self):
+        self.assertIn("PostProcess/**", pull_request_paths("web-e2e.yml"))
+
+    def test_unit_tests_runs_on_what_its_tests_read(self):
+        paths = pull_request_paths("unit-tests.yml")
+        for path in ("pages/**", "scripts/**", "docs/**", "README.md", "METHODS.md",
+                     "test/benchmark/**", "PAMs/**", "CHANGELOG.md", ".github/workflows/**"):
+            with self.subTest(path=path):
+                self.assertIn(path, paths)
+
+    def test_the_two_pages_entries_it_replaces_are_gone(self):
+        paths = pull_request_paths("unit-tests.yml")
+        self.assertNotIn("pages/history_page.py", paths)
+        self.assertNotIn("pages/settings_page.py", paths)
+
+    def test_a_path_this_module_reads_is_listed_for_it(self):
+        # this module reads them, so it must run on a change to any
+        paths = pull_request_paths("unit-tests.yml")
+        for read in ("docs/RELEASE_CHECKLIST.md", "README.md", "docs/DOCKER_QUICKSTART.md",
+                     "install_from_source.sh", "test/benchmark/benchmarks.json",
+                     ".github/workflows/web-e2e.yml", "crisprme.py", "PostProcess/validate.py"):
+            with self.subTest(path=read):
+                self.assertTrue(any(fnmatch.fnmatch(read, p.replace("**", "*")) for p in paths))
 
 
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
