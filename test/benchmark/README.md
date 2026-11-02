@@ -23,7 +23,9 @@ alignment instead of CRISPRme's TST index search).
   RAM). `CRISPRME_SKIP_HEAVY=1` leaves them out, an opt-out for very small machines.
 - `max-edits-5/` — references for the same two guides at **5 total edits**
   (`cas9_sg1617_n5`, `cas12a_hbg_n5`, also `"heavy": true`): chr22, the same bulge-2
-  indexes, a binding `--max-total-edits 5`, with **381 and 92 sites**. They are there
+  indexes, a binding `--max-total-edits 5`, with **381 and 92 sites**, 271 and 55 of them
+  with an alignment holding two bulges of one type, which the per-type cases (one of each)
+  do not search for. They are there
   because the two cases above can hardly catch a lost site: `cas12a_hbg_simple`'s
   reference is a header with no rows and `cas9_sg1617_simple`'s holds 3 rows at 2 sites,
   so a search that lost its sites still passed them. One lost site fails these. The

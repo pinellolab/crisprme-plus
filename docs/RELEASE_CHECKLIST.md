@@ -57,9 +57,9 @@ Every user-facing surface must agree on **version · default index · scorer · 
 
 #### The local gate: nothing stays skipped
 
-Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. It needs Docker, git-lfs, and network to Hugging Face, EBI, GitHub and MCR. 4 CPUs and 16 GB are enough; about 40-50 min in all.
+Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. It needs Docker, git-lfs, and network to Hugging Face, EBI, GitHub and MCR. 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them.
 
-**Three skips are allowed, and only these**, each run elsewhere in the gate: `no TensorFlow here` (`test_crispr_bulge_fidelity`, the CRISPR-Bulge fidelity gate, runs in its own env in step 3), `en_US.UTF-8 is not installed` (`test_index_resolution`'s locale tests, step 2) and `no ps here to compare` (`test_index_resolution`, runs in the `unit-tests` job, whose image has `ps`).
+**Three skips are allowed, and only these**, each run elsewhere in the gate: `no TensorFlow here` (`test_crispr_bulge_fidelity`, the CRISPR-Bulge fidelity gate, runs in its own env in step 3), `en_US.UTF-8 is not installed` (`test_index_resolution`'s locale tests, step 2) and `no ps here to compare` (`test_index_resolution`, runs in the `unit-tests` job, whose runner has `ps`).
 
 **Six function-based modules must run as scripts**: `test_determinism`, `test_indel_genotypes`, `test_indel_snp_bruteforce`, `test_indel_snp_cis`, `test_indel_snp_overlay`, `test_samplesid_overlisting`. Under `python -m unittest` each reports `Ran 0 tests` and `OK`, a false pass; as scripts their runners call every test and raise on a failure. Step 1's loop does it. Run each module in a process of its own, as the CI steps do.
 
@@ -113,7 +113,7 @@ docker rm -f gate-web
 # 6. All four workflows green on the release PR, and confirm in each run log that unit-tests and validate-benchmarks actually ran (T-09).
 ```
 
-Nothing above may print `GATE_FAILED` or `FAIL`.
+Nothing above may print `GATE_FAILED` or `FAIL`. When `benchmarks.json` or a reference changes, also regenerate the references with `test/benchmark/generate_references.py` (see its README): no CI runs it.
 
 **On an HPC node without Docker**, a plain SIF is read-only, so use a writable sandbox. One more skip is allowed there, in step 1: `no group to give genome_library` (an unprivileged user namespace maps no second group; the Docker run above tests it).
 

@@ -622,7 +622,7 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
 Pass the variable with `-e`, as above. Written in front of `docker run`
 (`CRISPRME_ALLOW_ONDEMAND_BUILD=1 docker run ...`) it is set on your machine only, never in
 the container, so `complete-test` looks for a prebuilt index, finds none, and exits 0 having
-tested nothing. The run took about 10 minutes at 8 threads on an Apple Silicon Mac in testing.
+tested nothing. The run took about 25 minutes at 8 threads on an Apple Silicon Mac in testing.
 
 ### 1.3 Install CRISPRme from source (without Bioconda)
 
@@ -664,7 +664,7 @@ CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
 crisprme.py validate-test --chrom chr22   # expect: 6 passed, 0 failed, 0 skipped
 ```
 
-`CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode: without it, `complete-test` runs the prebuilt-index smoke ([§2.2.2](#222-complete-test)), which needs an index you have downloaded and gives `validate-test` nothing to check. The run took 10 to 20 minutes at 8 threads in testing.
+`CRISPRME_ALLOW_ONDEMAND_BUILD=1` selects the benchmark mode: without it, `complete-test` runs the prebuilt-index smoke ([§2.2.2](#222-complete-test)), which needs an index you have downloaded and gives `validate-test` nothing to check. The run took 25 to 35 minutes at 8 threads in testing.
 
 Notes:
 - This is exactly the recipe the project `Dockerfile` automates — if you prefer full isolation, build the image instead (Section 1.2).
@@ -1315,7 +1315,8 @@ function, including detailed explanations and default behaviors:
 > crisprme.py validate-test --chrom chr22
 > ```
 > It fits in 16 GB of RAM (measured peak 3.66 GB). On a very small machine,
-> `CRISPRME_SKIP_HEAVY=1` leaves out the bulge-2 benchmarks.
+> `CRISPRME_SKIP_HEAVY=1` on `complete-test` leaves out the bulge-2 benchmarks, and
+> `validate-test` then ends `2 passed, 0 failed, 4 skipped`.
 
 ##### Output Data Overview
 ---
@@ -2258,7 +2259,7 @@ As CI runs it, the single-chromosome test is `complete-test`'s benchmark mode fo
 `validate-test`: it downloads chromosome 22 with its 1000 Genomes variants, builds small
 test indexes, runs every registered benchmark, and `validate-test` compares the off-targets
 with the committed brute-force ground truth. Run it from an empty folder; it fits in 16 GB
-of RAM and took 10 to 20 minutes at 8 threads in testing:
+of RAM and took 25 to 35 minutes at 8 threads in testing:
 ```bash
 CRISPRME_ALLOW_ONDEMAND_BUILD=1 \
   crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8

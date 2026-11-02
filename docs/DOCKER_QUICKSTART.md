@@ -86,7 +86,7 @@ docker pull pinellolab/crisprme:latest
 
 **Optional: check the image.** The self-test that CI runs downloads chromosome 22 with its
 1000 Genomes variants, builds small test indexes, searches them, and compares the off-targets
-with a brute-force ground truth. It took about 10 minutes at 8 threads on an Apple Silicon Mac in
+with a brute-force ground truth. It took about 25 minutes at 8 threads on an Apple Silicon Mac in
 testing. Run it in an empty folder of its own, not the data folder of step 2:
 
 ```bash

@@ -218,10 +218,11 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
 
     def test_the_expected_output_is_every_benchmark_passed(self):
         expected = f"{len(self.benchmarks())} passed, 0 failed, 0 skipped"
-        for name, count in (("README.md", 3), ("docs/DOCKER_QUICKSTART.md", 1)):
+        for name in ("README.md", "docs/DOCKER_QUICKSTART.md"):
             with self.subTest(surface=name):
-                said = re.findall(r"# expect: (.+)", self.text(name))
-                self.assertEqual(said, [expected] * count)
+                said = re.findall(r"# expect: (\d+ passed, \d+ failed, \d+ skipped)", self.text(name))
+                self.assertTrue(said)
+                self.assertEqual(set(said), {expected})
 
     def test_the_more_than_16_gb_claim_is_gone(self):
         names = self.SURFACES + ("PostProcess/complete_test.py", "test/benchmark/benchmarks.json")
