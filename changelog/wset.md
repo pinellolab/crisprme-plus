@@ -261,29 +261,54 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   chr22:50091459, CFD 0.022); the report's `REFERENCE` and `VARIANT` off-targets go from 766 and 659
   to 962 and 422, and its CFD >= 0.05 net from 53 sites to 46. The default index with `hg38_mega`
   goes at population level from 3015 rows to 2520 (within 3 bp 997 to 4, `Not_found_in_REF` 2053 to
-  1558, 21 sites more); per sample from 2406 rows to 2077 (671 to 2, 1444 to 1115, 16 sites more),
-  and its rows of alternative alignments with the fewest or the CRISPR-Bulge block more than 100 bp
-  from the CFD block go from 28 and 27 to 0, and its haplotypes with a variant more than 1 kb from
-  their site from 26 to 0. A row with only its `AF` empty (a VCF with no `AF`, which the input check
+  1558, 21 sites more); per sample, with the next entry's fix, from 2406 rows to 2137 (671 to 2, 1444
+  to 1175, 73 sites more), and its rows of alternative alignments with the fewest or the CRISPR-Bulge
+  block more than 100 bp from the CFD block go from 28 and 27 to 0, and its haplotypes with a variant
+  more than 1 kb from their site from 26 to 0. A row with only its `AF` empty (a VCF with no `AF`, which the input check
   warns about: every variant on the dictionaries, every indel on the tiers) stayed at its site but
   went by its REF score, so the merge could keep a lower-scoring alignment of a variant: on a
   6-sample panel with no `AF`, the perfect match a deletion makes at chr2:10000 read CFD 0.9 with a
   bulge and now reads 1.0 with none, and the report's perfect matches go from 3 to 4. A search whose
   rows have no empty column (the default index alone, any VCF with `AF`, the reference alone) sorts
   as before. **If you searched a sites-only dataset or a VCF with no `AF`,** run the search again.
+- **A sites-only dataset goes the population-level way in a per-sample search too, as the command
+  line said it did, and loses no multi-variant worst case there.** A sites-only dataset (`hg38_mega`)
+  has no genotypes for a per-sample search to resolve, and `complete-search` said that `the
+  population-level analysis runs instead`. It did not: the dataset's rows went through the per-sample
+  path, which joins two variants only through carriers they share, and it has none, so a site that
+  takes two variants together lost its row, and others scored lower, with no warning. Installing the
+  default index and `hg38_mega` lists both for a search (`docs/PRECOMPUTED_INDEXES.md`), and the two
+  then ran that way with no mode flag. Now each dataset goes by its registry (its `data_type`, or for
+  a registry that has none its aggregation): a sites-only dataset's post-analysis is the
+  population-level one whatever the search's mode. `--per-sample` on sites-only datasets alone is the
+  population-level analysis (the same files as with no flag), with a WARNING on stdout. Beside a
+  genotyped dataset, whose rows stay per-sample, `complete-search` says which goes which way. With no
+  mode flag a phased dataset beside a sites-only one now runs per-sample whichever name sorts first;
+  with the sites-only name first it ran population-level. On chr22 (guide `CTAACAGTTGCTTTTATCACNNN`,
+  4 mismatches, 1+1 bulges), `hg38_mega --per-sample` goes from 1318 rows to 1384, the table of
+  `hg38_mega` with no flag, byte for byte, and lists 63 sites it did not; the default index with
+  `hg38_mega`, per-sample as it runs with no flag, goes from 2077 rows to 2137 (`Not_found_in_REF`
+  1115 to 1175, alternative alignments 5863 to 6226, `observed_haplotypes.tsv` 1556 rows to 1796).
+  It lists 57 sites it did not and loses none, 14 sites score higher and none lower (chr22:34270481
+  from CFD 0.173 to 0.233, and chr22:22881199 reads 0.274 where chr22:22881195 read 0.262), and the
+  report's CFD >= 0.05 and >= 0.2 tables each gain one site. Such rows have no carriers and read
+  `putative` in the report's Observed column (`observed` for one variant). A search with no sites-only
+  dataset, `hg38_mega` with no flag and any search at `--population-level` are unchanged, byte for
+  byte. **If you ran a per-sample search with a sites-only dataset,** run it again. Covered by
+  `PostProcess/test_sites_only_per_sample.py`.
 - **A command-line search of two datasets is no longer refused because only one has its VCFs on
   disk.** The input check of `complete-search` compared the samples of all the `--samplesID` lists
-  with the VCFs on disk (#46). With `hg38_walk`'s VCFs there and `hg38_walkB` installed as an index
-  (or as a sites-only dataset, whose VCFs have no sample columns, or whose list names `1000G2021`
-  and `HGDP`), it stopped with `--samplesID lists 3 sample(s) genotyped in no VCF (B4, B5, B6)`, and
-  told you to filter a list that was right; each step that leads there is documented (`download
-  --what vcf` for one dataset, several indexes in one list, your own cohort beside a dataset). Each
-  list is now compared on its own: up to as many lists as the search names such datasets, those
-  that name no sample of the VCFs on disk, are left out. A list that names some of them and others
-  they lack still stops the search, with those others named; so does a list of no dataset when
-  every dataset's VCFs are there. Measured on a 6-sample panel, the search that was refused gives
-  the same table as with both datasets' VCFs on disk, and as with neither. A web search does not
-  run this check and is not affected.
+  with the VCFs on disk (#46). With `hg38_walk`'s VCFs there and `hg38_walkB` installed as an index,
+  it stopped with `--samplesID lists 3 sample(s) genotyped in no VCF (B4, B5, B6)`, and told you to
+  filter a list that was right; so too beside a sites-only dataset, on disk or not, whose VCFs have
+  no sample columns and whose list names `1000G2021` and `HGDP`. Each step that leads there is
+  documented (`download --what vcf` for one dataset, several indexes in one list, your own cohort
+  beside a dataset). Each list is now compared on its own: up to as many lists as the search names
+  such datasets, those that name no sample of the VCFs on disk, are left out. A list that names some
+  of them and others they lack still stops the search, with those others named; so does a list of no
+  dataset when every dataset's VCFs are there. Measured on a 6-sample panel, the search that was
+  refused gives the same table as with both datasets' VCFs on disk, and as with neither. A web search
+  does not run this check and is not affected. Covered by `PostProcess/test_samplesid_overlisting.py`.
 - **A variant build that runs out of memory as it writes its tiers ends with a message, and no
   longer hangs.** `build-index-only --samplesID`, and in this release every variant build in the web
   Settings page, writes the dict-less tiers and the phased indel genotype store in forked workers,

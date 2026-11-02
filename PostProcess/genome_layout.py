@@ -23,7 +23,9 @@ or Ensembl header (``>NC_000913.3 Escherichia coli ...``, ``>chr1 1``, ``>1 dna:
 ...``), or CRLF line ends, indexed as done, and every search of it then lost results,
 often all of them with no error. The same fix writes such a file as ``>id`` with no
 carriage return. An id the pipeline cannot take (``gi|49175990|ref|...``, a PanSN
-``HG01255#1#CM086702.1``) is refused: it is for the user to rename. It is used by:
+``HG01255#1#CM086702.1``) is refused: it is for the user to rename.
+
+This module is used by:
 
 * ``utils.download_reference_genome`` -- split right after a UCSC/URL download;
 * ``pages/settings_page.py`` -- the same, for a genome uploaded in the web Settings

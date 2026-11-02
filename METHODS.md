@@ -546,13 +546,16 @@ index it is the population-level analysis (the only meaningful mode on sites-onl
 no per-sample genotypes to recover — verified on the released **mega** index: `--per-sample`
 yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no genotype store to
 enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are **byte-identical**
-across modes. On a sites-only index `--per-sample` has no genotypes to resolve, so since 2.8.1
-it runs the population-level analysis, with the same output as without it, and `complete-search`
-**warns** that the panel is sites-only; the web form **disables** the per-sample option when a
-sites-only index is selected. Before 2.8.1 the SNP post-analysis fell back there to the
-registry-only worst-case emission, which emitted *fewer* rows than the two-pass
-population-level path (integrated 3,065 vs 3,224 rows; SNP+SNP co-occurrence 4 vs 22 PUTATIVE
-rows) and resolved no carriers.
+across modes. A sites-only dataset has no genotypes for `--per-sample` to resolve, so as of 2.8.1
+its SNP post-analysis is the two-pass population-level one whatever the search's mode, dataset by
+dataset, from its registry's `data_type`: `--per-sample` on sites-only datasets alone **is** the
+population-level analysis, and `complete-search` **warns**; a phased dataset searched beside a
+sites-only one (per-sample by default) gives per-sample rows, the sites-only one population-level
+rows, and `complete-search` says so. (Before 2.8.1 such a dataset went through the per-sample path,
+whose emission joins variants only through the carriers they share, and it has none: it lost
+multi-variant worst cases, whole sites among them, with *fewer* rows than the population-level path:
+integrated 3,065 vs 3,224 rows, SNP+SNP co-occurrence 4 vs 22 PUTATIVE rows.) The web form
+**disables** the per-sample option when a sites-only index is selected.
 
 **Measured population-level vs `--per-sample` behavior (adversarially verified).** Running both
 modes on the then-released 1000 Genomes 2021 + HGDP genotyped index for one guide (identical
@@ -603,10 +606,9 @@ The measured numbers above, side by side (same guide/PAM/thresholds; only `--per
 | SNP+SNP co-occurrence PUTATIVE rows | **22** | 4 |
 | CONFIRMED rows / cis carriers | 0 / none (no genotype store) | 0 / none (no genotype store) |
 
-(Before 2.8.1, `--per-sample` on the sites-only mega could not resolve carriers and emitted
-*fewer* rows than the default population-level analysis. Since 2.8.1 it runs the population-level
-analysis, with the same output as without it, and `complete-search` warns that the panel is
-sites-only; the web form disables per-sample for a sites-only index.)
+(On the sites-only mega, `--per-sample` cannot resolve carriers and emitted *fewer* rows than the
+population-level analysis before 2.8.1. It now runs that analysis, whose rows are the left column's,
+and `complete-search` warns; the web form disables per-sample for a sites-only index.)
 
 **Scope of the analysis mode.** The mode toggles only the **SNP** post-analysis (`--per-sample`
 re-enables the 2^k IUPAC haplotype lattice / observed-haplotype enumeration that the
