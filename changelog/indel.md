@@ -19,18 +19,19 @@
   real haplotype the site is 5 mismatches + 1 bulge, past the search's limit. Its mismatch counts
   were understated the same way. And a code at a PAM position always read as its first allele: an R
   (A/G) at NRG's last base was shown as A, a PAM the search never matched, with a CFD of about 0
-  (1,088 rows of that search's highest-CFD block). Of its 13,622 highest-CFD indel rows, 8,260 lie
-  on no listed carrier's real haplotype (built from the phased VCF): for 6,572 nothing else explains
-  it; in the others a listed carrier also holds a second indel there (1,317, the next entry) or a
-  SNP at a split multi-allelic site (371, METHODS §8). Each carrier haplotype of the indel now gets
-  its own allele at every code: the SNP alt it carries, else the reference base. Haplotypes left
-  with the same sequence form one row that lists only their individuals and names the SNP alts they
-  hold next to the indel (`Variant_info`, rsID, MAF), with its mismatches recounted, its CFD,
-  CRISPR-Bulge and risk scores computed on that sequence, and its PAM creation flagged from it; a
-  sequence whose PAM does not satisfy the searched motif, or that is past `--mm` or
-  `--max-total-edits` (now passed to the indel post-analysis), is dropped, so a raw target no
-  individual has gives no row. An individual whose genotypes cannot put an allele on the indel's
-  haplotype (an unphased call, a missing allele, no phased indel genotype, a haploid call against a
+  (1,088 rows of that search's highest-CFD block). On 9,255 of its 13,622 highest-CFD indel rows no
+  listed carrier's real haplotype, built from the phased VCF, holds the reported sequence, mostly
+  for this reason (the next two entries and METHODS §8 cover the others). Each carrier haplotype of
+  the indel now gets its own allele at every code: the SNP alt it carries, else the reference base,
+  several alts on one VCF line each read against its own allele index. Haplotypes left with the same
+  sequence form one row that lists only their individuals and names the SNP alts they hold next to
+  the indel (`Variant_info`, rsID, MAF), with its mismatches recounted, its CFD, CRISPR-Bulge and
+  risk scores computed on that sequence, and its PAM creation flagged from it; a sequence whose PAM
+  does not satisfy the searched motif, or that is past `--mm` or `--max-total-edits` (now passed to
+  the indel post-analysis), is dropped, so a raw target no individual has gives no row. A row's
+  carriers stay on its sequence through the merge of a cluster's rows, which would otherwise add
+  those of another alignment of the site naming the same variants. An individual whose genotypes
+  cannot put an allele on the indel's haplotype (an unphased call, a missing allele, no phased indel genotype, a haploid call against a
   diploid one) gets the strongest target its own alleles allow, and is never listed for an allele it
   does not carry; with no genotypes at all (a sites-only panel, `hg38_mega`), the row holds the
   strongest target the codes allow (its PAM always one the motif allows) under the carriers the
@@ -43,28 +44,33 @@
   stay in the rows unresolved, scoring CFD 0, so the real SNP+indel targets were lost. With
   `CRISPRME_INDEL_SNP=0` at search time each code reads as the reference base, as on a fake-indel
   genome built without the overlay. A target with no code, every target of a fake-indel genome built
-  without the overlay, is reported as before. **Affected:** every search with a variant dataset that
-  has indels since 2.5.0, from the web or the command line, per-sample and population-level (the
-  indel post-analysis does not depend on the mode), with any PAM: every published variant index and
-  every index `build-index-only` builds carry the overlay. Under a PAM whose motif allows the base
-  the misreading produced (NRR allows A at its last position) the PAM stayed legal while the CFD
-  collapsed, so nothing showed. Reference and SNP-only off-targets are not affected, though a
-  cluster whose indel candidate goes away shows its next best in the results and its `Other_motifs`
-  count changes. Measured on the search above, rerun genome-wide with the fix: its highest-CFD indel
-  rows went from 13,622 to 5,311, of which 5,303 check out on a listed carrier's real haplotype and
-  the other 8 hold a SNP at a split multi-allelic site, which the enriched genome and its
-  dictionaries read as reference (METHODS §8); no ALT row shows a PAM NRG does not allow (3,581 over
-  the table's three blocks before); chr18:12386282 is now the SNP row of its real carrier, NA20541,
-  at CFD 0.14, out of the top-1000 table and the panel; that table lost 62 indel rows and gained 2
-  (chr5:170503088 among them), the recommended panel went from 259 to 234 sites, the CFD >= 0.5 tier
-  from 67 to 57, the CRISPR-Bulge sensitive tier from 162 to 156 and the <= 2 mismatches + bulges
-  tier from 9 to 7; the SNP+indel companion went from 590 to 423 lines, all CONFIRMED and the same
-  in both analysis modes; all 755,576 reference and SNP-only candidates are unchanged, and so are
-  the two perfect matches and the multiple-perfect-match banner. The search takes as long as before
-  and peaks at the same memory, its search stage's; an indel post-analysis worker holds about 3%
-  more. **What to do:** run such searches again; results of earlier releases are corrected only by
-  running the search again. Covered by `PostProcess/test_indel_haplotype_resolution.py`,
-  `PostProcess/test_indel_overlaid_rows.py`, the synthetic SNP+indel oracle through the real CLI
+  without the overlay, that holds its indel (the last entry) is reported as before. **Affected:**
+  every search since 2.5.0 on an index that carries the overlay, which every published variant index
+  and every index `build-index-only` builds do: from the web or the command line, per-sample and
+  population-level (the indel post-analysis does not depend on the mode), with any PAM. A search that
+  enriches its dataset on demand (`CRISPRME_ALLOW_ONDEMAND_BUILD=1`, as the benchmark mode of
+  `complete-test`) builds its fake-indel genome without the overlay, so no code reached its
+  post-analysis. Under a PAM whose motif allows the base the misreading produced (NRR allows A at its
+  last position) the PAM stayed legal while the CFD collapsed, so nothing showed. Reference and
+  SNP-only off-targets are not affected, though a cluster whose indel candidate goes away shows its
+  next best in the results and its `Other_motifs` count changes. Measured on the search above, rerun
+  genome-wide with the fixes of these three entries: its highest-CFD indel rows went from 13,622 to
+  5,047, of which 5,037 hold their sequence on a listed carrier's real haplotype, read literally
+  from the phased VCF, and every one of those spans its indel; the other 10 hold a SNP at a split
+  multi-allelic site, which the enriched genome and its dictionaries read as reference (METHODS §8),
+  as does one of the 103 carriers of one more row; no ALT row shows a PAM NRG does not allow (3,581
+  over the table's three blocks before); chr18:12386282 is now the SNP row of its real carrier,
+  NA20541, at CFD 0.14, out of the top-1000 table and the panel; that table lost 66 indel rows and
+  gained 2 (chr5:170503088 and chr10:103001704), from 88 to 24, the recommended panel went from
+  259 to 234 sites, the CFD >= 0.5 tier from 67 to 57, the CRISPR-Bulge sensitive tier from 162 to
+  156 and the <= 2 mismatches + bulges tier from 9 to 7; the SNP+indel companion went from 590 to
+  336 lines, all CONFIRMED and the same in both analysis modes; all 755,576 reference and SNP-only
+  candidates are unchanged, and so are the two perfect matches and the multiple-perfect-match banner.
+  The search takes as long as before and peaks at the same memory, its search stage's; an indel
+  post-analysis worker holds about 2% more. **What to do:** run such searches again; results of
+  earlier releases are corrected only by running the search again. Covered by
+  `PostProcess/test_indel_haplotype_resolution.py`, `PostProcess/test_indel_overlaid_rows.py`,
+  `PostProcess/test_representative_tiebreak.py`, the synthetic SNP+indel oracle through the real CLI
   (`test/indel_snp_oracle`, run by `validate-benchmarks.yml`) and a release gate,
   `scripts/check_alt_pam.py` (no ALT row may show a PAM the searched motif does not allow), run on
   the chr22 benchmark outputs.
@@ -73,11 +79,31 @@
   haplotype does not have the window's sequence; on the synthetic oracle a sample carrying two
   deletions on one haplotype was listed on both windows' rows, for sequences neither of its
   haplotypes has. It is no longer listed for them, nor when its second indel is inserted right next
-  to the first, nor when, on the same phased slot, an indel overlaps the first or a SNP alt sits on
-  its anchor base (one complex allele that the VCF splits into overlapping records). A variant only
-  on bases the indel deletes changes nothing, and an unphased carrier of two overlapping records, a
-  multi-allelic heterozygote, stays listed. This needs the phased indel genotype store, which the
-  build writes with the SNP overlay; a row left with no carrier is dropped. Its own target, which
-  needs both indels, is still not searched (METHODS §8). On the search above, 1,221 targets with no
-  SNP code lost such carriers, and no row left lies off a listed haplotype because of a second
-  indel.
+  to the first, nor when, on the same phased slot, an indel overlaps the first at another position
+  (one complex allele that the VCF splits into overlapping records). A variant only on bases the
+  indel deletes changes nothing. Another allele at the indel's own position, an indel or a SNP, is
+  an alternative to it (a haplotype holding both would be one record), so a slot phased with both is
+  a phasing artefact: on chr22 of the HGDP + 1000 Genomes panel, two indels at one position share a
+  slot for 40,679 carrier pairs against 2,463,324 on opposite slots, a SNP and an indel for 2,404
+  against 167,951. And an unphased carrier of two overlapping records is a multi-allelic
+  heterozygote, one allele per haplotype. All of these stay listed. This needs the phased indel
+  genotype store, which the build writes with the SNP overlay; a row left with no carrier is
+  dropped. Its own target, which needs both indels, is still not searched (METHODS §8). On the search
+  above, 693 targets with no SNP code lost such carriers, and no row left lies off a listed
+  haplotype because of a second indel.
+- **An indel row could hold no base of its indel.** The engine reports every target on a fake-indel
+  window, also one wholly in a flank, whose sequence is plain reference (or SNP) sequence that needs
+  no indel. The post-analysis computed a row's Start with no shift for the indel and kept the row when
+  that range met the indel's, so a target in the downstream flank of a deletion passed: a row with
+  the indel's name and carriers, at a coordinate the indel shifts, that could take the real row's
+  place in its cluster. On the search above, the top-1000 table showed at rank 628 chr1:69462019 as a
+  2-carrier off-target of a deletion and a SNP, hiding the SNP row chr1:69462021, chr1_69462039_A_G,
+  with its 3,459 carriers, so a common off-target read as a rare one (it is now at rank 588), and
+  at rank 983 chr8:28788278, the sequence of the reference row chr8:28788272 reported again 6 bp off.
+  A raw target now has to hold a base the ALT adds or replaces, or the two bases on either side of the
+  deleted ones; one wholly inside a long insertion does, and stays. **Affected:** every search with a
+  variant dataset that has indels, in every release, on any index, with or without the overlay and
+  with `CRISPRME_INDEL_SNP=0` too. No off-target goes with these rows: on the search above, each of the
+  1,566 distinct rows this removes has a reference or SNP row at its site that holds its sequence
+  (1,560) or names the same SNP alts (6). **What to do:** run such searches again. Covered by the
+  same tests.

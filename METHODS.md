@@ -434,7 +434,11 @@ haplotype** (`indel_snp_cis.resolve_target`):
 - every haplotype that carries the indel gets **its own allele** at each code column — the
   SNP alt it carries, else the reference base — and the haplotypes left with the same
   sequence form **one reported row**, listing only their individuals and naming the SNP alts
-  they hold next to the indel (Variant info, rsID, MAF);
+  they hold next to the indel (Variant info, rsID, MAF). A SNP with several alts on one VCF
+  line keeps its raw genotype under each alt (2|1 under A and under T), so each genotype is
+  first read against its own alt; where the genotypes cannot tell which index is which (every
+  carrier of two alts is 1|2) no slot can be tied to the alt and the carrier is resolved as an
+  unphased one;
 - a sequence whose PAM no longer satisfies the searched motif, or whose mismatches,
   recounted on the concrete sequence, exceed `--mm` or `--max-total-edits`, is **dropped**:
   a raw target that no individual carries gives no row;
@@ -449,11 +453,18 @@ haplotype** (`indel_snp_cis.resolve_target`):
 - the fake-indel window holds **one indel**, so a haplotype that carries a second indel
   inside the target does not have the window's sequence and is not listed for it, on any
   indel row (§8, residuals). That includes a second indel inserted right next to the
-  indel's anchor base and, on the same phased slot, an indel overlapping the first or a SNP
-  alt on its anchor (one complex allele the VCF splits into overlapping records; the window
-  keeps the reference there). A variant only on bases the indel deletes is not in the
-  window's sequence and changes nothing, and an unphased carrier of two overlapping records
-  is a multi-allelic heterozygote, one allele per haplotype: both stay listed;
+  indel's anchor base and, on the same phased slot, an indel overlapping the first at another
+  position (one complex allele the VCF splits into overlapping records; the window keeps the
+  reference there). A variant only on bases the indel deletes is not in the window's sequence
+  and changes nothing. Another allele at the indel's own position, an indel or a SNP, is an
+  alternative to it (a haplotype holding both would be one record), so a slot phased with both
+  is a phasing artefact. And an unphased carrier of two overlapping records is a multi-allelic
+  heterozygote, one allele per haplotype. All of these stay listed;
+- a target of the window that holds **no base of the indel** — none the ALT adds or replaces,
+  and not the two bases on either side of the deleted ones — lies wholly in a flank and gives
+  **no indel row**, with or without a code: its sequence is reference (or SNP) sequence, which
+  the reference and SNP searches report at its true coordinate for its true carriers, while
+  the indel shifts its coordinate on the window;
 - a classic dictionary install (no Tier-1 store, e.g. an index built without `--samplesID`)
   reads the same genotypes from the per-sample SNP dictionary; with `CRISPRME_INDEL_SNP=0`
   at search time every code reads as the reference base, as on a fake-indel genome built
@@ -464,7 +475,12 @@ the target **requires** — the guide's own base at a spacer column, or a base t
 the PAM where the reference does not — with that row's carriers: CONFIRMED when every
 carrier was resolved exactly, PUTATIVE otherwise. The resolution does not depend on the
 analysis mode (§5). A target with no code (every target of a classic, non-overlaid
-fake-indel genome) is reported as the engine found it.
+fake-indel genome) that holds the indel is reported as the engine found it. A row's carriers
+belong to its sequence: two alignments of one site can name the same variants with different
+carriers (an RNA-bulge alignment does not reach the base a SNP sits on, so it lists that SNP's
+carriers under the indel alone), and the merge of a cluster's rows, which otherwise keeps one
+row per position and variant list, keeps one per carrier set there, so that no carrier is
+added to a sequence it does not have.
 
 From 2.5.0 to 2.8.0 each code was instead read **column by column without genotypes** —
 the guide's base when it was an allele, else the code's first allele. That reported one
@@ -973,7 +989,9 @@ post-analysis' cis phasing pass over the genotype tiers, which the mode does not
 on the complete genome-wide matrix (2021 panel, same guide, default vs `--per-sample`): the two
 `indel_snp_cooc.tsv` files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
 per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
-carries the indel and SNP together — is preserved identically in both analysis modes.
+carries the indel and SNP together — is preserved identically in both analysis modes. Measured
+again with 2.8.1, whose companion holds only the SNPs a reported row requires, on the HGDP + 1000
+Genomes index: the two modes give the same lines for each of two guides (336 and 351, all CONFIRMED).
 
 **Two co-occurrence companions.** Alongside `indel_snp_cooc.tsv` (SNP+indel),
 `snp_snp_cooc.tsv` reports **SNP+SNP** co-occurrences — off-targets that require ≥2
@@ -1005,13 +1023,14 @@ each resolved on its carriers' own haplotypes (§4; since 2.8.1) and tagged CONF
 (phased) / PUTATIVE (unphased) with per-sample carriers and joint allele frequency. (The
 pre-2.5.0 behavior — two independent passes, SNPs on the IUPAC-enriched genome and indels
 on a plain-reference fake-indel genome — remains available by disabling the integration;
-classic dict builds are byte-identical.) One **residual**: the indel search materializes
+classic dict builds are byte-identical, but for the rows of §4 whose target holds no base of
+their indel, which no build reports since 2.8.1.) One **residual**: the indel search materializes
 **one indel per fake contig**, so an off-target requiring **≥ 2 co-occurring cis indels
 within a single protospacer** is not generated as a candidate — a pre-existing
 single-indel-search property, independent of the analysis mode; since 2.8.1 an individual
 whose haplotype carries such a second indel inside a target (or, as one complex allele
-split into overlapping records, an overlapping indel or a SNP alt on the first indel's
-anchor) is not listed for that target, whose sequence it does not have. This residual is **low-frequency**: raw multi-indel cis
+split into overlapping records, an indel overlapping it at another position) is not listed
+for that target, whose sequence it does not have. This residual is **low-frequency**: raw multi-indel cis
 co-occurrence is dominated by STR/VNTR repeats (which off-target analysis should
 soft-mask), falling to **~1–2%** of indel loci after
 repeat-masking and deduplication, and the **genuinely-missed** off-targets are **~0.1–0.2%**

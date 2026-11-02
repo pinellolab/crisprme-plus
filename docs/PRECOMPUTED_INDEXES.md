@@ -650,13 +650,14 @@ indels on a fake-indel genome cut from the *plain* reference).
 
 To reproduce the classic two-independent-passes behavior, set `CRISPRME_INDEL_SNP=0`
 **before both the build and the search**. With the gate off, builds and searches are
-byte-identical to classic CRISPRme.
+byte-identical to classic CRISPRme, but for the indel rows whose target holds no base of
+their indel, which no build reports since 2.8.1 (METHODS §4).
 
 ```bash
 # default (co-occurrence ON) — nothing to set:
 crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt \
     --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesID.listing.txt --path ./
-# to opt out and reproduce classic CRISPRme (byte-identical), set the gate to 0 first:
+# to opt out and reproduce classic CRISPRme, set the gate to 0 first:
 #   export CRISPRME_INDEL_SNP=0   # before BOTH build and search
 ```
 
