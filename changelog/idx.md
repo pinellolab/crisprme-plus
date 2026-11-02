@@ -1,4 +1,8 @@
-<!-- idx track: [2.8.1] entries for CHANGELOG.md, to be merged by the docs track. -->
+<!-- idx track: [2.8.1] entries for CHANGELOG.md, to be merged by the docs track. The [2.8.1] entry
+that says "An INDELS index that `complete-search` builds from a genome it enriched itself (the
+on-demand build) still has no SNP codes, as before" stops being true with these fixes: drop that
+sentence. The entry below on the SNP codes needs the indel track's fix for a dataset with no
+registry. -->
 
 ### Fixed
 

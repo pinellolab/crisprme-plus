@@ -174,3 +174,20 @@ with a line on stdout that says so.
 **Fix.** Once no CRISPRme container is building, remove them:
 `rm -rf genome_library/.build-index-only-* Genomes/.build-index-only-enrich-* Dictionaries/.build-index-only-dicts-*`
 from your data folder.
+
+## 11. A search stops and says no index serves it
+
+Each of these names the index and what to do; none of them removes anything.
+
+- **`no variant index here serves this search (...)`.** The dataset's indexes are for another PAM or
+  fewer bulges, or need `--prune-pam`, and neither its VCFs nor its enriched genome are here to build
+  one. A download holds its own index only: `NRG_3_hg38+hg38_HGDP1kGP` searches NRG (and, with a
+  20-nt guide, up to 2 bulges of each type). Search with what the message lists, or install another
+  index ([Precomputed indexes](PRECOMPUTED_INDEXES.md)).
+- **`index '...' is not installed, and this run cannot build it`.** The library is on a read-only
+  mount, has no write permission or is full, and lacks the index this PAM and these bulges need. Make
+  it writable, or run `build-index-only` where it is, or search with no bulges, which opens no index.
+- **`... was built for a 20-nt guide, and this search has a 23-nt guide ...: it stores too few bases
+  per site`.** An index name carries no guide length, and this search builds its own under that name.
+  Move that index aside, or run from another working directory. Any published index serves a 21-nt
+  guide at up to 1 bulge of each type.
