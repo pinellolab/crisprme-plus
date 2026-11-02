@@ -294,11 +294,18 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   5863 to 6226, `observed_haplotypes.tsv` 1556 rows to 1796). It lists 57 sites it did not and loses
   none, 14 sites score higher and none lower (chr22:34270481 from CFD 0.173 to 0.233, and
   chr22:22881199 reads 0.274 where chr22:22881195 read 0.262), and the report's CFD >= 0.05 and >=
-  0.2 tables each gain one site. Such rows have no carriers and read `putative` in the report's
-  Observed column (`observed` for one variant). A search with no sites-only dataset, `hg38_mega`
-  with no flag and any search at `--population-level` are unchanged, byte for byte. **If you ran a
-  per-sample search with a sites-only dataset,** run it again. Covered by
-  `PostProcess/test_sites_only_per_sample.py`.
+  0.2 tables each gain one site. On a denser search of the two (chr19 and chr21, 5 mismatches, 2 DNA
+  and 2 RNA bulges, guides CTAACAGTTGCTTTTATCAC and CTCTCAGCTGGTACACGGCA), 249 sites of `hg38_mega`
+  searched alone were not in its table (the best chr19:2433201, CFD 0.533) and 411 scored lower
+  there (chr19:388343, 0.503, read 0.114). Now each site that either dataset gives alone is in the
+  table with its CFD or a higher one, but for 29 with a CFD of at most 0.002 that the merge step
+  joins, as before, to a site within 3 bp on the other strand that scores at least as high. The
+  table goes from 49,193 rows to 49,452, and its sites with a CFD >= 0.05, >= 0.2 and >= 0.5 from
+  1,273, 138 and 5 to 1,316, 151 and 7. A sites-only dataset's rows have no carriers and read
+  `putative` in the report's Observed column (`observed` for one variant). A search with no
+  sites-only dataset, `hg38_mega` with no flag and any search at `--population-level` are unchanged,
+  byte for byte. **If you ran a per-sample search with a sites-only dataset,** run it again. Covered
+  by `PostProcess/test_sites_only_per_sample.py`.
 - **A command-line search of two datasets is no longer refused because only one has its VCFs on
   disk.** The input check of `complete-search` compared the samples of all the `--samplesID` lists
   with the VCFs on disk (#46). With `hg38_walk`'s VCFs there and `hg38_walkB` installed as an index,
