@@ -109,6 +109,7 @@ aa9c54b and on these fixes.
   on the per-sample search of the entry above, 181,836 of 205,415 on the population-level one, and
   114,865 of 128,730 and 133,747 of 150,103 with guide CTCTCAGCTGGTACACGGCA. Only these four columns
   change, on those rows, in `*_integrated_results`, `*_all_results_with_alternative_alignments`,
-  `*_observed_haplotypes_raw`, the results database and the web tables that list them (Query Genomic
-  Region with the fewest criterion selected); no plot or report table reads them. To correct results
-  made before, run the search again. Covered by `PostProcess/test_seed_counts_dna_bulge.py`.
+  `*_observed_haplotypes_raw`, the results database and what reads it (the web tables that list them,
+  such as Query Genomic Region with the fewest criterion selected, and a Personal Risk Card's
+  targets file); no plot or report table reads them. To correct results made before, run the search
+  again. Covered by `PostProcess/test_seed_counts_dna_bulge.py`.
