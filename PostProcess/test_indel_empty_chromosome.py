@@ -190,7 +190,7 @@ class SearchSide(_Fixture):
 
     def run_search(self, logs, bins, records=(), fakes=None, true_pam="NRG", pam=NRG,
                    bulges=("1", "1"), vcfs=(), pam_files=None, pam_build=None, view=None,
-                   listed="ds"):
+                   listed="ds", no_trees=()):
         """bins: chrom -> whether its sub-index holds a .bin (a chromosome left out has
         none); records: the chromosomes whose sub-index holds the record of a build with
         no target; fakes: chrom -> the sequence of its fake-indel contig, written where
@@ -199,7 +199,9 @@ class SearchSide(_Fixture):
         pam_files: name -> line of a PAM file in the working directory's PAMs/; pam_build:
         what the variant index's .pam_build says; view: a chromosome, to search as
         complete-test --chrom does, from complete_test's own view of the working directory;
-        listed: how the search's --vcf list spells the dataset."""
+        listed: how the search's --vcf list spells the dataset; no_trees: the chromosomes
+        whose sub-index holds a directory x.bin and a file named .bin, neither of them a
+        tree searchTST loads."""
         cwd = self.work = os.path.join(self.tmp, "work")
         self.true_pam = true_pam
         logdir = os.path.join(cwd, "Dictionaries", "log_indels_ds")
@@ -215,6 +217,9 @@ class SearchSide(_Fixture):
             if chrom in records:
                 with open(os.path.join(d, NO_TARGETS), "w") as fh:
                     fh.write("built, 0 targets\n")
+            if chrom in no_trees:
+                os.makedirs(os.path.join(d, "x.bin"))
+                open(os.path.join(d, ".bin"), "w").close()
         if pam_build is not None:
             os.makedirs(os.path.join(cwd, "genome_library", f"{true_pam}_3_ref+ds"))
             with open(os.path.join(cwd, "genome_library", f"{true_pam}_3_ref+ds", ".pam_build"), "w") as fh:
@@ -388,6 +393,29 @@ class SearchSide(_Fixture):
         self.refused(res, self.empty(f"{self.fake('chrB')}/fakechrB.fa holds a target of NRG: "
                                      "the index is incomplete"), self.chain())
         self.assertIsNone(lines)
+
+    def test_an_index_built_before_the_record_whose_genome_cannot_be_read_fails(self):
+        # no target found in a genome read otherwise than buildTST reads it says nothing of
+        # the index: skipping that chromosome could lose its indel off-targets, so it fails
+        for why, seq in (("CRLF line ends", f"{NO_NRG}\r\n{NO_NRG}"),
+                         ("a byte no IUPAC base is", f"{NO_NRG}?{NO_NRG}")):
+            with self.subTest(why=why):
+                self.tearDown_dirs()
+                res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, vcfs=AB,
+                                             fakes={"chrA": WITH_NRG, "chrB": seq})
+                self.refused(res, self.empty(f"{self.fake('chrB')}/fakechrB.fa cannot be read "
+                                             "as buildTST reads it"), self.chain())
+                self.assertIsNone(lines)
+
+    def test_a_name_that_ends_in_bin_is_no_tree(self):
+        # a directory x.bin and a file named .bin: searchTST loads neither, so the sub-index
+        # holds no .bin (with no target in its genome, the chromosome is skipped)
+        res, lines = self.run_search(LOGS_AB, {"chrA": True, "chrB": False}, no_trees={"chrB"},
+                                     fakes={"chrA": WITH_NRG, "chrB": NO_NRG})
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.searched(), ["chrA"])
+        self.assertIn("No NRG target in the indels of chrB", res.stdout)
+        self.assertEqual([ln for ln in lines[1:] if ln], [ROW_A])
 
     # A PAM-less index standing in for the search's PAM (NNN_3 serving NRG; NNNNNNNN_3
     # under --prune-pam): a build of it holds the targets of its own PAM, which the
