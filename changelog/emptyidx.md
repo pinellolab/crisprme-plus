@@ -73,10 +73,11 @@
   the same. (2) An INDELS index copied in part. Measured through the real CLI on a test genome
   (NRG, 4 mismatches, 1 DNA and 1 RNA bulge): way 1 lost 5 of the 2446 rows with alternative
   alignments and 190 of the 191 indel+SNP co-occurrence rows of chr3 (2447 -> 2442 rows on 2.8.0),
-  way 2 lost 3 rows with alternative alignments, and the integrated results changed with both. Now
-  (1) that rebuild uses the PAM the index was built with (from its `.pam_build`, else of the
-  search's guide length), and is byte-identical to the INDELS index build-index-only builds, so the
-  search's result files are those of an intact index; and (2) a search with bulges stops at a chromosome whose indel log, or fake-indel genome, shows indels but
+  way 2 lost 3 rows with alternative alignments (2446 -> 2443; 2446 -> 2444 on 2.8.0), and the
+  integrated results changed with both. Now (1) that rebuild uses the PAM the index was built with
+  (from its `.pam_build`, else of the search's guide length), and is byte-identical to the INDELS
+  index build-index-only builds, so the search's result files are those of an intact index; and (2)
+  a search with bulges stops at a chromosome whose indel log, or fake-indel genome, shows indels but
   which has no sub-index, with an ERROR that says how to rebuild the INDELS index (as above), but
   for a contig with an underscore in its name, which no build gives one (next entry). A search
   without bulges still searches the fake-indel genome, and a chromosome without indels is skipped as
@@ -85,10 +86,12 @@
   them. **Affected:**
   searches with bulges through a PAM-less index serving another PAM whose INDELS index was missing,
   and searches with an INDELS index copied in part. **What to do:** a job was affected by (1) when
-  it allowed bulges and its `log_verbose.txt` shows `Variant index present (NNN_...)` (or
-  `NNNNNNNN_...`) for another PAM, followed by `Indexing INDELs in ...` lines: run it again with
-  2.8.1, and remove what it left under the other PAM's name, the `NNN_<N>_fake<chr>` (or
-  `NNNNNNNN_<N>_fake<chr>`) directories in `genome_library/<that PAM>_<N>_<genome>+<dataset>_INDELS`,
+  it allowed bulges, its `log_verbose.txt` shows `Variant index present (NNN_...)` (or
+  `NNNNNNNN_...`) for another PAM, and its `log.txt` shows `Indexing Indels` `Start` (its
+  `log_verbose.txt` then has no `Indels index present` line; the `Indexing INDELs in ...` lines tell
+  nothing, as they may be missing from it): run it again with 2.8.1, and remove what it left under
+  the other PAM's name, the `NNN_<N>_fake<chr>` (or `NNNNNNNN_<N>_fake<chr>`) directories in
+  `genome_library/<that PAM>_<N>_<genome>+<dataset>_INDELS`,
   with that directory when nothing else is in it. For (2), a search now says which index is
   incomplete; once it is rebuilt, run again the searches made with it. Covered by
   `PostProcess/test_indel_empty_chromosome.py`.
