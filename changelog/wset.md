@@ -368,24 +368,27 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   went on losing results, and a build took it as present. An index built from a FASTA with a clean
   header line and CRLF after it has `.bin` names that do not show it, so it is not caught: remove it
   as the ERROR says. A sequence id that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a
-  backquote or `#` is refused too, at an upload, a download, `--split`, a build and a search
-  (`gi|49175990|ref|NC_000913.2|`, a PanSN `HG01255#1#CM086702.1`): a search of one failed in a
-  shell command (`/bin/sh: Syntax error`), or, for `#`, with `none survived post-analysis`. So is an
-  id that starts with `-` or `.`: a search of `-x` or `.x` beside `b` ended with exit status 0 and
-  the off-targets of `b` alone, none of the 7 of the other, its on-target among them (`grep` took
-  `-x` for an option, and the search left out the hidden file `.x.fa`). Measured character by
-  character through the real command line, `.`, `:`, `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~` and
-  `!` work inside an id, and all of them but `-` and `.` at its start, where `~` works only if no
-  user of the machine has the name that follows it (`~root`, and `~` alone, made a search fail in
-  its post-analysis). So do `*`, `?` and brackets in an id that matches, read as a shell pattern, no
-  other name of its folder (see the next entry) and no file of CRISPRme's `PostProcess` folder,
-  where the post-analysis runs: `HLA-A*01:01` and `KIR2DL1*001` worked, but `a*` matches
-  `adjust_cols.py` there, and a search of it failed. A file whose lines end in CR alone is refused
-  by `--split`, which says to convert it, as its first line holds the whole file. **If you have such
-  a genome,** run `python PostProcess/genome_layout.py --split <genome folder>`, remove the indexes
-  it names, and build again, or remove it in Settings and upload it again. A search of a genome of
-  plain headers is unchanged. Covered by `PostProcess/test_genome_layout.py` and
-  `PostProcess/test_build_index_only_layout.py`.
+  backquote or `#` (`gi|49175990|ref|NC_000913.2|`, a PanSN `HG01255#1#CM086702.1`) is refused too:
+  a search of one failed in a shell command (`/bin/sh: Syntax error`), or, for `#`, with `none
+  survived post-analysis`. So is an id that starts with `-` or `.`: a search of `-x` or `.x` beside
+  `b` ended with exit status 0 and the off-targets of `b` alone, none of the 7 of the other, its
+  on-target among them (`grep` took `-x` for an option, and the search left out the hidden file
+  `.x.fa`). Such an id is refused by a build and a search, and by an upload, a download or `--split`
+  when they write its file (a FASTA of several sequences, one not named after its sequence, or one
+  whose header is more than `>id` or whose lines end in CR); a file already named after such an id,
+  with a plain header, goes in as it is (an upload of an archive leaves out a hidden file such as
+  `.x.fa`), and its build is refused. Measured character by character through the real command line,
+  `.`, `:`, `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~` and `!` work inside an id, and all of them
+  but `-` and `.` at its start, where `~` works only if no user of the machine has the name that
+  follows it (`~root`, and `~` alone, made a search fail in its post-analysis). So do `*`, `?` and
+  brackets in an id that matches, read as a shell pattern, no other name of its folder (see the next
+  entry) and no file of CRISPRme's `PostProcess` folder, where the post-analysis runs: `HLA-A*01:01`
+  and `KIR2DL1*001` worked, but `a*` matches `adjust_cols.py` there, and a search of it failed. A
+  file whose lines end in CR alone is refused by `--split`, which says to convert it, as its first
+  line holds the whole file. **If you have such a genome,** run `python PostProcess/genome_layout.py
+  --split <genome folder>`, remove the indexes it names, and build again, or remove it in Settings
+  and upload it again. A search of a genome of plain headers is unchanged. Covered by
+  `PostProcess/test_genome_layout.py` and `PostProcess/test_build_index_only_layout.py`.
 - **A genome folder in which a sequence id, read as a shell pattern, matches the name of another
   sequence is refused; a search of it failed, or lost that sequence's off-targets.** The search
   script and its post-analysis take each sequence's name into shell commands as it is, where an id

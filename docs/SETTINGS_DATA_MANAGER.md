@@ -51,7 +51,8 @@ Type an assembly name and pick a source:
   (`>NC_000913.3 Escherichia coli ...`, `>chr1 1`) goes in as `>NC_000913.3`, `>chr1`. An
   id the pipeline cannot take (one that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`,
   `>`, a backquote or `#`, as `>gi|49175990|ref|NC_000913.2|` does, or that starts with `-`
-  or `.`) is refused: rename the sequence and upload it again.
+  or `.`) is refused, by the upload when it writes that file and otherwise by the build:
+  rename the sequence and upload it again.
   Hidden files are left out (the
   `._chr1.fa` that macOS `tar` adds beside `chr1.fa` holds its file attributes, not a
   sequence). An archive with two FASTA files that would go in under one name
