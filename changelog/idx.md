@@ -235,7 +235,13 @@ with "+" and start this one with "1 RNA bulge". -->
   carrier columns, and names the indel alone where an indel and a SNP make a site together. A full
   install, and one with the classic dictionaries, are unchanged. The
   download help, the README, docs/PRECOMPUTED_INDEXES.md and docs/TROUBLESHOOTING.md say what such
-  an install runs.
+  an install runs. A sites-only panel, such as `NRG_3_hg38+hg38_mega`, has no genotypes at all,
+  and so no store to install: `--per-sample` on it now runs the population-level analysis too, the
+  same as without the flag, and its `WARNING` says the panel is sites-only, with no genotypes to
+  resolve. Its output changes: on chr22 of the mega index, for sg1617 and TRAC at 4 mismatches + 1
+  DNA + 1 RNA bulge, `--per-sample` gave 3,605 rows before, and now gives the 3,801 of the run
+  without it, byte-identical. METHODS section 5 gives its earlier fewer-rows figure as the
+  behaviour before 2.8.1.
 - **An index is taken only for a search on the side of the guide it was built for, a dedicated
   one too, and an all-N index that records no side is taken for a 3' PAM only at the published
   widths.** 2.8.1 takes an all-N index of a 3' PAM's width, and one with no `.pam_build` for a 3'
