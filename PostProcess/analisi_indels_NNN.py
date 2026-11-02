@@ -998,16 +998,20 @@ def _other_indels(lo, hi, ipos, iref, ialt):
     return out
 
 
-def _ref_snps(ipos, iref, ialt):
+def _ref_snps(ipos, iref, ialt, first, last):
     """Carriers ({sample: genotype}) of each SNP alt on the bases of REF the indel keeps
-    (its anchor). The fake-indel window shows the reference base there (the overlay
+    (its anchor) that a target holds, ``first``..``last`` being its bases counted from
+    the anchor. The fake-indel window shows the reference base there (the overlay
     leaves the ALT alone), so a slot holding both is one complex allele the window does
     not hold. A SNP alt on a base the indel deletes is not in the window's sequence,
-    so it changes nothing. As for an overlapping indel, an unphased carrier of both is
-    a multi-allelic heterozygote, one allele per haplotype, so only phased and haploid
-    carriers count."""
+    so it changes nothing, nor is one on an anchor the target stops short of (a target
+    that starts inside an insertion). As for an overlapping indel, an unphased carrier
+    of both is a multi-allelic heterozygote, one allele per haplotype, so only phased
+    and haploid carriers count."""
     out = []
     for p in range(ipos, ipos + _isc.kept_bases(iref, ialt)):
+        if not first <= p - ipos <= last:
+            continue
         for carriers in (_snp_record(p) or {}).values():
             kept = {s: g for s, g in carriers.items() if "/" not in g}
             if kept:
@@ -1015,18 +1019,17 @@ def _ref_snps(ipos, iref, ialt):
     return out
 
 
-def _window_breakers(dna, real_of, ipos, iref, ialt):
+def _window_breakers(dna, real_of, offsets, ipos, iref, ialt, istart):
     """The carriers ({sample: genotype}, one per variant) whose slot does not have an
     indel target's sequence although it carries the indel: another indel changes the
-    bases the target covers (_other_indels), or, for a target that reaches the indel,
-    a SNP alt sits on its anchor (_ref_snps)."""
+    bases the target covers (_other_indels), or a SNP alt sits on an anchor base it
+    holds (_ref_snps). ``offsets``: the target's window_offsets."""
     span = _isc.target_ref_span(dna, real_of, ipos, iref)
     if not span:
         return ()
-    out = list(_other_indels(span[0], span[1], ipos, iref, ialt))
-    if span[0] <= ipos - 1 <= span[1]:
-        out += _ref_snps(ipos, iref, ialt)
-    return out
+    anchor = ipos - 1 - istart
+    return (list(_other_indels(span[0], span[1], ipos, iref, ialt))
+            + _ref_snps(ipos, iref, ialt, offsets[0] - anchor, offsets[1] - anchor))
 
 
 def _indel_carriers(indel_data, ipos, iref, ialt):
@@ -1094,7 +1097,10 @@ def _overlaid_rows(line, final_result, indel_data, amb):
         # the indel's phased carriers (the store), else the log's, phase unknown
         carriers = _indel_carriers(indel_data, _ipos, _iref, _ialt)
         if carriers.phase_known:
-            others = _window_breakers(line[2], real_of, _ipos, _iref, _ialt)
+            others = _window_breakers(
+                line[2], real_of,
+                _isc.window_offsets(line[2], int(line[4]), int(indel_data[5])),
+                _ipos, _iref, _ialt, _istart)
     if do_scores:
         def score_fn(bases, _cols=cols):
             return _cfd_from_alignment(line[1], _isc.realize(line[2], line[1], _cols, bases))
@@ -1181,7 +1187,9 @@ def _second_indel_rows(line, final_result, indel_data):
     _ipos, _iref, _ialt, _istart = _indel_window(indel_data)
     real_of = _isc.build_offset_to_real(
         line[2], int(line[4]), line[6], int(indel_data[5]), _istart, _iref, _ialt)
-    others = _window_breakers(line[2], real_of, _ipos, _iref, _ialt)
+    others = _window_breakers(
+        line[2], real_of, _isc.window_offsets(line[2], int(line[4]), int(indel_data[5])),
+        _ipos, _iref, _ialt, _istart)
     if not others:
         return [final_result]
     carriers = _indel_carriers(indel_data, _ipos, _iref, _ialt)
