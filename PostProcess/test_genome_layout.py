@@ -750,6 +750,37 @@ class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
         self.assertEqual(_read(os.path.join(dest, "chr3.fa")), ">chr3\nCC\n")
         self.assertEqual(_read(os.path.join(dest, "chr4.fa")), ">chr4\nTT\n")
 
+    def test_an_archive_with_two_fasta_files_of_one_name_is_refused(self):
+        # each went in under its file name alone, the second over the first, with exit
+        # status 0 and no message: an assembly's two haplotypes went in mixed (finB round
+        # 3 review). Refused, as an upload is, and a genome installed under the name is kept
+        installed = os.path.join(self.genomes, "udup")
+        os.makedirs(installed)
+        _write(os.path.join(installed, "chr9.fa"), ">chr9\nACGT\n")
+        members = [self._file("asm/a/chr1.fa", b">chr1\nAAAA\n"),
+                   self._file("asm/b/chr1.fa", b">chr1\nCCCC\n"),
+                   self._file("asm/chr3.fa", b">chr3\nGG\n")]
+        with mock.patch.object(utils, "download", self._fake_download(members)):
+            with self.assertRaises(RuntimeError) as cm:
+                utils.download_reference_genome(
+                    "udup", self.genomes, source="url", url="http://x/asm.tar.gz")
+        message = str(cm.exception)
+        self.assertTrue(message.startswith(
+            "The download holds two FASTA files that would both go in as chr1.fa ("), message)
+        self.assertIn("asm/a/chr1.fa", message)
+        self.assertIn("asm/b/chr1.fa", message)
+        self.assertIn("), one replacing the other, so nothing was installed. If they belong "
+                      "to two genomes (the two haplotypes of an assembly, say), install each "
+                      "under a name of its own.", message)
+        self.assertEqual(os.listdir(self.genomes), ["udup"])  # (no staging folder left)
+        self.assertEqual(os.listdir(installed), ["chr9.fa"])
+        # one of each name goes in as before
+        members[1] = self._file("asm/b/chr2.fa", b">chr2\nCCCC\n")
+        with mock.patch.object(utils, "download", self._fake_download(members)):
+            dest = utils.download_reference_genome(
+                "udup", self.genomes, source="url", url="http://x/asm.tar.gz")
+        self.assertEqual(sorted(os.listdir(dest)), ["chr1.fa", "chr2.fa", "chr3.fa"])
+
 
 class TestValidator(unittest.TestCase):
     def setUp(self):

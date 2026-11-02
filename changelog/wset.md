@@ -406,3 +406,13 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   unchanged. **If you have such a genome,** rename or remove the sequences the ERROR names, remove
   the indexes built from the folder, and build again. Covered by `PostProcess/test_genome_layout.py`
   and `PostProcess/test_build_index_only_layout.py`.
+- **A genome downloaded by Direct URL from an archive with two FASTA files of one name is refused;
+  one of them no longer replaces the other.** Each FASTA file of the archive went to the top of the
+  genome folder under its file name alone, so of `a/chr1.fa` and `b/chr1.fa` (the two haplotypes of
+  an assembly, say) one replaced the other, with exit status 0 and no message (the web Settings page
+  read `done`), and every search was of the one left. The download now stops with a message that
+  names the two files, and nothing is installed (the page reads `failed`): a genome installed under
+  that name is kept as it was. An upload in Settings refused such an archive already. An archive
+  with no two FASTA files of one name goes in as before, file for file. **If you downloaded such an
+  archive,** remove the genome it gave in Settings, with the indexes built on it, and install the
+  genomes it holds each under a name of its own. Covered by `PostProcess/test_genome_layout.py`.

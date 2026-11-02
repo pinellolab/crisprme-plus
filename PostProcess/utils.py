@@ -598,6 +598,20 @@ def download_reference_genome(
             raise RuntimeError(
                 f"No FASTA files found after downloading assembly '{assembly}'"
             )
+        # each goes in under its file name alone: of two of one name (an assembly's
+        # hap1/chr1.fa and hap2/chr1.fa), the second replaced the first with no message.
+        # Refused before an installed genome of that name is touched, as an upload is.
+        seen = {}
+        for fa in fastas:
+            other = seen.setdefault(os.path.basename(fa), fa)
+            if other != fa:
+                raise RuntimeError(
+                    f"The download holds two FASTA files that would both go in as "
+                    f"{os.path.basename(fa)} ({os.path.relpath(other, staging)}, "
+                    f"{os.path.relpath(fa, staging)}), one replacing the other, so nothing "
+                    f"was installed. If they belong to two genomes (the two haplotypes of "
+                    f"an assembly, say), install each under a name of its own."
+                )
         if os.path.isdir(dest_dir):
             shutil.rmtree(dest_dir, ignore_errors=True)
         os.makedirs(dest_dir)
