@@ -155,15 +155,17 @@ variant index. Choose one when you expect to search several PAMs over the same g
 
 **Limits of every index at contig ends and `N` runs** (dedicated or PAM-less, any flank; engine
 limits, [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)). An index of
-budget N cannot report a site whose guide lies within N − 1 nt of a contig start, a contig end
-or an `N` run, even a perfect match, which a search without bulges (a scan of the FASTA) does
-report; so an index of a larger budget is not a strict superset of a smaller one. For
-`NRG_3_hg38` that is 546 + strand and 504 − strand sites (1,050 NRG sites in all, 535 on primary
-contigs), none within 4 mismatches of nine therapeutic guides checked: what matters is a guide
-whose own on-target sits at such a boundary, whose report then has no perfect match. A − strand
-PAM at a contig's first base is reported on the + strand (11 NGG and 37 NRG hg38 contigs), and a
-+ strand PAM on a contig's last bases is found by no search (8 NGG and 31 NRG contigs): all alt,
-random or chrUn contigs, none a primary chromosome.
+budget N cannot report a site whose guide lies within N − 1 nt of a contig start, a contig end or
+an `N` run, even a perfect match, which a search without bulges (a scan of the FASTA) does
+report; but a variant search without bulges on an install without its whole enriched genome (a
+download) searches the variant index, so its SNP variant rows have this limit too. So an index of
+a larger budget is not a strict superset of a smaller one. For `NRG_3_hg38` that is 546 + strand
+and 504 − strand sites (1,050 NRG sites in all, 535 on primary contigs), none within 4 mismatches
+of nine therapeutic guides checked: what matters is a guide whose own on-target sits at such a
+boundary, whose report then has no perfect match. A − strand PAM at a contig's first base is
+reported on the + strand (11 NGG and 37 NRG hg38 contigs), and a + strand PAM on a contig's last
+bases is found by no search (8 NGG and 31 NRG contigs): all alt, random or chrUn contigs, none a
+primary chromosome.
 
 > **Flank width and compatibility.** A 3-nt flank is readable by any CRISPRme version: the
 > stored geometry is the same as a dedicated 3-nt PAM index, which is why `NNN_3` ships in
@@ -403,7 +405,9 @@ Only the genome index itself is PAM-specific; everything derived from the varian
 >
 > A search of the index itself needs no enriched genome, with no bulges either: a 0-bulge variant
 > search scans the enriched genome when every chromosome of it is in place, and otherwise searches
-> the installed variant index, with the same results.
+> the installed variant index, with the same results but for a site whose guide lies within 2 nt
+> of a contig start or end or an `N` run (N − 1 for an index of budget N): only the scan finds
+> its variant version (see the limits of every index at contig ends and `N` runs, above).
 
 ### Prerequisites
 

@@ -1079,13 +1079,17 @@ windows), and goes on.
 width. An index of budget *N* holds a window of the guide, the PAM and *N* more bases, and the
 build drops a window that holds an `N` or runs past the contig's start, so it cannot report a
 site whose guide lies within *N − 1* bases of a contig start, a contig end or an `N` run, even a
-perfect match; a search without bulges, which scans the FASTA, reports it. So an index of a
-larger budget is not a strict superset of a smaller one: a search that asks for more bulges can
-return fewer such sites. For `NRG_3_hg38` that is 546 + strand and 504 − strand PAM sites over
-hg38's 1,580 stretches between `N` runs; of the 1,050 such NRG sites (535 on primary contigs),
-none lies within 4 mismatches of the nine guides checked (TRAC, `ACTGAAATCTGTAAGCAGGC`, BCL11A
-sg1617, EMX1, HBG1, CCR5, VEGFA site 3, FANCF and HEK4), and 9 of 20,000 random 20-mers have one
-at up to 4 mismatches. The exposure that matters is a guide whose own on-target sits at such a
+perfect match; a search without bulges, which scans the FASTA, reports it. A variant search
+without bulges on an install without its whole enriched genome (a download) searches the variant
+index instead, so its SNP variant rows have this limit too: of such a site it reports the
+reference version, from the scan of the reference FASTA, when that is within the search's
+mismatches, and not the variant version or its carriers. So an index of a larger budget is not a
+strict superset of a smaller one: a search that asks for more bulges can return fewer such
+sites. For `NRG_3_hg38` that is 546 + strand and 504 − strand PAM sites over hg38's 1,580
+stretches between `N` runs; of the 1,050 such NRG sites (535 on primary contigs), none lies
+within 4 mismatches of the nine guides checked (TRAC, `ACTGAAATCTGTAAGCAGGC`, BCL11A sg1617,
+EMX1, HBG1, CCR5, VEGFA site 3, FANCF and HEK4), and 9 of 20,000 random 20-mers have one at up
+to 4 mismatches. The exposure that matters is a guide whose own on-target sits at such a
 boundary: its report then holds no perfect match. Two more engine limits at contig ends, as
 measured on hg38: a − strand PAM at a contig's first base is reported on the + strand at base
 *N* (11 NGG and 37 NRG contigs open so, all alt, random or chrUn contigs; the primary

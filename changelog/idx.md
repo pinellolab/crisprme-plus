@@ -19,14 +19,18 @@ too (the entry below on `build-index-only`'s record). -->
   enriched genome, on the CLI and in the web form's Advanced panel, in 2.8.0 and back to at least
   2.3.3 (searches with bulges, and installs with the enriched genome, were right). **What to do:**
   run those searches again. Measured on hg38 with the default index (TRAC guide, 4 mismatches, NRG,
-  per-sample): 483 rows before, 722 after, which is byte-identical to a scan of the enriched genome.
-  The 240 new sites are all variant sites, and one site listed before is now reported 1 nt over, at
-  a variant alignment that scores higher; sites found only in the variant genome go from 80 to 319;
-  sites at CFD >= 0.5 from 7 to 11, >= 0.2 from 33 to 50, >= 0.05 from 156 to 233; and 207 of the
-  sites already listed change too (a variant alignment that scores higher, or another motif counted).
-  The search now takes the installed variant index when any chromosome's enriched FASTA is missing,
-  with the same `-var`, `--max-edits` and `--prune-pam` a search with bulges passes; with the whole
-  enriched genome in place it scans it, as before.
+  per-sample): 483 rows before, 722 after, which for this guide is byte-identical to a scan of the
+  enriched genome. The 240 new sites are all variant sites, and one site listed before is now
+  reported 1 nt over, at a variant alignment that scores higher; sites found only in the variant
+  genome go from 80 to 319; sites at CFD >= 0.5 from 7 to 11, >= 0.2 from 33 to 50, >= 0.05 from
+  156 to 233; and 207 of the sites already listed change too (a variant alignment that scores
+  higher, or another motif counted). The search now takes the installed variant index when any
+  chromosome's enriched FASTA is missing, with the same `-var`, `--max-edits` and `--prune-pam` a
+  search with bulges passes; with the whole enriched genome in place it scans it, as before. The
+  index has the limit every index has at contig ends and `N` runs (below): for a site whose guide
+  lies within N − 1 nt of one (2 nt for the published indexes), the scan reports the variant
+  version and its carriers, and a search through the index only the reference version, from the
+  scan of the reference genome, when that is within the mismatches asked.
 - **A search the engine never ran now fails the run.** `crispritz.py` says what stops it before it
   searches on stdout and exits 0, so a search that never ran passed for one that found nothing.
   After each reference and variant search, the run now stops with an ERROR when the targets file is
@@ -299,13 +303,14 @@ too (the entry below on `build-index-only`'s record). -->
 - **The limits every index has at contig ends and `N` runs are documented.** METHODS section 9
   and docs/PRECOMPUTED_INDEXES.md now say that an index of budget N cannot report a site whose
   guide lies within N − 1 nt of a contig start, a contig end or an `N` run, which a search
-  without bulges reports, so that an index of a larger budget is not a strict superset of a
-  smaller one (for `NRG_3_hg38`, 1,050 NRG sites, 535 on primary contigs; the exposure that
-  matters is a guide whose own on-target sits at such a boundary); that a − strand PAM at a
-  contig's first base is reported on the + strand (11 NGG and 37 NRG hg38 contigs); and that a +
-  strand PAM on a contig's last bases is found by no search (8 NGG and 31 NRG contigs), these
-  last two only on alt, random or unplaced contigs. These are engine limits, in 2.8.0 too; the
-  engine and the published indexes are unchanged.
+  without bulges reports from the FASTA (a variant search without bulges of a download reads the
+  variant index, so its SNP variant rows have the limit too), so that an index of a larger budget
+  is not a strict superset of a smaller one (for `NRG_3_hg38`, 1,050 NRG sites, 535 on primary
+  contigs; the exposure that matters is a guide whose own on-target sits at such a boundary);
+  that a − strand PAM at a contig's first base is reported on the + strand (11 NGG and 37 NRG
+  hg38 contigs); and that a + strand PAM on a contig's last bases is found by no search (8 NGG
+  and 31 NRG contigs), these last two only on alt, random or unplaced contigs. These are engine
+  limits, in 2.8.0 too; the engine and the published indexes are unchanged.
 - **The scale of the split multi-allelic SNP limit is stated.** At a position with several
   biallelic SNP records only the last one's ALT reaches the enriched genome and the stores
   (CRISPRitz, every release). docs/INDEX_PROVENANCE.md and METHODS section 2 now give what was
