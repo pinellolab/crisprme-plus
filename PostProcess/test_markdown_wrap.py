@@ -10,9 +10,10 @@ docs/PRECOMPUTED_INDEXES.md had such a line too, and seven older lines of docs/ 
 ("+ bulges)", "+ 1 RNA bulge)", ...). This repo never uses "+" as a bullet, so a line that
 starts with one is a wrapped "plus".
 
-The scan reads the README, METHODS, docs/ (the Hugging Face cards included) and the
-changelog fragments. It skips fenced code blocks and HTML comments, which are not read as
-Markdown text.
+The scan reads the README, METHODS, CHANGELOG.md, docs/ (the Hugging Face cards included)
+and the changelog fragments of a release in the making, which merge_changelog.py merges into
+CHANGELOG.md at its release. It skips fenced code blocks and HTML comments, which are not
+read as Markdown text.
 """
 
 import pathlib
@@ -51,8 +52,8 @@ def plus_bullets(text):
 
 
 def shipped_markdown():
-    """The README, METHODS, docs/ and the changelog fragments."""
-    paths = [REPO / "README.md", REPO / "METHODS.md"]
+    """The README, METHODS, CHANGELOG.md, docs/ and the changelog fragments."""
+    paths = [REPO / "README.md", REPO / "METHODS.md", REPO / "CHANGELOG.md"]
     paths += sorted((REPO / "docs").rglob("*.md"))
     paths += sorted((REPO / "changelog").glob("*.md"))
     return paths
@@ -63,7 +64,7 @@ class TestNoWrappedLineOpensAPlusBullet(unittest.TestCase):
     def test_the_scan_reads_the_docs_and_the_cards(self):
         """Guard the scan itself: if it reads nothing it proves nothing."""
         names = {str(p.relative_to(REPO)) for p in shipped_markdown()}
-        for name in ("README.md", "METHODS.md", "docs/PRECOMPUTED_INDEXES.md",
+        for name in ("README.md", "METHODS.md", "CHANGELOG.md", "docs/PRECOMPUTED_INDEXES.md",
                      "docs/hf/crisprme-data-general-index_README.md"):
             self.assertIn(name, names)
 

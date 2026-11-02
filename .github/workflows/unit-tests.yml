@@ -376,7 +376,7 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_prune_flank -v
 
-      - name: "Markdown wrap (no line of the README, METHODS, docs/ or a changelog fragment opens a '+' bullet)"
+      - name: "Markdown wrap (no line of the README, METHODS, CHANGELOG, docs/ or a changelog fragment opens a '+' bullet)"
         working-directory: PostProcess
         run: python -m unittest test_markdown_wrap -v
 

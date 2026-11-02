@@ -159,19 +159,20 @@ growth is; a 3-nt PAM such as NRG still filters those targets out, while a short
 **Reproducible.** ml008 and ml007 each built the reference index independently, from
 the same binary and the same inputs: 1,628 of 1,628 bins byte-identical.
 
-**Verified.** The rebuilt pair, searched by 2.8.1 genome-wide with `NRG --prune-pam`
-(4 mm + 1 DNA + 1 RNA bulge, per-sample, HGDP + 1000 Genomes): 189,950 rows, 13,253
-indel rows each justified by its own window, 0 unjustified, and `pam_filter` dropping
-nothing on any of the three searches. Every column is byte-identical to the gate's
-report except `Annotation_COSMIC`: that run used a fresh `download --what
-annotations`, where COSMIC stays off until its licence is attested (its log: "COSMIC
-EXCLUDED ... dropped 742 COSMIC feature(s)"), so the column reads `NA` throughout.
-With that column removed, both reports have md5 `a02f03c5…`. For a user still on
-2.8.0, the released 2.8.0 image, unmodified, searching chr22 on the rebuilt reference
-index and on the published one gives **byte-identical** reports, both with NRG (the
-NNN index as a stand-in, how 2.8.0 serves a PAM it has no dedicated index for; 1,488
-rows) and with the unconstrained NNN PAM (8,108 rows). Both hold only because no
-hit there has an `N` in its PAM: one that does makes 2.8.0 fail or misreport.
+**Verified.** The rebuilt pair, searched by a 2.8.1 release candidate genome-wide with
+`NRG --prune-pam` (4 mm + 1 DNA + 1 RNA bulge, per-sample, HGDP + 1000 Genomes):
+189,950 rows, 13,253 indel rows each justified by its own window, 0 unjustified, and
+`pam_filter` dropping nothing on any of the three searches. Every column is
+byte-identical to the gate's report except `Annotation_COSMIC`: that run used a fresh
+`download --what annotations`, where COSMIC stays off until its licence is attested
+(its log: "COSMIC EXCLUDED ... dropped 742 COSMIC feature(s)"), so the column reads
+`NA` throughout. With that column removed, both reports have md5 `a02f03c5…`. For a
+user still on 2.8.0, the released 2.8.0 image, unmodified, searching chr22 on the
+rebuilt reference index and on the published one gives **byte-identical** reports,
+both with NRG (the NNN index as a stand-in, how 2.8.0 serves a PAM it has no dedicated
+index for; 1,488 rows) and with the unconstrained NNN PAM (8,108 rows). Both hold only
+because no hit there has an `N` in its PAM: one that does makes 2.8.0 fail or
+misreport.
 
 **With 2.8.0.** Use the rebuilt archives with 2.8.1 or later. 2.8.0 reads them, but it
 has no `--prune-pam` (it ignores the flag), and its post-search PAM filter treats a
@@ -260,8 +261,8 @@ bulge, guide `ACTGAAATCTGTAAGCAGGC`, all three runs exit 0:
 | run | indel off-target rows (per-dataset AF) | integrated rows |
 |---|---|---|
 | published NRR mega, CRISPRme 2.8.0 | **0** | 379,288 |
-| replacement NRR mega, 2.8.1 | 2,081,489 | 400,459 |
-| published NRG mega, 2.8.1 | 1,131,494 | 188,744 |
+| replacement NRR mega, 2.8.1 release candidate | 2,081,489 | 400,459 |
+| published NRG mega, 2.8.1 release candidate | 1,131,494 | 188,744 |
 
 And at the engine: on each of the 24 `_INDELS` sub-indexes, the replacement's NRR
 targets passed through `pam_filter.py` with NRG **equal** the published NRG mega's
