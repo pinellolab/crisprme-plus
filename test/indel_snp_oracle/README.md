@@ -11,10 +11,12 @@ It exits non-zero on any failure; CI runs it in `validate-benchmarks.yml`.
 Every indel row of the integrated results and of the alternative alignments, in all
 three blocks, must show a concrete NRG PAM; its CFD must be the CFD of its own
 alignment; its mismatch count must be the alignment's and its mismatches + bulges their
-sum; every variant it names must be a record of the VCF, forward strand; and every
-carrier it lists must have the sequence: a phased carrier on one of its haplotypes at
-that site, spanning the indel, with every variant the row names on that haplotype; an
-unphased one every allele the row names. The planted sites then pin who has which target:
+sum; its REF text must be the reference at its start, the bases its target holds,
+gapped as its target; every variant it names must be a record of the VCF, forward
+strand; and every carrier it lists must have the sequence: a phased carrier on one of
+its haplotypes at that site, spanning the indel, with every variant the row names on
+that haplotype; an unphased one every allele the row names. The planted sites then pin
+who has which target:
 
 | Site | Planted | Expected |
 |---|---|---|
@@ -38,7 +40,10 @@ unphased one every allele the row names. The planted sites then pin who has whic
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid fake-indel
 genome column by column, without genotypes: on aa9c54b (the 2.8.1 release candidate)
-the check fails at every site but the control C, I, J and L2.
+the check fails at every site but the control C, I, J and L2. Before the fix of an
+RNA-bulge row's start (3520eeb), the REF check fails on 68 row blocks: every RNA-bulge
+row on the + strand, which started one base early, and every RNA,DNA row, whose REF text
+had no gap and one base too many.
 
 Not covered: split multi-allelic SNP records at one position. CRISPRitz add-variants
 keeps only the last of them in the enriched genome and in the dictionary, so the other

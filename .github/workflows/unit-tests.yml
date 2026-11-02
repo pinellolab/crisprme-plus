@@ -217,6 +217,15 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows test_check_alt_pam -v
 
+      - name: "Indel row coordinates (2.8.1: an RNA-bulge row starts at its first aligned base, the REF text keeps the target's gaps; both strands, PAM at either end)"
+        # Up to 2.8.0 analisi_indels_NNN.py took CRISPRitz's Cluster_Position for an
+        # RNA-bulge row on the + strand with a 3' PAM and on the - strand with a 5' PAM,
+        # one base before the first aligned base, and the REF text of an RNA,DNA row, and
+        # of a 5' PAM RNA-bulge row, was a base off. The shipped analyzer on planted
+        # alignments given as the engine reports them (pandas + numpy).
+        working-directory: PostProcess
+        run: python -m unittest test_indel_row_coordinates -v
+
       - name: "Dict-less bulge cap + defaults + 0-bulge indel routing (v2.3.3)"
         working-directory: PostProcess
         run: python -m unittest test_bulge_cap -v

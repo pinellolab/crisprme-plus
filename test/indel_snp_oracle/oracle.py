@@ -16,6 +16,7 @@
         * the PAM is a concrete NRG and no IUPAC code is left;
         * CFD, recomputed from the row's own alignment, is the reported CFD;
         * the mismatch count is the alignment's, and mismatches + bulges is their sum;
+        * the REF text is the reference at the reported start, gapped as the target;
         * every variant it names is a record of the VCF, forward strand;
         * every listed carrier really has the reported sequence: a phased carrier on
           one of its haplotypes, at the reported site, spanning the indel the row
@@ -513,6 +514,7 @@ def alt_rows(path):
                         "start": int(row[col["Start_coordinate_(%s)" % b]]),
                         "strand": row[col["Strand_(%s)" % b]],
                         "crrna": row[col["Aligned_spacer+PAM_(%s)" % b]],
+                        "ref": row[col["Aligned_protospacer+PAM_REF_(%s)" % b]],
                         "alt": row[col["Aligned_protospacer+PAM_ALT_(%s)" % b]],
                         "mm": int(row[col["Mismatches_(%s)" % b]]),
                         "bulges": int(row[col["Bulges_(%s)" % b]]),
@@ -583,6 +585,16 @@ def check(wd, pp, result_dirs):
             if f["total"] != f["mm"] + f["bulges"]:
                 fail("%s: %d mismatches + bulges reported, the row has %d + %d"
                      % (where, f["total"], f["mm"], f["bulges"]))
+            # the REF text is the reference at the row's start: as many bases as its target
+            # holds, in its orientation, gapped as its target (an RNA bulge is a gap)
+            ref_at = truth.ref[f["start"]:f["start"] + len(stripped)]
+            ref_at = list(ref_at if f["strand"] == "+" else rc(ref_at))
+            for i, c in enumerate(f["alt"]):
+                if c == "-":
+                    ref_at.insert(i, "-")
+            if f["ref"].upper() != "".join(ref_at):
+                fail("%s: REF %s is not the reference at the row's start (%s)"
+                     % (where, f["ref"], "".join(ref_at)))
             if f["cfd"] is not None:
                 cfd = cfd_score_bulge_aware(f["crrna"], f["alt"])
                 if abs(round(cfd, 3) - f["cfd"]) > 1e-9:
