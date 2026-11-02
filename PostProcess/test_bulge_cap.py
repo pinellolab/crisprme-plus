@@ -275,6 +275,35 @@ class TestCliBulgeCap(unittest.TestCase):
         self.assertEqual(crisprme._installed_index_bulge_cap(
             _MOTIF, _REF, is_variant=False, prune=True), 0)
 
+    def test_an_index_at_index_path_counts(self):
+        """A library the search names with --index-path holds the index it reads; given no
+        bulges, the search stayed bulge-free with no message."""
+        shared = os.path.join(self.root, "shared")
+        _mkfile(os.path.join(shared, f"{_MOTIF}_2_{_REF}", "TSTgenome.NRG.bin"))
+        _mkfile(os.path.join(shared, f"{_MOTIF}_2_{_REF}+{_VCF}", "TSTgenome.NRG.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=True), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path=shared), 1)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=True, index_path=shared), 1)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path="_"), 0)
+
+    def test_a_wider_pamless_index_at_index_path_counts_under_prune(self):
+        shared = os.path.join(self.root, "shared")
+        _mkfile(os.path.join(shared, f"NNNNNNNN_3_{_REF}", "TSTgenome.N.bin"))
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, index_path=shared), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, prune=True, index_path=shared), 2)
+
+    def test_a_genome_folder_outside_genomes_makes_a_reference_index_buildable(self):
+        """--genome may name a folder elsewhere, the shared-mount recipe: the raw-genome
+        term looked at cwd/Genomes/<name> alone."""
+        outside = os.path.join(self.root, "elsewhere", _REF)
+        _mkfile(os.path.join(outside, "chr22.fa"), ">chr22\nA\n")
+        cap = crisprme._installed_index_bulge_cap
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False), 0)
+        self.assertEqual(cap(_MOTIF, _REF, is_variant=False, genomedir=outside), 2)
+
     def test_an_index_built_for_a_shorter_guide_serves_fewer_bulges_or_none(self):
         """The derived default bulges must not come from an index that cannot answer the
         guide: a 20-nt N=3 index serves a 21-nt guide at one bulge of each type, and a

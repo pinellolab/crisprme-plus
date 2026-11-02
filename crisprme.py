@@ -1806,7 +1806,8 @@ def _built_three_prime(index_dir: str) -> bool:
 
 def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
                                prune: bool = False, three_prime: bool = True,
-                               guide_len: int = 0) -> int:
+                               guide_len: int = 0, index_path: str = "_",
+                               genomedir: str = "") -> int:
     """Bulge depth a search can REACH for this PAM motif + genome (mirrors the web's
     pages_utils.reference_bulge_capacity/index_max_bulges cap without web dependencies).
 
@@ -1817,7 +1818,9 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     wider one serves only under ``prune`` (--prune-pam) and only a 3' PAM
     (``three_prime``), exactly as the search shell decides. ``guide_len`` is the search's
     guide length: an index built for a shorter guide serves it with fewer bulges, or none
-    (index_fit).
+    (index_fit). ``index_path`` is the search's --index-path, a library looked at beside
+    the working directory's; ``genomedir`` its --genome folder, wherever it is, whose FASTA
+    files make a reference index buildable (Genomes/<genome> without one).
 
     The REFERENCE and VARIANT terms are ASYMMETRIC:
       * REFERENCE: the larger of the installed reference index depth and -- when the raw
@@ -1836,7 +1839,9 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     error -> 0.
     """
     try:
-        lib = os.path.join(current_working_directory, "genome_library")
+        libs = [os.path.join(current_working_directory, "genome_library")]
+        if index_path and index_path != "_":
+            libs.append(index_path)
         if not motif or not genome:
             return 0
         # A directory is <PAM>_<N>_<genome>. It serves this search when its PAM is
@@ -1852,8 +1857,8 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
         # an index the search then does not use.
         suffix = f"_{genome}"
 
-        def _pam_serves(pam: str, d: str) -> bool:
-            if pam and set(pam) == {"N"} and _built_three_prime(os.path.join(lib, d)) != three_prime:
+        def _pam_serves(pam: str, index_dir: str) -> bool:
+            if pam and set(pam) == {"N"} and _built_three_prime(index_dir) != three_prime:
                 return False
             if pam == motif:
                 return True
@@ -1863,28 +1868,28 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
                 prune and three_prime and len(pam) > len(motif))
 
         def _scan(want_plus: bool) -> int:
-            if not os.path.isdir(lib):
-                return 0
             best = 0
-            for d in os.listdir(lib):
-                if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
-                    continue
-                base, plus, _enriched = d.partition("+")
-                if want_plus != bool(plus):
-                    continue
-                if not base.endswith(suffix):
-                    continue
-                stem = base[: -len(suffix)]
-                pam, _sep, n_str = stem.partition("_")
-                if not _sep or not n_str.isdigit() or not _pam_serves(pam, d):
-                    continue
-                best = max(best, index_fit.bulge_cap(
-                    index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide_len))
+            for lib in libs:
+                for d in _listdir(lib):
+                    if not os.path.isdir(os.path.join(lib, d)) or d.endswith("_INDELS"):
+                        continue
+                    base, plus, _enriched = d.partition("+")
+                    if want_plus != bool(plus):
+                        continue
+                    if not base.endswith(suffix):
+                        continue
+                    stem = base[: -len(suffix)]
+                    pam, _sep, n_str = stem.partition("_")
+                    if (not _sep or not n_str.isdigit()
+                            or not _pam_serves(pam, os.path.join(lib, d))):
+                        continue
+                    best = max(best, index_fit.bulge_cap(
+                        index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide_len))
             return best
 
         # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling.
         ref_installed = _scan(want_plus=False)
-        raw = os.path.join(current_working_directory, "Genomes", genome)
+        raw = genomedir or os.path.join(current_working_directory, "Genomes", genome)
         ref_buildable = 0
         try:
             if os.path.isdir(raw) and any(
@@ -2499,10 +2504,12 @@ def complete_search() -> None:
     # variant term stays strictly installed-index-based. If no index can supply bulges and no
     # raw genome exists the search stays bulge-free (fast, safe).
     _SIMPLE_BULGE_CAP = 1
+    _no_bulges_reached = False
     if not _bdna_given and not _brna_given and max_total_edits > 0:
         _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant,
                                               prune=prune_pam, three_prime=not pam_begin,
-                                              guide_len=total_pam_len - pam_len)
+                                              guide_len=total_pam_len - pam_len,
+                                              index_path=index_path, genomedir=genomedir)
         _derived = min(max_total_edits, _idx_cap, _SIMPLE_BULGE_CAP)
         if _derived > 0:
             bDNA = bRNA = _derived
@@ -2512,10 +2519,23 @@ def complete_search() -> None:
                 f"bulge(s) of each type (single-bulge domain; reachable index bulge depth "
                 f"{_idx_cap}). Pass explicit --bDNA/--bRNA for a deeper search."
             )
+        else:
+            _no_bulges_reached = True
     if variant:
         _refuse_no_variant_index(
             resolve_vcf_dataset_dirs(vcfdir, current_working_directory), genome_ref, pam_char,
             bDNA, bRNA, prune_pam, not pam_begin, total_pam_len - pam_len, index_path)
+    if _no_bulges_reached:
+        # A 0-bulge search reports a site that needs a bulge at its next best alignment, or
+        # not at all, and the rest of the run reads as any other: never silently.
+        print(
+            f"WARNING [complete-search]: no --bDNA/--bRNA given, and no index this search can "
+            f"use holds bulges for PAM {pam_char} on {genome_ref}: searching with NO bulges, so "
+            f"bulged off-targets are not reported. Pass --bDNA/--bRNA explicitly (a search builds "
+            f"an index it can build), or, for a wider PAM-less index, add --prune-pam "
+            f"--index-path.",
+            flush=True,
+        )
     # [max-total-edits] Surface the silent combined-edit prune (issue #107): when the
     # requested mm + bulges exceed the cap, any alignment stacking more than
     # max_total_edits edits is PRUNED inside the TST search -- the exact reason a deep

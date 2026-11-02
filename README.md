@@ -974,8 +974,9 @@ its purpose and usage:
   <br>Maximum allowable DNA bulge size. If omitted (together with `--bRNA`), it defaults to
   **1** (one DNA bulge), bounded by the bulge depth the installed index supports — the
   recommended single-bulge default (the CRISPR-Bulge ML scorer's validated domain). Pass it
-  explicitly for a deeper search. If no bulge-capable index is installed the search stays
-  bulge-free.
+  explicitly for a deeper search. If no index the search can use holds bulges (in the working
+  directory's `genome_library/` or at `--index-path`; a reference index that can be built from
+  the `--genome` folder counts), the search stays bulge-free and prints a `WARNING` that says so.
 
 - `--bRNA` (*Optional*, default `1`)
   <br>Maximum allowable RNA bulge size. See `--bDNA` — defaults to one RNA bulge when neither

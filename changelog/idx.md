@@ -91,3 +91,15 @@
   exactly the PAM's width. An install with the enriched genome (the build-inputs kit) or the VCFs
   still builds the index and is byte-identical to a dedicated one. The README no longer says a
   PAM-less index must be searched from the CLI: only a wider one must.
+- **With no `--bDNA`/`--bRNA`, a search no longer becomes a 0-bulge search with no message.** The
+  default of 1 bulge of each type is capped by the indexes a search can reach, but that cap looked
+  only at the working directory's `genome_library/` and `Genomes/<name>`. A library at
+  `--index-path` (variant, K=8 with `--prune-pam`), or a `--genome` folder elsewhere (the
+  shared-mount recipe), gave a cap of 0, and the run was byte-identical to a 0-bulge search: 33 rows
+  against 38 with bulges, with a site that needs a bulge reported at a worse alignment or not at all
+  (2.8.0 too). **What to do:** run those searches again, or pass the bulges. The cap now reads
+  `--index-path` and the `--genome` folder given, so these searches take their 1 bulge, and where no
+  usable index holds bulges (K=8 without `--prune-pam`, an index of another PAM) a `WARNING` says
+  the search runs with none, and what to pass. A variant index at `--index-path` is still read from
+  `genome_library/` alone: with the dataset's VCFs the search rebuilds it there, as it does with
+  explicit flags, and without them it stops and says so.
