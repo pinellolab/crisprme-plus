@@ -151,11 +151,11 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   index build said done. (A genome downloaded by Direct URL or from UCSC as one FASTA of one
   sequence is named after it the same way, and `PostProcess/genome_layout.py --split` renames such a
   file too.) Each header is written as `>id` (see the entry on those). Hidden files of an archive
-  are left out: the `._chr1.fa` that macOS `tar` adds beside
-  `chr1.fa` (its file attributes) was installed too, and every search read it as a chromosome and
-  failed, though the build said done. An archive with two FASTA files that would go in under one
-  name (`chr1.fa` and `chr1.fasta`, or two files of one sequence) is refused. (An upload under the
-  name of an installed genome now replaces it: see Changed.)
+  are left out: the `._chr1.fa` that macOS `tar` adds beside `chr1.fa` (its file attributes) was
+  installed too, and every search read it as a chromosome and failed, though the build said done. An
+  archive with two FASTA files that would go in under one name (`chr1.fa` and `chr1.fasta`, or two
+  files of one sequence) is refused. (An upload under the name of an installed genome now replaces
+  it: see Changed.)
   **A genome uploaded before** this fix that holds a multi-sequence FASTA, a `chroms/` folder,
   `.fasta` files, `._` files or a FASTA not named after its one sequence: remove it in Settings with
   the indexes built on it (*Remove installed data*), and any `Genomes/<genome>+<dataset>` variant
@@ -169,14 +169,15 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   done, though every search refuses an index with no `.bin`. It now ends with an ERROR (exit status
   1) that says what to do: before it builds anything, for a folder with no `.fa` file at its top,
   with a FASTA of several sequences (which every search refuses too; the message says to remove the
-  indexes built from the folder while it held that file) or with a FASTA of one sequence not named
+  indexes built from the folder while it held that file), with a FASTA of one sequence not named
   after it (`walkone.fa` holding `>chr1`, whose off-targets every search found and then dropped; the
-  message gives the `mv`, or `genome_layout.py --split`, which renames them all); and, putting
-  nothing in place, when the engine writes no `.bin` for the reference or the variant genome. A
-  reference index with no `.bin` that an earlier run left is no longer taken for present (the run
-  said `Reference index already present` and the Settings page showed the build done, though no
-  search uses it): the run says to remove it. A genome of one FASTA per sequence, each named after
-  its sequence and with a header of `>id` (see the entry on those), builds exactly as before.
+  message gives the `mv`, or `genome_layout.py --split`, which renames them all) or with a header of
+  more than `>id` (see the entry on those); and, putting nothing in place, when the engine writes no
+  `.bin` for the reference or the variant genome. A reference index with no `.bin` that an earlier
+  run left is no longer taken for present (the run said `Reference index already present` and the
+  Settings page showed the build done, though no search uses it): the run says to remove it. A
+  genome of one FASTA per sequence, each named after its sequence and with a header of `>id` (see
+  the entry on those), builds exactly as before.
 - **A single multi-chromosome `.vcf.gz` without its `.tbi` builds a variant index.** The
   documented auto-split read the file by region through its index, so a file uploaded alone (the
   Settings uploader takes one file at a time) failed with `Could not load .tbi index ...
@@ -261,40 +262,42 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   chr22:50091459, CFD 0.022); the report's `REFERENCE` and `VARIANT` off-targets go from 766 and 659
   to 962 and 422, and its CFD >= 0.05 net from 53 sites to 46. The default index with `hg38_mega`
   goes at population level from 3015 rows to 2520 (within 3 bp 997 to 4, `Not_found_in_REF` 2053 to
-  1558, 21 sites more); per sample, with the next entry's fix, from 2406 rows to 2137 (671 to 2, 1444
-  to 1175, 73 sites more), and its rows of alternative alignments with the fewest or the CRISPR-Bulge
-  block more than 100 bp from the CFD block go from 28 and 27 to 0, and its haplotypes with a variant
-  more than 1 kb from their site from 26 to 0. A row with only its `AF` empty (a VCF with no `AF`, which the input check
-  warns about: every variant on the dictionaries, every indel on the tiers) stayed at its site but
-  went by its REF score, so the merge could keep a lower-scoring alignment of a variant: on a
-  6-sample panel with no `AF`, the perfect match a deletion makes at chr2:10000 read CFD 0.9 with a
-  bulge and now reads 1.0 with none, and the report's perfect matches go from 3 to 4. A search whose
-  rows have no empty column (the default index alone, any VCF with `AF`, the reference alone) sorts
-  as before. **If you searched a sites-only dataset or a VCF with no `AF`,** run the search again.
+  1558, 21 sites more); per sample, with the next entry's fix, from 2406 rows to 2137 (671 to 2,
+  1444 to 1175, 73 sites more), and its rows of alternative alignments with the fewest or the
+  CRISPR-Bulge block more than 100 bp from the CFD block go from 28 and 27 to 0, and its haplotypes
+  with a variant more than 1 kb from their site from 26 to 0. A row with only its `AF` empty (a VCF
+  with no `AF`, which the input check warns about: every variant on the dictionaries, every indel on
+  the tiers) stayed at its site but went by its REF score, so the merge could keep a lower-scoring
+  alignment of a variant: on a 6-sample panel with no `AF`, the perfect match a deletion makes at
+  chr2:10000 read CFD 0.9 with a bulge and now reads 1.0 with none, and the report's perfect matches
+  go from 3 to 4. A search whose rows have no empty column (the default index alone, any VCF with
+  `AF`, the reference alone) sorts as before. **If you searched a sites-only dataset or a VCF with
+  no `AF`,** run the search again.
 - **A sites-only dataset goes the population-level way in a per-sample search too, as the command
-  line said it did, and loses no multi-variant worst case there.** A sites-only dataset (`hg38_mega`)
-  has no genotypes for a per-sample search to resolve, and `complete-search` said that `the
-  population-level analysis runs instead`. It did not: the dataset's rows went through the per-sample
-  path, which joins two variants only through carriers they share, and it has none, so a site that
-  takes two variants together lost its row, and others scored lower, with no warning. Installing the
-  default index and `hg38_mega` lists both for a search (`docs/PRECOMPUTED_INDEXES.md`), and the two
-  then ran that way with no mode flag. Now each dataset goes by its registry (its `data_type`, or for
-  a registry that has none its aggregation): a sites-only dataset's post-analysis is the
-  population-level one whatever the search's mode. `--per-sample` on sites-only datasets alone is the
-  population-level analysis (the same files as with no flag), with a WARNING on stdout. Beside a
-  genotyped dataset, whose rows stay per-sample, `complete-search` says which goes which way. With no
-  mode flag a phased dataset beside a sites-only one now runs per-sample whichever name sorts first;
-  with the sites-only name first it ran population-level. On chr22 (guide `CTAACAGTTGCTTTTATCACNNN`,
-  4 mismatches, 1+1 bulges), `hg38_mega --per-sample` goes from 1318 rows to 1384, the table of
-  `hg38_mega` with no flag, byte for byte, and lists 63 sites it did not; the default index with
-  `hg38_mega`, per-sample as it runs with no flag, goes from 2077 rows to 2137 (`Not_found_in_REF`
-  1115 to 1175, alternative alignments 5863 to 6226, `observed_haplotypes.tsv` 1556 rows to 1796).
-  It lists 57 sites it did not and loses none, 14 sites score higher and none lower (chr22:34270481
-  from CFD 0.173 to 0.233, and chr22:22881199 reads 0.274 where chr22:22881195 read 0.262), and the
-  report's CFD >= 0.05 and >= 0.2 tables each gain one site. Such rows have no carriers and read
-  `putative` in the report's Observed column (`observed` for one variant). A search with no sites-only
-  dataset, `hg38_mega` with no flag and any search at `--population-level` are unchanged, byte for
-  byte. **If you ran a per-sample search with a sites-only dataset,** run it again. Covered by
+  line said it did, and loses no multi-variant worst case there.** A sites-only dataset
+  (`hg38_mega`) has no genotypes for a per-sample search to resolve, and `complete-search` said that
+  `the population-level analysis runs instead`. It did not: the dataset's rows went through the
+  per-sample path, which joins two variants only through carriers they share, and it has none, so a
+  site that takes two variants together lost its row, and others scored lower, with no warning.
+  Installing the default index and `hg38_mega` lists both for a search
+  (`docs/PRECOMPUTED_INDEXES.md`), and the two then ran that way with no mode flag. Now each dataset
+  goes by its registry (its `data_type`, or for a registry that has none its aggregation): a
+  sites-only dataset's post-analysis is the population-level one whatever the search's mode.
+  `--per-sample` on sites-only datasets alone is the population-level analysis (the same files as
+  with no flag), with a WARNING on stdout. Beside a genotyped dataset, whose rows stay per-sample,
+  `complete-search` says which goes which way. With no mode flag a phased dataset beside a
+  sites-only one now runs per-sample whichever name sorts first; with the sites-only name first it
+  ran population-level. On chr22 (guide `CTAACAGTTGCTTTTATCACNNN`, 4 mismatches, 1+1 bulges),
+  `hg38_mega --per-sample` goes from 1318 rows to 1384, the table of `hg38_mega` with no flag, byte
+  for byte, and lists 63 sites it did not; the default index with `hg38_mega`, per-sample as it runs
+  with no flag, goes from 2077 rows to 2137 (`Not_found_in_REF` 1115 to 1175, alternative alignments
+  5863 to 6226, `observed_haplotypes.tsv` 1556 rows to 1796). It lists 57 sites it did not and loses
+  none, 14 sites score higher and none lower (chr22:34270481 from CFD 0.173 to 0.233, and
+  chr22:22881199 reads 0.274 where chr22:22881195 read 0.262), and the report's CFD >= 0.05 and >=
+  0.2 tables each gain one site. Such rows have no carriers and read `putative` in the report's
+  Observed column (`observed` for one variant). A search with no sites-only dataset, `hg38_mega`
+  with no flag and any search at `--population-level` are unchanged, byte for byte. **If you ran a
+  per-sample search with a sites-only dataset,** run it again. Covered by
   `PostProcess/test_sites_only_per_sample.py`.
 - **A command-line search of two datasets is no longer refused because only one has its VCFs on
   disk.** The input check of `complete-search` compared the samples of all the `--samplesID` lists
@@ -307,8 +310,9 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   such datasets, those that name no sample of the VCFs on disk, are left out. A list that names some
   of them and others they lack still stops the search, with those others named; so does a list of no
   dataset when every dataset's VCFs are there. Measured on a 6-sample panel, the search that was
-  refused gives the same table as with both datasets' VCFs on disk, and as with neither. A web search
-  does not run this check and is not affected. Covered by `PostProcess/test_samplesid_overlisting.py`.
+  refused gives the same table as with both datasets' VCFs on disk, and as with neither. A web
+  search does not run this check and is not affected. Covered by
+  `PostProcess/test_samplesid_overlisting.py`.
 - **A variant build that runs out of memory as it writes its tiers ends with a message, and no
   longer hangs.** `build-index-only --samplesID`, and in this release every variant build in the web
   Settings page, writes the dict-less tiers and the phased indel genotype store in forked workers,
@@ -318,29 +322,30 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   container was restarted; the same build finished in 2.8.0, which wrote no tiers. A worker that
   dies now sends the chromosomes left to one worker at a time, with a WARNING on stdout, and the
   build goes on if they fit. If a worker dies then too, the run ends with exit status 1 and an ERROR
-  that says memory is the likely cause, names `CRISPRME_TIER_WORKERS` (`CRISPRME_INDELGT_WORKERS` for
-  the store), and says how to go without what it could not write; Settings shows the build as failed
-  with that message. A run with one worker, or a dataset of one chromosome, ended the same way at
-  exit status 137 and with no message. What it could not write stays marked unfinished, so a search
-  refuses it, and the next run writes the rest; no variant index is built by that run. To build with
-  no tiers, remove them as the message says and run `build-index-only` from the command line with no
-  `--samplesID`: the Settings page has no way to. No worker outlives a run that is killed outright
-  either, one that waits for its next job looks for the run every few seconds. Measured on a
-  synthetic panel of 3000 samples and a SNP every 3 bp on 3 x 50 kb: with a limit of 1.5 GB the
-  Settings build reads `failed` with the message after 5 s, and with 6 GB, where three workers at
-  once are too many, the build finishes one chromosome at a time. A build with memory enough writes
-  the same files as before, byte for byte, and so does that one.
+  that says memory is the likely cause, names `CRISPRME_TIER_WORKERS` (`CRISPRME_INDELGT_WORKERS`
+  for the store), and says how to go without what it could not write; Settings shows the build as
+  failed with that message. A run with one worker, or of a dataset of one chromosome, which did not
+  hang but died at exit status 137 with no message, now ends with that ERROR too. What it could not
+  write stays marked unfinished, so a search refuses it, and the next run writes the rest; no
+  variant index is built by that run. To build with no tiers, remove them as the message says and
+  run `build-index-only` from the command line with no `--samplesID`: the Settings page has no way
+  to. No worker outlives a run that is killed outright either, one that waits for its next job looks
+  for the run every few seconds. Measured on a synthetic panel of 3000 samples and a SNP every 3 bp
+  on 3 x 50 kb: with a limit of 1.5 GB the Settings build reads `failed` with the message after 5 s,
+  and with 6 GB, where three workers at once are too many, the build finishes one chromosome at a
+  time. A build with memory enough writes the same files as before, byte for byte, and so does that
+  one.
 - **A genome whose FASTA headers carry a description, or whose lines end in CRLF, no longer indexes
   as done and then loses every search's results.** CRISPRitz names a chromosome after the whole
-  header line, and the pipeline splits on blanks, so the FASTAs NCBI, GENCODE, Ensembl and GATK
-  ship went wrong, each in its own way, with the same sequence that gives 7 sites under a plain
-  `>chr1`. An NCBI `>NC_000913.3 Escherichia coli str. K-12 substr. MG1655, complete genome` or a
-  GATK header: exit status 0, `No off-targets found` (in the browser, `Finished: no off-targets were
+  header line, and the pipeline splits on blanks, so the FASTAs NCBI, GENCODE, Ensembl and GATK ship
+  went wrong, each in its own way, with the same sequence that gives 7 sites under a plain `>chr1`.
+  An NCBI `>NC_000913.3 Escherichia coli str. K-12 substr. MG1655, complete genome` or a GATK
+  header: exit status 0, `No off-targets found` (in the browser, `Finished: no off-targets were
   found`). GENCODE `>chr1 1`: 7 sites, but with `chr1 1` for a chromosome and `NA` for every
   annotation. Ensembl `>1 dna:chromosome ...`: the search fails at integration (`Start coordinate is
   too large ... BEDOPS`). CRLF: 451 KB of warnings on stderr at exit status 0, and `No off-targets
-  found`. A variant build on `>chr1 1` failed with `Indels indexing failed`. An upload in Settings, a
-  Direct URL or UCSC download and `genome_layout.py --split` now write each header as `>id`, and
+  found`. A variant build on `>chr1 1` failed with `Indels indexing failed`. An upload in Settings,
+  a Direct URL or UCSC download and `genome_layout.py --split` now write each header as `>id`, and
   every line with no CR, also for a FASTA already named after its sequence; a file that needs none
   of this is not touched. Each of those genomes then gives the sites and table of the same sequence
   under a plain header, through the browser and the command line, and a variant build on one gives
@@ -355,9 +360,10 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   at an upload, a download, `--split`, a build and a search (`gi|49175990|ref|NC_000913.2|`, a PanSN
   `HG01255#1#CM086702.1`; measured character by character through the real command line, `.`, `:`,
   `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~`, `!`, `*`, `?` and brackets work): a search of one
-  failed with `/bin/sh: Syntax error`, or, for `#`, `none survived post-analysis`. A file whose lines
-  end in CR alone is refused by `--split`, which says to convert it, as its first line holds the
-  whole file. **If you have such a genome,** run `python PostProcess/genome_layout.py --split
-  <genome folder>`, remove the indexes it names, and build again, or remove it in Settings and upload
-  it again. A search of a genome of plain headers is unchanged. Covered by
-  `PostProcess/test_genome_layout.py` and `PostProcess/test_build_index_only_layout.py`.
+  failed in a shell command (`/bin/sh: Syntax error`), or, for `#`, with `none survived
+  post-analysis`. A file whose lines end in CR alone is refused by `--split`, which says to convert
+  it, as its first line holds the whole file. **If you have such a genome,** run `python
+  PostProcess/genome_layout.py --split <genome folder>`, remove the indexes it names, and build
+  again, or remove it in Settings and upload it again. A search of a genome of plain headers is
+  unchanged. Covered by `PostProcess/test_genome_layout.py` and
+  `PostProcess/test_build_index_only_layout.py`.

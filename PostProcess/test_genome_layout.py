@@ -269,6 +269,15 @@ class TestHeaderIsExactlyTheId(unittest.TestCase):
                 self.assertEqual(gl.find_unclean_fastas(self.tmp, deep=True), {})
                 self.assertEqual(vi.check_genome_fasta(self.tmp)[0], [])
 
+    def test_a_description_in_another_encoding(self):
+        with open(os.path.join(self.tmp, "chr1.fa"), "wb") as f:
+            f.write(b">chr1 caf\xe9\nACGT\n")
+        issues, _ = vi.check_genome_fasta(self.tmp)  # (it read the file as UTF-8, and crashed)
+        self.assertEqual([i.severity for i in issues], [vi.ERROR])
+        self.assertIn("its header line reads '>chr1 caf", issues[0].message)
+        gl.split_multi_record_fastas(self.tmp)
+        self.assertEqual(self._readb("chr1.fa"), ">chr1\nACGT\n")
+
     def test_a_clean_genome_is_not_touched(self):
         for name in ("chr1.fa", "chr2.fa"):
             self._writeb(name, f">{name[:-3]}\nACGT\nAC")  # (no last line end, as it was)

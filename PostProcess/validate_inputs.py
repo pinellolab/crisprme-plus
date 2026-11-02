@@ -292,12 +292,12 @@ def check_genome_fasta(genomedir: str) -> Tuple[List[Issue], List[str]]:
         chrom_names.append(fname.rsplit(".", 1)[0])
         fpath = os.path.join(genomedir, fname)
         try:
-            with open(fpath, "r") as fin:
+            with open(fpath, "rb") as fin:  # (a description can be in any encoding)
                 first_char = fin.read(1)
         except OSError as e:
             issues.append(Issue(ERROR, f"{fname}: could not read file ({e})"))
             continue
-        if first_char != ">":
+        if first_char != b">":
             issues.append(
                 Issue(
                     ERROR,
