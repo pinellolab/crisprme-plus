@@ -23,7 +23,10 @@ Type an assembly name and pick a source:
   single multi-FASTA) automatically: a single multi-FASTA download is split into one
   file per sequence, which is the layout every search requires.
 - **HuggingFace** — pulls a genome we host on the CRISPRme data repo.
-- **Direct URL** — any `.fa.gz` / `.tar.gz` link.
+- **Direct URL** — any `.fa.gz` / `.tar.gz` link. Like an upload (below), it is refused
+  while indexes or variant genomes built on a genome of that name are installed, and
+  the page says so before anything is fetched: the link can hold another genome than
+  the one they were built from. Download it under another name, or remove them first.
 - **Upload** — pick a local genome file (`.fa`, `.fa.gz` or `.tar.gz`); it is sent
   in chunks, so there is no browser size limit. It is laid out as every search needs
   it: every FASTA of an archive goes to the top of the genome folder (a UCSC

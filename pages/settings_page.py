@@ -50,6 +50,7 @@ from .pages_utils import (
 )
 import personal_assembly
 import assembly_reconcile  # (PostProcess/, as personal_assembly)
+import genome_in_use  # (PostProcess/, as personal_assembly)
 
 from dash import Input, Output, State, html, dcc, no_update
 from dash.exceptions import PreventUpdate
@@ -138,44 +139,20 @@ def _built_on_genome(assembly: str) -> List[str]:
     """What is installed built on a genome named ``assembly``, as paths under the data
     folder: its indexes (genome_library/<PAM>_<N>_<assembly>[+<dataset>], with their
     _INDELS companions) and its variant genomes (Genomes/<assembly>+<dataset>[_INDELS]).
-    A search, and a build of an index, take each one that is there as it is."""
-    found = []
-    for top in ("genome_library", "Genomes"):
-        root = os.path.join(current_working_directory, top)
-        try:
-            names = sorted(os.listdir(root))
-        except OSError:
-            continue
-        for d in names:
-            if top == "genome_library":  # (as _delete_dependents reads an index name)
-                built = len(d.split("_", 2)) == 3 and d.split("_", 2)[2].split("+")[0] == assembly
-            else:
-                built = d.startswith(assembly + "+")
-            if built and not d.startswith(".") and os.path.isdir(os.path.join(root, d)):
-                found.append(f"{top}/{d}")
-    return found
+    A search, and a build of an index, take each one that is there as it is
+    (genome_in_use, which a Direct URL download of a genome checks too)."""
+    return genome_in_use.built_on(current_working_directory, assembly)
 
 
-def _genome_upload_problem(assembly: str) -> Optional[str]:
-    """Why a genome upload must not install ``assembly``: indexes or variant genomes
-    built on a genome of that name are installed. They hold that genome's sequences and
-    positions, and every search and build of the new one would go on using them: a
-    genome uploaded again with its sequences swapped was searched at the old
-    positions, and one split on upload, at chr1 for its chr2 sites, by the index of the
-    one FASTA it was before (final review round 1, F2). None when nothing is built on
-    it."""
-    built = _built_on_genome(assembly)
-    if not built:
-        return None
-    shown = ", ".join(built[:4]) + (", ..." if len(built) > 4 else "")
-    return (
-        f"Indexes or variant genomes built on a genome named {assembly!r} are installed "
-        f"({shown}): searches of a genome uploaded under that name would go on using "
-        "them, with the sequences and positions of the genome they were built from. "
-        "Remove them first (an index under 'Remove installed data'; a "
-        f"Genomes/{assembly}+<dataset> folder from your data folder), or upload this "
-        "genome under another name."
-    )
+def _genome_upload_problem(assembly: str, how: str = "upload") -> Optional[str]:
+    """Why a genome upload (``how`` "upload") or a Direct URL download ("download") must
+    not install ``assembly``: indexes or variant genomes built on a genome of that name are
+    installed. They hold that genome's sequences and positions, and every search and build
+    of the new one would go on using them: a genome uploaded again with its sequences
+    swapped was searched at the old positions, and one split on upload, at chr1 for its
+    chr2 sites, by the index of the one FASTA it was before (final review round 1, F2). None
+    when nothing is built on it."""
+    return genome_in_use.replace_problem(current_working_directory, assembly, how)
 
 
 def _install_uploaded_genome(part_path: str, name: str, assembly: str, dest_dir: str) -> None:
@@ -2544,6 +2521,10 @@ def add_genome(n, assembly, source, url, hf_name):
         if not url:
             return no_update, no_update, "Direct URL source requires a URL."
         argv += ["--url", url.strip()]
+        # (the download refuses it too; said here at once, as for an upload)
+        err = _genome_upload_problem(assembly.strip(), "download")
+        if err:
+            return no_update, no_update, err
     derr = _preflight_disk(_catalog_size("genome", assembly.strip()) if source == "hf" else 0)
     if derr:
         return no_update, no_update, derr

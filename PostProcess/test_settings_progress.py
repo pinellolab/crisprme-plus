@@ -31,6 +31,8 @@ import time
 import unittest
 from typing import List, Optional
 
+import genome_in_use  # (PostProcess/: the rule _genome_upload_problem reads)
+
 _SETTINGS_PAGE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "pages", "settings_page.py",
@@ -670,6 +672,7 @@ class TestGenomeTarUpload(unittest.TestCase):
             tarfile=tarfile,
             shutil=shutil,
             tempfile=tempfile,
+            genome_in_use=genome_in_use,
         )
         return root, cwd, outside, ns
 
@@ -937,6 +940,18 @@ class TestGenomeTarUpload(unittest.TestCase):
                                   "folder), or upload this genome under another name.",
                                   str(cm.exception))
                     self.assertEqual(_tree(cwd), before)  # nothing changed
+
+    def test_a_direct_url_download_is_refused_alike_with_its_own_way_out(self):
+        # (add_genome says so at once; crisprme.py download refuses it with the same rule)
+        root, cwd, _outside, ns = self.sandbox()
+        os.makedirs(os.path.join(cwd, "genome_library", "NRG_2_asm"))
+        said = ns["_genome_upload_problem"]("asm", "download")
+        self.assertTrue(said.startswith(
+            "Indexes or variant genomes built on a genome named 'asm' are installed "
+            "(genome_library/NRG_2_asm): searches of a genome downloaded under that name "
+            "would go on using them"), said)
+        self.assertTrue(said.endswith("or download it under another name (--ref)."), said)
+        self.assertIsNone(ns["_genome_upload_problem"]("asm2", "download"))
 
     def test_what_is_built_on_other_genomes_does_not_refuse_it(self):
         root, cwd, _outside, ns = self.sandbox()

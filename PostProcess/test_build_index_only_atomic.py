@@ -3197,6 +3197,127 @@ class AnAllNIndexInPlaceKeepsItsSide(_Fixture):
         self.assertEqual(self.calls(), [])
 
 
+class AFolderOutsideGenomesIsKnownToItsIndex(_Fixture):
+    """A search takes a genome's index by the genome folder's name alone. complete-search
+    records, in an index it builds of a folder outside Genomes/, the folder it holds
+    (.genome_source), and refuses a search of another folder of that name; build-index-only
+    recorded nothing, so another folder of the name took its index with no message, a
+    bundle haplotype it had built for was refused as an index of unknown origin, and a
+    folder named like one in Genomes/ was indexed under that one's name. It now records
+    the folder as complete-search does, and checks the name the same way first."""
+
+    def copy_genome(self, *to):
+        """The genome, copied to the folder ``to`` of the working directory."""
+        dest = self.path(*to)
+        shutil.copytree(self.path("Genomes", "hg38"), dest)
+        return dest
+
+    def build(self, genome):
+        command = ["build-index-only", "--genome", genome, "--pam", PAM, "--bDNA", "1",
+                   "--bRNA", "1", "--thread", "2", "--path", self.work]
+        return self.finish(self.start(command=command))
+
+    def source(self, name):
+        try:
+            with open(os.path.join(self.lib(name), ".genome_source")) as fh:
+                return json.load(fh)
+        except OSError:
+            return None
+
+    def test_an_index_of_a_folder_outside_genomes_records_it(self):
+        rc, out, err = self.build(self.copy_genome("projA", "ref"))
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(self.source("NRG_2_ref")["genome"], os.path.join("projA", "ref"))
+        # of a folder in Genomes/, nothing, as before (SameTreeAsBefore has its tree)
+        rc, out, err = self.build(self.path("Genomes", "hg38"))
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIsNone(self.source("NRG_2_hg38"))
+
+    def test_another_folder_of_its_name_is_refused_before_anything_is_built(self):
+        self.build(self.copy_genome("projA", "ref"))
+        os.remove(self.log)
+        other = self.copy_genome("projB", "ref")
+        _write(os.path.join(other, "chr1.fa"), ">chr1\n" + GENOME["chr2"] + "\n")
+        rc, out, err = self.build(other)
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"Error: {self.lib('NRG_2_ref')} holds the genome in "
+                      f"{self.path('projA', 'ref')}, not {other}", err)
+        self.assertIn("Then run build-index-only again: it builds the index of its name from "
+                      "this folder.", err)
+        self.assertNotIn("already present", out)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.source("NRG_2_ref")["genome"], os.path.join("projA", "ref"))
+
+    def test_a_folder_named_like_one_in_genomes_is_refused(self):
+        rc, out, err = self.build(self.copy_genome("other", "hg38"))
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"Error: --genome {self.path('other', 'hg38')} has the name of another "
+                      f"genome folder, {self.path('Genomes', 'hg38')}.", err)
+        self.assertIn("and run build-index-only again.", err)
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(os.path.exists(self.lib("NRG_2_hg38")))
+
+    def test_a_recorded_folder_whose_fasta_files_changed_is_built_again(self):
+        genome = self.copy_genome("projA", "ref")
+        self.build(genome)
+        os.remove(self.log)
+        _write(os.path.join(genome, "chr1.fa"), ">chr1\n" + GENOME["chr2"] + "\n")
+        os.utime(os.path.join(genome, "chr1.fa"), (1, 1))
+        rc, out, err = self.build(genome)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("Removing index NRG_2_ref: projA/ref has changed since it was built.", out)
+        self.assertNotIn("already present", out)
+        self.assertEqual([c.split()[:2] for c in self.calls()][:1], [["index-genome", "ref"]])
+        self.assertEqual(self.source("NRG_2_ref")["genome"], os.path.join("projA", "ref"))
+
+    def test_a_bundle_haplotypes_index_it_built_is_then_searched(self):
+        # (an index of the folder name "genome" with no record could hold another
+        # haplotype: its search refused it, although build-index-only had just built it)
+        root = self.path("Assemblies", "W1")
+        for hap in ("paternal", "maternal"):
+            self.copy_genome("Assemblies", "W1", hap, "genome")
+        _write(os.path.join(root, "metadata.json"), json.dumps({
+            "format": "crisprme-personal-assembly", "format_version": 1, "individual": "W1",
+            "haplotypes": {h: {"genome_dir": f"{h}/genome"} for h in ("paternal", "maternal")}}))
+        paternal = os.path.join(root, "paternal", "genome")
+        rc, out, err = self.build(paternal)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(self.source("NRG_2_genome")["genome"],
+                         os.path.join("Assemblies", "W1", "paternal", "genome"))
+        _write(self.path("guides.txt"), GENOME["chr1"][:20] + "NNN\n")
+        search = ["complete-search", "--genome", paternal, "--guide", self.path("guides.txt"),
+                  "--pam", PAM, "--mm", "4", "--bDNA", "1", "--bRNA", "1", "--output", "pat",
+                  "--thread", "2"]
+        rc, out, err = self.finish(self.start(command=search, CRISPRME_SKIP_SCORER_ENV="1"))
+        self.assertIn("Launching job ", out)  # (the stub engine then fails the search)
+        self.assertNotIn("records no genome folder", err)
+        # the other haplotype, of the same folder name, is still refused
+        search[2] = os.path.join(root, "maternal", "genome")
+        search[search.index("pat")] = "mat"
+        rc, out, err = self.finish(self.start(command=search, CRISPRME_SKIP_SCORER_ENV="1"))
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"holds the genome in {paternal}", err)
+        self.assertNotIn("Launching job ", out)
+
+    def test_a_direct_url_download_over_a_genome_with_an_index_is_refused(self):
+        # (it replaced the FASTA files and kept the index: every search then reported the
+        # old genome's sites; refused before anything is fetched)
+        self.build(self.path("Genomes", "hg38"))
+        before = tree(self.path("Genomes"))
+        command = ["download", "--what", "genome", "--ref", "hg38", "--source", "url", "--url",
+                   "http://127.0.0.1:9/alt.fa.gz", "--path", self.work]
+        rc, out, err = self.finish(self.start(command=command))
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(err, "Error: Indexes or variant genomes built on a genome named 'hg38' "
+                              "are installed (genome_library/NRG_2_hg38): searches of a genome "
+                              "downloaded under that name would go on using them, with the "
+                              "sequences and positions of the genome they were built from. "
+                              f"Remove them first (each of them from {self.work}, or an index "
+                              "under 'Remove installed data' in the web Settings page), or "
+                              "download it under another name (--ref).\n")
+        self.assertEqual(tree(self.path("Genomes")), before)
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix."""

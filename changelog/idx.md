@@ -139,3 +139,28 @@ registry. -->
   to passing that list, in both analysis modes. With no such file the search still ends with the
   same `integrated_results`, with empty by-sample and population tables, and the warning says so.
   A carrier a partial list does not name has no row in those tables.
+- **`build-index-only` records the folder an index of a genome outside `Genomes/` holds, and a
+  Direct URL download no longer replaces a genome something is built on.** A search takes a
+  genome's index by the folder's name alone. `complete-search` records, in an index it builds of a
+  folder outside `Genomes/`, which folder it holds (`.genome_source`); `build-index-only` did not.
+  So after `build-index-only --genome projA/ref`, a search of another folder named `ref` reported
+  the results of `projA/ref`, byte for byte, at exit 0; `build-index-only` of a folder named like
+  one in `Genomes/` built that one's index from it, which every search of the `Genomes/` folder
+  then took; a recorded folder whose FASTA files had changed was "already present"; and the search
+  of a personal-assembly haplotype by its own path (`Assemblies/<individual>/<haplotype>/genome`)
+  was refused on the index `build-index-only` had just built for it, which it had said would be
+  reused. `download --what genome --source url`, the Settings page's Direct URL, put another
+  genome's FASTA files under an installed name and kept its indexes, which every search then used,
+  with the old genome's sequences and positions. **Affected:** `build-index-only` of a folder
+  outside `Genomes/` and a Direct URL download over a genome with an index, in 2.8.0 too; the
+  refused haplotype search is new in 2.8.1. **What to do:** a search run on such an index, or on a
+  genome downloaded over another, searched the other folder's sequence: remove that index and run
+  it again. `build-index-only` now records the folder, refuses one named like a folder in
+  `Genomes/` or like another folder an index records, and builds an index again when its folder's
+  FASTA files have changed (`Removing index ...`), as `complete-search` does, with the same
+  messages. Of a folder in `Genomes/` it records nothing, as before, so a downloaded index, and a
+  genome renamed together with its indexes, are served as before. A Direct URL download under the
+  name of a genome with an index or a variant genome installed is refused before anything is
+  fetched, by the rule a Settings upload has (remove them, or use another name), and the Settings
+  page says so at once. `--source ucsc` and the HuggingFace download give the same assembly by
+  name, and are not refused.

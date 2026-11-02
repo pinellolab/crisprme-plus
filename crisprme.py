@@ -102,6 +102,7 @@ from generate_report import build_combined_report  # noqa: E402
 from assembly_annotate import add_annotation_column, add_closest_gene_columns  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
 import index_fit  # noqa: E402  (which guide lengths an index can answer)
+import genome_in_use  # noqa: E402  (what is built on a genome's name)
 
 cicd_test = False
 if "--ci-cd-test" in input_args:
@@ -2036,7 +2037,8 @@ def _listdir(folder: str) -> List[str]:
 def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int = 0,
                                   pam: str = "", prune: bool = False,
                                   three_prime: bool = True, bdna: "Optional[int]" = None,
-                                  brna: "Optional[int]" = None, guide_len: int = 0) -> bool:
+                                  brna: "Optional[int]" = None, guide_len: int = 0,
+                                  cwd: str = "", command: str = "") -> bool:
     """Refuses a search that would take another genome folder's index or variant
     genomes for this one's.
 
@@ -2050,7 +2052,7 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     * the folder is outside Genomes/ and Genomes/<name> is another folder;
     * an index of that name in genome_library/ records (.genome_source) that it was
       built from another folder: _record_built_index_source records it in an index a
-      search of a folder outside Genomes/ builds;
+      search of a folder outside Genomes/ builds, and build-index-only in one it builds;
     * the folder is a haplotype of a personal assembly (personal_assembly.
       bundle_haplotype) given by its own path, not through the link assembly-search
       searches it through (haplotype_genome_view, named after the haplotype), and an
@@ -2090,13 +2092,18 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
             messages; `bulges` each when not given.
         guide_len: The search's guide length: the search takes no index that does not fit
             it (index_fit).
+        cwd: The working directory whose Genomes/ and genome_library/ are looked at:
+            current_working_directory by default, build-index-only's --path for it.
+        command: For build-index-only, which keeps an index of the name it finds in place
+            and builds one it does not find: the messages say to run that again, with no
+            more.
 
     Returns:
         Whether to record, in the reference index this search builds, the folder it
         holds: for a folder outside Genomes/, searched without --index-path. The
         indexes of a genome in Genomes/ are left as before.
     """
-    cwd = current_working_directory
+    cwd = cwd or current_working_directory
     name = os.path.basename(genomedir)
     genomes = os.path.join(cwd, CRISPRMEDIRS[0])
     outside = os.path.realpath(os.path.dirname(genomedir)) != os.path.realpath(genomes)
@@ -2107,7 +2114,9 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
     if index_path != "_":
         rerun += " without --index-path" + (" and --prune-pam (which needs it)" if prune else "")
     note = ""
-    if bdna or brna:
+    if command:
+        rerun = f"run {command} again"
+    elif bdna or brna:
         rerun += f"{' and' if index_path != '_' else ''} with --bDNA {bdna} --bRNA {brna}"
         note = " (given no --bDNA/--bRNA, this search may then take no bulges)"
     if outside and os.path.isdir(namesake) and os.path.realpath(namesake) != os.path.realpath(genomedir):
@@ -4121,6 +4130,13 @@ def build_index_only() -> None:
     _refuse_short_build(idx_folder, pamfile, bDNA, bRNA)
     if vcf_given:
         _refuse_short_build(snp_idx, pamfile, bDNA, bRNA)
+    # A search takes the index and the variant genomes of a genome by the folder's name
+    # alone: not those of another folder of the name, which this run would say are
+    # "already present", and of a folder outside Genomes/ an index recorded from it before
+    # its FASTA files changed is removed and built again (as a search does)
+    record_source = _check_genome_name_is_its_own(
+        genomedir, "_", bMax, pam_char, False, idx_val > 0, bDNA, bRNA,
+        index_fit.pam_file_spacer(pamfile) or 0, cwd=workdir, command="build-index-only")
     # The build directories that killed runs left (_reclaim_build_dirs) are removed
     # first, whatever this run goes on to build: a search may have built since what
     # one of them was building, and then no build here would reclaim it.
@@ -4174,6 +4190,8 @@ def build_index_only() -> None:
             indexed=(pamfile, bMax + 1, [(genomedir, "")]), need_bin=True, shell=True,
         ):
             print(f"Index built: {idx_folder}", flush=True)
+            if record_source:  # the folder it holds, as complete-search records it
+                stamp_index_source(workdir, genomedir, idx_folder)
     _write_pam_build(idx_folder, pamfile)
     if not vcf_given:
         _write_display_label(idx_folder, display_name)
@@ -5126,6 +5144,13 @@ def download_data() -> None:
     else:
         components = [what]
     for comp in components:
+        # A genome from a URL can be another genome of the name: never over what a search
+        # and a build would take with it, by that name alone (genome_in_use; the web
+        # Settings page refuses an upload the same way)
+        if comp == "genome" and source == "url":
+            problem = genome_in_use.replace_problem(workdir, ref, "download")
+            if problem:
+                error(problem)
         try:
             if comp == "genome" and source in ("ucsc", "url"):
                 # non-HuggingFace reference genome (e.g. a UCSC assembly such as
