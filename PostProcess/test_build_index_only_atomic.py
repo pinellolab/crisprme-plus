@@ -3318,6 +3318,52 @@ class AFolderOutsideGenomesIsKnownToItsIndex(_Fixture):
         self.assertEqual(tree(self.path("Genomes")), before)
 
 
+class AnIndexInPlaceLackingAChromosomeIsNotTakenForWhole(_Fixture):
+    """build-index-only said "already present" of an index that lacks a chromosome's trees
+    (a partial copy, a build an earlier release left stopped between chromosomes, a genome
+    folder that gained a FASTA since), and every search of it lost that chromosome's sites.
+    It now says which, and what to do (index_coverage)."""
+
+    def test_a_reference_index_lacking_a_chromosome_is_refused(self):
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual((rc, err), (0, ""))
+        os.remove(os.path.join(self.lib(REF), "NRG_chr2_1.bin"))
+        os.remove(self.log)
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"Error: index '{REF}' ({self.lib(REF)}) lacks trees of FASTAs that hold "
+                      "sites of its PAM: chr2.fa (no tree)", err)
+        self.assertIn(f"Remove it (rm -rf '{self.lib(REF)}') and run build-index-only again.",
+                      err)
+        self.assertNotIn("already present", out)
+        self.assertEqual(self.calls(), [])
+
+    def test_so_is_one_whose_genome_folder_gained_a_fasta_with_sites(self):
+        self.run_bio(vcf=False)
+        _write(self.path("Genomes", "hg38", "chr3.fa"), ">chr3\n" + GENOME["chr1"] + "\n")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("chr3.fa (no tree)", err)
+
+    def test_but_not_one_of_a_fasta_with_no_site(self):
+        # buildTST writes no tree for a contig of N alone, and no search misses one
+        self.run_bio(vcf=False)
+        _write(self.path("Genomes", "hg38", "chrN.fa"), ">chrN\n" + "N" * 200 + "\n")
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn(f"Reference index already present: {self.lib(REF)}", out)
+
+    def test_a_variant_index_lacking_a_chromosome_of_its_dataset_is_refused(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual((rc, err), (0, ""))
+        os.remove(os.path.join(self.lib(VAR), "NRG_chr1_1.bin"))
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"Error: index '{VAR}' ({self.lib(VAR)}) lacks trees of FASTAs that hold "
+                      "sites of its PAM: chr1.fa (no tree)", err)
+        self.assertNotIn("Variant index already present", out)
+
+
 class SameTreeAsBefore(_Fixture):
     """(f): a successful build, and a re-run with everything in place, produce the
     same tree, file for file, and print the same lines, as before the fix."""

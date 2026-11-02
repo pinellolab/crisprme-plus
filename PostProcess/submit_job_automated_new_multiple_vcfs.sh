@@ -1378,6 +1378,13 @@ while read vcf_f; do
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>$log
 		idx_ref="$idx_folder1"
 	fi
+	# An index that lacks a chromosome's trees (a partial copy, a build stopped between
+	# chromosomes, a genome folder that gained a FASTA since) would lose that chromosome's
+	# sites with exit 0: stop instead (index_coverage.py, which takes a FASTA with no site of
+	# the PAM for one that has no tree). Only a search with bulges opens this index.
+	if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then
+		python "$starting_dir/index_coverage.py" "$idx_ref" "$pos" "$ref_folder" || exit 1
+	fi
 	# END STEP 2.1 Reference genome indexing
 
 	# START STEP 2.2 Variant genome indexing
@@ -1424,6 +1431,12 @@ while read vcf_f; do
 			fi
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
 			idx_var="$idx_folder1"
+		fi
+		# ... nor a variant index lacking a chromosome of its dataset (the reference FASTA of
+		# that name tells where it has sites), wherever the search opens it
+		if [ "${#array_fake_chroms[@]}" -gt 0 ] \
+			&& { [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ] || ! _enriched_genome_whole; }; then
+			python "$starting_dir/index_coverage.py" "$idx_var" "$pos" "$ref_folder" "${array_fake_chroms[@]#fake}" || exit 1
 		fi
 
 		# START STEP 2.3 - indels indexing

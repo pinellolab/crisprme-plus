@@ -103,6 +103,7 @@ from assembly_annotate import add_annotation_column, add_closest_gene_columns  #
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
 import index_fit  # noqa: E402  (which guide lengths an index can answer)
 import genome_in_use  # noqa: E402  (what is built on a genome's name)
+import index_coverage  # noqa: E402  (whether an index holds every chromosome)
 
 cicd_test = False
 if "--ci-cd-test" in input_args:
@@ -4183,6 +4184,11 @@ def build_index_only() -> None:
                 f"it: remove it (rm -rf '{idx_folder}', or remove the index in the web "
                 f"Settings page) and run build-index-only again."
             )
+        # nor one that lacks the trees of a FASTA of the genome folder (index_coverage):
+        # every search of it would lose that chromosome's sites
+        _gaps = index_coverage.problems(idx_folder, genomedir, idx_val < 0)
+        if _gaps:
+            error(index_coverage.message(idx_folder, _gaps, "run build-index-only again."))
         print(f"Reference index already present: {idx_folder}", flush=True)
     else:
         print(
@@ -4909,6 +4915,11 @@ def build_index_only() -> None:
             shell=True,
         )
     else:
+        # (of the dataset's chromosomes, as the search reads them: index_coverage)
+        _gaps = index_coverage.problems(snp_idx, genomedir, idx_val < 0,
+                                        index_coverage.vcf_chroms(vcfdir))
+        if _gaps:
+            error(index_coverage.message(snp_idx, _gaps, "run build-index-only again."))
         print(f"Variant index already present: {snp_idx}", flush=True)
     # STEP 3: index the indels genome (pool_index_indels.py, as the pipeline does)
     _refuse_locked_build(indels_idx)

@@ -180,3 +180,24 @@ registry. -->
   library: a variant index there without its INDELS index stops the run with a message.
   Dictionaries, sample lists and the genome are still read from the working directory, and a
   search with the library in the working directory, with or without `--index-path`, is unchanged.
+- **A search refuses an index that lacks a chromosome's trees, instead of losing that
+  chromosome's sites.** A search took an index holding one `.bin` for a whole one: a partial copy,
+  a build that an earlier release left stopped between chromosomes, or an index of a genome folder
+  that gained a FASTA since, gave no row on the missing chromosome, at exit 0 and with no message,
+  on the CLI and the web, and `build-index-only` said "already present". Measured on the synthetic
+  genome: a reference index without chr2's tree gave 6 rows instead of 7, a variant index without
+  chr1's another result, and a FASTA added after the build was not searched. **Affected:** searches
+  of such an index, in 2.8.0 too; a stock install is not (every index on the lab's hg38 install, 32
+  reference and variant indexes of NRG, NGG, NRR, NNN and K=8, holds every tree). **What to do:**
+  nothing, unless a search now stops on an index: remove it and build it again, or download it
+  again, as the message says. Before it opens an index (with bulges, or for a variant search
+  without bulges and without the whole enriched genome), the search now checks that it holds the
+  trees of every FASTA of the genome folder, and a variant index those of every chromosome of its
+  dataset, and stops naming the FASTAs that lack them; `build-index-only` does the same before it
+  says "already present". A FASTA with no site of the index's PAM (all N, shorter than a window, no
+  PAM) has no tree in a healthy index and is not counted, by the engine's own rule for a site, and
+  neither is a variant chromosome the genome folder has no FASTA of. A gap in a chromosome's
+  numbered trees, and a full last tree of a chromosome that holds more sites, count as missing
+  trees too; a chromosome's last trees lost after a tree that is not full cannot be told from the
+  files. The check reads the first line of each FASTA, and a FASTA in full only where it has no
+  tree or a full last tree: under a second on hg38.

@@ -341,6 +341,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_search_indel_snp -v
 
+      - name: "Index coverage (an index lacking a chromosome's trees is refused, not searched)"
+        working-directory: PostProcess
+        run: python -m unittest test_index_coverage -v
+
       - name: "Indel report integrity (header injection) + complete-search flag gate + index resolution"
         # The header-injection guards: a dropped CRISPRitz header made
         # post_analisi_indel.sh prepend the merged file's first DATA row to every
