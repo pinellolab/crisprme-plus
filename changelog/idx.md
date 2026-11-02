@@ -294,11 +294,11 @@ too (the entry below on `build-index-only`'s record). -->
   That was measured genome-wide for one guide, which has no site at a contig's end. The index
   build scans for a PAM only where a whole flank of K bases fits, so with K > L a + strand PAM with
   1 to K − L bases after it to the end of a contig, and a − strand PAM in the contig's first K − L
-  bases, are not indexed, and a − strand PAM exactly K − L bases from the start is reported on the
-  + strand at another position; K = L is unaffected. **Affected:** searches of the K = 8 index for
-  a 3-nt PAM (on hg38, 145 + 101 NGG and 308 + 241 NRG sites, about 7.5 × 10⁻⁷ of all, none on a
-  primary chromosome for those PAMs), new with K = 8 in 2.8.1. **What to do:** nothing for a guide
-  whose sites lie on primary chromosomes; for one near the end of an alt, random or unplaced
+  bases, are not indexed, and a − strand PAM exactly K − L bases from the start is reported on
+  the + strand at another position; K = L is unaffected. **Affected:** searches of the K = 8 index
+  for a 3-nt PAM (on hg38, 145 + 101 NGG and 308 + 241 NRG sites, about 7.5 × 10⁻⁷ of all, none on
+  a primary chromosome for those PAMs), new with K = 8 in 2.8.1. **What to do:** nothing for a
+  guide whose sites lie on primary chromosomes; for one near the end of an alt, random or unplaced
   contig, use an index of the PAM's width or a dedicated one. The docs now say so with these
   counts, and a search that reads a flank wider than its PAM prints one `NOTE` on stdout, also
   written to the run's `Params.txt`. The engine is unchanged.
