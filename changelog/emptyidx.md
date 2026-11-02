@@ -111,11 +111,15 @@
   indel off-target found there without a bulge stops the search at "Post-analysis INDELs", with
   `ValueError: invalid literal for int() with base 10: 'KI270302v1'`. Where that fake-indel genome is
   not there (an index copied without `Genomes/<genome>+<dataset>_INDELS/`), the search stops at
-  "Post-analysis SNPs", with `tail: cannot open ...`. Off-targets on the contig that need no indel
-  are reported as usual; a contig with SNPs only gets no such line and is not affected. **Affected:**
-  variant datasets with indels on such contigs. No published index is: the indel logs of the 50
-  INDELS indexes on the build machine that have them beside them name no such contig. **What to do:**
-  to have a contig's indels searched, rename it without the underscore in its FASTA (file and header)
-  and its VCF (file and records) and build the index again: renamed `chrUnKI270302v1`, that contig
-  got its sub-index, and the search reported the bulged site. Covered by
-  `PostProcess/test_indel_empty_chromosome.py`.
+  "Post-analysis SNPs", with `tail: cannot open ...`. Off-targets on the contig that carry none of
+  its variants are reported as usual, but one that carries one of its SNPs stops the search at
+  "Integrating results", with the same `ValueError`. A contig with SNPs only gets no such line, and a
+  search stops there only for such an off-target, where 2.8.0 stopped every search of its dataset at
+  "Post-analysis SNPs", with `sed: -e expression #1, char 2: expected \ after ...`. **Affected:**
+  variant datasets with indels on such contigs, or with SNPs there that an off-target carries. No
+  published index is: the indel logs of the 50 INDELS indexes on the build machine that have them
+  beside them name no such contig, nor do the dictionaries in their working directories.
+  **What to do:** to have a contig's indels searched, rename it without the underscore in its FASTA
+  (file and header) and its VCF (file and records) and build the index again: renamed
+  `chrUnKI270302v1`, that contig got its sub-index, and the search reported the bulged site. Covered
+  by `PostProcess/test_indel_empty_chromosome.py`.
