@@ -3680,7 +3680,11 @@ def _check_genome_layout(genomedir: str) -> None:
     an index of the sequence, but every search of the folder dropped all its
     off-targets: a search takes each file for the sequence it is named after. A header
     that is more than >id, or CR line ends, gave an index named after the whole line,
-    and every search of it lost results, often all of them with no error."""
+    and every search of it lost results, often all of them with no error. A CR is
+    looked for in the whole of each file, which the build reads anyway: lines that end
+    in CR past the first ones (which a search's check, two lines a file, does not
+    read) built, with thousands of warnings on stderr, and every search of that index
+    found nothing."""
     from genome_layout import (describe_header_problems, describe_problem,
                                find_multi_record_fastas, find_name_mismatched_fastas)
 
@@ -3720,8 +3724,9 @@ def _check_genome_layout(genomedir: str) -> None:
             "the web Settings page is split this way: remove this one there, with the "
             "indexes built on it, and upload it again.)"
         )
-    # (before the next: its --split fixes a file that also has the wrong name, its mv not)
-    for _problem in describe_header_problems(genomedir):
+    # (before the next: its --split fixes a file that also has the wrong name, its mv not;
+    # deep: a CR anywhere in a file, not in its first two lines only)
+    for _problem in describe_header_problems(genomedir, deep=True):
         error(_problem)
     # one sequence, in a file not named after it (an upload of hg38_chr22.fa holding
     # >chr22, or of a bacterial genome, was installed so): the search found its

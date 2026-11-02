@@ -144,6 +144,34 @@ class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
                 self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
                                  ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
 
+    def test_fasta_whose_lines_end_in_cr_past_its_first_lines(self):
+        # LF for 100 lines, then CRLF: the check read two lines a file, so the index was
+        # built, with warnings on stderr, and every search of it found nothing (finB
+        # round 3 review). The build reads the genome whole anyway, and so looks for a CR
+        # in the whole of each file.
+        lines = [">chr1"] + [bio.GENOME["chr1"]] * 150
+        text = "".join(line + ("\n" if n < 100 else "\r\n") for n, line in enumerate(lines))
+        with open(self.genome("chr1.fa"), "wb") as fh:
+            fh.write(text.encode())
+        rc, out, err = self.run_bio(vcf=False)
+        self.assert_refused(rc, out, err, "Error: chr1.fa: its lines end in CR. A header must "
+                            "be >id and nothing else, on lines that end in LF",
+                            f"python PostProcess/genome_layout.py --split {self.genome()}\n",
+                            "Then remove each index built from the folder as it was "
+                            "(genome_library/*_hg38, genome_library/*_hg38+*, and the "
+                            "variant genomes Genomes/hg38+*)")
+        # written with no CR, the folder builds
+        done = subprocess.run([sys.executable, LAYOUT, "--split", self.genome()],
+                              capture_output=True, text=True)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertIn("Wrote chr1.fa's header as >id and its lines with no CR", done.stdout)
+        with open(self.genome("chr1.fa"), "rb") as fh:
+            self.assertEqual(fh.read(), text.replace("\r", "").encode())
+        rc, out, err = self.run_bio(vcf=False)
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF)) if f.endswith(".bin")),
+                         ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+
     def test_fasta_id_the_pipeline_cannot_take(self):
         with open(self.genome("chr1.fa")) as fh:
             seq = fh.read().split("\n", 1)[1]

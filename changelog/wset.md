@@ -359,28 +359,32 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   the same table too. A folder left with such a file is refused before anything is built or
   searched: `build-index-only`, `complete-search` and a web search end with an ERROR that gives the
   `--split` command and says to remove the indexes built from the folder as it was (`--split` lists
-  them). Such an index is refused as well, where its `.bin` names show it: it holds the old names
-  once the FASTA is written as it should be, and every search of it went on losing results, and a
-  build took it as present. An index built from a FASTA with a clean header line and CRLF after it
-  has `.bin` names that do not show it, so it is not caught: remove it as the ERROR says. A sequence
-  id that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or `#` is refused too,
-  at an upload, a download, `--split`, a build and a search (`gi|49175990|ref|NC_000913.2|`, a PanSN
-  `HG01255#1#CM086702.1`): a search of one failed in a shell command (`/bin/sh: Syntax error`), or,
-  for `#`, with `none survived post-analysis`. So is an id that starts with `-` or `.`: a search of
-  `-x` or `.x` beside `b` ended with exit status 0 and the off-targets of `b` alone, none of the 7
-  of the other, its on-target among them (`grep` took `-x` for an option, and the search left out
-  the hidden file `.x.fa`). Measured character by character through the real command line, `.`,
-  `:`, `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~` and `!` work inside an id, and all of them but
-  `-` and `.` at its start, where `~` works only if no user of the machine has the name that
-  follows it (`~root`, and `~` alone, made a search fail in its post-analysis). So do `*`, `?` and
-  brackets in an id that matches, read as a shell pattern, no other name of its folder (see the
-  next entry) and no file of CRISPRme's `PostProcess` folder, where the post-analysis runs:
-  `HLA-A*01:01` and `KIR2DL1*001` worked, but `a*` matches `adjust_cols.py` there, and a search of
-  it failed. A file whose lines end in CR alone is refused by `--split`, which says to convert it,
-  as its first line holds the whole file. **If you have such a genome,** run `python
-  PostProcess/genome_layout.py --split <genome folder>`, remove the indexes it names, and build
-  again, or remove it in Settings and upload it again. A search of a genome of plain headers is
-  unchanged. Covered by `PostProcess/test_genome_layout.py` and
+  them). A search looks for CR line ends in the first two lines of each file, and
+  `build-index-only`, which reads the whole genome anyway, in the whole file: one whose first 100
+  lines end in LF and the rest in CRLF built at exit status 0, with 402 KB of warnings on stderr,
+  and every search of that index found nothing (a search that built its own failed, on those
+  warnings); its build is refused now. Such an index is refused as well, where its `.bin` names
+  show it: it holds the old names once the FASTA is written as it should be, and every search of it
+  went on losing results, and a build took it as present. An index built from a FASTA with a clean
+  header line and CRLF after it has `.bin` names that do not show it, so it is not caught: remove it
+  as the ERROR says. A sequence id that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a
+  backquote or `#` is refused too, at an upload, a download, `--split`, a build and a search
+  (`gi|49175990|ref|NC_000913.2|`, a PanSN `HG01255#1#CM086702.1`): a search of one failed in a
+  shell command (`/bin/sh: Syntax error`), or, for `#`, with `none survived post-analysis`. So is an
+  id that starts with `-` or `.`: a search of `-x` or `.x` beside `b` ended with exit status 0 and
+  the off-targets of `b` alone, none of the 7 of the other, its on-target among them (`grep` took
+  `-x` for an option, and the search left out the hidden file `.x.fa`). Measured character by
+  character through the real command line, `.`, `:`, `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~` and
+  `!` work inside an id, and all of them but `-` and `.` at its start, where `~` works only if no
+  user of the machine has the name that follows it (`~root`, and `~` alone, made a search fail in
+  its post-analysis). So do `*`, `?` and brackets in an id that matches, read as a shell pattern, no
+  other name of its folder (see the next entry) and no file of CRISPRme's `PostProcess` folder,
+  where the post-analysis runs: `HLA-A*01:01` and `KIR2DL1*001` worked, but `a*` matches
+  `adjust_cols.py` there, and a search of it failed. A file whose lines end in CR alone is refused
+  by `--split`, which says to convert it, as its first line holds the whole file. **If you have such
+  a genome,** run `python PostProcess/genome_layout.py --split <genome folder>`, remove the indexes
+  it names, and build again, or remove it in Settings and upload it again. A search of a genome of
+  plain headers is unchanged. Covered by `PostProcess/test_genome_layout.py` and
   `PostProcess/test_build_index_only_layout.py`.
 - **A genome folder in which a sequence id, read as a shell pattern, matches the name of another
   sequence is refused; a search of it failed, or lost that sequence's off-targets.** The search
