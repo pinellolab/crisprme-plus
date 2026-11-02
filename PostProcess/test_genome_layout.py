@@ -430,6 +430,14 @@ class TestCommandLine(unittest.TestCase):
         self.assertEqual(self._run(self.tmp).returncode, 0)
         self.assertEqual(self._run("--split", self.tmp).stdout, "")
 
+    def test_deep_check_finds_a_cr_past_the_first_lines(self):
+        with open(os.path.join(self.tmp, "chr1.fa"), "wb") as f:
+            f.write(b">chr1\nAC\nGT\r\n")
+        self.assertEqual(self._run(self.tmp).returncode, 0)
+        r = self._run("--deep", self.tmp)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("ERROR: chr1.fa: its lines end in CR", r.stderr)
+
     def test_the_check_of_a_genome_finds_an_index_left_from_its_old_headers(self):
         # the web search's guard: a data folder, its Genomes/<genome>, its genome_library
         genome = os.path.join(self.tmp, "Genomes", "ecoli")
