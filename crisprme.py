@@ -4730,12 +4730,14 @@ def build_index_only() -> None:
                 os.path.basename(indels_idx),
                 "Indels indexing failed",
                 # each chromosome's fake-indel genome, into its directory of the index,
-                # as pool_index_indels.py indexes them
+                # as pool_index_indels.py indexes them (it indexes no contig with an
+                # underscore in its name, and says which)
                 indexed=(pamfile, bMax + 1, [
                     (os.path.join(indels_out, _fk),
                      f"{pam_char}_{bMax + 1}_fake{_fk.split('_')[-1]}")
                     for _fk in sorted(os.listdir(indels_out)) if "chr" in _fk
-                    and os.path.isdir(os.path.join(indels_out, _fk))]),
+                    and os.path.isdir(os.path.join(indels_out, _fk))
+                    and "_" not in _fk[len(f"fake_{vcf_name}_"):]]),
             )
     else:
         print(f"Indels index already present: {indels_idx}", flush=True)

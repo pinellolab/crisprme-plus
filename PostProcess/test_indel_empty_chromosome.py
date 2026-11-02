@@ -35,7 +35,9 @@ before the record read a fake-indel genome the view does not hold.
 A contig with an underscore in its name (chrUn_KI270302v1) has never had a sub-index:
 pool_index_indels.py takes what follows the last underscore for its chromosome. With an
 indel on it, that refusal stopped every search with bulges, for good, with a rebuild
-command that could not help (reproduced through the real CLI). The search goes on.
+command that failed too: build-index-only took the sub-index it did not find for a full
+disk, and exited 1, where 2.8.0 exited 0 (both reproduced through the real CLI). The
+build now names such contigs and expects no sub-index of them, and the search goes on.
 
 Pinned here: the empty chromosome is skipped on BOTH sides (not indexed, not
 searched), the merge tolerates its missing part file and only its, an all-empty
@@ -48,8 +50,8 @@ bulge search of a chromosome with indels but no sub-index fails the same way whi
 search without bulges still searches its fake-indel genome, a PAM-less stand-in's
 INDELS index is built with its own PAM, a search from complete-test --chrom's view (the
 real one) names and reads the working directory's paths, a refusal ends the run at its
-own stage, a contig with an underscore in its name is refused by no search, and the
-normal path is unchanged.
+own stage, a contig with an underscore in its name is named by the build, expected by no
+check, and refused by no search, and the normal path is unchanged.
 
 Hermetic: a stub crispritz.py on PATH stands in for the engine and, like
 CRISPRitz 2.9.1, refuses an index directory with no .bin; its index-genome writes
@@ -67,6 +69,7 @@ import tempfile
 import unittest
 
 import complete_test as ct
+import test_build_index_only_atomic as atomic
 from test_index_resolution import _ShippedScript
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -100,8 +103,11 @@ elif sys.argv[1] == "index-genome":
     # anew, the PAM read from the PAM file, a .bin for each contig of a .fa there but
     # those $STUB_NO_BIN names (buildTST writes none for a contig without a target).
     # $STUB_RECORD_BLOCKED leaves a directory where the record of no target would go.
-    # The log gets the PAM file's line too ("pam-line <line>").
+    # The log gets the PAM file's line too ("pam-line <line>"). A genome directory that
+    # is not there writes nothing: the real one says so on stdout, and exits 0.
     name, gdir, pam_file = sys.argv[2], sys.argv[3], sys.argv[4]
+    if not os.path.isdir(gdir):
+        sys.exit(0)
     nb = sys.argv[sys.argv.index("-bMax") + 1]
     with open(pam_file) as fh:
         seq, size = fh.read().split()[:2]
@@ -140,6 +146,8 @@ LOGS_AB = {"chrA": ["chrA\t\trs1\t0.1\tA>AT\t5\tACGT"], "chrB": ["chrB\t\trs2\t0
 AB = ("chrA", "chrB")
 # contigs with an underscore in their name, which pool_index_indels.py does not index
 UNPLACED, RANDOM = "chrUn_KI270302v1", "chr1_KI270706v1_random"
+LEFT_OUT = ("No INDELS sub-index for {}: a contig with an underscore in its name gets none, so "
+            "a search does not find the indel off-targets there that need a bulge")
 
 
 def _gnu_sed():
@@ -746,16 +754,18 @@ class IndexSide(_Fixture):
     """pool_index_indels.py must not hand an empty fake genome to buildTST, and records
     a build that found no target."""
 
-    def run_index(self, fastas, pam=NRG, true_pam=None, pam_build=None, **env):
+    def run_index(self, fastas, pam=NRG, true_pam=None, pam_build=None, dataset="ds", **env):
         """``true_pam``: the PAM of the variant index, when it is not that of ``pam``
         (a PAM-less index standing in for it, as a search passes it on), with what its
         .pam_build says."""
-        folder = os.path.join(self.tmp, "Genomes", "ref+ds_INDELS")
+        self.dataset = dataset
+        folder = os.path.join(self.tmp, "Genomes", f"ref+{dataset}_INDELS")
         for chrom, text in fastas.items():
-            d = os.path.join(folder, f"fake_ds_{chrom}")
+            d = os.path.join(folder, f"fake_{dataset}_{chrom}")
             os.makedirs(d)
             if text is not None:
-                with open(os.path.join(d, f"fake{chrom}.fa"), "w") as fh:
+                with open(os.path.join(d, f"fake{chrom}.fa"),
+                          "wb" if isinstance(text, bytes) else "w") as fh:
                     fh.write(text)
         with open(os.path.join(self.tmp, "pam.txt"), "w") as fh:
             fh.write(pam + "\n")
@@ -765,7 +775,7 @@ class IndexSide(_Fixture):
             os.makedirs(os.path.join(self.tmp, "genome_library", f"{true_pam}_3_ref+ds"))
             with open(os.path.join(self.tmp, "genome_library", f"{true_pam}_3_ref+ds", ".pam_build"), "w") as fh:
                 fh.write(pam_build)
-        res = subprocess.run([sys.executable, INDEX, folder + "/", "pam.txt", true_pam, "ref", "ds", "3", "2"],
+        res = subprocess.run([sys.executable, INDEX, folder + "/", "pam.txt", true_pam, "ref", dataset, "3", "2"],
                              cwd=self.tmp, env=dict(self.env, **env), capture_output=True, text=True)
         indexed = sorted(c[2].rsplit("_", 1)[-1] for c in self.calls() if c[0] == "index-genome")
         return res, indexed
@@ -777,13 +787,14 @@ class IndexSide(_Fixture):
                 sorted({" ".join(c[1:]) for c in calls if c[0] == "pam-line"}))
 
     def sub(self, chrom):
-        return os.path.join(self.tmp, "genome_library", f"{self.true_pam}_3_ref+ds_INDELS",
-                            f"{self.true_pam}_3_fake{chrom}")
+        return os.path.join(self.top(), f"{self.true_pam}_3_fake{chrom}")
+
+    def top(self):
+        return os.path.join(self.tmp, "genome_library", f"{self.true_pam}_3_ref+{self.dataset}_INDELS")
 
     def recorded(self):
-        top = os.path.join(self.tmp, "genome_library", f"{self.true_pam}_3_ref+ds_INDELS")
-        return sorted(d.rsplit("_fake", 1)[-1] for d in os.listdir(top)
-                      if os.path.isfile(os.path.join(top, d, NO_TARGETS)))
+        return sorted(d.rsplit("_fake", 1)[-1] for d in os.listdir(self.top())
+                      if os.path.isfile(os.path.join(self.top(), d, NO_TARGETS)))
 
     def test_header_only_fake_genome_is_not_indexed(self):
         res, indexed = self.run_index({"chrA": ">fakechrA\nACGTNNACGT\n", "chrB": ">fakechrB\n"})
@@ -859,6 +870,54 @@ class IndexSide(_Fixture):
             self.assertEqual(os.listdir(self.sub(chrom)), [f"NRG_fake{chrom}_1.bin"])
         self.assertEqual(self.built_with(), (["pam.txt", "pam.txt"], [NRG]))
         self.assertNotIn("stands in", res.stdout)
+        self.assertNotIn("No INDELS sub-index", res.stdout)
+
+    # A contig with an underscore in its name gets no sub-index, on any release: the build
+    # names them, in one line (a dataset's name may hold an underscore: it does not count).
+
+    def left_out(self, res):
+        return [ln for ln in res.stdout.splitlines() if ln.startswith("No INDELS sub-index")]
+
+    def test_a_contig_with_an_underscore_gets_no_sub_index_and_the_build_names_it(self):
+        for dataset in ("ds", "hg38_ds"):
+            with self.subTest(dataset=dataset):
+                self.tearDown_dirs()
+                res, _ = self.run_index(
+                    {"chrA": f">fakechrA\n{WITH_NRG}\n",
+                     UNPLACED: f">fake{UNPLACED}\n{WITH_NRG}\n",
+                     RANDOM: f">fake{RANDOM}\n{WITH_NRG}\n"}, dataset=dataset)
+                self.assertEqual((res.returncode, res.stderr), (0, ""))
+                self.assertEqual(self.left_out(res), [LEFT_OUT.format(f"{RANDOM}, {UNPLACED}")])
+                self.assertEqual(sorted(os.listdir(self.top())), ["NRG_3_fakechrA"])
+
+    def test_a_dataset_whose_only_indels_are_on_such_a_contig_gets_an_index_with_no_sub_index(self):
+        for true_pam in (None, "NNN"):  # (of a PAM-less stand-in too, under its own PAM)
+            with self.subTest(true_pam=true_pam):
+                self.tearDown_dirs()
+                res, _ = self.run_index({"chrA": ">fakechrA\n", UNPLACED: f">fake{UNPLACED}\n{WITH_NRG}\n"},
+                                        true_pam=true_pam)
+                self.assertEqual((res.returncode, res.stderr), (0, ""))
+                self.assertEqual(self.left_out(res), [LEFT_OUT.format(UNPLACED)])
+                self.assertEqual(os.listdir(self.top()), [])
+
+    def test_a_contig_with_snps_only_is_left_out_of_nothing(self):
+        # (its fake-indel genome is header-only: no indels, and so no sub-index to miss)
+        res, _ = self.run_index({"chrA": f">fakechrA\n{WITH_NRG}\n", UNPLACED: f">fake{UNPLACED}\n"})
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.left_out(res), [])
+
+    def test_a_dataset_whose_name_holds_an_underscore_leaves_out_no_chromosome(self):
+        res, indexed = self.run_index({"chrA": f">fakechrA\n{WITH_NRG}\n"}, dataset="hg38_ds")
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.left_out(res), [])
+        self.assertEqual(indexed, ["chrA"])
+        self.assertEqual(os.listdir(self.sub("chrA")), ["NRG_fakechrA_1.bin"])
+
+    def test_a_contig_read_otherwise_is_named_and_does_not_stop_the_build(self):
+        # (a genome that could not be read may hold indels, and naming it is all this does)
+        res, _ = self.run_index({"chrA": f">fakechrA\n{WITH_NRG}\n", UNPLACED: b"\xff\xfe\n"})
+        self.assertEqual((res.returncode, res.stderr), (0, ""))
+        self.assertEqual(self.left_out(res), [LEFT_OUT.format(UNPLACED)])
 
     # A search builds a missing INDELS index with pool_index_indels.py, handing it the
     # PAM file of the search and the PAM of the variant index it resolved, which may be a
@@ -1045,6 +1104,86 @@ exit 0
         self.assertIn("Search INDELs completed", run.stdout)
         self.assertIn(["Off-targets search", "End"], stages)
         self.assertEqual(len(targets), 1)
+
+
+class ABuildOfAContigWithAnUnderscore(atomic._Fixture):
+    """The real build-index-only, with the stub engine of test_build_index_only_atomic, of a
+    dataset with an indel on a contig with an underscore in its name. The check that each
+    chromosome holding a target got its .bin looked for a sub-index pool_index_indels.py
+    has never made, and exited 1 taking it for a full disk's, where 2.8.0 exited 0."""
+
+    # as index-genome does (checkExistance): a genome directory that is not there is said on
+    # stdout, and it exits 0
+    ENGINE = r'''#!PYTHON
+import os, sys
+if sys.argv[1] == "index-genome" and not os.path.isdir(sys.argv[3]):
+    print("ERROR! %s is not a directory." % sys.argv[3])
+    sys.exit()
+os.execv(__file__ + ".stub", [__file__ + ".stub"] + sys.argv[1:])
+'''
+
+    @classmethod
+    def setUpClass(cls):
+        atomic.setUpModule()
+        cls.addClassCleanup(atomic.tearDownModule)
+
+    def fresh(self):
+        super().fresh()
+        engine = os.path.join(self.bin, "crispritz.py")
+        os.rename(engine, engine + ".stub")
+        with open(engine, "w") as fh:
+            fh.write(self.ENGINE.replace("#!PYTHON", "#!" + sys.executable, 1))
+        os.chmod(engine, 0o755)
+
+    def build(self, contigs=(), dataset="ds", **stub):
+        """build-index-only --vcf of the inputs, their VCFs in VCFs/<dataset>, with each of
+        contigs added, an insertion on it."""
+        vcfs = self.path("VCFs", dataset)
+        if dataset != "ds":
+            os.rename(self.path("VCFs", "ds"), vcfs)
+        bases = atomic.GENOME["chr1"]
+        for contig in contigs:
+            atomic._write(self.path("Genomes", "hg38", f"{contig}.fa"), f">{contig}\n{bases}\n")
+            with gzip.open(os.path.join(vcfs, f"{dataset}.{contig}.vcf.gz"), "wt") as fh:
+                fh.write("##fileformat=VCFv4.2\n"
+                         "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tS1\tS2\n"
+                         f"{contig}\t26\trs_c_26\t{bases[25]}\t{bases[25]}T\t.\tPASS\tAF=0.25"
+                         "\tGT\t0|0\t1|0\n")
+        return self.run_bio(command=[
+            "build-index-only", "--genome", self.path("Genomes", "hg38"), "--pam", atomic.PAM,
+            "--bDNA", "1", "--bRNA", "1", "--thread", "2", "--path", self.work,
+            "--vcf", vcfs, "--samplesID", self.path("samples.txt")], **stub)
+
+    def test_it_exits_0_and_names_the_contig(self):
+        rc, out, err = self.build((UNPLACED, RANDOM))
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertEqual([ln for ln in out.splitlines() if ln.startswith("No INDELS sub-index")],
+                         [LEFT_OUT.format(f"{RANDOM}, {UNPLACED}")])
+        self.assertEqual(self.bins(atomic.INDELS), ["NRG_2_fakechr1/NRG_fakechr1_1.bin",
+                                                    "NRG_2_fakechr2/NRG_fakechr2_1.bin"])
+        self.assertIn(f"Variant index ready: {atomic.VAR} (+ _INDELS)", out)
+
+    def test_it_exits_0_where_such_a_contig_alone_has_indels(self):
+        # (no other chromosome makes the INDELS index's directory, and an index with no
+        # directory is taken for a failed build, where 2.8.0 exited 0)
+        for chrom in atomic.GENOME:
+            os.remove(self.path("Genomes", "hg38", f"{chrom}.fa"))
+            os.remove(self.path("VCFs", "ds", f"ds.{chrom}.vcf.gz"))
+        rc, out, err = self.build((UNPLACED,))
+        self.assertEqual((rc, err), (0, ""), out)
+        self.assertIn(LEFT_OUT.format(UNPLACED) + "\n", out)
+        self.assertEqual(os.listdir(self.lib(atomic.INDELS)), [])
+        self.assertIn(f"Variant index ready: {atomic.VAR} (+ _INDELS)", out)
+
+    def test_a_chromosome_without_its_bin_still_fails_it(self):
+        # with no such contig, beside one, and in a dataset whose name holds an underscore
+        for contigs, dataset in (((), "ds"), ((UNPLACED,), "ds"), ((UNPLACED,), "hg38_ds")):
+            with self.subTest(contigs=contigs, dataset=dataset):
+                self.fresh()
+                rc, out, err = self.build(contigs, dataset, STUB_NO_BIN="NRG_2_fakechr2 fakechr2.fa")
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("wrote no .bin for fakechr2 (", err)
+                self.assertFalse(os.path.exists(self.lib(f"NRG_2_hg38+{dataset}_INDELS")))
 
 
 class TheRecordsName(unittest.TestCase):

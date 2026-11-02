@@ -155,6 +155,26 @@ def _record_no_targets(chrom, fake_dir):
     return 0
 
 
+def _contigs_left_out():
+    """The contigs with indels that get no sub-index: those with an underscore in their
+    name. The chromosome the loop below takes from such a directory is what follows its
+    last underscore, a fake-indel genome that is not there: index-genome says so, on the
+    stdout it sends away, and exits 0, on every release. build-index-only expects no
+    sub-index of them, and a search with bulges requires none. A header-only genome
+    (no indels) is not left out of anything."""
+    prefix = f"fake_{vcf_name}_"
+    contigs = []
+    for f in sorted(os.listdir(indels_folder)):
+        if f.startswith(prefix) and "_" in f[len(prefix):]:
+            try:
+                if _fake_genome_is_empty(os.path.join(indels_folder, f)):
+                    continue
+            except (OSError, UnicodeDecodeError):
+                pass
+            contigs.append(f[len(prefix):])
+    return contigs
+
+
 def index_indels(chrom):
     fake_dir = f"{indels_folder}/fake_{vcf_name}_{chrom}"
     if _fake_genome_is_empty(fake_dir):
@@ -174,6 +194,12 @@ chrs = []
 for f in os.listdir(indels_folder):
     if "chr" in f:
         chrs.append(f.split("_")[-1])
+
+left_out = _contigs_left_out()
+if left_out:
+    print(f"No INDELS sub-index for {', '.join(left_out)}: a contig with an underscore in its "
+          f"name gets none, so a search does not find the indel off-targets there that need a "
+          f"bulge", flush=True)
 
 # The PAM file index-genome builds with: the one given, but for a PAM-less variant
 # index that stands in for its PAM, a file of the PAM that index was built with
@@ -203,6 +229,11 @@ if own:
 try:
     with Pool(processes=int(ncpus)) as pool:
         statuses = pool.map(index_indels, chrs)
+    if left_out:
+        # (where those contigs alone have indels nothing has made the index's directory,
+        # and build-index-only would take it for a failed build)
+        os.makedirs(os.path.join("genome_library", f"{_index_pam(build_pam)}_{bMax}_{ref_name}"
+                                 f"+{vcf_name}_INDELS"), exist_ok=True)
 finally:
     if own_dir:
         shutil.rmtree(own_dir, ignore_errors=True)
