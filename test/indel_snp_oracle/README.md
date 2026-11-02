@@ -34,6 +34,7 @@ unphased one every allele the row names. The planted sites then pin who has whic
 | H | an unphased carrier homozygous for a SNP that spoils the target | S41 on the mismatch row, never the perfect one; S42 CFD 1 |
 | J | a carrier homozygous for the deletion and for the SNP the target needs | S43 CFD 1; joint frequency 2 / AN |
 | I | a long insertion holding a whole perfect target | S44 CFD 1 |
+| P | an insertion, and on S45's slot another insertion and a SNP at its POS and anchor | S45 (a phasing artefact) and S46 CFD 1 |
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid fake-indel
 genome column by column, without genotypes: on aa9c54b (the 2.8.1 release candidate)

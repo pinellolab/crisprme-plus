@@ -292,6 +292,16 @@ def generate(wd):
     var("I", "ins", i0 + 1, seq[i0], seq[i0] + "CAT" + G + "TGG" + "CAT", {"S44": "1|0"})
     expect["I"] = {"perfect": ["S44"]}
 
+    # P (+): an insertion restores a perfect target; on S45's slot 0 another insertion and a
+    # SNP share its POS and anchor: alternative alleles, so a phasing artefact, and S45
+    # stays on each window. S46 carries the first insertion alone.
+    p0 = 13600
+    put(p0, G[:10] + G[13:] + "TGG")
+    var("P", "ins", p0 + 10, G[9], G[9] + G[10:13], {"S45": "1|0", "S46": "0|1"})
+    var("P", "ins2", p0 + 10, G[9], G[9] + "AAA", {"S45": "1|0"})
+    var("P", "snp", p0 + 10, G[9], other(G[9]), {"S45": "1|0"})
+    expect["P"] = {"perfect": ["S45", "S46"]}
+
     # (No split multi-allelic SNP records here: CRISPRitz add-variants keeps only the
     # last of two records at one position in the enriched genome and the dictionary,
     # so the other alt is invisible to every stage. PostProcess/
@@ -373,10 +383,12 @@ class Truth(object):
     def phased(self, sample):
         return all(p for _v, _t, p in self.gts.get(sample, ()))
 
-    def haplotype(self, sample, h):
-        """(sequence, reference 0-based position of each base, None for inserted)."""
+    def haplotype(self, sample, h, first=()):
+        """(sequence, reference 0-based position of each base, None for inserted). Of two
+        records at one position on a slot (a phasing artefact) the first applies, those
+        in ``first`` before any other."""
         vs = sorted((v for v, toks, _p in self.gts.get(sample, ()) if toks[h] == "1"),
-                    key=lambda v: v["pos1"])
+                    key=lambda v: (v["pos1"], (v["pos1"], v["ref"], v["alt"]) not in first))
         out, pos, i = [], [], 0
         for v in vs:
             p0 = v["pos1"] - 1
@@ -398,13 +410,13 @@ class Truth(object):
         pos.extend(range(i, len(self.ref)))
         return "".join(out), pos
 
-    def occurrences(self, sample, seq, strand, start, slack=40):
+    def occurrences(self, sample, seq, strand, start, slack=40, first=()):
         """(slot, reference position of each base) of every occurrence of ``seq``
         (strand-oriented) on the sample's haplotypes, its leftmost base within ``slack``
         bp of the reference coordinate ``start``."""
         out = []
         for h in (0, 1):
-            hap, pos = self.haplotype(sample, h)
+            hap, pos = self.haplotype(sample, h, first)
             probe = seq if strand == "+" else rc(seq)
             k = hap.find(probe)
             while k >= 0:
@@ -417,9 +429,9 @@ class Truth(object):
                 k = hap.find(probe, k + 1)
         return out
 
-    def carries_at(self, sample, seq, strand, start, slack=40):
+    def carries_at(self, sample, seq, strand, start, slack=40, first=()):
         """True iff one haplotype of the sample holds ``seq`` near ``start``."""
-        return bool(self.occurrences(sample, seq, strand, start, slack))
+        return bool(self.occurrences(sample, seq, strand, start, slack, first))
 
     def on_slot(self, sample, h, pos1, ref, alt):
         """True iff the sample's slot ``h`` holds the variant."""
@@ -432,7 +444,7 @@ class Truth(object):
         """True iff the sample has ``seq`` near ``start`` on a slot holding every named
         variant, the occurrence spanning each named indel: an inserted base (no reference
         position) or a jump across the deleted bases."""
-        for h, seg in self.occurrences(sample, seq, strand, start):
+        for h, seg in self.occurrences(sample, seq, strand, start, first=tokens):
             ok = True
             for pos1, ref, alt in tokens:
                 if not self.on_slot(sample, h, pos1, ref, alt):
@@ -584,7 +596,8 @@ def check(wd, pp, result_dirs):
                     fail("%s: %s is not a record of the VCF" % (where, "_".join(map(str, n))))
             for s in samples:
                 if truth.phased(s):
-                    if not truth.carries_at(s, stripped.upper(), f["strand"], f["start"]):
+                    if not truth.carries_at(s, stripped.upper(), f["strand"], f["start"],
+                                            first=named):
                         fail("%s: %s is listed but no haplotype of it has the sequence"
                              % (where, s))
                     elif not truth.holds_all(s, stripped.upper(), f["strand"], f["start"], named):

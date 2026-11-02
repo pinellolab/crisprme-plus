@@ -18,11 +18,11 @@ on them and its rows checked:
     and in trans, a chimera only another sample's SNP would complete, a cis spacer
     SNP, an unphased carrier, a minus-strand PAM SNP and a minus-strand spacer SNP, a
     second variant on the same slot: an indel inside the target, inserted next to the
-    indel's anchor or overlapping the indel (one complex allele), a SNP on the indel's
-    anchor; and one that changes nothing: a SNP or a nested indel on bases the indel
-    deletes, another allele at the indel's own POS, a SNP on an anchor the target does
-    not hold; several SNP alts on one VCF line; a target that lies wholly in a flank of
-    the window and holds no base of the indel);
+    indel's anchor or overlapping the indel (one complex allele), a SNP on a base a
+    record keeps past its POS; and one that changes nothing: a SNP or a nested indel on
+    bases the indel deletes, another allele (an indel or a SNP) at the indel's own POS, a
+    SNP on a kept base the target does not hold; several SNP alts on one VCF line; a
+    target that lies wholly in a flank of the window and holds no base of the indel);
   * the SNP+indel co-occurrence companion names the SNPs a row requires, CONFIRMED
     or PUTATIVE, PAM-window SNPs included, its joint frequency counting haplotype
     copies;
@@ -179,13 +179,23 @@ class World(object):
         self._put(q0, g + "T" * 30)
         self._indel("Q", q0 + 20, g[19], g[19] + "TGG", {"S07": "0|1", "S10": "0/1", "S12": "0|1"})
         self._indel("Q2", q0 + 17, g[16:20], g[16], {"S10": "0/1", "S12": "0|1"})
-        # R (+): the same insertion, with a C>T SNP on its own anchor base, in cis in S05
-        # and in trans in S06. The overlay leaves the anchor alone, so the window shows
-        # the reference base there: S05's slot does not have the window's sequence.
+        # R (+): the same insertion, with a C>T SNP at its own POS, on one slot in S05 and
+        # on the other in S06: two records at one POS are alternative alleles of that base
+        # (a haplotype holding both would be one record, C>TTGG), so one slot phased with
+        # both is a phasing artefact, and both samples stay listed.
         r0 = 1630
         self._put(r0, g + "T" * 30)
         self._indel("R", r0 + 20, g[19], g[19] + "TGG", {"S05": "1|0", "S06": "1|0"})
         self._snp("R", r0 + 20, g[19], "T", {"S05": "1|0", "S06": "0|1"})
+        # RK (+): a record left unnormalized, GCA>GC, keeps two bases; a C>T SNP on the second
+        # is in cis in S05, in trans in S06, unphased in S07. The overlay leaves the ALT
+        # alone, so the window shows the reference base there: S05's slot does not have
+        # the window's sequence, and an unphased carrier stays.
+        rk = 4200
+        self._put(rk, g + "A" + "TGG" + "T" * 20)
+        self._indel("RK", rk + 19, g[18:20] + "A", g[18:20],
+                    {"S05": "1|0", "S06": "1|0", "S07": "1|0"})
+        self._snp("RK", rk + 20, g[19], "T", {"S05": "1|0", "S06": "0|1", "S07": "0/1"})
         # S (+): a deletion restores a perfect target; S03's slot also holds a SNP on a
         # base it deletes, which is not in the window's sequence: S03 stays listed.
         s0 = 1720
@@ -256,19 +266,21 @@ class World(object):
         self._put(h0, g[:10] + "C" + g[10:] + "TGG")
         self._indel("HH", h0 + 10, g[9] + "C", g[9], {"S22": "0/1", "S23": "0/1"})
         self._snp("HH", h0 + 4, g[3], "T", {"S22": "1/1"})
-        # AA (+): a spacer SNP in cis, and on the anchor an unphased SNP: one allele per
-        # haplotype, so it does not take S24 off a slot, which stays exact (CONFIRMED).
+        # AA (+): a spacer SNP in cis, and on the second base a record keeps (CTG>CT) an
+        # unphased SNP: one allele per haplotype, so it does not take S24 off a slot, which
+        # stays exact (CONFIRMED).
         a2 = 3400
         self._put(a2, g[:3] + "C" + g[4:10] + "G" + g[10:] + "TGG")
-        self._indel("AA", a2 + 10, g[9] + "G", g[9], {"S24": "1|0"})
+        self._indel("AA", a2 + 9, g[8:10] + "G", g[8:10], {"S24": "1|0"})
         self._snp("AA", a2 + 4, "C", "G", {"S24": "1|0"})
         self._snp("AA", a2 + 10, g[9], "C", {"S24": "0/1"})
-        # A3 (+): a target starting at the first inserted base; S25's slot also holds a
-        # SNP on the anchor, which the target does not hold: S25 stays listed.
+        # A3 (+): an insertion after two kept bases (TC>TC...), a target starting at the first
+        # inserted base; S25's slot also holds a SNP on the second kept base, which the
+        # target does not hold: S25 stays listed.
         a3 = 3600
-        self._put(a3, "T" + g[12:] + "TGG" + "A" * 20)
-        self._indel("A3", a3 + 1, "T", "T" + g[:12], {"S25": "1|0", "S26": "1|0"})
-        self._snp("A3", a3 + 1, "T", "C", {"S25": "1|0"})
+        self._put(a3, "TC" + g[12:] + "TGG" + "A" * 20)
+        self._indel("A3", a3 + 1, "TC", "TC" + g[:12], {"S25": "1|0", "S26": "1|0"})
+        self._snp("A3", a3 + 2, "C", "A", {"S25": "1|0"})
         # B2 (+): a code column neither of whose alleles is the guide's: an unphased
         # carrier gets the allele with the higher CFD, not simply the reference base.
         b2 = 3800
@@ -569,11 +581,11 @@ class FullTiers(_Base):
         fx = self.run_analyzer()
         rows = fx.rows()
         self.assertTrue(rows)
-        # S16 holds two alleles at one POS on a slot, S25 an insertion and a SNP on its
-        # anchor: the fixture's haplotypes apply the first variant of a position only.
-        # (S22, S27 and S29 are unphased or unresolved: their rows are pinned below.)
+        # S16 holds two alleles at one POS on a slot: the fixture's haplotypes apply the first
+        # variant of a position only. (S07, S22, S27 and S29 are unphased or unresolved at
+        # some site: their rows are pinned below.)
         self.assert_on_carrier_haplotypes(
-            rows, putative_ok=("S10", "S11", "S16", "S22", "S25", "S27", "S29"))
+            rows, putative_ok=("S07", "S10", "S11", "S16", "S22", "S27", "S29"))
         site = self.by_site(rows)
         g = GUIDE
         best = lambda rs: max(rs, key=lambda r: r["cfd"])  # noqa: E731
@@ -616,8 +628,12 @@ class FullTiers(_Base):
         self.assertEqual([(r["dna"], r["samples"]) for r in site["Q"]],
                          [(g + "TGG", "S07,S10")])
         self.assertFalse([r for r in site.get("Q2", ()) if "S12" in r["samples"].split(",")])
-        # R: a SNP on the indel's own anchor, on the same slot in S05: S06 only
-        self.assertEqual([(r["dna"], r["samples"]) for r in site["R"]], [(g + "TGG", "S06")])
+        # R: a SNP at the indel's own POS is another allele: S05 stays, on the same slot
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["R"]],
+                         [(g + "TGG", "S05,S06")])
+        # RK: a SNP on a base the record keeps past its POS, on the same slot in S05: off
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["RK"]],
+                         [(g + "TGG", "S06,S07")])
         # S: a SNP on a base the deletion removes changes nothing: S03 stays
         self.assertEqual([(r["dna"], r["samples"]) for r in site["S"]], [(g + "TGG", "S03")])
         # T: the nested deletion is inside what the outer one removes: S04 stays there,
@@ -699,7 +715,7 @@ class FullTiers(_Base):
             ("2613", "2619", "rs_X_snp", "CONFIRMED", "1", "S17"),
             ("2810", "2806", "rs_Y_snp", "CONFIRMED", "1", "S20"),
             ("3010", "3004", "rs_Z_snp", "CONFIRMED", "1", "S21"),
-            ("3410", "3404", "rs_AA_snp", "CONFIRMED", "1", "S24"),  # its anchor SNP is /
+            ("3409", "3404", "rs_AA_snp", "CONFIRMED", "1", "S24"),  # its kept-base SNP is /
             ("4010", "4004", ".", "PUTATIVE", "1", "S29"),  # the code without a record
         ]))
         # the joint frequency counts cis copies: 1|1 is two, on the panel's alleles
