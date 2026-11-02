@@ -8,7 +8,9 @@ name: web e2e (playwright)
 #
 # Runs on web-affecting changes (and on demand), on PostProcess/, which the pages
 # import and whose test modules the steps below run, and on the other files the pages
-# import or its tests read. It builds the image from source
+# import or the tests only this job runs read. The docs and scripts that the in-image
+# step reads through test_complete_search_flags's scans are not listed: a change to
+# one starts unit-tests, which runs the same scans. It builds the image from source
 # because the app requires the PR's Dash-2.x code AND a Dash-2.x runtime — the
 # released bioconda image still ships Dash 1.x, so overlaying code onto it would
 # not exercise the migration.

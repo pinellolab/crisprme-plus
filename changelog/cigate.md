@@ -40,7 +40,7 @@ entry, whose "their variables go" then becomes "its variable goes".
 ### Changed
 - **The documented self-test now runs every benchmark, and it ends `6 passed, 0 failed, 0 skipped`.**
   **Affected:** anyone who runs `complete-test`'s benchmark mode and `validate-test`, as README
-  §1.2, §1.3, §2.2.2 and §3.2.1, `docs/DOCKER_QUICKSTART.md`, both commands' `--help`, the
+  §1.2, §1.3, §2.2.2, §2.2.3 and §3.2.1, `docs/DOCKER_QUICKSTART.md`, both commands' `--help`, the
   installer's last line and `validate-benchmarks.yml` give them. All of these set
   `CRISPRME_SKIP_HEAVY=1`, on the claim that the bulge-2 index builds need more than 16 GB of RAM,
   so each left out 2 of its 4 benchmarks. That claim was wrong: the run peaks at 3.66 GB of RAM,
@@ -69,13 +69,16 @@ entry, whose "their variables go" then becomes "its variable goes".
   the impg truth tests, the flag-gate behaviour tests, the `post_process.sh` test, whose own step in
   the light job tested nothing, and `test_index_resolution` (368 tests, about 100 s). It fails on any
   skip but the two the image cannot help. `validate-benchmarks.yml`'s smoke step runs the real
-  Hugging Face download test, which no job ran. The path filters of `unit-tests` and `web-e2e` list
-  every file their tests read, as found by replaying each step with every file read logged: a pull
-  request that changed only `pages/`, `scripts/`, `docs/`, the README, `test/benchmark/`,
-  `test/data/`, `assets/`, or a script outside `PostProcess/` such as one in `seq_script/`, did not
-  start `unit-tests`, and one that changed only `PostProcess/`, `seq_script/`, `PAMs/` or
-  `download_hprc_assembly.py` did not start `web-e2e`. Covered by `PostProcess/test_ci_workflows.py`,
-  which `unit-tests.yml` runs.
+  Hugging Face download test, which no job ran. The path filters of `unit-tests` and `web-e2e` now
+  start, on a change to any file one of their tests reads, a job that runs that test, as found by
+  replaying each step with every file read logged: `unit-tests` lists every file its tests read,
+  and `web-e2e` every file read by the tests only it runs (the docs and scripts its in-image step
+  reads through `test_complete_search_flags`'s scans start `unit-tests`, which runs the same
+  scans). Before, a pull request that changed only `pages/`, `scripts/`, `docs/`, the README,
+  `test/benchmark/`, `test/data/`, `assets/`, or a script outside `PostProcess/` such as one in
+  `seq_script/`, did not start `unit-tests`, and one that changed only `PostProcess/`,
+  `seq_script/`, `PAMs/` or `download_hprc_assembly.py` did not start `web-e2e`. Covered by
+  `PostProcess/test_ci_workflows.py`, which `unit-tests.yml` runs.
 - **`docs/RELEASE_CHECKLIST.md` Gate B gives the local gate** (maintainers): the exact commands that
   leave nothing skipped, on the release image, amd64 and arm64, with the three skips it allows
   named. The six function-based test modules run as scripts there, since `python -m unittest` alone

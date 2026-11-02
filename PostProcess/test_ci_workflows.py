@@ -146,6 +146,20 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
         self.assertIn("PostProcess/complete_test.py", scanned)
         self.assertEqual([p for p in scanned if not listed(p, paths)], [])
 
+    def test_unit_tests_runs_the_scans_whose_reads_web_e2e_does_not_list(self):
+        # web-e2e's in-image step runs test_complete_search_flags too, and a replay of it read
+        # 69 files no web-e2e filter matches, the README, METHODS, docs/ and scripts, all
+        # through these scans. A change to one does not start web-e2e, so unit-tests, which
+        # lists them, must run the scans, not skip them, or no job would check the change
+        import test_complete_search_flags as flag_gate
+        steps = "\n".join(ln for ln in workflow("unit-tests.yml").splitlines()
+                          if not ln.lstrip().startswith("#"))
+        self.assertRegex(steps, r"python -m unittest (?:[\w.]+\s+)*?test_complete_search_flags(?![\w.])")
+        for scan in ("TestCallersUseAcceptedFlags", "TestDocumentedCommandsPassTheFlagChecks",
+                     "TestNoDocumentedCommandIsABareCrisprme"):
+            with self.subTest(scan=scan):
+                self.assertFalse(getattr(getattr(flag_gate, scan), "__unittest_skip__", False))
+
     def test_web_e2e_runs_on_every_repository_module_the_pages_import(self):
         # the web unit tests and the browser tests load the pages, and so all they import
         paths = pull_request_paths("web-e2e.yml")
