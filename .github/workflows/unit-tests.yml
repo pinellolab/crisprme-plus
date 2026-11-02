@@ -126,6 +126,7 @@ jobs:
         run: python test_samplesid_overlisting.py
 
       - name: post_process.sh writes temps to output dir, not install dir
+        # Imports only here: its tests skip with no BEDOPS. web-e2e.yml runs them in the image.
         working-directory: PostProcess
         run: python -m unittest test_post_process_tempdir -v
 

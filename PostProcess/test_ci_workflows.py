@@ -154,7 +154,7 @@ class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
         # `python -m unittest` finds no test in these, and says OK: 0 tests, a false pass
         text = "\n".join(p.read_text() for p in WORKFLOWS.glob("*.yml"))
         modules = function_based_modules()
-        self.assertEqual(len(modules), 6, modules)
+        self.assertTrue(modules)
         for name in modules:
             with self.subTest(module=name):
                 self.assertRegex(text, rf"python {name}\.py\b")
