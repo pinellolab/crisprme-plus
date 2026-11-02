@@ -601,6 +601,22 @@ class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
                 "myasm", self.genomes, source="url", url="http://x/asm.tar.gz")
         self.assertEqual(sorted(os.listdir(dest)), ["chr1.fa", "chr2.fa"])
 
+    def test_an_archive_goes_in_as_the_settings_guide_says(self):
+        # docs/SETTINGS_DATA_MANAGER.md, Direct URL: each header written as >id; unlike an
+        # upload, a .fasta file that needs nothing stays so, and a hidden file goes in
+        # (the guide said once it was laid out as an upload is; change both together)
+        members = [self._file("asm/chr1.fasta"), self._file("asm/._chr2.fa", b"\0\5\26\7"),
+                   self._file("asm/chr2.fa", b">chr2\nGG\n"),
+                   self._file("asm/chr3.fa", b">chr3 3\nCC\n"),
+                   self._file("asm/hg38_chr4.fa", b">chr4\nTT\n")]
+        with mock.patch.object(utils, "download", self._fake_download(members)):
+            dest = utils.download_reference_genome(
+                "uasm", self.genomes, source="url", url="http://x/asm.tar.gz")
+        self.assertEqual(sorted(os.listdir(dest)),
+                         ["._chr2.fa", "chr1.fasta", "chr2.fa", "chr3.fa", "chr4.fa"])
+        self.assertEqual(_read(os.path.join(dest, "chr3.fa")), ">chr3\nCC\n")
+        self.assertEqual(_read(os.path.join(dest, "chr4.fa")), ">chr4\nTT\n")
+
 
 class TestValidator(unittest.TestCase):
     def setUp(self):

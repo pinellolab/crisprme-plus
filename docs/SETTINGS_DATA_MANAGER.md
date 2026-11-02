@@ -23,11 +23,17 @@ Type an assembly name and pick a source:
   single multi-FASTA) automatically: a single multi-FASTA download is split into one
   file per sequence, which is the layout every search requires.
 - **HuggingFace** — pulls a genome we host on the CRISPRme data repo.
-- **Direct URL** — any `.fa.gz` / `.tar.gz` link. It is laid out as an upload is, and
-  each header written as `>id` (below). Like an upload, it is refused while indexes or
-  variant genomes built on a genome of that name are installed, and the page says so
-  before anything is fetched: the link can hold another genome than the one they were
-  built from. Download it under another name, or remove them first.
+- **Direct URL** — any `.fa.gz` / `.tar.gz` link. Its FASTA files go to the top of the
+  genome folder, a FASTA of several sequences is split into one file per sequence, one of
+  one sequence is named after it, and each header is written as `>id` (as for an upload,
+  below). Unlike an upload, a `.fasta` file that needs none of this stays a `.fasta` file,
+  which no index or search reads, and the hidden files of an archive go in too (the
+  `._chr1.fa` that macOS `tar` adds beside `chr1.fa`, with which a command-line search
+  stops): rename or remove them in the genome folder, or upload the archive instead.
+  Like an upload, it is refused while indexes or variant genomes built on a genome of that
+  name are installed, and the page says so before anything is fetched: the link can hold
+  another genome than the one they were built from. Download it under another name, or
+  remove them first.
 - **Upload** — pick a local genome file (`.fa`, `.fa.gz` or `.tar.gz`); it is sent
   in chunks, so there is no browser size limit. It is laid out as every search needs
   it: every FASTA of an archive goes to the top of the genome folder (a UCSC
