@@ -22,8 +22,9 @@ on:
       # (test_hf_sha256sums, generate_cfd_tables.py --check, test_check_alt_pam's release
       # gate), PAMs/ (test_index_resolution),
       # test/benchmark/ (test_validate_test, test_complete_test, test_ci_workflows), and the
-      # docs that test_complete_search_flags, test_install_from_source, test_hf_sha256sums and
-      # test_ci_workflows scan.
+      # docs that test_complete_search_flags, test_install_from_source, test_hf_sha256sums,
+      # test_ci_workflows and test_markdown_wrap scan, the last with the changelog fragments of
+      # a release in the making (changelog/*.md, merged into CHANGELOG.md at its release).
       - "pages/**"
       - "scripts/**"
       - "PAMs/**"
@@ -32,6 +33,7 @@ on:
       - "README.md"
       - "METHODS.md"
       - "CHANGELOG.md"
+      - "changelog/**"
       # app.py sizes the search pool from app_settings at import time and index.py
       # imports it; test_app_settings guards that, so a PR touching only these two
       # must still run it.

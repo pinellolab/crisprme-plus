@@ -103,8 +103,9 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
     def test_unit_tests_runs_on_what_its_tests_read(self):
         paths = pull_request_paths("unit-tests.yml")
         for path in ("pages/**", "scripts/**", "docs/**", "README.md", "METHODS.md",
-                     "test/benchmark/**", "PAMs/**", "CHANGELOG.md", ".github/workflows/**",
-                     "assets/**", "test/data/**", "**.py", "**.sh", "**.yml", "**.yaml"):
+                     "test/benchmark/**", "PAMs/**", "CHANGELOG.md", "changelog/**",
+                     ".github/workflows/**", "assets/**", "test/data/**", "**.py", "**.sh",
+                     "**.yml", "**.yaml"):
             with self.subTest(path=path):
                 self.assertIn(path, paths)
 
