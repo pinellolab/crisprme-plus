@@ -7,9 +7,9 @@ offset coordinates: it searches any guide it is given, and past what the tree st
 reports wrong alignments or loses targets, at exit 0.
 
 The rule, measured through the real CLI against an index dedicated to the guide (246 cells
-of built length, N, guide length and bulges, dedicated, all-N and all-N under --prune-pam;
-submit_job_automated_new_multiple_vcfs.sh _index_fits_guide says the same, and the two must
-not disagree):
+of built length, N, guide length and bulges, dedicated, all-N and all-N under --prune-pam,
+and 70 more of variant searches and a 5' PAM; submit_job_automated_new_multiple_vcfs.sh
+_index_fits_guide says the same, and the two must not disagree):
 
     built + N >= guide + bDNA + (1 if bRNA else 0)
 

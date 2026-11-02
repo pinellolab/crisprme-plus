@@ -822,6 +822,13 @@ class TestGenerateReport(unittest.TestCase):
         base = {"datasets": "1000G+HGDP", "mm": "6", "bdna": 2, "brna": 2,
                 "max_edits": "4", "search_mode": "population-level"}
         # slim (not bundled): no false "bundled as" claim
+        # a population-level run of an index with no registry has no co-occurrence table
+        html_noreg = gr.render_inputs_criteria({**base, "search_mode": "population-level"})
+        self.assertIn("no SNP+indel co-occurrence table is written", html_noreg)
+        self.assertNotIn("co-occurrence is unaffected", html_noreg)
+        html_reg = gr.render_inputs_criteria({**base, "search_mode": "population-level"},
+                                             variant_count={"n_records": 1, "databases": {}})
+        self.assertIn("SNP+indel co-occurrence is unaffected by the analysis mode", html_reg)
         html_slim = gr.render_inputs_criteria({**base})
         self.assertIn("written to <code>variant_created.tsv</code> in the result", html_slim)
         self.assertIn("--report-full", html_slim)

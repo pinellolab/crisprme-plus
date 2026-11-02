@@ -1650,7 +1650,11 @@ def render_inputs_criteria(meta, variant_created_name=None, dataset_counts=None,
             "with <code>--per-sample</code> for that per-sample resolution on a genotyped panel "
             "(recommended for clinical validation). For sites-only (aggregate) panels there are no "
             "per-sample genotypes, so this loses nothing (<code>--per-sample</code> is a no-op "
-            "there). SNP+indel co-occurrence is unaffected by the analysis mode."
+            "there). " + (
+                "SNP+indel co-occurrence is unaffected by the analysis mode." if variant_count else
+                "An off-target that needs an indel and a SNP beside it is reported in either mode, "
+                "but this index has no Tier-0 registry, so no SNP+indel co-occurrence table is "
+                "written.")
         )
     rows = [
         ("Variant database(s)", _esc(ds)),

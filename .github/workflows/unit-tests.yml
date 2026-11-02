@@ -337,6 +337,10 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_index_fit -v
 
+      - name: "A search's own enrichment (SNP overlay of the fake-indel genome + phased indel genotype store)"
+        working-directory: PostProcess
+        run: python -m unittest test_search_indel_snp -v
+
       - name: "Indel report integrity (header injection) + complete-search flag gate + index resolution"
         # The header-injection guards: a dropped CRISPRitz header made
         # post_analisi_indel.sh prepend the merged file's first DATA row to every

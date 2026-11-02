@@ -995,6 +995,12 @@ while read vcf_f; do
 		exit 1
 	}
 
+	# 0 with the SNP+indel co-occurrence on, as crisprme.py and overlay_indel_snps.py read it.
+	_indel_snp_on() {
+		case "${CRISPRME_INDEL_SNP-1}" in 1 | true | True | yes) return 0 ;; esac
+		return 1
+	}
+
 	# Count DATA rows in a CRISPRitz targets file: every line that is not the header.
 	# These files carry a '#'-prefixed header and pam_filter preserves it, so a plain
 	# `-s` or `wc -l` test reads an EMPTY result as one hit. That used to be
@@ -1078,6 +1084,7 @@ while read vcf_f; do
 	# post-analysis derives the registry/genotype sibling paths from the dict_folder
 	# stem, so dict_folder may point at a dictionaries_<vcf>/ that does not exist.
 	precomputed_variant=0
+	_fake_coded=  # 1 once this run has put the SNP codes on the dataset's fake-indel genome
 	if [ "$vcf_name" != "_" ]; then
 		# A PAM-less index of any width counts here -- see _resolve_index_dir.
 		if [ -n "$(_resolve_index_dir "$current_working_directory/genome_library" "$true_pam" "${ref_name}+${vcf_name}" "$bMax")" ] \
@@ -1127,6 +1134,20 @@ while read vcf_f; do
 			# fixed-name variants_genome/ output does not collide with concurrent runs)
 			cd "$_run_tmp"
 			crispritz.py add-variants "$vcf_folder/" "$ref_folder/" "true"
+			# [indel-snp] The SNP codes go onto the fake-indel genome before any of it is in
+			# place, and the phased indel genotype store is written, as build-index-only
+			# does: without them the INDELS index this run builds is blind to a SNP beside an
+			# indel, and every later run keeps it.
+			if _indel_snp_on && ! [ -s "$logerror" ] && [ -d "$variants_tmp" ]; then
+				python "$starting_dir/search_indel_snp.py" overlay "$variants_tmp" \
+					"$variants_tmp/SNPs_genome/${ref_name}_enriched" "$variants_tmp/SNPs_genome"
+				_fake_coded=1
+				if ! [ -s "$logerror" ]; then
+					python "$starting_dir/search_indel_snp.py" store "$vcf_folder" \
+						"$current_working_directory/Dictionaries/indel_genotypes_${vcf_name}" \
+						"$_run_tmp/indel_genotypes" "$ncpus"
+				fi
+			fi
 			# Taken over meanwhile, the lock is another run's, and so is what it guards:
 			# move nothing into place, and remove only this run's own scratch (_lock_lost).
 			if _lock_lost "$_lock"; then
@@ -1372,14 +1393,24 @@ while read vcf_f; do
 			_lock_take "$_lock" "indexing $indels_index_dir" "$indels_index_dir"
 			if [ $? != 1 ]; then
 				echo -e 'Indexing Indels\tStart\t'$(date) >>"$log"
-				"$starting_dir/pool_index_indels.py" \
-					"$indels_out/" \
-					"$pam_file" \
-					"$idx_pam" \
-					"$ref_name" \
-					"$vcf_name" \
-					"$idx_n" \
-					"$ncpus"
+				# [indel-snp] An enrichment this run did not make may lack the SNP codes: one a
+				# search made before 2.8.1, or one that came another way. An index built from
+				# it would be blind to a SNP beside an indel, and every later run would keep it.
+				if _indel_snp_on && [ -z "$_fake_coded" ]; then
+					python "$starting_dir/search_indel_snp.py" overlay "$indels_out" \
+						"$current_working_directory/Genomes/${ref_name}+${vcf_name}" \
+						"$current_working_directory/Dictionaries/log_indels_${vcf_name}"
+				fi
+				if ! [ -s "$logerror" ]; then
+					"$starting_dir/pool_index_indels.py" \
+						"$indels_out/" \
+						"$pam_file" \
+						"$idx_pam" \
+						"$ref_name" \
+						"$vcf_name" \
+						"$idx_n" \
+						"$ncpus"
+				fi
 				_lock_lost "$_lock" && exit 1  # taken over meanwhile, as for the reference
 
 				if [ -s "$logerror" ]; then

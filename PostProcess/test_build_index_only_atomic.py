@@ -1859,6 +1859,56 @@ class TheFakeIndelGenomeGoesIntoPlaceWithItsSNPCodes(_Fixture):
         ])
         self.assertEqual(tree(self.lib(INDELS)), clean[0])
 
+    def test_indels_indexes_a_search_built_blind_are_removed_and_this_one_built_again(self):
+        """A search before 2.8.1 enriched a dataset with no SNP codes, built an INDELS index
+        from it, and every later run kept that index, this command too ("already present",
+        with nothing coded). This command now codes that genome whenever it finds it in
+        place, and an INDELS index built before the codes goes, of any budget, for a search
+        to rebuild."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        clean = tree(self.lib(INDELS)), tree(self.path("Genomes", "hg38+ds_INDELS"))
+        self.fresh()
+        self.kit()
+        self.search_builds_the_indels_index()
+        other = self.lib("NRG_1_hg38+ds_INDELS")
+        os.makedirs(other)
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertIn(f"Removing {self.lib(INDELS)}: it was built from the fake-indel genome",
+                      out)
+        self.assertIn(f"Removing {other}: it was built from the fake-indel genome before its "
+                      "SNP codes", out)
+        self.assertFalse(os.path.exists(other))
+        self.assertEqual(tree(self.lib(INDELS)), clean[0])
+        self.assertEqual(tree(self.path("Genomes", "hg38+ds_INDELS")), clean[1])
+        self.assertEqual(self.leftovers(), [])
+
+    def test_one_carrying_its_codes_leaves_every_indels_index_in_place(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        other = self.lib("NRG_1_hg38+ds_INDELS")
+        os.makedirs(other)
+        before = tree(self.lib(INDELS))
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn("Removing ", out)
+        self.assertTrue(os.path.isdir(other))
+        self.assertEqual(tree(self.lib(INDELS)), before)
+
+    def test_a_locked_indels_index_is_left_to_the_run_that_builds_it(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.fresh()
+        self.kit()
+        other = self.lib("NRG_1_hg38+ds_INDELS")
+        os.makedirs(other)
+        os.makedirs(other + ".lock")
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn(f"Removing {other}", out)
+        self.assertTrue(os.path.isdir(other))
+
     def test_a_rerun_says_the_fake_indel_genome_already_carries_its_codes(self):
         """A re-run, after a kill while the variant index was built, overlays this
         release's own enrichment, coded before it went into place: no base changes,

@@ -56,3 +56,22 @@
   last 3 nt (2 rows against 35, and none at 0 bulges, at exit 0), under the full guide's name. The
   pre-flight now says which bases would go and what to do. Padding with extra `N`s drops nothing
   and stays accepted. CLI `--guide` only: the web form and `--sequence` never pass such a guide.
+- **A search that enriches a dataset itself no longer loses targets that need an indel and a SNP
+  beside it, and no longer keeps a blind INDELS index.** Only `build-index-only` put the SNP codes
+  on the fake-indel genome. A search that found the dataset's VCFs and no index for its PAM or
+  bulges (a download plus `--what vcf`, or a renamed genome folder), and the web's first 0-bulge
+  search of a dataset that has only its VCFs, enriched the genome without them, so a cis SNP+indel
+  site read 2 mismatches, CFD 0.096, listing a carrier that does not hold both, against 1 mismatch,
+  CFD 0.353 on a built index; the INDELS index stayed in the library, so every later run gave the
+  same, and `build-index-only` said "already present". Exit 0, no message. **Affected:** every such
+  search since 2.5.0. Now the search script overlays the codes before the fake-indel genome goes
+  into place, and again before it builds an INDELS index from one that is there, and writes the
+  phased indel genotype store where it enriches. Measured on the walk genome: the on-demand search
+  is byte-identical to a search of a built index, in all 41 result files. The first web search gets
+  the same row, carrier and scores (it needs the indel track's fix, in this release, to resolve the
+  codes without tiers); it has no registry, so its report says no co-occurrence table is written
+  rather than "unaffected", and the CLI warning says the same. **What to do:** an INDELS index built
+  by such a search stays blind until it is rebuilt. Run `build-index-only` with the dataset's VCFs and
+  your PAM: it now codes a fake-indel genome it finds without codes, removes the INDELS indexes of
+  every PAM and budget of that dataset built before the codes, says which, and builds its own (a
+  later search rebuilds the others).

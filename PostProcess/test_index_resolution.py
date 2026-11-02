@@ -29,6 +29,7 @@ placeholder, which it must leave alone too, and its samples-list blocks with a l
 the user's own that has the placeholder's name, which they must still read whole.
 """
 
+import gzip
 import os
 import re
 import shlex
@@ -795,6 +796,21 @@ fi
 # VCF folder $2 and reference folder $3 -- the enriched genome, its dictionaries and
 # indel logs, one fake-indel genome per chromosome. Otherwise it writes nothing, as
 # with no source VCFs installed.
+# STUB_ENRICH=snp: the same, for chromosome chr1 of 120 bases, as the enricher writes it: a
+# SNP as its IUPAC code at offset 10 of the enriched genome, and an insertion after offset
+# 25, cut out with its flanks as a fake contig, whose log row maps it back (what the SNP
+# overlay reads).
+if [ "$1" = add-variants ] && [ "$STUB_ENRICH" = snp ]; then
+	_ref=${3%/}; _ref=${_ref##*/}; _vcf=${2%/}; _vcf=${_vcf##*/}
+	_sn=variants_genome/SNPs_genome
+	mkdir -p "$_sn/${_ref}_enriched" "variants_genome/fake_${_vcf}_chr1"
+	_seq=ACGTTGCAAGACGTTGCAAGACGTTGCAAGACGTTGCAAGACGTTGCAAGACGTTGCAAG
+	printf '>chr1\n%sR%s\n' "${_seq:0:10}" "${_seq:11}" >"$_sn/${_ref}_enriched/chr1.enriched.fa"
+	printf '{}\n' >"$_sn/my_dict_chr1.json"
+	printf 'CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\nchr1_0-60_1\tS2\trs1\t0.25\tchr1_26_%s_%sT\t0,61\t%s\n' \
+		"${_seq:25:1}" "${_seq:25:1}" "$_seq" >"$_sn/logchr1.txt"
+	printf '>fakechr1\n%sT%s\n' "${_seq:0:26}" "${_seq:26}" >"variants_genome/fake_${_vcf}_chr1/fakechr1.fa"
+fi
 if [ "$1" = add-variants ] && [ "$STUB_ENRICH" = 1 ]; then
 	_ref=${3%/}; _ref=${_ref##*/}; _vcf=${2%/}; _vcf=${_vcf##*/}
 	mkdir -p "variants_genome/SNPs_genome/${_ref}_enriched" "variants_genome/fake_${_vcf}_chr1"
@@ -3511,6 +3527,132 @@ class ALibraryTheRunCannotWriteTo(_ShippedScript):
         self.assertNotIn("is not installed", run.stderr)
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
         self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+
+
+class TheSnpCodesOfASearchsOwnEnrichment(_ShippedScript):
+    """build-index-only puts the SNP codes on the fake-indel genome, and writes the phased
+    indel genotype store; a search that enriched a dataset itself, or built an INDELS index
+    from a fake-indel genome in place, did neither: it lost every target that needs an
+    indel and a SNP beside it, with no message, and every later run kept that index. The
+    overlay and the store are the real modules here, on what the stub writes."""
+
+    SEQ = "ACGTTGCAAG" * 6
+    PLAIN = f">fakechr1\n{SEQ[:26]}T{SEQ[26:]}\n"
+    CODED = f">fakechr1\n{SEQ[:10]}R{SEQ[11:26]}T{SEQ[26:]}\n"
+    LOG = ("CHR\tSAMPLES\trsID\tAF\tindel\tFAKEPOS\trefseq\n"
+           f"chr1_0-60_1\tS2\trs1\t0.25\tchr1_26_{SEQ[25]}_{SEQ[25]}T\t0,61\t{SEQ}\n")
+
+    def setUp(self):
+        super().setUp()
+        self.fake = (self.home / "Genomes" / f"hg38+{self.VCF}_INDELS" / f"fake_{self.VCF}_chr1"
+                     / "fakechr1.fa")
+        self.store = self.home / "Dictionaries" / f"indel_genotypes_{self.VCF}"
+
+    def vcfs(self):
+        folder = self.home / "VCFs" / self.VCF
+        folder.mkdir(parents=True)
+        with gzip.open(folder / "x.chr1.vcf.gz", "wt") as fh:
+            fh.write("##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\t"
+                     f"FORMAT\tS1\tS2\nchr1\t26\trs1\t{self.SEQ[25]}\t{self.SEQ[25]}T\t.\tPASS\t"
+                     "AF=0.25\tGT\t0|0\t1|0\n")
+
+    def enrichment_in_place(self, text):
+        """An enrichment that came another way: its fake-indel genome holds ``text``."""
+        enriched = self.home / "Genomes" / f"hg38+{self.VCF}"
+        enriched.mkdir(parents=True)
+        (enriched / "chr1.enriched.fa").write_text(f">chr1\n{self.SEQ[:10]}R{self.SEQ[11:]}\n")
+        (self.home / "Dictionaries" / f"dictionaries_{self.VCF}").mkdir()
+        (self.home / "Dictionaries" / f"log_indels_{self.VCF}" / "logchr1.txt").write_text(self.LOG)
+        self.fake.parent.mkdir(parents=True)
+        self.fake.write_text(text)
+
+    def indels_built(self, run):
+        return [c for c in run.builds if "_INDELS/" in c[1]]
+
+    def test_a_search_that_enriches_codes_the_fake_genome_before_it_goes_into_place(self):
+        self.install("NRG_2", variant=False)
+        self.vcfs()
+        shutil.rmtree(self.home / "Dictionaries" / f"log_indels_{self.VCF}")
+        run = self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
+        self.assertTrue(run.enriched)
+        self.assertEqual(self.fake.read_text().split("\n")[1], self.CODED.split("\n")[1],
+                         run.stdout + run.stderr)
+        self.assertIn("overlay_indel_snps: chr1 -> 1 SNP overlays", run.stdout)
+        self.assertEqual(len(self.indels_built(run)), 1, run.calls)
+
+    def test_and_writes_the_phased_indel_genotype_store(self):
+        self.install("NRG_2", variant=False)
+        self.vcfs()
+        self.assertFalse(self.store.exists())
+        run = self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
+        with gzip.open(self.store / "gt_indel_chr1.tsv.gz", "rt") as fh:
+            self.assertIn("S2", fh.read(), run.stdout + run.stderr)
+        self.assertTrue((self.store / "gt_indel_chr1.tsv.gz.done").exists())
+        self.assertEqual(sorted(p.name for p in (self.home / "Genomes").iterdir()),
+                         sorted(["hg38", f"hg38+{self.VCF}", f"hg38+{self.VCF}_INDELS"]))
+
+    def test_a_store_in_place_is_kept(self):
+        self.install("NRG_2", variant=False)
+        self.vcfs()
+        self.store.mkdir()
+        (self.store / "gt_indel_chr1.tsv.gz").write_bytes(gzip.compress(b"kept\n"))
+        self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
+        with gzip.open(self.store / "gt_indel_chr1.tsv.gz", "rt") as fh:
+            self.assertEqual(fh.read(), "kept\n")
+
+    def test_a_fake_genome_in_place_is_coded_before_its_index_is_built(self):
+        # one a search before 2.8.1 enriched, or that came another way
+        self.install("NRG_2")
+        shutil.rmtree(self.library / f"NRG_2_hg38+{self.VCF}_INDELS")
+        self.enrichment_in_place(self.PLAIN)
+        run = self.run_pipeline(env={"STUB_BUILD_WRITES": "1"})
+        self.assertEqual(self.fake.read_text().split("\n")[1], self.CODED.split("\n")[1],
+                         run.stdout + run.stderr)
+        self.assertEqual(len(self.indels_built(run)), 1, run.calls)
+
+    def test_a_failed_overlay_builds_no_index_from_that_genome(self):
+        # an index built after it would be blind where the overlay did not get to
+        self.install("NRG_2")
+        shutil.rmtree(self.library / f"NRG_2_hg38+{self.VCF}_INDELS")
+        self.enrichment_in_place(self.PLAIN)
+        tool = self.root / "postprocess"
+        shutil.copytree(_SCRIPT.parent, tool, ignore=shutil.ignore_patterns("__pycache__", "test_*"))
+        (tool / "search_indel_snp.py").write_text("import sys\nsys.exit('the overlay failed')\n")
+        run = self.run_pipeline(env={"STUB_BUILD_WRITES": "1"}, postprocess=tool)
+        self.assertIn("the overlay failed", run.stderr)
+        self.assertIn(f"ERROR: indels indexing failed on {self.VCF}", run.stderr)
+        self.assertEqual(self.indels_built(run), [])
+
+    def test_one_coded_already_is_left_as_it_is(self):
+        self.install("NRG_2")
+        shutil.rmtree(self.library / f"NRG_2_hg38+{self.VCF}_INDELS")
+        self.enrichment_in_place(self.CODED)
+        before = self.fake.stat().st_mtime_ns
+        run = self.run_pipeline(env={"STUB_BUILD_WRITES": "1"})
+        self.assertEqual(self.fake.stat().st_mtime_ns, before, run.stdout + run.stderr)
+
+    def test_an_index_in_place_is_used_and_the_genome_left_alone(self):
+        self.install("NRG_2")
+        self.enrichment_in_place(self.PLAIN)
+        run = self.run_pipeline()
+        self.assertEqual(run.indels, f"NRG_2_hg38+{self.VCF}_INDELS")
+        self.assertEqual(self.fake.read_text(), self.PLAIN)
+
+    def test_the_opt_out_leaves_all_of_it_as_it_was(self):
+        off = {"CRISPRME_INDEL_SNP": "0", "STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"}
+        self.install("NRG_2", variant=False)
+        self.vcfs()
+        shutil.rmtree(self.home / "Dictionaries" / f"log_indels_{self.VCF}")
+        self.run_pipeline(env=off)
+        self.assertEqual(self.fake.read_text().split("\n")[1], self.PLAIN.split("\n")[1])
+        self.assertFalse(self.store.exists())
+
+    def test_nothing_goes_to_stderr(self):
+        self.install("NRG_2", variant=False)
+        self.vcfs()
+        run = self.run_pipeline(env={"STUB_ENRICH": "snp", "STUB_BUILD_WRITES": "1"})
+        # (the stub stops the run at its variant search, which it reaches)
+        self.assertEqual(run.stderr.strip(), "ERROR: Off-targets search Variant failed")
 
 
 class AnIndexBuiltForAnotherGuideInTheScript(_ShippedScript):

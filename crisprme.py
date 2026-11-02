@@ -2720,10 +2720,12 @@ def complete_search() -> None:
                 print(
                     "WARNING [complete-search]: SNP+indel co-occurrence is ON but the "
                     "dict-less registry tier (registry_<vcf>/) is missing for: %s. This "
-                    "index has only the classic per-sample dict, so co-occurrence will NOT "
-                    "be reported (not an error -- the rest of the search runs normally). To "
-                    "enable it, download the index from HuggingFace or rebuild with "
-                    "build-index-only --samplesID." % ", ".join(_no_reg)
+                    "index has only the classic per-sample dict, so an off-target that needs "
+                    "an indel and a SNP beside it is reported, but the co-occurrence table "
+                    "(*.indel_snp_cooc.tsv) and its report section are NOT written (not an "
+                    "error -- the rest of the search runs normally). To enable them, download "
+                    "the index from HuggingFace or rebuild with build-index-only --samplesID."
+                    % ", ".join(_no_reg)
                 )
 
     if population_level and variant:
@@ -4158,6 +4160,23 @@ def build_index_only() -> None:
                           lambda tmp: os.rename(indels_idx, os.path.join(tmp, "removed")))
         _unmark_unfinished(indels_out)
         _overlaid.append((_said.getvalue(), _n, _coded[0]))
+        # Any other INDELS index of this dataset came from the FASTAs as they were, before
+        # these codes: a search before 2.8.1 built one from an enrichment of its own, with
+        # none, and every later run kept it. Gone, a later search rebuilds it from the
+        # FASTAs as they are now.
+        if _marked or _was_marked:
+            for _other in _glob(os.path.join(workdir, "genome_library",
+                                             f"*_{genome_ref}+{vcf_name}_INDELS")):
+                if (os.path.normpath(_other) != os.path.normpath(indels_idx)
+                        and not os.path.isdir(_other + ".lock")):
+                    print(
+                        f"Removing {_other}: it was built from the fake-indel genome before "
+                        f"its SNP codes, so it is blind to a SNP beside an indel. A search "
+                        f"that needs it builds it again.",
+                        flush=True,
+                    )
+                    _in_build_dir(os.path.join(workdir, "genome_library"), ".build-index-only-",
+                                  lambda tmp, _o=_other: os.rename(_o, os.path.join(tmp, "removed")))
 
     def _enriched_already():
         # an enriched genome is there for a finished enrichment, but for one this command
@@ -4329,12 +4348,10 @@ def build_index_only() -> None:
         # after the hours of the steps between, it stayed without them after a run
         # stopped in between, and a complete-search then built the INDELS index from it,
         # blind to the SNPs beside an indel, which every later run kept. So it is
-        # overlaid now, whenever its INDELS index is still to be built (and no search
-        # holds that index's lock, building it from this genome), or a run stopped while
-        # it overlaid it (its mark).
+        # overlaid now, unless a search holds its INDELS index's lock, building it from
+        # this genome: with that index in place too, as a search before 2.8.1 left one
+        # built from an enrichment of its own, which this removes (_overlay_in_place).
         if (_snp_overlay and not os.path.isdir(indels_idx + ".lock")
-                and (not os.path.isdir(indels_idx)
-                     or os.path.isdir(os.path.join(indels_out, ".building")))
                 and _indel_bases(indels_out)):
             _overlay_in_place()
     # STEP 1b (ADDITIVE): emit the dictless tiers (Tier-0 registry + Tier-1 genotype
