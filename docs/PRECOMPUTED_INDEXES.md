@@ -158,7 +158,7 @@ limits, [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering
 budget N cannot report a site whose guide lies within N − 1 nt of a contig start, a contig end
 or an `N` run, even a perfect match, which a search without bulges (a scan of the FASTA) does
 report; so an index of a larger budget is not a strict superset of a smaller one. For
-`NRG_3_hg38` that is 491 + strand and 504 − strand sites (1,050 NRG sites in all, 535 on primary
+`NRG_3_hg38` that is 546 + strand and 504 − strand sites (1,050 NRG sites in all, 535 on primary
 contigs), none within 4 mismatches of nine therapeutic guides checked: what matters is a guide
 whose own on-target sits at such a boundary, whose report then has no perfect match. A − strand
 PAM at a contig's first base is reported on the + strand (11 NGG and 37 NRG hg38 contigs), and a

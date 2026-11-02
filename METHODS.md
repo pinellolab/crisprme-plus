@@ -1081,7 +1081,7 @@ build drops a window that holds an `N` or runs past the contig's start, so it ca
 site whose guide lies within *N − 1* bases of a contig start, a contig end or an `N` run, even a
 perfect match; a search without bulges, which scans the FASTA, reports it. So an index of a
 larger budget is not a strict superset of a smaller one: a search that asks for more bulges can
-return fewer such sites. For `NRG_3_hg38` that is 491 + strand and 504 − strand PAM sites over
+return fewer such sites. For `NRG_3_hg38` that is 546 + strand and 504 − strand PAM sites over
 hg38's 1,580 stretches between `N` runs; of the 1,050 such NRG sites (535 on primary contigs),
 none lies within 4 mismatches of the nine guides checked (TRAC, `ACTGAAATCTGTAAGCAGGC`, BCL11A
 sg1617, EMX1, HBG1, CCR5, VEGFA site 3, FANCF and HEK4), and 9 of 20,000 random 20-mers have one
