@@ -38,7 +38,8 @@ on:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The hosted job took 523 s at 2.8.1's first release head, and the steps have grown since.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -351,6 +352,12 @@ jobs:
         # against test_build_index_only_atomic's stub engine.
         working-directory: PostProcess
         run: python -m unittest test_build_index_only_layout -v
+
+      - name: "CI runs what it says: the job limit, and the same again as the items below land"
+        # The workflows, read as text: a job that is cancelled, never starts, or skips what
+        # it is there to test passes for nothing.
+        working-directory: PostProcess
+        run: python -m unittest test_ci_workflows -v
 
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import
