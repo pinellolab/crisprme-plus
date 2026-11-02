@@ -360,6 +360,23 @@ class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
     def test_it_takes_the_commit_the_image_provisions(self):
         self.assertIn("print(scorer_env.CBULGE_PIN)", self.checklist())
 
+    def test_it_names_every_host_its_commands_reach(self):
+        # a maintainer who opens only the hosts it names must be able to pass it: without
+        # the Debian mirror step 2's locale tests skip, without PyPI step 5 has no playwright
+        text = self.checklist()
+        gate = text[text.index("#### The local gate"):text.index("**On an HPC node")]
+        needs = re.search(r"It needs Docker, git-lfs, and network to ([^.]+)\.", gate).group(1)
+        for command, host in (("IMG=pinellolab/crisprme:", "Docker Hub"),
+                              ("-e CRISPRME_RUN_HF_TESTS=1", "Hugging Face"),
+                              ("complete-test --chrom chr22 --vcf_dataset 1000G", "EBI"),
+                              ("git clone https://github.com/", "GitHub"),
+                              ("mcr.microsoft.com/", "MCR"),
+                              ("pip install", "PyPI"),
+                              ("apt-get install", "Debian package mirror")):
+            with self.subTest(host=host):
+                self.assertIn(command, gate)
+                self.assertIn(host, needs)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

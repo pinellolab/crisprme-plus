@@ -57,7 +57,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 
 #### The local gate: nothing stays skipped
 
-Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. It needs Docker, git-lfs, and network to Hugging Face, EBI, GitHub and MCR. 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them.
+Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. It needs Docker, git-lfs, and network to Docker Hub, Hugging Face, EBI, GitHub, MCR, PyPI (step 5) and the Debian package mirror (step 2). 4 CPUs and 16 GB are enough; it took 36 min on the Mac and 55 min on a busy amd64 node, step 4 being 24 and 34 of them.
 
 **Three skips are allowed, and only these**, each run elsewhere in the gate: `no TensorFlow here` (`test_crispr_bulge_fidelity`, the CRISPR-Bulge fidelity gate, runs in its own env in step 3), `en_US.UTF-8 is not installed` (`test_index_resolution`'s locale tests, step 2) and `no ps here to compare` (`test_index_resolution`, runs in the `unit-tests` job, whose runner has `ps`).
 
