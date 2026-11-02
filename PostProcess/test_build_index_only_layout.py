@@ -155,6 +155,40 @@ class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
         self.assert_refused(rc, out, err, f"sequence id {rid!r} holds '|', which the pipeline "
                             "cannot take", "Rename the sequence in the FASTA header")
 
+    def test_fasta_id_that_starts_with_a_dash_or_a_dot(self):
+        # the index was built, and a search ended with exit status 0 and none of the
+        # sequence's off-targets: the post-analysis grep took -x for an option, and the
+        # search script lists the chromosomes as the folder's *.fa, which leaves out
+        # .x.fa (finB round 3 review)
+        for rid in ("-x", ".x"):
+            with self.subTest(rid):
+                self.fresh()
+                with open(self.genome("chr1.fa")) as fh:
+                    seq = fh.read().split("\n", 1)[1]
+                os.remove(self.genome("chr1.fa"))
+                with open(self.genome(rid + ".fa"), "w") as fh:
+                    fh.write(f">{rid}\n{seq}")
+                says = (f"{rid}.fa: sequence id {rid!r} starts with {rid[0]!r}, which the "
+                        "pipeline cannot take")
+                rc, out, err = self.run_bio(vcf=False)
+                self.assert_refused(rc, out, err, says, "Rename the sequence in the FASTA header")
+                rc, out, err = self.run_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("[ERROR] " + says, err)
+                self.assertNotIn("Launching job ", out)
+                rc, out, err = self.run_web_search()
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn("ERROR: " + says, err)
+                self.assertEqual(self.calls(), [])  # the engine never ran
+                # renamed, the folder builds
+                os.remove(self.genome(rid + ".fa"))
+                with open(self.genome("x.fa"), "w") as fh:
+                    fh.write(f">x\n{seq}")
+                rc, out, err = self.run_bio(vcf=False)
+                self.assertEqual((rc, err), (0, ""), out)
+                self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF))
+                                        if f.endswith(".bin")), ["NRG_chr2_1.bin", "NRG_x_1.bin"])
+
     def test_fasta_ids_one_of_which_matches_the_other_as_a_shell_pattern(self):
         # the search script took the first as the second, and with --thread 1 a search
         # ended with exit status 0 and none of the first's off-targets; with more threads

@@ -347,15 +347,61 @@ class TestHeaderIsExactlyTheId(unittest.TestCase):
                 self.assertEqual(os.listdir(self.tmp), ["asm.fa"])
 
     def test_ids_the_pipeline_takes_are_not_refused(self):
-        # each alone in its folder, measured so through the real CLI with a build and a
-        # search; one that holds '*', '?' or '[' as long as it matches no other name there
+        # measured so through the real CLI, with a build and a search, alone in the folder
+        # or beside one other; one that holds '*', '?' or '[' as long as it matches no
+        # other name there, nor a file of the PostProcess folder, where the post-analysis
+        # runs ('a*' matches adjust_cols.py, and a search of it failed: this check does not
+        # see it); and '~' at the start as long as no user of the machine has the name
+        # that follows ('~root' made a search fail, '~nouser' worked)
         for rid in ("NC_000913.3", "chr1_KI270706v1_random", "chr1:1-50000", "1", "HLA-A*01:01",
-                    "seq=1,2", "X@y%z^~!+", "c[12]", "seq?1"):
+                    "seq=1,2", "X@y%z^~!+", "c[12]", "seq?1", "x-n", "a~b", "_x", ":x", "+x",
+                    "~nouser"):
             with self.subTest(rid):
                 self._fresh()
                 self._writeb(f"{rid}.fa", f">{rid}\nACGT\n")
                 self.assertEqual(gl.describe_header_problems(self.tmp), [])
                 self.assertEqual(vi.check_genome_fasta(self.tmp)[0], [])
+
+    def test_an_id_that_starts_with_a_dash_or_a_dot_is_refused(self):
+        # measured through the real CLI: a search of -x (or -n) or .x beside b ended with
+        # exit status 0 and only b's off-targets, none of the other's, its on-target among
+        # them (the post-analysis grep took -x for an option; the search script lists the
+        # chromosomes as the folder's *.fa, which leaves out .x.fa)
+        for rid in ("-x", "-n", "--help", ".x"):
+            with self.subTest(rid):
+                self._fresh()
+                self._writeb(f"{rid}.fa", f">{rid}\nACGT\n")
+                self._writeb("b.fa", ">b\nACGT\n")
+                problems = gl.describe_header_problems(self.tmp)
+                self.assertEqual(len(problems), 1, problems)
+                other = "." if rid[0] == "-" else "-"
+                self.assertTrue(problems[0].startswith(
+                    f"{rid}.fa: sequence id {rid!r} starts with {rid[0]!r}, which the pipeline "
+                    f"cannot take (nor one that starts with {other!r}): a search of it finds "
+                    "its off-targets and then drops them all, with no error. Rename the "
+                    "sequence in the FASTA header and the file after it, then remove each "
+                    "index built from the folder"), problems[0])
+                issues, _ = vi.check_genome_fasta(self.tmp)
+                self.assertEqual([(i.severity, i.message) for i in issues], [(vi.ERROR, problems[0])])
+                # renamed, the folder is as a search needs it
+                os.remove(os.path.join(self.tmp, f"{rid}.fa"))
+                self._writeb("x.fa", ">x\nACGT\n")
+                self.assertEqual(gl.describe_header_problems(self.tmp), [])
+                # a split (an upload, a download) refuses it before anything is written
+                self._fresh()
+                self._writeb("asm.fa", f">chr2\nGG\n>{rid} a description\nACGT\n")
+                with self.assertRaises(ValueError) as cm:
+                    gl.split_multi_record_fastas(self.tmp)
+                self.assertIn(f"sequence id {rid!r} starts with '-', which the pipeline cannot "
+                              "take" if rid[0] == "-" else
+                              f"sequence id {rid!r} cannot be used as a file name", str(cm.exception))
+                self.assertEqual(os.listdir(self.tmp), ["asm.fa"])
+        # one message for each kind, whatever the number of files
+        self._fresh()
+        for rid in ("-x", "-y", "gi|1", "gi|2"):
+            self._writeb(f"{rid}.fa", f">{rid}\nACGT\n")
+        problems = gl.describe_header_problems(self.tmp)
+        self.assertEqual([p.split(":", 1)[0] for p in problems], ["gi|1.fa", "-x.fa"])
 
     def test_an_id_that_matches_another_name_as_a_shell_pattern_is_refused(self):
         # the search script and its post-analysis take each name into shell commands

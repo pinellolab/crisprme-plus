@@ -23,10 +23,11 @@ or Ensembl header (``>NC_000913.3 Escherichia coli ...``, ``>chr1 1``, ``>1 dna:
 ...``), or CRLF line ends, indexed as done, and every search of it then lost results,
 often all of them with no error. The same fix writes such a file as ``>id`` with no
 carriage return. An id the pipeline cannot take (``gi|49175990|ref|...``, a PanSN
-``HG01255#1#CM086702.1``) is refused: it is for the user to rename. So is a folder where
-an id that holds ``*``, ``?`` or ``[`` matches, read as a shell pattern, the name of
-another of its files (``HLA-A*02:10`` and ``HLA-A*24:02:10`` of the GATK GRCh38 FASTA):
-a search of it failed, or lost the off-targets of one of them with no error.
+``HG01255#1#CM086702.1``, one that starts with ``-`` or ``.``) is refused: it is for the
+user to rename. So is a folder where an id that holds ``*``, ``?`` or ``[`` matches, read
+as a shell pattern, the name of another of its files (``HLA-A*02:10`` and
+``HLA-A*24:02:10`` of the GATK GRCh38 FASTA): a search of it failed, or lost the
+off-targets of one of them with no error.
 
 This module is used by:
 
@@ -59,12 +60,20 @@ from typing import Dict, List, Optional, Tuple
 FASTA_EXTENSIONS = (".fa", ".fasta")
 # In a sequence id: each makes a shell command that holds the chromosome name fail (or,
 # '#', makes the tables that hold it lose its rows). Measured through the real CLI, with
-# ":", "." and "_" among those that work.
+# ":", "." and "_" among those that work inside an id.
 UNUSABLE_IN_ID = "|;'\"$()&<>`#"
+# At the start of a sequence id: the post-analysis greps for the name, unquoted, so grep
+# took '-x' for an option, and the search script lists the chromosomes as the folder's
+# *.fa, which leaves out '.x.fa'. A search of either ended with exit status 0 and none of
+# its off-targets (measured through the real CLI).
+UNUSABLE_ID_START = "-."
 # In a sequence id, what makes the shell read it as a pattern: the search script and its
 # post-analysis take each name into commands unquoted, where it stands for every file
-# name it matches. An id that matches no other name works (measured through the real
-# CLI); one that does made a search fail, or drop its off-targets with no error.
+# name it matches. Measured through the real CLI, an id that matches another name of its
+# folder made a search fail, or drop its off-targets with no error, and one that matches
+# a file of the PostProcess folder, where the post-analysis runs ('a*' matches
+# adjust_cols.py), made it fail; find_pattern_clashes looks for the first only. Ids that
+# matched neither worked (HLA-A*01:01, KIR2DL1*001, c[12] beside cA).
 PATTERN_CHARS = "*?["
 HEADER_LIMIT = 1 << 16  # (the most of a line read to judge it; no id comes near this)
 
@@ -207,6 +216,10 @@ def _unusable_char(rid: str) -> Optional[str]:
     return next((c for c in UNUSABLE_IN_ID if c in rid), None)
 
 
+def _unusable_start(rid: str) -> Optional[str]:
+    return rid[0] if rid and rid[0] in UNUSABLE_ID_START else None
+
+
 def _validate_ids(fname: str, ids: List[str]) -> None:
     seen = set()
     for rid in ids:
@@ -219,6 +232,11 @@ def _validate_ids(fname: str, ids: List[str]) -> None:
             raise ValueError(
                 f"{fname}: sequence id {rid!r} holds {_unusable_char(rid)!r}, which the "
                 "pipeline cannot take; rename the sequence in the FASTA header and retry"
+            )
+        if _unusable_start(rid):
+            raise ValueError(
+                f"{fname}: sequence id {rid!r} starts with {_unusable_start(rid)!r}, which "
+                "the pipeline cannot take; rename the sequence in the FASTA header and retry"
             )
         if rid in seen:
             raise ValueError(f"{fname}: duplicate sequence id {rid!r}")
@@ -348,19 +366,32 @@ def describe_header_problems(genomedir: str, deep: bool = False, reported=()) ->
             f"again. (A genome uploaded from the web Settings page is written this way: "
             f"remove this one there, with the indexes built on it, and upload it again.)"
         )
+    held = started = None  # (the first file of each kind)
     for fname in sorted(os.listdir(genomedir)):
         if fname.split(".")[-1] != "fa" or fname in reported:
             continue
         ids = fasta_record_ids(os.path.join(genomedir, fname), limit=1)
-        if ids and _unusable_char(ids[0]):
-            errors.append(
+        if ids and held is None and _unusable_char(ids[0]):
+            held = (
                 f"{fname}: sequence id {ids[0]!r} holds {_unusable_char(ids[0])!r}, which "
                 f"the pipeline cannot take (nor any of {' '.join(UNUSABLE_IN_ID)}): a search "
                 f"of it fails, or drops all its off-targets. Rename the sequence in the "
                 f"FASTA header and the file after it, then remove each index built from the "
                 f"folder and run build-index-only again."
             )
+        if ids and started is None and _unusable_start(ids[0]):
+            start = _unusable_start(ids[0])
+            others = " or ".join(repr(c) for c in UNUSABLE_ID_START if c != start)
+            started = (
+                f"{fname}: sequence id {ids[0]!r} starts with {start!r}, which the pipeline "
+                f"cannot take (nor one that starts with {others}): a search of it finds its "
+                f"off-targets and then drops them all, with no error. Rename the sequence in "
+                f"the FASTA header and the file after it, then remove each index built from "
+                f"the folder and run build-index-only again."
+            )
+        if held and started:
             break
+    errors += [problem for problem in (held, started) if problem]
     clashes = {f: o for f, o in find_pattern_clashes(genomedir).items() if f not in reported}
     if clashes:
         fname, others = next(iter(clashes.items()))

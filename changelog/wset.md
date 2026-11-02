@@ -365,12 +365,19 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   has `.bin` names that do not show it, so it is not caught: remove it as the ERROR says. A sequence
   id that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a backquote or `#` is refused too,
   at an upload, a download, `--split`, a build and a search (`gi|49175990|ref|NC_000913.2|`, a PanSN
-  `HG01255#1#CM086702.1`; measured character by character through the real command line, `.`, `:`,
-  `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~` and `!` work, and so do `*`, `?` and brackets in an
-  id that matches no other name of its folder: see the next entry): a search of one failed in a
-  shell command (`/bin/sh: Syntax error`), or, for `#`, with `none survived post-analysis`. A file
-  whose lines end in CR alone is refused by `--split`, which says to convert it, as its first line
-  holds the whole file. **If you have such a genome,** run `python
+  `HG01255#1#CM086702.1`): a search of one failed in a shell command (`/bin/sh: Syntax error`), or,
+  for `#`, with `none survived post-analysis`. So is an id that starts with `-` or `.`: a search of
+  `-x` or `.x` beside `b` ended with exit status 0 and the off-targets of `b` alone, none of the 7
+  of the other, its on-target among them (`grep` took `-x` for an option, and the search left out
+  the hidden file `.x.fa`). Measured character by character through the real command line, `.`,
+  `:`, `_`, `-`, `=`, `,`, `+`, `@`, `%`, `^`, `~` and `!` work inside an id, and all of them but
+  `-` and `.` at its start, where `~` works only if no user of the machine has the name that
+  follows it (`~root`, and `~` alone, made a search fail in its post-analysis). So do `*`, `?` and
+  brackets in an id that matches, read as a shell pattern, no other name of its folder (see the
+  next entry) and no file of CRISPRme's `PostProcess` folder, where the post-analysis runs:
+  `HLA-A*01:01` and `KIR2DL1*001` worked, but `a*` matches `adjust_cols.py` there, and a search of
+  it failed. A file whose lines end in CR alone is refused by `--split`, which says to convert it,
+  as its first line holds the whole file. **If you have such a genome,** run `python
   PostProcess/genome_layout.py --split <genome folder>`, remove the indexes it names, and build
   again, or remove it in Settings and upload it again. A search of a genome of plain headers is
   unchanged. Covered by `PostProcess/test_genome_layout.py` and
@@ -390,8 +397,8 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   525 ids match others, and, downloaded by Direct URL, they indexed as done and every search of
   them failed at its start. `build-index-only`, `complete-search` and a web search now refuse such
   a folder before anything is built or searched (a build in the web Settings page reads `failed`),
-  with an ERROR that names each file whose id matches another's and says to rename those
-  sequences, header and file, with none of those characters, or to remove them. With those 10
+  with an ERROR that names the files whose ids match another's (10 at most) and says to rename
+  those sequences, header and file, with none of those characters, or to remove them. With those 10
   renamed (`HLA-A_02:10`), the HLA sequences build and search, and the guide `CCAGGCAGTGACAGTGCCCA`
   finds its perfect match in each of the 135 HLA-A sequences. An id that holds one of those
   characters and matches no other name is taken as before (`HLA-X*03:01:01` beside
