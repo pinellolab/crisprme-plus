@@ -23,9 +23,10 @@ own allele at each code column. These tests pin
   (b) table-driven per-haplotype cases on a small phased fixture: a SNP in cis / in
       trans / absent / unphased / with a missing allele / with no genotype source,
       the chr18 geometry, a minus-strand PAM SNP, a bulge next to the PAM, split
-      multi-allelic records, overlapping indels, haploid chrX calls, the edit
-      budget, the worst case against a brute force, and the PAM-window SNPs of the
-      co-occurrence decode;
+      multi-allelic records and several alts on one VCF line, overlapping indels,
+      haploid chrX calls, the edit budget, the worst case against a brute force, the
+      PAM-window SNPs of the co-occurrence decode, and which targets of a fake-indel
+      window hold its indel at all;
   (c) that analisi_indels_NNN.py routes every overlaid target through it, with the
       search budget plumbed in.
 
@@ -232,6 +233,20 @@ class PerHaplotypeCases(unittest.TestCase):
             (0, ("HET", "HOMALT"), isc.PUTATIVE),   # the alt's row: only its carriers
             (1, ("NOSNP",), isc.CONFIRMED),         # no SNP: the same on any slot
         ])
+
+    def test_an_unphased_homozygous_alt_has_no_reference_allele(self):
+        """1/1 at a SNP that spoils the target: no slot of this carrier holds the
+        reference base, so it is never listed for the perfect target. The reference
+        is its candidate only with fewer alt copies than its ploidy."""
+        guide = GUIDE + "NNN"
+        target = GUIDE[:3] + "K" + GUIDE[4:] + "TGG"  # ref G (the guide's), alt T
+        cols = [_col(3, "G", {"T": {"HOM": "1/1", "HET": "0/1"}}, "K")]
+        rows = _resolve(guide, target, cols, {"HOM": "0/1"})
+        self.assertEqual([(r["seq"][3], r["mm"], r["samples"], r["phase"]) for r in rows],
+                         [("t", 1, ["HOM"], isc.PUTATIVE)])
+        rows = _resolve(guide, target, cols, {"HET": "0/1"})
+        self.assertEqual([(r["seq"][3], r["mm"], r["samples"], r["phase"]) for r in rows],
+                         [("G", 0, ["HET"], isc.PUTATIVE)])
 
     def test_a_missing_allele_on_the_indel_slot_is_putative(self):
         guide = GUIDE + "NNN"
@@ -463,6 +478,187 @@ class PerHaplotypeCases(unittest.TestCase):
     def test_classic_targets_have_no_code_column(self):
         self.assertEqual(isc.ambiguous_columns("ACGTACGTacgt-ACGTN"), [])
         self.assertEqual(isc.ambiguous_columns("ACrTyACG"), [2, 4])
+
+
+class TargetsThatHoldTheirIndel(unittest.TestCase):
+    """indel_snp_cis.holds_indel: a fake-indel window is 25 bp of plain flank, the ALT,
+    then the downstream flank. A target wholly in a flank is reference (or SNP) sequence
+    that needs no indel; its row showed the indel's token at a coordinate the indel
+    shifts, and could take the real row's place in its cluster."""
+
+    POS1 = 1026   # VCF POS: the window starts at 1000, so the REF's first base is offset 25
+    START = 1000
+
+    def _holds(self, first, last, ref, alt):
+        return isc.holds_indel(first, last, self.POS1, self.START, ref, alt)
+
+    def test_a_deletion_is_held_across_its_junction(self):
+        ref, alt = "TC", "T"
+        for first, last, want, why in (
+                (3, 25, False, "ends at the anchor: reference sequence"),
+                (3, 26, True, "the last base is past the junction"),
+                (25, 47, True, "starts at the anchor"),
+                (26, 48, False, "starts past the junction: the downstream flank"),
+                (40, 62, False, "well inside the downstream flank"),
+                (0, 22, False, "inside the left flank")):
+            self.assertEqual(self._holds(first, last, ref, alt), want, why)
+
+    def test_a_long_deletion_is_the_same_on_the_window(self):
+        for ref in ("TCAG", "TCAGGTCAGGTCAGGTCAGGTCAGGTCAGG"):
+            self.assertFalse(self._holds(3, 25, ref, "T"))
+            self.assertTrue(self._holds(3, 26, ref, "T"))
+            self.assertFalse(self._holds(26, 48, ref, "T"))
+
+    def test_an_insertion_is_held_through_an_inserted_base(self):
+        ref, alt = "G", "GCAT"  # ALT at 25..28, inserted bases 26..28
+        for first, last, want, why in (
+                (3, 25, False, "holds the anchor alone: its sequence is the reference's"),
+                (4, 26, True, "ends at the first inserted base"),
+                (26, 48, True, "starts at the first inserted base"),
+                (28, 50, True, "starts at the last inserted base"),
+                (29, 51, False, "starts past the insertion: the downstream flank")):
+            self.assertEqual(self._holds(first, last, ref, alt), want, why)
+
+    def test_a_replacement_is_held_through_any_replacing_base(self):
+        ref, alt = "CT", "GAA"  # nothing kept: ALT at 25..27
+        for first, last, want in ((3, 24, False), (3, 25, True), (27, 49, True),
+                                  (28, 50, False)):
+            self.assertEqual(self._holds(first, last, ref, alt), want, (first, last))
+
+    def test_more_than_one_kept_base(self):
+        """An ALT sharing two bases with REF: the junction is after both."""
+        ref, alt = "ACG", "AC"  # ALT at 25..26, the junction between 26 and 27
+        for first, last, want in ((3, 26, False), (3, 27, True), (26, 48, True),
+                                  (27, 49, False)):
+            self.assertEqual(self._holds(first, last, ref, alt), want, (first, last))
+
+    def test_a_shorter_left_flank(self):
+        """The window of an indel near the chromosome's start: the REF's first base is
+        found from the window's own start, not at a fixed offset."""
+        self.assertTrue(isc.holds_indel(0, 22, 10, 0, "TC", "T"))
+        self.assertFalse(isc.holds_indel(10, 32, 10, 0, "TC", "T"))
+
+    def test_window_offsets_count_the_bases_only(self):
+        self.assertEqual(isc.window_offsets("ACGT", 110, 100), (10, 13))
+        self.assertEqual(isc.window_offsets("A-GT", 110, 100), (10, 12))  # an RNA bulge
+        self.assertEqual(isc.window_offsets("A-Gt--A", 0, 0), (0, 3))
+
+
+class TheBadTargetFilter(unittest.TestCase):
+    """remove_bad_indel_targets.py reads a row's indel from its variant list."""
+
+    def _filter(self, rows):
+        import subprocess
+        import sys
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "best.txt")
+            with open(path, "w") as fh:
+                fh.write("header\n")
+                for start, var in rows:
+                    cols = ["n"] * 22
+                    cols[1] = GUIDE + "NNN"
+                    cols[5] = str(start)
+                    cols[18] = var
+                    fh.write("\t".join(cols) + "\n")
+            subprocess.run([sys.executable, os.path.join(HERE, "remove_bad_indel_targets.py"),
+                            path], check=True, cwd=d)
+            with open(path) as fh:
+                return [line.split("\t")[18] for line in fh.readlines()[1:]]
+
+    def test_a_row_is_judged_on_its_indel_alone(self):
+        """'chr1_100_GA_G,chr1_120_A_G'.split('_') used to read the ALT as 'G,chr1', a
+        range six bases wide."""
+        one = "chr1_100_GA_G"
+        two = one + ",chr1_120_A_G"
+        self.assertEqual(self._filter([(90, one), (90, two)]), [one, two])
+        self.assertEqual(self._filter([(102, one), (102, two)]), [],
+                         "past the indel's own range, whatever else the row names")
+
+    def test_a_contig_name_with_underscores(self):
+        tok = "chr1_KI270706v1_random_100_GA_G"
+        self.assertEqual(self._filter([(90, tok)]), [tok])
+        self.assertEqual(self._filter([(102, tok)]), [])
+
+    def test_reference_rows_pass(self):
+        self.assertEqual(self._filter([(5, "n")]), ["n"])
+
+
+class MultiAllelicRecordsOnOneLine(unittest.TestCase):
+    """indel_snp_cis.biallelic_site: a record with several alts on one VCF line keeps
+    its raw genotype under every alt its sample carries (Tier-1 and the per-sample
+    dictionary alike), and the resolution reads "1" as "this slot holds this alt"."""
+
+    def test_the_table(self):
+        site = {"A": {"S26": "0|1", "S27": "2|1"},
+                "T": {"S25": "2|2", "S27": "2|1", "S28": "0|2", "S29": "1|2", "S30": "2"}}
+        site["A"]["S29"] = "1|2"
+        got = isc.biallelic_site(site)
+        self.assertEqual(got["A"], {"S26": "0|1", "S27": "0|1", "S29": "1|0"})
+        self.assertEqual(got["T"], {"S25": "1|1", "S27": "1|0", "S28": "0|1", "S29": "0|1",
+                                    "S30": "1"})
+
+    def test_unphased_and_missing_alleles_stay_so(self):
+        got = isc.biallelic_site({"A": {"U": "1/2", "M": ".|1"}, "T": {"U": "1/2", "V": "0/2",
+                                                                       "W": ".|2"}})
+        self.assertEqual(got["A"], {"U": "1/0", "M": ".|1"})
+        self.assertEqual(got["T"], {"U": "0/1", "V": "0/1", "W": ".|1"})
+
+    def test_a_single_carrier_needs_the_other_alt(self):
+        """2|1, the only carrier of A: its genotype alone holds both tokens; T's other
+        carrier is 2|2, so A is 1. The most frequent token (the SNP path's rule) ties."""
+        got = isc.biallelic_site({"A": {"S": "2|1"}, "T": {"S": "2|1", "X": "2|2"}})
+        self.assertEqual(got["A"], {"S": "0|1"})
+        self.assertEqual(got["T"], {"S": "1|0", "X": "1|1"})
+
+    def test_a_lone_foreign_index(self):
+        got = isc.biallelic_site({"T": {"S": "2|0", "X": "2|2"}})
+        self.assertEqual(got["T"], {"S": "1|0", "X": "1|1"})
+
+    def test_genotypes_that_cannot_tell_lose_their_phase(self):
+        """Every carrier of both alts is 1|2: which slot holds which alt is not known."""
+        got = isc.biallelic_site({"A": {"S": "1|2"}, "T": {"S": "1|2"}})
+        self.assertEqual(got, {"A": {"S": "1/0"}, "T": {"S": "1/0"}})
+        guide = GUIDE + "NNN"
+        target = GUIDE[:5] + "H" + GUIDE[6:] + "TGG"
+        cols = [_col(5, "C", got, "H")]
+        rows = _resolve(guide, target, cols, {"S": "1|0"})
+        self.assertEqual([(r["seq"][5], r["samples"], r["phase"]) for r in rows],
+                         [("A", ["S"], isc.PUTATIVE)])
+
+    def test_split_and_biallelic_records_come_back_as_they_are(self):
+        for site in ({"A": {"S": "1|0"}}, {"A": {"S": "1|0"}, "T": {"S": "0|1", "X": "1|1"}},
+                     {"A": {"S": "1/0", "H": "1", "M": ".|1"}}, {}):
+            self.assertIs(isc.biallelic_site(site), site)
+
+    def test_each_slot_gets_its_own_allele(self):
+        """The reviewer's site: C>A,T on one line, A the guide's base, a deletion on one
+        slot. S26's deletion slot holds A, S27's holds T (2|1), S25 is 2|2 (no C at all),
+        S28 has the reference: all exact, none PUTATIVE."""
+        guide = GUIDE + "NNN"
+        target = GUIDE[:5] + "H" + GUIDE[6:] + "TGG"
+        site = isc.biallelic_site({"A": {"S26": "0|1", "S27": "2|1"},
+                                   "T": {"S25": "2|2", "S27": "2|1"}})
+        cols = [_col(5, "C", site, "H")]
+        rows = _resolve(guide, target, cols,
+                        {"S25": "1|0", "S26": "0|1", "S27": "1|0", "S28": "1|0"})
+        got = sorted((r["seq"][5], tuple(r["samples"]), r["phase"]) for r in rows)
+        self.assertEqual(got, [("A", ("S26",), isc.CONFIRMED),
+                               ("c", ("S28",), isc.CONFIRMED),
+                               ("t", ("S25", "S27"), isc.CONFIRMED)])
+
+    def test_unphased_homozygous_foreign_index_has_no_reference_allele(self):
+        guide = GUIDE + "NNN"
+        target = GUIDE[:5] + "H" + GUIDE[6:] + "TGG"
+        site = isc.biallelic_site({"A": {"X": "1/0"}, "T": {"S": "2/2", "H": "0/2"}})
+        cols = [_col(5, "C", site, "H")]
+        rows = _resolve(guide, target, cols, {"S": "1|0"})
+        self.assertEqual([(r["seq"][5], r["mm"], r["phase"]) for r in rows],
+                         [("t", 1, isc.PUTATIVE)])
+        # a heterozygote does have one: its worst case over C and T
+        rows = _resolve(guide, target, cols, {"H": "1|0"})
+        self.assertEqual([r["phase"] for r in rows], [isc.PUTATIVE])
+        self.assertIn(rows[0]["seq"][5], "ct")
 
 
 # --------------------------------------------------------------------------- #

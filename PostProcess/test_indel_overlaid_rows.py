@@ -16,14 +16,19 @@ on them and its rows checked:
   * every PAM satisfies NRG, and no IUPAC code is left;
   * the planted sites give exactly the rows their carriers have (a PAM SNP in cis
     and in trans, a chimera only another sample's SNP would complete, a cis spacer
-    SNP, an unphased carrier, a minus-strand PAM SNP, a second variant on the same
-    slot: an indel inside the target, inserted next to the indel's anchor or
-    overlapping the indel (one complex allele), a SNP on the indel's anchor; and one
-    that changes nothing: a SNP or a nested indel on bases the indel deletes);
+    SNP, an unphased carrier, a minus-strand PAM SNP and a minus-strand spacer SNP, a
+    second variant on the same slot: an indel inside the target, inserted next to the
+    indel's anchor or overlapping the indel (one complex allele), a SNP on the indel's
+    anchor; and one that changes nothing: a SNP or a nested indel on bases the indel
+    deletes, another allele at the indel's own POS, a SNP on an anchor the target does
+    not hold; several SNP alts on one VCF line; a target that lies wholly in a flank of
+    the window and holds no base of the indel);
   * the SNP+indel co-occurrence companion names the SNPs a row requires, CONFIRMED
-    or PUTATIVE, PAM-window SNPs included;
+    or PUTATIVE, PAM-window SNPs included, its joint frequency counting haplotype
+    copies;
   * a classic dictionary install (no Tier-1 store: the per-sample SNP dictionary), a
-    sites-only panel (no genotypes), CRISPRME_INDEL_SNP=0 and --max-total-edits.
+    sites-only panel (no genotypes), no phased indel store, CRISPRME_INDEL_SNP=0 and
+    --max-total-edits.
 
 On 2.8.0 / aa9c54b the chimera and the PAM-less rows (an R at the last PAM base read
 as A) are reported, and a classic dictionary install leaves the codes in the rows.
@@ -53,10 +58,13 @@ CHROM = "chrT"
 VCF = "synth"
 GUIDE = "ACTGAAATCTGTAAGCAGGC"
 CODE = {frozenset("AG"): "R", frozenset("CT"): "Y", frozenset("CG"): "S",
-        frozenset("AT"): "W", frozenset("GT"): "K", frozenset("AC"): "M"}
+        frozenset("AT"): "W", frozenset("GT"): "K", frozenset("AC"): "M",
+        frozenset("CGT"): "B", frozenset("AGT"): "D", frozenset("ACT"): "H",
+        frozenset("ACG"): "V"}
 ALLELES = {v: set(k) for k, v in CODE.items()}
-COMP = str.maketrans("ACGTRYSWKMacgtryswkm", "TGCAYRSWMKtgcayrswmk")
-SAMPLES = ["S%02d" % i for i in range(1, 13)]
+COMP = str.maketrans("ACGTRYSWKMBDHVacgtryswkmbdhv", "TGCAYRSWMKVHDBtgcayrswmkvhdb")
+SAMPLES = ["S%02d" % i for i in range(1, 31)]
+AN = 2 * len(SAMPLES)
 SAMPLE_META = {s: ("synth", "POP", "female") for s in SAMPLES}
 
 
@@ -103,9 +111,11 @@ class World(object):
 
     def __init__(self):
         rng = random.Random(28101)
-        self.seq = [rng.choice("ACGT") for _ in range(2000)]
+        self.seq = [rng.choice("ACGT") for _ in range(5000)]
         self.snps = []    # (pos1, ref, alt, rsid, {sample: gt})
         self.indels = []  # (pos1, ref, alt, rsid, {sample: gt})
+        self.alt_token = {}   # (pos1, alt) -> its allele index, on a multi-allelic line
+        self.extra_codes = {}  # pos1 -> a code the enriched genome holds with no SNP
         g = GUIDE
         # A (+): a deletion of CAC restores a perfect target, PAM TGG; a G>A SNP at the
         # PAM's last base in cis (S02), in trans (S03) and with no indel (S04).
@@ -188,6 +198,93 @@ class World(object):
         self._put(t0, g[:10] + "CAGTA" + g[10:] + "TGG" + "T" * 20)
         self._indel("T", t0 + 10, g[9] + "CAGTA", g[9], {"S04": "1|0"})
         self._indel("T2", t0 + 12, "AGT", "A", {"S04": "1|0"})
+        # U (+): GT>G, 2 bp, then a target a C>A SNP makes perfect, wholly in the deletion's
+        # downstream flank: S13 holds both on one slot, S14 the deletion, S15 the SNP. It
+        # is S13's and S15's SNP target; on the window it holds no base of the deletion.
+        u0 = 2000
+        self._put(u0, "GGTCA" + g[:5] + "C" + g[6:] + "TGG")
+        self._indel("U", u0 + 2, "GT", "G", {"S13": "1|0", "S14": "1|0"})
+        self._snp("U", u0 + 11, "C", "A", {"S13": "1|0", "S15": "1|0"})
+        # V, V2 (+): two insertions at one POS and anchor, both on S16's slot 0, inside the
+        # target: no haplotype holds both, so that is a phasing artefact and S16 stays on
+        # each window; S17 and S18 carry one of them.
+        v0 = 2200
+        self._put(v0, g[:10] + g[13:] + "TGG" + "A" * 30)
+        self._indel("V", v0 + 10, g[9], g[9] + g[10:13], {"S16": "1|0", "S17": "1|0"})
+        self._indel("V2", v0 + 10, g[9], g[9] + "AAA", {"S16": "1|0", "S18": "0|1"})
+        # V3, V4 (+): two deletions at one POS and anchor (G>., two As and one A of five), on
+        # S16's slot 0: V4's window would read V3 as changing a base it covers.
+        v3 = 2300
+        self._put(v3, g[:4] + "AAAAA" + g[7:] + "TGG")
+        self._indel("V3", v3 + 4, "GAA", "G", {"S16": "1|0", "S17": "0|1"})
+        self._indel("V4", v3 + 4, "GA", "G", {"S16": "1|0", "S18": "1|0"})
+        # W (+): a C>A,T SNP on one VCF line (raw genotypes under each alt), A the guide's
+        # base; a deletion. S14's deletion slot holds A, S15's T (2|1, deletion on slot 0),
+        # S13 is 2|2, S16 has neither.
+        w0 = 2400
+        self._put(w0, g[:5] + "C" + g[6:10] + "G" + g[10:] + "CGG")
+        self._indel("W", w0 + 10, g[9] + "G", g[9],
+                    {"S13": "1|0", "S14": "0|1", "S15": "1|0", "S16": "1|0"})
+        self._snp("W", w0 + 6, "C", "A", {"S14": "0|1", "S15": "2|1"})
+        self._snp("W", w0 + 6, "C", "T", {"S13": "2|2", "S15": "2|1"})
+        self.alt_token[(w0 + 6, "A")] = "1"
+        self.alt_token[(w0 + 6, "T")] = "2"
+        # X (-): a spacer SNP the guide needs on the minus strand: forward G>T (the target
+        # reads C>A), in cis in S17, in trans in S18.
+        x0 = 2600
+        site = g[:5] + "C" + g[6:10] + "C" + g[10:] + "TGG"
+        fwd = rc(site)
+        self._put(x0, fwd)
+        self._indel("X", x0 + 13, fwd[12:14], fwd[12], {"S17": "1|0", "S18": "1|0"})
+        self._snp("X", x0 + 19, "G", "T", {"S17": "1|0", "S18": "0|1"})
+        # Y (+): a target with a SNP code; S19's slot also holds a second deletion inside
+        # it (Y2), so S19 does not have the window's sequence; S20 does.
+        y0 = 2800
+        self._put(y0, g[:5] + "C" + g[6:10] + "C" + g[10:] + "TGG")
+        self._indel("Y", y0 + 10, g[9] + "C", g[9], {"S19": "1|0", "S20": "1|0"})
+        self._indel("Y2", y0 + 3, g[2] + g[3], g[2], {"S19": "1|0"})
+        self._snp("Y", y0 + 6, "C", "A", {"S19": "1|0", "S20": "1|0"})
+        # Z (+): a carrier homozygous for the deletion and the SNP the target needs: two
+        # cis copies, one cis sample.
+        z0 = 3000
+        self._put(z0, g[:3] + "C" + g[4:10] + "G" + g[10:] + "CGG")
+        self._indel("Z", z0 + 10, g[9] + "G", g[9], {"S21": "1|1"})
+        self._snp("Z", z0 + 4, "C", "G", {"S21": "1|1"})
+        # HH (+): an unphased carrier homozygous for a SNP that spoils the target (S22):
+        # it has no reference allele there, so never the perfect target; S23 has no SNP.
+        h0 = 3200
+        self._put(h0, g[:10] + "C" + g[10:] + "TGG")
+        self._indel("HH", h0 + 10, g[9] + "C", g[9], {"S22": "0/1", "S23": "0/1"})
+        self._snp("HH", h0 + 4, g[3], "T", {"S22": "1/1"})
+        # AA (+): a spacer SNP in cis, and on the anchor an unphased SNP: one allele per
+        # haplotype, so it does not take S24 off a slot, which stays exact (CONFIRMED).
+        a2 = 3400
+        self._put(a2, g[:3] + "C" + g[4:10] + "G" + g[10:] + "TGG")
+        self._indel("AA", a2 + 10, g[9] + "G", g[9], {"S24": "1|0"})
+        self._snp("AA", a2 + 4, "C", "G", {"S24": "1|0"})
+        self._snp("AA", a2 + 10, g[9], "C", {"S24": "0/1"})
+        # A3 (+): a target starting at the first inserted base; S25's slot also holds a
+        # SNP on the anchor, which the target does not hold: S25 stays listed.
+        a3 = 3600
+        self._put(a3, "T" + g[12:] + "TGG" + "A" * 20)
+        self._indel("A3", a3 + 1, "T", "T" + g[:12], {"S25": "1|0", "S26": "1|0"})
+        self._snp("A3", a3 + 1, "T", "C", {"S25": "1|0"})
+        # B2 (+): a code column neither of whose alleles is the guide's: an unphased
+        # carrier gets the allele with the higher CFD, not simply the reference base.
+        b2 = 3800
+        weak, strong = sorted("ACT", key=lambda b: cfd_score_bulge_aware(
+            g + "NNN", g[:3] + b.lower() + g[4:] + "CGG"))[:2]
+        self.b2_strong = strong
+        self._put(b2, g[:3] + weak + g[4:10] + "G" + g[10:] + "CGG")
+        self._indel("B2", b2 + 10, g[9] + "G", g[9], {"S27": "0/1", "S28": "1|0"})
+        self._snp("B2", b2 + 4, weak, strong, {"S27": "0/1"})
+        # C2 (+): a code that does not hold the reference base (never expected: the overlay
+        # copies the enriched genome): the column is resolved without genotypes, and the
+        # run says so.
+        c2 = 4000
+        self._put(c2, g[:3] + "T" + g[4:10] + "C" + g[10:] + "TGG")
+        self._indel("C2", c2 + 10, g[9] + "C", g[9], {"S29": "1|0"})
+        self.extra_codes[c2 + 4] = "R"
         self.ref = "".join(self.seq)
 
     def _put(self, start0, s):
@@ -207,8 +304,13 @@ class World(object):
         """[(indel, start_position, window)] -- 25 bp of plain reference, the ALT, then
         27 bp downstream (CRISPRitz add-variants), SNP-overlaid (overlay_indel_snps)."""
         enriched = list(self.ref)
+        alleles = {}
         for pos1, ref, alt, _rs, _g in self.snps:
-            enriched[pos1 - 1] = CODE[frozenset((ref, alt))]
+            alleles.setdefault(pos1, {ref}).add(alt)
+        for pos1, bases in alleles.items():
+            enriched[pos1 - 1] = CODE[frozenset(bases)]
+        for pos1, code in self.extra_codes.items():
+            enriched[pos1 - 1] = code
         enriched = "".join(enriched)
         out = []
         for ind in self.indels:
@@ -230,7 +332,7 @@ class World(object):
                 if gt is None:
                     continue
                 toks = gt.replace("/", "|").split("|")
-                if h < len(toks) and toks[h] == "1":
+                if h < len(toks) and toks[h] == self.alt_token.get((pos1, alt), "1"):
                     variants.append((pos1, ref, alt))
             seq, pos, i = [], [], 0
             for pos1, ref, alt in sorted(variants):
@@ -249,10 +351,11 @@ class World(object):
         return out
 
 
-def engine_targets(windows, max_mm=4):
+def engine_targets(windows, max_mm=4, max_total=None):
     """The engine's X (no-bulge) NRG targets on the overlaid fake genome: a code
     matches the guide or the PAM when any of its alleles fits; mismatches lower
-    case. Returns (fake chromosome, rows)."""
+    case; past --mm or --max-total-edits no target, as in the engine. Returns (fake
+    chromosome, rows)."""
     fake, rows = [], []
     starts = []
     for _ind, _s, win in windows:
@@ -281,7 +384,7 @@ def engine_targets(windows, max_mm=4):
                 else:
                     dna.append(b.lower())
                     mm += 1
-            if mm > max_mm:
+            if mm > max_mm or (max_total is not None and mm > max_total):
                 continue
             rows.append(["X", GUIDE + "NNN", "".join(dna) + pam.upper(), "fake" + CHROM,
                          str(f0), str(f0), strand, str(mm), "0", str(mm)])
@@ -292,13 +395,13 @@ class _Fixture(object):
     """Write the world as a data folder and run the shipped analyzer on it."""
 
     def __init__(self, tmp, world, tiers=("registry", "tier1", "indelgt"), env=None,
-                 max_total=None):
+                 max_total=None, indel_af=None):
         self.tmp = tmp
         self.world = world
         d = os.path.join(tmp, "Dictionaries")
         os.makedirs(d)
         windows = world.fake_windows()
-        fake, starts, rows = engine_targets(windows)
+        fake, starts, rows = engine_targets(windows, max_total=max_total)
         self.rows_in = rows
         with open(os.path.join(tmp, CHROM + ".fa"), "w") as fh:
             fh.write(">%s\n%s\n" % (CHROM, world.ref))
@@ -309,7 +412,7 @@ class _Fixture(object):
             for k, ((pos1, ref, alt, rs, gts), s, win) in enumerate(windows):
                 fh.write("%s_%d-%d_%d\t%s\t%s\t%s\t%s_%d_%s_%s\t%d,%d\t%s\n" % (
                     CHROM, s, s + len(win), k + 1, ",".join(sorted(gts)), rs,
-                    "%.6g" % (sum(g.count("1") for g in gts.values()) / 24.0),
+                    "%.6g" % (sum(g.count("1") for g in gts.values()) / float(AN)),
                     CHROM, pos1, ref, alt, starts[k], starts[k] + len(win),
                     world.ref[s:s + len(win)]))
         recs = [(p, r, a, rs, dict(g)) for p, r, a, rs, g in world.snps]
@@ -331,9 +434,11 @@ class _Fixture(object):
             os.makedirs(dd)
             entries = {}
             for p, r, a, rs, g in world.snps:
-                entries["%s,%d" % (CHROM, p)] = "%s;%s,%s;%s;%s" % (
+                entry = "%s;%s,%s;%s;%s" % (
                     ",".join("%s:%s" % kv for kv in sorted(g.items())), r, a, rs,
-                    "%.6g" % (sum(x.count("1") for x in g.values()) / 24.0))
+                    "%.6g" % (sum(x.count("1") for x in g.values()) / float(AN)))
+                key = "%s,%d" % (CHROM, p)
+                entries[key] = entries[key] + "$" + entry if key in entries else entry
             with gzip.open(os.path.join(dd, "my_dict_%s.json.gz" % CHROM), "wt") as fh:
                 json.dump(entries, fh)
         if "indelgt" in tiers:
@@ -343,6 +448,13 @@ class _Fixture(object):
                 for p, r, a, _rs, g in world.indels:
                     fh.write("%d_%s_%s\t%s\n" % (p, r, a, ",".join(
                         "%s:%s" % kv for kv in sorted(g.items()))))
+        if indel_af is not None:
+            iad = os.path.join(d, "indel_af_" + VCF)
+            os.makedirs(iad)
+            with gzip.open(os.path.join(iad, "indel_af_%s.tsv.gz" % CHROM), "wt") as fh:
+                fh.write("#pos\tref\talt\tAF_panel\tAF_max\n")
+                for p, r, a, _rs, _g in world.indels:
+                    fh.write("%d\t%s\t%s\t%s\t%s\n" % (p, r, a, indel_af, indel_af))
         with open(os.path.join(tmp, "pam.txt"), "w") as fh:
             fh.write("NNNNNNNNNNNNNNNNNNNNNRG 3\n")
         with open(os.path.join(tmp, "guides.txt"), "w") as fh:
@@ -419,6 +531,19 @@ class _Base(unittest.TestCase):
             sites.setdefault(site.split("_")[1], []).append(r)
         return sites
 
+    def fake_start(self, fx, site):
+        """The fake-genome offset of a site's window (from the indel log)."""
+        log = os.path.join(self.tmp, "Dictionaries", "log_indels_" + VCF,
+                           "log%s.txt" % CHROM)
+        pos1 = next(p for p, _r, _a, rs, _g in self.world.indels
+                    if rs == "rs_%s_indel" % site)
+        with open(log) as fh:
+            for line in fh:
+                c = line.split("\t")
+                if c[0] != "CHR" and int(c[4].split("_")[1]) == pos1:
+                    return int(c[5].split(",")[0])
+        raise KeyError(site)
+
     def assert_on_carrier_haplotypes(self, rows, putative_ok=()):
         """Every listed carrier holds the reported sequence: phased carriers on one
         of their slots, at the reported strand; for the samples in putative_ok each
@@ -444,7 +569,11 @@ class FullTiers(_Base):
         fx = self.run_analyzer()
         rows = fx.rows()
         self.assertTrue(rows)
-        self.assert_on_carrier_haplotypes(rows, putative_ok=("S10", "S11"))
+        # S16 holds two alleles at one POS on a slot, S25 an insertion and a SNP on its
+        # anchor: the fixture's haplotypes apply the first variant of a position only.
+        # (S22, S27 and S29 are unphased or unresolved: their rows are pinned below.)
+        self.assert_on_carrier_haplotypes(
+            rows, putative_ok=("S10", "S11", "S16", "S22", "S25", "S27", "S29"))
         site = self.by_site(rows)
         g = GUIDE
         best = lambda rs: max(rs, key=lambda r: r["cfd"])  # noqa: E731
@@ -495,21 +624,89 @@ class FullTiers(_Base):
         # and is never listed for the inner window
         self.assertEqual([(r["dna"], r["samples"]) for r in site["T"]], [(g + "TGG", "S04")])
         self.assertFalse([r for r in site.get("T2", ()) if "S04" in r["samples"].split(",")])
-        # every recomputed CFD and mismatch count agrees with its alignment
+        # U: a target wholly in the deletion's flank holds no base of it: no indel row,
+        # although the engine reported it on the window (it is S13's and S15's SNP target)
+        self.assertTrue([x for x in fx.rows_in if x[2].upper().replace("M", "A") == g + "TGG"
+                         and 0 <= int(x[4]) - self.fake_start(fx, "U") < 80],
+                        "the engine must report the flank target")
+        self.assertNotIn("U", site, site.get("U"))
+        # V..V4: another allele at one POS and anchor takes no carrier off a window
+        anchor = g[9]
+        v = sorted((r["var"], r["dna"], r["samples"]) for r in rows
+                   if r["var"].startswith("%s_2210_" % CHROM) and r["mm"] <= 2)
+        self.assertEqual(v, sorted([
+            ("%s_2210_%s_%s" % (CHROM, anchor, anchor + g[10:13]), g + "TGG", "S16,S17"),
+            ("%s_2210_%s_%sAAA" % (CHROM, anchor, anchor),
+             g[:10] + "aa" + g[12:] + "TGG", "S16,S18")]))
+        v = sorted((r["var"], r["samples"]) for r in rows
+                   if r["var"].startswith("%s_2304_" % CHROM))
+        self.assertEqual(v, [("%s_2304_GAA_G" % CHROM, "S16,S17"),
+                             ("%s_2304_GA_G" % CHROM, "S16,S18")])
+        # W: several SNP alts on one VCF line: each slot gets the allele it holds
+        w = sorted((r["dna"][5], r["samples"], r["var"]) for r in site["W"])
+        self.assertEqual(w, [
+            ("A", "S14", "%s_2410_TG_T,%s_2406_C_A" % (CHROM, CHROM)),
+            ("c", "S16", "%s_2410_TG_T" % CHROM),
+            ("t", "S13,S15", "%s_2410_TG_T,%s_2406_C_T" % (CHROM, CHROM))])
+        # X: a minus-strand SNP is named forward, as the VCF has it; the trans carrier's
+        # mismatch counts in Mismatches and in mismatches + bulges (the engine counted the
+        # code as a match)
+        x = {r["samples"]: r for r in site["X"]}
+        self.assertEqual(x["S17"]["dna"], g + "TGG")
+        self.assertEqual(x["S17"]["var"].split(","),
+                         ["%s_2613_%s_%s" % (CHROM, self.world.ref[2612:2614],
+                                             self.world.ref[2612]),
+                          "%s_2619_G_T" % CHROM])
+        self.assertEqual((x["S18"]["mm"], x["S18"]["total"]), (1, 1))
+        self.assertEqual(x["S18"]["dna"][5], "c")
+        raw_x = [q for q in fx.rows_in if q[2].upper() == g[:5] + "M" + g[6:] + "TGG"]
+        self.assertTrue(raw_x and all(q[7] == "0" and q[9] == "0" for q in raw_x), raw_x)
+        # Y: the second-indel rule on a target with a SNP code: S19 is on no row of it
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["Y"]], [(g + "TGG", "S20")])
+        # Z: 1|1 at both: one row, one sample
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["Z"]], [(g + "CGG", "S21")])
+        # HH: 1/1 at a SNP that spoils the target: S22 never gets the reference base
+        hh = {r["samples"]: r for r in site["HH"]}
+        self.assertEqual((hh["S22"]["dna"][3], hh["S22"]["mm"]), ("t", 1))
+        self.assertEqual(hh["S22"]["var"].split(",")[1], "%s_3204_G_T" % CHROM)
+        self.assertEqual((hh["S23"]["dna"], hh["S23"]["cfd"]), (g + "TGG", 1.0))
+        # A3: a SNP on an anchor the target does not hold: S25 stays
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["A3"]],
+                         [(g + "TGG", "S25,S26")])
+        # B2: S27's worst case takes the allele with the higher CFD, S28 has the reference
+        b2 = {r["samples"]: r for r in site["B2"]}
+        self.assertEqual(b2["S27"]["dna"][3], self.world.b2_strong.lower())
+        self.assertNotEqual(b2["S28"]["dna"][3], self.world.b2_strong.lower())
+        # C2: a code without the reference base: resolved over the code, and reported
+        self.assertEqual([(r["dna"], r["samples"]) for r in site["C2"]], [(g + "TGG", "S29")])
+        self.assertIn("did not map onto the reference base", fx.proc.stdout)
+        # every recomputed CFD, mismatch count and total agrees with its alignment
         for r in rows:
             self.assertAlmostEqual(cfd_score_bulge_aware(r["crRNA"], r["dna"]), r["cfd"],
                                    places=3)
             self.assertEqual(r["mm"], sum(1 for c in r["dna"][:20] if c.islower()))
+            self.assertEqual(r["total"], r["mm"])  # the fixture's targets have no bulge
 
     def test_the_cooccurrence_companion(self):
         fx = self.run_analyzer()
         cooc = fx.cooc()
         got = sorted(set((c[1], c[6], c[7], c[8], c[10], c[11]) for c in cooc))
-        self.assertEqual(got, [
+        self.assertEqual(got, sorted([
             ("1110", "1124", "rs_G_snp", "CONFIRMED", "1", "S03"),  # a PAM-window SNP
             ("510", "504", "rs_D_snp", "CONFIRMED", "1", "S07"),
             ("710", "704", "rs_E_snp", "PUTATIVE", "1", "S10"),
-        ])
+            ("2410", "2406", "rs_W_snp", "CONFIRMED", "1", "S14"),  # one alt of C>A,T
+            ("2613", "2619", "rs_X_snp", "CONFIRMED", "1", "S17"),
+            ("2810", "2806", "rs_Y_snp", "CONFIRMED", "1", "S20"),
+            ("3010", "3004", "rs_Z_snp", "CONFIRMED", "1", "S21"),
+            ("3410", "3404", "rs_AA_snp", "CONFIRMED", "1", "S24"),  # its anchor SNP is /
+            ("4010", "4004", ".", "PUTATIVE", "1", "S29"),  # the code without a record
+        ]))
+        # the joint frequency counts cis copies: 1|1 is two, on the panel's alleles
+        z = [c for c in cooc if c[1] == "3010"]
+        self.assertEqual(sorted(set(c[9] for c in z)), ["%.6g" % (2.0 / AN)])
+        d = [c for c in cooc if c[1] == "510"]
+        self.assertEqual(sorted(set(c[9] for c in d)), ["%.6g" % (1.0 / AN)])
 
     def test_the_total_edits_cap(self):
         """With --max-total-edits 0 only the perfect haplotypes stay."""
@@ -533,6 +730,26 @@ class OtherInstalls(_Base):
         key = lambda r: (r["dna"], r["start"], r["strand"], r["samples"], r["var"], r["cfd"])  # noqa: E731
         self.assertEqual(sorted(map(key, rows)), sorted(map(key, full)))
         self.assertIsNone(fx.cooc())  # the companion needs the registry, as before
+
+    def test_no_phased_indel_store(self):
+        """The indel log's carriers, no phase: a sample holding the SNP gets its worst
+        case, PUTATIVE, on whichever slot the SNP is (S07 is 1|0 at the SNP)."""
+        fx = self.run_analyzer(tiers=("registry", "tier1"))
+        rows = fx.rows()
+        d = {r["samples"]: r for r in self.by_site(rows)["D"]}
+        self.assertEqual(d["S07"]["dna"], GUIDE + "CGG")
+        self.assertEqual(d["S08"]["dna"][3], "c")
+        lines = [c for c in fx.cooc() if c[1] == "510"]
+        self.assertEqual(sorted(set(c[8] for c in lines)), ["PUTATIVE"])
+
+    def test_sites_only_joint_frequency(self):
+        """No genotypes: the joint frequency of a PAM-creating SNP and the indel is bounded
+        by the rarer of the two (the indel's AF from its per-dataset sidecar)."""
+        fx = self.run_analyzer(tiers=("registry",), indel_af="0.002")
+        lines = [c for c in fx.cooc() if c[1] == "1110"]
+        self.assertTrue(lines)
+        self.assertEqual(sorted(set((c[8], c[9], c[10], c[11]) for c in lines)),
+                         [("PUTATIVE", "0.002", "NA", "NA")])
 
     def test_sites_only_panel(self):
         """No genotypes at all: one PUTATIVE worst-case row per target, the log's

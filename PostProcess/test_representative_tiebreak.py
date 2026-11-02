@@ -315,5 +315,116 @@ class RepresentativeTiebreak(unittest.TestCase):
             self.assertEqual(rep[SNP_COL], "n")
 
 
+class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
+    """The merge step and SNP+indel rows (2.8.1).
+
+    Rows of one cluster naming the same variants at one Cluster_Position merge into the
+    first (their samples unioned), whatever their sequence. On an indel row the carriers
+    belong to the sequence (each carrier haplotype is resolved on its own), and two
+    alignments of a site can name the same variants with different carriers: an
+    RNA-bulge alignment does not reach the base a SNP sits on, so it lists that SNP's
+    carriers under the indel alone; the union then put them on the full alignment, a
+    sequence they do not have."""
+
+    INDEL = "chr1_1010_TC_T"
+    X = "ACTGAAATCTGTAAGCAGGCTGG"
+    RNA = "-CTGAAATCTGTAAGCAGGCTGG"
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="merge_indel_rows_")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def _row(self, dna, cfd, total, samples, snp=None, rsid="rs1", af="0.1"):
+        r = _row(dna, cfd=cfd, total=total, samples=samples, snp=snp or self.INDEL)
+        r[3] = dna.upper()  # the Reference column holds the reference alignment
+        r[16], r[17] = rsid, af
+        return r
+
+    def _merge(self, rows):
+        infile = os.path.join(self.d, "in.txt")
+        outfile = os.path.join(self.d, "out.txt")
+        with open(infile, "w") as fh:
+            fh.write("\t".join(POST_ADJUST_HEADER) + "\n")
+            for r in rows:
+                fh.write("\t".join(r) + "\n")
+        cmd = [sys.executable, os.path.join(PP, "remove_contiguous_samples.py"),
+               infile, outfile, "3", "5", "7", "11", "16", "19", "21",
+               "score", "mm+bulges"]
+        res = subprocess.run(cmd, cwd=PP, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        out = []
+        for path in (outfile, outfile + ".discarded_samples"):
+            with open(path) as fh:
+                out.append([l.rstrip("\n").split("\t") for l in fh.readlines()[1:]])
+        return out
+
+    def test_a_carrier_stays_off_a_sequence_it_does_not_have(self):
+        best, alt = self._merge([self._row(self.X, "1.000", 0, "S23"),
+                                 self._row(self.RNA, "0.900", 1, "S23,S24")])
+        self.assertEqual((best[0][DNA_COL], best[0][13]), (self.X, "S23"))
+        self.assertEqual([(a[DNA_COL], a[13]) for a in alt], [(self.RNA, "S23,S24")])
+        self.assertEqual(best[0][19], "1")  # the cluster's other rows
+
+    def test_alignments_with_one_carrier_set_stay_one_entry(self):
+        """The rule as before: one row per variant list at a site, the best kept."""
+        best, alt = self._merge([self._row(self.X, "1.000", 0, "S23,S24"),
+                                 self._row(self.RNA, "0.900", 1, "S24,S23")])
+        self.assertEqual((best[0][DNA_COL], best[0][13]), (self.X, "S23,S24"))
+        self.assertEqual(alt, [])
+
+    def test_one_sequence_from_two_datasets_is_still_merged(self):
+        """What the merge is for: the same target from two VCF datasets."""
+        best, alt = self._merge([
+            self._row(self.X, "1.000", 0, "S23", rsid="rs1", af="0.1"),
+            self._row(self.X, "1.000", 0, "T01", rsid=".", af="0.2")])
+        self.assertEqual(best[0][13], "S23,T01")
+        self.assertEqual(best[0][16], ".,rs1")
+        self.assertEqual(best[0][17], "0.1,0.2")
+        self.assertEqual(alt, [])
+
+    def test_folded_alignments_still_add_their_rsid_and_af(self):
+        """Another sequence with the carriers the first has: one entry, as before."""
+        best, alt = self._merge([
+            self._row(self.X, "1.000", 0, "S23", rsid="rs1", af="0.1"),
+            self._row(self.RNA, "0.900", 1, "S23", rsid=".", af="0.2")])
+        self.assertEqual((best[0][DNA_COL], best[0][16], best[0][17]),
+                         (self.X, ".,rs1", "0.1,0.2"))
+        self.assertEqual(alt, [])
+
+    def test_snp_only_rows_merge_as_before(self):
+        """A row with no indel keeps the old key, whatever its sequence."""
+        snp = "chr1_1006_C_A"
+        best, alt = self._merge([self._row(self.X, "1.000", 0, "S23", snp=snp),
+                                 self._row(self.RNA, "0.900", 1, "S23,S24", snp=snp)])
+        self.assertEqual((best[0][DNA_COL], best[0][13]), (self.X, "S23,S24"))
+        self.assertEqual(alt, [])
+
+    def test_a_snp_named_after_the_indel_counts_as_an_indel_row(self):
+        snps = self.INDEL + ",chr1_1006_C_A"
+        best, alt = self._merge([self._row(self.X, "1.000", 0, "S23", snp=snps),
+                                 self._row(self.RNA, "0.900", 1, "S24", snp=snps)])
+        self.assertEqual(best[0][13], "S23")
+        self.assertEqual([a[13] for a in alt], ["S24"])
+
+    def test_the_row_count_does_not_depend_on_the_sort(self):
+        """The three files of a search hold the same rows, each sorted by its own
+        criterion, and their alternative alignments are joined line by line (pr -m), so
+        a cluster must keep one row count in all three."""
+        rows = [self._row(self.X, "1.000", 0, "S1"),
+                self._row(self.RNA, "0.900", 1, "S1,S2"),
+                self._row("ACTGAAATCTGTAAGCAGG-CAG", "0.300", 1, "S1"),
+                self._row("A-TGAAATCTGTAAGCAGGCTGG", "0.200", 1, "S1,S2"),
+                self._row("ACTGAA-TCTGTAAGCAGGCTGG", "0.100", 1, "S2")]
+        counts = set()
+        for order in (rows, rows[::-1], rows[2:] + rows[:2], rows[1::2] + rows[::2]):
+            best, alt = self._merge([list(r) for r in order])
+            self.assertEqual(len(best), 1)
+            counts.add(len(alt))
+        self.assertEqual(counts, {2})  # the carrier sets {S1}, {S1,S2}, {S2}
+
+
 if __name__ == "__main__":
     unittest.main()

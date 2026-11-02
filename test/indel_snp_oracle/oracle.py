@@ -5,7 +5,9 @@
       A small reference chromosome, a phased VCF (with a few unphased calls), its
       samplesID file, the NRG PAM, the guide and spec.json, with SpCas9 sites that
       need an indel, a SNP, or both, planted in cis, in trans, unphased, as two
-      indels on one haplotype, and as split multi-allelic SNP records.
+      indels on one haplotype, as a multi-allelic SNP on one VCF line, with a SNP at
+      the far end of the target, and with a target in an indel's flank that does not
+      hold the indel.
   oracle.py check <workdir> <PostProcess dir> <results dir> [<results dir> ...]
       Builds every sample's two haplotypes from the VCF (a brute-force truth that
       shares no code with CRISPRme's resolution) and checks every row whose variant
@@ -13,13 +15,16 @@
       alternative alignments, all three blocks:
         * the PAM is a concrete NRG and no IUPAC code is left;
         * CFD, recomputed from the row's own alignment, is the reported CFD;
-        * the mismatch count is the alignment's;
+        * the mismatch count is the alignment's, and mismatches + bulges is their sum;
+        * every variant it names is a record of the VCF, forward strand;
         * every listed carrier really has the reported sequence: a phased carrier on
-          one of its haplotypes, at the reported site; an unphased one carries every
-          allele the row names;
-      then the planted sites' expectations (who has which target, at what CFD), and
-      the SNP+indel co-occurrence companion's CONFIRMED lines (their carriers hold the
-      indel and the named SNP alts on one haplotype). Exit status 1 on any failure.
+          one of its haplotypes, at the reported site, spanning the indel the row
+          names, with every named variant on that haplotype; an unphased one carries
+          every allele the row names;
+      then the planted sites' expectations (who has which target, at what CFD, under
+      which variants), and the SNP+indel co-occurrence companion's CONFIRMED lines
+      (their carriers hold the indel and the named SNP alts on one haplotype, their
+      joint frequency counts haplotype copies). Exit status 1 on any failure.
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid
 fake-indel genome column by column, without genotypes: 5 of the first 7 sites below
@@ -41,7 +46,7 @@ import zipfile
 G = "ACTGAAATCTGTAAGCAGGC"  # the guide
 COMP = str.maketrans("ACGTacgt", "TGCAtgca")
 CODES = set("RYSWKMBDHVryswkmbdhv")
-NSAMPLES = 22
+NSAMPLES = 46
 
 
 def rc(s):
@@ -60,7 +65,7 @@ def other(b, avoid=()):
 # --------------------------------------------------------------------------- #
 def generate(wd):
     random.seed(7)
-    length = 10500
+    length = 16000
     seq = [random.choice("ACGT") for _ in range(length)]
     variants = []  # dicts: site, kind, pos1, ref, alt, gts{sample: 'a|b'}
     samples = ["S%02d" % i for i in range(1, NSAMPLES + 1)]
@@ -73,6 +78,19 @@ def generate(wd):
     def var(site, kind, pos1, ref, alt, gts):
         assert "".join(seq[pos1 - 1:pos1 - 1 + len(ref)]) == ref, (site, kind, pos1, ref)
         variants.append(dict(site=site, kind=kind, pos1=pos1, ref=ref, alt=alt, gts=gts))
+
+    def multi(site, kind, pos1, ref, alts, raw):
+        """One VCF line with several alts. The truth holds one biallelic variant per alt
+        (a slot holds this alt or not); the VCF line keeps the raw genotypes."""
+        for k, alt in enumerate(alts):
+            one = {}
+            for s, g in raw.items():
+                sep = "/" if "/" in g else "|"
+                toks = g.split(sep)
+                if str(k + 1) in toks:
+                    one[s] = sep.join("1" if t == str(k + 1) else "0" for t in toks)
+            var(site, kind, pos1, ref, alt, one)
+            variants[-1]["line"] = dict(alts=alts, raw=raw, index=k)
 
     # A (+): a deletion of CAC restores a perfect target (PAM TGG); a G>A SNP at the
     # PAM's last base in cis (S02: no PAM), in trans (S03) and with no indel (S04).
@@ -165,6 +183,109 @@ def generate(wd):
     var("O", "del", o0 + 11, G[9] + "C", G[9], {"S21": "1|0", "S22": "1|0"})
     expect["O"] = {"listed": ["S22"], "never": ["S21"], "never_any": ["S21"]}
 
+    # M (+), M2 (-): the indel restores a perfect target. S24's and S26's slot also holds
+    # a SNP at the target's far-end base, so their target has one mismatch there. An
+    # RNA-bulge alignment at the same site does not reach that base and lists them too,
+    # under the same variant list: the merge step must not put them on the perfect row.
+    m0 = 10000
+    put(m0, G[:10] + "C" + G[10:] + "TGG")
+    var("M", "del", m0 + 10, G[9] + "C", G[9], {"S23": "1|0", "S24": "1|0"})
+    var("M", "farsnp", m0 + 1, G[0], other(G[0]), {"S24": "1|0"})
+    expect["M"] = {"perfect": ["S23"], "never_perfect": ["S24"], "one_mm": ["S24"]}
+    m2 = 10300
+    pre = rc(G[14:] + "AGG")
+    post = rc(G[:12])
+    put(m2, pre + post)
+    var("M2", "ins", m2 + len(pre), pre[-1], pre[-1] + "TT", {"S25": "1|0", "S26": "1|0"})
+    far = m2 + len(pre) + len(post) - 1
+    var("M2", "farsnp", far + 1, seq[far], "G", {"S26": "1|0"})  # a CFD below 1 there
+    expect["M2"] = {"perfect": ["S25"], "never_perfect": ["S26"], "one_mm": ["S26"]}
+
+    # N (+): F's geometry with the spacer SNP as one VCF line C>A,T; A is the guide's base.
+    # S28's deletion slot holds A (perfect), S29's holds T (2|1, its deletion on slot 1),
+    # S27 is 2|2 (no A, no C), S30 has no SNP (C).
+    n0 = 10600
+    put(n0, G[:5] + "C" + G[6:10] + "C" + G[10:] + "TGG")
+    var("N", "del", n0 + 10, G[9] + "C", G[9],
+        {"S27": "1|0", "S28": "0|1", "S29": "1|0", "S30": "1|0"})
+    multi("N", "snp05", n0 + 6, "C", ["A", "T"], {"S27": "2|2", "S28": "0|1", "S29": "2|1"})
+    expect["N"] = {"perfect": ["S28"], "never_perfect": ["S27", "S29", "S30"],
+                   "one_mm": ["S27", "S29", "S30"],
+                   "named": {"S28": ["chr21_%d_C_A" % (n0 + 6)],
+                             "S27": ["chr21_%d_C_T" % (n0 + 6)],
+                             "S29": ["chr21_%d_C_T" % (n0 + 6)]},
+                   "bare": ["S30"]}
+
+    # N2 (+): the same with S31 the only carrier of A, 2|1: its carrier genotypes alone
+    # do not say which token is A; S32's T (2|2) does. Its deletion slot holds A.
+    n2 = 10900
+    put(n2, G[:5] + "C" + G[6:10] + "C" + G[10:] + "TGG")
+    var("N2", "del", n2 + 10, G[9] + "C", G[9], {"S31": "0|1", "S32": "1|0"})
+    multi("N2", "snp05", n2 + 6, "C", ["A", "T"], {"S31": "2|1", "S32": "2|2"})
+    expect["N2"] = {"perfect": ["S31"], "never_perfect": ["S32"], "one_mm": ["S32"]}
+
+    # L (+): a target in the downstream flank of a deletion, holding no base of it: GT>G,
+    # then 2 bp, then a target a C>A SNP makes perfect. S33 carries both on one slot, S36
+    # only the deletion, S34 and S35 only the SNP. It is a SNP off-target of S33, S34,
+    # S35; the fake-indel window's row (deletion + SNP, S33) must not take its place.
+    l0 = 11200
+    put(l0, "GGTCA" + G[:5] + "C" + G[6:] + "TGG")
+    var("L", "del", l0 + 2, "GT", "G", {"S33": "1|0", "S36": "1|0"})
+    var("L", "snp05", l0 + 5 + 5 + 1, "C", "A", {"S33": "1|0", "S34": "1|0", "S35": "0|1"})
+    expect["L"] = {"no_indel_rows": True, "snp_perfect": ["S33", "S34", "S35"]}
+
+    # L2 (+): the same on an insertion: A>ACC, then 3 bp, then a perfect reference target.
+    # L3 (+): a perfect reference target whose last base is the anchor of an insertion:
+    # the target holds no inserted base, so its sequence is the reference's.
+    l2 = 11500
+    put(l2, "GATCA" + G + "TGG")
+    var("L2", "ins", l2 + 2, "A", "ACC", {"S33": "0|1", "S36": "0|1"})
+    expect["L2"] = {"no_indel_rows": True}
+    l3 = 11800
+    put(l3, G + "TGG" + "TTCAGTTAC")
+    var("L3", "ins", l3 + 23, "G", "GCAT", {"S34": "0|1", "S35": "1|0"})
+    expect["L3"] = {"no_indel_rows": True}
+
+    # R (-): F's geometry on the minus strand. The forward SNP is G>T (the target reads
+    # C>A), in cis in S37, in trans in S38: named forward, as the VCF has it.
+    r0 = 12100
+    site = G[:5] + "C" + G[6:10] + "C" + G[10:] + "TGG"
+    put(r0, rc(site))
+    fwd = rc(site)
+    # the deleted C is forward index 13 (G), its anchor the base left of it
+    var("R", "del", r0 + 13, fwd[12:14], fwd[12], {"S37": "1|0", "S38": "1|0"})
+    var("R", "snp05", r0 + 19, "G", "T", {"S37": "1|0", "S38": "0|1"})
+    expect["R"] = {"perfect": ["S37"], "one_mm": ["S38"], "cooc": ["S37"],
+                   "named": {"S37": ["chr21_%d_G_T" % (r0 + 19)]}, "bare": ["S38"]}
+
+    # Q (+): a target holding a SNP code and, on S39's slot, a second deletion inside it.
+    # The window keeps the T its second deletion removes, so S39 does not have the
+    # window's sequence and is on no row; S40, with the SNP and no second deletion, is.
+    q0 = 12400
+    put(q0, G[:2] + "T" + G[2:5] + "C" + G[6:10] + "C" + G[10:] + "TGG")
+    var("Q", "del2", q0 + 2, G[1] + "T", G[1], {"S39": "1|0"})
+    var("Q", "snp05", q0 + 7, "C", "A", {"S39": "1|0", "S40": "1|0"})
+    var("Q", "del", q0 + 11, G[9] + "C", G[9], {"S39": "1|0", "S40": "1|0"})
+    expect["Q"] = {"listed": ["S40"], "never_any": ["S39"]}
+
+    # H (+): an unphased carrier homozygous for a G>T SNP that spoils the target: it has
+    # no reference allele there, so it is never listed for the perfect target. S42 has
+    # the deletion and no SNP.
+    h0 = 12700
+    put(h0, G[:10] + "C" + G[10:] + "TGG")
+    var("H", "del", h0 + 10, G[9] + "C", G[9], {"S41": "0/1", "S42": "0/1"})
+    var("H", "snp03", h0 + 4, "G", "T", {"S41": "1/1"})
+    expect["H"] = {"perfect": ["S42"], "never_perfect": ["S41"], "one_mm": ["S41"],
+                   "named": {"S41": ["chr21_%d_G_T" % (h0 + 4)]}}
+
+    # J (+): a carrier homozygous for the deletion and the SNP the target needs: two cis
+    # copies, so the joint frequency is 2 / AN, with one cis sample.
+    j0 = 13000
+    put(j0, G[:5] + "C" + G[6:10] + "C" + G[10:] + "TGG")
+    var("J", "del", j0 + 10, G[9] + "C", G[9], {"S43": "1|1"})
+    var("J", "snp05", j0 + 6, "C", "A", {"S43": "1|1"})
+    expect["J"] = {"perfect": ["S43"], "cooc": ["S43"], "cooc_copies": 2}
+
     # (No split multi-allelic SNP records here: CRISPRitz add-variants keeps only the
     # last of two records at one position in the enriched genome and the dictionary,
     # so the other alt is invisible to every stage. PostProcess/
@@ -186,10 +307,21 @@ def generate(wd):
         fh.write('##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n')
         fh.write("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\t"
                  + "\t".join(samples) + "\n")
+        an = 2 * len(samples)
         for v in variants:
+            line = v.get("line")
+            if line is not None:
+                if line["index"]:
+                    continue  # the first alt's line holds them all
+                gts = [line["raw"].get(s, "0|0") for s in samples]
+                acs = [sum(g.count(str(k + 1)) for g in gts) for k in range(len(line["alts"]))]
+                fh.write("chr21\t%d\tsyn_%s_%s\t%s\t%s\t.\tPASS\tAC=%s;AN=%d;AF=%s\tGT\t%s\n" % (
+                    v["pos1"], v["site"], v["kind"], v["ref"], ",".join(line["alts"]),
+                    ",".join(str(a) for a in acs), an,
+                    ",".join("%.6g" % (a / an) for a in acs), "\t".join(gts)))
+                continue
             gts = [v["gts"].get(s, "0|0") for s in samples]
             ac = sum(g.count("1") for g in gts)
-            an = 2 * len(samples)
             fh.write("chr21\t%d\tsyn_%s_%s\t%s\t%s\t.\tPASS\tAC=%d;AN=%d;AF=%.6g\tGT\t%s\n" % (
                 v["pos1"], v["site"], v["kind"], v["ref"], v["alt"], ac, an, ac / an,
                 "\t".join(gts)))
@@ -260,19 +392,59 @@ class Truth(object):
         pos.extend(range(i, len(self.ref)))
         return "".join(out), pos
 
-    def carries_at(self, sample, seq, strand, start, slack=40):
-        """True iff one haplotype of the sample holds ``seq`` (strand-oriented) with
-        its leftmost base within ``slack`` bp of the reference coordinate ``start``."""
+    def occurrences(self, sample, seq, strand, start, slack=40):
+        """(slot, reference position of each base) of every occurrence of ``seq``
+        (strand-oriented) on the sample's haplotypes, its leftmost base within ``slack``
+        bp of the reference coordinate ``start``."""
+        out = []
         for h in (0, 1):
             hap, pos = self.haplotype(sample, h)
             probe = seq if strand == "+" else rc(seq)
             k = hap.find(probe)
             while k >= 0:
-                anchor = next((p for p in pos[k:k + len(probe)] if p is not None), None)
+                seg = pos[k:k + len(probe)]
+                anchor = next((p for p in seg if p is not None), None)
                 if anchor is not None and abs(anchor - start) <= slack:
-                    return True
+                    out.append((h, seg))
                 k = hap.find(probe, k + 1)
+        return out
+
+    def carries_at(self, sample, seq, strand, start, slack=40):
+        """True iff one haplotype of the sample holds ``seq`` near ``start``."""
+        return bool(self.occurrences(sample, seq, strand, start, slack))
+
+    def on_slot(self, sample, h, pos1, ref, alt):
+        """True iff the sample's slot ``h`` holds the variant."""
+        for v, toks, _p in self.gts.get(sample, ()):
+            if (v["pos1"], v["ref"], v["alt"]) == (pos1, ref, alt) and toks[h] == "1":
+                return True
         return False
+
+    def holds_all(self, sample, seq, strand, start, tokens):
+        """True iff the sample has ``seq`` near ``start`` on a slot holding every named
+        variant, the occurrence spanning each named indel: an inserted base (no reference
+        position) or a jump across the deleted bases."""
+        for h, seg in self.occurrences(sample, seq, strand, start):
+            ok = True
+            for pos1, ref, alt in tokens:
+                if not self.on_slot(sample, h, pos1, ref, alt):
+                    ok = False
+                    break
+                if len(ref) > len(alt):
+                    lo, hi = pos1 - 1, pos1 - 1 + len(ref)  # anchor; first base kept after it
+                    if not any(a == lo and b == hi for a, b in zip(seg, seg[1:])):
+                        ok = False
+                        break
+                elif len(alt) > len(ref) and None not in seg:
+                    ok = False
+                    break
+            if ok:
+                return True
+        return False
+
+    def is_record(self, pos1, ref, alt):
+        return any((v["pos1"], v["ref"], v["alt"]) == (pos1, ref, alt)
+                   for v in self.spec["variants"])
 
     def carries_allele(self, sample, pos1, ref, alt):
         for v, toks, _p in self.gts.get(sample, ()):
@@ -305,8 +477,8 @@ def _open_table(path):
     return open(path, newline="")
 
 
-def indel_rows(path):
-    """Every (block, field dict) of a results table whose variant list holds an indel."""
+def alt_rows(path):
+    """Every (block, field dict) of a results table with a variant."""
     csv.field_size_limit(1 << 30)
     out = []
     with _open_table(path) as fh:
@@ -323,6 +495,8 @@ def indel_rows(path):
                         "crrna": row[col["Aligned_spacer+PAM_(%s)" % b]],
                         "alt": row[col["Aligned_protospacer+PAM_ALT_(%s)" % b]],
                         "mm": int(row[col["Mismatches_(%s)" % b]]),
+                        "bulges": int(row[col["Bulges_(%s)" % b]]),
+                        "total": int(row[col["Mismatches+bulges_(%s)" % b]]),
                         "var": row[col["Variant_info_genome_(%s)" % b]],
                         "samples": row[col["Variant_samples_(%s)" % b]],
                     }
@@ -333,11 +507,15 @@ def indel_rows(path):
                 f["cfd"] = float(row[col[key]]) if key in col else None
                 if f["origin"] != "alt" or f["var"] in ("", "NA"):
                     continue
-                if not any(_is_indel_token(t) for t in f["var"].split(",")):
-                    continue
                 f["block"] = b
                 out.append(f)
     return out
+
+
+def indel_rows(path):
+    """Every (block, field dict) of a results table whose variant list holds an indel."""
+    return [f for f in alt_rows(path)
+            if any(_is_indel_token(t) for t in f["var"].split(","))]
 
 
 def check(wd, pp, result_dirs):
@@ -365,6 +543,9 @@ def check(wd, pp, result_dirs):
         for t in tables:
             rows.extend(indel_rows(t))
         print("oracle: %s: %d indel row blocks" % (name, len(rows)))
+        snp_only = [f for t in glob.glob(os.path.join(rd, "*integrated_results.tsv"))
+                    for f in alt_rows(t)
+                    if not any(_is_indel_token(x) for x in f["var"].split(","))]
         seen = {}  # site -> [(samples set, cfd, mm, names)]
         for f in rows:
             where = "%s %s:%d(%s) %s %s" % (name, f["block"], f["start"], f["strand"],
@@ -379,6 +560,9 @@ def check(wd, pp, result_dirs):
             mm = sum(1 for c in f["alt"][:-3] if c.islower())
             if mm != f["mm"]:
                 fail("%s: %d mismatches reported, the alignment has %d" % (where, f["mm"], mm))
+            if f["total"] != f["mm"] + f["bulges"]:
+                fail("%s: %d mismatches + bulges reported, the row has %d + %d"
+                     % (where, f["total"], f["mm"], f["bulges"]))
             if f["cfd"] is not None:
                 cfd = cfd_score_bulge_aware(f["crrna"], f["alt"])
                 if abs(round(cfd, 3) - f["cfd"]) > 1e-9:
@@ -386,11 +570,18 @@ def check(wd, pp, result_dirs):
                          % (where, f["cfd"], cfd))
             samples = [s for s in f["samples"].split(",") if s and s != "NA"]
             toks = [t.split("_") for t in f["var"].split(",")]
+            named = [(int(t[-3]), t[-2], t[-1]) for t in toks]
+            for n in named:
+                if not truth.is_record(*n):
+                    fail("%s: %s is not a record of the VCF" % (where, "_".join(map(str, n))))
             for s in samples:
                 if truth.phased(s):
                     if not truth.carries_at(s, stripped.upper(), f["strand"], f["start"]):
                         fail("%s: %s is listed but no haplotype of it has the sequence"
                              % (where, s))
+                    elif not truth.holds_all(s, stripped.upper(), f["strand"], f["start"], named):
+                        fail("%s: no haplotype of %s has the sequence spanning the indel with "
+                             "every variant the row names" % (where, s))
                 else:
                     for t in toks:
                         if not truth.carries_allele(s, int(t[-3]), t[-2], t[-1]):
@@ -402,6 +593,28 @@ def check(wd, pp, result_dirs):
         for site, ex in sorted(expect.items()):
             got = seen.get(site, [])
             listed = set().union(*[s for s, _c, _m, _v in got]) if got else set()
+            if ex.get("no_indel_rows") and got:
+                fail("%s: site %s: indel row(s) on a target that holds no base of the indel: %s"
+                     % (name, site, got))
+            if "snp_perfect" in ex:
+                lo, hi = truth.spec["sites"][site]
+                best = [set(f["samples"].split(",")) for f in snp_only
+                        if lo - 60 <= f["start"] <= hi + 60 and f["block"] == "highest_CFD"
+                        and f["cfd"] is not None and f["cfd"] >= 0.999]
+                if not any(set(ex["snp_perfect"]) <= b for b in best):
+                    fail("%s: site %s: no CFD-1 SNP row in the integrated results lists %s"
+                         % (name, site, ex["snp_perfect"]))
+            for s in ex.get("never_perfect", ()):
+                if any(s in ss and c is not None and c >= 0.999 for ss, c, _m, _v in got):
+                    fail("%s: site %s: %s is listed on a CFD-1 row it does not have"
+                         % (name, site, s))
+            for s, want in sorted(ex.get("named", {}).items()) if per_sample else ():
+                if not any(s in ss and all(w in v.split(",") for w in want)
+                           for ss, _c, _m, v in got):
+                    fail("%s: site %s: no row lists %s under %s" % (name, site, s, want))
+            for s in ex.get("bare", ()) if per_sample else ():
+                if not any(s in ss and len(v.split(",")) == 1 for ss, _c, _m, v in got):
+                    fail("%s: site %s: no row lists %s under the indel alone" % (name, site, s))
             for s in ex.get("perfect", ()):
                 if not any(s in ss and c is not None and c >= 0.999 for ss, c, _m, _v in got):
                     fail("%s: site %s: no CFD-1 row lists %s" % (name, site, s))
@@ -451,6 +664,12 @@ def check(wd, pp, result_dirs):
                 if not any(c[8] == "CONFIRMED" and lo <= int(c[1]) <= hi and s in c[11].split(",")
                            for c in cooc):
                     fail("%s: site %s: no CONFIRMED co-occurrence lists %s" % (name, site, s))
+            if "cooc_copies" in ex:
+                want = ex["cooc_copies"] / (2.0 * NSAMPLES)
+                for c in cooc:
+                    if lo <= int(c[1]) <= hi and abs(float(c[9]) - want) > 1e-5:
+                        fail("%s: site %s: joint frequency %s, not %d copies of %d"
+                             % (name, site, c[9], ex["cooc_copies"], 2 * NSAMPLES))
             for s in ex.get("cooc_putative", ()):
                 if not any(c[8] == "PUTATIVE" and lo <= int(c[1]) <= hi and s in c[11].split(",")
                            for c in cooc):
