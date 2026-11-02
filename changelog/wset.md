@@ -416,3 +416,17 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   with no two FASTA files of one name goes in as before, file for file. **If you downloaded such an
   archive,** remove the genome it gave in Settings, with the indexes built on it, and install the
   genomes it holds each under a name of its own. Covered by `PostProcess/test_genome_layout.py`.
+- **A genome download that is refused leaves the genome installed under its name as it was.** A
+  Direct URL or UCSC download removed the genome installed under its name before it laid out its
+  own files there (split a FASTA of several sequences, named a FASTA of one after it, wrote each
+  header as `>id`), so when that step refused it, no genome was left under the name: `crisprme.py
+  download --what genome --source url` of a `.fa.gz` holding `>-x`, or two sequences `>a`, over an
+  installed genome ended with exit status 1, its message, and no genome under that name (in 2.8.0,
+  the one of two sequences `>a` did the same). The download now lays out its files in its staging
+  folder, as an upload in Settings does, and puts them in place of the installed genome only once
+  that is done: one that is refused leaves it as it was (the web Settings page reads `failed`, with
+  the message). A download with a FASTA whose sequence would go in under the name of another file
+  of it (`all.fa` holding `>chr1`, beside `chr1.fa`), which ended in a Python traceback, now ends
+  with a message: `all.fa: cannot split -- chr1.fa already exists`. A download that is not refused
+  goes in as before, file for file. **If a refused download removed a genome,** install it again.
+  Covered by `PostProcess/test_genome_layout.py`.

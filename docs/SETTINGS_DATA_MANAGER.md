@@ -28,7 +28,9 @@ Type an assembly name and pick a source:
   one sequence is named after it, and each header is written as `>id` (as for an upload,
   below). An archive with two FASTA files of one name (`a/chr1.fa` and `b/chr1.fa`) is
   refused, as by an upload, and nothing is installed: if it holds two genomes (the two
-  haplotypes of an assembly), install each under a name of its own. Unlike an upload, a
+  haplotypes of an assembly), install each under a name of its own. A download replaces a
+  genome installed under its name only once it is laid out: one that is refused leaves
+  that genome as it was. Unlike an upload, a
   `.fasta` file that needs none of this stays a `.fasta` file, which no index or search
   reads, and the hidden files of an archive go in too (the `._chr1.fa` that macOS `tar`
   adds beside `chr1.fa`, with which a command-line search stops): rename or remove them in

@@ -11,6 +11,7 @@ delivered as ONE multi-sequence file (UCSC's ``susScr11.fa.gz``) indexes and
 searches fine and then silently returns an empty result set.
 """
 
+import errno
 import gzip
 import io
 import os
@@ -780,6 +781,131 @@ class TestDownloadRefusesUnsafeArchive(unittest.TestCase):
             dest = utils.download_reference_genome(
                 "udup", self.genomes, source="url", url="http://x/asm.tar.gz")
         self.assertEqual(sorted(os.listdir(dest)), ["chr1.fa", "chr2.fa", "chr3.fa"])
+
+
+class TestARefusedDownloadKeepsTheInstalledGenome(unittest.TestCase):
+    """A download that its layout refuses (an id the pipeline cannot take, two sequences
+    of one id, a sequence that would go in as another file) leaves a genome installed
+    under its name as it was. The download removed that genome before it laid out its
+    own files there, so a refused one left no genome under the name; at a5379e0 it put
+    the bad genome in its place (finB round 3 review). It is laid out in the staging
+    folder now, as an upload is. By Direct URL (a .fa.gz, a .tar.gz) and from UCSC (a
+    chromFa archive, or the one FASTA of an assembly that has none)."""
+
+    SOURCES = ("url .fa.gz", "url .tar.gz", "ucsc chromFa", "ucsc .fa.gz")
+    INSTALLED = ">chr9\nACGT\n"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.genomes = os.path.join(self.tmp, "Genomes")
+        self.installed = os.path.join(self.genomes, "g")
+
+    def install(self):
+        shutil.rmtree(self.genomes, ignore_errors=True)
+        os.makedirs(self.installed)
+        _write(os.path.join(self.installed, "chr9.fa"), self.INSTALLED)
+
+    def download(self, source, files):
+        """download_reference_genome of g from source, whose archive holds files (path in
+        the archive -> content; a .fa.gz, the content of its one FASTA)."""
+        def fake(staging, http_url=None, **_kw):
+            if source.endswith(".fa.gz"):
+                path = os.path.join(staging, "g.fa.gz")
+                (content,) = files.values()
+                with gzip.open(path, "wb") as fh:
+                    fh.write(content)
+                return path
+            path = os.path.join(staging, "g.tar.gz")
+            with tarfile.open(path, "w:gz") as tar:
+                for name, content in files.items():
+                    info = tarfile.TarInfo(name)
+                    info.size = len(content)
+                    tar.addfile(info, io.BytesIO(content))
+            return path
+
+        def exists(url):  # (UCSC: its chromFa archive, or the one FASTA of one with none)
+            return url.endswith(".chromFa.tar.gz" if source == "ucsc chromFa" else "/g.fa.gz")
+
+        kind, ext = source.split()
+        with mock.patch.object(utils, "download", fake), \
+                mock.patch.object(utils, "_url_exists", exists):
+            return utils.download_reference_genome(
+                "g", self.genomes, source=kind, url="http://x/g" + ext if kind == "url" else None)
+
+    def assert_kept(self):
+        self.assertEqual(os.listdir(self.genomes), ["g"])  # (no staging folder left)
+        self.assertEqual(os.listdir(self.installed), ["chr9.fa"])
+        self.assertEqual(_read(os.path.join(self.installed, "chr9.fa")), self.INSTALLED)
+
+    def test_a_refused_download_keeps_the_installed_genome(self):
+        one = {  # (a .fa.gz: one FASTA, named g.fa)
+            "an id that starts with '-'": (
+                b">-x\nACGT\n>b\nGG\n",
+                "g.fa: sequence id '-x' starts with '-', which the pipeline cannot take"),
+            "two sequences of one id": (b">a\nAC\n>a\nGG\n", "g.fa: duplicate sequence id 'a'"),
+        }
+        archive = {
+            "an id that starts with '-'": (
+                {"asm/-x.fa": b">-x a description\nACGT\n", "asm/b.fa": b">b\nGG\n"},
+                "-x.fa: sequence id '-x' starts with '-', which the pipeline cannot take"),
+            "two sequences of one id": (
+                {"asm/all.fa": b">a\nAC\n>a\nGG\n"}, "all.fa: duplicate sequence id 'a'"),
+            "a sequence that would go in as another file": (
+                {"asm/chr1.fa": b">chr1\nAC\n", "asm/all.fa": b">chr1\nGG\n>chr2\nTT\n"},
+                "all.fa: cannot split -- chr1.fa already exists"),  # (no staging folder)
+        }
+        for source in self.SOURCES:
+            cases = one if source.endswith(".fa.gz") else archive
+            for label, (content, says) in cases.items():
+                with self.subTest(source=source, case=label):
+                    self.install()
+                    files = {"g.fa": content} if source.endswith(".fa.gz") else content
+                    with self.assertRaises(ValueError) as cm:
+                        self.download(source, files)
+                    self.assertTrue(str(cm.exception).startswith(says), str(cm.exception))
+                    self.assert_kept()
+            with self.subTest(source=source, case="a download that goes in"):
+                # replaces the installed genome, as before
+                self.install()
+                files = ({"g.fa": b">chr1 one\nAC\n>chr2\nGG\n"} if source.endswith(".fa.gz")
+                         else {"asm/chr1.fa": b">chr1 one\nAC\n", "asm/chr2.fa": b">chr2\nGG\n"})
+                self.assertEqual(self.download(source, files), self.installed)
+                self.assertEqual(os.listdir(self.genomes), ["g"])
+                self.assertEqual(sorted(os.listdir(self.installed)), ["chr1.fa", "chr2.fa"])
+                self.assertEqual(_read(os.path.join(self.installed, "chr1.fa")), ">chr1\nAC\n")
+
+    def test_a_download_that_cannot_be_put_in_place_puts_the_installed_genome_back(self):
+        real = os.rename
+
+        def rename(src, dst, **kw):  # (the laid-out genome's move into place fails)
+            if dst == self.installed and os.path.basename(src) == "new":
+                raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+            return real(src, dst, **kw)
+
+        self.install()
+        with mock.patch.object(os, "rename", rename):
+            with self.assertRaises(OSError):
+                self.download("url .fa.gz", {"g.fa": b">chr1\nAC\n"})
+        self.assert_kept()
+
+    def test_an_installed_genome_that_is_a_link_to_a_shared_copy(self):
+        # the link alone is replaced, and kept when the download is refused; the copy it
+        # points to is never written to (it was left as it was, the download failing)
+        shared = os.path.join(self.tmp, "shared", "g")
+        os.makedirs(shared)
+        _write(os.path.join(shared, "chr9.fa"), self.INSTALLED)
+        os.makedirs(self.genomes)
+        os.symlink(shared, self.installed)
+        with self.assertRaises(ValueError):
+            self.download("url .fa.gz", {"g.fa": b">-x\nACGT\n"})
+        self.assertEqual(os.readlink(self.installed), shared)
+        self.assert_kept()
+        self.assertEqual(self.download("url .fa.gz", {"g.fa": b">chr1\nAC\n"}), self.installed)
+        self.assertFalse(os.path.islink(self.installed))
+        self.assertEqual(os.listdir(self.installed), ["chr1.fa"])
+        self.assertEqual(os.listdir(shared), ["chr9.fa"])
+        self.assertEqual(_read(os.path.join(shared, "chr9.fa")), self.INSTALLED)
 
 
 class TestValidator(unittest.TestCase):

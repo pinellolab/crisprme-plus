@@ -33,6 +33,7 @@ import subprocess
 import requests
 import hashlib
 import tarfile
+import tempfile
 import gzip
 import time
 import sys
@@ -524,7 +525,10 @@ def download_reference_genome(
     name and would silently drop every result (see ``genome_layout.py``).
     The download lands in a staging dir and is promoted only on success, so a
     failed/partial download never leaves a half-written, auto-discoverable
-    ``Genomes/<assembly>`` folder.
+    ``Genomes/<assembly>`` folder. It is laid out there too (split, named after
+    its sequences, headers written as ``>id``) and only then replaces a genome
+    installed under that name, as an upload does, so a download refused at any
+    step leaves that genome as it was.
 
     Parameters
     ----------
@@ -612,22 +616,35 @@ def download_reference_genome(
                     f"was installed. If they belong to two genomes (the two haplotypes of "
                     f"an assembly, say), install each under a name of its own."
                 )
-        if os.path.isdir(dest_dir):
-            shutil.rmtree(dest_dir, ignore_errors=True)
-        os.makedirs(dest_dir)
+        # Laid out in the staging folder, as an upload is (pages/settings_page.py), and
+        # only then put in place of a genome installed under the name: a download its
+        # layout refused (an id the pipeline cannot take, two sequences of one id) had
+        # removed that genome first, and left no genome under the name.
+        work = tempfile.mkdtemp(prefix=".install_", dir=staging)
+        built, old = os.path.join(work, "new"), os.path.join(work, "old")
+        os.makedirs(built)
         for fa in fastas:
-            shutil.move(fa, os.path.join(dest_dir, os.path.basename(fa)))
+            shutil.move(fa, os.path.join(built, os.path.basename(fa)))
         # CRISPRme identifies chromosomes by FASTA file name, one sequence per file
         # (see genome_layout.py). UCSC assemblies without a per-chromosome archive
         # (e.g. the pig susScr11) arrive as ONE multi-sequence .fa, which indexes and
         # searches fine but then silently yields an empty result -- split it now.
-        # On failure remove the half-built folder so it is never auto-discovered.
-        try:
-            from genome_layout import split_multi_record_fastas
+        from genome_layout import split_multi_record_fastas
 
-            split_multi_record_fastas(dest_dir)
+        try:
+            split_multi_record_fastas(built)
+        except FileExistsError as e:  # (a sequence that would go in as another file;
+            raise ValueError(str(e).replace(built + os.sep, "")) from None  # no stage path)
+        # the genome it replaces is moved aside (a link to a shared copy, as a link), and
+        # back if this one cannot go in; it goes with the staging folder
+        replaced = os.path.islink(dest_dir) or os.path.isdir(dest_dir)
+        try:
+            if replaced:
+                os.rename(dest_dir, old)
+            os.rename(built, dest_dir)
         except BaseException:
-            shutil.rmtree(dest_dir, ignore_errors=True)
+            if replaced and os.path.lexists(old) and not os.path.lexists(dest_dir):
+                os.rename(old, dest_dir)
             raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
