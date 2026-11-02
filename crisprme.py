@@ -416,7 +416,9 @@ def print_help_complete_search() -> None:
         "annotations. The fourth column must contain the annotation name. The "
         "input BED files must be compressed using bgzip [OPTIONAL]\n"
         "\t--samplesID, specify a file listing sample files (one per line) "
-        "present in samplesIDs folder [OPTIONAL]\n"
+        "present in samplesIDs folder [OPTIONAL: with --vcf, a dataset's "
+        "samplesIDs/<dataset>.samplesID.txt is used without it, and with none the by-sample "
+        "and population tables stay empty]\n"
         "\t--gene_annotation, specify gene annotation (e.g., GENCODE) to find "
         "nearest gene for each target (must be bgzip-compressed) [OPTIONAL]\n"
         "\t--mm, number of mismatches allowed in the search [REQUIRED]\n"
@@ -1484,12 +1486,7 @@ def _check_samples_ids(args: List[str], variant: bool) -> str:
         # Tier-0 registry (registry_<vcf>/), not a samplesID. Allow the search to
         # proceed with the empty mock sample set rather than hard-failing; the report
         # still gets per-dataset AF from the registry, just no per-individual columns.
-        sys.stderr.write(
-            "WARNING: variant-aware search without --samplesID -- using an empty "
-            "sample set. Per-dataset allele frequencies still come from the registry; "
-            "there will be no per-individual sample columns (correct for an aggregate/"
-            "sites-only index such as the mega all-source panel).\n"
-        )
+        # (_samples_list_for_search then takes the list of a dataset that has one.)
         return os.path.join(script_path, "vuoto.txt")
     if not variant and "--samplesID" in args:
         error("Missing --samplesID selected, but missing --vcf argument")
@@ -1503,6 +1500,37 @@ def _check_samples_ids(args: List[str], variant: bool) -> str:
     if not os.path.isfile(samplefile):
         error("The file specified for --samplesID does not exist")
     return samplefile
+
+def _samples_list_for_search(vcf_list: str, outputfolder: str, samplefile: str) -> str:
+    """The samples list of a variant search given no --samplesID.
+
+    A dataset's list, samplesIDs/<dataset>.samplesID.txt, comes with its index download and
+    is what the flag would name: with one, the search has its by-sample and population
+    tables, as with the flag. A list naming those of its datasets goes in the output folder,
+    and its path is returned. With none, ``samplefile`` (the empty placeholder) is returned
+    and the search runs without those tables, as a sites-only panel does.
+    """
+    names = [os.path.basename(os.path.normpath(d)) for d in
+             resolve_vcf_dataset_dirs(vcf_list, current_working_directory)]
+    found = [f"{name}.samplesID.txt" for name in dict.fromkeys(names)
+             if os.path.isfile(os.path.join(current_working_directory, "samplesIDs",
+                                            f"{name}.samplesID.txt"))]
+    if not found:
+        sys.stderr.write(
+            "WARNING: variant-aware search without --samplesID, and no samplesIDs/<dataset>"
+            ".samplesID.txt to take: using an empty sample set. Per-dataset allele frequencies "
+            "still come from the registry; the by-sample and population tables stay empty "
+            "(correct for an aggregate/sites-only index such as the mega all-source panel; on a "
+            "genotyped index, pass --samplesID with its sample list to get them).\n"
+        )
+        return samplefile
+    print(f"[complete-search] no --samplesID given: using {', '.join(found)} from samplesIDs/.",
+          flush=True)
+    listing = os.path.join(outputfolder, ".list_samplesID.txt")
+    with open(listing, "w") as fh:
+        fh.write("".join(f"{name}\n" for name in found))
+    return listing
+
 
 def _check_gene_annotation(args: List[str], geneann: bool) -> str:
     """Retrieves and validates the gene annotation file from command-line arguments.
@@ -2204,6 +2232,8 @@ def complete_search() -> None:
     sorting_criteria_scoring = _check_sorting_criteria_scoring(args, "--sorting-criteria-scoring" in args)  # sorting criteria score columns
     sorting_criteria = _check_sorting_criteria(args, "--sorting-criteria" in args)  # sorting criteria (mm+bulges) columns
     outputfolder = _check_output(args)  # output folder
+    if variant and "--samplesID" not in args:
+        samplefile = _samples_list_for_search(vcfdir, outputfolder, samplefile)
     thread = _check_threads(args, "--thread" in args)  # number of threads
     # VCF FILTER values to treat as passing (default: "PASS,." per VCF spec §1.6.1)
     vcf_filter_pass_values = "PASS,."

@@ -963,7 +963,9 @@ its purpose and usage:
 - `--samplesID` 
   <br>Path to a text config file listing sample identifiers (one per line)
   corresponding to VCF datasets. This enables sample-specific off-target 
-  analyses. Mandatory if `--vcf` is specified.
+  analyses. Optional: without it a variant search uses `samplesIDs/<dataset>.samplesID.txt`
+  for each dataset that has one (an index download installs it), and with none the search
+  still runs and names carriers, with empty by-sample and population tables.
 
 **Search and Merging Parameters**
 

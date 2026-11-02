@@ -121,3 +121,15 @@
   file there that holds the line it needs, or a hidden one for the run. With another nuclease's PAM
   an empty result on the whole genome passes too, as it does on one chromosome. An index whose side
   cannot be told stops in one line. Results on NGG, NRG, NNN and a 2-nt PAM are unchanged.
+- **A variant search on a genotyped index without `--samplesID` no longer ends in a `KeyError` after
+  the whole search.** The help marks the flag optional and the run warned "using an empty sample
+  set", a case meant for sites-only panels; on a genotyped index the rows name carriers, and
+  `process_summaries.py` looked each up in an empty table at "Creating images", then deleted the
+  results: 65 to 78 minutes on hg38 for a `KeyError`. An empty or a partial list on a folder with no
+  VCFs did the same, and so did `complete-test` with a sample list under another name (2.8.0 too).
+  **What to do:** run those searches again. Without the flag the search now uses
+  `samplesIDs/<dataset>.samplesID.txt` for each dataset that has one, which an index download
+  installs, and says so: every result file but its own list `.list_samplesID.txt` is byte-identical
+  to passing that list, in both analysis modes. With no such file the search still ends with the
+  same `integrated_results`, with empty by-sample and population tables, and the warning says so.
+  A carrier a partial list does not name has no row in those tables.

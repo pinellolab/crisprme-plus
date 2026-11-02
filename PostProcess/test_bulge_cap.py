@@ -34,6 +34,8 @@ literals lives in test_dictless_defaults below (source-level, no Dash import).
 (Bio.Seq + absent-scientific-module stubs). ``pages_utils`` is loaded with TARGETED stubs
 for its web-only top-level imports (app, dash, pandas) -- never a catch-all.
 """
+import contextlib
+import io
 import os
 import shutil
 import struct
@@ -320,6 +322,52 @@ class TestCliBulgeCap(unittest.TestCase):
                         fh.write(struct.pack("=ii", 7, built))
                 self.assertEqual(crisprme._installed_index_bulge_cap(
                     _MOTIF, _REF, is_variant=False, guide_len=guide), expected)
+
+
+# --------------------------------------------------------------------------- #
+# A variant search given no --samplesID takes the list a download installs
+# --------------------------------------------------------------------------- #
+class TestSamplesListForSearch(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="sampleslist_")
+        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        self._orig_cwd = crisprme.current_working_directory
+        crisprme.current_working_directory = self.root + "/"
+        self.addCleanup(setattr, crisprme, "current_working_directory", self._orig_cwd)
+        self.out = os.path.join(self.root, "out")
+        os.makedirs(self.out)
+        self.vcfs = os.path.join(self.root, "list_vcf.txt")
+
+    def call(self, *datasets):
+        with open(self.vcfs, "w") as fh:
+            fh.write("".join(f"{d}\n" for d in datasets))
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            got = crisprme._samples_list_for_search(self.vcfs, self.out, "placeholder")
+        return got, err.getvalue(), out.getvalue()
+
+    def test_a_dataset_with_its_list_gets_a_listing_of_it(self):
+        _mkfile(os.path.join(self.root, "samplesIDs", "ds.samplesID.txt"), "#h\n")
+        got, err, out = self.call("ds")
+        self.assertEqual(got, os.path.join(self.out, ".list_samplesID.txt"))
+        with open(got) as fh:
+            self.assertEqual(fh.read(), "ds.samplesID.txt\n")
+        self.assertEqual(err, "")  # (the pre-flight's stderr is shown; none is due here)
+        self.assertIn("using ds.samplesID.txt from samplesIDs/", out)
+
+    def test_a_panel_with_one_and_one_without_lists_the_one_and_each_once(self):
+        _mkfile(os.path.join(self.root, "samplesIDs", "ds.samplesID.txt"), "#h\n")
+        got, _, _ = self.call("ds", "mega", "ds")
+        with open(got) as fh:
+            self.assertEqual(fh.read(), "ds.samplesID.txt\n")
+
+    def test_with_none_it_stays_empty_and_says_what_that_costs(self):
+        got, err, _ = self.call("mega")
+        self.assertEqual(got, "placeholder")
+        self.assertIn("using an empty sample set", err)
+        self.assertIn("the by-sample and population tables stay empty", err)
+        self.assertIn("pass --samplesID", err)
+        self.assertFalse(os.path.exists(os.path.join(self.out, ".list_samplesID.txt")))
 
 
 # --------------------------------------------------------------------------- #
