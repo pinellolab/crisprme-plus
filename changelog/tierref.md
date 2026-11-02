@@ -72,13 +72,13 @@ aa9c54b and on these fixes.
   kept its sites.
 
   Second, where a row of SNPs and a row with an indel (alone or with a SNP) give the same alignment,
-  with the same start, score, mismatches and bulges and the same number of carriers, the row of SNPs
-  is now always the one reported and the other goes to the alternative alignments (which a
-  per-sample search lists). Such a tie used to fall to that whole-line sort: on the tier path the
-  upper-case REF of the row of SNPs put it first nearly every time, and with the marks back the
-  sample IDs would have decided. At the ties that did go to the row with the indel, the row of SNPs
-  now takes its place, with its own variant, rsID, allele frequency and carriers and, where the two
-  differ, PAM creation and REF and risk scores. That is 4 sites for `highest_CFD`, 4 for
+  with the same start, score, mismatches and bulges and the same number of carriers, at least one,
+  the row of SNPs is now always the one reported and the other goes to the alternative alignments
+  (which a per-sample search lists). Such a tie used to fall to that whole-line sort: on the tier
+  path the upper-case REF of the row of SNPs put it first nearly every time, and with the marks back
+  the sample IDs would have decided. At the ties that did go to the row with the indel, the row of
+  SNPs now takes its place, with its own variant, rsID, allele frequency and carriers and, where the
+  two differ, PAM creation and REF and risk scores. That is 4 sites for `highest_CFD`, 4 for
   `fewest_mm+b` and 3 for `highest_CRISPR_BULGE` on the per-sample search above, and one site for
   all three criteria on each of the other three (with guide CTCTCAGCTGGTACACGGCA, chr13:110666221,
   from a row without an rsID to rs534552989), none of them in a report table. It is also what a
@@ -88,9 +88,10 @@ aa9c54b and on these fixes.
   population distribution plot, and the report's population figure), and `observed_haplotypes.tsv`
   can list the lines of such a site in another order or, at population level, other lines. On the
   dictionary path an indel row keeps the IUPAC codes of the other variants, so such a tie is rare:
-  none on chr21 and chr22 of the default index with these three guides, where no row moved. A search
-  of an index without the tiers, or of the reference alone, gives the same results byte for byte but
-  for the columns of the next entry.
+  none on chr21 and chr22 of the default index with these three guides, where no row moved. The rows
+  of a sites-only index have no carriers and keep the order they had. A search of an index without
+  the tiers, or of the reference alone, gives the same results byte for byte but for the columns of
+  the next entry.
 
   The set of alignments reported (best and alternative), the scores and every other column are
   otherwise unchanged. To correct results made before, run the search again (`generate-report` alone
