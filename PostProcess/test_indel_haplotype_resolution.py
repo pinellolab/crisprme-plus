@@ -534,6 +534,24 @@ class TargetsThatHoldTheirIndel(unittest.TestCase):
                                   (27, 49, False)):
             self.assertEqual(self._holds(first, last, ref, alt), want, (first, last))
 
+    def test_a_record_left_unnormalized(self):
+        """TCA>TA keeps the A: the record deletes one C (bases either side: 25, 26), so a
+        target starting at that A is reference sequence. TA>TCA adds one C at offset 26."""
+        for first, last, want in ((3, 25, False), (3, 26, True), (26, 48, False)):
+            self.assertEqual(self._holds(first, last, "TCA", "TA"), want, (first, last))
+        for first, last, want in ((3, 25, False), (4, 26, True), (26, 48, True),
+                                  (27, 49, False)):
+            self.assertEqual(self._holds(first, last, "TA", "TCA"), want, (first, last))
+        self.assertEqual(isc.shared_tail("TCA", "TA"), 1)
+        self.assertEqual(isc.shared_tail("TA", "TCA"), 1)
+        self.assertEqual(isc.shared_tail("TC", "T"), 0)
+        self.assertEqual(isc.shared_tail("AA", "A"), 0)  # no base is counted twice
+        # the A a second variant keeps changes nothing either: only 0-based 101 is lost
+        self.assertTrue(isc.changes_span(101, "TCA", "TA", 95, 101))
+        self.assertFalse(isc.changes_span(101, "TCA", "TA", 102, 120))
+        self.assertFalse(isc.changes_span(101, "TA", "TCA", 101, 120))  # past the insertion
+        self.assertTrue(isc.changes_span(101, "TA", "TCA", 95, 110))
+
     def test_a_shorter_left_flank(self):
         """The window of an indel near the chromosome's start: the REF's first base is
         found from the window's own start, not at a fixed offset."""

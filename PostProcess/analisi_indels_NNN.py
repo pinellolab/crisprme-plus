@@ -976,7 +976,8 @@ def _other_indels(lo, hi, ipos, iref, ialt):
         _indel_maxref = max((len(r) for _p, r, _a in _indel_index), default=1)
     i0, i1 = ipos - 1, ipos - 1 + len(iref)  # this indel's REF, 0-based half-open
     kept = _isc.kept_bases(iref, ialt)
-    gone = (i0 + kept, i1 - 1) if len(iref) > kept else None
+    tail = _isc.shared_tail(iref, ialt)
+    gone = (i0 + kept, i1 - 1 - tail) if len(iref) - tail > kept else None
     out = []
     k = bisect.bisect_left(_indel_starts, lo - _indel_maxref)
     while k < len(_indel_index) and _indel_index[k][0] - 1 <= hi:
