@@ -190,5 +190,49 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
                 self.assertIsNone(self.OLD_CLAIM.search(self.text(name)))
 
 
+class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
+    """docs/RELEASE_CHECKLIST.md's local gate: the commands that run on the release image
+    what CI cannot, with the only skips it allows named. Its checks are greps, so what
+    they look for has to stay what the tests and validate-test print."""
+
+    def checklist(self):
+        return (REPO / "docs" / "RELEASE_CHECKLIST.md").read_text()
+
+    def test_it_expects_every_benchmark(self):
+        count = len(json.loads((REPO / "test/benchmark/benchmarks.json").read_text())["benchmarks"])
+        self.assertIn(f"Validation summary: {count} passed, 0 failed, 0 skipped", self.checklist())
+
+    def test_it_sets_no_opt_out(self):
+        self.assertNotRegex(self.checklist(), r"-e CRISPRME_SKIP_HEAVY|--env CRISPRME_SKIP_HEAVY")
+
+    def test_the_skips_it_allows_are_the_skips_the_tests_print(self):
+        text = self.checklist()
+        allowed = re.search(r'grep -vE "([^"]+)"', text).group(1).split("|")
+        self.assertEqual(len(allowed), 3, allowed)
+        sources = {"no TensorFlow here": "test_crispr_bulge_fidelity.py",
+                   "en_US.UTF-8 is not installed": "test_index_resolution.py",
+                   "no ps here to compare": "test_index_resolution.py"}
+        self.assertEqual(sorted(allowed), sorted(sources))
+        for reason, module in sources.items():
+            with self.subTest(skip=reason):
+                self.assertIn(reason, (REPO / "PostProcess" / module).read_text())
+                self.assertIn(f"`{reason}`", text)
+        # the one more an Apptainer run allows
+        self.assertIn("no group to give genome_library",
+                      (REPO / "PostProcess/test_build_index_only_atomic.py").read_text())
+        self.assertIn("`no group to give genome_library`", text)
+
+    def test_it_runs_the_function_based_modules_as_scripts(self):
+        text = self.checklist()
+        for name in function_based_modules():
+            with self.subTest(module=name):
+                self.assertIn(f"`{name}`", text)
+        self.assertIn('if grep -q "^Ran 0 tests"', text)
+        self.assertIn('python "$f" >', text)
+
+    def test_it_takes_the_commit_the_image_provisions(self):
+        self.assertIn("print(scorer_env.CBULGE_PIN)", self.checklist())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

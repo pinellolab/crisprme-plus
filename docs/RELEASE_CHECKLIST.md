@@ -51,9 +51,87 @@ Every user-facing surface must agree on **version · default index · scorer · 
 - [ ] **From-scratch RC image test** (stronger than overlay; closes T-20). Build a BAKED RC image from the release branch and run the full new-user flow against it with **no code binds**. On a Docker host: `docker build` the branch → run `download --what all` + `download --what index --index-name NRG_3_hg38+hg38_HGDP1kGP` + pop-level + `--per-sample` 4/1/1 + `generate-report`. **On a restricted/corporate network that blocks `conda.anaconda.org` (the local/Mac-build SSL failure), pass `--build-arg CONDA_CHANNEL_BASE=https://prefix.dev`** (the Dockerfile threads it into both the main and scorer-env conda solves; see T-37). GitHub-Actions CI builds on GitHub runners (open network) so it uses the default channel fine. On an **apptainer-only node (no Docker, e.g. ml003)**: `apptainer build --fakeroot rc.sif` from a def that bootstraps the latest released SIF and, in `%setup`, copies the branch source into `/opt/conda/opt/crisprme` + `/opt/conda/bin/crisprme.py` (mirrors the Dockerfile `COPY .`); invoke via `apptainer exec --env PATH=/opt/conda/bin:/usr/local/bin:/usr/bin:/bin` (this SIF has no runscript — see T-33). This exercises the BAKED `bin/` wrapper + baked PostProcess/calibration, not a runtime overlay.
 - [ ] **`--per-sample` on Docker Desktop for Mac** (virtiofs bind mount) — not only Linux. The annotation flock race (T-31) is filesystem-specific; Linux/cluster never reproduces it.
 - [ ] **Report threshold-message consistency** (T-32) — the shipped `panel_top100.tsv` IS the recommended default panel `(CB≥1.9e-4, 95%-recall) ∪ (mm+b≤2) ∪ (CFD≥0.2@0-bulge) ∪ (CFD≥0.5@1-bulge) ∪ clean-bulge ∪ must-includes` (a superset of the previous panel); the Section-4 CRISPR-Bulge tier table carries the sensitive `≥1.9e-4 (95% recall)` row + `crispr_bulge_gt_0.tsv` (stable file key); and the risk card, the "how to read this" modal, the Section-4 note, the score glossary, and METHODS §3.5 tell ONE threshold story. The new REF/aligned columns (`CFD_ref`, `CRISPR-Bulge_ref`, `Aligned_spacer+PAM`) appear in the in-report top-1000 table AND every download TSV.
-- [ ] **Full CI green on the release PR** — `build`, `unit-tests`, `validate-benchmarks`, `web-e2e`, `Build multi-arch image`. ⚠️ A PR touching only `pages/**` or docs does **not** trigger `unit-tests`/`validate-benchmarks` (path filters — see trap T-09); the version bump touches `crisprme.py`, which re-triggers the full suite, so confirm they actually ran.
+- [ ] **Full CI green on the release PR** — `build`, `unit-tests`, `validate-benchmarks`, `web-e2e`, `Build multi-arch image`. ⚠️ A PR touching only `pages/**` or docs does **not** trigger `validate-benchmarks` (path filters — see trap T-09); the version bump touches `crisprme.py`, which re-triggers the full suite, so confirm they actually ran.
 - [ ] **Web walkthrough (Playwright)** — home search submit → `/load`; Settings download index / add annotation / download genome / build index / delete genome; assembly-search submit. Screenshots archived.
-- [ ] **CLI test suite** — `PostProcess/test_*.py` + `test/web/*.py` pass inside the shipped env.
+- [ ] **CLI test suite, with nothing left skipped** (T-41) — the local gate below, on the release image, amd64 and arm64.
+
+#### The local gate: nothing stays skipped
+
+Run it on the release image with no overlay, on amd64 Linux and again on the Mac (arm64): CI builds arm64 and tests nothing on it, and `validate-benchmarks` overlays the published image, so it never sees the release code with the release's CRISPRitz. It needs Docker, git-lfs, and network to Hugging Face, EBI, GitHub and MCR. 4 CPUs and 16 GB are enough; about 40-50 min in all.
+
+**Three skips are allowed, and only these**, each run elsewhere in the gate: `no TensorFlow here` (`test_crispr_bulge_fidelity`, the CRISPR-Bulge fidelity gate, runs in its own env in step 3), `en_US.UTF-8 is not installed` (`test_index_resolution`'s locale tests, step 2) and `no ps here to compare` (`test_index_resolution`, runs in the `unit-tests` job, whose image has `ps`).
+
+**Six function-based modules must run as scripts**: `test_determinism`, `test_indel_genotypes`, `test_indel_snp_bruteforce`, `test_indel_snp_cis`, `test_indel_snp_overlay`, `test_samplesid_overlisting`. Under `python -m unittest` each reports `Ran 0 tests` and `OK`, a false pass; as scripts their runners call every test and raise on a failure. Step 1's loop does it. Run each module in a process of its own, as the CI steps do.
+
+```bash
+IMG=pinellolab/crisprme:vX.Y.Z      # or an RC: docker build -t crisprme:rc . (T-37 if conda.anaconda.org is blocked)
+SRC=$PWD                            # the release checkout (for test/web)
+GATE=$PWD/gate; rm -rf "$GATE"; mkdir -p "$GATE/heavy"
+docker run --rm "$IMG" crisprme.py scorer-env check   # must print: compute self-test: OK
+
+# 1. Every module, the function-based ones as scripts, the hermetic test/web scripts, the HF network test.
+docker run --rm -e CRISPRME_RUN_HF_TESTS=1 -v "$GATE:/gate" -w /opt/conda/opt/crisprme/PostProcess "$IMG" bash -c '
+  fail=0
+  for f in test_*.py; do m=${f%.py}
+    python -m unittest "$m" -v > "/gate/$m.log" 2>&1 || { fail=1; echo "FAIL $m"; }
+    if grep -q "^Ran 0 tests" "/gate/$m.log"; then python "$f" > "/gate/$m.script.log" 2>&1 || { fail=1; echo "FAIL $m (script)"; }; fi
+  done
+  for t in ../test/web/test_*.py; do case "$t" in *_e2e.py) continue;; esac
+    python -u "$t" > "/gate/web_$(basename "$t" .py).log" 2>&1 || { fail=1; echo "FAIL web $t"; }
+  done
+  exit $fail' || echo GATE_FAILED
+# Must print nothing: any other skip is a test that did not run.
+grep -h "skipped '" "$GATE"/test_*.log | grep -vE "no TensorFlow here|en_US.UTF-8 is not installed|no ps here to compare"
+
+# 2. The en_US arm of the locale tests.
+docker run --rm -w /opt/conda/opt/crisprme/PostProcess "$IMG" bash -c '(apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq locales) >/dev/null 2>&1; localedef -i en_US -f UTF-8 en_US.UTF-8; python -m unittest test_index_resolution.ChoiceIsLocaleIndependent -v' 2>&1 | tee "$GATE/en_us.log"
+grep -q "^OK$" "$GATE/en_us.log" || echo GATE_FAILED   # Ran 4 tests, OK, no skip
+
+# 3. CRISPR-Bulge fidelity, at the commit the image provisions (a 524 MB LFS download).
+PIN=$(docker run --rm -w /opt/conda/opt/crisprme/PostProcess "$IMG" python -c 'import scorer_env; print(scorer_env.CBULGE_PIN)')
+GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/OrensteinLab/CRISPR-Bulge.git cb
+git -C cb checkout "$PIN"
+git -C cb lfs install --local
+git -C cb lfs pull --include files/datasets.zip
+unzip -q cb/files/datasets.zip 'datasets/Refined_TrueOT.csv' -d cb/files
+docker run --rm -v "$PWD/cb:/cb" -e CBULGE_REPO=/cb -w /opt/conda/opt/crisprme/PostProcess "$IMG" micromamba run -n cbulge python -m unittest test_crispr_bulge_fidelity -v 2>&1 | tee "$GATE/fidelity.log"
+grep -q "^OK$" "$GATE/fidelity.log" || echo GATE_FAILED   # Ran 2 tests, OK, no skip; [fidelity] ... MATCH
+
+# 4. Every benchmark, with no CRISPRME_SKIP_HEAVY.
+docker run --rm -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "$GATE/heavy:/DATA" -w /DATA "$IMG" crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 8
+docker run --rm -v "$GATE/heavy:/DATA" -w /DATA "$IMG" crisprme.py validate-test --chrom chr22 2>&1 | tee "$GATE/validate.out"
+grep -q "Validation summary: 6 passed, 0 failed, 0 skipped" "$GATE/validate.out" || echo GATE_FAILED
+
+# 5. The browser tests. On a Mac: drop --network host and use CRISPRME_WEB_URL=http://host.docker.internal:8090.
+docker run -d --rm --name gate-web -p 8090:8080 "$IMG" crisprme.py web-interface
+until curl -sf -o /dev/null http://localhost:8090/index; do sleep 3; done
+for t in test_web_e2e test_settings_upload_e2e; do
+  docker run --rm --network host -v "$SRC/test/web:/t:ro" -e CRISPRME_WEB_URL=http://localhost:8090 mcr.microsoft.com/playwright/python:v1.47.0-jammy bash -c "pip install -q playwright==1.47.0 && python -u /t/$t.py" || echo GATE_FAILED
+done
+docker rm -f gate-web
+
+# 6. All four workflows green on the release PR, and confirm in each run log that unit-tests and validate-benchmarks actually ran (T-09).
+```
+
+Nothing above may print `GATE_FAILED` or `FAIL`.
+
+**On an HPC node without Docker**, a plain SIF is read-only, so use a writable sandbox. One more skip is allowed there, in step 1: `no group to give genome_library` (an unprivileged user namespace maps no second group; the Docker run above tests it).
+
+```bash
+apptainer build --sandbox sb crisprme.sif && mkdir -p "sb$PWD" gate/heavy tmp locale hf
+# step 1: save its loop as gate_step1.sh with /gate replaced by $PWD/gate, then
+apptainer exec --writable --no-home --bind "$PWD" --pwd /opt/conda/opt/crisprme/PostProcess --env TMPDIR="$PWD/tmp" sb /usr/local/bin/_entrypoint.sh bash "$PWD/gate_step1.sh"
+# the HF test (home bound, HF_HOME on scratch):
+apptainer exec --env CRISPRME_RUN_HF_TESTS=1 --env HF_HOME="$PWD/hf" --bind "$PWD" --pwd /opt/conda/opt/crisprme/PostProcess sb /usr/local/bin/_entrypoint.sh python -m unittest test_hf_downloads -v
+# step 2 (needs the host's /usr/share/i18n):
+apptainer exec --bind /usr/share/i18n:/usr/share/i18n --bind "$PWD" sb /usr/local/bin/_entrypoint.sh localedef -i en_US -f UTF-8 --no-archive "$PWD/locale/en_US.UTF-8"
+apptainer exec --env LOCPATH="$PWD/locale" --bind "$PWD" --pwd /opt/conda/opt/crisprme/PostProcess sb /usr/local/bin/_entrypoint.sh python -m unittest test_index_resolution.ChoiceIsLocaleIndependent -v
+# step 3 (home bound: micromamba writes ~/.cache/mamba), with the clone of step 3 above:
+apptainer exec --env CBULGE_REPO="$PWD/cb" --bind "$PWD" --pwd /opt/conda/opt/crisprme/PostProcess sb /usr/local/bin/_entrypoint.sh micromamba run -n cbulge python -m unittest test_crispr_bulge_fidelity -v
+# step 4:
+apptainer run --bind "$PWD/gate/heavy:/DATA" --pwd /DATA --env CRISPRME_ALLOW_ONDEMAND_BUILD=1 sb crisprme.py complete-test --chrom chr22 --vcf_dataset 1000G --thread 16
+apptainer run --bind "$PWD/gate/heavy:/DATA" --pwd /DATA sb crisprme.py validate-test --chrom chr22
+```
 
 ### C. Release mechanics (at/after tag)
 - [ ] Bump `crisprme.py` version; move `CHANGELOG [Unreleased]` → `[X.Y.Z]` dated + fresh `[Unreleased]` + fix link footer.
@@ -76,7 +154,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 | T-06 | Hidden web dropdowns used `dcc.Dropdown` whose `value` didn't round-trip → assembly-search submitted `None` and no job was submittable. | Use `dcc.Store` for hidden state; assembly-search submit e2e. |
 | T-07 | Web search didn't pass `--gene_annotation` → the gencode companion was discarded, so **closest-gene columns were missing** from web jobs. | Closest-gene columns asserted in the web-job report during the walkthrough. |
 | T-08 | A single multi-chromosome custom VCF produced a cryptic `Genomes/<g>/.fa` failure (the enricher needs per-chrom files); a SNP-only VCF aborted the whole build at the indel step. | `_ensure_per_chromosome_vcfs` auto-split + graceful 0-indel skip; custom-VCF build test. |
-| T-09 | CI **path filters** mean a `pages/**`-only or docs-only PR silently skips `unit-tests` + `validate-benchmarks` — a PR can look "green" without running them. | Gate B note: confirm the full suite actually *ran* (the version-bump PR touches `crisprme.py`, which re-triggers it). |
+| T-09 | CI **path filters** mean a `pages/**`-only or docs-only PR silently skips `validate-benchmarks` (and, until 2.8.1, `unit-tests`) — a PR can look "green" without running them. | Gate B note: confirm the full suite actually *ran* (the version-bump PR touches `crisprme.py`, which re-triggers it). `test_ci_workflows` pins the paths `unit-tests` and `web-e2e` must list. |
 | T-10 | `apptainer exec` bypasses the image entrypoint, so `crisprme.py` isn't on PATH. | Use `apptainer run` (or call `/opt/conda/bin/python` directly) in all HPC/test invocations + docs. |
 | T-11 | HF uploads/deletes 401 when the token comes from the env; `HfFolder` was removed in new `huggingface_hub`. | Pass `token=get_token()` explicitly; delete via `create_commit([CommitOperationDelete…])`. |
 | T-12 | Editing a bash script **while instances of it are running** corrupts the running jobs (broke chr7/chr9 in a GW re-phase). | Never edit a running script — copy to a new filename and run that. |
@@ -108,6 +186,7 @@ Every user-facing surface must agree on **version · default index · scorer · 
 | T-38 | RE-OCCURRENCE of the T-16 read-only-`vuoto.txt` class via a NEW path: the 2.8.0 annotation **serial index pre-build** (`submit_job…:984`, the flock-race fix) called `annotation.load_annotation_bed($annotation_file)` DIRECTLY, bypassing `annotation.py main()`'s `empty` guard. For a **reference-only search** `$annotation_file` is the empty placeholder `vuoto.txt`, and `load_annotation_bed`→`_reindex`→`pysam.tabix_index()` **bgzips it in place and REMOVES the plain file** → the later gene-annotation `cp vuoto.txt` fails ("cannot stat"), aborting the search. It went green on `main` and failed only on the branch (the pre-build was new). SUBTLE CI trap: the `validate-benchmarks` RO-smoke `chmod -R a-w`s the code dir to mimic Apptainer, but **Docker runs as root and root ignores the perm bits**, so the in-place bgzip SUCCEEDS in Docker (consuming vuoto.txt) where a REAL read-only SIF would fail the write — same end result, opaque cause. | `load_annotation_bed` now returns `None` for `vuoto.txt` (never lock/reindex/bgzip the placeholder; callers already take the no-annotation path, `annotate_target` accepts `None`), AND the shell pre-build skips it (`if basename != vuoto.txt`). `test_annotation.test_vuoto_placeholder_never_indexed_or_consumed` pins it (returns None, `tabix_index` never called, no `.gz`/`.tbi`/`.tbi.lock`). On any change to annotation/index-prebuild code: reproduce the **reference-only search on a read-only install** with the REAL CI base image (`docker run pinellolab/crisprme:latest` + overlay the branch, chmod a-w, reference-only search) — do NOT trust an old local SIF (an outdated base image masks the regression), and remember Docker-root bypasses `chmod a-w`. |
 | T-39 | CFD was scored by code inherited from the original CRISPRme: three `calc_cfd` copies with their `revcom` / `get_mm_pam_scores` helpers and the binary `mismatch_score.pkl` / `PAM_scores.pkl` tables. The copies had already drifted apart once (the INDEL path's `N`-in-PAM divergence), and the tables were binary pickles rather than reviewable data. 2.8.0 replaced them with CRISPRme+'s own implementation (`PostProcess/cfd_score.py`, Doench 2016, reviewable JSON tables), bit-for-bit identical in output. | Gate A sub-check "CFD clean-room provenance" below: the grep finds no inherited body or `.pkl`, `test_cfd_cleanroom_equiv` reproduces the frozen `cfd_golden.tsv.gz` (6,132 cases) bit for bit, and `scripts/generate_cfd_tables.py --check` validates the JSON tables. |
 | T-40 | `NRR_3_hg38+hg38_mega` was published (2026-10-27) with an **empty** `_INDELS` (24 sub-indexes, 0 `.bin`) and header-only `log_indels`, so every indel search on it found nothing — and installing it next to `NRG_3_hg38+hg38_mega` REPLACED that index's correct 419 MB indel logs with the empty ones. It was built by an ad-hoc script from a fake-indel genome that predates the sites-only fix (#191) instead of through `seq_script/merge_panels/mega_build_indels.sh`; `buildTST` crashed on each empty genome and nothing checked. The release's own index audit verified builder content and readability, not indel completeness. The same archive check found `NRR_3_hg38+hg38_HPRC`'s registry predating the `data_type` stamp, so it silently defaulted to population-level on a phased panel; both came from ml007 build dirs that missed the later registry backfill. | Gate A "every published variant archive can find indels", run on the archive itself; build any new-PAM mega index only through `mega_build_indels.sh` or from its kit genome. A search cannot catch this archive: 2.8.1 fails loudly on a `.bin`-less sub-index only when that chromosome's log lists indels, and here the logs were empty too, so it reads exactly like a dataset with no indels. The archive check is the safeguard. |
+| T-41 | A skipped test looks like a pass. Every documented self-test and `validate-benchmarks.yml` set `CRISPRME_SKIP_HEAVY=1` on the claim that the bulge-2 index builds need more than 16 GB of RAM, never measured (peak 3.66 GB; passes in 16 GiB, 4 CPUs, no swap); the two benchmarks so skipped could hardly catch a lost site anyway (one reference empty, the other 2 sites). The light CI job's step for `post_process.sh` ran one test and skipped it, 8 other tests skipped there too, and one module was in no workflow: all passed in the image, where no job ran them. Six function-based modules report `Ran 0 tests`, `OK` under `python -m unittest`. | Gate B's local gate: only the three named skips are allowed, the six modules run as scripts, every benchmark runs. A new claim that something does not fit is measured before it becomes a skip. `test_ci_workflows` pins the workflows and the docs' expected output to the registry's count. |
 
 **Gate A sub-checks added from this pass** (wire into section A above):
 - Read-only reference-only search (T-38, re-occurrence of T-16): a reference-only `complete-search` (no `--annotation`, so the `vuoto.txt` placeholder is used) on a READ-ONLY install must emit `integrated_results` and NOT consume/need to write `vuoto.txt`. Covered by the `validate-benchmarks` RO-smoke; any NEW code that indexes/pre-builds an annotation must skip the `vuoto.txt` placeholder. Validate against the REAL current base image, not a stale local SIF (Docker-root bypasses `chmod a-w`; a true read-only FS or an Apptainer SIF is the faithful test).
