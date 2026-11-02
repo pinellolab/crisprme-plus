@@ -45,6 +45,7 @@ Command line::
 
 import mmap
 import os
+import re
 import sys
 from typing import Dict, List, Optional, Tuple
 
@@ -333,8 +334,8 @@ def _indexes_of(library: str, genome: str) -> List[str]:
         names = sorted(os.listdir(library))
     except OSError:
         return []
-    return [name for name in names
-            if name.endswith(f"_{genome}") or f"_{genome}+" in name]
+    named = re.compile(r"[A-Za-z]+_[0-9]+_" + re.escape(genome) + r"(\+.*)?\Z")
+    return [name for name in names if named.match(name)]
 
 
 def describe_index_problems(library: str, genome: str) -> List[str]:
@@ -377,7 +378,7 @@ def main(argv: List[str]) -> int:
         unclean = find_unclean_fastas(genomedir, deep=True)
         try:
             done = split_multi_record_fastas(genomedir)
-        except (ValueError, FileExistsError) as err:
+        except (ValueError, OSError) as err:
             sys.stderr.write(f"ERROR: {err}\n")
             return 1
         for fname, pieces in done.items():

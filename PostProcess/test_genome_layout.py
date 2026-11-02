@@ -354,6 +354,7 @@ class TestHeaderIsExactlyTheId(unittest.TestCase):
         for name, bins in (("NRG_2_ecoli", ["NRG_NC_000913.3 Escherichia coli_1.bin"]),
                            ("NRG_2_ecoli+ds", ["NRG_chr1\r_1.bin"]),
                            ("NRG_2_clean", ["NRG_NC_000913.3 Escherichia coli_1.bin"]),
+                           ("NRG_2_my_ecoli", ["NRG_NC_000913.3 Escherichia coli_1.bin"]),
                            ("NRG_2_ecoli2", ["NRG_chr1_1.bin", ".pam_build"])):
             os.makedirs(os.path.join(lib, name))
             for b in bins:
