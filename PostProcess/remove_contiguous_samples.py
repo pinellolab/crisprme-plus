@@ -70,10 +70,14 @@ def _merged_list(kept, other):
 
 
 def _holds_indel_token(variants):
-    """True iff a row's variant list (chrN_pos_REF_ALT,...) names an indel."""
+    """True iff a row's variant list (<contig>_<pos>_<ref>_<alt>,...) names a variant of
+    the indel path: a REF or ALT longer than one base. That is an indel, or a multi-base
+    record of equal length (an MNV, AC>TG), which CRISPRitz add-variants also puts in a
+    fake-indel window, so its rows are resolved per carrier like indel rows. A token is
+    split from the right because a contig name can hold '_'."""
     for tok in variants.split(","):
-        p = tok.split("_")
-        if len(p) >= 4 and len(p[-2]) != len(p[-1]):
+        p = tok.rsplit("_", 3)
+        if len(p) == 4 and (len(p[2]) > 1 or len(p[3]) > 1):
             return True
     return False
 

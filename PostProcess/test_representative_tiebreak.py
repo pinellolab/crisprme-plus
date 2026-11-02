@@ -409,6 +409,24 @@ class IndelRowsKeepTheirOwnCarriers(unittest.TestCase):
         self.assertEqual(best[0][13], "S23")
         self.assertEqual([a[13] for a in alt], ["S24"])
 
+    def test_an_mnv_row_keeps_its_own_carriers(self):
+        """A multi-base record of equal length (AC>TG) goes to a fake-indel window like
+        an indel, and its rows are resolved per carrier: S24's slot holds a SNP the full
+        alignment reaches and the RNA-bulge alignment does not."""
+        for mnv in ("chr1_1010_AC_TG", "chr1_1006_C_A,chr1_1010_AC_TG",
+                    "chrUn_KI270742v1_1010_AC_TG"):
+            best, alt = self._merge([self._row(self.X, "1.000", 0, "S23", snp=mnv),
+                                     self._row(self.RNA, "0.900", 1, "S23,S24", snp=mnv)])
+            self.assertEqual((best[0][DNA_COL], best[0][13]), (self.X, "S23"), mnv)
+            self.assertEqual([(a[DNA_COL], a[13]) for a in alt], [(self.RNA, "S23,S24")], mnv)
+
+    def test_snp_rows_on_a_contig_with_underscores_merge_as_before(self):
+        snp = "chrUn_KI270742v1_1006_C_A"
+        best, alt = self._merge([self._row(self.X, "1.000", 0, "S23", snp=snp),
+                                 self._row(self.RNA, "0.900", 1, "S23,S24", snp=snp)])
+        self.assertEqual((best[0][DNA_COL], best[0][13]), (self.X, "S23,S24"))
+        self.assertEqual(alt, [])
+
     def test_the_row_count_does_not_depend_on_the_sort(self):
         """The three files of a search hold the same rows, each sorted by its own
         criterion, and their alternative alignments are joined line by line (pr -m), so

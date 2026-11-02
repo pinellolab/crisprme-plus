@@ -1843,10 +1843,17 @@ class TestGenerateReport(unittest.TestCase):
         self.assertEqual(cell("alt", "S1,S2", indel_snp), "2 carriers")
         self.assertEqual(cell("alt", "S1", "chr18;12386299;TTTTC;T,chr18;12386296;T;A"),
                          "1 carrier")
+        # an equal-length multi-base record (MNV) is resolved in a fake-indel window too
+        self.assertEqual(cell("alt", "S1,S2", "chr2_53829114_AC_TG,chr2_53829121_C_A"),
+                         "2 carriers")
+        self.assertEqual(cell("alt", "S1", "chr18;12386296;T;A,chr18;12386299;TC;GA"),
+                         "1 carrier")
         # a SNP-only worst-case union keeps its flag
         self.assertEqual(cell("alt", "S1,S2", "chr2_53829121_C_A,chr2_53829125_G_T"),
                          "2 carriers (>=1 of 2 vars, poss. chimera)")
         self.assertTrue(gr._has_indel("chr1_100_A_AT"))
+        self.assertTrue(gr._has_indel("chr1_100_AC_TG"))
+        self.assertTrue(gr._has_indel("1:100:AC:TG;rs1"))
         self.assertFalse(gr._has_indel("chr1_100_A_T,chr1;101;C;G"))
         self.assertFalse(gr._has_indel("NA"))
         gr._PER_SAMPLE = True

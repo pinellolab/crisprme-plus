@@ -543,16 +543,18 @@ def _count_variants(raw) -> int:
 
 
 def _has_indel(raw) -> bool:
-    """True iff a comma-joined variant field holds an indel (a REF and an ALT of
-    different lengths), in any of the forms _norm_one_variant reads or the
-    ``chrom;pos;ref;alt`` form it returns."""
+    """True iff a comma-joined variant field holds a variant of the indel path (a REF or
+    an ALT longer than one base: an indel, or a multi-base record of equal length, an
+    MNV, which CRISPRitz also puts in a fake-indel window), in any of the forms
+    _norm_one_variant reads or the ``chrom;pos;ref;alt`` form it returns."""
     if _is_na(raw):
         return False
     for tok in str(raw).split(","):
         tok = tok.strip()
         coord = tok if tok.count(";") >= 3 else _norm_one_variant(tok)[0]
         parts = coord.split(";") if coord else []
-        if len(parts) >= 4 and len(parts[2].split()[0]) != len(parts[3].split()[0]):
+        if len(parts) >= 4 and (len(parts[2].split()[0]) > 1
+                                or len(parts[3].split()[0]) > 1):
             return True
     return False
 
