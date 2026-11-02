@@ -38,6 +38,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -790,7 +791,10 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
         if os.geteuid() == 0:
             gid = 4242
         else:
-            gid = next((g for g in os.getgroups() if g != os.getegid()), None)
+            # 65534 is no group of this user's: in an unprivileged Apptainer run the
+            # user namespace gives it for every group it does not map, and chown to it
+            # is an EINVAL
+            gid = next((g for g in os.getgroups() if g not in (os.getegid(), 65534)), None)
             if gid is None:
                 self.skipTest("no group to give genome_library but this user's own")
         lib = self.path("genome_library")
@@ -804,6 +808,22 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                 self.assertTrue(os.stat(top).st_mode & stat.S_ISGID, top)
                 for entry in [top] + [os.path.join(top, f) for f in files]:
                     self.assertEqual(os.stat(entry).st_gid, gid, entry)
+
+    def test_the_setgid_test_takes_no_group_a_user_namespace_does_not_map(self):
+        """os.getgroups() as an unprivileged Apptainer run gives it, os.chown as the kernel
+        answers there: the test above errored, on a host where nothing is wrong. It has no
+        second group to use there, so it says so."""
+        case = type(self)("test_the_indexes_take_the_setgid_group_of_genome_library")
+        result = unittest.TestResult()
+        with mock.patch.object(sys, "platform", "linux"), \
+             mock.patch("os.geteuid", return_value=1000), \
+             mock.patch("os.getegid", return_value=1000), \
+             mock.patch("os.getgroups", return_value=[65534, 1000, 65534]), \
+             mock.patch("os.chown", side_effect=OSError(errno.EINVAL, "Invalid argument")):
+            case.run(result)
+        self.assertEqual(result.errors, [])
+        self.assertEqual([why for _, why in result.skipped],
+                         ["no group to give genome_library but this user's own"])
 
     def test_a_failed_build_exits_non_zero_and_leaves_neither_index_nor_build_directory(self):
         for name, (vcf, chr2, _) in WHOLE.items():
