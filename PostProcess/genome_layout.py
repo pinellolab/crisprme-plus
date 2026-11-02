@@ -354,11 +354,14 @@ def describe_index_problems(library: str, genome: str) -> List[str]:
             continue
         unclean = [b for b in bins if b.endswith(".bin") and len(b.split()) != 1]
         if unclean:
+            # (a variant index: the enriched genome it was built from holds the same headers)
+            variant = name.split("_", 2)[2]
+            also = f" and the variant genome Genomes/{variant}" if "+" in variant else ""
             errors.append(
                 f"The index {index} holds {unclean[0]!r}: it was built from a FASTA header "
                 f"of more than >id, or with CR line ends, and every search of it loses "
                 f"results. Remove it (rm -rf '{index}', or remove the index in the web "
-                f"Settings page) and run build-index-only again."
+                f"Settings page){also} and run build-index-only again."
             )
     return errors
 

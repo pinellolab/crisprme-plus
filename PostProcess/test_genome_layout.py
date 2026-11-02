@@ -373,7 +373,9 @@ class TestHeaderIsExactlyTheId(unittest.TestCase):
         self.assertIn(f"The index {lib}/NRG_2_ecoli holds 'NRG_NC_000913.3 Escherichia coli_1.bin'",
                       problems[0])
         self.assertIn(f"rm -rf '{lib}/NRG_2_ecoli'", problems[0])
-        self.assertIn("NRG_2_ecoli+ds", problems[1])
+        self.assertIn(f"rm -rf '{lib}/NRG_2_ecoli+ds'", problems[1])
+        self.assertIn("and the variant genome Genomes/ecoli+ds and run build-index-only", problems[1])
+        self.assertNotIn("variant genome", problems[0])
         self.assertEqual(gl.describe_index_problems(lib, "ecoli2"), [])
         self.assertEqual(gl.describe_index_problems(lib + "_none", "ecoli"), [])
 
