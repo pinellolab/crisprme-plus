@@ -20,7 +20,6 @@ import gzip
 import json
 import os
 import random
-import re
 import shutil
 import subprocess
 import sys
@@ -234,8 +233,8 @@ def main(root):
     b11, b00 = table(full, "b11"), table(full, "b00")
     say("truth: the example finds its off-targets at 1/1 and 0/0",
         bool(b11 and b00) and b11.count("\n") > b00.count("\n"))
-    say("truth: the cis SNP+indel site is one mismatch, CFD 0.353",
-        "CTAcCAGTTGCTTTTATCACTGG" in (b11 or ""))
+    say("truth: the cis SNP+indel site is one mismatch, CFD 0.353, carrier S4 alone",
+        the_cis_site(b11), str(rows_at(b11, "chr3", 20000)))
 
     # a 0-bulge variant search of a download serves from the installed index
     w = as_download(copy_of(root, nrg2, "download_0_bulges"))
@@ -293,14 +292,16 @@ def main(root):
         rc == 0 and identical(table(w, "o"), b11), out[-600:])
 
     # the first search of a dataset that has only its VCFs, as the web's first 0-bulge one, which
-    # enriches it: it finds the target that needs the indel and the SNP, with the SNP's code at
-    # it, or the carrier's base where the indel post-analysis resolves the code with no registry
+    # enriches it: it finds the target that needs the indel and the SNP, each carrier's own
+    # haplotype resolved (the indel post-analysis, 2.8.1), as on a built index
     w = copy_of(root, seed, "first_search")
     rc, out = search(w, "o", bulges=(0, 0), env={"CRISPRME_ALLOW_ONDEMAND_BUILD": "1"})
-    say("first search of a dataset with only its VCFs: the cis SNP+indel site, and the genotype store",
-        rc == 0 and re.search("CTAcCAGTTGCTTT[TY]ATCACTGG", table(w, "o") or "") is not None
+    say("first search of a dataset with only its VCFs: the cis SNP+indel site at CFD 0.353 with "
+        "carrier S4 alone, and the genotype store",
+        rc == 0 and the_cis_site(table(w, "o"))
         and os.path.isfile(os.path.join(w, "Dictionaries", "indel_genotypes_gx_ds",
-                                        "gt_indel_chr3.tsv.gz")), out[-600:])
+                                        "gt_indel_chr3.tsv.gz")),
+        f"{rows_at(table(w, 'o'), 'chr3', 20000)} " + out[-600:])
 
     # the guide length: served inside the rule, refused or built outside it
     dedicated = copy_of(root, g21, "g21_truth")
