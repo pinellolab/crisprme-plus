@@ -2501,9 +2501,9 @@ def complete_search() -> None:
     ]
     if _force_ps and _sites_only and set(_sites_only) == set(_named):
         print(
-            f"WARNING [complete-search]: --per-sample has nothing to resolve here: "
-            f"{', '.join(_sites_only)} is sites-only, with no genotypes, so the population-"
-            f"level analysis runs instead.",
+            f"WARNING [complete-search]: --per-sample has nothing to resolve here, as what "
+            f"it searches is sites-only, with no genotypes ({', '.join(_sites_only)}): the "
+            f"population-level analysis runs instead.",
             flush=True,
         )
         per_sample = False
@@ -2574,10 +2574,10 @@ def complete_search() -> None:
     population_level = not per_sample
     if per_sample and _sites_only:
         print(
-            f"[complete-search] {', '.join(_sites_only)}: sites-only, with no genotypes to "
-            f"resolve, so its rows are the population-level analysis's (worst-possible "
-            f"off-targets with no carriers), beside the per-sample rows of the other "
-            f"dataset(s).",
+            f"[complete-search] Sites-only, with no genotypes to resolve: "
+            f"{', '.join(_sites_only)}. A sites-only dataset's rows are the population-level "
+            f"analysis's (worst-possible off-targets with no carriers), beside the per-sample "
+            f"rows of the other dataset(s).",
             flush=True,
         )
 

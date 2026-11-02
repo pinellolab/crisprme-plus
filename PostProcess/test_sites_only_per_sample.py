@@ -141,8 +141,8 @@ class TheModeOfASearchWithASitesOnlyDataset(bio._Fixture):
                 mode, alt, out = self.mode_of(f"ds\n{name}\n")
                 self.assertEqual((mode, alt), ("per-sample", "alt-alignments"))
                 self.assertIn("genotyped + PHASED index detected", out)
-                self.assertIn(f"[complete-search] {name}: sites-only, with no genotypes to resolve, "
-                              "so its rows are the population-level analysis's", out)
+                self.assertIn(f"[complete-search] Sites-only, with no genotypes to resolve: {name}. "
+                              "A sites-only dataset's rows are the population-level analysis's", out)
                 self.assertNotIn("WARNING [complete-search]: --per-sample", out)
 
     def test_per_sample_on_sites_only_datasets_alone_is_the_population_level_analysis(self):
@@ -150,9 +150,9 @@ class TheModeOfASearchWithASitesOnlyDataset(bio._Fixture):
         self.add_sites_only("mega")
         mode, alt, out = self.mode_of("mega\n", "--per-sample")
         self.assertEqual((mode, alt), ("population-level", "no-alt-alignments"))
-        self.assertIn("WARNING [complete-search]: --per-sample has nothing to resolve here: mega is "
-                      "sites-only, with no genotypes, so the population-level analysis runs instead.",
-                      out)
+        self.assertIn("WARNING [complete-search]: --per-sample has nothing to resolve here, as what it "
+                      "searches is sites-only, with no genotypes (mega): the population-level analysis "
+                      "runs instead.", out)
         self.assertIn("[complete-search] POPULATION-LEVEL analysis", out)
         self.assertNotIn("PER-SAMPLE analysis", out)
         # with no mode flag, as it was
@@ -169,24 +169,24 @@ class TheModeOfASearchWithASitesOnlyDataset(bio._Fixture):
         self.assertIn("WARNING [complete-search]: --per-sample has nothing to resolve here", out)
         mode, alt, out = self.mode_of("ds\nmega\n")
         self.assertEqual((mode, alt), ("per-sample", "alt-alignments"))
-        self.assertIn("[complete-search] mega: sites-only", out)
+        self.assertIn("[complete-search] Sites-only, with no genotypes to resolve: mega.", out)
 
     def test_per_sample_on_the_two_says_which_goes_which_way(self):
         self.run_bio()
         self.add_sites_only("mega")
         mode, alt, out = self.mode_of("ds\nmega\n", "--per-sample")
         self.assertEqual((mode, alt), ("per-sample", "alt-alignments"))
-        self.assertIn("[complete-search] mega: sites-only", out)
+        self.assertIn("[complete-search] Sites-only, with no genotypes to resolve: mega.", out)
         self.assertNotIn("WARNING [complete-search]: --per-sample", out)
         mode, alt, out = self.mode_of("ds\nmega\n", "--population-level")
         self.assertEqual((mode, alt), ("population-level", "no-alt-alignments"))
-        self.assertNotIn("[complete-search] mega: sites-only", out)
+        self.assertNotIn("[complete-search] Sites-only", out)
 
     def test_no_sites_only_dataset_no_word_of_it(self):
         self.run_bio()
         mode, alt, out = self.mode_of("ds\n")
         self.assertEqual((mode, alt), ("per-sample", "alt-alignments"))
-        self.assertNotIn(": sites-only, with no genotypes", out)
+        self.assertNotIn("Sites-only, with no genotypes", out)
         self.assertNotIn("WARNING [complete-search]: --per-sample", out)
 
 
