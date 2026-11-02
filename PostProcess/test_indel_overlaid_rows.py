@@ -783,7 +783,8 @@ class OtherInstalls(_Base):
 
     def test_opting_out_reads_the_reference(self):
         """CRISPRME_INDEL_SNP=0 on an overlaid genome: each code is the reference
-        base, as on a fake-indel genome without the overlay."""
+        base, as on a fake-indel genome without the overlay. A target that holds no base
+        of its indel gives no row there either: that rule does not depend on the gate."""
         fx = self.run_analyzer(env={"CRISPRME_INDEL_SNP": "0"})
         rows = fx.rows()
         site = self.by_site(rows)
@@ -793,6 +794,12 @@ class OtherInstalls(_Base):
         for r in rows:
             self.assertEqual(len(r["var"].split(",")), 1, r)  # no SNP is named
         self.assertIsNone(fx.cooc())
+        # U: the engine reports the target in the deletion's flank; it is no indel row
+        self.assertTrue([x for x in fx.rows_in
+                         if x[2].upper().replace("M", "A") == GUIDE + "TGG"
+                         and 0 <= int(x[4]) - self.fake_start(fx, "U") < 80],
+                        "the engine must report the flank target")
+        self.assertNotIn("U", site, site.get("U"))
 
 
 if __name__ == "__main__":

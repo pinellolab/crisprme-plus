@@ -14,7 +14,8 @@ strand CRISPRitz searches forward (+ with a 3' PAM, - with a 5' PAM), else the P
 (CRISPRitz 2.9.1 searchOnTST.cpp; a real search of these sites through crisprme.py gives
 the same). Each row must start at the planted base, keep the engine's offset to its
 cluster position, and show as REF the reference bases its target holds from that start,
-gapped as its target.
+gapped as its target, with the SNP+indel integration on and with CRISPRME_INDEL_SNP=0
+(as on a fake-indel genome built without the SNP overlay) alike.
 
 Before 2.8.1 an RNA-bulge row took the cluster position on the + strand with a 3' PAM
 and on the - strand with a 5' PAM, so it started one base before its first aligned base,
@@ -124,7 +125,7 @@ class _Planted(object):
 
 
 class RowCoordinates(unittest.TestCase):
-    def run_side(self, side):
+    def run_side(self, side, gate="1"):
         tmp = tempfile.mkdtemp(prefix="indel_row_coordinates_")
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         p = _Planted(side)
@@ -173,6 +174,7 @@ class RowCoordinates(unittest.TestCase):
         env = {k: v for k, v in os.environ.items()
                if k not in ("MAMBA_EXE", "CONDA_EXE", "CRISPRME_CONDA_EXE")}
         env["PATH"] = os.path.dirname(sys.executable) + ":/usr/bin:/bin"
+        env["CRISPRME_INDEL_SNP"] = gate
         try:
             import intervaltree  # noqa: F401
         except ImportError:
@@ -225,6 +227,14 @@ class RowCoordinates(unittest.TestCase):
     @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
     def test_five_prime_pam(self):
         self.run_side("5p")
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_three_prime_pam_gate_off(self):
+        self.run_side("3p", gate="0")
+
+    @unittest.skipUnless(_gnu_wc(), _SKIP_WC)
+    def test_five_prime_pam_gate_off(self):
+        self.run_side("5p", gate="0")
 
 
 if __name__ == "__main__":
