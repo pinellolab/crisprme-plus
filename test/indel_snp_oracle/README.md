@@ -5,8 +5,9 @@ reference chromosome and a phased VCF of 50 samples (`oracle.py generate`), buil
 indexes and dictionaries with `build-index-only`, runs `complete-search` with
 `--per-sample` and with `--population-level`, then checks every row whose variant list
 holds an indel or an MNV (`oracle.py check`) against each sample's two haplotypes
-built from the VCF, and runs the ALT-PAM release gate (`scripts/check_alt_pam.py`) on
-both results. It exits non-zero on any failure; CI runs it in `validate-benchmarks.yml`.
+built from the VCF, and runs the ALT-PAM and no-N release gate
+(`scripts/check_alt_pam.py`) on both results. It exits non-zero on any failure; CI runs it
+in `validate-benchmarks.yml`.
 
 Every such row of the integrated results and of the alternative alignments, in all
 three blocks, must show a concrete NRG PAM; its CFD must be the CFD of its own

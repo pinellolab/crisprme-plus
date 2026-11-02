@@ -248,12 +248,14 @@ jobs:
             echo "FAIL: a benchmark did not run"; exit 1
           fi
 
-      - name: "ALT-PAM release gate on the chr22 outputs (no ALT row shows a PAM the search did not match)"
+      - name: "ALT-PAM and no-N release gate on the chr22 outputs (no ALT row shows a PAM the search did not match, no reported target holds an N)"
         run: |
           # scripts/check_alt_pam.py: every ALT-origin block of every integrated results
           # table must show a PAM that satisfies the searched motif (read from the run's
           # Params.txt), with no IUPAC code left. Blind to a motif that allows the base a
-          # misreading produces (NRR's last position): the unit tests cover that.
+          # misreading produces (NRR's last position): the unit tests cover that. And no
+          # REF or ALT target of any block may hold an N, an assembly gap, which matches
+          # no guide and no PAM.
           shopt -s nullglob
           tables=(work/Results/crisprme-test-out_*/*integrated_results.tsv)
           if [ "${#tables[@]}" -eq 0 ]; then echo "FAIL: no integrated results under work/Results"; exit 1; fi

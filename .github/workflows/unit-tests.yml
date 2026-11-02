@@ -212,8 +212,9 @@ jobs:
         # position and on table-driven phased cases; test_indel_overlaid_rows runs
         # the shipped analyzer on a fixture with the repo's own Tier-0 / Tier-1 /
         # indel-store writers (pandas + numpy; intervaltree is stubbed when absent);
-        # test_check_alt_pam covers scripts/check_alt_pam.py, which
-        # validate-benchmarks runs on the chr22 outputs.
+        # test_check_alt_pam covers scripts/check_alt_pam.py (and its check that no
+        # reported target holds an N), which validate-benchmarks runs on the chr22
+        # outputs.
         working-directory: PostProcess
         run: python -m unittest test_indel_haplotype_resolution test_indel_overlaid_rows test_check_alt_pam -v
 

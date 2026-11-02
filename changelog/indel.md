@@ -84,8 +84,9 @@
   `PostProcess/test_indel_haplotype_resolution.py`, `PostProcess/test_indel_overlaid_rows.py`,
   `PostProcess/test_representative_tiebreak.py`, the synthetic SNP+indel oracle through the real CLI
   (`test/indel_snp_oracle`, run by `validate-benchmarks.yml`) and a release gate,
-  `scripts/check_alt_pam.py` (no ALT row may show a PAM the searched motif does not allow), run on
-  the chr22 benchmark outputs.
+  `scripts/check_alt_pam.py` (no ALT row may show a PAM the searched motif does not allow, and no
+  REF or ALT target of any block may hold an N, an assembly gap of the genome), run on the chr22
+  benchmark outputs.
 - **An individual whose haplotype carries a second indel inside an indel off-target was listed for
   the sequence of the first one.** The fake-indel genome holds one indel per window, so such a
   haplotype does not have the window's sequence; on the synthetic oracle a sample carrying two

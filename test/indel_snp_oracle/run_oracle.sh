@@ -4,8 +4,8 @@
 # generates the synthetic phased genome + VCF (oracle.py generate), builds its
 # indexes and dictionaries with build-index-only, runs complete-search per-sample and
 # population-level, then checks every indel row against the per-haplotype truth
-# (oracle.py check) and the ALT-PAM release gate (scripts/check_alt_pam.py). Exits
-# non-zero on the first failing step. A few minutes on 2 threads.
+# (oracle.py check) and the ALT-PAM and no-N release gate (scripts/check_alt_pam.py).
+# Exits non-zero on the first failing step. A few minutes on 2 threads.
 set -uo pipefail
 wd=$1
 here=${2:-$(cd "$(dirname "$0")" && pwd)}
