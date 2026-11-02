@@ -47,7 +47,8 @@ Type an assembly name and pick a source:
   sequences is split into one file per sequence, and a FASTA of one sequence is named
   after it (`hg38_chr22.fa` holding `>chr22` goes in as `chr22.fa`: a search takes each
   file for the sequence it is named after). Each header is written as `>id`, with no
-  description, and every line with no carriage return: an NCBI, GENCODE or Ensembl FASTA
+  description, and every line with no carriage return (one that only ends a file, which
+  costs no result, may stay): an NCBI, GENCODE or Ensembl FASTA
   (`>NC_000913.3 Escherichia coli ...`, `>chr1 1`) goes in as `>NC_000913.3`, `>chr1`. An
   id the pipeline cannot take (one that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`,
   `>`, a backquote or `#`, as `>gi|49175990|ref|NC_000913.2|` does, or that starts with `-`

@@ -1735,11 +1735,13 @@ and the `release-crisprme` skill.
   and every search of that index found nothing (a search that built its own failed, on those
   warnings); its build is refused now. A CR counts only with more sequence after it: one that only
   ends a file, on its last line or after its last LF, built with an empty stderr and searched as
-  the file does without it (13 rows, the plain genome's table), and both checks let it through. Such an index is refused as well, where its `.bin` names
-  show it: it holds the old names once the FASTA is written as it should be, and every search of it
-  went on losing results, and a build took it as present. An index built from a FASTA with a clean
-  header line and CRLF after it has `.bin` names that do not show it, so it is not caught: remove it
-  as the ERROR says. A sequence id that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`, `>`, a
+  the file does without it (13 rows, the plain genome's table): both checks let it through, and an
+  upload, a download or `--split` may leave it in place. Such an index is refused as well, where its
+  `.bin` names show it: it holds the old names once the FASTA is written as it should be, and
+  every search of it went on losing results, and a build took it as present. An index built from a
+  FASTA with a clean header line and CRLF after it has `.bin` names that do not show it, so it is
+  not caught: remove it as the ERROR says. A sequence id that holds `|`, `;`, `'`, `"`, `$`, `(`,
+  `)`, `&`, `<`, `>`, a
   backquote or `#` (`gi|49175990|ref|NC_000913.2|`, a PanSN `HG01255#1#CM086702.1`) is refused too:
   a search of one failed in a shell command (`/bin/sh: Syntax error`), or, for `#`, with `none
   survived post-analysis`. So is an id that starts with `-` or `.`: a search of `-x` or `.x` beside
