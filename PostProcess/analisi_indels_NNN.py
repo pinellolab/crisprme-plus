@@ -963,7 +963,10 @@ def _other_indels(lo, hi, ipos, iref, ialt):
     as part of one complex allele split into overlapping records, which the window
     does not hold either; an unphased carrier of both is a multi-allelic heterozygote
     (one allele per haplotype), so only its phased and haploid carriers count. An
-    indel that only deletes bases this one deletes too changes nothing."""
+    indel at this one's own POS that keeps the same anchor is another allele of that
+    anchor: one haplotype cannot hold both, so a slot phased with both is a phasing
+    artefact, not a complex allele, and takes no carrier off this window. An indel
+    that only deletes bases this one deletes too changes nothing."""
     global _indel_index, _indel_starts, _indel_maxref
     if _indelgt is None:
         return ()
@@ -981,6 +984,8 @@ def _other_indels(lo, hi, ipos, iref, ialt):
         k += 1
         if (p, r, a) == (ipos, iref, ialt):
             continue
+        if p == ipos and kept and _isc.kept_bases(r, a):
+            continue  # another allele of the same anchor
         if not _isc.changes_span(p, r, a, lo, hi, gone):
             continue
         gts = _jgt_cache.get((p, r, a))
