@@ -374,17 +374,18 @@ def _registry_data_type_for_search(args):
                 matched = genome_matched
         if not matched and len(regdirs) == 1:
             matched = regdirs  # unambiguous single panel
+        # A sites-only dataset does not decide for the datasets beside it: its own
+        # post-analysis is population-level whatever the mode (new_simple_analysis.py),
+        # and with it first by name, a phased dataset beside it lost its per-sample
+        # default, which it has beside a sites-only dataset named later.
+        sites_only = None
         for d in matched:
-            regdir = os.path.join(dic, d)
-            try:
-                for f in sorted(os.listdir(regdir)):
-                    if f.startswith("reg_") and f.endswith(".idx"):
-                        with open(os.path.join(regdir, f)) as fh:
-                            dt = json.load(fh).get("data_type")
-                        if dt:
-                            return dt  # dataset-wide; one manifest read suffices
-            except (OSError, ValueError):
-                continue
+            dt = _registry_data_type(os.path.join(dic, d))
+            if dt == "sites-only":
+                sites_only = dt
+            elif dt:
+                return dt
+        return sites_only
     except Exception:
         return None
     return None
@@ -2488,7 +2489,25 @@ def complete_search() -> None:
     # a site and drops what only such a pair reaches, while the population-level one reports
     # each site's worst case. So it runs population-level, and says why.
     _no_store = _datasets_without_genotypes(vcfdir) if variant else []
-    if _force_ps:
+    # The datasets the search names whose registry says sites-only: no genotypes to resolve,
+    # so their post-analysis is population-level whatever the mode (new_simple_analysis.py).
+    # --per-sample on such datasets alone is then the population-level analysis, as said.
+    _named = [os.path.basename(_v) for _v in (
+        resolve_vcf_dataset_dirs(vcfdir, current_working_directory) if variant else [])]
+    _sites_only = [
+        _n for _n in dict.fromkeys(_named)
+        if _registry_data_type(os.path.join(current_working_directory, "Dictionaries",
+                                            f"registry_{_n}")) == "sites-only"
+    ]
+    if _force_ps and _sites_only and set(_sites_only) == set(_named):
+        print(
+            f"WARNING [complete-search]: --per-sample has nothing to resolve here: "
+            f"{', '.join(_sites_only)} is sites-only, with no genotypes, so the population-"
+            f"level analysis runs instead.",
+            flush=True,
+        )
+        per_sample = False
+    elif _force_ps:
         per_sample = True
     elif _force_pop:
         per_sample = False
@@ -2553,6 +2572,14 @@ def complete_search() -> None:
             )
     os.environ["CRISPRME_FAST_MODE"] = "0" if per_sample else "1"
     population_level = not per_sample
+    if per_sample and _sites_only:
+        print(
+            f"[complete-search] {', '.join(_sites_only)}: sites-only, with no genotypes to "
+            f"resolve, so its rows are the population-level analysis's (worst-possible "
+            f"off-targets with no carriers), beside the per-sample rows of the other "
+            f"dataset(s).",
+            flush=True,
+        )
 
     # ALTERNATIVE-ALIGNMENT output (the altMerge / *_all_results_with_alternative_alignments.tsv
     # dump = the NON-best alignments per locus cluster). It grows combinatorially with the edit
@@ -2562,11 +2589,9 @@ def complete_search() -> None:
     # integrated_results). Its only real consumer is assembly-search's haplotype reconciliation.
     # So it is EMITTED BY MODE: OFF for a population-level analysis, ON for a per-sample one
     # (where the observed-haplotype detail is wanted and bounded). --alt-alignments /
-    # --no-alt-alignments override explicitly. The default is purely MODE-driven here; the
-    # sites-only refinement in the plan's matrix (a sites-only panel should stay alt-off even
-    # under --per-sample) arrives with the Phase-2 data_type manifest flag -- until then, forcing
-    # --per-sample on a sites-only panel (already discouraged / grayed-out on the web) requests
-    # alt like any other per-sample run. Propagated to the post-analysis subprocess tree via the
+    # --no-alt-alignments override explicitly. The default is purely MODE-driven here (a
+    # search of sites-only panels alone is population-level even under --per-sample, so it
+    # stays alt-off). Propagated to the post-analysis subprocess tree via the
     # internal env var CRISPRME_EMIT_ALT_ALIGNMENTS ("1"=emit, "0"=skip), mirroring
     # CRISPRME_FAST_MODE. (assembly-search reconciles from integrated_results.tsv only since
     # PR #49, so it no longer force-passes --alt-alignments; its per-haplotype searches run lean.)

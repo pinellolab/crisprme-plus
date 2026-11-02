@@ -2003,6 +2003,18 @@ if registry_only_mode:
         f"with degraded (NA) Samples -- no genotype tier to resolve carriers"
         f"{' (aggregate info_af registry; sample-less dict ignored)' if _aggregate_registry else ''}."
     )
+# A sites-only dataset has no genotypes for a per-sample search to resolve: its rows are
+# the population-level path's whatever the search's mode (each dataset of a search has a
+# post-analysis of its own). On the enumeration of the per-sample path, which joins
+# variants only through shared carriers, it lost its multi-variant worst cases: whole
+# sites and higher scores, in a search beside a genotyped dataset, where the mode is
+# per-sample by default, too.
+if registry_only_mode and _twopass_emit is not None and (
+    _aggregate_registry or getattr(myreg, "manifest", {}).get("data_type") == "sites-only"
+):
+    if not _FAST_MODE:
+        print(f"Sites-only dataset on {current_chr}: population-level post-analysis.")
+    _FAST_MODE = True
 
 # check PAM position and relative coordinates on targets
 pam_at_beginning = False

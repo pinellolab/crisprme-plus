@@ -408,6 +408,13 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_build_index_only_worker_death -v
 
+      - name: "A sites-only dataset's post-analysis is the population-level one, whatever the search's mode"
+        # A per-sample search lost its multi-variant worst cases. The real
+        # new_simple_analysis.py on a real sites-only registry, and the real crisprme.py
+        # complete-search against test_build_index_only_atomic's stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_sites_only_per_sample -v
+
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import
         # env, array_module (numpy vs cupy), and configure_tf device placement via a fake
