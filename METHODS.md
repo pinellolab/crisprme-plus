@@ -1001,12 +1001,18 @@ before it is written out.
 *L ≤ K* and the flank is on the PAM's side of the guide. The flank lies where the PAM file
 the index was built from puts the PAM (the 3′ side for `PAMs/20bp-NNN-NO-PAM.txt` and every
 published PAM-less index), and the engine reads it on the side the search's PAM file names,
-so a 5′ search of a 3′-built index finds nothing at all. CRISPRme therefore takes a PAM-less
-index only for a PAM on the side recorded in the index's `.pam_build` (written by
-`build-index-only`, and by a search that builds an all-`N` index), and takes an index without
-one for a 3′ build. A search with an all-`N` PAM builds its index under the name an index for
-the other side may already have, and stops rather than search that one; `build-index-only` does
-not record a PAM file over an index recorded for the other side. The search PAM is
+so a 5′ search of a 3′-built index finds nothing at all. A dedicated index is named after its
+PAM by PAM files of both sides alike (`N…NTTTV 4` and the 5′ Cas12a file both build
+`TTTV_<N>_<genome>`), and read on the wrong side it reports sites that are not there. CRISPRme
+therefore takes any index only for a PAM on the side recorded in its `.pam_build` (written by
+`build-index-only`, and by a search that builds an index). A dedicated index without one is used
+as before. A PAM-less index without one is taken for a 3′ build at the published widths, 3 and 8
+(the K = 8 archive has no `.pam_build`), or under the search PAM's own name, and at no other
+width: a search before 2.8.1 built one of any width from a 5′ PAM file and recorded nothing. A
+search builds its index under a name an index for the other side may already have, and stops
+rather than search that one; `build-index-only` does not record a PAM file over an index
+recorded for the other side, nor a 3′ one over an unrecorded PAM-less index of another width.
+The search PAM is
 widened to *K* with `N`s on the distal side (the end for a 3′ PAM, the front for a 5′ PAM),
 and a leaf is rejected when, at any position the real PAM covers, the stored and requested
 IUPAC codes share no nucleotide. Pad positions are not tested at all: they state no
