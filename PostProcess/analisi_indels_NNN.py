@@ -120,45 +120,21 @@ def convert_fasta_to_dict(f):
     return fasta
 
 
-def alignRefFromVar(line):  # chr_fake, start_pos, len_guide, bulge):
+def alignRefFromVar(line):
+    """The reference at an indel row's coordinates, aligned as its target: as many
+    bases as the target holds from its first aligned base (an RNA bulge is a gap in the
+    target, so it covers one base fewer), in the target's orientation, with the
+    target's gaps put back. Mismatches against the guide are lower case."""
     t = line.copy()
-    # chr_fake = t[10].split('_')
-    len_guide = len(t[2])
     start_pos = int(t[4])
-    true_chr = t[3]
-    good_chr_fake = true_chr + ":" + str(start_pos) + "-" + str(start_pos + len_guide)
-    # dict_ref_seq[good_chr_fake].upper() #file_fasta.readline().strip().upper()
-    sequence = genomeStr[start_pos : start_pos + len_guide].upper()
-    # print('ref sequence', sequence, len(sequence), len_guide)
-
+    target = t[2]
+    sequence = genomeStr[start_pos : start_pos + len(target.replace("-", ""))].upper()
     if t[6] == "-":  # if negative strand reverse ref sequence
-        # target = t[2][::-1]
         sequence = reverse_complement_table(sequence)
-        target = t[2]
-    else:
-        target = t[2]
-
-    if t[0] == "RNA":  # if RNA bulges in sequences find gaps and update ref sequence
-        tmp_gap_position = [g.start() for g in re.finditer("-", target)]
-        sequence = list(sequence)
-        # cut sequence to extract only the part interested by counting the RNA bulges
-        sequence = sequence[len(tmp_gap_position) :]
-        for tmp_g_p in tmp_gap_position:
-            # sequence[tmp_g_p] = '-'
-            sequence.insert(tmp_g_p, "-")
-        # if t[6] == '-':
-        #     sequence = reverse_complement_table(''.join(sequence))
-        # else:
-
-        # sequence = sequence[len(tmp_gap_position):]
-        sequence = "".join(sequence)
-        # if t[6] == '+':
-        #     sequence = sequence[0:len_guide]
-        # else:
-        #     sequence = reverse_complement_table(''.join(sequence))
-        #     sequence = sequence[len(tmp_gap_position):]
-    # elif t[6] == '-':
-    #     sequence = reverse_complement_table(sequence)
+    sequence = list(sequence)
+    for tmp_g_p in [g.start() for g in re.finditer("-", target)]:
+        sequence.insert(tmp_g_p, "-")
+    sequence = "".join(sequence)
     guide_no_pam = t[1][pos_beg:pos_end]
     list_t = list(sequence)
 
@@ -1358,27 +1334,17 @@ for line in inResult:
     final_result[16] = indel_data[3]  # MAF
     final_result[17] = indel_data[4]  # INDELinfo
 
-    # correct position if PAM at beginning and strand
-    if pam_at_beginning:
-        if line[0] == "RNA" and line[6] == "-":
-            # cluster_position
-            fake_start_target = int(line[5]) - int(indel_data[5])
-        else:
-            # real_position
-            fake_start_target = int(line[4]) - int(indel_data[5])
-    else:
-        if line[0] == "RNA" and line[6] == "+":
-            # cluster_position
-            fake_start_target = int(line[5]) - int(indel_data[5])
-        else:
-            # real_position
-            fake_start_target = int(line[4]) - int(indel_data[5])
+    # the target's offset in its window: CRISPRitz's Position is its first aligned
+    # base, the leftmost, on either strand and with any bulge, as the reference and
+    # SNP rows report it (its Cluster_Position is less the RNA bulges and plus the DNA
+    # bulges on one strand: + with a 3' PAM, - with a 5' PAM)
+    fake_start_target = int(line[4]) - int(indel_data[5])
 
     # correct start with real chr spatial info and length of the target
     true_start_target = (
         int(indel_data[0].split("_")[1].split("-")[0]) + fake_start_target
     )
-    # correct cluster position
+    # the cluster position keeps CRISPRitz's offset from the Position, as on the SNP path
     diff_pos_clus = int(line[4]) - int(line[5])
     # real_start
     final_result[4] = str(true_start_target)
