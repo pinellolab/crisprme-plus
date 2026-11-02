@@ -168,16 +168,24 @@ Each source VCF is normalized so that variant records are directly comparable:
   position with several biallelic SNP records only the **last** record's ALT is
   searched: an earlier record's ALT is in neither the enriched genome nor the
   dictionaries nor the Tier-0 registry nor the Tier-1 genotype store, and an
-  off-target that needs it is not found. Measured on HGDP + 1000 Genomes chr22, in
-  the normalized source VCF: 45,837 of 1,757,775 SNP records (2.6 %), at 43,389
-  positions, are not the last at their position; 5,104 of them have AC ≥ 41 (AF ≥
-  0.5 % of 8,182 haplotypes) and 1,566 AC ≥ 818 (about 10 %). Checked directly at six
-  such positions (the three with the highest AC on chr22, two at AC 82 and 257, and
-  chr20:12296886): each earlier ALT, up to AC = 8,179 (`rs807755` T>A at
+  off-target that needs it is not found, or is reported at a lower score, without
+  its carriers (a VCF line that lists several ALTs itself is coded with all of them).
+  On the HGDP + 1000 Genomes panel, 2,486,165 of its 127,666,429 SNP records
+  (1.95 %), at 2,441,139 positions, are not coded for this reason. Per guide (NRG, 4
+  mismatches + 1 DNA + 1 RNA bulge, per-sample, genome-wide) this leaves 3 to 7 sites
+  whose true CFD puts them in the top-1000 out of it or understated there, and at most
+  one site reaching CFD ≥ 0.5 in the five guides tested (the README's, ACTGA, TRAC,
+  EMX1 and VEGFA site 3; the one is EMX1's chr17:12179615, 11 haplotypes, CFD 0.508);
+  and 52 to 324 rows per guide (99 % of them at CFD < 0.1) name an individual who
+  carries such an ALT, read as the reference base, for a sequence they do not have.
+  On chr22, in the normalized source VCF: 45,837 of 1,757,775 SNP records (2.6 %), at
+  43,389 positions, are not the last at their position; 5,104 of them have AC ≥ 41
+  (AF ≥ 0.5 % of 8,182 haplotypes) and 1,566 AC ≥ 818 (about 10 %). Checked directly
+  at six such positions (the three with the highest AC on chr22, two at AC 82 and 257,
+  and chr20:12296886): each earlier ALT, up to AC = 8,179 (`rs807755` T>A at
   chr22:19142014), is absent from the enriched genome's code and from all three
-  stores, and only the last record's ALT (AC 1 to 3) is held. A fix changes the
-  enriched genomes and every index built from them, so it is left to a CRISPRitz
-  release.
+  stores, and only the last record's ALT (AC 1 to 3) is held. It will be fixed, with
+  rebuilt indexes, in the next release.
 - **Consistent coordinates and contigs** (reference build, chromosome naming)
   across datasets.
 
@@ -1066,9 +1074,11 @@ alt in the enriched genome and its dictionaries (a CRISPRitz `add-variants` prop
 a carrier of an earlier record's alt is read as reference there, in the SNP and the indel
 post-analysis alike, however common that alt: on the HGDP + 1000 Genomes panel
 chr8:4174067 T>C (8,170 copies) is read as reference because T>G (1 copy) is the later
-record. The phased indel genotype store leaves out equal-length multi-base records (MNVs),
-so their carriers are resolved with the phase unknown, PUTATIVE (§4): the HGDP + 1000
-Genomes index has none, HPRC's chr22 has 9,079 among its 195,813 indel-search records.
+record. That is 1.95 % of the panel's SNP records, whose effect §2 gives as measured; it
+will be fixed, with rebuilt indexes, in the next release. The phased indel genotype store
+leaves out equal-length multi-base records (MNVs), so their carriers are resolved with the
+phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
+among its 195,813 indel-search records.
 The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,

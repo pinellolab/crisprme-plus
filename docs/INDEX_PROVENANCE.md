@@ -360,9 +360,18 @@ compiled into `buildTST`, so it cannot affect index content.
   biallelic records, and each record rebuilds the position's IUPAC code from the
   reference base and overwrites the SNP dict entry, so an earlier record's ALT is in
   neither the enriched genome nor the dict, and an off-target that needs it is not
-  found. It applies to any index enriched from a VCF with such sites. Measured for
-  HGDP + 1000 Genomes: on chr22, 45,837 of 1,757,775 SNP records (2.6 %), at 43,389
-  positions, lose their ALT this way, counted in the normalized source VCF
+  found, or is reported at a lower score, without its carriers (a VCF line that lists
+  several ALTs itself is coded with all of them). It applies to any index enriched
+  from a VCF with such sites. Measured for HGDP + 1000 Genomes: 2,486,165 of the
+  panel's 127,666,429 SNP records (1.95 %), at 2,441,139 positions, are not coded for
+  this reason; per guide (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample,
+  genome-wide) this leaves 3 to 7 sites whose true CFD puts them in the top-1000 out
+  of it or understated there, and at most one site reaching CFD ≥ 0.5 in the five
+  guides tested (EMX1's chr17:12179615, 11 haplotypes, CFD 0.508), and 52 to 324 rows
+  per guide (99 % of them at CFD < 0.1) name an individual who carries such an ALT,
+  read as the reference base, for a sequence they do not have. On chr22, 45,837 of
+  1,757,775 SNP records (2.6 %), at 43,389 positions, lose their ALT this way,
+  counted in the normalized source VCF
   (`hgdp1kgp.chr22.norm.vcf.gz`) as the records not last at their position; 5,104
   of them have AC ≥ 41 (AF ≥ 0.5 % of 8,182 haplotypes) and 1,566 AC ≥ 818 (about 10 %).
   Confirmed directly in the shipped data at six such positions, the three of chr22
@@ -373,7 +382,8 @@ compiled into `buildTST`, so it cannot affect index content.
   AC = 1, and the enriched genome reads `K` (G/T), the stores hold G alone;
   chr20:12296886 has `rs6109350` G>A at AC = 1,451 and G>C at AC = 2, the code is
   `S` (C/G), and the stores hold C alone. A fix changes the enriched genomes, and
-  with them every affected index, so it is being investigated separately.
+  with them every affected index: it will be fixed, with rebuilt indexes, in the next
+  release.
 
 ## How to re-run these measurements
 

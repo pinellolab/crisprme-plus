@@ -324,12 +324,21 @@ with "+" and start this one with "1 RNA bulge". -->
   hg38 contigs); and that a + strand PAM on a contig's last bases is found by no search (8 NGG
   and 31 NRG contigs), these last two only on alt, random or unplaced contigs. These are engine
   limits, in 2.8.0 too; the engine and the published indexes are unchanged.
-- **The scale of the split multi-allelic SNP limit is stated.** At a position with several
-  biallelic SNP records only the last one's ALT reaches the enriched genome and the stores
-  (CRISPRitz, every release). docs/INDEX_PROVENANCE.md and METHODS section 2 now give what was
-  measured and how: on HGDP + 1000 Genomes chr22, 45,837 of 1,757,775 SNP records (2.6 %) are
-  not the last at their position, 5,104 with AC ≥ 41 and 1,566 with AC ≥ 818, counted in the
-  normalized source VCF; and, read in the shipped enriched genome, registry, genotype store and
-  dictionary at six such positions, the earlier ALT is absent from each, up to AC = 8,179
-  (`rs807755` T>A at chr22:19142014, whose position the stores hold as T>G at AC = 1). Unchanged:
-  a fix changes the enriched genomes and every index built from them.
+- **A known limit, stated with its scale: at a split multi-allelic SNP site only the last record's
+  ALT is searched.** At a position with several biallelic SNP records only the last one's ALT
+  reaches the enriched genome and the stores (CRISPRitz, every release), so an off-target that
+  needs an earlier one is not found, or is reported at a lower score, without its carriers (a VCF
+  line that lists several ALTs itself is coded with all of them). On the HGDP + 1000 Genomes
+  panel, 2,486,165 of its 127,666,429 SNP records (1.95 %), at 2,441,139 positions, are not coded
+  for this reason. Per guide (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample, genome-wide)
+  this leaves 3 to 7 sites whose true CFD puts them in the top-1000 out of it or understated
+  there, and at most one site reaching CFD >= 0.5 in the five guides tested (the README's, ACTGA,
+  TRAC, EMX1 and VEGFA site 3; the one is EMX1's chr17:12179615, 11 haplotypes, CFD 0.508), and 52
+  to 324 rows per guide (99 % of them at CFD < 0.1) name an individual who carries such an ALT,
+  read as the reference base, for a sequence they do not have. docs/INDEX_PROVENANCE.md and
+  METHODS section 2 give what was measured and how: on chr22, 45,837 of 1,757,775 SNP records
+  (2.6 %) are not the last at their position, 5,104 with AC ≥ 41 and 1,566 with AC ≥ 818, counted
+  in the normalized source VCF; and, read in the shipped enriched genome, registry, genotype store
+  and dictionary at six such positions, the earlier ALT is absent from each, up to AC = 8,179
+  (`rs807755` T>A at chr22:19142014, whose position the stores hold as T>G at AC = 1). It will be
+  fixed, with rebuilt indexes, in the next release.
