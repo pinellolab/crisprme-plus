@@ -60,15 +60,17 @@ with open(sys.argv[1], "r") as fileIn:
                     fileOut.write(line)
             else:
                 if splitted[18] != "n":
-                    indel_info = splitted[18].split("_")
-                    start_indel = int(indel_info[1])
-                    if len(indel_info[2]) < len(indel_info[3]):
+                    # the indel's own token comes first; a row holding SNP alts too
+                    # lists them after it (chrN_pos_REF_ALT,chrN_pos_REF_ALT)
+                    indel_info = splitted[18].split(",")[0].split("_")
+                    start_indel = int(indel_info[-3])
+                    if len(indel_info[-2]) < len(indel_info[-1]):
                         range_indel = range(
-                            start_indel, start_indel + len(indel_info[3])
+                            start_indel, start_indel + len(indel_info[-1])
                         )
                     else:
                         range_indel = range(
-                            start_indel, start_indel + len(indel_info[2])
+                            start_indel, start_indel + len(indel_info[-2])
                         )
                     range_target = range(
                         int(splitted[5]), int(splitted[5]) + len(splitted[1])

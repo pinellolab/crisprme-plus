@@ -421,6 +421,32 @@ def target_ref_span(dna_aligned, real_of, indel_pos1, ref):
     return min(reals), max(reals)
 
 
+def window_offsets(dna_aligned, fake_start, indel_fake_start):
+    """(first, last): the offsets (inclusive) of a target's bases in its fake-indel
+    window. The aligned DNA's bases are contiguous on the window, a gap being an RNA
+    bulge, and ``fake_start`` is the leftmost of them on either strand."""
+    first = fake_start - indel_fake_start
+    return first, first + len(dna_aligned) - dna_aligned.count("-") - 1
+
+
+def holds_indel(first, last, indel_pos1, indel_start, ref, alt):
+    """True iff a target at the window offsets first..last (window_offsets) holds the
+    window's indel: a base the ALT adds or replaces, or the two bases on either side
+    of the deleted ones. Anything else lies wholly in a flank: plain reference (or SNP)
+    sequence that does not need the indel, at a coordinate the indel shifts.
+    ``indel_start`` is the real 0-based start of the window (the log's), so the REF's
+    first base is at offset indel_pos1 - 1 - indel_start (overlay_indel_snps.LEFT_FLANK
+    on a full window)."""
+    alt_at = indel_pos1 - 1 - indel_start
+    past_alt = alt_at + len(alt)
+    kept = kept_bases(ref, alt)
+    if first >= past_alt:
+        return False
+    if len(alt) > kept and last >= alt_at + kept:
+        return True
+    return len(ref) > kept and last >= past_alt
+
+
 class IndelCarriers(object):
     """The carriers of one indel, parsed once: {sample: (genotype tokens, kind,
     indel-carrying slots)} plus the slot total. ``phase_known`` is False when they

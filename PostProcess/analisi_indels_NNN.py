@@ -820,6 +820,14 @@ def _indel_window(indel_data):
             int(indel_data[0].split("_")[1].split("-")[0]))
 
 
+def _holds_its_indel(dna, fake_start, indel_data):
+    """True iff an engine target holds the indel of the window it lies in
+    (indel_snp_cis.holds_indel)."""
+    ipos, iref, ialt, istart = _indel_window(indel_data)
+    first, last = _isc.window_offsets(dna, fake_start, int(indel_data[5]))
+    return _isc.holds_indel(first, last, ipos, istart, iref, ialt)
+
+
 def _overlaid_positions(path):
     """The 1-based positions the per-haplotype resolution reads from the per-sample
     dictionary: every IUPAC code of this chromosome's overlaid indel targets, and the
@@ -835,6 +843,8 @@ def _overlaid_positions(path):
                 idata = sorted(INDELS_tree[int(ln[4])])[0].data
             except Exception:  # noqa: BLE001 - no indel here: skipped by the loop too
                 continue
+            if not _holds_its_indel(ln[2], int(ln[4]), idata):
+                continue  # dropped by the loop too
             _ipos, _iref, _ialt, _istart = _indel_window(idata)
             out.update(range(_ipos, _ipos + _isc.kept_bases(_iref, _ialt)))
             amb = _isc.ambiguous_columns(ln[2])
@@ -884,7 +894,7 @@ def _cache_put(cache, key, value, n):
     return value
 # how the overlaid targets were resolved (printed at the end, on stdout)
 _ovl_stats = {"targets": 0, "rows": 0, "dropped": 0, "putative": 0, "unmapped": 0,
-              "second_indel": 0}
+              "second_indel": 0, "flank": 0}
 
 
 def _snp_record(pos1):
@@ -1185,6 +1195,10 @@ def _second_indel_rows(line, final_result, indel_data):
 def _report_overlaid():
     """One stdout line on how the overlaid targets were resolved (stdout only:
     the pipeline treats any stderr write as a fatal stage failure)."""
+    if _ovl_stats["flank"]:
+        print("indel-snp: %d target(s) of the fake-indel windows lie in a flank and hold "
+              "no base of the indel: not indel off-targets, dropped"
+              % _ovl_stats["flank"], flush=True)
     if _ovl_stats["second_indel"]:
         print("indel-snp: %d target(s) without a SNP code lost the carriers whose "
               "haplotype holds a second indel inside them"
@@ -1309,6 +1323,14 @@ for line in inResult:
         indel_data = sorted(INDELS_tree[int(line[4])])[0].data
     except:
         # target found has no INDEL, so it's REF and must be skipped
+        continue
+    # A target wholly in a flank of the window holds no base of the indel: its sequence
+    # is reference (or SNP) sequence, which the reference and SNP searches report at
+    # its true coordinate, for its true carriers. It is not an indel off-target of the
+    # indel's carriers, whose row would show the indel's token at a coordinate the
+    # indel shifts, and could take the place of the real row in its cluster.
+    if not _holds_its_indel(line[2], int(line[4]), indel_data):
+        _ovl_stats["flank"] += 1
         continue
     # assign extracted data to final target
     final_result[3] = current_chr  # current analyzed chr
