@@ -27,6 +27,7 @@ _POSTPROCESS_PATH = os.path.join(
 if _POSTPROCESS_PATH not in sys.path:
     sys.path.insert(0, _POSTPROCESS_PATH)
 import personal_assembly  # noqa: E402
+import index_fit  # noqa: E402
 
 
 # Define DNA alphabet
@@ -1099,6 +1100,15 @@ def get_available_PAM() -> List:
         for pam in pams_files
         if "tempPAM" not in pam
     ]
+    # PAM files of one motif and nuclease that differ in guide length (20bp- and
+    # 23bp-TTTV-Cas12a) would read the same: say the length, which picks another guide.
+    labels = [p["label"] for p in pams]
+    for p in pams:
+        if labels.count(p["label"]) > 1:
+            guide = index_fit.pam_file_spacer(
+                os.path.join(current_working_directory, PAMS_DIR, p["value"] + ".txt"))
+            if guide:
+                p["label"] = f"{p['label']} ({guide} nt)"
     return pams
 
 
@@ -1596,13 +1606,16 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
     ``+<ref>_<vcf>`` folder submit_job resolves — so the combined value ``1000G_HGDP``
     matches its combined index while a single ``1000G`` query does not (the search would
     not either). Pamless (all-N) indexes of the same length also match (they serve any
-    PAM). Returns 0 if no matching index exists (only a 0-bulge, index-free search is
-    possible). A variant search also needs the variant index, so callers should take the
-    min with the reference result.
+    PAM). An index built for a guide shorter than this PAM file's serves fewer bulges, or
+    none (index_fit, as the search script takes it). Returns 0 if no matching index exists
+    (only a 0-bulge, index-free search is possible). A variant search also needs the
+    variant index, so callers should take the min with the reference result.
     """
     motif = pam_motif(pam_value)
     if not motif or not genome:
         return 0
+    guide = index_fit.pam_file_spacer(
+        os.path.join(current_working_directory, PAMS_DIR, pam_value + ".txt"))
     genome = genome.replace(" ", "_")
     lib = os.path.join(current_working_directory, "genome_library")
     if not os.path.isdir(lib):
@@ -1646,8 +1659,9 @@ def index_max_bulges(genome: str, pam_value: str, vcf: Optional[str] = None) -> 
         pam, sep, n_str = stem.partition("_")  # "<motif>" , "<N>"
         if not sep or not n_str.isdigit() or not _pam_serves(pam):
             continue
-        best = max(best, int(n_str))
-    return max(0, best - 1)
+        best = max(best, index_fit.bulge_cap(
+            index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide))
+    return best
 
 
 def reference_bulge_capacity(genome: str, pam_value: str) -> int:
@@ -2092,10 +2106,16 @@ def get_pam_options(genome: str, variant_choice: Optional[str]) -> List:
                     if slen == ilen and same_orient and abs(spos) <= abs(ipos):
                         ok.add(pv)
             else:
-                # SPECIFIC index: serves exactly the PAM(s) whose motif matches (the
-                # index length matches that PAM by construction).
-                for pv in geom:
-                    if pam_motif(pv) == motif:
+                # SPECIFIC index: serves exactly the PAM(s) whose motif matches, of a guide
+                # its stored window fits with no bulge at least (index_fit: several PAM
+                # files of one motif can differ in guide length, and the index's name says
+                # nothing of which it was built for).
+                built = index_fit.built_guide_len(os.path.join(lib, d))
+                n_str = d.split("_")[1]
+                for pv, (slen, spos) in geom.items():
+                    if pam_motif(pv) == motif and (
+                            slen is None or not n_str.isdigit()
+                            or index_fit.fits(built, int(n_str), slen - abs(spos), 0, 0)):
                         ok.add(pv)
         per_dataset_ok.append(ok)
     usable = set.intersection(*per_dataset_ok) if per_dataset_ok else set()

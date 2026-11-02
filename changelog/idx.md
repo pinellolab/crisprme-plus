@@ -31,6 +31,26 @@
   such search, in 2.8.0 too. It now stops with one ERROR that names the index and the library and
   says what to do, shown on the web job's banner. A library that holds the right index still serves
   the search, byte-identically, and a 0-bulge search, which opens no index there, still runs.
+- **A guide that does not fit an index's stored window is no longer searched on it.** An index name
+  carries no guide length, and the engine searches any guide: past what the index stores, it
+  reports wrong alignments or loses sites at exit 0, or, on a site planted at a contig start, stops
+  with `Non-numeric start coordinate`. A 20-nt search at default flags builds `<PAM>_2`, and the next
+  23-nt search took it: on real chr22, 181 rows against 1003, the on-target no longer a perfect
+  match. On the web, the same, with no message. `build-index-only` with a 23-nt PAM file over a 20-nt
+  index said "already present" and rewrote `.pam_build` with the wrong geometry. **Affected:** a
+  search of a guide longer than its index was built for, in 2.8.0 too; every published index is
+  20-nt, so a 20-nt search is not (nothing changes for it), a 21-nt one at up to 1 bulge of each
+  type on an N=3 index is not, and any longer one is. **What to do:** run those searches again;
+  they build their own index, or say how to clear the way. The length comes from the index's own
+  `.bin` header, so no index needs rebuilding. A search takes an index only where built + N >= guide +
+  bDNA + (1 if bRNA > 0), measured through the real CLI on 246 cells: every cell inside is
+  byte-identical to a dedicated index, every cell outside differs. When an index of the same name
+  is in the way it stops with one ERROR naming the index, both lengths and what to do; the index is
+  never removed. An index built for this very guide is now preferred to one that merely fits, so a
+  20-nt search beside a 23-nt `NGG_2` and a 20-nt `NGG_3` takes `NGG_3`. `build-index-only` stops
+  the same way, and leaves the record of an index built for another guide. The web form's bulge
+  caps and PAM list follow the same rule, and two PAM files that read the same show their guide
+  length ("Cas12a · TTTV (23 nt)").
 - **A guide longer than its PAM file's spacer is refused.** The search kept the spacer's length of
   it and dropped the rest with no message: a 23-nt guide with `20bp-NGG` was searched without its
   last 3 nt (2 rows against 35, and none at 0 bulges, at exit 0), under the full guide's name. The

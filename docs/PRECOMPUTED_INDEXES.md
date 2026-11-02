@@ -133,6 +133,10 @@ so one index answers any 3′ PAM no longer than that flank when the search pass
 `--prune-pam` (see [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
 A 5′ PAM (Cas12a) needs a dedicated index: these indexes store the flank on the 3′ side of
 the guide, so a 5′ search does not use them.
+Every index here was built for a 20-nt guide, with N = 3. That also serves a 21-nt guide at up
+to 1 bulge of each type, byte-identically to an index built for it (so the shipped 21-nt SaCas9
+PAM files work on the 8-nt-flank indexes with `--prune-pam`); a longer guide needs its own
+index ([METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
 They carry exactly the same variant data and `Dictionaries/` as the dedicated index for the
 same panel — those tiers are PAM-independent — and a `--prune-pam` run over one is
 byte-identical to the dedicated index for that PAM, verified genome-wide. They are

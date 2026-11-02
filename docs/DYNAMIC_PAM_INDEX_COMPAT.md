@@ -98,8 +98,9 @@ unchanged. Pam-less indexes get a new **index-scoped, data-driven** picker:
 - On index selection, FILTER that table by the index metadata: show a preset iff
   `guide_len == index.guide_len AND side == index.side AND len(pam) <= K AND pam ⊆ build_pam`.
   So the index's geometry prunes the menu — an un-servable enzyme never appears for an index.
-  (A 20-nt / 3' / K=8 pam-less index serves the whole 20-nt 3'-PAM family; it does NOT serve
-  SaCas9/Nme2 (different guide length) or Cas12a/CasX/Cas12b (5' PAM) — those get their own index.)
+  (A 20-nt / 3' / K=8 pam-less index serves the whole 20-nt 3'-PAM family, and 21-nt SaCas9 at up
+  to 1 bulge of each type (METHODS §9 has the rule); it does NOT serve a longer guide such as Nme2's
+  24 nt, or Cas12a/CasX/Cas12b (5' PAM) — those get their own index.)
 - Layout: *SpCas9 & variants (recommended)* — **NGG (default)**, NRG, NRR, SpG, SpRY (NRN/NYN),
   VQR, xCas9, VRER; *Other 20-nt 3' enzymes (expandable)*; *Custom PAM…*; *Not available on this
   index (greyed, with reason + link to the matching index)*.

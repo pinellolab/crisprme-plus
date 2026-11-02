@@ -36,6 +36,7 @@ for its web-only top-level imports (app, dash, pandas) -- never a catch-all.
 """
 import os
 import shutil
+import struct
 import sys
 import tempfile
 import types
@@ -274,6 +275,23 @@ class TestCliBulgeCap(unittest.TestCase):
         self.assertEqual(crisprme._installed_index_bulge_cap(
             _MOTIF, _REF, is_variant=False, prune=True), 0)
 
+    def test_an_index_built_for_a_shorter_guide_serves_fewer_bulges_or_none(self):
+        """The derived default bulges must not come from an index that cannot answer the
+        guide: a 20-nt N=3 index serves a 21-nt guide at one bulge of each type, and a
+        23-nt one at none (index_fit, as the search shell takes it). A longer build, or
+        one whose length cannot be read, keeps the name's budget."""
+        for built, guide, expected in ((20, 20, 2), (20, 21, 1), (20, 22, 0), (20, 23, 0),
+                                       (23, 20, 2), (None, 23, 2), (20, 0, 2)):
+            with self.subTest(built=built, guide=guide):
+                idx = os.path.join(self.root, "genome_library", f"{_MOTIF}_3_{_REF}")
+                shutil.rmtree(idx, ignore_errors=True)
+                os.makedirs(idx)
+                with open(os.path.join(idx, "NRG_chr1_1.bin"), "wb") as fh:
+                    if built:
+                        fh.write(struct.pack("=ii", 7, built))
+                self.assertEqual(crisprme._installed_index_bulge_cap(
+                    _MOTIF, _REF, is_variant=False, guide_len=guide), expected)
+
 
 # --------------------------------------------------------------------------- #
 # (1) BULGE-CAP -- web pages_utils.reference_bulge_capacity
@@ -323,6 +341,45 @@ class TestWebReferenceBulgeCapacity(unittest.TestCase):
         _mkfile(os.path.join(self.root, "genome_library", f"NNN_3_{_REF}",
                              "TSTgenome.NNN.bin"))
         self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 2)
+
+    def _index_built_for(self, name, guide):
+        idx = os.path.join(self.root, "genome_library", name)
+        os.makedirs(idx, exist_ok=True)
+        with open(os.path.join(idx, "NRG_chr1_1.bin"), "wb") as fh:
+            fh.write(struct.pack("=ii", 7, guide))
+
+    def test_an_index_built_for_a_shorter_guide_offers_fewer_bulges_or_none(self):
+        """The form must not offer bulges on the strength of an index the search does not
+        take for this PAM file's guide (index_fit)."""
+        _mkfile(os.path.join(self.root, "PAMs", "21bp-NRG-X.txt"), "N" * 21 + "NRG 3\n")
+        _mkfile(os.path.join(self.root, "PAMs", "23bp-NRG-X.txt"), "N" * 23 + "NRG 3\n")
+        _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        self._index_built_for(f"NRG_3_{_REF}", 20)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, _PAM_VALUE, None), 2)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, "21bp-NRG-X", None), 1)
+        self.assertEqual(pages_utils.index_max_bulges(_REF, "23bp-NRG-X", None), 0)
+
+    def test_two_pam_files_of_one_motif_read_differently(self):
+        """20bp- and 23bp-TTTV-Cas12a read the same in the dropdown, and the first was
+        taken for both; a label alone in its motif stays as it was."""
+        _mkfile(os.path.join(self.root, "PAMs", "20bp-TTTV-Cas12a.txt"), "TTTV" + "N" * 20 + " -4\n")
+        _mkfile(os.path.join(self.root, "PAMs", "23bp-TTTV-Cas12a.txt"), "TTTV" + "N" * 23 + " -4\n")
+        _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        labels = {p["value"]: p["label"] for p in pages_utils.get_available_PAM()}
+        self.assertEqual(labels["20bp-TTTV-Cas12a"], "Cas12a · TTTV (20 nt)")
+        self.assertEqual(labels["23bp-TTTV-Cas12a"], "Cas12a · TTTV (23 nt)")
+        self.assertEqual(labels[_PAM_VALUE], pages_utils.friendly_pam_label(_PAM_VALUE))
+
+    def test_a_dedicated_variant_index_offers_the_pam_files_it_fits(self):
+        """The form lists a PAM file of the motif of a panel's index only where the index
+        stores enough for its guide: "the index length matches that PAM by construction"
+        does not hold, as the name carries no guide length."""
+        _mkfile(os.path.join(self.root, "PAMs", "20bp-TTTV-Cas12a.txt"), "TTTV" + "N" * 20 + " -4\n")
+        _mkfile(os.path.join(self.root, "PAMs", "23bp-TTTV-Cas12a.txt"), "TTTV" + "N" * 23 + " -4\n")
+        _mkfile(os.path.join(self.root, "PAMs", _PAM_VALUE + ".txt"), _PAM_LINE)
+        self._index_built_for(f"TTTV_2_{_REF}+{_VCF}", 20)
+        values = [p["value"] for p in pages_utils.get_pam_options(_REF, _DATASET)]
+        self.assertEqual(values, ["20bp-TTTV-Cas12a"])
 
 
 # --------------------------------------------------------------------------- #

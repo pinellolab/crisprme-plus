@@ -232,6 +232,13 @@ crisprme.py complete-search --prune-pam \
 A 5′ PAM (Cas12a) needs a dedicated index, which `build-index-only` builds: these indexes
 store the flank on the 3′ side of the guide, so a 5′ search does not use them.
 
+An index also fixes how many bases it stores per site, from the guide length it was built
+for and its `N` (`NRG_3`: N = 3). Every published index was built for a 20-nt guide with
+N = 3, which also serves a 21-nt guide (the shipped SaCas9 PAM files) at up to 1 bulge of
+each type, byte-identically to an index built for it. A guide past that needs its own index:
+the search builds it, or says what to do when an index of the same name is in the way (rule:
+[methods §9](METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
+
 The two 8-nt-flank indexes live in a separate dataset repo,
 `lucapinello/crisprme-data-general-index`, because a release older than CRISPRme+ 2.8.1
 cannot read them; `download` fetches them from there by itself.

@@ -34,6 +34,7 @@ import re
 import shlex
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -63,14 +64,19 @@ def _extract_resolver():
 RESOLVER = _extract_resolver()
 
 
-def resolve(libdir, pam_want, suffix, bmax, locale="C", prune=0, pos=1, any_side=""):
+def resolve(libdir, pam_want, suffix, bmax, locale="C", prune=0, pos=1, any_side="",
+            guide=0, bdna=0, brna=0):
     """Run the shipped resolver; return the chosen basename, or "" for none.
 
     prune/pos mirror the script's own `prune_pam` and `pos` (the PAM-file offset:
     > 0 is a 3' PAM). The resolver reads them to decide whether a flank WIDER than
-    the PAM may be used. any_side is its optional fifth argument.
+    the PAM may be used. any_side is its optional fifth argument. guide, bdna and brna
+    are the search's guide length (its PAM file then has that spacer) and bulges, the
+    script's own `fullseqpam`, `bDNA` and `bRNA`, which it fits an index to.
     """
-    script = (f"prune_pam={prune}\npos={pos}\n{RESOLVER}\n"
+    fullseq = "N" * (guide + abs(pos)) if guide else ""
+    script = (f"prune_pam={prune}\npos={pos}\nfullseqpam={fullseq}\nbDNA={bdna}\nbRNA={brna}\n"
+              f"{RESOLVER}\n"
               f"_resolve_index_dir \"$1\" \"$2\" \"$3\" \"$4\" \"$5\"\n")
     env = dict(os.environ, LC_ALL=locale, LANG=locale)
     out = subprocess.run(
@@ -91,6 +97,12 @@ def resolver_stderr(libdir, pam_want, suffix, bmax, prune=0, pos=1):
         ["bash", "-c", script, "bash", str(libdir), pam_want, suffix, str(bmax)],
         capture_output=True, text=True, env=dict(os.environ, LC_ALL="C", LANG="C"),
     ).stderr
+
+
+def built_for_guide(index_dir, guide):
+    """The trees of <index_dir> record the guide length `guide`, as buildTST writes it:
+    the second int32 of a .bin."""
+    Path(index_dir, "chr1.bin").write_bytes(struct.pack("=ii", 7, guide) + b"\0" * 16)
 
 
 def built_for(index_dir, pos):
@@ -375,6 +387,123 @@ def _glob_order(locale):
             capture_output=True, text=True,
             env=dict(os.environ, LC_ALL=locale, LANG=locale),
         ).stdout.split()
+
+
+class AGuideMustFitTheIndex(_Tree):
+    """An index name says nothing of the guide it was built for, and the engine searches
+    any guide: past what the tree stores it gives wrong alignments or loses targets, at
+    exit 0. The resolver reads the length from the .bin, and takes an index only where
+    built + N >= guide + bDNA + (bRNA > 0), the rule measured through the real CLI."""
+
+    def built(self, name, guide):
+        lib = self.lib(name)
+        built_for_guide(lib / name, guide)
+        return lib
+
+    def test_the_rule_at_its_edges(self):
+        # (built, N, guide, bDNA, bRNA, served): each is a cell measured with the real CLI
+        for built, n, guide, bdna, brna, served in (
+                (20, 3, 21, 1, 1, True),   # on any N=3 index, byte-identical to a dedicated one
+                (20, 3, 21, 2, 2, False),
+                (20, 3, 21, 2, 0, True),
+                (20, 3, 21, 0, 2, True),
+                (20, 3, 21, 2, 1, False),
+                (20, 3, 22, 1, 0, True),
+                (20, 3, 22, 0, 1, True),
+                (20, 3, 22, 1, 1, False),
+                (20, 3, 23, 1, 0, False),
+                (20, 3, 23, 0, 1, False),
+                (20, 2, 21, 1, 1, False),
+                (20, 2, 21, 1, 0, True),
+                (20, 2, 21, 0, 1, True),
+                (20, 2, 23, 1, 1, False),
+                (20, 2, 20, 1, 1, True),
+                (23, 2, 20, 1, 1, True),   # a longer build holds a shorter guide
+                (18, 2, 20, 1, 1, False)):
+            with self.subTest(built=built, n=n, guide=guide, bdna=bdna, brna=brna):
+                with tempfile.TemporaryDirectory() as tmp:
+                    d = Path(tmp) / f"NGG_{n}_hg38"
+                    d.mkdir()
+                    built_for_guide(d, built)
+                    self.assertEqual(
+                        resolve(tmp, "NGG", "hg38", max(bdna, brna) + 1, pos=3, guide=guide,
+                                bdna=bdna, brna=brna),
+                        d.name if served else "")
+
+    def test_it_holds_for_a_5_prime_pam_too(self):
+        lib = self.built("TTTV_3_hg38", 20)
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 2, pos=-4, guide=21, bdna=1, brna=1),
+                         "TTTV_3_hg38")
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 2, pos=-4, guide=23, bdna=1, brna=1), "")
+
+    def test_it_holds_for_a_pam_less_index_under_prune(self):
+        lib = self.built("NNNNNNNN_3_hg38", 20)
+        self.assertEqual(resolve(lib, "NNGRRT", "hg38", 2, prune=1, pos=6, guide=21, bdna=1,
+                                 brna=1), "NNNNNNNN_3_hg38")  # the shipped 21-nt SaCas9 PAM
+        self.assertEqual(resolve(lib, "NGG", "hg38", 2, prune=1, pos=3, guide=23, bdna=1,
+                                 brna=1), "")
+
+    def test_a_reference_search_with_no_bulges_opens_no_index_so_any_fits(self):
+        lib = self.built("NGG_2_hg38", 20)
+        self.assertEqual(resolve(lib, "NGG", "hg38", 1, pos=3, guide=24), "NGG_2_hg38")
+
+    def test_a_variant_search_with_no_bulges_reads_the_index_of_its_indels(self):
+        lib = self.built("NGG_2_hg38+ds", 20)
+        self.assertEqual(resolve(lib, "NGG", "hg38+ds", 1, pos=3, guide=22), "NGG_2_hg38+ds")
+        self.assertEqual(resolve(lib, "NGG", "hg38+ds", 1, pos=3, guide=23), "")
+
+    def test_an_index_whose_length_cannot_be_read_fits_as_before(self):
+        lib = self.lib("NGG_2_hg38")  # an empty .bin
+        self.assertEqual(resolve(lib, "NGG", "hg38", 2, pos=3, guide=23, bdna=1, brna=1),
+                         "NGG_2_hg38")
+
+    def test_a_pam_file_with_no_spacer_fits_as_before(self):
+        lib = self.built("NGG_2_hg38", 20)
+        self.assertEqual(resolve(lib, "NGG", "hg38", 2, pos=3, bdna=1, brna=1), "NGG_2_hg38")
+
+    def test_the_length_is_read_through_a_symlinked_index(self):
+        lib = self.built("NGG_2_hg38", 20)
+        shared = Path(self.tmp.name, "shared")
+        shared.mkdir()
+        (shared / "NGG_2_hg38").symlink_to(lib / "NGG_2_hg38")
+        self.assertEqual(resolve(shared, "NGG", "hg38", 2, pos=3, guide=23, bdna=1, brna=1), "")
+
+    def test_a_correct_index_is_not_passed_over_for_a_shallow_one(self):
+        # the smallest N used to win: a 20-nt TTTV_2 answered a 23-nt guide beside a 23-nt TTTV_3
+        lib = self.built("TTTV_2_hg38", 20)
+        (lib / "TTTV_3_hg38").mkdir()
+        built_for_guide(lib / "TTTV_3_hg38", 23)
+        self.assertEqual(resolve(lib, "TTTV", "hg38", 2, pos=-4, guide=23, bdna=1, brna=1),
+                         "TTTV_3_hg38")
+
+    def test_an_index_of_this_very_guide_is_preferred_to_a_longer_one(self):
+        # a 23-nt NGG_2 beside a 20-nt NGG_3, searched for 20 nt: both fit, and only one
+        # was built for it
+        lib = self.built("NGG_2_hg38", 23)
+        (lib / "NGG_3_hg38").mkdir()
+        built_for_guide(lib / "NGG_3_hg38", 20)
+        self.assertEqual(resolve(lib, "NGG", "hg38", 2, pos=3, guide=20, bdna=1, brna=1),
+                         "NGG_3_hg38")
+
+    def test_the_requested_pam_still_comes_first(self):
+        lib = self.built("NGG_3_hg38", 20)
+        (lib / "NNN_3_hg38").mkdir()
+        built_for_guide(lib / "NNN_3_hg38", 21)
+        self.assertEqual(resolve(lib, "NGG", "hg38", 2, pos=3, guide=21, bdna=1, brna=1),
+                         "NGG_3_hg38")
+
+    def test_any_side_finds_one_that_does_not_fit_to_say_why(self):
+        lib = self.built("NGG_2_hg38", 20)
+        self.assertEqual(resolve(lib, "NGG", "hg38", 2, pos=3, guide=23, bdna=1, brna=1,
+                                 any_side="any"), "NGG_2_hg38")
+
+    def test_stderr_stays_silent(self):
+        lib = self.built("NGG_2_hg38", 20)
+        script = (f"prune_pam=0\npos=3\nfullseqpam={'N' * 26}\nbDNA=1\nbRNA=1\n{RESOLVER}\n"
+                  f"_resolve_index_dir \"$1\" NGG hg38 2\n")
+        out = subprocess.run(["bash", "-c", script, "bash", str(lib)], capture_output=True,
+                             text=True)
+        self.assertEqual(out.stderr, "")
 
 
 class ChoiceIsLocaleIndependent(_Tree):
@@ -3382,6 +3511,82 @@ class ALibraryTheRunCannotWriteTo(_ShippedScript):
         self.assertNotIn("is not installed", run.stderr)
         self.assertEqual([c[1] for c in run.builds], ["hg38"])
         self.assertEqual(run.searched(variant=False), ("NRG_2_hg38", False))
+
+
+class AnIndexBuiltForAnotherGuideInTheScript(_ShippedScript):
+    """The script's own use of the fit: a same-named index it would build over, the
+    message under --index-path, and a search it does serve."""
+
+    def setUp(self):
+        super().setUp()
+        self.p23 = {"pam": "23bp-NGG-X", "pam_text": "N" * 23 + "NGG 3\n"}
+        self.p21 = {"pam": "21bp-NGG-X", "pam_text": "N" * 21 + "NGG 3\n"}
+
+    def install_built(self, prefix, guide, variant=False):
+        self.install(prefix, variant=variant)
+        built_for_guide(self.library / f"{prefix}_hg38", guide)
+        if variant:
+            built_for_guide(self.library / f"{prefix}_hg38+{self.VCF}", guide)
+
+    def test_a_same_named_index_for_a_shorter_guide_stops_the_search(self):
+        # the plain two-search sequence: a 20-nt search builds NGG_2, the next one is 23-nt
+        self.install_built("NGG_2", 20)
+        run = self.run_pipeline(variant=False, **self.p23)
+        self.assertEqual(run.stderr.splitlines()[0],
+                         "ERROR: NGG_2_hg38 was built for a 20-nt guide, and this search has a "
+                         "23-nt guide with 1 DNA and 1 RNA bulge(s): it stores too few bases per "
+                         "site, so a search of it would report wrong alignments and lose "
+                         "off-targets. This search builds its index under that name: move it out "
+                         f"of {self.library}, or run this search from another working directory")
+        self.assertEqual(run.builds, [])
+        self.assertIsNone(run.searched(variant=False))
+        self.assertTrue((self.library / "NGG_2_hg38" / "chr1.bin").exists())
+
+    def test_a_same_named_variant_index_stops_it_too_and_names_its_companion(self):
+        self.install_built("NGG_2", 23)  # the reference fits
+        (self.library / f"NGG_2_hg38+{self.VCF}").mkdir()
+        built_for_guide(self.library / f"NGG_2_hg38+{self.VCF}", 20)
+        (self.library / f"NGG_2_hg38+{self.VCF}_INDELS").mkdir()
+        folder = self.home / "Genomes" / f"hg38+{self.VCF}"
+        folder.mkdir()
+        (folder / "chr1.enriched.fa").write_text(">chr1\nACGT\n")
+        run = self.run_pipeline(**self.p23)
+        self.assertRegex(run.stderr, rf"^ERROR: NGG_2_hg38\+{self.VCF} was built for a 20-nt guide")
+        self.assertIn(f"move it and NGG_2_hg38+{self.VCF}_INDELS out of", run.stderr)
+        self.assertIsNone(run.searched(variant=True))
+
+    def test_another_budget_of_a_shorter_guide_is_passed_over_and_the_search_builds_its_own(self):
+        self.install_built("NGG_3", 20)
+        run = self.run_pipeline(variant=False, env={"STUB_BUILD_WRITES": "1"}, **self.p23)
+        self.assertEqual([c[1] for c in run.builds], ["hg38"])
+        self.assertEqual(run.searched(variant=False), ("NGG_2_hg38", False))
+
+    def test_a_guide_the_index_serves_is_not_rebuilt_or_refused(self):
+        self.install_built("NGG_3", 20)
+        run = self.run_pipeline(variant=False, **self.p21)
+        self.assertEqual(run.builds, [])
+        self.assertEqual(run.reference, "NGG_3_hg38")
+        self.assertEqual(run.searched(variant=False), ("NGG_3_hg38", False))
+
+    def test_index_path_says_why_the_index_there_does_not_serve(self):
+        self.install_built("NGG_2", 20)
+        run = self.run_pipeline(variant=False, index_path=self.library, **self.p23)
+        self.assertIn("no matching reference index under --index-path", run.stderr)
+        self.assertIn("NGG_2_hg38 was built for a 20-nt guide, and this search has a 23-nt guide",
+                      run.stderr)
+        self.assertIsNone(run.searched(variant=False))
+
+    def test_a_reference_search_with_no_bulges_goes_on(self):
+        self.install_built("NGG_1", 20)
+        run = self.run_pipeline(variant=False, bulges=0, **self.p23)
+        self.assertNotIn("too few bases", run.stderr)
+        self.assertEqual(Path(next(c for c in run.calls if c[0] == "search")[1]).name, "hg38")
+
+    def test_a_search_of_this_very_guide_changes_nothing(self):
+        self.install_built("NGG_2", 20)
+        run = self.run_pipeline(pam="20bp-NGG-SpCas9", variant=False)
+        self.assertEqual(run.searched(variant=False), ("NGG_2_hg38", False))
+        self.assertNotIn("too few bases", run.stderr)
 
 
 class TheThreadGuardSizesTheIndexSearched(_ShippedScript):

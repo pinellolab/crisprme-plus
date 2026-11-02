@@ -139,10 +139,17 @@ class TestNoHitsStatus(unittest.TestCase):
                     "nothing can be created in '/data/genome_library' (a read-only mount, no "
                     "write permission, or a full disk). Make that folder writable, or install "
                     "the index there, then run this search again")
+        # (an index in the way, built for a shorter guide)
+        short = ("NGG_2_hg38 was built for a 20-nt guide, and this search has a 23-nt guide "
+                 "with 1 DNA and 1 RNA bulge(s): it stores too few bases per site, so a search "
+                 "of it would report wrong alignments and lose off-targets. This search builds "
+                 "its index under that name: move it out of /data/genome_library, or run this "
+                 "search from another working directory")
         for name, err, says in (
                 ("refused", f"ERROR: {refused}\n", f"The search was not run: {refused}."),
                 ("refused tiers", f"ERROR: {tiers}\n", f"The search was not run: {tiers}."),
                 ("no index", f"ERROR: {no_index}\n", f"The search was not run: {no_index}."),
+                ("short index", f"ERROR: {short}\n", f"The search was not run: {short}."),
                 ("failed", "ERROR: Off-targets search Variant failed\n",
                  "The selected result encountered some errors, please remove it and try "
                  "to submit again.")):

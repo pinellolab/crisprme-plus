@@ -768,19 +768,56 @@ while read vcf_f; do
 		return 1
 	}
 
+	# The guide length index $1 was built for, on stdout: the second int32 of any .bin of
+	# it (len_guide_used, which buildTST has written since 2019, whoever built the index;
+	# its .pam_build, which build-index-only used to rewrite over any index it found, may
+	# say another), or nothing where it cannot tell. Silent on stderr.
+	_index_guide_len() {
+		local _bin _g
+		_bin=$(find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)
+		[ -n "$_bin" ] || return 0
+		_g=$(od -An -t d4 -j4 -N4 "$_bin" 2>/dev/null)
+		_g=${_g//[[:space:]]/}
+		case "$_g" in '' | 0 | *[!0-9]*) return 0 ;; esac
+		printf '%s' "$_g"
+	}
+
+	# 0 when index $1, of N $2, can answer this search whatever guide it was built for. The
+	# engine takes the built length only to offset coordinates, and searches any guide: past
+	# what the tree stores it reports wrong alignments or loses targets, with exit 0. The
+	# rule, measured through the real CLI against an index dedicated to the guide (246 cells
+	# of built length, N, guide length and bulges; PostProcess/index_fit.py, which the
+	# pre-flight and the web use, says the same): built + N >= guide + bDNA + (bRNA > 0).
+	# Inside it the results are byte-identical to a dedicated index, outside it they differ.
+	# An index whose length cannot be read, or a PAM file with no spacer, fits, as before. A
+	# reference search with no bulges scans the FASTA and opens no index, so any fits it; a
+	# variant one reads the index of its indels, at least.
+	_index_fits_guide() {
+		local _g _b=${1##*/} _guide=$(( ${#fullseqpam} - ${pos#-} ))
+		[ "${#fullseqpam}" -gt 0 ] && [ "$_guide" -gt 0 ] || return 0
+		if [ "${_b#*+}" = "$_b" ] && [ "${bDNA:-0}" -eq 0 ] && [ "${bRNA:-0}" -eq 0 ]; then
+			return 0
+		fi
+		_g=$(_index_guide_len "$1")
+		[ -n "$_g" ] || return 0
+		[ "$((_g + $2))" -ge "$((_guide + ${bDNA:-0} + (${bRNA:-0} > 0)))" ]
+	}
+
 	# Pick which installed index serves this search.
 	#   $1 library dir   $2 requested PAM   $3 name suffix (<ref> or <ref>+<vcf>)
 	#   $4 requested bMax
 	#   $5 optional: any non-empty value takes an all-N index whichever side it was
-	#      built for (only to say why one was refused)
+	#      built for, and an index whatever guide it fits (only to say why one was refused)
 	# Writes the chosen directory to stdout, or nothing when none is sufficient.
 	#
 	# An index named <PAM>_<N>_<suffix> was built with -bMax N and so supports searches
-	# up to N-1 bulges of each type: any N >= bMax serves. Among those, in order:
+	# up to N-1 bulges of each type: any N >= bMax serves whose guide length fits this
+	# search (_index_fits_guide). Among those, in order:
 	#   1. the requested PAM itself, ahead of any PAM-less index -- it needs neither
 	#      N-padding nor the post-search PAM filter to be right;
-	#   2. the smallest sufficient N, so a tighter index beats a wider one;
-	#   3. the narrowest PAM-less flank, so --prune-pam pads as little as possible.
+	#   2. an index built for this very guide length, ahead of one that fits only;
+	#   3. the smallest sufficient N, so a tighter index beats a wider one;
+	#   4. the narrowest PAM-less flank, so --prune-pam pads as little as possible.
 	# Every tie is settled by a rule, because glob order is not one: it follows
 	# LC_COLLATE, and NNNNNNNN_3_hg38 sorts BEFORE NNN_3_hg38 under LC_ALL=C (as inside
 	# the container) but after it under en_US.UTF-8. Leaving the choice to the glob
@@ -790,8 +827,8 @@ while read vcf_f; do
 	# An all-N index must also have been built for a PAM on the search PAM's side.
 	_resolve_index_dir() {
 		local _lib="$1" _pam_want="$2" _suffix="$3" _want="$4" _any_side="$5"
-		local _d _b _pam _n _exact _better _side
-		local _best="" _best_n="" _best_pam_len="" _best_exact=""
+		local _d _b _pam _n _exact _better _side _len _g
+		local _best="" _best_n="" _best_pam_len="" _best_exact="" _best_len=""
 		for _d in "$_lib"/*_*_"$_suffix"; do
 			[ -d "$_d" ] || continue
 			case "$_d" in *_INDELS) continue ;; esac
@@ -860,20 +897,29 @@ while read vcf_f; do
 					[ "$_side" = 5 ] || continue
 				fi
 			fi
+			[ -n "$_any_side" ] || _index_fits_guide "$_d" "$_n" || continue
+			# built for this very guide (or not known), rather than one it merely fits
+			_len=1
+			_g=$(_index_guide_len "$_d")
+			[ -z "$_g" ] || [ "$_g" = "$(( ${#fullseqpam} - ${pos#-} ))" ] || _len=0
 			_better=0
 			if [ -z "$_best" ]; then
 				_better=1
 			elif [ "$_exact" -gt "$_best_exact" ]; then
 				_better=1
 			elif [ "$_exact" -eq "$_best_exact" ]; then
-				if [ "$_n" -lt "$_best_n" ]; then
+				if [ "$_len" -gt "$_best_len" ]; then
 					_better=1
-				elif [ "$_n" -eq "$_best_n" ] && [ "${#_pam}" -lt "$_best_pam_len" ]; then
-					_better=1
+				elif [ "$_len" -eq "$_best_len" ]; then
+					if [ "$_n" -lt "$_best_n" ]; then
+						_better=1
+					elif [ "$_n" -eq "$_best_n" ] && [ "${#_pam}" -lt "$_best_pam_len" ]; then
+						_better=1
+					fi
 				fi
 			fi
 			if [ "$_better" = 1 ]; then
-				_best="$_d"; _best_n="$_n"; _best_pam_len=${#_pam}; _best_exact="$_exact"
+				_best="$_d"; _best_n="$_n"; _best_pam_len=${#_pam}; _best_exact="$_exact"; _best_len="$_len"
 			fi
 		done
 		[ -n "$_best" ] && printf '%s\n' "$_best"
@@ -917,6 +963,34 @@ while read vcf_f; do
 		printf "ERROR: %s is in the way: this search builds its index under that name\n" "$1" >&2
 		_say_other_side "$1"
 		printf "       move it%s out of %s, or run this search from another working directory\n" \
+			"$_also" "$(dirname "$1")" >&2
+		exit 1
+	}
+
+	# Say on stderr why index $1 cannot serve this search, when it stores too little for
+	# this guide (_index_fits_guide): to one line of what follows it.
+	_say_short_index() {
+		local _n _b=${1##*/}
+		_n=${_b#*_}; _n=${_n%%_*}
+		_index_fits_guide "$1" "$_n" && return 0
+		printf "%s was built for a %s-nt guide, and this search has a %s-nt guide with %s DNA and %s RNA bulge(s): it stores too few bases per site, so a search of it would report wrong alignments and lose off-targets" \
+			"$_b" "$(_index_guide_len "$1")" "$(( ${#fullseqpam} - ${pos#-} ))" "${bDNA:-0}" "${bRNA:-0}" >&2
+	}
+
+	# A search builds its index under the name <PAM>_<bMax>_<suffix>, which says nothing
+	# of the guide, so index $1 in place under that name, which the scan refused for a
+	# guide it does not fit, stands in the way of the build. Stop instead of searching it.
+	# Never removed: it is someone's, and answers its own guide. $2 is its _INDELS
+	# companion, for a variant index.
+	_refuse_short_index() {
+		local _n _b=${1##*/} _also=
+		_lock_built "$1" 1 || return 0
+		_n=${_b#*_}; _n=${_n%%_*}
+		_index_fits_guide "$1" "$_n" && return 0
+		[ -n "$2" ] && [ -d "$2" ] && _also=" and $(basename "$2")"
+		printf "ERROR: " >&2
+		_say_short_index "$1"
+		printf ". This search builds its index under that name: move it%s out of %s, or run this search from another working directory\n" \
 			"$_also" "$(dirname "$1")" >&2
 		exit 1
 	}
@@ -1171,7 +1245,15 @@ while read vcf_f; do
 		for _l in "${_dead_locks[@]}"; do printf '%s\n' "$_l" >&2; done
 		printf "ERROR: no matching reference index under --index-path '%s'\n" "$ref_lib" >&2
 		_other=$(_resolve_index_dir "$ref_lib" "$true_pam" "$ref_name" "$bMax" any)
-		[ -n "$_other" ] && _say_other_side "$_other"
+		if [ -n "$_other" ]; then
+			_say_other_side "$_other"
+			_n=${_other##*/}; _n=${_n#*_}; _n=${_n%%_*}
+			if ! _index_fits_guide "$_other" "$_n"; then
+				printf "       " >&2
+				_say_short_index "$_other"
+				printf "\n" >&2
+			fi
+		fi
 		printf "       expected an index '%s_N_%s' with N >= %s (e.g. %s)\n" "$true_pam" "$ref_name" "$bMax" "$(basename "$idx_folder1")" >&2
 		printf "       re-run 'crisprme.py download --what index --index-name %s' (it fetches the shared reference index too), or build it with 'crisprme.py build-index-only'.\n" "$(basename "$idx_folder1")" >&2
 		exit 1
@@ -1200,6 +1282,7 @@ while read vcf_f; do
 			_lock_release "$_lock" || exit 1
 		else
 			_refuse_other_side "$idx_folder1"  # in place, and not this run's build
+			_refuse_short_index "$idx_folder1"
 			_lock_built "$idx_folder1" 1 || _no_index_here "$idx_folder1" ", or point --index-path at a library that holds it"
 		fi
 		echo -e 'Index-genome Reference\tEnd\t'$(date) >>$log
@@ -1245,6 +1328,7 @@ while read vcf_f; do
 				_lock_release "$_lock" || exit 1
 			else
 				_refuse_other_side "$idx_folder1" "${idx_folder1}_INDELS"
+				_refuse_short_index "$idx_folder1" "${idx_folder1}_INDELS"
 				_lock_built "$idx_folder1" 1 || _no_index_here "$idx_folder1"
 			fi
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"

@@ -1040,6 +1040,29 @@ Genomes variant index 110 GB against 28 GB (download sizes, GB = 10⁹ bytes). P
 happens at leaf time, so a PAM-less search is not faster than a dedicated one — the gain
 is that one index answers many PAMs.
 
+**Guide length.** An index name carries no guide length; each tree records the one it was
+built for, as the second int32 of its `.bin` (written by `buildTST` since 2019, whoever built
+the index). The engine reads that length only to offset coordinates and searches any guide it
+is given, so past what the tree stores it gives wrong alignments or loses targets, with exit 0.
+A search therefore takes an index only where
+
+    built + N >= guide + bDNA + (1 if bRNA > 0, else 0)
+
+with N the number in the index's name. We measured the rule with the real CLI against an index
+dedicated to each guide, on a synthetic genome with no site near a contig end or an N run: of
+246 cells (built 20, 22 or 23 nt; N 2 to 4; guide 20 to 24 nt; dedicated, all-`N`, and all-`N`
+under `--prune-pam`; up to 3 bulges), the 136 inside the rule are byte-identical to the
+dedicated index and the 110 outside it all differ, up to an empty result. Another 70 cells, of
+variant searches (SNP and indel rows, with no bulges too, through the index) and of a 5′ PAM,
+fall on the same side of the rule. So a published 20-nt N = 3 index serves a 21-nt guide at up
+to 1 bulge of each type, a 22-nt guide with one bulge of one type, a 23-nt guide with no bulge
+through the index, and no longer guide. An index built for this very guide is preferred to one that merely fits. With
+none that fits, a search builds its own under the name `<PAM>_<N>_<genome>`, or stops with an
+ERROR that names both lengths when an index of that name, built for another guide, is in the
+way; `build-index-only` does the same and leaves that index and its `.pam_build` as they are.
+A longer build serves a shorter guide, but, like any deeper index, it does not hold a site
+next to an N run or a contig end that a shallower one does.
+
 **Limits.** `--prune-pam` requires `--index-path` and is command-line only: the web
 interface never passes the flag. (Its PAM picker prefers a PAM whose geometry matches the
 installed index, but falls back to offering every PAM when none matches, so it does not

@@ -101,6 +101,7 @@ from assembly_reconcile import reconcile_haplotypes, check_liftover_available, c
 from generate_report import build_combined_report  # noqa: E402
 from assembly_annotate import add_annotation_column, add_closest_gene_columns  # noqa: E402
 import personal_assembly  # noqa: E402  (personal-assembly folder+metadata layout)
+import index_fit  # noqa: E402  (which guide lengths an index can answer)
 
 cicd_test = False
 if "--ci-cd-test" in input_args:
@@ -1793,7 +1794,8 @@ MAX_BULGES = 3
 
 
 def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
-                               prune: bool = False, three_prime: bool = True) -> int:
+                               prune: bool = False, three_prime: bool = True,
+                               guide_len: int = 0) -> int:
     """Bulge depth a search can REACH for this PAM motif + genome (mirrors the web's
     pages_utils.reference_bulge_capacity/index_max_bulges cap without web dependencies).
 
@@ -1802,7 +1804,9 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
     covers alignments that start with a gap). A pamless all-N index of the same length
     serves any PAM on the side it was built for (its ``.pam_build``; 3' without one); a
     wider one serves only under ``prune`` (--prune-pam) and only a 3' PAM
-    (``three_prime``), exactly as the search shell decides.
+    (``three_prime``), exactly as the search shell decides. ``guide_len`` is the search's
+    guide length: an index built for a shorter guide serves it with fewer bulges, or none
+    (index_fit).
 
     The REFERENCE and VARIANT terms are ASYMMETRIC:
       * REFERENCE: the larger of the installed reference index depth and -- when the raw
@@ -1870,8 +1874,9 @@ def _installed_index_bulge_cap(motif: str, genome: str, is_variant: bool,
                 pam, _sep, n_str = stem.partition("_")
                 if not _sep or not n_str.isdigit() or not _pam_serves(pam, d):
                     continue
-                best = max(best, int(n_str))
-            return max(0, best - 1)
+                best = max(best, index_fit.bulge_cap(
+                    index_fit.built_guide_len(os.path.join(lib, d)), int(n_str), guide_len))
+            return best
 
         # REFERENCE term: installed reference index OR buildable-from-raw-genome ceiling.
         ref_installed = _scan(want_plus=False)
@@ -1920,7 +1925,7 @@ def _index_serves_search(index: str, genome: str, motif: str, want: int, prune: 
 def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int = 0,
                                   pam: str = "", prune: bool = False,
                                   three_prime: bool = True, bdna: "Optional[int]" = None,
-                                  brna: "Optional[int]" = None) -> bool:
+                                  brna: "Optional[int]" = None, guide_len: int = 0) -> bool:
     """Refuses a search that would take another genome folder's index or variant
     genomes for this one's.
 
@@ -1972,6 +1977,8 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
             search again without --prune-pam.
         bdna, brna: The search's DNA and RNA bulges, given or taken by default, for the
             messages; `bulges` each when not given.
+        guide_len: The search's guide length: the search takes no index that does not fit
+            it (index_fit).
 
     Returns:
         Whether to record, in the reference index this search builds, the folder it
@@ -2026,6 +2033,9 @@ def _check_genome_name_is_its_own(genomedir: str, index_path: str, bulges: int =
                 for index_dir in unrecorded_index_dirs(cwd, genomedir)
                 if _index_serves_search(os.path.basename(index_dir), name, pam, bulges + 1,
                                         prune, three_prime)
+                and index_fit.fits(index_fit.built_guide_len(index_dir),
+                                   int(os.path.basename(index_dir).split("_")[1]),
+                                   guide_len, bdna, brna)
             ]
         assembly_search = (
             f"assembly-search --bDNA {bdna} --bRNA {brna}, which searches each haplotype "
@@ -2413,7 +2423,8 @@ def complete_search() -> None:
     _SIMPLE_BULGE_CAP = 1
     if not _bdna_given and not _brna_given and max_total_edits > 0:
         _idx_cap = _installed_index_bulge_cap(pam_char, genome_ref, variant,
-                                              prune=prune_pam, three_prime=not pam_begin)
+                                              prune=prune_pam, three_prime=not pam_begin,
+                                              guide_len=total_pam_len - pam_len)
         _derived = min(max_total_edits, _idx_cap, _SIMPLE_BULGE_CAP)
         if _derived > 0:
             bDNA = bRNA = _derived
@@ -2445,7 +2456,8 @@ def complete_search() -> None:
     # variant genomes by the genome folder's name alone: refuse one whose folder
     # shares its name with another genome folder (_check_genome_name_is_its_own).
     record_index_source = (search_index or variant) and _check_genome_name_is_its_own(
-        genomedir, index_path, bMax, pam_char, prune_pam, not pam_begin, bDNA, bRNA
+        genomedir, index_path, bMax, pam_char, prune_pam, not pam_begin, bDNA, bRNA,
+        total_pam_len - pam_len
     )
     if variant:
         genome_idx_list = []
@@ -3098,7 +3110,9 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
     (pages_utils.get_pam_options / index_build_pam) offer only compatible PAMs —
     critical for pamless (NNN) indexes, which otherwise look like they serve every
     PAM. The sidecar lives inside the index dir, so it travels in the publish
-    tarball and download automatically. Non-fatal on any error.
+    tarball and download automatically. Non-fatal on any error. An index in place that
+    was built for another guide length keeps its record: this PAM file does not describe
+    it (a longer build, which serves a shorter guide: _refuse_short_build stops the rest).
     """
     if not os.path.isdir(index_dir):
         return
@@ -3106,6 +3120,9 @@ def _write_pam_build(index_dir: str, pamfile: str) -> None:
         with open(pamfile) as fh:
             parts = fh.readline().split()
         seq, pos = parts[0], int(parts[1])
+        built = index_fit.built_guide_len(index_dir)
+        if built and built != len(seq) - abs(pos):
+            return
         name = os.path.splitext(os.path.basename(pamfile))[0]
         with open(os.path.join(index_dir, ".pam_build"), "w") as fd:
             fd.write(f"{name} {len(seq)} {pos}\n")
@@ -3142,6 +3159,29 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
             f"{side[built < 0]} side of the guide (as its .pam_build records), and "
             f"{pamfile} puts the PAM on the {side[wanted < 0]} side. The index for that "
             f"PAM file has the same name: build it in another working directory (--path)."
+        )
+
+
+def _refuse_short_build(index_dir: str, pamfile: str, bdna: int, brna: int) -> None:
+    """Stops build-index-only when ``index_dir`` is an index already in place, built for
+    a guide too short for ``pamfile`` at these bulges (index_fit; its .bin files record
+    the length). build-index-only keeps an index it finds in place and, before this check,
+    said "already present" and recorded ``pamfile`` on it (_write_pam_build), which left a
+    record that contradicts the index and a search of it that reports wrong alignments.
+    The index ``pamfile`` asks for has the same name, so it needs another working
+    directory, or this one moved out of the way: never removed here.
+    """
+    built = index_fit.built_guide_len(index_dir)
+    guide = index_fit.pam_file_spacer(pamfile)
+    n = int(os.path.basename(index_dir).split("_")[1])
+    if not index_fit.fits(built, n, guide, bdna, brna):
+        error(
+            f"{index_dir} is already there, built for a {built}-nt guide (as its .bin files "
+            f"record), and {pamfile} asks for a {guide}-nt guide with {bdna} DNA and {brna} "
+            f"RNA bulge(s): it stores too few bases per site, so a search of it would report "
+            f"wrong alignments and lose off-targets. The index for that PAM file has the same "
+            f"name: build it in another working directory (--path), or move this one out of "
+            f"{os.path.dirname(index_dir)}."
         )
 
 
@@ -3919,6 +3959,10 @@ def build_index_only() -> None:
     _refuse_other_side_build(idx_folder, pamfile)
     if vcf_given:
         _refuse_other_side_build(snp_idx, pamfile)
+    # (nor on an index built for a guide too short for pamfile)
+    _refuse_short_build(idx_folder, pamfile, bDNA, bRNA)
+    if vcf_given:
+        _refuse_short_build(snp_idx, pamfile, bDNA, bRNA)
     # The build directories that killed runs left (_reclaim_build_dirs) are removed
     # first, whatever this run goes on to build: a search may have built since what
     # one of them was building, and then no build here would reclaim it.

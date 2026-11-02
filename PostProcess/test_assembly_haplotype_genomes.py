@@ -1399,12 +1399,13 @@ class APipelineGenomeKeepsTheNameItIsGivenUnder(_Workdir):
 
 
 def _shipped_resolver():
-    """`_resolve_index_dir`, extracted from the shipped script (not copied), as
-    test_index_resolution.py extracts it."""
+    """`_resolve_index_dir`, extracted from the shipped script (not copied) with the
+    helpers it calls, which the script defines just before it, as test_index_resolution.py
+    extracts it."""
     with open(SHELL_SCRIPT) as fh:
         text = fh.read()
-    start = text.index("\t_resolve_index_dir() {")
-    end = text.index("\n\t}\n", start) + len("\n\t}\n")
+    start = text.index("\t_index_side() {")
+    end = text.index("\n\t}\n", text.index("\t_resolve_index_dir() {", start)) + len("\n\t}\n")
     return "\n".join(ln[1:] if ln.startswith("\t") else ln for ln in text[start:end].splitlines())
 
 

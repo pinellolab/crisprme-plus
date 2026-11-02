@@ -75,9 +75,9 @@ if os.environ.get("STUB_BIG_FAKE"):
 CODE = dict(zip("ACGTRYSWKMBDHV", (1, 2, 4, 8, 5, 10, 6, 9, 12, 3, 14, 13, 11, 7)))
 
 
-def tst(pam, nb, seq):
+def tst(pam, guide, seq):
     """A .bin as saveTST writes one, of a single target: the sequence seq, with pam
-    for its PAM and nb in the guide-length field; its tree is a chain of one node a
+    for its PAM and guide in the guide-length field; its tree is a chain of one node a
     base, which ends with the target's index (crispritz_bins has the layout)."""
     nibbles = [n for base in seq for n in (CODE.get(base, 0), 0, 0)]  # a base, no lo/hi kid
     tree = bytes(a << 4 | b for a, b in zip(nibbles[::2], nibbles[1::2]))
@@ -85,7 +85,7 @@ def tst(pam, nb, seq):
     codes = [CODE.get(base, 0) for base in pam] + [0]
     target = struct.pack("=i", 0) + bytes(codes[i] << 4 | codes[i + 1]
                                           for i in range(0, len(pam), 2)) + b"0"
-    return (struct.pack("=ii", 1, int(nb)) + target + struct.pack("=i", len(seq)) + tree
+    return (struct.pack("=ii", 1, int(guide)) + target + struct.pack("=i", len(seq)) + tree
             + struct.pack("=i", -1))
 
 
@@ -144,7 +144,7 @@ if sys.argv[1] == "index-genome":
             continue
         if os.environ.get("STUB_NO_BIN") and os.environ["STUB_NO_BIN"] in key:
             continue
-        data = tst(pam, nb, seq)
+        data = tst(pam, len(motif) - abs(size), seq)
         if os.environ.get("STUB_CUT") and os.environ["STUB_CUT"] in key:
             data = data[: int(os.environ.get("STUB_CUT_TO", len(data) // 2))]
         with open(os.path.join(out, "%s_%s_1.bin" % (pam, header(os.path.join(gdir, fa)))),
@@ -2840,8 +2840,8 @@ BEFORE = {
             "dir  genome_library/NRG_2_hg38/",
             "4983ff2823805684  genome_library/NRG_2_hg38/.display_label",
             "425fad713f395627  genome_library/NRG_2_hg38/.pam_build",
-            "dee1e9b039f12fe0  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
-            "338fbfb5efc7044c  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
+            "d66362e6e632d716  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
+            "dd9cec0f0c518aaa  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
             "c442c9cdd4d80f67  samples.txt",
             "dir  samplesIDs/",
             "036a130b3364d826  samplesIDs/hg38_ds.samplesID.txt",
@@ -2902,17 +2902,17 @@ BEFORE = {
             "dir  genome_library/NRG_2_hg38+ds/",
             "4983ff2823805684  genome_library/NRG_2_hg38+ds/.display_label",
             "425fad713f395627  genome_library/NRG_2_hg38+ds/.pam_build",
-            "1dafb9f88a997704  genome_library/NRG_2_hg38+ds/NRG_chr1_1.bin",
-            "fdb7a83262a278ee  genome_library/NRG_2_hg38+ds/NRG_chr2_1.bin",
+            "1ee8d75c82560b81  genome_library/NRG_2_hg38+ds/NRG_chr1_1.bin",
+            "b27b5953fb0c4677  genome_library/NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
-            "270e5e2a33dbf6ed  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
+            "13a14310b8ce8302  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
-            "5086fa72ea1b3534  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
+            "103c77c7195d36be  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/NRG_2_hg38/",
             "425fad713f395627  genome_library/NRG_2_hg38/.pam_build",
-            "dee1e9b039f12fe0  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
-            "338fbfb5efc7044c  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
+            "d66362e6e632d716  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
+            "dd9cec0f0c518aaa  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
             "c442c9cdd4d80f67  samples.txt",
             "dir  samplesIDs/",
             "036a130b3364d826  samplesIDs/hg38_ds.samplesID.txt",
@@ -2990,17 +2990,17 @@ BEFORE = {
             "dir  genome_library/NRG_2_hg38+ds/",
             "4983ff2823805684  genome_library/NRG_2_hg38+ds/.display_label",
             "425fad713f395627  genome_library/NRG_2_hg38+ds/.pam_build",
-            "1dafb9f88a997704  genome_library/NRG_2_hg38+ds/NRG_chr1_1.bin",
-            "fdb7a83262a278ee  genome_library/NRG_2_hg38+ds/NRG_chr2_1.bin",
+            "1ee8d75c82560b81  genome_library/NRG_2_hg38+ds/NRG_chr1_1.bin",
+            "b27b5953fb0c4677  genome_library/NRG_2_hg38+ds/NRG_chr2_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/",
-            "270e5e2a33dbf6ed  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
+            "13a14310b8ce8302  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr1/NRG_fakechr1_1.bin",
             "dir  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/",
-            "5086fa72ea1b3534  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
+            "103c77c7195d36be  genome_library/NRG_2_hg38+ds_INDELS/NRG_2_fakechr2/NRG_fakechr2_1.bin",
             "dir  genome_library/NRG_2_hg38/",
             "425fad713f395627  genome_library/NRG_2_hg38/.pam_build",
-            "dee1e9b039f12fe0  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
-            "338fbfb5efc7044c  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
+            "d66362e6e632d716  genome_library/NRG_2_hg38/NRG_chr1_1.bin",
+            "dd9cec0f0c518aaa  genome_library/NRG_2_hg38/NRG_chr2_1.bin",
             "c442c9cdd4d80f67  samples.txt",
             "dir  samplesIDs/",
             "036a130b3364d826  samplesIDs/hg38_ds.samplesID.txt",
@@ -3068,6 +3068,61 @@ class AnAllNIndexInPlaceKeepsItsSide(_Fixture):
                               "working directory (--path).\n")
         self.assertEqual(self.record("NNN_2_hg38"), "20bp-NNN-NO-PAM 23 3\n")
         self.assertEqual(self.calls(), [])
+
+    def built_for_guide(self, name, guide):
+        """An index in place whose trees record the guide length ``guide``."""
+        os.makedirs(self.lib(name), exist_ok=True)
+        with open(os.path.join(self.lib(name), "NGG_chr1_1.bin"), "wb") as fh:
+            fh.write(struct.pack("=ii", 1, guide) + b"\0" * 16)
+
+    def test_a_pam_file_of_a_longer_guide_is_refused_and_the_record_kept(self):
+        # "already present", and the 23-nt file recorded over a 20-nt index: the web then
+        # described it wrong, and every search of it reported wrong alignments
+        self.built_for_guide("NGG_2_hg38", 20)
+        _write(os.path.join(self.lib("NGG_2_hg38"), ".pam_build"), "20bp-NGG-SpCas9 23 3\n")
+        before = self.record("NGG_2_hg38")
+        long_pam = self.path("23bp-NGG-X.txt")
+        _write(long_pam, "N" * 23 + "NGG 3\n")
+        rc, out, err = self.build(long_pam)
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"Error: {self.lib('NGG_2_hg38')} is already there, built for a 20-nt "
+                      f"guide (as its .bin files record), and {long_pam} asks for a 23-nt guide "
+                      "with 1 DNA and 1 RNA bulge(s)", err)
+        self.assertIn("stores too few bases per site", err)
+        self.assertNotIn("already present", out)
+        self.assertEqual(self.record("NGG_2_hg38"), before)
+        self.assertEqual(self.calls(), [])
+
+    def test_so_is_one_over_a_variant_index(self):
+        self.built_for_guide("NGG_2_hg38+ds", 20)
+        long_pam = self.path("23bp-NGG-X.txt")
+        _write(long_pam, "N" * 23 + "NGG 3\n")
+        rc, out, err = self.build(long_pam, vcf=True)
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"Error: {self.lib('NGG_2_hg38+ds')} is already there, built for a 20-nt "
+                      "guide", err)
+        self.assertEqual(self.calls(), [])
+
+    def test_an_index_built_for_a_longer_guide_is_kept_and_keeps_its_record(self):
+        # it serves the shorter guide, so it is "already present"; its record, of what it
+        # was built from, stays
+        self.built_for_guide("NGG_2_hg38", 23)
+        _write(os.path.join(self.lib("NGG_2_hg38"), ".pam_build"), "23bp-NGG-X 26 3\n")
+        short_pam = self.path("20bp-NGG-X.txt")
+        _write(short_pam, "N" * 20 + "NGG 3\n")
+        rc, out, err = self.build(short_pam)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("Reference index already present", out)
+        self.assertEqual(self.record("NGG_2_hg38"), "23bp-NGG-X 26 3\n")
+        self.assertEqual(self.calls(), [])
+
+    def test_an_index_of_this_very_guide_gets_the_record_it_lacks(self):
+        self.built_for_guide("NGG_2_hg38", 20)
+        pam = self.path("20bp-NGG-X.txt")
+        _write(pam, "N" * 20 + "NGG 3\n")
+        rc, out, err = self.build(pam)
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(self.record("NGG_2_hg38"), "20bp-NGG-X 23 3\n")
 
     def test_and_so_is_one_over_a_variant_index_recorded_for_the_other_side(self):
         self.in_place("NNN_2_hg38+ds", "23bp-NNN-5p 23 -3\n")

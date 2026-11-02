@@ -333,6 +333,10 @@ jobs:
       - name: "CFD score tables validation (JSON structure/counts/anchors; the committed tables are the source of truth)"
         run: python scripts/generate_cfd_tables.py --check
 
+      - name: "Index fit (which guide lengths an index answers; the search script says the same)"
+        working-directory: PostProcess
+        run: python -m unittest test_index_fit -v
+
       - name: "Indel report integrity (header injection) + complete-search flag gate + index resolution"
         # The header-injection guards: a dropped CRISPRitz header made
         # post_analisi_indel.sh prepend the merged file's first DATA row to every

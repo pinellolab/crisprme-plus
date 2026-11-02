@@ -34,6 +34,7 @@ REUSED_HASH = "#reused"
 # run cannot build one: each is one line that says what to do.
 _NO_INDEX_REFUSALS = (
     " is not installed, and this run cannot build it: ",  # a library that takes no lock
+    " stores too few bases per site",  # an index in the way, built for a shorter guide
 )
 
 
