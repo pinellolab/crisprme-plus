@@ -41,7 +41,9 @@ def _rep_tiebreak(x):
     element settles it: the row of SNPs comes first. A variant token is
     ``<contig>_<pos>_<ref>_<alt>``, split from the right because a contig name can hold
     '_'; a REF or ALT longer than one base comes from the indel path. It is consulted only
-    after everything else ties, so no other choice of representative can change.
+    after everything else ties, so no other choice of representative can change. It holds
+    among rows with carriers only: the rows of a sites-only index (mega) have none and
+    their REF alignment was never upper case, so their ties stay in the sort's order.
     """
     try:
         _samples = str(x[true_guide - 2])
@@ -51,7 +53,7 @@ def _rep_tiebreak(x):
         )
     except Exception:  # never let the tie-break break the sort
         _ncarriers = 0
-    _has_indel = any(
+    _has_indel = _ncarriers > 0 and any(
         len(_var) == 4 and (len(_var[2]) > 1 or len(_var[3]) > 1)
         for _var in (_tok.rsplit("_", 3) for _tok in str(x[snp_info]).split(","))
     )

@@ -25,7 +25,8 @@ lexicographically-smallest aligned-DNA representative.
 2.8.1: a row of SNPs and a row with an indel can give the SAME aligned DNA at the same
 position, with the same number of carriers. Those two fell through to input order, the
 whole-line sort of the merge step, where the REF alignment's letter case and the sample
-IDs decide. The has-indel element settles it: the row of SNPs is the representative.
+IDs decide. The has-indel element settles it among rows with carriers: the row of SNPs
+is the representative.
 
 WHAT THIS TEST DOES
 -------------------
@@ -47,7 +48,8 @@ ASSERTS:
     (deletion, insertion, indel + SNP, a contig name with '_'), and the row with the
     indel is listed in the alternative alignments, on the score and on the total
     branch. Controls: more carriers, a smaller aligned DNA, a smaller Position or a
-    higher CFD still win over it.
+    higher CFD still win over it; rows without carriers (a sites-only index) keep the
+    order of the merge step's sort.
 
 Run with:
     cd PostProcess && python3 -m unittest test_representative_tiebreak -v
@@ -286,6 +288,22 @@ class RepresentativeTiebreak(unittest.TestCase):
         for rows in ((winner, loser), (loser, winner)):
             rep = self._representative([list(r) for r in rows], "score")
             self.assertEqual(rep[SNP_COL], indel)
+
+    def test_rows_without_carriers_keep_their_order(self):
+        """The rows of a sites-only index (mega) have no carriers, and their REF alignment
+        was never upper case: their ties stay in the order of the merge step's sort, so
+        these searches give what they gave before the SNP-first rule. The two rows are
+        told apart here by the order alone, whichever comes first is reported."""
+        snp, indel = "chr1_1010_G_C", "chr1_1015_ACT_A"
+        for samples in ("", "NO_SAMPLES"):
+            first_snp = self._variant_row(snp, samples)
+            first_indel = self._variant_row(indel, samples)
+            for rows in ((first_snp, first_indel), (first_indel, first_snp)):
+                for sort_order in ("score", "total"):
+                    with self.subTest(samples=samples, first=rows[0][SNP_COL],
+                                      sort_order=sort_order):
+                        rep = self._representative([list(r) for r in rows], sort_order)
+                        self.assertEqual(rep[SNP_COL], rows[0][SNP_COL])
 
     def test_reference_row_is_not_a_variant_row(self):
         """The marker of a reference row ("n") is not a variant token, so it is not an
