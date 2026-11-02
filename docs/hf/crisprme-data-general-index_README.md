@@ -98,11 +98,19 @@ index cannot be used from the web interface.
 ## Equivalence claim
 
 A PAM-less index of flank *K* searched with `--prune-pam` and a 3′ PAM of length
-*L ≤ K* produces the **same report as a dedicated index built for that PAM**.
-Verified genome-wide at `NRG` 4 mismatches + 1 DNA bulge + 1 RNA bulge over HGDP +
+*L ≤ K* produces the **same report as a dedicated index built for that PAM**, but for
+what a flank wider than the PAM cannot index at a contig's very end and start: a + strand
+PAM with 1 to *K − L* nt after it to the end, and a − strand PAM in the first *K − L* nt,
+are not indexed, and one exactly *K − L* nt from the start is reported on the + strand at
+another position. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites, none
+on a primary chromosome; CRISPRme+ says so when a search reads such a flank.
+Measured genome-wide at `NRG` 4 mismatches + 1 DNA bulge + 1 RNA bulge over HGDP +
 1000 Genomes with per-sample resolution: the flank-8 arm, the flank-3 arm and the
 dedicated `NRG_3` arm give **byte-identical** `integrated_results.tsv`
-(189,950 rows), with every indel row justified by its own window.
+(189,950 rows), with every indel row justified by its own window; that guide has no site
+at a contig's end. The archives here were built by CRISPRitz 2.9.1, which keeps a target
+whose flank holds an `N`: an index of this flank built by an earlier release misses
+those sites, and CRISPRme+ 2.8.1 warns when a search reads one.
 
 ## Verifying a download
 

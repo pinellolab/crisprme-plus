@@ -362,8 +362,18 @@ compiled into `buildTST`, so it cannot affect index content.
   neither the enriched genome nor the dict, and an off-target that needs it is not
   found. It applies to any index enriched from a VCF with such sites. Measured for
   HGDP + 1000 Genomes: on chr22, 45,837 of 1,757,775 SNP records (2.6 %), at 43,389
-  positions, lose their ALT this way. A fix changes the enriched genomes, and with
-  them every affected index, so it is being investigated separately.
+  positions, lose their ALT this way, counted in the normalized source VCF
+  (`hgdp1kgp.chr22.norm.vcf.gz`) as the records not last at their position; 5,104
+  of them have AC ≥ 41 (AF ≥ 0.5 % of 8,182 haplotypes) and 1,566 AC ≥ 818 (about 10 %).
+  Confirmed directly in the shipped data at six such positions, the three of chr22
+  with the highest AC, two at AC 257 and 82, and chr20:12296886: the earlier ALT is
+  absent from the enriched genome's IUPAC code, the Tier-0 registry, the Tier-1
+  genotype store and the per-sample dictionary, and only the last record's ALT is
+  held. Two examples: chr22:19142014 has `rs807755` T>A at AC = 8,179 and T>G at
+  AC = 1, and the enriched genome reads `K` (G/T), the stores hold G alone;
+  chr20:12296886 has `rs6109350` G>A at AC = 1,451 and G>C at AC = 2, the code is
+  `S` (C/G), and the stores hold C alone. A fix changes the enriched genomes, and
+  with them every affected index, so it is being investigated separately.
 
 ## How to re-run these measurements
 

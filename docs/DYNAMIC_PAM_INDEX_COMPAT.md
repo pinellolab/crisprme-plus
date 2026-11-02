@@ -17,7 +17,11 @@ builds.
   {NGG, NAG, NGA, NRG}; an all-N flank-K index serves anything ≤ K. You can only *narrow*.
 - **Size cost (measured, 2×):** the flank is 4-bit nibble-packed → `+2 bytes/leaf` for 3→8,
   i.e. **~+9%** (ref index ~134 GB → ~146 GB). Linear, not multiplicative.
-- **Proven:** NNN+`--prune-pam NGG` == a dedicated NGG index, identical loci (chr22 cross-check).
+- **Measured:** NNN+`--prune-pam NGG` == a dedicated NGG index, identical loci (chr22 cross-check,
+  `L = K`). With `K > L` the flank does not index a + strand PAM with 1..K−L nt after it to the
+  end of a contig, nor a − strand PAM in its first K−L nt, and reports one exactly K−L nt from the
+  start on the + strand (on hg38 at K = 8: 145 + 101 NGG and 308 + 241 NRG sites, none on a
+  primary chromosome; METHODS §9).
 
 ## 2. Backward-compatibility contract (two independent layers)
 

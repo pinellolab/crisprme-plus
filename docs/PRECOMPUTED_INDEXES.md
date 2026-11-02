@@ -138,11 +138,32 @@ to 1 bulge of each type, byte-identically to an index built for it (so the shipp
 PAM files work on the 8-nt-flank indexes with `--prune-pam`); a longer guide needs its own
 index ([METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)).
 They carry exactly the same variant data and `Dictionaries/` as the dedicated index for the
-same panel — those tiers are PAM-independent — and a `--prune-pam` run over one is
-byte-identical to the dedicated index for that PAM, verified genome-wide. They are
+same panel — those tiers are PAM-independent — and a `--prune-pam` run over one gives the
+dedicated index's report for that PAM: byte for byte from a flank of the PAM's width (`NNN_3`
+for NRG, verified genome-wide), and from a wider one (K = 8 for a 3-nt PAM) but for what it
+cannot index at a contig's very end and start: a + strand PAM with 1 to K − L nt after it to the
+end, and a − strand PAM in the first K − L nt, and one exactly K − L nt from the start is reported
+on the + strand at another position. On hg38 at K = 8 that is 145 + 101 NGG and 308 + 241 NRG
+sites, about 7.5 × 10⁻⁷ of all, none on a primary chromosome (whole-genome, K = 8 lost one row
+of 27,216 for a guide picked for its perfect match there, and one of 216,978 for VEGFA site 3);
+a search that reads a wider flank says so on stdout. A wider index must have been built by
+CRISPRme 2.8.1 (CRISPRitz 2.9.1), which keeps a target whose flank holds an `N`, as every
+archive published here was; the search warns of one built before. They are
 correspondingly larger, because nothing is excluded at build time: 71 GB for the reference
 index against 9 GB for `NRG_3_hg38`, and 110 GB against 28 GB for the HGDP + 1000 Genomes
 variant index. Choose one when you expect to search several PAMs over the same genome.
+
+**Limits of every index at contig ends and `N` runs** (dedicated or PAM-less, any flank; engine
+limits, [METHODS §9](../METHODS.md#9-pam-less-indexes-and-dynamic-pam-filtering)). An index of
+budget N cannot report a site whose guide lies within N − 1 nt of a contig start, a contig end
+or an `N` run, even a perfect match, which a search without bulges (a scan of the FASTA) does
+report; so an index of a larger budget is not a strict superset of a smaller one. For
+`NRG_3_hg38` that is 491 + strand and 504 − strand sites (1,050 NRG sites in all, 535 on primary
+contigs), none within 4 mismatches of nine therapeutic guides checked: what matters is a guide
+whose own on-target sits at such a boundary, whose report then has no perfect match. A − strand
+PAM at a contig's first base is reported on the + strand (11 NGG and 37 NRG hg38 contigs), and a
++ strand PAM on a contig's last bases is found by no search (8 NGG and 31 NRG contigs): all alt,
+random or chrUn contigs, none a primary chromosome.
 
 > **Flank width and compatibility.** A 3-nt flank is readable by any CRISPRme version: the
 > stored geometry is the same as a dedicated 3-nt PAM index, which is why `NNN_3` ships in

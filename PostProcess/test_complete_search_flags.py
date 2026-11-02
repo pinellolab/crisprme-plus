@@ -313,6 +313,16 @@ class TestThePrunePamHelpSaysWhichSideItServes(unittest.TestCase):
         self.assertIn("published PAM-less indexes store the flank on the 3' side", entry)
         self.assertNotIn("a 5' PAM must equal it", entry)
 
+    def test_it_says_what_a_flank_wider_than_the_pam_cannot_index(self):
+        # (it said "The result is identical to a dedicated index built for that PAM", which
+        # does not hold for a PAM at a contig's very end or start: idx audit IDX-4)
+        entry = self._entry()
+        self.assertIn("From a flank as wide as the PAM the result is identical to a dedicated "
+                      "index built for that PAM", entry)
+        self.assertIn("are not indexed (the search says so)", entry)
+        self.assertIn("built by CRISPRme 2.8.1 or later", entry)
+        self.assertNotIn("The result is identical to a dedicated index", entry)
+
 
 # Needs crisprme.py to be importable: these run it as a subprocess, and it imports
 # Bio.Seq at module scope. The static checks above parse the source instead and must

@@ -2,7 +2,12 @@
 that says "An INDELS index that `complete-search` builds from a genome it enriched itself (the
 on-demand build) still has no SNP codes, as before" stops being true with these fixes: drop that
 sentence. The entry below on the SNP codes needs the indel track's fix for a dataset with no
-registry. -->
+registry. The [2.8.1] `--prune-pam` entry says a 3-nt-flank and an 8-nt-flank PAM-less index give
+byte-identical reports to a dedicated NRG index: that was measured for one guide with no site at
+a contig's end, and a flank wider than the PAM does not index a PAM at a contig's very end or
+start: add that, as the first "Changed" entry below words it. changelog/asm.md's entry on the
+genome folder an index records says `complete-search` records it: `build-index-only` now does
+too (the entry below on `build-index-only`'s record). -->
 
 ### Fixed
 
@@ -272,3 +277,40 @@ registry. -->
   `Error: cannot create <folder>: <reason>. Run CRISPRme from a working folder you can write to.`,
   and the help prints. A read-only folder that already holds every CRISPRme folder, searched with
   an `--output` elsewhere, runs as before.
+
+### Changed
+
+- **`--prune-pam` from a flank wider than the PAM: what it cannot index is said, in the docs and
+  by the search.** The README, METHODS section 9, docs/PRECOMPUTED_INDEXES.md,
+  docs/DYNAMIC_PAM_INDEX_COMPAT.md, the general-index card in `docs/hf/` and `complete-search
+  --help` said a PAM-less index with `--prune-pam` gives a report identical to a dedicated index.
+  That was measured genome-wide for one guide, which has no site at a contig's end. The index
+  build scans for a PAM only where a whole flank of K bases fits, so with K > L a + strand PAM with
+  1 to K − L bases after it to the end of a contig, and a − strand PAM in the contig's first K − L
+  bases, are not indexed, and a − strand PAM exactly K − L bases from the start is reported on the
+  + strand at another position; K = L is unaffected. **Affected:** searches of the K = 8 index for
+  a 3-nt PAM (on hg38, 145 + 101 NGG and 308 + 241 NRG sites, about 7.5 × 10⁻⁷ of all, none on a
+  primary chromosome for those PAMs), new with K = 8 in 2.8.1. **What to do:** nothing for a guide
+  whose sites lie on primary chromosomes; for one near the end of an alt, random or unplaced
+  contig, use an index of the PAM's width or a dedicated one. The docs now say so with these
+  counts, and a search that reads a flank wider than its PAM prints one `NOTE` on stdout, also
+  written to the run's `Params.txt`. The engine is unchanged.
+- **The limits every index has at contig ends and `N` runs are documented.** METHODS section 9
+  and docs/PRECOMPUTED_INDEXES.md now say that an index of budget N cannot report a site whose
+  guide lies within N − 1 nt of a contig start, a contig end or an `N` run, which a search
+  without bulges reports, so that an index of a larger budget is not a strict superset of a
+  smaller one (for `NRG_3_hg38`, 1,050 NRG sites, 535 on primary contigs; the exposure that
+  matters is a guide whose own on-target sits at such a boundary); that a − strand PAM at a
+  contig's first base is reported on the + strand (11 NGG and 37 NRG hg38 contigs); and that a +
+  strand PAM on a contig's last bases is found by no search (8 NGG and 31 NRG contigs), these
+  last two only on alt, random or unplaced contigs. These are engine limits, in 2.8.0 too; the
+  engine and the published indexes are unchanged.
+- **The scale of the split multi-allelic SNP limit is stated.** At a position with several
+  biallelic SNP records only the last one's ALT reaches the enriched genome and the stores
+  (CRISPRitz, every release). docs/INDEX_PROVENANCE.md and METHODS section 2 now give what was
+  measured and how: on HGDP + 1000 Genomes chr22, 45,837 of 1,757,775 SNP records (2.6 %) are
+  not the last at their position, 5,104 with AC ≥ 41 and 1,566 with AC ≥ 818, counted in the
+  normalized source VCF; and, read in the shipped enriched genome, registry, genotype store and
+  dictionary at six such positions, the earlier ALT is absent from each, up to AC = 8,179
+  (`rs807755` T>A at chr22:19142014, whose position the stores hold as T>G at AC = 1). Unchanged:
+  a fix changes the enriched genomes and every index built from them.

@@ -162,6 +162,22 @@ Each source VCF is normalized so that variant records are directly comparable:
   or any foreign alt index (`2`, …) is treated as a called non-carrier allele,
   and `.` is missing. This prevents a `1|2` genotype from being miscounted as
   two copies of alt `1`.
+
+  *Known limit (engine).* The enricher writes one IUPAC code a position and one
+  SNP entry a position, rebuilt from the reference base by each record, so at a
+  position with several biallelic SNP records only the **last** record's ALT is
+  searched: an earlier record's ALT is in neither the enriched genome nor the
+  dictionaries nor the Tier-0 registry nor the Tier-1 genotype store, and an
+  off-target that needs it is not found. Measured on HGDP + 1000 Genomes chr22, in
+  the normalized source VCF: 45,837 of 1,757,775 SNP records (2.6 %), at 43,389
+  positions, are not the last at their position; 5,104 of them have AC ≥ 41 (AF ≥
+  0.5 % of 8,182 haplotypes) and 1,566 AC ≥ 818 (about 10 %). Checked directly at six
+  such positions (the three with the highest AC on chr22, two at AC 82 and 257, and
+  chr20:12296886): each earlier ALT, up to AC = 8,179 (`rs807755` T>A at
+  chr22:19142014), is absent from the enriched genome's code and from all three
+  stores, and only the last record's ALT (AC 1 to 3) is held. A fix changes the
+  enriched genomes and every index built from them, so it is left to a CRISPRitz
+  release.
 - **Consistent coordinates and contigs** (reference build, chromosome naming)
   across datasets.
 
@@ -1026,7 +1042,17 @@ over HGDP + 1000 Genomes (4,091 samples, guide `ACTGAAATCTGTAAGCAGGC`, NRG, 4 mi
 1 DNA bulge + 1 RNA bulge, per-sample): a 3-nt-flank PAM-less index with `--prune-pam`, an
 8-nt-flank PAM-less index with `--prune-pam`, and a dedicated NRG index produce
 **byte-identical** reports — the same 189,950 rows, every indel row justified by its own
-variant window.
+variant window. That holds at *L = K*, and at *K > L* for a guide with no site at a contig's
+very end or start, as this one has none. The build scans a contig for a PAM only where a whole
+window of *K* bases fits, so with *K > L* a + strand PAM with 1 to *K − L* bases after it to the
+contig's end, and a − strand PAM in the contig's first *K − L* bases, are not indexed, and a −
+strand PAM exactly *K − L* bases from the start is reported on the + strand at another
+coordinate. On hg38 at *K* = 8 that is 145 + 101 NGG and 308 + 241 NRG sites (about 7.5 × 10⁻⁷
+of all), none on a primary chromosome for those PAMs; in two whole-genome searches the 8-nt
+flank lost one row each against a dedicated index (27,215 of 27,216 rows for a guide picked for
+its perfect match on `chr11_JH159136v1_alt`, and 216,977 of 216,978 for VEGFA site 3 at 5
+mismatches). A search that reads a flank wider than its PAM says so on stdout and in the run's
+`Params.txt`. N runs inside a contig are not affected by the width.
 
 **Genomic `N`.** This equivalence needs engine support, not just a filter. A genomic `N`
 is stored as a code that intersects nothing, so it fails a PAM match at every position; a
@@ -1039,6 +1065,33 @@ width-26 window's 41,454,105, so **16.3%** were invisible to a wider index. Real
 `N` sits in megabase gaps where nothing matches, which is why reference and SNP searches
 were never affected. CRISPRitz now keeps a target whose stored PAM/flank region holds an
 `N` and lets the search PAM decide, exactly as a dedicated index does.
+
+An index built before CRISPRitz 2.9.1 (CRISPRme 2.8.0 and earlier) lacks every target whose
+flank holds an `N`, and searched with `--prune-pam` for a PAM narrower than its flank it misses
+the sites whose flank holds an `N` past the PAM (3 of 36 rows on a synthetic genome, 2.6 % of
+the indel rows on chr22). Its `.pam_build` has the same format, but its trees tell: one built
+since stores an `N` (a 0 nibble) in the flank of a target beside one, and no earlier build does.
+A search that reads such an index wider than its PAM warns on stdout (it reads the smallest
+tree of a contig whose sequence holds an `N`, and of the INDELS index one of several indel
+windows), and goes on.
+
+**Contig ends and N runs.** These limits hold for every index, dedicated or PAM-less, at any
+width. An index of budget *N* holds a window of the guide, the PAM and *N* more bases, and the
+build drops a window that holds an `N` or runs past the contig's start, so it cannot report a
+site whose guide lies within *N − 1* bases of a contig start, a contig end or an `N` run, even a
+perfect match; a search without bulges, which scans the FASTA, reports it. So an index of a
+larger budget is not a strict superset of a smaller one: a search that asks for more bulges can
+return fewer such sites. For `NRG_3_hg38` that is 491 + strand and 504 − strand PAM sites over
+hg38's 1,580 stretches between `N` runs; of the 1,050 such NRG sites (535 on primary contigs),
+none lies within 4 mismatches of the nine guides checked (TRAC, `ACTGAAATCTGTAAGCAGGC`, BCL11A
+sg1617, EMX1, HBG1, CCR5, VEGFA site 3, FANCF and HEK4), and 9 of 20,000 random 20-mers have one
+at up to 4 mismatches. The exposure that matters is a guide whose own on-target sits at such a
+boundary: its report then holds no perfect match. Two more engine limits at contig ends, as
+measured on hg38: a − strand PAM at a contig's first base is reported on the + strand at base
+*N* (11 NGG and 37 NRG contigs open so, all alt, random or chrUn contigs; the primary
+chromosomes open with `N`), and a + strand PAM on a contig's last bases is found by no search,
+indexed or not (8 NGG and 31 NRG contigs end so, none a primary chromosome, and no fake-indel
+contig, which all end in `N`). They need an engine change, and the indexes rebuilt with it.
 
 **Cost.** A PAM-less index is much larger, because no site is excluded at build time: the
 reference index is 71 GB against 9 GB for a dedicated NRG index, and the HGDP + 1000
