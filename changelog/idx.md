@@ -15,7 +15,8 @@ registry. -->
   2.3.3 (searches with bulges, and installs with the enriched genome, were right). **What to do:**
   run those searches again. Measured on hg38 with the default index (TRAC guide, 4 mismatches, NRG,
   per-sample): 483 rows before, 722 after, which is byte-identical to a scan of the enriched genome.
-  The 240 new sites are all variant sites; sites found only in the variant genome go from 80 to 319;
+  The 240 new sites are all variant sites, and one site listed before is now reported 1 nt over, at
+  a variant alignment that scores higher; sites found only in the variant genome go from 80 to 319;
   sites at CFD >= 0.5 from 7 to 11, >= 0.2 from 33 to 50, >= 0.05 from 156 to 233; and 207 of the
   sites already listed change too (a variant alignment that scores higher, or another motif counted).
   The search now takes the installed variant index when any chromosome's enriched FASTA is missing,
