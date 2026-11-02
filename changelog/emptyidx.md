@@ -114,11 +114,12 @@
   "Post-analysis SNPs", with `tail: cannot open ...`. Off-targets on the contig that carry none of
   its variants are reported as usual, but one that carries one of its SNPs stops the search at
   "Integrating results", with the same `ValueError`. A contig with SNPs only gets no such line, and a
-  search stops there only for such an off-target, where 2.8.0 stopped every search of its dataset at
-  "Post-analysis SNPs", with `sed: -e expression #1, char 2: expected \ after ...`. **Affected:**
-  variant datasets with indels on such contigs, or with SNPs there that an off-target carries. No
-  published index is: the indel logs of the 50 INDELS indexes on the build machine that have them
-  beside them name no such contig, nor do the dictionaries in their working directories.
+  search stops there only for such an off-target. So did 2.8.0, but when the contig's VCF file came
+  last of the dataset's by name (as on the test genome, which has no chrX), it stopped every search
+  of the dataset at "Post-analysis SNPs", with `sed: -e expression #1, char 2: expected \ after ...`.
+  **Affected:** variant datasets with indels on such contigs, or with SNPs there that an off-target
+  carries. No published index is: the indel logs of the 50 INDELS indexes on the build machine that
+  have them beside them name no such contig, nor do the dictionaries in their working directories.
   **What to do:** to have such a contig's indels searched, and the off-targets that carry its SNPs
   reported, rename it without the underscore in its FASTA (file and header), in the VCF of each
   dataset with records on it (file and records) and in any annotation BED that names it. What was
