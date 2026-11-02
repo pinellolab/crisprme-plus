@@ -33,7 +33,11 @@ alignment instead of CRISPRme's TST index search).
   folders out of its package (`validate.py` then downloads them from `reference_base_url`,
   the main branch), where a reference that lands with a release is not there until that
   release is merged. These ship in every install, Docker, source and Bioconda, and need
-  no network.
+  no network. The committed files came from the Rust generator run over 1 Mb pieces of the
+  chromosome overlapping by 200 nt, sorted by position. `generate_references.py --only
+  <name> --generator rust/target/release/brute_force_gen` on the whole enriched chr22 (about
+  1.6 h on one core each) gives the same rows, 1988 and 454 with 0 differences, in another
+  order, so with another md5.
 - `generate_brute_force.py` — the ground-truth generator (see credit below).
 - `generate_references.py` — registry-driven driver (regenerates any benchmark).
 
