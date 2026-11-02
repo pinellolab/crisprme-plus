@@ -108,7 +108,7 @@ class TheModeOfASearchWithASitesOnlyDataset(bio._Fixture):
     """complete-search as a user runs it next to the indexes: ds, a phased dataset that
     build-index-only built (its tiers), and a sites-only one copied from it."""
 
-    def add_sites_only(self, name):
+    def add_sites_only(self, name, manifest=None):
         for tier in ("dictionaries", "log_indels"):
             shutil.copytree(self.path("Dictionaries", f"{tier}_ds"),
                             self.path("Dictionaries", f"{tier}_{name}"))
@@ -116,7 +116,7 @@ class TheModeOfASearchWithASitesOnlyDataset(bio._Fixture):
         os.makedirs(registry)
         for chrom in ("chr1", "chr2"):
             with open(os.path.join(registry, f"reg_{chrom}.idx"), "w") as fh:
-                json.dump({"data_type": "sites-only", "aggregation": "info_af"}, fh)
+                json.dump(manifest or {"data_type": "sites-only", "aggregation": "info_af"}, fh)
             open(os.path.join(registry, f"reg_{chrom}.bin"), "w").close()
         for suffix in ("", "_INDELS"):
             shutil.copytree(self.lib(bio.VAR + suffix), self.lib(f"NRG_2_hg38+{name}{suffix}"))
@@ -159,6 +159,17 @@ class TheModeOfASearchWithASitesOnlyDataset(bio._Fixture):
         mode, alt, out = self.mode_of("mega\n")
         self.assertEqual((mode, alt), ("population-level", "no-alt-alignments"))
         self.assertNotIn("sites-only", out.replace("sites-only / unphased", ""))
+
+    def test_a_registry_with_no_data_type_is_sites_only_by_its_aggregation(self):
+        # a mega index built before the manifest had one, and not stamped since
+        self.run_bio()
+        self.add_sites_only("mega", {"aggregation": "info_af"})
+        mode, alt, out = self.mode_of("mega\n", "--per-sample")
+        self.assertEqual((mode, alt), ("population-level", "no-alt-alignments"))
+        self.assertIn("WARNING [complete-search]: --per-sample has nothing to resolve here", out)
+        mode, alt, out = self.mode_of("ds\nmega\n")
+        self.assertEqual((mode, alt), ("per-sample", "alt-alignments"))
+        self.assertIn("[complete-search] mega: sites-only", out)
 
     def test_per_sample_on_the_two_says_which_goes_which_way(self):
         self.run_bio()
