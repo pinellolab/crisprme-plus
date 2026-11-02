@@ -434,10 +434,13 @@ def print_help_complete_search() -> None:
         "\t--output, specify the output folder name; results will be saved in "
         "Results/<name> [REQUIRED]\n"
         "\t--thread, set number of threads to use [default: 8]\n"
-        "\t--index-path, use a prebuilt reference-index library at this path "
+        "\t--index-path, use a prebuilt index library at this path "
         "(e.g. one made with 'build-index-only' or downloaded ahead of time) "
         "instead of building the index under the working directory; a missing "
-        "matching index is a hard error [OPTIONAL]\n"
+        "matching reference index is a hard error. A variant index, with its "
+        "INDELS index beside it, is read from this library first, then from the "
+        "working directory's genome_library; its dictionaries and sample lists stay "
+        "in the working directory [OPTIONAL]\n"
         "\t--prune-pam, serve the search from a PAM-less all-N index (e.g. an "
         "'NNNNNNNN' index) by filtering it at search time to the PAM given in "
         "--pam, so one flexible index answers any 3' PAM up to its flank width. "
@@ -1970,9 +1973,9 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
     submit_job_automated_new_multiple_vcfs.sh, with the same words): here it stops before
     the pre-flight's '[OK] source VCFs not required', and the run writes nothing.
     """
-    lib = os.path.join(current_working_directory, "genome_library")
     dicts = os.path.join(current_working_directory, "Dictionaries")
     want = max(bdna, brna) + 1
+    libs = _variant_libraries(index_path)
     for vdir in vcf_dirs:
         vcf = os.path.basename(os.path.normpath(vdir))
         dataset = f"{genome}+{vcf}"
@@ -1984,8 +1987,8 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
             continue
         have, fewer, wider = [], "", ""
 
-        def _serves(name: str, wide: bool) -> bool:
-            index = os.path.join(lib, name)
+        def _serves(index: str, wide: bool) -> bool:
+            name = os.path.basename(index)
             pam = name.split("_")[0]
             return (_index_serves_search(name, dataset, motif, want, wide, three_prime)
                     and not os.path.isdir(index + ".lock")
@@ -1994,25 +1997,28 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
                     and index_fit.fits(index_fit.built_guide_len(index),
                                        int(name.split("_")[1]), guide_len, bdna, brna))
 
-        names = [d for d in sorted(_listdir(lib))
-                 if d.endswith(f"_{dataset}") and os.path.isdir(os.path.join(lib, d))]
-        if any(_serves(name, prune) for name in names):
+        indexes = [os.path.join(lib, d) for lib in libs for d in sorted(_listdir(lib))
+                   if d.endswith(f"_{dataset}") and os.path.isdir(os.path.join(lib, d))]
+        if any(_serves(index, prune) for index in indexes):
             continue
-        for name in names:
+        for index in indexes:
+            name = os.path.basename(index)
             pam, _, rest = name.partition("_")
             n, _, held = rest.partition("_")
             if not n.isdigit() or held != dataset:
                 continue
-            built = index_fit.built_guide_len(os.path.join(lib, name))
+            built = index_fit.built_guide_len(index)
             have.append(f"{name} (up to {int(n) - 1} bulge(s) of each type"
                         + (f", built for a {built}-nt guide" if built else "") + ")")
             if pam == motif and 1 < int(n) < want:
                 fewer = (f"{name} holds this PAM with up to {int(n) - 1} bulge(s) of each type: "
                          f"search with no more. ")
-        served = [] if prune else [name for name in names if _serves(name, True)]
+        served = [] if prune else [index for index in indexes if _serves(index, True)]
         if served:
-            wider = (f"{served[0]} can serve it from the command line: run this search again "
-                     f"with --prune-pam --index-path genome_library. ")
+            at = os.path.dirname(served[0])
+            at = "genome_library" if at == libs[-1] else at
+            wider = (f"{os.path.basename(served[0])} can serve it from the command line: run "
+                     f"this search again with --prune-pam --index-path {at}. ")
         error(
             f"no variant index here serves this search (genome {genome}, dataset {vcf}, PAM "
             f"{motif}, {bdna} DNA and {brna} RNA bulge(s), a {guide_len}-nt guide), and none can "
@@ -2020,10 +2026,20 @@ def _refuse_no_variant_index(vcf_dirs: List[str], genome: str, motif: str, bdna:
             f"is installed. Variant indexes installed for {vcf}: {', '.join(have) or 'none'}. "
             f"{fewer}{wider}To install one: crisprme.py download --what index --index-name "
             f"{motif}_{max(want, 3)}_{dataset} if it is published, or crisprme.py build-index-only with "
-            f"the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)"
-            + (". --index-path supplies the reference index only: a variant index is read from "
-               "genome_library/ in the working directory" if index_path != "_" else "") + "."
+            f"the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)."
         )
+
+
+def _variant_libraries(index_path: str) -> List[str]:
+    """The libraries a search reads a variant index from, in the order it reads them: the
+    --index-path library (``index_path``, "_" for none), then the working directory's
+    genome_library, where a search builds one (the search script's _variant_index)."""
+    home = os.path.join(current_working_directory, "genome_library")
+    try:
+        same = index_path == "_" or os.path.samefile(index_path, home)
+    except OSError:
+        same = False
+    return ([] if same else [index_path]) + [home]
 
 
 def _listdir(folder: str) -> List[str]:
@@ -2802,9 +2818,10 @@ def complete_search() -> None:
         _genome = os.path.basename(os.path.normpath(genomedir))
         for _vdir in vcf_dataset_dirs:
             _vn = os.path.basename(os.path.normpath(_vdir))
-            _in_place = _um.indels_index_in_place(
-                os.path.join(current_working_directory, "genome_library"),
-                f"{_genome}+{_vn}", pam_char, bMax + 1, prune_pam, not pam_begin)
+            # (in the libraries the search script reads a variant index from)
+            _in_place = any(_um.indels_index_in_place(
+                _lib, f"{_genome}+{_vn}", pam_char, bMax + 1, prune_pam, not pam_begin)
+                for _lib in _variant_libraries(index_path))
             for _part, _what, _rerun in _um.dataset_parts(current_working_directory,
                                                           _genome, _vn, _in_place):
                 _refuse_unfinished(_part, _what, _rerun)

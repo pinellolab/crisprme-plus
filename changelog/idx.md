@@ -106,9 +106,7 @@ registry. -->
   (2.8.0 too). **What to do:** run those searches again, or pass the bulges. The cap now reads
   `--index-path` and the `--genome` folder given, so these searches take their 1 bulge, and where no
   usable index holds bulges (K=8 without `--prune-pam`, an index of another PAM) a `WARNING` says
-  the search runs with none, and what to pass. A variant index at `--index-path` is still read from
-  `genome_library/` alone: with the dataset's VCFs the search rebuilds it there, as it does with
-  explicit flags, and without them it stops and says so.
+  the search runs with none, and what to pass.
 - **`complete-test` works on any index you installed, and no longer breaks when the K=8 index sits
   beside the default.** Its smoke wrote the example guide and a 3' PAM from the index's name, so on
   a PAM wider than 3 nt it stopped with `guide ... is 23 nt but the PAM expects 28 ... Fix: append 8
@@ -164,3 +162,21 @@ registry. -->
   fetched, by the rule a Settings upload has (remove them, or use another name), and the Settings
   page says so at once. `--source ucsc` and the HuggingFace download give the same assembly by
   name, and are not refused.
+- **A variant search reads the variant index at `--index-path`.** `--index-path` served the
+  reference index alone: the variant index and its INDELS index were looked for in the working
+  directory's `genome_library/` only, so a variant search of a complete library kept elsewhere
+  (a shared, read-only install) stopped with `mv: cannot stat` and `Genome enrichment failed`
+  when the dataset's VCFs were absent, and with them it enriched the genome and built a second
+  variant index in the working directory, which every later run there took, also when the one at
+  `--index-path` was newer. **Affected:** `complete-search --vcf --index-path <library>` of a
+  library other than the working directory's, in 2.8.0 too; the web passes no `--index-path`.
+  **What to do:** a variant index such a run built in the working directory can be removed. The
+  variant index, with its INDELS index beside it, is now read from the `--index-path` library first
+  and then from the working directory's, and the run says which library it read
+  (`Variant index library: ...` in `log_verbose.txt`). Measured on the synthetic genome: a library
+  elsewhere with no VCFs here, the same with the VCFs here, a K=8 library with `--prune-pam`, and
+  a stale index of the same name in the working directory are each byte-identical to the search
+  with that library in place, and build nothing. A search builds no index in an `--index-path`
+  library: a variant index there without its INDELS index stops the run with a message.
+  Dictionaries, sample lists and the genome are still read from the working directory, and a
+  search with the library in the working directory, with or without `--index-path`, is unchanged.

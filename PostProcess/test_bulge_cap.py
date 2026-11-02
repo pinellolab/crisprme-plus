@@ -390,8 +390,8 @@ class TestPreflightNoVariantIndex(unittest.TestCase):
             os.makedirs(os.path.join(self.root, "Dictionaries", d))
         self.vdir = os.path.join(self.root, "VCFs", self.DS)
 
-    def index(self, name, record=None, guide=None):
-        folder = os.path.join(self.root, "genome_library", name)
+    def index(self, name, record=None, guide=None, library="genome_library"):
+        folder = os.path.join(self.root, library, name)
         os.makedirs(folder)
         with open(os.path.join(folder, "X_chr1_1.bin"), "wb") as fh:
             fh.write(struct.pack("=ii", 7, guide) if guide else b"")
@@ -428,9 +428,24 @@ class TestPreflightNoVariantIndex(unittest.TestCase):
         self.index(f"NNNNNNNN_3_{_REF}+{self.DS}")
         self.assertIn("--prune-pam --index-path genome_library", self.check())
 
-    def test_under_index_path_it_says_what_that_serves(self):
-        self.assertIn("--index-path supplies the reference index only",
-                      self.check(path="/elsewhere"))
+    def test_a_variant_index_at_index_path_serves(self):
+        # the search script reads one there first, then in genome_library/ (OF-5)
+        self.index(f"NGG_2_{_REF}+{self.DS}", guide=20, library="shared")
+        self.assertIsNone(self.check(path=os.path.join(self.root, "shared")))
+
+    def test_under_index_path_it_names_the_indexes_of_both_libraries(self):
+        self.index(f"NRG_3_{_REF}+{self.DS}", guide=20, library="shared")
+        self.index(f"NAG_3_{_REF}+{self.DS}", guide=20)
+        said = self.check(path=os.path.join(self.root, "shared"))
+        self.assertIn(f"Variant indexes installed for {self.DS}: NRG_3_{_REF}+{self.DS} (up to 2 "
+                      f"bulge(s) of each type, built for a 20-nt guide), NAG_3_{_REF}+{self.DS} ",
+                      said)
+        self.assertNotIn("supplies the reference index only", said)
+
+    def test_a_wider_pam_less_index_at_index_path_is_named_with_that_library(self):
+        shared = os.path.join(self.root, "shared")
+        self.index(f"NNNNNNNN_3_{_REF}+{self.DS}", library="shared")
+        self.assertIn(f"--prune-pam --index-path {shared}.", self.check(path=shared))
 
     def test_an_index_that_serves_goes_on(self):
         self.index(f"NGG_2_{_REF}+{self.DS}", guide=20)

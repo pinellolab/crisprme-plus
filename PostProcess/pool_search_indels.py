@@ -183,6 +183,10 @@ max_edits = sys.argv[14] if len(sys.argv) > 14 else "-1"
 # -> no flag -> byte-identical indel search. Needs a CRISPRitz build with --prune-pam.
 prune_pam = sys.argv[15] if len(sys.argv) > 15 else "0"
 prune_pam_flag = "--prune-pam" if prune_pam == "1" else ""
+# optional: the library that holds the variant index the search resolved, and its INDELS
+# index beside it -- a library given with --index-path, or the working directory's
+index_library = (sys.argv[16] if len(sys.argv) > 16
+                 else os.path.join(current_working_directory, "genome_library"))
 
 
 def _in_chrom_view():
@@ -225,7 +229,7 @@ def _own_pam():
         return None
     k = len(true_pam)
     guide, n, name = len(seq) - abs(size), (k if size > 0 else -k), None
-    built = os.path.join(_outside_view(current_working_directory), "genome_library",
+    built = os.path.join(_outside_view(index_library),
                          f"{true_pam}_{bMax}_{ref_name}+{vcf_name}", ".pam_build")
     try:
         with open(built) as fh:
@@ -295,7 +299,7 @@ def _rebuild(raw_fakechrom, fasta):
     that genome, and an INDELS index built there would go with the view, so that run sends
     the user to a run that does build it."""
     cwd = os.path.normpath(_outside_view(current_working_directory))
-    indels_index = os.path.join(cwd, "genome_library",
+    indels_index = os.path.join(os.path.normpath(_outside_view(index_library)),
                                 f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS")
     # (a downloaded index comes without the fake-indel genome. download skips an index
     # whose INDELS index is in place, and else swaps in both from one archive: a variant
@@ -465,8 +469,7 @@ def search_indels(chrom):
         print(f"No indels on {chrom}: skipping its indel search (no indel off-target possible)", flush=True)
         return SKIPPED
     indexed_fakechrom = os.path.join(
-        current_working_directory,
-        "genome_library",
+        index_library,
         f"{true_pam}_{bMax}_{ref_name}+{vcf_name}_INDELS",
         f"{true_pam}_{bMax}_fake{chrom}",
     )

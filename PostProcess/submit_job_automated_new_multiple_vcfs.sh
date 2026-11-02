@@ -1008,33 +1008,66 @@ while read vcf_f; do
 	# folders behind.) The web launches this script straight, so the check is here, as
 	# well as in complete-search's pre-flight (crisprme.py _refuse_no_variant_index).
 	_refuse_no_variant_index() {
-		local _lib="$current_working_directory/genome_library" _set="${ref_name}+${vcf_name}"
-		local _d _b _p _n _g _have= _fewer= _wider= _todo= _other=
-		for _d in "$_lib"/*_*_"$_set"; do
-			[ -d "$_d" ] || continue
-			_b=${_d##*/}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
-			case "$_n" in '' | *[!0-9]*) continue ;; esac
-			[ "${_b#"${_p}_${_n}_"}" = "$_set" ] || continue  # another genome's (see _resolve_index_dir)
-			_g=$(_index_guide_len "$_d")
-			_have="$_have${_have:+, }$_b (up to $((_n - 1)) bulge(s) of each type${_g:+, built for a $_g-nt guide})"
-			[ "$_p" = "$true_pam" ] && [ "$_n" -gt 1 ] && [ "$_n" -lt "$bMax" ] \
-				&& _fewer="$_b holds this PAM with up to $((_n - 1)) bulge(s) of each type: search with no more. "
+		local _home="$current_working_directory/genome_library" _set="${ref_name}+${vcf_name}"
+		local _lib _libs=() _d _b _p _n _g _have= _fewer= _wider= _todo= _other= _at
+		# the libraries _variant_index reads: --index-path's, then the working directory's
+		[ "$ref_lib" -ef "$_home" ] || _libs+=("$ref_lib")
+		_libs+=("$_home")
+		for _lib in "${_libs[@]}"; do
+			for _d in "$_lib"/*_*_"$_set"; do
+				[ -d "$_d" ] || continue
+				_b=${_d##*/}; _p=${_b%%_*}; _n=${_b#*_}; _n=${_n%%_*}
+				case "$_n" in '' | *[!0-9]*) continue ;; esac
+				[ "${_b#"${_p}_${_n}_"}" = "$_set" ] || continue  # another genome's (see _resolve_index_dir)
+				_g=$(_index_guide_len "$_d")
+				_have="$_have${_have:+, }$_b (up to $((_n - 1)) bulge(s) of each type${_g:+, built for a $_g-nt guide})"
+				[ "$_p" = "$true_pam" ] && [ "$_n" -gt 1 ] && [ "$_n" -lt "$bMax" ] \
+					&& _fewer="$_b holds this PAM with up to $((_n - 1)) bulge(s) of each type: search with no more. "
+			done
 		done
-		if [ -n "$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")" ]; then
-			_todo="Its dictionaries are not installed (Dictionaries/registry_${vcf_name} or dictionaries_${vcf_name}, and log_indels_${vcf_name}): download the index again. "
-		elif [ "${prune_pam:-0}" != 1 ]; then
-			_wider=$(prune_pam=1; _resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")
-			[ -z "$_wider" ] || _todo="${_wider##*/} can serve it from the command line: run this search again with --prune-pam --index-path genome_library. "
-		fi
+		for _lib in "${_libs[@]}"; do
+			if [ -n "$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")" ]; then
+				_todo="Its dictionaries are not installed (Dictionaries/registry_${vcf_name} or dictionaries_${vcf_name}, and log_indels_${vcf_name}): download the index again. "
+				break
+			elif [ "${prune_pam:-0}" != 1 ]; then
+				_wider=$(prune_pam=1; _resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax")
+				_at=genome_library
+				[ "$_lib" -ef "$_home" ] || _at=$_lib
+				[ -z "$_wider" ] || { _todo="${_wider##*/} can serve it from the command line: run this search again with --prune-pam --index-path $_at. "; break; }
+			fi
+		done
 		# (the indexes published are of N = 3)
-		printf "ERROR: no variant index here serves this search (genome %s, dataset %s, PAM %s, %s DNA and %s RNA bulge(s), a %s-nt guide), and none can be built: neither its VCFs (VCFs/%s) nor its enriched genome (Genomes/%s) is installed. Variant indexes installed for %s: %s. %s%sTo install one: crisprme.py download --what index --index-name %s if it is published, or crisprme.py build-index-only with the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)%s\n" \
+		printf "ERROR: no variant index here serves this search (genome %s, dataset %s, PAM %s, %s DNA and %s RNA bulge(s), a %s-nt guide), and none can be built: neither its VCFs (VCFs/%s) nor its enriched genome (Genomes/%s) is installed. Variant indexes installed for %s: %s. %s%sTo install one: crisprme.py download --what index --index-name %s if it is published, or crisprme.py build-index-only with the dataset's VCFs (docs/PRECOMPUTED_INDEXES.md)\n" \
 			"$ref_name" "$vcf_name" "$true_pam" "$bDNA" "$bRNA" "$(( ${#fullseqpam} - ${pos#-} ))" \
 			"$vcf_name" "$_set" "$vcf_name" "${_have:-none}" "$_fewer" "$_todo" \
-			"${true_pam}_$(( bMax > 3 ? bMax : 3 ))_${_set}" \
-			"$( { [ "$index_path" = "_" ] || [ -z "$index_path" ]; } || echo ". --index-path supplies the reference index only: a variant index is read from genome_library/ in the working directory")" >&2
-		_other=$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax" any)
-		[ -z "$_other" ] || _say_other_side "$_other"
+			"${true_pam}_$(( bMax > 3 ? bMax : 3 ))_${_set}" >&2
+		for _lib in "${_libs[@]}"; do
+			_other=$(_resolve_index_dir "$_lib" "$true_pam" "$_set" "$bMax" any)
+			[ -z "$_other" ] || { _say_other_side "$_other"; break; }
+		done
 		exit 1
+	}
+
+	# Index library base: a user-supplied --index-path (prebuilt or downloaded indexes)
+	# when provided, otherwise the working-directory library.
+	if [ "$index_path" != "_" ] && [ -n "$index_path" ]; then
+		ref_lib="$(realpath "$index_path")"
+	else
+		ref_lib="${current_working_directory}/genome_library"
+	fi
+
+	# The installed variant index that serves this search, on stdout (nothing when none
+	# does): from the --index-path library first, then from the working directory's,
+	# where a search builds its own -- each by _resolve_index_dir's rules. A variant index
+	# downloaded to a shared library is searched there, with its INDELS index beside it
+	# (STEP 2.3); a dataset's dictionaries, sample lists and enriched genomes are still the
+	# working directory's.
+	_variant_index() {
+		local _i= _home="$current_working_directory/genome_library"
+		[ "$ref_lib" -ef "$_home" ] \
+			|| _i=$(_resolve_index_dir "$ref_lib" "$true_pam" "${ref_name}+${vcf_name}" "$bMax")
+		[ -n "$_i" ] || _i=$(_resolve_index_dir "$_home" "$true_pam" "${ref_name}+${vcf_name}" "$bMax")
+		[ -n "$_i" ] && printf '%s\n' "$_i"
 	}
 
 	# Count DATA rows in a CRISPRitz targets file: every line that is not the header.
@@ -1122,8 +1155,9 @@ while read vcf_f; do
 	precomputed_variant=0
 	_fake_coded=  # 1 once this run has put the SNP codes on the dataset's fake-indel genome
 	if [ "$vcf_name" != "_" ]; then
-		# A PAM-less index of any width counts here -- see _resolve_index_dir.
-		if [ -n "$(_resolve_index_dir "$current_working_directory/genome_library" "$true_pam" "${ref_name}+${vcf_name}" "$bMax")" ] \
+		# A PAM-less index of any width counts here -- see _resolve_index_dir -- and one
+		# in the --index-path library as well as the working directory's (_variant_index).
+		if [ -n "$(_variant_index)" ] \
 			&& { [ -d "$current_working_directory/Dictionaries/dictionaries_${vcf_name}" ] \
 				|| [ -d "$current_working_directory/Dictionaries/registry_${vcf_name}" ]; } \
 			&& [ -d "$current_working_directory/Dictionaries/log_indels_${vcf_name}" ]; then
@@ -1243,13 +1277,7 @@ while read vcf_f; do
 	cd "$current_working_directory/"
 
 	# START STEP 2.1 Reference genome indexing
-	# reference-index library base: a user-supplied --index-path (prebuilt or
-	# downloaded index) when provided, otherwise the working-directory library
-	if [ "$index_path" != "_" ] && [ -n "$index_path" ]; then
-		ref_lib="$(realpath "$index_path")"
-	else
-		ref_lib="${current_working_directory}/genome_library"
-	fi
+	# (in $ref_lib: --index-path when given, else the working directory's library)
 	# Reuse any installed index sufficient for the requested bulge budget (the caller
 	# passes bMax as max(bDNA,bRNA)+1), PAM-less ones included -- a PAM-less index
 	# serves a PAM no longer than its flank on the side it was built for (the rules
@@ -1359,11 +1387,12 @@ while read vcf_f; do
 		# smaller bulge request without a rebuild.
 		basedir="${current_working_directory}/genome_library"
 		idx_folder1="${basedir}/${true_pam}_${bMax}_${ref_name}+${vcf_name}"  # exact-budget name, used only for the auto-build path below
-		idx_var=$(_resolve_index_dir "$basedir" "$true_pam" "${ref_name}+${vcf_name}" "$bMax")
+		idx_var=$(_variant_index)
 
 		# use the existing (sufficient) variant index if the scan found one
 		if [ -n "$idx_var" ]; then
 			echo "Variant index present ($(basename "$idx_var"))"
+			[ "$(dirname "$idx_var")" -ef "$basedir" ] || echo "Variant index library: $(dirname "$idx_var")"
 			echo -e 'Index-genome Variant\tEnd\t'$(date) >>"$log"
 		else
 			# no index found, compute it; use mkdir lock to prevent concurrent builds
@@ -1408,7 +1437,7 @@ while read vcf_f; do
 		idx_prefix="${idx_var_base%"_${ref_name}+${vcf_name}"}"  # <PAM>_<N>
 		idx_pam="${idx_prefix%_*}"
 		idx_n="${idx_prefix##*_}"
-		indels_index_dir="$current_working_directory/genome_library/${idx_var_base}_INDELS"
+		indels_index_dir="$(dirname "$idx_var")/${idx_var_base}_INDELS"
 		indels_out="$current_working_directory/Genomes/${ref_name}+${vcf_name}_INDELS"
 
 		# A locked INDELS directory is still being written -- or was, by a run that died --
@@ -1417,6 +1446,11 @@ while read vcf_f; do
 		if [ -d "$indels_index_dir" ] && ! [ -d "${indels_index_dir}.lock" ]; then
 			echo "Indels index present ($(basename "$indels_index_dir"))"
 			echo -e 'Indexing Indels\tEnd\t'$(date) >>"$log"
+		elif ! [ "$(dirname "$idx_var")" -ef "$current_working_directory/genome_library" ]; then
+			# a variant index of the --index-path library: a search builds nothing there
+			printf "ERROR: INDELS index '%s' is not beside its variant index in '%s' (--index-path), and a search builds no index there. Install the two there together (crisprme.py download --what index --index-name %s, or crisprme.py build-index-only, run in the folder that holds that library), or run this search without --index-path\n" \
+				"$(basename "$indels_index_dir")" "$(dirname "$idx_var")" "$idx_var_base" >&2
+			exit 1
 		elif [ -d "$indels_out" ]; then
 			# source fake-chrom genome present (on-demand enrichment path) -> build it.
 			# use mkdir lock to prevent concurrent builds. pool_index_indels.py runs
@@ -1675,7 +1709,7 @@ while read vcf_f; do
 			cd $starting_dir
 			# TODO: REMOVE POOL SCRIPT FROM PROCESSING
 			# (a refused index or an uncaught error: it has said why on stderr)
-			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits" "$prune_pam" || exit 1
+			./pool_search_indels.py "$ref_folder" "$vcf_folder" "$vcf_name" "$guide_file" "$pam_file" $idx_n $mm $bDNA $bRNA "$output_folder" $idx_pam "$current_working_directory/" "$ncpus" "$max_total_edits" "$prune_pam" "$(dirname "$indels_index_dir")" || exit 1
 			awk '($3 !~ "n") {print $0}' "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt" >"$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp"
 			mv "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt.tmp" "$output_folder/indels_${ref_name}+${vcf_name}_${pam_name}_${guide_name}_${mm}_${bDNA}_${bRNA}.targets.txt"
 		else

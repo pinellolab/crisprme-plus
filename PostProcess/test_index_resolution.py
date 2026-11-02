@@ -1139,6 +1139,41 @@ class EveryScanInTheShippedScript(_ShippedScript):
             self.assertEqual(run.searched(variant=True),
                              (f"NRG_3_hg38+{self.VCF}", bool(prune)))
 
+    def test_a_variant_index_at_index_path_is_searched_there(self):
+        # It used to be looked for in the working directory alone: without VCFs the search
+        # stopped, and with them it enriched the genome and built its own (OF-5).
+        shared = self.root / "shared_library"
+        self.install("NRG_3", library=shared)
+        for prune in (0, 1):
+            run = self.run_pipeline(prune=prune, index_path=shared)
+            self.assertServedBy(run, "NRG_3", prune)
+            var = [c for c in run.calls if c[0] == "search" and "-var" in c][0]
+            self.assertEqual(var[1], str(shared / f"NRG_3_hg38+{self.VCF}"))
+            self.assertIn(f"Variant index library: {shared}", run.stdout)
+        # without --index-path, the working directory's library alone, as before
+        self.assertNoVariantIndex(self.run_pipeline())
+
+    def test_the_index_path_library_comes_first(self):
+        shared = self.root / "shared_library"
+        self.install("NRG_3", library=shared)
+        self.install("NRG_3", reference=False)
+        run = self.run_pipeline(index_path=shared)
+        var = [c for c in run.calls if c[0] == "search" and "-var" in c][0]
+        self.assertEqual(var[1], str(shared / f"NRG_3_hg38+{self.VCF}"))
+
+    def test_an_indels_index_missing_beside_a_variant_index_at_index_path_is_refused(self):
+        shared = self.root / "shared_library"
+        self.install("NRG_3", library=shared)
+        shutil.rmtree(shared / f"NRG_3_hg38+{self.VCF}_INDELS")
+        (self.home / "Genomes" / f"hg38+{self.VCF}_INDELS").mkdir()  # (a search could build it)
+        run = self.run_pipeline(index_path=shared)
+        self.assertEqual(run.builds, [])
+        self.assertIsNone(run.searched(variant=False))
+        self.assertIn(f"ERROR: INDELS index 'NRG_3_hg38+{self.VCF}_INDELS' is not beside its "
+                      f"variant index in '{shared}' (--index-path), and a search builds no index "
+                      "there", run.stderr)
+        self.assertFalse((self.library / f"NRG_3_hg38+{self.VCF}_INDELS").exists())
+
     def test_an_insufficient_dedicated_index_is_never_chosen(self):
         self.install("NRG_2", "NNN_3")
         for prune in (0, 1):
@@ -3603,11 +3638,13 @@ class NoVariantIndexAndNothingToBuildOneFrom(_ShippedScript):
                       "guide)", run.stderr)
         self.assertNotIn("search with no more", run.stderr)  # (fewer bulges would not serve it)
 
-    def test_under_index_path_it_says_that_serves_the_reference_alone(self):
+    def test_under_index_path_it_names_the_variant_indexes_there(self):
+        # (a variant index at --index-path serves the search: EveryScanInTheShippedScript)
         self.install("NRG_3", library=self.root / "shared")
-        run = self.refused(index_path=self.root / "shared")
-        self.assertIn("--index-path supplies the reference index only", run.stderr)
-        self.assertIn(f"Variant indexes installed for {self.VCF}: none", run.stderr)
+        run = self.refused(pam="20bp-NGG-SpCas9", index_path=self.root / "shared")
+        self.assertIn(f"Variant indexes installed for {self.VCF}: NRG_3_hg38+{self.VCF} ",
+                      run.stderr)
+        self.assertNotIn("supplies the reference index only", run.stderr)
 
     def test_an_index_that_serves_with_its_dictionaries_gone_says_so(self):
         self.install("NRG_3")

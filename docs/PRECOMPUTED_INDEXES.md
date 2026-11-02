@@ -342,7 +342,12 @@ crisprme.py complete-search \
 ```
 
 The search finds the prebuilt index (and its tiers + samplesIDs) and skips the
-build/enrichment entirely.
+build/enrichment entirely. The variant index and its `_INDELS` index are read from the
+`--index-path` library first, then from the working directory's `genome_library/`; the
+tiers (`Dictionaries/`), the sample lists (`samplesIDs/`) and the genome (`Genomes/`) are
+read from the working directory, so a library kept elsewhere needs those there (links
+are fine). A search builds no index in an `--index-path` library: a variant index found
+there without its `_INDELS` index beside it stops the search with a message.
 
 ## Building a new-PAM index for a published dataset (HGDP+1kGP, mega)
 
@@ -601,9 +606,10 @@ itself is what `complete-search` consumes.
   bundled, so `download --what index` + search works without a separate
   `--what samples`. The genotype store is the only optional piece (skip it with
   `--no-genotypes` for detection-only).
-- If `--index-path` is given but no matching index is found there,
+- If `--index-path` is given but no matching reference index is found there,
   `complete-search` fails fast with a clear message rather than silently
-  rebuilding — so a missing/wrong download is caught immediately.
+  rebuilding — so a missing/wrong download is caught immediately. A variant index
+  is looked for there first, then in the working directory's `genome_library/`.
 
 ## SNP+indel co-occurring off-targets (on by default)
 

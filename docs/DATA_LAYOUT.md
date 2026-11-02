@@ -43,7 +43,8 @@ Because it is a normal host directory, you have full read/write access to it at 
 at them. They are the large part (the indexes under `genome_library/` are the biggest — tens of GB).
 
 Searches add to them, once: a search builds the index it needs in `genome_library/` when it is
-missing (not one run with `--index-path`, which only reads that library). A variant dataset's
+missing (not in a library given with `--index-path`, which a search only reads: a reference index
+from there, and a variant index from there first, then from `genome_library/`). A variant dataset's
 dictionaries (`Dictionaries/`) come with its index download (`download --what index`), or are built
 with its enriched genome (`Genomes/<genome>+<dataset>/`) and its index by `build-index-only --vcf`;
 `complete-search --vcf` refuses a dataset that has none yet and says how to get them. From the web,
