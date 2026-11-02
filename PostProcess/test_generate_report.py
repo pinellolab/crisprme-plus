@@ -48,6 +48,7 @@ import contextlib
 import glob
 import gzip
 import inspect
+import io
 import os
 import re
 import sys
@@ -2808,6 +2809,23 @@ class TestAssemblyCuratedColumns(unittest.TestCase):
 @unittest.skipUnless(_HAVE_DEPS, _SKIP_REASON)
 class TestAssemblyExtraColumns(unittest.TestCase):
     """The assembly-only columns appended after the shared curated set."""
+
+    def setUp(self):
+        # A combined report built earlier in this process leaves its own columns here;
+        # a report path of the pipeline has its process to itself. These read the default.
+        self.addCleanup(setattr, gr, "_ASSEMBLY_EXTRA_ACTIVE", gr._ASSEMBLY_EXTRA_ACTIVE)
+        gr._ASSEMBLY_EXTRA_ACTIVE = None
+
+    def test_a_combined_report_built_before_them_changes_nothing(self):
+        """test_assembly_reconcile.TestCombinedTableWhenAHaplotypeHasNoSite builds a real
+        one. Run before this class in one process (unittest discover does), it failed
+        3 tests here, on no fault of the report; run after it, none."""
+        gr._ASSEMBLY_EXTRA_ACTIVE = []  # as build_combined_report leaves it
+        others = [t for t in unittest.defaultTestLoader.loadTestsFromTestCase(type(self))
+                  if t._testMethodName != self._testMethodName]
+        outcome = unittest.TextTestRunner(stream=io.StringIO()).run(unittest.TestSuite(others))
+        self.assertEqual(outcome.failures + outcome.errors, [])
+        self.assertTrue(outcome.testsRun)
 
     def test_they_are_not_in_the_shared_curated_set(self):
         """CURATED_COLUMNS/_COLS are shared with complete-search: an entry there
