@@ -70,8 +70,11 @@ jobs:
           echo "BRANCH_MOUNT=-v ${GITHUB_WORKSPACE}:/branch:ro" >> "$GITHUB_ENV"
 
       - name: Smoke — new subcommands dispatch + HF/index unit tests (full env)
+        # CRISPRME_RUN_HF_TESTS=1: the one test of a real Hugging Face download, which no other
+        # job can run (the unit-tests job has no huggingface_hub), and this one downloads from
+        # Hugging Face anyway.
         run: |
-          docker run --rm $BRANCH_MOUNT "$IMG" bash -c '
+          docker run --rm -e CRISPRME_RUN_HF_TESTS=1 $BRANCH_MOUNT "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
             cp -rf /branch/PostProcess/* /opt/conda/opt/crisprme/PostProcess/
@@ -93,7 +96,7 @@ jobs:
             if ! echo "$cs" | grep -q -- "--max-total-edits"; then echo "FAIL: --max-total-edits missing"; exit 1; fi
             # HF + index unit tests inside the full env
             cd /opt/conda/opt/crisprme/PostProcess
-            python -m unittest test_crisprme_hf test_hf_downloads.TestHfFetchFallbackContract
+            python -m unittest test_crisprme_hf test_hf_downloads
             echo "smoke OK"
           '
 

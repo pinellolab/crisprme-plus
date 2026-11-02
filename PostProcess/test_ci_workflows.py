@@ -6,6 +6,7 @@ what it is there to test, passes for nothing, and the release rule is all-green 
 
 Read as text: the CI env has no YAML parser (and YAML 1.1 reads the `on` key as true).
 """
+import ast
 import json
 import re
 import unittest
@@ -19,6 +20,16 @@ def workflow(name):
     return (WORKFLOWS / name).read_text()
 
 
+def function_based_modules():
+    """The test modules whose tests are plain functions run by their own __main__."""
+    found = []
+    for path in sorted((REPO / "PostProcess").glob("test_*.py")):
+        body = ast.parse(path.read_text()).body
+        if any(isinstance(n, ast.FunctionDef) and n.name.startswith("test_") for n in body):
+            found.append(path.stem)
+    return found
+
+
 @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
 class TheUnitTestsJobHasTheTimeToFinish(unittest.TestCase):
     """Its limit was 10 minutes. The hosted job took 523 s of those 600 at aa9c54b, and
@@ -29,6 +40,61 @@ class TheUnitTestsJobHasTheTimeToFinish(unittest.TestCase):
     def test_its_limit_is_at_least_twenty_minutes(self):
         limit = re.search(r"^\s*timeout-minutes:\s*(\d+)\s*$", workflow("unit-tests.yml"), re.M)
         self.assertGreaterEqual(int(limit.group(1)), 20)
+
+
+@unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+class TheTestsThatSkipInTheLightJobRunInCI(unittest.TestCase):
+    """unit-tests.yml's job has no BEDOPS, minimap2, impg, Dash or Biopython, so its step for
+    post_process.sh ran one test and skipped it, the impg truth tests and the flag-gate
+    behaviour tests skipped too, and test_assembly_annotate was in no workflow. All pass in the
+    image, where no job ran them."""
+
+    MODULES = ("test_assembly_annotate", "test_assembly_reconcile", "test_complete_search_flags",
+               "test_post_process_tempdir", "test_index_resolution")
+
+    def in_image_step(self):
+        text = workflow("web-e2e.yml")
+        start = text.index("""- name: "Tests that need the image's tools""")
+        return text[start:text.index("- name:", start + 1)]
+
+    def test_the_image_runs_them(self):
+        step = self.in_image_step()
+        self.assertIn("crisprme:web", step)
+        self.assertIn("-w /opt/conda/opt/crisprme/PostProcess", step)
+        modules = re.search(r"python -m unittest ((?:[\w.]+\s*\\?\s*)+?) -v", step)
+        self.assertEqual(sorted(modules.group(1).replace("\\", " ").split()), sorted(self.MODULES))
+
+    def test_a_skip_there_fails_the_step(self):
+        # bash -e alone would not see the tests fail through the tee, and a test the image
+        # no longer has the tool for would skip, and pass, as they did in the light job
+        step = self.in_image_step()
+        self.assertIn("set -o pipefail", step)
+        self.assertRegex(step, r"""if grep "skipped '" \S+ \\\n\s+\| grep -vE "en_US[^"]*\|no ps here[^"]*"; then""")
+        self.assertRegex(step, r"FAIL: .*\n?.*exit 1")
+
+    def test_every_test_module_is_named_in_a_workflow(self):
+        text = "\n".join(p.read_text() for p in WORKFLOWS.glob("*.yml"))
+        unnamed = [p.stem for p in sorted((REPO / "PostProcess").glob("test_*.py"))
+                   if not re.search(rf"\b{p.stem}\b", text)]
+        self.assertEqual(unnamed, [])
+
+    def test_a_function_based_module_runs_as_a_script(self):
+        # `python -m unittest` finds no test in these, and says OK: 0 tests, a false pass
+        text = "\n".join(p.read_text() for p in WORKFLOWS.glob("*.yml"))
+        modules = function_based_modules()
+        self.assertEqual(len(modules), 6, modules)
+        for name in modules:
+            with self.subTest(module=name):
+                self.assertRegex(text, rf"python {name}\.py\b")
+                self.assertNotRegex(text, rf"-m unittest(?:\s+\w+)*\s+{name}\b")
+
+    def test_the_real_hugging_face_download_runs_in_the_smoke_step(self):
+        # the job already downloads from there; the unit-tests job has no huggingface_hub
+        text = workflow("validate-benchmarks.yml")
+        start = text.index("- name: Smoke")
+        step = text[start:text.index("- name:", start + 1)]
+        self.assertIn("-e CRISPRME_RUN_HF_TESTS=1", step)
+        self.assertRegex(step, r"python -m unittest test_crisprme_hf test_hf_downloads\n")
 
 
 class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):

@@ -353,9 +353,9 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_build_index_only_layout -v
 
-      - name: "CI runs what it says: the job limit, and the same again as the items below land"
-        # The workflows, read as text: a job that is cancelled, never starts, or skips what
-        # it is there to test passes for nothing.
+      - name: "CI and the documented self-test run what they say (job limit, path filters, in-image tests, every benchmark)"
+        # The workflows and the docs, read as text: a job that is cancelled, never starts, or
+        # skips what it is there to test passes for nothing.
         working-directory: PostProcess
         run: python -m unittest test_ci_workflows -v
 
