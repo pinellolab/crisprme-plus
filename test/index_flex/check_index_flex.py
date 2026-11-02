@@ -215,6 +215,14 @@ def main(root):
     rc, out = search(w, "o2", samples=False)
     say("no --samplesID and no list: same results, no KeyError",
         rc == 0 and identical(table(w, "o2"), b11), out[-600:])
+    # refused, it leaves its output folder empty: the corrected command, same --output, runs
+    w = as_download(copy_of(root, nrg2, "no_samples_flag_refused"))
+    rc, out = search(w, "o", pam="20bp-NGG-SpCas9.txt", samples=False)
+    left = sorted(os.listdir(os.path.join(w, "Results", "o")))
+    rc2, out2 = search(w, "o", samples=False)
+    say("no --samplesID, refused: its output folder left empty, and the corrected command runs",
+        rc != 0 and "no variant index here serves this search" in out and left == []
+        and rc2 == 0 and identical(table(w, "o"), b11), f"left {left}: " + (out + out2)[-800:])
 
     # another PAM or budget than the download holds: one clear ERROR, and nothing made
     w = as_download(copy_of(root, nrg2, "download_other_pam"))

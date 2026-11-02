@@ -1542,14 +1542,16 @@ def _check_samples_ids(args: List[str], variant: bool) -> str:
         error("The file specified for --samplesID does not exist")
     return samplefile
 
-def _samples_list_for_search(vcf_list: str, outputfolder: str, samplefile: str) -> str:
-    """The samples list of a variant search given no --samplesID.
+def _samples_list_for_search(vcf_list: str) -> List[str]:
+    """The samples lists a variant search given no --samplesID takes.
 
     A dataset's list, samplesIDs/<dataset>.samplesID.txt, comes with its index download and
     is what the flag would name: with one, the search has its by-sample and population
-    tables, as with the flag. A list naming those of its datasets goes in the output folder,
-    and its path is returned. With none, ``samplefile`` (the empty placeholder) is returned
-    and the search runs without those tables, as a sites-only panel does.
+    tables, as with the flag. Returns those of its datasets, each once, and says so. With
+    none, returns none, and the search runs without those tables, as a sites-only panel does.
+    Nothing is written: _write_samples_list writes the listing the search reads, in the
+    output folder once the pre-flight has passed (a refused search leaves the folder empty,
+    and the corrected command, with the same --output, runs).
     """
     names = [os.path.basename(os.path.normpath(d)) for d in
              resolve_vcf_dataset_dirs(vcf_list, current_working_directory)]
@@ -1564,12 +1566,18 @@ def _samples_list_for_search(vcf_list: str, outputfolder: str, samplefile: str) 
             "(correct for an aggregate/sites-only index such as the mega all-source panel; on a "
             "genotyped index, pass --samplesID with its sample list to get them).\n"
         )
-        return samplefile
+        return []
     print(f"[complete-search] no --samplesID given: using {', '.join(found)} from samplesIDs/.",
           flush=True)
-    listing = os.path.join(outputfolder, ".list_samplesID.txt")
+    return found
+
+
+def _write_samples_list(folder: str, names: List[str]) -> str:
+    """Writes ``folder``/.list_samplesID.txt, a listing of the samples lists ``names`` (one
+    a line, as --samplesID names one), and returns its path."""
+    listing = os.path.join(folder, ".list_samplesID.txt")
     with open(listing, "w") as fh:
-        fh.write("".join(f"{name}\n" for name in found))
+        fh.write("".join(f"{name}\n" for name in names))
     return listing
 
 
@@ -2409,8 +2417,10 @@ def complete_search() -> None:
     sorting_criteria_scoring = _check_sorting_criteria_scoring(args, "--sorting-criteria-scoring" in args)  # sorting criteria score columns
     sorting_criteria = _check_sorting_criteria(args, "--sorting-criteria" in args)  # sorting criteria (mm+bulges) columns
     outputfolder = _check_output(args)  # output folder
-    if variant and "--samplesID" not in args:
-        samplefile = _samples_list_for_search(vcfdir, outputfolder, samplefile)
+    # (given no --samplesID, the samples lists of its datasets: their listing goes in the
+    # output folder only once the pre-flight has passed, as a refusal leaves it empty)
+    samples_taken = (_samples_list_for_search(vcfdir)
+                     if variant and "--samplesID" not in args else [])
     thread = _check_threads(args, "--thread" in args)  # number of threads
     # VCF FILTER values to treat as passing (default: "PASS,." per VCF spec §1.6.1)
     vcf_filter_pass_values = "PASS,."
@@ -2954,15 +2964,27 @@ def complete_search() -> None:
     vcf_dataset_dirs = (
         resolve_vcf_dataset_dirs(vcfdir, current_working_directory) if variant else []
     )
-    validation_report = run_lightweight(
-        genomedir,
-        vcf_dataset_dirs,
-        os.path.join(outputfolder, "guides.txt"),
-        pamfile,
-        gene_annotation,
-        samplefile,
-        current_working_directory,
-    )
+    # (the listing of the samples lists taken without --samplesID is checked in a folder of
+    # its own, gone once checked: the output folder gets it at the launch)
+    checked_samples, samples_check_dir = samplefile, None
+    if samples_taken:
+        import tempfile
+        samples_check_dir = tempfile.mkdtemp(prefix="crisprme_samples_",
+                                             dir=_writable_tmp_base())
+        checked_samples = _write_samples_list(samples_check_dir, samples_taken)
+    try:
+        validation_report = run_lightweight(
+            genomedir,
+            vcf_dataset_dirs,
+            os.path.join(outputfolder, "guides.txt"),
+            pamfile,
+            gene_annotation,
+            checked_samples,
+            current_working_directory,
+        )
+    finally:
+        if samples_check_dir:
+            shutil.rmtree(samples_check_dir, ignore_errors=True)
     validation_report.write()
 
     # opt-in full-file scan (--full_input_validate): slower, so only runs on
@@ -3152,6 +3174,9 @@ def complete_search() -> None:
                 "dense panels; pass --population-level for the fast worst-case screen."
                 % _why
             )
+    # the pre-flight has passed: the samples lists taken without --samplesID, for the pipeline
+    if samples_taken:
+        samplefile = _write_samples_list(outputfolder, samples_taken)
     # record the resolved search mode so generate-report can surface it (the report note).
     try:
         with open(os.path.join(outputfolder, ".search_mode"), "w") as _sm:

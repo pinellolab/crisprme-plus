@@ -585,15 +585,20 @@ class _Fixture(unittest.TestCase):
     def run_bio(self, **kw):
         return self.finish(self.start(**kw))
 
-    def run_search(self, *options, pam=PAM, bulges="1", vcfs="ds\n"):
+    def run_search(self, *options, pam=PAM, bulges="1", vcfs="ds\n", samples=True, genome=None,
+                   again=False):
         """complete-search --vcf here, as a user runs it next (CFD only, as no
         CRISPR-Bulge env is here), into an output folder of its own, with PAM file pam,
-        bulges of each type, the --vcf list vcfs, and options."""
-        shutil.rmtree(self.path("Results", "search"), ignore_errors=True)
+        bulges of each type, the --vcf list vcfs, and options; without --samplesID if not
+        samples, of the genome folder genome rather than Genomes/hg38, and, again, into the
+        output folder an earlier run left."""
+        if not again:
+            shutil.rmtree(self.path("Results", "search"), ignore_errors=True)
         _write(self.path("guides.txt"), GENOME["chr1"][:20] + "NNN\n")
         _write(self.path("vcfs.txt"), vcfs)
-        command = ["complete-search", "--genome", self.path("Genomes", "hg38"),
-                   "--vcf", self.path("vcfs.txt"), "--samplesID", self.path("samples.txt"),
+        command = ["complete-search", "--genome", genome or self.path("Genomes", "hg38"),
+                   "--vcf", self.path("vcfs.txt"),
+                   *(["--samplesID", self.path("samples.txt")] if samples else []),
                    "--guide", self.path("guides.txt"), "--pam", pam, "--mm", "4",
                    "--bDNA", bulges, "--bRNA", bulges, "--output", "search", "--thread", "2",
                    *options]
@@ -3429,6 +3434,39 @@ class AnInstallWithoutGenotypesRunsPopulationLevel(_Fixture):
         os.makedirs(self.path("Dictionaries", "genotypes_ds"))
         rc, out, err = self.run_search()
         self.assertEqual(self.mode(), "population-level")
+
+
+class ARefusedSearchWithoutSamplesIDLeavesItsOutputFolderEmpty(_Fixture):
+    """A variant search given no --samplesID takes samplesIDs/<dataset>.samplesID.txt, and
+    wrote its listing, .list_samplesID.txt, in the output folder before its checks: a search
+    they refused left the folder not empty, so the corrected command, with the same --output,
+    stopped at 'Output folder ... not empty!'. The listing goes there once the checks pass."""
+
+    def test_the_corrected_command_runs(self):
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        shutil.copy(self.path("samplesIDs", "hg38_ds.samplesID.txt"),
+                    self.path("samplesIDs", "ds.samplesID.txt"))
+        shutil.copytree(self.path("Genomes", "hg38"), self.path("elsewhere", "hg38"))
+        for refused, kw, said in (
+                ((), {"genome": self.path("elsewhere", "hg38")},
+                 "has the name of another genome folder"),
+                (("--per-sample", "--population-level"), {}, "mutually exclusive")):
+            with self.subTest(said):
+                rc, out, err = self.run_search(*refused, samples=False, **kw)
+                self.assertEqual(rc, 1)
+                self.assertIn(said, err)
+                self.assertEqual(os.listdir(self.path("Results", "search")), [])
+                rc, out, err = self.run_search(samples=False, again=True)
+                self.assertNotIn("not empty", err)
+                self.assertIn("using ds.samplesID.txt from samplesIDs/", out)
+                self.assertIn("Launching job ", out)
+                # (the search script adds a line to it, and takes it off when it ends well)
+                with open(self.path("Results", "search", ".list_samplesID.txt")) as fh:
+                    self.assertEqual(fh.read().split(), ["ds.samplesID.txt"])
+        # what the pre-flight read it from is gone
+        self.assertEqual([f for f in os.listdir(self.work) if f.startswith("crisprme_samples_")],
+                         [])
 
 
 class SameTreeAsBefore(_Fixture):

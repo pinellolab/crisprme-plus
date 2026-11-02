@@ -343,31 +343,40 @@ class TestSamplesListForSearch(unittest.TestCase):
             fh.write("".join(f"{d}\n" for d in datasets))
         err, out = io.StringIO(), io.StringIO()
         with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
-            got = crisprme._samples_list_for_search(self.vcfs, self.out, "placeholder")
+            got = crisprme._samples_list_for_search(self.vcfs)
         return got, err.getvalue(), out.getvalue()
 
     def test_a_dataset_with_its_list_gets_a_listing_of_it(self):
         _mkfile(os.path.join(self.root, "samplesIDs", "ds.samplesID.txt"), "#h\n")
         got, err, out = self.call("ds")
-        self.assertEqual(got, os.path.join(self.out, ".list_samplesID.txt"))
-        with open(got) as fh:
-            self.assertEqual(fh.read(), "ds.samplesID.txt\n")
+        self.assertEqual(got, ["ds.samplesID.txt"])
         self.assertEqual(err, "")  # (the pre-flight's stderr is shown; none is due here)
         self.assertIn("using ds.samplesID.txt from samplesIDs/", out)
+        listing = crisprme._write_samples_list(self.out, got)
+        self.assertEqual(listing, os.path.join(self.out, ".list_samplesID.txt"))
+        with open(listing) as fh:
+            self.assertEqual(fh.read(), "ds.samplesID.txt\n")
+
+    def test_it_writes_nothing_in_the_output_folder(self):
+        """The listing went in the output folder before the pre-flight: a refused search
+        left it there, and the corrected command was refused as 'not empty'. It goes there
+        at the launch now (test_build_index_only_atomic runs that)."""
+        _mkfile(os.path.join(self.root, "samplesIDs", "ds.samplesID.txt"), "#h\n")
+        self.call("ds")
+        self.assertEqual(os.listdir(self.out), [])
 
     def test_a_panel_with_one_and_one_without_lists_the_one_and_each_once(self):
         _mkfile(os.path.join(self.root, "samplesIDs", "ds.samplesID.txt"), "#h\n")
         got, _, _ = self.call("ds", "mega", "ds")
-        with open(got) as fh:
-            self.assertEqual(fh.read(), "ds.samplesID.txt\n")
+        self.assertEqual(got, ["ds.samplesID.txt"])
 
     def test_with_none_it_stays_empty_and_says_what_that_costs(self):
         got, err, _ = self.call("mega")
-        self.assertEqual(got, "placeholder")
+        self.assertEqual(got, [])
         self.assertIn("using an empty sample set", err)
         self.assertIn("the by-sample and population tables stay empty", err)
         self.assertIn("pass --samplesID", err)
-        self.assertFalse(os.path.exists(os.path.join(self.out, ".list_samplesID.txt")))
+        self.assertEqual(os.listdir(self.out), [])
 
 
 # --------------------------------------------------------------------------- #
