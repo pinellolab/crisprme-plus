@@ -11,6 +11,7 @@ _warnings.filterwarnings(
     "ignore", message=r".*importing Biopython from inside the source tree.*"
 )
 
+from concurrent.futures.process import BrokenProcessPool as _BrokenProcessPool
 from typing import List, NoReturn, Tuple
 from Bio.Seq import Seq
 
@@ -4190,6 +4191,42 @@ def _with_cleanup(run, cleanup):
         sys.exit(128 + stop.args[0])
 
 
+def _worker_ends_with_run(run: int) -> None:
+    """Starts a worker of _in_forked_workers. A worker waits for its next job on a queue
+    whose other end it holds too, as a fork inherits it, so it would wait for good once
+    the run that forked it was killed: it looks for the run every few seconds."""
+    import threading
+    import time
+
+    def _watch():
+        while os.getppid() == run:
+            time.sleep(5)
+        os._exit(1)
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
+def _in_forked_workers(function, jobs, workers: int) -> list:
+    """Returns ``[function(*job) for job in jobs]``, at most ``workers`` of them at a
+    time, each in a forked process. A worker that dies, as one the OOM killer picks does,
+    raises BrokenProcessPool here, the workers left stopped. A multiprocessing.Pool sees
+    no such thing: it starts an idle worker in its place and waits for the result for
+    good, so the run, and the web Settings job it is, never ended. What a job raises is
+    raised here too, once the jobs under way have ended, and no other job starts."""
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    if not jobs:
+        return []
+    pool = ProcessPoolExecutor(max_workers=workers,
+                               mp_context=multiprocessing.get_context("fork"),
+                               initializer=_worker_ends_with_run, initargs=(os.getpid(),))
+    try:
+        return list(pool.map(function, *zip(*jobs)))
+    finally:
+        pool.shutdown(cancel_futures=True)
+
+
 def _in_build_dir(parent: str, prefix: str, build, stage=None):
     """Returns ``build(tmp)``, called with ``tmp`` a fresh hidden directory
     ``<parent>/<prefix>*`` to build in, under a name no index or genome listing
@@ -4920,12 +4957,16 @@ def build_index_only() -> None:
             # accept as done (silently shipping a short tier store).
             _reg_dir = os.path.join(os.path.dirname(dict_folder), f"registry_{vcf_name}")
             _gt_dir = os.path.join(os.path.dirname(dict_folder), f"genotypes_{vcf_name}")
+
+            def _tier_written(_c):
+                return (os.path.isfile(os.path.join(_reg_dir, f"reg_{_c}.idx"))
+                        and os.path.isfile(os.path.join(_gt_dir, f"gt_{_c}.idx")))
+
             _tier_jobs = []
             _tier_present = 0
             for _dfile in sorted(_dict_files, key=os.path.getsize, reverse=True):
                 _c = _tier_chrom(_dfile)
-                if (os.path.isfile(os.path.join(_reg_dir, f"reg_{_c}.idx"))
-                        and os.path.isfile(os.path.join(_gt_dir, f"gt_{_c}.idx"))):
+                if _tier_written(_c):
                     _tier_present += 1
                     continue
                 _tier_jobs.append((_dfile, db_to_samplesid, _c, dict_folder))
@@ -4958,37 +4999,48 @@ def build_index_only() -> None:
                     f"once that is fixed, which emits the rest."
                 )
 
-            def _emit_tiers(_job):
-                try:
-                    return _bdt.emit_dictless_tiers_guarded(*_job)
-                except (OSError, MemoryError) as _err:
-                    _tiers_failed(_err)
+            def _tiers_killed():
+                error(
+                    f"Emitting the dict-less tiers of {vcf_name} failed: a worker process "
+                    f"died, with one chromosome at a time as well (CRISPRME_TIER_WORKERS "
+                    f"sets how many go at once), most likely killed for want of memory: a "
+                    f"chromosome can take ~150-180 GB at panel scale. {_reg_dir} stays "
+                    f"marked unfinished, and a search refuses it. Run build-index-only "
+                    f"again with more memory, which emits the rest. To go without the "
+                    f"tiers, remove them (rm -rf '{_reg_dir}' '{_gt_dir}') and run "
+                    f"build-index-only from the command line with no --samplesID: searches "
+                    f"then read the dictionaries."
+                )
 
-            _emitted = _tier_present
             if _tier_workers > 1:
                 print(f"  emitting tiers with {_tier_workers} parallel worker(s) "
                       "(RAM-bounded; set CRISPRME_TIER_WORKERS to tune)", flush=True)
-                import multiprocessing as _mp
+            _emitted = _tier_present
+            while True:
                 try:
-                    with _mp.get_context("fork").Pool(_tier_workers) as _tpool:
-                        for _r in _tpool.starmap(
-                            _bdt.emit_dictless_tiers_guarded, _tier_jobs
-                        ):
-                            if _r is not None:
-                                _emitted += 1
-                except Exception as _tperr:  # noqa: BLE001 - degrade to sequential
+                    _emitted += sum(
+                        1 for _r in _in_forked_workers(
+                            _bdt.emit_dictless_tiers_guarded, _tier_jobs, _tier_workers)
+                        if _r is not None
+                    )
+                    break
+                except Exception as _tperr:  # noqa: BLE001 - degrade to one at a time
                     if _bdt.ends_the_build(_tperr):  # (a worker's, raised again here)
                         _tiers_failed(_tperr)
-                    print(f"WARNING [tier-parallel]: pool failed ({_tperr}); "
-                          "re-emitting sequentially.", flush=True)
-                    _emitted = _tier_present
-                    for _job in _tier_jobs:
-                        if _emit_tiers(_job) is not None:
-                            _emitted += 1
-            else:
-                for _job in _tier_jobs:
-                    if _emit_tiers(_job) is not None:
-                        _emitted += 1
+                    _killed = isinstance(_tperr, _BrokenProcessPool)
+                    if _tier_workers == 1:
+                        if _killed:
+                            _tiers_killed()
+                        _tiers_failed(_tperr)
+                    print("WARNING [tier-parallel]: "
+                          + (f"a worker process died, most likely killed for want of "
+                             f"memory; set CRISPRME_TIER_WORKERS below {_tier_workers} to "
+                             f"start with fewer"
+                             if _killed else f"pool failed ({_tperr})")
+                          + "; emitting the chromosomes left one at a time.", flush=True)
+                    _tier_workers = 1
+                    _tier_jobs = [_job for _job in _tier_jobs if not _tier_written(_job[2])]
+                    _emitted = len(_dict_files) - len(_tier_jobs)
             print(
                 f"Dictless tier emission complete: {_emitted}/{len(_dict_files)} "
                 "chromosome(s) emitted (registry_<vcf>/ + genotypes_<vcf>/ siblings "
@@ -5094,6 +5146,10 @@ def build_index_only() -> None:
                         _keep |= _big._load_panel(_sid)
                 _keep = _keep or None
             _n_ig = 0
+
+            def _ig_written(_igt_out):
+                return os.path.isfile(_igt_out) and _big.store_is_complete(_igt_out)
+
             # Build (vcf, out, keep) jobs; detect chrom from the first data line (the
             # filename may not carry it). Skip chromosomes already built so a restart
             # resumes instead of re-streaming 20GB VCFs.
@@ -5115,7 +5171,7 @@ def build_index_only() -> None:
                 # Resume only if the store is a COMPLETE, non-truncated gzip -- a
                 # size>0 check would skip a file left partial by an OOM/SIGKILL
                 # mid-write and silently ship a short store (the gt_indel_chr1 bug).
-                if os.path.isfile(_igt_out) and _big.store_is_complete(_igt_out):
+                if _ig_written(_igt_out):
                     _n_ig += 1  # already built (resume)
                     continue
                 _ig_jobs.append((_vf, _igt_out, _keep))
@@ -5134,16 +5190,26 @@ def build_index_only() -> None:
                 # written in place too, a chromosome at a time: marked unfinished
                 # until this step has built every chromosome's, as the tiers above are
                 _mark_unfinished(_igt_dir)
-                if _igw > 1:
-                    import multiprocessing as _mp
-                    with _mp.get_context("fork").Pool(_igw) as _igpool:
-                        _ig_res = _igpool.starmap(
-                            _big.compile_indel_genotypes_safe, _ig_jobs)
-                    _n_ig += sum(1 for _r in _ig_res if _r is not None and _r >= 0)
-                else:
-                    for _job in _ig_jobs:
-                        if _big.compile_indel_genotypes_safe(*_job) >= 0:
-                            _n_ig += 1
+                _ig_done = _n_ig
+                while True:
+                    try:
+                        _n_ig += sum(
+                            1 for _r in _in_forked_workers(
+                                _big.compile_indel_genotypes_safe, _ig_jobs, _igw)
+                            if _r is not None and _r >= 0
+                        )
+                        break
+                    except _BrokenProcessPool:
+                        if _igw == 1:
+                            raise
+                        print(f"WARNING [indel-snp]: a worker process died, most likely "
+                              f"killed for want of memory; set CRISPRME_INDELGT_WORKERS "
+                              f"below {_igw} to start with fewer; building the "
+                              f"chromosomes left one at a time.", flush=True)
+                        _igw = 1
+                        _left = [_job for _job in _ig_jobs if not _ig_written(_job[1])]
+                        _n_ig = _ig_done + len(_ig_jobs) - len(_left)
+                        _ig_jobs = _left
             print(f"[indel-snp] phased indel genotype store: {_n_ig} chromosome(s) "
                   f"-> {os.path.basename(_igt_dir)}", flush=True)
             if _n_ig < _ig_total:  # (a chromosome skipped with a WARNING above)
@@ -5158,6 +5224,17 @@ def build_index_only() -> None:
                     f"({str(_ig_err) or type(_ig_err).__name__}): {_igt_dir} stays marked "
                     f"unfinished, and a search refuses it. Run build-index-only again "
                     f"once that is fixed, which builds the rest."
+                )
+            if isinstance(_ig_err, _BrokenProcessPool):
+                error(
+                    f"Building the phased indel genotype store of {vcf_name} failed: a "
+                    f"worker process died, with one chromosome at a time as well "
+                    f"(CRISPRME_INDELGT_WORKERS sets how many go at once), most likely "
+                    f"killed for want of memory. {_igt_dir} stays marked unfinished, and a "
+                    f"search refuses it. Run build-index-only again with more memory, "
+                    f"which builds the rest. To go without the store (SNP+indel "
+                    f"co-occurrence then stays PUTATIVE), remove it (rm -rf '{_igt_dir}') "
+                    f"and run build-index-only with CRISPRME_INDEL_SNP=0."
                 )
             print(f"WARNING [indel-snp]: phased indel genotype store not built "
                   f"({_ig_err}); indel post-analysis falls back to PUTATIVE.", flush=True)

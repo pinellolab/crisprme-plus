@@ -66,7 +66,10 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   holds the SNP + indel and SNP + SNP co-occurrence and phase-confirmation tables, and the shareable
   report gives the dataset's SNP and indel counts and its SNP + indel cis co-occurrences. A dataset
   built in Settings before this release has no tiers until its variant index is built again there,
-  and its searches read its dictionaries until then, as before.
+  and its searches read its dictionaries until then, as before. Writing the tiers takes memory that
+  a build without them did not need: at panel scale ~150-180 GB a chromosome, by default up to 4
+  chromosomes at once (~700 GB, `CRISPRME_TIER_WORKERS` sets how many). A build that runs out of it
+  fails with a message that says what to do (see Fixed).
 - **A genome uploaded in the web Settings page under the name of an installed genome replaces it,
   and is refused while indexes built on a genome of that name are installed.** The upload went into
   that genome's folder, beside the files already there (and so into the shared copy, when that
@@ -280,3 +283,24 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   every dataset's VCFs are there. Measured on a 6-sample panel, the search that was refused gives
   the same table as with both datasets' VCFs on disk, and as with neither. A web search does not
   run this check and is not affected.
+- **A variant build that runs out of memory as it writes its tiers ends with a message, and no
+  longer hangs.** `build-index-only --samplesID`, and in this release every variant build in the web
+  Settings page, writes the dict-less tiers and the phased indel genotype store in forked workers,
+  one chromosome each. The pool they ran in did not see a worker die: when the OOM killer took one,
+  the run waited for good, at 0% CPU, with nothing on stdout or stderr. In Settings the build read
+  `running` for ever, with its buttons locked and every later job queued behind it, until the
+  container was restarted; the same build finished in 2.8.0, which wrote no tiers. A worker that
+  dies now sends the chromosomes left to one worker at a time, with a WARNING on stdout, and the
+  build goes on if they fit. If a worker dies then too, the run ends with exit status 1 and an ERROR
+  that says memory is the likely cause, names `CRISPRME_TIER_WORKERS` (`CRISPRME_INDELGT_WORKERS` for
+  the store), and says how to go without what it could not write; Settings shows the build as failed
+  with that message. A run with one worker, or a dataset of one chromosome, ended the same way at
+  exit status 137 and with no message. What it could not write stays marked unfinished, so a search
+  refuses it, and the next run writes the rest; no variant index is built by that run. To build with
+  no tiers, remove them as the message says and run `build-index-only` from the command line with no
+  `--samplesID`: the Settings page has no way to. No worker outlives a run that is killed outright
+  either, one that waits for its next job looks for the run every few seconds. Measured on a
+  synthetic panel of 3000 samples and a SNP every 3 bp on 3 x 50 kb: with a limit of 1.5 GB the
+  Settings build reads `failed` with the message after 5 s, and with 6 GB, where three workers at
+  once are too many, the build finishes one chromosome at a time. A build with memory enough writes
+  the same files as before, byte for byte, and so does that one.

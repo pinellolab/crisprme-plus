@@ -66,6 +66,13 @@ Bulge-enabled searches need a genome **index**.
   search form need them, and the index is self-complete for fast post-analysis. (CLI
   equivalent:
   `crisprme.py build-index-only --genome Genomes/hg38 --pam PAMs/20bp-NRG-SpCas9.txt --bDNA 2 --bRNA 2 --vcf VCFs/hg38_HGDP1kGP --samplesID samplesIDs.config.txt`.)
+  The tiers take memory: at panel scale ~150-180 GB a chromosome, by default up to 4
+  chromosomes at once (`CRISPRME_TIER_WORKERS` in the container's environment sets how
+  many). A worker that runs out sends the chromosomes left to one at a time. If one dies
+  then too, the build fails with a message: give the container more memory and build
+  again, which writes the rest, or follow the message to build from the command line
+  without the tiers (this page has no way to). Until one of those is done, searches of
+  the dataset are refused.
 - A build stops with an error, and puts no index in place, when the genome folder
   holds no `.fa` file at its top, holds a FASTA of several sequences, or gives an
   index with no `.bin` file: every search would refuse such an index. It stops as

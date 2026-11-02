@@ -402,6 +402,12 @@ jobs:
         working-directory: PostProcess
         run: python -m unittest test_ci_workflows -v
 
+      - name: "build-index-only: a tier or indel-store worker that dies (an OOM kill) ends the run with a message, and does not hang it"
+        # A multiprocessing.Pool never sees a worker die: the web Settings job read
+        # running for ever. The real crisprme.py against the same stub engine.
+        working-directory: PostProcess
+        run: python -m unittest test_build_index_only_worker_death -v
+
       - name: "Compute-backend selection (cpu|cuda|metal resolve/fallback matrix; no TF/cupy)"
         # resolve_backend degradation (requested accelerator absent -> CPU), pre-import
         # env, array_module (numpy vs cupy), and configure_tf device placement via a fake
