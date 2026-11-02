@@ -33,11 +33,11 @@ unphased one every allele the row names. The planted sites then pin who has whic
 | Q | a target with a SNP code and, on S39's slot, a second deletion inside it | S40 listed; S39 on no row |
 | H | an unphased carrier homozygous for a SNP that spoils the target | S41 on the mismatch row, never the perfect one; S42 CFD 1 |
 | J | a carrier homozygous for the deletion and for the SNP the target needs | S43 CFD 1; joint frequency 2 / AN |
+| I | a long insertion holding a whole perfect target | S44 CFD 1 |
 
 Up to 2.8.0 the indel post-analysis read each IUPAC code of the SNP-overlaid fake-indel
 genome column by column, without genotypes: on aa9c54b (the 2.8.1 release candidate)
-the check fails at every site but the control C and the sites with no SNP (L2, L3 hold
-no SNP but L3's row is there all the same).
+the check fails at every site but the control C, I, J and L2.
 
 Not covered: split multi-allelic SNP records at one position. CRISPRitz add-variants
 keeps only the last of them in the enriched genome and in the dictionary, so the other

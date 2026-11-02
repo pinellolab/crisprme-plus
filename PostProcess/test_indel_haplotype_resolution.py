@@ -518,6 +518,8 @@ class TargetsThatHoldTheirIndel(unittest.TestCase):
                 (28, 50, True, "starts at the last inserted base"),
                 (29, 51, False, "starts past the insertion: the downstream flank")):
             self.assertEqual(self._holds(first, last, ref, alt), want, why)
+        # a target wholly inside a long insertion spans no reference base, and needs it
+        self.assertTrue(self._holds(30, 52, "G", "G" + "CAT" * 20))
 
     def test_a_replacement_is_held_through_any_replacing_base(self):
         ref, alt = "CT", "GAA"  # nothing kept: ALT at 25..27

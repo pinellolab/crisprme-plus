@@ -286,6 +286,12 @@ def generate(wd):
     var("J", "snp05", j0 + 6, "C", "A", {"S43": "1|1"})
     expect["J"] = {"perfect": ["S43"], "cooc": ["S43"], "cooc_copies": 2}
 
+    # I (+): a long insertion holding a whole perfect target: it spans no reference base,
+    # yet it needs the indel (the window's ALT), so it is an indel row of the carrier.
+    i0 = 13300
+    var("I", "ins", i0 + 1, seq[i0], seq[i0] + "CAT" + G + "TGG" + "CAT", {"S44": "1|0"})
+    expect["I"] = {"perfect": ["S44"]}
+
     # (No split multi-allelic SNP records here: CRISPRitz add-variants keeps only the
     # last of two records at one position in the enriched genome and the dictionary,
     # so the other alt is invisible to every stage. PostProcess/
@@ -404,6 +410,8 @@ class Truth(object):
             while k >= 0:
                 seg = pos[k:k + len(probe)]
                 anchor = next((p for p in seg if p is not None), None)
+                if anchor is None:  # wholly inside an insertion: the base before it
+                    anchor = next((p for p in reversed(pos[:k]) if p is not None), None)
                 if anchor is not None and abs(anchor - start) <= slack:
                     out.append((h, seg))
                 k = hap.find(probe, k + 1)
