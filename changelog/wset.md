@@ -226,13 +226,13 @@ non-seed counts leave the mismatches out (they count only the row's bulges);".
   the same alignment more than once: each variant dataset's post-analysis carries every row of the
   one reference search, and on the dict-less tiers (searches of a `--samplesID` build, of a
   downloaded index such as the default one, and of a variant index built in the web Settings page)
-  the post-analysis also gives the reference alignment of each variant window again. So a search
-  that read the tiers counted each reference alignment over a SNP twice in `Other_motifs` (`444`
-  where the dictionaries gave `222`), a search of two variant datasets counted every reference
-  alignment once per dataset (`491` where one dataset gave `245`), and a per-sample search's file of
-  alternative alignments listed each of them as many times, a copy of the site's best alignment
-  among them. On chr22 of the default index, a per-sample search gave 6152 rows for its 4941
-  alternative alignments, and 280 of its 1940 sites a higher `Other_motifs` (280 of 2356 at
+  the post-analysis also gives the reference alignment of a variant window on the plus strand again.
+  So a search that read the tiers counted each reference alignment over a SNP twice in
+  `Other_motifs` (`444` where the dictionaries gave `222`), a search of two variant datasets counted
+  every reference alignment once per dataset (`491` where one dataset gave `245`), and a per-sample
+  search's file of alternative alignments listed each of them as many times, a copy of the site's
+  best alignment among them. On chr22 of the default index, a per-sample search gave 6152 rows for
+  its 4941 alternative alignments, and 280 of its 1940 sites a higher `Other_motifs` (280 of 2356 at
   population level); on a 6-sample panel searched with a second dataset, 3779 rows for 1887. Each
   reference alignment is now kept once. Rows equal in every column but `#Seq_in_cluster` and the two
   score columns are one alignment: each dataset scores the rows itself, and CRISPR-Bulge can give
