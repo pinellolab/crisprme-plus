@@ -473,11 +473,15 @@ haplotype** (`indel_snp_cis.resolve_target`):
   at search time every code reads as the reference base, as on a fake-indel genome built
   without the overlay.
 
-The co-occurrence companion `indel_snp_cooc.tsv` lists, for each reported row, the SNP alts
-the target **requires** — the guide's own base at a spacer column, or a base that creates
-the PAM where the reference does not — with that row's carriers: CONFIRMED when every
-carrier was resolved exactly, PUTATIVE otherwise. The resolution does not depend on the
-analysis mode (§5). A target with no code (every target of a classic, non-overlaid
+The co-occurrence companion `indel_snp_cooc.tsv` lists the SNP alts the indel
+post-analysis's rows **require** — the guide's own base at a spacer column, or a base that
+creates the PAM where the reference does not — with those rows' carriers: CONFIRMED when
+every carrier was resolved exactly, PUTATIVE otherwise. It is written before the merge
+picks each cluster's alignments, one line per engine alignment, required SNP set and phase
+(an alignment that needs no SNP writes no line), so a line can name an alignment the merge
+did not keep: a population-level run, which writes no alternative alignments, can have
+lines with no row in its tables. The resolution does not depend on the analysis mode (§5).
+A target with no code (every target of a classic, non-overlaid
 fake-indel genome) that holds the indel needs no resolution: its sequence is the one the
 engine found. A row's carriers belong to its sequence: two alignments of one site can name
 the same variants with different carriers (an RNA-bulge alignment does not reach the base a
@@ -1004,9 +1008,9 @@ on the complete genome-wide matrix (2021 panel, same guide, default vs `--per-sa
 `indel_snp_cooc.tsv` files are **byte-identical** (same MD5, 2,729 rows, 843 CONFIRMED / 1,886 PUTATIVE, full
 per-sample `cis_samples` and joint-AF in both). So per-sample cis attribution — which individual
 carries the indel and SNP together — is preserved identically in both analysis modes. Measured
-again with 2.8.1, whose companion holds only the SNPs a reported row requires, on the HGDP + 1000
-Genomes index: the two modes give the same lines for each of two guides (339 and 363 distinct
-lines, all CONFIRMED).
+again with 2.8.1, whose companion holds only the SNPs the indel post-analysis's rows require, on
+the HGDP + 1000 Genomes index: the two modes give the same lines for each of two guides (339 and
+363 distinct lines, all CONFIRMED).
 
 **Two co-occurrence companions.** Alongside `indel_snp_cooc.tsv` (SNP+indel),
 `snp_snp_cooc.tsv` reports **SNP+SNP** co-occurrences — off-targets that require ≥2

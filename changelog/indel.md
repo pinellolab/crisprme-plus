@@ -39,9 +39,13 @@
   sites-only panel, `hg38_mega`), the row holds the strongest target the codes allow (its PAM
   always one the motif allows) under the carriers the
   indel log lists, as before. Both are PUTATIVE in the SNP+indel co-occurrence companion
-  (`*.indel_snp_cooc.tsv`), which now lists, per reported row, the SNP alts it requires, a SNP that
-  creates the PAM included, with that row's carriers (CONFIRMED when each was resolved on its phased
-  haplotype), and no longer a SNP set no carrier's haplotype holds. A classic dictionary install (an
+  (`*.indel_snp_cooc.tsv`), which now lists the SNP alts the indel post-analysis's rows require, a
+  SNP that creates the PAM included, with those rows' carriers (CONFIRMED when each was resolved on
+  its phased haplotype), and no longer a SNP set no carrier's haplotype holds. The companion is
+  written before the merge picks each cluster's alignments, one line per engine alignment, required
+  SNP set and phase (an alignment that needs no SNP writes no line), so a population-level run,
+  which writes no alternative alignments, can have lines with no row in its tables. A classic
+  dictionary install (an
   index built without `--samplesID`, as the web Settings page builds them, so with no Tier-1
   genotype store) reads the genotypes from the per-sample SNP dictionary: there, the codes used to
   stay in the rows unresolved, scoring CFD 0, so the real SNP+indel targets were lost. With

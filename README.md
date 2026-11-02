@@ -1129,13 +1129,17 @@ feature; both are bundled into the report ZIP):
 
 2a. `*.indel_snp_cooc.tsv`
 
-    - **Contents**: One row per off-target requiring **both** a nearby SNP **and** an
+    - **Contents**: Off-targets requiring **both** a nearby SNP **and** an
     indel in the same protospacer window — chrom, indel pos/ref/alt, off-target start,
     strand, SNP positions + rsIDs, phase (`CONFIRMED`/`PUTATIVE`), joint AF, cis-carrier
-    count, and carrier samples. The SNPs are those a reported indel row requires (the
-    guide's own base at a protospacer position, or a base that creates the PAM), and the
-    carriers are that row's: individuals whose own haplotype holds the indel and those
-    SNP alts (PUTATIVE: phase unknown, or no genotypes).
+    count, and carrier samples. The indel post-analysis writes the file before the merge
+    picks each cluster's alignments, one line per engine alignment, required SNP set
+    and phase (an alignment that needs no SNP writes no line). The SNPs are the alts
+    the alignment's rows require (the guide's own base at a protospacer position, or a
+    base that creates the PAM), and the carriers are those rows': individuals whose
+    own haplotype holds the indel and those SNP alts (PUTATIVE: phase unknown, or no
+    genotypes). A population-level run, which writes no alternative alignments, can
+    have lines with no row in its tables.
 
     - **Purpose**: Surfaces SNP+indel co-occurring off-targets, which the classic
     two-independent-passes search could not see.
