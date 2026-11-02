@@ -201,6 +201,21 @@ class TheDocumentedSelfTestRunsEveryBenchmark(unittest.TestCase):
     def test_nor_does_the_ci_job(self):
         self.assertNotIn("CRISPRME_SKIP_HEAVY", workflow("validate-benchmarks.yml"))
 
+    @unittest.skipUnless(WORKFLOWS.is_dir(), "needs the checkout's .github/workflows")
+    def test_a_benchmark_that_did_not_run_fails_the_ci_job(self):
+        # validate-test exits 0 with one skipped: complete-test left it no output, say
+        text = workflow("validate-benchmarks.yml")
+        start = text.index("- name: validate-test (chr22)")
+        step = text[start:text.index("- name:", start + 1)]
+        self.assertIn("set -o pipefail", step)
+        check = step[step.index("if ! grep"):]
+        for summary, status in (("6 passed, 0 failed, 0 skipped.", 0), ("5 passed, 0 failed, 1 skipped.", 1),
+                                ("2 passed, 0 failed, 4 skipped.", 1)):
+            with self.subTest(summary=summary), tempfile.TemporaryDirectory() as d:
+                (Path(d) / "validate-test.log").write_text(f"\nValidation summary: {summary}\nEnjoy CRISPRme!\n")
+                got = subprocess.run(["bash", "-e", "-c", check], cwd=d, capture_output=True, text=True)
+                self.assertEqual(got.returncode, status, got.stdout)
+
     def test_the_expected_output_is_every_benchmark_passed(self):
         expected = f"{len(self.benchmarks())} passed, 0 failed, 0 skipped"
         for name, count in (("README.md", 3), ("docs/DOCKER_QUICKSTART.md", 1)):

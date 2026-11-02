@@ -189,7 +189,10 @@ jobs:
           done
 
       - name: validate-test (chr22) — assert all benchmarks match the ground truth
+        # validate-test exits 0 with a benchmark skipped, and a skipped one checked nothing:
+        # complete-test left it no output, say. So the step also asks for 0 skipped.
         run: |
+          set -o pipefail
           docker run --rm $BRANCH_MOUNT -e CRISPRME_ALLOW_ONDEMAND_BUILD=1 -v "${PWD}/work:/DATA" -w /DATA "$IMG" bash -c '
             set -e
             cp /branch/crisprme.py /opt/conda/bin/crisprme.py
@@ -197,7 +200,10 @@ jobs:
             mkdir -p /opt/conda/opt/crisprme/test
             cp -rf /branch/test/* /opt/conda/opt/crisprme/test/
             crisprme.py validate-test --chrom chr22
-          '
+          ' 2>&1 | tee validate-test.log
+          if ! grep -q ", 0 failed, 0 skipped\.$" validate-test.log; then
+            echo "FAIL: a benchmark did not run"; exit 1
+          fi
 
       - name: Upload logs on failure
         if: failure()
