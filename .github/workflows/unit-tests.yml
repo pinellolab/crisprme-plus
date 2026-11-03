@@ -24,7 +24,8 @@ on:
       # test/benchmark/ (test_validate_test, test_complete_test, test_ci_workflows), and the
       # docs that test_complete_search_flags, test_install_from_source, test_hf_sha256sums,
       # test_ci_workflows and test_markdown_wrap scan, the last with the changelog fragments of
-      # a release in the making (changelog/*.md, merged into CHANGELOG.md at its release).
+      # a release in the making (changelog/*.md, merged into CHANGELOG.md at its release),
+      # which test_changelog_fragments reads too.
       - "pages/**"
       - "scripts/**"
       - "PAMs/**"
@@ -387,6 +388,12 @@ jobs:
       - name: "Markdown wrap (no line of the README, METHODS, CHANGELOG, docs/ or a changelog fragment opens a '+' bullet)"
         working-directory: PostProcess
         run: python -m unittest test_markdown_wrap -v
+
+      - name: "Changelog fragments (a fragment's headings are the sections it is merged into; notes for the merge go before them)"
+        # changelog/docs3.md ended with "### Notes for the merge", which the merge took for text of
+        # its Changed block and put in CHANGELOG.md's [2.8.1], with no warning.
+        working-directory: PostProcess
+        run: python -m unittest test_changelog_fragments -v
 
       - name: "Documented sizes (the installers, README, website, Quickstart, TROUBLESHOOTING and DATA_LAYOUT give the measured install and image sizes)"
         # The installers said the image is ~800 MB (a 4.84 GB pull on amd64) and asked for ~45 GB

@@ -1,7 +1,24 @@
-<!-- docs3 track: entries for CHANGELOG.md [2.8.1], to be merged by the docs track. The last
-section holds notes for the merge: an amendment to an entry already in [2.8.1], the
-corrections this track made in CHANGELOG.md itself, and where the EQUIVALENCE_NUMBERS
-placeholders the release manager fills are. -->
+<!-- docs3 track: entries for CHANGELOG.md [2.8.1], to be merged by the docs track. The text
+between this comment and the first heading is for whoever merges: merge_changelog.py does not
+merge it, and says it is there. -->
+
+**For the merge, not for the changelog: two notes.**
+
+1. Already corrected in `CHANGELOG.md` on this branch, against what the code does at 9c6b4046:
+   the index-choice rules of "When a dedicated index for the PAM is installed beside a PAM-less
+   one" (the guide-length rule, second of four); the no-bulge sizing of "The RAM thread guard
+   sized a search served by a PAM-less index" (a variant search of a download is sized by its
+   variant index); "A search of a VCF dataset built in the web Settings page reads its dict-less
+   tiers" (the SNP + indel row is the same on the dictionaries since the indel fix; no extra
+   `Other_motifs` alignment or new row order on the tiers; a dataset not rebuilt changes too);
+   "`scorer-env create` failed whenever conda was the env manager" (a `complete-search` refused,
+   a web search ran CFD-only); and the `--prune-pam` equivalence in Added, the header-injection
+   entry and the `NNN_3` republish entry (no release-candidate counts).
+2. The placeholder `EQUIVALENCE_NUMBERS`, in double braces inside an HTML comment beside the
+   claim (grep the repository for it), marks where the final genome-wide three-arm run's numbers
+   go, once the last results fix is in: the `--prune-pam` entry under Added, METHODS §9's
+   "Equivalence" paragraph, and the "Equivalence claim" of
+   `docs/hf/crisprme-data-general-index_README.md`. The claim reads correctly without them.
 
 ### Fixed
 
@@ -77,28 +94,13 @@ placeholders the release manager fills are. -->
   left the comment at the previous version, as it read 2.4.0 at every tag from v2.5.0 to v2.7.8.
   The sweep now asks for it, `docs/RELEASING.md` and the skill bump it by hand with a command the
   same test runs, and the test fails while the comment names another release than `crisprme.py`.
-
-### Notes for the merge
-
-- Amend the entry "`docs/RELEASE_CHECKLIST.md` Gate B gives the local gate" (Changed) with: "Its
-  step 4b runs, on the release image, amd64 and arm64, the engine checks CI runs only with the
-  branch overlaid on the published image and its older CRISPRitz: `test/index_flex/
-  check_index_flex.py`, whose K = 8 cells must give the same results as a dedicated index (on an
-  engine without `--prune-pam` they pass by refusing), `test/indel_snp_oracle/run_oracle.sh` and
-  `scripts/check_alt_pam.py` on step 4's tables. `PostProcess/test_ci_workflows.py` pins the step
-  and its greps to what the checks print." (Trap T-42 in the checklist.)
-- Already corrected in CHANGELOG.md on this branch, against what the code does at 9c6b4046: the
-  index-choice rules of "When a dedicated index for the PAM is installed beside a PAM-less one"
-  (the guide-length rule, second of four); the no-bulge sizing of "The RAM thread guard sized a
-  search served by a PAM-less index" (a variant search of a download is sized by its variant
-  index); "A search of a VCF dataset built in the web Settings page reads its dict-less tiers"
-  (the SNP + indel row is the same on the dictionaries since the indel fix; no extra
-  `Other_motifs` alignment or new row order on the tiers; a dataset not rebuilt changes too);
-  "`scorer-env create` failed whenever conda was the env manager" (a `complete-search` refused, a
-  web search ran CFD-only); and the `--prune-pam` equivalence in Added, the header-injection entry
-  and the `NNN_3` republish entry (no release-candidate counts).
-- The placeholder `EQUIVALENCE_NUMBERS`, in double braces inside an HTML comment beside the claim
-  (grep the repository for it), marks where the final genome-wide
-  three-arm run's numbers go, once the last results fix is in: the `--prune-pam` entry under
-  Added, METHODS §9's "Equivalence" paragraph, and the "Equivalence claim" of
-  `docs/hf/crisprme-data-general-index_README.md`. The claim reads correctly without them.
+- **`docs/RELEASE_CHECKLIST.md` Gate B runs the engine checks on the release's own CRISPRitz**
+  (maintainers). CI runs `test/index_flex/check_index_flex.py`, the SNP + indel oracle
+  (`test/indel_snp_oracle/run_oracle.sh`) and `scripts/check_alt_pam.py` on search results only
+  in `validate-benchmarks.yml`, with the branch overlaid on the published image: for 2.8.1 that is
+  2.8.0's, with CRISPRitz 2.9.0 where 2.8.1 ships 2.9.1. There index_flex passes both K = 8 cells
+  by refusing them, as on any engine without `--prune-pam`, and still prints `INDEX FLEX PASS`.
+  The local gate's step 4b runs the three on the release image, amd64 and arm64, and fails unless
+  both K = 8 cells read "same results as" (a dedicated index, and NRG), the oracle prints
+  `ORACLE PASS` and `check_alt_pam.py` passes step 4's tables. Trap T-42 in the checklist.
+  `PostProcess/test_ci_workflows.py` pins the step and its greps to what the checks print.
