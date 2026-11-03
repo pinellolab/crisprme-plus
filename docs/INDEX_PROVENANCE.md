@@ -356,8 +356,8 @@ compiled into `buildTST`, so it cannot affect index content.
   through `gnomAD-converter --multiallelic`. The fix does not retroactively touch
   an already-built store, and nothing invalidates one.
 - **At a position carrying more than one SNP record, only the last record's ALT
-  reaches the enriched genome** (CRISPRitz, both enricher ports, every release; in
-  its 2.9.1 Known issues). Normalising a VCF splits a multiallelic site into
+  reaches the enriched genome** (CRISPRitz, both enricher ports, since 2.6.0 in 2021;
+  the SNP dict has always kept one entry a position; in CRISPRitz 2.9.1's Known issues). Normalising a VCF splits a multiallelic site into
   biallelic records, and each record rebuilds the position's IUPAC code from the
   reference base and overwrites the SNP dict entry, so an earlier record's ALT is in
   neither the enriched genome nor the dict, and an off-target that needs it is not

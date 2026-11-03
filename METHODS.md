@@ -170,6 +170,8 @@ Each source VCF is normalized so that variant records are directly comparable:
   dictionaries nor the Tier-0 registry nor the Tier-1 genotype store, and an
   off-target that needs it is not found, or is reported at a lower score, without
   its carriers (a VCF line that lists several ALTs itself is coded with all of them).
+  It is not new in 2.8.1: every release behaves the same (the SNP dictionaries have
+  always kept one record a position, the enriched genome since CRISPRitz 2.6.0).
   On the HGDP + 1000 Genomes panel, 2,486,165 of its 127,666,429 SNP records
   (1.95 %), at 2,441,139 positions, are not coded for this reason. Per guide (NRG, 4
   mismatches + 1 DNA + 1 RNA bulge, per-sample, genome-wide) this leaves 3 to 7 sites
@@ -646,7 +648,8 @@ yields **zero CONFIRMED rows and no cis carriers** in either mode (there is no g
 enumerate), and the `indel_snp_cooc.tsv` / `indel_af.tsv` companions are **byte-identical**
 across modes. A sites-only dataset has no genotypes for `--per-sample` to resolve, so as of 2.8.1
 its SNP post-analysis is the two-pass population-level one whatever the search's mode, dataset by
-dataset, from its registry's `data_type`: `--per-sample` on sites-only datasets alone **is** the
+dataset, from its registry's `data_type` (for a registry with none, its aggregation: an INFO-AF
+registry is sites-only): `--per-sample` on sites-only datasets alone **is** the
 population-level analysis, and `complete-search` **warns**; a phased dataset searched beside a
 sites-only one (per-sample by default) gives per-sample rows, the sites-only one population-level
 rows, and `complete-search` says so. (Before 2.8.1 such a dataset went through the per-sample path,

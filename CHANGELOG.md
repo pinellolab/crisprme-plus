@@ -314,8 +314,8 @@ and the `release-crisprme` skill.
   limits, in 2.8.0 too; the engine and the published indexes are unchanged.
 - **A known limit, stated with its scale: at a split multi-allelic SNP site only the last record's
   ALT is searched.** At a position with several biallelic SNP records only the last one's ALT
-  reaches the enriched genome and the stores (CRISPRitz, every release), so an off-target that
-  needs an earlier one is not found, or is reported at a lower score, without its carriers (a VCF
+  reaches the enriched genome and the stores, so an off-target that needs an earlier one is not
+  found, or is reported at a lower score, without its carriers (a VCF
   line that lists several ALTs itself is coded with all of them). On the HGDP + 1000 Genomes
   panel, 2,486,165 of its 127,666,429 SNP records (1.95 %), at 2,441,139 positions, are not coded
   for this reason. Per guide (NRG, 4 mismatches + 1 DNA + 1 RNA bulge, per-sample, genome-wide)
@@ -328,8 +328,10 @@ and the `release-crisprme` skill.
   (2.6 %) are not the last at their position, 5,104 with AC ≥ 41 and 1,566 with AC ≥ 818, counted
   in the normalized source VCF; and, read in the shipped enriched genome, registry, genotype store
   and dictionary at six such positions, the earlier ALT is absent from each, up to AC = 8,179
-  (`rs807755` T>A at chr22:19142014, whose position the stores hold as T>G at AC = 1). It will be
-  fixed, with rebuilt indexes, in the next release.
+  (`rs807755` T>A at chr22:19142014, whose position the stores hold as T>G at AC = 1). This is not
+  new: 2.8.0 and every earlier release behave the same (the SNP dictionaries have always kept only
+  the last record of a position, and the enriched genome since CRISPRitz 2.6.0, 2021), and 2.8.1
+  does not change it. It will be fixed, with rebuilt indexes, in the next release.
 
 ### Fixed
 - **One indel off-target could be reported on every chromosome, each time with that chromosome's real
@@ -1659,9 +1661,10 @@ and the `release-crisprme` skill.
   `hg38_mega --per-sample` goes from 1318 rows to 1384, the table of `hg38_mega` with no flag,
   byte for byte, and lists 63 sites it did not (with the TRAC guide `CTCTCAGCTGGTACACGGCA` beside
   it, at 4 mismatches + 1 DNA + 1 RNA bulge, from 3,605 rows to the 3,801 of the run with no
-  flag); the default index with `hg38_mega`, per-sample as it runs with no flag, goes from 2077
-  rows to 2137 (`Not_found_in_REF` 1115 to 1175, alternative alignments 5863 to 6226,
-  `observed_haplotypes.tsv` 1556 rows to 1796). It lists 57 sites it did not and loses none, 14
+  flag, 3,802 with this release's indel-row fix as well; the other counts in this entry are
+  from before that fix); the default index with `hg38_mega`, per-sample as it runs with no
+  flag, goes from 2077 rows to 2137 (`Not_found_in_REF` 1115 to 1175, alternative alignments
+  5863 to 6226, `observed_haplotypes.tsv` 1556 rows to 1796). It lists 57 sites it did not and loses none, 14
   sites score higher and none lower (chr22:34270481 from CFD 0.173 to 0.233, and chr22:22881199
   reads 0.274 where chr22:22881195 read 0.262), and the report's CFD >= 0.05 and >= 0.2 tables
   each gain one site. On a denser search of the two (chr19 and chr21, 5 mismatches, 2 DNA and 2
