@@ -369,7 +369,14 @@ haplotypes is bounded by ≈2×(number of carriers) rather than 2^*k*, so it is
 efficient, and each enumerated haplotype carries its **exact set of carriers**
 (which in turn yields its exact frequency, Section 3). Cross-individual chimeras
 — combinations assembled from variants carried by *different* people — are
-**excluded** by construction.
+**excluded** by construction. A SNP row's carriers are resolved from SNP genotypes
+only: an individual whose haplotype holding the row's SNPs also carries an indel
+inside the target is still listed, though its own sequence there is the indel's
+(reported on the indel row when it is in budget). On chr22 of the HGDP + 1000 Genomes
+panel, per sample, this affects 2.2% of SNP row-blocks (990 of 45,921, five guides),
+and 545 of them have no listed carrier that holds the sequence. It only over-lists, no
+site is lost, and 2.8.0 behaves the same; it is fixed in the next release (§8,
+residuals).
 
 ### Behavior by phasing status
 The confidence attached to an enumerated haplotype depends on the phasing of the
@@ -509,8 +516,8 @@ did not keep: a population-level run, which writes no alternative alignments, ca
 lines with no row in its tables. The resolution does not depend on the analysis mode (§5).
 A target with no code (every target of a classic, non-overlaid
 fake-indel genome) that holds the indel needs no resolution: its sequence is the one the
-engine found. A row's carriers belong to its sequence: two alignments of one site can name
-the same variants with different carriers (an RNA-bulge alignment does not reach the base a
+engine found. An indel row's carriers belong to its sequence: two alignments of one site can
+name the same variants with different carriers (an RNA-bulge alignment does not reach the base a
 SNP sits on, so it lists that SNP's carriers under the indel alone), and the merge of a
 cluster's rows, which otherwise keeps one row per position and variant list, keeps one per
 carrier set there, so that no carrier is added to a sequence it does not have; of the
@@ -1106,7 +1113,12 @@ record. That is 1.95 % of the panel's SNP records, whose effect §2 gives as mea
 will be fixed, with rebuilt indexes, in the next release. The phased indel genotype store
 leaves out equal-length multi-base records (MNVs), so their carriers are resolved with the
 phase unknown, PUTATIVE (§4): the HGDP + 1000 Genomes index has none, HPRC's chr22 has 9,079
-among its 195,813 indel-search records.
+among its 195,813 indel-search records. A SNP row's carriers are resolved from SNP genotypes
+only (§4): an individual whose haplotype holding the row's SNPs also carries an indel inside
+the target is still listed, though its own sequence there is the indel's (reported on the
+indel row when in budget). On chr22 of the HGDP + 1000 Genomes panel, per sample, this
+affects 2.2% of SNP row-blocks, and 545 have no carrier that holds the sequence. It only
+over-lists, 2.8.0 behaves the same, and it is fixed in the next release.
 The `Max_total_edits` value is a
 **search cap on the variant-collapsed (IUPAC) genome**; individual variant-expanded SNP
 alignments may exceed it (the report surfaces the observed maximum), while an indel row,
