@@ -499,7 +499,9 @@ A web search builds a missing **reference** index itself, from the installed gen
 (about 20 to 35 minutes for hg38), before it searches. A **variant** index it does not
 build for bulges: the search form offers a variant panel only the bulges its installed
 index supports (0 when it has none yet, and that first 0-bulge search prepares the
-variant genome and a 0-bulge index of it, which can take hours on a full genome; without
+variant genome and a 0-bulge index of it from the panel's VCF files, one per chromosome,
+which can take hours on a full genome; a panel added as a single multi-chromosome VCF file
+is split only when its index is built, so the form has you build that one first; without
 the panel's VCF files or its enriched genome it stops and says what to do). Build
 it ahead of time in **Settings**, under "Build an index locally", or from the command
 line with `crisprme.py build-index-only` (the same `--genome`/`--pam`/`--bDNA`/`--bRNA`,

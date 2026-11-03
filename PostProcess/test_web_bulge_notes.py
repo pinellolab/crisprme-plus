@@ -18,10 +18,12 @@ one change, whatever the order of the two runs and their answers (_Form), and Ma
 comes back as far as the bulges allow when a cap is lifted only partly (a panel with a
 1-bulge index after one with none): it stayed at the 4 of the 0-bulge cap.
 
-A sites-only dataset was offered a search that cannot run (TestRefusedDatasets): Submit
-refuses every search of it, with or without its index, and the note offered a 0-bulge
-search of it and a build in Settings, or the bulges of its index. Now it says what
-Submit says.
+Two kinds of dataset were offered a search that cannot run (TestRefusedDatasets): one
+added as a single multi-chromosome VCF file, with no variant index yet, whose search
+fails as it prepares the variant genome (only a build of its index splits the file per
+chromosome), and a sites-only one, whose search Submit refuses with or without its
+index. The note offered a 0-bulge search of either and a build in Settings, or the
+bulges of its index; now it says what Submit says, and Submit refuses the first too.
 
 Run with:
 
@@ -156,6 +158,12 @@ class TestRefusedDatasets(_Install):
     """A dataset whose search Submit refuses whatever the bulges is not offered as
     searchable: the note says what Submit says."""
 
+    SINGLE = ("VCF is a single multi-chromosome file, which a search cannot prepare the "
+              "variant genome from: the file is split per chromosome only when its index is "
+              "built. Build its index in Settings (Build an index locally) first, or remove "
+              "the dataset in Settings and add it again as one VCF file per chromosome "
+              "(<name>.chrN.vcf.gz).")
+
     def setUp(self):
         super().setUp()
         self.index("NRG_2_hg38")
@@ -184,6 +192,44 @@ class TestRefusedDatasets(_Install):
                          + "".join(f"{s}\thg38_{name}\tunknown\tunknown\n" for s in samples))
         return folder
 
+    def test_single_multi_chromosome_vcf_without_its_index(self):
+        # the search fails as it begins (CRISPRitz add-variants takes the chromosome from a
+        # '.chrN.' token in the file name: "cannot open Genomes/hg38/.fa"), and the note
+        # said that the first 0-bulge search prepares the variant genome
+        folder = self.dataset("one", ["walk.vcf.gz"])
+        note = self.note("one")
+        self.assertEqual(note, "No one variant index for this PAM is installed yet, and the "
+                               "dataset's " + self.SINGLE)
+        self.assertNotIn("prepares the variant genome and", note)
+        self.assertEqual(self.submit("one"), (False, [note]))
+        # with Reference only, or with the dataset selected with another one
+        self.assertEqual(self.submit("ref"), (True, []))
+        self.dataset("per", ["walk.chr1.vcf.gz", "walk.chr2.vcf.gz"])
+        self.assertEqual(self.note("per+one"), note)
+        self.assertEqual(self.submit("per+one"), (False, [note]))
+        # one file per chromosome: offered as before, and Submit runs it
+        self.assertIn("No per variant index for this PAM is installed yet, so only a 0-bulge "
+                      "search is offered, and the first one prepares", self.note("per"))
+        self.assertEqual(self.submit("per"), (True, []))
+        # its variant genome already prepared: a search does not read its VCF
+        os.makedirs(os.path.join(self.tmp, "Genomes", "hg38+hg38_one"))
+        self.assertIn("the first one prepares", self.note("one"))
+        self.assertEqual(self.submit("one"), (True, []))
+        os.rmdir(os.path.join(self.tmp, "Genomes", "hg38+hg38_one"))
+        # built in Settings: the file split per chromosome, and its index there
+        os.rename(os.path.join(folder, "walk.vcf.gz"), os.path.join(folder, "walk.chr1.vcf.gz"))
+        _vcf(os.path.join(folder, "walk.chr2.vcf.gz"))
+        self.index("NRG_2_hg38+hg38_one")
+        self.assertEqual(self.note("one", 1, 1), "Up to 1 DNA/RNA bulge(s) available.")
+        self.assertEqual(self.submit("one", 1, 1), (True, []))
+        # a single-file dataset with a variant index of its own for this PAM (as a
+        # downloaded one, whose dictionaries a search reads instead of the VCFs)
+        self.dataset("dl", ["walk.vcf.gz"])
+        self.index("NRG_1_hg38+hg38_dl")
+        self.assertIn("The installed dl variant index for this PAM supports no bulges",
+                      self.note("dl"))
+        self.assertEqual(self.submit("dl"), (True, []))
+
     def test_sites_only_dataset_with_or_without_its_index(self):
         # Submit refuses a search of a sites-only dataset, which has no sample list, and
         # building its index does not change that; the note offered a 0-bulge search and a
@@ -198,6 +244,12 @@ class TestRefusedDatasets(_Install):
                 self.assertTrue(note.startswith("The variant dataset 'sites' is sites-only"))
                 self.assertNotIn("Build an index locally", note)
                 self.assertEqual(self.submit("sites"), (False, [note]))
+        # a single multi-chromosome sites-only file: the sites-only message alone, as a
+        # build does not make it searchable
+        self.dataset("agg", ["agg.vcf.gz"], samples=(), sample_list=False)
+        note = self.note("agg")
+        self.assertTrue(note.startswith("The variant dataset 'agg' is sites-only"))
+        self.assertEqual(self.submit("agg"), (False, [note]))
 
     def test_datasets_submit_does_not_refuse_keep_their_note(self):
         # a sites-only dataset with a sample list, as the published hg38_mega index

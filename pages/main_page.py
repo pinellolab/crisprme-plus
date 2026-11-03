@@ -2151,6 +2151,15 @@ def check_input(
             if _why:
                 update_style = True
                 miss_input_list.append(_why)
+            # A dataset added as a single multi-chromosome VCF, with no variant index for
+            # this PAM: the search would fail as it prepares the variant genome. Refused
+            # with what the bulge note says, unless the dataset is sites-only, which no
+            # build makes searchable (the message above says so).
+            if pam and not _sites_only_refusal(_genome, _d):
+                _unsplit = _unsplit_vcf_refusal(_genome, pam, _d)
+                if _unsplit:
+                    update_style = True
+                    miss_input_list.append(_unsplit)
     miss_input = html.Div(
         [
             html.P("The following inputs are wrong or missing:"),
@@ -2631,6 +2640,38 @@ def _sites_only_refusal(genome: str, panel: str) -> Optional[str]:
     return None
 
 
+def _unsplit_vcf_refusal(genome: str, pam: str, panel: str) -> Optional[str]:
+    """Why a search of the variant dataset ``panel`` cannot run, though a 0-bulge one is
+    offered, or None. With no variant index for this PAM and no variant genome yet, the
+    search (submit_job_automated_new_multiple_vcfs.sh) prepares the variant genome from
+    the dataset's VCF folder with CRISPRitz add-variants, which takes each file's
+    chromosome from a '.chrN.' token in its name. A single multi-chromosome file has
+    none: the search fails as it begins ("cannot open Genomes/<genome>/.fa"). Only a
+    build of its index (build-index-only, as Settings runs it) splits it per chromosome;
+    this is that build's test (crisprme.py _ensure_per_chromosome_vcfs)."""
+    genome = genome.replace(" ", "_")
+    if _index_installed(genome, pam, panel):
+        return None
+    folder = _resolve_vcf_folder(genome, panel)
+    if os.path.isdir(os.path.join(current_working_directory, GENOMES_DIR,
+                                  f"{genome}+{folder}")):
+        return None  # the variant genome is there: the search does not read the VCFs
+    try:
+        vcfs = [f for f in os.listdir(os.path.join(current_working_directory, "VCFs", folder))
+                if f.endswith(".vcf.gz")]
+    except OSError:
+        return None
+    if not vcfs or all(any("chr" in tok for tok in f.split(".")) for f in vcfs):
+        return None
+    return (
+        f"No {panel} variant index for this PAM is installed yet, and the dataset's VCF is "
+        "a single multi-chromosome file, which a search cannot prepare the variant genome "
+        "from: the file is split per chromosome only when its index is built. Build its "
+        "index in Settings (Build an index locally) first, or remove the dataset in "
+        "Settings and add it again as one VCF file per chromosome (<name>.chrN.vcf.gz)."
+    )
+
+
 # The note under the Advanced bulge caps: how many bulges this genome, PAM and variant
 # panel allow, and what a search with the bulges selected builds first, if anything.
 @app.callback(
@@ -2649,7 +2690,7 @@ def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
     # a dataset whose search Submit refuses whatever the bulges: the note says what Submit
     # says (check_input), and offers no search of it and no build that would not help
     for panel in _selected_panels(variant_choice):
-        why = _sites_only_refusal(genome, panel)
+        why = _sites_only_refusal(genome, panel) or _unsplit_vcf_refusal(genome, pam, panel)
         if why:
             return why
     maxb = _bulge_cap(genome, pam, variant_choice)

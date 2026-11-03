@@ -13,7 +13,10 @@ tabix, bcftools) on a small synthetic genome, run with the argv the page launche
    from the VCF header; the Settings build passes that list (--samplesID), so the
    dict-less tiers are built and the dataset reads "genotyped, phased", with
    per-sample analysis available. A dataset uploaded per chromosome, and one
-   uploaded as a single multi-chromosome file, alike.
+   uploaded as a single multi-chromosome file, alike. Before its build, the search
+   form offers a 0-bulge search of the first, which prepares the variant genome; of
+   the second, which a search does not split per chromosome (the build does), it says
+   to build it first, and Submit refuses that search with the same message.
 2. The search form offers a dataset for the genome its marker names, whatever its
    name, with the bulges of its index; a genotyped dataset with no tiers reads
    "genotyped, samples not indexed", not "sites-only".
@@ -125,10 +128,27 @@ for dataset, files in UPLOADS.items():
           + [f"{s}\t{dataset}\tunknown\tunknown" for s in SAMPLES],
           f"{dataset}: the upload writes its sample list from the VCF header "
           f"(got {rows and rows[:3]}...)")
+    # before its build: a search prepares the variant genome from the VCFs, and does not
+    # split one multi-chromosome file per chromosome (the build does), so that search
+    # failed as it began; the form says to build it first, and Submit refuses it
+    value = dataset[len("toyg_"):] if dataset.startswith("toyg_") else dataset
+    note = main_page.update_bulge_note("toyg", PAM, value, 0, 0)
+    out = main_page.check_input(1, None, "toyg", PAM, "IP", "CTAACAGTTGCTTTTATCAC",
+                                4, 0, 0, value, False)
+    msgs = [li.children for li in out[-1].children[1].children]
+    if len(files) == 1:
+        check("the dataset's VCF is a single multi-chromosome file" in note
+              and "Build its index in Settings (Build an index locally) first" in note,
+              f"{dataset}: before its build the note says to build it first (got {note!r})")
+        check(out[0] is None and msgs == [note],
+              f"{dataset}: and Submit refuses its search with the same message (got {msgs})")
+    else:
+        check("the first one prepares the variant genome" in note,
+              f"{dataset}: before its build the note offers a 0-bulge search (got {note!r})")
+        check(out[0] == 1 and not msgs, f"{dataset}: and Submit runs it ({msgs})")
     argv, rc, err = settings_build(dataset)
     check("--samplesID" in argv, f"{dataset}: the Settings build passes --samplesID ({argv})")
     check(rc == 0, f"{dataset}: the Settings build succeeds (rc {rc}; stderr {err[-1500:]!r})")
-    value = dataset[len("toyg_"):] if dataset.startswith("toyg_") else dataset
     dt = pages_utils.variant_dataset_data_type("toyg", value)
     check(dt == "genotyped-phased", f"{dataset}: reads genotyped-phased (got {dt})")
 

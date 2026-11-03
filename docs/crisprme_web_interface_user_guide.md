@@ -312,8 +312,10 @@ bulges you ask for, the search first builds one from the installed genome (once:
 20 to 35 minutes for hg38), and later searches reuse it. A **variant** panel offers only
 the bulges its installed variant index supports: with no variant index yet, only a
 0-bulge search, and the first one prepares the variant genome and a 0-bulge index of it
-(this can take hours on a full genome), if the panel's VCF files or its enriched genome are
-installed; without them the search stops and says what to do. To search a panel with bulges, build its index
+(this can take hours on a full genome), if the panel's VCF files, one per chromosome, or its
+enriched genome are installed; without them the search stops and says what to do. A panel
+added as a single multi-chromosome VCF file is split per chromosome only when its index is
+built, so build that one first: until then **Submit** refuses its search. To search a panel with bulges, build its index
 first in **Settings**, under "Build an index locally" (the genome and the panel's VCF
 files must be installed), or download a prebuilt one (see the Docker Quickstart,
 "Installing more indexes"). The note under the bulge options in **Advanced options**
