@@ -3657,6 +3657,15 @@ def _refuse_other_side_build(index_dir: str, pamfile: str) -> None:
         )
 
 
+def _refuse_newer_build(index_dir: str) -> None:
+    """Stops build-index-only when ``index_dir`` is an index in place that a newer CRISPRitz
+    built (index_fit.newer_format_error): this CRISPRme does not read it, and every search
+    refuses it, so it is not kept as "already present". Never removed here."""
+    newer = index_fit.newer_format_error(index_dir) if os.path.isdir(index_dir) else None
+    if newer:
+        error(newer + ".")
+
+
 def _refuse_short_build(index_dir: str, pamfile: str, bdna: int, brna: int) -> None:
     """Stops build-index-only when ``index_dir`` is an index already in place, built for
     a guide too short for ``pamfile`` at these bulges (index_fit; its .bin files record
@@ -3665,11 +3674,9 @@ def _refuse_short_build(index_dir: str, pamfile: str, bdna: int, brna: int) -> N
     record that contradicts the index and a search of it that reports wrong alignments.
     The index ``pamfile`` asks for has the same name, so it needs another working
     directory, or this one moved out of the way: never removed here. Nor is one a newer
-    CRISPRitz built kept (index_fit.newer_format_error): this CRISPRme does not read it.
+    CRISPRitz built kept (_refuse_newer_build): this CRISPRme does not read it.
     """
-    newer = index_fit.newer_format_error(index_dir) if os.path.isdir(index_dir) else None
-    if newer:
-        error(newer + ".")
+    _refuse_newer_build(index_dir)
     built = index_fit.built_guide_len(index_dir)
     guide = index_fit.pam_file_spacer(pamfile)
     n = int(os.path.basename(index_dir).split("_")[1])
@@ -5431,6 +5438,11 @@ def build_index_only() -> None:
                     and "_" not in _fk[len(f"fake_{vcf_name}_"):]]),
             )
     else:
+        # nor one a newer CRISPRitz built, as the reference and variant indexes are not
+        # (_refuse_short_build): a search that builds the INDELS index with one refuses it
+        # and leaves it, beside indexes of format 1. It is looked at here, where it is
+        # kept: one built while the SNP codes went on was removed above, to be built again.
+        _refuse_newer_build(indels_idx)
         print(f"Indels index already present: {indels_idx}", flush=True)
     _write_pam_build(snp_idx, pamfile)
     _write_display_label(snp_idx, display_name)

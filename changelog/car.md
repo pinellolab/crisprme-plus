@@ -70,11 +70,12 @@ are those of `CHANGELOG.md` at 9c6b4046) with the text after it. All three entri
    > files open with a magic and the format version), holds no length this release reads: a search
    > that takes one, found or built with such a CRISPRitz installed, stops with one ERROR that says
    > what it is and what to do (use a CRISPRme that reads index format 2, or install CRISPRitz 2.9.1
-   > and build the index again), and so does `build-index-only` with one in place or written by the
-   > installed CRISPRitz. Measured through the real CLI with that CRISPRitz built into the image,
-   > they had read its format version as the guide length ("built for a 2-nt guide") and its magic
-   > as a leaf count ("not a tree ..., as when the disk fills up"); with CRISPRitz 2.9.1 the same
-   > runs give the same tables. Only a Bioconda install can pull such a CRISPRitz: the image and
+   > and build the index again), and so does `build-index-only` with one in place that it would
+   > keep (the reference, the variant or the INDELS index), or one the installed CRISPRitz writes.
+   > Measured through the real CLI with that CRISPRitz built into the image, they had read its
+   > format version as the guide length ("built for a 2-nt guide") and its magic as a leaf count
+   > ("not a tree ..., as when the disk fills up"); with CRISPRitz 2.9.1 the same runs give the
+   > same tables. Only a Bioconda install can pull such a CRISPRitz: the image and
    > `install_from_source.sh` pin 2.9.1.
 
 ### Fixed

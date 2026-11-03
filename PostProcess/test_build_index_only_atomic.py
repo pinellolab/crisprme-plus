@@ -894,33 +894,71 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
         """An index of format 2 in place (one a newer CRISPRitz built, or downloaded for a
         newer release): build-index-only kept it ('already present'), and a search read
         its format version as the guide length it was built for, and refused it as 'built
-        for a 2-nt guide'. Each now stops with one ERROR that says what it is (PKG-1)."""
+        for a 2-nt guide'. Each now stops with one ERROR that says what it is (PKG-1). So
+        does build-index-only on an INDELS index of format 2, which it kept ('Indels index
+        already present') and ended done, though every search refuses it: one is left there
+        by a search that built it with such a CRISPRitz, beside the reference and variant
+        indexes of format 1 it took."""
+        kept = {REF: "Reference index", VAR: "Variant index", INDELS: "Indels index"}
+        for name in (REF, VAR, INDELS):
+            with self.subTest(index=name):
+                self.fresh()
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 0, err)
+                index = self.lib(name)
+                first = self.bins(name)[0]  # (of an INDELS index, in a folder of it)
+                with open(os.path.join(index, first), "rb") as fh:
+                    body = fh.read()
+                with open(os.path.join(index, first), "wb") as fh:
+                    fh.write(b"CZI\xfe" + struct.pack("=6i", 2, 31, 0, 20, 3, 2) + b"NRG" + body
+                             + b"CZI\xfe")
+                rc, out, err = self.run_bio()
+                self.assertEqual(rc, 1, out + err)
+                self.assertEqual(err.count("Error: "), 1, err)
+                self.assertTrue(err.startswith(
+                    f"Error: {index} was built by a newer CRISPRitz ({first} is in index format "
+                    f"2, which CRISPRitz 2.9.2 and later write): "), err)
+                self.assertNotIn(f"{kept[name]} already present", out)
+                self.assertNotIn("Variant index ready", out)
+                with open(os.path.join(index, first), "rb") as fh:  # (left as it is)
+                    self.assertEqual(fh.read()[4 + 24 + 3:-4], body)
+                for search in (self.run_search, self.run_web_search):
+                    with self.subTest(index=name, search=search.__name__):
+                        rc, out, err = search()
+                        self.assertNotEqual(rc, 0)
+                        log = err
+                        if search == self.run_search:
+                            with open(self.path("Results", "search", "log_error.txt")) as fh:
+                                log = fh.read()
+                        self.assertEqual(log.count("ERROR: "), 1, log)
+                        self.assertIn(f"ERROR: {index} was built by a newer CRISPRitz "
+                                      f"({first} is in index format 2", log)
+                        self.assertNotIn("-nt guide", log)
+
+    def test_an_indels_index_of_format_2_it_removes_anyway_is_built_again(self):
+        """The INDELS index is looked at where build-index-only keeps it: one of format 2
+        that it removes, as built from the fake-indel genome before the SNP codes this run
+        puts on it (here by a search with a CRISPRitz that writes that format), is built
+        again, as one of format 1 is, not refused."""
         rc, out, err = self.run_bio()
         self.assertEqual(rc, 0, err)
-        index = self.lib(REF)
-        first = os.path.join(index, sorted(f for f in os.listdir(index) if f.endswith(".bin"))[0])
+        clean = tree(self.lib(INDELS))
+        self.fresh()
+        self.kit()
+        self.search_builds_the_indels_index()
+        first = os.path.join(self.lib(INDELS), self.bins(INDELS)[0])
         with open(first, "rb") as fh:
             body = fh.read()
         with open(first, "wb") as fh:
             fh.write(b"CZI\xfe" + struct.pack("=6i", 2, 31, 0, 20, 3, 2) + b"NRG" + body
                      + b"CZI\xfe")
         rc, out, err = self.run_bio()
-        self.assertEqual(rc, 1, out + err)
-        self.assertIn(f"{index} was built by a newer CRISPRitz ({os.path.basename(first)} is in "
-                      f"index format 2, which CRISPRitz 2.9.2 and later write)", err)
-        self.assertNotIn("Reference index already present", out)
-        for search in (self.run_search, self.run_web_search):
-            with self.subTest(search=search.__name__):
-                rc, out, err = search()
-                self.assertNotEqual(rc, 0)
-                log = err
-                if search == self.run_search:
-                    with open(self.path("Results", "search", "log_error.txt")) as fh:
-                        log = fh.read()
-                self.assertEqual(log.count("ERROR: "), 1, log)
-                self.assertIn(f"ERROR: {index} was built by a newer CRISPRitz "
-                              f"({os.path.basename(first)} is in index format 2", log)
-                self.assertNotIn("-nt guide", log)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(err, "")
+        self.assertIn(f"Removing {self.lib(INDELS)}: it was built from the fake-indel genome "
+                      f"while its SNP codes were going on", out)
+        self.assertEqual(tree(self.lib(INDELS)), clean)
+        self.assertEqual(self.leftovers(), [])
 
     def test_a_build_the_engine_left_without_a_bin_is_not_put_in_place(self):
         """buildTST does not check that a .bin opened either: with the disk's inode
