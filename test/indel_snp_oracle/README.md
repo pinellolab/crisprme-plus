@@ -53,7 +53,9 @@ MNV row's carriers on its sequence, it fails at K and K2 in both modes: S48 and 
 listed on the perfect row (K's RNA-bulge row, no longer one base early, now meets the
 site's other alignments). On 9c6b4046, which took a carrier off an indel row whenever its
 slot held a second indel inside the target, decided on the indel's position, it fails at W
-and V in both modes: S51 and S53, whose haplotypes hold the target, are on no row.
+and V in both modes: S51 and S53, whose haplotypes hold the target, are on no CFD-1 row.
+S51 is on no row at all, and S53 only on the CFD-0.9 RNA-bulge alignment that starts past
+the insertion.
 
 Not covered: split multi-allelic SNP records at one position. CRISPRitz add-variants
 keeps only the last of them in the enriched genome and in the dictionary, so the other
