@@ -18,11 +18,17 @@ one change, whatever the order of the two runs and their answers (_Form), and Ma
 comes back as far as the bulges allow when a cap is lifted only partly (a panel with a
 1-bulge index after one with none): it stayed at the 4 of the 0-bulge cap.
 
+A sites-only dataset was offered a search that cannot run (TestRefusedDatasets): Submit
+refuses every search of it, with or without its index, and the note offered a 0-bulge
+search of it and a build in Settings, or the bulges of its index. Now it says what
+Submit says.
+
 Run with:
 
     <env>/bin/python3 -m unittest discover -s PostProcess -p 'test_web_bulge_notes.py' -v
 """
 
+import gzip
 import os
 import shutil
 import sys
@@ -134,6 +140,83 @@ class TestBulgeNote(_Install):
     def test_no_index_and_no_genome_files(self):
         os.remove(os.path.join(self.tmp, "Genomes", "hg38", "chr1.fa"))
         self.assertIn("no FASTA files", self.note("ref", 0, 0))
+
+
+def _vcf(path, samples=("S1", "S2")):
+    """A VCF file with a real header, gzipped as bgzip writes it: with sample columns,
+    or with none (a sites-only file, as the hg38_mega VCFs)."""
+    cols = "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO"
+    if samples:
+        cols += "\tFORMAT\t" + "\t".join(samples)
+    with gzip.open(path, "wt") as fh:
+        fh.write("##fileformat=VCFv4.2\n" + cols + "\n")
+
+
+class TestRefusedDatasets(_Install):
+    """A dataset whose search Submit refuses whatever the bulges is not offered as
+    searchable: the note says what Submit says."""
+
+    def setUp(self):
+        super().setUp()
+        self.index("NRG_2_hg38")
+
+    def note(self, variant, dna=0, rna=0):
+        return mp.update_bulge_note("hg38", PAM, variant, dna, rna)
+
+    def submit(self, variant, dna=0, rna=0):
+        """check_input, as the Submit button runs it: (runs, messages)."""
+        out = mp.check_input(1, None, "hg38", PAM, "IP", "CTAACAGTTGCTTTTATCAC", 4, dna, rna,
+                             variant, False)
+        return out[0] == 1, [li.children for li in out[-1].children[1].children]
+
+    def dataset(self, name, files, samples=("S1", "S2"), sample_list=True):
+        """A dataset as Settings adds it: its VCF files and, when they name samples, the
+        sample list written from their header."""
+        folder = os.path.join(self.tmp, "VCFs", f"hg38_{name}")
+        os.makedirs(folder)
+        for f in files:
+            _vcf(os.path.join(folder, f), samples)
+        if sample_list:
+            os.makedirs(os.path.join(self.tmp, "samplesIDs"), exist_ok=True)
+            with open(os.path.join(self.tmp, "samplesIDs", f"hg38_{name}.samplesID.txt"),
+                      "w") as fh:
+                fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+                         + "".join(f"{s}\thg38_{name}\tunknown\tunknown\n" for s in samples))
+        return folder
+
+    def test_sites_only_dataset_with_or_without_its_index(self):
+        # Submit refuses a search of a sites-only dataset, which has no sample list, and
+        # building its index does not change that; the note offered a 0-bulge search and a
+        # build in Settings, then the bulges of the index built
+        self.dataset("sites", ["sites.chr1.vcf.gz"], samples=(), sample_list=False)
+        for built in (False, True):
+            if built:
+                self.index("NRG_2_hg38+hg38_sites")
+            with self.subTest(built=built):
+                note = self.note("sites")
+                self.assertEqual(note, pu.samplesid_problem("hg38_sites", "sites"))
+                self.assertTrue(note.startswith("The variant dataset 'sites' is sites-only"))
+                self.assertNotIn("Build an index locally", note)
+                self.assertEqual(self.submit("sites"), (False, [note]))
+
+    def test_datasets_submit_does_not_refuse_keep_their_note(self):
+        # a sites-only dataset with a sample list, as the published hg38_mega index
+        # installs one: searchable, so the note is the bulge note
+        self.dataset("mega", ["mega.chr1.vcf.gz"], samples=(), sample_list=False)
+        os.makedirs(os.path.join(self.tmp, "samplesIDs"), exist_ok=True)
+        with open(os.path.join(self.tmp, "samplesIDs", "hg38_mega.samplesID.txt"), "w") as fh:
+            fh.write("#SAMPLE_ID\tPOPULATION_ID\tSUPERPOPULATION_ID\tSEX\n"
+                     "gnomAD\tgnomAD\tgnomAD\tunknown\n")
+        self.index("NRG_2_hg38+hg38_mega")
+        self.assertEqual(self.note("mega", 1, 1), "Up to 1 DNA/RNA bulge(s) available.")
+        # a genotyped dataset with no sample list: Submit refuses it, saying how to get
+        # one (a build in Settings writes it); the note is the bulge note
+        self.dataset("nolist", ["nolist.chr1.vcf.gz"], sample_list=False)
+        self.assertIn("the first one prepares", self.note("nolist"))
+        ok, msgs = self.submit("nolist")
+        self.assertFalse(ok)
+        self.assertEqual(len(msgs), 1)
+        self.assertTrue(msgs[0].startswith("No sample list for the variant dataset 'nolist'"))
 
 
 class _Form:

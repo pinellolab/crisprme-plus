@@ -39,6 +39,7 @@ from .pages_utils import (
     variant_dataset_data_type,
     variant_dataset_sample_count,
     samplesid_problem,
+    _vcf_folder_has_samples,
     build_active_annotation,
     get_pam_options,
     get_custom_VCF,
@@ -2618,6 +2619,18 @@ def _has_files(folder: str, suffixes: Tuple[str, ...]) -> bool:
         return False
 
 
+def _sites_only_refusal(genome: str, panel: str) -> Optional[str]:
+    """samplesid_problem's message for the variant dataset ``panel`` when it is sites-only
+    (its VCFs have no sample columns) and has no sample list: Submit refuses every search
+    of it, and building its index does not change that. None for any other dataset."""
+    folder = _resolve_vcf_folder(genome.replace(" ", "_"), panel)
+    why = samplesid_problem(folder, panel)
+    if why and _vcf_folder_has_samples(
+            os.path.join(current_working_directory, "VCFs", folder)) is False:
+        return why
+    return None
+
+
 # The note under the Advanced bulge caps: how many bulges this genome, PAM and variant
 # panel allow, and what a search with the bulges selected builds first, if anything.
 @app.callback(
@@ -2633,6 +2646,12 @@ def _has_files(folder: str, suffixes: Tuple[str, ...]) -> bool:
 def update_bulge_note(genome, pam, variant_choice, dna, rna) -> str:
     if not genome or not pam:
         return ""
+    # a dataset whose search Submit refuses whatever the bulges: the note says what Submit
+    # says (check_input), and offers no search of it and no build that would not help
+    for panel in _selected_panels(variant_choice):
+        why = _sites_only_refusal(genome, panel)
+        if why:
+            return why
     maxb = _bulge_cap(genome, pam, variant_choice)
     ref_capacity = reference_bulge_capacity(genome, pam)
     if maxb == 0 and ref_capacity == 0:

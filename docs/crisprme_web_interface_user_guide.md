@@ -275,7 +275,12 @@ the reference genome they are called against, then build their variant index the
 (*Add a precomputed index / build one*, with the dataset as *Variants*). The dataset
 is then offered here for that genome, with its sample list written from the VCF
 header when the VCF has sample columns (see
-[`SETTINGS_DATA_MANAGER.md`](SETTINGS_DATA_MANAGER.md)).
+[`SETTINGS_DATA_MANAGER.md`](SETTINGS_DATA_MANAGER.md)). A sites-only VCF (no sample
+columns, such as the hosted `hg38_mega` VCFs) is listed too, but **Submit** refuses a
+search of it, built here or not, and the note under the bulge options says why: a search
+reports its variants only through a per-dataset allele-frequency registry, which a build
+here does not make. To search the mega variants, download the published
+`NRG_3_hg38+hg38_mega` index instead, which ships one.
 
 > **RNA-targeting strategies:** For RNA-targeting Cas proteins, you can either
 > provide a custom transcriptome genome or use a variant-enriched genome. Be aware
