@@ -224,9 +224,57 @@ class TheVersionSweepComparesLikeWithLike(unittest.TestCase):
         sweep = next(ln for ln in (REPO / "docs" / "RELEASE_CHECKLIST.md").read_text(
             encoding="utf-8").splitlines() if ln.startswith("- [ ] **Version sweep**"))
         self.assertNotIn("`Dockerfile` (CRISPRitz ARG)", sweep)
-        self.assertIn("The `Dockerfile` carries no CRISPRme version", sweep)
+        # it pins none, but its header comment names the release (the next test)
+        self.assertNotIn("carries no CRISPRme version", sweep)
+        self.assertIn("The `Dockerfile` pins no CRISPRme version (its header comment names the "
+                      "release: bump it with the rest", sweep)
         self.assertIn("its `ARG crispritz_ref` is the CRISPRitz pin", sweep)
         self.assertIn("must equal `install_from_source.sh`'s `CRISPRITZ_REF` default", sweep)
+
+    def test_the_dockerfile_header_names_the_release_crisprme_py_is(self):
+        """The Dockerfile pins no CRISPRme version, but its header comment names the release,
+        bumped at every release since 2.7.9 (it named 2.4.0 at every tag from v2.5.0 to
+        v2.7.8). scripts/prepare_release.py bumps crisprme.py alone, so the release docs bump
+        the comment by hand, and a release that forgets it fails here."""
+        version = re.search(r'^version = "(\d+\.\d+\.\d+)"',
+                            (REPO / "crisprme.py").read_text(encoding="utf-8"), flags=re.M)
+        header = re.search(r"^# CRISPRme\+ (\d+\.\d+\.\d+) — ",
+                           (REPO / "Dockerfile").read_text(encoding="utf-8"), flags=re.M)
+        self.assertIsNotNone(version, "crisprme.py has no version line")
+        self.assertIsNotNone(header, "the Dockerfile's header comment names no release")
+        self.assertEqual(header.group(1), version.group(1),
+                         "the Dockerfile's header comment names another release than crisprme.py")
+
+    def test_the_release_docs_bump_the_header_and_nothing_else_of_the_dockerfile(self):
+        """RELEASING.md and the release skill said the Dockerfile carries no CRISPRme version
+        (the skill: 'Dockerfile -> nothing', and a bump whose diff 'must show ONLY
+        crisprme.py'), so a release that followed them left the header comment behind. Each now
+        gives the command that bumps it: run here, with X.Y.Z filled in, on a copy of the
+        Dockerfile, it changes that one line and leaves no file behind."""
+        dockerfile = (REPO / "Dockerfile").read_text(encoding="utf-8")
+        for doc in (REPO / "docs" / "RELEASING.md",
+                    REPO / ".claude" / "skills" / "release-crisprme" / "SKILL.md"):
+            text = doc.read_text(encoding="utf-8")
+            with self.subTest(doc=doc.name):
+                for wrong in ("carries no CRISPRme version", "carried no CRISPRme version",
+                              "`Dockerfile` → nothing", "must show ONLY crisprme.py\n"):
+                    self.assertFalse(wrong in text, f"{doc.name} still says {wrong!r}")
+                bump = [ln for ln in text.splitlines()
+                        if ln.startswith("sed ") and "# CRISPRme+ X.Y.Z" in ln]
+                self.assertEqual(len(bump), 1, "no one command bumps the Dockerfile's header")
+                with tempfile.TemporaryDirectory() as tmp:
+                    Path(tmp, "Dockerfile").write_text(dockerfile, encoding="utf-8")
+                    subprocess.run(["bash", "-c", bump[0].replace("X.Y.Z", "9.10.11")],
+                                   cwd=tmp, check=True)
+                    self.assertEqual(os.listdir(tmp), ["Dockerfile"])
+                    after = Path(tmp, "Dockerfile").read_text(encoding="utf-8")
+                changed = [(a, b) for a, b in zip(dockerfile.split("\n"), after.split("\n"))
+                           if a != b]
+                self.assertEqual(len(after.split("\n")), len(dockerfile.split("\n")))
+                self.assertEqual(len(changed), 1, changed)
+                self.assertRegex(changed[0][0], r"^# CRISPRme\+ \d+\.\d+\.\d+ — ")
+                self.assertEqual(changed[0][1],
+                                 re.sub(r"\d+\.\d+\.\d+", "9.10.11", changed[0][0], count=1))
 
 
 if __name__ == "__main__":

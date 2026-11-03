@@ -71,7 +71,12 @@ placeholders the release manager fills are. -->
   checklist's version sweep asked the Dockerfile's `crispritz_ref`
   (v2.9.1) to read CRISPRme's version (2.8.1), which no correct release could pass; it now asks it
   to equal `install_from_source.sh`'s `CRISPRITZ_REF` default, which
-  `PostProcess/test_install_from_source.py` checks.
+  `PostProcess/test_install_from_source.py` checks. The release docs also said the Dockerfile
+  carries no CRISPRme version, while its header comment names the release, and
+  `scripts/prepare_release.py` bumps `crisprme.py` alone: a release that followed them would have
+  left the comment at the previous version, as it read 2.4.0 at every tag from v2.5.0 to v2.7.8.
+  The sweep now asks for it, `docs/RELEASING.md` and the skill bump it by hand with a command the
+  same test runs, and the test fails while the comment names another release than `crisprme.py`.
 
 ### Notes for the merge
 

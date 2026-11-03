@@ -39,9 +39,10 @@ a Claude Code session opened at the repo root:
 2. **Invoke it:** type `/release-crisprme`, or just ask in plain language, e.g.
    *"release CRISPRme 2.1.13"*. The skill then walks the whole flow:
    - pre-flight version-consistency check across `crisprme.py`, the git tag and the
-     Bioconda recipe, plus the CRISPRitz pin in the `Dockerfile`;
+     Bioconda recipe, plus the CRISPRitz pin and the header comment in the `Dockerfile`;
    - move `CHANGELOG.md` `[Unreleased]` into the new version;
-   - bump the version everywhere (`scripts/prepare_release.py X.Y.Z`);
+   - bump the version (`scripts/prepare_release.py X.Y.Z` edits `crisprme.py`; the release
+     the `Dockerfile`'s header comment names is bumped by hand);
    - create the GitHub release/tag `vX.Y.Z` — this triggers the multi-arch Docker
      publish automatically;
    - update the Bioconda recipe (autobump PR or a manual PR) with the tarball
@@ -58,7 +59,8 @@ skill isn't available.
 
 There is one source of truth for a version — the number `X.Y.Z` — and it must be
 identical in three places: `crisprme.py`, the git tag and the Bioconda recipe. The
-`Dockerfile` carries no CRISPRme version, only the CRISPRitz pin. The Bioconda recipe
+`Dockerfile` pins no CRISPRme version, only CRISPRitz; its header comment names the release
+and is bumped with the rest. The Bioconda recipe
 additionally pins the **sha256 of the GitHub release tarball**, which is why the order of
 operations matters: you cannot compute that hash until the GitHub release (and therefore
 the tarball) exists.
@@ -97,7 +99,7 @@ typical timeline is:
 | Location | What to change |
 |---|---|
 | `crisprme.py` | `version = "X.Y.Z"` (this also sets `__version__`, surfaced by `crisprme.py --version`) |
-| `Dockerfile` | `ARG crispritz_ref=vA.B.C` — the CRISPRitz tag the image builds from. There is **no** `ARG crisprme_version`: the image is built from source (`COPY .`), so CRISPRme's own version is pinned only in `crisprme.py`. |
+| `Dockerfile` | `ARG crispritz_ref=vA.B.C` — the CRISPRitz tag the image builds from. There is **no** `ARG crisprme_version`: the image is built from source (`COPY .`), so CRISPRme's own version is pinned only in `crisprme.py`. Its header comment (`# CRISPRme+ X.Y.Z — Python 3.11 image, built FROM SOURCE.`) names the release: bump it by hand, as `prepare_release.py` leaves it. |
 | Git tag / GitHub release | tag `vX.Y.Z`, notes from the changelog |
 | `recipes/crisprme/meta.yaml` (in `bioconda/bioconda-recipes`) | `{% set version = "X.Y.Z" %}`, `source.sha256`, `build.number: 0`, and the bounded `crispritz >=A.B.C,<…` pin whenever `crispritz_ref` moves (see the top of this page) |
 
@@ -116,6 +118,7 @@ was missed), fix that first so you start from a consistent state.
 ```bash
 grep -E '^version *= *' crisprme.py
 grep -E '^ARG crispritz_ref=' Dockerfile     # the CRISPRitz pin, not CRISPRme's version
+grep -E '^# CRISPRme\+ ' Dockerfile          # the release its header comment names
 git tag --sort=-v:refname | head -1
 curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/recipes/crisprme/meta.yaml \
   | grep -E 'set version|sha256|number:'
@@ -125,11 +128,15 @@ curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/reci
 
 Use the helper script, which edits only `crisprme.py` (it looks for an
 `ARG crisprme_version` in the `Dockerfile`, finds none in the source-built image, and says
-so), is idempotent, and prints the Bioconda-recipe and changelog scaffolds for you:
+so), is idempotent, and prints the Bioconda-recipe and changelog scaffolds for you. It
+leaves the release the `Dockerfile`'s header comment names
+(`# CRISPRme+ X.Y.Z — Python 3.11 image, built FROM SOURCE.`), which pins nothing: bump that
+by hand.
 
 ```bash
 python scripts/prepare_release.py X.Y.Z --no-download
-git diff crisprme.py     # sanity-check the one-line change
+sed -i.bak -E 's/^# CRISPRme\+ [0-9]+\.[0-9]+\.[0-9]+ /# CRISPRme+ X.Y.Z /' Dockerfile && rm Dockerfile.bak
+git diff crisprme.py Dockerfile     # the version line and the header comment
 ```
 
 (The `--no-download` flag skips the sha256 fetch, which cannot succeed until the
@@ -208,11 +215,12 @@ and tests the recipe automatically. Handy PR comments: `@BiocondaBot please upda
 ### 6. Verify everything matches
 
 After the Bioconda PR merges and the package publishes (this can take an hour or
-more), confirm that `crisprme.py`, the tag and Bioconda all report `X.Y.Z`, and that the
-`Dockerfile` pins the intended CRISPRitz:
+more), confirm that `crisprme.py`, the tag and Bioconda all report `X.Y.Z`, that the
+`Dockerfile`'s header comment names it, and that the `Dockerfile` pins the intended CRISPRitz:
 
 ```bash
 grep -E '^version *= *' crisprme.py
+grep -E '^# CRISPRme\+ ' Dockerfile          # the release its header comment names
 grep -E '^ARG crispritz_ref=' Dockerfile     # the CRISPRitz pin, not CRISPRme's version
 git tag --sort=-v:refname | head -1
 conda search -c bioconda crisprme | tail -3
@@ -257,4 +265,4 @@ env is missing or broken in the shipped artifact.
 - **Bad in-repo bump:** `git checkout crisprme.py Dockerfile CHANGELOG.md`.
 - **Premature/incorrect GitHub release:** `gh release delete vX.Y.Z --repo pinellolab/crisprme-plus --cleanup-tag`, then redo.
 - **sha256 mismatch in the Bioconda PR:** GitHub occasionally regenerates archive tarballs; recompute the hash from the live tarball and update `meta.yaml`.
-- **Version lag between files:** always run the step-1 pre-flight. The `Dockerfile` has carried no CRISPRme version since the image was first built from source, so the drift to look for is between `crisprme.py`, the tag and the Bioconda recipe.
+- **Version lag between files:** always run the step-1 pre-flight. The `Dockerfile` has pinned no CRISPRme version since the image was first built from source, so the drift to look for is between `crisprme.py`, the tag, the Bioconda recipe and the release the `Dockerfile`'s header comment names (it named 2.4.0 at every tag from v2.5.0 to v2.7.8).
