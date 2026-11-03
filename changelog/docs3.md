@@ -48,13 +48,16 @@ placeholders the release manager fills are. -->
   card is corrected when the release uploads `docs/hf/crisprme-data_README.md`.
 - **`docs/DYNAMIC_PAM_INDEX_COMPAT.md` read as a description of 2.8.1.** The page, new in 2.8.1,
   is the design written before `--prune-pam` was built, and described what does not ship: a
-  CRISPRme that passes `--prune-pam` itself when the PAM is narrower than the index, a web PAM
-  picker, an `index_meta.json` sidecar on every PAM-less index, and a `pinellolab` repository for
-  PAM-less indexes. A status note under its title now says what 2.8.1 does (the flag is explicit,
-  needs `--index-path` and is command-line only; an index serves only its own PAM or, all-N, a
-  narrower one; no sidecar; `NNN_3` in `lucapinello/crisprme-data`, the 8-nt-flank indexes in
-  `lucapinello/crisprme-data-general-index`), and the sections that describe the rest are marked
-  planned. Its example of the engine's subset rule no longer has `NRG` serve `NGA`.
+  `complete-search` that adds `--prune-pam` itself when the PAM is narrower than the index, a web
+  PAM picker, an `index_meta.json` sidecar on every PAM-less index, and a `pinellolab` repository
+  for PAM-less indexes. A status note under its title now says what 2.8.1 does: the flag is
+  explicit, needs `--index-path` and is command-line only, and only `complete-test` passes it
+  itself, to search a 3′ all-N index wider than 3 nt such as the K = 8 one; an index serves only
+  its own PAM or, all-N, a narrower one; no `index_meta.json` is written or read (the PAM file
+  is recorded in a `.pam_build` by `build-index-only` and by a search that builds an index);
+  `NNN_3` is in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
+  `lucapinello/crisprme-data-general-index`. The sections that describe the rest are marked
+  planned, and its example of the engine's subset rule no longer has `NRG` serve `NGA`.
 
 ### Changed
 

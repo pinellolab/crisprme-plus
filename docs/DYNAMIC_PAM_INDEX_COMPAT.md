@@ -1,14 +1,17 @@
 # Dynamic-PAM pam-less indexes — design & backward-compatibility contract
 
 > **Status: pre-implementation design (2026-10-24), not a description of CRISPRme+ 2.8.1.**
-> What 2.8.1 ships: `--prune-pam` is explicit and needs `--index-path`; CRISPRme never passes
-> it for you. It is command-line only (the web interface never passes it) and serves a 3′ PAM
-> only. CRISPRme uses an index only if its PAM is the search PAM or all-N: an all-N flank as
-> wide as the PAM (`NNN_3` for a 3-nt PAM) serves without the flag, narrowed by the
-> post-search PAM filter; a wider flank (`NNNNNNNN_3`) serves only under `--prune-pam`; a
-> dedicated index of another PAM is refused, even one whose PAM holds the search PAM (an `NRG`
-> index does not serve an `NGG` search). No `index_meta.json` sidecar is written or read:
-> `build-index-only` writes only `.pam_build` and `.genome_source` beside an index's trees.
+> What 2.8.1 ships: `--prune-pam` is explicit and needs `--index-path`; `complete-search` never
+> adds it for you (only `complete-test` passes it itself, to search a 3′ all-N index wider than
+> 3 nt, such as the published `NNNNNNNN_3`, for NRG). It is command-line only (the web
+> interface never passes it) and serves a 3′ PAM only. CRISPRme uses an index only if its PAM
+> is the search PAM or all-N: an all-N flank as wide as the PAM (`NNN_3` for a 3-nt PAM)
+> serves without the flag, narrowed by the post-search PAM filter; a wider flank
+> (`NNNNNNNN_3`) serves only under `--prune-pam`; a dedicated index of another PAM is refused,
+> even one whose PAM holds the search PAM (an `NRG` index does not serve an `NGG` search). No
+> `index_meta.json` sidecar is written or read. The nearest record is `.pam_build`, the PAM
+> file an index was built from, which `build-index-only` writes into a reference or variant
+> index, and a search into one it builds (the published 8-nt-flank archives have none).
 > `NNN_3` is published in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
 > `lucapinello/crisprme-data-general-index`. The parts below marked *planned* are not in
 > 2.8.1. What ships is described in
@@ -62,8 +65,8 @@ and old tools lack the guard — so those go in a **SEPARATE HF repo** (proposed
 knows both; `publish-index` targets the pam-less repo only for width>3 indexes.
 
 ### Layer 2 — RUNTIME version-gate: fail-safe even if an index is hand-moved
-*Planned, not in 2.8.1 (which writes and reads no sidecar):* each pam-less index ships a sidecar
-`index_meta.json`:
+*Planned, not in 2.8.1 (which writes and reads no `index_meta.json`):* each pam-less index ships
+a sidecar `index_meta.json`:
 ```json
 { "build_pam": "NNNNNNNN", "flank_len": 8, "pam_at_start": false,
   "min_crispritz_version": "<this release>", "min_crisprme_version": "<consuming release>" }
@@ -104,7 +107,7 @@ On index selection, read the sidecar → a **PAM picker** populated with that in
 
 ## 6. NNN index publish plan (*superseded*)
 2.8.1 publishes `NNN_3` in `lucapinello/crisprme-data` and the 8-nt-flank indexes in
-`lucapinello/crisprme-data-general-index`, with no sidecar. The plan was:
+`lucapinello/crisprme-data-general-index`, with no `index_meta.json`. The plan was:
 The genome-wide NNN HGDP+1kGP index (in progress) is published to the **new pam-less HF repo**,
 flank-tagged name, with the `index_meta.json` sidecar (`build_pam`, `flank_len`, min versions) —
 **not** the legacy `lucapinello/crisprme-data` repo. So no old client ever discovers it.
