@@ -186,6 +186,43 @@ def the_cis_site(text):
         and rows[0]["Variant_rsID"] == "rs20011,rs20016")
 
 
+def without_carriers(text):
+    """The rows of an integrated results table without their Variant_samples columns, sorted:
+    the same for two runs that differ only in the carriers they name and the order of their rows."""
+    if not text:
+        return None
+    lines = text.rstrip("\n").split("\n")
+    keep = [i for i, name in enumerate(lines[0].split("\t"))
+            if not name.startswith("Variant_samples")]
+    return sorted([line.split("\t")[i] for i in keep] for line in lines[1:])
+
+
+def carriers(text):
+    """{(chromosome, start): the set of the Variant_samples of a row's three blocks} for the rows
+    of an integrated results table that hold a variant ('NA' is a reference row)."""
+    found = {}
+    lines = (text or "").rstrip("\n").split("\n")
+    head = lines[0].split("\t")
+    for line in lines[1:]:
+        row = dict(zip(head, line.split("\t")))
+        named = {v for k, v in row.items() if k.startswith("Variant_samples")}
+        if named != {"NA"}:
+            found[(row["Chromosome"], row["Start_coordinate_(highest_CFD)"])] = named
+    return found
+
+
+def cooc(work, output):
+    """The (phase, cis carriers) of the lines of a run's SNP+indel co-occurrence companions."""
+    found = set()
+    for path in glob.glob(os.path.join(work, "Results", output, "*.indel_snp_cooc.tsv")):
+        with open(path) as fh:
+            lines = fh.read().splitlines()
+        for line in lines[1:]:
+            row = dict(zip(lines[0].split("\t"), line.split("\t")))
+            found.add((row["phase"], row["cis_samples"]))
+    return found
+
+
 def build(root, seed, name, pam, bulges, variant=True):
     work = os.path.join(root, "lib", name)
     shutil.copytree(seed, work, symlinks=True)
@@ -405,6 +442,23 @@ def main(root):
     say("no genotype store: population-level, as --population-level gives it",
         rc == 0 and mode == "population-level" and identical(table(w, "o"), table(w, "p"))
         and "no genotype store" in out, out[-600:])
+    # what it names, against a full install's --population-level run: the same rows but for their
+    # carriers; a row of SNPs names none; the row of the cis site, which names the indel and the
+    # SNP, lists every carrier of the indel, S4 and S5, as no genotype says which of them has the
+    # SNP too (PUTATIVE), where a full install lists S4, whose haplotype holds both (CONFIRMED)
+    search(full, "pop", extra=("--population-level",))
+    mine, theirs = carriers(table(w, "o")), carriers(table(full, "pop"))
+    cis = ("chr3", "20000")
+    say("no genotype store: a full install's --population-level rows, no carrier on a row of SNPs, "
+        "and every carrier of the indel at the cis SNP+indel site",
+        without_carriers(table(w, "o")) is not None
+        and without_carriers(table(w, "o")) == without_carriers(table(full, "pop"))
+        and [r["Variant_rsID"] for r in rows_at(table(w, "o"), *cis)] == ["rs20011,rs20016"]
+        and mine.get(cis) == {"S4,S5"} and theirs.get(cis) == {"S4"}
+        and cooc(w, "o") == {("PUTATIVE", "NA")} and cooc(full, "pop") == {("CONFIRMED", "S4")}
+        and len(mine) > 1
+        and all(mine[k] == {""} and theirs.get(k, {""}) != {""} for k in mine if k != cis),
+        f"no store {mine} {cooc(w, 'o')}, full {theirs} {cooc(full, 'pop')}")
 
     # a sites-only panel, as mega (its registry says so): --per-sample is the run without it,
     # and the WARNING says the panel has no genotypes, not to install a store it does not have
