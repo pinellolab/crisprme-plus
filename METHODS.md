@@ -460,7 +460,10 @@ haplotype** (`indel_snp_cis.resolve_target`):
   phased indel genotype store keeps only records whose REF and ALT differ in length. With
   **no genotypes at all** (a sites-only panel such as `mega`) the row
   holds that worst case over the code's alleles, keeps the carriers the indel log lists,
-  and its co-occurrence is rung 3 above (PUTATIVE, min-AF bound);
+  and its co-occurrence is rung 3 above (PUTATIVE, min-AF bound); with no SNP genotypes
+  (no Tier-1 store and no classic dictionaries, as after
+  `download --what index --no-genotypes`) the row is that worst case too, under every
+  carrier of the indel the log lists, PUTATIVE;
 - the fake-indel window holds **one indel**, so a haplotype that carries a second indel
   inside the target does not have the window's sequence and is not listed for it, on any
   indel row (§8, residuals). That includes a second indel inserted right next to the
