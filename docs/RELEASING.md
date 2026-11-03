@@ -7,9 +7,14 @@
 >    **Python 3.11** from `pinellolab/crisprme-plus` tags since 2.7.9 (the 2.1.x line stays
 >    available as `crisprme=2.1.14`). Per release: when the CRISPRitz pin moves, bump the
 >    `crispritz` recipe first (2.9.1 for 2.8.1), then the `crisprme` recipe: version, sha256 of
->    the tag tarball, and its `crispritz >=` pin. Check the result like a user: a fresh
->    Miniforge, `conda create -n crisprme crisprme=X.Y.Z python=3.11`, then
->    `crisprme.py scorer-env create` and `scorer-env doctor`.
+>    the tag tarball, and its `crispritz` pin. Bound that pin, `crispritz >=X,<Y`: X is the
+>    CRISPRitz the release is built and validated on (the Dockerfile's `crispritz_ref`), Y the
+>    next CRISPRitz that changes the index format or the enricher. For 2.8.1 that is
+>    `crispritz >=2.9.1,<2.9.2`: 2.8.1 reads index format 1, and the CRISPRitz planned as 2.9.2
+>    writes format 2 and enriches multi-allelic sites another way. With a bare `>=` the solver
+>    installs the newest engine beside the release, an engine it was never tested on. Check the
+>    result like a user: a fresh Miniforge, `conda create -n crisprme crisprme=X.Y.Z
+>    python=3.11`, then `crisprme.py scorer-env create` and `scorer-env doctor`.
 >
 > The sections below have been corrected for this model: the image is built from source, so the
 > Dockerfile pins **CRISPRitz** (`ARG crispritz_ref`) and never CRISPRme's own version.
@@ -94,7 +99,7 @@ typical timeline is:
 | `crisprme.py` | `version = "X.Y.Z"` (this also sets `__version__`, surfaced by `crisprme.py --version`) |
 | `Dockerfile` | `ARG crispritz_ref=vA.B.C` — the CRISPRitz tag the image builds from. There is **no** `ARG crisprme_version`: the image is built from source (`COPY .`), so CRISPRme's own version is pinned only in `crisprme.py`. |
 | Git tag / GitHub release | tag `vX.Y.Z`, notes from the changelog |
-| `recipes/crisprme/meta.yaml` (in `bioconda/bioconda-recipes`) | `{% set version = "X.Y.Z" %}`, `source.sha256`, `build.number: 0` |
+| `recipes/crisprme/meta.yaml` (in `bioconda/bioconda-recipes`) | `{% set version = "X.Y.Z" %}`, `source.sha256`, `build.number: 0`, and the bounded `crispritz >=A.B.C,<…` pin whenever `crispritz_ref` moves (see the top of this page) |
 
 The Bioconda `source.url` is templated
 (`.../archive/refs/tags/v{{ version }}.tar.gz`) and must not be edited by hand —
@@ -180,7 +185,9 @@ requests automatically — often within a day of the release. Watch for it:
 gh pr list --repo bioconda/bioconda-recipes --search "crisprme in:title" --state all -L5
 ```
 
-Verify the auto-PR carries the correct version, sha256, and `build.number: 0`,
+Verify the auto-PR carries the correct version, sha256, and `build.number: 0`, and
+that its `crispritz` pin is the bounded one this release needs (the bot only moves the
+version and the hash, so a release that moves `crispritz_ref` corrects the pin by hand),
 wait for CI/lint to go green, and once it is approved, comment
 `@BiocondaBot please merge`. To ask the bot to scan immediately rather than wait,
 comment `@BiocondaBot autobump crisprme` on a recipe PR/issue.
@@ -188,7 +195,8 @@ comment `@BiocondaBot autobump crisprme` on a recipe PR/issue.
 **Manual PR (when you don't want to wait, or the auto-PR needs correcting).**
 Fork `bioconda/bioconda-recipes`, branch from an up-to-date `master`, edit
 `recipes/crisprme/meta.yaml` (bump `version`, set the new `sha256`, reset
-`build.number` to `0`), and open a PR titled `Update crisprme to X.Y.Z`. CI builds
+`build.number` to `0`, and bound the `crispritz` pin as above), and open a PR titled
+`Update crisprme to X.Y.Z`. CI builds
 and tests the recipe automatically. Handy PR comments: `@BiocondaBot please update`
 (sync your branch), `@BiocondaBot please add label` (request review), and
 `@BiocondaBot please merge` (after green CI + approval).

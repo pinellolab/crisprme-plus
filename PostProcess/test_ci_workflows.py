@@ -105,7 +105,7 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
         for path in ("pages/**", "scripts/**", "docs/**", "README.md", "METHODS.md",
                      "test/benchmark/**", "PAMs/**", "CHANGELOG.md", "changelog/**",
                      ".github/workflows/**", "assets/**", "test/data/**", "**.py", "**.sh",
-                     "**.yml", "**.yaml", "install/**"):
+                     "**.yml", "**.yaml", "install/**", "Dockerfile"):
             with self.subTest(path=path):
                 self.assertIn(path, paths)
 
@@ -374,6 +374,75 @@ class TheReleaseGateLeavesNothingSkipped(unittest.TestCase):
 
     def test_it_takes_the_commit_the_image_provisions(self):
         self.assertIn("print(scorer_env.CBULGE_PIN)", self.checklist())
+
+    # The engine checks (T-42): validate-benchmarks runs them with the branch overlaid on the
+    # published :latest, so for 2.8.1 on CRISPRitz 2.9.0 while the release ships 2.9.1, and
+    # index_flex then took its refusal branch for both K=8 cells and still printed INDEX FLEX
+    # PASS. Nothing in the gate ran them on the release's own engine.
+    ENGINE_CHECKS = ("test/index_flex/check_index_flex.py", "test/indel_snp_oracle/run_oracle.sh",
+                     "scripts/check_alt_pam.py")
+
+    def gate_blocks(self):
+        """The local gate's two command blocks: Docker, then Apptainer."""
+        text = self.checklist()
+        gate = text[text.index("#### The local gate"):text.index("### C. Release mechanics")]
+        return re.findall(r"```bash\n(.*?)```", gate, re.S)
+
+    def test_it_runs_the_engine_checks_on_the_release_image_and_the_sif(self):
+        docker, apptainer = self.gate_blocks()
+        for path in self.ENGINE_CHECKS:
+            with self.subTest(check=path):
+                self.assertTrue((REPO / path).is_file())
+        self.assertIn('docker run --rm "$IMG" python3 /opt/conda/opt/crisprme/'
+                      'test/index_flex/check_index_flex.py /tmp/index_flex', docker)
+        self.assertIn('"$IMG" bash /opt/conda/opt/crisprme/test/indel_snp_oracle/run_oracle.sh '
+                      '/gate/oracle', docker)
+        self.assertIn('python3 "$SRC/scripts/check_alt_pam.py" '
+                      '"$GATE"/heavy/Results/crisprme-test-out_*/*integrated_results.tsv', docker)
+        self.assertIn('sb /usr/local/bin/_entrypoint.sh python3 /opt/conda/opt/crisprme/'
+                      'test/index_flex/check_index_flex.py "$PWD/gate/index_flex"', apptainer)
+        self.assertIn('sb /usr/local/bin/_entrypoint.sh bash /opt/conda/opt/crisprme/'
+                      'test/indel_snp_oracle/run_oracle.sh "$PWD/gate/oracle"', apptainer)
+        self.assertIn('/opt/conda/opt/crisprme/scripts/check_alt_pam.py '
+                      '"$PWD"/gate/heavy/Results/crisprme-test-out_*/*integrated_results.tsv',
+                      apptainer)
+
+    def test_its_engine_greps_are_lines_the_checks_print(self):
+        flex = read(REPO / "test/index_flex/check_index_flex.py")
+        oracle = read(REPO / "test/indel_snp_oracle/run_oracle.sh")
+        self.assertIn("{'PASS' if ok else 'FAIL'}  {cell}", flex)   # say(): "PASS  <cell>"
+        for block in self.gate_blocks():
+            greps = re.findall(r'grep -q "\^([^"]+)" \S*(?:flex|oracle)\.log', block)
+            self.assertEqual(len(greps), 4, greps)
+            for pattern in greps:
+                with self.subTest(grep=pattern):
+                    if pattern.startswith("PASS  "):
+                        self.assertRegex(flex, r'say\(\s*"' + re.escape(pattern[len("PASS  "):]))
+                    elif pattern == "INDEX FLEX PASS":
+                        self.assertIn('"INDEX FLEX PASS"', flex)
+                    else:
+                        self.assertEqual(pattern, "ORACLE PASS")
+                        self.assertIn('echo "ORACLE PASS"', oracle)
+
+    def test_its_index_flex_grep_fails_an_engine_without_prune_pam(self):
+        # that engine's run passes every cell, the two K=8 ones by refusing, saying so
+        flex = read(REPO / "test/index_flex/check_index_flex.py")
+        refused = re.findall(r'say\(\s*"((?:K=8|complete-test on K=8)[^"]*engine without[^"]*)"',
+                             flex)
+        self.assertEqual(len(refused), 2, refused)
+        line = next(ln for ln in self.gate_blocks()[0].splitlines()
+                    if ln.startswith('grep -q "^INDEX FLEX PASS"'))
+        log_old = "".join(f"PASS  {cell}\n" for cell in refused) + "INDEX FLEX PASS\n"
+        log_new = ("PASS  K=8 with --prune-pam: same results as a dedicated index\n"
+                   "PASS  complete-test on K=8: same results as on NRG, and no PAM file left\n"
+                   "INDEX FLEX PASS\n")
+        for log, said in ((log_old, "GATE_FAILED"), (log_new, ""),
+                          (log_new.replace("INDEX FLEX PASS", "1 cell(s) failed"), "GATE_FAILED")):
+            with self.subTest(log=log), tempfile.TemporaryDirectory() as d:
+                (Path(d) / "flex.log").write_text(log)
+                out = subprocess.run(["bash", "-c", line], env={"GATE": d, "PATH": os.environ["PATH"]},
+                                     capture_output=True, text=True).stdout
+                self.assertEqual(out.strip(), said)
 
     def test_it_names_every_host_its_commands_reach(self):
         # a maintainer who opens only the hosts it names must be able to pass it: without

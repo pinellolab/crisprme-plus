@@ -207,5 +207,27 @@ class TheDocsNameTheCRISPRitzThisScriptBuilds(unittest.TestCase):
                                         "that is: " + "; ".join(offenders))
 
 
+class TheVersionSweepComparesLikeWithLike(unittest.TestCase):
+    """docs/RELEASE_CHECKLIST.md's version sweep listed the Dockerfile's CRISPRitz ARG among
+    the values that must read CRISPRme's own X.Y.Z: v2.9.1 against 2.8.1, a rule no correct
+    release could pass, and one a maintainer could 'fix' by building CRISPRitz v2.8.1, a tag
+    that exists. The ARG is the CRISPRitz pin: the tag this script builds by default."""
+
+    def test_the_dockerfile_builds_the_crispritz_this_script_builds(self):
+        default = re.search(r'^CRISPRITZ_REF="\$\{CRISPRITZ_REF:-(v\d+\.\d+\.\d+)\}"',
+                            SCRIPT.read_text(), flags=re.M).group(1)
+        ref = re.search(r"^ARG crispritz_ref=(v\d+\.\d+\.\d+)\s*$",
+                        (REPO / "Dockerfile").read_text(), flags=re.M).group(1)
+        self.assertEqual(ref, default)
+
+    def test_the_sweep_asks_x_y_z_of_crisprme_and_the_crispritz_pin_of_the_dockerfile(self):
+        sweep = next(ln for ln in (REPO / "docs" / "RELEASE_CHECKLIST.md").read_text(
+            encoding="utf-8").splitlines() if ln.startswith("- [ ] **Version sweep**"))
+        self.assertNotIn("`Dockerfile` (CRISPRitz ARG)", sweep)
+        self.assertIn("The `Dockerfile` carries no CRISPRme version", sweep)
+        self.assertIn("its `ARG crispritz_ref` is the CRISPRitz pin", sweep)
+        self.assertIn("must equal `install_from_source.sh`'s `CRISPRITZ_REF` default", sweep)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

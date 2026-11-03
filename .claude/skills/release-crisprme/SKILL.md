@@ -10,14 +10,16 @@ Cut a CRISPRme release and keep three artifacts in sync:
 ```
 git tag vX.Y.Z ──▶ GitHub release tarball ──▶ Bioconda meta.yaml (sha256 of that tarball)
         │                                              │
-        └── version pinned in crisprme.py + Dockerfile ┘
+        └── version pinned in crisprme.py ─────────────┘
 ```
 
 Version-sync points (ALL must equal the same `X.Y.Z`):
 - `crisprme.py` → `version = "X.Y.Z"` (also sets `__version__`)
 - `Dockerfile` → nothing: there is NO `ARG crisprme_version`. The image is built FROM SOURCE
   (`COPY . ${PREFIX}/opt/crisprme/`), so the only pin is `crisprme.py`. The Dockerfile does carry
-  `ARG crispritz_ref=vX.Y.Z`, which a release bumps when CRISPRitz moves.
+  `ARG crispritz_ref=vA.B.C`, the CRISPRitz pin and never CRISPRme's version, which a release bumps
+  when CRISPRitz moves; it equals `install_from_source.sh`'s `CRISPRITZ_REF` default and the lower
+  bound of the recipe's bounded `crispritz >=A.B.C,<…` pin (`docs/RELEASING.md`).
 - git tag / GitHub release → `vX.Y.Z`
 - Bioconda `recipes/crisprme/meta.yaml` → `{% set version = "X.Y.Z" %}` + fresh `sha256` + `build.number: 0`
 
@@ -40,19 +42,19 @@ echo "latest release: $(gh release list --repo pinellolab/crisprme-plus -L1)"
 curl -sL https://raw.githubusercontent.com/bioconda/bioconda-recipes/master/recipes/crisprme/meta.yaml | grep -E 'set version|sha256|number:'
 ```
 
-Expected before a release: `crisprme.py`, `Dockerfile`, latest tag, and the recipe all show the **previous** version, consistent with each other. If they disagree (e.g. Dockerfile lags crisprme.py), fix the lag first. **Do not proceed with inconsistent state.**
+Expected before a release: `crisprme.py`, the latest tag, and the recipe all show the **previous** version, consistent with each other, and the Dockerfile's `crispritz_ref` (a CRISPRitz version, never CRISPRme's) equals `install_from_source.sh`'s `CRISPRITZ_REF` default. If they disagree, fix that first. **Do not proceed with inconsistent state.**
 
 ## Step 1 — Bump in-repo version pins (helper script)
 
-The helper edits ONLY `crisprme.py` and `Dockerfile`, is idempotent, and prints the recipe + changelog scaffolds. The sha256 fetch only works AFTER the tag exists, so run it now with `--no-download`, then again after Step 3 to get the hash.
+The helper edits ONLY `crisprme.py` (it finds no `ARG crisprme_version` in the source-built `Dockerfile` and says so), is idempotent, and prints the recipe + changelog scaffolds. The sha256 fetch only works AFTER the tag exists, so run it now with `--no-download`, then again after Step 3 to get the hash.
 
 ```bash
 python scripts/prepare_release.py X.Y.Z --no-download
-git --no-pager diff --stat        # must show ONLY crisprme.py + Dockerfile
-git --no-pager diff crisprme.py Dockerfile
+git --no-pager diff --stat        # must show ONLY crisprme.py
+git --no-pager diff crisprme.py
 ```
 
-Rollback if wrong: `git checkout crisprme.py Dockerfile`.
+Rollback if wrong: `git checkout crisprme.py`.
 
 ## Step 2 — Update CHANGELOG.md
 
@@ -117,7 +119,7 @@ Bioconda runs an autobump bot that periodically scans GitHub releases and opens
 gh pr list --repo bioconda/bioconda-recipes --search "crisprme in:title" --state all -L 5
 ```
 
-If a PR exists, review that it has the right version + sha256 + `build.number: 0`, wait for CI/lint (green), then a Bioconda member or you (once approved) comment on the PR:
+If a PR exists, review that it has the right version + sha256 + `build.number: 0` and the bounded `crispritz` pin this release needs (the bot moves only the version and the hash), wait for CI/lint (green), then a Bioconda member or you (once approved) comment on the PR:
 
 ```
 @BiocondaBot please merge
@@ -143,6 +145,7 @@ Edit `recipes/crisprme/meta.yaml`:
 - `{% set version = "X.Y.Z" %}`  ← bump
 - `source.sha256:` ← the hash from above
 - `build.number: 0`  ← RESET to 0 (only INCREMENT, keeping version, for a same-version rebuild)
+- `crispritz >=A.B.C,<…`  ← keep it BOUNDED below the next CRISPRitz that changes the index format or the enricher (`>=2.9.1,<2.9.2` for 2.8.1; `docs/RELEASING.md`), and move it when `crispritz_ref` moves
 - Do NOT edit `source.url` — it uses `{{ version }}` and resolves automatically.
 
 ```bash
@@ -180,7 +183,7 @@ docker build -t crisprme:X.Y.Z . && \
   docker run --rm crisprme:X.Y.Z crisprme.py --version   # expect vX.Y.Z
 ```
 
-All four (crisprme.py, Dockerfile ARG, git tag, bioconda version) must read `X.Y.Z`. Done.
+crisprme.py, the git tag and the bioconda version must read `X.Y.Z`; the Dockerfile's `crispritz_ref` reads the CRISPRitz pin (`vA.B.C`). Done.
 
 ---
 
