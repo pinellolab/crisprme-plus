@@ -293,5 +293,86 @@ class TestReadJobInfoQueued(unittest.TestCase):
         self.assertIsNone(self.read_job_info("/no/such/log.txt", "new_job"))
 
 
+class _Tag:
+    """Stands in for a dash html component: keeps its children and keywords."""
+
+    def __init__(self, children=None, **kwargs):
+        self.children = children
+        self.kwargs = kwargs
+
+
+class _Html:
+    A = Td = Th = Tr = Thead = Tbody = Table = Div = _Tag
+
+
+def _load_history_table():
+    """construct_history_summary and history_table_body_, with what they call, from
+    pages/history_page.py, the html components replaced by _Tag (no Dash here)."""
+    src = open(_HISTORY_PAGE).read()
+    ns = {
+        "os": os, "sys": __import__("sys"), "pd": pd, "datetime": datetime, "Dict": Dict,
+        "List": __import__("typing").List, "Optional": Optional,
+        "Tuple": __import__("typing").Tuple, "html": _Html, "URL": "",
+        "PARAMS_FILE": ".Params.txt", "GUIDES_FILE": ".guides.txt", "LOG_FILE": "log.txt",
+        "RESULTS_DIR": "Results",
+    }
+    names = set(_NAMES) | {"read_params", "process_genome", "construct_history_summary",
+                           "history_table_body_"}
+    found = set()
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.FunctionDef) and node.name in names:
+            exec(ast.get_source_segment(src, node), ns)  # noqa: S102 - trusted own source
+            found.add(node.name)
+        elif isinstance(node, ast.Assign) and any(
+                getattr(t, "id", None) == "SUMMARYTABCOLS" for t in node.targets):
+            exec(ast.get_source_segment(src, node), ns)  # noqa: S102
+            found.add("SUMMARYTABCOLS")
+    missing = (names | {"SUMMARYTABCOLS"}) - found
+    if missing:
+        raise AssertionError(f"Not found in pages/history_page.py: {sorted(missing)}")
+    return ns
+
+
+class TestHistoryTableNewestFirst(unittest.TestCase):
+    """The History table lists the jobs newest first. construct_history_summary sorted
+    them by Start but kept the labels the rows had before the sort, and
+    history_table_body_ reads row i by its label: the table showed the jobs in the order
+    of the Results/ folder listing (since upstream ab6cae8, 2025; v2.8.0 too)."""
+
+    def test_rows_render_newest_first_with_their_own_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ns = _load_history_table()
+            ns["current_working_directory"] = tmp
+            starts = {  # the folder listing order below is neither this one nor its reverse
+                "job_mid": "Tue Nov 3 09:52:45 UTC 2026",
+                "job_new": "Tue Nov 3 09:53:59 UTC 2026",
+                "job_old": "Tue Nov 3 09:49:01 UTC 2026",
+                "job_newer": "Tue Nov 3 09:53:10 UTC 2026",
+            }
+            for jobid, start in starts.items():
+                job_dir = os.path.join(tmp, "Results", jobid)
+                os.makedirs(job_dir)
+                with open(os.path.join(job_dir, ".Params.txt"), "w") as f:
+                    f.write("Genome_selected\thg38\nGenome_idx\tNRG_2_hg38\nPam\tNRG\n"
+                            "Mismatches\t4\nDNA\t1\nRNA\t1\nMax_total_edits\t6\n")
+                with open(os.path.join(job_dir, "log.txt"), "w") as f:
+                    f.write(f"Job\tStart\t{start}\n")
+                with open(os.path.join(job_dir, ".guides.txt"), "w") as f:
+                    f.write("CTAACAGTTGCTTTTATCACNNN\n")
+            summary = ns["construct_history_summary"](list(starts))
+            rows = ns["history_table_body_"](summary, 1, 1000000, summary.shape[0])
+            shown = []
+            for row in rows:
+                link = row.children[0].children  # the Job cell's link
+                start = row.children[-1].children  # the Start cell
+                self.assertEqual(link.kwargs["href"], f"load?job={link.children}")
+                shown.append((link.children, start))
+            self.assertEqual([job for job, _ in shown],
+                             ["job_new", "job_newer", "job_mid", "job_old"])
+            # each row's Start is its own job's
+            for job, start in shown:
+                self.assertEqual(start, pd.to_datetime(starts[job], utc=True))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -445,7 +445,10 @@ def construct_history_summary(results: List[str]) -> pd.DataFrame:
     summary[SUMMARYTABCOLS[9]] = pd.to_datetime(
         summary[SUMMARYTABCOLS[9]], format="mixed", utc=True
     )
-    summary = summary.sort_values([SUMMARYTABCOLS[9]], ascending=False)
+    # newest first, numbered again: history_table_body_ reads row i by its label, so
+    # with the labels the rows had before the sort the table showed the jobs in the
+    # order of the Results/ folder listing
+    summary = summary.sort_values([SUMMARYTABCOLS[9]], ascending=False).reset_index(drop=True)
     return summary
 
 
