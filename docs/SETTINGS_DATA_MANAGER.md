@@ -47,8 +47,8 @@ Type an assembly name and pick a source:
   sequences is split into one file per sequence, and a FASTA of one sequence is named
   after it (`hg38_chr22.fa` holding `>chr22` goes in as `chr22.fa`: a search takes each
   file for the sequence it is named after). Each header is written as `>id`, with no
-  description, and every line with no carriage return (one that only ends a file, which
-  costs no result, may stay): an NCBI, GENCODE or Ensembl FASTA
+  description, and every line with no carriage return, the last one too: an NCBI, GENCODE
+  or Ensembl FASTA
   (`>NC_000913.3 Escherichia coli ...`, `>chr1 1`) goes in as `>NC_000913.3`, `>chr1`. An
   id the pipeline cannot take (one that holds `|`, `;`, `'`, `"`, `$`, `(`, `)`, `&`, `<`,
   `>`, a backquote or `#`, as `>gi|49175990|ref|NC_000913.2|` does, or that starts with `-`
@@ -100,11 +100,12 @@ Bulge-enabled searches need a genome **index**.
   `>chr22`), whose off-targets every search would find and then drop: rename it after
   its sequence (`python PostProcess/genome_layout.py --split <genome folder>` renames
   them all) and build again. It stops as well for a header that is more than `>id`, or
-  lines that end in a carriage return anywhere in a file with more sequence after them, in a
-  folder put there by hand or installed before 2.8.1 (a search stops too, for a header, or
-  carriage returns in a file's first two lines): every search would lose results, often all
-  of them. A carriage return that only ends a file (on its last line, or after it) costs no
-  result, and goes through. The
+  lines that end in a carriage return anywhere in a file, in a folder put there by hand or
+  installed before 2.8.1 (a search stops too, for a header, or carriage returns in a file's
+  first two lines): every search would lose results, often all of them. One that only
+  ends a file (on its last line, or after it) is no exception: with a PAM site in the last
+  bases of a sequence, the build warned, and a search of the index, or of a variant index
+  built on the genome, could crash or report other rows. The
   same command writes them as `>id`; then remove each index built from the folder as it
   was. It stops as well, and so does a search, for a sequence id that holds `*`, `?` or
   `[` and, read as a shell pattern, matches the name of another sequence of the folder

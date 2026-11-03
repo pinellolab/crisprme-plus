@@ -1733,10 +1733,14 @@ and the `release-crisprme` skill.
   `build-index-only`, which reads the whole genome anyway, in the whole file: one whose first 100
   lines end in LF and the rest in CRLF built at exit status 0, with 402 KB of warnings on stderr,
   and every search of that index found nothing (a search that built its own failed, on those
-  warnings); its build is refused now. A CR counts only with more sequence after it: one that only
-  ends a file, on its last line or after its last LF, built with an empty stderr and searched as
-  the file does without it (13 rows, the plain genome's table): both checks let it through, and an
-  upload, a download or `--split` may leave it in place. Such an index is refused as well, where its
+  warnings); its build is refused now. So is a CR that only ends a file, on its last line or after
+  its last LF: the index build takes a CR on a line that ends in LF for a base, and the variant
+  enricher keeps every CR, so with a PAM in the last bases of a sequence the build wrote engine
+  warnings on stderr at exit status 0 (`The character () of the PAM is not part of the IUPAC
+  nucleotide nomenclature`), and a search of that index failed (`searchTST (index search) failed
+  (signal SIGSEGV)`) or reported other rows than the file with no CR (a variant search, from a lone
+  CR after the last LF that the reference build does not read: 19 rows for 18); an upload, a
+  download and `--split` write such a file with no CR. Such an index is refused as well, where its
   `.bin` names show it: it holds the old names once the FASTA is written as it should be, and
   every search of it went on losing results, and a build took it as present. An index built from a
   FASTA with a clean header line and CRLF after it has `.bin` names that do not show it, so it is

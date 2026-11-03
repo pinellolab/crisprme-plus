@@ -813,7 +813,12 @@ class TestGenomeTarUpload(unittest.TestCase):
                 ("gencode.fa.gz", gzip.compress(b">chr1 1\nACGT\n>chr2 2\nGG\n"),
                  {"chr1.fa": b">chr1\nACGT\n", "chr2.fa": b">chr2\nGG\n"}),
                 ("chr1.fa", b">chr1 1\nACGT\n", {"chr1.fa": b">chr1\nACGT\n"}),
-                ("chr1.fa", b">chr1\r\nACGT\r\nAC\r\n", {"chr1.fa": b">chr1\nACGT\nAC\n"})):
+                ("chr1.fa", b">chr1\r\nACGT\r\nAC\r\n", {"chr1.fa": b">chr1\nACGT\nAC\n"}),
+                # a CR that only ends the file: a build reads it, or a variant build does
+                # (integration round 2 review, F1)
+                ("chr1.fa", b">chr1\nACGT\nAC\r\n", {"chr1.fa": b">chr1\nACGT\nAC\n"}),
+                ("chr1.fa", b">chr1\nACGT\nAC\n\r", {"chr1.fa": b">chr1\nACGT\nAC\n"}),
+                ("chr1.fa", b">chr1\nACGT\nAC\r\n\r\n", {"chr1.fa": b">chr1\nACGT\nAC\n\n"})):
             with self.subTest(name, data=data):
                 root, cwd, _outside, ns = self.sandbox()
                 part = self.plain_upload(cwd, name, data)

@@ -173,40 +173,60 @@ class AGenomeFolderItCannotIndexIsRefused(bio._Fixture):
                          ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
 
     def test_fasta_whose_only_cr_ends_the_file(self):
-        # a CR that only ends a file -- the CRLF of its last line, a lone CR after its last
-        # LF, the CRLF of the one line of sequence of a file of two -- built with an empty
-        # stderr and searched as the file does without it before the whole-file check, which
-        # refused it (finB round 4 review): it is let through, and a CR with more sequence
-        # after it is still refused
+        # a CR that only ends a file -- the CRLF of its last line, CRs after its last LF, the
+        # CRLF of the one line of sequence of a file of two. The index build takes a CR on a
+        # line that ends in LF for a base, and the variant enricher keeps every CR, so with a
+        # PAM in the last bases of the sequence the build wrote warnings on stderr at exit
+        # status 0, and a search of the index crashed (SIGSEGV) or reported other rows,
+        # through the real engine (integration round 2 review, F1). Each is refused, with
+        # the --split command, as a CR with more sequence after it is; written with no CR,
+        # the folder builds
         lines = [">chr1"] + [bio.GENOME["chr1"]] * 150
         plain = "".join(line + "\n" for line in lines)
         one_line = ">chr1\n" + bio.GENOME["chr1"] * 150 + "\n"
-        for name, text in (("last line in CRLF", plain[:-1] + "\r\n"),
-                           ("a lone CR after the last LF", plain + "\r"),
-                           ("CRLF and an empty line in CRLF at the end", plain[:-1] + "\r\n\r\n"),
-                           ("one line of sequence, in CRLF", one_line[:-1] + "\r\n")):
-            with self.subTest(name):
-                self.fresh()
-                with open(self.genome("chr1.fa"), "wb") as fh:
-                    fh.write(text.encode())
-                rc, out, err = self.run_bio(vcf=False)
-                self.assertEqual((rc, err), (0, ""), out)
-                self.assertNotIn("its lines end in CR", out)
-                self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF))
-                                        if f.endswith(".bin")),
-                                 ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
         before_last = "".join(line + ("\r\n" if n == len(lines) - 2 else "\n")
                               for n, line in enumerate(lines))
-        for name, text in (("CRLF on the line before the last", before_last),
+        for name, text in (("last line in CRLF", plain[:-1] + "\r\n"),
+                           ("a lone CR after the last LF", plain + "\r"),
+                           ("three CRs after the last LF", plain + "\r\r\r"),
+                           ("CRLF and an empty line in CRLF at the end", plain[:-1] + "\r\n\r\n"),
+                           ("two CRs and an LF at the end", plain[:-1] + "\r\r\n"),
+                           ("an empty line in CRLF at the end", plain + "\r\n"),
+                           ("one line of sequence, in CRLF", one_line[:-1] + "\r\n"),
+                           ("CRLF on the line before the last", before_last),
                            ("an empty line in CRLF, then more sequence",
                             plain + "\r\n" + bio.GENOME["chr1"] + "\n")):
             with self.subTest(name):
                 self.fresh()
                 with open(self.genome("chr1.fa"), "wb") as fh:
                     fh.write(text.encode())
-                self.assertEqual(text.count("\r"), 1)
                 rc, out, err = self.run_bio(vcf=False)
-                self.assert_refused(rc, out, err, "Error: chr1.fa: its lines end in CR.")
+                self.assert_refused(rc, out, err, "Error: chr1.fa: its lines end in CR. A header "
+                                    "must be >id and nothing else, on lines that end in LF",
+                                    f"python PostProcess/genome_layout.py --split {self.genome()}\n")
+                done = subprocess.run([sys.executable, LAYOUT, "--split", self.genome()],
+                                      capture_output=True, text=True)
+                self.assertEqual((done.returncode, done.stderr), (0, ""))
+                self.assertIn("Wrote chr1.fa's header as >id and its lines with no CR",
+                              done.stdout)
+                with open(self.genome("chr1.fa"), "rb") as fh:
+                    self.assertEqual(fh.read(), text.replace("\r", "").encode())
+                rc, out, err = self.run_bio(vcf=False)
+                self.assertEqual((rc, err), (0, ""), out)
+                self.assertEqual(sorted(f for f in os.listdir(self.lib(bio.REF))
+                                        if f.endswith(".bin")),
+                                 ["NRG_chr1_1.bin", "NRG_chr2_1.bin"])
+        # a search's check reads two lines a file: the CR of the one line of sequence it
+        # refuses, before the engine runs
+        self.fresh()
+        with open(self.genome("chr1.fa"), "wb") as fh:
+            fh.write((one_line[:-1] + "\r\n").encode())
+        rc, out, err = self.run_search()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("[ERROR] chr1.fa: its lines end in CR", err)
+        self.assertIn(f"python PostProcess/genome_layout.py --split {self.genome()}", err)
+        self.assertNotIn("Launching job ", out)
+        self.assertEqual(self.calls(), [])
 
     def test_fasta_id_the_pipeline_cannot_take(self):
         with open(self.genome("chr1.fa")) as fh:
