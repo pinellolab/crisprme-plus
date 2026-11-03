@@ -269,7 +269,7 @@ and the `release-crisprme` skill.
   measure it). `web-e2e.yml` gets a step that runs, in the image, the tests that skip in the light
   job for want of BEDOPS, minimap2, impg or Dash: `test_assembly_annotate`, which no workflow named,
   the impg truth tests, the flag-gate behaviour tests, the `post_process.sh` test, whose own step in
-  the light job tested nothing, and `test_index_resolution` (368 tests, about 100 s). It fails on any
+  the light job tested nothing, and `test_index_resolution` (440 tests, about 100 s). It fails on any
   skip but the two the image cannot help. `validate-benchmarks.yml`'s smoke step runs the real
   Hugging Face download test, which no job ran. The path filters of `unit-tests` and `web-e2e` now
   start, on a change to any file one of their tests reads, a job that runs that test, as found by
