@@ -101,7 +101,7 @@ irm https://pinellolab.github.io/crisprme-plus/install.ps1 | iex
 Then open **CRISPRme** (Applications on macOS; Desktop / Start Menu on Windows) — a
 small window with three buttons: **Start**, **Update**, **Stop**. Click **Start**: the
 first time it downloads the reference + variant data automatically (~45 GB download, once;
-~85 GB on disk once installed — keep ~100 GB free; a reference-only setup is far smaller, ~25 GB), then
+~98 GB on disk once installed — keep ~150 GB free; a reference-only setup is far smaller, ~25 GB), then
 opens the web interface at http://localhost:8080; every Start after that is instant.
 (Memory: the **whole-genome *variant-aware* search** needs **~64 GB of RAM** — set that
 under Docker Desktop → Settings → Resources → Memory. **On Windows with the WSL 2 backend
@@ -344,7 +344,7 @@ Memory scales with the search — pick your tier (measured figures):
 | Search | RAM | Disk |
 |---|---|---|
 | **Reference-only / single-chromosome** (toy or reference-genome runs) | **8–16 GB** | ~22 GB (reference-only install) |
-| **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`NRG_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~85 GB (full variant-aware install) |
+| **Whole-genome, variant-aware** (e.g. HGDP + 1000 Genomes (`NRG_3_hg38+hg38_HGDP1kGP`); the web/Quickstart default) | **64 GB minimum, ~80 GB for high `--max-total-edits`** | ~98 GB (full variant-aware install; keep ~150 GB free) |
 
 The variant-aware genome-wide search is the memory-heavy one: the CRISPRitz search
 process alone peaks around **68–75 GB** loading and traversing the variant index, so

@@ -40,21 +40,22 @@ fi
 say "${GRN}Docker found.${NC}"
 
 # ---- 1b. Pre-pull the engine image (best-effort, visible progress) --------
-# Front-load the ~800 MB image now — with progress here in the terminal — so the
+# Front-load the engine image now (a ~5 GB download on Intel/AMD, ~1.8 GB on Apple
+# Silicon; ~7 GB+ once unpacked) — with progress here in the terminal — so the
 # app's first Start (which probes a bind mount using this image) doesn't appear to
 # hang while it pulls. Skipped silently if the daemon isn't up yet; the app pulls
 # it on demand in that case.
 if docker info >/dev/null 2>&1; then
-  say "Fetching the CRISPRme engine image (~800 MB, one time)…"
+  say "Fetching the CRISPRme engine image (one time; ~5 GB download, ~1.8 GB on Apple Silicon)…"
   docker pull "$IMAGE" || true
 fi
 
 # ---- 2. Config dir --------------------------------------------------------
-# The app stores its data (~45 GB) in a folder the user picks on first run and
-# which is remembered in ${DATA_DIR}/.data_location (so a low-space home disk can
-# send the data to an external/other disk). ${DATA_DIR} itself only holds that
-# tiny pointer file — the big data lives wherever the user chooses. The app runs
-# the container with `docker run` (no compose file needed).
+# The app stores its data (a ~45 GB download, ~98 GB once installed) in a folder the user
+# picks on first run and which is remembered in ${DATA_DIR}/.data_location (so a
+# low-space home disk can send the data to an external/other disk). ${DATA_DIR} itself
+# only holds that tiny pointer file — the big data lives wherever the user chooses. The
+# app runs the container with `docker run` (no compose file needed).
 mkdir -p "${DATA_DIR}"
 say "${GRN}Config folder ready:${NC} ${DATA_DIR}  (data location chosen on first Start)"
 
@@ -66,8 +67,9 @@ if [ "$OS" = "Darwin" ]; then
   SRC="$(mktemp -t crisprme_app).applescript"
   cat > "$SRC" <<'OSA'
 -- CRISPRme+ launcher. Three actions: Start / Update / Stop.
--- Data (~45 GB) lives in a user-chosen folder, remembered across launches in
--- ~/CRISPRme/.data_location so a low-space home disk can point elsewhere.
+-- Data (a ~45 GB download, ~98 GB once installed) lives in a user-chosen folder,
+-- remembered across launches in ~/CRISPRme/.data_location so a low-space home disk
+-- can point elsewhere.
 property img : "pinellolab/crisprme:latest"
 property configDir : ""
 property dataDir : ""
@@ -134,13 +136,13 @@ on setDataDir(p)
   do shell script "mkdir -p " & quoted form of configDir & "; printf '%s' " & quoted form of p & " > " & quoted form of (configDir & "/.data_location")
 end setDataDir
 
--- first run: let the user choose where the ~45 GB lives (e.g. a big external
+-- first run: let the user choose where the data lives (e.g. a big external
 -- disk), then remember it. Returns the chosen crisprme-data path.
 on pickDataDir()
   set defaultDir to configDir & "/crisprme-data"
-  set choice to button returned of (display dialog "Where should CRISPRme store its data? (~45 GB, downloaded once.)" & return & return & "Default (your home folder):" & return & defaultDir & return & return & "If that disk is low on space, choose another disk or folder." buttons {"Choose a folder…", "Use default"} default button "Use default" with title "CRISPRme+ — data location")
+  set choice to button returned of (display dialog "Where should CRISPRme store its data? (A ~45 GB download, ~98 GB once installed: pick a disk with ~150 GB free.)" & return & return & "Default (your home folder):" & return & defaultDir & return & return & "If that disk is low on space, choose another disk or folder." buttons {"Choose a folder…", "Use default"} default button "Use default" with title "CRISPRme+ — data location")
   if choice is "Choose a folder…" then
-    set f to (choose folder with prompt "Select a folder where CRISPRme will store ~45 GB of data:")
+    set f to (choose folder with prompt "Select a folder for the CRISPRme data (~98 GB once installed; keep ~150 GB free):")
     set base to POSIX path of f
     if base does not end with "/" then set base to base & "/"
     set p to base & "crisprme-data"
@@ -175,7 +177,7 @@ on run
   set action to button returned of (display dialog "CRISPRme+  —  CRISPR off-target analysis" & return & return & "Start   —  open the web app (sets everything up the first time)" & return & "Update  —  get the latest CRISPRme" & return & "Stop    —  shut CRISPRme down" buttons {"Stop", "Update", "Start"} default button "Start" with title "CRISPRme+")
 
   if action is "Start" then
-    -- first run with no data AND no remembered location: let the user pick where the ~45 GB goes
+    -- first run with no data AND no remembered location: let the user pick where the data goes
     if (not my hasData()) and ((my storedDataDir()) is "") then
       set dataDir to my pickDataDir()
     end if
@@ -220,9 +222,9 @@ OSA
   say "The first Start downloads the data (once) and opens the web app; after that Start is instant."
   open "$APPS" 2>/dev/null || true
 else
-  # Linux: minimal — run the web interface directly (pick any disk with ~45 GB free)
+  # Linux: minimal — run the web interface directly (pick any disk with ~150 GB free)
   say "${YEL}Linux clickable-app support is minimal in this MVP.${NC}"
   say "Use: docker run --rm -v <data-folder>:/DATA -w /DATA -p 8080:8080 ${IMAGE} crisprme.py web-interface"
-  say "(then open http://localhost:8080; <data-folder> is any folder with ~45 GB free)"
+  say "(then open http://localhost:8080; <data-folder> is any folder with ~150 GB free: the data take ~98 GB once downloaded)"
   say "${YEL}NVIDIA GPU?${NC} add '--gpus all -e CRISPRME_COMPUTE_BACKEND=cuda' to the docker run to use it (auto CPU-fallback if unavailable)."
 fi

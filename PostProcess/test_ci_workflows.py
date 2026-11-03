@@ -105,7 +105,7 @@ class APullRequestToWhatAJobReadsStartsIt(unittest.TestCase):
         for path in ("pages/**", "scripts/**", "docs/**", "README.md", "METHODS.md",
                      "test/benchmark/**", "PAMs/**", "CHANGELOG.md", "changelog/**",
                      ".github/workflows/**", "assets/**", "test/data/**", "**.py", "**.sh",
-                     "**.yml", "**.yaml"):
+                     "**.yml", "**.yaml", "install/**"):
             with self.subTest(path=path):
                 self.assertIn(path, paths)
 

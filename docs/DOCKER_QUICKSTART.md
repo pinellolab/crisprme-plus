@@ -59,11 +59,14 @@ Confirm how much memory Docker actually got before downloading anything:
 docker info --format '{{.MemTotal}}' | awk '{printf "%.1f GB\n", $1/1073741824}'
 ```
 
-> **Disk:** the batteries-included (variant-aware) setup is a **~45 GB download → ~85 GB
-> on disk**; give Docker **≈ 100 GB free**. CRISPRme+ ships a **dict-less** variant index
-> (no per-sample dictionaries): the reference + variant genome indexes are ~40 GB, the
-> compact allele-frequency registry a few GB (shipped uncompressed for fast lookups),
-> and an optional per-genotype store (for per-sample carrier annotation) ~26 GB. The
+> **Disk:** the batteries-included (variant-aware) setup is a **~45 GB download → ~98 GB
+> on disk** (measured: 97.9 GB; it peaks around 103 GB while the genotype store unpacks), so
+> keep **≈ 150 GB free** on the disk that holds your data folder. CRISPRme+ ships a
+> **dict-less** variant index (no per-sample dictionaries). Installed, the genome is ~3 GB,
+> the reference + variant genome indexes (the indel index included) ~41 GB, the compact
+> allele-frequency registry ~8.5 GB (shipped uncompressed for fast lookups), the genotype
+> store (for per-sample carrier annotation; `--no-genotypes` skips it) ~30 GB, the indel
+> genotype store ~7.7 GB and the indel logs ~6.5 GB. The
 > genotyped **HGDP + 1000 Genomes** (HGDP1kGP) index is a ~28 GB download; the sites-only **mega**
 > (five-source) index ~12 GB. A reference-only setup is far smaller (~25 GB).
 
@@ -386,8 +389,8 @@ interchangeable).
 
 ```bash
 # 1. pick a working folder, then build the image into it
-#    Needs room for the ~85 GB of data, the ~4-5 GB .sif and your results -- so ~100 GB
-#    free is comfortable. Any location works as long as it has that much space; check
+#    Needs room for the ~98 GB of data, the ~4-5 GB .sif and your results -- so ~150 GB
+#    free. Any location works as long as it has that much space; check
 #    before you start, since home directories are often quota-limited. (On filesystems
 #    that bill allocated blocks rather than file sizes, expect the reported usage to be
 #    noticeably higher than the file sizes suggest.)

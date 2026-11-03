@@ -92,7 +92,7 @@
       <p>
         It needs <a href="https://www.docker.com/products/docker-desktop/">Docker Desktop</a>
         (the installer guides you if it is missing) and downloads the reference + default
-        variant data (~45&nbsp;GB download &rarr; ~85&nbsp;GB on disk; keep &asymp;&nbsp;100&nbsp;GB free for the full
+        variant data (~45&nbsp;GB download &rarr; ~98&nbsp;GB on disk; keep &asymp;&nbsp;150&nbsp;GB free for the full
         variant-aware setup, far less &mdash; ~25&nbsp;GB &mdash; for reference-only) on first launch. Prefer the terminal, or want to script /
         batch analyses? The <strong>Docker quickstart below</strong> and the command line both
         work too.
@@ -138,7 +138,8 @@
           <strong>16&nbsp;GB</strong> of memory for a first / reference-only run, but
           <strong>64&nbsp;GB</strong> for a genome-wide variant-aware search (16&nbsp;GB or
           32&nbsp;GB will run out of memory on that workload). You also need
-          <strong>&asymp;&nbsp;100&nbsp;GB free disk</strong> for the variant-aware setup
+          <strong>&asymp;&nbsp;150&nbsp;GB free disk</strong> for the variant-aware setup, which
+          takes ~98&nbsp;GB once installed
           (far less &mdash; ~25&nbsp;GB &mdash; for a reference-only setup). You cannot give
           Docker more memory than the machine physically has: under 64&nbsp;GB total, run
           genome-wide variant-aware searches on a workstation or cluster instead.
@@ -214,9 +215,9 @@ docker run --rm -v "${PWD}:/DATA" -w /DATA pinellolab/crisprme:latest \
           to a <code>.sif</code> file (no admin rights needed):
         </p>
         <p class="note">
-          Pick a working folder with room for the <strong>~85&nbsp;GB of data</strong>, the
+          Pick a working folder with room for the <strong>~98&nbsp;GB of data</strong>, the
           <strong>~4&ndash;5&nbsp;GB <code>.sif</code></strong> and your results &mdash; so
-          &asymp;&nbsp;100&nbsp;GB free is comfortable. Any location works as long as it has
+          &asymp;&nbsp;150&nbsp;GB free. Any location works as long as it has
           that much space &mdash; worth checking before you start, since home directories are
           often quota-limited.
         </p>

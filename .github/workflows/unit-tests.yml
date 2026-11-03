@@ -43,6 +43,8 @@ on:
       # the checkout is ignored, so a PR touching only these two must still run it.
       - "install_from_source.sh"
       - ".gitignore"
+      # test_documented_sizes reads the one-line installers' README there too.
+      - "install/**"
       # test_ci_workflows reads all of them
       - ".github/workflows/**"
       # generate_report.py, which the report tests run, puts assets/'s logo and background
@@ -379,6 +381,12 @@ jobs:
       - name: "Markdown wrap (no line of the README, METHODS, CHANGELOG, docs/ or a changelog fragment opens a '+' bullet)"
         working-directory: PostProcess
         run: python -m unittest test_markdown_wrap -v
+
+      - name: "Documented sizes (the installers, README, website, Quickstart, TROUBLESHOOTING and DATA_LAYOUT give the measured install and image sizes)"
+        # The installers said the image is ~800 MB (a 4.84 GB pull on amd64) and asked for ~45 GB
+        # free; the docs said ~85 GB on disk and ~100 GB free. A default install is 97.9 GB.
+        working-directory: PostProcess
+        run: python -m unittest test_documented_sizes -v
 
       - name: "Indel report integrity (header injection) + complete-search flag gate + index resolution"
         # The header-injection guards: a dropped CRISPRitz header made
