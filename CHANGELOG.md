@@ -2308,14 +2308,16 @@ and the `release-crisprme` skill.
   population-level, by default and under `--per-sample`, with one `WARNING` on stdout that names
   the dataset and the download. On the synthetic genome the no-store default is then byte-identical
   to its `--population-level` run and reports that site at 1 mismatch, CFD 0.6, with no carriers; it
-  lists the same sites, at the same CFD, as a full install's `--population-level` run, with empty
-  carrier columns, and names the indel alone where an indel and a SNP make a site together. A full
-  install, and one with the classic dictionaries, are unchanged. The
-  download help, the README, docs/PRECOMPUTED_INDEXES.md and docs/TROUBLESHOOTING.md say what such
-  an install runs. A sites-only dataset, such as `hg38_mega`, has no genotypes at all, and so no
-  store to install: it is not one of these, and leaves the mode of the datasets beside it as it is
-  (a phased one stays per-sample); its own rows are the population-level analysis's in any mode
-  (the entry on sites-only datasets).
+  lists the same sites, at the same CFD and with the same variants, as a full install's
+  `--population-level` run, and a row of SNPs names no carrier. Where an indel and a SNP make a site
+  together, its row names both and lists every carrier of the indel, S4 and S5, as no genotype says
+  which of them has the SNP too (PUTATIVE in the SNP+indel companion), where a full install lists S4
+  alone, whose haplotype holds both (CONFIRMED). A full install, and one with the classic
+  dictionaries, are unchanged. The download help, the README, docs/PRECOMPUTED_INDEXES.md and
+  docs/TROUBLESHOOTING.md say what such an install runs. A sites-only dataset, such as `hg38_mega`,
+  has no genotypes at all, and so no store to install: it is not one of these, and leaves the mode
+  of the datasets beside it as it is (a phased one stays per-sample); its own rows are the
+  population-level analysis's in any mode (the entry on sites-only datasets).
 - **An index is taken only for a search on the side of the guide it was built for, a dedicated
   one too, and an all-N index that records no side is taken for a 3' PAM only at the published
   widths.** 2.8.1 takes an all-N index of a 3' PAM's width, and one with no `.pam_build` for a 3'
