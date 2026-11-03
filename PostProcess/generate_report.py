@@ -1457,9 +1457,11 @@ def build_summary_meta(result_dir, tsv_path, df, cols, params_override=None):
 def build_mmb_matrix(df, cols, meta):
     """Off-targets binned by origin(REFERENCE/VARIANT) x bulge x mismatch.
 
-    Mirrors the web result-page top matrix: columns Total, 0MM..<mm>MM; rows
+    Laid out as the web result-page top matrix: columns Total, 0MM..<mm>MM; rows
     grouped REFERENCE then VARIANT, within each a row per bulge count 0..maxbulges.
-    Split by origin only (variant := Not_found_in_REF=="y"); PERFECT matches
+    Split by origin only (variant := Not_found_in_REF=="y", a site that exists only
+    because of a variant; the web page's VARIANT is every site whose reported alignment
+    is a variant one, so its VARIANT total can be larger); PERFECT matches
     (mm+b==0) are INCLUDED as putative off-targets in the 0MM/0B cell, because a
     guide's intended on-target cannot be told from a perfect-match off-target a
     priori. So REFERENCE + VARIANT matrix totals == the grand total of all sites.

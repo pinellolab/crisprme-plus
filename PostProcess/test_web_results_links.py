@@ -13,6 +13,9 @@
 * the Personal Risk Card drew its "Private" plot from the personal targets;
 * the Graphical Reports caption said that the perfect matches are drawn as black
   stars, also above a plot drawn before 2.8.1, which leaves them out;
+* the caption under the results-page matrix said VARIANT counts the targets that exist
+  only because a variant creates them (Not_found_in_REF): it counts every site whose
+  reported alignment is a variant one, as the report's matrix does not;
 * the job status page held the "view-results" link twice (one id, two elements).
 
 Run with:
@@ -352,6 +355,30 @@ class TestGraphicalReportsCaption(_Tmp):
                       "black stars", text)
         self.assertIn("A plot drawn before CRISPRme 2.8.1 leaves out every site with 0 or 1 "
                       "mismatches and bulges: run the search again to draw them.", text)
+
+
+class TestMatrixCaption(_Tmp):
+    def test_variant_is_a_site_whose_reported_alignment_is_a_variant_one(self):
+        # The caption under the matrix said VARIANT is a target that exists only because a
+        # variant creates it (Not_found_in_REF). process_summaries.py counts there every
+        # site whose reported alignment is a variant one (its samples column is not NA):
+        # also a reference site a variant changes, as to fewer mismatches. The report's
+        # matrix is the one that splits on Not_found_in_REF.
+        job = "cap_ABC"
+        d = self._job(job, log="Job\tDone\tFri\n")
+        with open(os.path.join(d, f".{job}.acfd_CFD.txt"), "w") as f:
+            f.write(f"{GUIDE}\t99\t1\n")
+        open(os.path.join(d, f"{GUIDE}+NRG_hg38+hg38_x_4+2_all_results_with_alternative_"
+                             "alignments.tsv"), "w").close()
+        text = _text(rp.result_page(job))
+        self.assertIn("split by the origin of the alignment reported for the filter criterion "
+                      "selected below", text)
+        self.assertIn("the reported alignment is the reference-genome one", text)
+        self.assertIn("the reported alignment is a variant one (", text)
+        self.assertIn("The downloadable report counts as VARIANT only the sites that exist "
+                      "only because of a variant (", text)
+        self.assertNotIn("exists only because a variant creates it", text)
+        self.assertNotIn("the target exists in the reference genome", text)
 
 
 class TestStatusPageIds(unittest.TestCase):

@@ -702,9 +702,11 @@ def result_page(job_id: str) -> html.Div:
             )
         )
     )
-    # Explanation BELOW the table, consistent in message with the downloadable report's
-    # matrix caption: what a cell is, the origin split, the perfect-match cell, and that
-    # every site is counted once (one row carrying both alleles as columns).
+    # Explanation BELOW the table: what a cell is, the origin split, the perfect-match cell,
+    # and that every site is counted once (one row carrying both alleles as columns). The
+    # split is process_summaries.py's: a site whose reported alignment (for the filter
+    # criterion) is a variant one counts as VARIANT. The downloadable report's matrix
+    # splits on Not_found_in_REF instead, so its VARIANT total can be smaller.
     _cap_style = {
         "margin": "0 5% 0 5%",
         "fontSize": "1.02rem",
@@ -728,14 +730,19 @@ def result_page(job_id: str) -> html.Div:
                     [
                         "Each entry counts ",
                         html.Strong("distinct putative off-target sites"),
-                        ", grouped by mismatch count and bulge size and split by origin: ",
+                        ", grouped by mismatch count and bulge size and split by the origin "
+                        "of the alignment reported for the filter criterion selected below: ",
                         html.Strong("REFERENCE"),
-                        " — the target exists in the reference genome (even if a variant "
-                        "also alters it) — vs ",
+                        " — the reported alignment is the reference-genome one — vs ",
                         html.Strong("VARIANT"),
-                        " — the target exists only because a variant creates it (",
+                        " — the reported alignment is a variant one (",
+                        html.Code("REF/ALT_origin"),
+                        " alt): a variant either creates the site or changes a reference "
+                        "site, for example to fewer mismatches. The downloadable report "
+                        "counts as VARIANT only the sites that exist only because of a "
+                        "variant (",
                         html.Code("Not_found_in_REF"),
-                        ").",
+                        "), so its VARIANT total can be smaller.",
                     ],
                     style=_cap_style,
                 ),
