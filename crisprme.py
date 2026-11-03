@@ -3664,8 +3664,12 @@ def _refuse_short_build(index_dir: str, pamfile: str, bdna: int, brna: int) -> N
     said "already present" and recorded ``pamfile`` on it (_write_pam_build), which left a
     record that contradicts the index and a search of it that reports wrong alignments.
     The index ``pamfile`` asks for has the same name, so it needs another working
-    directory, or this one moved out of the way: never removed here.
+    directory, or this one moved out of the way: never removed here. Nor is one a newer
+    CRISPRitz built kept (index_fit.newer_format_error): this CRISPRme does not read it.
     """
+    newer = index_fit.newer_format_error(index_dir) if os.path.isdir(index_dir) else None
+    if newer:
+        error(newer + ".")
     built = index_fit.built_guide_len(index_dir)
     guide = index_fit.pam_file_spacer(pamfile)
     n = int(os.path.basename(index_dir).split("_")[1])
@@ -4339,7 +4343,8 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
     does. Every path ``cmd`` names is absolute, so it resolves from there.
     ``failure`` is the error for a command that fails, or that exits 0 but leaves a
     .bin that is not whole (crispritz_bins: buildTST does not check its writes, so a
-    full disk leaves one empty or cut short). buildTST does not check that a .bin
+    full disk leaves one empty or cut short), or one in an index format this CRISPRme
+    does not read (index_fit.newer_bin: a CRISPRitz newer than 2.9.1 wrote it). buildTST does not check that a .bin
     opened either: with the disk's inode table or a file-count quota full, it
     writes none for the contigs left, or for the parts left of a contig it writes
     in several, and still exits 0. So the run fails the same way when a contig that
@@ -4370,6 +4375,15 @@ def _build_index_dir(cmd, workdir: str, name: str, failure: str, indexed=None,
         code = subprocess.call(cmd, cwd=tmp, **kwargs)
         if code != 0 or not os.path.isdir(built):
             error(f"{failure} (expected {final})")
+        newer = index_fit.newer_bin(built)
+        if newer:
+            error(
+                f"{failure}: the installed CRISPRitz wrote {os.path.relpath(newer[0], built)} "
+                f"in index format {newer[1]}, which CRISPRitz 2.9.2 and later write: this "
+                f"CRISPRme reads index format 1 only (CRISPRitz up to 2.9.1). Install "
+                f"CRISPRitz 2.9.1, or use a CRISPRme that reads index format {newer[1]}: "
+                f"nothing was put in place (expected {final})"
+            )
         cut = crispritz_bins.incomplete_bins(built)
         if cut:
             error(

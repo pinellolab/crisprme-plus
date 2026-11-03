@@ -61,7 +61,9 @@ writes each .bin as buildTST does, named by its contig's header, a tree of one
 target (the whole sequence), and none for a contig of N alone; one whose step's key
 holds $STUB_CUT it cuts to $STUB_CUT_TO bytes (half by default), and one whose key
 holds $STUB_NO_BIN it does not write, and still exits 0, as buildTST does on a full
-disk, or with the disk's inode table full. add-variants pads the fake
+disk, or with the disk's inode table full; one whose key holds $STUB_FORMAT2 it writes
+in index format 2, as CRISPRitz 2.9.2 and later do (a header with the magic "CZI" 0xFE
+and the format version, then the body, then the magic again). add-variants pads the fake
 contig of chromosome $STUB_BIG_FAKE with a megabase of N (and this stub lifts any
 file-size limit of its own), and with $STUB_GZ_BLOCKED leaves a directory where the
 last dictionary's .gz would go.
@@ -145,6 +147,9 @@ if sys.argv[1] == "index-genome":
         if os.environ.get("STUB_NO_BIN") and os.environ["STUB_NO_BIN"] in key:
             continue
         data = tst(pam, len(motif) - abs(size), seq)
+        if os.environ.get("STUB_FORMAT2") and os.environ["STUB_FORMAT2"] in key:
+            data = (b"CZI\xfe" + struct.pack("=6i", 2, 28 + len(pam), 0, len(motif) - abs(size),
+                                             len(pam), int(nb)) + pam.encode() + data + b"CZI\xfe")
         if os.environ.get("STUB_CUT") and os.environ["STUB_CUT"] in key:
             data = data[: int(os.environ.get("STUB_CUT_TO", len(data) // 2))]
         with open(os.path.join(out, "%s_%s_1.bin" % (pam, header(os.path.join(gdir, fa)))),
@@ -865,6 +870,57 @@ class AnIndexIsPutInPlaceWholeOrNotAtAll(_Fixture):
                     rc, out, err = self.run_bio(vcf=vcf)
                     self.assertEqual(rc, 0, err)
                     self.assertEqual(self.bins(name), whole)
+
+    def test_a_build_in_a_newer_index_format_is_not_put_in_place(self):
+        """A CRISPRitz newer than this release reads (2.9.2 and later) writes index format
+        2, whose first int32 is a magic, negative as a leaf count: the build was said to be
+        cut short, 'as when the disk fills up'. It is said to be in a format this release
+        does not read, and nothing goes into place (PKG-1)."""
+        for name, (vcf, chr2, whole) in WHOLE.items():
+            with self.subTest(index=name):
+                self.fresh()
+                rc, out, err = self.run_bio(vcf=vcf, STUB_FORMAT2=chr2)
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn(f" indexing failed: the installed CRISPRitz wrote {whole[1]} in "
+                              f"index format 2, which CRISPRitz 2.9.2 and later write: this "
+                              f"CRISPRme reads index format 1 only (CRISPRitz up to 2.9.1). ",
+                              err)
+                self.assertIn(f"nothing was put in place (expected {self.lib(name)})\n", err)
+                self.assertNotIn("not a tree", err)
+                self.assertFalse(os.path.lexists(self.lib(name)))
+                self.assertEqual(self.leftovers(), [])
+
+    def test_an_index_a_newer_crispritz_built_is_refused_where_it_is_taken(self):
+        """An index of format 2 in place (one a newer CRISPRitz built, or downloaded for a
+        newer release): build-index-only kept it ('already present'), and a search read
+        its format version as the guide length it was built for, and refused it as 'built
+        for a 2-nt guide'. Each now stops with one ERROR that says what it is (PKG-1)."""
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 0, err)
+        index = self.lib(REF)
+        first = os.path.join(index, sorted(f for f in os.listdir(index) if f.endswith(".bin"))[0])
+        with open(first, "rb") as fh:
+            body = fh.read()
+        with open(first, "wb") as fh:
+            fh.write(b"CZI\xfe" + struct.pack("=6i", 2, 31, 0, 20, 3, 2) + b"NRG" + body
+                     + b"CZI\xfe")
+        rc, out, err = self.run_bio()
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn(f"{index} was built by a newer CRISPRitz ({os.path.basename(first)} is in "
+                      f"index format 2, which CRISPRitz 2.9.2 and later write)", err)
+        self.assertNotIn("Reference index already present", out)
+        for search in (self.run_search, self.run_web_search):
+            with self.subTest(search=search.__name__):
+                rc, out, err = search()
+                self.assertNotEqual(rc, 0)
+                log = err
+                if search == self.run_search:
+                    with open(self.path("Results", "search", "log_error.txt")) as fh:
+                        log = fh.read()
+                self.assertEqual(log.count("ERROR: "), 1, log)
+                self.assertIn(f"ERROR: {index} was built by a newer CRISPRitz "
+                              f"({os.path.basename(first)} is in index format 2", log)
+                self.assertNotIn("-nt guide", log)
 
     def test_a_build_the_engine_left_without_a_bin_is_not_put_in_place(self):
         """buildTST does not check that a .bin opened either: with the disk's inode

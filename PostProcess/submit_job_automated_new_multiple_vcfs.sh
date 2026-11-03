@@ -775,15 +775,56 @@ while read vcf_f; do
 	# The guide length index $1 was built for, on stdout: the second int32 of any .bin of
 	# it (len_guide_used, which buildTST has written since 2019, whoever built the index;
 	# its .pam_build, which build-index-only used to rewrite over any index it found, may
-	# say another), or nothing where it cannot tell. Silent on stderr.
+	# say another), or nothing where it cannot tell: in an index a newer CRISPRitz built
+	# (_index_format) that int32 is the format version. Silent on stderr.
 	_index_guide_len() {
 		local _bin _g
 		_bin=$(find -L "$1" -maxdepth 1 -name '*.bin' -print -quit 2>/dev/null)
 		[ -n "$_bin" ] || return 0
+		_g=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
+		[ "${_g//[[:space:]]/}" != 435a49fe ] || return 0
 		_g=$(od -An -t d4 -j4 -N4 "$_bin" 2>/dev/null)
 		_g=${_g//[[:space:]]/}
 		case "$_g" in '' | 0 | *[!0-9]*) return 0 ;; esac
 		printf '%s' "$_g"
+	}
+
+	# "<format><TAB><file>" on stdout for the first .bin of index $1, or of a folder in it
+	# (an INDELS index holds one a chromosome), in an index format newer than 1; nothing
+	# where there is none. CRISPRitz 2.9.2 and later open an index file with the magic
+	# "CZI" 0xFE and then the format version as an int32 (index format 2: CRISPRitz's
+	# docs/INDEX_FORMAT.md); up to 2.9.1 a file opens with its leaf count, and that format
+	# is the only one this CRISPRme reads (PostProcess/index_fit.py newer_bin, the same
+	# rule). The first .bin of each folder is read: one build writes a folder whole.
+	# Silent on stderr.
+	_index_format() {
+		local _bin _head _v _seen=
+		while IFS= read -r -d '' _bin; do
+			case "|$_seen|" in *"|${_bin%/*}|"*) continue ;; esac
+			_seen="$_seen|${_bin%/*}"
+			_head=$(od -An -t x1 -N4 "$_bin" 2>/dev/null)
+			[ "${_head//[[:space:]]/}" = 435a49fe ] || continue
+			_v=$(od -An -t d4 -j4 -N4 "$_bin" 2>/dev/null)
+			_v=${_v//[[:space:]]/}
+			printf '%s\t%s' "${_v:-?}" "$_bin"
+			return 0
+		done < <(find -L "$1" -maxdepth 2 -name '*.bin' -print0 2>/dev/null | sort -z 2>/dev/null)
+		return 0
+	}
+
+	# Stop, with one ERROR, before the search reads index $1 when a newer CRISPRitz built
+	# it (_index_format): this CRISPRme would read its format version as the guide length
+	# it was built for (a format-2 index as one for a 2-nt guide) and its magic as a leaf
+	# count. Called where the search takes an index, whether it found it or built it.
+	_refuse_newer_index() {
+		local _f _v _bin
+		_f=$(_index_format "$1")
+		[ -n "$_f" ] || return 0
+		_v=${_f%%$'\t'*}
+		_bin=${_f#*$'\t'}
+		printf "ERROR: %s was built by a newer CRISPRitz (%s is in index format %s, which CRISPRitz 2.9.2 and later write): this CRISPRme reads index format 1 only (CRISPRitz up to 2.9.1), and needs a newer release to search it. Use a CRISPRme that reads index format %s, or install CRISPRitz 2.9.1 and build the index again, with %s moved out of the way first\n" \
+			"$1" "${_bin#"$1"/}" "$_v" "$_v" "$1" >&2
+		exit 1
 	}
 
 	# 0 when index $1, of N $2, can answer this search whatever guide it was built for. The
@@ -795,7 +836,9 @@ while read vcf_f; do
 	# Inside it the results are byte-identical to a dedicated index, outside it they differ.
 	# An index whose length cannot be read, or a PAM file with no spacer, fits, as before. A
 	# reference search with no bulges scans the FASTA and opens no index, so any fits it; a
-	# variant one reads the index of its indels, at least.
+	# variant one reads the index of its indels, at least. An index a newer CRISPRitz built
+	# holds no length this CRISPRme reads (_index_guide_len): it is not judged here, and
+	# the search stops on it where it takes it (_refuse_newer_index), with one ERROR.
 	_index_fits_guide() {
 		local _g _b=${1##*/} _guide=$(( ${#fullseqpam} - ${pos#-} ))
 		[ "${#fullseqpam}" -gt 0 ] && [ "$_guide" -gt 0 ] || return 0
@@ -1416,6 +1459,7 @@ while read vcf_f; do
 	# sites with exit 0: stop instead (index_coverage.py, which takes a FASTA with no site of
 	# the PAM for one that has no tree). Only a search with bulges opens this index.
 	if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ]; then
+		_refuse_newer_index "$idx_ref"
 		python "$starting_dir/index_coverage.py" "$idx_ref" "$pos" "$ref_folder" || exit 1
 	fi
 	# END STEP 2.1 Reference genome indexing
@@ -1467,6 +1511,9 @@ while read vcf_f; do
 		fi
 		# ... nor a variant index lacking a chromosome of its dataset (the reference FASTA of
 		# that name tells where it has sites), wherever the search opens it
+		if [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ] || ! _enriched_genome_whole; then
+			_refuse_newer_index "$idx_var"
+		fi
 		if [ "${#array_fake_chroms[@]}" -gt 0 ] \
 			&& { [ "$bDNA" -ne 0 ] || [ "$bRNA" -ne 0 ] || ! _enriched_genome_whole; }; then
 			python "$starting_dir/index_coverage.py" "$idx_var" "$pos" "$ref_folder" "${array_fake_chroms[@]#fake}" || exit 1
@@ -1562,6 +1609,7 @@ while read vcf_f; do
 			fi
 			exit 1
 		fi
+		_refuse_newer_index "$indels_index_dir"
 		# END STEP 2.3 - indels indexing
 	fi
 
